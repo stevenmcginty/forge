@@ -59,7 +59,11 @@ const FALLBACK_SETTINGS: Settings = {
   terminalFontSize: 13,
   terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, monospace",
   shell: 'pwsh.exe',
-  window: { width: 1440, height: 900, maximized: false }
+  window: { width: 1440, height: 900, maximized: false },
+  sttPython: '',
+  sttModelDir: '',
+  sttAutoStopSeconds: 10,
+  sttHotkey: 'ControlRight'
 }
 
 const INITIAL: AppState = {
@@ -382,6 +386,8 @@ export interface AppActions {
   revealProject(id: string): void
   toggleRail(): void
   setFontSize(size: number): void
+  /** Generic settings write — used by the dictation setup card. Persisted. */
+  patchSettings(patch: Partial<Settings>): void
   saveProfile(profile: AgentProfile): void
   deleteProfile(id: string): void
   newTab(profileId?: string): void
@@ -564,6 +570,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       toggleRail: () => dispatch({ type: 'patchSettings', patch: { railCollapsed: !state.settings.railCollapsed } }),
       setFontSize: (size) =>
         dispatch({ type: 'patchSettings', patch: { terminalFontSize: Math.min(24, Math.max(9, size)) } }),
+      patchSettings: (patch) => dispatch({ type: 'patchSettings', patch }),
       saveProfile: (profile) => dispatch({ type: 'saveProfile', profile }),
       deleteProfile: (id) => dispatch({ type: 'deleteProfile', id }),
       newTab: (profileId) => dispatch({ type: 'newTab', profileId: profileId ?? defaultProfileFor(activeProjectId) }),

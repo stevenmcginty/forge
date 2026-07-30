@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { ACCENT_PALETTE, makeCustomProfile } from '@/lib/agents'
 import { useApp } from '@/state/AppState'
 import { AgentBadge } from './AgentBadge'
+import { DictationSetup } from './DictationSetup'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
 import './SettingsPopover.css'
@@ -139,6 +140,12 @@ export function SettingsPopover({
             <span className="profile-row__name">New profile…</span>
           </PopoverRow>
         )}
+      </PopoverSection>
+
+      <PopoverDivider />
+
+      <PopoverSection title="Dictation">
+        <DictationSetup compact />
       </PopoverSection>
 
       <PopoverDivider />

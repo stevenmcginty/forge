@@ -18,6 +18,14 @@ export const IPC = {
   storeDeleteWorkspace: 'store:delete-workspace',
   storeReveal: 'store:reveal',
 
+  // dictation (stt sidecar)
+  sttStart: 'stt:start',
+  sttStop: 'stt:stop',
+  sttReload: 'stt:reload',
+  sttStatus: 'stt:status',
+  sttStatusEvent: 'stt:status-event',
+  sttPhrase: 'stt:phrase',
+
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
   openPath: 'shell:open-path',

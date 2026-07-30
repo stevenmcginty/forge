@@ -13,6 +13,7 @@ import {
   snapshot
 } from './store'
 import { disposePtyHost, registerPtyHandlers, setPtyTarget } from './pty-host'
+import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-sidecar'
 
 const isDev = !app.isPackaged
 const BG = '#0B0C0E'
@@ -169,6 +170,7 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
     setPtyTarget(null)
+    setSttTarget(null)
   })
 
   // Never let the renderer navigate away or spawn windows.
@@ -183,6 +185,7 @@ function createWindow(): void {
   })
 
   setPtyTarget(mainWindow)
+  setSttTarget(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
@@ -273,6 +276,7 @@ void app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
   registerAppHandlers()
   registerPtyHandlers()
+  registerSttHandlers()
   createWindow()
 
   app.on('activate', () => {
@@ -286,4 +290,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   disposePtyHost()
+  disposeSttSidecar()
 })

@@ -363,6 +363,26 @@ class TerminalHost {
     this.entries.get(paneId)?.term.paste(text)
   }
 
+  /**
+   * Dictation insertion. Sends text to the shell as though it had been typed —
+   * and deliberately never a carriage return: Steve reads what landed and
+   * presses Enter himself, so a misheard word is never a submitted command.
+   * (term.paste() is no good here: xterm folds newlines into \r, which submits.)
+   *
+   * Returns false when the pane has no live terminal, so the caller can fall
+   * back to the clipboard instead of silently swallowing the words.
+   */
+  type(paneId: string, text: string): boolean {
+    const entry = this.entries.get(paneId)
+    if (!entry || entry.runtime.status === 'exited') return false
+    window.forge.pty.write(paneId, text.replace(/[\r\n]+/g, ' '))
+    return true
+  }
+
+  has(paneId: string): boolean {
+    return this.entries.has(paneId)
+  }
+
   scrollToBottom(paneId: string): void {
     this.entries.get(paneId)?.term.scrollToBottom()
   }
