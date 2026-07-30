@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isSttSetupError, type SttStatus } from '@shared/types'
 import { insertPhrase, resolveInsertTarget, type InsertTarget } from '@/lib/dictation'
+import { dictationTranscript, transcriptBus } from '@/lib/transcriptSource'
 import { useActiveTab, useApp } from '@/state/AppState'
 
 /**
@@ -43,6 +44,27 @@ export function useDictation(): Dictation {
   const noticeRef = useRef(actions.setNotice)
   noticeRef.current = actions.setNotice
 
+  /* ------------------------------------------------------------- routing
+   *
+   * Two places a phrase can go, and exactly one rule for choosing: the voice
+   * panel open *and* its mic armed means the words are meant for the agent;
+   * anything else means they are meant for whatever you are looking at.
+   *
+   * The registration is the switch. While it holds, dictation is a source on
+   * the transcript bus and the panel picks phrases up like any other source;
+   * while it does not, the bus has never heard of dictation and insertPhrase
+   * does what M3 always did. Nothing can reach both.
+   */
+
+  const toAgent = state.settings.voicePanelOpen && state.agentListening
+  const toAgentRef = useRef(toAgent)
+  toAgentRef.current = toAgent
+
+  useEffect(() => {
+    if (!toAgent) return undefined
+    return transcriptBus.register(dictationTranscript)
+  }, [toAgent])
+
   /* --------------------------------------------------------- subscriptions */
 
   useEffect(() => {
@@ -59,6 +81,12 @@ export function useDictation(): Dictation {
 
   useEffect(() => {
     return window.forge.stt.onPhrase(({ text }) => {
+      // The agent's turn: hand it to the bus and stop. No insertion, so a phrase
+      // aimed at the agent cannot also land in the pane behind the panel.
+      if (toAgentRef.current) {
+        dictationTranscript.push(text)
+        return
+      }
       // Prefer where focus is *now*; fall back to where it was when the user
       // started talking, because clicking the pill moved it.
       let target = resolveInsertTarget(activePaneRef.current)
