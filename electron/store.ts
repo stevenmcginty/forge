@@ -20,12 +20,19 @@ import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
  */
 
 /**
- * Dictation reuses DictationMic's interpreter and its already-downloaded
- * Parakeet model rather than shipping a second 660 MB copy. Both are editable
- * in settings.json (and from the pill's setup card) for anyone whose install
- * lives elsewhere.
+ * Dictation's two paths default to *nothing found*, and are filled in only when
+ * this particular machine happens to have something usable.
+ *
+ * A packaged Forge carries its own frozen sidecar and downloads its own model,
+ * so the normal answer on a fresh install is the empty string — which the
+ * dictation host reports as a clean setup state rather than pointing at a folder
+ * that only exists on the machine Forge was written on.
+ *
+ * The fast path is for that machine: an install of DictationMic already has an
+ * interpreter with onnx-asr in it and has already paid for the 660 MB model, so
+ * if it is there, use it. Both are editable in settings.json and from Settings.
  */
-const DICTATION_HOME = join(homedir(), 'Desktop', 'DictationMic')
+const PARAKEET_NAME = 'parakeet-tdt-0.6b-v2'
 
 /** The Windows account name, for the account chip's first run. */
 function defaultAccountName(): string {
@@ -39,48 +46,86 @@ function defaultAccountName(): string {
   }
 }
 
-const DEFAULT_SETTINGS: Settings = {
-  agentProfiles: BUILTIN_AGENT_PROFILES,
-  lastProjectId: null,
-  railCollapsed: false,
-  terminalFontSize: 13,
-  terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
-  shell: 'pwsh.exe',
-  catchShots: true,
-  shotsKeep: DEFAULT_KEEP,
-  window: { width: 1440, height: 900, maximized: false },
-  sttPython: join(DICTATION_HOME, 'venv', 'Scripts', 'python.exe'),
-  sttModelDir: join(DICTATION_HOME, 'models', 'parakeet-tdt-0.6b-v2'),
-  sttAutoStopSeconds: 10,
-  sttHotkey: 'ControlRight',
-  voicePanelOpen: false,
-  voicePanelWidth: 380,
-  // Gemini is the live brain; with no key set it degrades to the stub.
-  voiceBrain: 'gemini',
-  anthropicKey: '',
-  geminiKey: '',
-  geminiModel: 'gemini-2.5-flash',
-  accountName: defaultAccountName(),
-  accountColor: '#C6FF4A',
-  themeId: 'volt',
-  customThemes: [],
-  reducedMotion: false,
-  themeBg: '#0b0c0e',
-  themeInk: '#e8eaed',
-  voiceAutoRelay: false,
-  voiceRelayGraceMs: 2500,
-  // Spoken replies on by default: an agent you have to read is not one you can
-  // talk to while you work.
-  voiceReplyMode: 'both',
-  voiceReplyVoice: '',
-  projectsRoot: '',
-  // Empty = use gemini-media.ts's built-in default, which the MCP bridge shares.
-  geminiImageModel: '',
-  openrouterKey: '',
-  // Mirrors DEFAULT_OPENROUTER_MODEL in src/lib/voicebrain.ts, the same way
-  // geminiModel above mirrors DEFAULT_GEMINI_MODEL — main cannot import a
-  // renderer module, and voice-check asserts the two literals still agree.
-  openrouterModel: 'google/gemini-2.5-flash-lite'
+function dictationMicHome(): string {
+  return join(homedir(), 'Desktop', 'DictationMic')
+}
+
+/** An interpreter that can import onnx-asr, if one is sitting on this disk. */
+function detectSttPython(): string {
+  const candidate = join(dictationMicHome(), 'venv', 'Scripts', 'python.exe')
+  return existsSync(candidate) ? candidate : ''
+}
+
+/**
+ * A Parakeet model already on this disk: Forge's own download first, then
+ * DictationMic's copy. Empty when neither is there.
+ *
+ * Deliberately not shared with electron/stt-model.ts's defaultModelDir(): that
+ * one is evaluated live on every spawn, this one only seeds a fresh
+ * settings.json. Keeping them apart means downloading the model does not have to
+ * rewrite a setting the user may have pointed somewhere else on purpose.
+ */
+function detectSttModelDir(): string {
+  for (const candidate of [
+    join(resolveDataRoot(), 'models', PARAKEET_NAME),
+    join(dictationMicHome(), 'models', PARAKEET_NAME)
+  ]) {
+    if (existsSync(candidate)) return candidate
+  }
+  return ''
+}
+
+/**
+ * A fresh settings.json, computed rather than frozen: two of these values are
+ * answers about *this* machine (is there a DictationMic to borrow from, what is
+ * this Windows account called), and a constant evaluated at import time would
+ * bake the authoring machine's answers into everybody else's install.
+ */
+function defaultSettings(): Settings {
+  return {
+    agentProfiles: BUILTIN_AGENT_PROFILES,
+    lastProjectId: null,
+    railCollapsed: false,
+    terminalFontSize: 13,
+    terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
+    shell: 'pwsh.exe',
+    catchShots: true,
+    shotsKeep: DEFAULT_KEEP,
+    window: { width: 1440, height: 900, maximized: false },
+    onboarded: false,
+    sttPython: detectSttPython(),
+    sttModelDir: detectSttModelDir(),
+    sttAutoStopSeconds: 10,
+    sttHotkey: 'ControlRight',
+    voicePanelOpen: false,
+    voicePanelWidth: 380,
+    // Gemini is the live brain; with no key set it degrades to the stub.
+    voiceBrain: 'gemini',
+    anthropicKey: '',
+    geminiKey: '',
+    geminiModel: 'gemini-2.5-flash',
+    accountName: defaultAccountName(),
+    accountColor: '#C6FF4A',
+    themeId: 'volt',
+    customThemes: [],
+    reducedMotion: false,
+    themeBg: '#0b0c0e',
+    themeInk: '#e8eaed',
+    voiceAutoRelay: false,
+    voiceRelayGraceMs: 2500,
+    // Spoken replies on by default: an agent you have to read is not one you can
+    // talk to while you work.
+    voiceReplyMode: 'both',
+    voiceReplyVoice: '',
+    projectsRoot: '',
+    // Empty = use gemini-media.ts's built-in default, which the MCP bridge shares.
+    geminiImageModel: '',
+    openrouterKey: '',
+    // Mirrors DEFAULT_OPENROUTER_MODEL in src/lib/voicebrain.ts, the same way
+    // geminiModel above mirrors DEFAULT_GEMINI_MODEL — main cannot import a
+    // renderer module, and voice-check asserts the two literals still agree.
+    openrouterModel: 'google/gemini-2.5-flash-lite'
+  }
 }
 
 let dataDir = ''
@@ -203,6 +248,7 @@ function normaliseTheme(raw: unknown): ThemeCore | null {
 /** Keep unknown/extra keys out, fill missing keys in, never trust the file. */
 function normaliseSettings(raw: Partial<Settings> | null): Settings {
   const s = raw ?? {}
+  const DEFAULT_SETTINGS = defaultSettings()
   const profiles: AgentProfile[] = Array.isArray(s.agentProfiles)
     ? s.agentProfiles.filter((p) => p && p.id && p.name)
     : []
@@ -238,6 +284,11 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     shell: s.shell || DEFAULT_SETTINGS.shell,
     catchShots: s.catchShots ?? true,
     shotsKeep: clampKeep(s.shotsKeep),
+    // "First run" means no settings.json, not "no `onboarded` key". A
+    // settings.json written before onboarding existed belongs to somebody who
+    // has been using Forge for months, and showing them the welcome card would
+    // be the merge announcing itself rather than the feature working.
+    onboarded: raw === null ? false : s.onboarded !== false,
     sttPython: typeof s.sttPython === 'string' ? s.sttPython : DEFAULT_SETTINGS.sttPython,
     sttModelDir: typeof s.sttModelDir === 'string' ? s.sttModelDir : DEFAULT_SETTINGS.sttModelDir,
     // 0 legitimately means "never auto-stop", so a junk value has to fall back
@@ -395,18 +446,6 @@ export function getDataDir(): string {
 /** %APPDATA%\Forge\shots — created on demand, owned by the shots shelf. */
 export function getShotsDir(): string {
   const dir = join(getDataDir(), 'shots')
-  mkdirSync(dir, { recursive: true })
-  return dir
-}
-
-/**
- * %APPDATA%\Forge\models — where Forge puts a speech model it downloaded
- * itself. Deliberately inside the data root, so FORGE_DATA_DIR isolates a test
- * instance's models too, and so deleting the data folder really does remove
- * everything Forge ever wrote.
- */
-export function getModelsDir(): string {
-  const dir = join(getDataDir(), 'models')
   mkdirSync(dir, { recursive: true })
   return dir
 }

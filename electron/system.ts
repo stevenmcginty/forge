@@ -3,6 +3,7 @@ import { userInfo } from 'node:os'
 import { ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { ClaudeCliState } from '@shared/types'
+import { whichCommand } from './agent-probe'
 
 /**
  * Read-only probes of the machine, for the Settings page's Account section.
@@ -30,8 +31,15 @@ export function windowsUserName(): string {
  * Run `claude --version`. On Windows the executable is usually a `.cmd` shim,
  * which CreateProcess will not run directly — hence `shell: true`, with a fixed
  * argument list that nothing user-supplied ever reaches.
+ *
+ * Whether `claude` exists at all is not decided here: agent-probe.ts already
+ * walks PATH for exactly that, and it is what the first-run welcome shows. Two
+ * implementations of "is it installed" is two answers, and the one time they
+ * disagreed the welcome said "installed" while Settings said "not found". So
+ * this asks the probe first and only spawns a process to learn the *version*.
  */
 export function claudeVersion(): Promise<ClaudeCliState> {
+  if (!whichCommand('claude')) return Promise.resolve({ ok: false, error: 'not found on PATH' })
   return new Promise((resolve) => {
     execFile(
       'claude',

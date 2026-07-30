@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { ClaudeCliState } from '@shared/types'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { AgentPresence, ClaudeCliState } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { maskKey } from './parts'
 import type { ChipTone } from './parts'
@@ -9,13 +9,19 @@ import type { ChipTone } from './parts'
  *
  * The Account section and the account chip's menu both render this, so the
  * status dot on the chip and the list you open cannot disagree about whether
- * something is set up. Two of the four are deliberately placeholders: Forge
+ * something is set up. Two of the entries are deliberately placeholders: Forge
  * does not do OAuth and has no phone companion, and a card that says so is
  * better than an empty space that implies one is coming next week.
+ *
+ * The CLI rows come from the same `probeAgents()` the first-run welcome uses —
+ * there is one implementation of "is this command on PATH"
+ * (electron/agent-probe.ts) and both surfaces read it, because the failure mode
+ * of having two is that the welcome and Settings tell you different things
+ * about the same machine.
  */
 
 export interface Connection {
-  id: 'gemini' | 'google' | 'companion' | 'claude'
+  id: string
   name: string
   /** One line, always true. */
   detail: string
@@ -27,32 +33,53 @@ export interface Connection {
   section?: 'models' | 'agents'
 }
 
-/** Probe the Claude CLI once per mount, and again when asked. */
-export function useClaudeCli(): { state: ClaudeCliState | null; recheck: () => void } {
-  const [state, setState] = useState<ClaudeCliState | null>(null)
+export interface AgentProbe {
+  /** Null until the first probe lands. */
+  agents: AgentPresence[] | null
+  /** `claude --version`, layered on top of the PATH probe. Null while checking. */
+  claude: ClaudeCliState | null
+  recheck: () => void
+}
+
+/**
+ * Probe the machine once per mount, and again when asked.
+ *
+ * Both calls are cheap enough to sit behind a chip: probeAgents() only stats
+ * files, and claudeVersion() no longer spawns anything unless that same probe
+ * has already found `claude`.
+ */
+export function useAgentProbe(): AgentProbe {
+  const [agents, setAgents] = useState<AgentPresence[] | null>(null)
+  const [claude, setClaude] = useState<ClaudeCliState | null>(null)
   const [nonce, setNonce] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    setState(null)
+    setAgents(null)
+    setClaude(null)
+    void window.forge.probeAgents().then((found) => {
+      if (!cancelled) setAgents(found)
+    })
     void window.forge.system.claudeVersion().then((s) => {
-      if (!cancelled) setState(s)
+      if (!cancelled) setClaude(s)
     })
     return () => {
       cancelled = true
     }
   }, [nonce])
 
-  return { state, recheck: () => setNonce((n) => n + 1) }
+  const recheck = useCallback(() => setNonce((n) => n + 1), [])
+  return { agents, claude, recheck }
 }
 
-export function useConnections(claude: ClaudeCliState | null): {
+export function useConnections(probe: AgentProbe): {
   connections: Connection[]
   /** True when everything that *can* be configured is. */
   healthy: boolean
 } {
   const { state } = useApp()
   const geminiKey = state.settings.geminiKey
+  const { agents, claude } = probe
 
   return useMemo(() => {
     const connections: Connection[] = [
@@ -81,23 +108,38 @@ export function useConnections(claude: ClaudeCliState | null): {
         chip: 'coming soon',
         tone: 'soon',
         placeholder: true
-      },
-      {
-        id: 'claude',
-        name: 'Claude CLI',
-        detail:
-          claude === null
-            ? 'checking…'
-            : claude.ok
-              ? `claude ${claude.version} on your PATH`
-              : `claude could not be run — ${claude.error}`,
-        chip: claude === null ? 'checking' : claude.ok ? claude.version : 'not found',
-        tone: claude === null ? 'off' : claude.ok ? 'ok' : 'warn',
-        section: 'agents'
       }
     ]
 
+    if (agents === null) {
+      connections.push({
+        id: 'cli',
+        name: 'Agent CLIs',
+        detail: 'checking…',
+        chip: 'checking',
+        tone: 'off',
+        section: 'agents'
+      })
+    } else {
+      for (const agent of agents) {
+        // Claude gets its version because we have it; the others get the resolved
+        // path, which is the more useful fact when two installs are fighting
+        // over PATH.
+        const version = agent.id === 'claude' && claude?.ok ? claude.version : null
+        connections.push({
+          id: `cli:${agent.id}`,
+          name: `${agent.name} CLI`,
+          detail: agent.found
+            ? `${agent.command} — ${version ? `version ${version}` : (agent.path ?? 'on your PATH')}`
+            : `${agent.command} is not on your PATH — a pane using it opens onto "not recognized"`,
+          chip: agent.found ? (version ?? 'installed') : 'not found',
+          tone: agent.found ? 'ok' : 'warn',
+          section: 'agents'
+        })
+      }
+    }
+
     const healthy = connections.every((c) => c.placeholder || c.tone === 'ok' || c.tone === 'off')
     return { connections, healthy }
-  }, [geminiKey, claude])
+  }, [geminiKey, agents, claude])
 }

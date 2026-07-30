@@ -82,14 +82,14 @@ export function DictationSetup({
 
       <div className="field">
         <label className="field__label" htmlFor="stt-python">
-          Python interpreter
+          Python interpreter (optional)
         </label>
         <input
           id="stt-python"
           className="field__input mono"
           value={python}
           spellCheck={false}
-          placeholder="…\DictationMic\venv\Scripts\python.exe"
+          placeholder="empty — use the speech engine Forge ships"
           onChange={(e) => setPython(e.target.value)}
           onKeyDown={onFieldKey}
           onBlur={() => save(false)}
@@ -106,7 +106,7 @@ export function DictationSetup({
             className="field__input mono"
             value={modelDir}
             spellCheck={false}
-            placeholder="…\DictationMic\models\parakeet-tdt-0.6b-v2"
+            placeholder="…\models\parakeet-tdt-0.6b-v2"
             onChange={(e) => setModelDir(e.target.value)}
             onKeyDown={onFieldKey}
             onBlur={() => save(false)}
@@ -160,7 +160,8 @@ export function DictationSetup({
 
       <div className="dsetup__actions">
         <span className="dsetup__hint">
-          Dictation runs entirely on this machine — nothing is uploaded.
+          Dictation runs entirely on this machine — nothing is uploaded. A packaged Forge carries its own speech
+          engine, so the interpreter above is only for running the sidecar from source.
           {onRetry ? ' The model takes a few seconds to load the first time.' : ''}
         </span>
         {onRetry ? (

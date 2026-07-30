@@ -213,6 +213,8 @@ await test('StubBrain echoes the transcript as the draft prompt', async () => {
 
 await test('scaffolds exist, hold a key, and admit they are not implemented', async () => {
   assert.equal(new ClaudeBrain('').ready().reason, 'no-key')
+  // The key-shaped strings below and in the masking test are invented, and are
+  // declared to the packaging gate as such: SECRETS-AUDIT: fixtures
   assert.equal(new ClaudeBrain('sk-ant-test').ready().reason, 'not-implemented')
   assert.equal(new OpenAIBrain('sk-test').ready().reason, 'not-implemented')
   await assert.rejects(() => new ClaudeBrain('k').interpret('hi', { recentTranscript: [] }), /not implemented/)

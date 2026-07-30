@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type { EngineProgress, EngineState } from '@shared/types'
+import type { SttModelState } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
 import { Card, StateChip } from './parts'
@@ -13,51 +13,45 @@ import { Card, StateChip } from './parts'
  * model at all, which is otherwise a dead end: the pill goes amber, the setup
  * form asks for a folder, and there is no folder to give it.
  *
- * So it reports one of three states honestly, and only the third offers to
- * download anything.
+ * So it reports where the model is coming from honestly, and only offers to
+ * download when there is nothing to point at.
+ *
+ * The download itself belongs to the main process (electron/stt-model.ts), not
+ * to this component: leaving Settings mid-download must not abandon 600 MB, and
+ * the first-run welcome watches the same three events. All this card does is
+ * ask, start, cancel and listen.
  */
 export function SpeechEngineCard(): ReactNode {
   const { state, actions } = useApp()
-  const [engine, setEngine] = useState<EngineState | null>(null)
-  const [progress, setProgress] = useState<EngineProgress | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [model, setModel] = useState<SttModelState | null>(null)
 
   const refresh = useCallback(async () => {
-    setEngine(await window.forge.models.engineState())
+    setModel(await window.forge.stt.modelState())
   }, [])
 
   useEffect(() => {
     void refresh()
   }, [refresh, state.settings.sttModelDir])
 
-  useEffect(
-    () =>
-      window.forge.models.onEngineProgress((p) => {
-        setProgress(p)
-        if (p.done) {
-          setBusy(false)
-          void refresh()
-        }
-      }),
-    [refresh]
-  )
+  // Progress, completion and failure all carry the whole state, so there is
+  // nothing to merge — the last message wins.
+  useEffect(() => {
+    const offs = [
+      window.forge.stt.onDownloadProgress(setModel),
+      window.forge.stt.onDownloadError(setModel),
+      window.forge.stt.onDownloadDone((s) => {
+        setModel(s)
+        // The download nails sttModelDir to Forge's own folder; mirror that into
+        // the live settings so the paths form below updates without a reload.
+        void window.forge.store
+          .snapshot()
+          .then((snap) => actions.patchSettings({ sttModelDir: snap.settings.sttModelDir }))
+      })
+    ]
+    return () => offs.forEach((off) => off())
+  }, [actions])
 
-  const install = (): void => {
-    setBusy(true)
-    setProgress({ fraction: null, file: '', receivedBytes: 0, totalBytes: 0 })
-    void window.forge.models.engineInstall().then((p) => {
-      setProgress(p)
-      setBusy(false)
-      void refresh()
-      // The download points sttModelDir at Forge's own folder; mirror that into
-      // the live settings so the form above updates without a reload.
-      if (p.done === 'ok') {
-        void window.forge.store.snapshot().then((snap) => actions.patchSettings({ sttModelDir: snap.settings.sttModelDir }))
-      }
-    })
-  }
-
-  if (!engine) {
+  if (!model || model.status === 'unknown') {
     return (
       <Card title="Speech engine">
         <p className="scard__hint">Checking…</p>
@@ -65,91 +59,95 @@ export function SpeechEngineCard(): ReactNode {
     )
   }
 
-  const missing = engine.source === 'missing'
-  const downloading = busy || engine.downloading
+  const downloading = model.status === 'downloading'
+  const ready = model.status === 'ready'
+  const percent = Math.round(model.fraction * 100)
+  // A folder the user typed in themselves is theirs to fix — quietly
+  // downloading a second copy elsewhere would be Forge overruling them.
+  const canInstall = !downloading && !ready && model.source !== 'external'
 
   return (
     <Card
       title="Speech engine"
-      tone={missing && !downloading ? 'warn' : 'plain'}
-      actions={
-        <StateChip tone={missing ? 'warn' : 'ok'}>
-          {engine.source === 'forge' ? 'installed' : engine.source === 'dictationmic' ? "DictationMic's" : 'not installed'}
-        </StateChip>
-      }
+      tone={!ready && !downloading ? 'warn' : 'plain'}
+      actions={<StateChip tone={ready ? 'ok' : downloading ? 'off' : 'warn'}>{chipLabel(model)}</StateChip>}
     >
-      {engine.source === 'dictationmic' ? (
+      {ready ? (
         <>
           <p className="sengine__lead">
-            Found DictationMic&rsquo;s engine — using it. Nothing to install, and no second copy of the model on your
-            disk.
+            {model.source === 'dictationmic'
+              ? 'Found DictationMic’s model — using it. Nothing to install, and no second copy of the 660 MB on your disk.'
+              : model.source === 'external'
+                ? 'Using the model folder you pointed Forge at. Dictation runs entirely on this machine.'
+                : 'Parakeet TDT 0.6B is installed. Dictation runs entirely on this machine.'}
           </p>
           <dl className="sengine__facts">
             <div>
               <dt>Model</dt>
-              <dd className="mono truncate">{engine.dir}</dd>
+              <dd className="mono truncate">{model.dir}</dd>
             </div>
             <div>
               <dt>On disk</dt>
-              <dd className="mono">{formatBytes(engine.bytes)}</dd>
+              <dd className="mono">{formatBytes(model.bytes)}</dd>
             </div>
           </dl>
         </>
       ) : null}
 
-      {engine.source === 'forge' ? (
-        <>
-          <p className="sengine__lead">Parakeet TDT 0.6B is installed. Dictation runs entirely on this machine.</p>
-          <dl className="sengine__facts">
-            <div>
-              <dt>Model</dt>
-              <dd className="mono truncate">{engine.dir}</dd>
-            </div>
-            <div>
-              <dt>On disk</dt>
-              <dd className="mono">{formatBytes(engine.bytes)}</dd>
-            </div>
-          </dl>
-        </>
-      ) : null}
-
-      {missing ? (
+      {!ready && !downloading ? (
         <>
           <p className="sengine__lead">
-            No usable model at{' '}
-            <span className="mono">{engine.dir || '(no folder set)'}</span>. Dictation cannot start without one.
+            {model.status === 'partial' ? (
+              <>
+                A partly downloaded model is in <span className="mono">{model.dir}</span> — installing again picks up
+                where it stopped rather than starting over.
+              </>
+            ) : (
+              <>
+                No usable model at <span className="mono">{model.dir || '(no folder set)'}</span>. Dictation cannot
+                start without one.
+              </>
+            )}
           </p>
-          <ul className="sengine__files">
-            {engine.files.map((f) => (
-              <li key={f.name} data-ok={f.ok ? 'true' : undefined}>
-                <Icon name={f.ok ? 'check' : 'close'} size={11} />
-                <span className="mono truncate">{f.name}</span>
-                <span className="sengine__size mono">{f.bytes > 0 ? formatBytes(f.bytes) : 'missing'}</span>
-              </li>
-            ))}
-          </ul>
+          {model.files.length > 0 ? (
+            <ul className="sengine__files">
+              {model.files.map((f) => (
+                <li key={f.name} data-ok={f.ok ? 'true' : undefined}>
+                  <Icon name={f.ok ? 'check' : 'close'} size={11} />
+                  <span className="mono truncate">{f.name}</span>
+                  <span className="sengine__size mono">{f.bytes > 0 ? formatBytes(f.bytes) : 'missing'}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </>
       ) : null}
 
-      {downloading || progress?.done === 'error' ? (
+      {downloading || model.error ? (
         <div className="sengine__progress">
-          <div className="sengine__bar" role="progressbar" aria-valuenow={Math.round((progress?.fraction ?? 0) * 100)}>
+          <div
+            className="sengine__bar"
+            role="progressbar"
+            aria-valuenow={percent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
             <span
               className="sengine__bar-fill"
-              data-indeterminate={progress?.fraction === null ? 'true' : undefined}
-              style={{ width: `${Math.round((progress?.fraction ?? 0) * 100)}%` }}
+              data-indeterminate={downloading && model.fraction === 0 ? 'true' : undefined}
+              style={{ width: `${percent}%` }}
             />
           </div>
           <div className="sengine__progress-text">
             <span className="mono">
-              {progress?.done === 'error'
-                ? (progress.error ?? 'failed')
-                : progress?.fraction === null
+              {model.error
+                ? model.error
+                : model.fraction === 0
                   ? 'connecting…'
-                  : `${Math.round((progress?.fraction ?? 0) * 100)}% · ${formatBytes(progress?.receivedBytes ?? 0)} of ${formatBytes(progress?.totalBytes ?? 0)}`}
+                  : `${percent}% · ${formatBytes(model.bytes)} of ${formatBytes(model.totalBytes)}${model.file ? ` · ${model.file}` : ''}`}
             </span>
             {downloading ? (
-              <button type="button" className="ghost-btn sbtn" onClick={() => void window.forge.models.engineCancel()}>
+              <button type="button" className="ghost-btn sbtn" onClick={() => void window.forge.stt.cancelDownload()}>
                 Cancel
               </button>
             ) : null}
@@ -157,20 +155,35 @@ export function SpeechEngineCard(): ReactNode {
         </div>
       ) : null}
 
-      {missing && !downloading ? (
+      {canInstall ? (
         <div className="sengine__install">
-          <button type="button" className="cta-btn" onClick={install}>
+          <button type="button" className="cta-btn" onClick={() => void window.forge.stt.downloadModel()}>
             <Icon name="voice" size={13} />
-            Install speech engine
+            {model.status === 'partial' ? 'Resume download' : 'Install speech engine'}
           </button>
           <span className="sengine__hint">
-            ~660 MB, once. It resumes if the connection drops, and lands in{' '}
-            <span className="mono">{engine.forgeDir}</span>.
+            {model.sizeHint}, once. It resumes if the connection drops, and lands in{' '}
+            <span className="mono">{model.forgeDir}</span>.
           </span>
         </div>
       ) : null}
+
+      {!canInstall && !downloading && !ready ? (
+        <span className="sengine__hint">
+          Forge will not download over a folder you chose yourself. Clear the model path below and Forge will fetch its
+          own copy.
+        </span>
+      ) : null}
     </Card>
   )
+}
+
+/** The one-word verdict on the chip. */
+function chipLabel(model: SttModelState): string {
+  if (model.status === 'downloading') return 'downloading'
+  if (model.status === 'ready') return model.source === 'dictationmic' ? "DictationMic's" : 'installed'
+  if (model.status === 'partial') return 'partly downloaded'
+  return 'not installed'
 }
 
 function formatBytes(n: number): string {

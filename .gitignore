@@ -2,6 +2,14 @@ node_modules/
 out/
 dist/
 .vite/
+
+# Packaging output (electron-builder) and the frozen dictation sidecar —
+# 129 MB of PyInstaller, rebuilt with `npm run stt:build`.
+release/
+stt-dist/
+.stt-build/
+bridge-dist/
+
 *.tsbuildinfo
 *.log
 .DS_Store

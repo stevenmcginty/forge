@@ -41,7 +41,16 @@ export function ModelsSection(): ReactNode {
           value={s.geminiKey}
           onCommit={actions.setGeminiKey}
           placeholder="AIza…"
-          actions={<ImportButton label="Import from DictationMic" onImport={() => window.forge.voice.importKey('gemini')} onUse={actions.setGeminiKey} />}
+          actions={
+            // Not "Import from DictationMic": on anyone else's machine that
+            // names an app they have never heard of. The main process looks in
+            // several places and the result says which one it found.
+            <ImportButton
+              label="Import a saved key"
+              onImport={() => window.forge.voice.importKey('gemini')}
+              onUse={actions.setGeminiKey}
+            />
+          }
           note={
             <>
               The only key Forge sends anywhere. When Gemini is the voice brain, what you say plus a summary of your

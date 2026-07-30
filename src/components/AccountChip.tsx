@@ -4,7 +4,7 @@ import { useApp } from '@/state/AppState'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
 import { StateChip } from './settings/parts'
-import { useClaudeCli, useConnections } from './settings/useConnections'
+import { useAgentProbe, useConnections } from './settings/useConnections'
 import './AccountChip.css'
 
 /**
@@ -20,10 +20,11 @@ export function AccountChip(): ReactNode {
   const { state, actions } = useApp()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLButtonElement | null>(null)
-  // Only probe the CLI while the menu is open — this sits in the chrome of every
-  // window and has no business spawning a process on every render.
-  const { state: claude } = useClaudeCli()
-  const { connections, healthy } = useConnections(claude)
+  // The probe only stats files on PATH, and asks for a version at most once per
+  // mount — this sits in the chrome of every window, so it must not be the kind
+  // of thing that spawns a process on every render.
+  const probe = useAgentProbe()
+  const { connections, healthy } = useConnections(probe)
 
   const name = state.settings.accountName || 'You'
   const colour = state.settings.accountColor

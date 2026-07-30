@@ -3,7 +3,7 @@ import { ACCENT_PALETTE } from '@/lib/agents'
 import { useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
 import { Card, ColorPicker, Row, Section, StateChip, TextField } from './parts'
-import { useClaudeCli, useConnections } from './useConnections'
+import { useAgentProbe, useConnections } from './useConnections'
 
 /**
  * Who you are to Forge, and what Forge is connected to.
@@ -15,8 +15,8 @@ import { useClaudeCli, useConnections } from './useConnections'
  */
 export function AccountSection(): ReactNode {
   const { state, actions } = useApp()
-  const { state: claude, recheck } = useClaudeCli()
-  const { connections } = useConnections(claude)
+  const probe = useAgentProbe()
+  const { connections } = useConnections(probe)
   const [suggested, setSuggested] = useState<string | null>(null)
 
   // Offer the Windows account name when the stored one has been emptied.
@@ -72,7 +72,7 @@ export function AccountSection(): ReactNode {
       <Card
         title="Connected accounts"
         actions={
-          <button type="button" className="ghost-btn sbtn" onClick={recheck} title="Check again">
+          <button type="button" className="ghost-btn sbtn" onClick={probe.recheck} title="Check again">
             <Icon name="restart" size={12} />
             Re-check
           </button>
