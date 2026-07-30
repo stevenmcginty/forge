@@ -115,6 +115,29 @@ A marker left behind by a crash is a "user is here" claim with no expiry, so it
 would mute your phone forever. Forge deletes any stale marker on start, and its
 own on quit.
 
+### It suppresses notifications, not the session list
+
+Worth being precise, because the two are easy to confuse:
+
+- **The Code tab's session list** always shows your remote-controllable
+  sessions, and their Connected / Disconnected state, whatever the marker says.
+  Seeing cards there while you are sitting at the PC is correct.
+- **Push notifications** — the buzz — are what the marker holds back. Claude
+  checks it at send time and skips the push while you are present.
+
+So "I can see my Forge sessions on my phone" is the feature working. "My phone
+buzzed while I was at the keyboard" would be the bug — and if that happens,
+check that a Forge window really had focus at that moment, and that the pane was
+started after the marker existed.
+
+### One way it can quietly not work
+
+Claude refuses to stat a presence path on a UNC network share (`\\server\...`)
+— verified in the v2.1.220 binary, which skips any UNC path that is not
+`\\wsl$`. Point `FORGE_DATA_DIR` at a network drive and the marker is written
+but never read, so the phone behaves as though you are always away. A local
+path — which is the default — is fine.
+
 ---
 
 ## Using it
