@@ -47,12 +47,17 @@ export interface ModelFile {
  * The four files onnx-asr needs, with the same floors stt_service.py enforces.
  * Ordered smallest first so an obviously broken base URL fails in a second
  * rather than after 600 MB.
+ *
+ * `expectBytes` are the sizes the host actually reports (checked with ranged
+ * requests, not guessed), so the progress bar is honest before any
+ * Content-Length arrives. They are only used for weighting — a file that comes
+ * back a different size is judged by `minBytes`, never by these.
  */
 export const MODEL_FILES: ModelFile[] = [
-  { name: 'config.json', minBytes: 50, expectBytes: 100 },
-  { name: 'vocab.txt', minBytes: 5_000, expectBytes: 9_600 },
-  { name: 'decoder_joint-model.int8.onnx', minBytes: 5_000_000, expectBytes: 9_400_000 },
-  { name: 'encoder-model.int8.onnx', minBytes: 500_000_000, expectBytes: 684_000_000 }
+  { name: 'config.json', minBytes: 50, expectBytes: 97 },
+  { name: 'vocab.txt', minBytes: 5_000, expectBytes: 9_384 },
+  { name: 'decoder_joint-model.int8.onnx', minBytes: 5_000_000, expectBytes: 8_998_286 },
+  { name: 'encoder-model.int8.onnx', minBytes: 500_000_000, expectBytes: 652_184_014 }
 ]
 
 const CHUNK_LOG_BYTES = 262_144

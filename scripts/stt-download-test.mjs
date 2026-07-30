@@ -2,7 +2,8 @@
  * Unit test for the speech-model downloader — resume, retry, validation and
  * cancellation — against a local HTTP server that can misbehave on demand.
  *
- *   node scripts/stt-download-test.mjs
+ *   node scripts/stt-download-test.mjs             + one live check
+ *   node scripts/stt-download-test.mjs --offline    local server only
  *
  * No Electron, no HuggingFace and nothing 660 MB: the files here are a few
  * kilobytes, because every property worth testing (does a `Range` request pick
@@ -24,9 +25,8 @@ const scratch = mkdtempSync(join(tmpdir(), 'forge-model-'))
 
 const shim = join(scratch, 'model-download.mts')
 writeFileSync(shim, readFileSync(join(ROOT, 'electron', 'stt', 'model-download.ts'), 'utf8'), 'utf8')
-const { CancelledError, HttpStatusError, downloadModel, fetchResumable, inspectModel } = await import(
-  pathToFileURL(shim).href
-)
+const { CancelledError, HttpStatusError, MODEL_FILES, PARAKEET_BASE, downloadModel, fetchResumable, inspectModel } =
+  await import(pathToFileURL(shim).href)
 
 let pass = 0
 let fail = 0
@@ -302,6 +302,46 @@ console.log('\ninspectModel')
   ok(partial.missing.length === 3, 'and names only what is still needed')
 
   ok((await inspectModel('', FILES)).presence === 'missing', 'no folder at all is missing, not a crash')
+}
+
+/* --------------------------------------------------------------- the real host
+ *
+ * Everything above proves the logic. This proves the *addresses* — that the
+ * HuggingFace repo, the four file names and the resume support are still what
+ * the code believes. Only the two small files are fetched (9.5 KB together);
+ * the 652 MB encoder is checked with a 64-byte ranged request, which is enough
+ * to learn its real size and that the server answers 206.
+ *
+ * Skipped with --offline, since it is the one part that needs a network.
+ */
+if (!process.argv.includes('--offline')) {
+  console.log('\nagainst the real model host')
+  try {
+    const dir = fresh('live')
+    const small = MODEL_FILES.filter((f) => f.expectBytes < 100_000)
+    const report = await downloadModel({ dir, files: small, sleep: noSleep, maxAttempts: 3 })
+    ok(report.presence === 'ready', 'config.json and vocab.txt download from HuggingFace')
+    ok(
+      statSync(join(dir, 'config.json')).size >= 50 && statSync(join(dir, 'vocab.txt')).size >= 5_000,
+      'and are big enough to be real'
+    )
+
+    for (const file of MODEL_FILES) {
+      const res = await fetch(PARAKEET_BASE + file.name, {
+        headers: { range: 'bytes=0-63', 'user-agent': 'Forge/0.1 (+dictation model fetch)' }
+      })
+      const range = res.headers.get('content-range') ?? ''
+      const total = Number(range.split('/')[1] ?? 0)
+      ok(res.status === 206, `${file.name}: the host honours Range`, `status ${res.status}`)
+      ok(total >= file.minBytes, `${file.name}: ${total} bytes, above the ${file.minBytes} floor`)
+      // A drifting expectBytes only skews the progress bar, so this warns
+      // rather than fails — but 20% out means the constant is stale.
+      const drift = total ? Math.abs(total - file.expectBytes) / total : 1
+      if (drift > 0.2) console.log(`  --   ${file.name}: expectBytes is ${(drift * 100).toFixed(0)}% out (${total})`)
+    }
+  } catch (err) {
+    console.log(`  --   skipped: could not reach the model host (${err?.message ?? err})`)
+  }
 }
 
 /* ------------------------------------------------------------------- done */
