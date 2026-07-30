@@ -109,7 +109,28 @@ function broadcast(): Shot[] {
 
 /* ------------------------------------------------------------------ poll */
 
+/**
+ * The clipboard is a shared, lockable OS resource: any app can hold it, and a
+ * read that collides with somebody else's write throws. On a timer in the main
+ * process an uncaught throw takes the whole app down, so every poll is fenced.
+ * Failures are logged once a minute at most — if the clipboard is being held,
+ * it will be held for many polls in a row.
+ */
+let lastPollError = 0
+
 function poll(): void {
+  try {
+    pollOnce()
+  } catch (err) {
+    const now = Date.now()
+    if (now - lastPollError > 60000) {
+      lastPollError = now
+      console.error('[shots] clipboard poll failed (will keep trying):', err)
+    }
+  }
+}
+
+function pollOnce(): void {
   // No window, no tray to fill — and no reason to touch the clipboard at all.
   if (!shelf || !enabled || BrowserWindow.getAllWindows().length === 0) return
 
@@ -183,14 +204,20 @@ export function registerShotsHandlers(): void {
   ipcMain.handle(IPC.shotsCopy, (_e, path: string) => {
     const target = String(path)
     if (!shelf?.owns(target)) return false
-    const img = nativeImage.createFromPath(target)
-    if (img.isEmpty()) return false
-    // Both formats at once: an editor or chat takes the image, a terminal or
-    // text field takes the quoted path. Electron cannot offer CF_HDROP, so
-    // "paste as a file" is served by dragging the thumbnail out instead.
-    clipboard.write({ image: img, text: `"${target}"` })
-    absorbClipboard(true)
-    return true
+    try {
+      const img = nativeImage.createFromPath(target)
+      if (img.isEmpty()) return false
+      // Both formats at once: an editor or chat takes the image, a terminal or
+      // text field takes the quoted path. Electron cannot offer CF_HDROP, so
+      // "paste as a file" is served by dragging the thumbnail out instead.
+      clipboard.write({ image: img, text: `"${target}"` })
+      absorbClipboard(true)
+      return true
+    } catch (err) {
+      // Somebody else is holding the clipboard. Say so rather than throwing.
+      console.error('[shots] could not copy to the clipboard:', err)
+      return false
+    }
   })
 
   ipcMain.handle(IPC.shotsAdopt, (_e, paths: string[]) => {
