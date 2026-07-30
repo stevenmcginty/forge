@@ -25,6 +25,7 @@ export function SettingsPopover({
   const [command, setCommand] = useState('')
 
   const size = state.settings.terminalFontSize
+  const keep = state.settings.shotsKeep
 
   const commit = (): void => {
     if (!name.trim()) return
@@ -62,6 +63,45 @@ export function SettingsPopover({
         <div className="setting-row">
           <span className="setting-row__label">Shell</span>
           <span className="setting-row__value mono truncate">{state.info?.shell ?? 'pwsh.exe'}</span>
+        </div>
+      </PopoverSection>
+
+      <PopoverDivider />
+
+      <PopoverSection title="Screenshots">
+        <button
+          type="button"
+          className="setting-row setting-row--toggle"
+          role="switch"
+          aria-checked={state.settings.catchShots}
+          onClick={() => actions.setCatchShots(!state.settings.catchShots)}
+        >
+          <span className="setting-row__label">Catch screenshots &amp; copied images</span>
+          <span className="switch" data-on={state.settings.catchShots ? 'true' : undefined}>
+            <span className="switch__knob" />
+          </span>
+        </button>
+        <div className="setting-row">
+          <span className="setting-row__label">Keep newest</span>
+          <div className="stepper">
+            <button
+              type="button"
+              className="ghost-btn stepper__btn"
+              aria-label="Keep fewer shots"
+              onClick={() => actions.setShotsKeep(keep - 1)}
+            >
+              −
+            </button>
+            <span className="stepper__value mono">{keep}</span>
+            <button
+              type="button"
+              className="ghost-btn stepper__btn"
+              aria-label="Keep more shots"
+              onClick={() => actions.setShotsKeep(keep + 1)}
+            >
+              +
+            </button>
+          </div>
         </div>
       </PopoverSection>
 

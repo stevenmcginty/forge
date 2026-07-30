@@ -59,6 +59,8 @@ const FALLBACK_SETTINGS: Settings = {
   terminalFontSize: 13,
   terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, monospace",
   shell: 'pwsh.exe',
+  catchShots: true,
+  shotsKeep: 12,
   window: { width: 1440, height: 900, maximized: false }
 }
 
@@ -382,6 +384,8 @@ export interface AppActions {
   revealProject(id: string): void
   toggleRail(): void
   setFontSize(size: number): void
+  setCatchShots(on: boolean): void
+  setShotsKeep(keep: number): void
   saveProfile(profile: AgentProfile): void
   deleteProfile(id: string): void
   newTab(profileId?: string): void
@@ -564,6 +568,9 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       toggleRail: () => dispatch({ type: 'patchSettings', patch: { railCollapsed: !state.settings.railCollapsed } }),
       setFontSize: (size) =>
         dispatch({ type: 'patchSettings', patch: { terminalFontSize: Math.min(24, Math.max(9, size)) } }),
+      setCatchShots: (on) => dispatch({ type: 'patchSettings', patch: { catchShots: on } }),
+      setShotsKeep: (keep) =>
+        dispatch({ type: 'patchSettings', patch: { shotsKeep: Math.min(60, Math.max(1, Math.round(keep))) } }),
       saveProfile: (profile) => dispatch({ type: 'saveProfile', profile }),
       deleteProfile: (id) => dispatch({ type: 'deleteProfile', id }),
       newTab: (profileId) => dispatch({ type: 'newTab', profileId: profileId ?? defaultProfileFor(activeProjectId) }),

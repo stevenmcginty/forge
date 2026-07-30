@@ -5,3 +5,6 @@ dist/
 *.tsbuildinfo
 *.log
 .DS_Store
+
+# Agent worktrees (Claude Code)
+.claude/worktrees/

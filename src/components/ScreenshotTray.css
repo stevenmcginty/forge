@@ -1,10 +1,22 @@
 .tray {
+  position: relative;
   flex: none;
   height: var(--tray-h);
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--line-hairline);
   background: linear-gradient(180deg, #131418 0%, #101115 100%);
+}
+
+/* A file hovering over the shelf, ready to be adopted. */
+.tray[data-dropping='true']::after {
+  content: '';
+  position: absolute;
+  inset: var(--s-2);
+  border: 1px dashed var(--accent-line);
+  border-radius: var(--r-md);
+  background: var(--accent-softer);
+  pointer-events: none;
 }
 
 .tray--collapsed {
@@ -14,19 +26,63 @@
   color: var(--text-dim);
 }
 
+.tray--collapsed[data-unseen='true'] {
+  color: var(--accent);
+}
+
+.tray__pip {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  font-size: var(--t-eyebrow);
+  color: var(--text-muted);
+}
+
+.tray--collapsed[data-unseen='true'] .tray__pip {
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------------- head */
+
 .tray__head {
   display: flex;
   align-items: center;
   gap: var(--s-3);
   flex: none;
   height: 26px;
-  padding: 0 var(--s-5);
+  padding: 0 var(--s-4) 0 var(--s-5);
 }
 
 .tray__count {
   font-size: var(--t-eyebrow);
   color: var(--text-dim);
 }
+
+.tray__badge {
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-full);
+  padding: 1px var(--s-3) 0;
+}
+
+.tray__head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.tray__act {
+  height: 20px;
+  padding: 0 var(--s-3);
+  font-size: var(--t-xs);
+}
+
+/* ------------------------------------------------------------ empty state */
 
 .tray__body {
   flex: 1;
@@ -62,8 +118,199 @@
 
 .tray__note {
   margin: 0;
+  /* Column, not a row: at rail width the sentence wraps, and a chip sitting
+     beside two wrapped lines reads as a mistake. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
   font-size: var(--t-xs);
   line-height: 1.4;
   color: var(--text-dim);
   text-align: center;
+}
+
+.tray__hint {
+  font-size: var(--t-eyebrow);
+  color: var(--text-muted);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-xs);
+  padding: 1px var(--s-2);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ strip */
+
+.tray__strip {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-1) var(--s-5) var(--s-3);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+/*
+ * Twelve shots never fit in a 260px rail, so the strip scrolls — and has to say
+ * so. The edges fade only on the side that has more to show.
+ */
+.tray__strip[data-more-right='true'] {
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 26px), transparent 100%);
+}
+
+.tray__strip[data-more-left='true'] {
+  mask-image: linear-gradient(90deg, transparent 0, #000 26px, #000 100%);
+}
+
+.tray__strip[data-more-left='true'][data-more-right='true'] {
+  mask-image: linear-gradient(90deg, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
+}
+
+.tray__strip[data-busy='true'] {
+  opacity: 0.5;
+}
+
+/* A full-fat scrollbar would eat into the thumbnails. */
+.tray__strip::-webkit-scrollbar {
+  height: 5px;
+}
+
+.tray__strip::-webkit-scrollbar-thumb {
+  border-width: 1px;
+}
+
+/* ------------------------------------------------------------------- shot */
+
+.shot {
+  position: relative;
+  flex: none;
+  width: 68px;
+  height: 46px;
+}
+
+.shot__btn {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-hairline);
+  background: var(--bg-sunken);
+  box-shadow: var(--shadow-key);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.shot__btn:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card);
+}
+
+.shot__btn:active {
+  transform: translateY(0);
+}
+
+.shot__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  /* The drag is started by the parent button, so the image must not claim it. */
+  pointer-events: none;
+}
+
+.shot__stamp {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 5px var(--s-2) 2px;
+  font-size: var(--t-eyebrow);
+  color: var(--text-secondary);
+  background: linear-gradient(180deg, rgba(8, 9, 10, 0) 0%, rgba(8, 9, 10, 0.86) 62%);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.shot__btn:hover .shot__stamp {
+  opacity: 1;
+}
+
+/* Volt until you have looked at it — DictationMic's rule. */
+.shot[data-unseen='true'] .shot__btn {
+  border-color: var(--accent-line);
+  box-shadow:
+    0 0 0 1px var(--accent-line),
+    0 0 10px var(--accent-glow);
+}
+
+.shot__kill {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 15px;
+  height: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-panel-raised);
+  color: var(--text-secondary);
+  opacity: 0;
+  transform: scale(0.8);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.shot:hover .shot__kill,
+.shot__kill:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.shot__kill:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ------------------------------------------------------------------ toast */
+
+.tray__toast {
+  position: absolute;
+  left: var(--s-5);
+  right: var(--s-5);
+  bottom: calc(100% + var(--s-3));
+  z-index: var(--z-toast);
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-hairline);
+  background: var(--bg-panel-raised);
+  box-shadow: var(--shadow-card);
+  font-size: var(--t-xs);
+  line-height: 1.35;
+  color: var(--text-secondary);
+  animation: tray-toast var(--dur-med) var(--ease-out);
+}
+
+@keyframes tray-toast {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

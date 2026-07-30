@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { PaneLeaf, Project } from '@shared/types'
 import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { droppedFilePaths } from '@/lib/paths'
 import { terminalHost, type PaneRuntime, type TerminalSpec } from '@/lib/terminals'
 import { useApp } from '@/state/AppState'
 import { AgentBadge } from './AgentBadge'
@@ -132,10 +133,7 @@ export function TerminalPane({
     if (!carriesFiles(e)) return
     e.preventDefault()
     setDropping(false)
-    const quoted = Array.from(e.dataTransfer.files)
-      .map((f) => window.forge.pathForFile(f))
-      .filter((p) => p.length > 0)
-      .map((p) => `"${p}"`)
+    const quoted = droppedFilePaths(e).map((p) => `"${p}"`)
     if (quoted.length === 0) return
     claimFocus()
     terminalHost.paste(leaf.id, `${quoted.join(' ')} `)

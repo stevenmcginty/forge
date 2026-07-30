@@ -95,3 +95,49 @@
   border-top: 1px solid var(--line-soft);
   margin-top: var(--s-2);
 }
+
+/* -------------------------------------------------------------- toggle row */
+
+.setting-row--toggle {
+  width: 100%;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.setting-row--toggle:hover {
+  background: var(--bg-hover);
+}
+
+.switch {
+  flex: none;
+  width: 30px;
+  height: 17px;
+  padding: 2px;
+  border-radius: var(--r-full);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-strong);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.switch[data-on='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.switch__knob {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border-radius: var(--r-full);
+  background: var(--text-dim);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.switch[data-on='true'] .switch__knob {
+  background: var(--accent);
+  transform: translateX(13px);
+}

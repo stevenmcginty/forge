@@ -12,7 +12,8 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit --composite false -p tsconfig.node.json && tsc --noEmit --composite false -p tsconfig.web.json",
     "build": "npm run typecheck && electron-vite build",
-    "pty:smoke": "node scripts/pty-smoke.mjs"
+    "pty:smoke": "node scripts/pty-smoke.mjs",
+    "shots:smoke": "node scripts/shots-smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
