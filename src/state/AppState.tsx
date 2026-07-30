@@ -87,7 +87,18 @@ const FALLBACK_SETTINGS: Settings = {
   geminiModel: 'gemini-2.5-flash',
   geminiImageModel: '',
   openrouterKey: '',
-  openrouterModel: 'google/gemini-2.5-flash-lite'
+  openrouterModel: 'google/gemini-2.5-flash-lite',
+  // Companion (M9): the phone link, off and unconfigured until Steve says
+  // otherwise. This fallback is only ever used before the first snapshot
+  // arrives, so "off" is also the only safe answer here.
+  companionEnabled: false,
+  companionApiKey: '',
+  companionDatabaseURL: '',
+  companionAuthBase: '',
+  companionTokenBase: '',
+  companionEmail: '',
+  companionRefreshToken: '',
+  companionUid: ''
 }
 
 /** The voice panel never gets narrower than this, nor wider. */

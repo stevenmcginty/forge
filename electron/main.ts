@@ -19,6 +19,7 @@ import { writeBridgeConfig } from './bridge/mcp-config'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
 import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-sidecar'
 import { registerVoiceHandlers } from './voice-bridge'
+import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 
 const isDev = !app.isPackaged
 const BG = '#0B0C0E'
@@ -268,6 +269,19 @@ function registerAppHandlers(): void {
     if (before.geminiKey !== next.geminiKey || before.geminiImageModel !== next.geminiImageModel) {
       writeBridgeConfig()
     }
+    // Flipping the phone link on or repointing it at another Firebase project
+    // should take effect now, not at the next launch. Restarting the service is
+    // cheap and idempotent, so only the fields it actually reads are compared.
+    if (
+      before.companionEnabled !== next.companionEnabled ||
+      before.companionApiKey !== next.companionApiKey ||
+      before.companionDatabaseURL !== next.companionDatabaseURL ||
+      before.companionAuthBase !== next.companionAuthBase ||
+      before.companionTokenBase !== next.companionTokenBase ||
+      before.companionUid !== next.companionUid
+    ) {
+      applyCompanionSettings()
+    }
     return next
   })
   ipcMain.handle(IPC.storeSetProjects, (_e, projects: Project[]) => setProjects(Array.isArray(projects) ? projects : []))
@@ -337,6 +351,9 @@ void app.whenReady().then(() => {
   registerShotsHandlers()
   registerSttHandlers()
   registerVoiceHandlers()
+  // Off by default: this reads settings, sees `companionEnabled: false`, and
+  // returns without touching the network or a credential.
+  registerCompanionHandlers()
   createWindow()
 
   app.on('activate', () => {
@@ -352,4 +369,5 @@ app.on('before-quit', () => {
   disposePtyHost()
   disposeShotsWatcher()
   disposeSttSidecar()
+  disposeCompanion()
 })

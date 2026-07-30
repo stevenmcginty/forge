@@ -16,7 +16,10 @@
     "shots:smoke": "node scripts/shots-smoke.mjs",
     "voice:check": "node scripts/voice-check.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
-    "bridge:register": "node scripts/bridge-register-check.mjs"
+    "bridge:register": "node scripts/bridge-register-check.mjs",
+    "companion:smoke": "node scripts/companion-smoke.mjs",
+    "companion:icons": "node scripts/companion-icons.mjs",
+    "companion:serve": "node scripts/companion-serve.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
@@ -25,6 +28,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^43.2.0",
     "electron-vite": "^5.0.0",
+    "firebase-tools": "^15.25.0",
     "typescript": "^7.0.2",
     "vite": "^7.3.6"
   },

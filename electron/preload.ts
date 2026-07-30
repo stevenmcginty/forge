@@ -69,6 +69,16 @@ const api: ForgeApi = {
     editImage: (req) => ipcRenderer.invoke(IPC.voiceEditImage, req)
   },
 
+  companion: {
+    status: () => ipcRenderer.invoke(IPC.companionStatus),
+    signIn: (email, password) => ipcRenderer.invoke(IPC.companionSignIn, email, password),
+    signOut: () => ipcRenderer.invoke(IPC.companionSignOut),
+    publish: () => ipcRenderer.invoke(IPC.companionPublish),
+    reply: (itemId, text, projectId) => ipcRenderer.invoke(IPC.companionReply, itemId, text, projectId),
+    onStatus: (cb) => subscribe(IPC.companionStatusEvent, cb),
+    onUtterance: (cb) => subscribe(IPC.companionUtterance, cb)
+  },
+
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
 

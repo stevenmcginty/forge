@@ -15,3 +15,10 @@ scripts/fixtures/
 
 # Temp probe files written into the root by scripts/bridge-register-check.mjs
 .bridge-check-*.cjs
+
+# Steve's own Firebase project id for the companion — created by
+# `firebase use --alias default forge-sync`. The shape is in
+# companion/.firebaserc.example; the id itself is his, not the repo's.
+companion/.firebaserc
+# Emulator state, if anyone ever runs with --export-on-exit
+companion/.emulator-data/

@@ -1,5 +1,8 @@
 import type {
   AppInfo,
+  CompanionSignInResult,
+  CompanionStatus,
+  CompanionUtteranceEvent,
   CreateSessionRequest,
   CreateSessionResult,
   EditImageRequest,
@@ -118,6 +121,32 @@ export interface ForgeApi {
     makeImage(req: MakeImageRequest): Promise<MediaCallResult>
     /** Edit an existing image into a new file. The original is untouched. */
     editImage(req: EditImageRequest): Promise<MediaCallResult>
+  }
+
+  /**
+   * Forge Companion — the phone link (M9). Off until switched on and signed in;
+   * every method here is safe to call in that state and simply does nothing.
+   */
+  companion: {
+    status(): Promise<CompanionStatus>
+    /**
+     * Sign in, creating the account if it is new. The password is used for one
+     * HTTPS POST in the main process and never stored — what reaches disk is a
+     * revocable refresh token.
+     */
+    signIn(email: string, password: string): Promise<CompanionSignInResult>
+    signOut(): Promise<CompanionStatus>
+    /** Republish the project list now (after adding/renaming/removing one). */
+    publish(): Promise<number>
+    /**
+     * Send text back to the phone. `itemId` is the one from the utterance
+     * event, which threads the reply under the message that asked for it;
+     * `projectId` is only needed for an unprompted note.
+     */
+    reply(itemId: string, text: string, projectId?: string): Promise<boolean>
+    onStatus(cb: (s: CompanionStatus) => void): () => void
+    /** THE voice-pipeline hookup. Returns an unsubscribe function. */
+    onUtterance(cb: (e: CompanionUtteranceEvent) => void): () => void
   }
 
   pickFolder(): Promise<string | null>

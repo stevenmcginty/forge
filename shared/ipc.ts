@@ -62,6 +62,19 @@ export const IPC = {
   voiceMakeImage: 'voice:make-image',
   voiceEditImage: 'voice:edit-image',
 
+  // forge companion — the phone link (M9)
+  companionStatus: 'companion:status',
+  companionStatusEvent: 'companion:status-event',
+  companionSignIn: 'companion:sign-in',
+  companionSignOut: 'companion:sign-out',
+  companionPublish: 'companion:publish',
+  companionReply: 'companion:reply',
+  /**
+   * A message arrived from the phone. THE hookup point for the voice pipeline —
+   * see CompanionUtteranceEvent in shared/types.ts.
+   */
+  companionUtterance: 'companion:utterance',
+
   // diagnostics
   rendererError: 'diag:renderer-error'
 } as const
