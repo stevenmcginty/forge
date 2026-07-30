@@ -241,8 +241,16 @@ function registerAppHandlers(): void {
 
   ipcMain.handle(IPC.storeSnapshot, () => snapshot())
   ipcMain.handle(IPC.storeSetSettings, (_e, patch: Partial<Settings>) => {
+    const before = getSettings()
     const next = setSettings(patch ?? {})
     applyShotSettings(next)
+    // The bridge's mcp.json carries the Gemini key and image model, so it has to
+    // be rewritten when either changes — otherwise a key pasted today would not
+    // reach make_image until the next launch. (Panes still have to be reopened:
+    // Claude reads the config once, at start.)
+    if (before.geminiKey !== next.geminiKey || before.geminiImageModel !== next.geminiImageModel) {
+      writeBridgeConfig()
+    }
     return next
   })
   ipcMain.handle(IPC.storeSetProjects, (_e, projects: Project[]) => setProjects(Array.isArray(projects) ? projects : []))

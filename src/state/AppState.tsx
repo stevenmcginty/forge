@@ -78,7 +78,10 @@ const FALLBACK_SETTINGS: Settings = {
   voiceBrain: 'gemini',
   anthropicKey: '',
   geminiKey: '',
-  geminiModel: 'gemini-2.5-flash'
+  geminiModel: 'gemini-2.5-flash',
+  geminiImageModel: '',
+  openrouterKey: '',
+  openrouterModel: 'google/gemini-2.5-flash-lite'
 }
 
 /** The voice panel never gets narrower than this, nor wider. */

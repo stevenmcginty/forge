@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { MAX_PANES_PER_TAB, MAX_SESSIONS } from '@shared/ipc'
-import type { AgentProfile } from '@shared/types'
+import type { AgentProfile, KeySource, VoiceBrainId } from '@shared/types'
 import { resolveProfile } from '@/lib/agents'
 import { buildManifest, type ManifestSnapshot } from '@/lib/appmanifest'
 import {
@@ -17,6 +17,7 @@ import { transcriptBus, typedTranscript } from '@/lib/transcriptSource'
 import { parseUtterance } from '@/lib/voicecommands'
 import {
   brainStatusLabel,
+  DEFAULT_OPENROUTER_MODEL,
   getActiveBrain,
   maskKey,
   type BrainContext,
@@ -103,9 +104,18 @@ export function VoicePanel(): ReactNode {
         voiceBrain: state.settings.voiceBrain,
         anthropicKey: state.settings.anthropicKey,
         geminiKey: state.settings.geminiKey,
-        geminiModel: state.settings.geminiModel
+        geminiModel: state.settings.geminiModel,
+        openrouterKey: state.settings.openrouterKey,
+        openrouterModel: state.settings.openrouterModel
       }),
-    [state.settings.voiceBrain, state.settings.anthropicKey, state.settings.geminiKey, state.settings.geminiModel]
+    [
+      state.settings.voiceBrain,
+      state.settings.anthropicKey,
+      state.settings.geminiKey,
+      state.settings.geminiModel,
+      state.settings.openrouterKey,
+      state.settings.openrouterModel
+    ]
   )
   const status: BrainStatus = brain.ready()
 
@@ -145,7 +155,34 @@ export function VoicePanel(): ReactNode {
     closePane: (paneId) => actions.closePane(paneId),
     closeTab: (tabId) => actions.closeTab(tabId),
     selectProject: (projectId) => actions.selectProject(projectId),
-    selectTab: (tabId) => actions.selectTab(tabId)
+    selectTab: (tabId) => actions.selectTab(tabId),
+    // Media generation goes to the main process, which holds the key, writes
+    // into the project's assets/generated/ and puts the result in the tray.
+    makeImage: async (request) => {
+      const res = await window.forge.voice.makeImage({ ...request, projectPath: project?.path })
+      if (!res.ok) return { ok: false, summary: mediaFailure(res.error), requested: request.count, done: 0 }
+      const made = res.paths.length
+      return {
+        ok: true,
+        summary:
+          `Made ${made} ${made === 1 ? 'image' : 'images'} in assets/generated` +
+          `${res.adopted > 0 ? ' — also in the shot tray' : ''}${res.note ? ` (${res.note})` : ''}`,
+        requested: request.count,
+        done: made,
+        paths: res.paths
+      }
+    },
+    editImage: async (request) => {
+      const res = await window.forge.voice.editImage({ ...request, projectPath: project?.path })
+      if (!res.ok) return { ok: false, summary: mediaFailure(res.error), requested: 1, done: 0 }
+      return {
+        ok: true,
+        summary: `Edited image saved to assets/generated${res.adopted > 0 ? ' — also in the shot tray' : ''}`,
+        requested: 1,
+        done: res.paths.length,
+        paths: res.paths
+      }
+    }
   }
 
   const manifestRef = useRef<string>('')
@@ -205,28 +242,64 @@ export function VoicePanel(): ReactNode {
 
   /* ------------------------------------------------------------- executor */
 
-  const runActions = useCallback((list: AppAction[]): ActionOutcome[] => {
-    let ctx = ctxRef.current
-    const runner = runnerRef.current
-    if (!ctx || !runner) return []
-    const out: ActionOutcome[] = []
-    for (const action of list) {
-      const outcome = runAppAction(action, ctx, runner)
-      out.push(outcome)
-      // Later actions in the same breath must see the earlier ones' effect.
-      if (action.kind === 'open_tabs') {
-        ctx = { ...ctx, paneCount: ctx.paneCount + outcome.done }
-      } else if (action.kind === 'open_panes') {
-        ctx = {
-          ...ctx,
-          paneCount: ctx.paneCount + outcome.done,
-          panesInActiveTab: ctx.panesInActiveTab + outcome.done
+  /**
+   * `onResolved` exists for the asynchronous actions only. Generating an image
+   * takes seconds, so `runAppAction` hands back a provisional "Generating…"
+   * outcome plus a promise; when it settles the chip is replaced in place rather
+   * than the card sitting there lying about what happened.
+   */
+  const runActions = useCallback(
+    (list: AppAction[], onResolved?: (index: number, outcome: ActionOutcome) => void): ActionOutcome[] => {
+      let ctx = ctxRef.current
+      const runner = runnerRef.current
+      if (!ctx || !runner) return []
+      const out: ActionOutcome[] = []
+      for (const [i, action] of list.entries()) {
+        const outcome = runAppAction(action, ctx, runner)
+        out.push(outcome)
+        if (outcome.pending && onResolved) {
+          const index = i
+          void outcome.pending.then(
+            (settled) => onResolved(index, settled),
+            (err: unknown) =>
+              onResolved(index, {
+                ok: false,
+                summary: mediaFailure(err instanceof Error ? err.message : String(err)),
+                requested: outcome.requested,
+                done: 0
+              })
+          )
         }
-      } else if (action.kind === 'close_pane') {
-        ctx = { ...ctx, paneCount: Math.max(0, ctx.paneCount - outcome.done) }
+        // Later actions in the same breath must see the earlier ones' effect.
+        if (action.kind === 'open_tabs') {
+          ctx = { ...ctx, paneCount: ctx.paneCount + outcome.done }
+        } else if (action.kind === 'open_panes') {
+          ctx = {
+            ...ctx,
+            paneCount: ctx.paneCount + outcome.done,
+            panesInActiveTab: ctx.panesInActiveTab + outcome.done
+          }
+        } else if (action.kind === 'close_pane') {
+          ctx = { ...ctx, paneCount: Math.max(0, ctx.paneCount - outcome.done) }
+        }
       }
-    }
-    return out
+      return out
+    },
+    []
+  )
+
+  /** Replace one chip on a turn once its slow action has settled. */
+  const patchOutcome = useCallback((turnId: string, index: number, outcome: ActionOutcome): void => {
+    setTurns((prev) =>
+      prev.map((t) => {
+        if (t.id !== turnId) return t
+        const current = t.kind === 'command' ? t.outcomes : t.outcomes
+        if (!current || !current[index]) return t
+        const next = [...current]
+        next[index] = outcome
+        return t.kind === 'command' ? { ...t, outcomes: next } : { ...t, outcomes: next }
+      })
+    )
   }, [])
 
   /* ---------------------------------------------------- transcript intake */
@@ -239,7 +312,7 @@ export function VoicePanel(): ReactNode {
       const ctx = ctxRef.current
       const hit = ctx ? parseUtterance(said, ctx) : null
       if (hit) {
-        const outcomes = runActions(hit.actions)
+        const outcomes = runActions(hit.actions, (index, outcome) => patchOutcome(id, index, outcome))
         setTurns((prev) => [
           ...prev,
           { id, said, at: Date.now(), kind: 'command', actions: hit.actions, outcomes }
@@ -261,7 +334,9 @@ export function VoicePanel(): ReactNode {
       brain
         .interpret(said, context)
         .then((reply) => {
-          const outcomes = reply.actions?.length ? runActions(reply.actions) : undefined
+          const outcomes = reply.actions?.length
+            ? runActions(reply.actions, (index, outcome) => patchOutcome(id, index, outcome))
+            : undefined
           setTurns((prev) =>
             prev.map((t) =>
               t.id === id && t.kind === 'brain'
@@ -280,7 +355,7 @@ export function VoicePanel(): ReactNode {
           )
         )
     },
-    [brain, project?.path, runActions]
+    [brain, patchOutcome, project?.path, runActions]
   )
 
   // One subscription for every source that ever registers with the bus — which
@@ -489,6 +564,18 @@ export function VoicePanel(): ReactNode {
   )
 }
 
+/* ---------------------------------------------------------------- failures */
+
+/**
+ * A provider's error is a paragraph aimed at an agent; an outcome chip is one
+ * line. Keep the first sentence — which is where the actual reason lives ("out
+ * of quota", "refused the key") — and drop the advice that follows it.
+ */
+function mediaFailure(error: string): string {
+  const first = (error ?? '').split('\n')[0]?.trim() || (error ?? '').trim() || 'Image generation failed'
+  return first.length > 180 ? `${first.slice(0, 177)}…` : first
+}
+
 /* ------------------------------------------------------------------- chip */
 
 function BrainChip({ status, brainName }: { status: BrainStatus; brainName: string }): ReactNode {
@@ -506,8 +593,9 @@ function BrainChip({ status, brainName }: { status: BrainStatus; brainName: stri
 
 /* --------------------------------------------------------------- settings */
 
-const BRAIN_ROWS: Array<{ id: 'gemini' | 'stub' | 'claude' | 'openai'; name: string; note: string; ready: boolean }> = [
+const BRAIN_ROWS: Array<{ id: VoiceBrainId; name: string; note: string; ready: boolean }> = [
   { id: 'gemini', name: 'Gemini', note: 'live — needs a key', ready: true },
+  { id: 'openrouter', name: 'OpenRouter', note: 'live — any model', ready: true },
   { id: 'stub', name: 'Stub', note: 'offline, echoes you', ready: true },
   { id: 'claude', name: 'Claude', note: 'coming soon', ready: false },
   { id: 'openai', name: 'OpenAI', note: 'coming soon', ready: false }
@@ -519,19 +607,36 @@ function VoiceSettings(): ReactNode {
   const [geminiDraft, setGeminiDraft] = useState(state.settings.geminiKey)
   const [anthropicDraft, setAnthropicDraft] = useState(state.settings.anthropicKey)
   const [modelDraft, setModelDraft] = useState(state.settings.geminiModel)
-  const [found, setFound] = useState<{ key: string; last4: string; source: string } | null>(null)
+  const [openrouterDraft, setOpenrouterDraft] = useState(state.settings.openrouterKey)
+  const [openrouterModelDraft, setOpenrouterModelDraft] = useState(state.settings.openrouterModel)
+  const [found, setFound] = useState<{ key: string; last4: string; source: string; which: KeySource } | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
 
   useEffect(() => setGeminiDraft(state.settings.geminiKey), [state.settings.geminiKey])
   useEffect(() => setAnthropicDraft(state.settings.anthropicKey), [state.settings.anthropicKey])
   useEffect(() => setModelDraft(state.settings.geminiModel), [state.settings.geminiModel])
+  useEffect(() => setOpenrouterDraft(state.settings.openrouterKey), [state.settings.openrouterKey])
+  useEffect(() => setOpenrouterModelDraft(state.settings.openrouterModel), [state.settings.openrouterModel])
 
-  const importKey = async (): Promise<void> => {
+  const importKey = async (which: KeySource): Promise<void> => {
     setImportError(null)
     setFound(null)
-    const result = await window.forge.voice.importKey()
-    if (result.ok) setFound({ key: result.key, last4: result.last4, source: result.source })
+    const result = await window.forge.voice.importKey(which)
+    if (result.ok) setFound({ key: result.key, last4: result.last4, source: result.source, which })
     else setImportError(result.error)
+  }
+
+  /** Take the key that was found, and switch to the brain it belongs to. */
+  const acceptFound = (): void => {
+    if (!found) return
+    if (found.which === 'openrouter') {
+      actions.patchSettings({ openrouterKey: found.key })
+      actions.setVoiceBrain('openrouter')
+    } else {
+      actions.setGeminiKey(found.key)
+      actions.setVoiceBrain('gemini')
+    }
+    setFound(null)
   }
 
   return (
@@ -597,21 +702,13 @@ function VoiceSettings(): ReactNode {
               <button type="button" className="ghost-btn turn__action" onClick={() => setFound(null)}>
                 Cancel
               </button>
-              <button
-                type="button"
-                className="ghost-btn turn__action turn__action--send"
-                onClick={() => {
-                  actions.setGeminiKey(found.key)
-                  actions.setVoiceBrain('gemini')
-                  setFound(null)
-                }}
-              >
+              <button type="button" className="ghost-btn turn__action turn__action--send" onClick={acceptFound}>
                 Use this key
               </button>
             </div>
           </div>
         ) : (
-          <button type="button" className="ghost-btn voice__import-btn" onClick={() => void importKey()}>
+          <button type="button" className="ghost-btn voice__import-btn" onClick={() => void importKey('gemini')}>
             Import from DictationMic
           </button>
         )}
@@ -632,6 +729,55 @@ function VoiceSettings(): ReactNode {
           onKeyDown={(e) => {
             e.stopPropagation()
             if (e.key === 'Enter') actions.setGeminiModel(modelDraft)
+          }}
+        />
+      </div>
+
+      <div className="field voice__field">
+        <label className="field__label" htmlFor="voice-openrouter-key">
+          OpenRouter API key
+        </label>
+        <div className="voice__key-row">
+          <input
+            id="voice-openrouter-key"
+            className="field__input mono voice__key-input"
+            type={reveal ? 'text' : 'password'}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="sk-or-v1-…"
+            value={openrouterDraft}
+            onChange={(e) => setOpenrouterDraft(e.target.value)}
+            onBlur={() => actions.patchSettings({ openrouterKey: openrouterDraft.trim() })}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter') actions.patchSettings({ openrouterKey: openrouterDraft.trim() })
+            }}
+          />
+        </div>
+        <div className="voice__key-state mono">
+          {state.settings.openrouterKey ? maskKey(state.settings.openrouterKey) : 'no key stored'}
+        </div>
+        <button type="button" className="ghost-btn voice__import-btn" onClick={() => void importKey('openrouter')}>
+          Import from ~/.kimi-key
+        </button>
+      </div>
+
+      <div className="field voice__field">
+        <label className="field__label" htmlFor="voice-openrouter-model">
+          OpenRouter model
+        </label>
+        <input
+          id="voice-openrouter-model"
+          className="field__input mono"
+          spellCheck={false}
+          value={openrouterModelDraft}
+          onChange={(e) => setOpenrouterModelDraft(e.target.value)}
+          onBlur={() => actions.patchSettings({ openrouterModel: openrouterModelDraft.trim() || DEFAULT_OPENROUTER_MODEL })}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') {
+              actions.patchSettings({ openrouterModel: openrouterModelDraft.trim() || DEFAULT_OPENROUTER_MODEL })
+            }
           }}
         />
       </div>
@@ -661,10 +807,11 @@ function VoiceSettings(): ReactNode {
       </div>
 
       <p className="voice__settings-note">
-        Keys live in <span className="mono">settings.json</span> on this PC. The Gemini key is the only one that goes
-        anywhere: when Gemini is the brain, what you say plus a summary of your projects, tabs and panes is sent to{' '}
-        <span className="mono">generativelanguage.googleapis.com</span>. Nothing else in Forge makes a network call,
-        and the Anthropic key is stored but never used.
+        Keys live in <span className="mono">settings.json</span> on this PC. Only the selected brain&rsquo;s key goes
+        anywhere: what you say plus a summary of your projects, tabs and panes is sent to{' '}
+        <span className="mono">generativelanguage.googleapis.com</span> or <span className="mono">openrouter.ai</span>.
+        The Gemini key is also used to generate images, and is written into the MCP config that gives Claude panes{' '}
+        <span className="mono">make_image</span>. The Anthropic key is stored but never used.
       </p>
       <p className="voice__settings-note">
         Commands like “open two Claude tabs” are matched here on your machine and never sent anywhere. Replies are

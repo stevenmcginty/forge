@@ -2,9 +2,15 @@ import type {
   AppInfo,
   CreateSessionRequest,
   CreateSessionResult,
+  EditImageRequest,
   GeminiCallRequest,
   GeminiCallResult,
   ImportedKeyResult,
+  KeySource,
+  MakeImageRequest,
+  MediaCallResult,
+  OpenRouterCallRequest,
+  OpenRouterCallResult,
   Project,
   PtyDataEvent,
   PtyExitEvent,
@@ -97,8 +103,21 @@ export interface ForgeApi {
    */
   voice: {
     gemini(req: GeminiCallRequest): Promise<GeminiCallResult>
-    /** Read Steve's own Gemini key off disk (DictationMic). Never writes. */
-    importKey(): Promise<ImportedKeyResult>
+    /** OpenRouter's OpenAI-compatible chat completions, for OpenRouterBrain. */
+    openrouter(req: OpenRouterCallRequest): Promise<OpenRouterCallResult>
+    /**
+     * Read a key Steve already has on disk — DictationMic's `gemini.key`, or
+     * `~/.kimi-key` for OpenRouter. Read-only; never writes.
+     */
+    importKey(which?: KeySource): Promise<ImportedKeyResult>
+    /**
+     * Really generate images. They are written into the current project's
+     * `assets/generated/` and adopted into the screenshot shelf, so they appear
+     * in the tray straight away. The Gemini key is read in the main process.
+     */
+    makeImage(req: MakeImageRequest): Promise<MediaCallResult>
+    /** Edit an existing image into a new file. The original is untouched. */
+    editImage(req: EditImageRequest): Promise<MediaCallResult>
   }
 
   pickFolder(): Promise<string | null>

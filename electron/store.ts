@@ -47,7 +47,14 @@ const DEFAULT_SETTINGS: Settings = {
   voiceBrain: 'gemini',
   anthropicKey: '',
   geminiKey: '',
-  geminiModel: 'gemini-2.5-flash'
+  geminiModel: 'gemini-2.5-flash',
+  // Empty = use gemini-media.ts's built-in default, which the MCP bridge shares.
+  geminiImageModel: '',
+  openrouterKey: '',
+  // Mirrors DEFAULT_OPENROUTER_MODEL in src/lib/voicebrain.ts, the same way
+  // geminiModel above mirrors DEFAULT_GEMINI_MODEL — main cannot import a
+  // renderer module, and voice-check asserts the two literals still agree.
+  openrouterModel: 'google/gemini-2.5-flash-lite'
 }
 
 let dataDir = ''
@@ -155,13 +162,20 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     voicePanelOpen: Boolean(s.voicePanelOpen),
     voicePanelWidth: clamp(s.voicePanelWidth ?? DEFAULT_SETTINGS.voicePanelWidth, 300, 640),
     voiceBrain:
-      brain === 'claude' || brain === 'openai' || brain === 'stub' || brain === 'gemini'
+      brain === 'claude' || brain === 'openai' || brain === 'stub' || brain === 'gemini' || brain === 'openrouter'
         ? brain
         : DEFAULT_SETTINGS.voiceBrain,
     anthropicKey: typeof s.anthropicKey === 'string' ? s.anthropicKey : '',
     geminiKey: typeof s.geminiKey === 'string' ? s.geminiKey.trim() : '',
     geminiModel:
-      typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel
+      typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel,
+    // Blank is meaningful here — it means "whatever gemini-media.ts defaults to".
+    geminiImageModel: typeof s.geminiImageModel === 'string' ? s.geminiImageModel.trim() : '',
+    openrouterKey: typeof s.openrouterKey === 'string' ? s.openrouterKey.trim() : '',
+    openrouterModel:
+      typeof s.openrouterModel === 'string' && s.openrouterModel.trim()
+        ? s.openrouterModel.trim()
+        : DEFAULT_SETTINGS.openrouterModel
   }
 }
 
