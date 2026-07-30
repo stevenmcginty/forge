@@ -43,6 +43,21 @@ interface Cell {
  * Column counts chosen so tiles stay roughly terminal-shaped as the wall fills
  * up, rather than growing ever-wider letterboxes.
  */
+/**
+ * How far a zoomed pane may be blown up past life size.
+ *
+ * Zoom does not refit the PTY, so magnifying is the only way to make a pane
+ * that was one of eight in a split actually readable — at natural scale it is a
+ * postage stamp adrift in the middle of the window. The character grid is
+ * untouched either way; the glyphs simply get bigger.
+ *
+ * Capped low deliberately. Scaling all the way to fit would put a 310px pane at
+ * 2.7x — a 35px font, which is a novelty rather than a terminal. 1.5x is enough
+ * to make the smallest pane comfortable and does not bind at all on a pane that
+ * had a tab to itself.
+ */
+const ZOOM_MAX_SCALE = 1.5
+
 function columnsFor(count: number): number {
   if (count <= 1) return 1
   if (count <= 2) return 2
@@ -303,14 +318,18 @@ function MosaicTile({
   }, [geometry, paneId])
 
   /*
-   * Renderers: the zoomed tile gets WebGL, the wall does not. A browser only
-   * hands out a dozen or so contexts per process, and sixteen tiles all asking
-   * at once just means the losers get their context yanked mid-frame. The DOM
-   * renderer is also the honest choice for a shrunken tile — real text scales,
-   * a resampled canvas smears.
+   * Nothing in the mosaic uses WebGL.
+   *
+   * Every surface here is scaled, and a scaled canvas is a resampled bitmap —
+   * smeared shrunk, soft blown up — where xterm's DOM rows are real text that
+   * Chromium re-rasterises crisply at whatever scale we hand it. It also
+   * sidesteps the context ceiling entirely: a browser will not hand out sixteen
+   * live WebGL contexts, and the ones it takes back it takes back mid-frame.
+   * Measured, the DOM renderer holds 60fps with sixteen live tiles, so there is
+   * nothing to buy back. WebGL belongs to tab view, where scale is always 1.
    */
   useEffect(() => {
-    terminalHost.setWebgl(paneId, zoomed)
+    terminalHost.setWebgl(paneId, false)
     if (zoomed) terminalHost.focus(paneId)
   }, [paneId, zoomed])
 
@@ -328,7 +347,8 @@ function MosaicTile({
       const w = stage.clientWidth
       const h = stage.clientHeight
       if (w < 4 || h < 4) return
-      const scale = Math.min(1, w / against.width, h / against.height)
+      const cap = zoomed ? ZOOM_MAX_SCALE : 1
+      const scale = Math.min(cap, w / against.width, h / against.height)
       /*
        * Tiles hang off the top-left, so the wall's terminals all start on the
        * same line and the eye can run down them. A zoomed pane is centred
