@@ -128,7 +128,19 @@ const FALLBACK_SETTINGS: Settings = {
   memoryLlmSummarize: false,
   // Filled in by the store on hydrate — main knows the real data root.
   skillsLibraryDir: '',
-  skillsEnabled: []
+  skillsEnabled: [],
+  remoteControlDefault: true,
+  // Companion (M9): the phone link, off and unconfigured until Steve says
+  // otherwise. This fallback is only ever used before the first snapshot
+  // arrives, so "off" is also the only safe answer here.
+  companionEnabled: false,
+  companionApiKey: '',
+  companionDatabaseURL: '',
+  companionAuthBase: '',
+  companionTokenBase: '',
+  companionEmail: '',
+  companionRefreshToken: '',
+  companionUid: ''
 }
 
 /** The voice panel never gets narrower than this, nor wider. */

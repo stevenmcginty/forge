@@ -1,0 +1,111 @@
+// Forge Companion — Realtime Database security rules.
+//
+// The whole model in one sentence: a signed-in user can read and write
+// users/<their own uid> and nothing else. Everything below that is shape
+// validation, not access control — it stops a buggy client bloating the
+// database, it is not what keeps other people out.
+//
+// The two deny-by-default rules at the root matter. RTDB rules cascade
+// downwards only: a subtree added outside users/ later would inherit no rule
+// at all, and "no rule" at the root is what these two turn from a silent
+// mistake into a refusal.
+//
+// Deploy:  firebase deploy --only database        (from companion/)
+// Test:    npm run companion:smoke                (asserts these actually bite)
+//
+// Note this file is JSON *with comments* — Firebase's rules parser accepts
+// them, which is why the schema notes live here rather than only in README.md.
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "users": {
+      "$uid": {
+        // The only access-control rules in the file.
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+
+        // Forge's heartbeat, so the phone can tell "the desktop is running"
+        // from "the desktop published this an hour ago".
+        "presence": {
+          ".validate": "newData.hasChildren(['device'])",
+          "device": { ".validate": "newData.isString() && newData.val().length <= 40" },
+          "at": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        },
+
+        // Forge writes, the phone reads. Never contains a local file path.
+        "projects": {
+          "$projectId": {
+            ".validate": "newData.hasChildren(['name'])",
+            "name": { ".validate": "newData.isString() && newData.val().length <= 200" },
+            "color": { ".validate": "newData.isString() && newData.val().length <= 32" },
+            "status": { ".validate": "newData.isString() && newData.val().length <= 120" },
+            "panes": { ".validate": "newData.isNumber()" },
+            "tabs": { ".validate": "newData.isNumber()" },
+            "lastActivity": { ".validate": "newData.isNumber()" },
+            "updatedAt": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        },
+
+        // The phone writes; Forge consumes and acks onto the same node.
+        "inbox": {
+          "$projectId": {
+            "$itemId": {
+              ".validate": "newData.hasChildren(['kind', 'status'])",
+              "kind": { ".validate": "newData.val() === 'image' || newData.val() === 'message'" },
+              "status": { ".validate": "newData.val().matches(/^(pending|done|failed|stale)$/)" },
+              "createdAt": { ".validate": "newData.isNumber()" },
+              "origin": { ".validate": "newData.val() === 'phone'" },
+
+              "text": { ".validate": "newData.isString() && newData.val().length <= 8000" },
+
+              "name": { ".validate": "newData.isString() && newData.val().length <= 200" },
+              "mime": { ".validate": "newData.isString() && newData.val().length <= 60" },
+
+              // MAX_INLINE_BASE64 (200 KB) is measured on the base64 payload;
+              // this field also carries the "data:image/jpeg;base64," prefix,
+              // so the rule allows a little headroom over the client's cap.
+              // It is a backstop, not the enforcement: the phone refuses first
+              // and electron/companion-sync.ts refuses again.
+              "data": { ".validate": "newData.isString() && newData.val().length <= 205000" },
+
+              // Reserved for Storage-backed images. Nothing writes it yet.
+              "storagePath": { ".validate": "newData.isString() && newData.val().length <= 500" },
+
+              // Written by Forge when it consumes the item.
+              "result": { ".validate": "newData.isString() && newData.val().length <= 300" },
+              "doneAt": { ".validate": "newData.isNumber()" },
+
+              "$other": { ".validate": false }
+            }
+          }
+        },
+
+        // Forge writes; the phone reads and stamps seenAt.
+        "outbox": {
+          "$projectId": {
+            "$itemId": {
+              ".validate": "newData.hasChildren(['kind', 'text'])",
+              "kind": { ".validate": "newData.val() === 'reply' || newData.val() === 'note'" },
+              "text": { ".validate": "newData.isString() && newData.val().length <= 8000" },
+              "createdAt": { ".validate": "newData.isNumber()" },
+              "origin": { ".validate": "newData.val() === 'forge'" },
+              "replyTo": { ".validate": "newData.isString() && newData.val().length <= 64" },
+              // The delivery ack. Client time, phone-written, Forge never
+              // touches it — that is what makes it an ack rather than a second
+              // copy of createdAt.
+              "seenAt": { ".validate": "newData.isNumber()" },
+              "$other": { ".validate": false }
+            }
+          }
+        },
+
+        // Anything else under the user's node is a bug, not a feature.
+        "$other": { ".validate": false }
+      }
+    }
+  }
+}

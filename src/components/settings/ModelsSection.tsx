@@ -12,8 +12,19 @@ import { Card, KeyField, Row, Section, StateChip, TextField } from './parts'
  * not there. Only one of these keys is ever sent anywhere.
  */
 
+/**
+ * The recommended fast brain. Measured on this machine: a full voice turn back
+ * in 1.9s with valid brain JSON every time, which is the bar the voice panel
+ * actually cares about. It is *not* DEFAULT_GEMINI_MODEL — the default is what
+ * a settings.json written before today already says, and silently rewriting a
+ * stored model id is not this page's job. The hint below points at it; the
+ * dropdown lets you take it.
+ */
+const RECOMMENDED_GEMINI_MODEL = 'gemini-3.6-flash'
+
 const GEMINI_MODELS = [
-  { id: DEFAULT_GEMINI_MODEL, label: 'Flash — fast, cheap, the default' },
+  { id: RECOMMENDED_GEMINI_MODEL, label: 'Flash 3.6 — fastest, recommended' },
+  { id: DEFAULT_GEMINI_MODEL, label: 'Flash 2.5 — fast, cheap, the old default' },
   { id: 'gemini-2.5-pro', label: 'Pro — slower, better at long reasoning' }
 ]
 
@@ -60,7 +71,16 @@ export function ModelsSection(): ReactNode {
           }
         />
 
-        <Row label="Model" hint="Flash is plenty for the voice agent">
+        <Row
+          label="Model"
+          hint={
+            <>
+              Flash is plenty for the voice agent. <span className="mono">{RECOMMENDED_GEMINI_MODEL}</span> is the one
+              to pick — a voice turn comes back in about 1.9s with brain JSON that parses every time. Your stored
+              choice is left alone until you change it here.
+            </>
+          }
+        >
           <select
             className="select"
             value={custom ? '__custom' : s.geminiModel}

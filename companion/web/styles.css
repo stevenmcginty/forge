@@ -1,0 +1,681 @@
+/*
+ * Forge Companion — the phone skin.
+ *
+ * Same family as the desktop (src/theme/tokens.css): machined near-black with a
+ * faint green undertone, bone ink, hairline edges, and volt lime as the only
+ * loud colour — it means live / focused / go, and nothing else.
+ *
+ * Two deliberate differences from the desktop, both because this is a thumb
+ * interface on a small screen:
+ *   - Geometry is DictationMic's "capsule": pill radii are exactly half the
+ *     element's height, so every control reads as one machined family.
+ *   - Type is a step larger and touch targets are 44px minimum.
+ *
+ * Fonts are the platform's own — no vendored woff2, no CDN. A phone PWA that
+ * ships two variable fonts pays 120KB on a mobile connection for a typeface
+ * nobody asked for, and Segoe UI Variable / SF Pro are already the right
+ * answer on the two devices this will ever run on.
+ */
+
+:root {
+  /* ------------------------------------------------------------ surfaces */
+  --bg: #0b0c0e;
+  --surface: #121317;
+  --raised: #171921;
+  --hover: #1b1d24;
+
+  /* ---------------------------------------------------------------- ink */
+  --ink: #e8eaed;
+  --muted: #9aa0aa;
+  --faint: #6a7078;
+  --dim: #4a4f57;
+  --on-accent: #0b0c0e;
+
+  /* ------------------------------------------------------------- lines */
+  --hairline: #23262e;
+  --line-soft: #1a1c22;
+
+  /* ------------------------------------------------------------ accent */
+  --volt: #c6ff4a;
+  --volt-soft: rgba(198, 255, 74, 0.14);
+  --volt-line: rgba(198, 255, 74, 0.42);
+
+  /* ------------------------------------------------------------ signals */
+  --danger: #ff5c48;
+  --warn: #ffb347;
+  --ok: #5ee6a8;
+  --info: #7fd1ff;
+
+  /* --------------------------------------------------------- typography */
+  --font-ui: 'Segoe UI Variable Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
+    sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --topbar-h: 56px;
+  --composer-h: 64px;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overscroll-behavior-y: none;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--volt);
+  color: var(--on-accent);
+}
+
+/* Film grain. Fixed, inert, and cheap — one inline SVG, no image request. */
+.grain {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ------------------------------------------------------------------ chrome */
+
+.topbar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 40;
+  height: calc(var(--topbar-h) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(11, 12, 14, 0.86);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+}
+
+.brand-text {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Three volt bars — the desktop's activity dot, stood up. They animate only
+   while the link is live, which makes "connected" something you see rather
+   than something you read. */
+.brand-mark {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2.5px;
+  height: 16px;
+}
+.brand-mark i {
+  display: block;
+  width: 3px;
+  height: 6px;
+  border-radius: 1.5px;
+  background: var(--dim);
+  transition: background 0.3s;
+}
+.brand-mark.big {
+  height: 28px;
+  gap: 4px;
+}
+.brand-mark.big i {
+  width: 5px;
+  border-radius: 2.5px;
+}
+body.link-live .brand-mark i {
+  background: var(--volt);
+  animation: bar 0.9s var(--ease) infinite alternate;
+}
+body.link-live .brand-mark i:nth-child(2) {
+  animation-delay: -0.3s;
+}
+body.link-live .brand-mark i:nth-child(3) {
+  animation-delay: -0.6s;
+}
+@keyframes bar {
+  from {
+    height: 5px;
+  }
+  to {
+    height: 16px;
+  }
+}
+
+.status-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  border: 1px solid var(--hairline);
+  background: var(--raised);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.status-capsule[data-state='live'] .status-dot {
+  background: var(--volt);
+  box-shadow: 0 0 8px var(--volt-line);
+}
+.status-capsule[data-state='connecting'] .status-dot,
+.status-capsule[data-state='queued'] .status-dot {
+  background: var(--warn);
+  animation: pulse 1.6s infinite;
+}
+.status-capsule[data-state='error'] .status-dot {
+  background: var(--danger);
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, transform 0.12s var(--ease);
+}
+.icon-btn:active {
+  transform: scale(0.94);
+}
+.icon-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-btn.round {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  border: 1px solid var(--hairline);
+  background: var(--raised);
+}
+.icon-btn.round:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.icon-btn.send {
+  background: var(--volt);
+  border-color: var(--volt);
+  color: var(--on-accent);
+}
+.icon-btn.send:disabled {
+  background: var(--raised);
+  border-color: var(--hairline);
+  color: var(--dim);
+}
+.icon-btn.listening {
+  background: var(--volt-soft);
+  border-color: var(--volt-line);
+  color: var(--volt);
+  animation: pulse 1.4s infinite;
+}
+.back {
+  margin-left: -10px;
+  display: none;
+}
+body.view-project .back {
+  display: inline-flex;
+}
+
+/* -------------------------------------------------------------------- app */
+
+.app {
+  padding-top: calc(var(--topbar-h) + env(safe-area-inset-top));
+  min-height: 100%;
+}
+
+.pane {
+  display: none;
+  padding: 18px 16px calc(24px + env(safe-area-inset-bottom));
+}
+body.view-projects .pane-projects,
+body.view-project .pane-project {
+  display: block;
+}
+/* Clear the fixed composer, plus a thumb's worth of breathing room — the last
+   bubble sitting half under the send button is the single most obvious way for
+   a chat layout to look broken. */
+body.view-project .pane-project {
+  padding-bottom: calc(var(--composer-h) + 56px + env(safe-area-inset-bottom));
+}
+
+.eyebrow {
+  margin: 4px 0 14px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.empty {
+  margin: 48px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+.dim {
+  color: var(--faint);
+  font-size: 13px;
+}
+
+/* --------------------------------------------------------- project list */
+
+.project-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 15px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, transform 0.12s var(--ease);
+}
+/* Only rows that are genuinely new animate in. Both lists are rebuilt on every
+   stream event, and animating all of them every time makes an idle screen
+   flicker — which reads as a bug, not as polish. */
+.project-row.fresh,
+.bubble.fresh {
+  animation: row-in 0.32s var(--ease) both;
+}
+.project-row:active {
+  transform: scale(0.985);
+  background: var(--hover);
+}
+.project-row.busy {
+  border-color: var(--volt-line);
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.project-dot {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--volt);
+}
+.project-row.busy .project-dot {
+  box-shadow: 0 0 10px currentColor;
+}
+
+.project-body {
+  flex: 1;
+  min-width: 0;
+}
+.project-name {
+  display: block;
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-status {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.project-row.busy .project-status {
+  color: var(--volt);
+}
+
+.project-when {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* ------------------------------------------------------------- project */
+
+.project-title {
+  margin: 2px 0 4px;
+  font-size: clamp(1.5rem, 6vw, 2rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.project-sub {
+  margin: 0 0 20px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.feed:empty + .feed-empty {
+  display: block;
+}
+.feed-empty {
+  display: none;
+}
+
+.bubble {
+  max-width: 86%;
+  padding: 11px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  font-size: 14.5px;
+  overflow-wrap: anywhere;
+}
+/* Mine — volt-tinted, right-aligned. Theirs (the agent) — plain, left. */
+.bubble.mine {
+  align-self: flex-end;
+  background: var(--volt-soft);
+  border-color: var(--volt-line);
+}
+.bubble.theirs {
+  align-self: flex-start;
+  background: var(--raised);
+}
+.bubble img {
+  display: block;
+  max-width: 100%;
+  border-radius: 9px;
+  margin: -3px 0 6px;
+}
+.bubble-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.bubble-meta .pip {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.bubble[data-status='pending'] .pip,
+.bubble[data-status='queued'] .pip {
+  background: var(--warn);
+  animation: pulse 1.6s infinite;
+}
+.bubble[data-status='done'] .pip {
+  background: var(--volt);
+}
+.bubble[data-status='failed'] .pip,
+.bubble[data-status='stale'] .pip {
+  background: var(--danger);
+}
+
+/* ------------------------------------------------------------ composer */
+
+.composer {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 30;
+  display: none;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  background: rgba(11, 12, 14, 0.9);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid var(--hairline);
+}
+body.view-project .composer {
+  display: flex;
+}
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  max-height: 140px;
+  padding: 11px 15px;
+  border: 1px solid var(--hairline);
+  border-radius: 22px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  resize: none;
+  caret-color: var(--volt);
+  /* Hidden until autosize() decides the text has outgrown max-height. A
+     one-row textarea whose placeholder wraps renders a scrollbar on first
+     paint otherwise, which looks like a broken control before you have typed
+     anything. */
+  overflow-y: hidden;
+}
+.composer-input.overflowing {
+  overflow-y: auto;
+}
+.composer-input:focus {
+  outline: none;
+  border-color: var(--volt-line);
+}
+.composer-input::placeholder {
+  color: var(--dim);
+}
+
+/* -------------------------------------------------------------- sign in */
+
+.auth {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+}
+.auth[hidden] {
+  display: none;
+}
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+}
+.auth-card h1 {
+  margin: 18px 0 4px;
+  font-size: 1.7rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.auth-lede {
+  margin: 0 0 28px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.auth input {
+  display: block;
+  width: 100%;
+  height: 46px;
+  margin-bottom: 10px;
+  padding: 0 18px;
+  border: 1px solid var(--hairline);
+  border-radius: 23px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  caret-color: var(--volt);
+}
+.auth input:focus {
+  outline: none;
+  border-color: var(--volt-line);
+}
+.auth input::placeholder {
+  color: var(--dim);
+}
+
+.capsule {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 46px;
+  padding: 0 22px;
+  border-radius: 23px;
+  border: 1px solid var(--hairline);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease), background 0.2s, border-color 0.2s;
+}
+.capsule:active {
+  transform: scale(0.97);
+}
+.capsule.solid {
+  background: var(--volt);
+  border-color: var(--volt);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.capsule.wide {
+  width: 100%;
+  margin-top: 6px;
+}
+.capsule:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.auth-error {
+  min-height: 20px;
+  margin: 12px 0 0;
+  color: var(--danger);
+  font-size: 13.5px;
+}
+.auth-note {
+  margin: 20px 0 0;
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+/* --------------------------------------------------------------- toast */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--composer-h) + 24px + env(safe-area-inset-bottom));
+  z-index: 110;
+  transform: translate(-50%, 12px);
+  max-width: calc(100% - 32px);
+  padding: 10px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--hairline);
+  background: var(--raised);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  font-size: 13.5px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s var(--ease);
+}
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

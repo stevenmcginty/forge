@@ -128,7 +128,19 @@ function defaultSettings(): Settings {
     // the dictation paths above: it is an answer about *this* machine's data
     // root, which FORGE_DATA_DIR is allowed to move.
     skillsLibraryDir: defaultSkillsDir(),
-    skillsEnabled: []
+    skillsEnabled: [],
+    // Steve wants his Claude panes reachable from his phone out of the box.
+    remoteControlDefault: true,
+    // The phone link (M9) is off, unconfigured and credential-less out of the
+    // box. Nothing in electron/companion-sync.ts runs until all three change.
+    companionEnabled: false,
+    companionApiKey: '',
+    companionDatabaseURL: '',
+    companionAuthBase: '',
+    companionTokenBase: '',
+    companionEmail: '',
+    companionRefreshToken: '',
+    companionUid: ''
   }
 }
 
@@ -274,6 +286,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // Adopt a new built-in default (e.g. the Gemini bridge) into a settings.json
     // written before the flag existed, without overriding a deliberate opt-out.
     if (p.mcpBridge === undefined && builtin?.mcpBridge !== undefined) p.mcpBridge = builtin.mcpBridge
+    if (p.remoteControl === undefined && builtin?.remoteControl !== undefined) p.remoteControl = builtin.remoteControl
     // Profiles written before the shell/agent split get a kind from their
     // command; a built-in's kind is not up for negotiation.
     p.kind = builtin?.kind ?? inferKind(p)
@@ -359,8 +372,25 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       .map((n) => String(n ?? '').trim())
       .filter((n) => isValidSkillName(n))
       .filter((n, i, all) => all.indexOf(n) === i)
-      .slice(0, 200)
+      .slice(0, 200),
+    remoteControlDefault: s.remoteControlDefault ?? DEFAULT_SETTINGS.remoteControlDefault,
+    // Companion (M9). Trimmed, because every one of these is pasted by hand out
+    // of the Firebase console and a trailing space in a URL is a mystery bug.
+    // `enabled` is coerced rather than defaulted: a settings.json written before
+    // M9 has no key at all, and the answer for that file is "off".
+    companionEnabled: Boolean(s.companionEnabled),
+    companionApiKey: str(s.companionApiKey),
+    companionDatabaseURL: str(s.companionDatabaseURL).replace(/\/+$/, ''),
+    companionAuthBase: str(s.companionAuthBase).replace(/\/+$/, ''),
+    companionTokenBase: str(s.companionTokenBase).replace(/\/+$/, ''),
+    companionEmail: str(s.companionEmail),
+    companionRefreshToken: str(s.companionRefreshToken),
+    companionUid: str(s.companionUid)
   }
+}
+
+function str(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
 }
 
 function clamp(n: number, lo: number, hi: number): number {
