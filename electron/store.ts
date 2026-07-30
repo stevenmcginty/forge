@@ -124,7 +124,17 @@ function defaultSettings(): Settings {
     // project summary is neither, so it is opt-in.
     memoryLlmSummarize: false,
     // Steve wants his Claude panes reachable from his phone out of the box.
-    remoteControlDefault: true
+    remoteControlDefault: true,
+    // The phone link (M9) is off, unconfigured and credential-less out of the
+    // box. Nothing in electron/companion-sync.ts runs until all three change.
+    companionEnabled: false,
+    companionApiKey: '',
+    companionDatabaseURL: '',
+    companionAuthBase: '',
+    companionTokenBase: '',
+    companionEmail: '',
+    companionRefreshToken: '',
+    companionUid: ''
   }
 }
 
@@ -341,8 +351,24 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
         ? s.openrouterModel.trim()
         : DEFAULT_SETTINGS.openrouterModel,
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
-    remoteControlDefault: s.remoteControlDefault ?? DEFAULT_SETTINGS.remoteControlDefault
+    remoteControlDefault: s.remoteControlDefault ?? DEFAULT_SETTINGS.remoteControlDefault,
+    // Companion (M9). Trimmed, because every one of these is pasted by hand out
+    // of the Firebase console and a trailing space in a URL is a mystery bug.
+    // `enabled` is coerced rather than defaulted: a settings.json written before
+    // M9 has no key at all, and the answer for that file is "off".
+    companionEnabled: Boolean(s.companionEnabled),
+    companionApiKey: str(s.companionApiKey),
+    companionDatabaseURL: str(s.companionDatabaseURL).replace(/\/+$/, ''),
+    companionAuthBase: str(s.companionAuthBase).replace(/\/+$/, ''),
+    companionTokenBase: str(s.companionTokenBase).replace(/\/+$/, ''),
+    companionEmail: str(s.companionEmail),
+    companionRefreshToken: str(s.companionRefreshToken),
+    companionUid: str(s.companionUid)
   }
+}
+
+function str(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : ''
 }
 
 function clamp(n: number, lo: number, hi: number): number {

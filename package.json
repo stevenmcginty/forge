@@ -29,7 +29,10 @@
     "remote:check": "node scripts/remote-check.mjs",
     "packaged:check": "node scripts/packaged-check.mjs",
     "secrets:test": "node scripts/secrets-audit-test.mjs",
-    "theme:check": "node scripts/theme-check.mjs"
+    "theme:check": "node scripts/theme-check.mjs",
+    "companion:smoke": "node scripts/companion-smoke.mjs",
+    "companion:icons": "node scripts/companion-icons.mjs",
+    "companion:serve": "node scripts/companion-serve.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
@@ -39,6 +42,7 @@
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "firebase-tools": "^15.25.0",
     "typescript": "^7.0.2",
     "vite": "^7.3.6"
   },

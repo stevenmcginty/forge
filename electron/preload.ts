@@ -83,6 +83,16 @@ const api: ForgeApi = {
     clear: (projectId) => ipcRenderer.invoke(IPC.memoryClear, projectId)
   },
 
+  companion: {
+    status: () => ipcRenderer.invoke(IPC.companionStatus),
+    signIn: (email, password) => ipcRenderer.invoke(IPC.companionSignIn, email, password),
+    signOut: () => ipcRenderer.invoke(IPC.companionSignOut),
+    publish: () => ipcRenderer.invoke(IPC.companionPublish),
+    reply: (itemId, text, projectId) => ipcRenderer.invoke(IPC.companionReply, itemId, text, projectId),
+    onStatus: (cb) => subscribe(IPC.companionStatusEvent, cb),
+    onUtterance: (cb) => subscribe(IPC.companionUtterance, cb)
+  },
+
   system: {
     userName: () => ipcRenderer.invoke(IPC.systemUserName),
     claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion)
