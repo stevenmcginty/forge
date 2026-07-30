@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { MAX_PANES_PER_TAB, MAX_SESSIONS } from '@shared/ipc'
-import type { AgentProfile, KeySource, VoiceBrainId } from '@shared/types'
+import type { AgentProfile } from '@shared/types'
 import { resolveProfile } from '@/lib/agents'
 import { buildManifest, type ManifestSnapshot } from '@/lib/appmanifest'
 import {
@@ -17,9 +17,7 @@ import { transcriptBus, typedTranscript } from '@/lib/transcriptSource'
 import { parseUtterance } from '@/lib/voicecommands'
 import {
   brainStatusLabel,
-  DEFAULT_OPENROUTER_MODEL,
   getActiveBrain,
-  maskKey,
   type BrainContext,
   type BrainReply,
   type BrainStatus,
@@ -90,7 +88,6 @@ export function VoicePanel(): ReactNode {
   const open = state.settings.voicePanelOpen
   const [turns, setTurns] = useState<Turn[]>([])
   const [draftPhrase, setDraftPhrase] = useState('')
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [dragWidth, setDragWidth] = useState<number | null>(null)
 
   const logRef = useRef<HTMLDivElement | null>(null)
@@ -503,8 +500,8 @@ export function VoicePanel(): ReactNode {
       />
 
       <header className="voice__head">
-        <span className="voice__mark">
-          <Icon name="voice" size={14} />
+        <span className="voice__mark" title="The voice agent — say what you want and it does it">
+          <Icon name="mic" size={14} />
         </span>
         <h2 className="voice__title">Voice Agent</h2>
         <BrainChip status={status} brainName={brain.name} />
@@ -528,24 +525,43 @@ export function VoicePanel(): ReactNode {
         <button
           type="button"
           className="ghost-btn voice__icon-btn"
-          title="Voice agent settings"
-          aria-pressed={settingsOpen}
-          data-on={settingsOpen ? 'true' : undefined}
-          onClick={() => setSettingsOpen((v) => !v)}
+          title="Voice settings — brain, keys and model (Ctrl+,)"
+          aria-label="Voice settings"
+          onClick={() => actions.openSettings('models')}
         >
           <Icon name="gear" size={13} />
         </button>
         <button
           type="button"
           className="ghost-btn voice__icon-btn"
-          title="Hide voice agent (Ctrl+Shift+G)"
+          title="Hide the voice agent (Ctrl+Shift+G)"
+          aria-label="Hide the voice agent"
           onClick={() => actions.toggleVoicePanel()}
         >
           <Icon name="close" size={13} />
         </button>
       </header>
 
-      {settingsOpen ? <VoiceSettings /> : null}
+      {/*
+        Why the settings live elsewhere: this panel used to hold an expandable
+        settings section, and scrolled down inside it there was no way back out —
+        the gear that opened it was off the top of the panel and nothing else
+        said "done". A one-line status that links to the real Settings page
+        cannot trap anybody.
+      */}
+      {!status.ok ? (
+        <button
+          type="button"
+          className="voice__degraded"
+          onClick={() => actions.openSettings('models')}
+          title="Open Models & APIs"
+        >
+          <span className="voice__degraded-text">
+            {status.detail ?? 'No model key — spoken commands still work'}
+          </span>
+          <span className="voice__degraded-go">Set it up →</span>
+        </button>
+      ) : null}
 
       <div className="voice__log" ref={logRef}>
         {turns.length === 0 ? (
@@ -635,236 +651,6 @@ function BrainChip({ status, brainName }: { status: BrainStatus; brainName: stri
       <span className="voice__chip-dot" />
       {brainStatusLabel(status)}
     </span>
-  )
-}
-
-/* --------------------------------------------------------------- settings */
-
-const BRAIN_ROWS: Array<{ id: VoiceBrainId; name: string; note: string; ready: boolean }> = [
-  { id: 'gemini', name: 'Gemini', note: 'live — needs a key', ready: true },
-  { id: 'openrouter', name: 'OpenRouter', note: 'live — any model', ready: true },
-  { id: 'stub', name: 'Stub', note: 'offline, echoes you', ready: true },
-  { id: 'claude', name: 'Claude', note: 'coming soon', ready: false },
-  { id: 'openai', name: 'OpenAI', note: 'coming soon', ready: false }
-]
-
-function VoiceSettings(): ReactNode {
-  const { state, actions } = useApp()
-  const [reveal, setReveal] = useState(false)
-  const [geminiDraft, setGeminiDraft] = useState(state.settings.geminiKey)
-  const [anthropicDraft, setAnthropicDraft] = useState(state.settings.anthropicKey)
-  const [modelDraft, setModelDraft] = useState(state.settings.geminiModel)
-  const [openrouterDraft, setOpenrouterDraft] = useState(state.settings.openrouterKey)
-  const [openrouterModelDraft, setOpenrouterModelDraft] = useState(state.settings.openrouterModel)
-  const [found, setFound] = useState<{ key: string; last4: string; source: string; which: KeySource } | null>(null)
-  const [importError, setImportError] = useState<string | null>(null)
-
-  useEffect(() => setGeminiDraft(state.settings.geminiKey), [state.settings.geminiKey])
-  useEffect(() => setAnthropicDraft(state.settings.anthropicKey), [state.settings.anthropicKey])
-  useEffect(() => setModelDraft(state.settings.geminiModel), [state.settings.geminiModel])
-  useEffect(() => setOpenrouterDraft(state.settings.openrouterKey), [state.settings.openrouterKey])
-  useEffect(() => setOpenrouterModelDraft(state.settings.openrouterModel), [state.settings.openrouterModel])
-
-  const importKey = async (which: KeySource): Promise<void> => {
-    setImportError(null)
-    setFound(null)
-    const result = await window.forge.voice.importKey(which)
-    if (result.ok) setFound({ key: result.key, last4: result.last4, source: result.source, which })
-    else setImportError(result.error)
-  }
-
-  /** Take the key that was found, and switch to the brain it belongs to. */
-  const acceptFound = (): void => {
-    if (!found) return
-    if (found.which === 'openrouter') {
-      actions.patchSettings({ openrouterKey: found.key })
-      actions.setVoiceBrain('openrouter')
-    } else {
-      actions.setGeminiKey(found.key)
-      actions.setVoiceBrain('gemini')
-    }
-    setFound(null)
-  }
-
-  return (
-    <section className="voice__settings" aria-label="Voice agent settings">
-      <div className="eyebrow voice__settings-eyebrow">Brain</div>
-      <div className="voice__brains">
-        {BRAIN_ROWS.map((row) => (
-          <button
-            key={row.id}
-            type="button"
-            className="voice__brain"
-            data-selected={state.settings.voiceBrain === row.id ? 'true' : undefined}
-            disabled={!row.ready}
-            title={row.ready ? `Use the ${row.name} brain` : `${row.name} — coming soon`}
-            onClick={() => actions.setVoiceBrain(row.id)}
-          >
-            <span className="voice__brain-name">{row.name}</span>
-            <span className="voice__brain-note mono">{row.note}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="field voice__field">
-        <label className="field__label" htmlFor="voice-gemini-key">
-          Gemini API key
-        </label>
-        <div className="voice__key-row">
-          <input
-            id="voice-gemini-key"
-            className="field__input mono voice__key-input"
-            type={reveal ? 'text' : 'password'}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="AIza…"
-            value={geminiDraft}
-            onChange={(e) => setGeminiDraft(e.target.value)}
-            onBlur={() => actions.setGeminiKey(geminiDraft)}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Enter') actions.setGeminiKey(geminiDraft)
-            }}
-          />
-          <button
-            type="button"
-            className="ghost-btn voice__key-toggle"
-            title={reveal ? 'Hide keys' : 'Show keys'}
-            onClick={() => setReveal((v) => !v)}
-          >
-            {reveal ? 'hide' : 'show'}
-          </button>
-        </div>
-        <div className="voice__key-state mono">
-          {state.settings.geminiKey ? maskKey(state.settings.geminiKey) : 'no key stored'}
-        </div>
-
-        {found ? (
-          <div className="voice__import">
-            <span className="voice__import-text">
-              Found a key ending <span className="mono">{found.last4}</span> in{' '}
-              <span className="mono voice__import-path">{found.source}</span>
-            </span>
-            <div className="voice__import-actions">
-              <button type="button" className="ghost-btn turn__action" onClick={() => setFound(null)}>
-                Cancel
-              </button>
-              <button type="button" className="ghost-btn turn__action turn__action--send" onClick={acceptFound}>
-                Use this key
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button type="button" className="ghost-btn voice__import-btn" onClick={() => void importKey('gemini')}>
-            Import from DictationMic
-          </button>
-        )}
-        {importError ? <div className="voice__import-error">{importError}</div> : null}
-      </div>
-
-      <div className="field voice__field">
-        <label className="field__label" htmlFor="voice-gemini-model">
-          Model
-        </label>
-        <input
-          id="voice-gemini-model"
-          className="field__input mono"
-          spellCheck={false}
-          value={modelDraft}
-          onChange={(e) => setModelDraft(e.target.value)}
-          onBlur={() => actions.setGeminiModel(modelDraft)}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (e.key === 'Enter') actions.setGeminiModel(modelDraft)
-          }}
-        />
-      </div>
-
-      <div className="field voice__field">
-        <label className="field__label" htmlFor="voice-openrouter-key">
-          OpenRouter API key
-        </label>
-        <div className="voice__key-row">
-          <input
-            id="voice-openrouter-key"
-            className="field__input mono voice__key-input"
-            type={reveal ? 'text' : 'password'}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="sk-or-v1-…"
-            value={openrouterDraft}
-            onChange={(e) => setOpenrouterDraft(e.target.value)}
-            onBlur={() => actions.patchSettings({ openrouterKey: openrouterDraft.trim() })}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Enter') actions.patchSettings({ openrouterKey: openrouterDraft.trim() })
-            }}
-          />
-        </div>
-        <div className="voice__key-state mono">
-          {state.settings.openrouterKey ? maskKey(state.settings.openrouterKey) : 'no key stored'}
-        </div>
-        <button type="button" className="ghost-btn voice__import-btn" onClick={() => void importKey('openrouter')}>
-          Import from ~/.kimi-key
-        </button>
-      </div>
-
-      <div className="field voice__field">
-        <label className="field__label" htmlFor="voice-openrouter-model">
-          OpenRouter model
-        </label>
-        <input
-          id="voice-openrouter-model"
-          className="field__input mono"
-          spellCheck={false}
-          value={openrouterModelDraft}
-          onChange={(e) => setOpenrouterModelDraft(e.target.value)}
-          onBlur={() => actions.patchSettings({ openrouterModel: openrouterModelDraft.trim() || DEFAULT_OPENROUTER_MODEL })}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (e.key === 'Enter') {
-              actions.patchSettings({ openrouterModel: openrouterModelDraft.trim() || DEFAULT_OPENROUTER_MODEL })
-            }
-          }}
-        />
-      </div>
-
-      <div className="field voice__field">
-        <label className="field__label" htmlFor="voice-anthropic-key">
-          Anthropic API key (unused)
-        </label>
-        <input
-          id="voice-anthropic-key"
-          className="field__input mono"
-          type={reveal ? 'text' : 'password'}
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="sk-ant-…"
-          value={anthropicDraft}
-          onChange={(e) => setAnthropicDraft(e.target.value)}
-          onBlur={() => actions.setAnthropicKey(anthropicDraft)}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (e.key === 'Enter') actions.setAnthropicKey(anthropicDraft)
-          }}
-        />
-        <div className="voice__key-state mono">
-          {state.settings.anthropicKey ? maskKey(state.settings.anthropicKey) : 'no key stored'}
-        </div>
-      </div>
-
-      <p className="voice__settings-note">
-        Keys live in <span className="mono">settings.json</span> on this PC. Only the selected brain&rsquo;s key goes
-        anywhere: what you say plus a summary of your projects, tabs and panes is sent to{' '}
-        <span className="mono">generativelanguage.googleapis.com</span> or <span className="mono">openrouter.ai</span>.
-        The Gemini key is also used to generate images, and is written into the MCP config that gives Claude panes{' '}
-        <span className="mono">make_image</span>. The Anthropic key is stored but never used.
-      </p>
-      <p className="voice__settings-note">
-        Commands like “open two Claude tabs” are matched here on your machine and never sent anywhere. Replies are
-        text only — nothing is ever spoken aloud.
-      </p>
-    </section>
   )
 }
 

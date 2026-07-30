@@ -1,4 +1,4 @@
-import type { AgentProfile } from './types'
+import type { AgentProfile, ClaudePermissionMode, ProfileKind } from './types'
 
 /**
  * Built-in agent profiles. These are *seeded into* settings.json on first run
@@ -12,7 +12,8 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     command: '',
     accent: '#7FD1FF',
     badge: 'PS',
-    builtin: true
+    builtin: true,
+    kind: 'shell'
   },
   {
     id: 'claude',
@@ -21,6 +22,8 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     accent: '#C6FF4A',
     badge: 'CC',
     builtin: true,
+    kind: 'agent',
+    permissionMode: 'default',
     // Claude gets the Gemini bridge: video summaries, image generation and
     // second opinions it cannot produce on its own.
     mcpBridge: true
@@ -31,7 +34,8 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     command: 'kimi',
     accent: '#C08BFF',
     badge: 'KI',
-    builtin: true
+    builtin: true,
+    kind: 'agent'
   },
   {
     id: 'gemini',
@@ -39,7 +43,8 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     command: 'gemini',
     accent: '#7C9CFF',
     badge: 'GM',
-    builtin: true
+    builtin: true,
+    kind: 'agent'
   }
 ]
 
@@ -57,10 +62,72 @@ export const ACCENT_PALETTE = [
   '#9AA3AF'
 ]
 
+/** The neutral badge tint every shell profile wears, whatever its accent. */
+export const SHELL_BADGE_COLOR = '#9AA3AF'
+
 /** Derive a sensible two-letter badge from a profile name. */
 export function deriveBadge(name: string): string {
   const words = name.trim().split(/[\s_-]+/).filter(Boolean)
   if (words.length === 0) return '??'
   if (words.length === 1) return words[0]!.slice(0, 2).toUpperCase()
   return (words[0]![0]! + words[1]![0]!).toUpperCase()
+}
+
+/* ------------------------------------------------------------------- kinds */
+
+/**
+ * What a profile is, for anything loaded before `kind` existed: no command is
+ * a shell, a command is an agent. Not clever, and right for every profile
+ * anyone has actually written.
+ */
+export function inferKind(profile: Pick<AgentProfile, 'command' | 'kind'>): ProfileKind {
+  if (profile.kind === 'shell' || profile.kind === 'agent') return profile.kind
+  return profile.command.trim() ? 'agent' : 'shell'
+}
+
+export function isShellProfile(profile: Pick<AgentProfile, 'command' | 'kind'>): boolean {
+  return inferKind(profile) === 'shell'
+}
+
+/* ------------------------------------------------------- permission modes */
+
+/** The first word of a command line, stripped of quotes and any path. */
+export function commandExe(command: string): string {
+  const first = command.trim().split(/\s+/)[0] ?? ''
+  const bare = first.replace(/^["']|["']$/g, '')
+  const leaf = bare.split(/[\\/]/).pop() ?? bare
+  return leaf.replace(/\.(cmd|bat|exe|ps1)$/i, '').toLowerCase()
+}
+
+/**
+ * Whether a profile's command is Claude Code — i.e. whether the permission-mode
+ * flags mean anything to it. Matches `claude`, a full path to it, and the .cmd
+ * shim npm drops on Windows.
+ */
+export function isClaudeCommand(command: string): boolean {
+  return commandExe(command) === 'claude'
+}
+
+/** The flag each mode adds. `default` adds nothing at all. */
+export const PERMISSION_FLAGS: Record<ClaudePermissionMode, string> = {
+  default: '',
+  acceptEdits: '--permission-mode acceptEdits',
+  plan: '--permission-mode plan',
+  bypass: '--dangerously-skip-permissions'
+}
+
+export const PERMISSION_MODES: Array<{
+  id: ClaudePermissionMode
+  label: string
+  note: string
+  danger?: boolean
+}> = [
+  { id: 'default', label: 'Default', note: 'Claude asks before it acts' },
+  { id: 'acceptEdits', label: 'Accept edits', note: 'file edits go through, commands still ask' },
+  { id: 'plan', label: 'Plan', note: 'read and think, change nothing' },
+  { id: 'bypass', label: 'Bypass', note: 'never asks — it can do anything you can', danger: true }
+]
+
+export function isPermissionMode(value: unknown): value is ClaudePermissionMode {
+  return value === 'default' || value === 'acceptEdits' || value === 'plan' || value === 'bypass'
 }

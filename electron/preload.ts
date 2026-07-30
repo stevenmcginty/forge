@@ -69,6 +69,18 @@ const api: ForgeApi = {
     editImage: (req) => ipcRenderer.invoke(IPC.voiceEditImage, req)
   },
 
+  system: {
+    userName: () => ipcRenderer.invoke(IPC.systemUserName),
+    claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion)
+  },
+
+  models: {
+    engineState: () => ipcRenderer.invoke(IPC.modelsEngineState),
+    engineInstall: () => ipcRenderer.invoke(IPC.modelsEngineInstall),
+    engineCancel: () => ipcRenderer.invoke(IPC.modelsEngineCancel),
+    onEngineProgress: (cb) => subscribe(IPC.modelsEngineProgress, cb)
+  },
+
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
 
@@ -80,7 +92,8 @@ const api: ForgeApi = {
     minimize: () => ipcRenderer.send(IPC.windowMinimize),
     toggleMaximize: () => ipcRenderer.send(IPC.windowToggleMaximize),
     close: () => ipcRenderer.send(IPC.windowClose),
-    onState: (cb) => subscribe(IPC.windowState, cb)
+    onState: (cb) => subscribe(IPC.windowState, cb),
+    setTitlebar: (color, symbolColor) => ipcRenderer.send(IPC.windowTitlebar, color, symbolColor)
   }
 }
 

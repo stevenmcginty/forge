@@ -135,7 +135,7 @@ export function TerminalGrid(): ReactNode {
         anchor={newTabRef.current}
         open={chooserOpen}
         onClose={() => setChooserOpen(false)}
-        onPick={(profileId) => actions.newTab(profileId)}
+        onPick={(profileId, permissionMode) => actions.newTab(profileId, permissionMode)}
         selectedId={project.defaultProfileId}
       />
     </div>

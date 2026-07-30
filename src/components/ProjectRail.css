@@ -109,7 +109,7 @@
 }
 
 .prow[data-active='true'] {
-  background: #171a20;
+  background: var(--bg-active);
   border-color: var(--line-hairline);
 }
 
@@ -134,7 +134,7 @@
   width: 8px;
   height: 8px;
   border-radius: var(--r-full);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.03);
+  box-shadow: 0 0 0 3px var(--raised-ring);
 }
 
 .rail[data-collapsed='true'] .prow__dot {

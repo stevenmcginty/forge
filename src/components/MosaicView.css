@@ -136,6 +136,21 @@
   color: var(--text-dim);
 }
 
+.mtile__perm {
+  flex: none;
+  padding: 0 3px;
+  border-radius: var(--r-xs);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  color: var(--warn);
+  border: 1px solid var(--warn-line);
+}
+
+.mtile__perm[data-danger='true'] {
+  color: var(--danger);
+  border-color: var(--danger-line);
+}
+
 .mtile__status {
   flex: none;
   font-size: var(--t-eyebrow);

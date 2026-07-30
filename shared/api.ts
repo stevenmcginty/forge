@@ -1,8 +1,11 @@
 import type {
   AppInfo,
+  ClaudeCliState,
   CreateSessionRequest,
   CreateSessionResult,
   EditImageRequest,
+  EngineProgress,
+  EngineState,
   GeminiCallRequest,
   GeminiCallResult,
   ImportedKeyResult,
@@ -120,6 +123,30 @@ export interface ForgeApi {
     editImage(req: EditImageRequest): Promise<MediaCallResult>
   }
 
+  /**
+   * Read-only probes of the machine, for the Account section's state chips.
+   * Nothing here writes, installs or signs anything in.
+   */
+  system: {
+    /** The Windows account name — the default display name. */
+    userName(): Promise<string>
+    /** `claude --version`, or why it could not be run. */
+    claudeVersion(): Promise<ClaudeCliState>
+  }
+
+  /**
+   * The dictation model. Forge can download Parakeet itself (into
+   * %APPDATA%\Forge\models) for anyone who has not already got DictationMic's
+   * copy — resumable, cancellable, and the only download Forge ever does.
+   */
+  models: {
+    engineState(): Promise<EngineState>
+    /** Resolves when the download ends, one way or another. */
+    engineInstall(): Promise<EngineProgress>
+    engineCancel(): Promise<void>
+    onEngineProgress(cb: (p: EngineProgress) => void): () => void
+  }
+
   pickFolder(): Promise<string | null>
   openPath(target: string): Promise<string>
 
@@ -135,5 +162,12 @@ export interface ForgeApi {
     toggleMaximize(): void
     close(): void
     onState(cb: (e: WindowStateEvent) => void): () => void
+    /**
+     * Repaint the *native* minimise/maximise/close buttons, which Windows draws
+     * into our titlebar and which therefore cannot be styled with CSS. Called
+     * whenever the theme changes; without it a light theme has three dark
+     * buttons welded into its top-right corner.
+     */
+    setTitlebar(color: string, symbolColor: string): void
   }
 }
