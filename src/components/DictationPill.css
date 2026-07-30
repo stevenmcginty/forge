@@ -141,8 +141,8 @@
 /* --------------------------------------------------------------- needs setup */
 
 .dpill[data-setup='true'] {
-  border-color: rgba(255, 179, 71, 0.45);
-  background: linear-gradient(180deg, rgba(255, 179, 71, 0.1), var(--bg-sunken));
+  border-color: var(--warn-line-strong);
+  background: linear-gradient(180deg, var(--warn-soft), var(--bg-sunken));
 }
 
 .dpill[data-setup='true'] .dpill__dot {

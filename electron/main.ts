@@ -18,11 +18,15 @@ import { disposePtyHost, registerPtyHandlers, setPtyTarget } from './pty-host'
 import { writeBridgeConfig } from './bridge/mcp-config'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
 import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-sidecar'
+import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './stt-model'
+import { registerAgentProbeHandlers } from './agent-probe'
 import { registerVoiceHandlers } from './voice-bridge'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
+import { registerSystemHandlers } from './system'
 
 const isDev = !app.isPackaged
-const BG = '#0B0C0E'
+/** Only the very first launch, before a theme has ever been recorded. */
+const FALLBACK_BG = '#0B0C0E'
 const TITLEBAR_HEIGHT = 38
 
 /* ------------------------------------------------------------- app identity
@@ -123,6 +127,10 @@ function schedulePersistBounds(): void {
 
 function createWindow(): void {
   const settings = getSettings()
+  // Paint the window in the theme it will be wearing a frame from now, rather
+  // than flashing near-black on the way into a light theme.
+  const bg = settings.themeBg || FALLBACK_BG
+  const ink = settings.themeInk || '#E8EAED'
 
   mainWindow = new BrowserWindow({
     width: settings.window.width,
@@ -131,14 +139,14 @@ function createWindow(): void {
     minHeight: 560,
     show: false,
     title: 'Forge',
-    backgroundColor: BG,
+    backgroundColor: bg,
     autoHideMenuBar: true,
     // Native window controls painted onto our own dark titlebar. This is the
     // reliable custom-titlebar route on Windows 11 (no re-implemented buttons).
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: BG,
-      symbolColor: '#E8EAED',
+      color: bg,
+      symbolColor: ink,
       height: TITLEBAR_HEIGHT
     },
     webPreferences: {
@@ -215,6 +223,7 @@ function createWindow(): void {
     mainWindow = null
     setPtyTarget(null)
     setSttTarget(null)
+    setSttModelTarget(null)
   })
 
   // Never let the renderer navigate away or spawn windows.
@@ -230,6 +239,7 @@ function createWindow(): void {
 
   setPtyTarget(mainWindow)
   setSttTarget(mainWindow)
+  setSttModelTarget(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
@@ -333,6 +343,23 @@ function registerAppHandlers(): void {
     else mainWindow.maximize()
   })
   ipcMain.on(IPC.windowClose, () => mainWindow?.close())
+
+  /**
+   * The window controls are painted by Windows, not by us, so a theme change
+   * has to be pushed to them explicitly — otherwise Paper gets three near-black
+   * buttons in its top-right corner. Only hex colours are accepted: this value
+   * goes straight into a native API.
+   */
+  ipcMain.on(IPC.windowTitlebar, (_e, color: string, symbolColor: string) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const hex = /^#[0-9a-fA-F]{6}$/
+    if (!hex.test(String(color)) || !hex.test(String(symbolColor))) return
+    try {
+      mainWindow.setTitleBarOverlay({ color, symbolColor, height: TITLEBAR_HEIGHT })
+    } catch {
+      /* not every platform has an overlay to set */
+    }
+  })
 }
 
 /* ------------------------------------------------------------- lifecycle */
@@ -350,10 +377,13 @@ void app.whenReady().then(() => {
   registerPtyHandlers()
   registerShotsHandlers()
   registerSttHandlers()
+  registerSttModelHandlers()
+  registerAgentProbeHandlers()
   registerVoiceHandlers()
   // Off by default: this reads settings, sees `companionEnabled: false`, and
   // returns without touching the network or a credential.
   registerCompanionHandlers()
+  registerSystemHandlers()
   createWindow()
 
   app.on('activate', () => {
@@ -369,5 +399,6 @@ app.on('before-quit', () => {
   disposePtyHost()
   disposeShotsWatcher()
   disposeSttSidecar()
+  disposeSttModel()
   disposeCompanion()
 })

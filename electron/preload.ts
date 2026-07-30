@@ -58,7 +58,14 @@ const api: ForgeApi = {
     reload: (force) => ipcRenderer.invoke(IPC.sttReload, force === true),
     status: () => ipcRenderer.invoke(IPC.sttStatus),
     onStatus: (cb) => subscribe(IPC.sttStatusEvent, cb),
-    onPhrase: (cb) => subscribe(IPC.sttPhrase, cb)
+    onPhrase: (cb) => subscribe(IPC.sttPhrase, cb),
+
+    downloadModel: () => ipcRenderer.invoke(IPC.sttDownloadModel),
+    cancelDownload: () => ipcRenderer.invoke(IPC.sttDownloadCancel),
+    modelState: () => ipcRenderer.invoke(IPC.sttDownloadState),
+    onDownloadProgress: (cb) => subscribe(IPC.sttDownloadProgress, cb),
+    onDownloadDone: (cb) => subscribe(IPC.sttDownloadDone, cb),
+    onDownloadError: (cb) => subscribe(IPC.sttDownloadError, cb)
   },
 
   voice: {
@@ -79,6 +86,13 @@ const api: ForgeApi = {
     onUtterance: (cb) => subscribe(IPC.companionUtterance, cb)
   },
 
+  system: {
+    userName: () => ipcRenderer.invoke(IPC.systemUserName),
+    claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion)
+  },
+
+  probeAgents: () => ipcRenderer.invoke(IPC.agentsProbe),
+
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
 
@@ -90,7 +104,8 @@ const api: ForgeApi = {
     minimize: () => ipcRenderer.send(IPC.windowMinimize),
     toggleMaximize: () => ipcRenderer.send(IPC.windowToggleMaximize),
     close: () => ipcRenderer.send(IPC.windowClose),
-    onState: (cb) => subscribe(IPC.windowState, cb)
+    onState: (cb) => subscribe(IPC.windowState, cb),
+    setTitlebar: (color, symbolColor) => ipcRenderer.send(IPC.windowTitlebar, color, symbolColor)
   }
 }
 

@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useActiveProject, useApp } from '@/state/AppState'
 import { shortPath } from '@/lib/paths'
 import { Icon } from './Icon'
-import { SettingsPopover } from './SettingsPopover'
 import './TitleBar.css'
 
 /**
@@ -13,9 +12,8 @@ import './TitleBar.css'
 export function TitleBar(): ReactNode {
   const { state, actions } = useApp()
   const project = useActiveProject()
-  const gearRef = useRef<HTMLButtonElement | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [focused, setFocused] = useState(true)
+  const inSettings = state.view === 'settings'
 
   useEffect(() => window.forge.window.onState((s) => setFocused(s.focused)), [])
 
@@ -26,6 +24,7 @@ export function TitleBar(): ReactNode {
           type="button"
           className="ghost-btn titlebar__btn"
           title={state.settings.railCollapsed ? 'Show projects (Ctrl+Shift+B)' : 'Hide projects (Ctrl+Shift+B)'}
+          aria-label="Projects rail"
           aria-pressed={!state.settings.railCollapsed}
           onClick={() => actions.toggleRail()}
         >
@@ -54,21 +53,31 @@ export function TitleBar(): ReactNode {
           type="button"
           className="ghost-btn titlebar__btn"
           title={
-            state.settings.voicePanelOpen ? 'Hide voice agent (Ctrl+Shift+G)' : 'Show voice agent (Ctrl+Shift+G)'
+            state.settings.voicePanelOpen
+              ? 'Hide the voice agent panel (Ctrl+Shift+G)'
+              : 'Show the voice agent panel (Ctrl+Shift+G)'
           }
+          aria-label="Voice agent panel"
           aria-pressed={state.settings.voicePanelOpen}
           data-on={state.settings.voicePanelOpen ? 'true' : undefined}
           onClick={() => actions.toggleVoicePanel()}
         >
-          <Icon name="voice" size={15} />
+          {/*
+            A panel toggle looks like a panel. The waveform belongs to the
+            dictation pill and the microphone to the agent itself — three
+            different things were wearing the same glyph, which is why nobody
+            could tell them apart.
+          */}
+          <Icon name="panelRight" size={15} />
         </button>
 
         <button
-          ref={gearRef}
           type="button"
           className="ghost-btn titlebar__btn"
-          title="Settings"
-          onClick={() => setSettingsOpen(true)}
+          title={inSettings ? 'Back to terminals (Esc)' : 'Settings (Ctrl+,)'}
+          aria-pressed={inSettings}
+          data-on={inSettings ? 'true' : undefined}
+          onClick={() => (inSettings ? actions.closeSettings() : actions.openSettings())}
         >
           <Icon name="gear" size={15} />
         </button>
@@ -76,8 +85,6 @@ export function TitleBar(): ReactNode {
 
       {/* Reserved for the native window controls (3 × 46px on Windows 11). */}
       <div className="titlebar__controls-gap" />
-
-      <SettingsPopover anchor={gearRef.current} open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
   )
 }

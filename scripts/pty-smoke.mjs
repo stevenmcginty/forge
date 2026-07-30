@@ -42,6 +42,17 @@ function waitFor(predicate, timeoutMs, label) {
 }
 
 async function main() {
+  /*
+   * Pretend this runner was itself launched from inside a Claude Code session.
+   * Forge often is — Steve starts it from a Claude pane — and a shell that
+   * inherits these markers tells the next `claude` it is a child session, which
+   * silently turns transcript saving off. Set before the manager is imported,
+   * because buildEnv reads process.env at spawn time.
+   */
+  process.env.CLAUDE_CODE_CHILD_SESSION = '1'
+  process.env.CLAUDECODE = '1'
+  process.env.CLAUDE_CODE_ENTRYPOINT = 'cli'
+  process.env.FORGE_SMOKE_KEEPME = 'kept'
   await build({
     entryPoints: [SOURCE],
     outfile: bundle,
@@ -95,6 +106,33 @@ async function main() {
   log(boot.ok === true, 'spawned a session with a bootstrap command')
   await waitFor(() => (output.get('smoke-2') ?? '').includes(marker), 15000, 'bootstrap output')
   log(true, 'bootstrap command typed itself and produced output')
+
+  /* --------------------------------------- 2b. inherited Claude markers */
+
+  // A pane is a new top-level shell, not a continuation of whatever launched
+  // Forge, so the session markers must not survive into it — while ordinary
+  // environment the user set stays exactly where it was.
+  manager.create({ id: 'smoke-env', cwd: ROOT, cols: 100, rows: 30 })
+  await waitFor(() => (output.get('smoke-env') ?? '').length > 0, 15000, 'env prompt')
+  manager.write(
+    'smoke-env',
+    'Write-Host "child=<$env:CLAUDE_CODE_CHILD_SESSION> cc=<$env:CLAUDECODE> entry=<$env:CLAUDE_CODE_ENTRYPOINT> keep=<$env:FORGE_SMOKE_KEEPME>"\r'
+  )
+  // The echoed command line comes back first and carries the variable *names*;
+  // only the expanded readout has the keep marker in it, so wait for that.
+  await waitFor(() => /keep=<kept>/.test(output.get('smoke-env') ?? ''), 15000, 'env readout').catch((e) => {
+    console.log('---RAW---')
+    console.log(JSON.stringify(output.get('smoke-env') ?? ''))
+    throw e
+  })
+  const readout = (output.get('smoke-env') ?? '').split(/\r?\n/).find((l) => /keep=<kept>/.test(l)) ?? ''
+  log(/child=<>/.test(readout), 'CLAUDE_CODE_CHILD_SESSION is not inherited by a pane')
+  log(/cc=<>/.test(readout), 'CLAUDECODE is not inherited by a pane')
+  log(/entry=<>/.test(readout), 'CLAUDE_CODE_ENTRYPOINT is not inherited by a pane')
+  log(/keep=<kept>/.test(readout), 'unrelated environment is left alone')
+
+  // Hand the slot back, so the session-cap test below still measures the cap.
+  manager.kill('smoke-env')
 
   /* ------------------------------------------------- 3. cwd is honoured */
 

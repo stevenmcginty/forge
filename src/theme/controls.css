@@ -1,3 +1,12 @@
+/*
+ * Shared form furniture: label-and-control rows, steppers, switches.
+ *
+ * These used to live in SettingsPopover.css, which was fine while the popover
+ * was the only place settings existed. It is now one of several — the settings
+ * page, the dictation setup card, the voice panel — so they live here, next to
+ * the tokens, and are imported once from global.css.
+ */
+
 .setting-row {
   display: flex;
   align-items: center;
@@ -18,6 +27,8 @@
   font-size: var(--t-eyebrow);
   color: var(--text-dim);
 }
+
+/* ------------------------------------------------------------------ stepper */
 
 .stepper {
   display: flex;
@@ -43,60 +54,7 @@
   color: var(--text-primary);
 }
 
-/* ---------------------------------------------------------- profile rows */
-
-.profile-row {
-  display: flex;
-  align-items: center;
-  gap: var(--s-4);
-  min-height: 28px;
-  padding: 0 var(--s-4);
-  border-radius: var(--r-sm);
-}
-
-.profile-row:hover {
-  background: var(--bg-hover);
-}
-
-.profile-row__name {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--t-md);
-}
-
-.profile-row__cmd {
-  flex: none;
-  max-width: 92px;
-  font-size: var(--t-eyebrow);
-  color: var(--text-dim);
-}
-
-.profile-row__lock {
-  flex: none;
-  color: var(--text-dim);
-}
-
-.profile-row__del {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  opacity: 0;
-}
-
-.profile-row:hover .profile-row__del {
-  opacity: 1;
-}
-
-.settings__version {
-  padding: var(--s-3) var(--s-4) var(--s-2);
-  font-size: 9.5px;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-  border-top: 1px solid var(--line-soft);
-  margin-top: var(--s-2);
-}
-
-/* -------------------------------------------------------------- toggle row */
+/* ------------------------------------------------------------------- toggle */
 
 .setting-row--toggle {
   width: 100%;
@@ -140,4 +98,35 @@
 .switch[data-on='true'] .switch__knob {
   background: var(--accent);
   transform: translateX(13px);
+}
+
+/* --------------------------------------------------------------- selects
+ *
+ * A native <select> paints its own popup from the OS, which is the one piece of
+ * chrome we cannot theme — so the closed state is styled to match everything
+ * else and the open list is left to Windows.
+ */
+
+.select {
+  height: 26px;
+  padding: 0 var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+
+.select:hover {
+  border-color: var(--line-strong);
+}
+
+.select:focus-visible {
+  border-color: var(--accent-line);
+}
+
+.select option {
+  background: var(--bg-panel-raised);
+  color: var(--text-primary);
 }

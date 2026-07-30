@@ -41,6 +41,13 @@ On the desktop side:
 | `scripts/companion-serve.mjs`   | Serve `web/` on localhost.                            |
 | `scripts/companion-icons.mjs`   | Regenerate the PWA icons.                             |
 
+**Nothing in `companion/` is packaged into the app.** `electron-builder.yml`
+ships `out/**/*` and `package.json` and nothing else, so the PWA travels to
+Steve's phone via Firebase Hosting and never inside `Forge-setup.exe`. The
+desktop half rides in the normal main-process bundle and, because it is REST
+rather than the Firebase SDK, adds no dependency for the packaging milestone to
+carry.
+
 ---
 
 ## Database schema

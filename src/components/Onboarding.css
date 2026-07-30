@@ -1,0 +1,321 @@
+/*
+ * The first-run welcome. Same obsidian-capsule family as the rest of the app —
+ * this is not a marketing splash, it is the app with three questions on it.
+ */
+
+.onboard {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-toast);
+  display: grid;
+  place-items: center;
+  padding: var(--s-8);
+  background: var(--bg-scrim);
+  backdrop-filter: blur(3px);
+  animation: onboard-in var(--dur-med) var(--ease-out);
+}
+
+@keyframes onboard-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.onboard__card {
+  position: relative;
+  width: min(620px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--s-8);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-card);
+  outline: none;
+}
+
+.onboard__dismiss {
+  position: absolute;
+  top: var(--s-5);
+  right: var(--s-5);
+  width: 24px;
+  padding: 0;
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------------ head */
+
+.onboard__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+}
+
+.onboard__mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  color: var(--accent);
+  background: linear-gradient(180deg, #1a1d19 0%, #131512 100%);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-key), var(--shadow-inset-top);
+}
+
+.onboard__eyebrow {
+  color: var(--text-dim);
+}
+
+.onboard__title {
+  margin: 0;
+  font-size: var(--t-display);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+}
+
+.onboard__lede {
+  max-width: 58ch;
+  margin: var(--s-6) 0 var(--s-7);
+  font-size: var(--t-md);
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ----------------------------------------------------------------- steps */
+
+.onboard__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboard__step {
+  display: flex;
+  gap: var(--s-5);
+  padding: var(--s-6);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  transition: border-color var(--dur-med) var(--ease-out);
+}
+
+.onboard__step[data-state='done'] {
+  border-color: var(--accent-line);
+}
+
+.onboard__step-num {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+}
+
+.onboard__step[data-state='done'] .onboard__step-num {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.onboard__step-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.onboard__step-title {
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-lg);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+}
+
+.onboard__body {
+  margin: 0 0 var(--s-5);
+  font-size: var(--t-md);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.onboard__note {
+  margin: var(--s-3) 0 0;
+  font-size: var(--t-sm);
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.onboard__path {
+  color: var(--text-secondary);
+}
+
+.onboard__action {
+  height: 28px;
+  font-size: var(--t-sm);
+}
+
+.onboard__ghost {
+  height: 28px;
+  padding: 0 var(--s-5);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+  font-size: var(--t-sm);
+}
+
+.onboard__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+}
+
+/* ---------------------------------------------------------------- agents */
+
+.onboard__agents {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboard__agent {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-2) 0;
+  font-size: var(--t-md);
+}
+
+.onboard__agent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--text-dim);
+}
+
+.onboard__agent[data-found='true'] .onboard__agent-dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.onboard__agent-name {
+  color: var(--text-primary);
+}
+
+.onboard__agent-cmd {
+  flex: 1 1 auto;
+  font-size: var(--t-sm);
+  color: var(--text-dim);
+}
+
+.onboard__agent-state {
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+}
+
+.onboard__agent-link {
+  font-size: var(--t-sm);
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.onboard__agent-link:hover {
+  color: var(--accent-bright);
+  text-decoration: underline;
+}
+
+/* ----------------------------------------------------------------- voice */
+
+.onboard__field + .onboard__field {
+  margin-top: var(--s-6);
+}
+
+.onboard__label {
+  display: block;
+  margin-bottom: var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.onboard__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--s-4);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+}
+
+.onboard__input:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+.onboard__bar {
+  height: 5px;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+}
+
+.onboard__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  transition: width var(--dur-med) var(--ease-out);
+}
+
+/* ------------------------------------------------------------------ foot */
+
+.onboard__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-5);
+  margin-top: var(--s-7);
+}
+
+/*
+  A link rather than a caption: it used to say "Settings has all of this" and
+  then leave you to find Settings. It is the way out of the welcome for anybody
+  who wants the long version, so it has to be clickable.
+*/
+.onboard__foot-hint {
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--text-dim) 40%, transparent);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.onboard__foot-hint:hover {
+  color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}

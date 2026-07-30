@@ -1,0 +1,109 @@
+# Packaging Forge for Windows.
+#
+# Two artifacts, on purpose:
+#   Forge-<ver>-setup.exe   NSIS, per-user, no admin prompt
+#   Forge-<ver>-win.zip     unzip and run — nothing installed, nothing written
+#                           outside %APPDATA%\Forge
+#
+# The zip is the one you give to a friend. See GIVE-TO-A-FRIEND.md.
+#
+#   npm run dist
+#
+# Everything below has a matching path-resolution site in the source; if you
+# change a `to:` here, change the resolver too:
+#   resources/bridge/gemini-bridge.mjs  ← electron/bridge/mcp-config.ts
+#                                          scriptCandidates()
+#                                          (the esbuild bundle, not the source —
+#                                           see scripts/build-bridge.mjs)
+#   resources/stt-bin/forge-stt.exe     ← electron/stt-sidecar.ts resolveFrozen()
+#   resources/stt/stt_service.py        ← electron/stt-sidecar.ts resolveScript()
+
+appId: dev.forge.app
+productName: Forge
+copyright: Forge
+# Matches app.setAppUserModelId in electron/main.ts, so the taskbar groups
+# windows under the icon rather than under a generic Electron entry.
+
+directories:
+  output: release
+  buildResources: build
+
+# The renderer, main and preload bundles, plus package.json for the version and
+# the `main` entry. Source is not shipped: electron-vite has already bundled it.
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+
+# --------------------------------------------------------------- resources
+#
+# These sit *beside* app.asar in resources/, not inside it. All three are things
+# that are executed or read by path rather than imported:
+#
+#  - the MCP bridge is spawned by `node <path>` from inside a Claude pane, which
+#    cannot read out of an asar. It is shipped as the esbuild *bundle*, because
+#    there is no node_modules beside it out here for its MCP SDK imports to
+#    resolve against.
+#  - the frozen speech engine is a PyInstaller folder; its bootloader resolves
+#    its own DLLs relative to the exe
+#  - stt_service.py is the fallback for anyone running the sidecar under their
+#    own interpreter
+extraResources:
+  - from: bridge-dist
+    to: bridge
+    filter:
+      - '**/*'
+  - from: stt-dist/forge-stt
+    to: stt-bin
+    filter:
+      - '**/*'
+  - from: stt
+    to: stt
+    filter:
+      - stt_service.py
+
+asar: true
+# node-pty's conpty.node / conpty.dll and its OpenConsole.exe are loaded by the
+# OS, which cannot see inside an asar. The whole package comes out rather than
+# just the binaries, because its worker threads are spawned by file path too.
+asarUnpack:
+  - '**/node_modules/@lydell/node-pty/**'
+  - '**/node_modules/@lydell/node-pty-*/**'
+
+# @lydell/node-pty ships prebuilt binaries and has no gyp step; there is nothing
+# to rebuild, and letting electron-builder try invites a toolchain it does not
+# need.
+npmRebuild: false
+buildDependenciesFromSource: false
+
+# A leaked key must stop the build *before* an installer exists, not after — so
+# the secrets audit runs against the packed app directory as an afterPack hook.
+afterPack: ./scripts/after-pack.cjs
+
+win:
+  icon: build/icon.ico
+  # Forge-0.1.0-win.zip — the give-to-a-friend one. NSIS overrides this below.
+  artifactName: ${productName}-${version}-win.${ext}
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+
+nsis:
+  artifactName: ${productName}-${version}-setup.${ext}
+  # Per-user, so no UAC prompt and no admin account needed.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Forge
+  deleteAppDataOnUninstall: false
+  # %APPDATA%\Forge holds projects, layouts and screenshots. Uninstalling the
+  # app is not a request to throw those away.
+
+# Forge is not code-signed: there is no certificate, and a self-signed one buys
+# nothing but a different SmartScreen dialog. GIVE-TO-A-FRIEND.md explains the
+# "More info → Run anyway" click that follows from that.

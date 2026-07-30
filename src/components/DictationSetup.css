@@ -16,8 +16,8 @@
   margin: 0 var(--s-4) var(--s-3);
   padding: var(--s-4);
   border-radius: var(--r-md);
-  background: rgba(255, 179, 71, 0.09);
-  border: 1px solid rgba(255, 179, 71, 0.32);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
 }
 
 .dsetup__problem-title {
