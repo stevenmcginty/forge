@@ -54,10 +54,12 @@ const ACTIVITY_THROTTLE_MS = 90
 
 /**
  * Geometry handed to a pane that has never been laid out at full size — only
- * reachable by opening a project straight into the mosaic. Sized like a
- * comfortable single pane so the shell's first prompt is a sane width.
+ * reachable by opening a project straight into the mosaic. Roughly the classic
+ * 80×24 at our default type size, which is both a sane width for a shell's
+ * first prompt and close enough to a real pane that the wall does not end up
+ * visibly two-tier.
  */
-export const DEFAULT_PANE_GEOMETRY: PaneGeometry = { width: 940, height: 560 }
+export const DEFAULT_PANE_GEOMETRY: PaneGeometry = { width: 640, height: 400 }
 
 interface Entry {
   paneId: string

@@ -11,7 +11,7 @@ import type { PaneLeaf, Project, TerminalTab, Workspace } from '@shared/types'
 import { isPaneDead, paneStatusLabel, usePaneRuntime } from '@/hooks/usePaneRuntime'
 import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
-import { terminalHost, type TerminalSpec } from '@/lib/terminals'
+import { terminalHost, type PaneGeometry, type TerminalSpec } from '@/lib/terminals'
 import { useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
@@ -85,6 +85,29 @@ export function MosaicView({
     null
 
   const columns = columnsFor(cells.length)
+
+  /*
+   * One scale for the whole wall, taken from the largest pane on it.
+   *
+   * Scaling each tile to its own pane would give every tile a different text
+   * size — a pane that was one of five in a split would come out twice as big
+   * as one that had a tab to itself — and a wall you have to refocus on for
+   * every tile is not a wall you can scan. Sizing everything against the
+   * biggest pane keeps the type uniform and still tells the truth: a tile
+   * showing a small pane simply covers less of its tile.
+   */
+  const reference = useMemo<PaneGeometry>(() => {
+    let width = 1
+    let height = 1
+    for (const cell of cells) {
+      const g = terminalHost.geometryFor(cell.leaf.id)
+      if (g.width > width) width = g.width
+      if (g.height > height) height = g.height
+    }
+    return { width, height }
+    // Re-measured whenever the wall's membership changes — which is also the
+    // only time a tile is mounted and could need a different scale.
+  }, [cells])
 
   const zoom = useCallback(
     (paneId: string) => {
@@ -180,6 +203,7 @@ export function MosaicView({
           key={zoomCell.leaf.id}
           cell={zoomCell}
           project={project}
+          reference={reference}
           zoomed
           selected={false}
           onZoom={zoom}
@@ -199,6 +223,7 @@ export function MosaicView({
             key={cell.leaf.id}
             cell={cell}
             project={project}
+            reference={reference}
             zoomed={false}
             selected={cell.leaf.id === selectedId}
             onZoom={zoom}
@@ -216,6 +241,7 @@ export function MosaicView({
 function MosaicTile({
   cell,
   project,
+  reference,
   zoomed,
   selected,
   onZoom,
@@ -225,6 +251,8 @@ function MosaicTile({
 }: {
   cell: Cell
   project: Project
+  /** The wall's shared scaling reference — ignored when zoomed. */
+  reference: PaneGeometry
   zoomed: boolean
   selected: boolean
   onZoom: (paneId: string) => void
@@ -240,7 +268,7 @@ function MosaicTile({
 
   const stageRef = useRef<HTMLDivElement | null>(null)
   const naturalRef = useRef<HTMLDivElement | null>(null)
-  const [scale, setScale] = useState(0)
+  const [fit, setFit] = useState({ scale: 0, dx: 0, dy: 0 })
 
   const specRef = useRef<TerminalSpec>({
     cwd: project.path,
@@ -286,7 +314,13 @@ function MosaicTile({
     if (zoomed) terminalHost.focus(paneId)
   }, [paneId, zoomed])
 
-  /* Fit the natural box into whatever the tile ended up being. */
+  /*
+   * Fit into whatever the tile ended up being. On the wall we measure against
+   * the shared reference so every tile lands on the same scale; zoomed, there
+   * is only one tile, so it may fill the area with its own geometry — capped at
+   * 1, because blowing a terminal up past life size just makes it blurry.
+   */
+  const against = zoomed ? geometry : reference
   useEffect(() => {
     const stage = stageRef.current
     if (!stage) return
@@ -294,13 +328,23 @@ function MosaicTile({
       const w = stage.clientWidth
       const h = stage.clientHeight
       if (w < 4 || h < 4) return
-      setScale(Math.min(1, w / geometry.width, h / geometry.height))
+      const scale = Math.min(1, w / against.width, h / against.height)
+      /*
+       * Tiles hang off the top-left, so the wall's terminals all start on the
+       * same line and the eye can run down them. A zoomed pane is centred
+       * instead: at natural scale a pane that was one of five in a split does
+       * not come close to filling the area, and shoved into a corner that reads
+       * as a layout bug rather than as the letterboxing it is.
+       */
+      const dx = zoomed ? Math.max(0, (w - geometry.width * scale) / 2) : 0
+      const dy = zoomed ? Math.max(0, (h - geometry.height * scale) / 2) : 0
+      setFit({ scale, dx, dy })
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(stage)
     return () => ro.disconnect()
-  }, [geometry])
+  }, [against, geometry, zoomed])
 
   const statusLabel = paneStatusLabel(runtime)
 
@@ -354,7 +398,10 @@ function MosaicTile({
         <div
           className="mtile__natural"
           ref={naturalRef}
-          style={{ transform: `scale(${scale})`, opacity: scale > 0 ? 1 : 0 }}
+          style={{
+            transform: `translate(${fit.dx}px, ${fit.dy}px) scale(${fit.scale})`,
+            opacity: fit.scale > 0 ? 1 : 0
+          }}
         />
       </div>
 
