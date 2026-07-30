@@ -23,7 +23,14 @@ const DEFAULT_SETTINGS: Settings = {
   terminalFontSize: 13,
   terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
   shell: 'pwsh.exe',
-  window: { width: 1440, height: 900, maximized: false }
+  window: { width: 1440, height: 900, maximized: false },
+  voicePanelOpen: false,
+  voicePanelWidth: 380,
+  // Gemini is the live brain; with no key set it degrades to the stub.
+  voiceBrain: 'gemini',
+  anthropicKey: '',
+  geminiKey: '',
+  geminiModel: 'gemini-2.5-flash'
 }
 
 let dataDir = ''
@@ -31,7 +38,10 @@ let layoutDir = ''
 
 function ensureDirs(): void {
   if (!dataDir) {
-    dataDir = join(app.getPath('appData'), 'Forge')
+    // FORGE_DATA_DIR lets a second Forge run against its own settings, projects
+    // and layouts — needed to try things out without touching the real ones.
+    const override = process.env['FORGE_DATA_DIR']
+    dataDir = override && override.trim() ? override.trim() : join(app.getPath('appData'), 'Forge')
     layoutDir = join(dataDir, 'layouts')
   }
   mkdirSync(layoutDir, { recursive: true })
@@ -87,6 +97,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
   }
 
   const win = s.window ?? DEFAULT_SETTINGS.window
+  const brain = s.voiceBrain
   return {
     agentProfiles: profiles,
     lastProjectId: s.lastProjectId ?? null,
@@ -100,7 +111,17 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       width: clamp(win.width ?? 1440, 720, 10000),
       height: clamp(win.height ?? 900, 480, 10000),
       maximized: Boolean(win.maximized)
-    }
+    },
+    voicePanelOpen: Boolean(s.voicePanelOpen),
+    voicePanelWidth: clamp(s.voicePanelWidth ?? DEFAULT_SETTINGS.voicePanelWidth, 300, 640),
+    voiceBrain:
+      brain === 'claude' || brain === 'openai' || brain === 'stub' || brain === 'gemini'
+        ? brain
+        : DEFAULT_SETTINGS.voiceBrain,
+    anthropicKey: typeof s.anthropicKey === 'string' ? s.anthropicKey : '',
+    geminiKey: typeof s.geminiKey === 'string' ? s.geminiKey.trim() : '',
+    geminiModel:
+      typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel
   }
 }
 

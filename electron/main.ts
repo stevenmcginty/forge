@@ -13,6 +13,7 @@ import {
   snapshot
 } from './store'
 import { disposePtyHost, registerPtyHandlers, setPtyTarget } from './pty-host'
+import { registerVoiceHandlers } from './voice-bridge'
 
 const isDev = !app.isPackaged
 const BG = '#0B0C0E'
@@ -273,6 +274,7 @@ void app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
   registerAppHandlers()
   registerPtyHandlers()
+  registerVoiceHandlers()
   createWindow()
 
   app.on('activate', () => {

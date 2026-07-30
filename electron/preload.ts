@@ -34,6 +34,11 @@ const api: ForgeApi = {
     revealDataDir: () => ipcRenderer.invoke(IPC.storeReveal)
   },
 
+  voice: {
+    gemini: (req) => ipcRenderer.invoke(IPC.voiceGemini, req),
+    importKey: () => ipcRenderer.invoke(IPC.voiceImportKey)
+  },
+
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
 

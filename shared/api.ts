@@ -2,6 +2,9 @@ import type {
   AppInfo,
   CreateSessionRequest,
   CreateSessionResult,
+  GeminiCallRequest,
+  GeminiCallResult,
+  ImportedKeyResult,
   Project,
   PtyDataEvent,
   PtyExitEvent,
@@ -38,6 +41,17 @@ export interface ForgeApi {
     setWorkspace(projectId: string, workspace: Workspace): Promise<void>
     deleteWorkspace(projectId: string): Promise<void>
     revealDataDir(): Promise<string>
+  }
+
+  /**
+   * The voice agent's outside world. Model calls live in the main process
+   * because the renderer's CSP (rightly) refuses to talk to any external host —
+   * and because a key is better off never reaching page script's network layer.
+   */
+  voice: {
+    gemini(req: GeminiCallRequest): Promise<GeminiCallResult>
+    /** Read Steve's own Gemini key off disk (DictationMic). Never writes. */
+    importKey(): Promise<ImportedKeyResult>
   }
 
   pickFolder(): Promise<string | null>

@@ -17,6 +17,7 @@ import type {
   Settings,
   SplitDirection,
   TerminalTab,
+  VoiceBrainId,
   Workspace
 } from '@shared/types'
 import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
@@ -59,8 +60,18 @@ const FALLBACK_SETTINGS: Settings = {
   terminalFontSize: 13,
   terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, monospace",
   shell: 'pwsh.exe',
-  window: { width: 1440, height: 900, maximized: false }
+  window: { width: 1440, height: 900, maximized: false },
+  voicePanelOpen: false,
+  voicePanelWidth: 380,
+  voiceBrain: 'gemini',
+  anthropicKey: '',
+  geminiKey: '',
+  geminiModel: 'gemini-2.5-flash'
 }
+
+/** The voice panel never gets narrower than this, nor wider. */
+export const VOICE_PANEL_MIN = 300
+export const VOICE_PANEL_MAX = 640
 
 const INITIAL: AppState = {
   ready: false,
@@ -381,6 +392,12 @@ export interface AppActions {
   selectProject(id: string): void
   revealProject(id: string): void
   toggleRail(): void
+  toggleVoicePanel(): void
+  setVoicePanelWidth(px: number): void
+  setVoiceBrain(id: VoiceBrainId): void
+  setAnthropicKey(key: string): void
+  setGeminiKey(key: string): void
+  setGeminiModel(model: string): void
   setFontSize(size: number): void
   saveProfile(profile: AgentProfile): void
   deleteProfile(id: string): void
@@ -562,6 +579,18 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         if (project) void window.forge.openPath(project.path)
       },
       toggleRail: () => dispatch({ type: 'patchSettings', patch: { railCollapsed: !state.settings.railCollapsed } }),
+      toggleVoicePanel: () =>
+        dispatch({ type: 'patchSettings', patch: { voicePanelOpen: !state.settings.voicePanelOpen } }),
+      setVoicePanelWidth: (px) =>
+        dispatch({
+          type: 'patchSettings',
+          patch: { voicePanelWidth: Math.round(Math.min(VOICE_PANEL_MAX, Math.max(VOICE_PANEL_MIN, px))) }
+        }),
+      setVoiceBrain: (id) => dispatch({ type: 'patchSettings', patch: { voiceBrain: id } }),
+      setAnthropicKey: (key) => dispatch({ type: 'patchSettings', patch: { anthropicKey: key } }),
+      setGeminiKey: (key) => dispatch({ type: 'patchSettings', patch: { geminiKey: key.trim() } }),
+      setGeminiModel: (model) =>
+        dispatch({ type: 'patchSettings', patch: { geminiModel: model.trim() || 'gemini-2.5-flash' } }),
       setFontSize: (size) =>
         dispatch({ type: 'patchSettings', patch: { terminalFontSize: Math.min(24, Math.max(9, size)) } }),
       saveProfile: (profile) => dispatch({ type: 'saveProfile', profile }),
@@ -586,7 +615,13 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       setNotice: (message) => dispatch({ type: 'notice', message }),
       openDataDir: () => void window.forge.store.revealDataDir()
     }
-  }, [activeProjectId, defaultProfileFor, state.projects, state.settings.railCollapsed])
+  }, [
+    activeProjectId,
+    defaultProfileFor,
+    state.projects,
+    state.settings.railCollapsed,
+    state.settings.voicePanelOpen
+  ])
 
   const value = useMemo<Ctx>(() => ({ state, actions }), [state, actions])
 
