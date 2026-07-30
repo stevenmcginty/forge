@@ -3,11 +3,13 @@ import type { TerminalTab, WorkspaceViewMode } from '@shared/types'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { resolveProfile } from '@/lib/agents'
+import { TAB_DRAG_TYPE } from '@/lib/mosaicLayout'
 import {
   useActiveProject,
   useActiveTab,
   useActiveWorkspace,
   useApp,
+  useMosaic,
   usePaneCount,
   useViewMode
 } from '@/state/AppState'
@@ -29,6 +31,7 @@ export function TerminalGrid(): ReactNode {
   const workspace = useActiveWorkspace()
   const tab = useActiveTab()
   const viewMode = useViewMode()
+  const mosaic = useMosaic()
   const { used, max } = usePaneCount()
 
   const newTabRef = useRef<HTMLButtonElement | null>(null)
@@ -77,6 +80,7 @@ export function TerminalGrid(): ReactNode {
               tab={t}
               index={index}
               active={t.id === workspace.activeTabId}
+              onWall={mosaic.wallTabs.includes(t.id)}
               dragFrom={dragFrom}
               setDragFrom={setDragFrom}
             />
@@ -95,6 +99,23 @@ export function TerminalGrid(): ReactNode {
         </button>
 
         <div className="tabstrip__spacer" />
+
+        {/*
+          The freeform wall's one control, parked here rather than over the
+          tiles: the mosaic must not gain a toolbar the moment you drag
+          something, or every tile shifts down by the height of it.
+        */}
+        {viewMode === 'mosaic' && mosaic.mode === 'custom' ? (
+          <button
+            type="button"
+            className="ghost-btn tabstrip__reset"
+            title="Freeform wall — drag a header to move it, an edge to resize it, double-click a header to refit its terminal. Click here to put every tile back in the grid."
+            onClick={() => actions.resetMosaicLayout()}
+          >
+            <Icon name="restart" size={11} />
+            Reset to grid
+          </button>
+        ) : null}
 
         <ViewToggle mode={viewMode} />
       </div>
@@ -144,13 +165,33 @@ export function TerminalGrid(): ReactNode {
 
 /* ----------------------------------------------------------- view toggle */
 
+/** How long a dragged tab has to hover the mosaic button before it flips. */
+const HOVER_FLIP_MS = 400
+
 /**
  * Tabs or mosaic. Two states, so it is a segmented control rather than a menu:
  * the choice is always visible and switching it is one click, because you will
  * be doing it constantly.
+ *
+ * The mosaic button is also a spring-loaded drop target: hold a dragged tab
+ * over it and the view flips under the pointer, so pulling a tab out of the
+ * strip and onto the wall is one gesture even when you started in tab view.
+ * 400ms, because anything shorter flips the app out from under a tab merely
+ * being dragged past it.
  */
 function ViewToggle({ mode }: { mode: WorkspaceViewMode }): ReactNode {
   const { actions } = useApp()
+  const flipRef = useRef<number | null>(null)
+  const [springing, setSpringing] = useState(false)
+
+  const cancelFlip = (): void => {
+    if (flipRef.current !== null) clearTimeout(flipRef.current)
+    flipRef.current = null
+    setSpringing(false)
+  }
+
+  useEffect(() => cancelFlip, [])
+
   const options: Array<{ value: WorkspaceViewMode; icon: 'viewTabs' | 'viewMosaic'; label: string }> = [
     { value: 'tabs', icon: 'viewTabs', label: 'Tab view' },
     { value: 'mosaic', icon: 'viewMosaic', label: 'Mosaic — every session as a live tile' }
@@ -164,9 +205,25 @@ function ViewToggle({ mode }: { mode: WorkspaceViewMode }): ReactNode {
           type="button"
           className="viewtoggle__btn"
           data-active={option.value === mode}
+          data-springing={option.value === 'mosaic' && springing ? 'true' : undefined}
           aria-pressed={option.value === mode}
           title={`${option.label} (Ctrl+G)`}
           onClick={() => actions.setViewMode(option.value)}
+          onDragOver={(e) => {
+            if (option.value !== 'mosaic' || mode === 'mosaic') return
+            if (!e.dataTransfer.types.includes(TAB_DRAG_TYPE)) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'copy'
+            if (flipRef.current !== null) return
+            setSpringing(true)
+            flipRef.current = window.setTimeout(() => {
+              flipRef.current = null
+              setSpringing(false)
+              actions.setViewMode('mosaic')
+            }, HOVER_FLIP_MS)
+          }}
+          onDragLeave={cancelFlip}
+          onDrop={cancelFlip}
         >
           <Icon name={option.icon} size={13} />
         </button>
@@ -181,12 +238,15 @@ function Tab({
   tab,
   index,
   active,
+  onWall,
   dragFrom,
   setDragFrom
 }: {
   tab: TerminalTab
   index: number
   active: boolean
+  /** This tab's panes were placed on the freeform wall by hand. */
+  onWall: boolean
   dragFrom: number | null
   setDragFrom: (i: number | null) => void
 }): ReactNode {
@@ -209,11 +269,16 @@ function Tab({
       role="tab"
       aria-selected={active}
       data-active={active}
+      data-onwall={onWall ? 'true' : undefined}
       data-dragover={dragFrom !== null && dragFrom !== index ? 'true' : undefined}
       draggable={!editing}
       onDragStart={(e) => {
         setDragFrom(index)
-        e.dataTransfer.effectAllowed = 'move'
+        // Two jobs for one drag: within the strip it reorders, and over the
+        // mosaic it puts this tab's panes on the wall. The payload is what the
+        // wall reads; `dragFrom` is what the strip reads.
+        e.dataTransfer.setData(TAB_DRAG_TYPE, tab.id)
+        e.dataTransfer.effectAllowed = 'copyMove'
       }}
       onDragEnd={() => setDragFrom(null)}
       onDragOver={(e) => {
@@ -264,6 +329,12 @@ function Tab({
       ) : (
         <span className="tab__title truncate">{tab.title}</span>
       )}
+
+      {onWall ? (
+        <span className="tab__wall" title="On the mosaic wall" aria-label="On the mosaic wall">
+          <Icon name="viewMosaic" size={10} />
+        </span>
+      ) : null}
 
       <button
         type="button"

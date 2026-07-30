@@ -19,14 +19,51 @@
  * postage stamps.
  */
 .mosaic__wall {
-  display: grid;
-  grid-template-columns: repeat(var(--mosaic-cols, 3), minmax(var(--mosaic-tile-min-w), 1fr));
-  grid-auto-rows: minmax(var(--mosaic-tile-min-h), 1fr);
-  gap: var(--s-3);
   flex: 1;
   min-height: 0;
   overflow: auto;
   padding-right: var(--s-1);
+}
+
+.mosaic__wall .mosaic__canvas {
+  display: grid;
+  grid-template-columns: repeat(var(--mosaic-cols, 3), minmax(var(--mosaic-tile-min-w), 1fr));
+  grid-auto-rows: minmax(var(--mosaic-tile-min-h), 1fr);
+  gap: var(--s-3);
+  min-height: 100%;
+}
+
+/*
+ * Freeform: the canvas stops being a grid and becomes a coordinate space. Every
+ * tile is absolutely positioned at the box the user put it in, which is also
+ * why a drag can be a bare `transform` — moving a tile cannot reflow anything,
+ * because nothing else is laid out relative to it.
+ */
+.mosaic__wall[data-custom='true'] .mosaic__canvas {
+  display: block;
+  position: relative;
+  gap: 0;
+}
+
+/* Where a dragged tile will actually land once it has been nudged clear. */
+.mosaic__ghost {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: var(--z-pane);
+  pointer-events: none;
+  border: 1px dashed var(--accent);
+  border-radius: var(--r-md);
+  background: var(--accent-softer);
+}
+
+/* A tab is overhead and about to be dropped. */
+.mosaic__wall[data-dropping='true'] {
+  outline: 1px dashed var(--accent-line);
+  outline-offset: -2px;
+  border-radius: var(--r-md);
+  background: var(--accent-softer);
 }
 
 .mosaic--zoomed {
@@ -54,6 +91,162 @@
   flex: 1;
   border-color: var(--accent-line);
   box-shadow: 0 0 0 1px var(--accent-softer);
+}
+
+/* -------------------------------------------------------- freeform tiles */
+
+.mtile[data-placed='true'] {
+  position: absolute;
+  /* left/top/width/height are written inline — by React, and by the drag. */
+}
+
+/*
+ * The tile under the pointer lifts off the wall: above its neighbours, with a
+ * shadow so it reads as held rather than merely selected. `will-change` is here
+ * and nowhere else — promoting sixteen tiles permanently costs more memory than
+ * it ever saves, but promoting the one being dragged is exactly what it is for.
+ */
+.mtile[data-dragging] {
+  z-index: var(--z-divider);
+  will-change: transform, left, top, width, height;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-card);
+  cursor: grabbing;
+}
+
+/* Overlapping while you aim is fine; the ghost says where it will end up. */
+.mtile[data-clash='true'] {
+  opacity: 0.92;
+  border-color: var(--warn);
+}
+
+.mtile[data-dragging='move'] .mtile__head {
+  cursor: grabbing;
+}
+
+.mtile[data-refit='true'] {
+  border-color: var(--accent-line);
+}
+
+.mtile__refit {
+  flex: none;
+  padding: 0 3px;
+  border-radius: var(--r-xs);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+}
+
+/* ------------------------------------------------------------------ grips */
+
+/*
+ * Eight resize grips, 8px of hit area each, sitting over everything else in the
+ * tile so an edge is grabbable even where it crosses the header. Invisible: a
+ * wall of terminals framed in eight visible handles apiece would be unreadable,
+ * and the cursor already says what each one does.
+ */
+.mtile__grip {
+  position: absolute;
+  z-index: var(--z-divider);
+}
+
+.mtile[data-placed='true'] .mtile__grip[data-edge='n'] {
+  top: 0;
+  right: 8px;
+  left: 8px;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.mtile[data-placed='true'] .mtile__grip[data-edge='s'] {
+  right: 8px;
+  bottom: 0;
+  left: 8px;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.mtile[data-placed='true'] .mtile__grip[data-edge='w'] {
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.mtile[data-placed='true'] .mtile__grip[data-edge='e'] {
+  top: 8px;
+  right: 0;
+  bottom: 8px;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.mtile[data-placed='true'] .mtile__grip[data-edge='nw'] {
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  cursor: nwse-resize;
+}
+
+.mtile[data-placed='true'] .mtile__grip[data-edge='ne'] {
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 8px;
+  cursor: nesw-resize;
+}
+
+.mtile[data-placed='true'] .mtile__grip[data-edge='sw'] {
+  bottom: 0;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  cursor: nesw-resize;
+}
+
+.mtile[data-placed='true'] .mtile__grip[data-edge='se'] {
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  cursor: nwse-resize;
+}
+
+/* In the auto grid the grips exist only to catch the first resize. */
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='e'],
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='s'],
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='se'] {
+  right: 0;
+  bottom: 0;
+}
+
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='e'] {
+  top: 8px;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='s'] {
+  left: 8px;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='se'] {
+  width: 8px;
+  height: 8px;
+  cursor: nwse-resize;
+}
+
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='n'],
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='w'],
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='nw'],
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='ne'],
+.mtile:not([data-placed='true']) .mtile__grip[data-edge='sw'] {
+  display: none;
 }
 
 /* The volt ring is the keyboard's ring: where Enter would zoom. */
@@ -95,6 +288,20 @@
   padding: 0 var(--s-2) 0 var(--s-3);
   background: var(--bg-panel);
   border-bottom: 1px solid var(--line-soft);
+}
+
+/*
+ * The header is the tile's handle — everywhere except zoomed, where it is a
+ * back button and a title bar and moving it would mean nothing.
+ *
+ * Selection is turned off here rather than by preventing the press, because
+ * preventing the press would also swallow the double-click that refits the
+ * tile: dblclick is a compatibility mouse event, and preventDefault on
+ * pointerdown takes the whole family with it.
+ */
+.mtile[data-zoomed='false'] .mtile__head {
+  cursor: grab;
+  user-select: none;
 }
 
 .mtile[data-zoomed='true'] .mtile__head,

@@ -132,12 +132,55 @@ export interface TerminalTab {
  */
 export type WorkspaceViewMode = 'tabs' | 'mosaic'
 
+/* ------------------------------------------------------------ mosaic wall */
+
+/** A tile's box on the freeform mosaic wall, in wall pixels from its top-left. */
+export interface MosaicRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** A tile's placement, plus how its terminal is shown inside it. */
+export interface MosaicTile extends MosaicRect {
+  /**
+   * True once the user double-clicked the header: the PTY is refitted to the
+   * box (real cols/rows, life-size type) instead of being scaled into it, and
+   * follows the box from then on. Opt-in per tile — see MosaicView.
+   */
+  fit?: boolean
+}
+
+/**
+ * How the wall arranges itself.
+ *
+ * `auto`   the uniform grid: Forge places every tile, nobody drags anything.
+ * `custom` freeform: every tile has a box the user put it in.
+ */
+export type MosaicLayoutMode = 'auto' | 'custom'
+
+/** A project's freeform wall. Absent until the user first moves a tile. */
+export interface MosaicState {
+  mode: MosaicLayoutMode
+  /** paneId → box. Only read in `custom` mode. */
+  tiles: Record<string, MosaicTile>
+  /**
+   * Tabs the user dragged out of the strip and onto the wall. Purely a marker:
+   * the tab itself is untouched, and its panes were already on the wall — the
+   * strip just says which ones you placed by hand.
+   */
+  wallTabs: string[]
+}
+
 /** One project's terminal workspace. */
 export interface Workspace {
   tabs: TerminalTab[]
   activeTabId: string | null
   /** Optional so workspaces written before the mosaic existed still load. */
   viewMode?: WorkspaceViewMode
+  /** Optional so workspaces written before the freeform wall existed still load. */
+  mosaic?: MosaicState
 }
 
 /* ------------------------------------------------------------------- shots */
@@ -473,6 +516,20 @@ export interface Settings {
    * predictable, whereas this is a real (if small) API call you did not ask for.
    */
   memoryLlmSummarize: boolean
+
+  /* --------------------------------------------------- skills library (M8) */
+  /**
+   * Where the skills library lives. Defaults to %APPDATA%\Forge\skills; movable
+   * by hand for anyone who would rather keep their skills in a repo.
+   */
+  skillsLibraryDir: string
+  /**
+   * Folder names of the skills currently synced into ~/.claude/skills, and so
+   * visible to every claude and kimi session on this machine. The list is the
+   * intent; electron/skills-store.ts reconciles the filesystem with it at
+   * startup and after every toggle.
+   */
+  skillsEnabled: string[]
 
   /* ------------------------------------------------ remote control (M7) */
   /**

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, screen, shell } from 'electron'
 import { existsSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import { planProjectFolder } from './projectfolder'
@@ -23,6 +24,7 @@ import {
   snapshot
 } from './store'
 import { registerMemoryHandlers, setMemoryDir } from './memory-store'
+import { registerSkillsHandlers, setSkillsDirs } from './skills-store'
 import { disposePtyHost, registerPtyHandlers, setPtyTarget } from './pty-host'
 import { writeBridgeConfig } from './bridge/mcp-config'
 import { disposePresence, initPresence, setPresence } from './presence'
@@ -293,6 +295,23 @@ function createWindow(): void {
 
 /* -------------------------------------------------------------------- ipc */
 
+/**
+ * The one folder picker, borrowed by both "add project" and "import skill" —
+ * they differ only in what the dialog calls its button.
+ */
+async function pickFolder(title: string, buttonLabel: string): Promise<string | null> {
+  const options: Electron.OpenDialogOptions = {
+    title,
+    buttonLabel,
+    properties: ['openDirectory', 'createDirectory']
+  }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options)
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]!
+}
+
 function registerAppHandlers(): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => {
     const settings = getSettings()
@@ -355,18 +374,40 @@ function registerAppHandlers(): void {
     clear: IPC.memoryClear
   })
 
-  ipcMain.handle(IPC.pickFolder, async (): Promise<string | null> => {
-    const parent = mainWindow ?? undefined
-    const result = parent
-      ? await dialog.showOpenDialog(parent, {
-          title: 'Add project folder',
-          properties: ['openDirectory', 'createDirectory'],
-          buttonLabel: 'Add project'
-        })
-      : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
-    if (result.canceled || result.filePaths.length === 0) return null
-    return result.filePaths[0]!
-  })
+  /**
+   * The skills library. Same shape as memory above: the store is handed its two
+   * directories rather than importing them, which keeps skills-store.ts free of
+   * `electron` and — the part that matters — lets scripts/skills-smoke.mjs run
+   * the real code against a temporary HOME instead of Steve's own
+   * ~/.claude/skills, which is full of skills he wrote by hand.
+   */
+  setSkillsDirs({
+    libraryDir: getSettings().skillsLibraryDir || join(getDataDir(), 'skills'),
+    claudeSkillsDir: join(homedir(), '.claude', 'skills'),
+    // Read-only, and only to say "that name exists over there too".
+    peerDirs: [join(homedir(), '.agents', 'skills'), join(homedir(), '.gemini', 'skills')]
+  }).syncEnabled(getSettings().skillsEnabled)
+
+  registerSkillsHandlers(
+    ipcMain,
+    {
+      list: IPC.skillsList,
+      read: IPC.skillsRead,
+      create: IPC.skillsCreate,
+      import: IPC.skillsImport,
+      remove: IPC.skillsRemove,
+      setEnabled: IPC.skillsSetEnabled,
+      openFolder: IPC.skillsOpenFolder
+    },
+    {
+      enabled: () => getSettings().skillsEnabled,
+      setEnabled: (names) => void setSettings({ skillsEnabled: names }),
+      openPath: (path) => void shell.openPath(path),
+      pickFolder: () => pickFolder('Import a skill folder', 'Import skill')
+    }
+  )
+
+  ipcMain.handle(IPC.pickFolder, () => pickFolder('Add project folder', 'Add project'))
 
   /**
    * Create a project folder from a spoken name.
