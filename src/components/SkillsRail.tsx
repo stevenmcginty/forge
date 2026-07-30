@@ -187,7 +187,10 @@ function SkillsFlyout({
       }}
       align="start"
       side="top"
-      width={352}
+      // Wider than the rail on purpose — that is half of why this is a flyout
+      // and not an inline expander. A skill's description is the only thing
+      // that tells you which of "fable-loop" and "fable-method" you want.
+      width={404}
       label="Skills"
     >
       <div className="sfly">

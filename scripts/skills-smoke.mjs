@@ -421,11 +421,12 @@ async function main() {
   // decides a model's JSON is honourable, the executor that runs it, and the
   // bus the renderer registers its typing implementation on. All three are
   // renderer TypeScript, so they are bundled the same way the store was.
-  const { actions, brain, bus, manifest } = await bundleTogether(
+  const { actions, brain, bus, manifest, library } = await bundleTogether(
     {
       actions: './src/lib/appactions.ts',
       brain: './src/lib/brainjson.ts',
       bus: './src/lib/skillbus.ts',
+      library: './src/lib/skills.ts',
       manifest: './src/lib/appmanifest.ts'
     },
     join(scratch, 'renderer.mjs')
@@ -549,6 +550,55 @@ async function main() {
     !manifest.EXTENSION_POINTS.some((p) => p.startsWith('use_skill')),
     'while no longer being listed as something that does not exist yet'
   )
+
+  /* ------------------------------- 12b. one library, two folders, one lookup
+   *
+   * The renderer's copy of the list. `apply` is pure — no window, no IPC — so
+   * the store can be driven here exactly as a round trip would drive it, and
+   * the question worth asking is whether "the apple design skill" resolves to
+   * the same folder however it was asked for: dropped on a pane, or named by
+   * the voice model. Both go through `find`.
+   */
+
+  library.skillLibrary.apply({
+    skills: [
+      { name: 'release-checklist', title: 'release-checklist', description: 'Before a build ships.', path: 'L1', enabled: true, link: 'junction', alsoIn: [] },
+      { name: 'gaffer', title: 'gaffer', description: 'Forge’s own copy.', path: 'L2', enabled: false, link: 'conflict', alsoIn: [] }
+    ],
+    machineSkills: [
+      { name: 'apple-design', title: 'apple-design', description: 'Apple’s design language.', path: 'M1', shadowed: false },
+      { name: 'gaffer', title: 'gaffer', description: 'Steve’s own.', path: 'M2', shadowed: true }
+    ]
+  })
+
+  log(library.skillLibrary.find('release-checklist')?.source === 'library', 'a library name resolves to the library')
+  log(library.skillLibrary.find('apple-design')?.source === 'machine', 'and a machine-only name to ~/.claude/skills')
+  log(library.skillLibrary.find('apple-design')?.skill.description === 'Apple’s design language.', 'with its description')
+  log(library.skillLibrary.find('gaffer')?.source === 'library', 'a name in both resolves to the library — one rule, both routes')
+  log(library.skillLibrary.find('not-a-skill') === null, 'and an unknown name resolves to nothing, rather than to something')
+
+  const roster = library.skillLibrary.catalogue()
+  log(roster.length === 3, `the model is told about both folders, once each (${roster.length})`)
+  log(roster.find((s) => s.name === 'apple-design')?.enabled === true, 'a machine skill is listed as on — it always is')
+  log(roster.filter((s) => s.name === 'gaffer').length === 1, 'and the shadowed duplicate is not listed twice')
+  log(roster.find((s) => s.name === 'gaffer')?.description === 'Forge’s own copy.', 'the library row is the one described')
+
+  // The whole point of the roster: a spoken "use the apple design skill" has to
+  // reach that folder. Same executor, same bus, same resolved pane as before.
+  const machineRoute = bus.setSkillHandler((req) => {
+    const found = library.skillLibrary.find(req.name)
+    return found
+      ? { ok: true, summary: `${found.source}:${found.skill.path}`, requested: 1, done: 1 }
+      : { ok: false, summary: 'no such skill', requested: 1, done: 0 }
+  })
+  log(
+    actions.runAppAction({ kind: 'use_skill', name: 'apple-design' }, CTX, {}).summary === 'machine:M1',
+    'use_skill reaches one of Steve’s own skills, not just the library'
+  )
+  machineRoute()
+
+  library.skillLibrary.apply({ skills: [], machineSkills: [] })
+  log(library.skillLibrary.catalogue().length === 0, 'and an empty machine folder leaves an empty roster, not a crash')
 
   /* ------------------------------------- 13. the skills already on the machine
    *
