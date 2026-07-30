@@ -14,10 +14,14 @@
     box-shadow var(--dur-fast) var(--ease-out);
 }
 
-/* Focus is the one thing that gets the volt treatment. */
+/*
+ * Focus is the one thing that always gets the volt treatment — the agent's own
+ * accent stays on its badge, activity dot and cursor, so "which pane has the
+ * keyboard" never has to compete with "which agent is this".
+ */
 .pane[data-focused='true'] {
-  border-color: color-mix(in srgb, var(--pane-accent, var(--accent)) 40%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, transparent);
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 1px var(--accent-softer);
 }
 
 .pane__header {
