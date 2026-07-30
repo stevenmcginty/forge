@@ -25,6 +25,7 @@ messages a WebSocket would.)
 
 client -> server
     {"cmd": "start"}                 begin listening
+    {"cmd": "start", "autoStop": 10}  ...and set the silence timeout for it
     {"cmd": "stop"}                  stop listening, transcribe what is left
     {"cmd": "status"}                 re-send the current state
     {"cmd": "shutdown"}              exit cleanly
@@ -515,7 +516,11 @@ class SttService:
 
     # -- listening ---------------------------------------------------------
 
-    def start_listening(self) -> None:
+    def start_listening(self, auto_stop: float | None = None) -> None:
+        if auto_stop is not None:
+            # Forge sends the current silence timeout with every start, so
+            # changing it in Settings takes effect without a respawn.
+            self.opts.auto_stop = auto_stop
         if self.state == LISTENING:
             return
         if not self.ready:
@@ -666,7 +671,10 @@ class SttService:
     def dispatch(self, msg: dict) -> None:
         cmd = msg.get("cmd")
         if cmd == "start":
-            self.start_listening()
+            raw = msg.get("autoStop")
+            self.start_listening(
+                float(raw) if isinstance(raw, (int, float)) and raw >= 0 else None
+            )
         elif cmd == "stop":
             self.stop_listening()
         elif cmd == "status":

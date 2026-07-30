@@ -42,12 +42,20 @@ export function DictationSetup({
    * Persist the paths. A running sidecar is holding the old ones, so it is
    * dropped either way; only the explicit Retry starts a replacement (see
    * ForgeApi.stt.reload).
+   *
+   * The store write is awaited rather than left to AppState's debounced
+   * persistence: the sidecar reads its paths from the store when it spawns, so
+   * respawning first would bring the new process up on the *old* paths and the
+   * fix would look like it had not worked.
    */
   const save = (force: boolean): void => {
-    if (dirty) {
-      actions.patchSettings({ sttPython: python.trim(), sttModelDir: modelDir.trim() })
-    }
-    if (dirty || force) void window.forge.stt.reload(force)
+    if (!dirty && !force) return
+    const patch = { sttPython: python.trim(), sttModelDir: modelDir.trim() }
+    if (dirty) actions.patchSettings(patch)
+    void (async () => {
+      if (dirty) await window.forge.store.setSettings(patch)
+      await window.forge.stt.reload(force)
+    })()
     if (force) onRetry?.()
   }
 

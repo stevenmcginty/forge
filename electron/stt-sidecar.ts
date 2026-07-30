@@ -311,7 +311,7 @@ function handleLine(line: string): void {
     budget.clear()
     if (pendingStart) {
       pendingStart = false
-      write({ cmd: 'start' })
+      sendStart()
     }
   }
 }
@@ -333,8 +333,17 @@ function startListening(): SttStatus {
     pendingStart = true
     return status
   }
-  write({ cmd: 'start' })
+  sendStart()
   return status
+}
+
+/**
+ * The silence timeout rides along with every start rather than only being an
+ * argv flag: otherwise changing it in Settings would do nothing until the
+ * sidecar happened to be respawned.
+ */
+function sendStart(): void {
+  write({ cmd: 'start', autoStop: getSettings().sttAutoStopSeconds })
 }
 
 function stopListening(): SttStatus {
