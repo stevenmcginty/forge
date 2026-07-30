@@ -239,9 +239,14 @@
   z-index: 3;
   pointer-events: none;
   border-radius: inherit;
-  border: 1px solid var(--accent-line);
-  background: var(--accent-softer);
-  box-shadow: inset 0 0 0 1px var(--accent-glow);
+  /* Two pixels and a wash, not one: the pane you are dropping onto is almost
+     always the focused one, and a 1px accent ring is exactly what focus already
+     looks like. This has to read as a different thing at a glance. */
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  box-shadow:
+    inset 0 0 0 1px var(--bg-terminal),
+    0 0 0 1px var(--accent-glow);
 }
 
 /* ----------------------------------------------------------- menu bits */
