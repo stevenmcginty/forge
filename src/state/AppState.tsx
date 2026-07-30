@@ -55,6 +55,12 @@ export interface AppState {
    * a peek is not something you want to still be inside after a restart.
    */
   mosaicZoom: string | null
+  /**
+   * True when the voice panel's mic is armed, i.e. dictated phrases are the
+   * agent's rather than the focused pane's. Transient on purpose: booting with
+   * the mic already pointed at the agent is not something anyone asked for.
+   */
+  agentListening: boolean
   /** Last non-fatal problem worth showing in the status bar. */
   notice: string | null
 }
@@ -94,6 +100,7 @@ const INITIAL: AppState = {
   activeProjectId: null,
   pendingKills: [],
   mosaicZoom: null,
+  agentListening: false,
   notice: null
 }
 
@@ -122,6 +129,7 @@ type Action =
   | { type: 'setViewMode'; mode: WorkspaceViewMode }
   | { type: 'toggleViewMode' }
   | { type: 'setMosaicZoom'; paneId: string | null }
+  | { type: 'setAgentListening'; on: boolean }
   | { type: 'drainKills'; ids: string[] }
   | { type: 'notice'; message: string | null }
 
@@ -433,6 +441,9 @@ function reducer(state: AppState, action: Action): AppState {
     case 'setMosaicZoom':
       return state.mosaicZoom === action.paneId ? state : { ...state, mosaicZoom: action.paneId }
 
+    case 'setAgentListening':
+      return state.agentListening === action.on ? state : { ...state, agentListening: action.on }
+
     case 'drainKills': {
       const remaining = state.pendingKills.filter((id) => !action.ids.includes(id))
       return remaining.length === state.pendingKills.length ? state : { ...state, pendingKills: remaining }
@@ -458,6 +469,8 @@ export interface AppActions {
   toggleRail(): void
   toggleVoicePanel(): void
   setVoicePanelWidth(px: number): void
+  /** Arm/disarm the voice panel's mic — see AppState.agentListening. */
+  setAgentListening(on: boolean): void
   setVoiceBrain(id: VoiceBrainId): void
   setAnthropicKey(key: string): void
   setGeminiKey(key: string): void
@@ -654,6 +667,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       toggleRail: () => dispatch({ type: 'patchSettings', patch: { railCollapsed: !state.settings.railCollapsed } }),
       toggleVoicePanel: () =>
         dispatch({ type: 'patchSettings', patch: { voicePanelOpen: !state.settings.voicePanelOpen } }),
+      setAgentListening: (on) => dispatch({ type: 'setAgentListening', on }),
       setVoicePanelWidth: (px) =>
         dispatch({
           type: 'patchSettings',

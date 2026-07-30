@@ -120,3 +120,14 @@ export const transcriptBus = new TranscriptBus()
 /** The panel's text box. Registered eagerly so the panel can mount whenever. */
 export const typedTranscript = createPushSource()
 transcriptBus.register(typedTranscript)
+
+/**
+ * M3's dictation, as a source.
+ *
+ * Deliberately *not* registered here, unlike the text box. A dictated phrase
+ * belongs to whatever pane you are looking at — that is the whole point of M3 —
+ * and only becomes the agent's while the voice panel is open with its mic
+ * armed. useDictation registers this as that becomes true and unregisters as it
+ * stops being true, so the same words never go to both places.
+ */
+export const dictationTranscript = createPushSource()

@@ -60,9 +60,31 @@ let layoutDir = ''
  * using — see scripts/ and the M2 notes.
  */
 export function resolveDataRoot(): string {
+  // --data-dir wins over the environment: it is the more specific request, and
+  // it is what you reach for when launching a throwaway copy from a shell that
+  // already exports FORGE_DATA_DIR for something else.
+  const flag = dataDirFlag()
+  if (flag) return resolve(flag)
   const override = process.env['FORGE_DATA_DIR']
   if (override && override.trim()) return resolve(override.trim())
   return join(app.getPath('appData'), 'Forge')
+}
+
+/** `--data-dir <path>` or `--data-dir=<path>`, whichever the caller used. */
+function dataDirFlag(): string | null {
+  const argv = process.argv
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i]!
+    if (arg === '--data-dir') {
+      const next = argv[i + 1]
+      if (next && next.trim() && !next.startsWith('--')) return next.trim()
+    }
+    if (arg.startsWith('--data-dir=')) {
+      const value = arg.slice('--data-dir='.length).trim()
+      if (value) return value
+    }
+  }
+  return null
 }
 
 function ensureDirs(): void {

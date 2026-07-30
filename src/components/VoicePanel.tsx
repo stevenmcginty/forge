@@ -95,6 +95,37 @@ export function VoicePanel(): ReactNode {
   const logRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
 
+  /* ----------------------------------------------------------------- mic
+   *
+   * The mic button arms *routing*: while it is on and this panel is open,
+   * dictated phrases are the agent's rather than the focused pane's (the rule
+   * lives in useDictation). Arming also starts the sidecar, because a mic button
+   * that does not turn the mic on would be a strange thing to ship.
+   *
+   * The engine is driven by IPC rather than through useDictation on purpose:
+   * that hook owns the global dictation hotkey, and a second copy of it would
+   * mean every press of Right Ctrl toggled twice and cancelled itself out.
+   */
+
+  const armed = state.agentListening
+  const [micLive, setMicLive] = useState(false)
+
+  useEffect(() => window.forge.stt.onStatus((s) => setMicLive(s.phase === 'listening')), [])
+
+  const toggleMic = useCallback(() => {
+    const next = !armed
+    actions.setAgentListening(next)
+    if (next) void window.forge.stt.start()
+    else void window.forge.stt.stop()
+  }, [armed, actions])
+
+  // Closing the panel disarms, so it never reopens secretly pointed at the
+  // agent. The sidecar is left alone: the pill may still be dictating into a
+  // pane, and that is not this panel's business to stop.
+  useEffect(() => {
+    if (!open && armed) actions.setAgentListening(false)
+  }, [open, armed, actions])
+
   /* --------------------------------------------------------------- brain */
 
   const brain = useMemo(
@@ -403,6 +434,22 @@ export function VoicePanel(): ReactNode {
         <h2 className="voice__title">Voice Agent</h2>
         <BrainChip status={status} brainName={brain.name} />
         <span className="voice__spacer" />
+        <button
+          type="button"
+          className="ghost-btn voice__icon-btn voice__mic"
+          title={
+            armed
+              ? 'Dictation is feeding the agent — click to send it back to the focused pane'
+              : 'Send dictation to the agent instead of the focused pane'
+          }
+          aria-pressed={armed}
+          aria-label="Send dictation to the agent"
+          data-on={armed ? 'true' : undefined}
+          data-live={armed && micLive ? 'true' : undefined}
+          onClick={toggleMic}
+        >
+          <Icon name="voice" size={13} />
+        </button>
         <button
           type="button"
           className="ghost-btn voice__icon-btn"

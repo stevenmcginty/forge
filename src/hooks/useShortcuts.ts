@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import type { SplitDirection } from '@shared/types'
+import { XTERM_TEXTAREA } from '@/lib/dictation'
 import { terminalHost } from '@/lib/terminals'
 import { useActiveTab, useActiveWorkspace, useApp } from '@/state/AppState'
 
@@ -44,8 +45,15 @@ export function useShortcuts(): void {
 
       // Text fields (renaming a pane/tab, popover forms, the voice composer)
       // keep their keys.
+      //
+      // xterm is the exception: it takes keystrokes through a hidden textarea,
+      // which holds the focus the whole time you are typing in a pane. Letting
+      // that count as a text field would silence every shortcut below exactly
+      // when it is wanted — Ctrl+T, Ctrl+W, Alt+arrows, and the Ctrl+G that is
+      // the way back out of a zoomed mosaic tile.
       const el = document.activeElement
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
+      const inTerminal = el instanceof HTMLTextAreaElement && el.classList.contains(XTERM_TEXTAREA)
+      if (!inTerminal && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return
 
       const activePaneId = tab?.activePaneId ?? null
 
