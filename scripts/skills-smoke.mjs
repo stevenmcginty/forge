@@ -55,6 +55,8 @@ function writeSkill(dir, name, description, extra = {}) {
   return dir
 }
 
+const ALIAS = { '@shared': join(ROOT, 'shared'), '@': join(ROOT, 'src') }
+
 async function bundle(entry, outfile) {
   await build({
     entryPoints: [entry],
@@ -65,7 +67,34 @@ async function bundle(entry, outfile) {
     target: 'node22',
     logLevel: 'silent',
     absWorkingDir: ROOT,
-    alias: { '@shared': join(ROOT, 'shared') }
+    alias: ALIAS
+  })
+  return import(pathToFileURL(outfile).href)
+}
+
+/**
+ * Several renderer modules in ONE bundle.
+ *
+ * It has to be one: `skillbus` holds the registered handler in a module-level
+ * variable, and two separate esbuild bundles would each inline their own copy of
+ * it — so the executor would look at a different registry from the one the test
+ * wrote to and the fallback would "fail" for a reason that does not exist in the
+ * app. One bundle, one module instance, same as the browser.
+ */
+async function bundleTogether(named, outfile) {
+  const contents = Object.entries(named)
+    .map(([alias, path]) => `export * as ${alias} from ${JSON.stringify(path.replace(/\\/g, '/'))}`)
+    .join('\n')
+  await build({
+    stdin: { contents, resolveDir: ROOT, sourcefile: 'together.ts', loader: 'ts' },
+    outfile,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    logLevel: 'silent',
+    absWorkingDir: ROOT,
+    alias: ALIAS
   })
   return import(pathToFileURL(outfile).href)
 }
@@ -336,7 +365,84 @@ async function main() {
   log(usesSlashSkills('C:\\npm\\claude.cmd'), 'nor does a full path to the npm shim')
   log(!usesSlashSkills('gemini') && !usesSlashSkills(''), 'nothing else claims to')
 
-  /* --------------------------------------------- 12. the real one is safe */
+  /* ------------------------------------------------ 12. the voice route */
+
+  // use_skill has to travel three modules to reach a pane: the sanitiser that
+  // decides a model's JSON is honourable, the executor that runs it, and the
+  // bus the renderer registers its typing implementation on. All three are
+  // renderer TypeScript, so they are bundled the same way the store was.
+  const { actions, brain, bus, manifest } = await bundleTogether(
+    {
+      actions: './src/lib/appactions.ts',
+      brain: './src/lib/brainjson.ts',
+      bus: './src/lib/skillbus.ts',
+      manifest: './src/lib/appmanifest.ts'
+    },
+    join(scratch, 'renderer.mjs')
+  )
+
+  const CTX = {
+    projects: [],
+    profiles: [],
+    defaultProfileId: 'claude',
+    activeProjectId: 'p',
+    activeProjectName: 'p',
+    loadedProjectIds: ['p'],
+    tabs: [],
+    activeTabId: null,
+    focusedPaneId: 'pane-1',
+    paneCount: 1,
+    panesInActiveTab: 1,
+    maxSessions: 16,
+    maxPanesPerTab: 8
+  }
+
+  const noRunner = actions.runAppAction({ kind: 'use_skill', name: 'tidy-up' }, CTX, {})
+  log(!noRunner.ok && /not available/.test(noRunner.summary), 'use_skill with nothing wired says so rather than lying')
+
+  const seen = []
+  const outcome = actions.runAppAction({ kind: 'use_skill', name: '/tidy-up', target: 'kimi' }, CTX, {
+    useSkill: (req) => {
+      seen.push(req)
+      return { ok: true, summary: `Typed /${req.name}`, requested: 1, done: 1 }
+    }
+  })
+  log(outcome.ok && seen[0].name === 'tidy-up', 'a leading slash is stripped before the runner sees it')
+  log(seen[0].target === 'kimi', 'and the target is carried through')
+  log(actions.runAppAction({ kind: 'use_skill', name: '  ' }, CTX, {}).ok === false, 'an empty name is refused')
+
+  // Nothing supplied a runner here: the executor falls back to the bus, which
+  // is how the voice panel reaches a pane without knowing skills exist.
+  const unregister = bus.setSkillHandler((req) => ({ ok: true, summary: `bus:${req.name}`, requested: 1, done: 1 }))
+  log(
+    actions.runAppAction({ kind: 'use_skill', name: 'tidy-up' }, CTX, {}).summary === 'bus:tidy-up',
+    'with no runner method, the executor falls back to the registered bus handler'
+  )
+  unregister()
+  log(
+    actions.runAppAction({ kind: 'use_skill', name: 'tidy-up' }, CTX, {}).ok === false,
+    'and unregistering it puts the honest refusal back'
+  )
+
+  log(brain.ACTION_KINDS.has('use_skill'), 'the sanitiser honours use_skill')
+  const fromModel = brain.sanitiseActions([
+    { kind: 'use_skill', name: '/tidy-up', target: 'claude' },
+    { kind: 'use_skill' },
+    { kind: 'use_skill', name: '   ' }
+  ])
+  log(fromModel.length === 1, 'a model asking for a nameless skill is dropped, not guessed at')
+  log(fromModel[0].name === 'tidy-up' && fromModel[0].target === 'claude', 'and a good one survives intact')
+
+  log(
+    manifest.ACTION_SPECS.some((s) => s.kind === 'use_skill'),
+    'and the model is told use_skill exists'
+  )
+  log(
+    !manifest.EXTENSION_POINTS.some((p) => p.startsWith('use_skill')),
+    'while no longer being listed as something that does not exist yet'
+  )
+
+  /* --------------------------------------------- 13. the real one is safe */
 
   const realClaudeSkills = join(homedir(), '.claude', 'skills')
   const strayInReal = existsSync(realClaudeSkills)
