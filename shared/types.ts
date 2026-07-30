@@ -7,6 +7,32 @@
 /* ------------------------------------------------------------------ agents */
 
 /**
+ * What a profile *is*, which is not the same question as what it runs.
+ *
+ * `shell` a bare prompt. Neutral chrome: it is a tool, not a collaborator.
+ * `agent` something that takes instructions — Claude, Kimi, Gemini, your own.
+ *
+ * The chooser and the profile editor group by this, so "give me a shell" is
+ * never buried three rows down a list of agents.
+ */
+export type ProfileKind = 'shell' | 'agent'
+
+/**
+ * How much Claude Code is allowed to do without asking, chosen per profile and
+ * overridable per pane.
+ *
+ *   default      Claude's own prompting — no flag
+ *   acceptEdits  --permission-mode acceptEdits
+ *   plan         --permission-mode plan
+ *   bypass       --dangerously-skip-permissions
+ *
+ * `bypass` is exactly as advertised: the agent stops asking. Panes launched
+ * with it are badged BYPASS in the header, because the one thing worse than a
+ * dangerous mode is a dangerous mode you forgot you turned on.
+ */
+export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypass'
+
+/**
  * An agent profile describes *what gets typed into a fresh shell*. Every pane
  * is a real pwsh session; a profile just decides whether we bootstrap it with
  * a command (`claude`, `kimi`, …) so that when the agent exits the prompt is
@@ -29,6 +55,13 @@ export interface AgentProfile {
    * `--mcp-config` flag. Set `false` explicitly to opt a built-in out.
    */
   mcpBridge?: boolean
+  /**
+   * Optional so profiles written before the split still load; the store fills
+   * it in from the command (empty command = shell).
+   */
+  kind?: ProfileKind
+  /** Default permission mode for claude-shaped commands. */
+  permissionMode?: ClaudePermissionMode
 }
 
 /* ---------------------------------------------------------------- projects */
@@ -56,6 +89,11 @@ export interface PaneLeaf {
   profileId: string
   /** User-editable title. Empty = derive from the profile name. */
   title: string
+  /**
+   * Per-open override of the profile's Claude permission mode, chosen in the
+   * chooser. Absent = whatever the profile says.
+   */
+  permissionMode?: ClaudePermissionMode
 }
 
 export interface PaneSplit {
@@ -178,6 +216,90 @@ export type ImportedKeyResult =
   | { ok: true; key: string; last4: string; source: string }
   | { ok: false; error: string }
 
+/* ------------------------------------------------------------------ themes */
+
+/**
+ * A theme is a *core* of eight-odd colours plus the sixteen terminal slots.
+ * Everything else in tokens.css (sunken wells, hovers, hairlines, the accent
+ * washes, muted ink) is derived from those by mixing — see src/theme/themes.ts.
+ *
+ * That is what makes the theme editor tractable: you pick a background, a panel,
+ * an ink and an accent, and the other forty tokens follow without you having to
+ * keep them in step by hand.
+ */
+export interface ThemeCore {
+  id: string
+  name: string
+  /** Drives the derivation direction and any light-only CSS. */
+  appearance: 'dark' | 'light'
+  /** App background. */
+  bg: string
+  /** Rail, trays, status bar — the raised furniture. */
+  panel: string
+  /** Primary ink. */
+  text: string
+  /** The one loud colour: live / focused / go. */
+  accent: string
+  danger: string
+  warn: string
+  info: string
+  ok: string
+  /** xterm canvas — usually a shade off `bg`. */
+  termBg: string
+  termFg: string
+  /**
+   * The sixteen ANSI slots in the canonical order:
+   * black red green yellow blue magenta cyan white, then the eight brights.
+   */
+  ansi: string[]
+  /** Set on themes the user made, so they can be deleted. */
+  custom?: boolean
+  /** Which built-in this one started life as. */
+  basedOn?: string
+}
+
+/* ------------------------------------------------------- speech engine (M6) */
+
+/**
+ * Where dictation's Parakeet model is coming from.
+ *
+ *   forge         downloaded into %APPDATA%\Forge\models — ours
+ *   dictationmic  DictationMic already has one and we are pointed at it
+ *   missing       nothing usable at the configured path
+ */
+export type EngineSource = 'forge' | 'dictationmic' | 'missing'
+
+export interface EngineState {
+  source: EngineSource
+  /** The folder the sidecar will be given. */
+  dir: string
+  /** Total bytes of the model files actually present. */
+  bytes: number
+  /** Forge's own model folder, whether or not it is populated. */
+  forgeDir: string
+  /** Per-file presence, newest check. */
+  files: Array<{ name: string; bytes: number; ok: boolean }>
+  /** True while a download is running. */
+  downloading: boolean
+}
+
+export interface EngineProgress {
+  /** 0..1 over the whole download, or null before the first byte lands. */
+  fraction: number | null
+  /** Which file is in flight. */
+  file: string
+  receivedBytes: number
+  totalBytes: number
+  /** Set when the download finished, failed or was cancelled. */
+  done?: 'ok' | 'error' | 'cancelled'
+  error?: string
+}
+
+/* -------------------------------------------------------- system probes */
+
+export type ClaudeCliState =
+  | { ok: true; version: string }
+  | { ok: false; error: string }
 /* --------------------------------------------------------- media generation */
 
 /**
@@ -243,6 +365,12 @@ export interface Settings {
   /** How many shots the shelf keeps before pruning the oldest. */
   shotsKeep: number
   window: WindowBounds
+  /**
+   * Set once the first-run welcome has been dismissed. Absent (or false) in a
+   * fresh data directory is exactly what "first run" means — see
+   * src/components/Onboarding.tsx.
+   */
+  onboarded: boolean
 
   /* ------------------------------------------------------ dictation (M3) */
   /** Python interpreter that can import onnx-asr + sounddevice. */
@@ -271,6 +399,40 @@ export interface Settings {
    */
   geminiKey: string
   geminiModel: string
+
+  /* --------------------------------------------------- account + themes (M6) */
+  /** Display name on the account chip. Seeded from the Windows username. */
+  accountName: string
+  /** Avatar colour. */
+  accountColor: string
+  /** Built-in or custom theme id. Falls back to `volt` if it has gone missing. */
+  themeId: string
+  /** Themes the user built in the theme editor. */
+  customThemes: ThemeCore[]
+  /** Force the reduced-motion behaviour on, regardless of the OS setting. */
+  reducedMotion: boolean
+  /**
+   * A cache of the current theme's background and ink, written by the renderer
+   * whenever the theme changes.
+   *
+   * It exists because two things are painted before any renderer code runs: the
+   * window's own background colour, and the native window controls Windows draws
+   * into our titlebar. Without this, launching in Paper means a near-black
+   * window flashing white — so main needs to know the answer at construction
+   * time, and the only place the answer exists is the renderer's theme table.
+   */
+  themeBg: string
+  themeInk: string
+
+
+  /* -------------------------------------------------- voice relay (M6) */
+  /**
+   * Hand a finished agent turn straight back to the voice agent instead of
+   * waiting to be asked. Stored here; the behaviour itself lives elsewhere.
+   */
+  voiceAutoRelay: boolean
+  /** How long a pane must be quiet before a relay counts as "finished". */
+  voiceRelayGraceMs: number
   /**
    * Image-generation model for `make_image` / `edit_image`. Empty means "use the
    * built-in default" (gemini-2.5-flash-image), which is also what the MCP
@@ -394,6 +556,53 @@ export interface SttStatus {
 
 export interface SttPhraseEvent {
   text: string
+}
+
+/* --------------------------------------------------- speech model (M8) */
+
+/**
+ * Forge ships the dictation engine but not the 660 MB Parakeet model, which is
+ * fetched on demand into %APPDATA%\Forge\models. This is that fetch, as the UI
+ * sees it — one object covering both "what is on disk" and "how far along".
+ *
+ *   unknown      nobody has looked yet
+ *   missing      not downloaded
+ *   partial      a previous attempt left bytes behind; it will resume
+ *   downloading  in flight, `fraction` is live
+ *   ready        installed and big enough to be real
+ */
+export type SttModelStatus = 'unknown' | 'missing' | 'partial' | 'downloading' | 'ready'
+
+export interface SttModelState {
+  status: SttModelStatus
+  /** Folder the model is (or will be) in. Empty when nothing is configured. */
+  dir: string
+  bytes: number
+  totalBytes: number
+  /** 0..1 across the whole model. */
+  fraction: number
+  /** File currently being fetched, while downloading. */
+  file: string
+  /** One sentence fit to show the user, including the failure reason. */
+  message: string
+  /** e.g. "~660 MB" — what to warn about before they commit. */
+  sizeHint: string
+}
+
+/* ------------------------------------------------------- agent detection */
+
+/** One of the CLI agents Forge can launch, as found (or not) on PATH. */
+export interface AgentPresence {
+  /** Matches the built-in profile id: `claude`, `kimi`, `gemini`. */
+  id: string
+  name: string
+  /** The command Forge would type into a shell. */
+  command: string
+  found: boolean
+  /** Absolute path of the resolved executable, when we found one. */
+  path?: string
+  /** Where to go and get it. */
+  installUrl: string
 }
 
 /**

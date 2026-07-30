@@ -28,6 +28,11 @@ export type IconName =
   | 'viewMosaic'
   | 'chevronLeft'
   | 'expand'
+  | 'user'
+  | 'key'
+  | 'palette'
+  | 'mic'
+  | 'panelRight'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -135,6 +140,43 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M9.6 2.6h3.8v3.8M13.4 2.6L8.5 7.5" />
       <path d="M6.4 13.4H2.6V9.6M2.6 13.4l4.9-4.9" />
+    </>
+  ),
+  user: (
+    <>
+      <circle cx="8" cy="5.8" r="2.6" />
+      <path d="M3 13.4a5 5 0 0 1 10 0" />
+    </>
+  ),
+  // A key: the section where credentials live.
+  key: (
+    <>
+      <circle cx="5.4" cy="5.4" r="2.8" />
+      <path d="M7.4 7.4L13 13M11 11l-1.4 1.4M12.4 9.6l-1.2 1.2" />
+    </>
+  ),
+  // A microphone: the voice agent you talk to. Deliberately not the waveform —
+  // that mark belongs to the dictation pill, and two different things wearing
+  // the same glyph is how you end up with three unlabelled buttons.
+  mic: (
+    <>
+      <rect x="6" y="2.2" width="4" height="7.2" rx="2" />
+      <path d="M3.8 7.6a4.2 4.2 0 0 0 8.4 0M8 11.8v1.9M5.8 13.7h4.4" />
+    </>
+  ),
+  // A panel hinged on the right: the voice panel's show/hide toggle.
+  panelRight: (
+    <>
+      <rect x="2" y="3" width="12" height="10" rx="1.6" />
+      <path d="M9.6 3v10" />
+    </>
+  ),
+  // Swatches: appearance.
+  palette: (
+    <>
+      <rect x="2.4" y="2.4" width="5" height="5" rx="1.1" />
+      <rect x="8.6" y="2.4" width="5" height="5" rx="1.1" />
+      <rect x="2.4" y="8.6" width="11.2" height="5" rx="1.1" />
     </>
   )
 }

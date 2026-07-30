@@ -41,9 +41,21 @@ export const IPC = {
   sttStatusEvent: 'stt:status-event',
   sttPhrase: 'stt:phrase',
 
+  // speech model download (main process owns it, so it survives the popover
+  // that started it being closed)
+  sttDownloadModel: 'stt:download-model',
+  sttDownloadCancel: 'stt:download-cancel',
+  sttDownloadState: 'stt:download-state',
+  sttDownloadProgress: 'stt:download-progress',
+  sttDownloadDone: 'stt:download-done',
+  sttDownloadError: 'stt:download-error',
+
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
   openPath: 'shell:open-path',
+
+  // onboarding — is `claude` / `kimi` / `gemini` on this machine's PATH?
+  agentsProbe: 'agents:probe',
 
   // window
   appInfo: 'app:info',
@@ -51,6 +63,7 @@ export const IPC = {
   windowToggleMaximize: 'window:toggle-maximize',
   windowClose: 'window:close',
   windowState: 'window:state',
+  windowTitlebar: 'window:titlebar',
 
   // voice agent (M4)
   voiceGemini: 'voice:gemini',
@@ -68,6 +81,16 @@ export const IPC = {
   memoryAppend: 'memory:append',
   memoryReplaceSummary: 'memory:replace-summary',
   memoryClear: 'memory:clear',
+
+  // system probes (M6 settings page)
+  systemUserName: 'system:user-name',
+  systemClaudeVersion: 'system:claude-version',
+
+  // speech-engine model management (M6)
+  modelsEngineState: 'models:engine-state',
+  modelsEngineInstall: 'models:engine-install',
+  modelsEngineCancel: 'models:engine-cancel',
+  modelsEngineProgress: 'models:engine-progress',
 
   // diagnostics
   rendererError: 'diag:renderer-error'

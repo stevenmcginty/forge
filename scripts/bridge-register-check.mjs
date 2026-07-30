@@ -230,7 +230,8 @@ async function main() {
         JSON.stringify(before)
       )
 
-      // A fake key, written the way Forge writes settings.
+      // A fake key, written the way Forge writes settings. Key-shaped on
+      // purpose, and declared to the packaging gate: SECRETS-AUDIT: fixtures
       const fake = 'AIzaSyFAKEKEYFORTESTSONLY0000000000000000'
       const settings = join(sandbox, 'settings.json')
       writeFileSync(

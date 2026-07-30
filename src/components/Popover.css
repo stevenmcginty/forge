@@ -119,7 +119,7 @@
   width: 18px;
   height: 18px;
   border-radius: var(--r-full);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--swatch-border);
   transition: transform var(--dur-fast) var(--ease-out);
 }
 

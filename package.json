@@ -12,12 +12,24 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit --composite false -p tsconfig.node.json && tsc --noEmit --composite false -p tsconfig.web.json",
     "build": "npm run typecheck && electron-vite build",
+    "icon": "node scripts/make-icon.mjs",
+    "stt:build": "node scripts/build-stt.mjs",
+    "secrets:audit": "node scripts/secrets-audit.mjs",
+    "dist": "npm run build && node scripts/build-stt.mjs && node scripts/build-bridge.mjs && node scripts/make-icon.mjs && electron-builder && node scripts/secrets-audit.mjs --packed",
+    "dist:nostt": "npm run build && node scripts/build-stt.mjs --optional && node scripts/build-bridge.mjs && node scripts/make-icon.mjs && electron-builder && node scripts/secrets-audit.mjs --packed",
     "pty:smoke": "node scripts/pty-smoke.mjs",
     "shots:smoke": "node scripts/shots-smoke.mjs",
+    "stt:manager": "node scripts/stt-manager-test.mjs",
+    "stt:download": "node scripts/stt-download-test.mjs",
     "voice:check": "node scripts/voice-check.mjs",
     "memory:smoke": "node scripts/memory-smoke.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
-    "bridge:register": "node scripts/bridge-register-check.mjs"
+    "bridge:register": "node scripts/bridge-register-check.mjs",
+    "bridge:build": "node scripts/build-bridge.mjs",
+    "packaged:check": "node scripts/packaged-check.mjs",
+    "secrets:test": "node scripts/secrets-audit-test.mjs",
+    "theme:check": "node scripts/theme-check.mjs",
+    "models:check": "node scripts/models-check.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
@@ -25,6 +37,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "typescript": "^7.0.2",
     "vite": "^7.3.6"

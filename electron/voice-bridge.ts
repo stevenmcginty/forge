@@ -31,9 +31,9 @@ import { getDataDir, getSettings } from './store'
  *     electron/gemini-media.ts, the very same REST logic the MCP bridge uses.
  *     Output lands in the current project's `assets/generated/` and is adopted
  *     into the screenshot shelf so it shows up in the tray instantly.
- *  4. `voice:import-key` — read a key Steve already has on disk (DictationMic's
- *     Gemini key, or `~/.kimi-key` for OpenRouter) so he does not have to type
- *     it again. Read-only: never writes to, moves or deletes the source file.
+ *  4. `voice:import-key` — find a key already saved on this machine, so nobody
+ *     has to type one twice. Read-only: never writes to, moves or deletes the
+ *     source file. See keyCandidates() for where it looks.
  *
  * These are the only outbound requests Forge makes; there is no telemetry and no
  * update check. Keys are never logged, and errors are passed back verbatim
@@ -49,17 +49,27 @@ const MAX_TIMEOUT_MS = 150_000
 /** Loose enough for every provider's format, tight enough to reject prose. */
 const KEY_SHAPE = /^[A-Za-z0-9_\-.]{20,200}$/
 
-/** Where a key might already be. First hit wins; nothing is written. */
+/**
+ * Where a key might already be sitting. First hit wins; nothing is ever
+ * written, moved or deleted.
+ *
+ * Forge's own data directory comes first, because it is the one place a *new*
+ * user could reasonably be told to drop a file. The rest are conveniences for
+ * the machine Forge was written on — an existing DictationMic install, the
+ * `~/.kimi-key` that `kimi` runs Claude Code on — and simply do not exist
+ * anywhere else. That is why the failure message lists every path it tried
+ * instead of naming one that means nothing to the person reading it.
+ */
 function keyCandidates(which: KeySource): string[] {
   const desktop = join(homedir(), 'Desktop')
   if (which === 'openrouter') {
-    // Steve's existing OpenRouter key — the one `kimi` runs Claude Code on.
-    return [join(homedir(), '.kimi-key'), join(homedir(), '.openrouter-key')]
+    return [join(getDataDir(), 'openrouter.key'), join(homedir(), '.kimi-key'), join(homedir(), '.openrouter-key')]
   }
   return [
+    join(getDataDir(), 'gemini.key'),
+    join(homedir(), '.gemini-key'),
     join(desktop, 'DictationMic', 'gemini.key'),
-    join(desktop, 'DictationMic', 'gemini_key.txt'),
-    join(homedir(), '.gemini-key')
+    join(desktop, 'DictationMic', 'gemini_key.txt')
   ]
 }
 
@@ -78,7 +88,7 @@ function importKey(which: KeySource): ImportedKeyResult {
       return { ok: false, error: `Could not read ${path}: ${(err as Error).message}` }
     }
   }
-  return { ok: false, error: `No key file found (looked in ${candidates[0]})` }
+  return { ok: false, error: `No saved key found. Looked in:\n${candidates.join('\n')}` }
 }
 
 /* ----------------------------------------------------------------- gemini */
