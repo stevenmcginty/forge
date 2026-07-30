@@ -109,6 +109,8 @@ const FALLBACK_SETTINGS: Settings = {
   themeId: 'volt',
   customThemes: [],
   reducedMotion: false,
+  themeBg: '#0b0c0e',
+  themeInk: '#e8eaed',
   openrouterKey: '',
   voiceAutoRelay: false,
   voiceRelayGraceMs: 2500
@@ -168,6 +170,7 @@ type Action =
   | { type: 'openSettings'; section?: SettingsSection }
   | { type: 'closeSettings' }
   | { type: 'setSettingsSection'; section: SettingsSection }
+  | { type: 'cacheThemeChrome'; bg: string; ink: string }
 
 /* -------------------------------------------------------------- helpers */
 
@@ -498,6 +501,10 @@ function reducer(state: AppState, action: Action): AppState {
     case 'setSettingsSection':
       return state.settingsSection === action.section ? state : { ...state, settingsSection: action.section }
 
+    case 'cacheThemeChrome':
+      if (state.settings.themeBg === action.bg && state.settings.themeInk === action.ink) return state
+      return { ...state, settings: { ...state.settings, themeBg: action.bg, themeInk: action.ink } }
+
     default:
       return state
   }
@@ -691,8 +698,19 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
   const themeId = state.settings.themeId
   const customThemes = state.settings.customThemes
   useEffect(() => {
-    applyTheme(findTheme(themeId, customThemes))
+    const tokens = applyTheme(findTheme(themeId, customThemes))
     terminalHost.refreshTheme()
+    // Windows paints the minimise/maximise/close buttons itself, into our
+    // titlebar, out of reach of any stylesheet. Push the new colours at it or a
+    // light theme keeps three near-black buttons in the corner.
+    const bg = tokens['bg-base']
+    const ink = tokens['text-primary']
+    if (!bg || !ink) return
+    window.forge.window.setTitlebar(bg, ink)
+    // Remember them for the *next* launch, where main has to paint the window
+    // before any of this has run. Only written when they actually change, so a
+    // restart in the same theme is not a settings write.
+    dispatch({ type: 'cacheThemeChrome', bg, ink })
   }, [themeId, customThemes])
 
   useEffect(() => {

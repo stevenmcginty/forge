@@ -23,11 +23,11 @@ import './SettingsPage.css'
  */
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName; blurb: string }> = [
-  { id: 'account', label: 'Account', icon: 'forge', blurb: 'name, avatar, connections' },
+  { id: 'account', label: 'Account', icon: 'user', blurb: 'name, avatar, connections' },
   { id: 'agents', label: 'Agents', icon: 'terminal', blurb: 'launch profiles' },
-  { id: 'models', label: 'Models & APIs', icon: 'voice', blurb: 'keys and brains' },
+  { id: 'models', label: 'Models & APIs', icon: 'key', blurb: 'keys and brains' },
   { id: 'voice', label: 'Voice', icon: 'voice', blurb: 'dictation and relay' },
-  { id: 'appearance', label: 'Appearance', icon: 'viewMosaic', blurb: 'themes and type' },
+  { id: 'appearance', label: 'Appearance', icon: 'palette', blurb: 'themes and type' },
   { id: 'screenshots', label: 'Screenshots', icon: 'camera', blurb: 'the shelf' },
   { id: 'advanced', label: 'Advanced', icon: 'gear', blurb: 'paths and versions' }
 ]

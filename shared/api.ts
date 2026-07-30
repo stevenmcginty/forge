@@ -145,5 +145,12 @@ export interface ForgeApi {
     toggleMaximize(): void
     close(): void
     onState(cb: (e: WindowStateEvent) => void): () => void
+    /**
+     * Repaint the *native* minimise/maximise/close buttons, which Windows draws
+     * into our titlebar and which therefore cannot be styled with CSS. Called
+     * whenever the theme changes; without it a light theme has three dark
+     * buttons welded into its top-right corner.
+     */
+    setTitlebar(color: string, symbolColor: string): void
   }
 }

@@ -51,6 +51,7 @@ export const IPC = {
   windowToggleMaximize: 'window:toggle-maximize',
   windowClose: 'window:close',
   windowState: 'window:state',
+  windowTitlebar: 'window:titlebar',
 
   // voice agent (M4)
   voiceGemini: 'voice:gemini',

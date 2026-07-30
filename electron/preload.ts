@@ -90,7 +90,8 @@ const api: ForgeApi = {
     minimize: () => ipcRenderer.send(IPC.windowMinimize),
     toggleMaximize: () => ipcRenderer.send(IPC.windowToggleMaximize),
     close: () => ipcRenderer.send(IPC.windowClose),
-    onState: (cb) => subscribe(IPC.windowState, cb)
+    onState: (cb) => subscribe(IPC.windowState, cb),
+    setTitlebar: (color, symbolColor) => ipcRenderer.send(IPC.windowTitlebar, color, symbolColor)
   }
 }
 

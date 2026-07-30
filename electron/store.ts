@@ -65,6 +65,8 @@ const DEFAULT_SETTINGS: Settings = {
   themeId: 'volt',
   customThemes: [],
   reducedMotion: false,
+  themeBg: '#0b0c0e',
+  themeInk: '#e8eaed',
   openrouterKey: '',
   voiceAutoRelay: false,
   voiceRelayGraceMs: 2500
@@ -240,6 +242,8 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       .filter((t): t is ThemeCore => t !== null)
       .slice(0, 40),
     reducedMotion: Boolean(s.reducedMotion),
+    themeBg: hex(s.themeBg, DEFAULT_SETTINGS.themeBg),
+    themeInk: hex(s.themeInk, DEFAULT_SETTINGS.themeInk),
     openrouterKey: typeof s.openrouterKey === 'string' ? s.openrouterKey.trim() : '',
     voiceAutoRelay: Boolean(s.voiceAutoRelay),
     voiceRelayGraceMs: Number.isFinite(s.voiceRelayGraceMs)

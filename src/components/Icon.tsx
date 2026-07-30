@@ -28,6 +28,9 @@ export type IconName =
   | 'viewMosaic'
   | 'chevronLeft'
   | 'expand'
+  | 'user'
+  | 'key'
+  | 'palette'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -135,6 +138,27 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M9.6 2.6h3.8v3.8M13.4 2.6L8.5 7.5" />
       <path d="M6.4 13.4H2.6V9.6M2.6 13.4l4.9-4.9" />
+    </>
+  ),
+  user: (
+    <>
+      <circle cx="8" cy="5.8" r="2.6" />
+      <path d="M3 13.4a5 5 0 0 1 10 0" />
+    </>
+  ),
+  // A key: the section where credentials live.
+  key: (
+    <>
+      <circle cx="5.4" cy="5.4" r="2.8" />
+      <path d="M7.4 7.4L13 13M11 11l-1.4 1.4M12.4 9.6l-1.2 1.2" />
+    </>
+  ),
+  // Swatches: appearance.
+  palette: (
+    <>
+      <rect x="2.4" y="2.4" width="5" height="5" rx="1.1" />
+      <rect x="8.6" y="2.4" width="5" height="5" rx="1.1" />
+      <rect x="2.4" y="8.6" width="11.2" height="5" rx="1.1" />
     </>
   )
 }

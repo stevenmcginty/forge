@@ -331,6 +331,18 @@ export interface Settings {
   customThemes: ThemeCore[]
   /** Force the reduced-motion behaviour on, regardless of the OS setting. */
   reducedMotion: boolean
+  /**
+   * A cache of the current theme's background and ink, written by the renderer
+   * whenever the theme changes.
+   *
+   * It exists because two things are painted before any renderer code runs: the
+   * window's own background colour, and the native window controls Windows draws
+   * into our titlebar. Without this, launching in Paper means a near-black
+   * window flashing white — so main needs to know the answer at construction
+   * time, and the only place the answer exists is the renderer's theme table.
+   */
+  themeBg: string
+  themeInk: string
 
   /* --------------------------------------------------------- keys (M6) */
   /**
