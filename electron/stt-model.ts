@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { ipcMain, type BrowserWindow } from 'electron'
@@ -11,7 +11,8 @@ import {
   PARAKEET_NAME,
   PARAKEET_SIZE_HINT,
   downloadModel,
-  inspectModel
+  inspectModel,
+  type ModelFile
 } from './stt/model-download'
 import { getDataDir, getSettings, setSettings } from './store'
 
@@ -129,7 +130,7 @@ function patch(next: Partial<SttModelState>): void {
  * progress bar next to the word "installed".
  */
 async function settle(dir: string, message?: string, error?: string): Promise<SttModelState> {
-  const report = await inspectModel(dir)
+  const report = await inspectModel(dir, modelSource().files)
   const status = report.presence === 'ready' ? 'ready' : report.presence === 'partial' ? 'partial' : 'missing'
   state = {
     ...state,
@@ -161,6 +162,36 @@ export async function refreshModelState(): Promise<SttModelState> {
   return settle(activeModelDir())
 }
 
+/* ---------------------------------------------------------- the source */
+
+/**
+ * Where the model is fetched from, and what files to expect.
+ *
+ * `FORGE_MODEL_SOURCE` points at a JSON file `{ base, files: [{ name, minBytes,
+ * expectBytes }] }` and replaces both. It exists because the only other way to
+ * watch this download actually drive the settings card — the progress bar, the
+ * cancel button, the state it lands in afterwards — is to fetch 660 MB, and
+ * nobody does that twice. Point it at a local server serving a few kilobytes
+ * and the whole path runs in a second.
+ *
+ * Unset in every normal run, including a packaged one, and read fresh each time
+ * so a test can move it without restarting. Same shape of hook as
+ * FORGE_DATA_DIR and FORGE_STT_FROZEN.
+ */
+function modelSource(): { base: string | undefined; files: ModelFile[] } {
+  const override = (process.env['FORGE_MODEL_SOURCE'] ?? '').trim()
+  if (!override) return { base: undefined, files: MODEL_FILES }
+  try {
+    const spec = JSON.parse(readFileSync(override, 'utf8')) as { base?: string; files?: ModelFile[] }
+    const files = Array.isArray(spec.files) && spec.files.length > 0 ? spec.files : MODEL_FILES
+    console.log(`[stt-model] FORGE_MODEL_SOURCE is set — fetching ${files.length} test file(s) from ${spec.base}`)
+    return { base: spec.base, files }
+  } catch (err) {
+    console.error(`[stt-model] FORGE_MODEL_SOURCE could not be read, using the real host:`, err)
+    return { base: undefined, files: MODEL_FILES }
+  }
+}
+
 /* -------------------------------------------------------------- download */
 
 /**
@@ -172,6 +203,7 @@ export async function startDownload(): Promise<SttModelState> {
   if (controller) return state
 
   const dir = forgeModelDir()
+  const { base, files } = modelSource()
   const ac = new AbortController()
   controller = ac
 
@@ -181,16 +213,18 @@ export async function startDownload(): Promise<SttModelState> {
     source: 'forge',
     dir,
     files: [],
-    file: MODEL_FILES[0]!.name,
+    file: files[0]!.name,
     fraction: 0,
     bytes: 0,
-    totalBytes: MODEL_FILES.reduce((n, f) => n + f.expectBytes, 0),
+    totalBytes: files.reduce((n, f) => n + f.expectBytes, 0),
     message: `Fetching the speech model (${PARAKEET_SIZE_HINT}). This runs once.`
   })
 
   try {
     await downloadModel({
       dir,
+      ...(base ? { base } : {}),
+      files,
       signal: ac.signal,
       onProgress: (p) => {
         if (controller !== ac) return
