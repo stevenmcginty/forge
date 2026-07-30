@@ -94,6 +94,13 @@ export type MediaErrorKind =
   | 'model'
   | 'network'
   | 'disk'
+  /**
+   * The key is valid and in quota, but the *account* is not allowed to call
+   * this model at all — Veo is billing-only. Distinct from `quota` (spend
+   * later, it will work) and from `auth` (the key is wrong): nothing but
+   * enabling billing fixes it, so it gets its own sentence.
+   */
+  | 'tier'
 
 export interface MediaOk {
   ok: true
@@ -450,17 +457,364 @@ export async function editImage(opts: EditImageOptions): Promise<MediaResult> {
   return result
 }
 
-/* ------------------------------------------------------------------ probes */
+/* ------------------------------------------------------------------- video
+ *
+ * Veo is a completely different shape from the image calls above, and every
+ * detail below was verified live against Steve's key on 2026-07-30 rather than
+ * taken from documentation:
+ *
+ *   1. POST /v1beta/models/<model>:predictLongRunning
+ *        { instances: [{ prompt }], parameters: { aspectRatio, durationSeconds } }
+ *      → 200 { "name": "models/<model>/operations/<id>" }   (nothing else)
+ *
+ *   2. GET /v1beta/<that name>  → { name } while running, then
+ *        { name, done: true, response: { generateVideoResponse: {
+ *            generatedSamples: [ { video: { uri } } ] } } }
+ *      A failure arrives as `{ done: true, error: { code, message } }`.
+ *      There is no progress percentage — `done` is the only signal.
+ *
+ *   3. GET <uri>  where uri is
+ *        https://generativelanguage.googleapis.com/v1beta/files/<id>:download?alt=media
+ *      The URI already carries `:download?alt=media`; it needs the API key and
+ *      nothing else. Verified: bare (no auth) → 403 PERMISSION_DENIED
+ *      ("Method doesn't allow unregistered callers"); `x-goog-api-key` header →
+ *      200 video/mp4; `?key=` query → 200 as well. The header is used here, for
+ *      the same reason as everywhere else: a key in a URL ends up in logs.
+ *
+ * Measured: veo-3.1-lite-generate-preview, 4 s of 16:9 → done at ~47 s,
+ * 4.9 MB, `ftypisom`, mvhd duration exactly 4.00 s.
+ *
+ * Parameter limits, all confirmed by deliberately invalid requests (which are
+ * rejected at submit time, before any generation is billed):
+ *   • aspectRatio accepts ONLY `16:9` and `9:16` — 1:1, 4:3, 3:4, 21:9 and
+ *     16:10 are all refused with "`aspectRatio` does not support `x`".
+ *   • durationSeconds must be 4–8 inclusive ("out of bound. Please provide a
+ *     value between 4 and 8, inclusive").
+ *   • an empty prompt is refused with "Text to video requires prompt to be set."
+ */
 
 /**
- * Is video generation reachable with this key? Reported, not used: Veo is a
- * `:predictLongRunning` call that returns an operation to poll and then a file
- * to download — a different shape from everything above, so no tool is built on
- * it. See bridge/README.md.
+ * The video model. `lite` is the cheapest of the three Veo 3.1 variants and is
+ * the one proven to work on Steve's key, so it is the default: a minute of
+ * waiting is bad enough without it also being the most expensive call Forge can
+ * make. `veo-3.1-fast-generate-preview` and `veo-3.1-generate-preview` are both
+ * present in /v1beta/models for the same key; reach them with
+ * FORGE_GEMINI_VIDEO_MODEL.
  */
-export const VIDEO_MODEL = 'veo-3.1-fast-generate-preview'
+export const DEFAULT_VIDEO_MODEL = 'veo-3.1-lite-generate-preview'
 
-export const NO_VIDEO_TOOL =
-  'Forge has no video-generation tool. Google\'s Veo models are reachable with a Gemini API key, but they use a ' +
-  'long-running-operation API (submit, poll, then download a file) rather than the inline call the image tools use, ' +
-  'so nothing here can make a video yet. Do not claim a video was made. `summarize_video` can *watch* one.'
+/** The only two Veo accepts. Not the image list — that one is much longer. */
+export const VIDEO_ASPECT_RATIOS: readonly string[] = ['16:9', '9:16']
+
+export const MIN_VIDEO_SECONDS = 4
+export const MAX_VIDEO_SECONDS = 8
+
+/**
+ * How long to wait for the whole thing. A lite 4-second clip took ~47 s; the
+ * bigger models and longer clips take several times that, so six minutes is the
+ * point at which something has genuinely gone wrong rather than "it is slow".
+ */
+export const DEFAULT_VIDEO_TIMEOUT_MS = 360_000
+
+/**
+ * Gaps between polls: quick twice in case it is already done, then settle at
+ * 15 s. Polling an operation is free, but hammering it is still rude.
+ */
+export const VIDEO_POLL_MS: readonly number[] = [5_000, 10_000]
+export const VIDEO_POLL_STEADY_MS = 15_000
+
+/** Each individual HTTP call. The *wait* is the poll loop's problem, not fetch's. */
+const VIDEO_REQUEST_TIMEOUT_MS = 120_000
+
+export function videoModel(override?: string): string {
+  const env = (process.env['FORGE_GEMINI_VIDEO_MODEL'] ?? '').trim()
+  const chosen = (override ?? '').trim() || env || DEFAULT_VIDEO_MODEL
+  return /^[a-zA-Z0-9][a-zA-Z0-9.\-_]{1,64}$/.test(chosen) ? chosen : DEFAULT_VIDEO_MODEL
+}
+
+export interface MakeVideoOptions {
+  key: string
+  description: string
+  outDir: string
+  model?: string
+  /** `16:9` or `9:16`. Defaults to the model's own choice. */
+  aspect?: string
+  /** Seconds, 4–8. Defaults to the model's own choice. */
+  duration?: number
+  /** Overall budget for submit + poll + download. */
+  timeoutMs?: number
+  /** Test seam: how to wait between polls. Real code never passes this. */
+  sleep?: (ms: number) => Promise<void>
+}
+
+/**
+ * Classify an HTTP failure from any of the three Veo calls. Shared by submit,
+ * poll and download so one status never means two different things.
+ */
+function videoHttpError(status: number, message: string, model: string): MediaErr {
+  if (status === 429 || /RESOURCE_EXHAUSTED|quota/i.test(message)) {
+    return fail('quota', `Gemini is out of quota for this key (${status}): ${message}`)
+  }
+  // Veo is billing-only on a plain AI Studio key. That is not a quota problem
+  // and waiting will not fix it, so it must not be reported as one.
+  if (/billed users|billing|FAILED_PRECONDITION|paid tier|not available in your|free tier/i.test(message)) {
+    return fail(
+      'tier',
+      `Video generation is a paid-only Google feature and this key is not billed (${status}): ${message} ` +
+        'Say exactly that: Veo needs billing enabled on the Google Cloud project behind the API key. Nothing else fixes it.'
+    )
+  }
+  if (status === 401 || status === 403 || /API_KEY_INVALID|API key not valid/i.test(message)) {
+    return fail('auth', `Gemini refused the key (${status}): ${message}`)
+  }
+  if (status === 404) {
+    return fail('model', `The video model “${model}” is not available to this key (404): ${message}`)
+  }
+  if (/safety|blocked|prohibited|policy/i.test(message)) {
+    return fail('safety', `Gemini refused to make that video (${status}): ${message}`)
+  }
+  return fail('model', `Gemini rejected the video request (${status}): ${message}`)
+}
+
+/** One JSON round trip, with the network failures already classified. */
+async function videoFetch(
+  url: string,
+  key: string,
+  init: RequestInit,
+  model: string
+): Promise<{ ok: true; res: Response; raw: string } | MediaErr> {
+  let res: Response
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: { ...(init.headers as Record<string, string>), 'x-goog-api-key': key },
+      signal: AbortSignal.timeout(VIDEO_REQUEST_TIMEOUT_MS)
+    })
+  } catch (err) {
+    const e = err as Error
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
+      return fail('network', `Gemini did not answer within ${Math.round(VIDEO_REQUEST_TIMEOUT_MS / 1000)}s`)
+    }
+    return fail('network', `Could not reach Gemini: ${scrub(e.message, key)}`)
+  }
+  const raw = await res.text()
+  if (!res.ok) {
+    let parsed: unknown = null
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      /* keep raw */
+    }
+    const err = (parsed as { error?: { message?: string; status?: string } } | null)?.error
+    const message = scrub(err?.message ?? raw.slice(0, 500) ?? res.statusText, key)
+    return videoHttpError(res.status, `${err?.status ?? ''} ${message}`.trim(), model)
+  }
+  return { ok: true, res, raw }
+}
+
+/**
+ * The operation's video URI points at Google's own file service. It is a URL
+ * the *API* chose, and it is about to be sent an API key, so it is checked
+ * against the host we meant to talk to rather than trusted.
+ */
+function safeVideoUri(uri: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(uri)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'https:') return null
+  if (parsed.host !== new URL(HOST).host) return null
+  return parsed.toString()
+}
+
+/** Dig the video URI out of a finished operation, whichever shape it arrived in. */
+function videoUriOf(op: unknown): string | null {
+  const o = op as {
+    response?: {
+      generateVideoResponse?: { generatedSamples?: Array<{ video?: { uri?: string } }> }
+      generatedVideos?: Array<{ video?: { uri?: string } }>
+    }
+  } | null
+  const samples = o?.response?.generateVideoResponse?.generatedSamples ?? o?.response?.generatedVideos ?? []
+  for (const s of samples) {
+    const uri = s?.video?.uri
+    if (typeof uri === 'string' && uri) return uri
+  }
+  return null
+}
+
+const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Text → one .mp4 on disk. Submit, poll, download; returns the absolute path,
+ * and never a path that was not actually written.
+ *
+ * This takes one to three minutes. Every caller is expected to have already
+ * told the user that.
+ */
+export async function makeVideo(opts: MakeVideoOptions): Promise<MediaResult> {
+  const key = (opts.key ?? '').trim()
+  if (!key) {
+    return fail('no-key', 'No Gemini API key. Set one in Forge’s voice-agent settings (or import it) and retry.')
+  }
+  const description = (opts.description ?? '').trim()
+  if (!description) return fail('bad-input', '`description` is required and must be a non-empty string')
+
+  const aspect = (opts.aspect ?? '').trim()
+  if (aspect && !VIDEO_ASPECT_RATIOS.includes(aspect)) {
+    return fail('bad-input', `\`aspect\` must be one of: ${VIDEO_ASPECT_RATIOS.join(', ')}`)
+  }
+
+  let duration = 0
+  if (opts.duration !== undefined && opts.duration !== null && `${opts.duration}`.trim() !== '') {
+    const n = Number(opts.duration)
+    if (!Number.isFinite(n) || n < MIN_VIDEO_SECONDS || n > MAX_VIDEO_SECONDS) {
+      return fail('bad-input', `\`duration\` must be a whole number of seconds from ${MIN_VIDEO_SECONDS} to ${MAX_VIDEO_SECONDS}`)
+    }
+    duration = Math.round(n)
+  }
+
+  const outDir = resolve(opts.outDir)
+  const dirErr = prepareOutDir(outDir)
+  if (dirErr) return dirErr
+
+  const model = videoModel(opts.model)
+  const budget = opts.timeoutMs ?? DEFAULT_VIDEO_TIMEOUT_MS
+  const sleep = opts.sleep ?? realSleep
+  const started = Date.now()
+  const left = (): number => budget - (Date.now() - started)
+
+  /* 1 — submit */
+  const parameters: Record<string, unknown> = {}
+  if (aspect) parameters['aspectRatio'] = aspect
+  if (duration) parameters['durationSeconds'] = duration
+
+  const submitted = await videoFetch(
+    `${HOST}/v1beta/models/${model}:predictLongRunning`,
+    key,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ instances: [{ prompt: description }], parameters })
+    },
+    model
+  )
+  if (!('res' in submitted)) return submitted
+
+  let operation: string
+  try {
+    operation = String((JSON.parse(submitted.raw) as { name?: string }).name ?? '')
+  } catch {
+    return fail('model', `Gemini accepted the video request but its reply was not JSON: ${submitted.raw.slice(0, 200)}`)
+  }
+  if (!operation) {
+    return fail('model', 'Gemini accepted the video request but named no operation to poll, so there is nothing to wait for.')
+  }
+
+  /* 2 — poll */
+  let op: unknown = null
+  let polls = 0
+  for (;;) {
+    const gap = VIDEO_POLL_MS[polls] ?? VIDEO_POLL_STEADY_MS
+    polls += 1
+    if (left() <= gap) {
+      return fail(
+        'network',
+        `The video was still rendering after ${Math.round((Date.now() - started) / 1000)}s and Forge stopped waiting. ` +
+          `It may still finish on Google's side, but no file was downloaded — do not claim one was. ` +
+          `A shorter clip, or ${DEFAULT_VIDEO_MODEL}, is faster.`
+      )
+    }
+    await sleep(gap)
+
+    const polled = await videoFetch(`${HOST}/v1beta/${operation}`, key, { method: 'GET' }, model)
+    if (!('res' in polled)) return polled
+    try {
+      op = JSON.parse(polled.raw)
+    } catch {
+      return fail('model', `Polling the video operation returned non-JSON: ${polled.raw.slice(0, 200)}`)
+    }
+
+    const done = (op as { done?: boolean }).done === true
+    if (!done) continue
+
+    // A finished-but-failed operation carries an error instead of a response.
+    const opErr = (op as { error?: { code?: number; message?: string } }).error
+    if (opErr) {
+      return videoHttpError(Number(opErr.code ?? 0), scrub(String(opErr.message ?? 'no reason given'), key), model)
+    }
+    break
+  }
+
+  const rawUri = videoUriOf(op)
+  if (!rawUri) {
+    return fail(
+      'no-image',
+      'Gemini finished the video operation but returned no file to download. This is usually a silent refusal — ' +
+        'no file was written, so do not claim one was.'
+    )
+  }
+  const uri = safeVideoUri(rawUri)
+  if (!uri) {
+    // Refusing here is the point: the key is about to be sent to this URL.
+    return fail('model', `Gemini returned a video URL Forge will not fetch (not ${new URL(HOST).host}): ${scrub(rawUri, key)}`)
+  }
+
+  /* 3 — download */
+  return finishVideoDownload(uri, key, model, outDir, started)
+}
+
+/**
+ * The download is the one call whose body is binary, so it cannot go through
+ * `videoFetch` (which reads text to classify errors). Errors here are rare —
+ * the URI has just been handed to us by a successful operation — but a 403 is
+ * still possible if the file expired, so they are classified the same way.
+ */
+async function finishVideoDownload(
+  uri: string,
+  key: string,
+  model: string,
+  outDir: string,
+  started: number
+): Promise<MediaResult> {
+  let res: Response
+  try {
+    res = await fetch(uri, {
+      headers: { 'x-goog-api-key': key },
+      signal: AbortSignal.timeout(VIDEO_REQUEST_TIMEOUT_MS)
+    })
+  } catch (err) {
+    const e = err as Error
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
+      return fail('network', 'The video was generated but the download timed out, so no file was saved.')
+    }
+    return fail('network', `The video was generated but could not be downloaded: ${scrub(e.message, key)}`)
+  }
+
+  if (!res.ok) {
+    const body = scrub((await res.text()).slice(0, 400), key)
+    return videoHttpError(res.status, body, model)
+  }
+
+  const bytes = Buffer.from(await res.arrayBuffer())
+  // `ftyp` at offset 4 is the ISO base-media signature every mp4 starts with.
+  // An error page saved as .mp4 is worse than an honest failure.
+  const looksMp4 = bytes.length > 12 && bytes.subarray(4, 8).toString('latin1') === 'ftyp'
+  if (!looksMp4) {
+    return fail(
+      'no-image',
+      `The download did not return a video (${bytes.length} bytes, no mp4 header). No file was written.`
+    )
+  }
+
+  const target = freshPath(outDir, `forge-video-${mediaStamp()}`, '.mp4')
+  try {
+    writeAtomic(target, bytes)
+  } catch (err) {
+    return fail('disk', `Gemini made the video but it could not be saved to ${target}: ${(err as Error).message}`)
+  }
+
+  return { ok: true, paths: [target], model, ms: Date.now() - started }
+}

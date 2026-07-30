@@ -78,8 +78,8 @@ const {
   RESPONSE_SCHEMA
 } = await import('../src/lib/geminibrain.ts')
 const brainjson = await import('../src/lib/brainjson.ts')
-const { claimsCompletedAction } = brainjson
-const { chooseVoice, speakable } = await import('../src/lib/speech.ts')
+const { claimsCompletedAction, companionReplyText } = brainjson
+const { chooseVoice, speakable, echoOverlap, ECHO_WINDOW_MS } = await import('../src/lib/speech.ts')
 const { planProjectFolder, sanitiseFolderName } = await import('../electron/projectfolder.ts')
 const { OpenRouterBrain } = await import('../src/lib/openrouterbrain.ts')
 const {
@@ -910,6 +910,23 @@ await test('targets resolve by number, ordinal, title and agent', () => {
   assert.equal(at('terminal nine').kind, 'none')
 })
 
+await test('"terminal one" is pane one, not the pane he happens to be in', () => {
+  // Found live, with six terminals open: "in terminal one, <prompt>" delivered
+  // the prompt to terminal six. "one" is in TARGET_NOUNS so that "the claude
+  // one" strips to "claude" -- which left "terminal one" stripping to nothing,
+  // and a target with no words left fell through to the focused pane. Silently.
+  const focusedLast = 'p5'
+  assert.equal(resolvePaneTarget('terminal one', CROWDED, focusedLast).pane.number, 1)
+  assert.equal(resolvePaneTarget('tab one', CROWDED, focusedLast).pane.number, 1)
+  assert.equal(resolvePaneTarget('pane one', CROWDED, focusedLast).pane.number, 1)
+  assert.equal(resolvePaneTarget('the first terminal', CROWDED, focusedLast).pane.number, 1)
+  // And the reading it was protecting still holds: a bare "one" after a word
+  // that is not a numbered noun is "that one", not pane 1.
+  assert.equal(resolvePaneTarget('this one', CROWDED, focusedLast).pane.paneId, focusedLast)
+  assert.equal(resolvePaneTarget('the last one', CROWDED, focusedLast).pane.number, 5)
+  assert.equal(resolvePaneTarget('the kimi one', CROWDED, focusedLast).pane.paneId, 'p5')
+})
+
 await test('two equal matches are asked about, never guessed', () => {
   // Steve's own example: three Claude panes and "the claude one".
   const out = resolvePaneTarget('the claude one', CROWDED, 'p1')
@@ -1360,6 +1377,60 @@ await test('a reply that claims to have acted, but did not, is contradicted', ()
   }
 })
 
+await test('the phone gets the words and the draft, and is told what could not run', () => {
+  // Level 2 of the Companion hookup: the phone named a project that is not
+  // the one on screen. Words and brief come back; the refusal is one line,
+  // and only when the reply actually wanted to do something.
+  const wanting = companionReplyText(
+    {
+      understood: 'open three claude terminals in roma',
+      say: 'Right — three of them.',
+      actions: [{ kind: 'open_tabs', profileId: 'claude', count: 3 }]
+    },
+    'roma-2026'
+  )
+  assert.match(wanting, /Right — three of them\./)
+  assert.match(wanting, /Switch to roma-2026 in Forge to run app actions\./)
+
+  // A question is answered with an answer. No nagging about switching.
+  const asking = companionReplyText({ understood: 'what is it', say: 'A POS for the cafe.' }, 'roma-2026')
+  assert.equal(asking, 'A POS for the cafe.')
+
+  // A drafted brief travels; it is the useful half of an answer he cannot run.
+  const drafted = companionReplyText(
+    { understood: 'brief it', say: 'Brief is ready.', draftPrompt: '# Goal\nBuild the till screen.' },
+    'roma-2026'
+  )
+  assert.match(drafted, /Brief is ready\./)
+  assert.match(drafted, /# Goal/)
+  assert.ok(!drafted.includes('Switch to'), 'nothing was asked for, so nothing is refused')
+
+  // Nothing but questions still says something rather than an empty bubble.
+  const asked = companionReplyText({ understood: 'unclear', questions: ['Which project?'] }, 'roma-2026')
+  assert.equal(asked, 'Which project?')
+})
+
+await test('Forge does not answer its own voice coming back through the mic', () => {
+  // Seen live: it said "Typed into Terminal 6 Claude Code, auto-relay is off in
+  // Settings", the sidecar cut the phrase once the room went quiet -- after the
+  // while-speaking guard had lifted -- and the brain was asked to answer it.
+  const said = 'Typed into Terminal 6 Claude Code, auto-relay is off in Settings'
+  // Speech-to-text mangles spelling, not shape: "Claude Code" comes back
+  // "clawed code". Words, therefore, not characters.
+  assert.ok(echoOverlap('Typing into Terminal 6 clawed code, auto relay is off in settings', said) >= 0.7)
+  assert.ok(echoOverlap(said, said) === 1)
+
+  // And what he actually says is not an echo, even on the same subject.
+  assert.ok(echoOverlap('open three more terminals', said) < 0.7)
+  assert.ok(echoOverlap('turn auto-relay on', said) < 0.7)
+  assert.ok(echoOverlap('no, terminal two', said) < 0.7)
+  assert.equal(echoOverlap('', said), 0)
+  assert.equal(echoOverlap('anything', ''), 0)
+
+  // The window is short: a minute later the same sentence is his.
+  assert.ok(ECHO_WINDOW_MS > 0 && ECHO_WINDOW_MS <= 10_000)
+})
+
 await test('a drafted prompt is never read aloud', () => {
   const draft = '# Goal\nBuild a landing page.\n\n```js\nconst x = 1\n```\n- one\n- two\nSee https://example.com/spec'
   const said = speakable(draft)
@@ -1390,6 +1461,10 @@ function mediaRunner(result) {
     editImage: async (request) => {
       base.calls.push(['editImage', request.path, request.instruction])
       return result ?? { ok: true, summary: 'Edited', requested: 1, done: 1, paths: ['C:\\b.png'] }
+    },
+    makeVideo: async (request) => {
+      base.calls.push(['makeVideo', request.description, request.aspect, request.duration])
+      return result ?? { ok: true, summary: 'Made a video', requested: 1, done: 1, paths: ['C:\\a.mp4'] }
     }
   }
 }
@@ -1443,6 +1518,74 @@ await test('a runner with no media support refuses instead of pretending', () =>
   assert.match(out.summary, /not available/)
   const edit = runAppAction({ kind: 'edit_image', path: 'C:\\a.png', instruction: 'blue' }, ctx(), fakeRunner())
   assert.equal(edit.ok, false)
+})
+
+await test('make_video warns that it is slow before it starts', async () => {
+  const run = mediaRunner()
+  const out = runAppAction(
+    { kind: 'make_video', description: 'a red pixel-art go-kart', aspect: '16:9', duration: 4 },
+    ctx(),
+    run
+  )
+  // Synchronous half: honest that nothing exists yet, and that this one is a
+  // wait rather than a blink — that warning is the whole point of the chip.
+  assert.equal(out.ok, true)
+  assert.equal(out.done, 0)
+  assert.equal(out.requested, 1)
+  assert.match(out.summary, /Rendering video…/)
+  assert.match(out.summary, /couple of minutes/)
+  assert.ok(out.pending instanceof Promise)
+  assert.deepEqual(run.calls, [['makeVideo', 'a red pixel-art go-kart', '16:9', 4]])
+
+  // Asynchronous half: exactly one real outcome replaces it.
+  const settled = await out.pending
+  assert.equal(settled.done, 1)
+  assert.deepEqual(settled.paths, ['C:\\a.mp4'])
+})
+
+await test('make_video refuses what Veo would refuse, before spending anything', () => {
+  const empty = runAppAction({ kind: 'make_video', description: '   ' }, ctx(), mediaRunner())
+  assert.equal(empty.ok, false)
+  assert.equal(empty.pending, undefined)
+  assert.match(empty.summary, /video of nothing/)
+
+  // The image aspect list is much longer than Veo's; a square video does not exist.
+  const square = runAppAction({ kind: 'make_video', description: 'a go-kart', aspect: '1:1' }, ctx(), mediaRunner())
+  assert.equal(square.ok, false)
+  assert.equal(square.pending, undefined)
+  assert.match(square.summary, /16:9 or 9:16/)
+
+  for (const duration of [1, 3, 9, 60]) {
+    const out = runAppAction({ kind: 'make_video', description: 'a go-kart', duration }, ctx(), mediaRunner())
+    assert.equal(out.ok, false, `${duration}s should be refused`)
+    assert.match(out.summary, /4–8 seconds/)
+  }
+  // The two Veo does take must survive.
+  for (const aspect of ['16:9', '9:16']) {
+    assert.equal(runAppAction({ kind: 'make_video', description: 'a go-kart', aspect }, ctx(), mediaRunner()).ok, true)
+  }
+})
+
+await test('a runner with no video support refuses instead of pretending', () => {
+  const out = runAppAction({ kind: 'make_video', description: 'a go-kart' }, ctx(), fakeRunner())
+  assert.equal(out.ok, false)
+  assert.equal(out.done, 0)
+  assert.equal(out.pending, undefined)
+  assert.match(out.summary, /not available/)
+})
+
+await test('a video failure comes back as a failed outcome, not a throw', async () => {
+  const run = mediaRunner({
+    ok: false,
+    summary: 'Video generation is a paid-only Google feature and this key is not billed (400)',
+    requested: 1,
+    done: 0
+  })
+  const out = runAppAction({ kind: 'make_video', description: 'a go-kart' }, ctx(), run)
+  const settled = await out.pending
+  assert.equal(settled.ok, false)
+  assert.equal(settled.done, 0)
+  assert.match(settled.summary, /paid-only/)
 })
 
 await test('a media failure comes back as a failed outcome, not a throw', async () => {
@@ -1572,12 +1715,13 @@ await test('the manifest describes the app, the actions, the limits and the stat
   assert.ok(text.includes('1. "build" [CURRENT]'))
   assert.ok(text.includes('kimmy'), 'spoken aliases should be listed')
   assert.ok(text.includes('draftPrompt'))
-  // Small enough to send every turn — about 2.3k tokens. It grew when
-  // send_prompt, the COUNTS rules and the closing/creating actions landed, and
-  // again for the two lines that tell the model its per-project memory is real;
+  // Small enough to send every turn — about 2.4k tokens. It grew when
+  // send_prompt, the COUNTS rules and the closing/creating actions landed,
+  // again for the two lines that tell the model its per-project memory is real,
+  // and again for make_video (which has to warn that a clip takes minutes);
   // each one earns its room, but the ceiling still has to bite, because this
   // goes up the wire on every single thing Steve says.
-  assert.ok(text.length < 9800, `manifest is ${text.length} chars`)
+  assert.ok(text.length < 10300, `manifest is ${text.length} chars`)
 })
 
 await test('the manifest gives every pane the spoken handle Steve uses', () => {
@@ -1606,13 +1750,29 @@ await test('the manifest offers the media actions and names the bridge tools', (
   const text = buildManifest(SNAPSHOT)
   assert.ok(text.includes('make_image'), 'make_image must be offered')
   assert.ok(text.includes('edit_image'), 'edit_image must be offered')
+  assert.ok(text.includes('make_video'), 'make_video must be offered')
   assert.ok(text.includes('assets/generated'), 'say where the files land')
   // The drafted prompt has to tell the coding agent what it can reach for.
   assert.ok(text.includes('# TOOLS THE CODING AGENT HAS'))
-  for (const tool of ['make_image', 'edit_image', 'ask_gemini', 'summarize_video']) {
+  for (const tool of ['make_image', 'edit_image', 'make_video', 'ask_gemini', 'summarize_video']) {
     assert.ok(text.includes(tool), `TOOLS section must name ${tool}`)
   }
   assert.match(text, /never claim the agent has any tool that is not on that list/i)
+})
+
+await test('the manifest is honest about how slow make_video is', () => {
+  const text = buildManifest(SNAPSHOT)
+  // A model that thinks video is as quick as an image will queue several and
+  // then narrate a wait it never warned about, so the cost has to be stated in
+  // both places the model reads: the action list and the coding-agent tools.
+  const spec = ACTION_SPECS.find((s) => s.kind === 'make_video')
+  assert.ok(spec, 'make_video must be in ACTION_SPECS')
+  assert.match(spec.what, /1–3 minutes/, 'the action spec must state the cost')
+  assert.match(spec.args, /make_video/)
+  assert.match(text, /1–3 minutes/)
+  // And the limits Veo actually enforces, so it does not ask for a square 30s clip.
+  assert.match(text, /4–8/, 'the clip-length limit must be stated')
+  assert.match(text, /9:16/, 'the two aspect ratios must be stated')
 })
 
 await test('the manifest, the action union and the sanitiser agree on what exists', () => {
@@ -1847,8 +2007,28 @@ await test('media actions survive sanitising, and half-formed ones do not', () =
   ])
   assert.deepEqual(sanitiseActions([{ kind: 'edit_image', path: 'C:\\a.png' }]), [], 'instruction is required')
   assert.deepEqual(sanitiseActions([{ kind: 'edit_image', instruction: 'blue' }]), [], 'path is required')
+
+  // make_video is real now. Description is the only required field; the two
+  // optional ones are dropped or clamped rather than passed on to be refused.
+  assert.deepEqual(sanitiseActions([{ kind: 'make_video', description: 'a red go-kart' }]), [
+    { kind: 'make_video', description: 'a red go-kart' }
+  ])
+  assert.deepEqual(sanitiseActions([{ kind: 'make_video', description: 'a go-kart', aspect: '9:16', duration: 6 }]), [
+    { kind: 'make_video', description: 'a go-kart', aspect: '9:16', duration: 6 }
+  ])
+  assert.deepEqual(sanitiseActions([{ kind: 'make_video' }]), [], 'description is required')
+  assert.deepEqual(sanitiseActions([{ kind: 'make_video', description: '  ' }]), [])
+  // An aspect Veo does not take is dropped, not forwarded: the default beats a
+  // guaranteed 400.
+  assert.equal(sanitiseActions([{ kind: 'make_video', description: 'x', aspect: '1:1' }])[0].aspect, undefined)
+  assert.equal(sanitiseActions([{ kind: 'make_video', description: 'x', aspect: '21:9' }])[0].aspect, undefined)
+  // Duration is clamped into Veo's 4-8s window.
+  assert.equal(sanitiseActions([{ kind: 'make_video', description: 'x', duration: 99 }])[0].duration, 8)
+  assert.equal(sanitiseActions([{ kind: 'make_video', description: 'x', duration: 1 }])[0].duration, 4)
+  assert.equal(sanitiseActions([{ kind: 'make_video', description: 'x', duration: 'six' }])[0].duration, undefined)
+
   // Still no back door for kinds nobody implements.
-  assert.deepEqual(sanitiseActions([{ kind: 'make_video', description: 'a red car' }]), [])
+  assert.deepEqual(sanitiseActions([{ kind: 'make_hologram', description: 'a red car' }]), [])
 })
 
 await test('salvage names whichever brain was cut off', () => {
@@ -1860,9 +2040,12 @@ await test('salvage names whichever brain was cut off', () => {
 
 await test('the response schema describes every field an action can carry', () => {
   const props = RESPONSE_SCHEMA.properties.actions.items.properties
-  for (const field of ['kind', 'profileId', 'count', 'description', 'aspect', 'path', 'instruction']) {
+  for (const field of ['kind', 'profileId', 'count', 'description', 'aspect', 'duration', 'path', 'instruction']) {
     assert.ok(props[field], `responseSchema is missing ${field}`)
   }
+  // Without this the model cannot ask for a clip length at all: a field absent
+  // from responseSchema is a field Gemini is structurally unable to emit.
+  assert.equal(props.duration.type, 'INTEGER', 'make_video duration must be an integer')
 })
 
 /* --------------------------------------------------------- OpenRouterBrain */
@@ -2060,7 +2243,7 @@ await test('OpenRouterBrain folds it in the same way, before the JSON reminder',
 await test('the manifest tells the model the memory exists, and stays small', () => {
   const text = buildManifest(SNAPSHOT)
   assert.match(text, /WHAT YOU REMEMBER ABOUT THIS PROJECT/, 'one line naming the section it will arrive under')
-  assert.ok(text.length < 9800, `manifest is ${text.length} chars`)
+  assert.ok(text.length < 10300, `manifest is ${text.length} chars`)
 })
 
 await test('the markdown format round-trips through parse and format', () => {

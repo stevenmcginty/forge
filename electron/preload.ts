@@ -73,7 +73,8 @@ const api: ForgeApi = {
     openrouter: (req) => ipcRenderer.invoke(IPC.voiceOpenRouter, req),
     importKey: (which) => ipcRenderer.invoke(IPC.voiceImportKey, which ?? 'gemini'),
     makeImage: (req) => ipcRenderer.invoke(IPC.voiceMakeImage, req),
-    editImage: (req) => ipcRenderer.invoke(IPC.voiceEditImage, req)
+    editImage: (req) => ipcRenderer.invoke(IPC.voiceEditImage, req),
+    makeVideo: (req) => ipcRenderer.invoke(IPC.voiceMakeVideo, req)
   },
 
   memory: {
