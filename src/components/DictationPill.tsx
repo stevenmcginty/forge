@@ -68,15 +68,26 @@ export function DictationPill(): ReactNode {
   }, [needsSetup])
 
   const key = hotkeyLabel(state.settings.sttHotkey)
+
+  /**
+   * Two microphones in one app is the confusion Steve ran into: he could not
+   * tell whether his words were being typed into a terminal or handed to the
+   * agent. Same rule as useDictation's routing, shown as a word — while the
+   * voice panel is open with agent mode on, the pill says so.
+   */
+  const toAgent = state.settings.voicePanelOpen && state.agentListening
+
   const title = needsSetup
     ? `Dictation needs setting up — ${status.error?.msg ?? ''}`
-    : status.phase === 'listening'
-      ? `Listening — ${key} to stop`
-      : status.phase === 'finishing'
-        ? 'Finishing the last phrase…'
-        : status.phase === 'starting'
-          ? 'Loading the speech model…'
-          : `Dictate — ${key}`
+    : toAgent
+      ? `Agent mode — what you say goes to the voice agent, not this pane (${key})`
+      : status.phase === 'listening'
+        ? `Listening — ${key} to stop`
+        : status.phase === 'finishing'
+          ? 'Finishing the last phrase…'
+          : status.phase === 'starting'
+            ? 'Loading the speech model…'
+            : `Dictate — ${key}`
 
   return (
     <>
@@ -86,6 +97,7 @@ export function DictationPill(): ReactNode {
         className="dpill"
         data-phase={status.phase}
         data-setup={needsSetup ? 'true' : undefined}
+        data-agent={toAgent ? 'true' : undefined}
         aria-label={title}
         aria-pressed={listening}
         title={title}
@@ -95,6 +107,7 @@ export function DictationPill(): ReactNode {
           setCardOpen((v) => !v)
         }}
       >
+        {toAgent ? <span className="dpill__tag">agent</span> : null}
         {listening ? (
           <span className="dpill__meter" aria-hidden="true">
             {Array.from({ length: BARS }, (_, i) => (

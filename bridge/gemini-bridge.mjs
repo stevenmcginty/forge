@@ -13,11 +13,11 @@
  *     which uses whatever login *it* holds in %USERPROFILE%\.gemini. If a
  *     GEMINI_API_KEY is in the environment it is passed straight through, so the
  *     CLI works even when nobody has run `gemini` to sign in.
- *   • `make_image` / `edit_image` call Google's REST API directly, because the
- *     CLI has no image tool at all (see README). They need GEMINI_API_KEY in the
- *     environment; Forge puts it there via the mcp.json it generates under
- *     %APPDATA%\Forge\bridge\. Nothing is written to disk by this file except
- *     the images themselves.
+ *   • `make_image` / `edit_image` / `make_video` call Google's REST API
+ *     directly, because the CLI has no media tools at all (see README). They
+ *     need GEMINI_API_KEY in the environment; Forge puts it there via the
+ *     mcp.json it generates under %APPDATA%\Forge\bridge\. Nothing is written to
+ *     disk by this file except the images and videos themselves.
  *
  * Run standalone (for testing):  node bridge/gemini-bridge.mjs
  * It speaks JSON-RPC over stdin/stdout, so stdout must stay clean — every
@@ -75,6 +75,29 @@ const INPUT_MIME = {
   '.heif': 'image/heif'
 }
 const MAX_INPUT_BYTES = 20 * 1024 * 1024
+
+/**
+ * Video (Veo), also DUPLICATED from electron/gemini-media.ts — see the block
+ * comment above. Every constant here is asserted equal to its twin by
+ * scripts/bridge-smoke.mjs.
+ *
+ * `lite` is the cheapest of the three Veo 3.1 variants and the one proven to
+ * work on this key. Override with FORGE_GEMINI_VIDEO_MODEL.
+ */
+const DEFAULT_VIDEO_MODEL = 'veo-3.1-lite-generate-preview'
+/** Veo accepts only these two — verified live; 1:1, 4:3, 3:4 and 21:9 are all refused. */
+const VIDEO_ASPECT_RATIOS = ['16:9', '9:16']
+const MIN_VIDEO_SECONDS = 4
+const MAX_VIDEO_SECONDS = 8
+const VIDEO_TIMEOUT_MS = 360_000
+const VIDEO_POLL_MS = [5_000, 10_000]
+const VIDEO_POLL_STEADY_MS = 15_000
+const VIDEO_REQUEST_TIMEOUT_MS = 120_000
+
+function videoModel() {
+  const chosen = (process.env['FORGE_GEMINI_VIDEO_MODEL'] ?? '').trim() || DEFAULT_VIDEO_MODEL
+  return /^[a-zA-Z0-9][a-zA-Z0-9.\-_]{1,64}$/.test(chosen) ? chosen : DEFAULT_VIDEO_MODEL
+}
 
 function imageModel() {
   const chosen = (process.env['FORGE_GEMINI_IMAGE_MODEL'] ?? '').trim() || DEFAULT_IMAGE_MODEL
@@ -462,6 +485,40 @@ const TOOLS = [
       },
       required: ['path', 'instruction']
     }
+  },
+  {
+    name: 'make_video',
+    description:
+      'Really generate a short video from a text description and save it to disk as an .mp4, returning the absolute ' +
+      'file path. Calls Google\'s Veo API directly, so it needs a Gemini API key in the environment — Forge supplies ' +
+      'one from its settings. Use it for animated mockups, loops, motion tests, b-roll or a moving version of ' +
+      'something you would otherwise draw. Describe subject, camera movement, style and lighting; motion and camera ' +
+      'direction matter far more than they do for a still image. IMPORTANT: this takes roughly 1-3 minutes — say so ' +
+      'before calling it, and do not call it repeatedly while one is running. Clips are 4-8 seconds, landscape or ' +
+      'portrait only. Errors are honest and specific (no key, billing not enabled, out of quota, refused, timed out) ' +
+      'and no path is ever returned unless the file was written.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        description: {
+          type: 'string',
+          description: 'What the video should show. Describe the subject, what MOVES, the camera, the style and the lighting.'
+        },
+        out_dir: { type: 'string', description: 'Optional absolute directory for the video. Defaults to %APPDATA%\\Forge\\bridge-out.' },
+        aspect: {
+          type: 'string',
+          enum: [...VIDEO_ASPECT_RATIOS],
+          description: 'Optional aspect ratio — landscape (16:9) or portrait (9:16) only. Defaults to the model\'s own choice.'
+        },
+        duration: {
+          type: 'integer',
+          minimum: MIN_VIDEO_SECONDS,
+          maximum: MAX_VIDEO_SECONDS,
+          description: `Optional clip length in seconds, ${MIN_VIDEO_SECONDS}-${MAX_VIDEO_SECONDS}. Longer clips take longer to render.`
+        }
+      },
+      required: ['description']
+    }
   }
 ]
 
@@ -832,13 +889,256 @@ async function editImage(args) {
   )
 }
 
+/* --------------------------------------------------------------- make_video
+ *
+ * DUPLICATED from electron/gemini-media.ts's makeVideo() — same three-step
+ * shape, same wording, same limits. See that file for the full write-up of the
+ * API's mechanics; the short version:
+ *
+ *   POST :predictLongRunning  → { name: "models/<m>/operations/<id>" }
+ *   GET  /v1beta/<name>       → { done: true, response.generateVideoResponse
+ *                                 .generatedSamples[0].video.uri }
+ *   GET  <uri>                → video/mp4 bytes; needs the API key (a bare
+ *                               request is 403 PERMISSION_DENIED)
+ */
+
+const NO_KEY_VIDEO =
+  'Cannot generate video: no Gemini API key is available to the bridge.\n\n' +
+  'Tell the user plainly that no video was created, and how to fix it: open Forge’s voice-agent settings, paste ' +
+  'a Google AI Studio key (or press “Import from DictationMic”), and restart the pane — Forge writes the key into ' +
+  'the MCP config it generates at %APPDATA%\\Forge\\bridge\\mcp.json, which is read when the pane launches. ' +
+  'Running the bridge by hand? Set GEMINI_API_KEY in the environment.\n\n' +
+  'Do not claim a video exists.'
+
+/** Classify a Veo HTTP failure. Kept identical to gemini-media.ts's videoHttpError. */
+function videoHttpError(status, message, model) {
+  if (status === 429 || /RESOURCE_EXHAUSTED|quota/i.test(message)) {
+    return (
+      `Gemini is out of quota for this key (${status}): ${message}\n\n` +
+      'No video was made. Tell the user the video quota is spent and to retry later.'
+    )
+  }
+  if (/billed users|billing|FAILED_PRECONDITION|paid tier|not available in your|free tier/i.test(message)) {
+    return (
+      `Video generation is a paid-only Google feature and this key is not billed (${status}): ${message}\n\n` +
+      'Say exactly that: Veo needs billing enabled on the Google Cloud project behind the API key. Nothing else ' +
+      'fixes it — not waiting, not a different prompt. No video was made.'
+    )
+  }
+  if (status === 401 || status === 403 || /API_KEY_INVALID|API key not valid/i.test(message)) {
+    return `Gemini refused the key (${status}): ${message}\n\nTell the user to check the Gemini key in Forge’s voice-agent settings.`
+  }
+  if (status === 404) {
+    return (
+      `The video model “${model}” is not available to this key (404): ${message}\n\n` +
+      'Set FORGE_GEMINI_VIDEO_MODEL to a model this key can use.'
+    )
+  }
+  if (/safety|blocked|prohibited|policy/i.test(message)) {
+    return (
+      `Gemini refused to make that video (${status}): ${message}\n\n` +
+      'No file was written; do not claim one was. Try a different description.'
+    )
+  }
+  return `Gemini rejected the video request (${status}): ${message}`
+}
+
+/** One JSON round trip against the Veo endpoints, errors already classified. */
+async function videoFetch(url, key, init, model) {
+  let res
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: { ...(init.headers ?? {}), 'x-goog-api-key': key },
+      signal: AbortSignal.timeout(VIDEO_REQUEST_TIMEOUT_MS)
+    })
+  } catch (err) {
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+      return { ok: false, error: `Gemini did not answer within ${Math.round(VIDEO_REQUEST_TIMEOUT_MS / 1000)}s. No video was made.` }
+    }
+    return { ok: false, error: `Could not reach Gemini: ${scrubKey(err?.message ?? err, key)}` }
+  }
+  const raw = await res.text()
+  if (!res.ok) {
+    let parsed = null
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      /* keep raw */
+    }
+    const err = parsed?.error
+    const message = scrubKey(err?.message ?? raw.slice(0, 500) ?? res.statusText, key)
+    return { ok: false, error: videoHttpError(res.status, `${err?.status ?? ''} ${message}`.trim(), model) }
+  }
+  return { ok: true, raw }
+}
+
+/** The key is about to be sent to this URL, so it is checked, not trusted. */
+function safeVideoUri(uri) {
+  let parsed
+  try {
+    parsed = new URL(uri)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'https:') return null
+  if (parsed.host !== new URL(GEMINI_HOST).host) return null
+  return parsed.toString()
+}
+
+function videoUriOf(op) {
+  const samples = op?.response?.generateVideoResponse?.generatedSamples ?? op?.response?.generatedVideos ?? []
+  for (const s of samples) {
+    if (typeof s?.video?.uri === 'string' && s.video.uri) return s.video.uri
+  }
+  return null
+}
+
+async function makeVideo(args) {
+  const description = asString(args?.['description'], 'description')
+
+  const aspect = typeof args?.['aspect'] === 'string' ? args['aspect'].trim() : ''
+  if (aspect && !VIDEO_ASPECT_RATIOS.includes(aspect)) {
+    throw new Error(`\`aspect\` must be one of: ${VIDEO_ASPECT_RATIOS.join(', ')}`)
+  }
+
+  const rawDuration = args?.['duration']
+  let duration = 0
+  if (rawDuration !== undefined && rawDuration !== null && `${rawDuration}`.trim() !== '') {
+    const n = Number(rawDuration)
+    if (!Number.isFinite(n) || n < MIN_VIDEO_SECONDS || n > MAX_VIDEO_SECONDS) {
+      throw new Error(`\`duration\` must be a whole number of seconds from ${MIN_VIDEO_SECONDS} to ${MAX_VIDEO_SECONDS}`)
+    }
+    duration = Math.round(n)
+  }
+
+  const key = apiKey()
+  if (!key) return fail(NO_KEY_VIDEO)
+
+  const prepared = prepareOutDir(args)
+  if (prepared.error) return fail(prepared.error)
+
+  const model = videoModel()
+  const started = Date.now()
+  const left = () => VIDEO_TIMEOUT_MS - (Date.now() - started)
+
+  /* 1 — submit */
+  const parameters = {}
+  if (aspect) parameters.aspectRatio = aspect
+  if (duration) parameters.durationSeconds = duration
+
+  const submitted = await videoFetch(
+    `${GEMINI_HOST}/v1beta/models/${model}:predictLongRunning`,
+    key,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ instances: [{ prompt: description }], parameters })
+    },
+    model
+  )
+  if (!submitted.ok) return fail(submitted.error)
+
+  let operation = ''
+  try {
+    operation = String(JSON.parse(submitted.raw).name ?? '')
+  } catch {
+    return fail(`Gemini accepted the video request but its reply was not JSON: ${submitted.raw.slice(0, 200)}`)
+  }
+  if (!operation) {
+    return fail('Gemini accepted the video request but named no operation to poll, so there is nothing to wait for.')
+  }
+
+  /* 2 — poll */
+  let op = null
+  let polls = 0
+  for (;;) {
+    const gap = VIDEO_POLL_MS[polls] ?? VIDEO_POLL_STEADY_MS
+    polls += 1
+    if (left() <= gap) {
+      return fail(
+        `The video was still rendering after ${Math.round((Date.now() - started) / 1000)}s and the bridge stopped ` +
+          'waiting. It may still finish on Google’s side, but nothing was downloaded — no file exists, so do not ' +
+          'claim one does. Tell the user to try a shorter clip.'
+      )
+    }
+    await new Promise((r) => setTimeout(r, gap))
+
+    const polled = await videoFetch(`${GEMINI_HOST}/v1beta/${operation}`, key, { method: 'GET' }, model)
+    if (!polled.ok) return fail(polled.error)
+    try {
+      op = JSON.parse(polled.raw)
+    } catch {
+      return fail(`Polling the video operation returned non-JSON: ${polled.raw.slice(0, 200)}`)
+    }
+    if (op?.done !== true) continue
+    if (op.error) {
+      return fail(videoHttpError(Number(op.error.code ?? 0), scrubKey(op.error.message ?? 'no reason given', key), model))
+    }
+    break
+  }
+
+  const rawUri = videoUriOf(op)
+  if (!rawUri) {
+    return fail(
+      'Gemini finished the video operation but returned no file to download. This is usually a silent refusal — ' +
+        'no file was written, so do not claim one was.'
+    )
+  }
+  const uri = safeVideoUri(rawUri)
+  if (!uri) {
+    return fail(`Gemini returned a video URL the bridge will not fetch (not ${new URL(GEMINI_HOST).host}).`)
+  }
+
+  /* 3 — download (binary, so it cannot go through videoFetch) */
+  let res
+  try {
+    res = await fetch(uri, { headers: { 'x-goog-api-key': key }, signal: AbortSignal.timeout(VIDEO_REQUEST_TIMEOUT_MS) })
+  } catch (err) {
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+      return fail('The video was generated but the download timed out, so no file was saved.')
+    }
+    return fail(`The video was generated but could not be downloaded: ${scrubKey(err?.message ?? err, key)}`)
+  }
+  if (!res.ok) {
+    const body = scrubKey((await res.text()).slice(0, 400), key)
+    return fail(videoHttpError(res.status, body, model))
+  }
+
+  const bytes = Buffer.from(await res.arrayBuffer())
+  // `ftyp` at offset 4 is the ISO base-media signature. An error page saved as
+  // .mp4 is worse than an honest failure.
+  if (!(bytes.length > 12 && bytes.subarray(4, 8).toString('latin1') === 'ftyp')) {
+    return fail(`The download did not return a video (${bytes.length} bytes, no mp4 header). No file was written.`)
+  }
+
+  const target = freshPath(prepared.outDir, `forge-video-${mediaStamp()}`, '.mp4')
+  try {
+    writeAtomic(target, bytes)
+  } catch (err) {
+    return fail(`Gemini made the video but it could not be saved to ${target}: ${err?.message ?? err}`)
+  }
+
+  const secs = ((Date.now() - started) / 1000).toFixed(1)
+  return ok(
+    [
+      `Video saved to ${target}`,
+      '',
+      `Model ${model}, ${secs}s, ${(bytes.length / 1e6).toFixed(1)} MB` +
+        `${duration ? `, ${duration}s` : ''}${aspect ? `, ${aspect}` : ''}. ` +
+        'The file above exists on disk — you may reference it by path.'
+    ].join('\n')
+  )
+}
+
 /* -------------------------------------------------------------------- serve */
 
 const HANDLERS = {
   ask_gemini: askGemini,
   summarize_video: summarizeVideo,
   make_image: makeImage,
-  edit_image: editImage
+  edit_image: editImage,
+  make_video: makeVideo
 }
 
 const server = new Server(
@@ -865,7 +1165,8 @@ async function main() {
   await server.connect(new StdioServerTransport())
   process.stderr.write(
     `[${SERVER_NAME}] ready (out dir: ${defaultOutDir()}, image model: ${imageModel()}, ` +
-      `api key: ${apiKey() ? 'present' : 'ABSENT — make_image/edit_image will refuse'})\n`
+      `video model: ${videoModel()}, ` +
+      `api key: ${apiKey() ? 'present' : 'ABSENT — make_image/edit_image/make_video will refuse'})\n`
   )
 }
 

@@ -16,10 +16,19 @@ import { skillCatalogue } from './skillbus'
  */
 
 export interface ManifestPane {
+  /**
+   * The spoken handle — "Terminal 3". 1-based across every tab in the active
+   * project, tab order then pane order, and identical to `ActionPane.number` in
+   * appactions.ts because both are built from the same walk. Steve, the model
+   * and the executor have to mean the same pane by "terminal two".
+   */
+  number: number
   title: string
   profileName: string
   status: string
   focused: boolean
+  /** A coding agent rather than a bare shell — only these get an Enter pressed. */
+  agent: boolean
 }
 
 export interface ManifestTab {
@@ -91,13 +100,43 @@ export const ACTION_SPECS: ActionSpec[] = [
   },
   {
     kind: 'close_pane',
-    args: '{"kind":"close_pane","which":"focused"}',
-    what: 'Close the pane that has focus (closing a tab’s last pane closes the tab).'
+    args: '{"kind":"close_pane","which":"focused"|"terminal 3"|"<pane title>"}',
+    what: 'Close one pane (closing a tab’s last pane closes the tab). which is spoken — a Terminal number works.'
   },
   {
     kind: 'close_tab',
-    args: '{"kind":"close_tab","which":"current"}',
-    what: 'Close the current tab and every pane in it.'
+    args: '{"kind":"close_tab","which":"current"|"tab 1"|"<tab title>"}',
+    what: 'Close ONE tab and every pane in it. "close tab one" is this with which "tab 1" — never focus_tab.'
+  },
+  {
+    kind: 'close_tabs',
+    args: '{"kind":"close_tabs","which":"all"|"others"|"<agent name>"}',
+    what:
+      'Close SEVERAL tabs: all of them, all but the current one, or every tab running a named agent ' +
+      '("close the kimi ones"). Over one tab, Forge counts down first so he can stop it.'
+  },
+  {
+    kind: 'rename_tab',
+    args: '{"kind":"rename_tab","which":"current"|"tab 2","name":"<new title>"}',
+    what: 'Rename a tab.'
+  },
+  {
+    kind: 'set_view',
+    args: '{"kind":"set_view","mode":"tabs"|"mosaic"}',
+    what: 'Switch between one tab at a time and the mosaic wall showing every terminal at once.'
+  },
+  {
+    kind: 'open_settings',
+    args: '{"kind":"open_settings","section":"account|appearance|agents|models|voice|shots|advanced"}',
+    what: 'Open the Settings page, optionally on one section. Use it when he asks for something only settings can do.'
+  },
+  {
+    kind: 'create_project',
+    args: '{"kind":"create_project","name":"<folder name>","parentDir":"desktop"|"documents"}',
+    what:
+      'Create a NEW folder and add it to the projects rail as the active project. parentDir defaults to his ' +
+      'configured projects folder, or the Desktop. It will never overwrite a folder that already exists, and it ' +
+      'cannot write anywhere except the Desktop, Documents or that configured folder.'
   },
   {
     kind: 'switch_project',
@@ -127,9 +166,27 @@ export const ACTION_SPECS: ActionSpec[] = [
     what: 'Edit an existing image into a new file. The original is never modified. Needs a real path on this PC.'
   },
   {
+    kind: 'make_video',
+    args: '{"kind":"make_video","description":"<full description>","aspect":"16:9"|"9:16","duration":<4-8>}',
+    what:
+      'Really generate a short .mp4 into the project’s assets/generated/. Say what MOVES and what the camera does. ' +
+      '16:9 or 9:16 only, 4–8 seconds, one clip per action. SLOW — 1–3 minutes: say so, and never queue several.'
+  },
+  {
+    kind: 'send_prompt',
+    args: '{"kind":"send_prompt","target":"terminal 2","text":"","flesh":true,"count":1}',
+    what:
+      'Hand a prompt to one of the open terminals listed under CURRENT STATE. target is spoken — "terminal 2", ' +
+      '"the claude one", "this" for the focused pane. Leave text empty to send the draftPrompt from this same ' +
+      'reply (preferred — do not write the prompt out twice). Set flesh true when you expanded his words into a ' +
+      'proper brief. If two terminals match equally, do NOT guess: return no action and ask which one.'
+  },
+  {
     kind: 'use_skill',
-    args: '{"kind":"use_skill","name":"<skill>","target":"<optional pane/agent>"}',
-    what: 'Type /<skill> into a pane, NOT submitted — Steve presses Enter. Only skills under SKILLS exist.'
+    args: '{"kind":"use_skill","name":"<skill>","target":"terminal 2"}',
+    what:
+      'Type /<skill> into a terminal, ready but NEVER submitted — Steve presses Enter himself. Only skills listed ' +
+      'under SKILLS exist. target is spoken, as for send_prompt; omit it for the focused terminal.'
   }
 ]
 
@@ -140,17 +197,17 @@ export const ACTION_SPECS: ActionSpec[] = [
  * `runAppAction()`. Nothing else needs to change.
  */
 export const EXTENSION_POINTS: string[] = [
-  'set_permission_mode — switching an agent between plan / auto / full-access modes',
-  'open_settings — jumping the user to a settings section',
-  'create_project — adding a project folder without the user picking it',
-  'send_prompt — typing a drafted prompt into a pane on the user’s behalf',
-  'capture_screenshot — taking and attaching a screenshot'
+  'set_permission_mode — switching a *running* agent between plan / auto / full-access modes',
+  'capture_screenshot — taking and attaching a screenshot',
+  'read_file — opening or quoting a file from the project',
+  'run_command — running a command yourself instead of typing it into a terminal'
 ]
 
 function paneLine(pane: ManifestPane): string {
   const bits = [pane.profileName, pane.status]
-  if (pane.focused) bits.push('focused')
-  return `${pane.title} (${bits.join(', ')})`
+  if (!pane.agent) bits.push('plain shell — never auto-submitted')
+  if (pane.focused) bits.push('FOCUSED')
+  return `Terminal ${pane.number} — "${pane.title}" (${bits.join(', ')})`
 }
 
 export function buildManifest(s: ManifestSnapshot): string {
@@ -168,9 +225,18 @@ export function buildManifest(s: ManifestSnapshot): string {
     'You are the voice agent inside Forge. Steve talks to you. You do two things:',
     '1. Drive the app when he asks you to — return one or more actions.',
     '2. Turn half-formed ideas into a precise brief for a coding agent — return draftPrompt.',
-    'Short, plain, British English. Never speak aloud; never claim to have done something you did not do.',
+    'Short, plain, British English. Never claim to have done something you did not do.',
     'You keep a memory per project: anything under WHAT YOU REMEMBER ABOUT THIS PROJECT below is what you have',
-    'learned in earlier sessions — treat it as true, build on it, and never contradict a stated preference.'
+    'learned in earlier sessions — treat it as true, build on it, and never contradict a stated preference.',
+    '',
+    'HOW `say` IS USED: it is READ ALOUD by a speech synthesiser while he works. So:',
+    '- TWO SENTENCES MAXIMUM. One is better. Then stop and hand the turn back.',
+    '- No greetings, no "certainly", no "I understand", no restating what he just said back at him.',
+    '- Do not narrate actions Forge already reports on screen ("Opened 3 Claude Code tabs" is shown and spoken',
+    '  for you) and do not re-announce anything from an earlier turn unless he asks.',
+    '- Never recite a drafted prompt, code, JSON or a file path. Refer to it instead: "the brief is ready for',
+    '  terminal two". The text itself belongs in draftPrompt, on screen, where he can read and edit it.',
+    '- If there is genuinely nothing worth hearing, leave `say` out. Silence is a valid reply.'
   )
   lines.push('')
   lines.push('# ACTIONS YOU MAY RETURN')
@@ -179,13 +245,25 @@ export function buildManifest(s: ManifestSnapshot): string {
     lines.push(`  ${spec.args}`)
   }
   lines.push('')
+  lines.push('# COUNTS — READ THIS TWICE')
+  lines.push(
+    '- Every action carries "count". It is never optional. Where it is meaningless, send 1.',
+    '- N of something is ONE action with count N. Never N actions with count 1.',
+    '  "open 3 claude code terminals" → [{"kind":"open_tabs","profileId":"claude","count":3}]',
+    '- count is the number he actually said. If he said three and you open one, you have failed.',
+    '- Leave projectName out unless he named a project other than the active one.'
+  )
+  lines.push('')
   lines.push('# LIMITS')
   lines.push(
     `- ${s.maxSessions} shells maximum across the whole app; ${s.paneCount} are open now.`,
     `- ${s.maxPanesPerTab} panes maximum per tab.`,
     '- Over-ask and it is fulfilled partially; you will be told what actually happened.',
-    '- You cannot pick folders, read files, run commands directly, or change settings.',
-    '- Anything not in the action list above does not exist. Say so rather than inventing it.'
+    '- You cannot pick an existing folder, read files, or run commands yourself.',
+    '- Anything not in the action list above does not exist. Say so rather than inventing it.',
+    '- NEVER substitute a different action for the one asked for. If he says "close tab one" and you cannot close',
+    '  it, say that — do not focus it, switch to it, or do the nearest thing you can. Doing something else and',
+    '  reporting success is the worst failure available to you.'
   )
   lines.push('')
   lines.push('# LAUNCH PROFILES')
@@ -228,10 +306,10 @@ export function buildManifest(s: ManifestSnapshot): string {
   } else {
     lines.push('tabs in the active project:')
     for (const tab of s.tabs) {
-      lines.push(
-        `- ${tab.number}. "${tab.title}"${tab.active ? ' [CURRENT]' : ''} — ${tab.panes.map(paneLine).join('; ')}`
-      )
+      lines.push(`- ${tab.number}. "${tab.title}"${tab.active ? ' [CURRENT]' : ''}`)
+      for (const pane of tab.panes) lines.push(`  · ${paneLine(pane)}`)
     }
+    lines.push('These Terminal numbers are what he says out loud. Use them verbatim as send_prompt targets.')
   }
   lines.push(
     `view: projects rail ${s.view.railCollapsed ? 'collapsed' : 'open'}, ` +
@@ -246,12 +324,13 @@ export function buildManifest(s: ManifestSnapshot): string {
     'Every Claude Code pane Forge opens is given Forge’s cross-agent bridge, so the agent you are drafting for can:',
     '- make_image — generate a real image file from a description',
     '- edit_image — change an existing image and save a new one',
+    '- make_video — generate a real .mp4 (4–8s, 16:9 or 9:16). Slow: 1–3 minutes, so warn the agent it has not hung.',
     '- ask_gemini — get a second opinion from Google Gemini, optionally with local files attached',
     '- summarize_video — watch a YouTube or local video and summarise it',
     'When a draftPrompt would benefit from any of these, say so in the prompt itself — one line, e.g. “You have',
-    'make_image/edit_image/ask_gemini/summarize_video available via the forge-bridge MCP server; use make_image for',
-    'the placeholder art rather than committing an empty file.” Do not mention them when they are irrelevant, and',
-    'never claim the agent has any tool that is not on that list.'
+    'make_image/edit_image/make_video/ask_gemini/summarize_video available via the forge-bridge MCP server; use',
+    'make_image for the placeholder art rather than committing an empty file.” Do not mention them when they are',
+    'irrelevant, and never claim the agent has any tool that is not on that list.'
   )
   lines.push('')
   lines.push('# HOW TO REPLY')
@@ -270,6 +349,18 @@ export function buildManifest(s: ManifestSnapshot): string {
     'criteria) and no actions. If you are unsure which, ask one question instead of guessing.',
     'Never promise a prompt you have not written. There is no "next message": if say mentions drafting, writing or',
     'preparing a prompt, then draftPrompt MUST contain the finished prompt in this same reply.'
+  )
+  lines.push('')
+  lines.push('# DISPATCHING TO A TERMINAL')
+  lines.push(
+    'He works out loud: "open three claude terminals", then "in terminal two, this is the prompt — a landing page',
+    'for a cafe". When he names a terminal, in ONE reply: put the finished fleshed-out brief in draftPrompt (a page',
+    'of structure for real work, near-verbatim for a one-line fix), return',
+    '{"kind":"send_prompt","target":"<his words>","text":"","flesh":true,"count":1} — empty text means that draft,',
+    'so you never write it twice — and keep say to one line naming the terminal.',
+    'If his words fit two terminals equally ("the claude one", three Claude panes), return NO action and ask which,',
+    'by Terminal number. Forge presses Enter itself when auto-relay is on and the target runs an agent; a plain',
+    'shell is only ever typed into.'
   )
 
   return lines.join('\n')

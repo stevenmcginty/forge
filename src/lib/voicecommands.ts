@@ -218,6 +218,11 @@ export function parseUtterance(transcript: string, ctx: CommandContext): Utteran
   const asSingle = (): UtteranceHit | null =>
     single ? { actions: [single.action], confidence: single.confidence } : null
 
+  // A dispatched prompt is one thing however many commas are in it — splitting
+  // "in terminal two, build a landing page, then a menu page" into clauses would
+  // throw the prompt away.
+  if (single?.action.kind === 'send_prompt' || single?.action.kind === 'create_project') return asSingle()
+
   const clauses = text
     .split(/\s*(?:,|;|\band then\b|\bthen\b|\band also\b|\band\b|\bplus\b)\s*/i)
     .map((c) => c.trim())
@@ -247,15 +252,75 @@ export function parseUtterance(transcript: string, ctx: CommandContext): Utteran
 export function parseCommand(transcript: string, ctx: CommandContext): CommandHit | null {
   const text = transcript.trim().toLowerCase()
   if (!text) return null
+
+  /* --- dispatch: "in terminal two, build me a landing page" --------------
+   *
+   * Ahead of the word cap on purpose. Everything else here is a short order;
+   * this one is an *address* followed by a prompt, and the prompt is as long as
+   * it likes. The address is what has to be short and unmistakable.
+   */
+  const dispatch = parseDispatch(transcript.trim())
+  if (dispatch) return dispatch
+
+  /* --- create a project: also ahead of the cap ---------------------------
+   * "Open up a new project called Tester Tester. Put the project file on the
+   * desktop and then open it in the projects pane" is one order in twenty-two
+   * words — he is saying where to put it and what to do next, not changing the
+   * subject. The cap exists to stop *briefs* being obeyed, and this is not one.
+   */
+  const created = parseCreateProject(transcript.trim())
+  if (created) return created
+
   const tokens = words(text)
   if (tokens.length === 0 || tokens.length > MAX_COMMAND_WORDS) return null
   const has = (w: string): boolean => tokens.includes(w)
 
-  /* --- memory: "what do you remember?", "forget this project's memory" --- */
+  /* --- memory: "what do you remember?", "forget this project's memory" ---
+   * Ahead of the close branch deliberately: "forget everything about this
+   * project" is a memory wipe, not a request to close five terminals. */
   const memory = parseMemoryCommand(text)
   if (memory) return memory
 
-  /* --- focus a tab by position: "go to tab 2", "second tab", "tab 3" ----- */
+  /* --- close: "close tab one", "close all three tabs", "close this pane" --
+   *
+   * The ordinal branch is here because of a real failure: "close tab one" used
+   * to produce *focus_tab* — the closing actions took no target, so the only
+   * action that could hold a number was the wrong one, and Forge cheerfully
+   * switched to the tab he had asked it to get rid of.
+   */
+  if (has('close') || has('kill') || has('shut') || has('quit')) {
+    const bulk = parseBulkClose(text, tokens)
+    if (bulk) return bulk
+
+    const targeted = /\b(?:tab|tabs|terminal|terminals|pane|panes|window|windows|split|splits)\s+(?:number\s+)?(\d+|one|two|three|four|five|six|seven|eight|nine|ten|last)\b/.exec(
+      text
+    )
+    const ordinalFirst = /\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last)\s+(tab|terminal|pane|window|split)\b/.exec(
+      text
+    )
+    if (targeted || ordinalFirst) {
+      const noun = targeted ? targeted[0].split(/\s+/)[0]! : ordinalFirst![2]!
+      const which = targeted ? `${noun} ${targeted[1]}` : `${ordinalFirst![2]} ${ordinalFirst![1]}`
+      const isPane = PANE_WORDS.has(noun) || noun === 'window' || noun === 'windows'
+      return {
+        action: isPane ? { kind: 'close_pane', which } : { kind: 'close_tab', which },
+        confidence: 'high'
+      }
+    }
+
+    if (tokens.some((t) => PANE_WORDS.has(t))) {
+      return { action: { kind: 'close_pane', which: 'focused' }, confidence: 'high' }
+    }
+    if (has('tab') || has('tabs') || has('terminal') || has('terminals')) {
+      return { action: { kind: 'close_tab', which: 'current' }, confidence: 'high' }
+    }
+    // "close this" / "close it" — a pane is the smaller, safer reading.
+    return { action: { kind: 'close_pane', which: 'focused' }, confidence: 'medium' }
+  }
+
+  /* --- focus a tab by position: "go to tab 2", "second tab", "tab 3" -----
+   * After closing, deliberately: "close tab one" names a tab and a number, and
+   * the only difference between the two readings is the verb. */
   const focus = parseFocusTab(text, tokens)
   if (focus) return focus
 
@@ -263,19 +328,7 @@ export function parseCommand(transcript: string, ctx: CommandContext): CommandHi
   const switched = parseSwitchProject(text)
   if (switched) return switched
 
-  /* --- close: "close this pane", "close the tab" ------------------------- */
-  if (has('close') || has('kill') || has('shut')) {
-    if (tokens.some((t) => PANE_WORDS.has(t))) {
-      return { action: { kind: 'close_pane', which: 'focused' }, confidence: 'high' }
-    }
-    if (has('tab') || has('tabs')) {
-      return { action: { kind: 'close_tab', which: 'current' }, confidence: 'high' }
-    }
-    // "close this" / "close it" — a pane is the smaller, safer reading.
-    return { action: { kind: 'close_pane', which: 'focused' }, confidence: 'medium' }
-  }
-
-  /* --- add a project: voice never opens a folder picker ------------------ */
+  /* --- add a project without a name: still a hint ------------------------ */
   if (has('project') && tokens.some((t) => t === 'new' || t === 'add' || t === 'create')) {
     return { action: { kind: 'new_project_hint' }, confidence: 'high' }
   }
@@ -316,6 +369,234 @@ function parseMemoryCommand(text: string): CommandHit | null {
   }
   return null
 }
+
+/* ------------------------------------------------------------- dispatch */
+
+/** Nouns that can be addressed: "terminal two", "the claude pane". */
+const ADDRESS_NOUN = 'terminals?|tabs?|panes?|windows?|shells?|sessions?|instances?'
+const ADDRESS_NUMBER = '\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve'
+const ADDRESS_ORDINAL = 'first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last'
+
+/**
+ * The guard that stops "the second tab is broken" being dispatched as the
+ * prompt "is broken". If what follows the address reads as a *statement about*
+ * that terminal rather than an *instruction to* it, this is conversation and
+ * belongs to the brain.
+ */
+const PREDICATE_START = new Set([
+  'is',
+  'isnt',
+  'was',
+  'wasnt',
+  'are',
+  'arent',
+  'were',
+  'has',
+  'hasnt',
+  'have',
+  'havent',
+  'had',
+  'looks',
+  'look',
+  'looking',
+  'seems',
+  'seem',
+  'keeps',
+  'keep',
+  'does',
+  'doesnt',
+  'did',
+  'didnt',
+  'wont',
+  'will',
+  'would',
+  'should',
+  'shall',
+  'can',
+  'cant',
+  'could',
+  'might',
+  'must',
+  'needs',
+  'shows',
+  'says',
+  'said',
+  'went',
+  'got',
+  'gets',
+  'goes',
+  'still',
+  'just',
+  'why',
+  'what',
+  'whats',
+  'when',
+  'where',
+  'who',
+  'how',
+  'which',
+  'whether',
+  'or',
+  'but'
+])
+
+/**
+ * Free-flow dispatch, straight past the brain.
+ *
+ * Steve says "open three claude terminals" and then, without pausing, "in
+ * terminal two, this is the prompt…". The second half is not a sentence to be
+ * interpreted — the address is explicit and the rest is his words. Sending that
+ * to a model would cost five seconds and risk it being rewritten, so a named
+ * terminal plus a remainder is dispatched verbatim.
+ *
+ * Deliberately *not* fleshed out here: that is the brain's job, and this is the
+ * quick path. Everything without an explicit address falls through.
+ */
+function parseDispatch(original: string): CommandHit | null {
+  const patterns: Array<{ re: RegExp; target: (m: RegExpExecArray) => string; rest: number; confidence: BrainConfidence }> = [
+    // "in terminal two, <rest>" / "terminal 2: <rest>" / "on tab three <rest>"
+    {
+      re: new RegExp(
+        `^(?:in|on|to|into|over in|over to)?\\s*(?:the\\s+)?(${ADDRESS_NOUN})\\s+(${ADDRESS_NUMBER})\\b\\s*[,;:.\\-–—]?\\s+(.+)$`,
+        'is'
+      ),
+      target: (m) => `${m[1]} ${m[2]}`,
+      rest: 3,
+      confidence: 'high'
+    },
+    // "in the second terminal, <rest>" / "the last pane: <rest>"
+    {
+      re: new RegExp(
+        `^(?:in|on|to|into)?\\s*(?:the\\s+)?(${ADDRESS_ORDINAL})\\s+(${ADDRESS_NOUN})\\b\\s*[,;:.\\-–—]?\\s+(.+)$`,
+        'is'
+      ),
+      target: (m) => `${m[2]} ${m[1]}`,
+      rest: 3,
+      confidence: 'high'
+    },
+    // "tell the claude pane <rest>" / "tell claude terminal: <rest>"
+    {
+      re: new RegExp(`^(?:tell|ask|send to|give)\\s+(?:the\\s+)?(.{1,24}?)\\s+(?:${ADDRESS_NOUN}|one)\\s*[,;:.\\-–—]?\\s+(.+)$`, 'is'),
+      target: (m) => m[1]!,
+      rest: 2,
+      confidence: 'high'
+    },
+    // "in the claude pane, <rest>" — a name rather than a number.
+    {
+      re: new RegExp(`^(?:in|on|to|into)\\s+(?:the\\s+)?(.{1,24}?)\\s+(?:${ADDRESS_NOUN})\\s*[,;:]\\s*(.+)$`, 'is'),
+      target: (m) => m[1]!,
+      rest: 2,
+      confidence: 'medium'
+    }
+  ]
+
+  for (const p of patterns) {
+    const m = p.re.exec(original)
+    if (!m) continue
+    const rest = (m[p.rest] ?? '').trim().replace(/^(?:this is the prompt|the prompt is|prompt)\s*[,:.-]?\s*/i, '')
+    if (!rest) continue
+    // A bare address plus one filler word is not a prompt.
+    const restWords = words(rest)
+    if (restWords.length === 0 || restWords.every((w) => FILLER.has(w) || ACK.has(w))) continue
+    if (PREDICATE_START.has(restWords[0]!)) continue
+    return {
+      action: { kind: 'send_prompt', target: p.target(m).trim(), text: rest, flesh: false },
+      confidence: p.confidence
+    }
+  }
+  return null
+}
+
+/**
+ * "close everything", "close all three tabs", "close the kimi ones".
+ *
+ * Only fires with an explicit plural or an explicit "all/every/everything" —
+ * "close the tab" must stay a single close, because bulk is the one that costs
+ * you five agent sessions.
+ */
+function parseBulkClose(text: string, tokens: string[]): CommandHit | null {
+  const everything = /\b(everything|all|every|the lot)\b/.test(text)
+  const plural = /\b(tabs|terminals|panes|windows|sessions|ones)\b/.test(text)
+  if (!everything && !plural) return null
+
+  if (/\bothers?\b|\ball but this\b|\beverything else\b/.test(text)) {
+    return { action: { kind: 'close_tabs', which: 'others' }, confidence: 'high' }
+  }
+  // "close the kimi ones" / "close all the claude tabs" — a named agent.
+  const named = tokens.find(
+    (t) =>
+      !CLOSE_FILLER.has(t) &&
+      !TAB_WORDS.has(t) &&
+      !PANE_WORDS.has(t) &&
+      NUMBERS[t] === undefined &&
+      !/^\d+$/.test(t)
+  )
+  if (named) return { action: { kind: 'close_tabs', which: named }, confidence: 'high' }
+  if (everything || plural) return { action: { kind: 'close_tabs', which: 'all' }, confidence: 'high' }
+  return null
+}
+
+/**
+ * "open up a new project called Tester Tester, put it on the desktop".
+ *
+ * The name is quoted back exactly as heard, capitals and all — a folder called
+ * "tester tester" when he said "Tester Tester" is a small thing that reads as
+ * the app not listening. Only an explicit "called/named X" counts; without a
+ * name there is nothing to create and it falls through to the hint.
+ */
+function parseCreateProject(original: string): CommandHit | null {
+  const text = original.toLowerCase()
+  // The order has to be the *opening* of the sentence. "I'm thinking about a
+  // new project called Roma, it would do X, Y and Z" is a brief, and creating a
+  // folder off the back of it would be Forge acting on thinking aloud.
+  if (
+    !/^(?:right|ok|okay|so|now|please|hey)?[,\s]*(?:can you |could you |i want you to |i'?d like you to |let'?s )?(?:open up|open|create|make|start|set up|add|new)\b/.test(
+      text
+    )
+  ) {
+    return null
+  }
+  if (!/\b(new|create|make|start|set up|add)\b/.test(text)) return null
+  if (!/\bproject\b/.test(text)) return null
+  const m = /\b(?:called|named|call it|name it)\s+([^,.;]+)/i.exec(original)
+  if (!m) return null
+
+  // Stop at the next instruction: "called Tester Tester and put it on the desktop".
+  const name = (m[1] ?? '')
+    .replace(/\s+\b(?:and|then|please|put|in|on|under|inside|into)\b.*$/i, '')
+    .replace(/^["'“”]+|["'“”]+$/g, '')
+    .trim()
+  if (!name || name.length > 60) return null
+
+  const action: AppAction = { kind: 'create_project', name }
+  if (/\bdesktop\b/i.test(original)) action.parentDir = 'desktop'
+  else if (/\bdocuments?\b/i.test(original)) action.parentDir = 'documents'
+  return { action, confidence: 'high' }
+}
+
+/** Words that carry no agent name in a close command. */
+const CLOSE_FILLER = new Set([
+  'close',
+  'kill',
+  'shut',
+  'quit',
+  'down',
+  'all',
+  'every',
+  'everything',
+  'the',
+  'my',
+  'a',
+  'an',
+  'of',
+  'them',
+  'ones',
+  'one',
+  'lot',
+  'please',
+  'off',
+  'out'
+])
 
 function parseFocusTab(text: string, tokens: string[]): CommandHit | null {
   const navigating = /\b(?:switch|go|jump|focus|show|take me|move)\b/.test(text)

@@ -1,9 +1,17 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, screen, shell } from 'electron'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
-import type { AppInfo, Project, Settings, Workspace } from '@shared/types'
+import { planProjectFolder } from './projectfolder'
+import type {
+  AppInfo,
+  MakeProjectFolderRequest,
+  MakeProjectFolderResult,
+  Project,
+  Settings,
+  Workspace
+} from '@shared/types'
 import {
   deleteWorkspace,
   getDataDir,
@@ -400,6 +408,52 @@ function registerAppHandlers(): void {
   )
 
   ipcMain.handle(IPC.pickFolder, () => pickFolder('Add project folder', 'Add project'))
+
+  /**
+   * Create a project folder from a spoken name.
+   *
+   * The one place in Forge where a voice command reaches the file system, so it
+   * is fenced in three ways rather than one:
+   *
+   *  1. The parent must be Desktop, Documents, or the folder Steve nominated in
+   *     Settings. Nothing else, and the resolved path is checked *after*
+   *     resolution, so `../../Windows` cannot sneak through a name.
+   *  2. The leaf is a single sanitised segment — no separators, no drive
+   *     letters, no dots-only names, no reserved Windows device names.
+   *  3. An existing folder is never touched. It comes back as an error saying
+   *     "open it instead", because silently adopting a folder full of somebody
+   *     else's work is exactly the surprise nobody wants from a microphone.
+   */
+  ipcMain.handle(IPC.makeProjectFolder, async (_e, req: MakeProjectFolderRequest): Promise<MakeProjectFolderResult> => {
+    const nominated = getSettings().projectsRoot?.trim()
+    const roots = [
+      // A nominated folder is the default when there is one, so it goes first.
+      ...(nominated ? [{ key: 'projectsroot', path: nominated }] : []),
+      { key: 'desktop', path: app.getPath('desktop') },
+      { key: 'documents', path: app.getPath('documents') }
+    ]
+
+    const plan = planProjectFolder({
+      name: String(req?.name ?? ''),
+      parentDir: String(req?.parentDir ?? ''),
+      roots
+    })
+    if (!plan.ok) return { ok: false, error: plan.error }
+    if (existsSync(plan.path)) {
+      return {
+        ok: false,
+        error: `“${plan.leaf}” already exists in ${plan.root.path} — open it instead`,
+        path: plan.path
+      }
+    }
+
+    try {
+      mkdirSync(plan.path, { recursive: false })
+    } catch (err) {
+      return { ok: false, error: `Could not create it: ${(err as Error).message}` }
+    }
+    return { ok: true, path: plan.path, name: plan.leaf }
+  })
 
   ipcMain.handle(IPC.openPath, async (_e, target: string) => shell.openPath(String(target)))
 

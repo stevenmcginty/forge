@@ -381,6 +381,24 @@ async function main() {
     join(scratch, 'renderer.mjs')
   )
 
+  /** A pane the way VoicePanel snapshots one, in spoken-handle order. */
+  const pane = (n, over = {}) => ({
+    paneId: `pane-${n}`,
+    tabId: `tab-${n}`,
+    tabNumber: n,
+    tabTitle: `Tab ${n}`,
+    number: n,
+    title: `Terminal ${n}`,
+    profileId: 'claude',
+    profileName: 'Claude Code',
+    live: true,
+    focused: n === 1,
+    agent: true,
+    lastFocusedAt: n === 1 ? 2 : 1,
+    ...over
+  })
+
+  const PANES = [pane(1), pane(2, { profileId: 'kimi', profileName: 'Kimi', title: 'notes' })]
   const CTX = {
     projects: [],
     profiles: [],
@@ -391,32 +409,72 @@ async function main() {
     tabs: [],
     activeTabId: null,
     focusedPaneId: 'pane-1',
-    paneCount: 1,
-    panesInActiveTab: 1,
+    paneCount: 2,
+    panesInActiveTab: 2,
     maxSessions: 16,
-    maxPanesPerTab: 8
+    maxPanesPerTab: 8,
+    panes: PANES
   }
 
   const noRunner = actions.runAppAction({ kind: 'use_skill', name: 'tidy-up' }, CTX, {})
   log(!noRunner.ok && /not available/.test(noRunner.summary), 'use_skill with nothing wired says so rather than lying')
 
   const seen = []
-  const outcome = actions.runAppAction({ kind: 'use_skill', name: '/tidy-up', target: 'kimi' }, CTX, {
+  const spy = {
     useSkill: (req) => {
       seen.push(req)
-      return { ok: true, summary: `Typed /${req.name}`, requested: 1, done: 1 }
+      return { ok: true, summary: `Typed /${req.name} into ${req.pane.title}`, requested: 1, done: 1 }
     }
-  })
+  }
+
+  const outcome = actions.runAppAction({ kind: 'use_skill', name: '/tidy-up' }, CTX, spy)
   log(outcome.ok && seen[0].name === 'tidy-up', 'a leading slash is stripped before the runner sees it')
-  log(seen[0].target === 'kimi', 'and the target is carried through')
+  log(seen[0].pane.paneId === 'pane-1', 'no target means the focused terminal')
+
+  // The shared resolver, not a private one: "terminal two" has to mean the same
+  // pane here as it does for send_prompt, or free-flow dispatch is a lottery.
+  actions.runAppAction({ kind: 'use_skill', name: 'tidy-up', target: 'terminal two' }, CTX, spy)
+  log(seen[1].pane.paneId === 'pane-2', 'a spoken number resolves through resolvePaneTarget')
+  actions.runAppAction({ kind: 'use_skill', name: 'tidy-up', target: 'the kimi one' }, CTX, spy)
+  log(seen[2].pane.paneId === 'pane-2', 'and so does the agent running in it')
+  log(
+    actions.runAppAction({ kind: 'use_skill', name: 'tidy-up', target: 'terminal 9' }, CTX, spy).ok === false,
+    'a terminal that is not open is refused, with the open ones listed'
+  )
+  log(seen.length === 3, 'and a refusal never reaches the runner')
+
+  const deadCtx = { ...CTX, panes: [pane(1, { live: false })], focusedPaneId: 'pane-1' }
+  log(
+    actions.runAppAction({ kind: 'use_skill', name: 'tidy-up' }, deadCtx, spy).ok === false,
+    'a pane whose shell has exited is refused rather than typed at'
+  )
+  log(
+    actions.runAppAction({ kind: 'use_skill', name: 'tidy-up' }, { ...CTX, panes: [] }, spy).ok === false,
+    'and with no terminals at all it says to open one'
+  )
   log(actions.runAppAction({ kind: 'use_skill', name: '  ' }, CTX, {}).ok === false, 'an empty name is refused')
+
+  // A skill is never submitted, whatever Settings says about auto-relay — the
+  // one place it deliberately parts company with send_prompt.
+  const relay = actions.runAppAction({ kind: 'use_skill', name: 'tidy-up' }, { ...CTX, autoRelay: true }, spy)
+  log(relay.ok && !/send/i.test(relay.summary), 'auto-relay does not make a skill submit itself')
+  log(
+    !Object.keys(seen[seen.length - 1]).includes('submit'),
+    'and the runner is never even offered the option'
+  )
 
   // Nothing supplied a runner here: the executor falls back to the bus, which
   // is how the voice panel reaches a pane without knowing skills exist.
-  const unregister = bus.setSkillHandler((req) => ({ ok: true, summary: `bus:${req.name}`, requested: 1, done: 1 }))
+  const unregister = bus.setSkillHandler((req) => ({
+    ok: true,
+    summary: `bus:${req.name}:${req.pane.paneId}`,
+    requested: 1,
+    done: 1
+  }))
   log(
-    actions.runAppAction({ kind: 'use_skill', name: 'tidy-up' }, CTX, {}).summary === 'bus:tidy-up',
-    'with no runner method, the executor falls back to the registered bus handler'
+    actions.runAppAction({ kind: 'use_skill', name: 'tidy-up', target: 'notes' }, CTX, {}).summary ===
+      'bus:tidy-up:pane-2',
+    'with no runner method, the executor falls back to the bus — resolved pane and all'
   )
   unregister()
   log(

@@ -721,6 +721,24 @@ class TerminalHost {
     return true
   }
 
+  /**
+   * Press Enter in a pane, on the user's behalf.
+   *
+   * Split out from `type()` rather than folded into it because the two carry
+   * completely different risk: typing is always safe, submitting is not. The
+   * only caller is the voice agent's auto-relay, which is off by default, only
+   * ever fires at a coding agent (never a bare shell) and only after a grace
+   * beat the user can interrupt. Keeping the carriage return in its own method
+   * means "who can submit for me?" is one search away.
+   */
+  submit(paneId: string): boolean {
+    const entry = this.entries.get(paneId)
+    if (!entry || entry.runtime.status === 'exited') return false
+    window.forge.pty.write(paneId, '\r')
+    entry.term.scrollToBottom()
+    return true
+  }
+
   has(paneId: string): boolean {
     return this.entries.has(paneId)
   }

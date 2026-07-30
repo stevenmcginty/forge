@@ -32,6 +32,7 @@ const MEDIA_TS = join(root, 'electron', 'gemini-media.ts')
 
 const forceAbsent = process.argv.includes('--force-absent')
 const liveImage = process.argv.includes('--live-image')
+const liveVideo = process.argv.includes('--live-video')
 
 /**
  * Where a Gemini key might be, for the opt-in live-image run only. A path, not
@@ -107,10 +108,12 @@ function openServer(env) {
   const request = (method, params) =>
     new Promise((res, rej) => {
       const id = nextId++
+      // Longer than the bridge's own 6-minute video budget, so a slow Veo
+      // render fails as the tool's honest timeout rather than as a dead test.
       const timer = setTimeout(() => {
         waiters.delete(id)
         rej(new Error(`timeout waiting for ${method}\nstderr: ${stderr}`))
-      }, 180_000)
+      }, 420_000)
       waiters.set(id, (msg) => {
         clearTimeout(timer)
         res(msg)
@@ -171,7 +174,7 @@ async function handshake(session, label) {
   return init
 }
 
-const TOOL_NAMES = ['ask_gemini', 'edit_image', 'make_image', 'summarize_video']
+const TOOL_NAMES = ['ask_gemini', 'edit_image', 'make_image', 'make_video', 'summarize_video']
 
 async function listTools(session, label) {
   const res = await session.request('tools/list', {})
@@ -193,7 +196,8 @@ async function listTools(session, label) {
     ask_gemini: ['prompt'],
     summarize_video: ['url_or_path'],
     make_image: ['description'],
-    edit_image: ['path', 'instruction']
+    edit_image: ['path', 'instruction'],
+    make_video: ['description']
   }
   for (const t of tools) {
     check(
@@ -294,6 +298,34 @@ async function runAbsentSuite() {
       [/`instruction` is required/]
     )
 
+    // make_video: no key is its problem too, and its own arguments are checked
+    // before anything is spent — a Veo call is far more expensive than an image.
+    expectGraceful(
+      'absent: make_video',
+      await session.request('tools/call', { name: 'make_video', arguments: { description: 'a red go-kart' } }),
+      [/no Gemini API key/i, /voice-agent settings/i, /GEMINI_API_KEY/]
+    )
+    expectGraceful(
+      'absent: make_video rejects an empty description',
+      await session.request('tools/call', { name: 'make_video', arguments: { description: '  ' } }),
+      [/`description` is required/]
+    )
+    expectGraceful(
+      'absent: make_video rejects an image-only aspect ratio',
+      await session.request('tools/call', { name: 'make_video', arguments: { description: 'a go-kart', aspect: '1:1' } }),
+      [/`aspect` must be one of: 16:9, 9:16/]
+    )
+    expectGraceful(
+      'absent: make_video rejects an out-of-range duration',
+      await session.request('tools/call', { name: 'make_video', arguments: { description: 'a go-kart', duration: 30 } }),
+      [/`duration` must be a whole number of seconds from 4 to 8/]
+    )
+    expectGraceful(
+      'absent: make_video rejects a duration below the floor',
+      await session.request('tools/call', { name: 'make_video', arguments: { description: 'a go-kart', duration: 1 } }),
+      [/`duration` must be a whole number of seconds from 4 to 8/]
+    )
+
     // A crashed server would have failed the requests above, but be explicit.
     check('absent: server still alive after all calls', session.child.exitCode === null, `exit ${session.child.exitCode}`)
   } finally {
@@ -382,6 +414,67 @@ function runDriftSuite() {
     /DUPLICATED from electron\/gemini-media\.ts/.test(bridge) && /cannot import this file/.test(media),
     'each file must point at the other'
   )
+
+  /* --- video (Veo) — the same duplication, so the same guard --- */
+
+  const bridgeVideo = model(bridge, 'DEFAULT_VIDEO_MODEL')
+  const mediaVideo = model(media, 'DEFAULT_VIDEO_MODEL')
+  check(
+    `drift: both default to the same video model (${bridgeVideo})`,
+    !!bridgeVideo && bridgeVideo === mediaVideo,
+    `bridge=${bridgeVideo} media=${mediaVideo}`
+  )
+  check('drift: the video model is a Veo model', /^veo-/.test(bridgeVideo ?? ''), `${bridgeVideo}`)
+
+  const videoAspects = (src) =>
+    (/VIDEO_ASPECT_RATIOS[^=]*=\s*\[([^\]]+)\]/.exec(src)?.[1] ?? '').replace(/[\s'"]/g, '')
+  check(
+    'drift: both accept the same video aspect ratios',
+    videoAspects(bridge) === videoAspects(media) && videoAspects(bridge) === '16:9,9:16',
+    `bridge=${videoAspects(bridge)}\n       media=${videoAspects(media)}`
+  )
+
+  for (const name of [
+    'MIN_VIDEO_SECONDS',
+    'MAX_VIDEO_SECONDS',
+    'VIDEO_POLL_STEADY_MS',
+    'VIDEO_REQUEST_TIMEOUT_MS'
+  ]) {
+    check(`drift: ${name} matches`, num(bridge, name) === num(media, name), `bridge=${num(bridge, name)} media=${num(media, name)}`)
+  }
+
+  // The overall budget is spelled differently either side (the TS one is
+  // exported under a longer name), so compare the numbers rather than the text.
+  const bridgeBudget = num(bridge, 'VIDEO_TIMEOUT_MS')
+  const mediaBudget = num(media, 'DEFAULT_VIDEO_TIMEOUT_MS')
+  check(
+    `drift: the video timeout budget matches (${bridgeBudget}ms)`,
+    bridgeBudget === mediaBudget,
+    `bridge=${bridgeBudget} media=${mediaBudget}`
+  )
+
+  const pollSteps = (src) => (/VIDEO_POLL_MS[^=]*=\s*\[([^\]]+)\]/.exec(src)?.[1] ?? '').replace(/[\s_]/g, '')
+  check(
+    'drift: both back off on the same poll schedule',
+    pollSteps(bridge) === pollSteps(media) && pollSteps(bridge) === '5000,10000',
+    `bridge=${pollSteps(bridge)}\n       media=${pollSteps(media)}`
+  )
+
+  // The tier error is the one nobody can test live on a working key, so assert
+  // both copies still classify it — and still say the word "billing".
+  for (const [label, src] of [['bridge', bridge], ['media', media]]) {
+    check(
+      `drift: ${label} still classifies the paid-only (tier) refusal`,
+      /billed users\|billing\|FAILED_PRECONDITION/.test(src) && /billing enabled/i.test(src),
+      'the Veo paid-only branch must survive edits'
+    )
+  }
+  check('drift: media declares a `tier` error kind', /\|\s*'tier'/.test(media), 'MediaErrorKind must carry tier')
+
+  // The key is sent to a URL the API chose, so both copies must still check it.
+  for (const [label, src] of [['bridge', bridge], ['media', media]]) {
+    check(`drift: ${label} still pins the download host`, /function safeVideoUri/.test(src), 'safeVideoUri must not be dropped')
+  }
 }
 
 /**
@@ -455,15 +548,85 @@ async function runLiveImageSuite() {
   }
 }
 
+/**
+ * The most expensive check in the repo, and the slowest: one real Veo clip.
+ * Opt in with --live-video. Asserts the file is on disk, is a real mp4 (ftyp at
+ * offset 4, not an apology saved with an .mp4 name) and is big enough to be
+ * video rather than a stub.
+ *
+ * A refusal is a legitimate outcome, not a test failure: if the key is not
+ * billed for Veo the tool must SAY so rather than invent a file, and that is
+ * exactly what gets asserted instead.
+ */
+async function runLiveVideoSuite() {
+  const found = findApiKey()
+  console.log('\n[5] Live video generation (Veo)')
+  if (!found) {
+    console.log('  --   skipped: no GEMINI_API_KEY and no key file on disk')
+    return
+  }
+  console.log(`  --   key from ${found.source}`)
+
+  const outDir = join(tmpdir(), `forge-bridge-smoke-video-${Date.now()}`)
+  const session = openServer({ ...process.env, GEMINI_API_KEY: found.key, FORGE_BRIDGE_OUT: outDir })
+  try {
+    await handshake(session, 'video')
+
+    const t0 = Date.now()
+    const made = await session.request('tools/call', {
+      name: 'make_video',
+      arguments: {
+        description: 'A red pixel-art go-kart driving across the screen from left to right, retro 8-bit game style, flat side-on view.',
+        aspect: '16:9',
+        duration: 4
+      }
+    })
+    const text = textOf(made.result)
+    const secs = ((Date.now() - t0) / 1000).toFixed(1)
+
+    if (made.result?.isError === true) {
+      // Honest refusal is a pass for the error path — but it must be honest.
+      console.log(`  --   refused after ${secs}s. Exact message:`)
+      console.log(text.split('\n').map((l) => `       | ${l}`).join('\n'))
+      check('video: a refusal names a cause and a fix', /billing|quota|key|refus|timed out|rendering/i.test(text), text.slice(0, 400))
+      check('video: a refusal does not claim a file', !/Video saved to/.test(text), text.slice(0, 300))
+      return
+    }
+
+    check(`video: make_video succeeded (${secs}s)`, made.result?.isError !== true, text.slice(0, 600))
+    const path = /Video saved to (.+)/.exec(text)?.[1]?.trim()
+    check('video: it named a path', !!path, text.slice(0, 300))
+    if (!path) return
+    check('video: the file exists', existsSync(path), path)
+    const bytes = existsSync(path) ? statSync(path).size : 0
+    check(`video: the file has real content (${Math.round(bytes / 1024)} KB)`, bytes > 100_000, `${bytes} bytes`)
+    const head = existsSync(path) ? readFileSync(path).subarray(0, 12) : Buffer.alloc(0)
+    check(
+      'video: the bytes really are an mp4 (ftyp at offset 4)',
+      head.subarray(4, 8).toString('latin1') === 'ftyp',
+      [...head].map((b) => b.toString(16).padStart(2, '0')).join(' ')
+    )
+    check('video: it reported which model made it', /Model veo-[a-z0-9.\-]+/i.test(text), text.slice(0, 400))
+    check('video: it reported how long it took', /\d+\.\d+s/.test(text), text.slice(0, 400))
+    check('video: the file is .mp4', /\.mp4$/i.test(path), path)
+    console.log(`  --   ${path}`)
+    console.log(`  --   ${text.split('\n').filter(Boolean).pop()}`)
+  } finally {
+    session.close()
+  }
+}
+
 async function main() {
   console.log(`bridge-smoke → ${SERVER}`)
   await runAbsentSuite()
   if (!forceAbsent) await runInstalledSuite()
   runDriftSuite()
   if (liveImage) await runLiveImageSuite()
+  if (liveVideo) await runLiveVideoSuite()
 
   console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`)
   if (!liveImage) console.log('(run with --live-image to also generate and edit a real image — spends quota)')
+  if (!liveVideo) console.log('(run with --live-video to also generate a real ~4s Veo clip — spends more, takes ~1min)')
   process.exit(failures === 0 ? 0 : 1)
 }
 

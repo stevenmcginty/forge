@@ -8,6 +8,7 @@ import type { BrainContext, BrainReply, BrainStatus, VoiceBrain } from './voiceb
  * arrived and needed exactly the same defensive parsing.
  */
 export {
+  claimsCompletedAction,
   extractJsonObject,
   parseBrainJson,
   salvagePartialJson,
@@ -62,24 +63,69 @@ export const RESPONSE_SCHEMA = {
       type: 'ARRAY',
       items: {
         type: 'OBJECT',
+        /**
+         * `count` is required, and that is not a nicety.
+         *
+         * It used to be optional, and gemini-2.5-flash, asked for "3 claude code
+         * terminals", answered `understood: "three new tabs"` and then emitted
+         * open_tabs with the count field simply absent — three times over, once
+         * per tab. The sanitiser's fallback turned each of those into 1 and the
+         * panel truthfully reported opening one tab. An optional integer in a
+         * responseSchema is an integer the model may quietly decline to think
+         * about; a required one is not. Ordering matters for the same reason a
+         * long reply loses its tail: emit the count before the trimmings.
+         */
+        propertyOrdering: [
+          'kind',
+          'profileId',
+          'count',
+          'target',
+          'text',
+          'flesh',
+          'projectName',
+          'direction',
+          'which',
+          'name',
+          'index',
+          'parentDir',
+          'mode',
+          'section',
+          'description',
+          'aspect',
+          'duration',
+          'path',
+          'instruction'
+        ],
         properties: {
           kind: { type: 'STRING' },
           profileId: { type: 'STRING' },
           count: { type: 'INTEGER' },
+          // send_prompt — which terminal, and what to say to it.
+          target: { type: 'STRING' },
+          text: { type: 'STRING' },
+          flesh: { type: 'BOOLEAN' },
           projectName: { type: 'STRING' },
           direction: { type: 'STRING' },
           which: { type: 'STRING' },
           name: { type: 'STRING' },
           index: { type: 'INTEGER' },
-          // make_image / edit_image. One flat property bag for every action
-          // kind, because responseSchema has no union type — the executor's
-          // sanitiser is what actually enforces per-kind requirements.
+          // create_project / set_view / open_settings.
+          parentDir: { type: 'STRING' },
+          mode: { type: 'STRING' },
+          section: { type: 'STRING' },
+          // make_image / edit_image / make_video. One flat property bag for
+          // every action kind, because responseSchema has no union type — the
+          // executor's sanitiser is what actually enforces per-kind
+          // requirements. `description` and `aspect` are shared with the image
+          // actions; `duration` is the only field make_video adds, and without
+          // it here the model physically cannot ask for a clip length.
           description: { type: 'STRING' },
           aspect: { type: 'STRING' },
+          duration: { type: 'INTEGER' },
           path: { type: 'STRING' },
           instruction: { type: 'STRING' }
         },
-        required: ['kind']
+        required: ['kind', 'count']
       }
     },
     draftPrompt: { type: 'STRING' },

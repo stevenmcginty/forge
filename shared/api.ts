@@ -13,6 +13,9 @@ import type {
   ImportedKeyResult,
   KeySource,
   MakeImageRequest,
+  MakeProjectFolderRequest,
+  MakeProjectFolderResult,
+  MakeVideoRequest,
   MediaCallResult,
   MemorySection,
   OpenRouterCallRequest,
@@ -157,6 +160,13 @@ export interface ForgeApi {
     makeImage(req: MakeImageRequest): Promise<MediaCallResult>
     /** Edit an existing image into a new file. The original is untouched. */
     editImage(req: EditImageRequest): Promise<MediaCallResult>
+    /**
+     * Really generate a short .mp4 (Veo). Same destination as the images —
+     * the project's `assets/generated/` — but it takes one to three minutes,
+     * so every caller must have said so before awaiting this. Videos are NOT
+     * adopted into the screenshot shelf: it only holds still images.
+     */
+    makeVideo(req: MakeVideoRequest): Promise<MediaCallResult>
   }
 
   /**
@@ -245,6 +255,8 @@ export interface ForgeApi {
   probeAgents(): Promise<AgentPresence[]>
 
   pickFolder(): Promise<string | null>
+  /** Create a project folder from a spoken name. Fenced hard — see main.ts. */
+  makeProjectFolder(req: MakeProjectFolderRequest): Promise<MakeProjectFolderResult>
   openPath(target: string): Promise<string>
   /**
    * Open an http(s) URL in the default browser. Anything else is refused in the

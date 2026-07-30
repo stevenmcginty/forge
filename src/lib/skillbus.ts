@@ -1,4 +1,4 @@
-import type { ActionOutcome } from './appactions'
+import type { ActionOutcome, ActionPane } from './appactions'
 
 /**
  * The one seam between `use_skill` and the thing that can actually type into a
@@ -23,11 +23,14 @@ export interface SkillRequest {
   /** Folder name of the skill — what `/<name>` types. */
   name: string
   /**
-   * Where to put it. A pane title or an agent name; matched loosely. Absent
-   * means the focused pane, which is what "use the writing skill" means when
-   * nobody said where.
+   * The pane to type it into, already resolved.
+   *
+   * The executor does the resolving, through the same `resolvePaneTarget` that
+   * `send_prompt` uses — so "terminal two" means the same terminal whichever
+   * action said it, and an ambiguous handle has already been refused before
+   * anything reaches here.
    */
-  target?: string
+  pane: ActionPane
 }
 
 export type SkillHandler = (request: SkillRequest) => ActionOutcome

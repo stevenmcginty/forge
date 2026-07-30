@@ -52,6 +52,7 @@ export const IPC = {
 
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
+  makeProjectFolder: 'dialog:make-project-folder',
   openPath: 'shell:open-path',
   openExternal: 'shell:open-external',
 
@@ -75,6 +76,8 @@ export const IPC = {
   // voice agent's executor can generate images too.
   voiceMakeImage: 'voice:make-image',
   voiceEditImage: 'voice:edit-image',
+  /** Veo. Same door as the two above, but it takes minutes rather than seconds. */
+  voiceMakeVideo: 'voice:make-video',
 
   // per-project agent memory (M7) — one markdown file per project, read into
   // the brain's system text and written back after every exchange.

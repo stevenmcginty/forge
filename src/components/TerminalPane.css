@@ -156,13 +156,19 @@
   color: var(--text-muted);
 }
 
-/* Live: Claude has connected and printed its session URL. */
-.pane__phone[data-connected='true'] {
+/* Live: Claude has connected and printed its session URL.
+ *
+ * Scoped under .pane on purpose. The hover/focus rules above are three
+ * selectors deep, so an unscoped `.pane__phone[data-connected]` loses to them
+ * — which meant the glyph went volt only on a pane you were *not* looking at,
+ * and the pane you were working in never showed that Remote Control had
+ * connected. Same for the button's own hover. Matching the depth fixes both. */
+.pane .pane__phone[data-connected='true'] {
   color: var(--accent);
 }
 
-.pane__phone:hover,
-.pane__phone[data-open='true'] {
+.pane .pane__phone:hover,
+.pane .pane__phone[data-open='true'] {
   color: var(--accent);
   background: var(--accent-softer);
 }

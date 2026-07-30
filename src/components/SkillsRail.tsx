@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { SkillInfo } from '@shared/skills'
 import { resolveProfile } from '@/lib/agents'
+import { paneLabel } from '@/lib/appactions'
 import { collectLeaves } from '@/lib/splitTree'
 import { setSkillCatalogue, setSkillHandler } from '@/lib/skillbus'
 import {
@@ -80,39 +81,34 @@ export function SkillsRail(): ReactNode {
    * The voice agent's route to the same behaviour. Registered on the bus rather
    * than passed down, because the runner it would travel in is built inside
    * VoicePanel — see src/lib/skillbus.ts.
+   *
+   * The pane arrives already resolved: `runAppAction` puts the spoken target
+   * through the same `resolvePaneTarget` as `send_prompt`, so "terminal two"
+   * cannot mean one terminal for a prompt and another for a skill, and an
+   * ambiguous handle was refused before it reached here. All that is left is to
+   * bring the pane forward and type.
    */
-  const activeProjectId = state.activeProjectId
   useEffect(() => {
-    return setSkillHandler(({ name, target }) => {
-      const skill = skillLibrary.find(name) ?? skillLibrary.find(name.replace(/^\//, ''))
+    return setSkillHandler(({ name, pane }) => {
+      const skill = skillLibrary.find(name)
       if (!skill) return { ok: false, summary: `No skill called “${name}” in the library`, requested: 1, done: 0 }
 
-      const ws = activeProjectId ? workspaces[activeProjectId] : undefined
-      const tab = ws?.tabs.find((t) => t.id === ws.activeTabId)
-      // Focused pane unless a target was named. Target resolution is deliberately
-      // small — pane title, then agent name — and should be replaced by the voice
-      // milestone's shared resolver the moment that lands.
-      let paneId = tab?.activePaneId ?? null
-      if (target && ws) {
-        const want = target.trim().toLowerCase()
-        for (const t of ws.tabs) {
-          for (const leaf of collectLeaves(t.root)) {
-            const profile = resolveProfile(profiles, leaf.profileId)
-            const title = (leaf.title || profile.name).toLowerCase()
-            if (title.includes(want) || profile.name.toLowerCase().includes(want)) paneId = leaf.id
-          }
-        }
+      const profile = resolveProfile(profiles, pane.profileId)
+      // revealPane, not focusPane: the resolver spans every tab in the project,
+      // so the answer may well be in one that is not on screen.
+      actions.revealPane(pane.paneId)
+      void typeSkillIntoPane(pane.paneId, skill, profile).then((ok) => {
+        terminalHost.focus(pane.paneId)
+        if (!ok) actions.setNotice(`${skill.title} could not be typed — that pane is not running`)
+      })
+      return {
+        ok: true,
+        summary: `Typed /${skill.name} into ${paneLabel(pane)} — press Enter when you have read it`,
+        requested: 1,
+        done: 1
       }
-      if (!paneId) return { ok: false, summary: 'No pane open to put it in', requested: 1, done: 0 }
-
-      const leaf = ws?.tabs.flatMap((t) => collectLeaves(t.root)).find((l) => l.id === paneId)
-      const profile = resolveProfile(profiles, leaf?.profileId)
-      const id = paneId
-      actions.focusPane(id)
-      void typeSkillIntoPane(id, skill, profile).then(() => terminalHost.focus(id))
-      return { ok: true, summary: `Typed /${skill.name} into ${leaf?.title || profile.name} — press Enter`, requested: 1, done: 1 }
     })
-  }, [actions, activeProjectId, profiles, workspaces])
+  }, [actions, profiles])
 
   if (collapsed) return null
 
