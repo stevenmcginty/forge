@@ -13,6 +13,12 @@
  * electron/stt/model-download.ts is copied to a .mts and imported, the same
  * trick scripts/stt-manager-test.mjs uses: Node strips the types, and because it
  * is the real source the test cannot drift from what ships.
+ *
+ * This is the *only* downloader suite. The Settings work grew a second one
+ * (scripts/models-check.mjs, against a second implementation in
+ * electron/models/parakeet.ts); that implementation is gone and its checks that
+ * were not already here — a server that ignores Range, an already-complete
+ * folder fetching nothing, a present-but-truncated file — were folded in below.
  */
 import { createServer } from 'node:http'
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs'
@@ -47,6 +53,11 @@ const ok = (cond, label, detail = '') => {
  *
  *  /good/<name>       serves the body, honouring Range
  *  /flaky/<name>      serves `cutAfter` bytes then hangs up, once per file
+ *  /norange/<name>    ignores Range entirely and answers 200 with the whole
+ *                     body — the proxy/CDN that silently throws your resume
+ *                     away. Appending that to a `.part` gives a file of exactly
+ *                     the right size and complete nonsense, so it is the one
+ *                     failure that validation by size cannot catch.
  *  /html/<name>       a 200 with an error page in it — the shape that has to be
  *                     caught by size validation rather than by the status code
  *  /gone/<name>       404
@@ -80,6 +91,13 @@ const server = createServer((req, res) => {
       start = Number(m[1])
       sawRangeFor.set(name, (sawRangeFor.get(name) ?? 0) + 1)
     }
+  }
+  // Asked for a range, sent the lot, said 200. Entirely legal HTTP, and fatal
+  // to a naive resume.
+  if (mode === 'norange') {
+    res.writeHead(200, { 'content-length': String(body.length) })
+    res.end(body)
+    return
   }
   if (start >= body.length) {
     res.writeHead(416, { 'content-range': `bytes */${body.length}` })
@@ -287,12 +305,68 @@ console.log('\ncancellation keeps what it has')
   )
 }
 
+console.log('\na server that ignores Range must not corrupt a resume')
+{
+  // The one failure size validation cannot catch: appending a whole 200 body to
+  // a `.part` produces a file that is too *long*, so `minBytes` waves it
+  // through and onnx-asr fails hours later with something unhelpful. The fix is
+  // in fetchResumable — a status that is not 206 means the prefix is worthless.
+  const dir = fresh('norange')
+  const name = 'encoder-model.int8.onnx'
+  const whole = bodies.get(name)
+  const part = join(dir, `${name}.part`)
+  const { mkdirSync } = await import('node:fs')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(part, whole.subarray(0, 40_001))
+
+  const size = await fetchResumable(base('norange') + name, part)
+  ok(size === whole.length, 'the file ends up its real length, not length + prefix', `got ${size}`)
+  ok(whole.equals(readFileSync(part)), 'the abandoned prefix is overwritten, not appended to')
+
+  // ...and the same thing through the whole-set path.
+  const report = await downloadModel({ dir, base: base('norange'), files: FILES, sleep: noSleep })
+  ok(report.presence === 'ready', 'a full download survives a Range-ignoring server')
+  ok(
+    FILES.every((f) => bodies.get(f.name).equals(readFileSync(join(dir, f.name)))),
+    'and every file is still byte-identical'
+  )
+}
+
+console.log('\nan already-complete folder is left alone')
+{
+  const dir = fresh('skip')
+  const { mkdirSync } = await import('node:fs')
+  mkdirSync(dir, { recursive: true })
+  for (const f of FILES) writeFileSync(join(dir, f.name), bodies.get(f.name))
+
+  let calls = 0
+  const report = await downloadModel({
+    dir,
+    base: base('gone'),
+    files: FILES,
+    sleep: noSleep,
+    fetchImpl: (...args) => {
+      calls++
+      return fetch(...args)
+    }
+  })
+  // The base URL is the 404 one deliberately: if anything were fetched at all,
+  // this would throw rather than quietly pass.
+  ok(report.presence === 'ready', 'a complete folder reports ready')
+  ok(calls === 0, 'and nothing is downloaded', `${calls} requests`)
+}
+
 console.log('\ninspectModel')
 {
   const dir = fresh('inspect')
   const empty = await inspectModel(dir, FILES)
   ok(empty.presence === 'missing', 'an absent folder is missing')
   ok(empty.missing.length === 4, 'and names every file', JSON.stringify(empty.missing))
+  ok(empty.files.length === 4, 'per-file detail covers every expected file')
+  ok(
+    empty.files.every((f) => f.ok === false && f.bytes === 0),
+    'each one reported absent with no bytes'
+  )
 
   const { mkdirSync } = await import('node:fs')
   mkdirSync(dir, { recursive: true })
@@ -300,8 +374,32 @@ console.log('\ninspectModel')
   const partial = await inspectModel(dir, FILES)
   ok(partial.presence === 'partial', 'a folder with one file of four is partial')
   ok(partial.missing.length === 3, 'and names only what is still needed')
+  ok(
+    partial.files.filter((f) => f.ok).length === 1 && partial.files[0].name === 'config.json',
+    'per-file detail marks exactly the one that landed'
+  )
 
-  ok((await inspectModel('', FILES)).presence === 'missing', 'no folder at all is missing, not a crash')
+  // A file that is present but far too small: the truncated download that
+  // otherwise fails much later, inside onnx-asr, with no clue why. The card
+  // shows this row in red rather than claiming the model is simply absent.
+  const short = fresh('short-file')
+  mkdirSync(short, { recursive: true })
+  writeFileSync(join(short, 'vocab.txt'), Buffer.alloc(10))
+  const shorted = await inspectModel(short, FILES)
+  ok(shorted.presence === 'partial', 'a truncated file does not count as installed')
+  const vocab = shorted.files.find((f) => f.name === 'vocab.txt')
+  ok(vocab.ok === false && vocab.bytes === 10, 'and is reported with its real size', JSON.stringify(vocab))
+
+  // A half-finished `.part` is progress, and the card says so rather than "0 B".
+  const resuming = fresh('part-bytes')
+  mkdirSync(resuming, { recursive: true })
+  writeFileSync(join(resuming, 'encoder-model.int8.onnx.part'), bodies.get('encoder-model.int8.onnx').subarray(0, 5_000))
+  const withPart = await inspectModel(resuming, FILES)
+  ok(withPart.bytes === 5_000, 'bytes in a .part count towards progress', String(withPart.bytes))
+
+  const nowhere = await inspectModel('', FILES)
+  ok(nowhere.presence === 'missing', 'no folder at all is missing, not a crash')
+  ok(nowhere.files.length === 4, 'and still reports every expected file')
 }
 
 /* --------------------------------------------------------------- the real host

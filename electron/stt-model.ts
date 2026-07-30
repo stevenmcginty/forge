@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { ipcMain, type BrowserWindow } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { SttModelState } from '@shared/types'
+import type { SttModelSource, SttModelState } from '@shared/types'
 import {
   CancelledError,
   HttpStatusError,
@@ -33,7 +33,10 @@ let target: BrowserWindow | null = null
 let controller: AbortController | null = null
 let state: SttModelState = {
   status: 'unknown',
+  source: 'none',
   dir: '',
+  forgeDir: '',
+  files: [],
   bytes: 0,
   totalBytes: 0,
   fraction: 0,
@@ -53,7 +56,15 @@ function send(channel: string, payload: unknown): void {
 
 /* ------------------------------------------------------------- discovery */
 
-/** Where Forge puts a model it downloaded itself. */
+/**
+ * Where Forge puts a model it downloaded itself.
+ *
+ * Deliberately inside the data root, so FORGE_DATA_DIR isolates a test
+ * instance's models too, and so deleting the data folder really does remove
+ * everything Forge ever wrote. Not created here — the download creates it, and
+ * a folder appearing because somebody opened Settings would make `existsSync`
+ * checks elsewhere lie.
+ */
 export function forgeModelDir(): string {
   return join(getDataDir(), 'models', PARAKEET_NAME)
 }
@@ -69,9 +80,14 @@ export function forgeModelDir(): string {
 export function defaultModelDir(): string {
   const own = forgeModelDir()
   if (existsSync(own)) return own
-  const dictationMic = join(homedir(), 'Desktop', 'DictationMic', 'models', PARAKEET_NAME)
+  const dictationMic = dictationMicModelDir()
   if (existsSync(dictationMic)) return dictationMic
   return ''
+}
+
+/** Where DictationMic keeps its copy, whether or not that copy exists. */
+export function dictationMicModelDir(): string {
+  return join(homedir(), 'Desktop', 'DictationMic', 'models', PARAKEET_NAME)
 }
 
 /** The folder dictation will actually read: the setting, or the default. */
@@ -80,34 +96,69 @@ export function activeModelDir(): string {
   return configured || defaultModelDir()
 }
 
+/** Windows paths differ in case and in trailing slashes; folders do not. */
+function samePath(a: string, b: string): boolean {
+  const tidy = (p: string): string => p.replace(/[\\/]+$/, '').toLowerCase()
+  return Boolean(a) && tidy(a) === tidy(b)
+}
+
+/**
+ * Whose model `dir` is — which decides what the settings card offers.
+ *
+ * "external" covers the folder somebody typed in by hand; it is not offered a
+ * download because Forge would then quietly stop using the folder they chose.
+ */
+export function modelSourceFor(dir: string): SttModelSource {
+  if (!dir) return 'none'
+  if (samePath(dir, forgeModelDir())) return 'forge'
+  if (samePath(dir, dictationMicModelDir())) return 'dictationmic'
+  return 'external'
+}
+
 /* ------------------------------------------------------------------ state */
 
 function patch(next: Partial<SttModelState>): void {
-  state = { ...state, ...next }
+  state = { ...state, ...next, forgeDir: forgeModelDir() }
   send(IPC.sttDownloadProgress, state)
 }
 
-/** Look at the disk and publish what is there. */
-export async function refreshModelState(): Promise<SttModelState> {
-  if (state.status === 'downloading') return state
-  const dir = activeModelDir()
+/**
+ * Turn a look at the disk into the state the UI renders. One function, because
+ * a refresh, a finished download and a failed download all have to agree about
+ * what "ready" looks like — and when they drifted apart, the card showed a
+ * progress bar next to the word "installed".
+ */
+async function settle(dir: string, message?: string, error?: string): Promise<SttModelState> {
   const report = await inspectModel(dir)
+  const status = report.presence === 'ready' ? 'ready' : report.presence === 'partial' ? 'partial' : 'missing'
   state = {
     ...state,
-    status: report.presence === 'ready' ? 'ready' : report.presence === 'partial' ? 'partial' : 'missing',
+    status,
+    source: status === 'missing' ? modelSourceFor(dir) : modelSourceFor(report.dir),
     dir,
+    forgeDir: forgeModelDir(),
+    files: report.files,
     bytes: report.bytes,
     totalBytes: report.expectBytes,
     fraction: report.expectBytes ? Math.min(1, report.bytes / report.expectBytes) : 0,
     file: '',
     message:
-      report.presence === 'ready'
+      message ??
+      (report.presence === 'ready'
         ? 'The speech model is installed.'
         : report.presence === 'partial'
           ? `A partly downloaded model is in ${dir || 'no folder yet'} — it will resume where it left off.`
-          : `The speech model is not downloaded yet (${PARAKEET_SIZE_HINT}).`
+          : `The speech model is not downloaded yet (${PARAKEET_SIZE_HINT}).`),
+    ...(error ? { error } : {})
   }
+  if (!error) delete state.error
   return state
+}
+
+/** Look at the disk and publish what is there. */
+export async function refreshModelState(): Promise<SttModelState> {
+  if (state.status === 'downloading') return state
+  return settle(activeModelDir())
 }
 
 /* -------------------------------------------------------------- download */
@@ -124,9 +175,12 @@ export async function startDownload(): Promise<SttModelState> {
   const ac = new AbortController()
   controller = ac
 
+  delete state.error
   patch({
     status: 'downloading',
+    source: 'forge',
     dir,
+    files: [],
     file: MODEL_FILES[0]!.name,
     fraction: 0,
     bytes: 0,
@@ -135,7 +189,7 @@ export async function startDownload(): Promise<SttModelState> {
   })
 
   try {
-    const report = await downloadModel({
+    await downloadModel({
       dir,
       signal: ac.signal,
       onProgress: (p) => {
@@ -158,19 +212,10 @@ export async function startDownload(): Promise<SttModelState> {
 
     controller = null
     // Nail the setting to what we just fetched, so the sidecar looks in the
-    // right place even if it was pointed somewhere stale.
+    // right place even if it was pointed somewhere stale. This is the step that
+    // actually turns dictation on — the bytes alone change nothing.
     if (getSettings().sttModelDir.trim() !== dir) setSettings({ sttModelDir: dir })
-    state = {
-      ...state,
-      status: 'ready',
-      dir,
-      file: '',
-      fraction: 1,
-      bytes: report.bytes,
-      totalBytes: report.expectBytes,
-      message: 'The speech model is installed.'
-    }
-    send(IPC.sttDownloadDone, state)
+    send(IPC.sttDownloadDone, await settle(dir, 'The speech model is installed.'))
     return state
   } catch (err) {
     controller = null
@@ -181,17 +226,7 @@ export async function startDownload(): Promise<SttModelState> {
         ? `Could not reach the model host (${err.message}).`
         : ((err as Error)?.message ?? String(err))
 
-    const report = await inspectModel(dir)
-    state = {
-      ...state,
-      status: report.presence === 'ready' ? 'ready' : report.presence === 'partial' ? 'partial' : 'missing',
-      dir,
-      file: '',
-      bytes: report.bytes,
-      totalBytes: report.expectBytes,
-      fraction: report.expectBytes ? Math.min(1, report.bytes / report.expectBytes) : 0,
-      message
-    }
+    await settle(dir, message, cancelled ? undefined : message)
     if (!cancelled) console.error(`[stt-model] ${message}`)
     send(cancelled ? IPC.sttDownloadDone : IPC.sttDownloadError, state)
     return state

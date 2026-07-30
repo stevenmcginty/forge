@@ -69,11 +69,30 @@ const USER_AGENT = 'Forge/0.1 (+dictation model fetch)'
 
 export type ModelPresence = 'ready' | 'partial' | 'missing'
 
+/**
+ * One file as found. `ok` is the only judgement that matters — a file below its
+ * floor is an error page or a truncation, not a model.
+ */
+export interface ModelFileReport {
+  name: string
+  bytes: number
+  ok: boolean
+}
+
 export interface ModelReport {
   presence: ModelPresence
   dir: string
   /** Files absent or below their minimum size, in download order. */
   missing: string[]
+  /**
+   * Every expected file with what is actually on disk, in download order.
+   *
+   * `missing` above answers "what is wrong"; this answers "show me", which is
+   * what the settings card needs — "no model here" is a dead end, whereas
+   * "encoder-model.int8.onnx: 412 MB of 652 MB" tells you the download was
+   * interrupted and will resume.
+   */
+  files: ModelFileReport[]
   /** Bytes on disk that count toward the model. */
   bytes: number
   /** Total the finished model will take. */
@@ -96,23 +115,37 @@ async function sizeOf(path: string): Promise<number> {
  */
 export async function inspectModel(dir: string, files: ModelFile[] = MODEL_FILES): Promise<ModelReport> {
   const expectBytes = files.reduce((n, f) => n + f.expectBytes, 0)
-  if (!dir) return { presence: 'missing', dir, missing: files.map((f) => f.name), bytes: 0, expectBytes }
+  if (!dir) {
+    return {
+      presence: 'missing',
+      dir,
+      missing: files.map((f) => f.name),
+      files: files.map((f) => ({ name: f.name, bytes: 0, ok: false })),
+      bytes: 0,
+      expectBytes
+    }
+  }
 
   const missing: string[] = []
+  const found: ModelFileReport[] = []
   let bytes = 0
   for (const file of files) {
     const whole = await sizeOf(join(dir, file.name))
     if (whole >= file.minBytes) {
       bytes += whole
+      found.push({ name: file.name, bytes: whole, ok: true })
       continue
     }
     missing.push(file.name)
-    // A `.part` is real progress even though the file is not usable yet.
-    bytes += whole > 0 ? whole : await sizeOf(join(dir, `${file.name}.part`))
+    // A `.part` is real progress even though the file is not usable yet, and it
+    // is the number the card should show: "412 MB of 652 MB, will resume".
+    const partial = whole > 0 ? whole : await sizeOf(join(dir, `${file.name}.part`))
+    bytes += partial
+    found.push({ name: file.name, bytes: partial, ok: false })
   }
 
   const presence: ModelPresence = missing.length === 0 ? 'ready' : bytes > 0 ? 'partial' : 'missing'
-  return { presence, dir, missing, bytes, expectBytes }
+  return { presence, dir, missing, files: found, bytes, expectBytes }
 }
 
 /* ------------------------------------------------------------------ errors */

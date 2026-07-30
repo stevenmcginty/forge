@@ -27,8 +27,7 @@
     "bridge:build": "node scripts/build-bridge.mjs",
     "packaged:check": "node scripts/packaged-check.mjs",
     "secrets:test": "node scripts/secrets-audit-test.mjs",
-    "theme:check": "node scripts/theme-check.mjs",
-    "models:check": "node scripts/models-check.mjs"
+    "theme:check": "node scripts/theme-check.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

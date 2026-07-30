@@ -434,15 +434,3 @@ export function getShotsDir(): string {
   mkdirSync(dir, { recursive: true })
   return dir
 }
-
-/**
- * %APPDATA%\Forge\models — where Forge puts a speech model it downloaded
- * itself. Deliberately inside the data root, so FORGE_DATA_DIR isolates a test
- * instance's models too, and so deleting the data folder really does remove
- * everything Forge ever wrote.
- */
-export function getModelsDir(): string {
-  const dir = join(getDataDir(), 'models')
-  mkdirSync(dir, { recursive: true })
-  return dir
-}

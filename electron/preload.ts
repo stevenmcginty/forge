@@ -81,13 +81,6 @@ const api: ForgeApi = {
     claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion)
   },
 
-  models: {
-    engineState: () => ipcRenderer.invoke(IPC.modelsEngineState),
-    engineInstall: () => ipcRenderer.invoke(IPC.modelsEngineInstall),
-    engineCancel: () => ipcRenderer.invoke(IPC.modelsEngineCancel),
-    onEngineProgress: (cb) => subscribe(IPC.modelsEngineProgress, cb)
-  },
-
   probeAgents: () => ipcRenderer.invoke(IPC.agentsProbe),
 
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),

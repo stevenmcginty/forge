@@ -258,43 +258,6 @@ export interface ThemeCore {
   basedOn?: string
 }
 
-/* ------------------------------------------------------- speech engine (M6) */
-
-/**
- * Where dictation's Parakeet model is coming from.
- *
- *   forge         downloaded into %APPDATA%\Forge\models — ours
- *   dictationmic  DictationMic already has one and we are pointed at it
- *   missing       nothing usable at the configured path
- */
-export type EngineSource = 'forge' | 'dictationmic' | 'missing'
-
-export interface EngineState {
-  source: EngineSource
-  /** The folder the sidecar will be given. */
-  dir: string
-  /** Total bytes of the model files actually present. */
-  bytes: number
-  /** Forge's own model folder, whether or not it is populated. */
-  forgeDir: string
-  /** Per-file presence, newest check. */
-  files: Array<{ name: string; bytes: number; ok: boolean }>
-  /** True while a download is running. */
-  downloading: boolean
-}
-
-export interface EngineProgress {
-  /** 0..1 over the whole download, or null before the first byte lands. */
-  fraction: number | null
-  /** Which file is in flight. */
-  file: string
-  receivedBytes: number
-  totalBytes: number
-  /** Set when the download finished, failed or was cancelled. */
-  done?: 'ok' | 'error' | 'cancelled'
-  error?: string
-}
-
 /* -------------------------------------------------------- system probes */
 
 export type ClaudeCliState =
@@ -548,10 +511,41 @@ export interface SttPhraseEvent {
  */
 export type SttModelStatus = 'unknown' | 'missing' | 'partial' | 'downloading' | 'ready'
 
+/**
+ * *Whose* model this is, which is a different question from whether it works.
+ *
+ *   forge         downloaded into %APPDATA%\Forge\models — ours to manage
+ *   dictationmic  DictationMic already paid the 660 MB and we borrow it
+ *   external      a folder the user typed in themselves
+ *   none          nothing configured and nothing found
+ *
+ * It exists because the advice differs: only `none`/`external`-with-nothing-in-it
+ * should ever be offered a download, and borrowing DictationMic's copy is a
+ * *good* outcome that deserves saying out loud rather than an install prompt.
+ */
+export type SttModelSource = 'forge' | 'dictationmic' | 'external' | 'none'
+
+/** One model file as found on disk. `ok` means "big enough to be real". */
+export interface SttModelFile {
+  name: string
+  bytes: number
+  ok: boolean
+}
+
 export interface SttModelState {
   status: SttModelStatus
+  /** Where the bytes are coming from. */
+  source: SttModelSource
   /** Folder the model is (or will be) in. Empty when nothing is configured. */
   dir: string
+  /** Forge's own model folder, populated or not — where a download lands. */
+  forgeDir: string
+  /**
+   * Per-file presence from the last look at the disk, so the settings card can
+   * say *which* file is missing instead of just "not installed". Empty while a
+   * download is in flight, when the interesting number is the progress bar.
+   */
+  files: SttModelFile[]
   bytes: number
   totalBytes: number
   /** 0..1 across the whole model. */
@@ -562,6 +556,8 @@ export interface SttModelState {
   message: string
   /** e.g. "~660 MB" — what to warn about before they commit. */
   sizeHint: string
+  /** Set when a download ended badly, so the card can show it in red. */
+  error?: string
 }
 
 /* ------------------------------------------------------- agent detection */

@@ -5,8 +5,6 @@ import type {
   CreateSessionRequest,
   CreateSessionResult,
   EditImageRequest,
-  EngineProgress,
-  EngineState,
   GeminiCallRequest,
   GeminiCallResult,
   ImportedKeyResult,
@@ -153,19 +151,6 @@ export interface ForgeApi {
     userName(): Promise<string>
     /** `claude --version`, or why it could not be run. */
     claudeVersion(): Promise<ClaudeCliState>
-  }
-
-  /**
-   * The dictation model. Forge can download Parakeet itself (into
-   * %APPDATA%\Forge\models) for anyone who has not already got DictationMic's
-   * copy — resumable, cancellable, and the only download Forge ever does.
-   */
-  models: {
-    engineState(): Promise<EngineState>
-    /** Resolves when the download ends, one way or another. */
-    engineInstall(): Promise<EngineProgress>
-    engineCancel(): Promise<void>
-    onEngineProgress(cb: (p: EngineProgress) => void): () => void
   }
 
   /**

@@ -21,7 +21,6 @@ import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-side
 import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './stt-model'
 import { registerAgentProbeHandlers } from './agent-probe'
 import { registerVoiceHandlers } from './voice-bridge'
-import { disposeEngineHost, registerEngineHandlers, setEngineTarget } from './models/engine-host'
 import { registerSystemHandlers } from './system'
 
 const isDev = !app.isPackaged
@@ -223,7 +222,6 @@ function createWindow(): void {
     mainWindow = null
     setPtyTarget(null)
     setSttTarget(null)
-    setEngineTarget(null)
     setSttModelTarget(null)
   })
 
@@ -240,7 +238,6 @@ function createWindow(): void {
 
   setPtyTarget(mainWindow)
   setSttTarget(mainWindow)
-  setEngineTarget(mainWindow)
   setSttModelTarget(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
@@ -370,7 +367,6 @@ void app.whenReady().then(() => {
   registerAgentProbeHandlers()
   registerVoiceHandlers()
   registerSystemHandlers()
-  registerEngineHandlers()
   createWindow()
 
   app.on('activate', () => {
@@ -386,6 +382,5 @@ app.on('before-quit', () => {
   disposePtyHost()
   disposeShotsWatcher()
   disposeSttSidecar()
-  disposeEngineHost()
   disposeSttModel()
 })
