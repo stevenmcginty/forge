@@ -74,7 +74,9 @@ const api: ForgeApi = {
     importKey: (which) => ipcRenderer.invoke(IPC.voiceImportKey, which ?? 'gemini'),
     makeImage: (req) => ipcRenderer.invoke(IPC.voiceMakeImage, req),
     editImage: (req) => ipcRenderer.invoke(IPC.voiceEditImage, req),
-    makeVideo: (req) => ipcRenderer.invoke(IPC.voiceMakeVideo, req)
+    makeVideo: (req) => ipcRenderer.invoke(IPC.voiceMakeVideo, req),
+    speak: (req) => ipcRenderer.invoke(IPC.voiceSpeak, req),
+    cancelSpeak: (requestId) => ipcRenderer.invoke(IPC.voiceSpeakCancel, requestId)
   },
 
   memory: {

@@ -29,6 +29,8 @@ import type {
   SttModelState,
   SttPhraseEvent,
   SttStatus,
+  VoiceSpeakRequest,
+  VoiceSpeakResult,
   WindowStateEvent,
   Workspace
 } from './types'
@@ -154,6 +156,16 @@ export interface ForgeApi {
      * adopted into the screenshot shelf: it only holds still images.
      */
     makeVideo(req: MakeVideoRequest): Promise<MediaCallResult>
+    /**
+     * Say something in a real voice.
+     *
+     * Returns base64 raw PCM for the renderer to play through Web Audio; the
+     * key is read in the main process and the bytes are never written to disk.
+     * Pass `requestId` and barge-in can abort it with `cancelSpeak`.
+     */
+    speak(req: VoiceSpeakRequest): Promise<VoiceSpeakResult>
+    /** Abort an in-flight `speak`. Unknown ids are a no-op, never an error. */
+    cancelSpeak(requestId: string): Promise<boolean>
   }
 
   /**

@@ -79,6 +79,18 @@ export const IPC = {
   /** Veo. Same door as the two above, but it takes minutes rather than seconds. */
   voiceMakeVideo: 'voice:make-video',
 
+  /**
+   * Neural speech (M10). Text in, raw PCM out — the renderer plays it through
+   * Web Audio. The key never leaves the main process, same as the media calls.
+   */
+  voiceSpeak: 'voice:speak',
+  /**
+   * Barge-in: abort an in-flight `voice:speak`. Steve talking over the agent
+   * must stop the request as well as the sound, or the quota is spent on words
+   * nobody will ever hear.
+   */
+  voiceSpeakCancel: 'voice:speak-cancel',
+
   // per-project agent memory (M7) — one markdown file per project, read into
   // the brain's system text and written back after every exchange.
   memoryRead: 'memory:read',

@@ -10,7 +10,9 @@ import {
 } from '@shared/types'
 import { agentMemory } from '@/lib/agentmemory'
 import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
+import { earconListening } from '@/lib/earcon'
 import { speaker } from '@/lib/speech'
+import { chooseEngine, pickVaried, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
 import { resolveProfile } from '@/lib/agents'
 import { buildManifest, type ManifestSnapshot } from '@/lib/appmanifest'
 import {
@@ -121,6 +123,29 @@ const THINKING_PATIENCE_MS = 5000
 /** Spoken brakes — these hold a prompt that is about to be submitted. */
 const CANCEL_WORDS = /^(?:wait|stop|no|nope|hold|hold on|cancel|don't|dont|abort|scratch that)\b/i
 
+/**
+ * What Forge itself says when the brain falls over.
+ *
+ * A pool rather than a constant, and never the same one twice running. One
+ * fixed sentence on every failure is the sameness that made the old voice
+ * sound like a machine reading a card, and this is the only line Forge writes
+ * for itself often enough for him to notice.
+ */
+const BRAIN_FAILED = [
+  'That one did not go through. Say it again?',
+  'Something broke on the way to the model. Try me again.',
+  'No luck there — give it another go.',
+  'The model did not answer. Once more?'
+]
+
+/**
+ * Phases that mean the microphone has just been given back.
+ *
+ * A short blip marks the handover instead of a spoken announcement. Coming from
+ * `off` is not in the list: arming is a deliberate tap and it needs no sound.
+ */
+const HANDS_BACK: ReadonlySet<AgentPhase> = new Set<AgentPhase>(['speaking', 'replied', 'error', 'thinking', 'warming'])
+
 interface PaneOption {
   paneId: string
   tabId: string
@@ -176,9 +201,47 @@ export function VoicePanel(): ReactNode {
 
   const replyMode = state.settings.voiceReplyMode
   const speaksAloud = replyMode !== 'text'
+
+  /**
+   * Which engine, which voice, which model — the whole of what the speaker
+   * needs, snapshotted per render and read through a ref so `sayAloud` does not
+   * have to be rebuilt (and the transcript subscription torn down) every time a
+   * setting changes.
+   */
+  const voiceConfig = useMemo<VoiceConfig>(
+    () => ({
+      engine: state.settings.voiceEngine,
+      hasKey: state.settings.geminiKey.trim().length > 0,
+      geminiVoice: state.settings.voiceTtsVoice,
+      ttsModel: state.settings.voiceTtsModel,
+      localVoice: state.settings.voiceReplyVoice
+    }),
+    [
+      state.settings.voiceEngine,
+      state.settings.geminiKey,
+      state.settings.voiceTtsVoice,
+      state.settings.voiceTtsModel,
+      state.settings.voiceReplyVoice
+    ]
+  )
+  const voiceConfigRef = useRef(voiceConfig)
+  voiceConfigRef.current = voiceConfig
+
+  /**
+   * Can anything speak at all?
+   *
+   * Not the same question as "is speechSynthesis present" any more: with a
+   * Gemini key the agent has a voice even on a machine with no SAPI voices
+   * installed, and the reply-mode buttons must not be greyed out on it.
+   */
+  const canSpeak = speaker.available || chooseEngine(voiceConfig) === 'gemini'
+
   /** True from just before the first syllable to just after the last. */
   const speakingRef = useRef(false)
   const [speaking, setSpeaking] = useState(false)
+
+  const noticeRef = useRef(actions.setNotice)
+  noticeRef.current = actions.setNotice
 
   /**
    * Say something, with the microphone shut for the duration.
@@ -186,17 +249,26 @@ export function VoicePanel(): ReactNode {
    * The stop/start around the utterance is the anti-feedback loop; `speakingRef`
    * is the second belt, because a phrase the sidecar had already cut can still
    * be delivered after `stop()`.
+   *
+   * Neural speech makes the *shape* of this matter more, not less. The request
+   * takes a couple of seconds, and the whole of that time counts as speaking:
+   * the mic is shut the moment there is something to say, not when the first
+   * sample arrives, because a sidecar re-armed in the gap would hear the reply
+   * and answer it. `voiceSpeaker` owns the engine chain — Gemini, then the local
+   * voice if that cannot run — so this never has to care which one is talking.
    */
   const sayAloud = useCallback(
     async (key: string, text: string): Promise<void> => {
-      if (!speaksAloud || !text.trim() || !speaker.available) return
+      if (!speaksAloud || !text.trim()) return
+      const config = voiceConfigRef.current
+      if (!speaker.available && chooseEngine(config) !== 'gemini') return
       speakingRef.current = true
       setSpeaking(true)
       if (armedRef.current) setPhase('speaking')
       void window.forge.stt.stop()
       try {
         // Keyed by turn: a re-render cannot make it say the same thing twice.
-        await speaker.speakOnce(key, text, { voiceName: state.settings.voiceReplyVoice })
+        await voiceSpeaker.speakOnce(key, text, config, (msg) => noticeRef.current(msg))
       } finally {
         // A short tail: the sidecar cuts a phrase on silence, so the last word
         // can land a beat after the audio stops.
@@ -205,7 +277,7 @@ export function VoicePanel(): ReactNode {
         setSpeaking(false)
       }
     },
-    [speaksAloud, state.settings.voiceReplyVoice]
+    [speaksAloud]
   )
 
   useEffect(() => {
@@ -260,11 +332,34 @@ export function VoicePanel(): ReactNode {
     setPhase(stt.phase === 'starting' ? 'warming' : 'listening')
   }, [armed, speaking, stt.phase])
 
+  /**
+   * The handover blip.
+   *
+   * This is what "returning to listening" sounds like now. It used to be a
+   * spoken sentence — the same words every time — and that was the single most
+   * robotic thing the agent did. 120 ms of quiet sine says it better, and it
+   * only fires coming *back* from a turn, never on the tap that arms the agent
+   * (`HANDS_BACK`), so a session does not open with a noise.
+   */
+  const previousPhase = useRef<AgentPhase>('off')
+  useEffect(() => {
+    const before = previousPhase.current
+    previousPhase.current = phase
+    if (phase !== 'listening' || !HANDS_BACK.has(before)) return
+    if (state.settings.voiceEarcons) earconListening()
+  }, [phase, state.settings.voiceEarcons])
+
   const toggleAgent = useCallback(() => {
     // Barge-in: pressing the button while it is talking shuts it up first, and
     // does not also turn the agent off. Interrupting is a conversation move.
+    //
+    // `voiceSpeaker.cancel()` does three things — stops the sound, aborts the
+    // TTS request that has not come back yet, and discards a reply already in
+    // the air. All three are needed: with a neural voice "it is talking" starts
+    // a second or two before any sound, and a clip that arrived after he
+    // interrupted would otherwise play over him.
     if (speakingRef.current) {
-      speaker.cancel()
+      voiceSpeaker.cancel()
       speakingRef.current = false
       setSpeaking(false)
       return
@@ -279,7 +374,7 @@ export function VoicePanel(): ReactNode {
       if (flashTimer.current) window.clearTimeout(flashTimer.current)
       flashTimer.current = null
       if (rearmTimer.current) window.clearTimeout(rearmTimer.current)
-      speaker.cancel()
+      voiceSpeaker.cancel()
       setPhase('off')
       void window.forge.stt.stop()
     }
@@ -467,6 +562,9 @@ export function VoicePanel(): ReactNode {
       setHolding(holds.current.size)
     })
   }, [])
+
+  /** The last thing said when something failed, so it is not said again. */
+  const lastFailure = useRef<string | undefined>(undefined)
 
   const runnerRef = useRef<ActionRunner | null>(null)
   runnerRef.current = {
@@ -853,7 +951,10 @@ export function VoicePanel(): ReactNode {
                 : t
             )
           )
-          const failed = 'That did not work — the brain failed. Try again?'
+          // Never the same words twice running: this is the one line Forge
+          // writes for itself often enough for the repetition to grate.
+          const failed = pickVaried(BRAIN_FAILED, lastFailure.current)
+          lastFailure.current = failed
           await speak(`${id}:error`, failed)
           return failed
         })
@@ -1041,7 +1142,7 @@ export function VoicePanel(): ReactNode {
         <span className="voice__spacer" />
         <ReplyModeToggle
           mode={replyMode}
-          canSpeak={speaker.available}
+          canSpeak={canSpeak}
           onPick={(next) => actions.patchSettings({ voiceReplyMode: next })}
         />
         <button
@@ -1242,7 +1343,7 @@ function ReplyModeToggle({
           data-on={m.id === mode ? 'true' : undefined}
           aria-pressed={m.id === mode}
           disabled={m.id !== 'text' && !canSpeak}
-          title={canSpeak ? m.hint : 'No speech voices are installed on this PC'}
+          title={canSpeak ? m.hint : 'Nothing can speak — add a Gemini key, or install a Windows voice'}
           onClick={() => onPick(m.id)}
         >
           {m.label}

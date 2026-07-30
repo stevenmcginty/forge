@@ -124,6 +124,13 @@ const FALLBACK_SETTINGS: Settings = {
   voiceRelayGraceMs: 2500,
   voiceReplyMode: 'both',
   voiceReplyVoice: '',
+  // Neural speech is the default, and with no key the engine chain in
+  // src/lib/tts.ts drops to the local voice on its own — so preferring the good
+  // one here cannot leave a keyless install silent.
+  voiceEngine: 'gemini',
+  voiceTtsVoice: '',
+  voiceTtsModel: '',
+  voiceEarcons: true,
   projectsRoot: '',
   geminiImageModel: '',
   openrouterKey: '',

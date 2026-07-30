@@ -117,6 +117,14 @@ function defaultSettings(): Settings {
     // talk to while you work.
     voiceReplyMode: 'both',
     voiceReplyVoice: '',
+    // Neural speech by default. With no Gemini key the renderer's engine chain
+    // degrades to the local SAPI voice on its own, so this is safe to prefer.
+    voiceEngine: 'gemini',
+    // Empty = the built-ins in electron/gemini-tts.ts (Sulafat, 3.1 flash TTS).
+    voiceTtsVoice: '',
+    voiceTtsModel: '',
+    // On: it is what replaced the spoken "listening again" announcement.
+    voiceEarcons: true,
     projectsRoot: '',
     // Empty = use gemini-media.ts's built-in default, which the MCP bridge shares.
     geminiImageModel: '',
@@ -350,6 +358,13 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
         ? s.voiceReplyMode
         : DEFAULT_SETTINGS.voiceReplyMode,
     voiceReplyVoice: typeof s.voiceReplyVoice === 'string' ? s.voiceReplyVoice.slice(0, 120) : '',
+    voiceEngine: s.voiceEngine === 'local' || s.voiceEngine === 'gemini' ? s.voiceEngine : DEFAULT_SETTINGS.voiceEngine,
+    // Blank is meaningful for both: "whatever gemini-tts.ts defaults to".
+    voiceTtsVoice: typeof s.voiceTtsVoice === 'string' ? s.voiceTtsVoice.trim().slice(0, 40) : '',
+    voiceTtsModel: typeof s.voiceTtsModel === 'string' ? s.voiceTtsModel.trim().slice(0, 80) : '',
+    // Undefined means a settings.json written before earcons existed, and the
+    // answer for that file is the default (on) rather than a silent off.
+    voiceEarcons: s.voiceEarcons === undefined ? DEFAULT_SETTINGS.voiceEarcons : Boolean(s.voiceEarcons),
     projectsRoot: typeof s.projectsRoot === 'string' ? s.projectsRoot.slice(0, 400) : '',
     voiceRelayGraceMs: Number.isFinite(s.voiceRelayGraceMs)
       ? clamp(s.voiceRelayGraceMs as number, 0, 60_000)
