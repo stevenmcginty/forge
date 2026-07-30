@@ -76,9 +76,42 @@ Nothing at all, unless you ask for it.
   dictation is entirely offline: your voice never leaves the machine. Start it
   from the welcome card or from Settings; skip it and dictation simply stays
   off.
-- **Nothing else.** No telemetry, no update check, no analytics. The only
-  outbound request Forge itself ever makes is to Google's Gemini API, and only
-  once you have pasted in your own key and are using the voice panel.
+- **An update check.** Once at launch and every six hours after, a packaged
+  Forge asks GitHub whether there is a newer release. It is one small HTTPS GET
+  that sends nothing about you, and if there *is* a newer version it puts a
+  strip under the titlebar and waits. Nothing downloads until you click it.
+  (Running from source never checks at all.)
+- **Nothing else.** No telemetry, no analytics. The only other outbound request
+  Forge itself makes is to Google's Gemini API, and only once you have pasted in
+  your own key and are using the voice panel.
+
+### About that update — Forge is not signed
+
+Forge has no code-signing certificate, and the update it downloads is another
+unsigned build. That matters more than it sounds:
+
+- **SmartScreen** will warn about the downloaded installer exactly as it warned
+  about the first one. Same **More info → Run anyway** click.
+- **Smart App Control**, if it is On, may block the update outright and
+  silently — the same way it blocks the first launch. If Forge will not update,
+  that is almost certainly why. Download the release by hand, or run from
+  source.
+- Because it is unsigned, nothing *cryptographically* proves the update came
+  from the same place the app did. The download is checksummed against the
+  release manifest, so it cannot be corrupted in transit, but a signature is
+  what proves authorship and there isn't one.
+
+The honest recommendation: **if Forge is ever really distributed, sign it.** A
+code-signing certificate is a few hundred pounds a year and it makes all three
+of the above go away. Until then the update path is a convenience for people who
+already trust where they got the app from, and the "Update & restart" button can
+be ignored forever without anything breaking.
+
+There is also a switch in **Settings → Updates & tools** for the *other* kind of
+update — the CLIs Forge runs. It shows what you have and what is current for
+PowerShell, Claude Code, Gemini CLI and Node, and the Update button opens a
+terminal pane with the right command typed into it, unsubmitted. You press
+Enter. It never runs an installer on your behalf unless you turn that on.
 
 The speech *engine* is already in the download (about 130 MB of it), so you do
 not need Python.

@@ -1132,3 +1132,98 @@
   opacity: 0.45;
   cursor: default;
 }
+
+/* --------------------------------------------------------- updates & tools
+ *
+ * One row per tool, laid out as: what it is | what you have → what exists |
+ * a state chip | the buttons. The middle column is monospaced and pivots on the
+ * arrow, so the two version numbers line up down the list and "7.6.4 → 7.6.4"
+ * reads as *the same number twice* at a glance rather than as something to
+ * parse.
+ */
+
+.stool {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.stool__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  padding: var(--s-4) 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.stool__row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.stool__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stool__name {
+  font-size: var(--t-md);
+}
+
+.stool__blurb {
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.stool__versions {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 210px;
+}
+
+.stool__version {
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stool__version--latest {
+  text-align: left;
+  color: var(--text-dim);
+}
+
+/* The one number that has changed is the one worth reading. */
+.stool__row[data-behind='true'] .stool__version--latest {
+  color: var(--accent);
+}
+
+.stool__arrow {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.stool__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 140px;
+  justify-content: flex-end;
+}
+
+.stool__update[data-behind='true'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+}

@@ -139,7 +139,11 @@ function defaultSettings(): Settings {
     companionTokenBase: '',
     companionEmail: '',
     companionRefreshToken: '',
-    companionUid: ''
+    companionUid: '',
+    // The Update button types the command and stops. Turning this on is opting
+    // in to a settings page that can start an installer with one click.
+    updatesAutoRun: false,
+    updateDismissedVersion: ''
   }
 }
 
@@ -374,7 +378,13 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     companionTokenBase: str(s.companionTokenBase).replace(/\/+$/, ''),
     companionEmail: str(s.companionEmail),
     companionRefreshToken: str(s.companionRefreshToken),
-    companionUid: str(s.companionUid)
+    companionUid: str(s.companionUid),
+    // Coerced rather than defaulted, like companionEnabled above: a settings.json
+    // written before M10 has no key, and the answer for that file is "no".
+    updatesAutoRun: Boolean(s.updatesAutoRun),
+    // A version string goes into a comparison, never into markup — but it also
+    // never needs to be longer than "10.20.30-rc.1", so it is capped.
+    updateDismissedVersion: str(s.updateDismissedVersion).slice(0, 40)
   }
 }
 

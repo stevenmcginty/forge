@@ -80,6 +80,33 @@ buildDependenciesFromSource: false
 # the secrets audit runs against the packed app directory as an afterPack hook.
 afterPack: ./scripts/after-pack.cjs
 
+# ------------------------------------------------------------------ updates
+#
+# Where a packaged Forge looks for a newer one. This block is also what makes
+# electron-builder emit `latest.yml` beside the artifacts, which is the file
+# electron-updater actually reads — without it, a packaged build has no feed
+# and reports "up to date" forever.
+#
+# Nothing here is a secret. The GitHub provider reads *public* releases with an
+# unauthenticated request; publishing to them needs a GH_TOKEN in the
+# environment of whoever runs `electron-builder --publish`, and that token is
+# never written into the app, this file, or the build.
+#
+# The repo does not exist yet. That is handled rather than hoped for: the
+# releases API answers 404, electron-updater raises, and electron/updater.ts
+# classifies it as "no feed" and stays silent. See isNoFeedError() in
+# shared/tools.ts.
+#
+# Forge is unsigned, so an auto-update replaces an unsigned exe with another
+# unsigned exe. SmartScreen will have opinions and Smart App Control may refuse
+# outright — GIVE-TO-A-FRIEND.md says so plainly, and so does the Updates &
+# tools settings section.
+publish:
+  provider: github
+  owner: stevenmcginty
+  repo: forge
+  releaseType: release
+
 win:
   icon: build/icon.ico
   # Forge-0.1.0-win.zip — the give-to-a-friend one. NSIS overrides this below.

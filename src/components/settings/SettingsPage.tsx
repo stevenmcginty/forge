@@ -7,6 +7,7 @@ import { AgentsSection } from './AgentsSection'
 import { AppearanceSection } from './AppearanceSection'
 import { ModelsSection } from './ModelsSection'
 import { ShotsSection } from './ShotsSection'
+import { UpdatesSection } from './UpdatesSection'
 import { VoiceSection } from './VoiceSection'
 import './SettingsPage.css'
 
@@ -29,6 +30,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName; blur
   { id: 'voice', label: 'Voice', icon: 'voice', blurb: 'dictation and relay' },
   { id: 'appearance', label: 'Appearance', icon: 'palette', blurb: 'themes and type' },
   { id: 'screenshots', label: 'Screenshots', icon: 'camera', blurb: 'the shelf' },
+  { id: 'updates', label: 'Updates & tools', icon: 'restart', blurb: 'CLIs, and Forge itself' },
   { id: 'advanced', label: 'Advanced', icon: 'gear', blurb: 'paths and versions' }
 ]
 
@@ -113,6 +115,7 @@ export function SettingsPage(): ReactNode {
             {section === 'voice' ? <VoiceSection /> : null}
             {section === 'appearance' ? <AppearanceSection /> : null}
             {section === 'screenshots' ? <ShotsSection /> : null}
+            {section === 'updates' ? <UpdatesSection /> : null}
             {section === 'advanced' ? <AdvancedSection /> : null}
           </div>
         </div>

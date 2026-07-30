@@ -291,6 +291,93 @@ export interface ThemeCore {
 export type ClaudeCliState =
   | { ok: true; version: string }
   | { ok: false; error: string }
+
+/* ------------------------------------------------------ updates & tools */
+
+/** The tools the Updates & Tools section reports on. See shared/tools.ts. */
+export type ToolId = 'pwsh' | 'claude' | 'kimi' | 'gemini' | 'node'
+
+/** Where "the latest version" comes from for a given tool. */
+export type ToolLatestSource = 'npm' | 'winget' | 'local' | 'none'
+
+export interface ToolSpec {
+  id: ToolId
+  name: string
+  /** One line under the name, explaining what this thing is to Forge. */
+  blurb: string
+  /** The executable to look for on PATH. */
+  command: string
+  /** Arguments that make it print its version, or null to never spawn it. */
+  versionArgs: string[] | null
+  latest: {
+    source: ToolLatestSource
+    /** For `npm`. */
+    npmPackage?: string
+    /** For `winget`, tried in order until one is installed. */
+    wingetIds?: string[]
+  }
+  /**
+   * The command the Update button types into a pane. Null means Forge has no
+   * business updating this one — a local shim, or something whose installer it
+   * cannot know (Node from nvm is not Node from winget).
+   */
+  updateCommand: string | null
+}
+
+/** What is on this machine right now. */
+export interface ToolProbe {
+  id: ToolId
+  /** Resolved on PATH? */
+  found: boolean
+  /** Absolute path, when found. */
+  path?: string
+  /** Parsed installed version, when one could be read. */
+  version?: string
+  /** Why there is no version, when there is not. */
+  error?: string
+}
+
+/** What the outside world says the latest version is. */
+export interface ToolLatest {
+  id: ToolId
+  source: ToolLatestSource
+  latest?: string
+  /** winget only: the package id that actually answered. */
+  via?: string
+  /** Set when the check could not be made — offline, 404, no winget. */
+  error?: string
+  /** Epoch ms of the answer, so the UI can say how stale it is. */
+  checkedAt: number
+}
+
+/* ------------------------------------------------------ forge self-update */
+
+/**
+ * The self-updater's whole visible state. `unsupported` is the honest answer in
+ * a dev run and in any build with no publish feed behind it — it is not an
+ * error, and the banner must never appear for it.
+ */
+export type UpdatePhase =
+  | 'unsupported'
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'ready'
+  | 'error'
+
+export interface UpdateStatus {
+  phase: UpdatePhase
+  /** The version being offered, when there is one. */
+  version?: string
+  /** 0–100 while downloading. */
+  percent?: number
+  bytesPerSecond?: number
+  error?: string
+  /** True when this status came from FORGE_FAKE_UPDATE rather than a real feed. */
+  simulated?: boolean
+}
+
 /* --------------------------------------------------------- media generation */
 
 /**
@@ -521,6 +608,25 @@ export interface Settings {
    */
   companionRefreshToken: string
   companionUid: string
+
+  /* ------------------------------------------------ updates & tools (M10) */
+  /**
+   * What the Update button does with the command it puts in a pane.
+   *
+   * False — the default — types it and stops, leaving the cursor at the end of
+   * an unsubmitted line. You read `winget upgrade Microsoft.PowerShell`, you
+   * press Enter. True presses Enter for you.
+   *
+   * The default is the safe one because the alternative is a settings page
+   * that can start installing software with one click on a button whose label
+   * does not say "and run it now".
+   */
+  updatesAutoRun: boolean
+  /**
+   * The Forge version whose update banner has been dismissed. Per-version on
+   * purpose: saying "not now" to 0.2.0 must not silence 0.3.0 as well.
+   */
+  updateDismissedVersion: string
 }
 
 /* ---------------------------------------------------- companion ipc (M9) */

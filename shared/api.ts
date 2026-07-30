@@ -29,6 +29,10 @@ import type {
   SttModelState,
   SttPhraseEvent,
   SttStatus,
+  ToolId,
+  ToolLatest,
+  ToolProbe,
+  UpdateStatus,
   WindowStateEvent,
   Workspace
 } from './types'
@@ -207,6 +211,37 @@ export interface ForgeApi {
     userName(): Promise<string>
     /** `claude --version`, or why it could not be run. */
     claudeVersion(): Promise<ClaudeCliState>
+  }
+
+  /**
+   * The Updates & Tools section's two questions. Both are read-only: nothing
+   * here installs, upgrades or downloads. Running an update command is the
+   * renderer's job, and it does it by typing into a real terminal pane.
+   */
+  tools: {
+    /** What is on PATH and what version it reports. Cached for the session. */
+    probe(refresh?: boolean): Promise<ToolProbe[]>
+    /**
+     * What winget and the npm registry say is available. Slow and network-bound,
+     * so it is separate from probe() and cached for half an hour unless
+     * `refresh` says otherwise.
+     */
+    latest(ids?: ToolId[] | null, refresh?: boolean): Promise<ToolLatest[]>
+  }
+
+  /**
+   * Forge updating itself. Packaged builds only — in a dev run every one of
+   * these is safe to call and the status stays `unsupported`, which is what
+   * keeps the banner off screen while you are working on the app.
+   */
+  updates: {
+    status(): Promise<UpdateStatus>
+    check(): Promise<UpdateStatus>
+    /** Start the download. Only ever called from the banner, by a click. */
+    download(): Promise<UpdateStatus>
+    /** Quit and run the installer. False when there is nothing ready. */
+    install(): Promise<boolean>
+    onStatus(cb: (s: UpdateStatus) => void): () => void
   }
 
   /**

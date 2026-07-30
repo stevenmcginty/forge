@@ -102,6 +102,18 @@ export const IPC = {
   systemUserName: 'system:user-name',
   systemClaudeVersion: 'system:claude-version',
 
+  // updates & tools (M10) — what is installed, what is available
+  toolsProbe: 'tools:probe',
+  toolsLatest: 'tools:latest',
+
+  // forge self-update (M10). Packaged builds only; every one of these is safe
+  // to call in a dev run and answers `unsupported`.
+  updateStatus: 'update:status',
+  updateStatusEvent: 'update:status-event',
+  updateCheck: 'update:check',
+  updateDownload: 'update:download',
+  updateInstall: 'update:install',
+
   // diagnostics
   rendererError: 'diag:renderer-error'
 } as const

@@ -30,6 +30,7 @@
     "packaged:check": "node scripts/packaged-check.mjs",
     "secrets:test": "node scripts/secrets-audit-test.mjs",
     "theme:check": "node scripts/theme-check.mjs",
+    "updates:check": "node scripts/updates-check.mjs",
     "companion:smoke": "node scripts/companion-smoke.mjs",
     "companion:icons": "node scripts/companion-icons.mjs",
     "companion:serve": "node scripts/companion-serve.mjs"
@@ -52,6 +53,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
+    "electron-updater": "^6.8.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   }
