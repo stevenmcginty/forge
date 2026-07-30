@@ -119,7 +119,11 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     if (typeof p.command !== 'string') p.command = ''
     if (!p.accent) p.accent = '#C6FF4A'
     if (!p.badge) p.badge = p.name.slice(0, 2).toUpperCase()
-    p.builtin = BUILTIN_AGENT_PROFILES.some((b) => b.id === p.id)
+    const builtin = BUILTIN_AGENT_PROFILES.find((b) => b.id === p.id)
+    p.builtin = Boolean(builtin)
+    // Adopt a new built-in default (e.g. the Gemini bridge) into a settings.json
+    // written before the flag existed, without overriding a deliberate opt-out.
+    if (p.mcpBridge === undefined && builtin?.mcpBridge !== undefined) p.mcpBridge = builtin.mcpBridge
   }
 
   const win = s.window ?? DEFAULT_SETTINGS.window

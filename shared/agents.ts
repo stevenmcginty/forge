@@ -20,7 +20,10 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     command: 'claude',
     accent: '#C6FF4A',
     badge: 'CC',
-    builtin: true
+    builtin: true,
+    // Claude gets the Gemini bridge: video summaries, image generation and
+    // second opinions it cannot produce on its own.
+    mcpBridge: true
   },
   {
     id: 'kimi',
@@ -28,6 +31,14 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     command: 'kimi',
     accent: '#C08BFF',
     badge: 'KI',
+    builtin: true
+  },
+  {
+    id: 'gemini',
+    name: 'Gemini',
+    command: 'gemini',
+    accent: '#7C9CFF',
+    badge: 'GM',
     builtin: true
   }
 ]

@@ -23,6 +23,12 @@ export interface AgentProfile {
   badge: string
   /** Built-ins ship with the app and cannot be deleted (only edited). */
   builtin?: boolean
+  /**
+   * Register Forge's cross-agent bridge (the Gemini MCP server) with this
+   * agent at launch. Only meaningful for agents that accept Claude Code's
+   * `--mcp-config` flag. Set `false` explicitly to opt a built-in out.
+   */
+  mcpBridge?: boolean
 }
 
 /* ---------------------------------------------------------------- projects */

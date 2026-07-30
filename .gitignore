@@ -12,3 +12,6 @@ dist/
 # Generated test audio for the dictation smoke test — regenerate with
 # scripts/make-speech-wav.ps1 rather than carrying a WAV in the repo.
 scripts/fixtures/
+
+# Temp probe files written into the root by scripts/bridge-register-check.mjs
+.bridge-check-*.cjs
