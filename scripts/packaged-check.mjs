@@ -17,6 +17,10 @@
  * against an isolated FORGE_DATA_DIR, so it can never touch a real install — and
  * so the data directory is genuinely empty, which is the only way to see the
  * first-run overlay.
+ *
+ * The debug port defaults to 9411 and can be moved with `--port` or the
+ * FORGE_CHECK_PORT environment variable, which is what you want when something
+ * else on the machine is already listening.
  */
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -31,7 +35,11 @@ const val = (f, d) => {
 }
 const APP = resolve(val('--app', join(ROOT, 'release', 'win-unpacked', 'Forge.exe')))
 const RESOURCES = join(APP, '..', 'resources')
-const PORT = Number(val('--port', '9333'))
+// The CDP port. 9333 was the old default and it collided with other tooling
+// running on this machine, which fails as a confusing CDP timeout rather than
+// as "port in use" — so it is configurable, and the default is deliberately an
+// odd number nothing else claims. `--port` still wins over the environment.
+const PORT = Number(val('--port', process.env.FORGE_CHECK_PORT || '9411'))
 const KEEP = argv.includes('--keep')
 
 let pass = 0

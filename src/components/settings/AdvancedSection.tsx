@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { SttStatus } from '@shared/types'
+import type { CompanionStatus, SttStatus } from '@shared/types'
 import { usePaneCount, useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
-import { Card, Row, Section, StateChip } from './parts'
+import { Card, Row, Section, StateChip, Toggle } from './parts'
 
 /**
  * Where things live and what state they are in. No knobs that belong somewhere
@@ -89,6 +89,8 @@ export function AdvancedSection(): ReactNode {
         </dl>
       </Card>
 
+      <CompanionCard />
+
       <Card title="Colour in terminals" tone="quiet">
         <p className="scard__hint">
           Forge answers OSC 10/11 colour queries with the current theme&rsquo;s terminal background and foreground, so
@@ -99,6 +101,72 @@ export function AdvancedSection(): ReactNode {
       </Card>
     </Section>
   )
+}
+
+/* ------------------------------------------------------- forge companion */
+
+/**
+ * The phone link's switch and its one honest status line.
+ *
+ * Deliberately the whole UI: turning it on is not enough to make it work, and
+ * pretending otherwise with a sign-in form here would be the dead end. The
+ * Firebase project, the rules and the credentials are a one-time setup that
+ * lives in companion/GO-LIVE.md, and the status line says which step you are
+ * stuck on rather than a bare "off".
+ *
+ * `enabled` is the only field this card writes. Everything else is read from
+ * the main process, which is also the only thing that can start the sync.
+ */
+function CompanionCard(): ReactNode {
+  const { state, actions } = useApp()
+  const [status, setStatus] = useState<CompanionStatus | null>(null)
+
+  useEffect(() => {
+    void window.forge.companion.status().then(setStatus)
+    return window.forge.companion.onStatus(setStatus)
+  }, [])
+
+  const on = state.settings.companionEnabled
+  const configured = status?.configured ?? false
+
+  return (
+    <Card
+      title="Phone companion"
+      tone="quiet"
+      hint={
+        <>
+          A phone web app that can see your projects and send you a message back. Off, unconfigured and holding no
+          credentials until you set it up — nothing here makes a network call on its own. The setup is a Firebase
+          project and about ten minutes: see <span className="mono">companion/GO-LIVE.md</span> in the Forge checkout.
+        </>
+      }
+    >
+      <Row label="Enable" hint="Off by default. On its own this only allows the link — it does not create one.">
+        <Toggle
+          checked={on}
+          onChange={(next) => actions.patchSettings({ companionEnabled: next })}
+          label="Enable the phone companion"
+        />
+      </Row>
+      <Row label="Status">
+        <StateChip tone={companionTone(on, status)}>{status?.state ?? 'off'}</StateChip>
+      </Row>
+      {status?.detail || !configured ? (
+        <p className="scard__hint">
+          {status?.detail ||
+            (on
+              ? 'No Firebase project configured yet, so there is nothing to connect to. Follow GO-LIVE.md, then sign in.'
+              : 'Switched off.')}
+        </p>
+      ) : null}
+    </Card>
+  )
+}
+
+function companionTone(enabled: boolean, status: CompanionStatus | null): 'ok' | 'warn' | 'off' {
+  if (!enabled) return 'off'
+  if (!status || !status.configured) return 'warn'
+  return status.state === 'live' ? 'ok' : 'warn'
 }
 
 function sttTone(stt: SttStatus | null): 'ok' | 'warn' | 'off' {
