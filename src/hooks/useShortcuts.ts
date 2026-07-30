@@ -51,10 +51,22 @@ export function useShortcuts(): void {
         return
       }
 
-      // Text fields (renaming a pane/tab, popover forms, the voice composer)
-      // keep their keys.
+      /*
+       * Text fields (renaming a pane/tab, popover forms, the voice composer)
+       * keep their keys.
+       *
+       * With one exception, and it matters more than it looks: xterm reads
+       * keystrokes through a hidden <textarea>, so a focused terminal is a
+       * focused text field — and a focused terminal is the normal state of this
+       * app. Bailing out here meant Ctrl+T, Ctrl+W and the rest quietly did
+       * nothing the moment you had actually started working, and only appeared
+       * to work on an empty workspace. The terminal's own keys are intercepted
+       * per pane in terminalHost; everything below is an app accelerator that
+       * should win.
+       */
       const el = document.activeElement
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
+      const inTerminal = el instanceof HTMLTextAreaElement && el.classList.contains('xterm-helper-textarea')
+      if (!inTerminal && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return
 
       const activePaneId = tab?.activePaneId ?? null
 

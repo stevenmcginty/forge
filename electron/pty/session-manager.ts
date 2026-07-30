@@ -262,6 +262,29 @@ function resolveCwd(cwd: string): string | null {
 }
 
 /**
+ * Markers Claude Code sets on its own child processes to say "you are running
+ * inside an agent session".
+ *
+ * They are correct for the process Claude spawned — and wrong for everything
+ * that process goes on to launch. Start Forge from a Claude pane and every
+ * terminal in it inherits them, so a fresh `claude` in one of Forge's panes
+ * believes it is a child of a session that is nothing to do with it and turns
+ * transcript saving off: "⚠ Transcript saving is off — inherited
+ * CLAUDE_CODE_CHILD_SESSION marker".
+ *
+ * A pane is a new top-level shell, not a continuation of whatever launched
+ * Forge, so the markers are dropped. Only these four, by name: authentication
+ * (`CLAUDE_CODE_OAUTH_TOKEN` and friends) and any deliberate configuration the
+ * user exported are left exactly as they are.
+ */
+const CLAUDE_SESSION_MARKERS = [
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDECODE',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_SSE_PORT'
+]
+
+/**
  * Electron injects variables that confuse child Node processes (notably
  * ELECTRON_RUN_AS_NODE, which would make `claude` boot as a bare Node script).
  * Strip them and add the usual terminal hints.
@@ -272,6 +295,7 @@ function buildEnv(): Record<string, string> {
     if (v === undefined) continue
     if (/^ELECTRON_(RUN_AS_NODE|NO_ATTACH_CONSOLE|IS_DEV|ENABLE_LOGGING)$/.test(k)) continue
     if (k === 'NODE_OPTIONS') continue
+    if (CLAUDE_SESSION_MARKERS.includes(k)) continue
     env[k] = v
   }
   env.TERM = 'xterm-256color'
