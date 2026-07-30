@@ -99,7 +99,12 @@ runs it off window focus (`electron/presence.ts`):
 | have a Forge window focused      | exists          | silent     |
 | alt-tab to a browser for 3s      | still exists    | silent     |
 | walk away (5s+ with no focus)    | deleted         | buzzes     |
+| minimise Forge                   | deleted (5s)    | buzzes     |
 | come back                        | recreated       | silent     |
+
+Minimised counts as away even when Windows still reports the window as focused,
+which it sometimes does — a window you cannot see is not one you are watching,
+and without that rule the phone could stay silent all afternoon.
 
 The five-second grace period is deliberate: without it every window switch would
 open and close the push gate, which reads as a phone buzzing at random. Focus is

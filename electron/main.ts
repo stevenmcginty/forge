@@ -126,13 +126,18 @@ function schedulePersistBounds(): void {
 }
 
 /**
- * "Is Steve at the PC?" — true while *any* Forge window has focus. Wired to
- * every window's focus/blur; the walk-away debounce lives in presence.ts, so a
- * blur followed straight away by another Forge window focusing never registers
- * as an absence.
+ * "Is Steve at the PC?" — true while *any* Forge window has focus and is not
+ * minimised. The walk-away debounce lives in presence.ts, so a blur followed
+ * straight away by another Forge window focusing never registers as an absence.
+ *
+ * Minimised counts as away even when Windows still reports the window as
+ * focused, which it sometimes does: a window you cannot see is not a window you
+ * are watching, and without this the phone could stay silent all afternoon.
  */
 function syncPresence(): void {
-  setPresence(BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isFocused()))
+  setPresence(
+    BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isFocused() && !w.isMinimized())
+  )
 }
 
 function createWindow(): void {
@@ -233,6 +238,12 @@ function createWindow(): void {
     emitWindowState()
     syncPresence()
   })
+  // Minimising does not reliably emit `blur` on Windows, and a minimised Forge
+  // is the clearest "I have walked away" there is.
+  mainWindow.on('minimize', syncPresence)
+  mainWindow.on('restore', syncPresence)
+  mainWindow.on('hide', syncPresence)
+  mainWindow.on('show', syncPresence)
 
   mainWindow.on('close', () => {
     if (boundsTimer) clearTimeout(boundsTimer)
@@ -398,6 +409,10 @@ void app.whenReady().then(() => {
   // pane's CLAUDE_CLIENT_PRESENCE_FILE, and init also clears a marker left
   // behind by a crash (a stale one would mute the phone for good).
   initPresence(getDataDir())
+  // App-level, so presence follows *any* Forge window rather than only the one
+  // createWindow happens to be holding.
+  app.on('browser-window-focus', syncPresence)
+  app.on('browser-window-blur', syncPresence)
   registerPtyHandlers()
   registerShotsHandlers()
   registerSttHandlers()
