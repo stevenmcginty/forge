@@ -20,34 +20,73 @@ import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
  */
 
 /**
- * Dictation reuses DictationMic's interpreter and its already-downloaded
- * Parakeet model rather than shipping a second 660 MB copy. Both are editable
- * in settings.json (and from the pill's setup card) for anyone whose install
- * lives elsewhere.
+ * Dictation's two paths default to *nothing found*, and are filled in only when
+ * this particular machine happens to have something usable.
+ *
+ * A packaged Forge carries its own frozen sidecar and downloads its own model,
+ * so the normal answer on a fresh install is the empty string — which the
+ * dictation host reports as a clean setup state rather than pointing at a folder
+ * that only exists on the machine Forge was written on.
+ *
+ * The fast path is for that machine: an install of DictationMic already has an
+ * interpreter with onnx-asr in it and has already paid for the 660 MB model, so
+ * if it is there, use it. Both are editable in settings.json and from Settings.
  */
-const DICTATION_HOME = join(homedir(), 'Desktop', 'DictationMic')
+const PARAKEET_NAME = 'parakeet-tdt-0.6b-v2'
 
-const DEFAULT_SETTINGS: Settings = {
-  agentProfiles: BUILTIN_AGENT_PROFILES,
-  lastProjectId: null,
-  railCollapsed: false,
-  terminalFontSize: 13,
-  terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
-  shell: 'pwsh.exe',
-  catchShots: true,
-  shotsKeep: DEFAULT_KEEP,
-  window: { width: 1440, height: 900, maximized: false },
-  sttPython: join(DICTATION_HOME, 'venv', 'Scripts', 'python.exe'),
-  sttModelDir: join(DICTATION_HOME, 'models', 'parakeet-tdt-0.6b-v2'),
-  sttAutoStopSeconds: 10,
-  sttHotkey: 'ControlRight',
-  voicePanelOpen: false,
-  voicePanelWidth: 380,
-  // Gemini is the live brain; with no key set it degrades to the stub.
-  voiceBrain: 'gemini',
-  anthropicKey: '',
-  geminiKey: '',
-  geminiModel: 'gemini-2.5-flash'
+function dictationMicHome(): string {
+  return join(homedir(), 'Desktop', 'DictationMic')
+}
+
+/** An interpreter that can import onnx-asr, if one is sitting on this disk. */
+function detectSttPython(): string {
+  const candidate = join(dictationMicHome(), 'venv', 'Scripts', 'python.exe')
+  return existsSync(candidate) ? candidate : ''
+}
+
+/**
+ * A Parakeet model already on this disk: Forge's own download first, then
+ * DictationMic's copy. Empty when neither is there.
+ *
+ * Deliberately not shared with electron/stt-model.ts's defaultModelDir(): that
+ * one is evaluated live on every spawn, this one only seeds a fresh
+ * settings.json. Keeping them apart means downloading the model does not have to
+ * rewrite a setting the user may have pointed somewhere else on purpose.
+ */
+function detectSttModelDir(): string {
+  for (const candidate of [
+    join(resolveDataRoot(), 'models', PARAKEET_NAME),
+    join(dictationMicHome(), 'models', PARAKEET_NAME)
+  ]) {
+    if (existsSync(candidate)) return candidate
+  }
+  return ''
+}
+
+function defaultSettings(): Settings {
+  return {
+    agentProfiles: BUILTIN_AGENT_PROFILES,
+    lastProjectId: null,
+    railCollapsed: false,
+    terminalFontSize: 13,
+    terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
+    shell: 'pwsh.exe',
+    catchShots: true,
+    shotsKeep: DEFAULT_KEEP,
+    window: { width: 1440, height: 900, maximized: false },
+    onboarded: false,
+    sttPython: detectSttPython(),
+    sttModelDir: detectSttModelDir(),
+    sttAutoStopSeconds: 10,
+    sttHotkey: 'ControlRight',
+    voicePanelOpen: false,
+    voicePanelWidth: 380,
+    // Gemini is the live brain; with no key set it degrades to the stub.
+    voiceBrain: 'gemini',
+    anthropicKey: '',
+    geminiKey: '',
+    geminiModel: 'gemini-2.5-flash'
+  }
 }
 
 let dataDir = ''
@@ -110,6 +149,7 @@ function writeJson(name: string, value: unknown): void {
 /** Keep unknown/extra keys out, fill missing keys in, never trust the file. */
 function normaliseSettings(raw: Partial<Settings> | null): Settings {
   const s = raw ?? {}
+  const DEFAULT_SETTINGS = defaultSettings()
   const profiles = Array.isArray(s.agentProfiles) ? s.agentProfiles.filter((p) => p && p.id && p.name) : []
   // Re-seed any built-in the user deleted by hand, preserving their edits.
   for (const builtin of BUILTIN_AGENT_PROFILES) {
@@ -137,6 +177,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     shell: s.shell || DEFAULT_SETTINGS.shell,
     catchShots: s.catchShots ?? true,
     shotsKeep: clampKeep(s.shotsKeep),
+    onboarded: s.onboarded === true,
     sttPython: typeof s.sttPython === 'string' ? s.sttPython : DEFAULT_SETTINGS.sttPython,
     sttModelDir: typeof s.sttModelDir === 'string' ? s.sttModelDir : DEFAULT_SETTINGS.sttModelDir,
     // 0 legitimately means "never auto-stop", so a junk value has to fall back

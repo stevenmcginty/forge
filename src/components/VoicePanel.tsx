@@ -611,8 +611,16 @@ function VoiceSettings(): ReactNode {
             </div>
           </div>
         ) : (
-          <button type="button" className="ghost-btn voice__import-btn" onClick={() => void importKey()}>
-            Import from DictationMic
+          <button
+            type="button"
+            className="ghost-btn voice__import-btn"
+            // Not "Import from DictationMic": on anyone else's machine that
+            // names an app they have never heard of. The main process looks in
+            // several places and the result says which one it found.
+            title="Look for a Gemini key already saved on this machine"
+            onClick={() => void importKey()}
+          >
+            Import a saved key
           </button>
         )}
         {importError ? <div className="voice__import-error">{importError}</div> : null}

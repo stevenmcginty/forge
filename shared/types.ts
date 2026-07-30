@@ -168,6 +168,12 @@ export interface Settings {
   /** How many shots the shelf keeps before pruning the oldest. */
   shotsKeep: number
   window: WindowBounds
+  /**
+   * Set once the first-run welcome has been dismissed. Absent (or false) in a
+   * fresh data directory is exactly what "first run" means — see
+   * src/components/Onboarding.tsx.
+   */
+  onboarded: boolean
 
   /* ------------------------------------------------------ dictation (M3) */
   /** Python interpreter that can import onnx-asr + sounddevice. */
@@ -299,6 +305,53 @@ export interface SttStatus {
 
 export interface SttPhraseEvent {
   text: string
+}
+
+/* --------------------------------------------------- speech model (M8) */
+
+/**
+ * Forge ships the dictation engine but not the 660 MB Parakeet model, which is
+ * fetched on demand into %APPDATA%\Forge\models. This is that fetch, as the UI
+ * sees it — one object covering both "what is on disk" and "how far along".
+ *
+ *   unknown      nobody has looked yet
+ *   missing      not downloaded
+ *   partial      a previous attempt left bytes behind; it will resume
+ *   downloading  in flight, `fraction` is live
+ *   ready        installed and big enough to be real
+ */
+export type SttModelStatus = 'unknown' | 'missing' | 'partial' | 'downloading' | 'ready'
+
+export interface SttModelState {
+  status: SttModelStatus
+  /** Folder the model is (or will be) in. Empty when nothing is configured. */
+  dir: string
+  bytes: number
+  totalBytes: number
+  /** 0..1 across the whole model. */
+  fraction: number
+  /** File currently being fetched, while downloading. */
+  file: string
+  /** One sentence fit to show the user, including the failure reason. */
+  message: string
+  /** e.g. "~660 MB" — what to warn about before they commit. */
+  sizeHint: string
+}
+
+/* ------------------------------------------------------- agent detection */
+
+/** One of the CLI agents Forge can launch, as found (or not) on PATH. */
+export interface AgentPresence {
+  /** Matches the built-in profile id: `claude`, `kimi`, `gemini`. */
+  id: string
+  name: string
+  /** The command Forge would type into a shell. */
+  command: string
+  found: boolean
+  /** Absolute path of the resolved executable, when we found one. */
+  path?: string
+  /** Where to go and get it. */
+  installUrl: string
 }
 
 /**

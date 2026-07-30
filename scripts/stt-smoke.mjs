@@ -14,6 +14,7 @@
 import { spawn } from 'node:child_process'
 import { createConnection } from 'node:net'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -25,10 +26,30 @@ const val = (f, d) => {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : d
 }
 
-const PY = val('--python', 'C:/Users/steve/Desktop/DictationMic/venv/Scripts/python.exe')
+/*
+ * Defaults are *discovered*, never hardcoded to one person's disk: an interpreter
+ * with onnx-asr in it and an already-downloaded model, wherever this machine
+ * happens to keep them. Pass --python / --model to override either.
+ */
+const DICTATION_MIC = join(homedir(), 'Desktop', 'DictationMic')
+const FORGE_DATA = process.env.FORGE_DATA_DIR || join(process.env.APPDATA || homedir(), 'Forge')
+
+const firstThatExists = (...paths) => paths.find((p) => p && existsSync(p)) ?? paths[paths.length - 1]
+
+const PY = val(
+  '--python',
+  firstThatExists(process.env.FORGE_STT_PYTHON, join(DICTATION_MIC, 'venv', 'Scripts', 'python.exe'), 'python')
+)
 const MODEL = has('--bad-model')
-  ? 'C:/nope/not/a/model'
-  : val('--model', 'C:/Users/steve/Desktop/DictationMic/models/parakeet-tdt-0.6b-v2')
+  ? join(ROOT, 'no-such-folder', 'not-a-model')
+  : val(
+      '--model',
+      firstThatExists(
+        process.env.FORGE_STT_MODEL_DIR,
+        join(FORGE_DATA, 'models', 'parakeet-tdt-0.6b-v2'),
+        join(DICTATION_MIC, 'models', 'parakeet-tdt-0.6b-v2')
+      )
+    )
 const WAV = val('--wav', join(ROOT, 'scripts', 'fixtures', 'speech.wav'))
 const AUTO_STOP = val('--auto-stop', '4')
 

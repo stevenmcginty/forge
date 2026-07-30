@@ -58,13 +58,22 @@ const api: ForgeApi = {
     reload: (force) => ipcRenderer.invoke(IPC.sttReload, force === true),
     status: () => ipcRenderer.invoke(IPC.sttStatus),
     onStatus: (cb) => subscribe(IPC.sttStatusEvent, cb),
-    onPhrase: (cb) => subscribe(IPC.sttPhrase, cb)
+    onPhrase: (cb) => subscribe(IPC.sttPhrase, cb),
+
+    downloadModel: () => ipcRenderer.invoke(IPC.sttDownloadModel),
+    cancelDownload: () => ipcRenderer.invoke(IPC.sttDownloadCancel),
+    modelState: () => ipcRenderer.invoke(IPC.sttDownloadState),
+    onDownloadProgress: (cb) => subscribe(IPC.sttDownloadProgress, cb),
+    onDownloadDone: (cb) => subscribe(IPC.sttDownloadDone, cb),
+    onDownloadError: (cb) => subscribe(IPC.sttDownloadError, cb)
   },
 
   voice: {
     gemini: (req) => ipcRenderer.invoke(IPC.voiceGemini, req),
     importKey: () => ipcRenderer.invoke(IPC.voiceImportKey)
   },
+
+  probeAgents: () => ipcRenderer.invoke(IPC.agentsProbe),
 
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),

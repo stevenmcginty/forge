@@ -69,6 +69,9 @@ const FALLBACK_SETTINGS: Settings = {
   catchShots: true,
   shotsKeep: 12,
   window: { width: 1440, height: 900, maximized: false },
+  // True until the real settings arrive, so the welcome overlay cannot flash up
+  // for a second on every launch while the store is still being read.
+  onboarded: true,
   sttPython: '',
   sttModelDir: '',
   sttAutoStopSeconds: 10,

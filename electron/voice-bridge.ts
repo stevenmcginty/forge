@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
 import type { GeminiCallRequest, GeminiCallResult, ImportedKeyResult } from '@shared/types'
+import { getDataDir } from './store'
 
 /**
  * The voice agent's only door to the outside world.
@@ -16,9 +17,9 @@ import type { GeminiCallRequest, GeminiCallResult, ImportedKeyResult } from '@sh
  *     script. This is the *only* outbound request Forge makes; there is no
  *     telemetry, no update check, nothing else.
  *
- *  2. `voice:import-key` — read Steve's existing Gemini key from DictationMic so
- *     he does not have to type it again. Read-only: this never writes to, moves
- *     or deletes the source file.
+ *  2. `voice:import-key` — find a Gemini key already saved on this machine, so
+ *     nobody has to type one twice. Read-only: this never writes to, moves or
+ *     deletes the source file. See keyCandidates() for where it looks.
  *
  * The key is never logged. Errors are passed back verbatim (minus the key) so
  * the panel can be honest about what Google said.
@@ -29,13 +30,23 @@ const HOST = 'https://generativelanguage.googleapis.com'
 const DEFAULT_TIMEOUT_MS = 75_000
 const MAX_TIMEOUT_MS = 150_000
 
-/** Where DictationMic keeps the key. First hit wins; nothing is written. */
+/**
+ * Places a Gemini key might already be sitting on this machine. First hit wins;
+ * nothing is ever written, moved or deleted.
+ *
+ * Forge's own data directory is first, because that is the one place a *new*
+ * user could reasonably be told to put a file. The rest are conveniences for
+ * the machine Forge was written on — an existing DictationMic install, or a
+ * `~/.gemini-key` — and simply do not exist anywhere else, which is why the
+ * failure message below lists every path it tried rather than naming one.
+ */
 function keyCandidates(): string[] {
   const desktop = join(homedir(), 'Desktop')
   return [
+    join(getDataDir(), 'gemini.key'),
+    join(homedir(), '.gemini-key'),
     join(desktop, 'DictationMic', 'gemini.key'),
-    join(desktop, 'DictationMic', 'gemini_key.txt'),
-    join(homedir(), '.gemini-key')
+    join(desktop, 'DictationMic', 'gemini_key.txt')
   ]
 }
 
@@ -53,7 +64,7 @@ function importKey(): ImportedKeyResult {
       return { ok: false, error: `Could not read ${path}: ${(err as Error).message}` }
     }
   }
-  return { ok: false, error: `No key file found (looked in ${keyCandidates()[0]})` }
+  return { ok: false, error: `No saved key found. Looked in:\n${keyCandidates().join('\n')}` }
 }
 
 /* ----------------------------------------------------------------- gemini */
