@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { TerminalTab } from '@shared/types'
+import type { TerminalTab, WorkspaceViewMode } from '@shared/types'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { resolveProfile } from '@/lib/agents'
-import { useActiveProject, useActiveTab, useActiveWorkspace, useApp, usePaneCount } from '@/state/AppState'
+import {
+  useActiveProject,
+  useActiveTab,
+  useActiveWorkspace,
+  useApp,
+  usePaneCount,
+  useViewMode
+} from '@/state/AppState'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
+import { MosaicView } from './MosaicView'
 import { SplitView } from './SplitView'
 import './TerminalGrid.css'
 
@@ -20,6 +28,7 @@ export function TerminalGrid(): ReactNode {
   const project = useActiveProject()
   const workspace = useActiveWorkspace()
   const tab = useActiveTab()
+  const viewMode = useViewMode()
   const { used, max } = usePaneCount()
 
   const newTabRef = useRef<HTMLButtonElement | null>(null)
@@ -86,10 +95,14 @@ export function TerminalGrid(): ReactNode {
         </button>
 
         <div className="tabstrip__spacer" />
+
+        <ViewToggle mode={viewMode} />
       </div>
 
       <div className="grid__body">
-        {tab ? (
+        {viewMode === 'mosaic' ? (
+          <MosaicView project={project} workspace={workspace} onNewTerminal={() => setChooserOpen(true)} />
+        ) : tab ? (
           <SplitView
             node={tab.root}
             project={project}
@@ -125,6 +138,39 @@ export function TerminalGrid(): ReactNode {
         onPick={(profileId) => actions.newTab(profileId)}
         selectedId={project.defaultProfileId}
       />
+    </div>
+  )
+}
+
+/* ----------------------------------------------------------- view toggle */
+
+/**
+ * Tabs or mosaic. Two states, so it is a segmented control rather than a menu:
+ * the choice is always visible and switching it is one click, because you will
+ * be doing it constantly.
+ */
+function ViewToggle({ mode }: { mode: WorkspaceViewMode }): ReactNode {
+  const { actions } = useApp()
+  const options: Array<{ value: WorkspaceViewMode; icon: 'viewTabs' | 'viewMosaic'; label: string }> = [
+    { value: 'tabs', icon: 'viewTabs', label: 'Tab view' },
+    { value: 'mosaic', icon: 'viewMosaic', label: 'Mosaic — every session as a live tile' }
+  ]
+
+  return (
+    <div className="viewtoggle" role="group" aria-label="Terminal view">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className="viewtoggle__btn"
+          data-active={option.value === mode}
+          aria-pressed={option.value === mode}
+          title={`${option.label} (Ctrl+G)`}
+          onClick={() => actions.setViewMode(option.value)}
+        >
+          <Icon name={option.icon} size={13} />
+        </button>
+      ))}
     </div>
   )
 }

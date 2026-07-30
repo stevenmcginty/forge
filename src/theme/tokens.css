@@ -16,6 +16,7 @@
   --bg-panel: #121317; /* rail, trays, status bar */
   --bg-panel-raised: #171921; /* popovers, cards */
   --bg-terminal: #0e0f12; /* xterm canvas */
+  --bg-header-live: #14161c; /* the header of the pane/tile you are in */
   --bg-hover: #1b1d24;
   --bg-active: #23262f;
   --bg-scrim: rgba(6, 7, 8, 0.62);
@@ -101,6 +102,8 @@
   --rail-w-collapsed: 56px;
   --tabbar-h: 36px;
   --pane-header-h: 28px;
+  --mosaic-tile-min-w: 230px;
+  --mosaic-tile-min-h: 148px;
   --tray-h: 116px;
   --statusbar-h: 26px;
 

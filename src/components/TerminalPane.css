@@ -36,7 +36,7 @@
 }
 
 .pane[data-focused='true'] .pane__header {
-  background: #14161c;
+  background: var(--bg-header-live);
   border-bottom-color: var(--line-hairline);
 }
 
@@ -69,53 +69,7 @@
   border-radius: var(--r-xs);
 }
 
-/* ------------------------------------------------------------ activity dot */
-
-.pane__dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--r-full);
-  background: var(--text-dim);
-  transition:
-    background var(--dur-med) var(--ease-out),
-    box-shadow var(--dur-med) var(--ease-out);
-}
-
-.pane__dot.is-active {
-  background: var(--pane-accent, var(--accent));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, transparent);
-  animation: dot-pulse 620ms var(--ease-out);
-}
-
-.pane[data-status='exited'] .pane__dot,
-.pane[data-status='error'] .pane__dot {
-  background: var(--danger);
-  box-shadow: none;
-  animation: none;
-}
-
-.pane[data-status='starting'] .pane__dot {
-  background: var(--warn);
-}
-
-@keyframes dot-pulse {
-  0% {
-    transform: scale(0.7);
-  }
-  40% {
-    transform: scale(1.25);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pane__dot.is-active {
-    animation: none;
-  }
-}
+/* The activity dot itself lives in ActivityDot.css — the mosaic wears it too. */
 
 /* ---------------------------------------------------------------- status */
 

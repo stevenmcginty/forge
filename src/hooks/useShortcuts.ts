@@ -134,6 +134,14 @@ export function useShortcuts(): void {
         return
       }
 
+      // Tabs ⇄ mosaic. Grabbed even while a terminal has focus: it is the way
+      // back out of a zoomed tile, so it has to work from inside one.
+      if (ctrl && !shift && e.code === 'KeyG') {
+        stop()
+        actions.toggleViewMode()
+        return
+      }
+
       if (ctrl && !shift && (e.code === 'Equal' || e.code === 'NumpadAdd')) {
         stop()
         actions.setFontSize(state.settings.terminalFontSize + 1)

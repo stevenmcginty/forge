@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { PaneLeaf, Project } from '@shared/types'
+import { isPaneDead, paneStatusLabel, usePaneRuntime } from '@/hooks/usePaneRuntime'
 import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
-import { terminalHost, type PaneRuntime, type TerminalSpec } from '@/lib/terminals'
+import { terminalHost, type TerminalSpec } from '@/lib/terminals'
 import { useApp } from '@/state/AppState'
+import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow } from './Popover'
 import './TerminalPane.css'
-
-const ACTIVITY_HOLD_MS = 620
 
 /**
  * One terminal: a slim header (badge, editable title, activity dot, split and
@@ -31,13 +31,12 @@ export function TerminalPane({
   const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const dotRef = useRef<HTMLSpanElement | null>(null)
   const splitBtnRef = useRef<HTMLButtonElement | null>(null)
   const menuAnchorRef = useRef<HTMLSpanElement | null>(null)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
   const [dropping, setDropping] = useState(false)
-  const [runtime, setRuntime] = useState<PaneRuntime>(() => terminalHost.runtime(leaf.id))
+  const runtime = usePaneRuntime(leaf.id)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(leaf.title)
 
@@ -70,28 +69,6 @@ export function TerminalPane({
   useEffect(() => {
     terminalHost.updateAccent(leaf.id, profile.accent)
   }, [leaf.id, profile.accent])
-
-  /* ------------------------------------------------------- subscriptions */
-
-  useEffect(() => {
-    setRuntime(terminalHost.runtime(leaf.id))
-    return terminalHost.subscribeRuntime(leaf.id, setRuntime)
-  }, [leaf.id])
-
-  useEffect(() => {
-    let timer: number | undefined
-    const unsub = terminalHost.subscribeActivity(leaf.id, () => {
-      const dot = dotRef.current
-      if (!dot) return
-      dot.classList.add('is-active')
-      if (timer) clearTimeout(timer)
-      timer = window.setTimeout(() => dot.classList.remove('is-active'), ACTIVITY_HOLD_MS)
-    })
-    return () => {
-      unsub()
-      if (timer) clearTimeout(timer)
-    }
-  }, [leaf.id])
 
   /* ------------------------------------------------------------- focus */
 
@@ -142,18 +119,7 @@ export function TerminalPane({
     terminalHost.focus(leaf.id)
   }
 
-  const statusLabel =
-    runtime.status === 'exited'
-      ? `exited ${runtime.exitCode ?? ''}`.trim()
-      : runtime.status === 'error'
-        ? 'failed'
-        : runtime.status === 'starting'
-          ? 'starting'
-          : runtime.status === 'live'
-            ? runtime.pid && runtime.pid > 0
-              ? `pid ${runtime.pid}`
-              : 'live'
-            : ''
+  const statusLabel = paneStatusLabel(runtime)
 
   return (
     <section
@@ -213,12 +179,12 @@ export function TerminalPane({
           </button>
         )}
 
-        <span ref={dotRef} className="pane__dot" aria-hidden="true" />
+        <ActivityDot paneId={leaf.id} status={runtime.status} />
 
         {statusLabel ? <span className="pane__status mono">{statusLabel}</span> : null}
 
         <div className="pane__actions">
-          {runtime.status === 'exited' || runtime.status === 'error' ? (
+          {isPaneDead(runtime) ? (
             <button
               type="button"
               className="ghost-btn pane__action"

@@ -1,0 +1,226 @@
+.mosaic {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.mosaic--empty {
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+}
+
+/*
+ * A wall of tiles. Rows and columns are both minmax(min, 1fr): they share the
+ * space when there is enough of it and stop shrinking when there is not, at
+ * which point the wall scrolls rather than crushing sixteen terminals into
+ * postage stamps.
+ */
+.mosaic__wall {
+  display: grid;
+  grid-template-columns: repeat(var(--mosaic-cols, 3), minmax(var(--mosaic-tile-min-w), 1fr));
+  grid-auto-rows: minmax(var(--mosaic-tile-min-h), 1fr);
+  gap: var(--s-3);
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: var(--s-1);
+}
+
+.mosaic--zoomed {
+  min-height: 0;
+}
+
+/* -------------------------------------------------------------------- tile */
+
+.mtile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-terminal);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.mtile[data-zoomed='true'] {
+  flex: 1;
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 1px var(--accent-softer);
+}
+
+/* The volt ring is the keyboard's ring: where Enter would zoom. */
+.mtile[data-selected='true'] {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 1px var(--accent-softer);
+}
+
+.mtile:hover {
+  border-color: var(--line-strong);
+}
+
+.mtile[data-selected='true']:hover {
+  border-color: var(--accent);
+}
+
+/* A dead shell is still worth showing — just visibly finished with. */
+.mtile[data-status='exited'],
+.mtile[data-status='error'] {
+  border-color: var(--line-soft);
+}
+
+.mtile[data-status='exited'] .mtile__stage,
+.mtile[data-status='error'] .mtile__stage {
+  opacity: 0.42;
+  filter: saturate(0.55);
+}
+
+/* -------------------------------------------------------------------- head */
+
+.mtile__head {
+  position: relative;
+  z-index: var(--z-divider);
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  height: var(--pane-header-h);
+  padding: 0 var(--s-2) 0 var(--s-3);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.mtile[data-zoomed='true'] .mtile__head,
+.mtile[data-selected='true'] .mtile__head {
+  background: var(--bg-header-live);
+  border-bottom-color: var(--line-hairline);
+}
+
+.mtile__back {
+  flex: none;
+  height: 20px;
+  padding: 0 var(--s-3) 0 var(--s-2);
+  font-size: var(--t-sm);
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.mtile__back:hover {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.mtile__title {
+  min-width: 0;
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+}
+
+.mtile[data-zoomed='true'] .mtile__title,
+.mtile[data-selected='true'] .mtile__title {
+  color: var(--text-primary);
+}
+
+/* Which tab this pane actually lives in — muted, because it is provenance. */
+.mtile__tab {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.mtile__status {
+  flex: none;
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.mtile[data-status='exited'] .mtile__status,
+.mtile[data-status='error'] .mtile__status {
+  color: var(--danger);
+}
+
+.mtile__actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.mtile:hover .mtile__actions,
+.mtile[data-selected='true'] .mtile__actions,
+.mtile[data-zoomed='true'] .mtile__actions,
+.mtile:focus-within .mtile__actions {
+  opacity: 1;
+}
+
+/* A dead pane's relaunch button is the point of the tile — always show it. */
+.mtile[data-status='exited'] .mtile__actions,
+.mtile[data-status='error'] .mtile__actions {
+  opacity: 1;
+}
+
+.mtile__action {
+  width: 20px;
+  height: 18px;
+  padding: 0;
+}
+
+/* ------------------------------------------------------------------- stage */
+
+.mtile__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/*
+ * The natural box: sized in pixels to the pane's real geometry by the tile, and
+ * shrunk from its top-left corner. The terminal inside is laid out full size and
+ * knows nothing about any of this.
+ */
+.mtile__natural {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+/* On the wall the terminal is a picture: no cursors, no selection, no typing. */
+.mtile[data-zoomed='false'] .mtile__natural {
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------------ hit sheet */
+
+.mtile__hit {
+  position: absolute;
+  top: var(--pane-header-h);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: var(--z-pane);
+  border-radius: 0 0 var(--r-md) var(--r-md);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.mtile__hit:hover {
+  background: var(--accent-softer);
+}
+
+.mtile__hit:active {
+  background: var(--accent-soft);
+}

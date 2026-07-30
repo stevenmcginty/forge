@@ -72,10 +72,20 @@ export interface TerminalTab {
   activePaneId: string
 }
 
+/**
+ * How a project's terminal workspace is presented.
+ *
+ * `tabs`   one tab at a time, its pane tree at full size — the working view.
+ * `mosaic` every live pane in the project as a small live tile — the peek view.
+ */
+export type WorkspaceViewMode = 'tabs' | 'mosaic'
+
 /** One project's terminal workspace. */
 export interface Workspace {
   tabs: TerminalTab[]
   activeTabId: string | null
+  /** Optional so workspaces written before the mosaic existed still load. */
+  viewMode?: WorkspaceViewMode
 }
 
 /* ------------------------------------------------------------------- shots */

@@ -22,6 +22,10 @@ export type IconName =
   | 'grip'
   | 'check'
   | 'trash'
+  | 'viewTabs'
+  | 'viewMosaic'
+  | 'chevronLeft'
+  | 'expand'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -99,6 +103,29 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M3.4 5.2h9.2M6.2 5.2V3.8h3.6v1.4" />
       <path d="M4.6 5.2l.6 7.4h5.6l.6-7.4" />
+    </>
+  ),
+  // One window with a tab on it: the working view.
+  viewTabs: (
+    <>
+      <path d="M2.2 5.4V4.1a.7.7 0 0 1 .7-.7h3.4l.9 1.2" />
+      <rect x="2.2" y="5.4" width="11.6" height="7.2" rx="1.3" />
+    </>
+  ),
+  // Four little windows: the mosaic.
+  viewMosaic: (
+    <>
+      <rect x="2.3" y="2.3" width="5" height="5" rx="1.1" />
+      <rect x="8.7" y="2.3" width="5" height="5" rx="1.1" />
+      <rect x="2.3" y="8.7" width="5" height="5" rx="1.1" />
+      <rect x="8.7" y="8.7" width="5" height="5" rx="1.1" />
+    </>
+  ),
+  chevronLeft: <path d="M9.6 4.4L6 8l3.6 3.6" />,
+  expand: (
+    <>
+      <path d="M9.6 2.6h3.8v3.8M13.4 2.6L8.5 7.5" />
+      <path d="M6.4 13.4H2.6V9.6M2.6 13.4l4.9-4.9" />
     </>
   )
 }
