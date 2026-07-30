@@ -35,6 +35,8 @@ import { registerAgentProbeHandlers } from './agent-probe'
 import { registerVoiceHandlers } from './voice-bridge'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import { registerSystemHandlers } from './system'
+import { registerToolsHandlers } from './tools'
+import { disposeUpdater, initUpdater, registerUpdateHandlers, setUpdateTarget } from './updater'
 
 const isDev = !app.isPackaged
 /** Only the very first launch, before a theme has ever been recorded. */
@@ -267,6 +269,7 @@ function createWindow(): void {
     setPtyTarget(null)
     setSttTarget(null)
     setSttModelTarget(null)
+    setUpdateTarget(null)
     syncPresence()
   })
 
@@ -284,6 +287,7 @@ function createWindow(): void {
   setPtyTarget(mainWindow)
   setSttTarget(mainWindow)
   setSttModelTarget(mainWindow)
+  setUpdateTarget(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
@@ -545,7 +549,13 @@ void app.whenReady().then(() => {
   // returns without touching the network or a credential.
   registerCompanionHandlers()
   registerSystemHandlers()
+  registerToolsHandlers()
+  registerUpdateHandlers()
   createWindow()
+  // After the window, so the first status event has somewhere to go — and it
+  // is a no-op in a dev run: initUpdater() returns immediately unless this is
+  // a packaged build or FORGE_FAKE_UPDATE is set. See electron/updater.ts.
+  initUpdater()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -563,4 +573,5 @@ app.on('before-quit', () => {
   disposeSttSidecar()
   disposeSttModel()
   disposeCompanion()
+  disposeUpdater()
 })

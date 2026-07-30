@@ -7,6 +7,7 @@ import { StatusBar } from '@/components/StatusBar'
 import { TerminalGrid } from '@/components/TerminalGrid'
 import { SettingsPage } from '@/components/settings/SettingsPage'
 import { TitleBar } from '@/components/TitleBar'
+import { UpdateBanner } from '@/components/UpdateBanner'
 import { VoicePanel } from '@/components/VoicePanel'
 import { useShortcuts } from '@/hooks/useShortcuts'
 import { terminalHost } from '@/lib/terminals'
@@ -28,6 +29,13 @@ export function App(): ReactNode {
   return (
     <div className="app" data-ready={state.ready}>
       <TitleBar />
+      {/*
+        Directly under the titlebar and above everything else, so it pushes the
+        whole app down by 30px rather than covering any of it. It renders
+        nothing at all unless there is an update — which, in a dev run, is
+        never. See src/components/UpdateBanner.tsx.
+      */}
+      <UpdateBanner />
       <div className="app__body">
         <aside className="app__left" data-collapsed={state.settings.railCollapsed}>
           <ProjectRail />

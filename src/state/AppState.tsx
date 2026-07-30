@@ -25,7 +25,7 @@ import type {
   Workspace,
   WorkspaceViewMode
 } from '@shared/types'
-import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
+import { BUILTIN_AGENT_PROFILES, isShellProfile } from '@shared/agents'
 import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
 import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
@@ -54,6 +54,7 @@ export type SettingsSection =
   | 'voice'
   | 'appearance'
   | 'screenshots'
+  | 'updates'
   | 'advanced'
 
 /**
@@ -63,6 +64,23 @@ export type SettingsSection =
  * terminalHost, which owns them independently of what React has mounted.
  */
 export type MainView = 'terminals' | 'settings'
+
+/**
+ * A command waiting for the pane it was opened for.
+ *
+ * `openToolPane` creates a tab and the text to put in it in the same dispatch,
+ * but the pane does not exist yet at that moment — TerminalGrid has to mount
+ * and terminalHost has to spawn a shell first. So the text is parked here and
+ * an effect delivers it when the pane comes alive, which is the same shape as
+ * `pendingKills` and for the same reason: the reducer describes what should be
+ * true, and an effect makes it true against the terminal host.
+ */
+interface PendingType {
+  paneId: string
+  text: string
+  /** True presses Enter afterwards. See Settings › Updates & Tools. */
+  submit: boolean
+}
 
 export interface AppState {
   ready: boolean
@@ -74,6 +92,8 @@ export interface AppState {
   activeProjectId: string | null
   /** Panes removed from a layout whose shells still need killing. */
   pendingKills: string[]
+  /** Commands typed into panes that are still starting up. */
+  pendingTypes: PendingType[]
   /**
    * The mosaic tile currently blown up to full size. Deliberately transient —
    * a peek is not something you want to still be inside after a restart.
@@ -153,7 +173,9 @@ const FALLBACK_SETTINGS: Settings = {
   companionTokenBase: '',
   companionEmail: '',
   companionRefreshToken: '',
-  companionUid: ''
+  companionUid: '',
+  updatesAutoRun: false,
+  updateDismissedVersion: ''
 }
 
 /** The voice panel never gets narrower than this, nor wider. */
@@ -168,6 +190,7 @@ const INITIAL: AppState = {
   workspaces: {},
   activeProjectId: null,
   pendingKills: [],
+  pendingTypes: [],
   mosaicZoom: null,
   agentListening: false,
   notice: null,
@@ -187,6 +210,8 @@ type Action =
   | { type: 'saveProfile'; profile: AgentProfile }
   | { type: 'deleteProfile'; id: string }
   | { type: 'newTab'; profileId: string; permissionMode?: ClaudePermissionMode }
+  | { type: 'openToolPane'; profileId: string; title: string; text: string; submit: boolean }
+  | { type: 'drainTypes'; paneIds: string[] }
   | { type: 'closeTab'; tabId: string }
   | { type: 'selectTab'; tabId: string }
   | { type: 'renameTab'; tabId: string; title: string }
@@ -448,6 +473,49 @@ function reducer(state: AppState, action: Action): AppState {
       })
     }
 
+    /**
+     * A named tab with a command already in it, unsubmitted.
+     *
+     * Not `newTab` plus `renameTab` plus a type: the whole point is that the
+     * pane's id, its title and the text destined for it are decided in one
+     * atomic step. Doing it in three would mean knowing the id of a tab the
+     * reducer has not created yet, which is exactly the sort of thing that
+     * works until two clicks land in the same frame.
+     */
+    case 'openToolPane': {
+      if (totalPanes(state) >= MAX_SESSIONS) {
+        return { ...state, notice: `Session limit reached (${MAX_SESSIONS})` }
+      }
+      if (!state.activeProjectId) {
+        return { ...state, notice: 'Open a project first — a command needs somewhere to run' }
+      }
+      const leaf = makeLeaf(action.profileId, '')
+      const tab: TerminalTab = {
+        id: makeId('tab'),
+        title: action.title,
+        root: leaf,
+        activePaneId: leaf.id
+      }
+      const next = mapActiveWorkspace(state, (ws) => ({
+        ...ws,
+        tabs: [...ws.tabs, tab],
+        activeTabId: tab.id
+      }))
+      return {
+        ...next,
+        pendingTypes: [...next.pendingTypes, { paneId: leaf.id, text: action.text, submit: action.submit }],
+        // The command is in a terminal, and the terminal is not the page you
+        // are looking at. Leaving settings open would hide the thing that just
+        // happened behind the button that caused it.
+        view: 'terminals'
+      }
+    }
+
+    case 'drainTypes': {
+      const remaining = state.pendingTypes.filter((p) => !action.paneIds.includes(p.paneId))
+      return remaining.length === state.pendingTypes.length ? state : { ...state, pendingTypes: remaining }
+    }
+
     case 'closeTab': {
       const ws = workspaceOf(state, state.activeProjectId)
       const tab = ws.tabs.find((t) => t.id === action.tabId)
@@ -666,6 +734,12 @@ export interface AppActions {
   /** Duplicate a profile under a new id, ready to be edited. */
   duplicateProfile(id: string): void
   newTab(profileId?: string, permissionMode?: ClaudePermissionMode): void
+  /**
+   * Open a shell pane in the current project with `command` already typed into
+   * it. Nothing is submitted unless `settings.updatesAutoRun` says so — see
+   * Settings › Updates & Tools, which is the only caller.
+   */
+  openToolPane(title: string, command: string): void
   closeTab(tabId: string): void
   selectTab(tabId: string): void
   renameTab(tabId: string, title: string): void
@@ -780,6 +854,66 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     terminalHost.disposeAll(ids)
     dispatch({ type: 'drainKills', ids })
   }, [state.pendingKills])
+
+  /* ------------------------------------------------------- type draining
+   *
+   * Deliver each queued command once its pane has a live shell.
+   *
+   * Polled rather than subscribed because the pane does not exist yet when the
+   * queue is written — there is nothing to subscribe *to* until TerminalGrid
+   * has mounted it, so the first thing any listener would have to do is wait
+   * for the entry to appear anyway.
+   *
+   * The settle beat after `live` is not superstition: conpty reports the child
+   * as running before PowerShell has drawn its first prompt, and text written
+   * into that window lands in the input buffer *before* the prompt and is
+   * repainted over. A fifth of a second is the difference between a command
+   * you can read and a smear.
+   */
+  useEffect(() => {
+    if (state.pendingTypes.length === 0) return
+    const queue = state.pendingTypes
+    let cancelled = false
+    const delivered: string[] = []
+    // A pane that never comes up — a shell that failed to spawn — must not
+    // leave an entry in the queue forever, re-running this effect on every
+    // render for the rest of the session.
+    const deadline = Date.now() + 30_000
+
+    const tick = (): void => {
+      if (cancelled) return
+      for (const pending of queue) {
+        if (delivered.includes(pending.paneId)) continue
+        const runtime = terminalHost.runtime(pending.paneId)
+        if (runtime.status === 'live') {
+          delivered.push(pending.paneId)
+          setTimeout(() => {
+            if (cancelled) return
+            if (!terminalHost.type(pending.paneId, pending.text)) return
+            terminalHost.focus(pending.paneId)
+            if (pending.submit) terminalHost.submit(pending.paneId)
+          }, 220)
+        } else if (runtime.status === 'exited' || runtime.status === 'error') {
+          delivered.push(pending.paneId)
+        }
+      }
+      if (delivered.length === queue.length || Date.now() > deadline) {
+        clearInterval(timer)
+        // Drained after the settle timeouts above have had their chance to
+        // fire; dispatching immediately would re-render and cancel them.
+        setTimeout(() => {
+          if (!cancelled) dispatch({ type: 'drainTypes', paneIds: queue.map((p) => p.paneId) })
+        }, 400)
+      }
+    }
+
+    const timer = setInterval(tick, 120)
+    tick()
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [state.pendingTypes])
 
   /* --------------------------------------------------------- persistence */
 
@@ -974,6 +1108,27 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           profileId: profileId ?? defaultProfileFor(activeProjectId),
           ...(permissionMode ? { permissionMode } : {})
         }),
+      openToolPane: (title, command) => {
+        // A plain shell, never an agent: `winget upgrade …` typed at a Claude
+        // prompt would be a sentence asking Claude to do it, which is not what
+        // the button says. The built-in pwsh profile is re-seeded by the store
+        // if it is ever deleted, but a renamed or hand-edited settings.json is
+        // still allowed to have moved it, so any shell profile will do.
+        const shell =
+          state.settings.agentProfiles.find((p) => p.id === 'pwsh') ??
+          state.settings.agentProfiles.find((p) => isShellProfile(p))
+        if (!shell) {
+          dispatch({ type: 'notice', message: 'No shell profile to run that in' })
+          return
+        }
+        dispatch({
+          type: 'openToolPane',
+          profileId: shell.id,
+          title: title.slice(0, 40),
+          text: command,
+          submit: state.settings.updatesAutoRun
+        })
+      },
       closeTab: (tabId) => dispatch({ type: 'closeTab', tabId }),
       selectTab: (tabId) => dispatch({ type: 'selectTab', tabId }),
       renameTab: (tabId, title) => dispatch({ type: 'renameTab', tabId, title }),

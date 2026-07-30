@@ -112,6 +112,19 @@ const api: ForgeApi = {
     claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion)
   },
 
+  tools: {
+    probe: (refresh) => ipcRenderer.invoke(IPC.toolsProbe, refresh === true),
+    latest: (ids, refresh) => ipcRenderer.invoke(IPC.toolsLatest, ids ?? null, refresh === true)
+  },
+
+  updates: {
+    status: () => ipcRenderer.invoke(IPC.updateStatus),
+    check: () => ipcRenderer.invoke(IPC.updateCheck),
+    download: () => ipcRenderer.invoke(IPC.updateDownload),
+    install: () => ipcRenderer.invoke(IPC.updateInstall),
+    onStatus: (cb) => subscribe(IPC.updateStatusEvent, cb)
+  },
+
   probeAgents: () => ipcRenderer.invoke(IPC.agentsProbe),
 
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
