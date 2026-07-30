@@ -33,6 +33,7 @@
     "theme:check": "node scripts/theme-check.mjs",
     "updates:check": "node scripts/updates-check.mjs",
     "mosaic:check": "node scripts/mosaic-check.mjs",
+    "hub:check": "node scripts/hub-check.mjs",
     "companion:smoke": "node scripts/companion-smoke.mjs",
     "companion:icons": "node scripts/companion-icons.mjs",
     "companion:serve": "node scripts/companion-serve.mjs"

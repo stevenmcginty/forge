@@ -22,6 +22,7 @@ import type {
   TerminalTab,
   ThemeCore,
   VoiceBrainId,
+  VoiceHubPlacement,
   Workspace,
   WorkspaceViewMode
 } from '@shared/types'
@@ -30,6 +31,7 @@ import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
 import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
 import { emptyMosaic, sanitiseMosaic } from '@/lib/mosaicLayout'
+import { DEFAULT_HUB } from '@/lib/voicehub'
 import { basename } from '@/lib/paths'
 import {
   collectLeaves,
@@ -132,6 +134,7 @@ const FALLBACK_SETTINGS: Settings = {
   sttHotkey: 'ControlRight',
   voicePanelOpen: false,
   voicePanelWidth: 380,
+  voiceHub: DEFAULT_HUB,
   voiceBrain: 'gemini',
   anthropicKey: '',
   geminiKey: '',
@@ -718,6 +721,12 @@ export interface AppActions {
   toggleRail(): void
   toggleVoicePanel(): void
   setVoicePanelWidth(px: number): void
+  /**
+   * Move or resize the floating voice hub. A patch, because dragging writes
+   * only `x`/`y` and the mode buttons write only `mode` — and the two happen
+   * inside the same gesture when a drag ends on the dock.
+   */
+  setVoiceHub(patch: Partial<VoiceHubPlacement>): void
   /** Arm/disarm the voice panel's mic — see AppState.agentListening. */
   setAgentListening(on: boolean): void
   setVoiceBrain(id: VoiceBrainId): void
@@ -1069,6 +1078,11 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       toggleRail: () => dispatch({ type: 'patchSettings', patch: { railCollapsed: !state.settings.railCollapsed } }),
       toggleVoicePanel: () =>
         dispatch({ type: 'patchSettings', patch: { voicePanelOpen: !state.settings.voicePanelOpen } }),
+      setVoiceHub: (patch) =>
+        dispatch({
+          type: 'patchSettings',
+          patch: { voiceHub: { ...(state.settings.voiceHub ?? DEFAULT_HUB), ...patch } }
+        }),
       setAgentListening: (on) => dispatch({ type: 'setAgentListening', on }),
       setVoicePanelWidth: (px) =>
         dispatch({
@@ -1193,7 +1207,8 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     state.settings.customThemes,
     state.settings.themeId,
     state.settings.railCollapsed,
-    state.settings.voicePanelOpen
+    state.settings.voicePanelOpen,
+    state.settings.voiceHub
   ])
 
   const value = useMemo<Ctx>(() => ({ state, actions }), [state, actions])

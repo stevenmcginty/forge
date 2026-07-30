@@ -8,6 +8,7 @@ import { TerminalGrid } from '@/components/TerminalGrid'
 import { SettingsPage } from '@/components/settings/SettingsPage'
 import { TitleBar } from '@/components/TitleBar'
 import { UpdateBanner } from '@/components/UpdateBanner'
+import { VoiceHub } from '@/components/VoiceHub'
 import { VoicePanel } from '@/components/VoicePanel'
 import { useShortcuts } from '@/hooks/useShortcuts'
 import { terminalHost } from '@/lib/terminals'
@@ -48,6 +49,13 @@ export function App(): ReactNode {
         <VoicePanel />
       </div>
       <StatusBar />
+      {/*
+        The floating voice hub. Last in the tree and `position: fixed`, so it
+        hovers over everything the app draws while occupying no layout of its
+        own — it renders nothing at all while docked, when the status-bar pill
+        *is* the hub. See src/components/VoiceHub.tsx.
+      */}
+      <VoiceHub />
       <Onboarding />
     </div>
   )

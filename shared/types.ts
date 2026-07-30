@@ -231,6 +231,25 @@ export type VoiceBrainId = 'stub' | 'gemini' | 'openrouter' | 'claude' | 'openai
  */
 export type VoiceReplyMode = 'text' | 'both' | 'voice'
 
+/**
+ * Where the voice hub is, and how big.
+ *
+ *   docked    the pill lives in the status bar, as it always has
+ *   floating  a bigger pill floating over the app, dragged anywhere
+ *   expanded  the floating Voice Hub card — dial, conversation, composer
+ *
+ * `x`/`y` are the top-left of the floating thing in viewport pixels. They are
+ * remembered while docked too, so dragging it out a second time puts it back
+ * where he last had it rather than in the middle of his terminals.
+ */
+export type VoiceHubMode = 'docked' | 'floating' | 'expanded'
+
+export interface VoiceHubPlacement {
+  mode: VoiceHubMode
+  x: number
+  y: number
+}
+
 /** `create_project`, as it crosses to the main process. */
 export interface MakeProjectFolderRequest {
   name: string
@@ -567,6 +586,13 @@ export interface Settings {
   /** Voice-agent panel: open state and width in px. */
   voicePanelOpen: boolean
   voicePanelWidth: number
+  /**
+   * The floating voice hub: docked in the status bar, floating as a pill, or
+   * expanded into the hub card — and where it was left. Persisted, because a
+   * hub you have parked over the second monitor's terminal is furniture, not a
+   * transient mode. See src/lib/voicehub.ts for the state machine.
+   */
+  voiceHub: VoiceHubPlacement
   voiceBrain: VoiceBrainId
   /**
    * Anthropic key for the (unbuilt) ClaudeBrain. Stored here and used nowhere:

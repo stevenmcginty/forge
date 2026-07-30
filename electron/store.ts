@@ -4,7 +4,16 @@ import { homedir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 import { BUILTIN_AGENT_PROFILES, inferKind, isClaudeCommand, isPermissionMode } from '@shared/agents'
 import { isValidSkillName } from '@shared/skills'
-import type { AgentProfile, Project, Settings, StoreSnapshot, ThemeCore, Workspace } from '@shared/types'
+import type {
+  AgentProfile,
+  Project,
+  Settings,
+  StoreSnapshot,
+  ThemeCore,
+  VoiceHubMode,
+  VoiceHubPlacement,
+  Workspace
+} from '@shared/types'
 import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
 
 /**
@@ -100,6 +109,9 @@ function defaultSettings(): Settings {
     sttHotkey: 'ControlRight',
     voicePanelOpen: false,
     voicePanelWidth: 380,
+    // The voice hub starts where it always was — in the status bar. Dragging it
+    // out is the opt-in; see src/lib/voicehub.ts.
+    voiceHub: { mode: 'docked', x: 0, y: 0 },
     // Gemini is the live brain; with no key set it degrades to the stub.
     voiceBrain: 'gemini',
     anthropicKey: '',
@@ -345,6 +357,11 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     },
     voicePanelOpen: Boolean(s.voicePanelOpen),
     voicePanelWidth: clamp(s.voicePanelWidth ?? DEFAULT_SETTINGS.voicePanelWidth, 300, 640),
+    // Mirrors sanitiseHubPlacement in src/lib/voicehub.ts — main cannot import a
+    // renderer module, and hub:check asserts the two still agree. The position
+    // is deliberately *not* clamped here: the window that saved it may have
+    // been a different size, so the renderer clamps against the live viewport.
+    voiceHub: hubPlacement(s.voiceHub),
     voiceBrain:
       brain === 'claude' || brain === 'openai' || brain === 'stub' || brain === 'gemini' || brain === 'openrouter'
         ? brain
@@ -431,6 +448,14 @@ function str(v: unknown): string {
 
 function clamp(n: number, lo: number, hi: number): number {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : lo
+}
+
+/** The voice hub's saved placement, made safe. See src/lib/voicehub.ts. */
+function hubPlacement(raw: unknown): VoiceHubPlacement {
+  const v = (raw ?? {}) as Partial<VoiceHubPlacement>
+  const mode: VoiceHubMode = v.mode === 'floating' || v.mode === 'expanded' || v.mode === 'docked' ? v.mode : 'docked'
+  const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? Math.round(n) : 0)
+  return { mode, x: num(v.x), y: num(v.y) }
 }
 
 /* ------------------------------------------------------------------- public */

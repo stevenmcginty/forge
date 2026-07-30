@@ -26,6 +26,46 @@
   border-color: var(--line-strong);
 }
 
+/* --------------------------------------------------------------- socket
+ *
+ * What the dock looks like with the pill lifted out of it: the same 50px of
+ * status bar, hollowed. Keeping the space is the point — the right-hand end of
+ * the bar reflowing every time he picks the hub up would read as breakage.
+ */
+
+.dpill--socket {
+  border-style: dashed;
+  border-color: var(--line-soft);
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.dpill--socket:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-softer);
+}
+
+.dpill__socket-mark {
+  width: 14px;
+  height: 1px;
+  border-radius: var(--r-full);
+  background: var(--text-dim);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.dpill--socket:hover .dpill__socket-mark {
+  background: var(--accent);
+}
+
+/* The magnet, while a floating pill is hovering over its home. */
+.dpill--socket[data-magnet='true'] {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
 /* ------------------------------------------------------------ agent tag
  *
  * Whose words are these? Forge has two microphones — the pill dictates into the

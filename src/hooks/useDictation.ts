@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isSttSetupError, type SttStatus } from '@shared/types'
 import { insertPhrase, resolveInsertTarget, type InsertTarget } from '@/lib/dictation'
 import { dictationTranscript, transcriptBus } from '@/lib/transcriptSource'
+import { agentSurfaceOpen } from '@/lib/voicehub'
 import { useActiveTab, useApp } from '@/state/AppState'
 
 /**
@@ -13,6 +14,12 @@ import { useActiveTab, useApp } from '@/state/AppState'
  * globalShortcut for the same key would have the two apps fighting over every
  * press. A window listener only fires while a Forge window is focused, which is
  * exactly the scope we want.
+ *
+ * This is the *engine*, and it must run exactly once: it holds a phrase
+ * subscription and a hotkey listener, so a second copy would insert every
+ * dictated sentence into the terminal twice and make each press of Right Ctrl
+ * toggle twice — i.e. do nothing. Components call `useDictation` from
+ * src/state/Dictation.tsx, which is one instance of this shared out.
  */
 
 const OFF: SttStatus = { phase: 'off', level: 0, error: null, ready: false }
@@ -27,7 +34,7 @@ export interface Dictation {
   reload: (force?: boolean) => void
 }
 
-export function useDictation(): Dictation {
+export function useDictationEngine(): Dictation {
   const { state, actions } = useApp()
   const tab = useActiveTab()
   const [status, setStatus] = useState<SttStatus>(OFF)
@@ -46,17 +53,24 @@ export function useDictation(): Dictation {
 
   /* ------------------------------------------------------------- routing
    *
-   * Two places a phrase can go, and exactly one rule for choosing: the voice
-   * panel open *and* its mic armed means the words are meant for the agent;
-   * anything else means they are meant for whatever you are looking at.
+   * Two places a phrase can go, and exactly one rule for choosing: an agent
+   * surface on screen *and* the mic armed means the words are meant for the
+   * agent; anything else means they are meant for whatever you are looking at.
+   *
+   * "Agent surface" is the part the floating hub changed. It used to be "the
+   * voice panel is open", which was the same question while the panel was the
+   * only place the round button lived. The hub carries that button too, so a
+   * pill floating over the terminals with agent mode on has to route the same
+   * way — otherwise arming it there would quietly type his half of the
+   * conversation into whatever pane was behind it.
    *
    * The registration is the switch. While it holds, dictation is a source on
-   * the transcript bus and the panel picks phrases up like any other source;
+   * the transcript bus and the agent picks phrases up like any other source;
    * while it does not, the bus has never heard of dictation and insertPhrase
    * does what M3 always did. Nothing can reach both.
    */
 
-  const toAgent = state.settings.voicePanelOpen && state.agentListening
+  const toAgent = agentSurfaceOpen(state.settings) && state.agentListening
   const toAgentRef = useRef(toAgent)
   toAgentRef.current = toAgent
 
