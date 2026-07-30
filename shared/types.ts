@@ -62,6 +62,14 @@ export interface AgentProfile {
   kind?: ProfileKind
   /** Default permission mode for claude-shaped commands. */
   permissionMode?: ClaudePermissionMode
+  /**
+   * Launch this agent with Claude Code's Remote Control, so the session can be
+   * watched and driven from Steve's phone (see docs/REMOTE.md). Only meaningful
+   * for agents that accept `--remote-control`; set `false` to opt a built-in
+   * out. Undefined means off, so a custom profile never gets a flag its tool
+   * has never heard of.
+   */
+  remoteControl?: boolean
 }
 
 /* ---------------------------------------------------------------- projects */
@@ -418,14 +426,101 @@ export interface Settings {
   openrouterKey: string
   openrouterModel: string
 
-  /* -------------------------------------------------- agent memory (M7) */
+  /* -------------------------------------------------------- agent memory */
   /**
    * Let the active brain rewrite the "About this project" summary every tenth
    * exchange. Off by default: the heuristic memory below costs nothing and is
    * predictable, whereas this is a real (if small) API call you did not ask for.
    */
   memoryLlmSummarize: boolean
+
+  /* ------------------------------------------------ remote control (M7) */
+  /**
+   * Master switch for Claude Code's Remote Control. On by default: Steve wants
+   * to be able to pick a pane up on his phone. Turning it off suppresses the
+   * flag for every pane regardless of the per-profile setting, which is the
+   * switch you want when you are on a plan or a network where it cannot work.
+   */
+  remoteControlDefault: boolean
+
+  /* ------------------------------------------------- forge companion (M9)
+   *
+   * The phone link. Every field is inert until `companionEnabled` is true AND
+   * a session has been signed in — nothing here causes a single network call
+   * on its own. See companion/README.md and companion/GO-LIVE.md.
+   */
+
+  /** Master switch. False = the service never starts, never reads a token. */
+  companionEnabled: boolean
+  /**
+   * Firebase Web API key of the companion project (`forge-sync`). Public by
+   * design: it identifies the project, it does not authorise anything —
+   * database.rules.json is what authorises.
+   */
+  companionApiKey: string
+  /**
+   * RTDB root, e.g. `https://forge-sync-default-rtdb.europe-west1.firebasedatabase.app`.
+   * Against the emulator suite: `http://127.0.0.1:9000?ns=forge-sync-default-rtdb`
+   * — any query string here is carried onto every request.
+   */
+  companionDatabaseURL: string
+  /**
+   * Identity Toolkit base. Blank = Google's real one. Set only to point the
+   * whole link at the emulator, which serves the same REST API under a path
+   * prefix: `http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1`.
+   */
+  companionAuthBase: string
+  /** Secure Token base. Blank = Google's. Emulator: same host, `/securetoken.googleapis.com/v1`. */
+  companionTokenBase: string
+  /** The signed-in account. Kept after sign-out so the form pre-fills. */
+  companionEmail: string
+  /**
+   * The only credential stored on disk, and never the password: a Firebase
+   * refresh token, revocable from the Firebase console without touching any
+   * password Steve uses elsewhere.
+   */
+  companionRefreshToken: string
+  companionUid: string
 }
+
+/* ---------------------------------------------------- companion ipc (M9) */
+
+export type CompanionState = 'off' | 'signed-out' | 'connecting' | 'live' | 'offline' | 'error'
+
+export interface CompanionStatus {
+  enabled: boolean
+  /** Has a key, a database and a restorable session. */
+  configured: boolean
+  state: CompanionState
+  email: string
+  uid: string
+  /** A human sentence for the settings panel, or empty when there is nothing to say. */
+  detail: string
+  /** How many projects were last published. */
+  projects: number
+  /** Epoch ms of the last inbox item consumed. 0 = none this session. */
+  lastInboxAt: number
+}
+
+/**
+ * A message from the phone, on its way to the voice agent.
+ *
+ * THE contract for the voice hookup: subscribe with
+ * `window.forge.companion.onUtterance(...)`, do whatever the voice pipeline
+ * does with a transcript, then call `window.forge.companion.reply(itemId, text)`
+ * to put the answer back on Steve's phone. `itemId` is opaque — pass back
+ * exactly what you were given and the reply threads under the message.
+ */
+export interface CompanionUtteranceEvent {
+  /** Forge's own project id, as in `Project.id`. */
+  projectId: string
+  projectName: string
+  /** Opaque id of the inbox item. Hand it to `reply()` to thread the answer. */
+  itemId: string
+  text: string
+}
+
+export type CompanionSignInResult = { ok: true; uid: string; created: boolean } | { ok: false; error: string }
 
 /* -------------------------------------------------------------------- ipc */
 
@@ -448,6 +543,13 @@ export interface CreateSessionRequest {
   rows: number
   /** Command written into the shell once it is ready. Empty = nothing. */
   bootstrapCommand?: string
+  /**
+   * Naming context for the bootstrap transforms. Only Remote Control uses it
+   * today, to label the session Steve's phone will show — see
+   * `remoteControlName` in shared/remote.ts.
+   */
+  projectName?: string
+  paneTitle?: string
 }
 
 export type CreateSessionResult =

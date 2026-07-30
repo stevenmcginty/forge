@@ -26,7 +26,10 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     permissionMode: 'default',
     // Claude gets the Gemini bridge: video summaries, image generation and
     // second opinions it cannot produce on its own.
-    mcpBridge: true
+    mcpBridge: true,
+    // …and Remote Control, so a pane can be picked up on the phone. Only
+    // Claude Code has the flag, so only Claude Code gets the default.
+    remoteControl: true
   },
   {
     id: 'kimi',

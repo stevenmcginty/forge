@@ -2,6 +2,9 @@ import type {
   AgentPresence,
   AppInfo,
   ClaudeCliState,
+  CompanionSignInResult,
+  CompanionStatus,
+  CompanionUtteranceEvent,
   CreateSessionRequest,
   CreateSessionResult,
   EditImageRequest,
@@ -168,6 +171,32 @@ export interface ForgeApi {
   }
 
   /**
+   * Forge Companion — the phone link (M9). Off until switched on and signed in;
+   * every method here is safe to call in that state and simply does nothing.
+   */
+  companion: {
+    status(): Promise<CompanionStatus>
+    /**
+     * Sign in, creating the account if it is new. The password is used for one
+     * HTTPS POST in the main process and never stored — what reaches disk is a
+     * revocable refresh token.
+     */
+    signIn(email: string, password: string): Promise<CompanionSignInResult>
+    signOut(): Promise<CompanionStatus>
+    /** Republish the project list now (after adding/renaming/removing one). */
+    publish(): Promise<number>
+    /**
+     * Send text back to the phone. `itemId` is the one from the utterance
+     * event, which threads the reply under the message that asked for it;
+     * `projectId` is only needed for an unprompted note.
+     */
+    reply(itemId: string, text: string, projectId?: string): Promise<boolean>
+    onStatus(cb: (s: CompanionStatus) => void): () => void
+    /** THE voice-pipeline hookup. Returns an unsubscribe function. */
+    onUtterance(cb: (e: CompanionUtteranceEvent) => void): () => void
+  }
+
+  /**
    * Read-only probes of the machine, for the Account section's state chips.
    * Nothing here writes, installs or signs anything in.
    */
@@ -187,6 +216,12 @@ export interface ForgeApi {
 
   pickFolder(): Promise<string | null>
   openPath(target: string): Promise<string>
+  /**
+   * Open an http(s) URL in the default browser. Anything else is refused in the
+   * main process — the renderer must never be able to hand the OS an arbitrary
+   * scheme to launch.
+   */
+  openExternal(url: string): Promise<boolean>
 
   /**
    * Absolute path of a dropped `File`. Typed as `unknown` because this contract

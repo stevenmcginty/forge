@@ -92,7 +92,7 @@ export function AccountSection(): ReactNode {
                   type="button"
                   className="ghost-btn sconn__go"
                   title={`Open ${c.section}`}
-                  onClick={() => actions.setSettingsSection(c.section === 'models' ? 'models' : 'agents')}
+                  onClick={() => actions.setSettingsSection(c.section!)}
                 >
                   <Icon name="chevronDown" size={12} className="sconn__go-icon" />
                 </button>

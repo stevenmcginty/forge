@@ -135,6 +135,56 @@
   padding: 0;
 }
 
+/* --------------------------------------------------------- remote control */
+
+/*
+ * The phone glyph sits outside .pane__actions on purpose: the actions strip
+ * fades in on hover, and this is a standing property of the pane rather than
+ * a control. Dim until you look at it, so a wall of Claude panes doesn't read
+ * as a row of badges.
+ */
+.pane__phone {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  padding: 0;
+  color: var(--text-dim);
+}
+
+.pane:hover .pane__phone,
+.pane[data-focused='true'] .pane__phone {
+  color: var(--text-muted);
+}
+
+/* Live: Claude has connected and printed its session URL. */
+.pane__phone[data-connected='true'] {
+  color: var(--accent);
+}
+
+.pane__phone:hover,
+.pane__phone[data-open='true'] {
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.pane__remote-body p {
+  margin: 0;
+}
+
+.pane__remote-body p + p {
+  margin-top: var(--s-3);
+}
+
+.pane__remote-name {
+  color: var(--text-primary);
+  font-size: var(--t-sm);
+  word-break: break-word;
+}
+
+.pane__remote-note {
+  color: var(--text-dim);
+}
+
 /* -------------------------------------------------------------- terminal */
 
 .pane__terminal {

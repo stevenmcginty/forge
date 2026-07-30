@@ -4,6 +4,8 @@ import type { CreateSessionRequest, CreateSessionResult } from '@shared/types'
 import { PtySessionManager } from './pty/session-manager'
 import { getSettings } from './store'
 import { applyMcpBridge } from './bridge/mcp-config'
+import { applyRemoteControl } from './bridge/remote-control'
+import { presenceFile } from './presence'
 
 /**
  * The PTY host: owns one PtySessionManager and bridges it to the renderer.
@@ -75,6 +77,9 @@ export function getManager(): PtySessionManager {
     const settings = getSettings()
     manager = new PtySessionManager({
       shell: settings.shell,
+      // While this file exists — i.e. while a Forge window has focus — Claude
+      // holds back the phone pushes. See electron/presence.ts.
+      env: { CLAUDE_CLIENT_PRESENCE_FILE: presenceFile() },
       maxSessions: MAX_SESSIONS,
       onData: queue,
       onExit: (id, exitCode, signal) => {
@@ -97,14 +102,23 @@ export function setPtyTarget(win: BrowserWindow | null): void {
 
 export function registerPtyHandlers(): void {
   ipcMain.handle(IPC.ptyCreate, (_e, req: CreateSessionRequest): CreateSessionResult => {
+    // The one place every pane's launch command passes through, and therefore
+    // where both bootstrap transforms live. Order matters: Remote Control adds
+    // `--remote-control '<name>'`, then the bridge appends `--mcp-config`,
+    // whose value is variadic and so has to stay last.
+    const bootstrapCommand = applyMcpBridge(
+      applyRemoteControl(req?.bootstrapCommand ?? '', {
+        projectName: String(req?.projectName ?? ''),
+        paneTitle: String(req?.paneTitle ?? '')
+      })
+    )
+
     const spec = {
       id: String(req?.id ?? ''),
       cwd: String(req?.cwd ?? ''),
       cols: Number(req?.cols ?? 80),
       rows: Number(req?.rows ?? 24),
-      // Profiles flagged `mcpBridge` get Forge's Gemini bridge appended here —
-      // the one place every pane's launch command passes through.
-      bootstrapCommand: applyMcpBridge(req?.bootstrapCommand ?? '')
+      bootstrapCommand
     }
 
     // A session can already exist when the renderer reloads (dev HMR) or after

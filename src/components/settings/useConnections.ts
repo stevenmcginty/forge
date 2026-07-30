@@ -9,9 +9,11 @@ import type { ChipTone } from './parts'
  *
  * The Account section and the account chip's menu both render this, so the
  * status dot on the chip and the list you open cannot disagree about whether
- * something is set up. Two of the entries are deliberately placeholders: Forge
- * does not do OAuth and has no phone companion, and a card that says so is
- * better than an empty space that implies one is coming next week.
+ * something is set up. Two of the entries are deliberately placeholders rather
+ * than actions: Google has retired the individual Google-account login, so
+ * there is no honest "Sign in with Google" to offer, and the phone companion is
+ * switched on under Advanced rather than from here. Both say what is true and
+ * where to go, which beats a button that cannot work.
  *
  * The CLI rows come from the same `probeAgents()` the first-run welcome uses —
  * there is one implementation of "is this command on PATH"
@@ -30,7 +32,7 @@ export interface Connection {
   /** Placeholders are shown but never counted as degraded. */
   placeholder?: boolean
   /** Which settings section fixes this one. */
-  section?: 'models' | 'agents'
+  section?: 'models' | 'agents' | 'advanced'
 }
 
 export interface AgentProbe {
@@ -79,6 +81,7 @@ export function useConnections(probe: AgentProbe): {
 } {
   const { state } = useApp()
   const geminiKey = state.settings.geminiKey
+  const companionEnabled = state.settings.companionEnabled
   const { agents, claude } = probe
 
   return useMemo(() => {
@@ -94,20 +97,29 @@ export function useConnections(probe: AgentProbe): {
         section: 'models'
       },
       {
+        // Not "coming soon" and not a sign-in button: Google retired the
+        // individual Google-account login that Gemini CLI used and points
+        // people at Antigravity instead, so a "Sign in with Google" here would
+        // be a button that cannot work. The API key above is the route.
         id: 'google',
-        name: 'Google / Antigravity',
-        detail: 'Signing in would let Forge reach Drive and Antigravity on your behalf. Not built yet.',
-        chip: 'coming soon',
-        tone: 'soon',
-        placeholder: true
+        name: 'Sign in with Google',
+        detail:
+          'Retired by Google — the individual Google-account login Gemini CLI used is gone, and Google now migrates people to Antigravity. Use the Gemini API key above instead.',
+        chip: 'not available',
+        tone: 'off',
+        placeholder: true,
+        section: 'models'
       },
       {
         id: 'companion',
         name: 'Phone companion',
-        detail: 'Dictate into Forge from your phone, the way DictationMic does. Not built yet.',
-        chip: 'coming soon',
-        tone: 'soon',
-        placeholder: true
+        detail: companionEnabled
+          ? 'Switched on. Needs a Firebase project before it can connect — see companion/GO-LIVE.md.'
+          : 'See your projects and send Forge a message from your phone. Built, off by default — switch it on under Advanced.',
+        chip: companionEnabled ? 'on' : 'off',
+        tone: 'off',
+        placeholder: true,
+        section: 'advanced'
       }
     ]
 
@@ -141,5 +153,5 @@ export function useConnections(probe: AgentProbe): {
 
     const healthy = connections.every((c) => c.placeholder || c.tone === 'ok' || c.tone === 'off')
     return { connections, healthy }
-  }, [geminiKey, agents, claude])
+  }, [geminiKey, companionEnabled, agents, claude])
 }

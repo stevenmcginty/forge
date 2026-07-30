@@ -53,6 +53,7 @@ export const IPC = {
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
   openPath: 'shell:open-path',
+  openExternal: 'shell:open-external',
 
   // onboarding — is `claude` / `kimi` / `gemini` on this machine's PATH?
   agentsProbe: 'agents:probe',
@@ -83,6 +84,18 @@ export const IPC = {
   memoryAppend: 'memory:append',
   memoryReplaceSummary: 'memory:replace-summary',
   memoryClear: 'memory:clear',
+  // forge companion — the phone link (M9)
+  companionStatus: 'companion:status',
+  companionStatusEvent: 'companion:status-event',
+  companionSignIn: 'companion:sign-in',
+  companionSignOut: 'companion:sign-out',
+  companionPublish: 'companion:publish',
+  companionReply: 'companion:reply',
+  /**
+   * A message arrived from the phone. THE hookup point for the voice pipeline —
+   * see CompanionUtteranceEvent in shared/types.ts.
+   */
+  companionUtterance: 'companion:utterance',
 
   // system probes (M6 settings page)
   systemUserName: 'system:user-name',
