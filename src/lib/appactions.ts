@@ -433,15 +433,8 @@ export function resolvePaneTarget(
   const raw = (spoken ?? '').trim()
   const tokens = targetTokens(raw)
 
-  /* --- "this", "here", or nothing at all --------------------------------- */
-  const meaningful = tokens.filter((t) => !TARGET_NOUNS.has(t))
-  if (tokens.length === 0 || (meaningful.length > 0 && meaningful.every((t) => THIS_PANE.has(t)))) {
+  if (tokens.length === 0) {
     return focused ? { kind: 'pane', pane: focused } : { kind: 'none', candidates: all }
-  }
-  if (meaningful.length === 0) {
-    // "the terminal" with exactly one open is unambiguous; otherwise ask.
-    if (all.length === 1) return { kind: 'pane', pane: all[0]! }
-    return focused ? { kind: 'pane', pane: focused } : { kind: 'ambiguous', candidates: all }
   }
 
   /* --- a number: "terminal two", "tab 3", "the second one" ---------------
@@ -449,6 +442,15 @@ export function resolvePaneTarget(
    * "one" is the awkward word: "terminal one" is a number and "the claude one"
    * is not. It only counts as 1 directly after a noun that can be numbered, or
    * on its own.
+   *
+   * This runs *first*, ahead of the "this"/bare-noun branches, and that
+   * ordering is the whole point. "one" has to live in TARGET_NOUNS so that
+   * "the claude one" strips down to "claude" — but that same membership means
+   * "terminal one" strips down to nothing at all, and a target with no
+   * meaningful words used to fall through to "the pane he is looking at". Said
+   * out loud with six terminals open, "in terminal one, <prompt>" delivered the
+   * prompt to terminal six. Numbers are the one handle that cannot be misread,
+   * so they are read before anything else gets a chance to be helpful.
    */
   let wanted: number | null = null
   for (const [i, t] of tokens.entries()) {
@@ -465,6 +467,17 @@ export function resolvePaneTarget(
   if (wanted !== null) {
     const hit = all.find((p) => p.number === wanted)
     return hit ? { kind: 'pane', pane: hit } : { kind: 'none', candidates: all }
+  }
+
+  /* --- "this", "here", or a bare noun ------------------------------------ */
+  const meaningful = tokens.filter((t) => !TARGET_NOUNS.has(t))
+  if (meaningful.length > 0 && meaningful.every((t) => THIS_PANE.has(t))) {
+    return focused ? { kind: 'pane', pane: focused } : { kind: 'none', candidates: all }
+  }
+  if (meaningful.length === 0) {
+    // "the terminal" with exactly one open is unambiguous; otherwise ask.
+    if (all.length === 1) return { kind: 'pane', pane: all[0]! }
+    return focused ? { kind: 'pane', pane: focused } : { kind: 'ambiguous', candidates: all }
   }
 
   /* --- a title: "the build pane", "notes" -------------------------------- */

@@ -79,7 +79,7 @@ const {
 } = await import('../src/lib/geminibrain.ts')
 const brainjson = await import('../src/lib/brainjson.ts')
 const { claimsCompletedAction, companionReplyText } = brainjson
-const { chooseVoice, speakable } = await import('../src/lib/speech.ts')
+const { chooseVoice, speakable, echoOverlap, ECHO_WINDOW_MS } = await import('../src/lib/speech.ts')
 const { planProjectFolder, sanitiseFolderName } = await import('../electron/projectfolder.ts')
 const { OpenRouterBrain } = await import('../src/lib/openrouterbrain.ts')
 const {
@@ -910,6 +910,23 @@ await test('targets resolve by number, ordinal, title and agent', () => {
   assert.equal(at('terminal nine').kind, 'none')
 })
 
+await test('"terminal one" is pane one, not the pane he happens to be in', () => {
+  // Found live, with six terminals open: "in terminal one, <prompt>" delivered
+  // the prompt to terminal six. "one" is in TARGET_NOUNS so that "the claude
+  // one" strips to "claude" -- which left "terminal one" stripping to nothing,
+  // and a target with no words left fell through to the focused pane. Silently.
+  const focusedLast = 'p5'
+  assert.equal(resolvePaneTarget('terminal one', CROWDED, focusedLast).pane.number, 1)
+  assert.equal(resolvePaneTarget('tab one', CROWDED, focusedLast).pane.number, 1)
+  assert.equal(resolvePaneTarget('pane one', CROWDED, focusedLast).pane.number, 1)
+  assert.equal(resolvePaneTarget('the first terminal', CROWDED, focusedLast).pane.number, 1)
+  // And the reading it was protecting still holds: a bare "one" after a word
+  // that is not a numbered noun is "that one", not pane 1.
+  assert.equal(resolvePaneTarget('this one', CROWDED, focusedLast).pane.paneId, focusedLast)
+  assert.equal(resolvePaneTarget('the last one', CROWDED, focusedLast).pane.number, 5)
+  assert.equal(resolvePaneTarget('the kimi one', CROWDED, focusedLast).pane.paneId, 'p5')
+})
+
 await test('two equal matches are asked about, never guessed', () => {
   // Steve's own example: three Claude panes and "the claude one".
   const out = resolvePaneTarget('the claude one', CROWDED, 'p1')
@@ -1391,6 +1408,27 @@ await test('the phone gets the words and the draft, and is told what could not r
   // Nothing but questions still says something rather than an empty bubble.
   const asked = companionReplyText({ understood: 'unclear', questions: ['Which project?'] }, 'roma-2026')
   assert.equal(asked, 'Which project?')
+})
+
+await test('Forge does not answer its own voice coming back through the mic', () => {
+  // Seen live: it said "Typed into Terminal 6 Claude Code, auto-relay is off in
+  // Settings", the sidecar cut the phrase once the room went quiet -- after the
+  // while-speaking guard had lifted -- and the brain was asked to answer it.
+  const said = 'Typed into Terminal 6 Claude Code, auto-relay is off in Settings'
+  // Speech-to-text mangles spelling, not shape: "Claude Code" comes back
+  // "clawed code". Words, therefore, not characters.
+  assert.ok(echoOverlap('Typing into Terminal 6 clawed code, auto relay is off in settings', said) >= 0.7)
+  assert.ok(echoOverlap(said, said) === 1)
+
+  // And what he actually says is not an echo, even on the same subject.
+  assert.ok(echoOverlap('open three more terminals', said) < 0.7)
+  assert.ok(echoOverlap('turn auto-relay on', said) < 0.7)
+  assert.ok(echoOverlap('no, terminal two', said) < 0.7)
+  assert.equal(echoOverlap('', said), 0)
+  assert.equal(echoOverlap('anything', ''), 0)
+
+  // The window is short: a minute later the same sentence is his.
+  assert.ok(ECHO_WINDOW_MS > 0 && ECHO_WINDOW_MS <= 10_000)
 })
 
 await test('a drafted prompt is never read aloud', () => {

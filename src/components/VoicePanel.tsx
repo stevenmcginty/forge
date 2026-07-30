@@ -55,9 +55,10 @@ import './VoicePanel.css'
  *     too; they run through the same executor, so it can never do more than the
  *     grammar could.
  *
- * The transcript arrives via `transcriptBus`, which is fed by the text box today
- * and by dictation once M3 lands — no change needed here. Replies are text only:
- * nothing is ever spoken aloud.
+ * The transcript arrives via `transcriptBus`, fed by the text box and, while
+ * agent mode is on, by dictation. Replies are written and — unless Settings says
+ * otherwise — spoken, which is why so much of this file is about the microphone
+ * being shut at the right moments.
  */
 
 interface TurnBase {
@@ -141,6 +142,8 @@ export function VoicePanel(): ReactNode {
 
   const logRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  /** The last thing he typed, so echo rejection never eats his own keystrokes. */
+  const lastTypedRef = useRef<string | null>(null)
 
   /* --------------------------------------------------------- agent mode
    *
@@ -756,6 +759,13 @@ export function VoicePanel(): ReactNode {
       // A typed phrase from the phone is never the agent, so it is let through.
       if (speakingRef.current && !opts?.silent) return ''
 
+      // 0b — and the same phrase arriving a beat *after* it stopped talking is
+      // still the agent. The sidecar cuts on silence, so its words land once the
+      // room is quiet, by which time the guard above has lifted. Anything Steve
+      // typed is exempt: it came from the keyboard, whatever it says.
+      if (!opts?.silent && said !== lastTypedRef.current && speaker.heardItself(said)) return ''
+      if (said === lastTypedRef.current) lastTypedRef.current = null
+
       // 0 — the brake. While a prompt is counting down into a terminal, "wait"
       // means stop that, not "start a new conversation about waiting".
       if (holds.current.size > 0 && CANCEL_WORDS.test(said.trim())) {
@@ -1011,6 +1021,18 @@ export function VoicePanel(): ReactNode {
     const text = draftPhrase.trim()
     if (!text) return
     setDraftPhrase('')
+    // Barge-in, the same move the button makes. The intake drops phrases that
+    // arrive while Forge is talking, because a microphone hears Forge — but a
+    // typed sentence is unambiguously him, and without this it vanished with
+    // no chip and no error while the agent finished its own sentence.
+    if (speakingRef.current) {
+      speaker.cancel()
+      speakingRef.current = false
+      setSpeaking(false)
+    }
+    // Interrupting ends the sentence, so nothing that follows is an echo.
+    speaker.forgetLastSpoken()
+    lastTypedRef.current = text
     typedTranscript.push(text)
   }, [draftPhrase])
 
