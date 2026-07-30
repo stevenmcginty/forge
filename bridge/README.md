@@ -357,7 +357,7 @@ To opt a profile out, set `"mcpBridge": false` on it in
 ## Testing
 
 ```pwsh
-npm run bridge:smoke        # protocol, degradation, live text route  (155 checks)
+npm run bridge:smoke        # protocol, degradation, live text route  (156 checks)
 npm run bridge:smoke -- --live-image       # + a real image generated and edited
 npm run bridge:smoke -- --live-video       # + a real ~4s Veo clip (~35s, costs more)
 npm run bridge:register     # config generation + claude accepts it (22 checks)
