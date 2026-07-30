@@ -100,10 +100,16 @@ async function loadAutoUpdater(): Promise<import('electron-updater').AppUpdater 
     // Required lazily: in a dev run this module is never reached, so a broken
     // or absent electron-updater cannot stop Forge from starting.
     const mod = (await import('electron-updater')) as unknown as {
-      autoUpdater: import('electron-updater').AppUpdater
+      autoUpdater?: import('electron-updater').AppUpdater
       default?: { autoUpdater: import('electron-updater').AppUpdater }
     }
-    const updater = mod.autoUpdater ?? mod.default?.autoUpdater ?? null
+    // electron-updater is CommonJS, and this bundle is too, so `import()` hands
+    // back a module namespace whose `default` is the real module.exports.
+    // cjs-module-lexer does *not* pick `autoUpdater` up as a named export here
+    // (it is a lazy getter), so `.default` is the one that actually resolves —
+    // checked first, with the named one kept as a fallback in case a future
+    // release changes that.
+    const updater = mod.default?.autoUpdater ?? mod.autoUpdater ?? null
     if (!updater) return null
 
     updater.autoDownload = false
