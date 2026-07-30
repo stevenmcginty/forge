@@ -166,10 +166,10 @@ export interface WindowBounds {
 }
 
 /**
- * Which interpreter the voice agent talks to. `gemini` is the live one;
- * `stub` is the offline fallback used whenever no key is set.
+ * Which interpreter the voice agent talks to. `gemini` and `openrouter` are the
+ * live ones; `stub` is the offline fallback used whenever no key is set.
  */
-export type VoiceBrainId = 'stub' | 'gemini' | 'claude' | 'openai'
+export type VoiceBrainId = 'stub' | 'gemini' | 'openrouter' | 'claude' | 'openai'
 
 /* ------------------------------------------------------- voice-agent ipc */
 
@@ -187,6 +187,30 @@ export interface GeminiCallRequest {
 export type GeminiCallResult =
   | { ok: true; text: string; finishReason?: string; model?: string }
   | { ok: false; error: string; status?: number }
+
+/**
+ * OpenRouter's chat-completions call. Deliberately OpenAI-shaped, because that
+ * is the API OpenRouter speaks — `system` is folded into the first message by
+ * the main process rather than here.
+ */
+export interface OpenRouterCallRequest {
+  key: string
+  model: string
+  system: string
+  /** Oldest first. `assistant` is the model's own past replies. */
+  turns: Array<{ role: 'user' | 'assistant'; text: string }>
+  /** Ask for `response_format: { type: 'json_object' }`. */
+  json?: boolean
+  maxTokens?: number
+  timeoutMs?: number
+}
+
+export type OpenRouterCallResult =
+  | { ok: true; text: string; finishReason?: string; model?: string }
+  | { ok: false; error: string; status?: number }
+
+/** Which on-disk key a `voice:import-key` call is after. */
+export type KeySource = 'gemini' | 'openrouter'
 
 export type ImportedKeyResult =
   | { ok: true; key: string; last4: string; source: string }
@@ -276,6 +300,39 @@ export interface EngineProgress {
 export type ClaudeCliState =
   | { ok: true; version: string }
   | { ok: false; error: string }
+/* --------------------------------------------------------- media generation */
+
+/**
+ * Generate an image. `projectPath` decides where it lands: the current project's
+ * `assets/generated/`, falling back to %APPDATA%\Forge\bridge-out when no
+ * project is open. The key is read from settings in the main process — it never
+ * travels from the renderer.
+ */
+export interface MakeImageRequest {
+  description: string
+  count?: number
+  aspect?: string
+  projectPath?: string
+}
+
+export interface EditImageRequest {
+  path: string
+  instruction: string
+  projectPath?: string
+}
+
+export type MediaCallResult =
+  | {
+      ok: true
+      /** Absolute paths of files actually written. Never empty. */
+      paths: string[]
+      model: string
+      ms: number
+      /** How many landed on the screenshot shelf. */
+      adopted: number
+      note?: string
+    }
+  | { ok: false; error: string; kind: string }
 
 export interface Settings {
   /** Editable in %APPDATA%\Forge\settings.json — built-ins are seeded here. */
@@ -344,12 +401,6 @@ export interface Settings {
   themeBg: string
   themeInk: string
 
-  /* --------------------------------------------------------- keys (M6) */
-  /**
-   * OpenRouter key for the (unbuilt) Kimi brain. Like anthropicKey: stored
-   * here and used nowhere.
-   */
-  openrouterKey: string
 
   /* -------------------------------------------------- voice relay (M6) */
   /**
@@ -359,6 +410,18 @@ export interface Settings {
   voiceAutoRelay: boolean
   /** How long a pane must be quiet before a relay counts as "finished". */
   voiceRelayGraceMs: number
+  /**
+   * Image-generation model for `make_image` / `edit_image`. Empty means "use the
+   * built-in default" (gemini-2.5-flash-image), which is also what the MCP
+   * bridge falls back to, so the two cannot disagree by accident.
+   */
+  geminiImageModel: string
+  /**
+   * OpenRouter key for OpenRouterBrain. Sent only to openrouter.ai, only when
+   * OpenRouter is the selected brain.
+   */
+  openrouterKey: string
+  openrouterModel: string
 }
 
 /* -------------------------------------------------------------------- ipc */

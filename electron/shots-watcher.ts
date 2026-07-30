@@ -220,17 +220,7 @@ export function registerShotsHandlers(): void {
     }
   })
 
-  ipcMain.handle(IPC.shotsAdopt, (_e, paths: string[]) => {
-    if (!shelf || !Array.isArray(paths)) return 0
-    let adopted = 0
-    for (const p of paths) {
-      if (typeof p !== 'string') continue
-      if (shelf.owns(p)) continue // already ours — dragging within the tray
-      if (shelf.pinFile(p, hashOfFile).ok) adopted += 1
-    }
-    if (adopted > 0) broadcast()
-    return adopted
-  })
+  ipcMain.handle(IPC.shotsAdopt, (_e, paths: string[]) => adoptShotFiles(paths))
 
   ipcMain.on(IPC.shotsDrag, (event, path: string) => {
     const target = String(path)
@@ -248,6 +238,26 @@ export function registerShotsHandlers(): void {
   })
 
   ipcMain.handle(IPC.shotsOpenFolder, () => shell.openPath(getShotsDir()))
+}
+
+/**
+ * Copy image files onto the shelf and tell the windows. Exported as well as
+ * exposed over IPC because generated images (electron/gemini-media.ts) land in
+ * the project folder and then want to appear in the tray immediately — same
+ * path as a drag-and-drop, no second implementation.
+ *
+ * Returns how many were adopted. Files already on the shelf are skipped.
+ */
+export function adoptShotFiles(paths: readonly string[]): number {
+  if (!shelf || !Array.isArray(paths)) return 0
+  let adopted = 0
+  for (const p of paths) {
+    if (typeof p !== 'string') continue
+    if (shelf.owns(p)) continue // already ours — dragging within the tray
+    if (shelf.pinFile(p, hashOfFile).ok) adopted += 1
+  }
+  if (adopted > 0) broadcast()
+  return adopted
 }
 
 /** Re-read the two settings the watcher cares about. */

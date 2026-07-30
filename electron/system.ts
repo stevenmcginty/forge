@@ -1,20 +1,18 @@
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { homedir, userInfo } from 'node:os'
-import { join } from 'node:path'
+import { userInfo } from 'node:os'
 import { ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { ClaudeCliState, ImportedKeyResult } from '@shared/types'
+import type { ClaudeCliState } from '@shared/types'
 
 /**
  * Read-only probes of the machine, for the Settings page's Account section.
  *
  * Everything here answers a question the connected-accounts list asks — is the
- * Claude CLI actually on this PATH, what is this Windows account called, is
- * there an OpenRouter key sitting in the file `kimi` already uses. Nothing
- * installs, signs in, writes or phones home; the honest "not found" is the
- * whole point, because a chip that says "connected" without checking is worse
- * than no chip.
+ * Claude CLI actually on this PATH, what is this Windows account called.
+ * Nothing installs, signs in, writes or phones home; the honest "not found" is
+ * the whole point, because a chip that says "connected" without checking is
+ * worse than no chip. (Reading a key off disk is next door, in voice-bridge's
+ * `importKey`, which already knew how.)
  */
 
 /** `claude --version` is fast, but a broken shim can hang. */
@@ -55,31 +53,7 @@ export function claudeVersion(): Promise<ClaudeCliState> {
   })
 }
 
-/**
- * Steve's OpenRouter key already lives in ~/.kimi-key, because that is where
- * the `kimi` launcher reads it from. Offer to reuse it rather than making him
- * find it again. Read-only, exactly like the Gemini import.
- */
-export function importOpenRouterKey(): ImportedKeyResult {
-  const candidates = [join(homedir(), '.kimi-key'), join(homedir(), '.openrouter-key')]
-  for (const path of candidates) {
-    if (!existsSync(path)) continue
-    try {
-      const key = readFileSync(path, 'utf8').trim()
-      if (!key) return { ok: false, error: `${path} is empty` }
-      if (!/^[A-Za-z0-9_\-.]{20,200}$/.test(key)) {
-        return { ok: false, error: `${path} does not look like an API key` }
-      }
-      return { ok: true, key, last4: key.slice(-4), source: path }
-    } catch (err) {
-      return { ok: false, error: `Could not read ${path}: ${(err as Error).message}` }
-    }
-  }
-  return { ok: false, error: `No key file found (looked in ${candidates[0]})` }
-}
-
 export function registerSystemHandlers(): void {
   ipcMain.handle(IPC.systemUserName, () => windowsUserName())
   ipcMain.handle(IPC.systemClaudeVersion, () => claudeVersion())
-  ipcMain.handle(IPC.systemImportOpenRouterKey, () => importOpenRouterKey())
 }

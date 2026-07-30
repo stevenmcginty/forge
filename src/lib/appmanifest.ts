@@ -97,6 +97,18 @@ export const ACTION_SPECS: ActionSpec[] = [
     kind: 'new_project_hint',
     args: '{"kind":"new_project_hint"}',
     what: 'Explain how to add a project. Adding one needs a folder picker, which you may not open.'
+  },
+  {
+    kind: 'make_image',
+    args: '{"kind":"make_image","description":"<full description>","count":<1-4>,"aspect":"16:9"}',
+    what:
+      'Really generate an image and save it into the project’s assets/generated/ folder — it also appears in the ' +
+      'screenshot tray. Describe subject, style, framing and mood; aspect is optional. Takes a few seconds each.'
+  },
+  {
+    kind: 'edit_image',
+    args: '{"kind":"edit_image","path":"<absolute path>","instruction":"<what to change>"}',
+    what: 'Edit an existing image into a new file. The original is never modified. Needs a real path on this PC.'
   }
 ]
 
@@ -192,6 +204,19 @@ export function buildManifest(s: ManifestSnapshot): string {
   lines.push('')
   lines.push('# NOT YET POSSIBLE (do not emit these)')
   for (const point of EXTENSION_POINTS) lines.push(`- ${point}`)
+  lines.push('')
+  lines.push('# TOOLS THE CODING AGENT HAS')
+  lines.push(
+    'Every Claude Code pane Forge opens is given Forge’s cross-agent bridge, so the agent you are drafting for can:',
+    '- make_image — generate a real image file from a description',
+    '- edit_image — change an existing image and save a new one',
+    '- ask_gemini — get a second opinion from Google Gemini, optionally with local files attached',
+    '- summarize_video — watch a YouTube or local video and summarise it',
+    'When a draftPrompt would benefit from any of these, say so in the prompt itself — one line, e.g. “You have',
+    'make_image/edit_image/ask_gemini/summarize_video available via the forge-bridge MCP server; use make_image for',
+    'the placeholder art rather than committing an empty file.” Do not mention them when they are irrelevant, and',
+    'never claim the agent has any tool that is not on that list.'
+  )
   lines.push('')
   lines.push('# HOW TO REPLY')
   lines.push(

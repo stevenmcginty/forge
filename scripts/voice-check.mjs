@@ -7,9 +7,17 @@
  *   • voicecommands   — the deterministic grammar (no model involved)
  *   • appactions      — the executor, its limits and its fuzzy name matching
  *   • appmanifest     — the capability manifest handed to every brain
+ *   • brainjson       — the JSON contract both live brains parse against
  *   • geminibrain     — request/JSON handling against a fake transport
+ *   • openrouterbrain — the same, over the OpenAI-shaped wire format
  *
  * Run: npm run voice:check
+ *      npm run voice:check -- --live-openrouter   # + one real, cheap API call
+ *
+ * The default run makes no network call at all: every transport is a fake, so
+ * the suite is deterministic and free. `--live-openrouter` adds a single
+ * round trip using the key in ~/.kimi-key, which is the only way to prove the
+ * model id in the defaults still exists.
  *
  * The hooks below only tell Node how to load the app's .ts modules: the package
  * is CommonJS for Electron's sake, and Node does not resolve extensionless
@@ -17,7 +25,11 @@
  * stripping types, so these are the real modules, not copies.
  */
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
+import { homedir } from 'node:os'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 
 registerHooks({
   resolve(spec, context, next) {
@@ -30,6 +42,9 @@ registerHooks({
   }
 })
 
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const LIVE_OPENROUTER = process.argv.includes('--live-openrouter')
+
 const {
   StubBrain,
   ClaudeBrain,
@@ -37,7 +52,8 @@ const {
   getActiveBrain,
   brainStatusLabel,
   maskKey,
-  NOT_CONNECTED
+  NOT_CONNECTED,
+  DEFAULT_OPENROUTER_MODEL
 } = await import('../src/lib/voicebrain.ts')
 const { createPushSource, transcriptBus, typedTranscript } = await import('../src/lib/transcriptSource.ts')
 const { parseCommand, parseUtterance } = await import('../src/lib/voicecommands.ts')
@@ -52,6 +68,8 @@ const {
   tidySay,
   RESPONSE_SCHEMA
 } = await import('../src/lib/geminibrain.ts')
+const brainjson = await import('../src/lib/brainjson.ts')
+const { OpenRouterBrain } = await import('../src/lib/openrouterbrain.ts')
 
 /* ------------------------------------------------------------- fixtures */
 
@@ -150,6 +168,36 @@ await test('getActiveBrain: gemini with a key, stub without', () => {
   // Nonsense from a hand-edited settings.json still yields a usable brain.
   assert.equal(getActiveBrain({ voiceBrain: 'llama' }).name, 'Stub')
   assert.equal(getActiveBrain(undefined).name, 'Stub')
+})
+
+await test('getActiveBrain: an explicit choice is never quietly overridden', () => {
+  assert.equal(getActiveBrain({ voiceBrain: 'openrouter', openrouterKey: 'sk-or-FAKE' }).name, 'OpenRouter')
+  // Picking OpenRouter with no OpenRouter key must NOT silently spend the
+  // Gemini key instead — that is the kind of swap you notice from the bill.
+  const wrongKey = getActiveBrain({ voiceBrain: 'openrouter', geminiKey: 'AIzaFAKE' })
+  assert.equal(wrongKey.name, 'Stub')
+  assert.equal(wrongKey.ready().reason, 'no-key')
+  const wrongWay = getActiveBrain({ voiceBrain: 'gemini', openrouterKey: 'sk-or-FAKE' })
+  assert.equal(wrongWay.name, 'Stub')
+})
+
+await test('getActiveBrain: unset falls through gemini > openrouter > stub', () => {
+  assert.equal(getActiveBrain({ geminiKey: 'AIzaFAKE', openrouterKey: 'sk-or-FAKE' }).name, 'Gemini')
+  assert.equal(getActiveBrain({ openrouterKey: 'sk-or-FAKE' }).name, 'OpenRouter')
+  assert.equal(getActiveBrain({}).name, 'Stub')
+  // Same order for a junk value, since that is "no choice made" too.
+  assert.equal(getActiveBrain({ voiceBrain: 'llama', openrouterKey: 'sk-or-FAKE' }).name, 'OpenRouter')
+})
+
+await test('the OpenRouter default model is one string, written in two places', () => {
+  // electron/store.ts cannot import a renderer module, so it repeats the
+  // literal. If they drift, a fresh settings.json points at a model the panel
+  // does not expect — cheap to assert, expensive to debug.
+  const store = readFileSync(join(ROOT, 'electron', 'store.ts'), 'utf8')
+  const m = /openrouterModel:\s*'([^']+)'/.exec(store)
+  assert.ok(m, 'store.ts has no openrouterModel default')
+  assert.equal(m[1], DEFAULT_OPENROUTER_MODEL)
+  assert.match(DEFAULT_OPENROUTER_MODEL, /^[a-z0-9-]+\/[a-z0-9.\-:]+$/i, 'looks like an OpenRouter id')
 })
 
 await test('the reported model is the chip label when live', () => {
@@ -539,6 +587,86 @@ await test('an unknown profile id is refused, not guessed', () => {
   assert.equal(out.ok, false)
 })
 
+/* ------------------------------------------------------- media actions */
+
+console.log('\nMedia actions')
+
+/** A runner that can generate, so the async path can be driven end to end. */
+function mediaRunner(result) {
+  const base = fakeRunner()
+  return {
+    ...base,
+    makeImage: async (request) => {
+      base.calls.push(['makeImage', request.description, request.count, request.aspect])
+      return result ?? { ok: true, summary: 'Made 1 image', requested: request.count, done: 1, paths: ['C:\\a.png'] }
+    },
+    editImage: async (request) => {
+      base.calls.push(['editImage', request.path, request.instruction])
+      return result ?? { ok: true, summary: 'Edited', requested: 1, done: 1, paths: ['C:\\b.png'] }
+    }
+  }
+}
+
+await test('make_image hands back a provisional chip plus a promise', async () => {
+  const run = mediaRunner()
+  const out = runAppAction({ kind: 'make_image', description: 'a red car', count: 2, aspect: '16:9' }, ctx(), run)
+  // Synchronous half: honest that nothing has happened yet.
+  assert.equal(out.ok, true)
+  assert.equal(out.done, 0)
+  assert.equal(out.requested, 2)
+  assert.match(out.summary, /Generating 2 images…/)
+  assert.ok(out.pending instanceof Promise)
+  assert.deepEqual(run.calls, [['makeImage', 'a red car', 2, '16:9']])
+  // Asynchronous half: the real outcome.
+  const settled = await out.pending
+  assert.equal(settled.done, 1)
+  assert.deepEqual(settled.paths, ['C:\\a.png'])
+})
+
+await test('make_image clamps the count and refuses an empty description', async () => {
+  const run = mediaRunner()
+  runAppAction({ kind: 'make_image', description: 'x', count: 99 }, ctx(), run)
+  assert.equal(run.calls[0][2], 4, 'four is the ceiling — each one is a separate API call')
+  runAppAction({ kind: 'make_image', description: 'y', count: 0 }, ctx(), run)
+  assert.equal(run.calls[1][2], 1)
+
+  const empty = runAppAction({ kind: 'make_image', description: '   ', count: 1 }, ctx(), mediaRunner())
+  assert.equal(empty.ok, false)
+  assert.equal(empty.pending, undefined)
+  assert.match(empty.summary, /picture of nothing/)
+})
+
+await test('edit_image needs both a path and an instruction', async () => {
+  const run = mediaRunner()
+  const out = runAppAction({ kind: 'edit_image', path: 'C:\\in.png', instruction: 'make it blue' }, ctx(), run)
+  assert.ok(out.pending instanceof Promise)
+  assert.deepEqual(run.calls, [['editImage', 'C:\\in.png', 'make it blue']])
+  await out.pending
+
+  assert.equal(runAppAction({ kind: 'edit_image', path: '', instruction: 'x' }, ctx(), mediaRunner()).ok, false)
+  assert.equal(runAppAction({ kind: 'edit_image', path: 'C:\\a.png', instruction: ' ' }, ctx(), mediaRunner()).ok, false)
+})
+
+await test('a runner with no media support refuses instead of pretending', () => {
+  // The command grammar's own runner (and every test double) has no makeImage.
+  const out = runAppAction({ kind: 'make_image', description: 'a red car', count: 1 }, ctx(), fakeRunner())
+  assert.equal(out.ok, false)
+  assert.equal(out.done, 0)
+  assert.equal(out.pending, undefined)
+  assert.match(out.summary, /not available/)
+  const edit = runAppAction({ kind: 'edit_image', path: 'C:\\a.png', instruction: 'blue' }, ctx(), fakeRunner())
+  assert.equal(edit.ok, false)
+})
+
+await test('a media failure comes back as a failed outcome, not a throw', async () => {
+  const run = mediaRunner({ ok: false, summary: 'Gemini is out of quota for this key (429)', requested: 1, done: 0 })
+  const out = runAppAction({ kind: 'make_image', description: 'a red car', count: 1 }, ctx(), run)
+  const settled = await out.pending
+  assert.equal(settled.ok, false)
+  assert.equal(settled.done, 0)
+  assert.match(settled.summary, /out of quota/)
+})
+
 /* -------------------------------------------------------------- manifest */
 
 console.log('\nCapability manifest')
@@ -589,6 +717,35 @@ await test('the manifest describes the app, the actions, the limits and the stat
   assert.ok(text.includes('draftPrompt'))
   // Small enough to send every turn.
   assert.ok(text.length < 6000, `manifest is ${text.length} chars`)
+})
+
+await test('the manifest offers the media actions and names the bridge tools', () => {
+  const text = buildManifest(SNAPSHOT)
+  assert.ok(text.includes('make_image'), 'make_image must be offered')
+  assert.ok(text.includes('edit_image'), 'edit_image must be offered')
+  assert.ok(text.includes('assets/generated'), 'say where the files land')
+  // The drafted prompt has to tell the coding agent what it can reach for.
+  assert.ok(text.includes('# TOOLS THE CODING AGENT HAS'))
+  for (const tool of ['make_image', 'edit_image', 'ask_gemini', 'summarize_video']) {
+    assert.ok(text.includes(tool), `TOOLS section must name ${tool}`)
+  }
+  assert.match(text, /never claim the agent has any tool that is not on that list/i)
+})
+
+await test('the manifest, the action union and the sanitiser agree on what exists', () => {
+  // Three lists that must not drift: what the model is told, what is honoured,
+  // and what the executor implements.
+  const kinds = ACTION_SPECS.map((s) => s.kind)
+  for (const kind of kinds) {
+    assert.ok(brainjson.ACTION_KINDS.has(kind), `${kind} is advertised but would be dropped by sanitiseActions`)
+  }
+  for (const kind of brainjson.ACTION_KINDS) {
+    assert.ok(kinds.includes(kind), `${kind} is honoured but never advertised`)
+  }
+  // And nothing that is still only a plan leaked into the offered list.
+  for (const point of EXTENSION_POINTS) {
+    assert.ok(!kinds.includes(point.split(' —')[0]), `${point} is listed as both possible and not`)
+  }
 })
 
 await test('the manifest copes with an empty app', () => {
@@ -775,5 +932,240 @@ await test('history is capped so the request cannot grow forever', async () => {
   assert.equal(sent.turns.length, 21)
   assert.equal(sent.turns.at(-1).text, 'now this')
 })
+
+/* -------------------------------------------------------------- brainjson */
+
+console.log('\nShared JSON contract (brainjson)')
+
+await test('geminibrain still re-exports the helpers it used to own', () => {
+  // Existing importers (and the section above) reach for these on geminibrain.
+  // The move to brainjson.ts must not have broken that.
+  assert.equal(extractJsonObject, brainjson.extractJsonObject)
+  assert.equal(parseBrainJson, brainjson.parseBrainJson)
+  assert.equal(salvagePartialJson, brainjson.salvagePartialJson)
+  assert.equal(sanitiseActions, brainjson.sanitiseActions)
+  assert.equal(tidySay, brainjson.tidySay)
+})
+
+await test('media actions survive sanitising, and half-formed ones do not', () => {
+  assert.deepEqual(sanitiseActions([{ kind: 'make_image', description: 'a red car' }]), [
+    { kind: 'make_image', description: 'a red car', count: 1 }
+  ])
+  assert.deepEqual(sanitiseActions([{ kind: 'make_image', description: 'a red car', count: 3, aspect: '16:9' }]), [
+    { kind: 'make_image', description: 'a red car', count: 3, aspect: '16:9' }
+  ])
+  // Four is the ceiling here as well as in the executor.
+  assert.equal(sanitiseActions([{ kind: 'make_image', description: 'x', count: 40 }])[0].count, 4)
+  assert.deepEqual(sanitiseActions([{ kind: 'make_image' }]), [], 'description is required')
+  assert.deepEqual(sanitiseActions([{ kind: 'make_image', description: '   ' }]), [])
+
+  assert.deepEqual(sanitiseActions([{ kind: 'edit_image', path: 'C:\\a.png', instruction: 'blue' }]), [
+    { kind: 'edit_image', path: 'C:\\a.png', instruction: 'blue' }
+  ])
+  assert.deepEqual(sanitiseActions([{ kind: 'edit_image', path: 'C:\\a.png' }]), [], 'instruction is required')
+  assert.deepEqual(sanitiseActions([{ kind: 'edit_image', instruction: 'blue' }]), [], 'path is required')
+  // Still no back door for kinds nobody implements.
+  assert.deepEqual(sanitiseActions([{ kind: 'make_video', description: 'a red car' }]), [])
+})
+
+await test('salvage names whichever brain was cut off', () => {
+  const truncated = '{"understood":"a car game","confidence":"high","draftPrompt":"# Goal\\nBuild a top'
+  assert.match(salvagePartialJson(truncated).say, /^Gemini hit its length limit/)
+  assert.match(salvagePartialJson(truncated, 'OpenRouter').say, /^OpenRouter hit its length limit/)
+  assert.equal(salvagePartialJson('{}', 'OpenRouter'), null)
+})
+
+await test('the response schema describes every field an action can carry', () => {
+  const props = RESPONSE_SCHEMA.properties.actions.items.properties
+  for (const field of ['kind', 'profileId', 'count', 'description', 'aspect', 'path', 'instruction']) {
+    assert.ok(props[field], `responseSchema is missing ${field}`)
+  }
+})
+
+/* --------------------------------------------------------- OpenRouterBrain */
+
+console.log('\nOpenRouterBrain (fake transport)')
+
+await test('no key means the stub, not a doomed request', () => {
+  const status = new OpenRouterBrain('', DEFAULT_OPENROUTER_MODEL, async () => {
+    throw new Error('should never be called')
+  }).ready()
+  assert.equal(status.ok, false)
+  assert.equal(status.reason, 'no-key')
+  assert.match(status.detail, /Kimi/, 'point him at the key he already has')
+
+  const live = new OpenRouterBrain('sk-or-FAKE', 'openai/gpt-5-nano', async () => ({ ok: true, text: GOOD })).ready()
+  assert.equal(live.ok, true)
+  assert.equal(brainStatusLabel(live), 'openai/gpt-5-nano')
+})
+
+await test('a good round trip sends the manifest, the history and asks for JSON', async () => {
+  const seen = []
+  const brain = new OpenRouterBrain('sk-or-FAKE', 'google/gemini-2.5-flash-lite', async (req) => {
+    seen.push(req)
+    return { ok: true, text: GOOD }
+  })
+  const reply = await brain.interpret('open three kimi tabs', {
+    recentTranscript: [],
+    manifest: 'MANIFEST-HERE',
+    history: [
+      { role: 'user', text: 'hello' },
+      { role: 'agent', text: 'hi' }
+    ]
+  })
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].model, 'google/gemini-2.5-flash-lite')
+  assert.ok(seen[0].system.startsWith('MANIFEST-HERE'))
+  // OpenAI-compatible JSON mode 400s if no message mentions JSON.
+  assert.match(seen[0].system, /JSON/)
+  assert.equal(seen[0].json, true)
+  // OpenAI roles, not Gemini's — 'assistant', never 'model'.
+  assert.deepEqual(
+    seen[0].turns.map((t) => t.role),
+    ['user', 'assistant', 'user']
+  )
+  assert.equal(seen[0].turns.at(-1).text, 'open three kimi tabs')
+  assert.deepEqual(reply.actions, [{ kind: 'open_tabs', profileId: 'kimi', count: 3 }])
+  assert.equal(reply.confidence, 'high')
+})
+
+await test('the same defensive parsing as Gemini: fences, prose, junk fields', async () => {
+  const fenced = new OpenRouterBrain('k', 'm', async () => ({ ok: true, text: '```json\n' + GOOD + '\n```' }))
+  assert.equal((await fenced.interpret('hi', { recentTranscript: [] })).confidence, 'high')
+
+  const chatty = new OpenRouterBrain('k', 'm', async () => ({ ok: true, text: `Sure! ${GOOD} hope that helps` }))
+  assert.equal((await chatty.interpret('hi', { recentTranscript: [] })).actions.length, 1)
+
+  const invented = new OpenRouterBrain('k', 'm', async () => ({
+    ok: true,
+    text: '{"understood":"x","confidence":"high","actions":[{"kind":"rm_rf","path":"C:\\\\"}]}'
+  }))
+  const reply = await invented.interpret('hi', { recentTranscript: [] })
+  assert.equal(reply.actions, undefined, 'an invented action must not reach the executor')
+})
+
+await test('malformed JSON is retried once with a nudge', async () => {
+  let calls = 0
+  const brain = new OpenRouterBrain('k', 'm', async (req) => {
+    calls++
+    if (calls === 2) {
+      // The nudge replays the bad reply as an assistant turn, then asks again.
+      assert.equal(req.turns.at(-2).role, 'assistant')
+      assert.match(req.turns.at(-1).text, /not valid JSON/)
+    }
+    return { ok: true, text: calls === 1 ? 'Sure, I can help with that!' : GOOD }
+  })
+  const reply = await brain.interpret('open three kimi tabs', { recentTranscript: [] })
+  assert.equal(calls, 2)
+  assert.equal(reply.confidence, 'high')
+})
+
+await test('a draft cut off by the token limit is rescued, not lost', async () => {
+  const truncated =
+    '{"understood":"The user wants a two-player top-down car game.","confidence":"high",' +
+    '"say":"Right, here it is.","draftPrompt":"# Goal\\nBuild a top-down car game.\\n\\n# Constraints\\n- Two players on one keyb'
+  // OpenAI's word for it is `length`, not Gemini's MAX_TOKENS.
+  const brain = new OpenRouterBrain('k', 'm', async () => ({ ok: true, text: truncated, finishReason: 'length' }))
+  const reply = await brain.interpret('a car game', { recentTranscript: [] })
+  assert.match(reply.draftPrompt, /^# Goal/)
+  assert.match(reply.say, /OpenRouter hit its length limit/)
+  assert.equal(reply.confidence, 'low')
+})
+
+await test('two malformed replies fail soft into the card, not into nothing', async () => {
+  const brain = new OpenRouterBrain('k', 'm', async () => ({ ok: true, text: 'still not json' }))
+  const reply = await brain.interpret('hello', { recentTranscript: [] })
+  assert.match(reply.understood, /not in the JSON shape/)
+  assert.equal(reply.say, 'still not json')
+  assert.equal(reply.confidence, 'low')
+})
+
+await test('API errors surface honestly, with OpenRouter’s own words', async () => {
+  const cases = [
+    ['401: No auth credentials found', /refused the key/],
+    ['402: Insufficient credits', /out of credit or rate-limiting/],
+    ['429: rate limited by upstream', /out of credit or rate-limiting/],
+    ['OpenRouter did not answer within 75s', /took too long/],
+    ['404: No endpoints found for llama/nope', /not on OpenRouter/],
+    ['Could not reach OpenRouter: ENOTFOUND', /check your connection/]
+  ]
+  for (const [error, expected] of cases) {
+    const brain = new OpenRouterBrain('k', 'm', async () => ({ ok: false, error }))
+    await assert.rejects(() => brain.interpret('hello', { recentTranscript: [] }), expected, error)
+  }
+})
+
+await test('history is capped so the request cannot grow forever', async () => {
+  let sent = null
+  const brain = new OpenRouterBrain('k', 'm', async (req) => {
+    sent = req
+    return { ok: true, text: GOOD }
+  })
+  const history = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? 'agent' : 'user', text: `t${i}` }))
+  await brain.interpret('now this', { recentTranscript: [], history })
+  assert.equal(sent.turns.length, 21)
+  assert.equal(sent.turns.at(-1).text, 'now this')
+})
+
+/* ------------------------------------------------------------------- live */
+
+/**
+ * The only check here that costs money — a single call on the cheapest model in
+ * the defaults, which is the only way to prove that model id still exists on
+ * OpenRouter. Opt-in, and skipped entirely without a key on disk.
+ */
+if (LIVE_OPENROUTER) {
+  console.log('\nOpenRouter (live)')
+  const keyPath = join(homedir(), '.kimi-key')
+  if (!existsSync(keyPath)) {
+    console.log(`  --  skipped: no ${keyPath}`)
+  } else {
+    const key = readFileSync(keyPath, 'utf8').trim()
+    await test(`a real round trip on ${DEFAULT_OPENROUTER_MODEL}`, async () => {
+      const started = Date.now()
+      const brain = new OpenRouterBrain(key, DEFAULT_OPENROUTER_MODEL, async (req) => {
+        // The main process is not running, so stand in for electron/voice-bridge.
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${req.key}`,
+            'HTTP-Referer': 'https://forge.local',
+            'X-Title': 'Forge'
+          },
+          body: JSON.stringify({
+            model: req.model,
+            messages: [
+              { role: 'system', content: req.system },
+              ...req.turns.map((t) => ({ role: t.role, content: t.text }))
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.2,
+            max_tokens: 800
+          })
+        })
+        const body = await res.json()
+        if (!res.ok || body.error) {
+          return { ok: false, error: `${res.status}: ${body?.error?.message ?? 'unknown'}` }
+        }
+        return {
+          ok: true,
+          text: body.choices?.[0]?.message?.content ?? '',
+          finishReason: body.choices?.[0]?.finish_reason,
+          model: body.model
+        }
+      })
+
+      const reply = await brain.interpret('open three kimi tabs', {
+        recentTranscript: [],
+        manifest: buildManifest(SNAPSHOT)
+      })
+      console.log(`      ${Date.now() - started}ms · understood: ${reply.understood}`)
+      console.log(`      actions: ${JSON.stringify(reply.actions ?? [])}`)
+      assert.ok(reply.understood, 'a live reply must say what it understood')
+      assert.ok(['low', 'medium', 'high'].includes(reply.confidence))
+    })
+  }
+}
 
 console.log(`\n${passed} checks passed\n`)

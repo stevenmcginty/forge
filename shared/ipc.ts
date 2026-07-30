@@ -55,12 +55,17 @@ export const IPC = {
 
   // voice agent (M4)
   voiceGemini: 'voice:gemini',
+  voiceOpenRouter: 'voice:openrouter',
   voiceImportKey: 'voice:import-key',
+
+  // media generation (M6) — the same REST calls the MCP bridge makes, so the
+  // voice agent's executor can generate images too.
+  voiceMakeImage: 'voice:make-image',
+  voiceEditImage: 'voice:edit-image',
 
   // system probes (M6 settings page)
   systemUserName: 'system:user-name',
   systemClaudeVersion: 'system:claude-version',
-  systemImportOpenRouterKey: 'system:import-openrouter-key',
 
   // speech-engine model management (M6)
   modelsEngineState: 'models:engine-state',

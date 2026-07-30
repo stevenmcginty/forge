@@ -6,25 +6,51 @@
  *
  * Run:  node scripts/bridge-smoke.mjs
  *
- * Two modes, chosen automatically:
+ * Modes, chosen automatically:
  *   - Gemini absent or signed out  → asserts every tool returns the graceful
  *     error path (isError + a message that names the fix).
  *   - Gemini signed in             → additionally asserts a live round trip.
+ *   - A Gemini API key on disk     → additionally generates and edits a real
+ *     image, and asserts the returned paths exist (opt in with --live-image;
+ *     it costs quota, so it is never part of the default run).
  *
  * Pass --force-absent to hide the CLI from the server (PATH stripped) and test
  * the not-installed branch even on a machine that has it.
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { delimiter, dirname, join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const SERVER = join(root, 'bridge', 'gemini-bridge.mjs')
+const MEDIA_TS = join(root, 'electron', 'gemini-media.ts')
 
 const forceAbsent = process.argv.includes('--force-absent')
+const liveImage = process.argv.includes('--live-image')
+
+/**
+ * Where a Gemini key might be, for the opt-in live-image run only. A path, not
+ * a key — nothing secret is committed, and nothing is written back.
+ */
+function findApiKey() {
+  const fromEnv = (process.env['GEMINI_API_KEY'] ?? '').trim()
+  if (fromEnv) return { key: fromEnv, source: 'GEMINI_API_KEY' }
+  const candidates = [
+    join(homedir(), 'Desktop', 'DictationMic', 'gemini.key'),
+    join(homedir(), '.gemini-key')
+  ]
+  for (const path of candidates) {
+    if (!existsSync(path)) continue
+    const key = readFileSync(path, 'utf8').trim()
+    if (key) return { key, source: path }
+  }
+  return null
+}
 
 let failures = 0
 let checks = 0
@@ -99,9 +125,17 @@ function openServer(env) {
   return { child, request, notify, stderrText: () => stderr, close: () => child.kill() }
 }
 
+/** No key in the environment: the media tools' "cannot do this" path. */
+function envWithoutKey(base = process.env) {
+  const env = { ...base }
+  delete env['GEMINI_API_KEY']
+  delete env['GOOGLE_API_KEY']
+  return env
+}
+
 /** Strip every directory that holds a gemini shim, to simulate "not installed". */
 function envWithoutGemini() {
-  const env = { ...process.env }
+  const env = envWithoutKey()
   const kept = (env['PATH'] ?? '')
     .split(delimiter)
     .filter((d) => d && !['gemini', 'gemini.cmd', 'gemini.exe'].some((n) => existsSync(join(d, n))))
@@ -137,13 +171,15 @@ async function handshake(session, label) {
   return init
 }
 
+const TOOL_NAMES = ['ask_gemini', 'edit_image', 'make_image', 'summarize_video']
+
 async function listTools(session, label) {
   const res = await session.request('tools/list', {})
   const tools = res.result?.tools ?? []
   const names = tools.map((t) => t.name).sort()
   check(
-    `${label}: tools/list returns exactly the three bridge tools`,
-    JSON.stringify(names) === JSON.stringify(['ask_gemini', 'make_image', 'summarize_video']),
+    `${label}: tools/list returns exactly the four bridge tools`,
+    JSON.stringify(names) === JSON.stringify(TOOL_NAMES),
     JSON.stringify(names)
   )
   for (const t of tools) {
@@ -156,7 +192,8 @@ async function listTools(session, label) {
   const required = {
     ask_gemini: ['prompt'],
     summarize_video: ['url_or_path'],
-    make_image: ['description']
+    make_image: ['description'],
+    edit_image: ['path', 'instruction']
   }
   for (const t of tools) {
     check(
@@ -208,10 +245,21 @@ async function runAbsentSuite() {
       }),
       fixIt
     )
+    // The media tools no longer touch the CLI at all, so "no CLI" is not their
+    // problem — "no API key" is, and the fix they name has to be the right one.
+    const noKey = [/no Gemini API key/i, /voice-agent settings/i, /GEMINI_API_KEY/]
     expectGraceful(
       'absent: make_image',
       await session.request('tools/call', { name: 'make_image', arguments: { description: 'a red car' } }),
-      [...fixIt, /image-generation/i]
+      noKey
+    )
+    expectGraceful(
+      'absent: edit_image',
+      await session.request('tools/call', {
+        name: 'edit_image',
+        arguments: { path: 'C:\\nope.png', instruction: 'make it blue' }
+      }),
+      noKey
     )
 
     // Bad input and unknown tools must be tool errors, not crashes.
@@ -219,6 +267,32 @@ async function runAbsentSuite() {
       /required/i
     ])
     expectGraceful('absent: unknown tool', await session.request('tools/call', { name: 'nope', arguments: {} }), [/unknown tool/i])
+
+    // Argument validation happens before anything is spent, so it must be
+    // reported even with no key at all.
+    expectGraceful(
+      'absent: make_image rejects a silly count',
+      await session.request('tools/call', { name: 'make_image', arguments: { description: 'a red car', count: 40 } }),
+      [/`count` must be a whole number from 1 to 4/]
+    )
+    expectGraceful(
+      'absent: make_image rejects an unknown aspect',
+      await session.request('tools/call', {
+        name: 'make_image',
+        arguments: { description: 'a red car', aspect: 'square-ish' }
+      }),
+      [/`aspect` must be one of/]
+    )
+    expectGraceful(
+      'absent: make_image rejects an empty description',
+      await session.request('tools/call', { name: 'make_image', arguments: { description: '   ' } }),
+      [/`description` is required/]
+    )
+    expectGraceful(
+      'absent: edit_image rejects a missing instruction',
+      await session.request('tools/call', { name: 'edit_image', arguments: { path: 'C:\\a.png' } }),
+      [/`instruction` is required/]
+    )
 
     // A crashed server would have failed the requests above, but be explicit.
     check('absent: server still alive after all calls', session.child.exitCode === null, `exit ${session.child.exitCode}`)
@@ -228,27 +302,23 @@ async function runAbsentSuite() {
 }
 
 async function runInstalledSuite() {
-  console.log('\n[2] Real CLI on PATH (live path)')
-  const session = openServer({ ...process.env })
+  console.log('\n[2] Real CLI on PATH, no API key (live path)')
+  const session = openServer(envWithoutKey())
   try {
     await handshake(session, 'live')
     await listTools(session, 'live')
 
-    // Image support is probed via `gemini extensions list`, which needs no
-    // login — so this asserts the honesty of make_image against the real CLI
-    // regardless of auth state.
+    // With the CLI present but no key, make_image must still refuse — it does
+    // not go anywhere near the CLI, and it must never invent a path.
     const img = await session.request('tools/call', { name: 'make_image', arguments: { description: 'a red car' } })
     const imgText = textOf(img.result)
-    if (/no image-generation tool/i.test(imgText) || /image-generation/i.test(imgText)) {
-      check('live: make_image admits the CLI cannot generate images', img.result?.isError === true, imgText.slice(0, 300))
-      check(
-        'live: make_image names the fix and forbids claiming success',
-        /genmedia|Imagen|extensions install/i.test(imgText) && /Do not claim an image exists/i.test(imgText),
-        imgText.slice(0, 600)
-      )
-    } else {
-      check('live: make_image did not fabricate a path', !/^Image saved to/.test(imgText) || existsSync(imgText.split('\n')[0].replace('Image saved to ', '')), imgText.slice(0, 300))
-    }
+    check('live: make_image refuses without a key', img.result?.isError === true, imgText.slice(0, 300))
+    check(
+      'live: make_image names the fix and forbids claiming success',
+      /voice-agent settings/i.test(imgText) && /Do not claim an image exists/i.test(imgText),
+      imgText.slice(0, 600)
+    )
+    check('live: make_image did not fabricate a path', !/Image saved to/.test(imgText), imgText.slice(0, 300))
 
     const res = await session.request('tools/call', {
       name: 'ask_gemini',
@@ -276,12 +346,124 @@ async function runInstalledSuite() {
   }
 }
 
+/**
+ * The bridge carries a deliberate copy of electron/gemini-media.ts's REST logic,
+ * because it has to run under bare `node` with no build step. A copy that
+ * quietly diverges is worse than no copy at all, so the pieces that matter are
+ * compared here rather than trusted.
+ */
+function runDriftSuite() {
+  console.log('\n[3] Bridge/gemini-media.ts drift guard')
+  const bridge = readFileSync(SERVER, 'utf8')
+  const media = readFileSync(MEDIA_TS, 'utf8')
+
+  const model = (src, name) => new RegExp(`${name}\\s*=\\s*'([^']+)'`).exec(src)?.[1]
+  const bridgeModel = model(bridge, 'DEFAULT_IMAGE_MODEL')
+  const mediaModel = model(media, 'DEFAULT_IMAGE_MODEL')
+  check(
+    `drift: both default to the same image model (${bridgeModel})`,
+    !!bridgeModel && bridgeModel === mediaModel,
+    `bridge=${bridgeModel} media=${mediaModel}`
+  )
+
+  const aspects = (src) => (/ASPECT_RATIOS[^=]*=\s*\[([^\]]+)\]/.exec(src)?.[1] ?? '').replace(/[\s'"]/g, '')
+  check('drift: both accept the same aspect ratios', aspects(bridge) === aspects(media) && aspects(bridge).length > 10, `bridge=${aspects(bridge)}\n       media=${aspects(media)}`)
+
+  const num = (src, name) => new RegExp(`${name}\\s*=\\s*([0-9_*\\s]+)`).exec(src)?.[1]?.replace(/[\s_]/g, '')
+  for (const name of ['MAX_IMAGE_COUNT', 'MAX_INPUT_BYTES']) {
+    check(`drift: ${name} matches`, num(bridge, name) === num(media, name), `bridge=${num(bridge, name)} media=${num(media, name)}`)
+  }
+
+  const mimes = (src) => (/INPUT_MIME[^{]*\{([^}]+)\}/.exec(src)?.[1] ?? '').replace(/[\s'"]/g, '')
+  check('drift: both accept the same input image types', mimes(bridge) === mimes(media) && mimes(bridge).includes('.png'), `bridge=${mimes(bridge)}\n       media=${mimes(media)}`)
+
+  check(
+    'drift: the copy is labelled as one in both files',
+    /DUPLICATED from electron\/gemini-media\.ts/.test(bridge) && /cannot import this file/.test(media),
+    'each file must point at the other'
+  )
+}
+
+/**
+ * The only checks that spend quota. Opt in with --live-image. Generates a real
+ * image, asserts the file is on disk and is a real PNG/JPEG, then feeds it back
+ * through edit_image and asserts the original survived untouched.
+ */
+async function runLiveImageSuite() {
+  const found = findApiKey()
+  console.log('\n[4] Live image generation')
+  if (!found) {
+    console.log('  --   skipped: no GEMINI_API_KEY and no key file on disk')
+    return
+  }
+  console.log(`  --   key from ${found.source}`)
+
+  const outDir = join(tmpdir(), `forge-bridge-smoke-${Date.now()}`)
+  const session = openServer({ ...process.env, GEMINI_API_KEY: found.key, FORGE_BRIDGE_OUT: outDir })
+  try {
+    await handshake(session, 'image')
+
+    const t0 = Date.now()
+    const made = await session.request('tools/call', {
+      name: 'make_image',
+      arguments: { description: 'A single ripe red apple on a plain white studio background, soft light, photographic.' }
+    })
+    const madeText = textOf(made.result)
+    const madeMs = Date.now() - t0
+    check('image: make_image succeeded', made.result?.isError !== true, madeText.slice(0, 600))
+
+    const path = /Image saved to (.+)/.exec(madeText)?.[1]?.trim()
+    check('image: it named a path', !!path, madeText.slice(0, 300))
+    if (!path) return
+    check(`image: the file exists (${madeMs}ms)`, existsSync(path), path)
+    const bytes = existsSync(path) ? statSync(path).size : 0
+    check(`image: the file has real content (${Math.round(bytes / 1024)} KB)`, bytes > 10_000, `${bytes} bytes`)
+    // First bytes must be a real image header, not a text apology saved as .png.
+    const head = existsSync(path) ? readFileSync(path).subarray(0, 4) : Buffer.alloc(0)
+    const isPng = head[0] === 0x89 && head[1] === 0x50
+    const isJpg = head[0] === 0xff && head[1] === 0xd8
+    check('image: the bytes really are an image', isPng || isJpg, [...head].map((b) => b.toString(16)).join(' '))
+    check('image: it reported which model made it', /Model [a-z0-9.\-]+image/i.test(madeText), madeText.slice(0, 400))
+    console.log(`  --   ${path}`)
+
+    const t1 = Date.now()
+    const edited = await session.request('tools/call', {
+      name: 'edit_image',
+      arguments: { path, instruction: 'Make the apple bright blue. Keep the framing and lighting identical.' }
+    })
+    const editText = textOf(edited.result)
+    check('image: edit_image succeeded', edited.result?.isError !== true, editText.slice(0, 600))
+    const editedPath = /Edited image saved to (.+)/.exec(editText)?.[1]?.trim()
+    check(`image: the edited file exists (${Date.now() - t1}ms)`, !!editedPath && existsSync(editedPath), editText.slice(0, 300))
+    check('image: the edit is a NEW file', editedPath !== path, `${editedPath}`)
+    check('image: the original was not modified', existsSync(path) && statSync(path).size === bytes, path)
+    if (editedPath) console.log(`  --   ${editedPath}`)
+
+    // A path that is not an image must be refused before anything is spent.
+    const badInput = await session.request('tools/call', {
+      name: 'edit_image',
+      arguments: { path: SERVER, instruction: 'make it blue' }
+    })
+    expectGraceful('image: edit_image refuses a non-image', badInput, [/not an image Gemini accepts/])
+    const missing = await session.request('tools/call', {
+      name: 'edit_image',
+      arguments: { path: join(outDir, 'not-here.png'), instruction: 'make it blue' }
+    })
+    expectGraceful('image: edit_image refuses a missing file', missing, [/No such file/])
+  } finally {
+    session.close()
+  }
+}
+
 async function main() {
   console.log(`bridge-smoke → ${SERVER}`)
   await runAbsentSuite()
   if (!forceAbsent) await runInstalledSuite()
+  runDriftSuite()
+  if (liveImage) await runLiveImageSuite()
 
   console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`)
+  if (!liveImage) console.log('(run with --live-image to also generate and edit a real image — spends quota)')
   process.exit(failures === 0 ? 0 : 1)
 }
 

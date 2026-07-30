@@ -53,7 +53,24 @@ let boundsTimer: NodeJS.Timeout | null = null
 /** Set only by user-driven resize/move — see persistBounds(). */
 let boundsDirty = false
 
-/* -------------------------------------------------------------- app single instance */
+/* -------------------------------------------------------------- app single instance
+ *
+ * The lock is per data directory, not per application, and that falls out of
+ * the ordering above: Electron keys it on the userData path, and userData was
+ * just pointed at DATA_ROOT. So
+ *
+ *   forge                                 one window; launching it again focuses that window
+ *   forge --data-dir D:\forge-test        an independent instance with its own lock
+ *   FORGE_DATA_DIR=... forge              likewise
+ *
+ * which is what makes a throwaway copy safe to run alongside the real one.
+ *
+ * TODO(phase B): `--project <path>` should open a second window onto another
+ * project inside the *same* instance, by handing the path to second-instance
+ * below and opening a BrowserWindow for it. Deliberately not built yet —
+ * everything from the store cache to terminalHost currently assumes one window,
+ * so it is a feature rather than the one-line arg parse it looks like.
+ */
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -250,8 +267,16 @@ function registerAppHandlers(): void {
 
   ipcMain.handle(IPC.storeSnapshot, () => snapshot())
   ipcMain.handle(IPC.storeSetSettings, (_e, patch: Partial<Settings>) => {
+    const before = getSettings()
     const next = setSettings(patch ?? {})
     applyShotSettings(next)
+    // The bridge's mcp.json carries the Gemini key and image model, so it has to
+    // be rewritten when either changes — otherwise a key pasted today would not
+    // reach make_image until the next launch. (Panes still have to be reopened:
+    // Claude reads the config once, at start.)
+    if (before.geminiKey !== next.geminiKey || before.geminiImageModel !== next.geminiImageModel) {
+      writeBridgeConfig()
+    }
     return next
   })
   ipcMain.handle(IPC.storeSetProjects, (_e, projects: Project[]) => setProjects(Array.isArray(projects) ? projects : []))

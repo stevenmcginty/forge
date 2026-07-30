@@ -93,6 +93,37 @@ export function VoicePanel(): ReactNode {
   const logRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
 
+  /* ----------------------------------------------------------------- mic
+   *
+   * The mic button arms *routing*: while it is on and this panel is open,
+   * dictated phrases are the agent's rather than the focused pane's (the rule
+   * lives in useDictation). Arming also starts the sidecar, because a mic button
+   * that does not turn the mic on would be a strange thing to ship.
+   *
+   * The engine is driven by IPC rather than through useDictation on purpose:
+   * that hook owns the global dictation hotkey, and a second copy of it would
+   * mean every press of Right Ctrl toggled twice and cancelled itself out.
+   */
+
+  const armed = state.agentListening
+  const [micLive, setMicLive] = useState(false)
+
+  useEffect(() => window.forge.stt.onStatus((s) => setMicLive(s.phase === 'listening')), [])
+
+  const toggleMic = useCallback(() => {
+    const next = !armed
+    actions.setAgentListening(next)
+    if (next) void window.forge.stt.start()
+    else void window.forge.stt.stop()
+  }, [armed, actions])
+
+  // Closing the panel disarms, so it never reopens secretly pointed at the
+  // agent. The sidecar is left alone: the pill may still be dictating into a
+  // pane, and that is not this panel's business to stop.
+  useEffect(() => {
+    if (!open && armed) actions.setAgentListening(false)
+  }, [open, armed, actions])
+
   /* --------------------------------------------------------------- brain */
 
   const brain = useMemo(
@@ -101,9 +132,18 @@ export function VoicePanel(): ReactNode {
         voiceBrain: state.settings.voiceBrain,
         anthropicKey: state.settings.anthropicKey,
         geminiKey: state.settings.geminiKey,
-        geminiModel: state.settings.geminiModel
+        geminiModel: state.settings.geminiModel,
+        openrouterKey: state.settings.openrouterKey,
+        openrouterModel: state.settings.openrouterModel
       }),
-    [state.settings.voiceBrain, state.settings.anthropicKey, state.settings.geminiKey, state.settings.geminiModel]
+    [
+      state.settings.voiceBrain,
+      state.settings.anthropicKey,
+      state.settings.geminiKey,
+      state.settings.geminiModel,
+      state.settings.openrouterKey,
+      state.settings.openrouterModel
+    ]
   )
   const status: BrainStatus = brain.ready()
 
@@ -143,7 +183,34 @@ export function VoicePanel(): ReactNode {
     closePane: (paneId) => actions.closePane(paneId),
     closeTab: (tabId) => actions.closeTab(tabId),
     selectProject: (projectId) => actions.selectProject(projectId),
-    selectTab: (tabId) => actions.selectTab(tabId)
+    selectTab: (tabId) => actions.selectTab(tabId),
+    // Media generation goes to the main process, which holds the key, writes
+    // into the project's assets/generated/ and puts the result in the tray.
+    makeImage: async (request) => {
+      const res = await window.forge.voice.makeImage({ ...request, projectPath: project?.path })
+      if (!res.ok) return { ok: false, summary: mediaFailure(res.error), requested: request.count, done: 0 }
+      const made = res.paths.length
+      return {
+        ok: true,
+        summary:
+          `Made ${made} ${made === 1 ? 'image' : 'images'} in assets/generated` +
+          `${res.adopted > 0 ? ' — also in the shot tray' : ''}${res.note ? ` (${res.note})` : ''}`,
+        requested: request.count,
+        done: made,
+        paths: res.paths
+      }
+    },
+    editImage: async (request) => {
+      const res = await window.forge.voice.editImage({ ...request, projectPath: project?.path })
+      if (!res.ok) return { ok: false, summary: mediaFailure(res.error), requested: 1, done: 0 }
+      return {
+        ok: true,
+        summary: `Edited image saved to assets/generated${res.adopted > 0 ? ' — also in the shot tray' : ''}`,
+        requested: 1,
+        done: res.paths.length,
+        paths: res.paths
+      }
+    }
   }
 
   const manifestRef = useRef<string>('')
@@ -203,28 +270,64 @@ export function VoicePanel(): ReactNode {
 
   /* ------------------------------------------------------------- executor */
 
-  const runActions = useCallback((list: AppAction[]): ActionOutcome[] => {
-    let ctx = ctxRef.current
-    const runner = runnerRef.current
-    if (!ctx || !runner) return []
-    const out: ActionOutcome[] = []
-    for (const action of list) {
-      const outcome = runAppAction(action, ctx, runner)
-      out.push(outcome)
-      // Later actions in the same breath must see the earlier ones' effect.
-      if (action.kind === 'open_tabs') {
-        ctx = { ...ctx, paneCount: ctx.paneCount + outcome.done }
-      } else if (action.kind === 'open_panes') {
-        ctx = {
-          ...ctx,
-          paneCount: ctx.paneCount + outcome.done,
-          panesInActiveTab: ctx.panesInActiveTab + outcome.done
+  /**
+   * `onResolved` exists for the asynchronous actions only. Generating an image
+   * takes seconds, so `runAppAction` hands back a provisional "Generating…"
+   * outcome plus a promise; when it settles the chip is replaced in place rather
+   * than the card sitting there lying about what happened.
+   */
+  const runActions = useCallback(
+    (list: AppAction[], onResolved?: (index: number, outcome: ActionOutcome) => void): ActionOutcome[] => {
+      let ctx = ctxRef.current
+      const runner = runnerRef.current
+      if (!ctx || !runner) return []
+      const out: ActionOutcome[] = []
+      for (const [i, action] of list.entries()) {
+        const outcome = runAppAction(action, ctx, runner)
+        out.push(outcome)
+        if (outcome.pending && onResolved) {
+          const index = i
+          void outcome.pending.then(
+            (settled) => onResolved(index, settled),
+            (err: unknown) =>
+              onResolved(index, {
+                ok: false,
+                summary: mediaFailure(err instanceof Error ? err.message : String(err)),
+                requested: outcome.requested,
+                done: 0
+              })
+          )
         }
-      } else if (action.kind === 'close_pane') {
-        ctx = { ...ctx, paneCount: Math.max(0, ctx.paneCount - outcome.done) }
+        // Later actions in the same breath must see the earlier ones' effect.
+        if (action.kind === 'open_tabs') {
+          ctx = { ...ctx, paneCount: ctx.paneCount + outcome.done }
+        } else if (action.kind === 'open_panes') {
+          ctx = {
+            ...ctx,
+            paneCount: ctx.paneCount + outcome.done,
+            panesInActiveTab: ctx.panesInActiveTab + outcome.done
+          }
+        } else if (action.kind === 'close_pane') {
+          ctx = { ...ctx, paneCount: Math.max(0, ctx.paneCount - outcome.done) }
+        }
       }
-    }
-    return out
+      return out
+    },
+    []
+  )
+
+  /** Replace one chip on a turn once its slow action has settled. */
+  const patchOutcome = useCallback((turnId: string, index: number, outcome: ActionOutcome): void => {
+    setTurns((prev) =>
+      prev.map((t) => {
+        if (t.id !== turnId) return t
+        const current = t.kind === 'command' ? t.outcomes : t.outcomes
+        if (!current || !current[index]) return t
+        const next = [...current]
+        next[index] = outcome
+        return t.kind === 'command' ? { ...t, outcomes: next } : { ...t, outcomes: next }
+      })
+    )
   }, [])
 
   /* ---------------------------------------------------- transcript intake */
@@ -237,7 +340,7 @@ export function VoicePanel(): ReactNode {
       const ctx = ctxRef.current
       const hit = ctx ? parseUtterance(said, ctx) : null
       if (hit) {
-        const outcomes = runActions(hit.actions)
+        const outcomes = runActions(hit.actions, (index, outcome) => patchOutcome(id, index, outcome))
         setTurns((prev) => [
           ...prev,
           { id, said, at: Date.now(), kind: 'command', actions: hit.actions, outcomes }
@@ -259,7 +362,9 @@ export function VoicePanel(): ReactNode {
       brain
         .interpret(said, context)
         .then((reply) => {
-          const outcomes = reply.actions?.length ? runActions(reply.actions) : undefined
+          const outcomes = reply.actions?.length
+            ? runActions(reply.actions, (index, outcome) => patchOutcome(id, index, outcome))
+            : undefined
           setTurns((prev) =>
             prev.map((t) =>
               t.id === id && t.kind === 'brain'
@@ -278,7 +383,7 @@ export function VoicePanel(): ReactNode {
           )
         )
     },
-    [brain, project?.path, runActions]
+    [brain, patchOutcome, project?.path, runActions]
   )
 
   // One subscription for every source that ever registers with the bus — which
@@ -403,6 +508,22 @@ export function VoicePanel(): ReactNode {
         <span className="voice__spacer" />
         <button
           type="button"
+          className="ghost-btn voice__icon-btn voice__mic"
+          title={
+            armed
+              ? 'Dictation is feeding the agent — click to send it back to the focused pane'
+              : 'Send dictation to the agent instead of the focused pane'
+          }
+          aria-pressed={armed}
+          aria-label="Send dictation to the agent"
+          data-on={armed ? 'true' : undefined}
+          data-live={armed && micLive ? 'true' : undefined}
+          onClick={toggleMic}
+        >
+          <Icon name="voice" size={13} />
+        </button>
+        <button
+          type="button"
           className="ghost-btn voice__icon-btn"
           title="Voice settings — brain, keys and model (Ctrl+,)"
           aria-label="Voice settings"
@@ -504,6 +625,18 @@ export function VoicePanel(): ReactNode {
       </div>
     </aside>
   )
+}
+
+/* ---------------------------------------------------------------- failures */
+
+/**
+ * A provider's error is a paragraph aimed at an agent; an outcome chip is one
+ * line. Keep the first sentence — which is where the actual reason lives ("out
+ * of quota", "refused the key") — and drop the advice that follows it.
+ */
+function mediaFailure(error: string): string {
+  const first = (error ?? '').split('\n')[0]?.trim() || (error ?? '').trim() || 'Image generation failed'
+  return first.length > 180 ? `${first.slice(0, 177)}…` : first
 }
 
 /* ------------------------------------------------------------------- chip */

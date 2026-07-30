@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import type { ImportedKeyResult, VoiceBrainId } from '@shared/types'
+import { DEFAULT_GEMINI_MODEL, DEFAULT_OPENROUTER_MODEL } from '@/lib/voicebrain'
 import { useApp } from '@/state/AppState'
-import { Card, KeyField, Row, Section, StateChip } from './parts'
+import { Card, KeyField, Row, Section, StateChip, TextField } from './parts'
 
 /**
  * Keys and models.
@@ -12,12 +13,16 @@ import { Card, KeyField, Row, Section, StateChip } from './parts'
  */
 
 const GEMINI_MODELS = [
-  { id: 'gemini-2.5-flash', label: 'Flash — fast, cheap, the default' },
+  { id: DEFAULT_GEMINI_MODEL, label: 'Flash — fast, cheap, the default' },
   { id: 'gemini-2.5-pro', label: 'Pro — slower, better at long reasoning' }
 ]
 
+/** Empty means "whatever gemini-media.ts defaults to" — say so, do not guess. */
+const IMAGE_MODEL_PLACEHOLDER = 'gemini-2.5-flash-image'
+
 const BRAINS: Array<{ id: VoiceBrainId; name: string; note: string; ready: boolean }> = [
   { id: 'gemini', name: 'Gemini', note: 'live — needs a key', ready: true },
+  { id: 'openrouter', name: 'OpenRouter', note: 'live — any model', ready: true },
   { id: 'stub', name: 'Stub', note: 'offline, echoes you', ready: true },
   { id: 'claude', name: 'Claude', note: 'coming soon', ready: false },
   { id: 'openai', name: 'OpenAI', note: 'coming soon', ready: false }
@@ -36,7 +41,7 @@ export function ModelsSection(): ReactNode {
           value={s.geminiKey}
           onCommit={actions.setGeminiKey}
           placeholder="AIza…"
-          actions={<ImportButton label="Import from DictationMic" onImport={() => window.forge.voice.importKey()} onUse={actions.setGeminiKey} />}
+          actions={<ImportButton label="Import from DictationMic" onImport={() => window.forge.voice.importKey('gemini')} onUse={actions.setGeminiKey} />}
           note={
             <>
               The only key Forge sends anywhere. When Gemini is the voice brain, what you say plus a summary of your
@@ -63,6 +68,20 @@ export function ModelsSection(): ReactNode {
             ))}
             <option value="__custom">Custom…</option>
           </select>
+        </Row>
+
+        <Row
+          label="Image model"
+          hint="Used by make_image and edit_image, here and in the MCP bridge"
+          htmlFor="gemini-image-model"
+        >
+          <TextField
+            id="gemini-image-model"
+            value={s.geminiImageModel}
+            onCommit={(v) => actions.patchSettings({ geminiImageModel: v.trim() })}
+            placeholder={IMAGE_MODEL_PLACEHOLDER}
+            mono
+          />
         </Row>
 
         {custom ? (
@@ -116,7 +135,7 @@ export function ModelsSection(): ReactNode {
         />
       </Card>
 
-      <Card title="OpenRouter" tone="quiet">
+      <Card title="OpenRouter">
         <KeyField
           label="API key"
           value={s.openrouterKey}
@@ -125,17 +144,34 @@ export function ModelsSection(): ReactNode {
           actions={
             <ImportButton
               label="Import from ~/.kimi-key"
-              onImport={() => window.forge.system.importOpenRouterKey()}
+              onImport={() => window.forge.voice.importKey('openrouter')}
               onUse={(key) => actions.patchSettings({ openrouterKey: key })}
             />
           }
           note={
             <>
-              For the Kimi brain, which is also not built yet. If you already run <span className="mono">kimi</span> in
-              a pane, its key is in <span className="mono">~/.kimi-key</span> and the button above will fetch it.
+              Sent only to <span className="mono">openrouter.ai</span>, and only while OpenRouter is the selected
+              brain. If you already run <span className="mono">kimi</span> in a pane its key is in{' '}
+              <span className="mono">~/.kimi-key</span> and the button above will fetch it.
             </>
           }
         />
+
+        <Row label="Model" hint="Any model id OpenRouter serves" htmlFor="openrouter-model">
+          <TextField
+            id="openrouter-model"
+            value={s.openrouterModel}
+            onCommit={(v) => actions.patchSettings({ openrouterModel: v.trim() || DEFAULT_OPENROUTER_MODEL })}
+            placeholder={DEFAULT_OPENROUTER_MODEL}
+            mono
+          />
+        </Row>
+
+        {s.voiceBrain === 'openrouter' && !s.openrouterKey ? (
+          <p className="scard__hint">
+            OpenRouter is selected but no key is stored, so the panel is running the offline stub.
+          </p>
+        ) : null}
       </Card>
 
       <p className="sset__foot">
