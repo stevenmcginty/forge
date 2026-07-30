@@ -30,6 +30,7 @@
     "packaged:check": "node scripts/packaged-check.mjs",
     "secrets:test": "node scripts/secrets-audit-test.mjs",
     "theme:check": "node scripts/theme-check.mjs",
+    "mosaic:check": "node scripts/mosaic-check.mjs",
     "companion:smoke": "node scripts/companion-smoke.mjs",
     "companion:icons": "node scripts/companion-icons.mjs",
     "companion:serve": "node scripts/companion-serve.mjs"
