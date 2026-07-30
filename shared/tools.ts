@@ -71,7 +71,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     id: 'node',
     name: 'Node',
-    blurb: 'runs the MCP bridge, and npm installs the CLIs above',
+    blurb: 'runs the MCP bridge — update it however you installed it',
     command: 'node',
     versionArgs: ['--version'],
     // Two ids because winget splits Node into current and LTS, and which one
@@ -156,6 +156,24 @@ export function compareVersions(a: string, b: string): number {
 export function isNewer(latest: string | null | undefined, installed: string | null | undefined): boolean {
   if (!latest || !installed) return false
   return compareVersions(latest, installed) > 0
+}
+
+/**
+ * How to spell the latest version *next to* the installed one.
+ *
+ * winget reports PowerShell as `7.6.4.0` — the MSIX package version, four
+ * fields — while `pwsh --version` says `7.6.4`. They are the same release, and
+ * compareVersions knows it, but a row reading "7.6.4 → 7.6.4.0" is a person
+ * squinting at two numbers trying to spot the difference. So when the two are
+ * the same version, the latest column borrows the installed version's spelling
+ * and the row reads "7.6.4 → 7.6.4": nothing to do, and obviously nothing to do.
+ *
+ * Only ever equal versions are rewritten. A real difference is always shown
+ * exactly as its source reported it.
+ */
+export function displayLatest(latest: string, installed: string | null | undefined): string {
+  if (!installed) return latest
+  return compareVersions(latest, installed) === 0 ? installed : latest
 }
 
 /* ------------------------------------------------------------ winget parsing */

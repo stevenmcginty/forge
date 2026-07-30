@@ -43,6 +43,7 @@ registerHooks({
 const {
   TOOL_SPECS,
   compareVersions,
+  displayLatest,
   formatRate,
   isNewer,
   isNoFeedError,
@@ -125,6 +126,16 @@ ok(isNewer('1.0.0', '2.0.0') === false, 'a downgrade is not an upgrade')
 ok(isNewer(null, '2.0.0') === false, 'no latest is not an upgrade')
 ok(isNewer('2.0.0', null) === false, 'no installed version is not an upgrade')
 ok(isNewer(undefined, undefined) === false, 'nothing at all is not an upgrade')
+
+console.log('\nhow the latest column is spelled')
+// The real case: winget calls PowerShell 7.6.4.0 (the MSIX package version) and
+// `pwsh --version` calls it 7.6.4. A row reading "7.6.4 → 7.6.4.0" invites
+// somebody to go hunting for a difference that is not there.
+ok(displayLatest('7.6.4.0', '7.6.4') === '7.6.4', 'an equal version borrows the installed spelling', displayLatest('7.6.4.0', '7.6.4'))
+ok(displayLatest('24.18.0', '24.13.0') === '24.18.0', 'a real upgrade is shown exactly as reported')
+ok(displayLatest('2.1.220', '2.1.220') === '2.1.220', 'identical strings are unchanged')
+ok(displayLatest('1.0.0', null) === '1.0.0', 'with nothing installed, the latest stands alone')
+ok(displayLatest('1.0.0', '2.0.0') === '1.0.0', 'a newer install than the registry is not rewritten')
 
 /* ----------------------------------------------------------- npm registry */
 

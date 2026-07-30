@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { isNewer, latestSourceLabel, relativeTime, TOOL_SPECS } from '@shared/tools'
+import { displayLatest, isNewer, latestSourceLabel, relativeTime, TOOL_SPECS } from '@shared/tools'
 import type { ToolId, ToolLatest, ToolProbe, ToolSpec, UpdateStatus } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
@@ -39,8 +39,10 @@ export function UpdatesSection(): ReactNode {
     return window.forge.updates.onStatus(setUpdate)
   }, [])
 
-  // Whatever the main process already has cached, without asking it to go and
-  // fetch anything: arriving on this tab should not cost three HTTPS requests.
+  // `refresh: false`, so this is the session cache if there is one and a real
+  // check if there is not. Arriving on the tab a second time costs nothing;
+  // arriving on it the first time fills the column in without being asked,
+  // which is the difference between a page and a form.
   useEffect(() => {
     void window.forge.tools.latest(null, false).then((rows) => {
       setLatest(new Map(rows.map((r) => [r.id, r])))
@@ -179,12 +181,12 @@ function ToolRow({
 
       <div className="stool__versions">
         <span className="stool__version mono" title={probe?.path ?? ''}>
-          {installedLabel(probe)}
+          {installedLabel(spec, probe)}
         </span>
         <span className="stool__arrow" aria-hidden="true">
           →
         </span>
-        <span className="stool__version stool__version--latest mono">{latestLabel(spec, latest, busy)}</span>
+        <span className="stool__version stool__version--latest mono">{latestLabel(spec, probe, latest, busy)}</span>
       </div>
 
       <StateChip tone={tone(probe, latest, behind)}>{chip(probe, latest, behind)}</StateChip>
@@ -218,17 +220,21 @@ function ToolRow({
   )
 }
 
-function installedLabel(probe: ToolProbe | null): string {
+function installedLabel(spec: ToolSpec, probe: ToolProbe | null): string {
   if (!probe) return '…'
   if (!probe.found) return 'not installed'
-  return probe.version ?? (probe.error ? 'installed' : '…')
+  if (probe.version) return probe.version
+  // A tool we deliberately never ask for a version — Kimi. "on PATH" is the
+  // whole truth about it, and an ellipsis that never resolves is not.
+  if (!spec.versionArgs) return 'on PATH'
+  return probe.error ? 'installed' : '…'
 }
 
-function latestLabel(spec: ToolSpec, latest: ToolLatest | null, busy: boolean): string {
+function latestLabel(spec: ToolSpec, probe: ToolProbe | null, latest: ToolLatest | null, busy: boolean): string {
   if (busy) return 'checking…'
   if (spec.latest.source === 'local') return 'managed locally'
   if (!latest) return '—'
-  if (latest.latest) return latest.latest
+  if (latest.latest) return displayLatest(latest.latest, probe?.version)
   return latest.error ?? '—'
 }
 
