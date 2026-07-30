@@ -48,6 +48,37 @@
   --warn: #ffb347;
   --ok: #5ee6a8;
 
+  /* --------------------------------------------------------- terminal
+   *
+   * xterm's 16-colour theme, read out of here by lib/terminals.ts — which is
+   * also what answers a TUI's OSC 10/11 "what colour are you?" probe, so these
+   * are what makes Claude Code pick its dark theme rather than assuming white.
+   * The ramp reuses the signal colours above so a terminal's reds and greens
+   * mean the same thing as the app's.
+   */
+  --term-bg: #0e0f12;
+  --term-fg: #e8eaed;
+  --term-cursor-accent: #0b0c0e;
+  --term-selection: rgba(198, 255, 74, 0.2);
+
+  --term-black: #16181d;
+  --term-red: #ff5c48;
+  --term-green: #5ee6a8;
+  --term-yellow: #ffb347;
+  --term-blue: #7fd1ff;
+  --term-magenta: #c08bff;
+  --term-cyan: #6fe3e1;
+  --term-white: #d5d9df;
+
+  --term-bright-black: #4a4f57;
+  --term-bright-red: #ff8272;
+  --term-bright-green: #8af0c2;
+  --term-bright-yellow: #ffc978;
+  --term-bright-blue: #a5e0ff;
+  --term-bright-magenta: #d3aeff;
+  --term-bright-cyan: #9af0ee;
+  --term-bright-white: #f4f6f8;
+
   /* ------------------------------------------------------------ radii */
   --r-xs: 3px;
   --r-sm: 5px;
