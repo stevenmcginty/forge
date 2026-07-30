@@ -1,66 +1,133 @@
-/* ------------------------------------------------------------- section */
+/* ------------------------------------------------------------- section
+ *
+ * One row. That is the whole brief: the rail is for projects, and skills used
+ * to eat a third of it. Everything the section used to show now lives in the
+ * flyout below, which floats and so costs the rail nothing at all.
+ */
 
 .skills {
   flex: none;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  /* Never more than a third of the rail: projects are the thing you navigate,
-     skills are the thing you keep. A long library scrolls inside itself. */
-  max-height: 34%;
+  padding: var(--s-2) var(--s-3);
   border-top: 1px solid var(--line-soft);
 }
 
-.skills[data-open='false'] {
-  max-height: none;
-}
-
-.skills__head {
+.skills__btn {
   display: flex;
   align-items: center;
   gap: var(--s-3);
-  flex: none;
-  height: 30px;
-  padding: 0 var(--s-3) 0 var(--s-4);
-}
-
-.skills__toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  height: 100%;
-  padding-right: var(--s-2);
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--s-2) 0 var(--s-3);
+  border-radius: var(--r-md);
   color: var(--text-muted);
-  transition: color var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
-.skills__toggle:hover {
+.skills__btn:hover,
+.skills__btn[aria-expanded='true'] {
+  background: var(--bg-hover);
   color: var(--text-secondary);
 }
 
-.skills__toggle svg {
-  transition: transform var(--dur-med) var(--ease-out);
-}
-
-.skills[data-open='false'] .skills__toggle svg {
-  transform: rotate(-90deg);
+.skills__label {
+  font-size: var(--t-md);
 }
 
 .skills__count {
+  min-width: 17px;
+  height: 16px;
+  padding: 0 var(--s-2);
+  display: grid;
+  place-items: center;
   font-size: var(--t-eyebrow);
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+  border-radius: var(--r-full);
+}
+
+.skills__chev {
+  display: grid;
+  place-items: center;
+  margin-left: auto;
   color: var(--text-dim);
 }
 
-.skills__add {
-  margin-left: auto;
+/* Points at the flyout: closed it sits to the side, open it lies flat. */
+.skills__chev svg {
+  transform: rotate(-90deg);
+  transition: transform var(--dur-med) var(--ease-out);
+}
+
+.skills__btn[aria-expanded='true'] .skills__chev svg {
+  transform: none;
+}
+
+/* -------------------------------------------------------------- flyout */
+
+.sfly {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sfly__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-2) var(--s-3) var(--s-4);
+}
+
+.sfly__hint {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sfly__add {
+  flex: none;
+  align-self: center;
   width: 24px;
 }
 
-.skills__list {
-  flex: 1;
+/* The popover is already scroll-capped; this keeps the header pinned while a
+   long library moves under it. */
+.sfly__scroll {
   min-height: 0;
+  max-height: min(52vh, 420px);
   overflow-y: auto;
-  padding: 0 var(--s-3) var(--s-4);
+}
+
+.sfly__group + .sfly__group {
+  margin-top: var(--s-3);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line-soft);
+}
+
+.sfly__eyebrow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3) var(--s-3);
+}
+
+.sfly__tally {
+  margin-left: auto;
+  font-size: var(--t-eyebrow);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-dim);
+}
+
+.sfly__shadow {
+  padding: var(--s-2) var(--s-3) 0;
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
 }
 
 /* ------------------------------------------------------------- skill row */
@@ -138,6 +205,36 @@
 
 .srow[data-problem='true'] .srow__desc {
   color: var(--warn);
+}
+
+/* A machine skill is live by definition — a seam in the muted colour, so it
+   reads as "already true" rather than "switched on by you". */
+.srow[data-machine='true']::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: var(--r-full);
+  background: var(--text-dim);
+}
+
+.srow[data-machine='true'] .srow__name {
+  color: var(--text-primary);
+}
+
+.srow__live {
+  flex: none;
+  height: 15px;
+  padding: 0 var(--s-2);
+  display: grid;
+  place-items: center;
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-full);
+  white-space: nowrap;
 }
 
 /* "this name exists in another agent's folder too" — a hint, never a blocker */
@@ -247,6 +344,13 @@
   box-shadow:
     inset 0 0 0 1px var(--bg-terminal),
     0 0 0 1px var(--accent-glow);
+}
+
+/* A skill dragged out of the flyout must not be dropped back onto it. For the
+   length of the drag every popover is transparent to the pointer, so the
+   document-level target underneath sees the pane it was aimed at. */
+body[data-skill-dragging='true'] .popover {
+  pointer-events: none;
 }
 
 /* ----------------------------------------------------------- menu bits */

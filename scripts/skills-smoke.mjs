@@ -16,6 +16,7 @@
  * check asserts that, by looking at the real path and confirming the run never
  * created anything in it.
  */
+import { createHash } from 'node:crypto'
 import {
   existsSync,
   lstatSync,
@@ -24,10 +25,11 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 
@@ -53,6 +55,37 @@ function writeSkill(dir, name, description, extra = {}) {
     writeFileSync(join(dir, file), body, 'utf8')
   }
   return dir
+}
+
+/**
+ * A fingerprint of a directory tree: every path, its kind, and the bytes of
+ * every file, hashed. This is how "Forge never writes in ~/.claude/skills" gets
+ * proved rather than asserted — take one before the read-only surface is
+ * exercised, take another after, and compare the two strings. A new file, a
+ * changed byte, a deleted junction or a re-created folder all move the hash.
+ *
+ * Junctions are recorded as links and never followed, so a link whose target
+ * changed underneath is still a link with the same name — which is exactly what
+ * we are claiming: the folder is untouched.
+ */
+function fingerprint(dir) {
+  const parts = []
+  const walk = (path) => {
+    for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = join(path, entry.name)
+      const rel = relative(dir, full).split(sep).join('/')
+      if (entry.isSymbolicLink()) {
+        parts.push(`L ${rel}`)
+      } else if (entry.isDirectory()) {
+        parts.push(`D ${rel}`)
+        walk(full)
+      } else {
+        parts.push(`F ${rel} ${createHash('sha256').update(readFileSync(full)).digest('hex')}`)
+      }
+    }
+  }
+  walk(dir)
+  return createHash('sha256').update(parts.join('\n')).digest('hex')
 }
 
 const ALIAS = { '@shared': join(ROOT, 'shared'), '@': join(ROOT, 'src') }
@@ -104,8 +137,17 @@ async function main() {
     join(ROOT, 'electron', 'skills-store.ts'),
     join(scratch, 'skills-store.mjs')
   )
-  const { parseFrontmatter, skillBody, skillTemplate, slugSkillName, isValidSkillName, usesSlashSkills, skillCommandFor } =
-    await bundle(join(ROOT, 'shared', 'skills.ts'), join(scratch, 'skills.mjs'))
+  const {
+    dedupeSkills,
+    isValidSkillName,
+    parseFrontmatter,
+    skillBlurb,
+    skillBody,
+    skillCommandFor,
+    skillTemplate,
+    slugSkillName,
+    usesSlashSkills
+  } = await bundle(join(ROOT, 'shared', 'skills.ts'), join(scratch, 'skills.mjs'))
 
   const sandbox = mkdtempSync(join(tmpdir(), 'forge-skills-'))
   const libraryDir = join(sandbox, 'library')
@@ -317,7 +359,8 @@ async function main() {
       import: 'skills:import',
       remove: 'skills:remove',
       setEnabled: 'skills:set-enabled',
-      openFolder: 'skills:open-folder'
+      openFolder: 'skills:open-folder',
+      copyToLibrary: 'skills:copy-to-library'
     },
     {
       enabled: () => settingsEnabled,
@@ -328,10 +371,17 @@ async function main() {
       pickFolder: async () => join(outside, 'imported-skill')
     }
   )
-  log(handlers.size === 7, `all seven channels are registered (${handlers.size})`)
+  log(handlers.size === 8, `all eight channels are registered (${handlers.size})`)
+
+  const listedOverIpc = await handlers.get('skills:list')()
+  log(
+    Array.isArray(listedOverIpc.skills) && Array.isArray(listedOverIpc.machineSkills),
+    'list hands back both groups in one round trip'
+  )
 
   const madeOverIpc = await handlers.get('skills:create')(null, 'over-ipc', 'Made through the bridge.')
   log(madeOverIpc.ok && madeOverIpc.skills.some((s) => s.name === 'over-ipc'), 'create over IPC returns the fresh list')
+  log(Array.isArray(madeOverIpc.machineSkills), 'and a mutation carries the machine group too')
 
   const on = await handlers.get('skills:set-enabled')(null, 'over-ipc', true)
   log(on.ok && settingsEnabled.includes('over-ipc'), 'enabling over IPC records the setting')
@@ -500,7 +550,120 @@ async function main() {
     'while no longer being listed as something that does not exist yet'
   )
 
-  /* --------------------------------------------- 13. the real one is safe */
+  /* ------------------------------------- 13. the skills already on the machine
+   *
+   * The second group in the rail: Steve's own ~/.claude/skills. Ten of them on
+   * the real machine, one of which is a junction into ~/.agents/skills and a
+   * couple of which are, as ever, half-written. Forge lists them, reads them,
+   * types them into panes — and never writes a byte in there. The fingerprint
+   * either side of this section is what turns that last sentence into a test
+   * rather than a comment.
+   */
+
+  const home2 = mkdtempSync(join(tmpdir(), 'forge-machine-'))
+  const machineDir = join(home2, '.claude', 'skills')
+  const otherLibrary = join(home2, 'library')
+  const agentsElsewhere = join(home2, '.agents', 'skills')
+  mkdirSync(machineDir, { recursive: true })
+  mkdirSync(otherLibrary, { recursive: true })
+
+  writeSkill(join(machineDir, 'apple-design'), 'apple-design', 'Build interfaces with Apple’s design language.')
+  writeSkill(join(machineDir, 'gaffer'), 'gaffer', 'Delegation harness.')
+
+  // remotion-best-practices really is a junction into ~/.agents/skills. A read
+  // through it has to work, and the folder it points at must never be recursed
+  // into by anything that deletes.
+  writeSkill(join(agentsElsewhere, 'remotion-best-practices'), 'remotion-best-practices', 'Video in React.')
+  let junctioned = true
+  try {
+    symlinkSync(join(agentsElsewhere, 'remotion-best-practices'), join(machineDir, 'remotion-best-practices'), 'junction')
+  } catch {
+    junctioned = false
+  }
+
+  // The two shapes a hand-written folder turns up in.
+  mkdirSync(join(machineDir, 'half-written'), { recursive: true })
+  writeFileSync(join(machineDir, 'half-written', 'SKILL.md'), '# Just a heading\n\nno frontmatter here\n', 'utf8')
+  mkdirSync(join(machineDir, 'not-a-skill-at-all'), { recursive: true })
+  writeFileSync(join(machineDir, 'not-a-skill-at-all', 'notes.txt'), 'keep me', 'utf8')
+
+  const machineStore = new SkillsStore({ libraryDir: otherLibrary, claudeSkillsDir: machineDir })
+  const before = fingerprint(machineDir)
+
+  const onMachine = machineStore.listMachine()
+  const m = (name) => onMachine.find((s) => s.name === name)
+  log(onMachine.length === (junctioned ? 5 : 4), `every folder in ~/.claude/skills is listed (${onMachine.length})`)
+  log(m('apple-design')?.description === 'Build interfaces with Apple’s design language.', 'a machine skill carries its description')
+  log(m('apple-design')?.title === 'apple-design', 'and its frontmatter name')
+  log(m('half-written')?.problem?.includes('frontmatter'), 'a SKILL.md with no frontmatter says so')
+  log(m('half-written')?.title === 'half-written', 'and still shows up as a usable row')
+  log(m('not-a-skill-at-all')?.problem?.includes('SKILL.md'), 'a folder with no SKILL.md says so instead of vanishing')
+  log(onMachine.every((s) => s.shadowed === false), 'nothing is shadowed while the library is empty')
+  if (junctioned) {
+    log(m('remotion-best-practices')?.description === 'Video in React.', 'a junction is read straight through')
+  } else {
+    log(true, 'no junctions on this filesystem — junction read skipped')
+  }
+
+  log(machineStore.readMachineSkillFile('apple-design').includes('Apple'), 'readMachineSkillFile returns the raw SKILL.md')
+  log(machineStore.readMachineSkillFile('../../secrets') === '', 'and cannot be pointed outside ~/.claude/skills')
+  log(machineStore.readMachineSkillFile('never-there') === '', 'a name that is not there reads as empty, not a throw')
+
+  // Shadowing: a library skill of the same name wins, and the machine row says
+  // so rather than pretending to be the one with the switch.
+  machineStore.createFromTemplate('gaffer', 'Forge’s own copy.')
+  const shadowed = machineStore.listMachine()
+  log(shadowed.find((s) => s.name === 'gaffer').shadowed === true, 'a name the library also has comes back shadowed')
+  log(shadowed.find((s) => s.name === 'apple-design').shadowed === false, 'and one it does not, does not')
+
+  const both = machineStore.listAll(['gaffer'])
+  log(both.skills.length === 1 && both.machineSkills.length === onMachine.length, 'listAll returns both groups')
+  const deduped = dedupeSkills(both.skills, both.machineSkills)
+  log(!deduped.some((s) => s.name === 'gaffer'), 'dedupeSkills drops the machine copy — the library one wins')
+  log(deduped.length === both.machineSkills.length - 1, 'and drops nothing else')
+  log(dedupeSkills([], both.machineSkills).length === both.machineSkills.length, 'an empty library shadows nothing')
+
+  // Copy into library — a copy, never a move.
+  const copied = machineStore.copyMachineToLibrary('apple-design')
+  log(copied.ok && copied.name === 'apple-design', 'copyMachineToLibrary takes a copy into the library')
+  log(existsSync(join(otherLibrary, 'apple-design', 'SKILL.md')), 'and the library copy is really there')
+  log(existsSync(join(machineDir, 'apple-design', 'SKILL.md')), 'while the original is still in ~/.claude/skills')
+  log(machineStore.copyMachineToLibrary('apple-design').ok === false, 'copying it twice is refused')
+  log(machineStore.copyMachineToLibrary('../../etc').ok === false, 'and a name that is not a skill name is refused')
+
+  log(
+    fingerprint(machineDir) === before,
+    'READ-ONLY: ~/.claude/skills is byte-for-byte identical after listing, reading and copying out of it'
+  )
+
+  // Anything Forge itself put in there is a *library* skill wearing a different
+  // hat, and must not be counted twice. This one writes, so it comes after the
+  // fingerprint check.
+  machineStore.createFromTemplate('forge-owned', 'Made by Forge.')
+  log(machineStore.enable('forge-owned').ok, 'a library skill syncs into the same folder')
+  log(existsSync(join(machineDir, 'forge-owned')), 'and is really there')
+  log(
+    !machineStore.listMachine().some((s) => s.name === 'forge-owned'),
+    'but listMachine skips it — it is already a row on the Library side'
+  )
+  log(machineStore.listMachine().length === onMachine.length, 'so the machine count did not move')
+
+  /* --------------------------------------------------------- 13b. blurbs */
+
+  // Steve's real descriptions run to paragraphs — huashu-design alone is 1.3k
+  // characters — and the manifest goes up the wire on every single utterance.
+  const long =
+    'Build distinctive, gallery-grade front-end UI. Invoke when the user wants a website, landing page, hero, ' +
+    'component, or UI that should look intentional and premium rather than templated, especially when they say ' +
+    '“Fable 5” or ask for a specific aesthetic, or want a design spec before code.'
+  log(skillBlurb(long).length <= 151, `a long description is cut down (${skillBlurb(long).length})`)
+  log(skillBlurb(long) === 'Build distinctive, gallery-grade front-end UI.', 'and cut at the first sentence where there is one')
+  log(skillBlurb('Short one.') === 'Short one.', 'a short description is left exactly as it is')
+  log(skillBlurb('  spread\n  over lines  ') === 'spread over lines', 'and flattened onto one line')
+  log(skillBlurb('') === '' && skillBlurb(null) === '', 'nothing in, nothing out')
+  log(!/\n/.test(skillBlurb('a'.repeat(400))), 'a description with no sentence in it is still cut, on a word')
+
+  /* --------------------------------------------- 14. the real one is safe */
 
   const realClaudeSkills = join(homedir(), '.claude', 'skills')
   const strayInReal = existsSync(realClaudeSkills)
@@ -511,6 +674,7 @@ async function main() {
   /* ------------------------------------------------------------- tidy up */
 
   rmSync(sandbox, { recursive: true, force: true })
+  rmSync(home2, { recursive: true, force: true })
   rmSync(scratch, { recursive: true, force: true })
 
   console.log(failures === 0 ? '\nskills: all checks passed\n' : `\nskills: ${failures} FAILED\n`)

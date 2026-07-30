@@ -119,6 +119,8 @@ export const IPC = {
   skillsRemove: 'skills:remove',
   skillsSetEnabled: 'skills:set-enabled',
   skillsOpenFolder: 'skills:open-folder',
+  /** Copy one of Steve's own ~/.claude/skills into the library. Never a move. */
+  skillsCopyToLibrary: 'skills:copy-to-library',
 
   // system probes (M6 settings page)
   systemUserName: 'system:user-name',

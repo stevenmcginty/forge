@@ -22,8 +22,10 @@ import {
   parseFrontmatter,
   skillTemplate,
   slugSkillName,
+  type MachineSkillInfo,
   type SkillInfo,
-  type SkillLinkState
+  type SkillLinkState,
+  type SkillsList
 } from '@shared/skills'
 
 /**
@@ -211,6 +213,88 @@ export class SkillsStore {
       out.push(info)
     }
     return out
+  }
+
+  /**
+   * The skills that were already in `~/.claude/skills` before Forge got here.
+   *
+   * This is the *other* half of the rail, and it is read-only in the strongest
+   * sense the module can manage: nothing in this method, or in anything it
+   * calls, opens a handle for writing, creates the directory, or removes a
+   * thing. Steve has ten skills in there — some hand-written, one a junction
+   * into ~/.agents/skills — and every claude and kimi session on the machine
+   * already has all of them loaded. Forge's job is to *show* them, not to own
+   * them, so there is no toggle and no delete: the only way one of these ever
+   * changes is Steve editing it himself.
+   *
+   * Anything Forge put there is skipped — a junction into our library or a
+   * folder carrying our marker is a *library* skill wearing a different hat,
+   * and listing it twice would be a lie about how many skills exist. A name the
+   * library also has (enabled or not) comes back `shadowed`, which is the
+   * `conflict` link state read from the other side.
+   */
+  listMachine(): MachineSkillInfo[] {
+    const out: MachineSkillInfo[] = []
+    for (const name of entries(this.claudeSkillsDir)) {
+      const dir = this.linkPathFor(name)
+      // A name we would never write is also a name `/name` could not type, and
+      // a folder we could not address safely. Skipped rather than guessed at.
+      if (!dir) continue
+      // Ours, therefore already on the Library side of the rail.
+      if (this.linkState(name).owned) continue
+
+      const info: MachineSkillInfo = {
+        name,
+        title: name,
+        description: '',
+        path: dir,
+        // A junction whose target has gone, or a folder with no SKILL.md, still
+        // gets a row: a half-written skill is the normal state of that folder.
+        shadowed: safe(() => isDir(join(this.libraryDir, name)), false)
+      }
+
+      const file = join(dir, SKILL_FILE)
+      if (!safe(() => existsSync(file), false)) {
+        info.problem = `No ${SKILL_FILE} in this folder — agents will ignore it`
+      } else {
+        const parsed = parseFrontmatter(safe(() => readFileSync(file, 'utf8'), ''))
+        if (parsed.name) info.title = parsed.name
+        info.description = parsed.description
+        if (!parsed.ok) info.problem = 'No YAML frontmatter — agents may ignore it'
+      }
+      out.push(info)
+    }
+    return out
+  }
+
+  /** Both halves in one read, which is what the list IPC hands the renderer. */
+  listAll(enabled: string[] = []): SkillsList {
+    return { skills: this.list(enabled), machineSkills: this.listMachine() }
+  }
+
+  /**
+   * The raw SKILL.md of a machine skill. Reads through the junction, and can
+   * only ever address a folder directly inside `~/.claude/skills` — same
+   * name-validating path builder the sync uses.
+   */
+  readMachineSkillFile(name: string): string {
+    const dir = this.linkPathFor(name)
+    if (!dir) return ''
+    return safe(() => readFileSync(join(dir, SKILL_FILE), 'utf8'), '')
+  }
+
+  /**
+   * Take a copy of a machine skill into the library. A copy — never a move.
+   *
+   * `importFolder` only ever reads its source (a recursive `cpSync` out of it),
+   * so the original is untouched, and the new library copy is a separate skill
+   * from that moment on. Enabling it afterwards would hit the conflict interlock
+   * against the original, which is correct: the machine already has that name.
+   */
+  copyMachineToLibrary(name: string): SkillResult {
+    const dir = this.linkPathFor(name)
+    if (!dir || !isDir(dir)) return { ok: false, error: 'That skill is not in ~/.claude/skills' }
+    return this.importFolder(dir)
   }
 
   /** Which peer agents already have a folder of this name. */
@@ -490,6 +574,8 @@ export interface SkillsChannels {
   remove: string
   setEnabled: string
   openFolder: string
+  /** Copy one of Steve's ~/.claude/skills into the library. Never a move. */
+  copyToLibrary: string
 }
 
 /**
@@ -514,37 +600,41 @@ export function registerSkillsHandlers(
     pickFolder(): Promise<string | null>
   }
 ): void {
-  const listNow = (): SkillInfo[] => store?.list(deps.enabled()) ?? []
+  const listNow = (): SkillsList => store?.listAll(deps.enabled()) ?? { skills: [], machineSkills: [] }
 
   ipc.handle(channels.list, () => listNow())
 
-  ipc.handle(channels.read, (_e, name: string) => store?.readSkillFile(String(name ?? '')) ?? '')
+  ipc.handle(channels.read, (_e, name: string, source?: string) =>
+    (source === 'machine'
+      ? store?.readMachineSkillFile(String(name ?? ''))
+      : store?.readSkillFile(String(name ?? ''))) ?? ''
+  )
 
   ipc.handle(channels.create, (_e, name: string, description: string) => {
     const result = store?.createFromTemplate(String(name ?? ''), String(description ?? '')) ?? {
       ok: false,
       error: 'Skills are not available'
     }
-    return { ...result, skills: listNow() }
+    return { ...result, ...listNow() }
   })
 
   ipc.handle(channels.import, async (_e, sourceDir?: string) => {
     const source = typeof sourceDir === 'string' && sourceDir.trim() ? sourceDir : await deps.pickFolder()
-    if (!source) return { ok: false, cancelled: true, skills: listNow() }
+    if (!source) return { ok: false, cancelled: true, ...listNow() }
     const result = store?.importFolder(source) ?? { ok: false, error: 'Skills are not available' }
-    return { ...result, skills: listNow() }
+    return { ...result, ...listNow() }
   })
 
   ipc.handle(channels.remove, (_e, name: string) => {
     const clean = String(name ?? '')
     const result = store?.remove(clean) ?? { ok: false, error: 'Skills are not available' }
     if (result.ok) deps.setEnabled(deps.enabled().filter((n) => n !== clean))
-    return { ...result, skills: listNow() }
+    return { ...result, ...listNow() }
   })
 
   ipc.handle(channels.setEnabled, (_e, name: string, on: unknown) => {
     const clean = String(name ?? '')
-    if (!store) return { ok: false, error: 'Skills are not available', skills: [] }
+    if (!store) return { ok: false, error: 'Skills are not available', skills: [], machineSkills: [] }
     const result = on === true ? store.enable(clean) : store.disable(clean)
     // The setting only moves when the filesystem agreed — a toggle that says
     // "on" while ~/.claude/skills says otherwise is the worst of both.
@@ -553,11 +643,30 @@ export function registerSkillsHandlers(
       if (on === true) next.push(clean)
       deps.setEnabled(next)
     }
-    return { ...result, skills: listNow() }
+    return { ...result, ...listNow() }
   })
 
-  ipc.handle(channels.openFolder, (_e, name?: string) => {
-    const dir = (name ? store?.pathFor(String(name)) : null) ?? store?.ensureLibrary() ?? ''
+  /**
+   * Copy, never move: the folder in ~/.claude/skills is left exactly as it was,
+   * and Steve ends up with two of them — one he owns, one Forge can edit.
+   */
+  ipc.handle(channels.copyToLibrary, (_e, name: string) => {
+    const result = store?.copyMachineToLibrary(String(name ?? '')) ?? {
+      ok: false,
+      error: 'Skills are not available'
+    }
+    return { ...result, ...listNow() }
+  })
+
+  ipc.handle(channels.openFolder, (_e, name?: string, source?: string) => {
+    const dir =
+      (name
+        ? source === 'machine'
+          ? store?.linkPathFor(String(name))
+          : store?.pathFor(String(name))
+        : null) ??
+      store?.ensureLibrary() ??
+      ''
     if (dir) deps.openPath(dir)
     return dir
   })

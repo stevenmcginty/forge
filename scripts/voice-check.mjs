@@ -1662,8 +1662,87 @@ await test('a brain can never recall or forget — those are grammar-only', () =
 
 console.log('\nCapability manifest')
 
+/**
+ * The SKILLS roster, sized like the real one.
+ *
+ * Steve has ten skills in ~/.claude/skills and Forge now lists all of them
+ * alongside its own library, so the manifest carries a roster from the moment
+ * he opens the app — a snapshot with an empty `skills` would measure a manifest
+ * nobody ever sends. The descriptions here are the real ones, and they are the
+ * point: a skill's frontmatter is written for the agent about to *read* it and
+ * runs to a paragraph, so `skillBlurb` cuts each one back to a sentence before
+ * it goes anywhere near the wire.
+ */
+const SKILLS = [
+  {
+    name: 'adhd',
+    enabled: true,
+    description:
+      'Parallel divergent ideation for coding agents. Spawns N isolated branches under different cognitive frames ' +
+      '(regulator, biology, speedrunner, 10-year-old, $0 budget), scores, clusters, prunes traps, and deepens top ' +
+      'survivors. Use on /adhd, "ADHD mode", brainstorm/ideate intents, or open-ended design decisions.'
+  },
+  {
+    name: 'apple-design',
+    enabled: true,
+    description:
+      "Build interfaces with Apple's actual design language - the real easing curves, durations, stagger timings, " +
+      'colour ramps, type tracking and scroll-reveal patterns measured directly from apple.com production CSS. Use ' +
+      'when the user wants something to feel "like Apple", premium, glassy or cinematic.'
+  },
+  {
+    name: 'fable-5',
+    enabled: true,
+    description:
+      'Build distinctive, gallery-grade front-end UI — hero sections, landing pages, portfolios, design-system ' +
+      'showcases, shaders, animated/interactive components, and 3D/WebGL scenes — using the design protocol and ' +
+      'motion-pattern library distilled from the claude-directory gallery of ~550 UI experiments.'
+  },
+  { name: 'fable-judge', enabled: true, description: 'Adversarial verification of finished work.' },
+  {
+    name: 'fable-loop',
+    enabled: true,
+    description:
+      'End-to-end orchestrated workflow that runs a task the way Fable ran sessions - parallel evidence subagents, ' +
+      'one committed plan, surgical execution, verification by observation.'
+  },
+  {
+    name: 'fable-method',
+    enabled: true,
+    description:
+      'A step-by-step problem-solving loop (classify the ask, define done, gather evidence, decide, act surgically, ' +
+      'verify by observation, report outcome-first).'
+  },
+  {
+    name: 'front-end-design',
+    enabled: true,
+    description: 'Front-end design guidance, best practices, and modern web development patterns'
+  },
+  {
+    name: 'gaffer',
+    enabled: true,
+    description:
+      'Delegation harness. Opus 5 acts as the gaffer — understands the request, reads the codebase, writes detailed ' +
+      'job briefs, judges the results — then delegates implementation to a crew of specialist agents.'
+  },
+  {
+    name: 'huashu-design',
+    enabled: true,
+    description:
+      '花叔Design（Huashu-Design）——用HTML做高保真原型、交互Demo、幻灯片、动画、设计变体探索+设计方向顾问+专家评审的一体化设计能力。' +
+      'HTML是工具不是媒介，根据任务embody不同专家（UX设计师/动画师/幻灯片设计师/原型师），避免web design tropes。'
+  },
+  {
+    name: 'remotion-best-practices',
+    enabled: true,
+    description: 'Best practices for Remotion - Video creation in React'
+  },
+  { name: 'release-checklist', enabled: false, description: 'What to do before Forge ships a build.' }
+]
+
 const SNAPSHOT = {
   appVersion: '0.1.0',
+  skills: SKILLS,
   projects: [
     { name: 'forge', path: 'C:\\Users\\steve\\Desktop\\forge', active: true },
     { name: '1', path: 'C:\\Users\\steve\\Desktop\\1', active: false }
@@ -1725,7 +1804,42 @@ await test('the manifest describes the app, the actions, the limits and the stat
   // neural voice reading "Ready for your next instruction." is still a machine
   // reading a card. Each one earns its room, but the ceiling still has to bite,
   // because this goes up the wire on every single thing Steve says.
-  assert.ok(text.length < 11400, `manifest is ${text.length} chars`)
+  //
+  // Raised from 11400 to 12800 when the rail started listing Steve's own
+  // ~/.claude/skills beside Forge's library: the roster went from empty to
+  // eleven names and it is never empty again, which is ~1.3k the old number had
+  // no room for. The prose itself did not grow — it is ~11.0k either side. The
+  // roster is already clamped by skillBlurb (a sentence per skill, not the
+  // paragraph the frontmatter carries), so when this fires again the first
+  // question is which prose grew, and the second is whether SKILL_BLURB_MAX
+  // should tighten. Moving the number is the last answer, not the first.
+  assert.ok(text.length < 12800, `manifest is ${text.length} chars`)
+})
+
+await test('the SKILLS roster names every skill, and never carries a whole paragraph', () => {
+  const text = buildManifest(SNAPSHOT)
+  const roster = text
+    .slice(text.indexOf('# SKILLS'))
+    .split('\n# ')[0]
+    .split('\n')
+    .filter((l) => l.startsWith('- '))
+
+  assert.equal(roster.length, SKILLS.length, 'every skill is listed — one the model is not told about is one it cannot use')
+  for (const skill of SKILLS) {
+    assert.ok(
+      roster.some((l) => l.startsWith(`- ${skill.name}`)),
+      `missing ${skill.name}`
+    )
+  }
+  // A library skill that is switched off still gets named — the model may say
+  // so — but it is marked, because typing it would not load anything.
+  assert.ok(roster.some((l) => l.includes('release-checklist [off]')), 'a disabled skill is marked')
+  assert.ok(!roster.some((l) => l.includes('gaffer [off]')), 'and an enabled one is not')
+
+  // The clamp. huashu-design's real description is 1.3k characters on its own.
+  for (const line of roster) {
+    assert.ok(line.length < 180, `roster line is ${line.length} chars: ${line.slice(0, 60)}…`)
+  }
 })
 
 await test('the manifest gives every pane the spoken handle Steve uses', () => {
@@ -2248,7 +2362,7 @@ await test('the manifest tells the model the memory exists, and stays small', ()
   const text = buildManifest(SNAPSHOT)
   assert.match(text, /WHAT YOU REMEMBER ABOUT THIS PROJECT/, 'one line naming the section it will arrive under')
   // Same ceiling as the manifest check above, and for the same reason.
-  assert.ok(text.length < 11400, `manifest is ${text.length} chars`)
+  assert.ok(text.length < 12800, `manifest is ${text.length} chars`)
 })
 
 await test('the markdown format round-trips through parse and format', () => {

@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from 'react'
-import type { SkillInfo } from '@shared/skills'
+import type { MachineSkillInfo, SkillBase, SkillInfo, SkillSource, SkillsList } from '@shared/skills'
 import {
+  dedupeSkills,
+  skillBlurb,
   skillBody,
   skillCommandFor,
   skillPreambleFor,
@@ -9,8 +11,14 @@ import {
 import type { AgentProfile } from '@shared/types'
 import { terminalHost } from './terminals'
 
-export type { SkillInfo }
-export { skillBody, skillCommandFor, skillPreambleFor, usesSlashSkills }
+export type { MachineSkillInfo, SkillBase, SkillInfo, SkillSource, SkillsList }
+export { dedupeSkills, skillBlurb, skillBody, skillCommandFor, skillPreambleFor, usesSlashSkills }
+
+/** A skill plus which folder it came out of — everything below travels as one. */
+export interface ResolvedSkill {
+  skill: SkillBase
+  source: SkillSource
+}
 
 /**
  * The renderer's copy of the skills library.
@@ -31,8 +39,10 @@ export { skillBody, skillCommandFor, skillPreambleFor, usesSlashSkills }
  */
 export const SKILL_DRAG_MIME = 'application/x-forge-skill'
 
+const EMPTY: SkillsList = { skills: [], machineSkills: [] }
+
 class SkillLibrary {
-  private skills: SkillInfo[] = []
+  private list: SkillsList = EMPTY
   private listeners = new Set<() => void>()
   private started = false
 
@@ -49,15 +59,41 @@ class SkillLibrary {
   }
 
   /** Stable between changes — useSyncExternalStore compares by identity. */
-  snapshot = (): SkillInfo[] => this.skills
+  snapshot = (): SkillsList => this.list
 
-  find(name: string): SkillInfo | null {
-    return this.skills.find((s) => s.name === name) ?? null
+  /**
+   * A skill by name, from either folder.
+   *
+   * Library first, always: a name in both is a library skill Forge either
+   * synced into ~/.claude/skills or is refusing to overwrite, and either way
+   * the library row is the one with the toggle. `dedupeSkills` applies the same
+   * rule to the roster the voice model is given, so a dropped skill and a spoken
+   * one can never resolve to different folders.
+   */
+  find(name: string): ResolvedSkill | null {
+    const own = this.list.skills.find((s) => s.name === name)
+    if (own) return { skill: own, source: 'library' }
+    const machine = this.list.machineSkills.find((s) => s.name === name)
+    return machine ? { skill: machine, source: 'machine' } : null
   }
 
-  apply(next: SkillInfo[] | undefined): void {
-    if (!Array.isArray(next)) return
-    this.skills = next
+  /** Every skill the model may name, machine ones shadowed by the library. */
+  catalogue(): Array<{ name: string; description: string; enabled: boolean }> {
+    return [
+      ...this.list.skills.map((s) => ({ name: s.name, description: s.description, enabled: s.enabled })),
+      // A machine skill is loaded by every session already — there is nothing to
+      // enable, so as far as the model is concerned it is simply on.
+      ...dedupeSkills(this.list.skills, this.list.machineSkills).map((s) => ({
+        name: s.name,
+        description: s.description,
+        enabled: true
+      }))
+    ]
+  }
+
+  apply(next: SkillsList | undefined): void {
+    if (!next || !Array.isArray(next.skills)) return
+    this.list = { skills: next.skills, machineSkills: next.machineSkills ?? [] }
     for (const cb of this.listeners) cb()
   }
 
@@ -68,7 +104,7 @@ class SkillLibrary {
 
 export const skillLibrary = new SkillLibrary()
 
-export function useSkills(): SkillInfo[] {
+export function useSkills(): SkillsList {
   return useSyncExternalStore(skillLibrary.subscribe, skillLibrary.snapshot, skillLibrary.snapshot)
 }
 
@@ -86,11 +122,15 @@ export function useSkills(): SkillInfo[] {
  * Unsubmitted either way. Steve reads what landed and presses Enter himself —
  * the same rule dictation follows, for the same reason.
  */
-export async function typeSkillIntoPane(paneId: string, skill: SkillInfo, profile: AgentProfile): Promise<boolean> {
+export async function typeSkillIntoPane(
+  paneId: string,
+  { skill, source }: ResolvedSkill,
+  profile: AgentProfile
+): Promise<boolean> {
   if (usesSlashSkills(profile.command)) {
     return terminalHost.type(paneId, skillCommandFor(skill.name))
   }
-  const text = await window.forge.skills.read(skill.name)
+  const text = await window.forge.skills.read(skill.name, source)
   const body = skillBody(text)
   if (!body) return terminalHost.type(paneId, skillCommandFor(skill.name))
   return terminalHost.type(paneId, skillPreambleFor(skill, body))

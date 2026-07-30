@@ -37,16 +37,53 @@ export const FORGE_MANAGED_MARKER = '.forge-managed'
 
 export const SKILL_FILE = 'SKILL.md'
 
-/** One skill as the rail draws it. */
-export interface SkillInfo {
+/**
+ * Which of the two folders a skill was read out of.
+ *
+ * `library`  %APPDATA%\Forge\skills — Forge's own, writable
+ * `machine`  ~\.claude\skills — Steve's, read-only to Forge for ever
+ */
+export type SkillSource = 'library' | 'machine'
+
+/** What every skill has, wherever it was read from. */
+export interface SkillBase {
   /** The folder name. This is the id, and what `/<name>` types into a pane. */
   name: string
   /** Frontmatter `name:`, falling back to the folder name. */
   title: string
   /** Frontmatter `description:`. Empty when the file does not say. */
   description: string
-  /** Absolute path of the skill folder inside the library. */
+  /** Absolute path of the skill folder. */
   path: string
+  /** Why this skill is unhappy — malformed frontmatter, failed sync, no SKILL.md. */
+  problem?: string
+}
+
+/**
+ * A skill that is already in `~/.claude/skills` and was NOT put there by Forge.
+ *
+ * These are Steve's — hand-written, or junctioned in from another agent's folder
+ * — and every claude and kimi session on the machine has them loaded already.
+ * There is nothing to enable, so there is no toggle; Forge lists them, types
+ * them into panes, tells the voice agent they exist, and never writes a byte
+ * inside that folder.
+ */
+export interface MachineSkillInfo extends SkillBase {
+  /**
+   * A library skill of the same name exists. The library row is the one that
+   * counts — same rule as the `conflict` link state, seen from the other side.
+   */
+  shadowed: boolean
+}
+
+/** Both halves of the list, as one IPC round trip hands them back. */
+export interface SkillsList {
+  skills: SkillInfo[]
+  machineSkills: MachineSkillInfo[]
+}
+
+/** One skill as the rail draws it. */
+export interface SkillInfo extends SkillBase {
   /** In `settings.skillsEnabled`. */
   enabled: boolean
   /** How the enabled copy is present in ~/.claude/skills. */
@@ -57,8 +94,24 @@ export interface SkillInfo {
    * from some other tool is not Forge's to fix, but it should not be a mystery.
    */
   alsoIn: string[]
-  /** Why this skill is unhappy — malformed frontmatter, failed sync, no SKILL.md. */
-  problem?: string
+}
+
+/**
+ * Library first, machine second, one entry per name.
+ *
+ * A name that is in both is a library skill that Forge either synced into
+ * `~/.claude/skills` itself or is refusing to sync over the top of one of
+ * Steve's. Either way the library row is the one with the toggle and the one
+ * `use_skill` should reach for, so it wins and the machine copy is dropped.
+ * Used by the manifest catalogue and by the rail's shadow hint, so the two can
+ * never disagree about which row is real.
+ */
+export function dedupeSkills<M extends { name: string }>(
+  library: ReadonlyArray<{ name: string }>,
+  machine: readonly M[]
+): M[] {
+  const taken = new Set(library.map((s) => s.name))
+  return machine.filter((s) => !taken.has(s.name))
 }
 
 /* ---------------------------------------------------------------- naming */
@@ -231,6 +284,30 @@ export function skillPreambleFor(info: Pick<SkillInfo, 'title' | 'name'>, body: 
   const heading = `Follow this skill — "${info.title || info.name}":`
   const flat = body.replace(/\s+/g, ' ').trim()
   return `${heading} ${flat} `
+}
+
+/* -------------------------------------------------------------- blurbs */
+
+/** How much of a skill's description the voice manifest is willing to carry. */
+export const SKILL_BLURB_MAX = 120
+
+/**
+ * One line of a skill's description, for the SKILLS roster in the manifest.
+ *
+ * Real descriptions are written for a coding agent that is about to *read the
+ * skill*, and they run to a paragraph — Steve's `huashu-design` alone is 1.3k
+ * characters. The voice model is doing something much smaller: deciding which
+ * name to put in `use_skill`. A sentence is enough for that, and the manifest
+ * goes up the wire on every single thing he says, so the rest is cost with no
+ * return. Cuts at the first sentence where there is one, otherwise on a word.
+ */
+export function skillBlurb(description: string): string {
+  const flat = String(description ?? '').replace(/\s+/g, ' ').trim()
+  if (flat.length <= SKILL_BLURB_MAX) return flat
+  const stop = flat.slice(0, SKILL_BLURB_MAX).search(/[.!?](\s|$)/)
+  if (stop > 40) return flat.slice(0, stop + 1)
+  const cut = flat.lastIndexOf(' ', SKILL_BLURB_MAX)
+  return `${flat.slice(0, cut > 40 ? cut : SKILL_BLURB_MAX).trimEnd()}…`
 }
 
 /** Agents that read ~/.claude/skills and expose each one as a slash command. */
