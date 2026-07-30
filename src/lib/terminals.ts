@@ -54,30 +54,80 @@ interface Listeners {
   activity: Set<() => void>
 }
 
+/**
+ * The palette comes off the design tokens rather than being written twice.
+ * Read once per terminal creation (a getComputedStyle call is not free) and
+ * cached, because tokens.css is static for the life of the window.
+ */
+let paletteCache: Record<string, string> | null = null
+
+const TERM_TOKENS = [
+  'bg',
+  'fg',
+  'cursor-accent',
+  'selection',
+  'black',
+  'red',
+  'green',
+  'yellow',
+  'blue',
+  'magenta',
+  'cyan',
+  'white',
+  'bright-black',
+  'bright-red',
+  'bright-green',
+  'bright-yellow',
+  'bright-blue',
+  'bright-magenta',
+  'bright-cyan',
+  'bright-white'
+] as const
+
+/** Fallbacks only matter if tokens.css failed to load at all. */
+const TERM_FALLBACK = '#e8eaed'
+
+function palette(): Record<string, string> {
+  if (paletteCache) return paletteCache
+  const style = getComputedStyle(document.documentElement)
+  const out: Record<string, string> = {}
+  for (const token of TERM_TOKENS) {
+    out[token] = style.getPropertyValue(`--term-${token}`).trim() || TERM_FALLBACK
+  }
+  paletteCache = out
+  return out
+}
+
+/**
+ * A complete 16-colour dark theme. Handing xterm every slot explicitly is what
+ * lets a TUI that probes the terminal (Claude Code does) see a dark background
+ * and pick its dark theme, instead of defaulting to white.
+ */
 function baseTheme(accent: string): ITheme {
+  const p = palette()
   return {
-    background: '#0e0f12',
-    foreground: '#e8eaed',
+    background: p['bg']!,
+    foreground: p['fg']!,
     cursor: accent,
-    cursorAccent: '#0e0f12',
-    selectionBackground: 'rgba(198, 255, 74, 0.20)',
+    cursorAccent: p['cursor-accent']!,
+    selectionBackground: p['selection']!,
     selectionForeground: undefined,
-    black: '#15171b',
-    red: '#ff6e6e',
-    green: '#b8f04a',
-    yellow: '#f2e56b',
-    blue: '#7fb6ff',
-    magenta: '#c08bff',
-    cyan: '#6fe3d2',
-    white: '#d6d9de',
-    brightBlack: '#5a6068',
-    brightRed: '#ff8f8f',
-    brightGreen: '#ceff6e',
-    brightYellow: '#ffef8f',
-    brightBlue: '#a3ccff',
-    brightMagenta: '#d5aeff',
-    brightCyan: '#9bf0e4',
-    brightWhite: '#f4f6f8'
+    black: p['black']!,
+    red: p['red']!,
+    green: p['green']!,
+    yellow: p['yellow']!,
+    blue: p['blue']!,
+    magenta: p['magenta']!,
+    cyan: p['cyan']!,
+    white: p['white']!,
+    brightBlack: p['bright-black']!,
+    brightRed: p['bright-red']!,
+    brightGreen: p['bright-green']!,
+    brightYellow: p['bright-yellow']!,
+    brightBlue: p['bright-blue']!,
+    brightMagenta: p['bright-magenta']!,
+    brightCyan: p['bright-cyan']!,
+    brightWhite: p['bright-white']!
   }
 }
 
@@ -246,7 +296,72 @@ class TerminalHost {
     })
     entry.disposers.push(() => resizeSub.dispose())
 
+    term.attachCustomKeyEventHandler((e) => this.handleKey(paneId, term, e))
+
+    // Answer "what colour are you?" — see answerColour.
+    for (const code of [10, 11] as const) {
+      const sub = term.parser.registerOscHandler(code, (data) => this.answerColour(paneId, code, data))
+      entry.disposers.push(() => sub.dispose())
+    }
+
     return entry
+  }
+
+  /**
+   * OSC 10/11 colour queries. A program asks "what is your foreground /
+   * background?" and a real terminal answers; xterm.js does not, so a TUI that
+   * probes this way (Claude Code among them) gets silence, assumes a light
+   * terminal, and renders itself white-on-white. We answer for it, in the
+   * standard 16-bit-per-channel form, straight back down the PTY.
+   */
+  private answerColour(paneId: string, code: 10 | 11, data: string): boolean {
+    if (data.trim() !== '?') return false
+    const hex = palette()[code === 10 ? 'fg' : 'bg'] ?? ''
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim())
+    if (!m) return false
+    const [, r, g, b] = m
+    window.forge.pty.write(paneId, `\x1b]${code};rgb:${r}${r}/${g}${g}/${b}${b}\x1b\\`)
+    return true
+  }
+
+  /**
+   * Windows-terminal clipboard conventions, intercepted per pane so a key only
+   * stops reaching the shell when we actually handled it.
+   *
+   *   Ctrl+C          copies when there is a selection, otherwise falls through
+   *                   as ^C so it still interrupts a running command
+   *   Ctrl+V          pastes (bracketed-paste safe, via term.paste)
+   *   Ctrl+Shift+C/V  the same, unconditionally — the classic aliases
+   *
+   * Returning false stops xterm sending the key to the PTY; preventDefault is
+   * also needed, because Chromium would otherwise run its own paste command on
+   * the textarea and we would paste twice.
+   */
+  private handleKey(paneId: string, term: Terminal, e: KeyboardEvent): boolean {
+    if (e.type !== 'keydown' || !e.ctrlKey || e.altKey || e.metaKey) return true
+    const key = e.key.toLowerCase()
+
+    if (key === 'v') {
+      e.preventDefault()
+      void this.pasteFromClipboard(paneId)
+      return false
+    }
+
+    if (key === 'c') {
+      if (term.hasSelection()) {
+        e.preventDefault()
+        this.copySelectionToClipboard(paneId)
+        return false
+      }
+      // Nothing selected: Ctrl+C is a break, Ctrl+Shift+C is simply a no-op.
+      if (e.shiftKey) {
+        e.preventDefault()
+        return false
+      }
+      return true
+    }
+
+    return true
   }
 
   private async loadWebgl(entry: Entry): Promise<void> {
@@ -353,14 +468,49 @@ class TerminalHost {
     this.entries.get(paneId)?.term.clear()
   }
 
+  hasSelection(paneId: string): boolean {
+    return this.entries.get(paneId)?.term.hasSelection() ?? false
+  }
+
   copySelection(paneId: string): string | null {
     const term = this.entries.get(paneId)?.term
     if (!term || !term.hasSelection()) return null
     return term.getSelection()
   }
 
+  /**
+   * Copy the selection and drop it, the way Windows Terminal does — leaving it
+   * highlighted after Ctrl+C makes the next Ctrl+C look like it did nothing.
+   */
+  copySelectionToClipboard(paneId: string): boolean {
+    const entry = this.entries.get(paneId)
+    if (!entry || !entry.term.hasSelection()) return false
+    const text = entry.term.getSelection()
+    if (!text) return false
+    void window.forge.clipboard.writeText(text)
+    entry.term.clearSelection()
+    return true
+  }
+
+  async pasteFromClipboard(paneId: string): Promise<boolean> {
+    const entry = this.entries.get(paneId)
+    if (!entry) return false
+    const text = await window.forge.clipboard.readText()
+    if (!text) return false
+    entry.term.paste(text)
+    entry.term.scrollToBottom()
+    return true
+  }
+
+  selectAll(paneId: string): void {
+    this.entries.get(paneId)?.term.selectAll()
+  }
+
   paste(paneId: string, text: string): void {
-    this.entries.get(paneId)?.term.paste(text)
+    const entry = this.entries.get(paneId)
+    if (!entry) return
+    entry.term.paste(text)
+    entry.term.scrollToBottom()
   }
 
   scrollToBottom(paneId: string): void {

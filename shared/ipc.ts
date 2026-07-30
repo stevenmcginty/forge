@@ -18,6 +18,21 @@ export const IPC = {
   storeDeleteWorkspace: 'store:delete-workspace',
   storeReveal: 'store:reveal',
 
+  // clipboard (the main-process module — navigator.clipboard needs a
+  // permission handler and fails silently in a packaged app)
+  clipboardReadText: 'clipboard:read-text',
+  clipboardWriteText: 'clipboard:write-text',
+
+  // shots
+  shotsList: 'shots:list',
+  shotsUpdated: 'shots:updated',
+  shotsRemove: 'shots:remove',
+  shotsClear: 'shots:clear',
+  shotsCopy: 'shots:copy',
+  shotsAdopt: 'shots:adopt',
+  shotsDrag: 'shots:drag',
+  shotsOpenFolder: 'shots:open-folder',
+
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
   openPath: 'shell:open-path',

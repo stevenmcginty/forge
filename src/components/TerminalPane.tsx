@@ -6,6 +6,7 @@ import { useApp } from '@/state/AppState'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
 import { Icon } from './Icon'
+import { Popover, PopoverDivider, PopoverRow } from './Popover'
 import './TerminalPane.css'
 
 const ACTIVITY_HOLD_MS = 620
@@ -32,7 +33,10 @@ export function TerminalPane({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const dotRef = useRef<HTMLSpanElement | null>(null)
   const splitBtnRef = useRef<HTMLButtonElement | null>(null)
+  const menuAnchorRef = useRef<HTMLSpanElement | null>(null)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
+  const [dropping, setDropping] = useState(false)
   const [runtime, setRuntime] = useState<PaneRuntime>(() => terminalHost.runtime(leaf.id))
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(leaf.title)
@@ -106,6 +110,38 @@ export function TerminalPane({
     if (draft !== leaf.title) actions.renamePane(leaf.id, draft.trim())
   }
 
+  /* ------------------------------------------------------- context menu */
+
+  /** Every menu action hands focus straight back to the shell. */
+  const runFromMenu = (fn: () => void): void => {
+    fn()
+    setMenu(null)
+    terminalHost.focus(leaf.id)
+  }
+
+  /* --------------------------------------------------------- dropped files */
+
+  const carriesFiles = (e: React.DragEvent): boolean => Array.from(e.dataTransfer.types).includes('Files')
+
+  /**
+   * A file dropped on a pane types its quoted path at the cursor — which is
+   * exactly what you want when you have just dragged a screenshot out of the
+   * tray and onto an agent.
+   */
+  const onDropFiles = (e: React.DragEvent): void => {
+    if (!carriesFiles(e)) return
+    e.preventDefault()
+    setDropping(false)
+    const quoted = Array.from(e.dataTransfer.files)
+      .map((f) => window.forge.pathForFile(f))
+      .filter((p) => p.length > 0)
+      .map((p) => `"${p}"`)
+    if (quoted.length === 0) return
+    claimFocus()
+    terminalHost.paste(leaf.id, `${quoted.join(' ')} `)
+    terminalHost.focus(leaf.id)
+  }
+
   const statusLabel =
     runtime.status === 'exited'
       ? `exited ${runtime.exitCode ?? ''}`.trim()
@@ -125,9 +161,22 @@ export function TerminalPane({
       data-pane-id={leaf.id}
       data-focused={focused}
       data-status={runtime.status}
+      data-dropping={dropping ? 'true' : undefined}
       style={{ '--pane-accent': profile.accent } as React.CSSProperties}
       onPointerDownCapture={claimFocus}
       onFocusCapture={claimFocus}
+      onDragOver={(e) => {
+        if (!carriesFiles(e)) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+        setDropping(true)
+      }}
+      onDragLeave={(e) => {
+        // Ignore the flurry of leave events from crossing child elements.
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+        setDropping(false)
+      }}
+      onDrop={onDropFiles}
     >
       <header className="pane__header">
         <AgentBadge profile={profile} size="sm" />
@@ -208,7 +257,51 @@ export function TerminalPane({
         </div>
       </header>
 
-      <div className="pane__terminal" ref={containerRef} />
+      <div
+        className="pane__terminal"
+        ref={containerRef}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          claimFocus()
+          setMenu({ x: e.clientX, y: e.clientY, hasSelection: terminalHost.hasSelection(leaf.id) })
+        }}
+      />
+
+      {/* A zero-size anchor parked at the cursor, so the context menu is the
+          same Popover primitive as every other menu in Forge. */}
+      <span
+        ref={menuAnchorRef}
+        className="pane__menu-anchor"
+        aria-hidden="true"
+        style={menu ? { left: menu.x, top: menu.y } : undefined}
+      />
+
+      <Popover
+        anchor={menu ? menuAnchorRef.current : null}
+        open={menu !== null}
+        onClose={() => setMenu(null)}
+        width={186}
+        label="Terminal actions"
+      >
+        <PopoverRow
+          disabled={!menu?.hasSelection}
+          onClick={() => runFromMenu(() => terminalHost.copySelectionToClipboard(leaf.id))}
+        >
+          <span className="pane__menu-name">Copy</span>
+          <span className="pane__menu-keys mono">Ctrl+C</span>
+        </PopoverRow>
+        <PopoverRow onClick={() => runFromMenu(() => void terminalHost.pasteFromClipboard(leaf.id))}>
+          <span className="pane__menu-name">Paste</span>
+          <span className="pane__menu-keys mono">Ctrl+V</span>
+        </PopoverRow>
+        <PopoverDivider />
+        <PopoverRow onClick={() => runFromMenu(() => terminalHost.selectAll(leaf.id))}>
+          <span className="pane__menu-name">Select all</span>
+        </PopoverRow>
+        <PopoverRow onClick={() => runFromMenu(() => terminalHost.clear(leaf.id))}>
+          <span className="pane__menu-name">Clear</span>
+        </PopoverRow>
+      </Popover>
 
       <AgentChooser
         anchor={splitBtnRef.current}

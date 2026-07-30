@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, screen, shell } from 'electron'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import type { AppInfo, Project, Settings, Workspace } from '@shared/types'
@@ -7,16 +8,39 @@ import {
   getDataDir,
   getSettings,
   getWorkspace,
+  resolveDataRoot,
   setProjects,
   setSettings,
   setWorkspace,
   snapshot
 } from './store'
 import { disposePtyHost, registerPtyHandlers, setPtyTarget } from './pty-host'
+import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
 
 const isDev = !app.isPackaged
 const BG = '#0B0C0E'
 const TITLEBAR_HEIGHT = 38
+
+/* ------------------------------------------------------------- app identity
+ *
+ * Named and rooted before anything else runs, because the single-instance lock
+ * below is taken on the userData path. Pointing userData at Forge's own data
+ * root is what makes FORGE_DATA_DIR a complete isolation switch: a second copy
+ * with its own root gets its own lock and its own Chromium profile instead of
+ * quitting on startup or fighting over the session directory.
+ */
+
+const DATA_ROOT = resolveDataRoot()
+// setPath throws on a directory that is not there yet.
+mkdirSync(DATA_ROOT, { recursive: true })
+
+app.setName('Forge')
+if (process.platform === 'win32') app.setAppUserModelId('dev.forge.app')
+app.setPath('userData', DATA_ROOT)
+// Keep Chromium's caches out of the way so the data root stays readable:
+// settings.json, projects.json, layouts/ and shots/ at the top, browser guts
+// in chromium/.
+app.setPath('sessionData', join(DATA_ROOT, 'chromium'))
 
 let mainWindow: BrowserWindow | null = null
 let boundsTimer: NodeJS.Timeout | null = null
@@ -211,7 +235,11 @@ function registerAppHandlers(): void {
   })
 
   ipcMain.handle(IPC.storeSnapshot, () => snapshot())
-  ipcMain.handle(IPC.storeSetSettings, (_e, patch: Partial<Settings>) => setSettings(patch ?? {}))
+  ipcMain.handle(IPC.storeSetSettings, (_e, patch: Partial<Settings>) => {
+    const next = setSettings(patch ?? {})
+    applyShotSettings(next)
+    return next
+  })
   ipcMain.handle(IPC.storeSetProjects, (_e, projects: Project[]) => setProjects(Array.isArray(projects) ? projects : []))
   ipcMain.handle(IPC.storeGetWorkspace, (_e, projectId: string) => getWorkspace(String(projectId)))
   ipcMain.handle(IPC.storeSetWorkspace, (_e, projectId: string, workspace: Workspace) => {
@@ -235,6 +263,14 @@ function registerAppHandlers(): void {
 
   ipcMain.handle(IPC.openPath, async (_e, target: string) => shell.openPath(String(target)))
 
+  // The renderer never touches navigator.clipboard: it needs a permission
+  // handler, rejects silently when the window is not focused, and cannot do
+  // images at all.
+  ipcMain.handle(IPC.clipboardReadText, () => clipboard.readText())
+  ipcMain.handle(IPC.clipboardWriteText, (_e, text: string) => {
+    clipboard.writeText(String(text ?? ''))
+  })
+
   ipcMain.on(
     IPC.rendererError,
     (_e, payload: { kind: string; message: string; source?: string; stack?: string }) => {
@@ -257,14 +293,6 @@ function registerAppHandlers(): void {
 
 /* ------------------------------------------------------------- lifecycle */
 
-app.setName('Forge')
-if (process.platform === 'win32') app.setAppUserModelId('dev.forge.app')
-
-// Keep Chromium's caches out of the way so %APPDATA%\Forge stays readable:
-// settings.json, projects.json and layouts/ at the top, browser guts in
-// chromium/.
-app.setPath('sessionData', join(app.getPath('appData'), 'Forge', 'chromium'))
-
 // A terminal grid is not a place for background throttling or GPU surprises.
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 
@@ -273,6 +301,7 @@ void app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
   registerAppHandlers()
   registerPtyHandlers()
+  registerShotsHandlers()
   createWindow()
 
   app.on('activate', () => {
@@ -286,4 +315,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   disposePtyHost()
+  disposeShotsWatcher()
 })

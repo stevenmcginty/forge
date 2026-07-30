@@ -167,3 +167,40 @@
   position: absolute;
   inset: 0;
 }
+
+/* ---------------------------------------------------------- context menu */
+
+/* Parked at the cursor so <Popover> has something to anchor against. */
+.pane__menu-anchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.pane__menu-name {
+  flex: 1;
+  text-align: left;
+}
+
+.pane__menu-keys {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+/* ----------------------------------------------------------- dropped files */
+
+.pane[data-dropping='true'] {
+  border-color: var(--accent-line);
+}
+
+.pane[data-dropping='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-md);
+  background: var(--accent-softer);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  pointer-events: none;
+  z-index: var(--z-divider);
+}

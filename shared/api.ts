@@ -6,6 +6,7 @@ import type {
   PtyDataEvent,
   PtyExitEvent,
   Settings,
+  Shot,
   StoreSnapshot,
   WindowStateEvent,
   Workspace
@@ -40,8 +41,40 @@ export interface ForgeApi {
     revealDataDir(): Promise<string>
   }
 
+  /**
+   * The main process's clipboard, not `navigator.clipboard` — the renderer one
+   * needs a permission handler, can reject silently, and has no image support.
+   */
+  clipboard: {
+    readText(): Promise<string>
+    writeText(text: string): Promise<void>
+  }
+
+  shots: {
+    list(): Promise<Shot[]>
+    /** Deletes the PNG. Resolves with the shelf as it now stands. */
+    remove(path: string): Promise<Shot[]>
+    clear(): Promise<Shot[]>
+    /** Puts the shot on the clipboard as an image *and* as its quoted path. */
+    copy(path: string): Promise<boolean>
+    /** Copy image files onto the shelf (drag-and-drop in). */
+    adopt(paths: string[]): Promise<number>
+    /** Begin a real OS file drag of this shot. Call from `dragstart`. */
+    startDrag(path: string): void
+    openFolder(): Promise<string>
+    /** Returns an unsubscribe function. */
+    onUpdated(cb: (shots: Shot[]) => void): () => void
+  }
+
   pickFolder(): Promise<string | null>
   openPath(target: string): Promise<string>
+
+  /**
+   * Absolute path of a dropped `File`. Typed as `unknown` because this contract
+   * is compiled for the main process too, where the DOM `File` type does not
+   * exist; the renderer always hands it a real File.
+   */
+  pathForFile(file: unknown): string
 
   window: {
     minimize(): void

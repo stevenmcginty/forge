@@ -1,8 +1,9 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
 import type { Project, Settings, StoreSnapshot, Workspace } from '@shared/types'
+import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
 
 /**
  * Dead-simple JSON persistence in %APPDATA%\Forge.
@@ -10,6 +11,7 @@ import type { Project, Settings, StoreSnapshot, Workspace } from '@shared/types'
  *   settings.json          app settings + agent profiles + window bounds
  *   projects.json          the project list (ordered)
  *   layouts/<id>.json      one terminal workspace per project
+ *   shots/                 the screenshot shelf (real PNGs)
  *
  * Writes are atomic (tmp file + rename) and debounced by the caller where it
  * matters. Reads are tolerant: a corrupt file falls back to defaults rather
@@ -23,15 +25,29 @@ const DEFAULT_SETTINGS: Settings = {
   terminalFontSize: 13,
   terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
   shell: 'pwsh.exe',
+  catchShots: true,
+  shotsKeep: DEFAULT_KEEP,
   window: { width: 1440, height: 900, maximized: false }
 }
 
 let dataDir = ''
 let layoutDir = ''
 
+/**
+ * Everything Forge owns lives under one root. FORGE_DATA_DIR moves it, which
+ * is how a second copy of Forge can be run side by side (its own settings, its
+ * own shots, its own single-instance lock) without disturbing the one you are
+ * using — see scripts/ and the M2 notes.
+ */
+export function resolveDataRoot(): string {
+  const override = process.env['FORGE_DATA_DIR']
+  if (override && override.trim()) return resolve(override.trim())
+  return join(app.getPath('appData'), 'Forge')
+}
+
 function ensureDirs(): void {
   if (!dataDir) {
-    dataDir = join(app.getPath('appData'), 'Forge')
+    dataDir = resolveDataRoot()
     layoutDir = join(dataDir, 'layouts')
   }
   mkdirSync(layoutDir, { recursive: true })
@@ -94,6 +110,8 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     terminalFontSize: clamp(s.terminalFontSize ?? DEFAULT_SETTINGS.terminalFontSize, 9, 28),
     terminalFontFamily: s.terminalFontFamily || DEFAULT_SETTINGS.terminalFontFamily,
     shell: s.shell || DEFAULT_SETTINGS.shell,
+    catchShots: s.catchShots ?? true,
+    shotsKeep: clampKeep(s.shotsKeep),
     window: {
       x: typeof win.x === 'number' ? win.x : undefined,
       y: typeof win.y === 'number' ? win.y : undefined,
@@ -197,4 +215,11 @@ export function snapshot(): StoreSnapshot {
 export function getDataDir(): string {
   ensureDirs()
   return dataDir
+}
+
+/** %APPDATA%\Forge\shots — created on demand, owned by the shots shelf. */
+export function getShotsDir(): string {
+  const dir = join(getDataDir(), 'shots')
+  mkdirSync(dir, { recursive: true })
+  return dir
 }

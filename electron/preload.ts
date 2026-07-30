@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { ForgeApi } from '@shared/api'
 
@@ -34,8 +34,30 @@ const api: ForgeApi = {
     revealDataDir: () => ipcRenderer.invoke(IPC.storeReveal)
   },
 
+  clipboard: {
+    readText: () => ipcRenderer.invoke(IPC.clipboardReadText),
+    writeText: (text) => ipcRenderer.invoke(IPC.clipboardWriteText, text)
+  },
+
+  shots: {
+    list: () => ipcRenderer.invoke(IPC.shotsList),
+    remove: (path) => ipcRenderer.invoke(IPC.shotsRemove, path),
+    clear: () => ipcRenderer.invoke(IPC.shotsClear),
+    copy: (path) => ipcRenderer.invoke(IPC.shotsCopy, path),
+    adopt: (paths) => ipcRenderer.invoke(IPC.shotsAdopt, paths),
+    // send, not invoke: startDrag has to happen while the mouse button is
+    // still down, so there is nothing useful to await.
+    startDrag: (path) => ipcRenderer.send(IPC.shotsDrag, path),
+    openFolder: () => ipcRenderer.invoke(IPC.shotsOpenFolder),
+    onUpdated: (cb) => subscribe(IPC.shotsUpdated, cb)
+  },
+
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
+
+  // File.path was removed in Electron 32; webUtils is the sanctioned way and
+  // it only works from the preload.
+  pathForFile: (file) => webUtils.getPathForFile(file as File),
 
   window: {
     minimize: () => ipcRenderer.send(IPC.windowMinimize),

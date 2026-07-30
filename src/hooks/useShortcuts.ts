@@ -105,24 +105,24 @@ export function useShortcuts(): void {
         return
       }
 
-      /* ------------------------------------------------------ clipboard */
+      /* ------------------------------------------------------ clipboard
+       *
+       * Ctrl+C / Ctrl+V inside a terminal are handled per pane, in
+       * terminalHost's xterm key handler, so that a plain Ctrl+C with nothing
+       * selected still reaches the shell as ^C. These two are the app-wide
+       * aliases: they work even when focus sits on some piece of chrome rather
+       * than in the terminal itself.
+       */
 
       if (ctrl && shift && e.code === 'KeyC') {
         if (!activePaneId) return
-        const text = terminalHost.copySelection(activePaneId)
-        if (text) {
-          stop()
-          void navigator.clipboard.writeText(text)
-        }
+        if (terminalHost.copySelectionToClipboard(activePaneId)) stop()
         return
       }
 
       if (ctrl && shift && e.code === 'KeyV') {
         stop()
-        if (!activePaneId) return
-        void navigator.clipboard.readText().then((text) => {
-          if (text) terminalHost.paste(activePaneId, text)
-        })
+        if (activePaneId) void terminalHost.pasteFromClipboard(activePaneId)
         return
       }
 

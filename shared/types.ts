@@ -78,6 +78,29 @@ export interface Workspace {
   activeTabId: string | null
 }
 
+/* ------------------------------------------------------------------- shots */
+
+/**
+ * One screenshot on the shelf, as the renderer sees it. The main process owns
+ * the files (see electron/shots/shelf.ts) and hands over a thumbnail data URL
+ * rather than a path, because a renderer cannot read `file://` under our CSP —
+ * and because 12 full-size 4K PNGs decoded in the DOM is not a tray, it is a
+ * memory leak with rounded corners.
+ */
+export interface Shot {
+  /** The file name — stable identity for keys and delete calls. */
+  id: string
+  name: string
+  path: string
+  createdAt: number
+  bytes: number
+  /** Pixel size of the original image. */
+  width: number
+  height: number
+  /** PNG data URL, scaled to fit the tray (and a hover preview). */
+  thumb: string
+}
+
 /* ---------------------------------------------------------------- settings */
 
 export interface WindowBounds {
@@ -97,6 +120,10 @@ export interface Settings {
   terminalFontFamily: string
   /** Shell executable. Defaults to pwsh.exe (PowerShell 7). */
   shell: string
+  /** Watch the clipboard for screenshots and copied images. */
+  catchShots: boolean
+  /** How many shots the shelf keeps before pruning the oldest. */
+  shotsKeep: number
   window: WindowBounds
 }
 
