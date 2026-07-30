@@ -62,6 +62,13 @@ export const IPC = {
   voiceMakeImage: 'voice:make-image',
   voiceEditImage: 'voice:edit-image',
 
+  // per-project agent memory (M7) — one markdown file per project, read into
+  // the brain's system text and written back after every exchange.
+  memoryRead: 'memory:read',
+  memoryAppend: 'memory:append',
+  memoryReplaceSummary: 'memory:replace-summary',
+  memoryClear: 'memory:clear',
+
   // diagnostics
   rendererError: 'diag:renderer-error'
 } as const

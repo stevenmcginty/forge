@@ -15,6 +15,7 @@
     "pty:smoke": "node scripts/pty-smoke.mjs",
     "shots:smoke": "node scripts/shots-smoke.mjs",
     "voice:check": "node scripts/voice-check.mjs",
+    "memory:smoke": "node scripts/memory-smoke.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
     "bridge:register": "node scripts/bridge-register-check.mjs"
   },

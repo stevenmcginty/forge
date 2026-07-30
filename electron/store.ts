@@ -54,7 +54,10 @@ const DEFAULT_SETTINGS: Settings = {
   // Mirrors DEFAULT_OPENROUTER_MODEL in src/lib/voicebrain.ts, the same way
   // geminiModel above mirrors DEFAULT_GEMINI_MODEL — main cannot import a
   // renderer module, and voice-check asserts the two literals still agree.
-  openrouterModel: 'google/gemini-2.5-flash-lite'
+  openrouterModel: 'google/gemini-2.5-flash-lite',
+  // Heuristic memory is free and predictable; letting a model rewrite the
+  // project summary is neither, so it is opt-in.
+  memoryLlmSummarize: false
 }
 
 let dataDir = ''
@@ -197,7 +200,8 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     openrouterModel:
       typeof s.openrouterModel === 'string' && s.openrouterModel.trim()
         ? s.openrouterModel.trim()
-        : DEFAULT_SETTINGS.openrouterModel
+        : DEFAULT_SETTINGS.openrouterModel,
+    memoryLlmSummarize: Boolean(s.memoryLlmSummarize)
   }
 }
 

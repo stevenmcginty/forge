@@ -1,5 +1,5 @@
 import type { GeminiCallRequest, GeminiCallResult } from '@shared/types'
-import { parseBrainJson, salvagePartialJson } from './brainjson'
+import { parseBrainJson, salvagePartialJson, withProjectMemory } from './brainjson'
 import type { BrainContext, BrainReply, BrainStatus, VoiceBrain } from './voicebrain'
 
 /**
@@ -13,7 +13,9 @@ export {
   salvagePartialJson,
   sanitiseActions,
   tidySay,
-  ACTION_KINDS
+  withProjectMemory,
+  ACTION_KINDS,
+  MEMORY_HEADING
 } from './brainjson'
 
 /**
@@ -130,7 +132,7 @@ export class GeminiBrain implements VoiceBrain {
     const base: GeminiCallRequest = {
       key: this.apiKey,
       model: this.model,
-      system: context.manifest ?? '',
+      system: withProjectMemory(context.manifest ?? '', context.projectMemory),
       turns,
       schema: RESPONSE_SCHEMA
     }

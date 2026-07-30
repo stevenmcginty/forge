@@ -14,6 +14,7 @@ import {
   setWorkspace,
   snapshot
 } from './store'
+import { registerMemoryHandlers, setMemoryDir } from './memory-store'
 import { disposePtyHost, registerPtyHandlers, setPtyTarget } from './pty-host'
 import { writeBridgeConfig } from './bridge/mcp-config'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
@@ -277,6 +278,17 @@ function registerAppHandlers(): void {
   })
   ipcMain.handle(IPC.storeDeleteWorkspace, (_e, projectId: string) => deleteWorkspace(String(projectId)))
   ipcMain.handle(IPC.storeReveal, () => shell.openPath(getDataDir()))
+
+  // Per-project memory. The store is handed a directory rather than importing
+  // the data root itself, which is what keeps memory-store.ts electron-free and
+  // therefore drivable head-less by scripts/memory-smoke.mjs.
+  setMemoryDir(join(getDataDir(), 'memory'))
+  registerMemoryHandlers(ipcMain, {
+    read: IPC.memoryRead,
+    append: IPC.memoryAppend,
+    replaceSummary: IPC.memoryReplaceSummary,
+    clear: IPC.memoryClear
+  })
 
   ipcMain.handle(IPC.pickFolder, async (): Promise<string | null> => {
     const parent = mainWindow ?? undefined

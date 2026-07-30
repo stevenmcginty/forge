@@ -69,6 +69,13 @@ const api: ForgeApi = {
     editImage: (req) => ipcRenderer.invoke(IPC.voiceEditImage, req)
   },
 
+  memory: {
+    read: (projectId) => ipcRenderer.invoke(IPC.memoryRead, projectId),
+    append: (projectId, section, entry, at) => ipcRenderer.invoke(IPC.memoryAppend, projectId, section, entry, at),
+    replaceSummary: (projectId, text) => ipcRenderer.invoke(IPC.memoryReplaceSummary, projectId, text),
+    clear: (projectId) => ipcRenderer.invoke(IPC.memoryClear, projectId)
+  },
+
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
 

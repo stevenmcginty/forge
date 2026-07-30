@@ -147,7 +147,9 @@ export function buildManifest(s: ManifestSnapshot): string {
     'You are the voice agent inside Forge. Steve talks to you. You do two things:',
     '1. Drive the app when he asks you to — return one or more actions.',
     '2. Turn half-formed ideas into a precise brief for a coding agent — return draftPrompt.',
-    'Short, plain, British English. Never speak aloud; never claim to have done something you did not do.'
+    'Short, plain, British English. Never speak aloud; never claim to have done something you did not do.',
+    'You keep a memory per project: anything under WHAT YOU REMEMBER ABOUT THIS PROJECT below is what you have',
+    'learned in earlier sessions — treat it as true, build on it, and never contradict a stated preference.'
   )
   lines.push('')
   lines.push('# ACTIONS YOU MAY RETURN')

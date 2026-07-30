@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { MAX_PANES_PER_TAB, MAX_SESSIONS } from '@shared/ipc'
 import type { AgentProfile, KeySource, VoiceBrainId } from '@shared/types'
+import { agentMemory } from '@/lib/agentmemory'
 import { resolveProfile } from '@/lib/agents'
 import { buildManifest, type ManifestSnapshot } from '@/lib/appmanifest'
 import {
@@ -150,6 +151,10 @@ export function VoicePanel(): ReactNode {
   )
   const status: BrainStatus = brain.ready()
 
+  // Agent memory (M7). Warmed here so the brain context can be built without an
+  // await; everything that decides what to remember lives in lib/agentmemory.ts.
+  useEffect(() => void agentMemory.prime(project?.id ?? null), [project?.id])
+
   /* ------------------------------------------------- state for the agent */
 
   const workspace = project ? state.workspaces[project.id] : undefined
@@ -213,7 +218,9 @@ export function VoicePanel(): ReactNode {
         done: res.paths.length,
         paths: res.paths
       }
-    }
+    },
+    recallMemory: () => agentMemory.recall(project?.id ?? null),
+    forgetMemory: () => agentMemory.forget(project?.id ?? null)
   }
 
   const manifestRef = useRef<string>('')
@@ -348,6 +355,7 @@ export function VoicePanel(): ReactNode {
           ...prev,
           { id, said, at: Date.now(), kind: 'command', actions: hit.actions, outcomes }
         ])
+        void agentMemory.record({ projectId: ctx?.activeProjectId ?? null, utterance: said, at: Date.now(), outcomes })
         return
       }
 
@@ -359,7 +367,8 @@ export function VoicePanel(): ReactNode {
         projectPath: project?.path,
         recentTranscript: [...historyRef.current.filter((t) => t.role === 'user').map((t) => t.text), said],
         manifest: manifestRef.current,
-        history: [...historyRef.current]
+        history: [...historyRef.current],
+        projectMemory: agentMemory.cached(ctx?.activeProjectId ?? null)
       }
 
       brain
@@ -375,6 +384,7 @@ export function VoicePanel(): ReactNode {
                 : t
             )
           )
+          void agentMemory.record({ projectId: ctx?.activeProjectId ?? null, utterance: said, at: Date.now(), reply, outcomes })
         })
         .catch((err: unknown) =>
           setTurns((prev) =>

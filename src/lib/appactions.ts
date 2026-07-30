@@ -25,6 +25,15 @@ export type AppAction =
   /** Real image generation. 1–4, each one a separate API call. */
   | { kind: 'make_image'; description: string; count: number; aspect?: string }
   | { kind: 'edit_image'; path: string; instruction: string }
+  /**
+   * Read this project's memory back, and wipe it.
+   *
+   * Grammar-only, both of them — deliberately absent from `ACTION_KINDS` and
+   * the manifest, so a brain can neither claim to have recalled something nor
+   * quietly delete what Steve told it to remember. He asks; only he asks.
+   */
+  | { kind: 'recall_memory' }
+  | { kind: 'forget_memory' }
 
 /** Image generation is the one thing here that cannot finish synchronously. */
 export const MAX_GENERATED_IMAGES = 4
@@ -73,6 +82,13 @@ export interface ActionRunner {
    */
   makeImage?(request: { description: string; count: number; aspect?: string }): Promise<ActionOutcome>
   editImage?(request: { path: string; instruction: string }): Promise<ActionOutcome>
+  /**
+   * Project memory, which lives in a file the main process owns — so reading it
+   * back and clearing it are IPC round trips, asynchronous like the media ones.
+   * Neither costs a model call: the answer is read off disk.
+   */
+  recallMemory?(): Promise<ActionOutcome>
+  forgetMemory?(): Promise<ActionOutcome>
 }
 
 export interface ActionOutcome {
@@ -354,6 +370,30 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
         requested: 1,
         done: 0,
         pending: run.editImage({ path, instruction })
+      }
+    }
+
+    case 'recall_memory': {
+      if (!ctx.activeProjectId) return fail('No project open — there is nothing for me to remember yet')
+      if (!run.recallMemory) return fail('Project memory is not available here')
+      return {
+        ok: true,
+        summary: 'Reading what I remember…',
+        requested: 1,
+        done: 0,
+        pending: run.recallMemory()
+      }
+    }
+
+    case 'forget_memory': {
+      if (!ctx.activeProjectId) return fail('No project open — there is no memory to forget')
+      if (!run.forgetMemory) return fail('Project memory is not available here')
+      return {
+        ok: true,
+        summary: 'Forgetting…',
+        requested: 1,
+        done: 0,
+        pending: run.forgetMemory()
       }
     }
 
