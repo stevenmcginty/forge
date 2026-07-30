@@ -40,6 +40,36 @@
   --accent-line: rgba(198, 255, 74, 0.42);
   --accent-glow: rgba(198, 255, 74, 0.22);
 
+  /* -------------------------------------------------------- terminal ink
+   *
+   * The xterm palette. It lives here — not in terminals.ts — so the app has one
+   * source of colour truth; TerminalHost reads these off the document at the
+   * moment it builds a terminal. Tuned for a near-black ground: nothing dips
+   * below roughly 4.5:1 on --term-bg, blues are lifted well clear of the
+   * background, and green sits next to the volt accent without clashing.
+   */
+  --term-bg: #0e0f12;
+  --term-fg: #e8eaed;
+  --term-cursor-accent: #0e0f12;
+  --term-selection: rgba(198, 255, 74, 0.22);
+
+  --term-black: #15171b;
+  --term-red: #ff6e6e;
+  --term-green: #b8f04a;
+  --term-yellow: #f2e56b;
+  --term-blue: #7fb6ff;
+  --term-magenta: #c08bff;
+  --term-cyan: #6fe3d2;
+  --term-white: #d6d9de;
+  --term-bright-black: #5a6068;
+  --term-bright-red: #ff8f8f;
+  --term-bright-green: #ceff6e;
+  --term-bright-yellow: #ffef8f;
+  --term-bright-blue: #a3ccff;
+  --term-bright-magenta: #d5aeff;
+  --term-bright-cyan: #9bf0e4;
+  --term-bright-white: #f4f6f8;
+
   /* ---------------------------------------------------------- signals */
   --danger: #ff5c48;
   --danger-soft: rgba(255, 92, 72, 0.14);

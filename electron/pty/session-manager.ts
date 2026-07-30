@@ -277,6 +277,11 @@ function buildEnv(): Record<string, string> {
   env.TERM = 'xterm-256color'
   env.COLORTERM = 'truecolor'
   env.FORGE_TERMINAL = '1'
+  // TUIs that cannot query the terminal for its background (Claude Code among
+  // them) fall back to COLORFGBG, and without it they assume a light theme and
+  // paint themselves white. 15;0 = light ink on a dark ground.
+  if (!env.COLORFGBG) env.COLORFGBG = '15;0'
+  if (!env.TERM_PROGRAM) env.TERM_PROGRAM = 'Forge'
   return env
 }
 
