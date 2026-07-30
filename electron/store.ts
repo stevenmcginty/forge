@@ -279,7 +279,11 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     shell: s.shell || DEFAULT_SETTINGS.shell,
     catchShots: s.catchShots ?? true,
     shotsKeep: clampKeep(s.shotsKeep),
-    onboarded: s.onboarded === true,
+    // "First run" means no settings.json, not "no `onboarded` key". A
+    // settings.json written before onboarding existed belongs to somebody who
+    // has been using Forge for months, and showing them the welcome card would
+    // be the merge announcing itself rather than the feature working.
+    onboarded: raw === null ? false : s.onboarded !== false,
     sttPython: typeof s.sttPython === 'string' ? s.sttPython : DEFAULT_SETTINGS.sttPython,
     sttModelDir: typeof s.sttModelDir === 'string' ? s.sttModelDir : DEFAULT_SETTINGS.sttModelDir,
     // 0 legitimately means "never auto-stop", so a junk value has to fall back
