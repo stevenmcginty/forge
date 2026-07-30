@@ -83,6 +83,16 @@ const api: ForgeApi = {
     clear: (projectId) => ipcRenderer.invoke(IPC.memoryClear, projectId)
   },
 
+  skills: {
+    list: () => ipcRenderer.invoke(IPC.skillsList),
+    read: (name) => ipcRenderer.invoke(IPC.skillsRead, name),
+    create: (name, description) => ipcRenderer.invoke(IPC.skillsCreate, name, description),
+    importFolder: (sourceDir) => ipcRenderer.invoke(IPC.skillsImport, sourceDir ?? ''),
+    remove: (name) => ipcRenderer.invoke(IPC.skillsRemove, name),
+    setEnabled: (name, on) => ipcRenderer.invoke(IPC.skillsSetEnabled, name, on === true),
+    openFolder: (name) => ipcRenderer.invoke(IPC.skillsOpenFolder, name ?? '')
+  },
+
   system: {
     userName: () => ipcRenderer.invoke(IPC.systemUserName),
     claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion)

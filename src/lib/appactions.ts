@@ -1,4 +1,5 @@
 import type { AgentProfile, SplitDirection } from '@shared/types'
+import { skillHandler } from './skillbus'
 
 /**
  * The things the voice agent is allowed to do to Forge.
@@ -25,6 +26,14 @@ export type AppAction =
   /** Real image generation. 1–4, each one a separate API call. */
   | { kind: 'make_image'; description: string; count: number; aspect?: string }
   | { kind: 'edit_image'; path: string; instruction: string }
+  /**
+   * Type `/<name>` into a pane, unsubmitted.
+   *
+   * Never submitted, deliberately: a skill is a long instruction the agent is
+   * about to follow, and the last look at it belongs to Steve. `target` names a
+   * pane or an agent; without one it is the focused pane.
+   */
+  | { kind: 'use_skill'; name: string; target?: string }
   /**
    * Read this project's memory back, and wipe it.
    *
@@ -89,6 +98,16 @@ export interface ActionRunner {
    */
   recallMemory?(): Promise<ActionOutcome>
   forgetMemory?(): Promise<ActionOutcome>
+  /**
+   * Type a skill into a pane. Synchronous, like the layout actions — it types
+   * and returns; nothing is submitted and nothing is awaited.
+   *
+   * Optional, and when a runner does not supply it the executor falls back to
+   * whatever the renderer registered on `skillbus`. That indirection exists
+   * because the runner is assembled inside VoicePanel while the thing that can
+   * reach a terminal lives with the skills rail — see src/lib/skillbus.ts.
+   */
+  useSkill?(request: { name: string; target?: string }): ActionOutcome
 }
 
 export interface ActionOutcome {
@@ -371,6 +390,15 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
         done: 0,
         pending: run.editImage({ path, instruction })
       }
+    }
+
+    case 'use_skill': {
+      const name = action.name.trim().replace(/^\//, '')
+      if (!name) return fail('Which skill?')
+      const use = run.useSkill ?? skillHandler()
+      if (!use) return fail('Skills are not available here')
+      const target = action.target?.trim()
+      return use(target ? { name, target } : { name })
     }
 
     case 'recall_memory': {

@@ -125,7 +125,10 @@ const FALLBACK_SETTINGS: Settings = {
   geminiImageModel: '',
   openrouterKey: '',
   openrouterModel: 'google/gemini-2.5-flash-lite',
-  memoryLlmSummarize: false
+  memoryLlmSummarize: false,
+  // Filled in by the store on hydrate — main knows the real data root.
+  skillsLibraryDir: '',
+  skillsEnabled: []
 }
 
 /** The voice panel never gets narrower than this, nor wider. */

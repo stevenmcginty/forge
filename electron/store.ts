@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkS
 import { homedir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 import { BUILTIN_AGENT_PROFILES, inferKind, isClaudeCommand, isPermissionMode } from '@shared/agents'
+import { isValidSkillName } from '@shared/skills'
 import type { AgentProfile, Project, Settings, StoreSnapshot, ThemeCore, Workspace } from '@shared/types'
 import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
 
@@ -122,8 +123,18 @@ function defaultSettings(): Settings {
     openrouterModel: 'google/gemini-2.5-flash-lite',
     // Heuristic memory is free and predictable; letting a model rewrite the
     // project summary is neither, so it is opt-in.
-    memoryLlmSummarize: false
+    memoryLlmSummarize: false,
+    // The skills library. Computed rather than frozen for the same reason as
+    // the dictation paths above: it is an answer about *this* machine's data
+    // root, which FORGE_DATA_DIR is allowed to move.
+    skillsLibraryDir: defaultSkillsDir(),
+    skillsEnabled: []
   }
+}
+
+/** %APPDATA%\Forge\skills — see electron/skills-store.ts. */
+function defaultSkillsDir(): string {
+  return join(resolveDataRoot(), 'skills')
 }
 
 let dataDir = ''
@@ -337,7 +348,18 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       typeof s.openrouterModel === 'string' && s.openrouterModel.trim()
         ? s.openrouterModel.trim()
         : DEFAULT_SETTINGS.openrouterModel,
-    memoryLlmSummarize: Boolean(s.memoryLlmSummarize)
+    memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
+    skillsLibraryDir:
+      typeof s.skillsLibraryDir === 'string' && s.skillsLibraryDir.trim()
+        ? s.skillsLibraryDir.trim()
+        : DEFAULT_SETTINGS.skillsLibraryDir,
+    // Only names that could ever be folders survive the trip off disk — this
+    // list is turned into paths under ~/.claude/skills.
+    skillsEnabled: (Array.isArray(s.skillsEnabled) ? s.skillsEnabled : [])
+      .map((n) => String(n ?? '').trim())
+      .filter((n) => isValidSkillName(n))
+      .filter((n, i, all) => all.indexOf(n) === i)
+      .slice(0, 200)
   }
 }
 

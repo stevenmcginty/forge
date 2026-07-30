@@ -416,6 +416,20 @@ export interface Settings {
    * predictable, whereas this is a real (if small) API call you did not ask for.
    */
   memoryLlmSummarize: boolean
+
+  /* --------------------------------------------------- skills library (M8) */
+  /**
+   * Where the skills library lives. Defaults to %APPDATA%\Forge\skills; movable
+   * by hand for anyone who would rather keep their skills in a repo.
+   */
+  skillsLibraryDir: string
+  /**
+   * Folder names of the skills currently synced into ~/.claude/skills, and so
+   * visible to every claude and kimi session on this machine. The list is the
+   * intent; electron/skills-store.ts reconciles the filesystem with it at
+   * startup and after every toggle.
+   */
+  skillsEnabled: string[]
 }
 
 /* -------------------------------------------------------------------- ipc */

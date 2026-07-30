@@ -60,7 +60,8 @@ export const ACTION_KINDS: ReadonlySet<string> = new Set([
   'focus_tab',
   'new_project_hint',
   'make_image',
-  'edit_image'
+  'edit_image',
+  'use_skill'
 ])
 
 /** How much conversational reply is worth showing. */
@@ -222,6 +223,17 @@ export function sanitiseActions(value: unknown): AppAction[] {
         const instruction = asString(a['instruction'])
         if (!path || !instruction) continue
         out.push({ kind: 'edit_image', path, instruction })
+        break
+      }
+      case 'use_skill': {
+        // A model that writes "/writing" instead of "writing" meant the same
+        // thing; the executor is the one place that decides what a name is.
+        const name = asString(a['name'])?.replace(/^\//, '')
+        if (!name) continue
+        const action: AppAction = { kind: 'use_skill', name }
+        const target = asString(a['target'])
+        if (target) action.target = target
+        out.push(action)
         break
       }
       default:

@@ -1,4 +1,5 @@
 import type { AgentProfile } from '@shared/types'
+import { skillCatalogue } from './skillbus'
 
 /**
  * The capability manifest: what the voice agent is told about Forge.
@@ -29,10 +30,25 @@ export interface ManifestTab {
   panes: ManifestPane[]
 }
 
+/** One skill, as the model is told about it. */
+export interface ManifestSkill {
+  /** Folder name — what `use_skill` takes and what `/name` types. */
+  name: string
+  description: string
+  /** Synced into ~/.claude/skills, so every claude/kimi session already has it. */
+  enabled: boolean
+}
+
 export interface ManifestSnapshot {
   appVersion: string | null
   projects: Array<{ name: string; path: string; active: boolean }>
   profiles: AgentProfile[]
+  /**
+   * The skills library. Optional so a caller written before skills existed still
+   * type-checks — an absent list simply means the SKILLS section is left out and
+   * the model is told there are none.
+   */
+  skills?: ManifestSkill[]
   tabs: ManifestTab[]
   paneCount: number
   maxSessions: number
@@ -109,6 +125,11 @@ export const ACTION_SPECS: ActionSpec[] = [
     kind: 'edit_image',
     args: '{"kind":"edit_image","path":"<absolute path>","instruction":"<what to change>"}',
     what: 'Edit an existing image into a new file. The original is never modified. Needs a real path on this PC.'
+  },
+  {
+    kind: 'use_skill',
+    args: '{"kind":"use_skill","name":"<skill>","target":"<optional pane/agent>"}',
+    what: 'Type /<skill> into a pane, NOT submitted — Steve presses Enter. Only skills under SKILLS exist.'
   }
 ]
 
@@ -176,6 +197,19 @@ export function buildManifest(s: ManifestSnapshot): string {
       lines.push(
         `- id "${p.id}" — ${p.name}, runs \`${p.command || '(plain shell)'}\`; spoken as: ${aliases.join(', ')}`
       )
+    }
+  }
+  lines.push('')
+  lines.push('# SKILLS')
+  lines.push('Folders of instructions in ~/.claude/skills. An enabled one is already loaded by every claude/kimi session.')
+  // The snapshot is the right place for this, but a caller that predates skills
+  // does not fill it in — see setSkillCatalogue.
+  const skills = s.skills ?? skillCatalogue() ?? []
+  if (skills.length === 0) {
+    lines.push('- (none — Steve adds them with + beside SKILLS in the rail)')
+  } else {
+    for (const skill of skills) {
+      lines.push(`- ${skill.name}${skill.enabled ? '' : ' [off]'}${skill.description ? `: ${skill.description}` : ''}`)
     }
   }
   lines.push('')
