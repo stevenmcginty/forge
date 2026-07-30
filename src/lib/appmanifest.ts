@@ -109,6 +109,13 @@ export const ACTION_SPECS: ActionSpec[] = [
     kind: 'edit_image',
     args: '{"kind":"edit_image","path":"<absolute path>","instruction":"<what to change>"}',
     what: 'Edit an existing image into a new file. The original is never modified. Needs a real path on this PC.'
+  },
+  {
+    kind: 'make_video',
+    args: '{"kind":"make_video","description":"<full description>","aspect":"16:9"|"9:16","duration":<4-8>}',
+    what:
+      'Really generate a short .mp4 into the project’s assets/generated/. Say what MOVES and what the camera does. ' +
+      '16:9 or 9:16 only, 4–8 seconds, one clip per action. SLOW — 1–3 minutes: say so, and never queue several.'
   }
 ]
 
@@ -212,12 +219,13 @@ export function buildManifest(s: ManifestSnapshot): string {
     'Every Claude Code pane Forge opens is given Forge’s cross-agent bridge, so the agent you are drafting for can:',
     '- make_image — generate a real image file from a description',
     '- edit_image — change an existing image and save a new one',
+    '- make_video — generate a real .mp4 (4–8s, 16:9 or 9:16). Slow: 1–3 minutes, so warn the agent it has not hung.',
     '- ask_gemini — get a second opinion from Google Gemini, optionally with local files attached',
     '- summarize_video — watch a YouTube or local video and summarise it',
     'When a draftPrompt would benefit from any of these, say so in the prompt itself — one line, e.g. “You have',
-    'make_image/edit_image/ask_gemini/summarize_video available via the forge-bridge MCP server; use make_image for',
-    'the placeholder art rather than committing an empty file.” Do not mention them when they are irrelevant, and',
-    'never claim the agent has any tool that is not on that list.'
+    'make_image/edit_image/make_video/ask_gemini/summarize_video available via the forge-bridge MCP server; use',
+    'make_image for the placeholder art rather than committing an empty file.” Do not mention them when they are',
+    'irrelevant, and never claim the agent has any tool that is not on that list.'
   )
   lines.push('')
   lines.push('# HOW TO REPLY')

@@ -26,6 +26,11 @@ export type AppAction =
   | { kind: 'make_image'; description: string; count: number; aspect?: string }
   | { kind: 'edit_image'; path: string; instruction: string }
   /**
+   * Real video generation (Veo). One clip per call and it takes minutes, not
+   * seconds, so there is deliberately no `count`.
+   */
+  | { kind: 'make_video'; description: string; aspect?: string; duration?: number }
+  /**
    * Read this project's memory back, and wipe it.
    *
    * Grammar-only, both of them — deliberately absent from `ACTION_KINDS` and
@@ -37,6 +42,12 @@ export type AppAction =
 
 /** Image generation is the one thing here that cannot finish synchronously. */
 export const MAX_GENERATED_IMAGES = 4
+
+/** Veo's own limits, repeated here so an action is rejected before any spend. */
+export const MIN_VIDEO_SECONDS = 4
+export const MAX_VIDEO_SECONDS = 8
+/** Veo accepts landscape and portrait only — not the image aspect list. */
+export const VIDEO_ASPECT_RATIOS: readonly string[] = ['16:9', '9:16']
 
 export interface ActionProject {
   id: string
@@ -82,6 +93,12 @@ export interface ActionRunner {
    */
   makeImage?(request: { description: string; count: number; aspect?: string }): Promise<ActionOutcome>
   editImage?(request: { path: string; instruction: string }): Promise<ActionOutcome>
+  /**
+   * Video is the same pattern as the two above but an order of magnitude
+   * slower — one to three minutes of submit-poll-download. The provisional
+   * summary says so, and exactly one final outcome replaces it.
+   */
+  makeVideo?(request: { description: string; aspect?: string; duration?: number }): Promise<ActionOutcome>
   /**
    * Project memory, which lives in a file the main process owns — so reading it
    * back and clearing it are IPC round trips, asynchronous like the media ones.
@@ -370,6 +387,31 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
         requested: 1,
         done: 0,
         pending: run.editImage({ path, instruction })
+      }
+    }
+
+    case 'make_video': {
+      const description = action.description.trim()
+      if (!description) return fail('No description — I will not generate a video of nothing')
+      if (!run.makeVideo) return fail('Video generation is not available here')
+      if (action.aspect && !VIDEO_ASPECT_RATIOS.includes(action.aspect)) {
+        return fail(`Video has to be ${VIDEO_ASPECT_RATIOS.join(' or ')} — landscape or portrait`)
+      }
+      if (
+        action.duration !== undefined &&
+        (!Number.isFinite(action.duration) || action.duration < MIN_VIDEO_SECONDS || action.duration > MAX_VIDEO_SECONDS)
+      ) {
+        return fail(`Video has to be ${MIN_VIDEO_SECONDS}–${MAX_VIDEO_SECONDS} seconds long`)
+      }
+      const request: { description: string; aspect?: string; duration?: number } = { description }
+      if (action.aspect) request.aspect = action.aspect
+      if (action.duration !== undefined) request.duration = action.duration
+      return {
+        ok: true,
+        summary: 'Rendering video… (can take a couple of minutes)',
+        requested: 1,
+        done: 0,
+        pending: run.makeVideo(request)
       }
     }
 

@@ -1,4 +1,4 @@
-import type { AppAction } from './appactions'
+import { MAX_VIDEO_SECONDS, MIN_VIDEO_SECONDS, VIDEO_ASPECT_RATIOS, type AppAction } from './appactions'
 import type { BrainReply } from './voicebrain'
 
 /**
@@ -60,7 +60,8 @@ export const ACTION_KINDS: ReadonlySet<string> = new Set([
   'focus_tab',
   'new_project_hint',
   'make_image',
-  'edit_image'
+  'edit_image',
+  'make_video'
 ])
 
 /** How much conversational reply is worth showing. */
@@ -222,6 +223,25 @@ export function sanitiseActions(value: unknown): AppAction[] {
         const instruction = asString(a['instruction'])
         if (!path || !instruction) continue
         out.push({ kind: 'edit_image', path, instruction })
+        break
+      }
+      case 'make_video': {
+        const description = asString(a['description'])
+        if (!description) continue
+        const action: AppAction = { kind: 'make_video', description }
+        // Veo takes landscape or portrait only, and 4-8 seconds. Anything else
+        // is dropped rather than passed on: the API would refuse it anyway, and
+        // a silently-corrected request is worse than a plain default.
+        const aspect = asString(a['aspect'])
+        if (aspect && VIDEO_ASPECT_RATIOS.includes(aspect)) action.aspect = aspect
+        const rawDuration = a['duration']
+        if (rawDuration !== undefined && rawDuration !== null) {
+          const n = typeof rawDuration === 'number' ? rawDuration : Number(rawDuration)
+          if (Number.isFinite(n)) {
+            action.duration = Math.min(MAX_VIDEO_SECONDS, Math.max(MIN_VIDEO_SECONDS, Math.round(n)))
+          }
+        }
+        out.push(action)
         break
       }
       default:

@@ -671,6 +671,10 @@ function mediaRunner(result) {
     editImage: async (request) => {
       base.calls.push(['editImage', request.path, request.instruction])
       return result ?? { ok: true, summary: 'Edited', requested: 1, done: 1, paths: ['C:\\b.png'] }
+    },
+    makeVideo: async (request) => {
+      base.calls.push(['makeVideo', request.description, request.aspect, request.duration])
+      return result ?? { ok: true, summary: 'Made a video', requested: 1, done: 1, paths: ['C:\\a.mp4'] }
     }
   }
 }
@@ -724,6 +728,74 @@ await test('a runner with no media support refuses instead of pretending', () =>
   assert.match(out.summary, /not available/)
   const edit = runAppAction({ kind: 'edit_image', path: 'C:\\a.png', instruction: 'blue' }, ctx(), fakeRunner())
   assert.equal(edit.ok, false)
+})
+
+await test('make_video warns that it is slow before it starts', async () => {
+  const run = mediaRunner()
+  const out = runAppAction(
+    { kind: 'make_video', description: 'a red pixel-art go-kart', aspect: '16:9', duration: 4 },
+    ctx(),
+    run
+  )
+  // Synchronous half: honest that nothing exists yet, and that this one is a
+  // wait rather than a blink — that warning is the whole point of the chip.
+  assert.equal(out.ok, true)
+  assert.equal(out.done, 0)
+  assert.equal(out.requested, 1)
+  assert.match(out.summary, /Rendering video…/)
+  assert.match(out.summary, /couple of minutes/)
+  assert.ok(out.pending instanceof Promise)
+  assert.deepEqual(run.calls, [['makeVideo', 'a red pixel-art go-kart', '16:9', 4]])
+
+  // Asynchronous half: exactly one real outcome replaces it.
+  const settled = await out.pending
+  assert.equal(settled.done, 1)
+  assert.deepEqual(settled.paths, ['C:\\a.mp4'])
+})
+
+await test('make_video refuses what Veo would refuse, before spending anything', () => {
+  const empty = runAppAction({ kind: 'make_video', description: '   ' }, ctx(), mediaRunner())
+  assert.equal(empty.ok, false)
+  assert.equal(empty.pending, undefined)
+  assert.match(empty.summary, /video of nothing/)
+
+  // The image aspect list is much longer than Veo's; a square video does not exist.
+  const square = runAppAction({ kind: 'make_video', description: 'a go-kart', aspect: '1:1' }, ctx(), mediaRunner())
+  assert.equal(square.ok, false)
+  assert.equal(square.pending, undefined)
+  assert.match(square.summary, /16:9 or 9:16/)
+
+  for (const duration of [1, 3, 9, 60]) {
+    const out = runAppAction({ kind: 'make_video', description: 'a go-kart', duration }, ctx(), mediaRunner())
+    assert.equal(out.ok, false, `${duration}s should be refused`)
+    assert.match(out.summary, /4–8 seconds/)
+  }
+  // The two Veo does take must survive.
+  for (const aspect of ['16:9', '9:16']) {
+    assert.equal(runAppAction({ kind: 'make_video', description: 'a go-kart', aspect }, ctx(), mediaRunner()).ok, true)
+  }
+})
+
+await test('a runner with no video support refuses instead of pretending', () => {
+  const out = runAppAction({ kind: 'make_video', description: 'a go-kart' }, ctx(), fakeRunner())
+  assert.equal(out.ok, false)
+  assert.equal(out.done, 0)
+  assert.equal(out.pending, undefined)
+  assert.match(out.summary, /not available/)
+})
+
+await test('a video failure comes back as a failed outcome, not a throw', async () => {
+  const run = mediaRunner({
+    ok: false,
+    summary: 'Video generation is a paid-only Google feature and this key is not billed (400)',
+    requested: 1,
+    done: 0
+  })
+  const out = runAppAction({ kind: 'make_video', description: 'a go-kart' }, ctx(), run)
+  const settled = await out.pending
+  assert.equal(settled.ok, false)
+  assert.equal(settled.done, 0)
+  assert.match(settled.summary, /paid-only/)
 })
 
 await test('a media failure comes back as a failed outcome, not a throw', async () => {
@@ -852,13 +924,29 @@ await test('the manifest offers the media actions and names the bridge tools', (
   const text = buildManifest(SNAPSHOT)
   assert.ok(text.includes('make_image'), 'make_image must be offered')
   assert.ok(text.includes('edit_image'), 'edit_image must be offered')
+  assert.ok(text.includes('make_video'), 'make_video must be offered')
   assert.ok(text.includes('assets/generated'), 'say where the files land')
   // The drafted prompt has to tell the coding agent what it can reach for.
   assert.ok(text.includes('# TOOLS THE CODING AGENT HAS'))
-  for (const tool of ['make_image', 'edit_image', 'ask_gemini', 'summarize_video']) {
+  for (const tool of ['make_image', 'edit_image', 'make_video', 'ask_gemini', 'summarize_video']) {
     assert.ok(text.includes(tool), `TOOLS section must name ${tool}`)
   }
   assert.match(text, /never claim the agent has any tool that is not on that list/i)
+})
+
+await test('the manifest is honest about how slow make_video is', () => {
+  const text = buildManifest(SNAPSHOT)
+  // A model that thinks video is as quick as an image will queue several and
+  // then narrate a wait it never warned about, so the cost has to be stated in
+  // both places the model reads: the action list and the coding-agent tools.
+  const spec = ACTION_SPECS.find((s) => s.kind === 'make_video')
+  assert.ok(spec, 'make_video must be in ACTION_SPECS')
+  assert.match(spec.what, /1–3 minutes/, 'the action spec must state the cost')
+  assert.match(spec.args, /make_video/)
+  assert.match(text, /1–3 minutes/)
+  // And the limits Veo actually enforces, so it does not ask for a square 30s clip.
+  assert.match(text, /4–8/, 'the clip-length limit must be stated')
+  assert.match(text, /9:16/, 'the two aspect ratios must be stated')
 })
 
 await test('the manifest, the action union and the sanitiser agree on what exists', () => {
@@ -1093,8 +1181,28 @@ await test('media actions survive sanitising, and half-formed ones do not', () =
   ])
   assert.deepEqual(sanitiseActions([{ kind: 'edit_image', path: 'C:\\a.png' }]), [], 'instruction is required')
   assert.deepEqual(sanitiseActions([{ kind: 'edit_image', instruction: 'blue' }]), [], 'path is required')
+
+  // make_video is real now. Description is the only required field; the two
+  // optional ones are dropped or clamped rather than passed on to be refused.
+  assert.deepEqual(sanitiseActions([{ kind: 'make_video', description: 'a red go-kart' }]), [
+    { kind: 'make_video', description: 'a red go-kart' }
+  ])
+  assert.deepEqual(sanitiseActions([{ kind: 'make_video', description: 'a go-kart', aspect: '9:16', duration: 6 }]), [
+    { kind: 'make_video', description: 'a go-kart', aspect: '9:16', duration: 6 }
+  ])
+  assert.deepEqual(sanitiseActions([{ kind: 'make_video' }]), [], 'description is required')
+  assert.deepEqual(sanitiseActions([{ kind: 'make_video', description: '  ' }]), [])
+  // An aspect Veo does not take is dropped, not forwarded: the default beats a
+  // guaranteed 400.
+  assert.equal(sanitiseActions([{ kind: 'make_video', description: 'x', aspect: '1:1' }])[0].aspect, undefined)
+  assert.equal(sanitiseActions([{ kind: 'make_video', description: 'x', aspect: '21:9' }])[0].aspect, undefined)
+  // Duration is clamped into Veo's 4-8s window.
+  assert.equal(sanitiseActions([{ kind: 'make_video', description: 'x', duration: 99 }])[0].duration, 8)
+  assert.equal(sanitiseActions([{ kind: 'make_video', description: 'x', duration: 1 }])[0].duration, 4)
+  assert.equal(sanitiseActions([{ kind: 'make_video', description: 'x', duration: 'six' }])[0].duration, undefined)
+
   // Still no back door for kinds nobody implements.
-  assert.deepEqual(sanitiseActions([{ kind: 'make_video', description: 'a red car' }]), [])
+  assert.deepEqual(sanitiseActions([{ kind: 'make_hologram', description: 'a red car' }]), [])
 })
 
 await test('salvage names whichever brain was cut off', () => {
@@ -1106,9 +1214,12 @@ await test('salvage names whichever brain was cut off', () => {
 
 await test('the response schema describes every field an action can carry', () => {
   const props = RESPONSE_SCHEMA.properties.actions.items.properties
-  for (const field of ['kind', 'profileId', 'count', 'description', 'aspect', 'path', 'instruction']) {
+  for (const field of ['kind', 'profileId', 'count', 'description', 'aspect', 'duration', 'path', 'instruction']) {
     assert.ok(props[field], `responseSchema is missing ${field}`)
   }
+  // Without this the model cannot ask for a clip length at all: a field absent
+  // from responseSchema is a field Gemini is structurally unable to emit.
+  assert.equal(props.duration.type, 'INTEGER', 'make_video duration must be an integer')
 })
 
 /* --------------------------------------------------------- OpenRouterBrain */

@@ -10,11 +10,12 @@ import type {
   ImportedKeyResult,
   KeySource,
   MakeImageRequest,
+  MakeVideoRequest,
   MediaCallResult,
   OpenRouterCallRequest,
   OpenRouterCallResult
 } from '@shared/types'
-import { editImage, makeImage, type MediaResult } from './gemini-media'
+import { editImage, makeImage, makeVideo, type MediaResult } from './gemini-media'
 import { adoptShotFiles } from './shots-watcher'
 import { getDataDir, getSettings } from './store'
 
@@ -27,10 +28,12 @@ import { getDataDir, getSettings } from './store'
  *
  *  1. `voice:gemini` — one POST to generativelanguage.googleapis.com.
  *  2. `voice:openrouter` — one POST to openrouter.ai, for OpenRouterBrain.
- *  3. `voice:make-image` / `voice:edit-image` — real image generation through
- *     electron/gemini-media.ts, the very same REST logic the MCP bridge uses.
- *     Output lands in the current project's `assets/generated/` and is adopted
- *     into the screenshot shelf so it shows up in the tray instantly.
+ *  3. `voice:make-image` / `voice:edit-image` / `voice:make-video` — real media
+ *     generation through electron/gemini-media.ts, the very same REST logic the
+ *     MCP bridge uses. Output lands in the current project's
+ *     `assets/generated/`. Images are also adopted into the screenshot shelf so
+ *     they show up in the tray instantly; videos are not, because that shelf
+ *     holds still images only.
  *  4. `voice:import-key` — find a key already saved on this machine, so nobody
  *     has to type one twice. Read-only: never writes to, moves or deletes the
  *     source file. See keyCandidates() for where it looks.
@@ -372,5 +375,31 @@ export function registerVoiceHandlers(): void {
         model: settings.geminiImageModel
       })
     )
+  })
+
+  ipcMain.handle(IPC.voiceMakeVideo, async (_e, req: MakeVideoRequest): Promise<MediaCallResult> => {
+    const settings = getSettings()
+    const opts: Parameters<typeof makeVideo>[0] = {
+      key: settings.geminiKey,
+      description: String(req?.description ?? ''),
+      outDir: mediaOutDir(req?.projectPath)
+    }
+    if (req?.aspect) opts.aspect = String(req.aspect)
+    if (req?.duration !== undefined && req.duration !== null) opts.duration = Number(req.duration)
+    // Deliberately NOT finishMedia(): the screenshot shelf is images-only
+    // (SHOT_EXTS in electron/shots/shelf.ts) and its tray thumbnails come from
+    // nativeImage, which cannot render a video frame. Adopting an .mp4 would be
+    // rejected anyway; claiming `adopted` for it would be a lie.
+    const result = await makeVideo(opts)
+    if (!result.ok) return { ok: false, error: result.error, kind: result.kind }
+    const out: MediaCallResult = {
+      ok: true,
+      paths: result.paths,
+      model: result.model,
+      ms: result.ms,
+      adopted: 0
+    }
+    if (result.note) out.note = result.note
+    return out
   })
 }
