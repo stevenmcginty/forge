@@ -1,4 +1,5 @@
 import type {
+  AgentPresence,
   AppInfo,
   ClaudeCliState,
   CreateSessionRequest,
@@ -20,6 +21,7 @@ import type {
   Settings,
   Shot,
   StoreSnapshot,
+  SttModelState,
   SttPhraseEvent,
   SttStatus,
   WindowStateEvent,
@@ -97,6 +99,25 @@ export interface ForgeApi {
     status(): Promise<SttStatus>
     onStatus(cb: (s: SttStatus) => void): () => void
     onPhrase(cb: (e: SttPhraseEvent) => void): () => void
+
+    /**
+     * Fetch the ~660 MB Parakeet model into %APPDATA%\Forge\models. Forge ships
+     * the engine but not the model, so this is what turns dictation on for
+     * somebody who was just handed a copy.
+     *
+     * The download is owned by the main process and resumes across restarts, so
+     * calling this twice returns the running one rather than starting a second.
+     * Resolves when it finishes (or fails) — watch onDownloadProgress for the
+     * bar, which is the only sane way to render 660 MB.
+     */
+    downloadModel(): Promise<SttModelState>
+    /** Stop, keeping the partial files so a later attempt resumes. */
+    cancelDownload(): Promise<SttModelState>
+    /** Look at the disk right now: is the model there, partial, or absent? */
+    modelState(): Promise<SttModelState>
+    onDownloadProgress(cb: (s: SttModelState) => void): () => void
+    onDownloadDone(cb: (s: SttModelState) => void): () => void
+    onDownloadError(cb: (s: SttModelState) => void): () => void
   }
 
   /**
@@ -146,6 +167,13 @@ export interface ForgeApi {
     engineCancel(): Promise<void>
     onEngineProgress(cb: (p: EngineProgress) => void): () => void
   }
+
+  /**
+   * Which of the built-in CLI agents are on this machine's PATH. Used by the
+   * first-run welcome to say "install Claude Code" instead of letting a pane
+   * open onto `'claude' is not recognized`.
+   */
+  probeAgents(): Promise<AgentPresence[]>
 
   pickFolder(): Promise<string | null>
   openPath(target: string): Promise<string>

@@ -41,9 +41,21 @@ export const IPC = {
   sttStatusEvent: 'stt:status-event',
   sttPhrase: 'stt:phrase',
 
+  // speech model download (main process owns it, so it survives the popover
+  // that started it being closed)
+  sttDownloadModel: 'stt:download-model',
+  sttDownloadCancel: 'stt:download-cancel',
+  sttDownloadState: 'stt:download-state',
+  sttDownloadProgress: 'stt:download-progress',
+  sttDownloadDone: 'stt:download-done',
+  sttDownloadError: 'stt:download-error',
+
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
   openPath: 'shell:open-path',
+
+  // onboarding — is `claude` / `kimi` / `gemini` on this machine's PATH?
+  agentsProbe: 'agents:probe',
 
   // window
   appInfo: 'app:info',

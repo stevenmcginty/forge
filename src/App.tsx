@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { AccountChip } from '@/components/AccountChip'
+import { Onboarding } from '@/components/Onboarding'
 import { ProjectRail } from '@/components/ProjectRail'
 import { ScreenshotTray } from '@/components/ScreenshotTray'
 import { StatusBar } from '@/components/StatusBar'
@@ -39,6 +40,7 @@ export function App(): ReactNode {
         <VoicePanel />
       </div>
       <StatusBar />
+      <Onboarding />
     </div>
   )
 }

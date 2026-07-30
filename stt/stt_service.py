@@ -741,13 +741,67 @@ class SttService:
 # --------------------------------------------------------------------------
 
 
+def _forge_data_dir() -> str:
+    """Forge's own data root, matching electron/store.ts resolveDataRoot()."""
+    env = os.environ.get("FORGE_DATA_DIR")
+    if env and env.strip():
+        return os.path.abspath(env.strip())
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return os.path.join(appdata, "Forge")
+    return os.path.join(os.path.expanduser("~"), ".forge")
+
+
 def default_model_dir() -> str:
+    """Where to look for Parakeet when nobody said.
+
+    Forge normally passes --model-dir, so this only matters when the sidecar is
+    run by hand. Order: an explicit env override, then Forge's own downloaded
+    copy, then DictationMic's copy if this machine happens to have one, then
+    nothing at all — which surfaces as a clean `model-missing` rather than a
+    path that only exists on one person's laptop.
+    """
     env = os.environ.get("FORGE_STT_MODEL_DIR")
     if env:
         return env
-    return os.path.join(
-        os.path.expanduser("~"), "Desktop", "DictationMic", "models", PARAKEET_NAME
+    candidates = [
+        os.path.join(_forge_data_dir(), "models", PARAKEET_NAME),
+        os.path.join(
+            os.path.expanduser("~"), "Desktop", "DictationMic", "models", PARAKEET_NAME
+        ),
+    ]
+    for path in candidates:
+        if os.path.isdir(path):
+            return path
+    return ""
+
+
+def import_check() -> int:
+    """Prove the frozen build carries everything a real model load needs.
+
+    A PyInstaller folder that is missing onnxruntime's DLLs builds perfectly
+    happily — the failure only shows up the first time somebody dictates. So the
+    build script runs `forge-stt.exe --import-check` and refuses to ship a binary
+    that cannot answer.
+    """
+    missing = []
+    for name in ("numpy", "onnxruntime", "onnx_asr", "sounddevice"):
+        try:
+            __import__(name)
+        except Exception as e:  # noqa: BLE001
+            missing.append(f"{name}: {e}")
+    if missing:
+        for m in missing:
+            print(f"MISSING {m}", file=sys.stderr, flush=True)
+        return 1
+    import onnxruntime as ort
+
+    print(
+        f"imports OK (onnxruntime {ort.__version__}, "
+        f"providers: {','.join(ort.get_available_providers())})",
+        flush=True,
     )
+    return 0
 
 
 def parse_args(argv=None):
@@ -773,6 +827,11 @@ def parse_args(argv=None):
         action="store_true",
         help="skip the model load and emit placeholder text (testing)",
     )
+    p.add_argument(
+        "--import-check",
+        action="store_true",
+        help="import every runtime dependency and exit (packaging check)",
+    )
     return p.parse_args(argv)
 
 
@@ -792,6 +851,8 @@ def main(argv=None) -> int:
     import asyncio
 
     opts = parse_args(argv)
+    if opts.import_check:
+        return import_check()
     engine: ParakeetEngine = (
         StubEngine(opts.model_dir) if opts.stub_engine else ParakeetEngine(opts.model_dir)
     )
