@@ -6,23 +6,28 @@
  *
  * Run:  node scripts/bridge-smoke.mjs
  *
- * Modes, chosen automatically:
- *   - Gemini absent or signed out  → asserts every tool returns the graceful
- *     error path (isError + a message that names the fix).
- *   - Gemini signed in             → additionally asserts a live round trip.
- *   - A Gemini API key on disk     → additionally generates and edits a real
- *     image, and asserts the returned paths exist (opt in with --live-image;
- *     it costs quota, so it is never part of the default run).
+ * The bridge is pure REST now — the Gemini CLI it used to shell out to is
+ * retired — so there is exactly one thing that decides what can be checked: a
+ * Gemini API key. Three tiers:
  *
- * Pass --force-absent to hide the CLI from the server (PATH stripped) and test
- * the not-installed branch even on a machine that has it.
+ *   - No key                → every tool must return the graceful error path
+ *                             (isError + a message naming the fix), and every
+ *                             argument must still be validated before spending.
+ *   - A key (found by       → a live ask_gemini round trip and a live
+ *     findApiKey, so this     summarize_video against a 19-second YouTube clip.
+ *     is the normal run)      Both are cheap; both run by default.
+ *   - --live-image /        → really generate an image / a Veo clip. Opt-in:
+ *     --live-video            they cost real quota.
+ *
+ * Pass --force-absent to skip the live tiers entirely (offline, or when you
+ * only want the no-key branch exercised).
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -35,8 +40,8 @@ const liveImage = process.argv.includes('--live-image')
 const liveVideo = process.argv.includes('--live-video')
 
 /**
- * Where a Gemini key might be, for the opt-in live-image run only. A path, not
- * a key — nothing secret is committed, and nothing is written back.
+ * Where a Gemini key might be. A path, not a key — nothing secret is committed,
+ * and nothing is written back.
  */
 function findApiKey() {
   const fromEnv = (process.env['GEMINI_API_KEY'] ?? '').trim()
@@ -128,25 +133,11 @@ function openServer(env) {
   return { child, request, notify, stderrText: () => stderr, close: () => child.kill() }
 }
 
-/** No key in the environment: the media tools' "cannot do this" path. */
+/** No key in the environment: every tool's "cannot do this" path. */
 function envWithoutKey(base = process.env) {
   const env = { ...base }
   delete env['GEMINI_API_KEY']
   delete env['GOOGLE_API_KEY']
-  return env
-}
-
-/** Strip every directory that holds a gemini shim, to simulate "not installed". */
-function envWithoutGemini() {
-  const env = envWithoutKey()
-  const kept = (env['PATH'] ?? '')
-    .split(delimiter)
-    .filter((d) => d && !['gemini', 'gemini.cmd', 'gemini.exe'].some((n) => existsSync(join(d, n))))
-  // Windows env lookups are case-insensitive but the object here is not, so
-  // clear both spellings or the child inherits the original PATH.
-  env['PATH'] = kept.join(delimiter)
-  env['Path'] = env['PATH']
-  delete env['FORGE_GEMINI_JS']
   return env
 }
 
@@ -181,7 +172,7 @@ async function listTools(session, label) {
   const tools = res.result?.tools ?? []
   const names = tools.map((t) => t.name).sort()
   check(
-    `${label}: tools/list returns exactly the four bridge tools`,
+    `${label}: tools/list returns exactly the five bridge tools`,
     JSON.stringify(names) === JSON.stringify(TOOL_NAMES),
     JSON.stringify(names)
   )
@@ -228,18 +219,20 @@ function expectGraceful(label, res, patterns) {
 /* --------------------------------------------------------------------- main */
 
 async function runAbsentSuite() {
-  console.log('\n[1] CLI hidden from the server (not-installed path)')
-  const session = openServer(envWithoutGemini())
+  console.log('\n[1] No API key (graceful-degradation path)')
+  const session = openServer(envWithoutKey())
   try {
     await handshake(session, 'absent')
     await listTools(session, 'absent')
 
-    const fixIt = [/npm install -g @google\/gemini-cli/, /run `gemini` once/, /not installed/i, /not logged in/i]
+    // One key, one road: with no key, every one of the five must name the same
+    // fix. There is no CLI left to blame, and no tool may quietly carry on.
+    const noKey = [/no Gemini API key/i, /voice-agent settings/i, /GEMINI_API_KEY/]
 
     expectGraceful(
       'absent: ask_gemini',
       await session.request('tools/call', { name: 'ask_gemini', arguments: { prompt: 'hello' } }),
-      fixIt
+      noKey
     )
     expectGraceful(
       'absent: summarize_video',
@@ -247,11 +240,8 @@ async function runAbsentSuite() {
         name: 'summarize_video',
         arguments: { url_or_path: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }
       }),
-      fixIt
+      noKey
     )
-    // The media tools no longer touch the CLI at all, so "no CLI" is not their
-    // problem — "no API key" is, and the fix they name has to be the right one.
-    const noKey = [/no Gemini API key/i, /voice-agent settings/i, /GEMINI_API_KEY/]
     expectGraceful(
       'absent: make_image',
       await session.request('tools/call', { name: 'make_image', arguments: { description: 'a red car' } }),
@@ -265,6 +255,30 @@ async function runAbsentSuite() {
       }),
       noKey
     )
+
+    // The text tools must forbid the one failure that would be invisible:
+    // answering in Gemini's place.
+    for (const name of ['ask_gemini', 'summarize_video']) {
+      const args = name === 'ask_gemini' ? { prompt: 'hello' } : { url_or_path: 'https://youtu.be/jNQXAC9IVRw' }
+      const res = await session.request('tools/call', { name, arguments: args })
+      const text = textOf(res.result)
+      check(
+        `absent: ${name} forbids answering in Gemini's place`,
+        /do not answer as though Gemini had replied/i.test(text) && /do not invent a summary/i.test(text),
+        text.slice(0, 400)
+      )
+      check(`absent: ${name} never mentions the retired CLI`, !/gemini-cli|run `gemini`/i.test(text), text.slice(0, 300))
+    }
+
+    // make_image's wording carries its own promise, and it must survive edits.
+    const img = await session.request('tools/call', { name: 'make_image', arguments: { description: 'a red car' } })
+    const imgText = textOf(img.result)
+    check(
+      'absent: make_image names the fix and forbids claiming success',
+      /voice-agent settings/i.test(imgText) && /Do not claim an image exists/i.test(imgText),
+      imgText.slice(0, 600)
+    )
+    check('absent: make_image did not fabricate a path', !/Image saved to/.test(imgText), imgText.slice(0, 300))
 
     // Bad input and unknown tools must be tool errors, not crashes.
     expectGraceful('absent: missing required arg', await session.request('tools/call', { name: 'ask_gemini', arguments: {} }), [
@@ -333,47 +347,102 @@ async function runAbsentSuite() {
   }
 }
 
-async function runInstalledSuite() {
-  console.log('\n[2] Real CLI on PATH, no API key (live path)')
-  const session = openServer(envWithoutKey())
+/**
+ * The live text route: the two tools that used to shell out to the CLI, now on
+ * `generateContent`. Both are cheap — a three-word answer and a 19-second video
+ * — so unlike the image and video suites these run by default whenever a key is
+ * present. They are the only proof the REST migration actually works.
+ */
+async function runLiveTextSuite() {
+  const found = findApiKey()
+  console.log('\n[2] Live text route (ask_gemini + summarize_video)')
+  if (!found) {
+    console.log('  --   skipped: no GEMINI_API_KEY and no key file on disk')
+    return
+  }
+  console.log(`  --   key from ${found.source}`)
+
+  const session = openServer({ ...process.env, GEMINI_API_KEY: found.key })
+  const scratch = join(tmpdir(), `forge-bridge-ask-${Date.now()}.txt`)
   try {
-    await handshake(session, 'live')
-    await listTools(session, 'live')
+    await handshake(session, 'ask')
 
-    // With the CLI present but no key, make_image must still refuse — it does
-    // not go anywhere near the CLI, and it must never invent a path.
-    const img = await session.request('tools/call', { name: 'make_image', arguments: { description: 'a red car' } })
-    const imgText = textOf(img.result)
-    check('live: make_image refuses without a key', img.result?.isError === true, imgText.slice(0, 300))
-    check(
-      'live: make_image names the fix and forbids claiming success',
-      /voice-agent settings/i.test(imgText) && /Do not claim an image exists/i.test(imgText),
-      imgText.slice(0, 600)
-    )
-    check('live: make_image did not fabricate a path', !/Image saved to/.test(imgText), imgText.slice(0, 300))
-
+    /* --- ask_gemini, the plainest possible round trip --- */
+    const t0 = Date.now()
     const res = await session.request('tools/call', {
       name: 'ask_gemini',
-      arguments: { prompt: 'reply with exactly: bridge-ok' }
+      arguments: { prompt: 'Reply with exactly this and nothing else: bridge-ok' }
     })
     const text = textOf(res.result)
-    const loggedOut = res.result?.isError === true && /not logged in|set an auth method|GEMINI_API_KEY/i.test(text)
+    check(`ask: ask_gemini round-trips (${Date.now() - t0}ms)`, res.result?.isError !== true, text.slice(0, 500))
+    check('ask: Gemini answered bridge-ok', /bridge-ok/i.test(text), text.slice(0, 400))
+    // A thinking model returns its private reasoning as separate parts; if those
+    // leaked through, this three-word answer would be a paragraph long.
+    check('ask: the answer is the answer, not the model\'s thinking', text.trim().length < 60, text.slice(0, 400))
 
-    if (loggedOut) {
-      console.log('  --   Gemini is signed out (the expected state until Steve logs in).')
-      console.log('  --   Exact message from the CLI:')
-      console.log(
-        text
-          .split('\n')
-          .map((l) => `       | ${l}`)
-          .join('\n')
-      )
-      expectGraceful('live: ask_gemini (signed out)', res, [/run `gemini` once/])
-    } else {
-      check('live: ask_gemini round-trips', res.result?.isError !== true, text.slice(0, 400))
-      check('live: Gemini answered bridge-ok', /bridge-ok/i.test(text), text.slice(0, 400))
-    }
+    /* --- ask_gemini with a file attached --- */
+    writeFileSync(scratch, 'The Forge bridge magic word is: pumpernickel-42\n')
+    const withFile = await session.request('tools/call', {
+      name: 'ask_gemini',
+      arguments: { prompt: 'What is the magic word in the attached file? Reply with just the word.', files: [scratch] }
+    })
+    const fileText = textOf(withFile.result)
+    check('ask: ask_gemini with a text file attached', withFile.result?.isError !== true, fileText.slice(0, 500))
+    check('ask: Gemini read the attached file', /pumpernickel-42/i.test(fileText), fileText.slice(0, 400))
+
+    /* --- a path that is not there must be reported, never silently dropped --- */
+    const missing = await session.request('tools/call', {
+      name: 'ask_gemini',
+      arguments: { prompt: 'Say ok.', files: [join(tmpdir(), 'forge-bridge-definitely-not-here.txt')] }
+    })
+    const missingText = textOf(missing.result)
+    check('ask: a missing attachment is reported, not dropped', /Not attached/.test(missingText), missingText.slice(0, 400))
+
+    /* --- a directory is refused by name --- */
+    const dir = await session.request('tools/call', {
+      name: 'ask_gemini',
+      arguments: { prompt: 'Say ok.', files: [root] }
+    })
+    check('ask: a directory is refused by name', /is a directory/.test(textOf(dir.result)), textOf(dir.result).slice(0, 400))
+
+    /* --- summarize_video against a 19-second public YouTube clip --- */
+    const t1 = Date.now()
+    const vid = await session.request('tools/call', {
+      name: 'summarize_video',
+      // "Me at the zoo" — 19 s, public, the oldest video on YouTube.
+      arguments: { url_or_path: 'https://www.youtube.com/watch?v=jNQXAC9IVRw', focus: 'what is said out loud' }
+    })
+    const vidText = textOf(vid.result)
+    check(`ask: summarize_video round-trips (${((Date.now() - t1) / 1000).toFixed(1)}s)`, vid.result?.isError !== true, vidText.slice(0, 600))
+    check('ask: the summary has the sections it promises', /## Gist/i.test(vidText) && /## Timeline/i.test(vidText), vidText.slice(0, 400))
+    // The proof it really watched it rather than pattern-matching the URL.
+    check('ask: it actually watched the video (elephants)', /elephant/i.test(vidText), vidText.slice(0, 600))
+    console.log(`  --   ${(/## Gist[^\n]*\n+([^\n]+)/i.exec(vidText)?.[1] ?? vidText.split('\n')[0] ?? '').slice(0, 160)}`)
+
+    /* --- an unreachable video must be said to be unreachable, not imagined --- */
+    const bad = await session.request('tools/call', {
+      name: 'summarize_video',
+      arguments: { url_or_path: 'https://www.youtube.com/watch?v=zzzzzzzzzzz' }
+    })
+    expectGraceful('ask: a video that cannot be fetched is reported honestly', bad, [/could not be|do not guess|invalid/i])
+
+    /* --- a local path that is not a video is refused before anything is spent --- */
+    const notVideo = await session.request('tools/call', {
+      name: 'summarize_video',
+      arguments: { url_or_path: SERVER }
+    })
+    expectGraceful('ask: a non-video local file is refused', notVideo, [/not a video type Gemini reads/])
+    const noSuch = await session.request('tools/call', {
+      name: 'summarize_video',
+      arguments: { url_or_path: join(tmpdir(), 'forge-bridge-no-such-video.mp4') }
+    })
+    expectGraceful('ask: a missing local video is refused', noSuch, [/No such file/])
   } finally {
+    try {
+      rmSync(scratch, { force: true })
+    } catch {
+      /* best effort */
+    }
     session.close()
   }
 }
@@ -475,6 +544,66 @@ function runDriftSuite() {
   for (const [label, src] of [['bridge', bridge], ['media', media]]) {
     check(`drift: ${label} still pins the download host`, /function safeVideoUri/.test(src), 'safeVideoUri must not be dropped')
   }
+
+  /* --- the CLI is retired: it must not creep back in --- */
+
+  check(
+    'retired: the bridge no longer spawns anything',
+    !/from 'node:child_process'/.test(bridge) && !/\bspawn\(/.test(bridge),
+    'the bridge is pure REST + node stdlib — nothing here may shell out'
+  )
+  check(
+    'retired: no npm shim resolution survives',
+    !/resolveLauncher|targetFromShim|launcherCache|FORGE_GEMINI_JS/.test(bridge),
+    'the gemini.cmd shim reader was deleted with the CLI'
+  )
+  check(
+    'retired: no CLI exit-code handling survives',
+    !/EXIT_AUTH|EXIT_CONFIG|exit 41|looksLoggedOut/.test(bridge),
+    'exit 41/42/52 belonged to the CLI'
+  )
+  check(
+    'retired: nobody is told to install or sign into the CLI',
+    !/npm install -g @google\/gemini-cli/.test(bridge) && !/run `gemini` once/.test(bridge),
+    'those instructions no longer fix anything — Google retired that login'
+  )
+  check(
+    'retired: the file says why the CLI went',
+    /UNSUPPORTED_CLIENT/.test(bridge) && /Antigravity/i.test(bridge),
+    'the header must record why, or someone will helpfully add it back'
+  )
+
+  /* --- the text route's own shape --- */
+
+  const askModel = /DEFAULT_ASK_MODEL\s*=\s*'([^']+)'/.exec(bridge)?.[1]
+  check(`text: an ask model is pinned (${askModel})`, /^gemini-/.test(askModel ?? ''), `${askModel}`)
+  check(
+    'text: the ask model is overridable',
+    /FORGE_GEMINI_ASK_MODEL/.test(bridge),
+    'every other model in this file has an env override; this one must too'
+  )
+  check(
+    'text: YouTube URLs are sent without a mime type',
+    /isYouTube\(url\)\) return \{ file_data: \{ file_uri: url \} \}/.test(bridge),
+    'verified live: a mime type on a YouTube file_uri is not what the API wants'
+  )
+  check(
+    'text: the Files API upload is the resumable three-step',
+    /X-Goog-Upload-Command': 'start'/.test(bridge) &&
+      /'upload, finalize'/.test(bridge) &&
+      /state !== 'ACTIVE'/.test(bridge),
+    'start → upload+finalize → poll for ACTIVE; skipping the poll is an error, not a wait'
+  )
+  check(
+    'text: uploads are deleted again afterwards',
+    /async function deleteFile/.test(bridge) && /await deleteFile\(/.test(bridge),
+    "nothing of the user's should sit on Google's side for 48 h"
+  )
+  check(
+    "text: the model's private thinking is filtered out of the answer",
+    /thought !== true/.test(bridge),
+    'gemini-3.x returns thought parts alongside the real text'
+  )
 }
 
 /**
@@ -619,7 +748,7 @@ async function runLiveVideoSuite() {
 async function main() {
   console.log(`bridge-smoke → ${SERVER}`)
   await runAbsentSuite()
-  if (!forceAbsent) await runInstalledSuite()
+  if (!forceAbsent) await runLiveTextSuite()
   runDriftSuite()
   if (liveImage) await runLiveImageSuite()
   if (liveVideo) await runLiveVideoSuite()

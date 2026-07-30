@@ -7,7 +7,7 @@ import { getDataDir, getSettings } from '../store'
  * The cross-agent bridge's Forge-side half.
  *
  * Forge ships an MCP server (bridge/gemini-bridge.mjs) that lets Claude Code
- * hand work to the Gemini CLI. For a pane to see it, Claude has to be told
+ * hand work to Google Gemini. For a pane to see it, Claude has to be told
  * about it at launch, so on every app start we write an MCP config file with
  * absolute paths and then append `--mcp-config <file>` to the bootstrap command
  * of any agent profile flagged `mcpBridge`.
@@ -99,6 +99,11 @@ export function writeBridgeConfig(): string | null {
   // override testable end to end rather than only inside the main process.
   const videoModel = (process.env['FORGE_GEMINI_VIDEO_MODEL'] ?? '').trim()
   if (videoModel) env['FORGE_GEMINI_VIDEO_MODEL'] = videoModel
+  // Same story for the model behind ask_gemini/summarize_video: no setting, a
+  // sensible default in the bridge, but Forge's environment is forwarded so the
+  // override can be exercised end to end.
+  const askModel = (process.env['FORGE_GEMINI_ASK_MODEL'] ?? '').trim()
+  if (askModel) env['FORGE_GEMINI_ASK_MODEL'] = askModel
 
   const config = {
     mcpServers: {
