@@ -405,6 +405,20 @@ async function runLiveTextSuite() {
     })
     check('ask: a directory is refused by name', /is a directory/.test(textOf(dir.result)), textOf(dir.result).slice(0, 400))
 
+    /* --- an unknown binary is refused rather than uploaded hopefully --- */
+    const binary = join(tmpdir(), `forge-bridge-binary-${Date.now()}.dat`)
+    writeFileSync(binary, Buffer.from([0x00, 0x01, 0x02, 0xff, 0x00, 0x7f, 0x00, 0x13]))
+    const bin = await session.request('tools/call', {
+      name: 'ask_gemini',
+      arguments: { prompt: 'Say ok.', files: [binary] }
+    })
+    check(
+      'ask: an unknown binary is refused by name',
+      /neither text nor a file type Gemini reads/.test(textOf(bin.result)),
+      textOf(bin.result).slice(0, 400)
+    )
+    rmSync(binary, { force: true })
+
     /* --- summarize_video against a 19-second public YouTube clip --- */
     const t1 = Date.now()
     const vid = await session.request('tools/call', {

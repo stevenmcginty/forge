@@ -25,7 +25,7 @@
  * diagnostic in this file goes to stderr.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { extname, isAbsolute, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
@@ -225,13 +225,33 @@ function absPath(p) {
  * the first 8 KB, means binary. UTF-8 high bytes are left alone, so accented
  * text and emoji stay text.
  */
-function looksTextual(bytes) {
-  const head = bytes.subarray(0, 8192)
+function looksTextual(head) {
   if (head.length === 0) return true
   if (head.includes(0)) return false
   let odd = 0
   for (const b of head) if (b < 9 || (b > 13 && b < 32)) odd += 1
   return odd / head.length < 0.02
+}
+
+/** The same question, asked without reading a 200 MB file to answer it. */
+function headLooksTextual(path) {
+  let fd
+  try {
+    fd = openSync(path, 'r')
+    const buf = Buffer.alloc(8192)
+    const read = readSync(fd, buf, 0, buf.length, 0)
+    return looksTextual(buf.subarray(0, read))
+  } catch {
+    return false
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd)
+      } catch {
+        /* already gone */
+      }
+    }
+  }
 }
 
 function mb(bytes) {
@@ -658,10 +678,25 @@ async function attachFiles(files, key) {
     }
 
     const ext = extname(abs).toLowerCase()
-    const mime = UPLOAD_MIME[ext]
+    let mime = UPLOAD_MIME[ext]
+    if (!mime) {
+      // No table entry, so the bytes decide. Source, logs, config and `.env`
+      // files are all welcome as text; unknown binary is not.
+      if (!headLooksTextual(abs)) {
+        notes.push(
+          `${abs} is neither text nor a file type Gemini reads — those are ${Object.keys(UPLOAD_MIME).join(' ')}`
+        )
+        continue
+      }
+      mime = 'text/plain'
+    }
 
-    /* 1 — text, whatever it is called. */
-    if (st.size <= MAX_TEXT_INLINE_BYTES && (!mime || mime.startsWith('text/'))) {
+    /* 1 — text small enough to paste straight into the prompt. */
+    if (mime.startsWith('text/') && st.size <= MAX_TEXT_INLINE_BYTES) {
+      if (st.size > inlineLeft) {
+        notes.push(`${abs} did not fit in the ${mb(MAX_INLINE_TOTAL_BYTES)} attachment budget`)
+        continue
+      }
       let bytes
       try {
         bytes = readFileSync(abs)
@@ -669,28 +704,12 @@ async function attachFiles(files, key) {
         notes.push(`${abs} could not be read: ${err?.message ?? err}`)
         continue
       }
-      if (looksTextual(bytes)) {
-        if (bytes.length > inlineLeft) {
-          notes.push(`${abs} did not fit in the ${mb(MAX_INLINE_TOTAL_BYTES)} attachment budget`)
-          continue
-        }
-        inlineLeft -= bytes.length
-        parts.push({ text: `--- ${abs} ---\n${bytes.toString('utf8')}` })
-        continue
-      }
-      if (!mime) {
-        notes.push(`${abs} is neither text nor a file type Gemini reads (${Object.keys(UPLOAD_MIME).join(' ')})`)
-        continue
-      }
-    } else if (!mime) {
-      notes.push(
-        `${abs} is ${mb(st.size)} of ${ext || 'no'} extension — Gemini reads text, ` +
-          `${Object.keys(UPLOAD_MIME).join(' ')}`
-      )
+      inlineLeft -= bytes.length
+      parts.push({ text: `--- ${abs} ---\n${bytes.toString('utf8')}` })
       continue
     }
 
-    /* 2 — an image small enough to ride along inline. */
+    /* 2 — an image small enough to ride along inline, skipping the upload hop. */
     if (INPUT_MIME[ext] && st.size <= MAX_INPUT_BYTES && st.size <= inlineLeft) {
       try {
         const bytes = readFileSync(abs)

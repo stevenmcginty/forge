@@ -69,12 +69,15 @@ file takes one of three roads:
 | text of any extension, ≤ 1 MB | an inline text part, headed by its absolute path |
 | an image (`.png .jpg .jpeg .webp .gif .bmp .heic .heif`) ≤ 20 MB | an inline `inline_data` part — no upload hop |
 | anything else Gemini reads — PDF, audio, video, or text over 1 MB | uploaded to the Files API, then a `file_data` part |
-| anything else at all | **not sent**, and said so in the reply |
+| unknown binary | **not sent**, and said so in the reply |
 
-"Text" is decided by the *bytes*, not the extension: a NUL byte or more than 2%
-odd control characters in the first 8 KB means binary. So `.ts`, `.rs`, `.toml`,
-`.env` and extensionless files all attach as text without needing a table, while
-UTF-8 accents and emoji stay text.
+"Text" is decided by the *bytes*, not the extension, and only the first 8 KB are
+read to decide it: a NUL byte, or more than 2% odd control characters, means
+binary. So `.ts`, `.rs`, `.toml`, `.env`, `.log` and extensionless files all
+attach as text without needing a table entry, while UTF-8 accents and emoji stay
+text. Verified live: a 1.57 MB `.log` — an extension in no mime table anywhere —
+is sniffed as text, uploaded, and a single planted line inside it read back
+correctly.
 
 Inline attachments share a 15 MB budget; whatever will not fit is reported.
 Uploads are capped at 200 MB each (the API's own limit is 2 GB, but the body is
