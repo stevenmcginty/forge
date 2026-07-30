@@ -82,6 +82,7 @@ const api: ForgeApi = {
   },
 
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
+  makeProjectFolder: (req) => ipcRenderer.invoke(IPC.makeProjectFolder, req),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
 
   // File.path was removed in Electron 32; webUtils is the sanctioned way and

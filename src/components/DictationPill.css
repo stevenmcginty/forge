@@ -26,6 +26,29 @@
   border-color: var(--line-strong);
 }
 
+/* ------------------------------------------------------------ agent tag
+ *
+ * Whose words are these? Forge has two microphones — the pill dictates into the
+ * pane you are looking at, the round button in the voice panel talks to the
+ * agent — and they share one engine, so at a glance they were indistinguishable.
+ * While agent mode is on the pill widens and says where the words are going.
+ */
+
+.dpill[data-agent='true'] {
+  width: auto;
+  gap: var(--s-3);
+  border-color: var(--accent-line);
+  background: linear-gradient(180deg, var(--accent-softer), var(--bg-sunken));
+}
+
+.dpill__tag {
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
 /* ------------------------------------------------------------------- dots */
 
 .dpill__dots {

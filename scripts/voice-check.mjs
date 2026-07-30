@@ -57,7 +57,9 @@ const {
 } = await import('../src/lib/voicebrain.ts')
 const { createPushSource, transcriptBus, typedTranscript } = await import('../src/lib/transcriptSource.ts')
 const { parseCommand, parseUtterance } = await import('../src/lib/voicecommands.ts')
-const { runAppAction, matchProfile, matchProject } = await import('../src/lib/appactions.ts')
+const { runAppAction, matchProfile, matchProject, resolvePaneTarget, paneLabel } = await import(
+  '../src/lib/appactions.ts'
+)
 const { buildManifest, ACTION_SPECS, EXTENSION_POINTS } = await import('../src/lib/appmanifest.ts')
 const {
   GeminiBrain,
@@ -69,6 +71,8 @@ const {
   RESPONSE_SCHEMA
 } = await import('../src/lib/geminibrain.ts')
 const brainjson = await import('../src/lib/brainjson.ts')
+const { chooseVoice, speakable } = await import('../src/lib/speech.ts')
+const { planProjectFolder, sanitiseFolderName } = await import('../electron/projectfolder.ts')
 const { OpenRouterBrain } = await import('../src/lib/openrouterbrain.ts')
 
 /* ------------------------------------------------------------- fixtures */
@@ -83,6 +87,44 @@ const PROJECTS = [
   { id: 'p1', name: 'forge' },
   { id: 'p2', name: '1' },
   { id: 'p3', name: 'cafe-roma-homepage' }
+]
+
+/**
+ * A pane as the agent sees it. `number` is the spoken handle — "Terminal 2" —
+ * and the order of this array is the order the manifest prints.
+ */
+function pane(over = {}) {
+  return {
+    paneId: 'pane1',
+    tabId: 't1',
+    tabNumber: 1,
+    tabTitle: 'build',
+    number: 1,
+    title: 'PowerShell',
+    profileId: 'pwsh',
+    profileName: 'PowerShell',
+    live: true,
+    focused: false,
+    agent: false,
+    lastFocusedAt: 0,
+    ...over
+  }
+}
+
+/** The default workspace the executor tests target: one shell, two Claudes. */
+const PANES = [
+  pane({ paneId: 'pane1', number: 1, title: 'PowerShell', focused: true }),
+  pane({
+    paneId: 'pane2',
+    number: 2,
+    tabId: 't2',
+    tabNumber: 2,
+    tabTitle: 'notes',
+    title: 'Claude Code',
+    profileId: 'claude',
+    profileName: 'Claude Code',
+    agent: true
+  })
 ]
 
 function ctx(over = {}) {
@@ -103,6 +145,8 @@ function ctx(over = {}) {
     panesInActiveTab: 1,
     maxSessions: 16,
     maxPanesPerTab: 8,
+    panes: PANES,
+    autoRelay: true,
     ...over
   }
 }
@@ -117,6 +161,23 @@ function fakeRunner() {
     closeTab: (tabId) => calls.push(['closeTab', tabId]),
     selectProject: (projectId) => calls.push(['selectProject', projectId]),
     selectTab: (tabId) => calls.push(['selectTab', tabId])
+  }
+}
+
+/** A runner that can also deliver prompts, so send_prompt runs end to end. */
+function dispatchRunner() {
+  const base = fakeRunner()
+  return {
+    ...base,
+    sendPrompt: async ({ pane: target, text, submit, holdReason, flesh }) => {
+      base.calls.push(['sendPrompt', target.paneId, text, submit, holdReason ?? null, flesh ?? null])
+      return {
+        ok: true,
+        summary: submit ? `Sent to ${paneLabel(target)}` : `Typed into ${paneLabel(target)}`,
+        requested: 1,
+        done: 1
+      }
+    }
   }
 }
 
@@ -457,6 +518,125 @@ await test('two orders in one breath both get obeyed', () => {
   ])
 })
 
+/* ---------------------------------------------------------- count matrix */
+
+console.log('\nCounts, end to end')
+
+/**
+ * The regression Steve actually hit: "is this working, open 3 claude code
+ * terminals" opened one tab. Everything below is the count travelling intact
+ * from his mouth to the executor, by every route it can take.
+ */
+await test('the exact sentence Steve said, and its variants, all mean three', () => {
+  for (const phrase of [
+    'open 3 claude code terminals',
+    'open three claude code terminals',
+    'three claude terminals',
+    '3 cc sessions',
+    'open 3 cc terminals',
+    'fire up three claude code sessions',
+    'give me 3 claude terminals'
+  ]) {
+    const hit = parseUtterance(phrase, C)
+    assert.ok(hit, `"${phrase}" did not parse`)
+    assert.equal(hit.actions.length, 1, `"${phrase}" should be one action, not ${hit.actions.length}`)
+    assert.equal(hit.actions[0].kind, 'open_tabs', phrase)
+    assert.equal(hit.actions[0].profileId, 'claude', phrase)
+    assert.equal(hit.actions[0].count, 3, `"${phrase}" lost its count`)
+  }
+})
+
+await test('the leading pleasantry sends it to the brain — and the count survives there', () => {
+  // The grammar deliberately refuses a half-command ("is this working" is a
+  // question), so this sentence is the brain's. What must not happen again is
+  // the count evaporating on the way through the JSON contract.
+  assert.equal(parseUtterance('is this working, open 3 claude code terminals', C), null)
+
+  const reply = parseBrainJson(
+    '{"understood":"three claude code tabs","confidence":"high",' +
+      '"actions":[{"kind":"open_tabs","profileId":"claude","count":3}]}'
+  )
+  assert.deepEqual(reply.actions, [{ kind: 'open_tabs', profileId: 'claude', count: 3 }])
+  const run = fakeRunner()
+  const out = runAppAction(reply.actions[0], ctx(), run)
+  assert.equal(out.done, 3)
+  assert.equal(out.summary, 'Opened 3 Claude Code tabs')
+  assert.equal(run.calls.length, 3)
+})
+
+await test('count is REQUIRED in the response schema — this is the bug', () => {
+  // gemini-2.5-flash, with count optional, simply did not emit it: the field is
+  // absent from the JSON and the sanitiser's fallback made every action a 1.
+  // Requiring it in the responseSchema is what actually fixed the repro.
+  const item = RESPONSE_SCHEMA.properties.actions.items
+  assert.ok(item.required.includes('count'), 'count must be required, or the model may skip it')
+  assert.ok(item.required.includes('kind'))
+  // And emitted early, so a reply that runs long cannot lose it.
+  assert.ok(item.propertyOrdering.indexOf('count') < item.propertyOrdering.indexOf('description'))
+})
+
+await test('N duplicate actions mean N — the shape the model actually returned', () => {
+  // The raw reply from the live repro: three open_tabs, no count anywhere.
+  const raw = [
+    { kind: 'open_tabs', profileId: 'claude', projectName: 'forge' },
+    { kind: 'open_tabs', profileId: 'claude', projectName: 'forge' },
+    { kind: 'open_tabs', profileId: 'claude', projectName: 'forge' }
+  ]
+  assert.deepEqual(sanitiseActions(raw), [
+    { kind: 'open_tabs', profileId: 'claude', count: 3, projectName: 'forge' }
+  ])
+  // Different agents are different orders and stay apart.
+  assert.deepEqual(
+    sanitiseActions([
+      { kind: 'open_tabs', profileId: 'claude', count: 2 },
+      { kind: 'open_tabs', profileId: 'kimi', count: 1 }
+    ]),
+    [
+      { kind: 'open_tabs', profileId: 'claude', count: 2 },
+      { kind: 'open_tabs', profileId: 'kimi', count: 1 }
+    ]
+  )
+  // So do different split directions.
+  assert.equal(
+    sanitiseActions([
+      { kind: 'open_panes', profileId: 'claude', count: 1, direction: 'row' },
+      { kind: 'open_panes', profileId: 'claude', count: 1, direction: 'column' }
+    ]).length,
+    2
+  )
+})
+
+await test('every count route agrees: grammar, brain, executor, clamp', () => {
+  const cases = [
+    { spoken: 'open two claude tabs', count: 2, paneCount: 2, done: 2, summary: /^Opened 2 Claude Code tabs$/ },
+    { spoken: 'open 5 claude tabs', count: 5, paneCount: 14, done: 2, summary: /Opened 2 of 5 .* session limit \(16\)/ },
+    { spoken: 'open one claude tab', count: 1, paneCount: 0, done: 1, summary: /^Opened 1 Claude Code tab$/ },
+    { spoken: 'open sixteen claude tabs', count: 16, paneCount: 0, done: 16, summary: /^Opened 16 Claude Code tabs$/ }
+  ]
+  for (const c of cases) {
+    const hit = parseUtterance(c.spoken, C)
+    assert.equal(hit.actions[0].count, c.count, c.spoken)
+    // The same count, arriving from a model instead, must behave identically.
+    const viaBrain = sanitiseActions([{ kind: 'open_tabs', profileId: 'claude', count: c.count }])
+    assert.deepEqual(viaBrain[0], hit.actions[0], `${c.spoken}: grammar and brain must agree`)
+    const run = fakeRunner()
+    const out = runAppAction(viaBrain[0], ctx({ paneCount: c.paneCount }), run)
+    assert.equal(out.requested, c.count, c.spoken)
+    assert.equal(out.done, c.done, c.spoken)
+    assert.equal(run.calls.length, c.done, c.spoken)
+    assert.match(out.summary, c.summary, c.spoken)
+  }
+})
+
+await test('terminals and sessions are tab words, so the free path catches them', () => {
+  for (const noun of ['terminal', 'terminals', 'session', 'sessions', 'instance', 'instances', 'shell', 'shells']) {
+    const hit = parseCommand(`open two claude ${noun}`, C)
+    assert.ok(hit, `"${noun}" is not a tab word`)
+    assert.equal(hit.action.kind, 'open_tabs', noun)
+    assert.equal(hit.action.count, 2, noun)
+  }
+})
+
 await test('half-command, half-brief goes to the brain whole', () => {
   // Obeying only the first half would be worse than obeying none of it.
   assert.equal(parseUtterance('open two kimi tabs and make the login page look like Apple', C), null)
@@ -587,6 +767,458 @@ await test('an unknown profile id is refused, not guessed', () => {
   assert.equal(out.ok, false)
 })
 
+/* ------------------------------------------------- dispatch to a terminal */
+
+console.log('\nFree-flow dispatch (send_prompt)')
+
+/** Three Claude panes and a shell — the shape "the claude one" is ambiguous in. */
+const CROWDED = [
+  pane({ paneId: 'p1', number: 1, title: 'PowerShell', focused: true }),
+  pane({ paneId: 'p2', number: 2, title: 'build', profileId: 'claude', profileName: 'Claude Code', agent: true }),
+  pane({ paneId: 'p3', number: 3, title: 'docs', profileId: 'claude', profileName: 'Claude Code', agent: true }),
+  pane({ paneId: 'p4', number: 4, title: 'tests', profileId: 'claude', profileName: 'Claude Code', agent: true }),
+  pane({ paneId: 'p5', number: 5, title: 'sidebar', profileId: 'kimi', profileName: 'Kimi', agent: true })
+]
+
+await test('the grammar dispatches a named terminal without a model', () => {
+  const cases = [
+    ['in terminal two, build me a landing page for a cafe', 'terminal two', 'build me a landing page for a cafe'],
+    ['terminal one build me a landing page', 'terminal one', 'build me a landing page'],
+    ['in tab 3: add a lap timer', 'tab 3', 'add a lap timer'],
+    ['on pane two — refactor the router', 'pane two', 'refactor the router'],
+    ['in the second terminal, write the tests', 'terminal second', 'write the tests'],
+    ['tell the claude pane to fix the header', 'claude', 'to fix the header'],
+    ['in terminal two, this is the prompt: build me a menu page', 'terminal two', 'build me a menu page']
+  ]
+  for (const [said, target, text] of cases) {
+    const hit = parseUtterance(said, C)
+    assert.ok(hit, `"${said}" did not dispatch`)
+    assert.equal(hit.actions.length, 1, said)
+    assert.equal(hit.actions[0].kind, 'send_prompt', said)
+    assert.equal(hit.actions[0].target, target, said)
+    assert.equal(hit.actions[0].text, text, said)
+    // The quick path hands his words over as they are; fleshing is the brain's.
+    assert.equal(hit.actions[0].flesh, false, said)
+  }
+})
+
+await test('a prompt full of commas is still one prompt', () => {
+  const hit = parseUtterance('in terminal two, build a landing page, a menu page and a booking form', C)
+  assert.equal(hit.actions.length, 1)
+  assert.equal(hit.actions[0].text, 'build a landing page, a menu page and a booking form')
+})
+
+await test('talking ABOUT a terminal is not talking TO it', () => {
+  for (const said of [
+    'the second tab is broken',
+    'terminal two keeps crashing',
+    'in terminal two what is going on',
+    'tab 3 looks wrong',
+    'terminal one',
+    'why is terminal two so slow'
+  ]) {
+    const hit = parseUtterance(said, C)
+    const kind = hit?.actions?.[0]?.kind
+    assert.notEqual(kind, 'send_prompt', `"${said}" must not be dispatched as a prompt`)
+  }
+})
+
+await test('targets resolve by number, ordinal, title and agent', () => {
+  const at = (spoken, focusedId = 'p1') => resolvePaneTarget(spoken, CROWDED, focusedId)
+  assert.equal(at('terminal two').pane.paneId, 'p2')
+  assert.equal(at('terminal 2').pane.paneId, 'p2')
+  assert.equal(at('2').pane.paneId, 'p2')
+  assert.equal(at('tab 4').pane.paneId, 'p4')
+  assert.equal(at('terminal second').pane.paneId, 'p2')
+  assert.equal(at('the last one').pane.paneId, 'p5')
+  assert.equal(at('docs').pane.paneId, 'p3')
+  assert.equal(at('the kimi one').pane.paneId, 'p5')
+  assert.equal(at('this').pane.paneId, 'p1')
+  assert.equal(at('').pane.paneId, 'p1')
+  assert.equal(at('current pane').pane.paneId, 'p1')
+  // A number nobody has is not silently rounded to the nearest pane.
+  assert.equal(at('terminal 9').kind, 'none')
+  assert.equal(at('terminal nine').kind, 'none')
+})
+
+await test('two equal matches are asked about, never guessed', () => {
+  // Steve's own example: three Claude panes and "the claude one".
+  const out = resolvePaneTarget('the claude one', CROWDED, 'p1')
+  assert.equal(out.kind, 'ambiguous')
+  assert.deepEqual(
+    out.candidates.map((c) => c.number),
+    [2, 3, 4]
+  )
+  // Sitting in one of them makes it obvious which one he means.
+  assert.equal(resolvePaneTarget('the claude one', CROWDED, 'p3').pane.paneId, 'p3')
+  // So does having been in one most recently.
+  const recent = CROWDED.map((p) => (p.paneId === 'p4' ? { ...p, lastFocusedAt: 9 } : p))
+  assert.equal(resolvePaneTarget('the claude one', recent, 'p1').pane.paneId, 'p4')
+})
+
+await test('the ambiguous case comes back as a question listing the candidates', () => {
+  const run = dispatchRunner()
+  const out = runAppAction(
+    { kind: 'send_prompt', target: 'the claude one', text: 'build a landing page' },
+    ctx({ panes: CROWDED, focusedPaneId: 'p1' }),
+    run
+  )
+  assert.equal(out.ok, false)
+  assert.match(out.summary, /^Which one\?/)
+  assert.match(out.summary, /Terminal 2 “build”/)
+  assert.match(out.summary, /Terminal 3 “docs”/)
+  assert.match(out.summary, /Terminal 4 “tests”/)
+  assert.equal(run.calls.length, 0, 'nothing may be sent while it is ambiguous')
+})
+
+await test('a resolved agent pane is typed into and submitted, once', async () => {
+  const run = dispatchRunner()
+  const out = runAppAction(
+    { kind: 'send_prompt', target: 'terminal two', text: 'build me a landing page', flesh: true },
+    ctx({ panes: CROWDED, focusedPaneId: 'p1' }),
+    run
+  )
+  assert.equal(out.ok, true)
+  assert.match(out.summary, /Sending to Terminal 2 “build”… say “wait” to hold/)
+  const settled = await out.pending
+  assert.equal(settled.done, 1)
+  assert.deepEqual(run.calls, [['sendPrompt', 'p2', 'build me a landing page', true, null, true]])
+})
+
+await test('a plain shell is never submitted for him, whatever the settings say', async () => {
+  const run = dispatchRunner()
+  const out = runAppAction(
+    { kind: 'send_prompt', target: 'terminal one', text: 'rm -rf everything' },
+    ctx({ panes: CROWDED, focusedPaneId: 'p1', autoRelay: true }),
+    run
+  )
+  await out.pending
+  assert.equal(run.calls[0][3], false, 'submit must be false for a plain shell')
+  assert.match(out.summary, /plain shell/)
+})
+
+await test('auto-relay off types it in and leaves the Enter to him', async () => {
+  const run = dispatchRunner()
+  const out = runAppAction(
+    { kind: 'send_prompt', target: 'terminal two', text: 'build me a landing page' },
+    ctx({ panes: CROWDED, focusedPaneId: 'p1', autoRelay: false }),
+    run
+  )
+  await out.pending
+  assert.equal(run.calls[0][3], false)
+  assert.match(out.summary, /auto-relay is off/)
+
+  // And an explicit submit:false from the brain is obeyed even with it on.
+  const run2 = dispatchRunner()
+  runAppAction(
+    { kind: 'send_prompt', target: 'terminal two', text: 'x', submit: false },
+    ctx({ panes: CROWDED, focusedPaneId: 'p1', autoRelay: true }),
+    run2
+  ).pending
+  assert.equal(run2.calls[0][3], false)
+})
+
+await test('send_prompt refuses what it cannot do, rather than pretending', () => {
+  const full = ctx({ panes: CROWDED, focusedPaneId: 'p1' })
+  assert.match(runAppAction({ kind: 'send_prompt', target: 'terminal two', text: '  ' }, full, dispatchRunner()).summary,
+    /prompt is empty/)
+  assert.match(
+    runAppAction({ kind: 'send_prompt', target: 'terminal nine', text: 'x' }, full, dispatchRunner()).summary,
+    /No terminal called “terminal nine”/
+  )
+  const dead = CROWDED.map((p) => (p.paneId === 'p2' ? { ...p, live: false } : p))
+  assert.match(
+    runAppAction({ kind: 'send_prompt', target: 'terminal two', text: 'x' }, ctx({ panes: dead }), dispatchRunner())
+      .summary,
+    /shell has exited/
+  )
+  assert.match(
+    runAppAction({ kind: 'send_prompt', target: 'terminal two', text: 'x' }, ctx({ panes: [] }), dispatchRunner())
+      .summary,
+    /No terminals open/
+  )
+  // A runner with no dispatch support says so instead of silently doing nothing.
+  assert.equal(runAppAction({ kind: 'send_prompt', target: 'this', text: 'x' }, full, fakeRunner()).ok, false)
+})
+
+await test('the whole flow: open three, then dispatch to the second', async () => {
+  // 1 — "open three claude terminals" opens three.
+  const opened = parseUtterance('open three claude terminals', C)
+  assert.equal(opened.actions[0].count, 3)
+  const run = fakeRunner()
+  assert.equal(runAppAction(opened.actions[0], ctx({ paneCount: 0 }), run).done, 3)
+
+  // 2 — "in terminal two, build me a landing page for a cafe" goes to that one.
+  const three = [
+    pane({ paneId: 'a', number: 1, title: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', agent: true, focused: true }),
+    pane({ paneId: 'b', number: 2, title: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', agent: true }),
+    pane({ paneId: 'c', number: 3, title: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', agent: true })
+  ]
+  const said = parseUtterance('in terminal two, build me a landing page for a cafe', C)
+  assert.equal(said.actions[0].kind, 'send_prompt')
+  const run2 = dispatchRunner()
+  const out = runAppAction(said.actions[0], ctx({ panes: three, focusedPaneId: 'a' }), run2)
+  await out.pending
+  assert.deepEqual(run2.calls, [['sendPrompt', 'b', 'build me a landing page for a cafe', true, null, false]])
+})
+
+await test('sanitiseActions carries a send_prompt through, and its empty-text convention', () => {
+  assert.deepEqual(sanitiseActions([{ kind: 'send_prompt', target: 'terminal 2', text: 'go', flesh: true }]), [
+    { kind: 'send_prompt', target: 'terminal 2', text: 'go', flesh: true }
+  ])
+  // Empty text is legal and means "the draftPrompt in this same reply"; the
+  // panel substitutes it before the executor ever sees it.
+  assert.deepEqual(sanitiseActions([{ kind: 'send_prompt', target: 'terminal 2' }]), [
+    { kind: 'send_prompt', target: 'terminal 2', text: '' }
+  ])
+  // No target at all means the pane he is looking at.
+  assert.equal(sanitiseActions([{ kind: 'send_prompt', text: 'go' }])[0].target, 'this')
+  assert.equal(sanitiseActions([{ kind: 'send_prompt', target: 't', text: 'x', submit: false }])[0].submit, false)
+})
+
+/* ----------------------------------------------- closing, making, viewing */
+
+console.log('\nClosing, creating, and the actions that used to be substituted')
+
+/** A runner that can also close in bulk and create a project. */
+function fullRunner(createResult) {
+  const base = dispatchRunner()
+  return {
+    ...base,
+    renameTab: (tabId, title) => base.calls.push(['renameTab', tabId, title]),
+    setViewMode: (mode) => base.calls.push(['setViewMode', mode]),
+    openSettings: (section) => base.calls.push(['openSettings', section ?? null]),
+    closeMany: async ({ tabIds, label }) => {
+      base.calls.push(['closeMany', tabIds.join(','), label])
+      return { ok: true, summary: `Closed ${tabIds.length} tabs (${label})`, requested: tabIds.length, done: tabIds.length }
+    },
+    createProject: async ({ name, parentDir }) => {
+      base.calls.push(['createProject', name, parentDir ?? null])
+      return createResult ?? { ok: true, summary: `Created “${name}”`, requested: 1, done: 1 }
+    }
+  }
+}
+
+await test('“Close tab one” closes tab one — it does not switch to it', () => {
+  // The exact regression from Steve's session: the closing actions took no
+  // target, so the model reached for focus_tab and Forge said "Switched to Tab
+  // 1" about a tab he had asked it to get rid of.
+  const hit = parseUtterance('close tab one', C)
+  assert.equal(hit.actions[0].kind, 'close_tab', 'close tab one must CLOSE')
+  assert.equal(hit.actions[0].which, 'tab one')
+
+  const run = fullRunner()
+  const out = runAppAction(hit.actions[0], ctx(), run)
+  assert.equal(out.ok, true)
+  assert.equal(out.summary, 'Closed “build”')
+  assert.deepEqual(run.calls, [['closeTab', 't1']])
+
+  // And the navigation reading still works when the verb is navigation.
+  assert.equal(parseUtterance('go to tab one', C).actions[0].kind, 'focus_tab')
+  assert.equal(parseUtterance('switch to tab 2', C).actions[0].kind, 'focus_tab')
+})
+
+await test('closing by number, ordinal and name, for tabs and for panes', () => {
+  const cases = [
+    ['close tab 2', 'close_tab', 'tab 2'],
+    ['close the second tab', 'close_tab', 'tab second'],
+    ['close the last tab', 'close_tab', 'tab last'],
+    ['kill terminal 3', 'close_tab', 'terminal 3'],
+    ['close pane two', 'close_pane', 'pane two'],
+    ['close this pane', 'close_pane', 'focused'],
+    ['close the tab', 'close_tab', 'current']
+  ]
+  for (const [said, kind, which] of cases) {
+    const hit = parseUtterance(said, C)
+    assert.ok(hit, said)
+    assert.equal(hit.actions[0].kind, kind, said)
+    assert.equal(hit.actions[0].which, which, said)
+  }
+  // Resolution: "tab second" and "the last tab" land on real tabs.
+  assert.equal(runAppAction({ kind: 'close_tab', which: 'tab second' }, ctx(), fullRunner()).summary, 'Closed “notes”')
+  assert.equal(runAppAction({ kind: 'close_tab', which: 'tab last' }, ctx(), fullRunner()).summary, 'Closed “notes”')
+  assert.equal(runAppAction({ kind: 'close_tab', which: 'notes' }, ctx(), fullRunner()).summary, 'Closed “notes”')
+  assert.match(runAppAction({ kind: 'close_tab', which: 'tab 9' }, ctx(), fullRunner()).summary, /No tab called/)
+})
+
+await test('bulk close counts down first, and only for more than one', async () => {
+  const three = [
+    { id: 'a', title: 'one' },
+    { id: 'b', title: 'two' },
+    { id: 'c', title: 'three' }
+  ]
+  const hit = parseUtterance('close all three tabs', C)
+  assert.equal(hit.actions[0].kind, 'close_tabs')
+  assert.equal(hit.actions[0].which, 'all')
+
+  const run = fullRunner()
+  const out = runAppAction(hit.actions[0], ctx({ tabs: three, activeTabId: 'a' }), run)
+  // Provisional, and honest that nothing has happened yet.
+  assert.equal(out.done, 0)
+  assert.match(out.summary, /Closing 3 tabs \(every tab\)… say “wait” to stop/)
+  const settled = await out.pending
+  assert.equal(settled.done, 3)
+  assert.deepEqual(run.calls, [['closeMany', 'a,b,c', 'every tab']])
+
+  // One tab needs no ceremony.
+  const single = fullRunner()
+  const one = runAppAction({ kind: 'close_tabs', which: 'all' }, ctx({ tabs: [three[0]], activeTabId: 'a' }), single)
+  assert.equal(one.done, 1)
+  assert.equal(one.pending, undefined)
+  assert.deepEqual(single.calls, [['closeTab', 'a']])
+})
+
+await test('“close everything” and “close the kimi ones”', async () => {
+  assert.equal(parseUtterance('close everything', C).actions[0].which, 'all')
+  assert.equal(parseUtterance('close all the tabs', C).actions[0].which, 'all')
+  assert.equal(parseUtterance('close the other tabs', C).actions[0].which, 'others')
+  assert.equal(parseUtterance('close the kimi ones', C).actions[0].which, 'kimi')
+
+  // "the kimi ones" only closes tabs that are running Kimi.
+  const panes = [
+    pane({ paneId: 'a', tabId: 't1', number: 1, profileId: 'kimi', profileName: 'Kimi', agent: true }),
+    pane({ paneId: 'b', tabId: 't2', number: 2, profileId: 'claude', profileName: 'Claude Code', agent: true })
+  ]
+  const run = fullRunner()
+  const out = runAppAction({ kind: 'close_tabs', which: 'kimi' }, ctx({ panes }), run)
+  assert.equal(out.done, 1)
+  assert.deepEqual(run.calls, [['closeTab', 't1']])
+  // And says so rather than closing the lot when nothing matches.
+  assert.match(
+    runAppAction({ kind: 'close_tabs', which: 'gemini' }, ctx({ panes }), fullRunner()).summary,
+    /No tabs are running/
+  )
+})
+
+await test('Steve’s exact project sentence creates the folder and opens it', async () => {
+  const said = 'Open up a new project called Tester Tester. Put the project file on the desktop and then open it in the projects pane'
+  const hit = parseUtterance(said, C)
+  assert.ok(hit, 'the sentence did not parse')
+  assert.equal(hit.actions[0].kind, 'create_project')
+  assert.equal(hit.actions[0].name, 'Tester Tester', 'the name must survive with its capitals')
+  assert.equal(hit.actions[0].parentDir, 'desktop')
+
+  const run = fullRunner()
+  const out = runAppAction(hit.actions[0], ctx(), run)
+  assert.match(out.summary, /Creating “Tester Tester”/)
+  await out.pending
+  assert.deepEqual(run.calls, [['createProject', 'Tester Tester', 'desktop']])
+
+  // Shorter forms too, and a nameless one still falls back to the hint.
+  assert.equal(parseUtterance('create a new project called roma', C).actions[0].name, 'roma')
+  assert.equal(parseUtterance('make a new project named tester in documents', C).actions[0].parentDir, 'documents')
+  assert.equal(parseUtterance('add a new project', C).actions[0].kind, 'new_project_hint')
+})
+
+await test('rename, view mode and settings are real actions now, not excuses', () => {
+  const run = fullRunner()
+  assert.equal(runAppAction({ kind: 'rename_tab', which: 'tab 2', name: 'docs' }, ctx(), run).ok, true)
+  assert.deepEqual(run.calls.at(-1), ['renameTab', 't2', 'docs'])
+  runAppAction({ kind: 'set_view', mode: 'mosaic' }, ctx(), run)
+  assert.deepEqual(run.calls.at(-1), ['setViewMode', 'mosaic'])
+  runAppAction({ kind: 'open_settings', section: 'voice' }, ctx(), run)
+  assert.deepEqual(run.calls.at(-1), ['openSettings', 'voice'])
+  // A runner that cannot do them refuses honestly.
+  assert.equal(runAppAction({ kind: 'set_view', mode: 'tabs' }, ctx(), fakeRunner()).ok, false)
+})
+
+await test('the new kinds survive sanitising, and junk in them does not', () => {
+  assert.deepEqual(sanitiseActions([{ kind: 'close_tab', which: 'tab 1' }]), [{ kind: 'close_tab', which: 'tab 1' }])
+  // The old literal shape still means what it used to.
+  assert.deepEqual(sanitiseActions([{ kind: 'close_tab' }]), [{ kind: 'close_tab', which: 'current' }])
+  assert.deepEqual(sanitiseActions([{ kind: 'close_pane' }]), [{ kind: 'close_pane', which: 'focused' }])
+  assert.deepEqual(sanitiseActions([{ kind: 'close_tabs' }]), [{ kind: 'close_tabs', which: 'all' }])
+  assert.deepEqual(sanitiseActions([{ kind: 'create_project', name: 'x', parentDir: 'desktop' }]), [
+    { kind: 'create_project', name: 'x', parentDir: 'desktop' }
+  ])
+  assert.deepEqual(sanitiseActions([{ kind: 'create_project' }]), [], 'a nameless project is nothing')
+  assert.deepEqual(sanitiseActions([{ kind: 'set_view', mode: 'sideways' }]), [], 'invented view modes are dropped')
+  assert.deepEqual(sanitiseActions([{ kind: 'open_settings', section: 'nonsense' }]), [{ kind: 'open_settings' }])
+  assert.deepEqual(sanitiseActions([{ kind: 'rename_tab', which: 'tab 1' }]), [], 'a rename needs a name')
+})
+
+await test('a spoken folder name cannot escape the folders Forge may write to', () => {
+  const roots = [
+    { key: 'desktop', path: 'C:\\Users\\steve\\Desktop' },
+    { key: 'documents', path: 'C:\\Users\\steve\\Documents' }
+  ]
+  const plan = (name, parentDir) => planProjectFolder({ name, parentDir, roots })
+
+  const good = plan('Tester Tester', 'desktop')
+  assert.equal(good.ok, true)
+  assert.equal(good.path, 'C:\\Users\\steve\\Desktop\\Tester Tester')
+  assert.equal(good.leaf, 'Tester Tester')
+  assert.equal(plan('roma', 'documents').path, 'C:\\Users\\steve\\Documents\\roma')
+  // No parent named: the first root, which is Desktop unless one is configured.
+  assert.equal(plan('roma').path, 'C:\\Users\\steve\\Desktop\\roma')
+
+  // Traversal, absolute paths and separators are all just *words* by the time
+  // they get here — neutralised into one flat leaf rather than refused, so
+  // whatever he says, the result is still a folder inside an allowed root.
+  for (const nasty of [
+    '..\\..\\Windows\\System32',
+    '../../etc/passwd',
+    'C:\\Windows',
+    '\\\\server\\share',
+    'a/b/c'
+  ]) {
+    const out = plan(nasty)
+    assert.equal(out.ok, true, nasty)
+    assert.ok(out.path.startsWith('C:\\Users\\steve\\Desktop\\'), `${nasty} escaped to ${out.path}`)
+    assert.ok(!out.leaf.includes('\\') && !out.leaf.includes('/'), `${nasty} kept a separator`)
+  }
+  assert.equal(sanitiseFolderName('..\\..\\Windows'), 'Windows')
+  assert.equal(sanitiseFolderName('a/b/c'), 'a b c')
+  assert.equal(sanitiseFolderName('  ...  '), '')
+
+  // Windows' own landmines.
+  assert.match(plan('NUL').error, /will not allow/)
+  assert.match(plan('com1').error, /will not allow/)
+  assert.match(plan('   ').error, /No name given/)
+  assert.match(plan('x'.repeat(80)).error, /too long/)
+
+  // A configured projects folder becomes the default and is allowed.
+  const withRoot = [{ key: 'projectsroot', path: 'D:\\code' }, ...roots]
+  assert.equal(planProjectFolder({ name: 'roma', roots: withRoot }).path, 'D:\\code\\roma')
+  assert.equal(planProjectFolder({ name: 'roma', parentDir: 'desktop', roots: withRoot }).path,
+    'C:\\Users\\steve\\Desktop\\roma')
+})
+
+/* ------------------------------------------------------------- speaking */
+
+console.log('\nSpeaking back (TTS)')
+
+await test('the best installed voice is chosen, not the first one', () => {
+  const voices = [
+    { name: 'Microsoft David Desktop - English (United States)', lang: 'en-US', default: true },
+    { name: 'Microsoft Hazel Desktop - English (Great Britain)', lang: 'en-GB' },
+    { name: 'Microsoft Sonia Online (Natural) - English (United Kingdom)', lang: 'en-GB' },
+    { name: 'Microsoft Hortense - French', lang: 'fr-FR' }
+  ]
+  assert.equal(chooseVoice(voices).name, 'Microsoft Sonia Online (Natural) - English (United Kingdom)')
+  // An explicit choice always wins.
+  assert.equal(chooseVoice(voices, 'Microsoft Hazel Desktop - English (Great Britain)').lang, 'en-GB')
+  // A saved name that is no longer installed falls back rather than failing.
+  assert.match(chooseVoice(voices, 'Microsoft Gone').name, /Sonia/)
+  // No English at all: take what there is rather than staying silent.
+  assert.equal(chooseVoice([{ name: 'Hortense', lang: 'fr-FR' }]).name, 'Hortense')
+  assert.equal(chooseVoice([]), null)
+})
+
+await test('a drafted prompt is never read aloud', () => {
+  const draft = '# Goal\nBuild a landing page.\n\n```js\nconst x = 1\n```\n- one\n- two\nSee https://example.com/spec'
+  const said = speakable(draft)
+  assert.ok(!said.includes('```'), 'code fences must not be spoken')
+  assert.ok(!said.includes('#'), 'markdown headings must not be spoken')
+  assert.ok(!said.includes('https://'), 'URLs must not be read out character by character')
+  assert.ok(said.includes('a link'))
+  // Long replies are cut at a sentence, not mid-word.
+  const long = 'One two three. '.repeat(80)
+  assert.ok(speakable(long).length <= 340)
+  assert.match(speakable(long), /\.$/)
+  assert.equal(speakable(''), '')
+})
+
 /* ------------------------------------------------------- media actions */
 
 console.log('\nMedia actions')
@@ -683,10 +1315,19 @@ const SNAPSHOT = {
       number: 1,
       title: 'build',
       active: true,
-      panes: [{ title: 'PowerShell', profileName: 'PowerShell', status: 'live', focused: true }]
+      panes: [{ number: 1, title: 'PowerShell', profileName: 'PowerShell', status: 'live', focused: true, agent: false }]
+    },
+    {
+      number: 2,
+      title: 'notes',
+      active: false,
+      panes: [
+        { number: 2, title: 'Claude Code', profileName: 'Claude Code', status: 'live', focused: false, agent: true },
+        { number: 3, title: 'docs', profileName: 'Claude Code', status: 'live', focused: false, agent: true }
+      ]
     }
   ],
-  paneCount: 1,
+  paneCount: 3,
   maxSessions: 16,
   maxPanesPerTab: 8,
   view: { railCollapsed: false, voicePanelWidth: 380, terminalFontSize: 13, shell: 'pwsh.exe' }
@@ -715,8 +1356,33 @@ await test('the manifest describes the app, the actions, the limits and the stat
   assert.ok(text.includes('1. "build" [CURRENT]'))
   assert.ok(text.includes('kimmy'), 'spoken aliases should be listed')
   assert.ok(text.includes('draftPrompt'))
-  // Small enough to send every turn.
-  assert.ok(text.length < 6000, `manifest is ${text.length} chars`)
+  // Small enough to send every turn — about 2.2k tokens. It grew when
+  // send_prompt, the COUNTS rules and the closing/creating actions landed; each
+  // one earns its room, but the ceiling still has to bite, because this goes up
+  // the wire on every single thing Steve says.
+  assert.ok(text.length < 9600, `manifest is ${text.length} chars`)
+})
+
+await test('the manifest gives every pane the spoken handle Steve uses', () => {
+  const text = buildManifest(SNAPSHOT)
+  // The numbering runs across tabs, in tab then pane order — the same walk the
+  // executor's ActionPane list uses, which is what makes "terminal two" mean
+  // one thing to him, to the model and to the code.
+  assert.ok(text.includes('Terminal 1 — "PowerShell"'), 'pane 1 has no handle')
+  assert.ok(text.includes('Terminal 2 — "Claude Code"'), 'pane 2 has no handle')
+  assert.ok(text.includes('Terminal 3 — "docs"'), 'pane 3 has no handle')
+  assert.match(text, /Terminal 1 — "PowerShell" \(PowerShell, live, plain shell[^)]*, FOCUSED\)/)
+  assert.match(text, /These Terminal numbers are what he says out loud/)
+  // And the model is told how to use them.
+  assert.ok(text.includes('# DISPATCHING TO A TERMINAL'))
+  assert.ok(text.includes('send_prompt'))
+})
+
+await test('the manifest spells out the counts rule that the repro broke on', () => {
+  const text = buildManifest(SNAPSHOT)
+  assert.ok(text.includes('# COUNTS'))
+  assert.match(text, /ONE action with count N\. Never N actions with count 1\./)
+  assert.ok(text.includes('"count":3'), 'show the model the exact shape')
 })
 
 await test('the manifest offers the media actions and names the bridge tools', () => {

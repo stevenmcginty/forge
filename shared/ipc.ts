@@ -43,6 +43,7 @@ export const IPC = {
 
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
+  makeProjectFolder: 'dialog:make-project-folder',
   openPath: 'shell:open-path',
 
   // window

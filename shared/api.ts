@@ -11,6 +11,8 @@ import type {
   ImportedKeyResult,
   KeySource,
   MakeImageRequest,
+  MakeProjectFolderRequest,
+  MakeProjectFolderResult,
   MediaCallResult,
   OpenRouterCallRequest,
   OpenRouterCallResult,
@@ -148,6 +150,8 @@ export interface ForgeApi {
   }
 
   pickFolder(): Promise<string | null>
+  /** Create a project folder from a spoken name. Fenced hard — see main.ts. */
+  makeProjectFolder(req: MakeProjectFolderRequest): Promise<MakeProjectFolderResult>
   openPath(target: string): Promise<string>
 
   /**

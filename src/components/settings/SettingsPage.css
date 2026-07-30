@@ -1086,3 +1086,49 @@
   opacity: 0;
   cursor: pointer;
 }
+
+/* --------------------------------------------------------- segmented control
+ *
+ * Three mutually exclusive choices, shown all at once. A <select> would hide
+ * two of them, and the point of the reply-mode setting is that Steve can see
+ * there are three and what each one costs him.
+ */
+
+.seg {
+  display: inline-flex;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-hairline);
+  overflow: hidden;
+}
+
+.seg__btn {
+  padding: var(--s-3) var(--s-5);
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--t-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.seg__btn + .seg__btn {
+  border-left: 1px solid var(--line-hairline);
+}
+
+.seg__btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.seg__btn[data-on='true'] {
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+.seg__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

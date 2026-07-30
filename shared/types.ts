@@ -171,6 +171,26 @@ export interface WindowBounds {
  */
 export type VoiceBrainId = 'stub' | 'gemini' | 'openrouter' | 'claude' | 'openai'
 
+/**
+ * How the voice agent answers.
+ *
+ *   text   written only — the panel as it has always been
+ *   both   written and spoken (the default)
+ *   voice  spoken only, and the panel collapses to the round button
+ */
+export type VoiceReplyMode = 'text' | 'both' | 'voice'
+
+/** `create_project`, as it crosses to the main process. */
+export interface MakeProjectFolderRequest {
+  name: string
+  /** 'desktop' | 'documents' | 'projectsroot', or an absolute allowed root. */
+  parentDir?: string
+}
+
+export type MakeProjectFolderResult =
+  | { ok: true; path: string; name: string }
+  | { ok: false; error: string; path?: string }
+
 /* ------------------------------------------------------- voice-agent ipc */
 
 export interface GeminiCallRequest {
@@ -410,6 +430,26 @@ export interface Settings {
   voiceAutoRelay: boolean
   /** How long a pane must be quiet before a relay counts as "finished". */
   voiceRelayGraceMs: number
+  /**
+   * Whether the agent answers in writing, out loud, or both.
+   *
+   * `voice` is not merely "also speak": it is a different panel. The log and
+   * the text box are hidden, leaving the round button and one line of status,
+   * because if you are talking to it you are not reading it — and Steve wants
+   * that space back for terminals.
+   */
+  voiceReplyMode: VoiceReplyMode
+  /**
+   * `SpeechSynthesisVoice.name` to speak with. Empty means "pick the best
+   * installed voice", which is what `chooseVoice` in src/lib/speech.ts does.
+   */
+  voiceReplyVoice: string
+  /**
+   * Where `create_project` puts a new folder when he does not say. Empty means
+   * the Desktop. Only this, the Desktop and Documents are ever writable from a
+   * spoken command — see the handler in electron/main.ts.
+   */
+  projectsRoot: string
   /**
    * Image-generation model for `make_image` / `edit_image`. Empty means "use the
    * built-in default" (gemini-2.5-flash-image), which is also what the MCP

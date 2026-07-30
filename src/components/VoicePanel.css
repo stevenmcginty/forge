@@ -80,33 +80,341 @@
   color: var(--text-primary);
 }
 
-/* Armed reads as the accent; actually hearing you adds the pulse, so "pointed
- * at the agent" and "listening right now" stay tellable apart. */
-.voice__mic[data-on='true'] {
+/* ---------------------------------------------------------- agent dial
+ *
+ * The one thing in this panel you cannot miss.
+ *
+ * Steve's complaint was not that the voice agent lacked features — it was
+ * "where is the agent?". So the agent is a 72px circle at the top of the panel
+ * with a word underneath it, and every state it can be in looks different
+ * enough to read across the room:
+ *
+ *   off        grey ring, no glow
+ *   warming    dim volt, the spinner sweeping (the model takes 3–6s to load)
+ *   listening  volt ring scaled by the real microphone level
+ *   thinking   volt spinner sweeping, core dimmed
+ *   replied    a bright flash, then straight back to listening
+ *   error      amber, then straight back to listening
+ *
+ * The ring's transform/opacity are written by rAF from the mic level; the CSS
+ * here only sets what it looks like at rest.
+ */
+
+.agentdial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  padding: var(--s-7) var(--s-5) var(--s-6);
+  border-bottom: 1px solid var(--line-hairline);
+  background:
+    radial-gradient(120% 90% at 50% 0%, var(--accent-softer), transparent 62%),
+    linear-gradient(180deg, var(--panel-grad-a), var(--panel-grad-b));
+}
+
+.agentdial__btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+  background: transparent;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.agentdial__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+/* The core disc — the part that always looks like a button. */
+.agentdial__core {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: var(--r-full);
+  background: var(--bg-panel-raised);
+  color: var(--text-secondary);
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    var(--shadow-card);
+  transition:
+    color var(--dur-med) var(--ease-out),
+    background var(--dur-med) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out),
+    transform var(--dur-med) var(--ease-out);
+}
+
+.agentdial__btn:hover .agentdial__core {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.agentdial__btn:active .agentdial__core {
+  transform: scale(0.95);
+}
+
+/* The live ring. Scale and opacity are driven from the mic level in JS. */
+.agentdial__ring {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: var(--r-full);
+  border: 2px solid var(--accent);
+  opacity: 0;
+  box-shadow:
+    0 0 18px var(--accent-glow),
+    inset 0 0 12px var(--accent-softer);
+  transition: opacity var(--dur-med) var(--ease-out);
+  pointer-events: none;
+}
+
+/* The thinking sweep — one arc going round, nothing else. */
+.agentdial__spin {
+  position: absolute;
+  inset: -4px;
+  z-index: 0;
+  border-radius: var(--r-full);
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.agentdial[data-phase='listening'] .agentdial__core {
   color: var(--accent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    var(--shadow-card);
 }
 
-.voice__mic[data-live='true'] {
-  animation: voice-mic-pulse 1.4s ease-in-out infinite;
+.agentdial[data-phase='warming'] .agentdial__core,
+.agentdial[data-phase='thinking'] .agentdial__core {
+  color: var(--accent);
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    var(--shadow-card);
 }
 
-@keyframes voice-mic-pulse {
-  0%,
-  100% {
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
-  }
+.agentdial[data-phase='warming'] .agentdial__spin,
+.agentdial[data-phase='thinking'] .agentdial__spin {
+  opacity: 1;
+  animation: agentdial-spin 900ms linear infinite;
+}
+
+.agentdial[data-phase='warming'] .agentdial__spin {
+  border-top-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  animation-duration: 1600ms;
+}
+
+/* Speaking. Distinct from listening on purpose — the ring is *solid* and the
+ * core is filled, because the one thing that must be obvious is that the
+ * microphone is shut while it talks. */
+.agentdial[data-phase='speaking'] .agentdial__ring {
+  opacity: 1;
+  transform: scale(1.08);
+  border-color: var(--accent-bright);
+  animation: agentdial-speak 760ms var(--ease-in-out) infinite;
+}
+
+.agentdial[data-phase='speaking'] .agentdial__core {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  box-shadow:
+    inset 0 0 0 1px var(--accent-bright),
+    0 0 26px var(--accent-glow);
+}
+
+@keyframes agentdial-speak {
   50% {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent),
-      0 0 8px color-mix(in srgb, var(--accent) 35%, transparent);
+    transform: scale(1.2);
+    opacity: 0.55;
+  }
+}
+
+.agentdial[data-phase='replied'] .agentdial__ring {
+  opacity: 1;
+  transform: scale(1.16);
+  border-color: var(--accent-bright);
+}
+
+.agentdial[data-phase='replied'] .agentdial__core {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  box-shadow:
+    inset 0 0 0 1px var(--accent-bright),
+    0 0 24px var(--accent-glow);
+}
+
+.agentdial[data-phase='error'] .agentdial__ring {
+  opacity: 1;
+  transform: scale(1.1);
+  border-color: var(--warn);
+  box-shadow: 0 0 18px var(--warn-soft);
+}
+
+.agentdial[data-phase='error'] .agentdial__core {
+  color: var(--warn);
+  box-shadow:
+    inset 0 0 0 1px var(--warn-line-strong),
+    var(--shadow-card);
+}
+
+@keyframes agentdial-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --------------------------------------------------------- dial labels */
+
+.agentdial__labels {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-1);
+  text-align: center;
+  min-height: 30px;
+}
+
+.agentdial__title {
+  font-size: var(--t-md);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+  transition: color var(--dur-med) var(--ease-out);
+}
+
+.agentdial[data-phase='listening'] .agentdial__title,
+.agentdial[data-phase='replied'] .agentdial__title {
+  color: var(--accent);
+}
+
+.agentdial[data-phase='error'] .agentdial__title {
+  color: var(--warn);
+}
+
+.agentdial__sub {
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+  max-width: 30ch;
+}
+
+/* The grace beat, when a prompt is about to be submitted for him. */
+.agentdial__hold {
+  max-width: 100%;
+  margin-top: var(--s-2);
+  padding: var(--s-2) var(--s-5);
+  border-radius: var(--r-full);
+  border: 1px solid var(--warn-line);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  cursor: pointer;
+  animation: agentdial-hold 900ms ease-in-out infinite;
+}
+
+@keyframes agentdial-hold {
+  50% {
+    border-color: var(--warn-line-strong);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .voice__mic[data-live='true'] {
+  .agentdial__spin,
+  .agentdial__ring {
+    animation: none !important;
+  }
+
+  .agentdial__hold {
     animation: none;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+}
+
+:root[data-reduced-motion='true'] .agentdial__spin,
+:root[data-reduced-motion='true'] .agentdial__ring,
+:root[data-reduced-motion='true'] .agentdial__hold {
+  animation: none;
+}
+
+/* -------------------------------------------------------- reply mode */
+
+.replymode {
+  display: inline-flex;
+  flex: none;
+  height: 18px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-hairline);
+  overflow: hidden;
+}
+
+.replymode__btn {
+  min-width: 24px;
+  padding: 0 var(--s-3);
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.replymode__btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.replymode__btn[data-on='true'] {
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+.replymode__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ------------------------------------------------------- voice-only line */
+
+.voice__lastline {
+  flex: none;
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--line-hairline);
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voice__lastline[data-tone='ok'] {
+  color: var(--accent);
+}
+
+.voice__lastline[data-tone='warn'] {
+  color: var(--warn);
+}
+
+/* Motion off still has to distinguish "thinking" from "off", so the sweep
+ * becomes a static three-quarter ring rather than nothing at all. */
+@media (prefers-reduced-motion: reduce) {
+  .agentdial[data-phase='warming'] .agentdial__spin,
+  .agentdial[data-phase='thinking'] .agentdial__spin {
+    border-color: var(--accent-line);
+    border-top-color: var(--accent);
   }
 }
 
@@ -358,6 +666,25 @@
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
+}
+
+/* The agent speaking for itself, rather than answering something. */
+.turn__note {
+  align-self: flex-start;
+  max-width: 92%;
+  margin: 0;
+  padding: var(--s-3) var(--s-5);
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-hairline);
+  background: var(--bg-panel-raised);
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+}
+
+.turn--note[data-tone='warn'] .turn__note {
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 .turn__said {

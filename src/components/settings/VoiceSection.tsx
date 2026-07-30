@@ -1,7 +1,9 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import type { VoiceReplyMode } from '@shared/types'
+import { chooseVoice, speaker } from '@/lib/speech'
 import { useApp } from '@/state/AppState'
 import { DictationSetup } from '../DictationSetup'
-import { Card, Row, Section, Stepper, Toggle } from './parts'
+import { Card, Row, Section, Stepper, TextField, Toggle } from './parts'
 import { SpeechEngineCard } from './SpeechEngineCard'
 
 /**
@@ -49,10 +51,106 @@ export function VoiceSection(): ReactNode {
           />
         </Row>
 
+        <Row
+          label="New projects go in"
+          hint="Where a spoken “create a project called…” puts the folder. Blank means your Desktop."
+        >
+          <TextField
+            value={s.projectsRoot}
+            mono
+            placeholder="(Desktop)"
+            onCommit={(next) => actions.patchSettings({ projectsRoot: next.trim() })}
+          />
+        </Row>
+
         <Row label="Per-project memory" hint="Remember what the voice agent learned about each project">
           <span className="ssoon">coming soon</span>
         </Row>
       </Card>
+
+      <SpokenRepliesCard />
     </Section>
+  )
+}
+
+const MODES: Array<{ id: VoiceReplyMode; label: string; hint: string }> = [
+  { id: 'text', label: 'Written', hint: 'Replies appear in the panel only' },
+  { id: 'both', label: 'Written + spoken', hint: 'Both — the default' },
+  { id: 'voice', label: 'Spoken only', hint: 'Hides the transcript and the text box' }
+]
+
+/**
+ * Talking back.
+ *
+ * The voice list is populated asynchronously on Windows: Chromium returns an
+ * empty array on the first call and fires `voiceschanged` once SAPI has been
+ * enumerated, so this listens rather than reading once and believing it.
+ */
+function SpokenRepliesCard(): ReactNode {
+  const { state, actions } = useApp()
+  const s = state.settings
+  const [voices, setVoices] = useState(() => speaker.voices())
+
+  useEffect(() => {
+    if (!speaker.available) return undefined
+    const refresh = (): void => setVoices(speaker.voices())
+    refresh()
+    window.speechSynthesis.addEventListener('voiceschanged', refresh)
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', refresh)
+  }, [])
+
+  const picked = chooseVoice(voices, s.voiceReplyVoice)
+
+  return (
+    <Card
+      title="Spoken replies"
+      hint="Speech comes from the voices installed on this PC — nothing is sent anywhere to say it. Drafted prompts are never read aloud."
+    >
+      <Row label="How the agent replies" hint="Also switchable from the voice panel's header">
+        <div className="seg" role="group" aria-label="Reply mode">
+          {MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className="seg__btn"
+              data-on={s.voiceReplyMode === m.id ? 'true' : undefined}
+              aria-pressed={s.voiceReplyMode === m.id}
+              disabled={m.id !== 'text' && !speaker.available}
+              title={m.hint}
+              onClick={() => actions.patchSettings({ voiceReplyMode: m.id })}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </Row>
+
+      <Row label="Voice" hint={picked ? `Now using ${picked.name}` : 'No speech voices are installed on this PC'}>
+        <select
+          className="field__input"
+          value={s.voiceReplyVoice}
+          disabled={voices.length === 0}
+          onChange={(e) => actions.patchSettings({ voiceReplyVoice: e.target.value })}
+        >
+          <option value="">Best available</option>
+          {voices.map((v) => (
+            <option key={v.name} value={v.name}>
+              {v.name}
+            </option>
+          ))}
+        </select>
+      </Row>
+
+      <Row label="Try it" hint="Say something in the chosen voice">
+        <button
+          type="button"
+          className="ghost-btn"
+          disabled={voices.length === 0}
+          onClick={() => void speaker.speak('Right. Three Claude Code terminals open.', { voiceName: s.voiceReplyVoice })}
+        >
+          Speak a test line
+        </button>
+      </Row>
+    </Card>
   )
 }

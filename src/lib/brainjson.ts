@@ -33,7 +33,24 @@ export const ACTION_KINDS: ReadonlySet<string> = new Set([
   'focus_tab',
   'new_project_hint',
   'make_image',
-  'edit_image'
+  'edit_image',
+  'send_prompt',
+  'close_tabs',
+  'create_project',
+  'rename_tab',
+  'set_view',
+  'open_settings'
+])
+
+/** The settings sections `open_settings` will actually go to. */
+const SETTINGS_SECTIONS: ReadonlySet<string> = new Set([
+  'account',
+  'appearance',
+  'agents',
+  'models',
+  'voice',
+  'shots',
+  'advanced'
 ])
 
 /** How much conversational reply is worth showing. */
@@ -158,12 +175,45 @@ export function sanitiseActions(value: unknown): AppAction[] {
         out.push(action)
         break
       }
+      // `which` is a spoken target now ("tab one", "notes"), not an enum — the
+      // old literals still mean what they meant.
       case 'close_pane':
-        out.push({ kind: 'close_pane', which: 'focused' })
+        out.push({ kind: 'close_pane', which: asString(a['which']) ?? 'focused' })
         break
       case 'close_tab':
-        out.push({ kind: 'close_tab', which: 'current' })
+        out.push({ kind: 'close_tab', which: asString(a['which']) ?? 'current' })
         break
+      case 'close_tabs':
+        out.push({ kind: 'close_tabs', which: asString(a['which']) ?? 'all' })
+        break
+      case 'create_project': {
+        const name = asString(a['name'])
+        if (!name) continue
+        const action: AppAction = { kind: 'create_project', name }
+        const parentDir = asString(a['parentDir'])
+        if (parentDir) action.parentDir = parentDir
+        out.push(action)
+        break
+      }
+      case 'rename_tab': {
+        const name = asString(a['name'])
+        if (!name) continue
+        out.push({ kind: 'rename_tab', which: asString(a['which']) ?? 'current', name })
+        break
+      }
+      case 'set_view': {
+        const mode = asString(a['mode'])?.toLowerCase()
+        if (mode !== 'tabs' && mode !== 'mosaic') continue
+        out.push({ kind: 'set_view', mode })
+        break
+      }
+      case 'open_settings': {
+        const section = asString(a['section'])?.toLowerCase()
+        // An invented section would land him on a blank page; drop it and let
+        // Settings open where it opens.
+        out.push(section && SETTINGS_SECTIONS.has(section) ? { kind: 'open_settings', section } : { kind: 'open_settings' })
+        break
+      }
       case 'switch_project': {
         const name = asString(a['name'])
         if (!name) continue
@@ -197,11 +247,62 @@ export function sanitiseActions(value: unknown): AppAction[] {
         out.push({ kind: 'edit_image', path, instruction })
         break
       }
+      case 'send_prompt': {
+        // `text` may be blank on purpose: that means "the draftPrompt in this
+        // same reply", which saves a model repeating a page of prose twice.
+        // The panel fills it in; the executor refuses an empty one.
+        const action: AppAction = {
+          kind: 'send_prompt',
+          target: asString(a['target']) ?? 'this',
+          text: asString(a['text']) ?? ''
+        }
+        if (typeof a['flesh'] === 'boolean') action.flesh = a['flesh']
+        if (a['submit'] === false) action.submit = false
+        out.push(action)
+        break
+      }
       default:
         break
     }
   }
+  return coalesceCounts(out)
+}
+
+/**
+ * "Three tabs" as three actions is the same order as one action with count 3.
+ *
+ * Models really do this — gemini-2.5-flash, asked for three Claude terminals,
+ * emitted `open_tabs` three times with no count at all, which then defaulted to
+ * one apiece and looked to Steve like "I asked for three, it opened one". The
+ * schema now requires `count`, but a model that regresses must not be able to
+ * cost him the difference again, so identical neighbours are folded together.
+ */
+function coalesceCounts(actions: AppAction[]): AppAction[] {
+  const out: AppAction[] = []
+  for (const action of actions) {
+    const last = out[out.length - 1]
+    if (
+      last &&
+      action.kind === last.kind &&
+      (action.kind === 'open_tabs' || action.kind === 'open_panes') &&
+      sameTarget(last, action)
+    ) {
+      ;(last as { count: number }).count += action.count
+      continue
+    }
+    out.push(action.kind === 'open_tabs' || action.kind === 'open_panes' ? { ...action } : action)
+  }
   return out
+}
+
+function sameTarget(a: AppAction, b: AppAction): boolean {
+  if (a.kind === 'open_tabs' && b.kind === 'open_tabs') {
+    return a.profileId === b.profileId && (a.projectName ?? '') === (b.projectName ?? '')
+  }
+  if (a.kind === 'open_panes' && b.kind === 'open_panes') {
+    return a.profileId === b.profileId && (a.direction ?? '') === (b.direction ?? '')
+  }
+  return false
 }
 
 /** Turn a model's text into a BrainReply, or null if it was not JSON at all. */
