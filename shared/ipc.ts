@@ -79,6 +79,18 @@ export const IPC = {
   /** Veo. Same door as the two above, but it takes minutes rather than seconds. */
   voiceMakeVideo: 'voice:make-video',
 
+  /**
+   * Neural speech (M10). Text in, raw PCM out — the renderer plays it through
+   * Web Audio. The key never leaves the main process, same as the media calls.
+   */
+  voiceSpeak: 'voice:speak',
+  /**
+   * Barge-in: abort an in-flight `voice:speak`. Steve talking over the agent
+   * must stop the request as well as the sound, or the quota is spent on words
+   * nobody will ever hear.
+   */
+  voiceSpeakCancel: 'voice:speak-cancel',
+
   // per-project agent memory (M7) — one markdown file per project, read into
   // the brain's system text and written back after every exchange.
   memoryRead: 'memory:read',
@@ -97,6 +109,16 @@ export const IPC = {
    * see CompanionUtteranceEvent in shared/types.ts.
    */
   companionUtterance: 'companion:utterance',
+
+  // skills library (M8) — %APPDATA%\Forge\skills, junctioned into
+  // ~/.claude/skills so every claude and kimi session on the machine sees them.
+  skillsList: 'skills:list',
+  skillsRead: 'skills:read',
+  skillsCreate: 'skills:create',
+  skillsImport: 'skills:import',
+  skillsRemove: 'skills:remove',
+  skillsSetEnabled: 'skills:set-enabled',
+  skillsOpenFolder: 'skills:open-folder',
 
   // system probes (M6 settings page)
   systemUserName: 'system:user-name',

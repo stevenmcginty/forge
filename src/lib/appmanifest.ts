@@ -1,4 +1,5 @@
 import type { AgentProfile } from '@shared/types'
+import { skillCatalogue } from './skillbus'
 
 /**
  * The capability manifest: what the voice agent is told about Forge.
@@ -38,10 +39,25 @@ export interface ManifestTab {
   panes: ManifestPane[]
 }
 
+/** One skill, as the model is told about it. */
+export interface ManifestSkill {
+  /** Folder name — what `use_skill` takes and what `/name` types. */
+  name: string
+  description: string
+  /** Synced into ~/.claude/skills, so every claude/kimi session already has it. */
+  enabled: boolean
+}
+
 export interface ManifestSnapshot {
   appVersion: string | null
   projects: Array<{ name: string; path: string; active: boolean }>
   profiles: AgentProfile[]
+  /**
+   * The skills library. Optional so a caller written before skills existed still
+   * type-checks — an absent list simply means the SKILLS section is left out and
+   * the model is told there are none.
+   */
+  skills?: ManifestSkill[]
   tabs: ManifestTab[]
   paneCount: number
   maxSessions: number
@@ -164,6 +180,13 @@ export const ACTION_SPECS: ActionSpec[] = [
       '"the claude one", "this" for the focused pane. Leave text empty to send the draftPrompt from this same ' +
       'reply (preferred — do not write the prompt out twice). Set flesh true when you expanded his words into a ' +
       'proper brief. If two terminals match equally, do NOT guess: return no action and ask which one.'
+  },
+  {
+    kind: 'use_skill',
+    args: '{"kind":"use_skill","name":"<skill>","target":"terminal 2"}',
+    what:
+      'Type /<skill> into a terminal, ready but NEVER submitted — Steve presses Enter himself. Only skills listed ' +
+      'under SKILLS exist. target is spoken, as for send_prompt; omit it for the focused terminal.'
   }
 ]
 
@@ -178,6 +201,38 @@ export const EXTENSION_POINTS: string[] = [
   'capture_screenshot — taking and attaching a screenshot',
   'read_file — opening or quoting a file from the project',
   'run_command — running a command yourself instead of typing it into a terminal'
+]
+
+/**
+ * How `say` must sound.
+ *
+ * Steve's verdict on the first version of talking back: "honestly, the voice
+ * agent is just garbage. It sounds robotic. 'Ready for your next instruction.'
+ * You've got to fix that." Half of that was the synthesiser, which is now a
+ * neural one. The other half was *what it was saying* — stock assistant
+ * sentences, the same ones over and over, announcing things he could already
+ * see — and no voice model saves you from that.
+ *
+ * So these are rules about writing, not about speech. Exported because
+ * voice:check asserts every one of them is still in the manifest: they are the
+ * fix, and a fix that can be deleted by accident is not one.
+ */
+export const SAY_RULES: string[] = [
+  'HOW `say` IS USED: it is READ ALOUD, in a real voice, while he works. Say it as you would to someone stood',
+  'next to you — not the way an assistant writes.',
+  '- TWO SHORT SENTENCES MAXIMUM. One is better. Then stop.',
+  '- Contractions, always: "that\'s done", "I\'ve opened three", "can\'t reach it". Never "it is" or "cannot".',
+  '- VARY IT. Never reuse a sentence you have already said this session, and never open two replies the same way.',
+  '- NO SIGN-OFFS. Never say you are ready, listening, standing by or waiting. "Ready for your next instruction"',
+  '  is the exact sentence that made him call this thing garbage — never write it or anything like it. Going back',
+  '  to listening is not news: he can see it, and Forge marks it with a sound.',
+  '- Never call what he said an "instruction", "command", "request" or "query". He is talking to you.',
+  '- No greetings, no "certainly", no "I understand", no repeating his own words back at him.',
+  '- Do not narrate yourself: no "I will now", no "let me", no "processing". Answer, or say what happened.',
+  '- Do not read out what is already on screen — Forge speaks its own outcome chips ("Opened 3 Claude Code tabs")',
+  '  and shows `understood` beside your reply. Saying either again is the "on and on" he complained about.',
+  '- Never recite a drafted prompt, code, JSON or a path. Refer to it: "the brief is ready for terminal two".',
+  '- If nothing is worth hearing, leave `say` out. Silence is a valid reply and often the right one.'
 ]
 
 function paneLine(pane: ManifestPane): string {
@@ -206,14 +261,7 @@ export function buildManifest(s: ManifestSnapshot): string {
     'You keep a memory per project: anything under WHAT YOU REMEMBER ABOUT THIS PROJECT below is what you have',
     'learned in earlier sessions — treat it as true, build on it, and never contradict a stated preference.',
     '',
-    'HOW `say` IS USED: it is READ ALOUD by a speech synthesiser while he works. So:',
-    '- TWO SENTENCES MAXIMUM. One is better. Then stop and hand the turn back.',
-    '- No greetings, no "certainly", no "I understand", no restating what he just said back at him.',
-    '- Do not narrate actions Forge already reports on screen ("Opened 3 Claude Code tabs" is shown and spoken',
-    '  for you) and do not re-announce anything from an earlier turn unless he asks.',
-    '- Never recite a drafted prompt, code, JSON or a file path. Refer to it instead: "the brief is ready for',
-    '  terminal two". The text itself belongs in draftPrompt, on screen, where he can read and edit it.',
-    '- If there is genuinely nothing worth hearing, leave `say` out. Silence is a valid reply.'
+    ...SAY_RULES
   )
   lines.push('')
   lines.push('# ACTIONS YOU MAY RETURN')
@@ -252,6 +300,19 @@ export function buildManifest(s: ManifestSnapshot): string {
       lines.push(
         `- id "${p.id}" — ${p.name}, runs \`${p.command || '(plain shell)'}\`; spoken as: ${aliases.join(', ')}`
       )
+    }
+  }
+  lines.push('')
+  lines.push('# SKILLS')
+  lines.push('Folders of instructions in ~/.claude/skills. An enabled one is already loaded by every claude/kimi session.')
+  // The snapshot is the right place for this, but a caller that predates skills
+  // does not fill it in — see setSkillCatalogue.
+  const skills = s.skills ?? skillCatalogue() ?? []
+  if (skills.length === 0) {
+    lines.push('- (none — Steve adds them with + beside SKILLS in the rail)')
+  } else {
+    for (const skill of skills) {
+      lines.push(`- ${skill.name}${skill.enabled ? '' : ' [off]'}${skill.description ? `: ${skill.description}` : ''}`)
     }
   }
   lines.push('')

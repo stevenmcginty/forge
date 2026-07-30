@@ -8,6 +8,7 @@ import { AgentBadge } from './AgentBadge'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
+import { SkillsRail } from './SkillsRail'
 import './ProjectRail.css'
 
 /**
@@ -68,6 +69,10 @@ export function ProjectRail(): ReactNode {
           ))
         )}
       </div>
+
+      {/* Skills sit under the projects because that is the order of the day:
+          you pick where you are working, then what the agent knows. */}
+      <SkillsRail />
 
       {collapsed ? null : (
         <footer className="rail__foot">

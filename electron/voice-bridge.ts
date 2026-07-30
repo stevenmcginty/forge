@@ -13,9 +13,12 @@ import type {
   MakeVideoRequest,
   MediaCallResult,
   OpenRouterCallRequest,
-  OpenRouterCallResult
+  OpenRouterCallResult,
+  VoiceSpeakRequest,
+  VoiceSpeakResult
 } from '@shared/types'
 import { editImage, makeImage, makeVideo, type MediaResult } from './gemini-media'
+import { speak as speakGemini } from './gemini-tts'
 import { adoptShotFiles } from './shots-watcher'
 import { getDataDir, getSettings } from './store'
 
@@ -339,6 +342,19 @@ function finishMedia(result: MediaResult): MediaCallResult {
   return out
 }
 
+/* ------------------------------------------------------------------ speech */
+
+/**
+ * In-flight speech requests, so barge-in can abort one.
+ *
+ * Steve talking over the agent has to stop the *request*, not just the sound:
+ * on a free key the TTS quota is a handful of sentences a minute, and spending
+ * one on words he has already interrupted is how the next real reply ends up
+ * being read by SAPI. Entries are removed in a `finally`, so nothing leaks even
+ * when the fetch throws.
+ */
+const speaking = new Map<string, AbortController>()
+
 export function registerVoiceHandlers(): void {
   ipcMain.handle(IPC.voiceImportKey, (_e, which: KeySource): ImportedKeyResult =>
     importKey(which === 'openrouter' ? 'openrouter' : 'gemini')
@@ -401,5 +417,51 @@ export function registerVoiceHandlers(): void {
     }
     if (result.note) out.note = result.note
     return out
+  })
+
+  ipcMain.handle(IPC.voiceSpeak, async (_e, req: VoiceSpeakRequest): Promise<VoiceSpeakResult> => {
+    const settings = getSettings()
+    const id = typeof req?.requestId === 'string' ? req.requestId : ''
+    const controller = new AbortController()
+    if (id) {
+      // A second request under a live id replaces it: the panel only ever has
+      // one mouth, so the older one is by definition stale.
+      speaking.get(id)?.abort()
+      speaking.set(id, controller)
+    }
+    try {
+      const result = await speakGemini({
+        // Read here, not passed from the renderer — same rule as the media calls.
+        key: settings.geminiKey,
+        text: String(req?.text ?? ''),
+        voice: req?.voice || settings.voiceTtsVoice,
+        model: req?.model || settings.voiceTtsModel,
+        signal: controller.signal
+      })
+      if (!result.ok) return { ok: false, error: result.error, kind: result.kind }
+      const out: VoiceSpeakResult = {
+        ok: true,
+        audio: result.audio.toString('base64'),
+        mime: result.mime,
+        sampleRate: result.sampleRate,
+        channels: result.channels,
+        model: result.model,
+        voice: result.voice,
+        ms: result.ms
+      }
+      if (result.note) out.note = result.note
+      return out
+    } finally {
+      if (id && speaking.get(id) === controller) speaking.delete(id)
+    }
+  })
+
+  ipcMain.handle(IPC.voiceSpeakCancel, (_e, requestId: string): boolean => {
+    const id = typeof requestId === 'string' ? requestId : ''
+    const controller = id ? speaking.get(id) : undefined
+    if (!controller) return false
+    controller.abort()
+    speaking.delete(id)
+    return true
   })
 }

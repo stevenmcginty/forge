@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkS
 import { homedir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 import { BUILTIN_AGENT_PROFILES, inferKind, isClaudeCommand, isPermissionMode } from '@shared/agents'
+import { isValidSkillName } from '@shared/skills'
 import type { AgentProfile, Project, Settings, StoreSnapshot, ThemeCore, Workspace } from '@shared/types'
 import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
 
@@ -117,6 +118,14 @@ function defaultSettings(): Settings {
     // talk to while you work.
     voiceReplyMode: 'both',
     voiceReplyVoice: '',
+    // Neural speech by default. With no Gemini key the renderer's engine chain
+    // degrades to the local SAPI voice on its own, so this is safe to prefer.
+    voiceEngine: 'gemini',
+    // Empty = the built-ins in electron/gemini-tts.ts (Sulafat, 3.1 flash TTS).
+    voiceTtsVoice: '',
+    voiceTtsModel: '',
+    // On: it is what replaced the spoken "listening again" announcement.
+    voiceEarcons: true,
     projectsRoot: '',
     // Empty = use gemini-media.ts's built-in default, which the MCP bridge shares.
     geminiImageModel: '',
@@ -128,6 +137,11 @@ function defaultSettings(): Settings {
     // Heuristic memory is free and predictable; letting a model rewrite the
     // project summary is neither, so it is opt-in.
     memoryLlmSummarize: false,
+    // The skills library. Computed rather than frozen for the same reason as
+    // the dictation paths above: it is an answer about *this* machine's data
+    // root, which FORGE_DATA_DIR is allowed to move.
+    skillsLibraryDir: defaultSkillsDir(),
+    skillsEnabled: [],
     // Steve wants his Claude panes reachable from his phone out of the box.
     remoteControlDefault: true,
     // The phone link (M9) is off, unconfigured and credential-less out of the
@@ -145,6 +159,11 @@ function defaultSettings(): Settings {
     updatesAutoRun: false,
     updateDismissedVersion: ''
   }
+}
+
+/** %APPDATA%\Forge\skills — see electron/skills-store.ts. */
+function defaultSkillsDir(): string {
+  return join(resolveDataRoot(), 'skills')
 }
 
 let dataDir = ''
@@ -354,6 +373,13 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
         ? s.voiceReplyMode
         : DEFAULT_SETTINGS.voiceReplyMode,
     voiceReplyVoice: typeof s.voiceReplyVoice === 'string' ? s.voiceReplyVoice.slice(0, 120) : '',
+    voiceEngine: s.voiceEngine === 'local' || s.voiceEngine === 'gemini' ? s.voiceEngine : DEFAULT_SETTINGS.voiceEngine,
+    // Blank is meaningful for both: "whatever gemini-tts.ts defaults to".
+    voiceTtsVoice: typeof s.voiceTtsVoice === 'string' ? s.voiceTtsVoice.trim().slice(0, 40) : '',
+    voiceTtsModel: typeof s.voiceTtsModel === 'string' ? s.voiceTtsModel.trim().slice(0, 80) : '',
+    // Undefined means a settings.json written before earcons existed, and the
+    // answer for that file is the default (on) rather than a silent off.
+    voiceEarcons: s.voiceEarcons === undefined ? DEFAULT_SETTINGS.voiceEarcons : Boolean(s.voiceEarcons),
     projectsRoot: typeof s.projectsRoot === 'string' ? s.projectsRoot.slice(0, 400) : '',
     voiceRelayGraceMs: Number.isFinite(s.voiceRelayGraceMs)
       ? clamp(s.voiceRelayGraceMs as number, 0, 60_000)
@@ -366,6 +392,17 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
         ? s.openrouterModel.trim()
         : DEFAULT_SETTINGS.openrouterModel,
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
+    skillsLibraryDir:
+      typeof s.skillsLibraryDir === 'string' && s.skillsLibraryDir.trim()
+        ? s.skillsLibraryDir.trim()
+        : DEFAULT_SETTINGS.skillsLibraryDir,
+    // Only names that could ever be folders survive the trip off disk — this
+    // list is turned into paths under ~/.claude/skills.
+    skillsEnabled: (Array.isArray(s.skillsEnabled) ? s.skillsEnabled : [])
+      .map((n) => String(n ?? '').trim())
+      .filter((n) => isValidSkillName(n))
+      .filter((n, i, all) => all.indexOf(n) === i)
+      .slice(0, 200),
     remoteControlDefault: s.remoteControlDefault ?? DEFAULT_SETTINGS.remoteControlDefault,
     // Companion (M9). Trimmed, because every one of these is pasted by hand out
     // of the Firebase console and a trailing space in a URL is a mystery bug.

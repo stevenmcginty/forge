@@ -132,12 +132,55 @@ export interface TerminalTab {
  */
 export type WorkspaceViewMode = 'tabs' | 'mosaic'
 
+/* ------------------------------------------------------------ mosaic wall */
+
+/** A tile's box on the freeform mosaic wall, in wall pixels from its top-left. */
+export interface MosaicRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** A tile's placement, plus how its terminal is shown inside it. */
+export interface MosaicTile extends MosaicRect {
+  /**
+   * True once the user double-clicked the header: the PTY is refitted to the
+   * box (real cols/rows, life-size type) instead of being scaled into it, and
+   * follows the box from then on. Opt-in per tile — see MosaicView.
+   */
+  fit?: boolean
+}
+
+/**
+ * How the wall arranges itself.
+ *
+ * `auto`   the uniform grid: Forge places every tile, nobody drags anything.
+ * `custom` freeform: every tile has a box the user put it in.
+ */
+export type MosaicLayoutMode = 'auto' | 'custom'
+
+/** A project's freeform wall. Absent until the user first moves a tile. */
+export interface MosaicState {
+  mode: MosaicLayoutMode
+  /** paneId → box. Only read in `custom` mode. */
+  tiles: Record<string, MosaicTile>
+  /**
+   * Tabs the user dragged out of the strip and onto the wall. Purely a marker:
+   * the tab itself is untouched, and its panes were already on the wall — the
+   * strip just says which ones you placed by hand.
+   */
+  wallTabs: string[]
+}
+
 /** One project's terminal workspace. */
 export interface Workspace {
   tabs: TerminalTab[]
   activeTabId: string | null
   /** Optional so workspaces written before the mosaic existed still load. */
   viewMode?: WorkspaceViewMode
+  /** Optional so workspaces written before the freeform wall existed still load. */
+  mosaic?: MosaicState
 }
 
 /* ------------------------------------------------------------------- shots */
@@ -421,6 +464,57 @@ export type MediaCallResult =
     }
   | { ok: false; error: string; kind: string }
 
+/* ------------------------------------------------------------ neural speech */
+
+/**
+ * Which engine says the agent's replies out loud.
+ *
+ *   gemini  Google's TTS models — a real voice, needs a key and the network
+ *   local   Chromium's `speechSynthesis`, i.e. Windows SAPI — no key, no
+ *           network, and the thing Steve called robotic
+ *
+ * `gemini` is the default whenever a key exists, and `local` is not merely the
+ * other choice: it is what speaks when the key is missing, the network is down
+ * or the quota has run out. Falling back is automatic and announced once —
+ * dead air would be worse than a robot.
+ */
+export type VoiceEngine = 'gemini' | 'local'
+
+export interface VoiceSpeakRequest {
+  text: string
+  /** A prebuilt Gemini voice name, e.g. `Sulafat`. Empty means the default. */
+  voice?: string
+  /** Empty means the model in settings, which itself defaults to 3.1 flash. */
+  model?: string
+  /**
+   * Barge-in handle. Pass the same id to `voice:speak-cancel` to abort this
+   * request mid-flight. Anything falsy simply cannot be cancelled.
+   */
+  requestId?: string
+}
+
+export type VoiceSpeakResult =
+  | {
+      ok: true
+      /**
+       * Base64 raw PCM — signed 16-bit little-endian, `channels` interleaved,
+       * with no WAV header. Base64 rather than a typed array because it is what
+       * the API already returned and what survives contextBridge unambiguously.
+       */
+      audio: string
+      /** The mime Google sent, verbatim. Spellings differ between models. */
+      mime: string
+      sampleRate: number
+      channels: number
+      /** The model that actually spoke, which is not always the one asked for. */
+      model: string
+      voice: string
+      ms: number
+      /** Said when a fallback model answered instead of the requested one. */
+      note?: string
+    }
+  | { ok: false; error: string; kind: string }
+
 /* --------------------------------------------------------- agent memory */
 
 /**
@@ -530,10 +624,36 @@ export interface Settings {
    */
   voiceReplyMode: VoiceReplyMode
   /**
-   * `SpeechSynthesisVoice.name` to speak with. Empty means "pick the best
-   * installed voice", which is what `chooseVoice` in src/lib/speech.ts does.
+   * `SpeechSynthesisVoice.name` for the LOCAL engine. Empty means "pick the
+   * best installed voice", which is what `chooseVoice` in src/lib/speech.ts
+   * does. Irrelevant while the Gemini engine is speaking.
    */
   voiceReplyVoice: string
+  /**
+   * Which engine says it. `gemini` out of the box — with no key it degrades to
+   * `local` by itself, so this can safely default to the good one.
+   */
+  voiceEngine: VoiceEngine
+  /**
+   * A prebuilt Gemini voice name. Empty means `DEFAULT_TTS_VOICE` in
+   * electron/gemini-tts.ts — Sulafat, the one Google documents as "Warm".
+   */
+  voiceTtsVoice: string
+  /**
+   * Gemini TTS model id. Empty means the built-in default
+   * (`gemini-3.1-flash-tts-preview`); the module falls across to the 2.5 flash
+   * model by itself when that one is out of quota.
+   */
+  voiceTtsModel: string
+  /**
+   * A soft two-note blip when the agent goes back to listening.
+   *
+   * It replaces something worse. The agent used to *announce* that it was
+   * listening again — a spoken sentence, identical every time, which is exactly
+   * the "robotic" Steve complained about. 120 ms of quiet sine says the same
+   * thing and never says it twice the same way you can get sick of.
+   */
+  voiceEarcons: boolean
   /**
    * Where `create_project` puts a new folder when he does not say. Empty means
    * the Desktop. Only this, the Desktop and Documents are ever writable from a
@@ -560,6 +680,20 @@ export interface Settings {
    * predictable, whereas this is a real (if small) API call you did not ask for.
    */
   memoryLlmSummarize: boolean
+
+  /* --------------------------------------------------- skills library (M8) */
+  /**
+   * Where the skills library lives. Defaults to %APPDATA%\Forge\skills; movable
+   * by hand for anyone who would rather keep their skills in a repo.
+   */
+  skillsLibraryDir: string
+  /**
+   * Folder names of the skills currently synced into ~/.claude/skills, and so
+   * visible to every claude and kimi session on this machine. The list is the
+   * intent; electron/skills-store.ts reconciles the filesystem with it at
+   * startup and after every toggle.
+   */
+  skillsEnabled: string[]
 
   /* ------------------------------------------------ remote control (M7) */
   /**

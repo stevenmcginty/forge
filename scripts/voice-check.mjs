@@ -25,7 +25,7 @@
  * stripping types, so these are the real modules, not copies.
  */
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -65,7 +65,7 @@ const { parseCommand, parseUtterance } = await import('../src/lib/voicecommands.
 const { runAppAction, matchProfile, matchProject, resolvePaneTarget, paneLabel } = await import(
   '../src/lib/appactions.ts'
 )
-const { buildManifest, ACTION_SPECS, EXTENSION_POINTS } = await import('../src/lib/appmanifest.ts')
+const { buildManifest, ACTION_SPECS, EXTENSION_POINTS, SAY_RULES } = await import('../src/lib/appmanifest.ts')
 const {
   GeminiBrain,
   parseBrainJson,
@@ -79,7 +79,7 @@ const {
 } = await import('../src/lib/geminibrain.ts')
 const brainjson = await import('../src/lib/brainjson.ts')
 const { claimsCompletedAction, companionReplyText } = brainjson
-const { chooseVoice, speakable } = await import('../src/lib/speech.ts')
+const { chooseVoice, speakable, echoOverlap, ECHO_WINDOW_MS } = await import('../src/lib/speech.ts')
 const { planProjectFolder, sanitiseFolderName } = await import('../electron/projectfolder.ts')
 const { OpenRouterBrain } = await import('../src/lib/openrouterbrain.ts')
 const {
@@ -910,6 +910,23 @@ await test('targets resolve by number, ordinal, title and agent', () => {
   assert.equal(at('terminal nine').kind, 'none')
 })
 
+await test('"terminal one" is pane one, not the pane he happens to be in', () => {
+  // Found live, with six terminals open: "in terminal one, <prompt>" delivered
+  // the prompt to terminal six. "one" is in TARGET_NOUNS so that "the claude
+  // one" strips to "claude" -- which left "terminal one" stripping to nothing,
+  // and a target with no words left fell through to the focused pane. Silently.
+  const focusedLast = 'p5'
+  assert.equal(resolvePaneTarget('terminal one', CROWDED, focusedLast).pane.number, 1)
+  assert.equal(resolvePaneTarget('tab one', CROWDED, focusedLast).pane.number, 1)
+  assert.equal(resolvePaneTarget('pane one', CROWDED, focusedLast).pane.number, 1)
+  assert.equal(resolvePaneTarget('the first terminal', CROWDED, focusedLast).pane.number, 1)
+  // And the reading it was protecting still holds: a bare "one" after a word
+  // that is not a numbered noun is "that one", not pane 1.
+  assert.equal(resolvePaneTarget('this one', CROWDED, focusedLast).pane.paneId, focusedLast)
+  assert.equal(resolvePaneTarget('the last one', CROWDED, focusedLast).pane.number, 5)
+  assert.equal(resolvePaneTarget('the kimi one', CROWDED, focusedLast).pane.paneId, 'p5')
+})
+
 await test('two equal matches are asked about, never guessed', () => {
   // Steve's own example: three Claude panes and "the claude one".
   const out = resolvePaneTarget('the claude one', CROWDED, 'p1')
@@ -1393,6 +1410,27 @@ await test('the phone gets the words and the draft, and is told what could not r
   assert.equal(asked, 'Which project?')
 })
 
+await test('Forge does not answer its own voice coming back through the mic', () => {
+  // Seen live: it said "Typed into Terminal 6 Claude Code, auto-relay is off in
+  // Settings", the sidecar cut the phrase once the room went quiet -- after the
+  // while-speaking guard had lifted -- and the brain was asked to answer it.
+  const said = 'Typed into Terminal 6 Claude Code, auto-relay is off in Settings'
+  // Speech-to-text mangles spelling, not shape: "Claude Code" comes back
+  // "clawed code". Words, therefore, not characters.
+  assert.ok(echoOverlap('Typing into Terminal 6 clawed code, auto relay is off in settings', said) >= 0.7)
+  assert.ok(echoOverlap(said, said) === 1)
+
+  // And what he actually says is not an echo, even on the same subject.
+  assert.ok(echoOverlap('open three more terminals', said) < 0.7)
+  assert.ok(echoOverlap('turn auto-relay on', said) < 0.7)
+  assert.ok(echoOverlap('no, terminal two', said) < 0.7)
+  assert.equal(echoOverlap('', said), 0)
+  assert.equal(echoOverlap('anything', ''), 0)
+
+  // The window is short: a minute later the same sentence is his.
+  assert.ok(ECHO_WINDOW_MS > 0 && ECHO_WINDOW_MS <= 10_000)
+})
+
 await test('a drafted prompt is never read aloud', () => {
   const draft = '# Goal\nBuild a landing page.\n\n```js\nconst x = 1\n```\n- one\n- two\nSee https://example.com/spec'
   const said = speakable(draft)
@@ -1680,10 +1718,14 @@ await test('the manifest describes the app, the actions, the limits and the stat
   // Small enough to send every turn — about 2.4k tokens. It grew when
   // send_prompt, the COUNTS rules and the closing/creating actions landed,
   // again for the two lines that tell the model its per-project memory is real,
-  // and again for make_video (which has to warn that a clip takes minutes);
-  // each one earns its room, but the ceiling still has to bite, because this
-  // goes up the wire on every single thing Steve says.
-  assert.ok(text.length < 10300, `manifest is ${text.length} chars`)
+  // again for make_video (which has to warn that a clip takes minutes), again
+  // for the SKILLS roster and use_skill — a skill the model is never told about
+  // is a skill it will never reach for — and last for the VOICE rules, which
+  // are the half of "it sounds robotic" that no speech model fixes, because a
+  // neural voice reading "Ready for your next instruction." is still a machine
+  // reading a card. Each one earns its room, but the ceiling still has to bite,
+  // because this goes up the wire on every single thing Steve says.
+  assert.ok(text.length < 11400, `manifest is ${text.length} chars`)
 })
 
 await test('the manifest gives every pane the spoken handle Steve uses', () => {
@@ -2205,7 +2247,8 @@ await test('OpenRouterBrain folds it in the same way, before the JSON reminder',
 await test('the manifest tells the model the memory exists, and stays small', () => {
   const text = buildManifest(SNAPSHOT)
   assert.match(text, /WHAT YOU REMEMBER ABOUT THIS PROJECT/, 'one line naming the section it will arrive under')
-  assert.ok(text.length < 10300, `manifest is ${text.length} chars`)
+  // Same ceiling as the manifest check above, and for the same reason.
+  assert.ok(text.length < 11400, `manifest is ${text.length} chars`)
 })
 
 await test('the markdown format round-trips through parse and format', () => {
@@ -2484,6 +2527,542 @@ await test('the optional LLM summary is off by default and rare when on', async 
 
 setMemoryBackend(null)
 setMemorySummariser(null)
+
+/* ----------------------------------------------------- neural speech (M10)
+ *
+ * Steve's verdict on the first version of talking back: "honestly, the voice
+ * agent is just garbage. It sounds robotic. 'Ready for your next instruction.'
+ * You've got to fix that."
+ *
+ * Two separate faults, so two separate groups of checks below. The synthesiser
+ * is now a Gemini TTS model (`electron/gemini-tts.ts`), driven here against a
+ * fake `fetch` so the exact wire shape is pinned without spending a request.
+ * The *writing* is fixed by the VOICE rules in the manifest, and by a grep that
+ * fails if a canned sign-off is ever hard-coded again.
+ */
+
+console.log('\nNeural speech — the request')
+
+const ttsModule = await import('../electron/gemini-tts.ts')
+const { speak: ttsSpeak, parsePcmMime, trimLeadingSilence, ttsVoice, ttsModel } = ttsModule
+const sharedTts = await import('../shared/tts.ts')
+
+/**
+ * 24 kHz mono PCM: `seconds` of a quiet tone, after `silence` seconds of
+ * nothing. A cosine rather than a sine so the very first audible sample is at
+ * full amplitude — with a sine it is zero, and the trim test would be arguing
+ * about one frame of nothing.
+ */
+function fakePcm(seconds = 0.5, silence = 0) {
+  const rate = 24_000
+  const frames = Math.round(rate * (seconds + silence))
+  const buf = Buffer.alloc(frames * 2)
+  for (let i = Math.round(rate * silence); i < frames; i++) {
+    buf.writeInt16LE(Math.round(8000 * Math.cos((i / rate) * 2 * Math.PI * 220)), i * 2)
+  }
+  return buf
+}
+
+/**
+ * Stand in for the network. Each reply is `{ status, body }` or a function;
+ * every request is recorded so the shape can be asserted rather than assumed.
+ */
+function fakeFetch(replies) {
+  const calls = []
+  const queue = [...replies]
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body)
+    calls.push({ url: String(url), headers: init.headers, body, signal: init.signal })
+    const next = queue.shift() ?? { status: 200, body: audioReply(fakePcm()) }
+    const reply = typeof next === 'function' ? next(calls.length) : next
+    return {
+      ok: reply.status >= 200 && reply.status < 300,
+      status: reply.status,
+      statusText: 'x',
+      text: async () => JSON.stringify(reply.body)
+    }
+  }
+  return calls
+}
+
+function audioReply(pcm, mime = 'audio/l16; rate=24000; channels=1') {
+  return { candidates: [{ content: { parts: [{ inlineData: { mimeType: mime, data: pcm.toString('base64') } }] }, finishReason: 'STOP' }] }
+}
+
+const realFetch = globalThis.fetch
+
+await test('the request is the shape the API actually accepts', async () => {
+  // Verified live on 2026-07-30. The array form printed on ai.google.dev
+  // ("speechConfig": [{ "voice": "Kore" }]) is a 400 — "Proto field is not
+  // repeating, cannot start list" — so this nested shape is not a preference,
+  // it is the only one that works.
+  const calls = fakeFetch([{ status: 200, body: audioReply(fakePcm()) }])
+  const r = await ttsSpeak({ key: 'k-123', text: 'Opened three Claude Code tabs.', voice: 'Sulafat' })
+  assert.equal(r.ok, true)
+  assert.equal(calls.length, 1)
+  assert.match(calls[0].url, /\/v1beta\/models\/gemini-3\.1-flash-tts-preview:generateContent$/)
+  assert.equal(calls[0].headers['x-goog-api-key'], 'k-123')
+  assert.deepEqual(calls[0].body, {
+    contents: [{ parts: [{ text: 'Opened three Claude Code tabs.' }] }],
+    generationConfig: {
+      responseModalities: ['AUDIO'],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Sulafat' } } }
+    }
+  })
+  // The key is never in the URL — a key in a URL ends up in a log.
+  assert.ok(!calls[0].url.includes('k-123'))
+})
+
+await test('both spellings of the PCM mime type parse, and anything else is 24k mono', () => {
+  // These are the two real ones, one per model generation, seen live.
+  assert.deepEqual(parsePcmMime('audio/l16; rate=24000; channels=1'), { sampleRate: 24_000, channels: 1 })
+  assert.deepEqual(parsePcmMime('audio/L16;codec=pcm;rate=24000'), { sampleRate: 24_000, channels: 1 })
+  assert.deepEqual(parsePcmMime('audio/l16; rate=48000; channels=2'), { sampleRate: 48_000, channels: 2 })
+  // Nonsense must not produce a chipmunk: fall back to what every model sends.
+  assert.deepEqual(parsePcmMime(''), { sampleRate: 24_000, channels: 1 })
+  assert.deepEqual(parsePcmMime('audio/l16; rate=3'), { sampleRate: 24_000, channels: 1 })
+})
+
+await test('leading digital silence is trimmed, and pure silence is left alone', () => {
+  // gemini-3.1-flash-tts-preview opens with a run of exact-zero samples. That
+  // is dead air between him finishing and hearing an answer, and it is free to
+  // remove because the samples are literally zero.
+  const withGap = fakePcm(0.4, 0.5)
+  const trimmed = trimLeadingSilence(withGap, 1)
+  assert.ok(trimmed.trimmed > 0, 'the silence should have been found')
+  // 240 frames of run-up are kept, so the first consonant is not on a cliff.
+  assert.equal(trimmed.trimmed, Math.round(24_000 * 0.5) - 240)
+  assert.equal(trimmed.audio.length, withGap.length - trimmed.trimmed * 2)
+
+  // Audio that starts immediately is returned untouched.
+  const noGap = fakePcm(0.4, 0)
+  assert.equal(trimLeadingSilence(noGap, 1).trimmed, 0)
+
+  // All silence is a bug upstream; returning nothing would look like success.
+  const silent = Buffer.alloc(4800)
+  assert.equal(trimLeadingSilence(silent, 1).trimmed, 0)
+  assert.equal(trimLeadingSilence(silent, 1).audio.length, 4800)
+})
+
+await test('an unknown voice or model never reaches the wire', () => {
+  // An unknown voice name comes back as a 404 "Requested entity was not found",
+  // which is indistinguishable from a missing model — so it is caught here
+  // instead of costing a round trip and a confusing error.
+  assert.equal(ttsVoice('Sulafat'), 'Sulafat')
+  assert.equal(ttsVoice('NotARealVoice'), sharedTts.DEFAULT_TTS_VOICE)
+  assert.equal(ttsVoice(''), sharedTts.DEFAULT_TTS_VOICE)
+  assert.equal(ttsVoice(undefined), sharedTts.DEFAULT_TTS_VOICE)
+  assert.equal(ttsModel(''), sharedTts.DEFAULT_TTS_MODEL)
+  assert.equal(ttsModel('gemini-2.5-flash-preview-tts'), 'gemini-2.5-flash-preview-tts')
+  assert.equal(ttsModel('../../etc/passwd'), sharedTts.DEFAULT_TTS_MODEL)
+})
+
+await test('the voice catalogue is one list, and the default is the warm one', () => {
+  assert.equal(sharedTts.TTS_VOICES.length, 30)
+  assert.equal(sharedTts.DEFAULT_TTS_VOICE, 'Sulafat')
+  // The default was not a hunch: it is the only voice Google describes as warm,
+  // and warm is the exact opposite of "it sounds robotic".
+  const warm = sharedTts.TTS_VOICES.filter((v) => v.character === 'Warm')
+  assert.deepEqual(warm.map((v) => v.name), ['Sulafat'])
+  assert.ok(sharedTts.isTtsVoice('Kore') && !sharedTts.isTtsVoice('Kore '.repeat(4)))
+  // The fallback model must be a real one, and not the default.
+  assert.ok(sharedTts.isTtsModel(sharedTts.FALLBACK_TTS_MODEL))
+  assert.notEqual(sharedTts.FALLBACK_TTS_MODEL, sharedTts.DEFAULT_TTS_MODEL)
+})
+
+await test('out of quota on one model, the other one says it', async () => {
+  // Not belt-and-braces: on a free AI Studio key the 3.1 preview 429s after
+  // roughly six sentences a minute, and its bucket is not the 2.5 bucket.
+  // Measured live — thirteen requests in a minute was enough to trip it.
+  const calls = fakeFetch([
+    { status: 429, body: { error: { status: 'RESOURCE_EXHAUSTED', message: 'You exceeded your current quota' } } },
+    { status: 200, body: audioReply(fakePcm()) }
+  ])
+  const r = await ttsSpeak({ key: 'k', text: 'Opened three Claude Code tabs.' })
+  assert.equal(r.ok, true)
+  assert.equal(calls.length, 2)
+  assert.match(calls[0].url, /gemini-3\.1-flash-tts-preview/)
+  assert.match(calls[1].url, /gemini-2\.5-flash-preview-tts/)
+  assert.equal(r.model, sharedTts.FALLBACK_TTS_MODEL)
+  assert.match(r.note, /unavailable \(quota\)/)
+})
+
+await test('a bad key is not retried on a second model — it would fail identically', async () => {
+  const calls = fakeFetch([{ status: 403, body: { error: { message: 'API key not valid' } } }])
+  const r = await ttsSpeak({ key: 'k', text: 'hello' })
+  assert.equal(r.ok, false)
+  assert.equal(r.kind, 'auth')
+  assert.equal(calls.length, 1, 'one failure, one request')
+})
+
+await test('no key, empty text and a novel are all refused before the network', async () => {
+  const calls = fakeFetch([])
+  assert.equal((await ttsSpeak({ key: '', text: 'hi' })).kind, 'no-key')
+  assert.equal((await ttsSpeak({ key: 'k', text: '   ' })).kind, 'bad-input')
+  assert.equal((await ttsSpeak({ key: 'k', text: 'x'.repeat(2000) })).kind, 'bad-input')
+  assert.equal(calls.length, 0, 'nothing reached the wire')
+})
+
+await test('a reply with no audio part is a failure, not silence pretending to be success', async () => {
+  fakeFetch([{ status: 200, body: { candidates: [{ content: { parts: [{ text: 'I would rather not' }] }, finishReason: 'STOP' }] } }])
+  const r = await ttsSpeak({ key: 'k', text: 'hello' })
+  assert.equal(r.ok, false)
+  assert.equal(r.kind, 'no-audio')
+})
+
+await test('barge-in before the request goes out costs nothing', async () => {
+  const calls = fakeFetch([])
+  const controller = new AbortController()
+  controller.abort()
+  const r = await ttsSpeak({ key: 'k', text: 'hello', signal: controller.signal })
+  assert.equal(r.ok, false)
+  assert.equal(r.kind, 'cancelled')
+  assert.equal(calls.length, 0)
+})
+
+globalThis.fetch = realFetch
+
+/* ------------------------------------------------------- the engine chain */
+
+console.log('\nNeural speech — the engine chain')
+
+const {
+  voiceSpeaker,
+  setTtsBackend,
+  chooseEngine,
+  stripFiller,
+  pickVaried,
+  ttsCacheKey,
+  LruCache,
+  base64ToPcm,
+  pcmToFloat32
+} = await import('../src/lib/tts.ts')
+
+/** A backend that never touches IPC or an audio device. */
+function fakeTts(reply = () => ({ ok: true, audio: fakePcm(0.2).toString('base64'), mime: 'audio/l16; rate=24000; channels=1', sampleRate: 24_000, channels: 1, model: 'm', voice: 'Sulafat', ms: 12 })) {
+  const calls = { speak: [], cancel: [], play: [] }
+  let release = null
+  return {
+    calls,
+    /** Let a request that was deliberately held finish. */
+    finish: () => release?.(),
+    hold: false,
+    backend: {
+      speak: async (req) => {
+        calls.speak.push(req)
+        if (fake.hold) await new Promise((r) => (release = r))
+        return reply(req, calls.speak.length)
+      },
+      cancelSpeak: async (id) => {
+        calls.cancel.push(id)
+        return true
+      },
+      play: (pcm, rate, channels) => {
+        calls.play.push({ frames: pcm.length, rate, channels })
+        return { done: Promise.resolve(), stop: () => calls.play.push('stopped') }
+      }
+    }
+  }
+}
+let fake = fakeTts()
+
+/** Windows, as far as speech.ts is concerned — so the local leg can be driven. */
+function withSpeechSynthesis() {
+  const said = []
+  global.window = {
+    speechSynthesis: {
+      speak(u) {
+        said.push(u.text)
+        setTimeout(() => u.onend?.(), 0)
+      },
+      cancel() {},
+      getVoices: () => [{ name: 'Microsoft Hazel - English (United Kingdom)', lang: 'en-GB' }]
+    },
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (t) => clearTimeout(t)
+  }
+  global.SpeechSynthesisUtterance = class {
+    constructor(text) {
+      this.text = text
+    }
+  }
+  return said
+}
+
+const GEMINI = { engine: 'gemini', hasKey: true, geminiVoice: 'Sulafat', ttsModel: '', localVoice: '' }
+
+await test('the engine is chosen by settings AND by whether a key exists', () => {
+  assert.equal(chooseEngine(GEMINI), 'gemini')
+  // No key is not a failure to report later — it is a different engine now.
+  assert.equal(chooseEngine({ ...GEMINI, hasKey: false }), 'local')
+  // An explicit choice of the local voice is honoured even with a key.
+  assert.equal(chooseEngine({ ...GEMINI, engine: 'local' }), 'local')
+})
+
+await test('with a key, the neural engine speaks and the audio reaches the device', async () => {
+  fake = fakeTts()
+  setTtsBackend(fake.backend)
+  voiceSpeaker.clearCache()
+  const r = await voiceSpeaker.speak('Opened three Claude Code tabs.', GEMINI)
+  assert.equal(r.spoke, true)
+  assert.equal(r.engine, 'gemini')
+  assert.equal(r.cached, false)
+  assert.equal(fake.calls.speak.length, 1)
+  assert.equal(fake.calls.speak[0].text, 'Opened three Claude Code tabs.')
+  assert.equal(fake.calls.speak[0].voice, 'Sulafat')
+  assert.equal(fake.calls.play.length, 1)
+  assert.equal(fake.calls.play[0].rate, 24_000)
+  assert.ok(fake.calls.play[0].frames > 0, 'silence is not speech')
+})
+
+await test('the same sentence twice is a cache hit — no second request', async () => {
+  // The free-tier TTS quota is about six sentences a minute, and "Opened three
+  // Claude Code tabs." is a sentence he hears twenty times a day.
+  fake = fakeTts()
+  setTtsBackend(fake.backend)
+  voiceSpeaker.clearCache()
+  await voiceSpeaker.speak('Opened three Claude Code tabs.', GEMINI)
+  const second = await voiceSpeaker.speak('Opened three Claude Code tabs.', GEMINI)
+  assert.equal(second.cached, true)
+  assert.equal(second.spoke, true)
+  assert.equal(fake.calls.speak.length, 1, 'the second one must not hit the network')
+  assert.equal(fake.calls.play.length, 2, 'but it must still be heard')
+
+  // A different voice is a different sound, so it is a different key.
+  await voiceSpeaker.speak('Opened three Claude Code tabs.', { ...GEMINI, geminiVoice: 'Puck' })
+  assert.equal(fake.calls.speak.length, 2)
+})
+
+await test('the cache key separates voice and model, and the LRU forgets the oldest', () => {
+  assert.notEqual(ttsCacheKey('hi', 'Sulafat', ''), ttsCacheKey('hi', 'Puck', ''))
+  assert.notEqual(ttsCacheKey('hi', 'Sulafat', 'a'), ttsCacheKey('hi', 'Sulafat', 'b'))
+  assert.equal(ttsCacheKey(' hi ', 'Sulafat', ''), ttsCacheKey('hi', 'Sulafat', ''))
+
+  const lru = new LruCache(3)
+  lru.set('a', 1)
+  lru.set('b', 2)
+  lru.set('c', 3)
+  assert.equal(lru.get('a'), 1) // touching 'a' makes 'b' the oldest
+  lru.set('d', 4)
+  assert.equal(lru.size, 3)
+  assert.equal(lru.has('b'), false)
+  assert.equal(lru.get('a'), 1)
+  assert.equal(lru.get('d'), 4)
+})
+
+await test('when the neural voice fails, the local one still says the words', async () => {
+  // NEVER DEAD AIR. An agent that silently says nothing is indistinguishable
+  // from one that has crashed, and Steve is not looking at the screen.
+  const said = withSpeechSynthesis()
+  const notices = []
+  fake = fakeTts(() => ({ ok: false, error: 'Gemini is out of quota for this key (429): ...', kind: 'quota' }))
+  setTtsBackend(fake.backend)
+  voiceSpeaker.clearCache()
+
+  const r = await voiceSpeaker.speak('Opened three Claude Code tabs.', GEMINI, (m) => notices.push(m))
+  assert.equal(r.engine, 'local')
+  assert.equal(r.spoke, true)
+  assert.equal(r.fellBackBecause, 'quota')
+  assert.deepEqual(said, ['Opened three Claude Code tabs.'])
+  assert.equal(notices.length, 1, 'it explains itself once')
+  assert.match(notices[0], /Neural voice unavailable/)
+  assert.match(notices[0], /out of quota/)
+
+  // Once per session, not once per sentence — a toast on every reply would be
+  // its own kind of nagging.
+  await voiceSpeaker.speak('Two Kimi tabs open.', GEMINI, (m) => notices.push(m))
+  assert.equal(notices.length, 1)
+  assert.deepEqual(said, ['Opened three Claude Code tabs.', 'Two Kimi tabs open.'])
+
+  delete global.window
+  delete global.SpeechSynthesisUtterance
+})
+
+await test('barge-in aborts the request in flight and never plays the late reply', async () => {
+  fake = fakeTts()
+  fake.hold = true
+  setTtsBackend(fake.backend)
+  voiceSpeaker.clearCache()
+
+  const speaking = voiceSpeaker.speak('A long answer he does not want to hear.', GEMINI)
+  await new Promise((r) => setTimeout(r, 5))
+  voiceSpeaker.cancel()
+  fake.finish()
+  const r = await speaking
+
+  assert.equal(r.spoke, false, 'nothing may be heard after he interrupts')
+  assert.equal(fake.calls.cancel.length, 1, 'the main-process fetch is aborted too')
+  assert.equal(fake.calls.cancel[0], fake.calls.speak[0].requestId)
+  assert.equal(fake.calls.play.length, 0, 'the clip that landed late is discarded')
+  fake.hold = false
+})
+
+await test('a turn is spoken exactly once, however often the panel re-renders', async () => {
+  fake = fakeTts()
+  setTtsBackend(fake.backend)
+  voiceSpeaker.clearCache()
+  await voiceSpeaker.speakOnce('turn_neural_1', 'Three Claude Code tabs open.', GEMINI)
+  await voiceSpeaker.speakOnce('turn_neural_1', 'Three Claude Code tabs open.', GEMINI)
+  await voiceSpeaker.speakOnce('turn_neural_1', 'Three Claude Code tabs open.', GEMINI)
+  assert.equal(fake.calls.play.length, 1, 'one turn, one utterance')
+})
+
+await test('echo rejection covers the neural engine too, or it covers neither', async () => {
+  // The bug this guards against was found live with SAPI: Forge said "Typed
+  // into Terminal 6 Claude Code, auto-relay is off in Settings", the sidecar
+  // cut those words once the room went quiet, and it answered itself. The
+  // microphone does not care which engine said them — and `gemini` is the
+  // default — so a neural clip has to arm the same guard.
+  const { speaker: spk } = await import('../src/lib/speech.ts')
+  spk.forgetLastSpoken()
+  assert.equal(spk.heardItself('opened three claude code tabs'), false, 'nothing said yet')
+
+  fake = fakeTts()
+  setTtsBackend(fake.backend)
+  voiceSpeaker.clearCache()
+  await voiceSpeaker.speak('Opened three Claude Code tabs.', GEMINI)
+
+  // Mangled by speech-to-text, as it really comes back, and still caught:
+  // the comparison is on words, not spelling.
+  assert.equal(spk.heardItself('opened three clawed code tabs'), true)
+  // Steve's own words are not an echo.
+  assert.equal(spk.heardItself('now open two kimi tabs instead'), false)
+  // And the window closes: six seconds later it is his again.
+  assert.equal(spk.heardItself('opened three clawed code tabs', Date.now() + 20_000), false)
+  spk.forgetLastSpoken()
+})
+
+await test('raw PCM becomes the floats Web Audio wants, without a WAV header', () => {
+  // Gemini sends headerless PCM, so decodeAudioData cannot be used at all —
+  // it sniffs container formats and rejects raw samples.
+  const pcm = Buffer.alloc(8)
+  pcm.writeInt16LE(0, 0)
+  pcm.writeInt16LE(32767, 2)
+  pcm.writeInt16LE(-32768, 4)
+  pcm.writeInt16LE(-16384, 6)
+  const samples = base64ToPcm(pcm.toString('base64'))
+  assert.deepEqual([...samples], [0, 32767, -32768, -16384])
+  const floats = pcmToFloat32(samples)
+  assert.equal(floats[0], 0)
+  assert.equal(floats[2], -1, 'the negative extreme maps to exactly -1')
+  assert.equal(floats[3], -0.5)
+  assert.ok(floats[1] < 1 && floats[1] > 0.999, 'and the positive one cannot overflow')
+})
+
+setTtsBackend(null)
+
+/* ------------------------------------------------- the canned robotics (B) */
+
+console.log('\nNothing canned')
+
+await test('a canned sign-off is stripped before anything is spoken', () => {
+  // The exact sentence Steve quoted. A prompt rule is a request, not a
+  // guarantee, so it is also removed on the way out.
+  assert.equal(stripFiller('Ready for your next instruction.'), '')
+  assert.equal(stripFiller('Opened three tabs. Ready for your next instruction.'), 'Opened three tabs.')
+  assert.equal(stripFiller('Done. Awaiting your next command.'), 'Done.')
+  assert.equal(stripFiller('Done. I am ready for your next instruction. Ready for the next command.'), 'Done.')
+  assert.equal(stripFiller('Standing by for your next request.'), '')
+  assert.equal(stripFiller("I'm listening."), '')
+  assert.equal(stripFiller('How can I help?'), '')
+  assert.equal(stripFiller('Anything else?'), '')
+  assert.equal(stripFiller("What's next?"), '')
+
+  // Real information survives, including sentences that merely contain the
+  // words. Stripping "the build is ready" would be a much worse bug.
+  assert.equal(stripFiller('The build is ready.'), 'The build is ready.')
+  assert.equal(stripFiller('Terminal two is listening on port 3000.'), 'Terminal two is listening on port 3000.')
+  assert.equal(stripFiller('Right — three of them, up and running.'), 'Right — three of them, up and running.')
+  assert.equal(stripFiller(''), '')
+})
+
+await test('what Forge says for itself is never the same sentence twice running', () => {
+  const options = ['one', 'two', 'three']
+  for (let i = 0; i < 50; i++) assert.notEqual(pickVaried(options, 'one'), 'one')
+  // A pool of one still has to answer rather than returning nothing.
+  assert.equal(pickVaried(['only'], 'only'), 'only')
+  assert.equal(pickVaried([], 'x'), '')
+})
+
+await test('no canned assistant filler is hard-coded anywhere in Forge', () => {
+  // The regression guard. Steve heard "Ready for your next instruction." and
+  // called the whole thing garbage; if one is ever typed into a source file
+  // again, this fails rather than shipping.
+  const CANNED = [
+    /ready for (?:your|the) next/i,
+    /awaiting (?:your|the|further)/i,
+    /standing by/i,
+    /at your service/i,
+    /how (?:can|may) i (?:help|assist)/i,
+    /is there anything else/i,
+    /next (?:instruction|command)\b/i,
+    /i am (?:ready|listening) (?:for|to receive)/i
+  ]
+  // Code only — comments are allowed to name the thing they are about, and two
+  // of them have to. Two files are exempt outright: appmanifest.ts quotes the
+  // sentence to forbid it, and tts.ts's regexes have to spell it to strip it.
+  const decomment = (text) => text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(?<!:)\/\/[^\n]*/g, ' ')
+  const roots = ['src', 'electron', 'shared', 'bridge', 'companion']
+  const SKIP = new Set(['node_modules', 'out', 'dist', '.git'])
+  const offenders = []
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP.has(entry.name)) continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+        continue
+      }
+      if (!/\.(ts|tsx|mjs|js|html)$/.test(entry.name)) continue
+      if (full.endsWith(join('src', 'lib', 'appmanifest.ts'))) continue
+      if (full.endsWith(join('src', 'lib', 'tts.ts'))) continue
+      const text = decomment(readFileSync(full, 'utf8'))
+      for (const rx of CANNED) {
+        const hit = rx.exec(text)
+        if (hit) offenders.push(`${full}: ${hit[0]}`)
+      }
+    }
+  }
+  for (const root of roots) walk(join(ROOT, root))
+  assert.deepEqual(offenders, [], `canned filler found:\n${offenders.join('\n')}`)
+
+  // And prove the guard actually bites: the sentence Steve quoted, in code.
+  assert.ok(CANNED.some((rx) => rx.test('const say = "Ready for your next instruction."')))
+})
+
+await test('the brain is told, in the manifest, how a spoken reply must sound', () => {
+  const manifest = buildManifest(SNAPSHOT)
+  // Every rule ships, or the fix is only half applied.
+  for (const rule of SAY_RULES) assert.ok(manifest.includes(rule), `missing rule: ${rule.slice(0, 60)}`)
+
+  // And the rules themselves say the things that matter, so a future edit
+  // cannot quietly hollow them out while keeping the heading.
+  const rules = SAY_RULES.join('\n')
+  assert.match(rules, /TWO SHORT SENTENCES MAXIMUM/)
+  assert.match(rules, /Contractions, always/)
+  assert.match(rules, /VARY IT/i)
+  assert.match(rules, /never reuse a sentence you have already/i)
+  assert.match(rules, /NO SIGN-OFFS/)
+  assert.match(rules, /Ready for your next instruction/)
+  assert.match(rules, /"instruction", "command", "request" or "query"/)
+  assert.match(rules, /Do not narrate yourself/)
+  assert.match(rules, /Do not read out what is already on screen/)
+  assert.match(rules, /Silence is a valid reply/)
+})
+
+await test('the speech settings default to the good engine, and survive a hand-edited file', () => {
+  // The renderer's fallback settings and the main process's defaults are two
+  // literals that must agree, exactly as geminiModel and openrouterModel do.
+  const store = readFileSync(join(ROOT, 'electron', 'store.ts'), 'utf8')
+  const state = readFileSync(join(ROOT, 'src', 'state', 'AppState.tsx'), 'utf8')
+  for (const line of ["voiceEngine: 'gemini'", 'voiceEarcons: true', "voiceTtsVoice: ''", "voiceTtsModel: ''"]) {
+    assert.ok(store.includes(line), `electron/store.ts is missing ${line}`)
+    assert.ok(state.includes(line), `AppState.tsx is missing ${line}`)
+  }
+  // Blank is meaningful for both — "whatever gemini-tts.ts defaults to" — so
+  // neither may be seeded with a literal model or voice name.
+  assert.ok(!/voiceTtsVoice: 'Sulafat'/.test(store))
+})
 
 /* ------------------------------------------------------------------- live */
 

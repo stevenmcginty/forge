@@ -14,6 +14,8 @@ import type {
   AppInfo,
   ClaudePermissionMode,
   LayoutNode,
+  MosaicState,
+  MosaicTile,
   Project,
   Settings,
   SplitDirection,
@@ -27,6 +29,7 @@ import { BUILTIN_AGENT_PROFILES, isShellProfile } from '@shared/agents'
 import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
 import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
+import { emptyMosaic, sanitiseMosaic } from '@/lib/mosaicLayout'
 import { basename } from '@/lib/paths'
 import {
   collectLeaves,
@@ -144,11 +147,21 @@ const FALLBACK_SETTINGS: Settings = {
   voiceRelayGraceMs: 2500,
   voiceReplyMode: 'both',
   voiceReplyVoice: '',
+  // Neural speech is the default, and with no key the engine chain in
+  // src/lib/tts.ts drops to the local voice on its own — so preferring the good
+  // one here cannot leave a keyless install silent.
+  voiceEngine: 'gemini',
+  voiceTtsVoice: '',
+  voiceTtsModel: '',
+  voiceEarcons: true,
   projectsRoot: '',
   geminiImageModel: '',
   openrouterKey: '',
   openrouterModel: 'google/gemini-2.5-flash-lite',
   memoryLlmSummarize: false,
+  // Filled in by the store on hydrate — main knows the real data root.
+  skillsLibraryDir: '',
+  skillsEnabled: [],
   remoteControlDefault: true,
   // Companion (M9): the phone link, off and unconfigured until Steve says
   // otherwise. This fallback is only ever used before the first snapshot
@@ -218,6 +231,14 @@ type Action =
   | { type: 'setViewMode'; mode: WorkspaceViewMode }
   | { type: 'toggleViewMode' }
   | { type: 'setMosaicZoom'; paneId: string | null }
+  /**
+   * Write boxes onto the freeform wall. `custom` flips the wall out of the auto
+   * grid (the caller has just seeded every tile's current position, so nothing
+   * visibly moves); `wallTab` marks a tab as having been dragged onto it.
+   */
+  | { type: 'mosaicTiles'; tiles: Record<string, MosaicTile>; custom?: boolean; wallTab?: string }
+  | { type: 'mosaicFit'; paneId: string; fit: boolean }
+  | { type: 'mosaicReset' }
   | { type: 'setAgentListening'; on: boolean }
   | { type: 'drainKills'; ids: string[] }
   | { type: 'notice'; message: string | null }
@@ -229,6 +250,46 @@ type Action =
 /* -------------------------------------------------------------- helpers */
 
 const EMPTY_WORKSPACE: Workspace = { tabs: [], activeTabId: null, viewMode: 'tabs' }
+
+function mosaicOf(ws: Workspace): MosaicState {
+  return ws.mosaic ?? emptyMosaic()
+}
+
+/** Replace the active project's mosaic layout through a mapper. */
+function mapMosaic(state: AppState, fn: (m: MosaicState) => MosaicState | null): AppState {
+  return mapActiveWorkspace(state, (ws) => {
+    const current = mosaicOf(ws)
+    const next = fn(current)
+    if (!next || next === current) return null
+    return { ...ws, mosaic: next }
+  })
+}
+
+/**
+ * Drop wall boxes belonging to panes and tabs that have just been closed.
+ *
+ * Stale entries are invisible rather than harmful — nothing looks a box up by a
+ * dead pane id — but a project worked in for a month would otherwise carry a
+ * few hundred of them to disk forever. A wall left with nothing on it goes back
+ * to the auto grid, which is the only honest thing an empty custom wall can be.
+ */
+function withPrunedMosaic(ws: Workspace): Workspace {
+  const m = ws.mosaic
+  if (!m) return ws
+  const livePanes = new Set<string>()
+  for (const t of ws.tabs) for (const l of collectLeaves(t.root)) livePanes.add(l.id)
+  const liveTabs = new Set(ws.tabs.map((t) => t.id))
+
+  const tiles: Record<string, MosaicTile> = {}
+  for (const [id, rect] of Object.entries(m.tiles)) if (livePanes.has(id)) tiles[id] = rect
+  const wallTabs = m.wallTabs.filter((id) => liveTabs.has(id))
+
+  const same =
+    Object.keys(tiles).length === Object.keys(m.tiles).length && wallTabs.length === m.wallTabs.length
+  if (same) return ws
+  if (Object.keys(tiles).length === 0) return { ...ws, mosaic: emptyMosaic() }
+  return { ...ws, mosaic: { ...m, tiles, wallTabs } }
+}
 
 function workspaceOf(state: AppState, projectId: string | null): Workspace {
   if (!projectId) return EMPTY_WORKSPACE
@@ -304,7 +365,10 @@ function sanitiseWorkspace(ws: Workspace | null, profileIds: Set<string>): Works
   }
   const activeTabId = tabs.some((t) => t.id === ws.activeTabId) ? ws.activeTabId : (tabs[0]?.id ?? null)
   const viewMode: WorkspaceViewMode = ws.viewMode === 'mosaic' ? 'mosaic' : 'tabs'
-  return { tabs, activeTabId, viewMode }
+  const livePanes = new Set<string>()
+  for (const t of tabs) for (const l of collectLeaves(t.root)) livePanes.add(l.id)
+  const mosaic = sanitiseMosaic(ws.mosaic, livePanes, new Set(tabs.map((t) => t.id)))
+  return { tabs, activeTabId, viewMode, mosaic }
 }
 
 /* ------------------------------------------------------------- reducer */
@@ -463,7 +527,7 @@ function reducer(state: AppState, action: Action): AppState {
           current.activeTabId === action.tabId
             ? (tabs[Math.max(0, current.tabs.findIndex((t) => t.id === action.tabId) - 1)]?.id ?? null)
             : current.activeTabId
-        return { ...current, tabs, activeTabId }
+        return withPrunedMosaic({ ...current, tabs, activeTabId })
       })
       return {
         ...next,
@@ -522,10 +586,11 @@ function reducer(state: AppState, action: Action): AppState {
         return { ...t, root, activePaneId: nextFocus ?? t.activePaneId }
       })
       if (next === state) return state
+      const pruned = mapActiveWorkspace(next, withPrunedMosaic)
       return {
-        ...next,
-        pendingKills: [...next.pendingKills, action.paneId],
-        mosaicZoom: next.mosaicZoom === action.paneId ? null : next.mosaicZoom
+        ...pruned,
+        pendingKills: [...pruned.pendingKills, action.paneId],
+        mosaicZoom: pruned.mosaicZoom === action.paneId ? null : pruned.mosaicZoom
       }
     }
 
@@ -576,6 +641,29 @@ function reducer(state: AppState, action: Action): AppState {
 
     case 'setMosaicZoom':
       return state.mosaicZoom === action.paneId ? state : { ...state, mosaicZoom: action.paneId }
+
+    case 'mosaicTiles':
+      return mapMosaic(state, (m) => {
+        const wallTabs =
+          action.wallTab && !m.wallTabs.includes(action.wallTab) ? [...m.wallTabs, action.wallTab] : m.wallTabs
+        return {
+          mode: action.custom ? 'custom' : m.mode,
+          tiles: { ...m.tiles, ...action.tiles },
+          wallTabs
+        }
+      })
+
+    case 'mosaicFit':
+      return mapMosaic(state, (m) => {
+        const tile = m.tiles[action.paneId]
+        if (!tile || (tile.fit ?? false) === action.fit) return null
+        const next: MosaicTile = { x: tile.x, y: tile.y, w: tile.w, h: tile.h }
+        if (action.fit) next.fit = true
+        return { ...m, tiles: { ...m.tiles, [action.paneId]: next } }
+      })
+
+    case 'mosaicReset':
+      return mapMosaic(state, (m) => (m.mode === 'auto' && m.wallTabs.length === 0 ? null : emptyMosaic()))
 
     case 'setAgentListening':
       return state.agentListening === action.on ? state : { ...state, agentListening: action.on }
@@ -672,6 +760,18 @@ export interface AppActions {
   setViewMode(mode: WorkspaceViewMode): void
   toggleViewMode(): void
   setMosaicZoom(paneId: string | null): void
+  /**
+   * Write tile boxes onto the freeform wall.
+   *
+   * `custom` moves the wall off the auto grid — pass it only together with a
+   * full set of seeded boxes, or tiles will jump. `wallTab` marks a tab as one
+   * the user dragged onto the wall by hand.
+   */
+  setMosaicTiles(tiles: Record<string, MosaicTile>, opts?: { custom?: boolean; wallTab?: string }): void
+  /** Opt a single tile in or out of refitting its PTY to its box. */
+  setMosaicFit(paneId: string, fit: boolean): void
+  /** Back to the auto grid, forgetting every hand-placed box. */
+  resetMosaicLayout(): void
   setNotice(message: string | null): void
   openDataDir(): void
 
@@ -1050,6 +1150,15 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       setViewMode: (mode) => dispatch({ type: 'setViewMode', mode }),
       toggleViewMode: () => dispatch({ type: 'toggleViewMode' }),
       setMosaicZoom: (paneId) => dispatch({ type: 'setMosaicZoom', paneId }),
+      setMosaicTiles: (tiles, opts) =>
+        dispatch({
+          type: 'mosaicTiles',
+          tiles,
+          ...(opts?.custom ? { custom: true } : {}),
+          ...(opts?.wallTab ? { wallTab: opts.wallTab } : {})
+        }),
+      setMosaicFit: (paneId, fit) => dispatch({ type: 'mosaicFit', paneId, fit }),
+      resetMosaicLayout: () => dispatch({ type: 'mosaicReset' }),
       setNotice: (message) => dispatch({ type: 'notice', message }),
       openDataDir: () => void window.forge.store.revealDataDir(),
 
@@ -1117,6 +1226,11 @@ export function useActiveTab(): TerminalTab | null {
 
 export function useViewMode(): WorkspaceViewMode {
   return useActiveWorkspace().viewMode ?? 'tabs'
+}
+
+/** The active project's freeform wall — the auto grid until it has been moved. */
+export function useMosaic(): MosaicState {
+  return mosaicOf(useActiveWorkspace())
 }
 
 export function usePaneCount(): { used: number; max: number } {

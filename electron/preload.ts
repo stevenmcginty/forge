@@ -74,7 +74,9 @@ const api: ForgeApi = {
     importKey: (which) => ipcRenderer.invoke(IPC.voiceImportKey, which ?? 'gemini'),
     makeImage: (req) => ipcRenderer.invoke(IPC.voiceMakeImage, req),
     editImage: (req) => ipcRenderer.invoke(IPC.voiceEditImage, req),
-    makeVideo: (req) => ipcRenderer.invoke(IPC.voiceMakeVideo, req)
+    makeVideo: (req) => ipcRenderer.invoke(IPC.voiceMakeVideo, req),
+    speak: (req) => ipcRenderer.invoke(IPC.voiceSpeak, req),
+    cancelSpeak: (requestId) => ipcRenderer.invoke(IPC.voiceSpeakCancel, requestId)
   },
 
   memory: {
@@ -82,6 +84,16 @@ const api: ForgeApi = {
     append: (projectId, section, entry, at) => ipcRenderer.invoke(IPC.memoryAppend, projectId, section, entry, at),
     replaceSummary: (projectId, text) => ipcRenderer.invoke(IPC.memoryReplaceSummary, projectId, text),
     clear: (projectId) => ipcRenderer.invoke(IPC.memoryClear, projectId)
+  },
+
+  skills: {
+    list: () => ipcRenderer.invoke(IPC.skillsList),
+    read: (name) => ipcRenderer.invoke(IPC.skillsRead, name),
+    create: (name, description) => ipcRenderer.invoke(IPC.skillsCreate, name, description),
+    importFolder: (sourceDir) => ipcRenderer.invoke(IPC.skillsImport, sourceDir ?? ''),
+    remove: (name) => ipcRenderer.invoke(IPC.skillsRemove, name),
+    setEnabled: (name, on) => ipcRenderer.invoke(IPC.skillsSetEnabled, name, on === true),
+    openFolder: (name) => ipcRenderer.invoke(IPC.skillsOpenFolder, name ?? '')
   },
 
   companion: {

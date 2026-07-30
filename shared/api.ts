@@ -33,9 +33,24 @@ import type {
   ToolLatest,
   ToolProbe,
   UpdateStatus,
+  VoiceSpeakRequest,
+  VoiceSpeakResult,
   WindowStateEvent,
   Workspace
 } from './types'
+import type { SkillInfo } from './skills'
+
+/** What every skills mutation hands back: the outcome, and the fresh list. */
+export interface SkillMutation {
+  ok: boolean
+  /** The skill the call was about, when it got far enough to know. */
+  name?: string
+  error?: string
+  /** True when the folder picker was dismissed — not a failure worth showing. */
+  cancelled?: boolean
+  /** The library as it now stands, so no caller needs a second round trip. */
+  skills: SkillInfo[]
+}
 
 /**
  * The whole surface the renderer is allowed to touch. Declared here (free of
@@ -158,6 +173,16 @@ export interface ForgeApi {
      * adopted into the screenshot shelf: it only holds still images.
      */
     makeVideo(req: MakeVideoRequest): Promise<MediaCallResult>
+    /**
+     * Say something in a real voice.
+     *
+     * Returns base64 raw PCM for the renderer to play through Web Audio; the
+     * key is read in the main process and the bytes are never written to disk.
+     * Pass `requestId` and barge-in can abort it with `cancelSpeak`.
+     */
+    speak(req: VoiceSpeakRequest): Promise<VoiceSpeakResult>
+    /** Abort an in-flight `speak`. Unknown ids are a no-op, never an error. */
+    cancelSpeak(requestId: string): Promise<boolean>
   }
 
   /**
@@ -174,6 +199,31 @@ export interface ForgeApi {
     replaceSummary(projectId: string, text: string): Promise<string>
     /** True when the file is gone (including when there was none). */
     clear(projectId: string): Promise<boolean>
+  }
+
+  /**
+   * The skills library: `%APPDATA%\Forge\skills\<name>\SKILL.md`.
+   *
+   * Enabling a skill junctions it into `~/.claude/skills`, which is machine-wide
+   * — every `claude` and `kimi` session started from anywhere picks it up, not
+   * just the panes Forge opened. That is the whole point of the feature, and
+   * also why nothing here will overwrite a folder Forge did not create.
+   *
+   * Every mutation resolves with the fresh list alongside its result, so the
+   * rail never has to ask twice.
+   */
+  skills: {
+    list(): Promise<SkillInfo[]>
+    /** The raw SKILL.md — used for the preamble dropped on a non-Claude agent. */
+    read(name: string): Promise<string>
+    create(name: string, description: string): Promise<SkillMutation>
+    /** Omit `sourceDir` to open the native folder picker. */
+    importFolder(sourceDir?: string): Promise<SkillMutation>
+    remove(name: string): Promise<SkillMutation>
+    /** Sync into (or out of) ~/.claude/skills, and record the choice. */
+    setEnabled(name: string, on: boolean): Promise<SkillMutation>
+    /** Reveal a skill's folder, or the library itself. Resolves with the path. */
+    openFolder(name?: string): Promise<string>
   }
 
   /**
