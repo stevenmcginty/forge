@@ -1,5 +1,5 @@
 import type { OpenRouterCallRequest, OpenRouterCallResult } from '@shared/types'
-import { parseBrainJson, salvagePartialJson } from './brainjson'
+import { parseBrainJson, salvagePartialJson, withProjectMemory } from './brainjson'
 import type { BrainContext, BrainReply, BrainStatus, VoiceBrain } from './voicebrain'
 
 /**
@@ -87,7 +87,7 @@ export class OpenRouterBrain implements VoiceBrain {
     const base: OpenRouterCallRequest = {
       key: this.apiKey,
       model: this.model,
-      system: `${context.manifest ?? ''}${JSON_REMINDER}`,
+      system: `${withProjectMemory(context.manifest ?? '', context.projectMemory)}${JSON_REMINDER}`,
       turns,
       json: true
     }

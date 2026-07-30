@@ -251,6 +251,10 @@ export function parseCommand(transcript: string, ctx: CommandContext): CommandHi
   if (tokens.length === 0 || tokens.length > MAX_COMMAND_WORDS) return null
   const has = (w: string): boolean => tokens.includes(w)
 
+  /* --- memory: "what do you remember?", "forget this project's memory" --- */
+  const memory = parseMemoryCommand(text)
+  if (memory) return memory
+
   /* --- focus a tab by position: "go to tab 2", "second tab", "tab 3" ----- */
   const focus = parseFocusTab(text, tokens)
   if (focus) return focus
@@ -278,6 +282,39 @@ export function parseCommand(transcript: string, ctx: CommandContext): CommandHi
 
   /* --- open tabs / panes ------------------------------------------------- */
   return parseOpen(text, tokens, ctx)
+}
+
+/**
+ * Asking the memory about itself, and wiping it.
+ *
+ * Both answer off the markdown file, with no model involved — which is the
+ * point: "what do you remember" should be instant, free, and provably not a
+ * hallucination. It is also why these patterns are narrow. "remember I prefer
+ * strict mode" must *not* match: that is a preference to be recorded and then
+ * answered by the brain, and swallowing it here would lose the reply.
+ */
+const RECALL_PATTERNS: RegExp[] = [
+  /\bwhat\s+(?:do|did)\s+you\s+remember\b/,
+  /\bwhat\s+(?:have|d)\s*you\s+(?:learn(?:ed|t)|remembered)\b/,
+  /\bwhat\s+do\s+you\s+know\s+about\s+(?:this|the|my)\s+project\b/,
+  /\bwhat(?:'s|s| is)\s+in\s+(?:your\s+|the\s+)?memory\b/,
+  /\bdo\s+you\s+remember\s+(?:anything|this|the\s+project|my\s+preferences?)\b/
+]
+
+const FORGET_PATTERNS: RegExp[] = [
+  /\b(?:forget|clear|wipe|erase|reset|delete|drop)\b[^.?]*\bmemor(?:y|ies)\b/,
+  /\bforget\s+(?:everything|all|what\s+you\s+know)\b[^.?]*\b(?:this|the|my)\s+project\b/,
+  /\bforget\s+(?:this|the|my)\s+project\b/
+]
+
+function parseMemoryCommand(text: string): CommandHit | null {
+  for (const re of RECALL_PATTERNS) {
+    if (re.test(text)) return { action: { kind: 'recall_memory' }, confidence: 'high' }
+  }
+  for (const re of FORGET_PATTERNS) {
+    if (re.test(text)) return { action: { kind: 'forget_memory' }, confidence: 'high' }
+  }
+  return null
 }
 
 function parseFocusTab(text: string, tokens: string[]): CommandHit | null {

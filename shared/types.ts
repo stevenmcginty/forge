@@ -297,6 +297,23 @@ export type MediaCallResult =
     }
   | { ok: false; error: string; kind: string }
 
+/* --------------------------------------------------------- agent memory */
+
+/**
+ * Which part of a project's memory an entry belongs to.
+ *
+ * These map one-for-one onto the `##` headings in
+ * `%APPDATA%\Forge\memory\<projectId>.md`, which is a plain markdown file on
+ * purpose: it is folded straight into the brain's system text, and Steve can
+ * open it in Notepad and see exactly what Forge thinks it knows about him.
+ *
+ *   about        one rolling paragraph — what this project *is*
+ *   decisions    choices that were made and should not be re-litigated
+ *   preferences  standing instructions ("always use TypeScript strict mode")
+ *   activity     a capped, timestamped list of what actually happened
+ */
+export type MemorySection = 'about' | 'decisions' | 'preferences' | 'activity'
+
 export interface Settings {
   /** Editable in %APPDATA%\Forge\settings.json — built-ins are seeded here. */
   agentProfiles: AgentProfile[]
@@ -391,6 +408,14 @@ export interface Settings {
    */
   openrouterKey: string
   openrouterModel: string
+
+  /* -------------------------------------------------- agent memory (M7) */
+  /**
+   * Let the active brain rewrite the "About this project" summary every tenth
+   * exchange. Off by default: the heuristic memory below costs nothing and is
+   * predictable, whereas this is a real (if small) API call you did not ask for.
+   */
+  memoryLlmSummarize: boolean
 }
 
 /* -------------------------------------------------------------------- ipc */

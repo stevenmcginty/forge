@@ -52,6 +52,16 @@ export interface BrainContext {
   manifest?: string
   /** Both sides of this panel session, oldest first, excluding the new phrase. */
   history?: BrainTurn[]
+  /**
+   * What Forge has learned about *this project* across every past session —
+   * the markdown from `%APPDATA%\Forge\memory\<projectId>.md`, verbatim.
+   *
+   * Every live brain folds this into its system text under
+   * `# WHAT YOU REMEMBER ABOUT THIS PROJECT`. Absent or empty means a project
+   * with no history yet, and the heading is left out entirely rather than
+   * teaching the model that it remembers nothing.
+   */
+  projectMemory?: string
 }
 
 export interface BrainReply {

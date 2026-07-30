@@ -22,6 +22,7 @@
     "stt:manager": "node scripts/stt-manager-test.mjs",
     "stt:download": "node scripts/stt-download-test.mjs",
     "voice:check": "node scripts/voice-check.mjs",
+    "memory:smoke": "node scripts/memory-smoke.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
     "bridge:register": "node scripts/bridge-register-check.mjs",
     "bridge:build": "node scripts/build-bridge.mjs",

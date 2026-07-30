@@ -49,8 +49,15 @@ export function VoiceSection(): ReactNode {
           />
         </Row>
 
-        <Row label="Per-project memory" hint="Remember what the voice agent learned about each project">
-          <span className="ssoon">coming soon</span>
+        <Row
+          label="Let the model rewrite the project summary"
+          hint="Memory is kept for free from what you say and what runs. This adds one small API call every tenth exchange to keep the summary tidy."
+        >
+          <Toggle
+            checked={s.memoryLlmSummarize}
+            onChange={(on) => actions.patchSettings({ memoryLlmSummarize: on })}
+            label="Let the model rewrite the project summary"
+          />
         </Row>
       </Card>
     </Section>

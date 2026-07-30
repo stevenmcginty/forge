@@ -124,7 +124,8 @@ const FALLBACK_SETTINGS: Settings = {
   voiceRelayGraceMs: 2500,
   geminiImageModel: '',
   openrouterKey: '',
-  openrouterModel: 'google/gemini-2.5-flash-lite'
+  openrouterModel: 'google/gemini-2.5-flash-lite',
+  memoryLlmSummarize: false
 }
 
 /** The voice panel never gets narrower than this, nor wider. */

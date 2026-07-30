@@ -16,6 +16,33 @@ import type { BrainReply } from './voicebrain'
  * and a truncated reply is salvaged down to whatever complete fields it managed.
  */
 
+/* ------------------------------------------------------------------- memory */
+
+/**
+ * The heading a project's memory arrives under in the system text. One string,
+ * used by every brain, so the model sees the same section name whichever engine
+ * is answering — and so voice-check can assert the fold-in really happened.
+ */
+export const MEMORY_HEADING = '# WHAT YOU REMEMBER ABOUT THIS PROJECT'
+
+/** Memory beyond this is a bug upstream; clip rather than send a novel. */
+const MEMORY_LIMIT = 12_000
+
+/**
+ * Append the project's memory to the manifest, if there is any.
+ *
+ * Deliberately additive: the manifest is built without knowing whether a memory
+ * exists, and an empty memory must leave the system text byte-identical to what
+ * it was before this feature landed. Nothing is invented — the markdown goes in
+ * exactly as it sits on disk, which is why the file is worth keeping readable.
+ */
+export function withProjectMemory(system: string, memory?: string): string {
+  const body = (memory ?? '').trim()
+  if (!body) return system
+  const clipped = body.length > MEMORY_LIMIT ? `${body.slice(0, MEMORY_LIMIT)}…` : body
+  return `${system}\n\n${MEMORY_HEADING}\n${clipped}`
+}
+
 /* ------------------------------------------------------------------ actions */
 
 /**

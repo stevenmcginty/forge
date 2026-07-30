@@ -28,11 +28,16 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { homedir } from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
+
+const SHARED = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '..', 'shared')).href
 
 registerHooks({
   resolve(spec, context, next) {
+    // `@shared/x` is a bundler alias, not a package — the app resolves it
+    // through electron.vite.config.ts, and Node has to be told the same thing.
+    if (spec.startsWith('@shared/')) return next(`${SHARED}/${spec.slice('@shared/'.length)}.ts`, context)
     if (spec.startsWith('.') && !/\.[a-z]+$/i.test(spec)) return next(`${spec}.ts`, context)
     return next(spec, context)
   },
@@ -66,10 +71,22 @@ const {
   extractJsonObject,
   salvagePartialJson,
   tidySay,
+  withProjectMemory,
+  MEMORY_HEADING,
   RESPONSE_SCHEMA
 } = await import('../src/lib/geminibrain.ts')
 const brainjson = await import('../src/lib/brainjson.ts')
 const { OpenRouterBrain } = await import('../src/lib/openrouterbrain.ts')
+const {
+  agentMemory,
+  describeMemory,
+  draftSubject,
+  extractMemoryUpdates,
+  setMemoryBackend,
+  setMemorySummariser,
+  SUMMARISE_EVERY
+} = await import('../src/lib/agentmemory.ts')
+const { formatMemory, parseMemory } = await import('../shared/memory.ts')
 
 /* ------------------------------------------------------------- fixtures */
 
@@ -404,6 +421,55 @@ await test('closing, and the safer reading of "close this"', () => {
   assert.equal(vague.confidence, 'medium')
 })
 
+await test('asking the memory about itself is a command, not a prompt', () => {
+  for (const phrase of [
+    'what do you remember',
+    'what do you remember about this project',
+    'what do you remember about this project?',
+    'so what do you remember',
+    'what have you learned',
+    'what have you learnt about this project',
+    'what do you know about this project',
+    "what's in your memory"
+  ]) {
+    const hit = parse(phrase)
+    assert.ok(hit, `no hit for "${phrase}"`)
+    assert.deepEqual(hit.action, { kind: 'recall_memory' }, phrase)
+    assert.equal(hit.confidence, 'high', phrase)
+  }
+})
+
+await test('wiping the memory is a command too', () => {
+  for (const phrase of [
+    "forget this project's memory",
+    'forget the memory',
+    'clear your memory',
+    'wipe this memory',
+    'reset the memory',
+    'forget everything about this project',
+    'forget this project'
+  ]) {
+    const hit = parse(phrase)
+    assert.ok(hit, `no hit for "${phrase}"`)
+    assert.deepEqual(hit.action, { kind: 'forget_memory' }, phrase)
+  }
+})
+
+await test('stating a preference is NOT a memory command — the brain must answer it', () => {
+  // This is the whole reason the recall patterns are anchored on "what": a
+  // preference has to reach the brain (and get a reply), while agentmemory
+  // records it in parallel. Swallowing it here would lose the answer.
+  for (const phrase of [
+    'remember I prefer TypeScript strict mode',
+    'always run the tests before you push',
+    'never commit straight to master',
+    'from now on use British English',
+    'remember that the API key lives in dot env'
+  ]) {
+    assert.equal(parse(phrase), null, `"${phrase}" should fall through to the brain`)
+  }
+})
+
 await test('adding a project is a hint, never a folder picker', () => {
   assert.deepEqual(parse('add a new project').action, { kind: 'new_project_hint' })
   assert.deepEqual(parse('create a project').action, { kind: 'new_project_hint' })
@@ -667,6 +733,67 @@ await test('a media failure comes back as a failed outcome, not a throw', async 
   assert.equal(settled.ok, false)
   assert.equal(settled.done, 0)
   assert.match(settled.summary, /out of quota/)
+})
+
+/* ------------------------------------------------------- memory actions */
+
+console.log('\nMemory actions')
+
+function memoryRunner() {
+  const base = fakeRunner()
+  return {
+    ...base,
+    recallMemory: async () => {
+      base.calls.push(['recallMemory'])
+      return { ok: true, summary: 'You told me: I prefer strict mode', requested: 1, done: 1 }
+    },
+    forgetMemory: async () => {
+      base.calls.push(['forgetMemory'])
+      return { ok: true, summary: 'Forgotten — this project’s memory file is deleted.', requested: 1, done: 1 }
+    }
+  }
+}
+
+await test('recall_memory reads the file, provisionally then for real', async () => {
+  const run = memoryRunner()
+  const out = runAppAction({ kind: 'recall_memory' }, ctx(), run)
+  assert.equal(out.ok, true)
+  assert.equal(out.done, 0)
+  assert.match(out.summary, /Reading what I remember…/)
+  assert.ok(out.pending instanceof Promise)
+  const settled = await out.pending
+  assert.match(settled.summary, /I prefer strict mode/)
+  assert.deepEqual(run.calls, [['recallMemory']])
+})
+
+await test('forget_memory says plainly that it is gone', async () => {
+  const run = memoryRunner()
+  const out = runAppAction({ kind: 'forget_memory' }, ctx(), run)
+  assert.match(out.summary, /Forgetting…/)
+  const settled = await out.pending
+  assert.match(settled.summary, /deleted/)
+  assert.deepEqual(run.calls, [['forgetMemory']])
+})
+
+await test('neither works without a project, and neither pretends', () => {
+  const none = runAppAction({ kind: 'recall_memory' }, ctx({ activeProjectId: null }), memoryRunner())
+  assert.equal(none.ok, false)
+  assert.equal(none.pending, undefined)
+  assert.match(none.summary, /No project open/)
+
+  // A runner with no memory support (the head-less ones) refuses honestly.
+  const bare = runAppAction({ kind: 'recall_memory' }, ctx(), fakeRunner())
+  assert.equal(bare.ok, false)
+  assert.match(bare.summary, /not available/)
+  assert.equal(runAppAction({ kind: 'forget_memory' }, ctx(), fakeRunner()).ok, false)
+})
+
+await test('a brain can never recall or forget — those are grammar-only', () => {
+  // The model is not told these exist, and would be ignored if it invented them.
+  assert.deepEqual(sanitiseActions([{ kind: 'recall_memory' }]), [])
+  assert.deepEqual(sanitiseActions([{ kind: 'forget_memory' }]), [])
+  assert.ok(!brainjson.ACTION_KINDS.has('forget_memory'))
+  assert.ok(!ACTION_SPECS.some((s) => s.kind === 'forget_memory'))
 })
 
 /* -------------------------------------------------------------- manifest */
@@ -1108,6 +1235,356 @@ await test('history is capped so the request cannot grow forever', async () => {
   assert.equal(sent.turns.length, 21)
   assert.equal(sent.turns.at(-1).text, 'now this')
 })
+
+/* --------------------------------------------------------- agent memory */
+
+console.log('\nAgent memory')
+
+const MEMORY_MD = [
+  '# Project memory',
+  '',
+  '## About this project',
+  'A browser car game in TypeScript.',
+  '',
+  '## Preferences',
+  '- remember I prefer TypeScript strict mode',
+  '',
+  '## Recent activity',
+  '- 2026-07-30 15:06 — Opened 3 Kimi tabs',
+  ''
+].join('\n')
+
+await test('a project’s memory is folded into the system text under its own heading', () => {
+  const folded = withProjectMemory('MANIFEST-HERE', MEMORY_MD)
+  assert.ok(folded.startsWith('MANIFEST-HERE'), 'the manifest comes first, untouched')
+  assert.ok(folded.includes(MEMORY_HEADING))
+  assert.ok(folded.includes('I prefer TypeScript strict mode'))
+  assert.ok(folded.indexOf(MEMORY_HEADING) > folded.indexOf('MANIFEST-HERE'))
+})
+
+await test('no memory means the system text is byte-identical to before', () => {
+  // The whole feature has to be invisible on a project that has said nothing.
+  assert.equal(withProjectMemory('MANIFEST-HERE'), 'MANIFEST-HERE')
+  assert.equal(withProjectMemory('MANIFEST-HERE', ''), 'MANIFEST-HERE')
+  assert.equal(withProjectMemory('MANIFEST-HERE', '   \n  '), 'MANIFEST-HERE')
+})
+
+await test('GeminiBrain really sends it, and only when there is some', async () => {
+  const seen = []
+  const brain = new GeminiBrain('AIzaFAKE', 'm', async (req) => {
+    seen.push(req)
+    return { ok: true, text: GOOD }
+  })
+  await brain.interpret('open three kimi tabs', {
+    recentTranscript: [],
+    manifest: 'MANIFEST-HERE',
+    projectMemory: MEMORY_MD
+  })
+  assert.match(seen[0].system, new RegExp(MEMORY_HEADING))
+  assert.match(seen[0].system, /I prefer TypeScript strict mode/)
+
+  await brain.interpret('again', { recentTranscript: [], manifest: 'MANIFEST-HERE' })
+  assert.equal(seen[1].system, 'MANIFEST-HERE', 'no memory, no heading')
+})
+
+await test('OpenRouterBrain folds it in the same way, before the JSON reminder', async () => {
+  const seen = []
+  const brain = new OpenRouterBrain('sk-or-FAKE', 'm', async (req) => {
+    seen.push(req)
+    return { ok: true, text: GOOD }
+  })
+  await brain.interpret('open three kimi tabs', {
+    recentTranscript: [],
+    manifest: 'MANIFEST-HERE',
+    projectMemory: MEMORY_MD
+  })
+  assert.match(seen[0].system, new RegExp(MEMORY_HEADING))
+  assert.match(seen[0].system, /JSON/, 'the JSON-mode reminder still comes last')
+  assert.ok(seen[0].system.indexOf(MEMORY_HEADING) < seen[0].system.lastIndexOf('JSON object'))
+})
+
+await test('the manifest tells the model the memory exists, and stays small', () => {
+  const text = buildManifest(SNAPSHOT)
+  assert.match(text, /WHAT YOU REMEMBER ABOUT THIS PROJECT/, 'one line naming the section it will arrive under')
+  assert.ok(text.length < 6000, `manifest is ${text.length} chars`)
+})
+
+await test('the markdown format round-trips through parse and format', () => {
+  const parsed = parseMemory(MEMORY_MD)
+  assert.equal(parsed.about, 'A browser car game in TypeScript.')
+  assert.deepEqual(parsed.preferences, ['remember I prefer TypeScript strict mode'])
+  assert.deepEqual(parsed.activity, ['2026-07-30 15:06 — Opened 3 Kimi tabs'])
+  assert.deepEqual(parseMemory(formatMemory(parsed)), parsed, 'format ∘ parse is identity')
+  assert.equal(formatMemory(parseMemory('')), '', 'nothing in, nothing out')
+})
+
+/* ---------------------------------------------------------- what it learns */
+
+await test('a standing instruction is stored verbatim as a preference', () => {
+  for (const said of [
+    'remember I prefer TypeScript strict mode',
+    'always run the tests before you push',
+    'never commit straight to master',
+    'from now on use British English',
+    "don't touch the packaging config",
+    'I prefer tabs over spaces'
+  ]) {
+    const updates = extractMemoryUpdates({ utterance: said })
+    assert.deepEqual(updates, [{ section: 'preferences', entry: said }], said)
+  }
+})
+
+await test('an ordinary request is not mistaken for a standing instruction', () => {
+  for (const said of [
+    'open three kimi tabs',
+    'why is the build failing',
+    'can you remember to check the tests',
+    'build me a car game like Mario',
+    'what do you remember'
+  ]) {
+    const updates = extractMemoryUpdates({ utterance: said })
+    assert.ok(!updates.some((u) => u.section === 'preferences'), `"${said}" is not a preference`)
+  }
+})
+
+await test('what actually happened becomes activity — and what has not, does not', () => {
+  const updates = extractMemoryUpdates({
+    utterance: 'open three kimi tabs',
+    outcomes: [
+      { ok: true, summary: 'Opened 3 Kimi tabs' },
+      { ok: false, summary: 'Session limit (16) reached — nothing opened' },
+      // Provisional: the image is still generating. Recording it would be a lie.
+      { ok: true, summary: 'Generating 2 images…' }
+    ]
+  })
+  assert.deepEqual(updates, [{ section: 'activity', entry: 'Opened 3 Kimi tabs' }])
+})
+
+await test('a drafted prompt names what the project is working on', () => {
+  const updates = extractMemoryUpdates({
+    utterance: 'I want a top-down car game',
+    reply: {
+      understood: 'build a car game',
+      confidence: 'high',
+      draftPrompt: '# Goal\nBuild a top-down two-player car game for the browser.\n\n# Constraints\n- Canvas only'
+    }
+  })
+  assert.deepEqual(updates, [
+    { section: 'decisions', entry: 'Working on: Build a top-down two-player car game for the browser.' },
+    { section: 'activity', entry: 'Drafted a prompt for: Build a top-down two-player car game for the browser.' }
+  ])
+  // A bare "# Goal" says nothing; the subject is the line that does.
+  assert.equal(draftSubject('# Goal\n\nShip the payments rewrite.'), 'Ship the payments rewrite.')
+  assert.equal(draftSubject('   \n\n'), null)
+})
+
+await test('one exchange can teach more than one thing', () => {
+  const updates = extractMemoryUpdates({
+    utterance: 'always use strict mode',
+    reply: { understood: 'a preference', confidence: 'high', draftPrompt: 'Turn on strict mode everywhere.' },
+    outcomes: [{ ok: true, summary: 'Opened 1 Kimi tab' }]
+  })
+  assert.deepEqual(
+    updates.map((u) => u.section),
+    ['preferences', 'activity', 'decisions', 'activity']
+  )
+})
+
+await test('nothing worth remembering means nothing is written', () => {
+  assert.deepEqual(extractMemoryUpdates({ utterance: 'hello' }), [])
+  assert.deepEqual(extractMemoryUpdates({ utterance: '' }), [])
+})
+
+/* ---------------------------------------------------------- reading it back */
+
+await test('“what do you remember?” is answered off the file, not by a model', () => {
+  const answer = describeMemory(MEMORY_MD)
+  assert.match(answer, /About: A browser car game/)
+  assert.match(answer, /You told me: remember I prefer TypeScript strict mode/)
+  assert.match(answer, /Last thing I did: Opened 3 Kimi tabs/)
+  assert.ok(!answer.includes('2026-07-30'), 'the stamp is not what he asked for')
+  assert.ok(answer.length <= 600)
+
+  assert.match(describeMemory(''), /Nothing yet/)
+  assert.match(describeMemory('# Project memory\n'), /Nothing yet/)
+})
+
+await test('a huge memory is clipped rather than dumped into one chip', () => {
+  const fat = formatMemory({
+    about: 'z'.repeat(1000),
+    decisions: [],
+    preferences: [],
+    activity: []
+  })
+  const answer = describeMemory(fat)
+  assert.ok(answer.length <= 600, `${answer.length} chars`)
+  assert.ok(answer.endsWith('…'))
+})
+
+/* --------------------------------------------------------- the write loop */
+
+/** An in-memory stand-in for the main process's store, same contract. */
+function fakeBackend() {
+  const files = new Map()
+  const calls = []
+  const backend = {
+    files,
+    calls,
+    async read(id) {
+      calls.push(['read', id])
+      return files.get(id) ?? ''
+    },
+    async append(id, section, entry, at) {
+      calls.push(['append', id, section, entry, at])
+      const memory = parseMemory(files.get(id) ?? '')
+      if (section === 'about') memory.about = `${memory.about} ${entry}`.trim()
+      else memory[section].push(section === 'activity' ? `2026-07-30 15:04 — ${entry}` : entry)
+      const next = formatMemory(memory)
+      files.set(id, next)
+      return next
+    },
+    async replaceSummary(id, text) {
+      calls.push(['replaceSummary', id, text])
+      const memory = parseMemory(files.get(id) ?? '')
+      memory.about = text
+      const next = formatMemory(memory)
+      files.set(id, next)
+      return next
+    },
+    async clear(id) {
+      calls.push(['clear', id])
+      files.delete(id)
+      return true
+    }
+  }
+  return backend
+}
+
+await test('recording an exchange writes it, and warms the copy the brain sees', async () => {
+  const backend = fakeBackend()
+  setMemoryBackend(backend)
+  setMemorySummariser(async () => null)
+  agentMemory.__reset()
+
+  await agentMemory.record({
+    projectId: 'p1',
+    utterance: 'remember I prefer TypeScript strict mode',
+    at: Date.parse('2026-07-30T15:04:00Z'),
+    outcomes: [{ ok: true, summary: 'Opened 3 Kimi tabs' }]
+  })
+
+  const file = backend.files.get('p1')
+  assert.match(file, /- remember I prefer TypeScript strict mode/)
+  assert.match(file, /Opened 3 Kimi tabs/)
+  // The panel builds the next brain context synchronously — no await allowed.
+  assert.equal(agentMemory.cached('p1'), file)
+})
+
+await test('memory is per project: nothing leaks from one to another', async () => {
+  const backend = fakeBackend()
+  setMemoryBackend(backend)
+  agentMemory.__reset()
+
+  await agentMemory.record({ projectId: 'p1', utterance: 'always use strict mode', at: 1 })
+  await agentMemory.record({ projectId: 'p2', utterance: 'never use jQuery', at: 2 })
+
+  assert.match(agentMemory.cached('p1'), /strict mode/)
+  assert.ok(!agentMemory.cached('p1').includes('jQuery'))
+  assert.match(agentMemory.cached('p2'), /jQuery/)
+  assert.ok(!agentMemory.cached('p2').includes('strict mode'))
+  assert.equal(agentMemory.cached(null), '', 'no project, no memory')
+})
+
+await test('with no project id nothing is written at all', async () => {
+  const backend = fakeBackend()
+  setMemoryBackend(backend)
+  agentMemory.__reset()
+  await agentMemory.record({ projectId: null, utterance: 'always use strict mode', at: 1 })
+  assert.equal(backend.calls.length, 0)
+})
+
+await test('recall and forget go through the same store', async () => {
+  const backend = fakeBackend()
+  setMemoryBackend(backend)
+  agentMemory.__reset()
+  await agentMemory.record({ projectId: 'p1', utterance: 'always use strict mode', at: 1 })
+
+  const recalled = await agentMemory.recall('p1')
+  assert.equal(recalled.ok, true)
+  assert.match(recalled.summary, /You told me: always use strict mode/)
+
+  const forgotten = await agentMemory.forget('p1')
+  assert.equal(forgotten.ok, true)
+  assert.match(forgotten.summary, /Forgotten/)
+  assert.equal(backend.files.has('p1'), false)
+  assert.equal(agentMemory.cached('p1'), '')
+
+  const again = await agentMemory.forget('p1')
+  assert.match(again.summary, /nothing to forget/)
+  assert.equal((await agentMemory.recall('p1')).summary, describeMemory(''))
+})
+
+await test('a store that is broken costs the memory, never the reply', async () => {
+  setMemoryBackend({
+    read: async () => {
+      throw new Error('disk on fire')
+    },
+    append: async () => {
+      throw new Error('disk on fire')
+    },
+    replaceSummary: async () => {
+      throw new Error('disk on fire')
+    },
+    clear: async () => {
+      throw new Error('disk on fire')
+    }
+  })
+  agentMemory.__reset()
+  // record() must resolve, not reject: the reply is already on screen. It does
+  // warn, which is the point — silenced here so the suite output stays honest
+  // about what failed and what merely proved it fails quietly.
+  const warn = console.warn
+  console.warn = () => {}
+  await agentMemory.record({ projectId: 'p1', utterance: 'always use strict mode', at: 1 })
+  console.warn = warn
+  assert.equal(await agentMemory.prime('p1'), '')
+  const failed = await agentMemory.recall('p1')
+  assert.equal(failed.ok, false)
+  assert.match(failed.summary, /disk on fire/)
+})
+
+await test('the optional LLM summary is off by default and rare when on', async () => {
+  const backend = fakeBackend()
+  setMemoryBackend(backend)
+  agentMemory.__reset()
+
+  let asked = 0
+  setMemorySummariser(async () => {
+    asked++
+    return 'A car game, built the way Steve likes it.'
+  })
+
+  for (let i = 0; i < SUMMARISE_EVERY - 1; i++) {
+    await agentMemory.record({ projectId: 'p1', utterance: `always do thing ${i}`, at: i })
+  }
+  assert.equal(asked, 0, 'nine exchanges cost nothing extra')
+
+  await agentMemory.record({ projectId: 'p1', utterance: 'always do the last thing', at: 99 })
+  assert.equal(asked, 1, `one call every ${SUMMARISE_EVERY} exchanges, not one per phrase`)
+  assert.match(agentMemory.cached('p1'), /A car game, built the way Steve likes it\./)
+  assert.match(agentMemory.cached('p1'), /always do thing 0/, 'and it rewrites only the summary')
+
+  // A summariser that declines (no key, setting off, API error) changes nothing.
+  setMemorySummariser(async () => null)
+  const before = agentMemory.cached('p1')
+  for (let i = 0; i < SUMMARISE_EVERY; i++) {
+    await agentMemory.record({ projectId: 'p1', utterance: 'nothing worth remembering', at: i })
+  }
+  assert.equal(agentMemory.cached('p1'), before)
+})
+
+setMemoryBackend(null)
+setMemorySummariser(null)
 
 /* ------------------------------------------------------------------- live */
 

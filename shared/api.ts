@@ -11,6 +11,7 @@ import type {
   KeySource,
   MakeImageRequest,
   MediaCallResult,
+  MemorySection,
   OpenRouterCallRequest,
   OpenRouterCallResult,
   Project,
@@ -140,6 +141,22 @@ export interface ForgeApi {
     makeImage(req: MakeImageRequest): Promise<MediaCallResult>
     /** Edit an existing image into a new file. The original is untouched. */
     editImage(req: EditImageRequest): Promise<MediaCallResult>
+  }
+
+  /**
+   * Per-project agent memory: one markdown file per project, kept in
+   * `%APPDATA%\Forge\memory`. The renderer reads it into the brain's system
+   * text and appends to it after each exchange; nothing else touches it.
+   *
+   * `append` and `replaceSummary` resolve with the file as it now stands, so a
+   * caller keeping a warm copy for the next prompt never needs a second read.
+   */
+  memory: {
+    read(projectId: string): Promise<string>
+    append(projectId: string, section: MemorySection, entry: string, at?: number): Promise<string>
+    replaceSummary(projectId: string, text: string): Promise<string>
+    /** True when the file is gone (including when there was none). */
+    clear(projectId: string): Promise<boolean>
   }
 
   /**
