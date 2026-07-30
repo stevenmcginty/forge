@@ -40,7 +40,14 @@ const DEFAULT_SETTINGS: Settings = {
   sttPython: join(DICTATION_HOME, 'venv', 'Scripts', 'python.exe'),
   sttModelDir: join(DICTATION_HOME, 'models', 'parakeet-tdt-0.6b-v2'),
   sttAutoStopSeconds: 10,
-  sttHotkey: 'ControlRight'
+  sttHotkey: 'ControlRight',
+  voicePanelOpen: false,
+  voicePanelWidth: 380,
+  // Gemini is the live brain; with no key set it degrades to the stub.
+  voiceBrain: 'gemini',
+  anthropicKey: '',
+  geminiKey: '',
+  geminiModel: 'gemini-2.5-flash'
 }
 
 let dataDir = ''
@@ -116,6 +123,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
   }
 
   const win = s.window ?? DEFAULT_SETTINGS.window
+  const brain = s.voiceBrain
   return {
     agentProfiles: profiles,
     lastProjectId: s.lastProjectId ?? null,
@@ -139,7 +147,17 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       width: clamp(win.width ?? 1440, 720, 10000),
       height: clamp(win.height ?? 900, 480, 10000),
       maximized: Boolean(win.maximized)
-    }
+    },
+    voicePanelOpen: Boolean(s.voicePanelOpen),
+    voicePanelWidth: clamp(s.voicePanelWidth ?? DEFAULT_SETTINGS.voicePanelWidth, 300, 640),
+    voiceBrain:
+      brain === 'claude' || brain === 'openai' || brain === 'stub' || brain === 'gemini'
+        ? brain
+        : DEFAULT_SETTINGS.voiceBrain,
+    anthropicKey: typeof s.anthropicKey === 'string' ? s.anthropicKey : '',
+    geminiKey: typeof s.geminiKey === 'string' ? s.geminiKey.trim() : '',
+    geminiModel:
+      typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel
   }
 }
 

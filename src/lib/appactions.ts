@@ -1,0 +1,307 @@
+import type { AgentProfile, SplitDirection } from '@shared/types'
+
+/**
+ * The things the voice agent is allowed to do to Forge.
+ *
+ * An `AppAction` is a plain, serialisable intent — never a closure — so it can
+ * come from the deterministic grammar (`voicecommands.ts`) today or from a real
+ * brain's structured output later, and be checked, logged or replayed either
+ * way. The executor is the only place that touches the app, and it goes through
+ * exactly the same `AppState` actions the buttons use: no back doors, no second
+ * implementation of "open a tab".
+ *
+ * This module is pure: hand it a context snapshot and a runner and it tells you
+ * what it did. That is what makes it testable without a renderer.
+ */
+
+export type AppAction =
+  | { kind: 'open_tabs'; profileId: string; count: number; projectName?: string }
+  | { kind: 'open_panes'; profileId: string; count: number; direction?: SplitDirection }
+  | { kind: 'close_pane'; which: 'focused' }
+  | { kind: 'close_tab'; which: 'current' }
+  | { kind: 'switch_project'; name: string }
+  | { kind: 'focus_tab'; index: number }
+  | { kind: 'new_project_hint' }
+
+export interface ActionProject {
+  id: string
+  name: string
+}
+
+/** Everything the executor is allowed to know, snapshotted at call time. */
+export interface ActionContext {
+  projects: ActionProject[]
+  profiles: AgentProfile[]
+  defaultProfileId: string
+  activeProjectId: string | null
+  activeProjectName: string | null
+  /** Projects whose saved workspace has been read off disk already. */
+  loadedProjectIds: string[]
+  tabs: Array<{ id: string; title: string }>
+  activeTabId: string | null
+  focusedPaneId: string | null
+  /** Shells open across every project. */
+  paneCount: number
+  panesInActiveTab: number
+  maxSessions: number
+  maxPanesPerTab: number
+}
+
+/** The UI actions the executor drives. Same ones the buttons call. */
+export interface ActionRunner {
+  newTab(profileId: string): void
+  splitPane(paneId: string, direction: SplitDirection, profileId: string): void
+  closePane(paneId: string): void
+  closeTab(tabId: string): void
+  selectProject(projectId: string): void
+  selectTab(tabId: string): void
+}
+
+export interface ActionOutcome {
+  /** False when nothing happened — the summary then says why. */
+  ok: boolean
+  /** One human line: what actually happened, not what was asked for. */
+  summary: string
+  requested: number
+  done: number
+}
+
+/* ------------------------------------------------------------- matching */
+
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+/** Vowel-stripped, de-doubled skeleton: "kimmy" and "kimi" collapse together. */
+function soundKey(s: string): string {
+  return norm(s)
+    .replace(/(.)\1+/g, '$1')
+    .replace(/[aeiou]/g, '')
+}
+
+function distance(a: string, b: string): number {
+  if (a === b) return 0
+  const rows = a.length + 1
+  const cols = b.length + 1
+  let prev = new Array<number>(cols)
+  let curr = new Array<number>(cols)
+  for (let j = 0; j < cols; j++) prev[j] = j
+  for (let i = 1; i < rows; i++) {
+    curr[0] = i
+    for (let j = 1; j < cols; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      curr[j] = Math.min(prev[j]! + 1, curr[j - 1]! + 1, prev[j - 1]! + cost)
+    }
+    const swap = prev
+    prev = curr
+    curr = swap
+  }
+  return prev[cols - 1]!
+}
+
+/** How close is close enough — short words get less rope. */
+function closeEnough(a: string, b: string): boolean {
+  if (!a || !b) return false
+  const limit = Math.max(a.length, b.length) <= 4 ? 1 : 2
+  if (distance(a, b) <= limit) return true
+  const ka = soundKey(a)
+  const kb = soundKey(b)
+  return ka.length > 1 && kb.length > 1 && distance(ka, kb) <= 1
+}
+
+/** Spoken words that mean a built-in profile. Only used if that profile exists. */
+const PROFILE_ALIASES: Record<string, string> = {
+  shell: 'pwsh',
+  powershell: 'pwsh',
+  pwsh: 'pwsh',
+  ps: 'pwsh',
+  posh: 'pwsh',
+  cc: 'claude',
+  claudecode: 'claude',
+  ki: 'kimi'
+}
+
+/** Resolve a spoken name to a profile: exact, prefix, then sounds-close. */
+export function matchProfile(profiles: AgentProfile[], spoken: string): AgentProfile | null {
+  const q = norm(spoken)
+  if (!q) return null
+
+  const aliasId = PROFILE_ALIASES[q]
+  if (aliasId) {
+    const hit = profiles.find((p) => p.id === aliasId)
+    if (hit) return hit
+  }
+
+  for (const p of profiles) if (norm(p.badge) === q || norm(p.name) === q) return p
+  if (q.length >= 3) {
+    for (const p of profiles) {
+      const n = norm(p.name)
+      if (n.startsWith(q) || q.startsWith(n)) return p
+    }
+    // First word of a multi-word name: "claude" for "Claude Code".
+    for (const p of profiles) {
+      const first = norm(p.name.split(/\s+/)[0] ?? '')
+      if (first && (first === q || first.startsWith(q) || q.startsWith(first))) return p
+    }
+    for (const p of profiles) if (closeEnough(q, norm(p.name))) return p
+  }
+  return null
+}
+
+/** Same idea for projects — they are named after folders, so sound matters. */
+export function matchProject(projects: ActionProject[], spoken: string): ActionProject | null {
+  const q = norm(spoken)
+  if (!q) return null
+  for (const p of projects) if (norm(p.name) === q) return p
+  for (const p of projects) {
+    const n = norm(p.name)
+    if (n && (n.startsWith(q) || q.startsWith(n))) return p
+  }
+  for (const p of projects) if (closeEnough(q, norm(p.name))) return p
+  return null
+}
+
+/* ------------------------------------------------------------- executor */
+
+function plural(n: number, one: string): string {
+  return n === 1 ? one : `${one}s`
+}
+
+function fail(summary: string, requested = 1): ActionOutcome {
+  return { ok: false, summary, requested, done: 0 }
+}
+
+export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionRunner): ActionOutcome {
+  switch (action.kind) {
+    case 'open_tabs': {
+      const profile = ctx.profiles.find((p) => p.id === action.profileId)
+      if (!profile) return fail('I do not know that agent')
+      const requested = Math.max(1, Math.floor(action.count))
+
+      // A named project means "over there" — but only once its saved layout has
+      // been read, otherwise opening a tab would overwrite it.
+      if (action.projectName) {
+        const target = matchProject(ctx.projects, action.projectName)
+        if (!target) return fail(`No project called “${action.projectName}”`, requested)
+        if (target.id !== ctx.activeProjectId) {
+          run.selectProject(target.id)
+          if (!ctx.loadedProjectIds.includes(target.id)) {
+            return {
+              ok: true,
+              summary: `Switched to ${target.name} — say that again to open ${plural(requested, 'tab')} there`,
+              requested,
+              done: 0
+            }
+          }
+        }
+      }
+
+      if (!ctx.activeProjectId && !action.projectName) {
+        return fail('No project open — add a folder with + in the rail first', requested)
+      }
+
+      const room = Math.max(0, ctx.maxSessions - ctx.paneCount)
+      const done = Math.min(requested, room)
+      for (let i = 0; i < done; i++) run.newTab(profile.id)
+
+      if (done === 0) {
+        return { ok: false, summary: `Session limit (${ctx.maxSessions}) reached — nothing opened`, requested, done }
+      }
+      if (done < requested) {
+        return {
+          ok: true,
+          summary: `Opened ${done} of ${requested} ${profile.name} ${plural(requested, 'tab')} — session limit (${ctx.maxSessions}) reached`,
+          requested,
+          done
+        }
+      }
+      return {
+        ok: true,
+        summary: `Opened ${done} ${profile.name} ${plural(done, 'tab')}`,
+        requested,
+        done
+      }
+    }
+
+    case 'open_panes': {
+      const profile = ctx.profiles.find((p) => p.id === action.profileId)
+      if (!profile) return fail('I do not know that agent')
+      const requested = Math.max(1, Math.floor(action.count))
+      if (!ctx.focusedPaneId) {
+        return fail('No pane to split — open a tab first', requested)
+      }
+      const room = Math.min(
+        Math.max(0, ctx.maxSessions - ctx.paneCount),
+        Math.max(0, ctx.maxPanesPerTab - ctx.panesInActiveTab)
+      )
+      const done = Math.min(requested, room)
+      const direction: SplitDirection = action.direction ?? 'row'
+      for (let i = 0; i < done; i++) run.splitPane(ctx.focusedPaneId, direction, profile.id)
+
+      if (done === 0) {
+        return {
+          ok: false,
+          summary: `This tab is full (${ctx.maxPanesPerTab} panes) — nothing split`,
+          requested,
+          done
+        }
+      }
+      if (done < requested) {
+        return {
+          ok: true,
+          summary: `Split ${done} of ${requested} ${profile.name} ${plural(requested, 'pane')} — limit reached`,
+          requested,
+          done
+        }
+      }
+      return { ok: true, summary: `Split ${done} ${profile.name} ${plural(done, 'pane')}`, requested, done }
+    }
+
+    case 'close_pane': {
+      if (!ctx.focusedPaneId) return fail('Nothing focused to close')
+      run.closePane(ctx.focusedPaneId)
+      return { ok: true, summary: 'Closed the focused pane', requested: 1, done: 1 }
+    }
+
+    case 'close_tab': {
+      if (!ctx.activeTabId) return fail('No tab open')
+      const tab = ctx.tabs.find((t) => t.id === ctx.activeTabId)
+      run.closeTab(ctx.activeTabId)
+      return { ok: true, summary: `Closed ${tab ? `“${tab.title}”` : 'the tab'}`, requested: 1, done: 1 }
+    }
+
+    case 'switch_project': {
+      const target = matchProject(ctx.projects, action.name)
+      if (!target) return fail(`No project called “${action.name}”`)
+      if (target.id === ctx.activeProjectId) {
+        return { ok: true, summary: `Already in ${target.name}`, requested: 1, done: 0 }
+      }
+      run.selectProject(target.id)
+      return { ok: true, summary: `Switched to ${target.name}`, requested: 1, done: 1 }
+    }
+
+    case 'focus_tab': {
+      const tab = ctx.tabs[action.index]
+      if (!tab) {
+        return fail(
+          ctx.tabs.length === 0 ? 'No tabs open' : `There is no tab ${action.index + 1} — ${ctx.tabs.length} open`
+        )
+      }
+      run.selectTab(tab.id)
+      return { ok: true, summary: `Switched to “${tab.title}”`, requested: 1, done: 1 }
+    }
+
+    case 'new_project_hint':
+      // Deliberately no folder picker from voice: choosing a folder is a
+      // deliberate, sighted act.
+      return {
+        ok: true,
+        summary: 'Use + at the top of the projects rail to add a folder — I will not pick one for you',
+        requested: 1,
+        done: 0
+      }
+
+    default:
+      return fail('I did not understand that')
+  }
+}

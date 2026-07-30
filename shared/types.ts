@@ -111,6 +111,33 @@ export interface WindowBounds {
   maximized: boolean
 }
 
+/**
+ * Which interpreter the voice agent talks to. `gemini` is the live one;
+ * `stub` is the offline fallback used whenever no key is set.
+ */
+export type VoiceBrainId = 'stub' | 'gemini' | 'claude' | 'openai'
+
+/* ------------------------------------------------------- voice-agent ipc */
+
+export interface GeminiCallRequest {
+  key: string
+  model: string
+  system: string
+  /** Oldest first. `model` is Gemini's own past replies. */
+  turns: Array<{ role: 'user' | 'model'; text: string }>
+  /** JSON schema handed to responseSchema, when the caller wants strict JSON. */
+  schema?: unknown
+  timeoutMs?: number
+}
+
+export type GeminiCallResult =
+  | { ok: true; text: string; finishReason?: string; model?: string }
+  | { ok: false; error: string; status?: number }
+
+export type ImportedKeyResult =
+  | { ok: true; key: string; last4: string; source: string }
+  | { ok: false; error: string }
+
 export interface Settings {
   /** Editable in %APPDATA%\Forge\settings.json — built-ins are seeded here. */
   agentProfiles: AgentProfile[]
@@ -135,6 +162,24 @@ export interface Settings {
   sttAutoStopSeconds: number
   /** KeyboardEvent.code that toggles dictation while Forge is focused. */
   sttHotkey: string
+
+  /* --------------------------------------------------- voice agent (M4) */
+  /** Voice-agent panel: open state and width in px. */
+  voicePanelOpen: boolean
+  voicePanelWidth: number
+  voiceBrain: VoiceBrainId
+  /**
+   * Anthropic key for the (unbuilt) ClaudeBrain. Stored here and used nowhere:
+   * no code in Forge sends it anywhere.
+   */
+  anthropicKey: string
+  /**
+   * Google AI Studio key for GeminiBrain — the one brain that really talks to a
+   * model. Sent only to generativelanguage.googleapis.com, only when Gemini is
+   * the selected brain.
+   */
+  geminiKey: string
+  geminiModel: string
 }
 
 /* -------------------------------------------------------------------- ipc */

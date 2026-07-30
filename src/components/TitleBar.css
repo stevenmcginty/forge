@@ -43,6 +43,11 @@
   height: 24px;
 }
 
+.titlebar__btn[data-on='true'] {
+  background: var(--accent-softer);
+  color: var(--accent);
+}
+
 .titlebar__mark {
   display: grid;
   place-items: center;

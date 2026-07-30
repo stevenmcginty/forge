@@ -52,6 +52,10 @@ export const IPC = {
   windowClose: 'window:close',
   windowState: 'window:state',
 
+  // voice agent (M4)
+  voiceGemini: 'voice:gemini',
+  voiceImportKey: 'voice:import-key',
+
   // diagnostics
   rendererError: 'diag:renderer-error'
 } as const

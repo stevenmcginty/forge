@@ -17,6 +17,7 @@ import {
 import { disposePtyHost, registerPtyHandlers, setPtyTarget } from './pty-host'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
 import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-sidecar'
+import { registerVoiceHandlers } from './voice-bridge'
 
 const isDev = !app.isPackaged
 const BG = '#0B0C0E'
@@ -306,6 +307,7 @@ void app.whenReady().then(() => {
   registerPtyHandlers()
   registerShotsHandlers()
   registerSttHandlers()
+  registerVoiceHandlers()
   createWindow()
 
   app.on('activate', () => {

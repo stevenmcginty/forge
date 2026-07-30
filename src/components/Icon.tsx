@@ -22,6 +22,8 @@ export type IconName =
   | 'grip'
   | 'check'
   | 'trash'
+  | 'voice'
+  | 'send'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -100,7 +102,14 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M3.4 5.2h9.2M6.2 5.2V3.8h3.6v1.4" />
       <path d="M4.6 5.2l.6 7.4h5.6l.6-7.4" />
     </>
-  )
+  ),
+  // A spoken waveform: the voice agent's mark.
+  voice: (
+    <>
+      <path d="M2.4 7.2v1.6M5.2 5v6M8 2.8v10.4M10.8 5v6M13.6 7.2v1.6" />
+    </>
+  ),
+  send: <path d="M2.8 8h8.4M7.8 4.6L11.4 8l-3.6 3.4" />
 }
 
 export function Icon({

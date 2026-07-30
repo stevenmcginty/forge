@@ -61,6 +61,11 @@ const api: ForgeApi = {
     onPhrase: (cb) => subscribe(IPC.sttPhrase, cb)
   },
 
+  voice: {
+    gemini: (req) => ipcRenderer.invoke(IPC.voiceGemini, req),
+    importKey: () => ipcRenderer.invoke(IPC.voiceImportKey)
+  },
+
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
 

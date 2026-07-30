@@ -26,10 +26,6 @@ export function useShortcuts(): void {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
-      // Text fields (renaming a pane/tab, popover forms) keep their keys.
-      const el = document.activeElement
-      if (el instanceof HTMLInputElement) return
-
       const ctrl = e.ctrlKey && !e.altKey
       const shift = e.shiftKey
       const alt = e.altKey && !e.ctrlKey
@@ -38,6 +34,18 @@ export function useShortcuts(): void {
         e.preventDefault()
         e.stopPropagation()
       }
+
+      // The voice panel toggle works from anywhere, including its own text box.
+      if (ctrl && shift && e.code === 'KeyG') {
+        stop()
+        actions.toggleVoicePanel()
+        return
+      }
+
+      // Text fields (renaming a pane/tab, popover forms, the voice composer)
+      // keep their keys.
+      const el = document.activeElement
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
 
       const activePaneId = tab?.activePaneId ?? null
 

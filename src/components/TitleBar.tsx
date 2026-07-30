@@ -51,6 +51,19 @@ export function TitleBar(): ReactNode {
 
       <div className="titlebar__right">
         <button
+          type="button"
+          className="ghost-btn titlebar__btn"
+          title={
+            state.settings.voicePanelOpen ? 'Hide voice agent (Ctrl+Shift+G)' : 'Show voice agent (Ctrl+Shift+G)'
+          }
+          aria-pressed={state.settings.voicePanelOpen}
+          data-on={state.settings.voicePanelOpen ? 'true' : undefined}
+          onClick={() => actions.toggleVoicePanel()}
+        >
+          <Icon name="voice" size={15} />
+        </button>
+
+        <button
           ref={gearRef}
           type="button"
           className="ghost-btn titlebar__btn"
