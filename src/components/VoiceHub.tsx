@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { hotkeyLabel } from '@/hooks/useDictation'
 import { hubDrag } from '@/lib/hubdrag'
 import {
+  clampCardSize,
   clampHubPos,
   defaultHubPos,
   dockPoint,
@@ -12,7 +13,8 @@ import {
   isFloatingHub,
   isNearDock,
   nextHubMode,
-  type Point
+  type Point,
+  type Size
 } from '@/lib/voicehub'
 import { useApp } from '@/state/AppState'
 import { useDictation } from '@/state/Dictation'
@@ -32,20 +34,25 @@ import {
 import './VoiceHub.css'
 
 /**
- * The floating Voice Hub.
+ * The Voice Hub — the whole of the voice agent's chrome.
  *
  * Steve's ask, in his words: drag the pill out of its corner, have it grow into
  * something you can put anywhere, open it up into a proper voice surface when
  * you want to talk properly, and throw it back at its corner when you are done.
  * DictationMic's floating pill, living inside Forge rather than over Windows.
  *
+ * Then, having watched it work: "we don't need the right-hand pane at all now".
+ * So there is no longer a panel to fall back on. This is it, and everything the
+ * panel could do the card must do — which it does, because both were always
+ * rendering the same parts out of VoiceSurface.tsx.
+ *
  * Three states, and `src/lib/voicehub.ts` owns the arithmetic behind all of
- * them (the transition table, the clamping, the dock magnet), so what is left
- * here is the gesture and the paint:
+ * them (the transition table, the clamping, the dock magnet, the card's size
+ * limits), so what is left here is the gesture and the paint:
  *
  *   docked     nothing rendered — the status-bar pill is the hub
  *   floating   a 180×56 pill: dictation on its body, the agent on the circle
- *   expanded   a 380×520 card: the same conversation the right-hand panel shows
+ *   expanded   the card: dial, conversation, composer, resizable by its corner
  *
  * BOTH microphones live on the floating pill on purpose. Tapping its body
  * toggles dictation into the pane behind it; tapping the circle beside that
@@ -54,9 +61,10 @@ import './VoiceHub.css'
  * ring are the two halves of the same object.
  *
  * Nothing in this file subscribes to the transcript bus, the sidecar or the
- * speaker. It renders `useVoiceAgent()` and `useDictation()`, both of which are
- * single shared engines — which is why having the hub *and* the panel open at
- * once cannot answer twice or speak twice. `npm run hub:check` enforces it.
+ * speaker, and nothing here is required for the agent to work: the pipeline is
+ * headless in src/state/VoiceAgent.tsx and answers the phone with the hub
+ * docked and this component returning null. `npm run hub:check` enforces both
+ * halves of that.
  */
 
 /** Where the hub is drawn, as a transform. */
@@ -88,6 +96,7 @@ export function VoiceHub(): ReactNode {
   const [magnet, setMagnet] = useState(false)
   /** The 200ms flight back to the corner. */
   const [snapping, setSnapping] = useState(false)
+  const [resizing, setResizing] = useState(false)
   const draggedRef = useRef(false)
 
   const bounds = (): ReturnType<typeof hubBounds> =>
@@ -108,8 +117,8 @@ export function VoiceHub(): ReactNode {
     // no position. Anywhere is better than the top-left corner.
     const resting =
       hub.x === 0 && hub.y === 0
-        ? defaultHubPos(hubSize(mode), bounds())
-        : clampHubPos({ x: hub.x, y: hub.y }, hubSize(mode), bounds())
+        ? defaultHubPos(hubSize(hub), bounds())
+        : clampHubPos({ x: hub.x, y: hub.y }, hubSize(hub), bounds())
     applyPos(rootRef.current, live ?? resting)
   }, [mode, hub.x, hub.y, snapping])
 
@@ -123,7 +132,7 @@ export function VoiceHub(): ReactNode {
   useEffect(() => {
     if (!isFloatingHub(mode)) return undefined
     const onResize = (): void => {
-      const clamped = clampHubPos({ x: hub.x, y: hub.y }, hubSize(mode), bounds())
+      const clamped = clampHubPos({ x: hub.x, y: hub.y }, hubSize(hub), bounds())
       applyPos(rootRef.current, clamped)
       if (clamped.x !== hub.x || clamped.y !== hub.y) actions.setVoiceHub(clamped)
     }
@@ -151,8 +160,9 @@ export function VoiceHub(): ReactNode {
       const grabY = e.clientY - rect.top
       const startX = e.clientX
       const startY = e.clientY
-      const currentSize = hubSize(mode)
+      const currentSize = hubSize(hub)
       const dock = measureDock()
+
       let moved = false
       let latest: Point = { x: rect.left, y: rect.top }
       draggedRef.current = false
@@ -220,6 +230,56 @@ export function VoiceHub(): ReactNode {
     draggedRef.current = false
     return true
   }
+
+  /* ------------------------------------------------------------- resize
+   *
+   * The card's bottom-right corner. This is what replaced the right-hand
+   * panel's resizer, and it is not decoration: a drafted prompt is a page of
+   * markdown, and the panel could be dragged out to read one. The card has to
+   * be able to do the same.
+   *
+   * Written to the element's own width/height during the drag and committed to
+   * the store on release — the same "live in the DOM, resting in the store"
+   * split the position uses, and for the same reason.
+   */
+  const onResizeDown = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => {
+      if (e.button !== 0) return
+      const el = rootRef.current
+      if (!el) return
+      e.preventDefault()
+      e.stopPropagation()
+      const rect = el.getBoundingClientRect()
+      const startX = e.clientX
+      const startY = e.clientY
+      let latest: Size = { w: rect.width, h: rect.height }
+      setResizing(true)
+      document.body.classList.add('is-hub-dragging')
+
+      const onMove = (ev: PointerEvent): void => {
+        latest = clampCardSize(
+          { w: rect.width + (ev.clientX - startX), h: rect.height + (ev.clientY - startY) },
+          bounds()
+        )
+        el.style.width = `${latest.w}px`
+        el.style.height = `${latest.h}px`
+      }
+      const onUp = (): void => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        window.removeEventListener('pointercancel', onUp)
+        document.body.classList.remove('is-hub-dragging')
+        setResizing(false)
+        // A card grown past the right or bottom edge has to come back on screen.
+        const pos = clampHubPos({ x: rect.left, y: rect.top }, latest, bounds())
+        actions.setVoiceHub({ w: latest.w, h: latest.h, ...pos })
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+      window.addEventListener('pointercancel', onUp)
+    },
+    [actions]
+  )
 
   /* ------------------------------------------------------------ keyboard */
 
@@ -308,9 +368,11 @@ export function VoiceHub(): ReactNode {
       className="vhub vhub--card"
       data-dragging={dragging ? 'true' : undefined}
       data-snapping={snapping ? 'true' : undefined}
+      data-resizing={resizing ? 'true' : undefined}
       data-phase={phase}
       role="dialog"
       aria-label="Voice hub"
+      style={{ width: hubSize(hub).w, height: hubSize(hub).h }}
       /* Focusable so grabbing the header puts the focus *in the card*. Without
          it the focus stays wherever it was — usually a terminal — and Escape
          would belong to that terminal rather than to the card he is holding. */
@@ -389,6 +451,16 @@ export function VoiceHub(): ReactNode {
         </button>
         <span className="vhub__hotkey mono">{hotkeyLabel(state.settings.sttHotkey)}</span>
       </footer>
+
+      {/* The corner. What the deleted panel's resizer became. */}
+      <div
+        className="vhub__grow"
+        role="separator"
+        aria-label="Resize the voice hub"
+        onPointerDown={onResizeDown}
+        onDoubleClick={() => actions.setVoiceHub({ w: 0, h: 0 })}
+        title="Drag to resize · double-click for the default size"
+      />
     </div>
   )
 }

@@ -14,7 +14,7 @@ import './SettingsPage.css'
 /**
  * Settings, as a place rather than a popover.
  *
- * It takes over the terminal area — the rail, the shelf and the voice panel stay
+ * It takes over the terminal area — the rail, the shelf and the floating voice hub stay
  * exactly where they were, because you are still in the same project and often
  * come here *because* of something a pane just did. The terminals themselves
  * keep running: terminalHost owns them, not React, so unmounting the grid costs

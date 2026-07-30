@@ -236,11 +236,18 @@ export type VoiceReplyMode = 'text' | 'both' | 'voice'
  *
  *   docked    the pill lives in the status bar, as it always has
  *   floating  a bigger pill floating over the app, dragged anywhere
- *   expanded  the floating Voice Hub card — dial, conversation, composer
+ *   expanded  the Voice Hub card — dial, conversation, composer
+ *
+ * These three are the *whole* of the voice agent's chrome now: the right-hand
+ * panel it used to live in is gone, along with its `voicePanelOpen` and
+ * `voicePanelWidth`. Steve's reason was the plain one — it was taking up all
+ * that space to show what the hub already shows.
  *
  * `x`/`y` are the top-left of the floating thing in viewport pixels. They are
  * remembered while docked too, so dragging it out a second time puts it back
- * where he last had it rather than in the middle of his terminals.
+ * where he last had it rather than in the middle of his terminals. `w`/`h` are
+ * the card's size after a corner-drag; 0 means "the default card", which is
+ * what every install starts with.
  */
 export type VoiceHubMode = 'docked' | 'floating' | 'expanded'
 
@@ -248,6 +255,8 @@ export interface VoiceHubPlacement {
   mode: VoiceHubMode
   x: number
   y: number
+  w: number
+  h: number
 }
 
 /** `create_project`, as it crosses to the main process. */
@@ -584,13 +593,15 @@ export interface Settings {
 
   /* --------------------------------------------------- voice agent (M4) */
   /** Voice-agent panel: open state and width in px. */
-  voicePanelOpen: boolean
-  voicePanelWidth: number
   /**
-   * The floating voice hub: docked in the status bar, floating as a pill, or
-   * expanded into the hub card — and where it was left. Persisted, because a
-   * hub you have parked over the second monitor's terminal is furniture, not a
-   * transient mode. See src/lib/voicehub.ts for the state machine.
+   * The voice hub: docked in the status bar, floating as a pill, or expanded
+   * into the hub card — and where it was left, and how big he made it.
+   * Persisted, because a hub you have parked over the second monitor's terminal
+   * is furniture, not a transient mode. See src/lib/voicehub.ts.
+   *
+   * This replaced `voicePanelOpen` / `voicePanelWidth` outright when the
+   * right-hand panel was deleted. Both are dropped by the store's normaliser,
+   * so an existing settings.json simply loses them on its next write.
    */
   voiceHub: VoiceHubPlacement
   voiceBrain: VoiceBrainId

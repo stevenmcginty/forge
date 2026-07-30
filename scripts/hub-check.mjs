@@ -11,15 +11,17 @@
  *    rather than by dragging a pill about and hoping. A hub that clamps wrong
  *    is a hub you can throw off the edge of the window and never get back.
  *
- * 2. ONE ENGINE. The hub shows the same conversation as the right-hand voice
- *    panel. If either surface ever grows its own subscription to the transcript
- *    bus, the sidecar or the speaker, then opening both would answer every
- *    sentence twice and say both answers out loud — the single worst bug this
- *    feature could have, and an invisible one until you hear it. So the second
- *    half of this file reads the source and insists there is exactly one of
- *    each, in the provider, and none in any surface.
+ * 2. ONE HEADLESS ENGINE. The hub is now the *only* surface — Steve had the
+ *    right-hand panel deleted — and the agent has to work whether it is on
+ *    screen or not: a message from his phone must still be answered, and memory
+ *    still written, with the hub docked and nothing rendered. That only holds
+ *    while the pipeline lives above the app rather than inside a surface, so
+ *    the second half of this file reads the source and insists on it: exactly
+ *    one of each subscription, all of them in the provider, none in the hub,
+ *    the providers wrapping the whole app, and the panel genuinely gone rather
+ *    than merely unrendered.
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -63,10 +65,34 @@ const BOUNDS = H.hubBounds(VIEW, { top: 0, bottom: 0 })
 /* ------------------------------------------------------------------ sizes */
 
 console.log('\nsizes')
-ok(H.hubSize('floating').w === H.HUB_PILL_SIZE.w, 'floating is the pill')
-ok(H.hubSize('expanded').w === H.HUB_CARD_SIZE.w, 'expanded is the card')
-ok(H.hubSize('docked').w === H.HUB_PILL_SIZE.w, 'docked measures as a pill — it is the thing that flies home')
+const placed = (mode, w = 0, h = 0) => ({ mode, x: 0, y: 0, w, h })
+ok(H.hubSize(placed('floating')).w === H.HUB_PILL_SIZE.w, 'floating is the pill')
+ok(H.hubSize(placed('expanded')).w === H.HUB_CARD_SIZE.w, 'an unresized card is the default card')
+ok(H.hubSize(placed('docked')).w === H.HUB_PILL_SIZE.w, 'docked measures as a pill — it is the thing that flies home')
 ok(H.HUB_CARD_SIZE.w > H.HUB_PILL_SIZE.w && H.HUB_CARD_SIZE.h > H.HUB_PILL_SIZE.h, 'the card is bigger both ways')
+ok(H.hubSize(placed('expanded', 500, 700)).h === 700, 'a resized card keeps the size he dragged it to')
+ok(H.hubSize(placed('floating', 500, 700)).w === H.HUB_PILL_SIZE.w, 'and a pill ignores it — a pill is a pill')
+
+/*
+ * The card is the only surface now, so it has to be big enough to read a
+ * drafted prompt in — the right-hand panel used to be the place you did that.
+ */
+ok(H.HUB_CARD_SIZE.w >= 420 && H.HUB_CARD_SIZE.h >= 560, 'the default card is at least 420×560')
+
+console.log('\ncorner resize — what replaced the panel resizer')
+const roomy = H.hubBounds({ w: 1920, h: 1200 }, { top: 0, bottom: 0 })
+ok(H.clampCardSize({ w: 520, h: 640 }, roomy).w === 520, 'a sensible size is taken as given')
+ok(H.clampCardSize({ w: 10, h: 10 }, roomy).w === H.HUB_CARD_MIN.w, 'it cannot be shrunk into nothing')
+ok(H.clampCardSize({ w: 5000, h: 5000 }, roomy).w === H.HUB_CARD_MAX.w, 'nor grown past the maximum')
+ok(
+  H.clampCardSize({ w: 5000, h: 5000 }, BOUNDS).h <= VIEW.h,
+  'and never past the window, whatever the maximum says',
+  String(H.clampCardSize({ w: 5000, h: 5000 }, BOUNDS).h)
+)
+ok(
+  H.clampCardSize({ w: 100, h: 100 }, H.hubBounds({ w: 300, h: 200 }, { top: 0, bottom: 0 })).w === H.HUB_CARD_MIN.w,
+  'in a tiny window the minimum still wins — a composer you cannot reach is worse than an overflow'
+)
 
 /* -------------------------------------------------------- state machine */
 
@@ -166,9 +192,16 @@ ok(!H.isNearDock(first, pill, dock), 'and clear of the magnet, so it does not sn
 /* ----------------------------------------------------------- persistence */
 
 console.log('\npersistence')
-const saved = { mode: 'expanded', x: 420, y: 96 }
+const saved = { mode: 'expanded', x: 420, y: 96, w: 500, h: 640 }
 const round = H.sanitiseHubPlacement(JSON.parse(JSON.stringify(saved)))
-ok(round.mode === 'expanded' && round.x === 420 && round.y === 96, 'a good placement survives the round trip')
+ok(
+  round.mode === 'expanded' && round.x === 420 && round.y === 96 && round.w === 500 && round.h === 640,
+  'a good placement survives the round trip, size and all'
+)
+ok(H.sanitiseHubPlacement({ mode: 'expanded', w: 20, h: 20 }).w === H.HUB_CARD_MIN.w, 'a silly saved size is clamped')
+ok(H.sanitiseHubPlacement({ mode: 'expanded', w: 0, h: 0 }).w === 0, 'zero survives — it means "the default card"')
+ok(H.sanitiseHubPlacement({ mode: 'expanded', w: 'wide' }).w === 0, 'and so does junk, which means the same thing')
+ok(H.DEFAULT_HUB.w === 0 && H.DEFAULT_HUB.h === 0, 'a fresh install has never resized the card')
 ok(H.sanitiseHubPlacement(undefined).mode === 'docked', 'no saved hub means docked')
 ok(H.sanitiseHubPlacement(null).x === 0, 'null is not a crash')
 ok(H.sanitiseHubPlacement({ mode: 'wide-open', x: 5, y: 5 }).mode === 'docked', 'a nonsense mode falls back to docked')
@@ -185,20 +218,63 @@ ok(H.DEFAULT_HUB.mode === 'docked', 'a fresh install is docked')
 /* --------------------------------------------------------- agent routing */
 
 console.log('\nagent surfaces')
-const surface = (voicePanelOpen, mode) => H.agentSurfaceOpen({ voicePanelOpen, voiceHub: { mode, x: 0, y: 0 } })
-ok(surface(true, 'docked'), 'the panel alone is an agent surface')
-ok(surface(false, 'floating'), 'so is a floating pill with the panel closed')
-ok(surface(false, 'expanded'), 'so is the hub card')
-ok(surface(true, 'expanded'), 'both at once is still one surface')
-ok(!surface(false, 'docked'), 'panel closed and hub docked is nowhere for a phrase to go')
+const surface = (mode) => H.agentSurfaceOpen({ voiceHub: { mode, x: 0, y: 0, w: 0, h: 0 } })
+ok(surface('floating'), 'a floating pill carries the round button, so it is an agent surface')
+ok(surface('expanded'), 'so is the hub card')
+ok(!surface('docked'), 'a docked hub is dictation only — nowhere for an agent phrase to go')
 
-/* ------------------------------------------------- one engine, not three */
+/* -------------------------------------------------- the panel is really gone */
 
-console.log('\none engine')
-const provider = read('src/state/VoiceAgent.tsx')
-const panel = read('src/components/VoicePanel.tsx')
+console.log('\nthe right-hand panel is gone')
+const app = read('src/App.tsx')
 const hub = read('src/components/VoiceHub.tsx')
 const surfaceParts = read('src/components/VoiceSurface.tsx')
+const settingsType = read('shared/types.ts')
+const store = read('electron/store.ts')
+
+ok(!existsSync(join(ROOT, 'src/components/VoicePanel.tsx')), 'the component file is deleted, not merely unused')
+ok(!existsSync(join(ROOT, 'src/components/VoicePanel.css')), 'and so is its stylesheet')
+ok(existsSync(join(ROOT, 'src/components/VoiceSurface.css')), 'its parts kept their styles, renamed to the surface')
+ok(!app.includes('VoicePanel'), 'App does not render it')
+ok(!/className="voice"/.test(hub + surfaceParts + app), 'nothing renders the <aside class="voice"> any more')
+ok(!/\.voice\s*\{/.test(read('src/components/VoiceSurface.css')), 'and the aside has no styles left to wear')
+
+/*
+ * The settings keys go with it, or an old settings.json quietly keeps a panel
+ * that no longer exists and nobody can explain the stale width in the file.
+ *
+ * Matched as *code* — `voicePanelOpen:`, `toggleVoicePanel(` — rather than as a
+ * bare word, because the comments that explain the deletion name them, and a
+ * check that forbade saying why would be a check that punished the explanation.
+ */
+for (const dead of ['voicePanelOpen', 'voicePanelWidth']) {
+  ok(!new RegExp(`${dead}\\s*[:?]`).test(settingsType), `Settings declares no ${dead}`)
+  ok(!store.includes(`${dead}:`), `and the store neither defaults nor normalises ${dead}`)
+}
+for (const [name, src] of [
+  ['AppState', read('src/state/AppState.tsx')],
+  ['useShortcuts', read('src/hooks/useShortcuts.ts')],
+  ['TitleBar', read('src/components/TitleBar.tsx')]
+]) {
+  ok(
+    !/settings\.voicePanel/.test(src) && !/toggleVoicePanel\s*[(:]/.test(src),
+    `${name} has no panel plumbing left`
+  )
+}
+ok(read('src/hooks/useShortcuts.ts').includes('toggleVoiceHubCard'), 'Ctrl+Shift+G opens the hub card instead')
+ok(read('src/components/TitleBar.tsx').includes('toggleVoiceHubCard'), 'and so does the titlebar button')
+
+// Everything the panel offered has to be reachable in the card. This is the
+// list of parts it used to render.
+for (const part of ['VoiceDial', 'VoiceLog', 'VoiceComposer', 'ReplyModeToggle', 'BrainChip', 'DegradedLink', 'LastLine']) {
+  ok(hub.includes(`<${part}`), `${part} lives on in the hub card`)
+}
+ok(surfaceParts.includes('Send to pane'), 'the send-to-pane picker came across too')
+
+/* ------------------------------------------------------- one headless engine */
+
+console.log('\none engine, and it is headless')
+const provider = read('src/state/VoiceAgent.tsx')
 const dictation = read('src/hooks/useDictation.ts')
 const dictProvider = read('src/state/Dictation.tsx')
 const entry = read('src/main.tsx')
@@ -213,7 +289,6 @@ const singletons = [
 for (const [needle, what, owner] of singletons) {
   ok(count(owner, needle) === 1, `${what} exists exactly once, in its provider`)
   for (const [name, src] of [
-    ['VoicePanel', panel],
     ['VoiceHub', hub],
     ['VoiceSurface', surfaceParts]
   ]) {
@@ -224,30 +299,48 @@ for (const [needle, what, owner] of singletons) {
 
 ok(count(provider, 'stt.onStatus(') === 1, 'the agent reads the sidecar status once')
 ok(count(dictation, 'stt.onStatus(') === 1, 'and dictation reads it once — a read, not a second microphone')
-ok(count(panel, 'stt.onStatus(') + count(hub, 'stt.onStatus(') === 0, 'no surface subscribes to the sidecar')
+ok(count(hub, 'stt.onStatus(') === 0, 'the hub subscribes to nothing at all')
 
-// A provider mounted twice would be exactly as bad as a second subscription.
+/*
+ * The whole point of the lift: the pipeline is mounted above the app, not
+ * inside a surface, so a phrase from the phone is answered and memory is
+ * written with the hub docked and nothing on screen.
+ */
 ok(count(entry, '<VoiceAgentProvider>') === 1, 'the voice agent is mounted once, at the root')
 ok(count(entry, '<DictationProvider>') === 1, 'and so is dictation')
+ok(entry.includes('<App />'), 'both wrap the whole app rather than living inside a surface')
 ok(count(dictProvider, 'useDictationEngine()') === 1, 'the dictation engine has exactly one caller')
-ok(count(panel, 'useDictationEngine') + count(hub, 'useDictationEngine') === 0, 'no surface calls the engine directly')
+ok(count(hub, 'useDictationEngine') === 0, 'no surface calls the engine directly')
 
-// Both surfaces really do render the same parts — the point of the refactor.
-for (const part of ['VoiceDial', 'VoiceLog', 'VoiceComposer', 'ReplyModeToggle', 'BrainChip']) {
-  ok(panel.includes(`<${part}`) && hub.includes(`<${part}`), `${part} is shared by the panel and the hub`)
+// The runner the panel used to assemble came across whole. These are the
+// members that have no other test coverage from the outside.
+for (const member of ['makeVideo:', 'makeImage:', 'editImage:', 'recallMemory:', 'forgetMemory:', 'sendPrompt:', 'closeMany:', 'createProject:']) {
+  ok(provider.includes(member), `the runner still has ${member.replace(':', '')}`)
 }
+ok(count(provider, 'agentMemory.record(') >= 2, 'memory is still written for commands and for brain turns')
+ok(provider.includes('agentMemory.prime('), 'and still primed per project')
 
 /* ------------------------------------------------------- main/renderer parity */
 
 console.log('\nmain and renderer agree')
-const store = read('electron/store.ts')
 ok(/voiceHub: hubPlacement\(s\.voiceHub\)/.test(store), 'the store sanitises the saved hub')
-ok(/mode: 'docked', x: 0, y: 0/.test(store), "the store's default hub is docked at 0,0")
+ok(/mode: 'docked', x: 0, y: 0, w: 0, h: 0/.test(store), "the store's default hub is docked, unplaced, unresized")
 ok(
   ["'floating'", "'expanded'", "'docked'"].every((m) => store.includes(`v.mode === ${m}`)),
   'the store accepts the same three modes the renderer does'
 )
 ok(H.DEFAULT_HUB.x === 0 && H.DEFAULT_HUB.y === 0, 'and the renderer default matches it')
+// The card's size limits are duplicated in main, which cannot import them.
+const dims = /dim\(v\.w, (\d+), (\d+)\), h: dim\(v\.h, (\d+), (\d+)\)/.exec(store)
+ok(
+  dims &&
+    Number(dims[1]) === H.HUB_CARD_MIN.w &&
+    Number(dims[2]) === H.HUB_CARD_MAX.w &&
+    Number(dims[3]) === H.HUB_CARD_MIN.h &&
+    Number(dims[4]) === H.HUB_CARD_MAX.h,
+  "the store's card-size limits are the same four numbers as the renderer's",
+  dims ? dims.slice(1).join(',') : 'no dim() call found'
+)
 
 const css = read('src/components/VoiceHub.css')
 ok(css.includes(`--hub-snap: ${H.HUB_SNAP_MS}ms`), 'the snap-home duration in CSS matches the one in code')
@@ -258,7 +351,11 @@ const z = (name) => Number(new RegExp(`--z-${name}: (\\d+)`).exec(tokens)?.[1] ?
 ok(z('hub') > z('settings'), 'the hub floats over the panes and the settings page', `${z('hub')} vs ${z('settings')}`)
 ok(z('hub') < z('popover') && z('hub') < z('toast'), 'and under popovers and toasts, which open on top of it')
 ok(/width: 180px/.test(css) && /height: 56px/.test(css), 'the floating pill is the size the code clamps for')
-ok(/width: 380px/.test(css) && /height: 520px/.test(css), 'and so is the card')
+// The card's size is written inline from the store, so the CSS must NOT also
+// state one — two sources for the same number is how they end up disagreeing.
+ok(!/\.vhub--card\s*\{[^}]*width:/.test(css), 'the card takes its size from the placement, not from CSS')
+ok(hub.includes('style={{ width: hubSize(hub).w, height: hubSize(hub).h }}'), 'and the card really is sized from it')
+ok(css.includes('.vhub__grow'), 'the corner resizer that replaced the panel resizer is styled')
 
 /* -------------------------------------------------------------- summary */
 

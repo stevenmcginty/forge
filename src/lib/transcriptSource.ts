@@ -3,7 +3,7 @@
  *
  * A `TranscriptSource` is anything that emits finished phrases. Today there is
  * exactly one — the panel's text box, i.e. "type what you'd say…". Tomorrow
- * dictation (M3) is a second one, and the voice panel must not have to change
+ * dictation (M3) is a second one, and the agent must not have to change
  * to accept it. So nothing subscribes to a source directly: sources register
  * with `transcriptBus`, and the panel listens to the bus.
  *
@@ -126,7 +126,7 @@ transcriptBus.register(typedTranscript)
  *
  * Deliberately *not* registered here, unlike the text box. A dictated phrase
  * belongs to whatever pane you are looking at — that is the whole point of M3 —
- * and only becomes the agent's while the voice panel is open with its mic
+ * and only becomes the agent's while the voice hub is out with its mic
  * armed. useDictation registers this as that becomes true and unregisters as it
  * stops being true, so the same words never go to both places.
  */

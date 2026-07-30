@@ -173,7 +173,8 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M3.8 7.6a4.2 4.2 0 0 0 8.4 0M8 11.8v1.9M5.8 13.7h4.4" />
     </>
   ),
-  // A panel hinged on the right: the voice panel's show/hide toggle.
+  // A panel hinged on the right. Unused since the voice panel was deleted —
+  // kept because it is the obvious glyph the day something else needs it.
   panelRight: (
     <>
       <rect x="2" y="3" width="12" height="10" rx="1.6" />

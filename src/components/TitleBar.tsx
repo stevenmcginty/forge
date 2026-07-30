@@ -14,6 +14,8 @@ export function TitleBar(): ReactNode {
   const project = useActiveProject()
   const [focused, setFocused] = useState(true)
   const inSettings = state.view === 'settings'
+  /** The hub button is a toggle for the *card*, not for the hub's existence. */
+  const hubOpen = state.settings.voiceHub.mode === 'expanded'
 
   useEffect(() => window.forge.window.onState((s) => setFocused(s.focused)), [])
 
@@ -53,22 +55,22 @@ export function TitleBar(): ReactNode {
           type="button"
           className="ghost-btn titlebar__btn"
           title={
-            state.settings.voicePanelOpen
-              ? 'Hide the voice agent panel (Ctrl+Shift+G)'
-              : 'Show the voice agent panel (Ctrl+Shift+G)'
+            hubOpen ? 'Close the voice hub (Ctrl+Shift+G)' : 'Open the voice hub (Ctrl+Shift+G)'
           }
-          aria-label="Voice agent panel"
-          aria-pressed={state.settings.voicePanelOpen}
-          data-on={state.settings.voicePanelOpen ? 'true' : undefined}
-          onClick={() => actions.toggleVoicePanel()}
+          aria-label="Voice hub"
+          aria-pressed={hubOpen}
+          data-on={hubOpen ? 'true' : undefined}
+          onClick={() => actions.toggleVoiceHubCard()}
         >
           {/*
-            A panel toggle looks like a panel. The waveform belongs to the
-            dictation pill and the microphone to the agent itself — three
-            different things were wearing the same glyph, which is why nobody
-            could tell them apart.
+            The glyph moved with the thing it opens. It used to be a panel,
+            because it opened a panel; the hub is a floating card, so it is the
+            card. The waveform still belongs to the dictation pill and the
+            microphone to the agent's own circle — three different things must
+            never wear the same glyph, which is what made them indistinguishable
+            the first time round.
           */}
-          <Icon name="panelRight" size={15} />
+          <Icon name="expand" size={15} />
         </button>
 
         <button

@@ -31,7 +31,7 @@ import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
 import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
 import { emptyMosaic, sanitiseMosaic } from '@/lib/mosaicLayout'
-import { DEFAULT_HUB } from '@/lib/voicehub'
+import { DEFAULT_HUB, nextHubMode } from '@/lib/voicehub'
 import { basename } from '@/lib/paths'
 import {
   collectLeaves,
@@ -102,7 +102,7 @@ export interface AppState {
    */
   mosaicZoom: string | null
   /**
-   * True when the voice panel's mic is armed, i.e. dictated phrases are the
+   * True when the voice hub's mic is armed, i.e. dictated phrases are the
    * agent's rather than the focused pane's. Transient on purpose: booting with
    * the mic already pointed at the agent is not something anyone asked for.
    */
@@ -132,8 +132,6 @@ const FALLBACK_SETTINGS: Settings = {
   sttModelDir: '',
   sttAutoStopSeconds: 10,
   sttHotkey: 'ControlRight',
-  voicePanelOpen: false,
-  voicePanelWidth: 380,
   voiceHub: DEFAULT_HUB,
   voiceBrain: 'gemini',
   anthropicKey: '',
@@ -180,10 +178,6 @@ const FALLBACK_SETTINGS: Settings = {
   updatesAutoRun: false,
   updateDismissedVersion: ''
 }
-
-/** The voice panel never gets narrower than this, nor wider. */
-export const VOICE_PANEL_MIN = 300
-export const VOICE_PANEL_MAX = 640
 
 const INITIAL: AppState = {
   ready: false,
@@ -719,15 +713,22 @@ export interface AppActions {
   selectProject(id: string): void
   revealProject(id: string): void
   toggleRail(): void
-  toggleVoicePanel(): void
-  setVoicePanelWidth(px: number): void
   /**
-   * Move or resize the floating voice hub. A patch, because dragging writes
-   * only `x`/`y` and the mode buttons write only `mode` — and the two happen
-   * inside the same gesture when a drag ends on the dock.
+   * Move or resize the voice hub. A patch, because dragging writes only
+   * `x`/`y`, a corner-drag writes only `w`/`h` and the mode buttons write only
+   * `mode` — and two of those happen inside the same gesture when a drag ends
+   * on the dock.
    */
   setVoiceHub(patch: Partial<VoiceHubPlacement>): void
-  /** Arm/disarm the voice panel's mic — see AppState.agentListening. */
+  /**
+   * Open the hub card, from wherever the hub happens to be — the titlebar
+   * button and Ctrl+Shift+G. Pressed again on an open card it minimises, so one
+   * key is the whole "show me the agent / put it away" gesture. This is what
+   * `toggleVoicePanel` used to be, pointed at the thing that replaced the
+   * panel.
+   */
+  toggleVoiceHubCard(): void
+  /** Arm/disarm the voice hub's mic — see AppState.agentListening. */
   setAgentListening(on: boolean): void
   setVoiceBrain(id: VoiceBrainId): void
   setAnthropicKey(key: string): void
@@ -1076,19 +1077,19 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         if (project) void window.forge.openPath(project.path)
       },
       toggleRail: () => dispatch({ type: 'patchSettings', patch: { railCollapsed: !state.settings.railCollapsed } }),
-      toggleVoicePanel: () =>
-        dispatch({ type: 'patchSettings', patch: { voicePanelOpen: !state.settings.voicePanelOpen } }),
       setVoiceHub: (patch) =>
         dispatch({
           type: 'patchSettings',
           patch: { voiceHub: { ...(state.settings.voiceHub ?? DEFAULT_HUB), ...patch } }
         }),
+      toggleVoiceHubCard: () => {
+        const hub = state.settings.voiceHub ?? DEFAULT_HUB
+        // `expand` reaches the card from docked *and* from floating — one key,
+        // one destination, wherever the hub was. See nextHubMode's table.
+        const mode = nextHubMode(hub.mode, hub.mode === 'expanded' ? 'minimise' : 'expand')
+        dispatch({ type: 'patchSettings', patch: { voiceHub: { ...hub, mode } } })
+      },
       setAgentListening: (on) => dispatch({ type: 'setAgentListening', on }),
-      setVoicePanelWidth: (px) =>
-        dispatch({
-          type: 'patchSettings',
-          patch: { voicePanelWidth: Math.round(Math.min(VOICE_PANEL_MAX, Math.max(VOICE_PANEL_MIN, px))) }
-        }),
       setVoiceBrain: (id) => dispatch({ type: 'patchSettings', patch: { voiceBrain: id } }),
       setAnthropicKey: (key) => dispatch({ type: 'patchSettings', patch: { anthropicKey: key } }),
       setGeminiKey: (key) => dispatch({ type: 'patchSettings', patch: { geminiKey: key.trim() } }),
@@ -1207,7 +1208,6 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     state.settings.customThemes,
     state.settings.themeId,
     state.settings.railCollapsed,
-    state.settings.voicePanelOpen,
     state.settings.voiceHub
   ])
 

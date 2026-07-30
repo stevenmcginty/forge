@@ -36,10 +36,13 @@ export function useShortcuts(): void {
         e.stopPropagation()
       }
 
-      // The voice panel toggle works from anywhere, including its own text box.
+      // The voice hub, from anywhere — including its own text box, and
+      // including the terminal you are typing in, which is the point of it.
+      // Docked or floating it opens the card where the hub is; open, it puts it
+      // away again.
       if (ctrl && shift && e.code === 'KeyG') {
         stop()
-        actions.toggleVoicePanel()
+        actions.toggleVoiceHubCard()
         return
       }
 

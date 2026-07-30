@@ -83,7 +83,7 @@ Nothing at all, unless you ask for it.
   (Running from source never checks at all.)
 - **Nothing else.** No telemetry, no analytics. The only other outbound request
   Forge itself makes is to Google's Gemini API, and only once you have pasted in
-  your own key and are using the voice panel.
+  your own key and are using the voice hub.
 
 ### About that update — Forge is not signed
 
@@ -123,7 +123,7 @@ not need Python.
   app never sends it anywhere.
 - A Gemini key you paste is stored in `settings.json` in that folder, in plain
   text. It is sent only to `generativelanguage.googleapis.com`, and only when
-  the voice panel is actually talking to Gemini.
+  the voice hub is actually talking to Gemini.
 - If you want a completely separate copy — a second Forge with its own projects
   and its own settings — set `FORGE_DATA_DIR` to a folder before launching it.
 

@@ -14,7 +14,7 @@ import { Card, KeyField, Row, Section, StateChip, TextField } from './parts'
 
 /**
  * The recommended fast brain. Measured on this machine: a full voice turn back
- * in 1.9s with valid brain JSON every time, which is the bar the voice panel
+ * in 1.9s with valid brain JSON every time, which is the bar the voice hub
  * actually cares about. It is *not* DEFAULT_GEMINI_MODEL — the default is what
  * a settings.json written before today already says, and silently rewriting a
  * stored model id is not this page's job. The hint below points at it; the
@@ -130,7 +130,7 @@ export function ModelsSection(): ReactNode {
         ) : null}
       </Card>
 
-      <Card title="Voice brain" hint="The voice panel keeps a shortcut to this, but it lives here now.">
+      <Card title="Voice brain" hint="The voice hub keeps a shortcut to this, but it lives here now.">
         <div className="sbrains">
           {BRAINS.map((b) => (
             <button

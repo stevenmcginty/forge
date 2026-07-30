@@ -1768,7 +1768,7 @@ const SNAPSHOT = {
   paneCount: 3,
   maxSessions: 16,
   maxPanesPerTab: 8,
-  view: { railCollapsed: false, voicePanelWidth: 380, terminalFontSize: 13, shell: 'pwsh.exe' }
+  view: { railCollapsed: false, voiceHub: 'docked', terminalFontSize: 13, shell: 'pwsh.exe' }
 }
 
 await test('the manifest describes the app, the actions, the limits and the state', () => {

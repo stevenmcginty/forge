@@ -837,7 +837,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       maxPanesPerTab: MAX_PANES_PER_TAB,
       view: {
         railCollapsed: state.settings.railCollapsed,
-        voicePanelWidth: state.settings.voicePanelWidth,
+        voiceHub: state.settings.voiceHub.mode,
         terminalFontSize: state.settings.terminalFontSize,
         shell: state.info?.shell ?? state.settings.shell
       }
@@ -848,7 +848,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     state.projects,
     state.settings.agentProfiles,
     state.settings.railCollapsed,
-    state.settings.voicePanelWidth,
+    state.settings.voiceHub.mode,
     state.settings.terminalFontSize,
     state.settings.shell,
     workspace,

@@ -1,91 +1,25 @@
-.voice {
-  position: relative;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  background: var(--bg-panel);
-  border-left: 1px solid var(--line-hairline);
-  overflow: hidden;
-  transition: width var(--dur-med) var(--ease-out);
-}
-
-.voice[data-open='false'] {
-  width: 0;
-  border-left-width: 0;
-}
-
-/* ------------------------------------------------------------- resizer */
-
-.voice__resizer {
-  position: absolute;
-  top: 0;
-  left: -3px;
-  z-index: var(--z-divider);
-  width: 7px;
-  height: 100%;
-  cursor: col-resize;
-}
-
-.voice__resizer::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 3px;
-  width: 1px;
-  height: 100%;
-  background: transparent;
-  transition: background var(--dur-fast) var(--ease-out);
-}
-
-.voice__resizer:hover::after {
-  background: var(--accent-line);
-}
-
-/* --------------------------------------------------------------- header */
-
-.voice__head {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  flex: none;
-  height: var(--tabbar-h);
-  padding: 0 var(--s-3) 0 var(--s-5);
-  border-bottom: 1px solid var(--line-hairline);
-}
-
-.voice__mark {
-  display: grid;
-  place-items: center;
-  flex: none;
-  color: var(--accent);
-}
-
-.voice__title {
-  flex: none;
-  margin: 0;
-  font-size: var(--t-md);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.voice__icon-btn {
-  flex: none;
-  width: 24px;
-  height: 22px;
-}
-
-.voice__icon-btn[data-on='true'] {
-  background: var(--bg-active);
-  color: var(--text-primary);
-}
+/*
+ * The voice agent's parts — the dial, the conversation, the composer, the
+ * chips.
+ *
+ * This was VoicePanel.css, and the panel it dressed no longer exists: Steve's
+ * verdict was that a fixed column down the right-hand side was taking up all
+ * that space to show what the floating hub already shows. So the chrome went
+ * (the aside, its resizer, its header) and everything that was really about the
+ * *agent* stayed, to be worn by the hub card instead — see VoiceSurface.tsx and
+ * VoiceHub.css.
+ *
+ * The `.voice__*` class names are kept deliberately. They name the agent, not
+ * the panel, and renaming several hundred lines of selector would have made the
+ * deletion look like a rewrite in the diff.
+ */
 
 /* ---------------------------------------------------------- agent dial
  *
- * The one thing in this panel you cannot miss.
+ * The one thing in the hub you cannot miss.
  *
  * Steve's complaint was not that the voice agent lacked features — it was
- * "where is the agent?". So the agent is a 72px circle at the top of the panel
+ * "where is the agent?". So the agent is a 72px circle at the top of the card
  * with a word underneath it, and every state it can be in looks different
  * enough to read across the room:
  *
@@ -408,7 +342,7 @@
   color: var(--warn);
 }
 
-/* What is left of the panel once the transcript and the composer are gone. */
+/* What is left of the card once the transcript and the composer are gone. */
 .voice__voiceonly {
   flex: 1;
   display: grid;
@@ -647,7 +581,7 @@
 .turn__draft {
   display: block;
   width: 100%;
-  /* The draft is the point of the panel — show it, don't peek at it. */
+  /* The draft is the point of the hub — show it, don't peek at it. */
   min-height: 168px;
   max-height: 420px;
   padding: var(--s-4);

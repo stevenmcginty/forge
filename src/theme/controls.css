@@ -3,7 +3,7 @@
  *
  * These used to live in SettingsPopover.css, which was fine while the popover
  * was the only place settings existed. It is now one of several — the settings
- * page, the dictation setup card, the voice panel — so they live here, next to
+ * page, the dictation setup card, the voice hub — so they live here, next to
  * the tokens, and are imported once from global.css.
  */
 

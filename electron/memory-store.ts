@@ -25,7 +25,7 @@ import type { MemorySection } from '@shared/types'
  *   • Every write is pruned first, so the file can never outgrow its cap — it
  *     is sent to a model on every turn.
  *   • Nothing here throws at the caller. A memory that cannot be written must
- *     not take the voice panel down with it; the worst case is a project that
+ *     not take the voice agent down with it; the worst case is a project that
  *     forgets, which is exactly where it started.
  *
  * Deliberately free of any `electron` import — it is handed a directory and an

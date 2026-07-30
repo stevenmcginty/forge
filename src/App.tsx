@@ -9,7 +9,6 @@ import { SettingsPage } from '@/components/settings/SettingsPage'
 import { TitleBar } from '@/components/TitleBar'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { VoiceHub } from '@/components/VoiceHub'
-import { VoicePanel } from '@/components/VoicePanel'
 import { useShortcuts } from '@/hooks/useShortcuts'
 import { terminalHost } from '@/lib/terminals'
 import { useApp } from '@/state/AppState'
@@ -19,13 +18,15 @@ export function App(): ReactNode {
   const { state } = useApp()
   useShortcuts()
 
-  // The rail or the voice panel animating open/closed changes every pane's
-  // width — and so does coming back from settings, where the grid was unmounted
-  // while the window carried on being resized.
+  // The rail animating open or closed changes every pane's width — and so does
+  // coming back from settings, where the grid was unmounted while the window
+  // carried on being resized. The voice hub is not in this list and never will
+  // be: it floats *over* the terminals rather than taking width from them,
+  // which is the whole reason the right-hand panel was deleted.
   useEffect(() => {
     const t = setTimeout(() => terminalHost.fitAll(), 200)
     return () => clearTimeout(t)
-  }, [state.settings.railCollapsed, state.settings.voicePanelOpen, state.settings.voicePanelWidth, state.view])
+  }, [state.settings.railCollapsed, state.view])
 
   return (
     <div className="app" data-ready={state.ready}>
@@ -46,14 +47,16 @@ export function App(): ReactNode {
         <main className="app__main">
           {state.view === 'settings' ? <SettingsPage /> : <TerminalGrid />}
         </main>
-        <VoicePanel />
       </div>
       <StatusBar />
       {/*
-        The floating voice hub. Last in the tree and `position: fixed`, so it
-        hovers over everything the app draws while occupying no layout of its
-        own — it renders nothing at all while docked, when the status-bar pill
-        *is* the hub. See src/components/VoiceHub.tsx.
+        The voice hub — the agent's only chrome now that the right-hand panel
+        is gone. Last in the tree and `position: fixed`, so it hovers over
+        everything the app draws while occupying no layout of its own, and it
+        renders nothing at all while docked, when the status-bar pill *is* the
+        hub. The agent itself does not live here: it is headless, in
+        <VoiceAgentProvider> at the root, and answers the phone whether any of
+        this is on screen or not. See src/components/VoiceHub.tsx.
       */}
       <VoiceHub />
       <Onboarding />

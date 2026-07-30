@@ -217,7 +217,7 @@ Really generates a short video (Google **Veo**) and returns the absolute path of
 the `.mp4` it was saved to. Same default output directory as the image tools.
 
 **It takes 1–3 minutes.** The tool description says so in capitals, the voice
-agent's manifest says so, and the provisional chip in the voice panel says so —
+agent's manifest says so, and the provisional chip in the voice hub says so —
 because an agent that thinks this is as quick as `make_image` will call it twice
 and then narrate a wait nobody was warned about.
 

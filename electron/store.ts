@@ -107,11 +107,10 @@ function defaultSettings(): Settings {
     sttModelDir: detectSttModelDir(),
     sttAutoStopSeconds: 10,
     sttHotkey: 'ControlRight',
-    voicePanelOpen: false,
-    voicePanelWidth: 380,
     // The voice hub starts where it always was — in the status bar. Dragging it
-    // out is the opt-in; see src/lib/voicehub.ts.
-    voiceHub: { mode: 'docked', x: 0, y: 0 },
+    // out (or Ctrl+Shift+G) is the opt-in; see src/lib/voicehub.ts. There is no
+    // voicePanelOpen/Width any more: the right-hand panel is gone.
+    voiceHub: { mode: 'docked', x: 0, y: 0, w: 0, h: 0 },
     // Gemini is the live brain; with no key set it degrades to the stub.
     voiceBrain: 'gemini',
     anthropicKey: '',
@@ -355,12 +354,14 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       height: clamp(win.height ?? 900, 480, 10000),
       maximized: Boolean(win.maximized)
     },
-    voicePanelOpen: Boolean(s.voicePanelOpen),
-    voicePanelWidth: clamp(s.voicePanelWidth ?? DEFAULT_SETTINGS.voicePanelWidth, 300, 640),
     // Mirrors sanitiseHubPlacement in src/lib/voicehub.ts — main cannot import a
     // renderer module, and hub:check asserts the two still agree. The position
     // is deliberately *not* clamped here: the window that saved it may have
     // been a different size, so the renderer clamps against the live viewport.
+    //
+    // `voicePanelOpen` and `voicePanelWidth` used to sit here. They are not
+    // read and not written: normalising builds this object from scratch, so the
+    // first save after the update quietly drops them from an existing file.
     voiceHub: hubPlacement(s.voiceHub),
     voiceBrain:
       brain === 'claude' || brain === 'openai' || brain === 'stub' || brain === 'gemini' || brain === 'openrouter'
@@ -455,7 +456,15 @@ function hubPlacement(raw: unknown): VoiceHubPlacement {
   const v = (raw ?? {}) as Partial<VoiceHubPlacement>
   const mode: VoiceHubMode = v.mode === 'floating' || v.mode === 'expanded' || v.mode === 'docked' ? v.mode : 'docked'
   const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? Math.round(n) : 0)
-  return { mode, x: num(v.x), y: num(v.y) }
+  // 0 means "the default card"; anything else is clamped to what a corner-drag
+  // is allowed to produce. The bounds are duplicated from HUB_CARD_MIN/MAX for
+  // the usual reason — main cannot import a renderer module — and hub:check
+  // asserts the four numbers still match.
+  const dim = (n: unknown, lo: number, hi: number): number => {
+    const px = num(n)
+    return px === 0 ? 0 : clamp(px, lo, hi)
+  }
+  return { mode, x: num(v.x), y: num(v.y), w: dim(v.w, 340, 760), h: dim(v.h, 400, 1000) }
 }
 
 /* ------------------------------------------------------------------- public */

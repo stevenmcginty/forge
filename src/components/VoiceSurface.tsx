@@ -17,21 +17,27 @@ import { AgentBadge } from './AgentBadge'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { Popover, PopoverRow, PopoverSection } from './Popover'
-import './VoicePanel.css'
+import './VoiceSurface.css'
 
 /**
- * The voice agent, as parts you can arrange.
+ * The voice agent, as parts.
  *
- * Two surfaces show the same conversation — the right-hand panel and the
- * floating hub card — so the dial, the log and the composer are components
- * rather than markup inside a panel. They take almost no props: everything
- * comes from `useVoiceAgent()`, which is the single engine, so a part rendered
- * in two places twice over is still one conversation, one microphone and one
- * voice.
+ * These were the innards of the right-hand panel. The panel is gone — Steve
+ * decided a permanent column showing what the hub already shows was not worth
+ * the width — so the dial, the log, the composer and the chips are components
+ * that the hub card arranges instead. Nothing was dropped on the way: the
+ * conversation, the drafted prompts, the send-to-pane picker, the outcome
+ * chips, the reply-mode switch and the brain chip are all still here, wearing
+ * the same stylesheet they always wore.
+ *
+ * They take almost no props: everything comes from `useVoiceAgent()`, the one
+ * headless engine at the app root. That is what let the panel be deleted
+ * without deleting the agent — and what would let a second surface exist again
+ * tomorrow without doubling a word of it.
  *
  * Nothing here subscribes to anything. If a part in this file ever grows a
- * `transcriptBus`, a `stt.on*` or a `speakOnce`, the second surface would double
- * it — `npm run hub:check` fails the build if one appears.
+ * `transcriptBus`, a `stt.on*` or a `speakOnce`, it would be a second engine —
+ * `npm run hub:check` fails the build if one appears.
  */
 
 /* ----------------------------------------------------------- agent button */
@@ -58,6 +64,10 @@ const AGENT_LABEL: Record<AgentPhase, { title: string; sub: string }> = {
  * `compact` is the floating pill's version: the same circle and the same
  * states, at 34px, with the words left off — the pill is 56px tall and there is
  * nowhere to put them.
+ *
+ * Both sizes are one component on purpose. The pill's circle and the card's are
+ * the same agent in the same phase, and two copies of this rAF loop would drift
+ * apart the first time either was tuned.
  */
 export function VoiceDial({ compact }: { compact?: boolean } = {}): ReactNode {
   const { phase, armed, levelRef, thinkingFor, holding, sttError, cancelAllHolds, toggleAgent } = useVoiceAgent()
@@ -231,11 +241,7 @@ export function LastLine(): ReactNode {
 
 /* ------------------------------------------------------------------ log */
 
-/**
- * The conversation. Scrolls itself to the bottom whenever a turn lands, which
- * is per-surface state — two views of the same log can be scrolled to different
- * places, and should be.
- */
+/** The conversation. Scrolls itself to the bottom whenever a turn lands. */
 export function VoiceLog(): ReactNode {
   const { turns, brainStatus, paneOptions, sendToPane, editDraft } = useVoiceAgent()
   const logRef = useRef<HTMLDivElement | null>(null)
@@ -276,7 +282,7 @@ export function VoiceLog(): ReactNode {
   )
 }
 
-/** What is left of a surface once the transcript and the composer are gone. */
+/** What is left of the card once the transcript and the composer are gone. */
 export function VoiceOnlyNote(): ReactNode {
   return (
     <div className="voice__voiceonly">
@@ -287,7 +293,7 @@ export function VoiceOnlyNote(): ReactNode {
 
 /* ------------------------------------------------------------- composer */
 
-/** `autoFocus` is for the surface that has just appeared, not for both. */
+/** `autoFocus` puts the caret in it as the card opens. */
 export function VoiceComposer({ autoFocus }: { autoFocus?: boolean } = {}): ReactNode {
   const { draftPhrase, setDraftPhrase, submitPhrase } = useVoiceAgent()
   const composerRef = useRef<HTMLTextAreaElement | null>(null)

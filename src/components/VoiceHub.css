@@ -247,15 +247,63 @@
 
 /* ------------------------------------------------------------------ card */
 
+/*
+ * The card. Its width and height are written inline from the stored placement
+ * (default 420×560, or whatever he last dragged the corner to), so there are no
+ * sizes here to disagree with src/lib/voicehub.ts.
+ */
 .vhub--card {
   flex-direction: column;
-  width: 380px;
-  height: 520px;
-  max-height: calc(100vh - 2 * var(--s-5));
   border-radius: var(--r-xl);
   background: var(--bg-panel);
   overflow: hidden;
   animation: vhub-rise 190ms var(--ease-spring);
+}
+
+/* Mid-resize the size is written straight to the element, so nothing may
+   animate towards it. */
+.vhub[data-resizing='true'] {
+  transition: none;
+  animation: none;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------------ grow
+ *
+ * The bottom-right corner: what the deleted panel's resizer turned into. Two
+ * hairlines, the same language as every other grip in Forge, and invisible
+ * until you go near it.
+ */
+
+.vhub__grow {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.vhub__grow::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--text-dim);
+  border-bottom: 1.5px solid var(--text-dim);
+  border-bottom-right-radius: var(--r-xs);
+  opacity: 0.5;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.vhub__grow:hover::after {
+  opacity: 1;
+  border-color: var(--accent);
 }
 
 /* It is focusable (see the tabIndex in VoiceHub.tsx) but it is not a control —
@@ -315,21 +363,15 @@
 }
 
 /*
- * The empty state is written for a panel that is as tall as the window. In a
- * 520px card its own padding plus the log's pushes it into a scrollbar, and the
- * first thing he ever sees of the hub is a clipped icon. Same words, less air.
+ * The empty state is written for a surface as tall as the window. In a card its
+ * own padding plus the log's pushed it into a scrollbar, and the first thing he
+ * ever saw of the hub was a clipped icon. Same words, less air.
  */
 .vhub--card .voice__log .empty {
   height: auto;
   margin: auto 0;
   gap: var(--s-3);
   padding: var(--s-3);
-}
-
-/* The plate is the first thing to go: it is decoration, and the sentence under
-   it is the part that teaches him what to say. */
-.vhub--card .voice__log .empty__plate {
-  display: none;
 }
 
 .vhub--card .voice__log .empty__body {

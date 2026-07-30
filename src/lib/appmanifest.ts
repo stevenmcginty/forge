@@ -65,7 +65,8 @@ export interface ManifestSnapshot {
   maxPanesPerTab: number
   view: {
     railCollapsed: boolean
-    voicePanelWidth: number
+    /** Where the agent's own chrome is: docked, floating or expanded. */
+    voiceHub: string
     terminalFontSize: number
     shell: string
   }
@@ -343,7 +344,7 @@ export function buildManifest(s: ManifestSnapshot): string {
   }
   lines.push(
     `view: projects rail ${s.view.railCollapsed ? 'collapsed' : 'open'}, ` +
-      `voice panel ${s.view.voicePanelWidth}px, terminal font ${s.view.terminalFontSize}px`
+      `voice hub ${s.view.voiceHub}, terminal font ${s.view.terminalFontSize}px`
   )
   lines.push('')
   lines.push('# NOT YET POSSIBLE (do not emit these)')

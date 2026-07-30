@@ -38,7 +38,7 @@ export function VoiceSection(): ReactNode {
 
       <Card
         title="Voice agent"
-        hint="The panel itself is Ctrl+Shift+G. Relay hands a finished agent turn back to the voice agent without you having to ask."
+        hint="The hub itself is Ctrl+Shift+G. Relay hands a finished agent turn back to the voice agent without you having to ask."
       >
         <Row label="Auto-relay finished turns" hint="Off means you decide what gets sent back">
           <Toggle
@@ -162,7 +162,7 @@ function SpokenRepliesCard(): ReactNode {
           : 'Speech comes from the voices installed on this PC — nothing is sent anywhere to say it. Drafted prompts are never read aloud.'
       }
     >
-      <Row label="How the agent replies" hint="Also switchable from the voice panel's header">
+      <Row label="How the agent replies" hint="Also switchable from the voice hub's header">
         <div className="seg" role="group" aria-label="Reply mode">
           {MODES.map((m) => (
             <button
