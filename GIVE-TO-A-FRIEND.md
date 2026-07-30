@@ -21,6 +21,25 @@ agent on and give it your own Gemini key.
    only have to do this once.
 4. The welcome card asks you three things. All three are skippable.
 
+### If nothing happens at all — Smart App Control
+
+On a clean Windows 11 install there is a second, stricter gate called **Smart
+App Control**, and it is *not* SmartScreen: it blocks unsigned programs outright
+with no "Run anyway" button. Forge just fails to start, sometimes silently.
+
+Check it at **Windows Security → App & browser control → Smart App Control**.
+
+- If it says **Evaluation**, it usually lets Forge through.
+- If it says **On**, it will not, and there is no per-app exception. The only
+  ways past it are to turn Smart App Control off — which is permanent, Microsoft
+  will not let you turn it back on without reinstalling Windows, and is a real
+  reduction in the machine's protection — or to run Forge from source
+  (`npm install && npm run dev`), which uses Electron's own signed binary.
+
+Nobody should turn Smart App Control off for a terminal app they were handed by
+a friend. If it is On, run from source or leave it. This is a limitation of
+Forge being unsigned, not a fault in the build.
+
 To move it, move the folder. To uninstall, delete the folder — and
 `%APPDATA%\Forge` if you want your settings gone too.
 
@@ -89,6 +108,8 @@ not need Python.
 ## If something goes wrong
 
 - **"Windows protected your PC"** → More info → Run anyway. See above.
+- **Double-clicking Forge.exe does nothing whatsoever** → Smart App Control. See
+  above; it gives no dialog, it just refuses.
 - **A pane opens and immediately says a command is not recognised** → that agent
   is not installed. See the table above.
 - **Nothing opens at all** → check you extracted the zip rather than running

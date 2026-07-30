@@ -18,7 +18,7 @@
  * so the data directory is genuinely empty, which is the only way to see the
  * first-run overlay.
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -56,11 +56,51 @@ console.log(`\npackaged check\n  ..   app       ${APP}\n  ..   data dir  ${dataD
 
 /* ------------------------------------------------------------------ launch */
 
-const child = spawn(APP, [`--remote-debugging-port=${PORT}`], {
-  env: { ...process.env, FORGE_DATA_DIR: dataDir },
-  stdio: ['ignore', 'pipe', 'pipe'],
-  windowsHide: false
-})
+/**
+ * Smart App Control is on by default on clean Windows 11 installs. It blocks
+ * unsigned executables it has no reputation for — and electron-builder's
+ * rebranding (icon, version resource, asar integrity) invalidates the signature
+ * Electron ships with, so every fresh Forge.exe is exactly that.
+ *
+ * The failure surfaces as `spawn UNKNOWN`, which explains nothing, so say what
+ * it actually means. This is the same wall the person you hand the zip to will
+ * hit; GIVE-TO-A-FRIEND.md covers what they can do about it.
+ */
+function explainSpawnFailure(err) {
+  if (process.platform !== 'win32' || err?.code !== 'UNKNOWN') return null
+  const probe = spawnSync(
+    'reg',
+    ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\CI\\Policy', '/v', 'VerifiedAndReputablePolicyState'],
+    { encoding: 'utf8' }
+  )
+  const on = /VerifiedAndReputablePolicyState\s+REG_DWORD\s+0x1\b/.test(probe.stdout ?? '')
+  return [
+    'Windows refused to start the packaged exe (spawn UNKNOWN).',
+    on
+      ? 'Smart App Control is ON on this machine (VerifiedAndReputablePolicyState = 1).'
+      : 'This is usually an application-control policy, antivirus quarantine, or a file still locked by the build.',
+    'electron-builder rebrands electron.exe (icon, version resource, asar integrity),',
+    'which breaks the Authenticode signature Electron ships with — so a freshly',
+    'built Forge.exe is an unsigned binary with no reputation, which is precisely',
+    'what Smart App Control blocks. Nothing in the build is wrong; the machine is',
+    'refusing to run an unsigned exe.'
+  ].join('\n       ')
+}
+
+let child
+try {
+  child = spawn(APP, [`--remote-debugging-port=${PORT}`], {
+    env: { ...process.env, FORGE_DATA_DIR: dataDir },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: false
+  })
+} catch (err) {
+  rmSync(dataDir, { recursive: true, force: true })
+  const why = explainSpawnFailure(err)
+  console.error(`\n  ✕    ${why ?? (err?.message ?? String(err))}\n`)
+  // 3, not 1: this is "could not run the check", not "the check found a fault".
+  process.exit(3)
+}
 let appStderr = ''
 child.stdout.setEncoding('utf8')
 child.stderr.setEncoding('utf8')
@@ -353,8 +393,17 @@ try {
   } catch {
     /* already gone */
   }
+  // Take the whole tree down, not just the main process. Electron's GPU and
+  // utility children outlive a plain kill() by a moment, and while they are
+  // alive they hold a handle on release/win-unpacked — which leaves the
+  // *directory name* in delete-pending state and makes the next `npm run dist`
+  // fail with EPERM renaming win-unpacked.tmp into place. taskkill /T is the
+  // only thing on Windows that reliably gets the children.
   child.kill()
-  await sleep(1200)
+  if (process.platform === 'win32' && child.pid) {
+    spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+  }
+  await sleep(2500)
   if (child.exitCode === null) child.kill('SIGKILL')
   if (!KEEP) rmSync(dataDir, { recursive: true, force: true })
   else console.log(`  ..   data dir kept at ${dataDir}`)
