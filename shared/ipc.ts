@@ -66,7 +66,13 @@ export const IPC = {
 
   // voice agent (M4)
   voiceGemini: 'voice:gemini',
+  voiceOpenRouter: 'voice:openrouter',
   voiceImportKey: 'voice:import-key',
+
+  // media generation (M6) — the same REST calls the MCP bridge makes, so the
+  // voice agent's executor can generate images too.
+  voiceMakeImage: 'voice:make-image',
+  voiceEditImage: 'voice:edit-image',
 
   // diagnostics
   rendererError: 'diag:renderer-error'

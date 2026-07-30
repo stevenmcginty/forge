@@ -272,6 +272,10 @@ function buildEnv(): Record<string, string> {
     if (v === undefined) continue
     if (/^ELECTRON_(RUN_AS_NODE|NO_ATTACH_CONSOLE|IS_DEV|ENABLE_LOGGING)$/.test(k)) continue
     if (k === 'NODE_OPTIONS') continue
+    // Forge is a truecolor terminal, so an inherited NO_COLOR is simply wrong
+    // here — and Steve's is set globally, which was quietly draining the colour
+    // out of every pane.
+    if (k === 'NO_COLOR') continue
     env[k] = v
   }
   env.TERM = 'xterm-256color'

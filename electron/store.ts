@@ -85,7 +85,14 @@ function defaultSettings(): Settings {
     voiceBrain: 'gemini',
     anthropicKey: '',
     geminiKey: '',
-    geminiModel: 'gemini-2.5-flash'
+    geminiModel: 'gemini-2.5-flash',
+    // Empty = use gemini-media.ts's built-in default, which the MCP bridge shares.
+    geminiImageModel: '',
+    openrouterKey: '',
+    // Mirrors DEFAULT_OPENROUTER_MODEL in src/lib/voicebrain.ts, the same way
+    // geminiModel above mirrors DEFAULT_GEMINI_MODEL — main cannot import a
+    // renderer module, and voice-check asserts the two literals still agree.
+    openrouterModel: 'google/gemini-2.5-flash-lite'
   }
 }
 
@@ -99,9 +106,31 @@ let layoutDir = ''
  * using — see scripts/ and the M2 notes.
  */
 export function resolveDataRoot(): string {
+  // --data-dir wins over the environment: it is the more specific request, and
+  // it is what you reach for when launching a throwaway copy from a shell that
+  // already exports FORGE_DATA_DIR for something else.
+  const flag = dataDirFlag()
+  if (flag) return resolve(flag)
   const override = process.env['FORGE_DATA_DIR']
   if (override && override.trim()) return resolve(override.trim())
   return join(app.getPath('appData'), 'Forge')
+}
+
+/** `--data-dir <path>` or `--data-dir=<path>`, whichever the caller used. */
+function dataDirFlag(): string | null {
+  const argv = process.argv
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i]!
+    if (arg === '--data-dir') {
+      const next = argv[i + 1]
+      if (next && next.trim() && !next.startsWith('--')) return next.trim()
+    }
+    if (arg.startsWith('--data-dir=')) {
+      const value = arg.slice('--data-dir='.length).trim()
+      if (value) return value
+    }
+  }
+  return null
 }
 
 function ensureDirs(): void {
@@ -196,13 +225,20 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     voicePanelOpen: Boolean(s.voicePanelOpen),
     voicePanelWidth: clamp(s.voicePanelWidth ?? DEFAULT_SETTINGS.voicePanelWidth, 300, 640),
     voiceBrain:
-      brain === 'claude' || brain === 'openai' || brain === 'stub' || brain === 'gemini'
+      brain === 'claude' || brain === 'openai' || brain === 'stub' || brain === 'gemini' || brain === 'openrouter'
         ? brain
         : DEFAULT_SETTINGS.voiceBrain,
     anthropicKey: typeof s.anthropicKey === 'string' ? s.anthropicKey : '',
     geminiKey: typeof s.geminiKey === 'string' ? s.geminiKey.trim() : '',
     geminiModel:
-      typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel
+      typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel,
+    // Blank is meaningful here — it means "whatever gemini-media.ts defaults to".
+    geminiImageModel: typeof s.geminiImageModel === 'string' ? s.geminiImageModel.trim() : '',
+    openrouterKey: typeof s.openrouterKey === 'string' ? s.openrouterKey.trim() : '',
+    openrouterModel:
+      typeof s.openrouterModel === 'string' && s.openrouterModel.trim()
+        ? s.openrouterModel.trim()
+        : DEFAULT_SETTINGS.openrouterModel
   }
 }
 

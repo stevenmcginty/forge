@@ -22,6 +22,12 @@ export type AppAction =
   | { kind: 'switch_project'; name: string }
   | { kind: 'focus_tab'; index: number }
   | { kind: 'new_project_hint' }
+  /** Real image generation. 1–4, each one a separate API call. */
+  | { kind: 'make_image'; description: string; count: number; aspect?: string }
+  | { kind: 'edit_image'; path: string; instruction: string }
+
+/** Image generation is the one thing here that cannot finish synchronously. */
+export const MAX_GENERATED_IMAGES = 4
 
 export interface ActionProject {
   id: string
@@ -55,6 +61,18 @@ export interface ActionRunner {
   closeTab(tabId: string): void
   selectProject(projectId: string): void
   selectTab(tabId: string): void
+  /**
+   * Media generation — optional, and asynchronous.
+   *
+   * Everything else in this file is a synchronous state change, which is what
+   * keeps the executor pure and testable. Generating an image is a 6-second
+   * network call, so these return a promise instead and the executor hands it
+   * back on `ActionOutcome.pending` for the caller to await. A runner that does
+   * not implement them (a test double, a head-less script) makes the action fail
+   * honestly rather than silently doing nothing.
+   */
+  makeImage?(request: { description: string; count: number; aspect?: string }): Promise<ActionOutcome>
+  editImage?(request: { path: string; instruction: string }): Promise<ActionOutcome>
 }
 
 export interface ActionOutcome {
@@ -64,6 +82,13 @@ export interface ActionOutcome {
   summary: string
   requested: number
   done: number
+  /**
+   * Set only by the asynchronous actions. The summary above is provisional
+   * ("Generating…"); await this for the real one and replace it.
+   */
+  pending?: Promise<ActionOutcome>
+  /** Absolute paths this action produced, once it has finished. */
+  paths?: string[]
 }
 
 /* ------------------------------------------------------------- matching */
@@ -300,6 +325,37 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
         requested: 1,
         done: 0
       }
+
+    case 'make_image': {
+      const description = action.description.trim()
+      if (!description) return fail('No description — I will not generate a picture of nothing')
+      if (!run.makeImage) return fail('Image generation is not available here')
+      const requested = Math.min(MAX_GENERATED_IMAGES, Math.max(1, Math.floor(action.count || 1)))
+      const request: { description: string; count: number; aspect?: string } = { description, count: requested }
+      if (action.aspect) request.aspect = action.aspect
+      return {
+        ok: true,
+        summary: `Generating ${requested} ${plural(requested, 'image')}…`,
+        requested,
+        done: 0,
+        pending: run.makeImage(request)
+      }
+    }
+
+    case 'edit_image': {
+      const path = action.path.trim()
+      const instruction = action.instruction.trim()
+      if (!path) return fail('No image to edit — give me the file path')
+      if (!instruction) return fail('No instruction — tell me what to change')
+      if (!run.editImage) return fail('Image editing is not available here')
+      return {
+        ok: true,
+        summary: 'Editing the image…',
+        requested: 1,
+        done: 0,
+        pending: run.editImage({ path, instruction })
+      }
+    }
 
     default:
       return fail('I did not understand that')

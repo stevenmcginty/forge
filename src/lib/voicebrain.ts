@@ -1,6 +1,7 @@
 import type { VoiceBrainId } from '@shared/types'
 import type { AppAction } from './appactions'
 import { GeminiBrain } from './geminibrain'
+import { OpenRouterBrain } from './openrouterbrain'
 
 /**
  * The voice agent's *brain* seam.
@@ -79,6 +80,8 @@ export interface BrainSettings {
   anthropicKey?: string
   geminiKey?: string
   geminiModel?: string
+  openrouterKey?: string
+  openrouterModel?: string
   /** Not a setting yet — reserved for OpenAIBrain. */
   openaiKey?: string
 }
@@ -88,6 +91,14 @@ export interface BrainSettings {
 export const NOT_CONNECTED = '(engine not connected)'
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
+
+/**
+ * Cheap, fast, and it honours `response_format` — verified against OpenRouter's
+ * public /models endpoint (2026-07-30): $0.10/M in, $0.40/M out, 1M context,
+ * `structured_outputs` supported. Mirrored in electron/store.ts's defaults,
+ * which cannot import this module; voice-check asserts the two agree.
+ */
+export const DEFAULT_OPENROUTER_MODEL = 'google/gemini-2.5-flash-lite'
 
 /**
  * The offline fallback. Understands nothing, admits it, and hands the transcript
@@ -108,7 +119,7 @@ export class StubBrain implements VoiceBrain {
       return {
         ok: false,
         reason: 'no-key',
-        detail: 'No Gemini key yet — commands still work; your words come back verbatim as a draft prompt.'
+        detail: 'No API key yet — commands still work; your words come back verbatim as a draft prompt.'
       }
     }
     return {
@@ -191,29 +202,44 @@ export class OpenAIBrain implements VoiceBrain {
 
 /* ---------------------------------------------------------------- selector */
 
+function geminiBrain(s: BrainSettings): VoiceBrain | null {
+  const key = (s.geminiKey ?? '').trim()
+  return key ? new GeminiBrain(key, s.geminiModel?.trim() || DEFAULT_GEMINI_MODEL) : null
+}
+
+function openRouterBrain(s: BrainSettings): VoiceBrain | null {
+  const key = (s.openrouterKey ?? '').trim()
+  return key ? new OpenRouterBrain(key, s.openrouterModel?.trim() || DEFAULT_OPENROUTER_MODEL) : null
+}
+
 /**
  * The brain named in settings. Never returns null, and never returns a brain
- * that cannot be used: Gemini without a key degrades to the stub, so the panel
- * keeps working (and says why) instead of erroring on every phrase.
+ * that cannot be used: a live engine without a key degrades to the stub, so the
+ * panel keeps working (and says why) instead of erroring on every phrase.
+ *
+ * An explicit choice always wins — picking OpenRouter with no OpenRouter key
+ * gets you the stub complaining about the missing key, *not* a silent fall back
+ * onto Gemini, because a brain quietly swapping itself out is the kind of thing
+ * you only notice from the bill. Only the unset/unknown case falls through the
+ * preference order gemini > openrouter > stub.
  */
 export function getActiveBrain(settings: BrainSettings | null | undefined): VoiceBrain {
-  switch (settings?.voiceBrain) {
-    case 'gemini': {
-      const key = (settings.geminiKey ?? '').trim()
-      if (!key) return new StubBrain('no-key')
-      return new GeminiBrain(key, settings.geminiModel?.trim() || DEFAULT_GEMINI_MODEL)
-    }
+  const s = settings ?? {}
+  switch (s.voiceBrain) {
+    case 'gemini':
+      return geminiBrain(s) ?? new StubBrain('no-key')
+    case 'openrouter':
+      return openRouterBrain(s) ?? new StubBrain('no-key')
     case 'claude':
-      return new ClaudeBrain(settings.anthropicKey ?? '')
+      return new ClaudeBrain(s.anthropicKey ?? '')
     case 'openai':
-      return new OpenAIBrain(settings.openaiKey ?? '')
+      return new OpenAIBrain(s.openaiKey ?? '')
     case 'stub':
       return new StubBrain()
-    default: {
-      // Unknown value from a hand-edited settings.json: behave like the default.
-      const key = (settings?.geminiKey ?? '').trim()
-      return key ? new GeminiBrain(key, settings?.geminiModel?.trim() || DEFAULT_GEMINI_MODEL) : new StubBrain('no-key')
-    }
+    default:
+      // Nothing chosen, or nonsense from a hand-edited settings.json: use
+      // whichever live brain has a key, Gemini first.
+      return geminiBrain(s) ?? openRouterBrain(s) ?? new StubBrain('no-key')
   }
 }
 

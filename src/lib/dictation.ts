@@ -16,7 +16,7 @@ export type InsertTarget =
   | { kind: 'none' }
 
 /** xterm's hidden textarea — a focused terminal, not a form field. */
-const XTERM_TEXTAREA = 'xterm-helper-textarea'
+export const XTERM_TEXTAREA = 'xterm-helper-textarea'
 
 const TEXTY_INPUT_TYPES = new Set(['text', 'search', 'url', 'email', 'tel', 'password', ''])
 

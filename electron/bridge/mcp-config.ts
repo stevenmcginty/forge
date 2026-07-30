@@ -18,6 +18,14 @@ import { getDataDir, getSettings } from '../store'
  *
  * Deliberately *not* `--strict-mcp-config`: that would hide Steve's own global
  * MCP servers from every Forge pane.
+ *
+ * ⚠ Key handling. `make_image`/`edit_image` call Google's REST API directly, so
+ * the bridge needs the Gemini key. It is passed in this file's `env` block and
+ * nowhere else: the generated mcp.json lives under %APPDATA%\Forge\bridge\ (not
+ * in the repo, not in the packaged app), is rewritten from settings on every
+ * start, and is the *only* file Forge ever writes a key into besides
+ * settings.json itself. When no key is set the variable is simply omitted, and
+ * the bridge says so instead of failing mysteriously.
  */
 
 const SERVER_KEY = 'forge-bridge'
@@ -71,15 +79,26 @@ export function writeBridgeConfig(): string | null {
   const outDir = join(getDataDir(), 'bridge-out')
   const target = join(dir, 'mcp.json')
 
+  const settings = getSettings()
+  const env: Record<string, string> = {
+    // Where make_image drops files, so the bridge and Forge agree.
+    FORGE_BRIDGE_OUT: outDir
+  }
+  // The same key the voice agent uses. Absent key => absent variable => the
+  // bridge returns "no key, here is how to set one" rather than a bare 401.
+  const key = (settings.geminiKey ?? '').trim()
+  if (key) env['GEMINI_API_KEY'] = key
+  // Only written when the user has deliberately overridden the model, so the
+  // bridge's own default stays the single source of truth otherwise.
+  const imageModel = (settings.geminiImageModel ?? '').trim()
+  if (imageModel) env['FORGE_GEMINI_IMAGE_MODEL'] = imageModel
+
   const config = {
     mcpServers: {
       [SERVER_KEY]: {
         command: 'node',
         args: [script],
-        env: {
-          // Where make_image drops files, so the bridge and Forge agree.
-          FORGE_BRIDGE_OUT: outDir
-        }
+        env
       }
     }
   }

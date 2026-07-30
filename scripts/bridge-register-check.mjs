@@ -17,7 +17,8 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
@@ -67,7 +68,7 @@ function run(file, args, opts = {}) {
 
 /* ------------------------------- 1. run the real module inside Electron ---- */
 
-async function probeInsideElectron() {
+async function probeInsideElectron(extraEnv = {}) {
   // The probe files must live in the repo root: Electron derives getAppPath()
   // from the directory holding the entry script's nearest package.json, and the
   // module under test resolves the bridge relative to it. Anywhere else and we
@@ -120,7 +121,7 @@ app.whenReady().then(() => {
   }
 
   // ELECTRON_RUN_AS_NODE must NOT be set: we need the real app module.
-  const env = { ...process.env }
+  const env = { ...process.env, ...extraEnv }
   delete env['ELECTRON_RUN_AS_NODE']
   const r = await run(electronExe, [entry], { env })
   const m = r.stdout.match(/@@RESULT@@([\s\S]*?)@@END@@/)
@@ -206,6 +207,55 @@ async function main() {
       )
     }
 
+    // The Gemini key rides in this file's env block — the only place besides
+    // settings.json that Forge ever writes one. Both directions matter: it must
+    // be there when set, and *absent* (not empty) when not, so the bridge can
+    // tell "no key" from "bad key".
+    console.log('\n[1b] Key injection, against a throwaway data dir')
+    const sandbox = join(tmpdir(), `forge-register-check-${Date.now()}`)
+    cleanup.push(sandbox)
+    try {
+      mkdirSync(sandbox, { recursive: true })
+
+      const noKey = await probeInsideElectron({ FORGE_DATA_DIR: sandbox })
+      const envOf = (probe) =>
+        probe?.configPath && existsSync(probe.configPath)
+          ? JSON.parse(readFileSync(probe.configPath, 'utf8'))?.mcpServers?.['forge-bridge']?.env ?? {}
+          : null
+      const before = envOf(noKey)
+      check('no key set → GEMINI_API_KEY is omitted entirely', !!before && !('GEMINI_API_KEY' in before), JSON.stringify(before))
+      check(
+        'no override set → FORGE_GEMINI_IMAGE_MODEL is omitted entirely',
+        !!before && !('FORGE_GEMINI_IMAGE_MODEL' in before),
+        JSON.stringify(before)
+      )
+
+      // A fake key, written the way Forge writes settings. Key-shaped on
+      // purpose, and declared to the packaging gate: SECRETS-AUDIT: fixtures
+      const fake = 'AIzaSyFAKEKEYFORTESTSONLY0000000000000000'
+      const settings = join(sandbox, 'settings.json')
+      writeFileSync(
+        settings,
+        JSON.stringify({ geminiKey: fake, geminiImageModel: 'gemini-3.1-flash-image' }, null, 2),
+        'utf8'
+      )
+      const withKey = await probeInsideElectron({ FORGE_DATA_DIR: sandbox })
+      const after = envOf(withKey)
+      check('key set → GEMINI_API_KEY is passed to the bridge', after?.GEMINI_API_KEY === fake, JSON.stringify(after))
+      check(
+        'image-model override → FORGE_GEMINI_IMAGE_MODEL is passed too',
+        after?.FORGE_GEMINI_IMAGE_MODEL === 'gemini-3.1-flash-image',
+        JSON.stringify(after)
+      )
+      check(
+        'the key went nowhere but the config it belongs in',
+        !readFileSync(join(root, 'bridge', 'gemini-bridge.mjs'), 'utf8').includes(fake),
+        'a key must never be written into the repo'
+      )
+    } catch (err) {
+      check('key-injection probe ran', false, String(err))
+    }
+
     console.log('\n[2] applyMcpBridge() gating')
     check('claude gets the flag', /^claude --mcp-config "/.test(res.claude), res.claude)
     check('flag goes last, after existing args', /^claude --resume --mcp-config "/.test(res.claudeWithArgs), res.claudeWithArgs)
@@ -246,7 +296,7 @@ async function main() {
         '--strict-mcp-config'
       ])
       const out = `${r.stdout}\n${r.stderr}`
-      for (const tool of ['ask_gemini', 'summarize_video', 'make_image']) {
+      for (const tool of ['ask_gemini', 'summarize_video', 'make_image', 'edit_image']) {
         check(`Claude sees ${tool}`, out.includes(tool), out.slice(0, 500))
       }
     }
@@ -254,7 +304,7 @@ async function main() {
     console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`)
     process.exit(failures === 0 ? 0 : 1)
   } finally {
-    for (const f of cleanup) rmSync(f, { force: true })
+    for (const f of cleanup) rmSync(f, { force: true, recursive: true })
   }
 }
 

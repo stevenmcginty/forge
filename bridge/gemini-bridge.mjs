@@ -7,9 +7,17 @@
  * cannot do itself (watch a YouTube video, generate an image) and second
  * opinions from a different model family.
  *
- * Auth model: none of Steve's credentials pass through here. Every call shells
- * out to the `gemini` binary already on PATH, which uses whatever login *it*
- * holds in %USERPROFILE%\.gemini. Forge stores no tokens and no API keys.
+ * Auth model, in two halves:
+ *
+ *   • `ask_gemini` / `summarize_video` shell out to the `gemini` binary on PATH,
+ *     which uses whatever login *it* holds in %USERPROFILE%\.gemini. If a
+ *     GEMINI_API_KEY is in the environment it is passed straight through, so the
+ *     CLI works even when nobody has run `gemini` to sign in.
+ *   • `make_image` / `edit_image` call Google's REST API directly, because the
+ *     CLI has no image tool at all (see README). They need GEMINI_API_KEY in the
+ *     environment; Forge puts it there via the mcp.json it generates under
+ *     %APPDATA%\Forge\bridge\. Nothing is written to disk by this file except
+ *     the images themselves.
  *
  * Run standalone (for testing):  node bridge/gemini-bridge.mjs
  * It speaks JSON-RPC over stdin/stdout, so stdout must stay clean — every
@@ -17,8 +25,8 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { delimiter, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -34,7 +42,48 @@ const EXIT_AUTH = 41
 const EXIT_INPUT = 42
 const EXIT_CONFIG = 52
 
-const IMAGE_EXT = /\.(png|jpg|jpeg|webp|gif|bmp|avif)$/i
+/* ------------------------------------------------------------- media config
+ *
+ * DUPLICATED from electron/gemini-media.ts — deliberately. That file is the
+ * canonical implementation (the voice agent's executor uses it), but this server
+ * has to run under bare `node` with no build step, so it cannot import a .ts
+ * module. Only the small parts below are copied; scripts/bridge-smoke.mjs reads
+ * both files and asserts the model id, the aspect list and the error wording
+ * still match, so the two cannot drift silently.
+ */
+
+const GEMINI_HOST = 'https://generativelanguage.googleapis.com'
+
+/**
+ * The image model: stable, public, and the one that returns PNG. Overridable
+ * with FORGE_GEMINI_IMAGE_MODEL (e.g. gemini-3.1-flash-image, which returns
+ * JPEG — the saved file's extension follows whatever the API sends).
+ */
+const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image'
+const IMAGE_TIMEOUT_MS = 120_000
+const MAX_IMAGE_COUNT = 4
+const ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
+/** Input images the API accepts inline, and their mime types. */
+const INPUT_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif'
+}
+const MAX_INPUT_BYTES = 20 * 1024 * 1024
+
+function imageModel() {
+  const chosen = (process.env['FORGE_GEMINI_IMAGE_MODEL'] ?? '').trim() || DEFAULT_IMAGE_MODEL
+  return /^[a-zA-Z0-9][a-zA-Z0-9.\-_]{1,64}$/.test(chosen) ? chosen : DEFAULT_IMAGE_MODEL
+}
+
+function apiKey() {
+  return (process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY'] ?? '').trim()
+}
 
 /** Where produced images land unless the caller says otherwise. */
 function defaultOutDir() {
@@ -223,6 +272,9 @@ function cleanEnv() {
   // Gemini's TUI does clever things with a live terminal; we want plain text.
   env['NO_COLOR'] = '1'
   env['TERM'] = 'dumb'
+  // GEMINI_API_KEY (when Forge put one in our environment) is passed straight
+  // through by the copy above: the CLI reads it and works signed-out, which
+  // makes ask_gemini/summarize_video usable without a browser login.
   return env
 }
 
@@ -376,19 +428,39 @@ const TOOLS = [
   {
     name: 'make_image',
     description:
-      'Generate an image from a text description via Gemini and save it to disk, returning the file path. ' +
-      'IMPORTANT CAPABILITY NOTE: the Gemini CLI has no built-in image-generation tool — it can only produce ' +
-      'images if an image/media-generation MCP extension (e.g. Google\'s genmedia MCP server, exposing Imagen) ' +
-      'is installed into the CLI, or an equivalent tool is configured. This tool probes for that at call time. ' +
-      'If nothing can generate an image it returns a clear error explaining exactly what to install — it never ' +
-      'invents a file path. Verify the returned path exists before telling the user an image was made.',
+      'Really generate an image from a text description and save it to disk, returning absolute file paths. ' +
+      'Calls Google\'s image-generation API directly (not the Gemini CLI, which has no image tool), so it needs a ' +
+      'Gemini API key in the environment — Forge supplies one from its settings. Use it whenever the user wants a ' +
+      'picture, mockup, texture, icon, placeholder art or reference image. Describe subject, style, framing, lighting ' +
+      'and mood; a fuller description gives a much better image. Errors are honest and specific (no key, out of ' +
+      'quota, refused on safety grounds) and no path is ever returned unless the file was written.',
     inputSchema: {
       type: 'object',
       properties: {
-        description: { type: 'string', description: 'What the image should show. Describe subject, style, framing and mood.' },
-        out_dir: { type: 'string', description: 'Optional absolute directory for the image. Defaults to %APPDATA%\\Forge\\bridge-out.' }
+        description: { type: 'string', description: 'What the image should show. Describe subject, style, framing, lighting and mood.' },
+        out_dir: { type: 'string', description: 'Optional absolute directory for the image. Defaults to %APPDATA%\\Forge\\bridge-out.' },
+        count: { type: 'integer', minimum: 1, maximum: MAX_IMAGE_COUNT, description: 'How many variations to generate, 1-4. Each one is a separate call, so 4 takes ~4x as long.' },
+        aspect: { type: 'string', enum: [...ASPECT_RATIOS], description: 'Optional aspect ratio. Defaults to the model\'s own choice (square).' }
       },
       required: ['description']
+    }
+  },
+  {
+    name: 'edit_image',
+    description:
+      'Edit an existing image with a plain-English instruction — recolour it, remove or add something, change the ' +
+      'background, restyle it — and save the result as a NEW file, returning its absolute path. The input file is ' +
+      'never modified. Pass an absolute path to a png/jpg/webp/gif/bmp under 20 MB and say exactly what to change; ' +
+      'saying what to keep the same ("keep the framing and lighting identical") measurably helps. Same direct API, ' +
+      'same key and the same honest errors as make_image.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path to the image to edit. Left untouched on disk.' },
+        instruction: { type: 'string', description: 'What to change, in plain English. Also say what must stay the same.' },
+        out_dir: { type: 'string', description: 'Optional absolute directory for the result. Defaults to %APPDATA%\\Forge\\bridge-out.' }
+      },
+      required: ['path', 'instruction']
     }
   }
 ]
@@ -472,93 +544,292 @@ async function summarizeVideo(args) {
   return ok(r.text)
 }
 
-/* --------------------------------------------------------------- make_image */
+/* ------------------------------------------------------------- media (REST)
+ *
+ * DUPLICATED from electron/gemini-media.ts — see the note at the top of the
+ * media-config block. Behaviour, wording and file naming are kept identical.
+ */
+
+const NO_KEY =
+  'Cannot generate images: no Gemini API key is available to the bridge.\n\n' +
+  'Tell the user plainly that no image was created, and how to fix it: open Forge’s voice-agent settings, paste ' +
+  'a Google AI Studio key (or press “Import from DictationMic”), and restart the pane — Forge writes the key into ' +
+  'the MCP config it generates at %APPDATA%\\Forge\\bridge\\mcp.json, which is read when the pane launches. ' +
+  'Running the bridge by hand? Set GEMINI_API_KEY in the environment.\n\n' +
+  'Do not claim an image exists. Offer to describe the image in words instead.'
+
+function extensionFor(mime) {
+  const m = (mime || '').toLowerCase()
+  if (m.includes('jpeg') || m.includes('jpg')) return '.jpg'
+  if (m.includes('webp')) return '.webp'
+  if (m.includes('gif')) return '.gif'
+  if (m.includes('bmp')) return '.bmp'
+  return '.png'
+}
+
+function mediaStamp(date = new Date()) {
+  const p = (n) => String(n).padStart(2, '0')
+  return (
+    `${date.getFullYear()}${p(date.getMonth() + 1)}${p(date.getDate())}` +
+    `-${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}`
+  )
+}
+
+function freshPath(dir, stem, ext) {
+  let candidate = join(dir, `${stem}${ext}`)
+  let n = 2
+  while (existsSync(candidate)) {
+    candidate = join(dir, `${stem} -${n}${ext}`)
+    n += 1
+  }
+  return candidate
+}
+
+/** tmp + rename, so a half-written PNG never appears in a watched folder. */
+function writeAtomic(target, bytes) {
+  const tmp = `${target}.tmp`
+  writeFileSync(tmp, bytes)
+  renameSync(tmp, target)
+}
+
+function scrubKey(text, key) {
+  return key ? String(text).split(key).join('«key»') : String(text)
+}
 
 /**
- * Does the installed CLI have anything that can actually make an image?
- * Checked live rather than assumed: an extension can be added at any time.
+ * One `:generateContent` round trip expected to return image bytes. The single
+ * network funnel, so every failure is classified in one place.
+ * Resolves `{ ok: true, images, text }` or `{ ok: false, error }`.
  */
-async function probeImageSupport() {
-  const r = await runGemini(['extensions', 'list'])
-  if (r.spawnFailed) return { available: false, reason: NOT_INSTALLED }
-  const listing = `${r.stdout}\n${r.stderr}`
-  if (/no extensions installed/i.test(listing)) return { available: false, reason: null, listing }
-  const hit = /genmedia|imagen|image|veo|media/i.test(listing)
-  return { available: hit, reason: null, listing }
-}
+async function postImage(model, key, parts, imageConfig) {
+  const generationConfig = { responseModalities: ['IMAGE'] }
+  if (imageConfig && Object.keys(imageConfig).length) generationConfig.imageConfig = imageConfig
 
-function newestImageSince(dir, since) {
-  if (!existsSync(dir)) return null
-  let best = null
-  for (const name of readdirSync(dir)) {
-    if (!IMAGE_EXT.test(name)) continue
-    const p = join(dir, name)
-    let st
-    try {
-      st = statSync(p)
-    } catch {
-      continue
+  let res
+  try {
+    res = await fetch(`${GEMINI_HOST}/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig }),
+      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS)
+    })
+  } catch (err) {
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+      return {
+        ok: false,
+        error: `Gemini did not answer within ${Math.round(IMAGE_TIMEOUT_MS / 1000)}s. No image was made.`
+      }
     }
-    if (!st.isFile() || st.mtimeMs < since) continue
-    if (!best || st.mtimeMs > best.mtimeMs) best = { path: p, mtimeMs: st.mtimeMs }
+    return { ok: false, error: `Could not reach Gemini: ${scrubKey(err?.message ?? err, key)}` }
   }
-  return best?.path ?? null
+
+  const raw = await res.text()
+  let parsed = null
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    /* keep raw */
+  }
+
+  if (!res.ok) {
+    const err = parsed?.error
+    const message = scrubKey(err?.message ?? raw.slice(0, 500) ?? res.statusText, key)
+    if (res.status === 429 || /RESOURCE_EXHAUSTED|quota/i.test(`${err?.status} ${message}`)) {
+      return {
+        ok: false,
+        error:
+          `Gemini is out of quota for this key (${res.status}): ${message}\n\n` +
+          'No image was made. Tell the user the daily/free-tier image quota is spent and to retry later or ' +
+          'use a key with billing enabled.'
+      }
+    }
+    if (res.status === 401 || res.status === 403 || /API_KEY_INVALID|API key not valid/i.test(message)) {
+      return {
+        ok: false,
+        error: `Gemini refused the key (${res.status}): ${message}\n\nTell the user to check the Gemini key in Forge’s voice-agent settings.`
+      }
+    }
+    if (res.status === 404) {
+      return {
+        ok: false,
+        error:
+          `The image model “${model}” is not available to this key (404): ${message}\n\n` +
+          'Set FORGE_GEMINI_IMAGE_MODEL to a model this key can use.'
+      }
+    }
+    return { ok: false, error: `Gemini rejected the request (${res.status} ${err?.status ?? res.statusText}): ${message}` }
+  }
+
+  if (parsed?.promptFeedback?.blockReason) {
+    return {
+      ok: false,
+      error:
+        `Gemini blocked the prompt (${parsed.promptFeedback.blockReason}) and made no image. ` +
+        'Tell the user it was refused on safety grounds and suggest a different description.'
+    }
+  }
+
+  const images = []
+  const texts = []
+  const candidate = parsed?.candidates?.[0]
+  for (const part of candidate?.content?.parts ?? []) {
+    if (part?.inlineData?.data) {
+      images.push({ mime: part.inlineData.mimeType ?? 'image/png', bytes: Buffer.from(part.inlineData.data, 'base64') })
+    } else if (part?.text) {
+      texts.push(part.text)
+    }
+  }
+
+  if (images.length === 0) {
+    const why = candidate?.finishReason ?? 'no reason given'
+    const said = texts.join(' ').trim()
+    return {
+      ok: false,
+      error:
+        `Gemini returned no image (${why}).${said ? ` It said: ${said}` : ''}\n\n` +
+        'This is usually a refusal — the subject, a real person, or the style was declined. No file was written; ' +
+        'do not claim one was. Try a different description.'
+    }
+  }
+
+  return { ok: true, images, text: texts.join('\n').trim() }
 }
 
-const NO_IMAGE_GEN =
-  'Cannot generate images: the installed Gemini CLI has no image-generation tool.\n\n' +
-  'Tell the user plainly that no image was created, and that to enable it they need ONE of:\n' +
-  '  1. An image/media-generation MCP extension in the Gemini CLI — e.g. Google\'s genmedia MCP server ' +
-  '(Imagen/Veo/Lyria), added with `gemini extensions install <source>` or configured in ' +
-  '%USERPROFILE%\\.gemini\\settings.json.\n' +
-  '  2. Any other image tool exposed to the CLI that can write a file to disk.\n\n' +
-  'Do not claim an image exists. Offer to describe the image in words, or to write the prompt out so ' +
-  'they can paste it into an image tool themselves.'
-
-async function makeImage(args) {
-  const description = asString(args?.['description'], 'description')
-  const outDir = typeof args?.['out_dir'] === 'string' && args['out_dir'].trim() ? args['out_dir'].trim() : defaultOutDir()
-
+function prepareOutDir(args) {
+  const outDir =
+    typeof args?.['out_dir'] === 'string' && args['out_dir'].trim() ? resolve(args['out_dir'].trim()) : defaultOutDir()
   try {
     mkdirSync(outDir, { recursive: true })
   } catch (err) {
-    return fail(`Cannot create output directory ${outDir}: ${err?.message ?? err}`)
+    return { error: `Cannot create output directory ${outDir}: ${err?.message ?? err}` }
+  }
+  return { outDir }
+}
+
+/* --------------------------------------------------------------- make_image */
+
+async function makeImage(args) {
+  const description = asString(args?.['description'], 'description')
+
+  const rawCount = args?.['count']
+  if (rawCount !== undefined && rawCount !== null) {
+    const n = Number(rawCount)
+    if (!Number.isFinite(n) || n < 1 || n > MAX_IMAGE_COUNT) {
+      throw new Error(`\`count\` must be a whole number from 1 to ${MAX_IMAGE_COUNT}`)
+    }
+  }
+  const count = Math.min(MAX_IMAGE_COUNT, Math.max(1, Math.floor(Number(rawCount ?? 1) || 1)))
+
+  const aspect = typeof args?.['aspect'] === 'string' ? args['aspect'].trim() : ''
+  if (aspect && !ASPECT_RATIOS.includes(aspect)) {
+    throw new Error(`\`aspect\` must be one of: ${ASPECT_RATIOS.join(', ')}`)
   }
 
-  const probe = await probeImageSupport()
-  if (probe.reason) return fail(probe.reason)
-  if (!probe.available) return fail(NO_IMAGE_GEN)
+  const key = apiKey()
+  if (!key) return fail(NO_KEY)
 
-  // An image tool is present — ask for the file, then verify on disk rather
-  // than trusting the model's word for it.
-  const startedAt = Date.now() - 2000
-  const prompt = [
-    'Generate an image and save it to disk.',
-    '',
-    `Description: ${description}`,
-    `Save the image file into this exact directory: ${outDir}`,
-    '',
-    'Use your image-generation tool, write the file, then reply with only the absolute path of the file ' +
-      'you wrote. If you have no tool that can generate an image, reply with exactly: NO_IMAGE_TOOL'
-  ].join('\n')
+  const prepared = prepareOutDir(args)
+  if (prepared.error) return fail(prepared.error)
 
-  const r = await ask(prompt, { cwd: outDir, extraArgs: ['--include-directories', outDir, '--approval-mode', 'yolo'] })
-  if (!r.ok) return fail(r.text)
-  if (/NO_IMAGE_TOOL/.test(r.text)) return fail(NO_IMAGE_GEN)
+  const model = imageModel()
+  const started = Date.now()
+  const paths = []
+  let lastError = null
+  let note = ''
 
-  // Prefer a path Gemini named, but only if it actually exists.
-  const claimed = (r.text.match(/[A-Za-z]:[\\/][^\s"'`<>|]+|\/[^\s"'`<>|]+/g) ?? [])
-    .map((p) => p.replace(/[.,)]+$/, ''))
-    .find((p) => IMAGE_EXT.test(p) && existsSync(p))
-
-  const found = claimed ?? newestImageSince(outDir, startedAt)
-  if (!found) {
-    return fail(
-      `Gemini reported success but no image file appeared in ${outDir}. Do not tell the user an image ` +
-        `was created. Gemini said:\n\n${r.text}`
-    )
+  for (let i = 0; i < count; i++) {
+    const r = await postImage(model, key, [{ text: description }], aspect ? { aspectRatio: aspect } : null)
+    if (!r.ok) {
+      lastError = r.error
+      break
+    }
+    if (r.text && !note) note = r.text
+    for (const img of r.images) {
+      const target = freshPath(prepared.outDir, `forge-image-${mediaStamp()}`, extensionFor(img.mime))
+      try {
+        writeAtomic(target, img.bytes)
+      } catch (err) {
+        return fail(`Gemini made the image but it could not be saved to ${target}: ${err?.message ?? err}`)
+      }
+      paths.push(target)
+    }
   }
-  return ok(`Image saved to ${found}\n\nGemini said: ${r.text}`)
+
+  if (paths.length === 0) return fail(lastError ?? 'Gemini produced no image and gave no reason.')
+
+  const secs = ((Date.now() - started) / 1000).toFixed(1)
+  const lines = [
+    paths.length === 1 ? `Image saved to ${paths[0]}` : `${paths.length} images saved:`,
+    ...(paths.length === 1 ? [] : paths.map((p) => `  ${p}`)),
+    '',
+    `Model ${model}, ${secs}s. The file(s) above exist on disk — you may reference them by path.`
+  ]
+  if (paths.length < count) lines.push(`Asked for ${count}, produced ${paths.length}.${lastError ? ` Then: ${lastError}` : ''}`)
+  if (note) lines.push(`Gemini also said: ${note}`)
+  return ok(lines.join('\n'))
+}
+
+/* --------------------------------------------------------------- edit_image */
+
+/** Read an image off disk into an inlineData part, or throw a readable reason. */
+function inlinePart(path) {
+  const abs = isAbsolute(path) ? path : resolve(process.cwd(), path)
+  if (!existsSync(abs)) throw new Error(`No such file: ${abs}`)
+  const st = statSync(abs)
+  if (!st.isFile()) throw new Error(`${abs} is not a file`)
+  const ext = extname(abs).toLowerCase()
+  const mime = INPUT_MIME[ext]
+  if (!mime) {
+    throw new Error(`${ext || 'that file'} is not an image Gemini accepts (${Object.keys(INPUT_MIME).join(', ')})`)
+  }
+  if (st.size > MAX_INPUT_BYTES) {
+    throw new Error(`${abs} is ${(st.size / 1e6).toFixed(1)} MB — inline images must be under 20 MB`)
+  }
+  const bytes = readFileSync(abs)
+  const stem = abs.split(/[\\/]/).pop().replace(/\.[^.]+$/, '')
+  return { part: { inlineData: { mimeType: mime, data: bytes.toString('base64') } }, stem }
+}
+
+async function editImage(args) {
+  const path = asString(args?.['path'], 'path')
+  const instruction = asString(args?.['instruction'], 'instruction')
+
+  const key = apiKey()
+  if (!key) return fail(NO_KEY.replace('generate images', 'edit images'))
+
+  const loaded = inlinePart(path)
+
+  const prepared = prepareOutDir(args)
+  if (prepared.error) return fail(prepared.error)
+
+  const model = imageModel()
+  const started = Date.now()
+  const r = await postImage(model, key, [loaded.part, { text: instruction }], null)
+  if (!r.ok) return fail(r.error)
+
+  const paths = []
+  for (const img of r.images) {
+    const target = freshPath(prepared.outDir, `${loaded.stem}-edited-${mediaStamp()}`, extensionFor(img.mime))
+    try {
+      writeAtomic(target, img.bytes)
+    } catch (err) {
+      return fail(`Gemini edited the image but it could not be saved to ${target}: ${err?.message ?? err}`)
+    }
+    paths.push(target)
+  }
+  if (paths.length === 0) return fail('Gemini returned no edited image. No file was written; do not claim one was.')
+
+  const secs = ((Date.now() - started) / 1000).toFixed(1)
+  return ok(
+    [
+      `Edited image saved to ${paths.join('\n')}`,
+      '',
+      `Model ${model}, ${secs}s. The original at ${path} was not modified.`,
+      r.text ? `Gemini also said: ${r.text}` : ''
+    ]
+      .filter(Boolean)
+      .join('\n')
+  )
 }
 
 /* -------------------------------------------------------------------- serve */
@@ -566,7 +837,8 @@ async function makeImage(args) {
 const HANDLERS = {
   ask_gemini: askGemini,
   summarize_video: summarizeVideo,
-  make_image: makeImage
+  make_image: makeImage,
+  edit_image: editImage
 }
 
 const server = new Server(
@@ -591,7 +863,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 async function main() {
   await server.connect(new StdioServerTransport())
-  process.stderr.write(`[${SERVER_NAME}] ready (out dir: ${defaultOutDir()})\n`)
+  process.stderr.write(
+    `[${SERVER_NAME}] ready (out dir: ${defaultOutDir()}, image model: ${imageModel()}, ` +
+      `api key: ${apiKey() ? 'present' : 'ABSENT — make_image/edit_image will refuse'})\n`
+  )
 }
 
 main().catch((err) => {

@@ -70,7 +70,10 @@ const api: ForgeApi = {
 
   voice: {
     gemini: (req) => ipcRenderer.invoke(IPC.voiceGemini, req),
-    importKey: () => ipcRenderer.invoke(IPC.voiceImportKey)
+    openrouter: (req) => ipcRenderer.invoke(IPC.voiceOpenRouter, req),
+    importKey: (which) => ipcRenderer.invoke(IPC.voiceImportKey, which ?? 'gemini'),
+    makeImage: (req) => ipcRenderer.invoke(IPC.voiceMakeImage, req),
+    editImage: (req) => ipcRenderer.invoke(IPC.voiceEditImage, req)
   },
 
   probeAgents: () => ipcRenderer.invoke(IPC.agentsProbe),
