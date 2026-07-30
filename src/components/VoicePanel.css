@@ -573,3 +573,43 @@
   padding: 0 var(--s-5);
   font-size: var(--t-sm);
 }
+
+/* ------------------------------------------------------------- degraded
+ *
+ * The panel's one honest line when the brain is not really connected. It is a
+ * button, and it goes somewhere: the settings section that used to live in this
+ * panel could be scrolled into with no visible way back out, which is exactly
+ * the shape of thing a one-line link cannot become.
+ */
+
+.voice__degraded {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  width: 100%;
+  padding: var(--s-3) var(--s-5);
+  text-align: left;
+  border-bottom: 1px solid var(--line-hairline);
+  background: var(--warn-soft);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.voice__degraded:hover {
+  background: var(--warn-line);
+}
+
+.voice__degraded-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-xs);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.voice__degraded-go {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  color: var(--warn);
+  white-space: nowrap;
+}

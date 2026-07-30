@@ -18,7 +18,6 @@ import { parseUtterance } from '@/lib/voicecommands'
 import {
   brainStatusLabel,
   getActiveBrain,
-  maskKey,
   type BrainContext,
   type BrainReply,
   type BrainStatus,
@@ -89,7 +88,6 @@ export function VoicePanel(): ReactNode {
   const open = state.settings.voicePanelOpen
   const [turns, setTurns] = useState<Turn[]>([])
   const [draftPhrase, setDraftPhrase] = useState('')
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [dragWidth, setDragWidth] = useState<number | null>(null)
 
   const logRef = useRef<HTMLDivElement | null>(null)
@@ -397,8 +395,8 @@ export function VoicePanel(): ReactNode {
       />
 
       <header className="voice__head">
-        <span className="voice__mark">
-          <Icon name="voice" size={14} />
+        <span className="voice__mark" title="The voice agent — say what you want and it does it">
+          <Icon name="mic" size={14} />
         </span>
         <h2 className="voice__title">Voice Agent</h2>
         <BrainChip status={status} brainName={brain.name} />
@@ -406,24 +404,43 @@ export function VoicePanel(): ReactNode {
         <button
           type="button"
           className="ghost-btn voice__icon-btn"
-          title="Voice agent settings"
-          aria-pressed={settingsOpen}
-          data-on={settingsOpen ? 'true' : undefined}
-          onClick={() => setSettingsOpen((v) => !v)}
+          title="Voice settings — brain, keys and model (Ctrl+,)"
+          aria-label="Voice settings"
+          onClick={() => actions.openSettings('models')}
         >
           <Icon name="gear" size={13} />
         </button>
         <button
           type="button"
           className="ghost-btn voice__icon-btn"
-          title="Hide voice agent (Ctrl+Shift+G)"
+          title="Hide the voice agent (Ctrl+Shift+G)"
+          aria-label="Hide the voice agent"
           onClick={() => actions.toggleVoicePanel()}
         >
           <Icon name="close" size={13} />
         </button>
       </header>
 
-      {settingsOpen ? <VoiceSettings /> : null}
+      {/*
+        Why the settings live elsewhere: this panel used to hold an expandable
+        settings section, and scrolled down inside it there was no way back out —
+        the gear that opened it was off the top of the panel and nothing else
+        said "done". A one-line status that links to the real Settings page
+        cannot trap anybody.
+      */}
+      {!status.ok ? (
+        <button
+          type="button"
+          className="voice__degraded"
+          onClick={() => actions.openSettings('models')}
+          title="Open Models & APIs"
+        >
+          <span className="voice__degraded-text">
+            {status.detail ?? 'No model key — spoken commands still work'}
+          </span>
+          <span className="voice__degraded-go">Set it up →</span>
+        </button>
+      ) : null}
 
       <div className="voice__log" ref={logRef}>
         {turns.length === 0 ? (
@@ -501,176 +518,6 @@ function BrainChip({ status, brainName }: { status: BrainStatus; brainName: stri
       <span className="voice__chip-dot" />
       {brainStatusLabel(status)}
     </span>
-  )
-}
-
-/* --------------------------------------------------------------- settings */
-
-const BRAIN_ROWS: Array<{ id: 'gemini' | 'stub' | 'claude' | 'openai'; name: string; note: string; ready: boolean }> = [
-  { id: 'gemini', name: 'Gemini', note: 'live — needs a key', ready: true },
-  { id: 'stub', name: 'Stub', note: 'offline, echoes you', ready: true },
-  { id: 'claude', name: 'Claude', note: 'coming soon', ready: false },
-  { id: 'openai', name: 'OpenAI', note: 'coming soon', ready: false }
-]
-
-function VoiceSettings(): ReactNode {
-  const { state, actions } = useApp()
-  const [reveal, setReveal] = useState(false)
-  const [geminiDraft, setGeminiDraft] = useState(state.settings.geminiKey)
-  const [anthropicDraft, setAnthropicDraft] = useState(state.settings.anthropicKey)
-  const [modelDraft, setModelDraft] = useState(state.settings.geminiModel)
-  const [found, setFound] = useState<{ key: string; last4: string; source: string } | null>(null)
-  const [importError, setImportError] = useState<string | null>(null)
-
-  useEffect(() => setGeminiDraft(state.settings.geminiKey), [state.settings.geminiKey])
-  useEffect(() => setAnthropicDraft(state.settings.anthropicKey), [state.settings.anthropicKey])
-  useEffect(() => setModelDraft(state.settings.geminiModel), [state.settings.geminiModel])
-
-  const importKey = async (): Promise<void> => {
-    setImportError(null)
-    setFound(null)
-    const result = await window.forge.voice.importKey()
-    if (result.ok) setFound({ key: result.key, last4: result.last4, source: result.source })
-    else setImportError(result.error)
-  }
-
-  return (
-    <section className="voice__settings" aria-label="Voice agent settings">
-      <div className="eyebrow voice__settings-eyebrow">Brain</div>
-      <div className="voice__brains">
-        {BRAIN_ROWS.map((row) => (
-          <button
-            key={row.id}
-            type="button"
-            className="voice__brain"
-            data-selected={state.settings.voiceBrain === row.id ? 'true' : undefined}
-            disabled={!row.ready}
-            title={row.ready ? `Use the ${row.name} brain` : `${row.name} — coming soon`}
-            onClick={() => actions.setVoiceBrain(row.id)}
-          >
-            <span className="voice__brain-name">{row.name}</span>
-            <span className="voice__brain-note mono">{row.note}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="field voice__field">
-        <label className="field__label" htmlFor="voice-gemini-key">
-          Gemini API key
-        </label>
-        <div className="voice__key-row">
-          <input
-            id="voice-gemini-key"
-            className="field__input mono voice__key-input"
-            type={reveal ? 'text' : 'password'}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="AIza…"
-            value={geminiDraft}
-            onChange={(e) => setGeminiDraft(e.target.value)}
-            onBlur={() => actions.setGeminiKey(geminiDraft)}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Enter') actions.setGeminiKey(geminiDraft)
-            }}
-          />
-          <button
-            type="button"
-            className="ghost-btn voice__key-toggle"
-            title={reveal ? 'Hide keys' : 'Show keys'}
-            onClick={() => setReveal((v) => !v)}
-          >
-            {reveal ? 'hide' : 'show'}
-          </button>
-        </div>
-        <div className="voice__key-state mono">
-          {state.settings.geminiKey ? maskKey(state.settings.geminiKey) : 'no key stored'}
-        </div>
-
-        {found ? (
-          <div className="voice__import">
-            <span className="voice__import-text">
-              Found a key ending <span className="mono">{found.last4}</span> in{' '}
-              <span className="mono voice__import-path">{found.source}</span>
-            </span>
-            <div className="voice__import-actions">
-              <button type="button" className="ghost-btn turn__action" onClick={() => setFound(null)}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="ghost-btn turn__action turn__action--send"
-                onClick={() => {
-                  actions.setGeminiKey(found.key)
-                  actions.setVoiceBrain('gemini')
-                  setFound(null)
-                }}
-              >
-                Use this key
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button type="button" className="ghost-btn voice__import-btn" onClick={() => void importKey()}>
-            Import from DictationMic
-          </button>
-        )}
-        {importError ? <div className="voice__import-error">{importError}</div> : null}
-      </div>
-
-      <div className="field voice__field">
-        <label className="field__label" htmlFor="voice-gemini-model">
-          Model
-        </label>
-        <input
-          id="voice-gemini-model"
-          className="field__input mono"
-          spellCheck={false}
-          value={modelDraft}
-          onChange={(e) => setModelDraft(e.target.value)}
-          onBlur={() => actions.setGeminiModel(modelDraft)}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (e.key === 'Enter') actions.setGeminiModel(modelDraft)
-          }}
-        />
-      </div>
-
-      <div className="field voice__field">
-        <label className="field__label" htmlFor="voice-anthropic-key">
-          Anthropic API key (unused)
-        </label>
-        <input
-          id="voice-anthropic-key"
-          className="field__input mono"
-          type={reveal ? 'text' : 'password'}
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="sk-ant-…"
-          value={anthropicDraft}
-          onChange={(e) => setAnthropicDraft(e.target.value)}
-          onBlur={() => actions.setAnthropicKey(anthropicDraft)}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (e.key === 'Enter') actions.setAnthropicKey(anthropicDraft)
-          }}
-        />
-        <div className="voice__key-state mono">
-          {state.settings.anthropicKey ? maskKey(state.settings.anthropicKey) : 'no key stored'}
-        </div>
-      </div>
-
-      <p className="voice__settings-note">
-        Keys live in <span className="mono">settings.json</span> on this PC. The Gemini key is the only one that goes
-        anywhere: when Gemini is the brain, what you say plus a summary of your projects, tabs and panes is sent to{' '}
-        <span className="mono">generativelanguage.googleapis.com</span>. Nothing else in Forge makes a network call,
-        and the Anthropic key is stored but never used.
-      </p>
-      <p className="voice__settings-note">
-        Commands like “open two Claude tabs” are matched here on your machine and never sent anywhere. Replies are
-        text only — nothing is ever spoken aloud.
-      </p>
-    </section>
   )
 }
 

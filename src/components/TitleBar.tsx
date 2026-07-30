@@ -24,6 +24,7 @@ export function TitleBar(): ReactNode {
           type="button"
           className="ghost-btn titlebar__btn"
           title={state.settings.railCollapsed ? 'Show projects (Ctrl+Shift+B)' : 'Hide projects (Ctrl+Shift+B)'}
+          aria-label="Projects rail"
           aria-pressed={!state.settings.railCollapsed}
           onClick={() => actions.toggleRail()}
         >
@@ -52,13 +53,22 @@ export function TitleBar(): ReactNode {
           type="button"
           className="ghost-btn titlebar__btn"
           title={
-            state.settings.voicePanelOpen ? 'Hide voice agent (Ctrl+Shift+G)' : 'Show voice agent (Ctrl+Shift+G)'
+            state.settings.voicePanelOpen
+              ? 'Hide the voice agent panel (Ctrl+Shift+G)'
+              : 'Show the voice agent panel (Ctrl+Shift+G)'
           }
+          aria-label="Voice agent panel"
           aria-pressed={state.settings.voicePanelOpen}
           data-on={state.settings.voicePanelOpen ? 'true' : undefined}
           onClick={() => actions.toggleVoicePanel()}
         >
-          <Icon name="voice" size={15} />
+          {/*
+            A panel toggle looks like a panel. The waveform belongs to the
+            dictation pill and the microphone to the agent itself — three
+            different things were wearing the same glyph, which is why nobody
+            could tell them apart.
+          */}
+          <Icon name="panelRight" size={15} />
         </button>
 
         <button
