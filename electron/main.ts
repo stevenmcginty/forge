@@ -401,7 +401,8 @@ function registerAppHandlers(): void {
       import: IPC.skillsImport,
       remove: IPC.skillsRemove,
       setEnabled: IPC.skillsSetEnabled,
-      openFolder: IPC.skillsOpenFolder
+      openFolder: IPC.skillsOpenFolder,
+      copyToLibrary: IPC.skillsCopyToLibrary
     },
     {
       enabled: () => getSettings().skillsEnabled,

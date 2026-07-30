@@ -88,12 +88,13 @@ const api: ForgeApi = {
 
   skills: {
     list: () => ipcRenderer.invoke(IPC.skillsList),
-    read: (name) => ipcRenderer.invoke(IPC.skillsRead, name),
+    read: (name, source) => ipcRenderer.invoke(IPC.skillsRead, name, source ?? 'library'),
     create: (name, description) => ipcRenderer.invoke(IPC.skillsCreate, name, description),
     importFolder: (sourceDir) => ipcRenderer.invoke(IPC.skillsImport, sourceDir ?? ''),
     remove: (name) => ipcRenderer.invoke(IPC.skillsRemove, name),
     setEnabled: (name, on) => ipcRenderer.invoke(IPC.skillsSetEnabled, name, on === true),
-    openFolder: (name) => ipcRenderer.invoke(IPC.skillsOpenFolder, name ?? '')
+    copyToLibrary: (name) => ipcRenderer.invoke(IPC.skillsCopyToLibrary, name),
+    openFolder: (name, source) => ipcRenderer.invoke(IPC.skillsOpenFolder, name ?? '', source ?? 'library')
   },
 
   companion: {

@@ -38,18 +38,16 @@ import type {
   WindowStateEvent,
   Workspace
 } from './types'
-import type { SkillInfo } from './skills'
+import type { SkillSource, SkillsList } from './skills'
 
 /** What every skills mutation hands back: the outcome, and the fresh list. */
-export interface SkillMutation {
+export interface SkillMutation extends SkillsList {
   ok: boolean
   /** The skill the call was about, when it got far enough to know. */
   name?: string
   error?: string
   /** True when the folder picker was dismissed — not a failure worth showing. */
   cancelled?: boolean
-  /** The library as it now stands, so no caller needs a second round trip. */
-  skills: SkillInfo[]
 }
 
 /**
@@ -213,17 +211,27 @@ export interface ForgeApi {
    * rail never has to ask twice.
    */
   skills: {
-    list(): Promise<SkillInfo[]>
+    /**
+     * Both groups in one round trip: the library, and the skills already sitting
+     * in `~/.claude/skills` that Forge did not put there (`machineSkills` —
+     * read-only, no toggle, live in every session already).
+     */
+    list(): Promise<SkillsList>
     /** The raw SKILL.md — used for the preamble dropped on a non-Claude agent. */
-    read(name: string): Promise<string>
+    read(name: string, source?: SkillSource): Promise<string>
     create(name: string, description: string): Promise<SkillMutation>
     /** Omit `sourceDir` to open the native folder picker. */
     importFolder(sourceDir?: string): Promise<SkillMutation>
     remove(name: string): Promise<SkillMutation>
     /** Sync into (or out of) ~/.claude/skills, and record the choice. */
     setEnabled(name: string, on: boolean): Promise<SkillMutation>
+    /**
+     * Copy one of Steve's own machine skills into the library, so Forge may
+     * edit it. A copy — the original in ~/.claude/skills is never touched.
+     */
+    copyToLibrary(name: string): Promise<SkillMutation>
     /** Reveal a skill's folder, or the library itself. Resolves with the path. */
-    openFolder(name?: string): Promise<string>
+    openFolder(name?: string, source?: SkillSource): Promise<string>
   }
 
   /**

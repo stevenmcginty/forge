@@ -1,3 +1,4 @@
+import { skillBlurb } from '@shared/skills'
 import type { AgentProfile } from '@shared/types'
 import { skillCatalogue } from './skillbus'
 
@@ -304,15 +305,19 @@ export function buildManifest(s: ManifestSnapshot): string {
   }
   lines.push('')
   lines.push('# SKILLS')
-  lines.push('Folders of instructions in ~/.claude/skills. An enabled one is already loaded by every claude/kimi session.')
+  lines.push('Folders of instructions. One not marked [off] is already loaded by every claude/kimi session.')
   // The snapshot is the right place for this, but a caller that predates skills
   // does not fill it in — see setSkillCatalogue.
   const skills = s.skills ?? skillCatalogue() ?? []
   if (skills.length === 0) {
-    lines.push('- (none — Steve adds them with + beside SKILLS in the rail)')
+    lines.push('- (none — Steve adds them from Skills in the rail)')
   } else {
     for (const skill of skills) {
-      lines.push(`- ${skill.name}${skill.enabled ? '' : ' [off]'}${skill.description ? `: ${skill.description}` : ''}`)
+      // skillBlurb, not the raw description: a skill's frontmatter is written
+      // for the agent about to *read* it and runs to a paragraph. The voice
+      // model only has to pick a name, and this goes up the wire every turn.
+      const blurb = skillBlurb(skill.description)
+      lines.push(`- ${skill.name}${skill.enabled ? '' : ' [off]'}${blurb ? `: ${blurb}` : ''}`)
     }
   }
   lines.push('')
