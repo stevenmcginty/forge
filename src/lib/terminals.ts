@@ -31,9 +31,35 @@ export interface TerminalSpec {
   accent: string
 }
 
+/**
+ * How a terminal is currently being shown.
+ *
+ * `tab`  full size in a pane: the container drives the geometry, so the PTY is
+ *        refitted whenever the container changes.
+ * `peek` a mosaic tile: the terminal keeps the cols/rows it already had and the
+ *        *view* is shrunk with a CSS transform instead. Nothing is refitted, so
+ *        a full-screen TUI never reflows just because you glanced at it.
+ */
+type PaneMode = 'tab' | 'peek'
+
+/** The pixel size a terminal was last laid out at while in `tab` mode. */
+export interface PaneGeometry {
+  width: number
+  height: number
+}
+
 const IDLE_RUNTIME: PaneRuntime = { status: 'idle', pid: null, exitCode: null, error: null }
 
 const ACTIVITY_THROTTLE_MS = 90
+
+/**
+ * Geometry handed to a pane that has never been laid out at full size — only
+ * reachable by opening a project straight into the mosaic. Roughly the classic
+ * 80×24 at our default type size, which is both a sane width for a shell's
+ * first prompt and close enough to a real pane that the wall does not end up
+ * visibly two-tier.
+ */
+export const DEFAULT_PANE_GEOMETRY: PaneGeometry = { width: 640, height: 400 }
 
 interface Entry {
   paneId: string
@@ -43,9 +69,16 @@ interface Entry {
   spec: TerminalSpec
   runtime: PaneRuntime
   container: HTMLElement | null
+  mode: PaneMode
+  /** Last full-size layout, remembered so a peek tile can scale against it. */
+  geometry: PaneGeometry | null
   resizeObserver: ResizeObserver | null
   lastActivityNotify: number
   activityTimer: number | null
+  /** The WebGL renderer, when this terminal currently has one. */
+  webgl: { dispose(): void } | null
+  webglWanted: boolean
+  webglLoading: boolean
   disposers: Array<() => void>
 }
 
@@ -197,8 +230,8 @@ class TerminalHost {
   /* ---------------------------------------------------------- lifecycle */
 
   /**
-   * Attach pane `paneId` into `container`, creating the terminal (and its PTY
-   * session) on first call. Safe to call repeatedly.
+   * Attach pane `paneId` into `container` at full size, creating the terminal
+   * (and its PTY session) on first call. Safe to call repeatedly.
    */
   attach(paneId: string, container: HTMLElement, spec: TerminalSpec): void {
     this.wire()
@@ -209,8 +242,9 @@ class TerminalHost {
       this.entries.set(paneId, entry)
       container.appendChild(entry.wrapper)
       entry.container = container
+      entry.mode = 'tab'
       entry.term.open(entry.wrapper)
-      void this.loadWebgl(entry)
+      this.setWebgl(paneId, true)
       this.observe(entry, container)
       // Size against the real container before spawning, so the shell's very
       // first prompt is already the right width.
@@ -220,15 +254,69 @@ class TerminalHost {
     }
 
     const existing = entry
+    existing.mode = 'tab'
     if (existing.container !== container) {
       container.appendChild(existing.wrapper)
       existing.container = container
       this.observe(existing, container)
     }
+    this.setWebgl(paneId, true)
     requestAnimationFrame(() => {
       this.fit(paneId)
       existing.term.refresh(0, existing.term.rows - 1)
     })
+  }
+
+  /**
+   * Attach pane `paneId` into a fixed-size box for a mosaic tile.
+   *
+   * `container` must already be `geometry` pixels big: the terminal is laid out
+   * at its natural size inside it and the *caller* shrinks the box with a CSS
+   * transform. Nothing here observes the box or refits, so cols/rows — and
+   * therefore any TUI drawing itself into them — are left completely alone.
+   */
+  attachPeek(paneId: string, container: HTMLElement, spec: TerminalSpec): void {
+    this.wire()
+    const existing = this.entries.get(paneId)
+
+    if (!existing) {
+      const entry = this.create(paneId, spec)
+      this.entries.set(paneId, entry)
+      container.appendChild(entry.wrapper)
+      entry.container = container
+      entry.mode = 'peek'
+      entry.term.open(entry.wrapper)
+      this.fit(paneId)
+      void this.start(entry)
+      return
+    }
+
+    existing.mode = 'peek'
+    // A peek surface never resizes its terminal, so drop the observer that
+    // would otherwise refit it the moment the tile is measured.
+    existing.resizeObserver?.disconnect()
+    existing.resizeObserver = null
+    if (existing.container !== container) {
+      container.appendChild(existing.wrapper)
+      existing.container = container
+    }
+    // Re-parenting drops DOM focus; make xterm agree, so a peek tile can never
+    // quietly swallow keystrokes.
+    existing.term.blur()
+    requestAnimationFrame(() => existing.term.refresh(0, existing.term.rows - 1))
+  }
+
+  /**
+   * The size a mosaic tile should lay this terminal out at: whatever it last
+   * measured at full size, or a sane default for one it has never shown.
+   */
+  geometryFor(paneId: string): PaneGeometry {
+    return this.entries.get(paneId)?.geometry ?? DEFAULT_PANE_GEOMETRY
+  }
+
+  /** True while a full-screen TUI (vim, htop, an agent) owns the screen. */
+  isAltBuffer(paneId: string): boolean {
+    return this.entries.get(paneId)?.term.buffer.active.type === 'alternate'
   }
 
   detach(paneId: string): void {
@@ -275,9 +363,14 @@ class TerminalHost {
       spec,
       runtime: { ...IDLE_RUNTIME },
       container: null,
+      mode: 'tab',
+      geometry: null,
       resizeObserver: null,
       lastActivityNotify: 0,
       activityTimer: null,
+      webgl: null,
+      webglWanted: false,
+      webglLoading: false,
       disposers: []
     }
 
@@ -364,16 +457,60 @@ class TerminalHost {
     return true
   }
 
+  /**
+   * Choose this terminal's renderer.
+   *
+   * WebGL is the fast one, but a browser only hands out a dozen or so live
+   * contexts per process — 16 panes all asking at once and the oldest get
+   * killed off. So it is a *request*, granted to whatever is being looked at
+   * full size and taken back from mosaic tiles, which fall back to the DOM
+   * renderer. That is also the better renderer for a tile: DOM rows are real
+   * text, so a CSS transform re-renders them crisply at any scale, where a
+   * shrunken canvas is just resampled mush.
+   */
+  setWebgl(paneId: string, want: boolean): void {
+    const entry = this.entries.get(paneId)
+    if (!entry || entry.webglWanted === want) return
+    entry.webglWanted = want
+    if (want) void this.loadWebgl(entry)
+    else this.unloadWebgl(entry)
+  }
+
   private async loadWebgl(entry: Entry): Promise<void> {
+    if (entry.webgl || entry.webglLoading) return
+    entry.webglLoading = true
     try {
       const { WebglAddon } = await import('@xterm/addon-webgl')
+      // The import is async: the pane may have been closed, or demoted to a
+      // mosaic tile, while it was in flight.
+      if (!entry.webglWanted || this.entries.get(entry.paneId) !== entry) return
       const addon = new WebglAddon()
-      addon.onContextLoss(() => addon.dispose())
+      addon.onContextLoss(() => {
+        // The browser reclaimed our context. Drop to the DOM renderer rather
+        // than fight for it back.
+        if (entry.webgl === addon) entry.webgl = null
+        entry.webglWanted = false
+        addon.dispose()
+      })
       entry.term.loadAddon(addon)
-      entry.disposers.push(() => addon.dispose())
+      entry.webgl = addon
     } catch (err) {
       // The DOM renderer is a perfectly good fallback; just say so once.
       console.warn('[forge] WebGL renderer unavailable, using DOM renderer', err)
+    } finally {
+      entry.webglLoading = false
+    }
+  }
+
+  /** Disposing the addon is what reverts xterm to its DOM renderer. */
+  private unloadWebgl(entry: Entry): void {
+    const addon = entry.webgl
+    entry.webgl = null
+    if (!addon) return
+    try {
+      addon.dispose()
+    } catch {
+      /* already gone */
     }
   }
 
@@ -426,6 +563,8 @@ class TerminalHost {
     }
     if (entry.activityTimer !== null) clearTimeout(entry.activityTimer)
     entry.resizeObserver?.disconnect()
+    entry.webglWanted = false
+    this.unloadWebgl(entry)
     for (const d of entry.disposers) {
       try {
         d()
@@ -449,6 +588,9 @@ class TerminalHost {
     if (!entry || !entry.container) return
     const { clientWidth, clientHeight } = entry.container
     if (clientWidth < 8 || clientHeight < 8) return
+    // Only a full-size layout is worth remembering — a peek tile's box is
+    // itself derived from this number.
+    if (entry.mode === 'tab') entry.geometry = { width: clientWidth, height: clientHeight }
     try {
       entry.fit.fit()
     } catch {

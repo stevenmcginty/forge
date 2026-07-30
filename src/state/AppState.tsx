@@ -18,7 +18,8 @@ import type {
   SplitDirection,
   TerminalTab,
   VoiceBrainId,
-  Workspace
+  Workspace,
+  WorkspaceViewMode
 } from '@shared/types'
 import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
 import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
@@ -49,6 +50,11 @@ export interface AppState {
   activeProjectId: string | null
   /** Panes removed from a layout whose shells still need killing. */
   pendingKills: string[]
+  /**
+   * The mosaic tile currently blown up to full size. Deliberately transient —
+   * a peek is not something you want to still be inside after a restart.
+   */
+  mosaicZoom: string | null
   /** Last non-fatal problem worth showing in the status bar. */
   notice: string | null
 }
@@ -87,6 +93,7 @@ const INITIAL: AppState = {
   workspaces: {},
   activeProjectId: null,
   pendingKills: [],
+  mosaicZoom: null,
   notice: null
 }
 
@@ -109,14 +116,18 @@ type Action =
   | { type: 'splitPane'; paneId: string; direction: SplitDirection; profileId: string }
   | { type: 'closePane'; paneId: string }
   | { type: 'focusPane'; paneId: string }
+  | { type: 'revealPane'; paneId: string }
   | { type: 'renamePane'; paneId: string; title: string }
   | { type: 'setRatio'; splitId: string; ratio: number }
+  | { type: 'setViewMode'; mode: WorkspaceViewMode }
+  | { type: 'toggleViewMode' }
+  | { type: 'setMosaicZoom'; paneId: string | null }
   | { type: 'drainKills'; ids: string[] }
   | { type: 'notice'; message: string | null }
 
 /* -------------------------------------------------------------- helpers */
 
-const EMPTY_WORKSPACE: Workspace = { tabs: [], activeTabId: null }
+const EMPTY_WORKSPACE: Workspace = { tabs: [], activeTabId: null, viewMode: 'tabs' }
 
 function workspaceOf(state: AppState, projectId: string | null): Workspace {
   if (!projectId) return EMPTY_WORKSPACE
@@ -191,7 +202,8 @@ function sanitiseWorkspace(ws: Workspace | null, profileIds: Set<string>): Works
     tabs.push({ id: tab.id, title: typeof tab.title === 'string' ? tab.title : 'Tab', root, activePaneId })
   }
   const activeTabId = tabs.some((t) => t.id === ws.activeTabId) ? ws.activeTabId : (tabs[0]?.id ?? null)
-  return { tabs, activeTabId }
+  const viewMode: WorkspaceViewMode = ws.viewMode === 'mosaic' ? 'mosaic' : 'tabs'
+  return { tabs, activeTabId, viewMode }
 }
 
 /* ------------------------------------------------------------- reducer */
@@ -219,6 +231,8 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         activeProjectId: action.projectId,
+        // A zoomed tile belongs to the project you were looking at.
+        mosaicZoom: null,
         settings: { ...state.settings, lastProjectId: action.projectId }
       }
     }
@@ -290,7 +304,7 @@ function reducer(state: AppState, action: Action): AppState {
       }
       return mapActiveWorkspace(state, (ws) => {
         const tab = makeTab(action.profileId, ws.tabs.length)
-        return { tabs: [...ws.tabs, tab], activeTabId: tab.id }
+        return { ...ws, tabs: [...ws.tabs, tab], activeTabId: tab.id }
       })
     }
 
@@ -305,9 +319,13 @@ function reducer(state: AppState, action: Action): AppState {
           current.activeTabId === action.tabId
             ? (tabs[Math.max(0, current.tabs.findIndex((t) => t.id === action.tabId) - 1)]?.id ?? null)
             : current.activeTabId
-        return { tabs, activeTabId }
+        return { ...current, tabs, activeTabId }
       })
-      return { ...next, pendingKills: [...next.pendingKills, ...kills] }
+      return {
+        ...next,
+        pendingKills: [...next.pendingKills, ...kills],
+        mosaicZoom: kills.includes(next.mosaicZoom ?? '') ? null : next.mosaicZoom
+      }
     }
 
     case 'selectTab':
@@ -360,11 +378,33 @@ function reducer(state: AppState, action: Action): AppState {
         return { ...t, root, activePaneId: nextFocus ?? t.activePaneId }
       })
       if (next === state) return state
-      return { ...next, pendingKills: [...next.pendingKills, action.paneId] }
+      return {
+        ...next,
+        pendingKills: [...next.pendingKills, action.paneId],
+        mosaicZoom: next.mosaicZoom === action.paneId ? null : next.mosaicZoom
+      }
     }
 
     case 'focusPane':
       return mapActiveTab(state, (t) => (t.activePaneId === action.paneId ? null : { ...t, activePaneId: action.paneId }))
+
+    /**
+     * Make `paneId` the app's current pane wherever in the project it lives —
+     * selecting its tab on the way. The mosaic spans every tab, so zooming or
+     * opening a tile has to be able to reach across them; `focusPane` only ever
+     * looks inside the tab that is already active.
+     */
+    case 'revealPane':
+      return mapActiveWorkspace(state, (ws) => {
+        const target = ws.tabs.find((t) => collectLeaves(t.root).some((l) => l.id === action.paneId))
+        if (!target) return null
+        const samePane = target.activePaneId === action.paneId
+        if (ws.activeTabId === target.id && samePane) return null
+        const tabs = samePane
+          ? ws.tabs
+          : ws.tabs.map((t) => (t.id === target.id ? { ...t, activePaneId: action.paneId } : t))
+        return { ...ws, tabs, activeTabId: target.id }
+      })
 
     case 'renamePane':
       return mapActiveTab(state, (t) => ({ ...t, root: updateLeaf(t.root, action.paneId, { title: action.title }) }))
@@ -374,6 +414,24 @@ function reducer(state: AppState, action: Action): AppState {
         const root = setSplitRatio(t.root, action.splitId, action.ratio)
         return root === t.root ? null : { ...t, root }
       })
+
+    case 'setViewMode': {
+      const next = mapActiveWorkspace(state, (ws) =>
+        (ws.viewMode ?? 'tabs') === action.mode ? null : { ...ws, viewMode: action.mode }
+      )
+      // Leaving the mosaic always drops the zoom — there is nothing to be
+      // zoomed *into* once the tiles are gone.
+      if (action.mode === 'tabs' && next.mosaicZoom !== null) return { ...next, mosaicZoom: null }
+      return next
+    }
+
+    case 'toggleViewMode': {
+      const current = workspaceOf(state, state.activeProjectId).viewMode ?? 'tabs'
+      return reducer(state, { type: 'setViewMode', mode: current === 'mosaic' ? 'tabs' : 'mosaic' })
+    }
+
+    case 'setMosaicZoom':
+      return state.mosaicZoom === action.paneId ? state : { ...state, mosaicZoom: action.paneId }
 
     case 'drainKills': {
       const remaining = state.pendingKills.filter((id) => !action.ids.includes(id))
@@ -419,9 +477,14 @@ export interface AppActions {
   splitPane(paneId: string, direction: SplitDirection, profileId?: string): void
   closePane(paneId: string): void
   focusPane(paneId: string): void
+  /** Focus a pane anywhere in the project, selecting its tab too. */
+  revealPane(paneId: string): void
   renamePane(paneId: string, title: string): void
   setRatio(splitId: string, ratio: number): void
   restartPane(paneId: string): void
+  setViewMode(mode: WorkspaceViewMode): void
+  toggleViewMode(): void
+  setMosaicZoom(paneId: string | null): void
   setNotice(message: string | null): void
   openDataDir(): void
 }
@@ -623,9 +686,13 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         }),
       closePane: (paneId) => dispatch({ type: 'closePane', paneId }),
       focusPane: (paneId) => dispatch({ type: 'focusPane', paneId }),
+      revealPane: (paneId) => dispatch({ type: 'revealPane', paneId }),
       renamePane: (paneId, title) => dispatch({ type: 'renamePane', paneId, title }),
       setRatio: (splitId, ratio) => dispatch({ type: 'setRatio', splitId, ratio }),
       restartPane: (paneId) => void terminalHost.restart(paneId),
+      setViewMode: (mode) => dispatch({ type: 'setViewMode', mode }),
+      toggleViewMode: () => dispatch({ type: 'toggleViewMode' }),
+      setMosaicZoom: (paneId) => dispatch({ type: 'setMosaicZoom', paneId }),
       setNotice: (message) => dispatch({ type: 'notice', message }),
       openDataDir: () => void window.forge.store.revealDataDir()
     }
@@ -663,6 +730,10 @@ export function useActiveWorkspace(): Workspace {
 export function useActiveTab(): TerminalTab | null {
   const ws = useActiveWorkspace()
   return ws.tabs.find((t) => t.id === ws.activeTabId) ?? null
+}
+
+export function useViewMode(): WorkspaceViewMode {
+  return useActiveWorkspace().viewMode ?? 'tabs'
 }
 
 export function usePaneCount(): { used: number; max: number } {

@@ -24,6 +24,10 @@ export type IconName =
   | 'trash'
   | 'voice'
   | 'send'
+  | 'viewTabs'
+  | 'viewMosaic'
+  | 'chevronLeft'
+  | 'expand'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -109,7 +113,30 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M2.4 7.2v1.6M5.2 5v6M8 2.8v10.4M10.8 5v6M13.6 7.2v1.6" />
     </>
   ),
-  send: <path d="M2.8 8h8.4M7.8 4.6L11.4 8l-3.6 3.4" />
+  send: <path d="M2.8 8h8.4M7.8 4.6L11.4 8l-3.6 3.4" />,
+  // One window with a tab on it: the working view.
+  viewTabs: (
+    <>
+      <path d="M2.2 5.4V4.1a.7.7 0 0 1 .7-.7h3.4l.9 1.2" />
+      <rect x="2.2" y="5.4" width="11.6" height="7.2" rx="1.3" />
+    </>
+  ),
+  // Four little windows: the mosaic.
+  viewMosaic: (
+    <>
+      <rect x="2.3" y="2.3" width="5" height="5" rx="1.1" />
+      <rect x="8.7" y="2.3" width="5" height="5" rx="1.1" />
+      <rect x="2.3" y="8.7" width="5" height="5" rx="1.1" />
+      <rect x="8.7" y="8.7" width="5" height="5" rx="1.1" />
+    </>
+  ),
+  chevronLeft: <path d="M9.6 4.4L6 8l3.6 3.6" />,
+  expand: (
+    <>
+      <path d="M9.6 2.6h3.8v3.8M13.4 2.6L8.5 7.5" />
+      <path d="M6.4 13.4H2.6V9.6M2.6 13.4l4.9-4.9" />
+    </>
+  )
 }
 
 export function Icon({
