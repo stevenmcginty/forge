@@ -48,13 +48,23 @@ export function createPushSource(): PushableTranscriptSource {
   }
 }
 
+/** Phrases held for a listener that has not attached yet. */
+const PENDING_LIMIT = 8
+
 /**
  * Fan-in for every source. Itself a `TranscriptSource`, so a bus can be handed
  * to anything that takes one.
+ *
+ * One deliberate wrinkle: a phrase that arrives while *nothing* is listening is
+ * kept and handed to the first listener that attaches. Without that, a phrase
+ * spoken in the instant before the panel wires itself up would vanish, and a
+ * swallowed first utterance is the worst possible first impression. Once there
+ * is a listener nothing is buffered, so there is no replay to reason about.
  */
 class TranscriptBus implements TranscriptSource {
   private readonly listeners = new Set<(text: string) => void>()
   private readonly sources = new Map<TranscriptSource, () => void>()
+  private pending: string[] = []
 
   register(source: TranscriptSource): () => void {
     if (this.sources.has(source)) return () => this.unregister(source)
@@ -76,15 +86,31 @@ class TranscriptBus implements TranscriptSource {
   }
 
   onPhrase(cb: (text: string) => void): () => void {
+    const first = this.listeners.size === 0
     this.listeners.add(cb)
+    if (first && this.pending.length > 0) {
+      const held = this.pending
+      this.pending = []
+      for (const phrase of held) cb(phrase)
+    }
     return () => {
       this.listeners.delete(cb)
     }
   }
 
+  /** Anything said before a listener attached, still waiting. */
+  pendingCount(): number {
+    return this.pending.length
+  }
+
   private emit(text: string): void {
     const phrase = clean(text)
     if (!phrase) return
+    if (this.listeners.size === 0) {
+      this.pending.push(phrase)
+      if (this.pending.length > PENDING_LIMIT) this.pending.shift()
+      return
+    }
     for (const cb of [...this.listeners]) cb(phrase)
   }
 }

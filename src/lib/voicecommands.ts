@@ -21,10 +21,19 @@ export interface CommandHit {
   confidence: BrainConfidence
 }
 
+/** One utterance may hold more than one order. */
+export interface UtteranceHit {
+  actions: AppAction[]
+  confidence: BrainConfidence
+}
+
 export type CommandContext = Pick<ActionContext, 'profiles' | 'projects' | 'defaultProfileId'>
 
 /** Commands are short. Long sentences are briefs, not orders. */
 const MAX_COMMAND_WORDS = 12
+
+/** Two or three orders in one breath is normal; a paragraph is not. */
+const MAX_UTTERANCE_WORDS = 26
 
 const NUMBERS: Record<string, number> = {
   zero: 0,
@@ -82,6 +91,29 @@ const TAB_WORDS = new Set([
 ])
 
 const PANE_WORDS = new Set(['pane', 'panes', 'split', 'splits'])
+
+/** Throat-clearing that carries no instruction of its own. */
+const ACK = new Set([
+  'right',
+  'ok',
+  'okay',
+  'so',
+  'now',
+  'also',
+  'please',
+  'yeah',
+  'yep',
+  'cheers',
+  'thanks',
+  'well',
+  'actually',
+  'oh',
+  'hey',
+  'and',
+  'then',
+  'go',
+  'on'
+])
 
 const OPEN_WORDS = new Set([
   'open',
@@ -168,6 +200,49 @@ function cleanName(raw: string): string {
 }
 
 /* ---------------------------------------------------------------- parsing */
+
+const RANK: Record<BrainConfidence, number> = { low: 0, medium: 1, high: 2 }
+
+/**
+ * The entry point the panel uses. Handles "close this pane and open a shell" by
+ * splitting on the joining words and requiring *every* clause to be an order —
+ * obeying half of a sentence is worse than obeying none of it, so a mixed
+ * utterance ("open two kimi tabs and make the login page pretty") is handed to
+ * the brain whole, where it can be answered properly.
+ */
+export function parseUtterance(transcript: string, ctx: CommandContext): UtteranceHit | null {
+  const text = transcript.trim()
+  if (!text) return null
+
+  const single = parseCommand(text, ctx)
+  const asSingle = (): UtteranceHit | null =>
+    single ? { actions: [single.action], confidence: single.confidence } : null
+
+  const clauses = text
+    .split(/\s*(?:,|;|\band then\b|\bthen\b|\band also\b|\band\b|\bplus\b)\s*/i)
+    .map((c) => c.trim())
+    .filter(Boolean)
+    // "right, open two kimi tabs" — drop the throat-clearing.
+    .filter((clause) => {
+      const w = words(clause)
+      return w.length > 0 && !w.every((t) => ACK.has(t))
+    })
+
+  if (clauses.length < 2) return asSingle()
+  if (words(text).length > MAX_UTTERANCE_WORDS) return asSingle()
+
+  const hits: CommandHit[] = []
+  for (const clause of clauses) {
+    const hit = parseCommand(clause, ctx)
+    if (!hit) return null // mixed intent — let the brain read the whole thing
+    hits.push(hit)
+  }
+  const confidence = hits.reduce<BrainConfidence>(
+    (worst, h) => (RANK[h.confidence] < RANK[worst] ? h.confidence : worst),
+    'high'
+  )
+  return { actions: hits.map((h) => h.action), confidence }
+}
 
 export function parseCommand(transcript: string, ctx: CommandContext): CommandHit | null {
   const text = transcript.trim().toLowerCase()

@@ -14,7 +14,7 @@ import { makeId } from '@/lib/ids'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { terminalHost, type PaneStatus } from '@/lib/terminals'
 import { transcriptBus, typedTranscript } from '@/lib/transcriptSource'
-import { parseCommand } from '@/lib/voicecommands'
+import { parseUtterance } from '@/lib/voicecommands'
 import {
   brainStatusLabel,
   getActiveBrain,
@@ -57,7 +57,7 @@ interface TurnBase {
 
 interface CommandTurn extends TurnBase {
   kind: 'command'
-  action: AppAction
+  actions: AppAction[]
   outcomes: ActionOutcome[]
 }
 
@@ -237,10 +237,13 @@ export function VoicePanel(): ReactNode {
 
       // 1 — plain commands never touch a model.
       const ctx = ctxRef.current
-      const hit = ctx ? parseCommand(said, ctx) : null
+      const hit = ctx ? parseUtterance(said, ctx) : null
       if (hit) {
-        const outcomes = runActions([hit.action])
-        setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'command', action: hit.action, outcomes }])
+        const outcomes = runActions(hit.actions)
+        setTurns((prev) => [
+          ...prev,
+          { id, said, at: Date.now(), kind: 'command', actions: hit.actions, outcomes }
+        ])
         return
       }
 

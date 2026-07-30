@@ -40,7 +40,7 @@ const {
   NOT_CONNECTED
 } = await import('../src/lib/voicebrain.ts')
 const { createPushSource, transcriptBus, typedTranscript } = await import('../src/lib/transcriptSource.ts')
-const { parseCommand } = await import('../src/lib/voicecommands.ts')
+const { parseCommand, parseUtterance } = await import('../src/lib/voicecommands.ts')
 const { runAppAction, matchProfile, matchProject } = await import('../src/lib/appactions.ts')
 const { buildManifest, ACTION_SPECS, EXTENSION_POINTS } = await import('../src/lib/appmanifest.ts')
 const { GeminiBrain, parseBrainJson, sanitiseActions, extractJsonObject, RESPONSE_SCHEMA } = await import(
@@ -187,6 +187,26 @@ await test('the bus fans several sources into one listener', () => {
   off()
   typedTranscript.push('after listener off')
   assert.deepEqual(seen, ['typed line', 'spoken line'])
+})
+
+await test('a phrase spoken before anything is listening is not lost', () => {
+  // Drain anything an earlier check left buffered.
+  transcriptBus.onPhrase(() => {})()
+  const source = createPushSource()
+  const unregister = transcriptBus.register(source)
+  // Nothing is listening yet — this is the dictation-fires-early case.
+  source.push('said too early')
+  assert.equal(transcriptBus.pendingCount(), 1)
+  const seen = []
+  const off = transcriptBus.onPhrase((t) => seen.push(t))
+  assert.deepEqual(seen, ['said too early'])
+  assert.equal(transcriptBus.pendingCount(), 0)
+  // With a listener attached, nothing is buffered.
+  source.push('live')
+  assert.equal(transcriptBus.pendingCount(), 0)
+  assert.deepEqual(seen, ['said too early', 'live'])
+  off()
+  unregister()
 })
 
 await test('registering the same source twice does not double-deliver', () => {
@@ -362,6 +382,32 @@ await test('a long sentence is a brief even if it mentions tabs', () => {
     parse('later on I would like the app to open a tab automatically whenever I plug in my second monitor'),
     null
   )
+})
+
+await test('two orders in one breath both get obeyed', () => {
+  const both = parseUtterance('right, open two kimi tabs and one powershell tab', C)
+  assert.deepEqual(both.actions, [
+    { kind: 'open_tabs', profileId: 'kimi', count: 2 },
+    { kind: 'open_tabs', profileId: 'pwsh', count: 1 }
+  ])
+
+  const mixed = parseUtterance('close this pane and open a shell', C)
+  assert.deepEqual(mixed.actions, [
+    { kind: 'close_pane', which: 'focused' },
+    { kind: 'open_tabs', profileId: 'pwsh', count: 1 }
+  ])
+
+  // A single order still comes back as one action.
+  assert.deepEqual(parseUtterance('open three kimi tabs', C).actions, [
+    { kind: 'open_tabs', profileId: 'kimi', count: 3 }
+  ])
+})
+
+await test('half-command, half-brief goes to the brain whole', () => {
+  // Obeying only the first half would be worse than obeying none of it.
+  assert.equal(parseUtterance('open two kimi tabs and make the login page look like Apple', C), null)
+  assert.equal(parseUtterance('I want to build a car game like Mario, top down, for the browser', C), null)
+  assert.equal(parseUtterance('add a menu screen and a lap timer', C), null)
 })
 
 /* ------------------------------------------------------------- executor */
