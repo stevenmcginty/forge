@@ -94,20 +94,23 @@ async function probeOne(id: ToolId): Promise<ToolProbe> {
     : { id, found: true, path: resolved, error: 'no version reported' }
 }
 
+/**
+ * Every tool at once. Each probe is an independent subprocess with its own
+ * six-second ceiling, so run in series the worst case is half a minute of a
+ * settings page saying "…" because one shim on the machine is wedged. In
+ * parallel the worst case is six seconds.
+ */
 export async function probeTools(refresh = false): Promise<ToolProbe[]> {
   if (refresh) probeCache.clear()
-  const out: ToolProbe[] = []
-  for (const spec of TOOL_SPECS) {
-    const cached = probeCache.get(spec.id)
-    if (cached) {
-      out.push(cached)
-      continue
-    }
-    const probe = await probeOne(spec.id)
-    probeCache.set(spec.id, probe)
-    out.push(probe)
-  }
-  return out
+  return Promise.all(
+    TOOL_SPECS.map(async (spec) => {
+      const cached = probeCache.get(spec.id)
+      if (cached) return cached
+      const probe = await probeOne(spec.id)
+      probeCache.set(spec.id, probe)
+      return probe
+    })
+  )
 }
 
 /* -------------------------------------------------------------- available */
