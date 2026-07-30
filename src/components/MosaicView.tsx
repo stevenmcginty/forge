@@ -9,7 +9,7 @@ import {
 } from 'react'
 import type { PaneLeaf, Project, TerminalTab, Workspace } from '@shared/types'
 import { isPaneDead, paneStatusLabel, usePaneRuntime } from '@/hooks/usePaneRuntime'
-import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { launchCommand, leafPermissionMode, paneDisplayTitle, permissionChip, resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost, type PaneGeometry, type TerminalSpec } from '@/lib/terminals'
 import { useApp } from '@/state/AppState'
@@ -280,6 +280,7 @@ function MosaicTile({
   const profile = resolveProfile(state.settings.agentProfiles, cell.leaf.profileId)
   const runtime = usePaneRuntime(paneId)
   const dead = isPaneDead(runtime)
+  const permChip = permissionChip(profile, leafPermissionMode(cell.leaf))
 
   const stageRef = useRef<HTMLDivElement | null>(null)
   const naturalRef = useRef<HTMLDivElement | null>(null)
@@ -287,14 +288,14 @@ function MosaicTile({
 
   const specRef = useRef<TerminalSpec>({
     cwd: project.path,
-    bootstrapCommand: profile.command,
+    bootstrapCommand: launchCommand(profile, leafPermissionMode(cell.leaf)),
     fontSize: state.settings.terminalFontSize,
     fontFamily: state.settings.terminalFontFamily,
     accent: profile.accent
   })
   specRef.current = {
     cwd: project.path,
-    bootstrapCommand: profile.command,
+    bootstrapCommand: launchCommand(profile, leafPermissionMode(cell.leaf)),
     fontSize: state.settings.terminalFontSize,
     fontFamily: state.settings.terminalFontFamily,
     accent: profile.accent
@@ -388,6 +389,11 @@ function MosaicTile({
         )}
 
         <span className="mtile__title truncate">{paneDisplayTitle(profile, cell.leaf.title)}</span>
+        {permChip ? (
+          <span className="mtile__perm mono" data-danger={permChip.danger ? 'true' : undefined}>
+            {permChip.label}
+          </span>
+        ) : null}
         <span className="mtile__tab truncate">{cell.tab.title}</span>
         <ActivityDot paneId={paneId} status={runtime.status} />
         {statusLabel ? <span className="mtile__status mono">{statusLabel}</span> : null}

@@ -16,7 +16,7 @@
   height: 42px;
   margin-bottom: var(--s-2);
   color: var(--accent);
-  background: linear-gradient(180deg, #1a1d19 0%, #131512 100%);
+  background: linear-gradient(180deg, var(--empty-grad-a) 0%, var(--empty-grad-b) 100%);
   border: 1px solid var(--line-hairline);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-key), var(--shadow-inset-top);

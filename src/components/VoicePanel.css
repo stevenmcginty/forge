@@ -113,8 +113,8 @@
 
 .voice__chip[data-ok='false'] {
   color: var(--warn);
-  border-color: rgba(255, 179, 71, 0.34);
-  background: rgba(255, 179, 71, 0.08);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
 }
 
 .voice__chip-dot {
@@ -305,7 +305,7 @@
 
 .action-chip[data-ok='false'] {
   background: var(--danger-soft);
-  border-color: rgba(255, 92, 72, 0.34);
+  border-color: var(--danger-line);
   color: var(--danger);
 }
 

@@ -1,9 +1,9 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
-import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
-import type { Project, Settings, StoreSnapshot, Workspace } from '@shared/types'
+import { BUILTIN_AGENT_PROFILES, inferKind, isClaudeCommand, isPermissionMode } from '@shared/agents'
+import type { AgentProfile, Project, Settings, StoreSnapshot, ThemeCore, Workspace } from '@shared/types'
 import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
 
 /**
@@ -27,6 +27,18 @@ import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
  */
 const DICTATION_HOME = join(homedir(), 'Desktop', 'DictationMic')
 
+/** The Windows account name, for the account chip's first run. */
+function defaultAccountName(): string {
+  try {
+    const name = userInfo().username.trim()
+    if (!name) return 'You'
+    // "steve" reads better with a capital on a chip you look at all day.
+    return name.charAt(0).toUpperCase() + name.slice(1)
+  } catch {
+    return 'You'
+  }
+}
+
 const DEFAULT_SETTINGS: Settings = {
   agentProfiles: BUILTIN_AGENT_PROFILES,
   lastProjectId: null,
@@ -47,7 +59,15 @@ const DEFAULT_SETTINGS: Settings = {
   voiceBrain: 'gemini',
   anthropicKey: '',
   geminiKey: '',
-  geminiModel: 'gemini-2.5-flash'
+  geminiModel: 'gemini-2.5-flash',
+  accountName: defaultAccountName(),
+  accountColor: '#C6FF4A',
+  themeId: 'volt',
+  customThemes: [],
+  reducedMotion: false,
+  openrouterKey: '',
+  voiceAutoRelay: false,
+  voiceRelayGraceMs: 2500
 }
 
 let dataDir = ''
@@ -107,10 +127,50 @@ function writeJson(name: string, value: unknown): void {
 
 /* ------------------------------------------------------------------ merging */
 
+/** A hex colour, or the fallback. Nothing off disk gets to be a CSS injection. */
+function hex(value: unknown, fallback: string): string {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(value.trim())
+    ? value.trim()
+    : fallback
+}
+
+/**
+ * A theme the user made. Every colour is re-validated: these end up as inline
+ * custom properties on the document, so "it came out of our own settings file"
+ * is not a good enough reason to trust the string.
+ */
+function normaliseTheme(raw: unknown): ThemeCore | null {
+  if (!raw || typeof raw !== 'object') return null
+  const t = raw as Partial<ThemeCore>
+  if (typeof t.id !== 'string' || !t.id.trim()) return null
+  const ansi = Array.isArray(t.ansi) ? t.ansi : []
+  if (ansi.length !== 16) return null
+  return {
+    id: t.id.trim().slice(0, 64),
+    name: (typeof t.name === 'string' && t.name.trim() ? t.name.trim() : t.id).slice(0, 48),
+    appearance: t.appearance === 'light' ? 'light' : 'dark',
+    bg: hex(t.bg, '#0b0c0e'),
+    panel: hex(t.panel, '#121317'),
+    text: hex(t.text, '#e8eaed'),
+    accent: hex(t.accent, '#c6ff4a'),
+    danger: hex(t.danger, '#ff5c48'),
+    warn: hex(t.warn, '#ffb347'),
+    info: hex(t.info, '#7fd1ff'),
+    ok: hex(t.ok, '#5ee6a8'),
+    termBg: hex(t.termBg, '#0e0f12'),
+    termFg: hex(t.termFg, '#e8eaed'),
+    ansi: ansi.map((c) => hex(c, '#e8eaed')),
+    custom: true,
+    ...(typeof t.basedOn === 'string' ? { basedOn: t.basedOn } : {})
+  }
+}
+
 /** Keep unknown/extra keys out, fill missing keys in, never trust the file. */
 function normaliseSettings(raw: Partial<Settings> | null): Settings {
   const s = raw ?? {}
-  const profiles = Array.isArray(s.agentProfiles) ? s.agentProfiles.filter((p) => p && p.id && p.name) : []
+  const profiles: AgentProfile[] = Array.isArray(s.agentProfiles)
+    ? s.agentProfiles.filter((p) => p && p.id && p.name)
+    : []
   // Re-seed any built-in the user deleted by hand, preserving their edits.
   for (const builtin of BUILTIN_AGENT_PROFILES) {
     if (!profiles.some((p) => p.id === builtin.id)) profiles.push({ ...builtin })
@@ -124,6 +184,12 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // Adopt a new built-in default (e.g. the Gemini bridge) into a settings.json
     // written before the flag existed, without overriding a deliberate opt-out.
     if (p.mcpBridge === undefined && builtin?.mcpBridge !== undefined) p.mcpBridge = builtin.mcpBridge
+    // Profiles written before the shell/agent split get a kind from their
+    // command; a built-in's kind is not up for negotiation.
+    p.kind = builtin?.kind ?? inferKind(p)
+    // A permission mode on something that is not Claude is noise: drop it, so
+    // renaming a profile's command cannot leave a stale flag behind.
+    if (!isClaudeCommand(p.command) || !isPermissionMode(p.permissionMode)) delete p.permissionMode
   }
 
   const win = s.window ?? DEFAULT_SETTINGS.window
@@ -161,7 +227,24 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     anthropicKey: typeof s.anthropicKey === 'string' ? s.anthropicKey : '',
     geminiKey: typeof s.geminiKey === 'string' ? s.geminiKey.trim() : '',
     geminiModel:
-      typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel
+      typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel,
+    accountName:
+      typeof s.accountName === 'string' && s.accountName.trim()
+        ? s.accountName.trim().slice(0, 40)
+        : DEFAULT_SETTINGS.accountName,
+    accountColor: hex(s.accountColor, DEFAULT_SETTINGS.accountColor),
+    themeId:
+      typeof s.themeId === 'string' && s.themeId.trim() ? s.themeId.trim().slice(0, 64) : DEFAULT_SETTINGS.themeId,
+    customThemes: (Array.isArray(s.customThemes) ? s.customThemes : [])
+      .map(normaliseTheme)
+      .filter((t): t is ThemeCore => t !== null)
+      .slice(0, 40),
+    reducedMotion: Boolean(s.reducedMotion),
+    openrouterKey: typeof s.openrouterKey === 'string' ? s.openrouterKey.trim() : '',
+    voiceAutoRelay: Boolean(s.voiceAutoRelay),
+    voiceRelayGraceMs: Number.isFinite(s.voiceRelayGraceMs)
+      ? clamp(s.voiceRelayGraceMs as number, 0, 60_000)
+      : DEFAULT_SETTINGS.voiceRelayGraceMs
   }
 }
 
@@ -263,6 +346,18 @@ export function getDataDir(): string {
 /** %APPDATA%\Forge\shots — created on demand, owned by the shots shelf. */
 export function getShotsDir(): string {
   const dir = join(getDataDir(), 'shots')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/**
+ * %APPDATA%\Forge\models — where Forge puts a speech model it downloaded
+ * itself. Deliberately inside the data root, so FORGE_DATA_DIR isolates a test
+ * instance's models too, and so deleting the data folder really does remove
+ * everything Forge ever wrote.
+ */
+export function getModelsDir(): string {
+  const dir = join(getDataDir(), 'models')
   mkdirSync(dir, { recursive: true })
   return dir
 }

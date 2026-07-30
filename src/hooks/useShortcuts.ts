@@ -42,12 +42,27 @@ export function useShortcuts(): void {
         return
       }
 
+      // Settings, the way every other app on the machine opens settings. Also
+      // works from a text field, because Ctrl+, is nobody's editing key.
+      if (ctrl && !shift && e.code === 'Comma') {
+        stop()
+        if (state.view === 'settings') actions.closeSettings()
+        else actions.openSettings()
+        return
+      }
+
       // Text fields (renaming a pane/tab, popover forms, the voice composer)
       // keep their keys.
       const el = document.activeElement
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
 
       const activePaneId = tab?.activePaneId ?? null
+
+      /*
+       * Everything below drives the terminal workspace, which is not on screen
+       * while settings is. Ctrl+W in there would close a pane you cannot see.
+       */
+      if (state.view === 'settings') return
 
       /* --------------------------------------------------- tabs & panes */
 
@@ -170,7 +185,7 @@ export function useShortcuts(): void {
 
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
-  }, [actions, state.settings.terminalFontSize, tab, workspace])
+  }, [actions, state.settings.terminalFontSize, state.view, tab, workspace])
 }
 
 /**

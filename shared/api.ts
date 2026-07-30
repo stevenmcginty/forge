@@ -1,7 +1,10 @@
 import type {
   AppInfo,
+  ClaudeCliState,
   CreateSessionRequest,
   CreateSessionResult,
+  EngineProgress,
+  EngineState,
   GeminiCallRequest,
   GeminiCallResult,
   ImportedKeyResult,
@@ -99,6 +102,32 @@ export interface ForgeApi {
     gemini(req: GeminiCallRequest): Promise<GeminiCallResult>
     /** Read Steve's own Gemini key off disk (DictationMic). Never writes. */
     importKey(): Promise<ImportedKeyResult>
+  }
+
+  /**
+   * Read-only probes of the machine, for the Account section's state chips.
+   * Nothing here writes, installs or signs anything in.
+   */
+  system: {
+    /** The Windows account name — the default display name. */
+    userName(): Promise<string>
+    /** `claude --version`, or why it could not be run. */
+    claudeVersion(): Promise<ClaudeCliState>
+    /** Read an OpenRouter key from ~/.kimi-key if it is there. Never writes. */
+    importOpenRouterKey(): Promise<ImportedKeyResult>
+  }
+
+  /**
+   * The dictation model. Forge can download Parakeet itself (into
+   * %APPDATA%\Forge\models) for anyone who has not already got DictationMic's
+   * copy — resumable, cancellable, and the only download Forge ever does.
+   */
+  models: {
+    engineState(): Promise<EngineState>
+    /** Resolves when the download ends, one way or another. */
+    engineInstall(): Promise<EngineProgress>
+    engineCancel(): Promise<void>
+    onEngineProgress(cb: (p: EngineProgress) => void): () => void
   }
 
   pickFolder(): Promise<string | null>

@@ -12,17 +12,20 @@ import { MAX_PANES_PER_TAB, MAX_SESSIONS } from '@shared/ipc'
 import type {
   AgentProfile,
   AppInfo,
+  ClaudePermissionMode,
   LayoutNode,
   Project,
   Settings,
   SplitDirection,
   TerminalTab,
+  ThemeCore,
   VoiceBrainId,
   Workspace,
   WorkspaceViewMode
 } from '@shared/types'
 import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
 import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
+import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
 import { basename } from '@/lib/paths'
 import {
@@ -39,6 +42,24 @@ import {
 import { terminalHost } from '@/lib/terminals'
 
 /* ------------------------------------------------------------------ state */
+
+/** The settings page's sections, in sidebar order. */
+export type SettingsSection =
+  | 'account'
+  | 'agents'
+  | 'models'
+  | 'voice'
+  | 'appearance'
+  | 'screenshots'
+  | 'advanced'
+
+/**
+ * What the main area is showing. Settings is a *view*, not a modal: it takes
+ * the terminal area over completely, because it is a place you go to work
+ * rather than a dialog you dismiss. The terminals keep running behind it — see
+ * terminalHost, which owns them independently of what React has mounted.
+ */
+export type MainView = 'terminals' | 'settings'
 
 export interface AppState {
   ready: boolean
@@ -57,6 +78,10 @@ export interface AppState {
   mosaicZoom: string | null
   /** Last non-fatal problem worth showing in the status bar. */
   notice: string | null
+  /** Terminals, or the settings page. */
+  view: MainView
+  /** Which settings section is open. Remembered across a visit, not a restart. */
+  settingsSection: SettingsSection
 }
 
 const FALLBACK_SETTINGS: Settings = {
@@ -78,7 +103,15 @@ const FALLBACK_SETTINGS: Settings = {
   voiceBrain: 'gemini',
   anthropicKey: '',
   geminiKey: '',
-  geminiModel: 'gemini-2.5-flash'
+  geminiModel: 'gemini-2.5-flash',
+  accountName: 'You',
+  accountColor: '#C6FF4A',
+  themeId: 'volt',
+  customThemes: [],
+  reducedMotion: false,
+  openrouterKey: '',
+  voiceAutoRelay: false,
+  voiceRelayGraceMs: 2500
 }
 
 /** The voice panel never gets narrower than this, nor wider. */
@@ -94,7 +127,9 @@ const INITIAL: AppState = {
   activeProjectId: null,
   pendingKills: [],
   mosaicZoom: null,
-  notice: null
+  notice: null,
+  view: 'terminals',
+  settingsSection: 'account'
 }
 
 type Action =
@@ -108,12 +143,18 @@ type Action =
   | { type: 'patchSettings'; patch: Partial<Settings> }
   | { type: 'saveProfile'; profile: AgentProfile }
   | { type: 'deleteProfile'; id: string }
-  | { type: 'newTab'; profileId: string }
+  | { type: 'newTab'; profileId: string; permissionMode?: ClaudePermissionMode }
   | { type: 'closeTab'; tabId: string }
   | { type: 'selectTab'; tabId: string }
   | { type: 'renameTab'; tabId: string; title: string }
   | { type: 'moveTab'; from: number; to: number }
-  | { type: 'splitPane'; paneId: string; direction: SplitDirection; profileId: string }
+  | {
+      type: 'splitPane'
+      paneId: string
+      direction: SplitDirection
+      profileId: string
+      permissionMode?: ClaudePermissionMode
+    }
   | { type: 'closePane'; paneId: string }
   | { type: 'focusPane'; paneId: string }
   | { type: 'revealPane'; paneId: string }
@@ -124,6 +165,9 @@ type Action =
   | { type: 'setMosaicZoom'; paneId: string | null }
   | { type: 'drainKills'; ids: string[] }
   | { type: 'notice'; message: string | null }
+  | { type: 'openSettings'; section?: SettingsSection }
+  | { type: 'closeSettings' }
+  | { type: 'setSettingsSection'; section: SettingsSection }
 
 /* -------------------------------------------------------------- helpers */
 
@@ -142,8 +186,8 @@ function totalPanes(state: AppState): number {
   return n
 }
 
-function makeTab(profileId: string, index: number): TerminalTab {
-  const leaf = makeLeaf(profileId)
+function makeTab(profileId: string, index: number, permissionMode?: ClaudePermissionMode): TerminalTab {
+  const leaf = makeLeaf(profileId, '', permissionMode)
   return {
     id: makeId('tab'),
     title: `Tab ${index + 1}`,
@@ -303,7 +347,7 @@ function reducer(state: AppState, action: Action): AppState {
         return { ...state, notice: `Session limit reached (${MAX_SESSIONS})` }
       }
       return mapActiveWorkspace(state, (ws) => {
-        const tab = makeTab(action.profileId, ws.tabs.length)
+        const tab = makeTab(action.profileId, ws.tabs.length, action.permissionMode)
         return { ...ws, tabs: [...ws.tabs, tab], activeTabId: tab.id }
       })
     }
@@ -355,7 +399,7 @@ function reducer(state: AppState, action: Action): AppState {
       if (countLeaves(tab.root) >= MAX_PANES_PER_TAB) {
         return { ...state, notice: `A tab holds at most ${MAX_PANES_PER_TAB} panes` }
       }
-      const leaf = makeLeaf(action.profileId)
+      const leaf = makeLeaf(action.profileId, '', action.permissionMode)
       return mapActiveTab(state, (t) => ({
         ...t,
         root: splitLeaf(t.root, action.paneId, action.direction, leaf),
@@ -441,6 +485,19 @@ function reducer(state: AppState, action: Action): AppState {
     case 'notice':
       return state.notice === action.message ? state : { ...state, notice: action.message }
 
+    case 'openSettings':
+      return {
+        ...state,
+        view: 'settings',
+        settingsSection: action.section ?? state.settingsSection
+      }
+
+    case 'closeSettings':
+      return state.view === 'terminals' ? state : { ...state, view: 'terminals' }
+
+    case 'setSettingsSection':
+      return state.settingsSection === action.section ? state : { ...state, settingsSection: action.section }
+
     default:
       return state
   }
@@ -469,12 +526,19 @@ export interface AppActions {
   patchSettings(patch: Partial<Settings>): void
   saveProfile(profile: AgentProfile): void
   deleteProfile(id: string): void
-  newTab(profileId?: string): void
+  /** Duplicate a profile under a new id, ready to be edited. */
+  duplicateProfile(id: string): void
+  newTab(profileId?: string, permissionMode?: ClaudePermissionMode): void
   closeTab(tabId: string): void
   selectTab(tabId: string): void
   renameTab(tabId: string, title: string): void
   moveTab(from: number, to: number): void
-  splitPane(paneId: string, direction: SplitDirection, profileId?: string): void
+  splitPane(
+    paneId: string,
+    direction: SplitDirection,
+    profileId?: string,
+    permissionMode?: ClaudePermissionMode
+  ): void
   closePane(paneId: string): void
   focusPane(paneId: string): void
   /** Focus a pane anywhere in the project, selecting its tab too. */
@@ -487,6 +551,22 @@ export interface AppActions {
   setMosaicZoom(paneId: string | null): void
   setNotice(message: string | null): void
   openDataDir(): void
+
+  /* ------------------------------------------------------- settings page */
+  openSettings(section?: SettingsSection): void
+  closeSettings(): void
+  setSettingsSection(section: SettingsSection): void
+
+  /* ------------------------------------------------------------- themes */
+  setTheme(id: string): void
+  /** Insert or update a custom theme, then switch to it. */
+  saveCustomTheme(theme: ThemeCore): void
+  deleteCustomTheme(id: string): void
+  setReducedMotion(on: boolean): void
+
+  /* ------------------------------------------------------------ account */
+  setAccountName(name: string): void
+  setAccountColor(color: string): void
 }
 
 interface Ctx {
@@ -596,6 +676,29 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     terminalHost.applyTypography(state.settings.terminalFontSize, state.settings.terminalFontFamily)
   }, [state.ready, state.settings.terminalFontSize, state.settings.terminalFontFamily])
 
+  /* ------------------------------------------------------------ theme sync
+   *
+   * One effect owns the entire look: it writes the resolved token set onto the
+   * document and then tells the terminal host to repaint. The order matters —
+   * terminals read their palette out of computed style, so they have to be
+   * refreshed *after* the new tokens are on the root, never before.
+   *
+   * It runs before `ready` too, unlike the effects above: hydration brings the
+   * saved theme with it, and a frame of Volt before Paper appears is a flash of
+   * the wrong app.
+   */
+
+  const themeId = state.settings.themeId
+  const customThemes = state.settings.customThemes
+  useEffect(() => {
+    applyTheme(findTheme(themeId, customThemes))
+    terminalHost.refreshTheme()
+  }, [themeId, customThemes])
+
+  useEffect(() => {
+    applyReducedMotion(state.settings.reducedMotion)
+  }, [state.settings.reducedMotion])
+
   /* ------------------------------------------------------- notice timeout */
 
   useEffect(() => {
@@ -672,17 +775,37 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       patchSettings: (patch) => dispatch({ type: 'patchSettings', patch }),
       saveProfile: (profile) => dispatch({ type: 'saveProfile', profile }),
       deleteProfile: (id) => dispatch({ type: 'deleteProfile', id }),
-      newTab: (profileId) => dispatch({ type: 'newTab', profileId: profileId ?? defaultProfileFor(activeProjectId) }),
+      duplicateProfile: (id) => {
+        const source = state.settings.agentProfiles.find((p) => p.id === id)
+        if (!source) return
+        dispatch({
+          type: 'saveProfile',
+          profile: {
+            ...source,
+            id: makeId('agent'),
+            name: `${source.name} copy`,
+            // A copy is yours: it can be deleted, whatever it was cloned from.
+            builtin: false
+          }
+        })
+      },
+      newTab: (profileId, permissionMode) =>
+        dispatch({
+          type: 'newTab',
+          profileId: profileId ?? defaultProfileFor(activeProjectId),
+          ...(permissionMode ? { permissionMode } : {})
+        }),
       closeTab: (tabId) => dispatch({ type: 'closeTab', tabId }),
       selectTab: (tabId) => dispatch({ type: 'selectTab', tabId }),
       renameTab: (tabId, title) => dispatch({ type: 'renameTab', tabId, title }),
       moveTab: (from, to) => dispatch({ type: 'moveTab', from, to }),
-      splitPane: (paneId, direction, profileId) =>
+      splitPane: (paneId, direction, profileId, permissionMode) =>
         dispatch({
           type: 'splitPane',
           paneId,
           direction,
-          profileId: profileId ?? defaultProfileFor(activeProjectId)
+          profileId: profileId ?? defaultProfileFor(activeProjectId),
+          ...(permissionMode ? { permissionMode } : {})
         }),
       closePane: (paneId) => dispatch({ type: 'closePane', paneId }),
       focusPane: (paneId) => dispatch({ type: 'focusPane', paneId }),
@@ -694,12 +817,38 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       toggleViewMode: () => dispatch({ type: 'toggleViewMode' }),
       setMosaicZoom: (paneId) => dispatch({ type: 'setMosaicZoom', paneId }),
       setNotice: (message) => dispatch({ type: 'notice', message }),
-      openDataDir: () => void window.forge.store.revealDataDir()
+      openDataDir: () => void window.forge.store.revealDataDir(),
+
+      openSettings: (section) => dispatch({ type: 'openSettings', ...(section ? { section } : {}) }),
+      closeSettings: () => dispatch({ type: 'closeSettings' }),
+      setSettingsSection: (section) => dispatch({ type: 'setSettingsSection', section }),
+
+      setTheme: (id) => dispatch({ type: 'patchSettings', patch: { themeId: id } }),
+      saveCustomTheme: (theme) => {
+        const rest = state.settings.customThemes.filter((t) => t.id !== theme.id)
+        dispatch({
+          type: 'patchSettings',
+          patch: { customThemes: [...rest, { ...theme, custom: true }], themeId: theme.id }
+        })
+      },
+      deleteCustomTheme: (id) => {
+        const customThemes = state.settings.customThemes.filter((t) => t.id !== id)
+        // Deleting the theme you are wearing has to leave you wearing something.
+        const themeId = state.settings.themeId === id ? 'volt' : state.settings.themeId
+        dispatch({ type: 'patchSettings', patch: { customThemes, themeId } })
+      },
+      setReducedMotion: (on) => dispatch({ type: 'patchSettings', patch: { reducedMotion: on } }),
+
+      setAccountName: (name) => dispatch({ type: 'patchSettings', patch: { accountName: name.trim().slice(0, 40) } }),
+      setAccountColor: (color) => dispatch({ type: 'patchSettings', patch: { accountColor: color } })
     }
   }, [
     activeProjectId,
     defaultProfileFor,
     state.projects,
+    state.settings.agentProfiles,
+    state.settings.customThemes,
+    state.settings.themeId,
     state.settings.railCollapsed,
     state.settings.voicePanelOpen
   ])

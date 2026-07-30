@@ -1,8 +1,10 @@
 import { useEffect, type ReactNode } from 'react'
+import { AccountChip } from '@/components/AccountChip'
 import { ProjectRail } from '@/components/ProjectRail'
 import { ScreenshotTray } from '@/components/ScreenshotTray'
 import { StatusBar } from '@/components/StatusBar'
 import { TerminalGrid } from '@/components/TerminalGrid'
+import { SettingsPage } from '@/components/settings/SettingsPage'
 import { TitleBar } from '@/components/TitleBar'
 import { VoicePanel } from '@/components/VoicePanel'
 import { useShortcuts } from '@/hooks/useShortcuts'
@@ -14,11 +16,13 @@ export function App(): ReactNode {
   const { state } = useApp()
   useShortcuts()
 
-  // The rail or the voice panel animating open/closed changes every pane's width.
+  // The rail or the voice panel animating open/closed changes every pane's
+  // width — and so does coming back from settings, where the grid was unmounted
+  // while the window carried on being resized.
   useEffect(() => {
     const t = setTimeout(() => terminalHost.fitAll(), 200)
     return () => clearTimeout(t)
-  }, [state.settings.railCollapsed, state.settings.voicePanelOpen, state.settings.voicePanelWidth])
+  }, [state.settings.railCollapsed, state.settings.voicePanelOpen, state.settings.voicePanelWidth, state.view])
 
   return (
     <div className="app" data-ready={state.ready}>
@@ -27,9 +31,10 @@ export function App(): ReactNode {
         <aside className="app__left" data-collapsed={state.settings.railCollapsed}>
           <ProjectRail />
           <ScreenshotTray />
+          <AccountChip />
         </aside>
         <main className="app__main">
-          <TerminalGrid />
+          {state.view === 'settings' ? <SettingsPage /> : <TerminalGrid />}
         </main>
         <VoicePanel />
       </div>

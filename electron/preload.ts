@@ -66,6 +66,19 @@ const api: ForgeApi = {
     importKey: () => ipcRenderer.invoke(IPC.voiceImportKey)
   },
 
+  system: {
+    userName: () => ipcRenderer.invoke(IPC.systemUserName),
+    claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion),
+    importOpenRouterKey: () => ipcRenderer.invoke(IPC.systemImportOpenRouterKey)
+  },
+
+  models: {
+    engineState: () => ipcRenderer.invoke(IPC.modelsEngineState),
+    engineInstall: () => ipcRenderer.invoke(IPC.modelsEngineInstall),
+    engineCancel: () => ipcRenderer.invoke(IPC.modelsEngineCancel),
+    onEngineProgress: (cb) => subscribe(IPC.modelsEngineProgress, cb)
+  },
+
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
 

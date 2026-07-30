@@ -56,6 +56,17 @@ export const IPC = {
   voiceGemini: 'voice:gemini',
   voiceImportKey: 'voice:import-key',
 
+  // system probes (M6 settings page)
+  systemUserName: 'system:user-name',
+  systemClaudeVersion: 'system:claude-version',
+  systemImportOpenRouterKey: 'system:import-openrouter-key',
+
+  // speech-engine model management (M6)
+  modelsEngineState: 'models:engine-state',
+  modelsEngineInstall: 'models:engine-install',
+  modelsEngineCancel: 'models:engine-cancel',
+  modelsEngineProgress: 'models:engine-progress',
+
   // diagnostics
   rendererError: 'diag:renderer-error'
 } as const

@@ -14,3 +14,90 @@
 .popover__row:hover .agent-chooser__cmd {
   color: var(--text-muted);
 }
+
+/* ------------------------------------------------------- permission modes
+ *
+ * A Claude row carries a second affordance: open it *now* in a mode other than
+ * the profile's default. The chevron opens the list in place rather than as a
+ * nested popover — one click to the mode you want, and the row you started from
+ * is still visible above it.
+ */
+
+.agent-chooser__line {
+  position: relative;
+}
+
+.agent-chooser__line .popover__row {
+  padding-right: 26px;
+}
+
+.agent-chooser__modes {
+  position: absolute;
+  right: var(--s-2);
+  top: 3px;
+  width: 20px;
+  height: 20px;
+  color: var(--text-dim);
+}
+
+.agent-chooser__modes:hover,
+.agent-chooser__modes[aria-expanded='true'] {
+  color: var(--text-primary);
+}
+
+.agent-chooser__mode {
+  flex: none;
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.04em;
+  color: var(--warn);
+}
+
+.agent-chooser__mode[data-danger='true'] {
+  color: var(--danger);
+}
+
+.agent-chooser__submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: var(--s-1) var(--s-2) var(--s-3) var(--s-6);
+  padding-left: var(--s-4);
+  border-left: 1px solid var(--line-hairline);
+}
+
+.agent-chooser__mode-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-sm);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.agent-chooser__mode-row:hover {
+  background: var(--bg-hover);
+}
+
+.agent-chooser__mode-row[data-selected='true'] .agent-chooser__mode-name {
+  color: var(--accent);
+}
+
+.agent-chooser__mode-row[data-danger='true']:hover {
+  background: var(--danger-soft);
+}
+
+.agent-chooser__mode-name {
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.agent-chooser__mode-row[data-danger='true'] .agent-chooser__mode-name {
+  color: var(--danger);
+}
+
+.agent-chooser__mode-note {
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+  line-height: 1.4;
+}

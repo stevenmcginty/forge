@@ -25,3 +25,14 @@
   padding: 0 3px;
   font-size: 9px;
 }
+
+/*
+ * A shell is not an agent. Same shape, no colour: no tinted wash, no coloured
+ * rim — just outlined grey, so on a wall of panes the loud badges are exactly
+ * the ones with something running in them.
+ */
+.agent-badge[data-shell='true'] {
+  color: var(--text-secondary);
+  background: none;
+  border-color: var(--line-strong);
+}

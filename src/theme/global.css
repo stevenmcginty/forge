@@ -1,4 +1,5 @@
 @import './tokens.css';
+@import './controls.css';
 
 *,
 *::before,
@@ -74,14 +75,14 @@ input {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: #24272f;
+  background: var(--scrollbar-thumb);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: var(--r-full);
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #333742;
+  background: var(--scrollbar-thumb-hover);
   background-clip: content-box;
 }
 
@@ -162,12 +163,12 @@ input {
 }
 
 .cta-btn:hover {
-  background: rgba(198, 255, 74, 0.2);
+  background: var(--accent-wash);
   box-shadow: 0 0 0 3px var(--accent-softer);
 }
 
 .cta-btn:active {
-  background: rgba(198, 255, 74, 0.26);
+  background: var(--accent-wash-strong);
 }
 
 .cta-btn[disabled] {

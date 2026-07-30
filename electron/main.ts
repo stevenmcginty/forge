@@ -19,6 +19,8 @@ import { writeBridgeConfig } from './bridge/mcp-config'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
 import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-sidecar'
 import { registerVoiceHandlers } from './voice-bridge'
+import { disposeEngineHost, registerEngineHandlers, setEngineTarget } from './models/engine-host'
+import { registerSystemHandlers } from './system'
 
 const isDev = !app.isPackaged
 const BG = '#0B0C0E'
@@ -197,6 +199,7 @@ function createWindow(): void {
     mainWindow = null
     setPtyTarget(null)
     setSttTarget(null)
+    setEngineTarget(null)
   })
 
   // Never let the renderer navigate away or spawn windows.
@@ -212,6 +215,7 @@ function createWindow(): void {
 
   setPtyTarget(mainWindow)
   setSttTarget(mainWindow)
+  setEngineTarget(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
@@ -312,6 +316,8 @@ void app.whenReady().then(() => {
   registerShotsHandlers()
   registerSttHandlers()
   registerVoiceHandlers()
+  registerSystemHandlers()
+  registerEngineHandlers()
   createWindow()
 
   app.on('activate', () => {
@@ -327,4 +333,5 @@ app.on('before-quit', () => {
   disposePtyHost()
   disposeShotsWatcher()
   disposeSttSidecar()
+  disposeEngineHost()
 })

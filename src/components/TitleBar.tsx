@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useActiveProject, useApp } from '@/state/AppState'
 import { shortPath } from '@/lib/paths'
 import { Icon } from './Icon'
-import { SettingsPopover } from './SettingsPopover'
 import './TitleBar.css'
 
 /**
@@ -13,9 +12,8 @@ import './TitleBar.css'
 export function TitleBar(): ReactNode {
   const { state, actions } = useApp()
   const project = useActiveProject()
-  const gearRef = useRef<HTMLButtonElement | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [focused, setFocused] = useState(true)
+  const inSettings = state.view === 'settings'
 
   useEffect(() => window.forge.window.onState((s) => setFocused(s.focused)), [])
 
@@ -64,11 +62,12 @@ export function TitleBar(): ReactNode {
         </button>
 
         <button
-          ref={gearRef}
           type="button"
           className="ghost-btn titlebar__btn"
-          title="Settings"
-          onClick={() => setSettingsOpen(true)}
+          title={inSettings ? 'Back to terminals (Esc)' : 'Settings (Ctrl+,)'}
+          aria-pressed={inSettings}
+          data-on={inSettings ? 'true' : undefined}
+          onClick={() => (inSettings ? actions.closeSettings() : actions.openSettings())}
         >
           <Icon name="gear" size={15} />
         </button>
@@ -76,8 +75,6 @@ export function TitleBar(): ReactNode {
 
       {/* Reserved for the native window controls (3 × 46px on Windows 11). */}
       <div className="titlebar__controls-gap" />
-
-      <SettingsPopover anchor={gearRef.current} open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
   )
 }
