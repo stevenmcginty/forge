@@ -294,9 +294,28 @@
   margin-top: var(--s-7);
 }
 
+/*
+  A link rather than a caption: it used to say "Settings has all of this" and
+  then leave you to find Settings. It is the way out of the welcome for anybody
+  who wants the long version, so it has to be clickable.
+*/
 .onboard__foot-hint {
+  font-family: var(--font-mono);
   font-size: var(--t-eyebrow);
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
   color: var(--text-dim);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--text-dim) 40%, transparent);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.onboard__foot-hint:hover {
+  color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }

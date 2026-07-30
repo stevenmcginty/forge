@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentPresence, SttModelState } from '@shared/types'
 import { Icon } from './Icon'
-import { useApp } from '@/state/AppState'
+import { useApp, type SettingsSection } from '@/state/AppState'
 import './Onboarding.css'
 
 /**
@@ -27,8 +27,6 @@ export function Onboarding(): ReactNode {
   const { state, actions } = useApp()
   const [agents, setAgents] = useState<AgentPresence[] | null>(null)
   const [model, setModel] = useState<SttModelState | null>(null)
-  const [key, setKey] = useState('')
-  const [keyNote, setKeyNote] = useState('')
   const [voiceTouched, setVoiceTouched] = useState(false)
   const cardRef = useRef<HTMLDivElement | null>(null)
 
@@ -67,9 +65,22 @@ export function Onboarding(): ReactNode {
   }, [open])
 
   const finish = useCallback(() => {
-    if (key.trim() && key.trim() !== state.settings.geminiKey) actions.setGeminiKey(key.trim())
     actions.patchSettings({ onboarded: true })
-  }, [actions, key, state.settings.geminiKey])
+  }, [actions])
+
+  /**
+   * Everything on this card also lives in Settings, in more detail and
+   * permanently. Rather than keep a second copy of the key form in step with
+   * that one, the welcome hands over: mark first-run done, then land on the
+   * section that owns the thing you clicked.
+   */
+  const handOver = useCallback(
+    (section: SettingsSection) => {
+      actions.patchSettings({ onboarded: true })
+      actions.openSettings(section)
+    },
+    [actions]
+  )
 
   if (!open) return null
 
@@ -77,20 +88,9 @@ export function Onboarding(): ReactNode {
 
   const projectStep: StepState = state.projects.length > 0 ? 'done' : 'todo'
   const agentStep: StepState = agents === null ? 'todo' : agents.some((a) => a.found) ? 'done' : 'skip'
-  const hasKey = Boolean(key.trim() || state.settings.geminiKey)
+  const hasKey = Boolean(state.settings.geminiKey)
   const voiceStep: StepState =
     model?.status === 'ready' || hasKey ? 'done' : voiceTouched ? 'skip' : 'todo'
-
-  const importKey = async (): Promise<void> => {
-    const result = await window.forge.voice.importKey()
-    setVoiceTouched(true)
-    if (result.ok) {
-      setKey(result.key)
-      setKeyNote(`Found a key ending ${result.last4}`)
-    } else {
-      setKeyNote(result.error)
-    }
-  }
 
   const downloading = model?.status === 'downloading'
   const percent = Math.round((model?.fraction ?? 0) * 100)
@@ -184,29 +184,15 @@ export function Onboarding(): ReactNode {
             </p>
 
             <div className="onboard__field">
-              <label className="onboard__label" htmlFor="onboard-key">
-                Gemini API key
-              </label>
-              <div className="onboard__row">
-                <input
-                  id="onboard-key"
-                  className="onboard__input mono"
-                  type="password"
-                  value={key}
-                  spellCheck={false}
-                  placeholder={state.settings.geminiKey ? 'already set' : 'paste, or leave empty'}
-                  onChange={(e) => {
-                    setKey(e.target.value)
-                    setVoiceTouched(true)
-                    setKeyNote('')
-                  }}
-                  onKeyDown={(e) => e.stopPropagation()}
-                />
-                <button type="button" className="ghost-btn onboard__ghost" onClick={() => void importKey()}>
-                  Import saved
-                </button>
-              </div>
-              {keyNote ? <p className="onboard__note">{keyNote}</p> : null}
+              <span className="onboard__label">Gemini API key</span>
+              <p className="onboard__note">
+                {hasKey
+                  ? 'A key is already stored — the voice agent has a brain.'
+                  : 'Without one the voice agent still obeys spoken commands, but cannot hold a conversation.'}
+              </p>
+              <button type="button" className="ghost-btn onboard__ghost" onClick={() => handOver('models')}>
+                {hasKey ? 'Change it in Settings' : 'Add a key in Settings'} &rarr;
+              </button>
             </div>
 
             <div className="onboard__field">
@@ -268,7 +254,9 @@ export function Onboarding(): ReactNode {
         </ol>
 
         <footer className="onboard__foot">
-          <span className="onboard__foot-hint mono">Settings has all of this, permanently</span>
+          <button type="button" className="onboard__foot-hint" onClick={() => handOver('voice')}>
+            Settings has all of this, permanently
+          </button>
           <button type="button" className="cta-btn" onClick={finish}>
             Start using Forge
           </button>
