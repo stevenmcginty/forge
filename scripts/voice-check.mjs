@@ -43,9 +43,15 @@ const { createPushSource, transcriptBus, typedTranscript } = await import('../sr
 const { parseCommand, parseUtterance } = await import('../src/lib/voicecommands.ts')
 const { runAppAction, matchProfile, matchProject } = await import('../src/lib/appactions.ts')
 const { buildManifest, ACTION_SPECS, EXTENSION_POINTS } = await import('../src/lib/appmanifest.ts')
-const { GeminiBrain, parseBrainJson, sanitiseActions, extractJsonObject, RESPONSE_SCHEMA } = await import(
-  '../src/lib/geminibrain.ts'
-)
+const {
+  GeminiBrain,
+  parseBrainJson,
+  sanitiseActions,
+  extractJsonObject,
+  salvagePartialJson,
+  tidySay,
+  RESPONSE_SCHEMA
+} = await import('../src/lib/geminibrain.ts')
 
 /* ------------------------------------------------------------- fixtures */
 
@@ -679,6 +685,45 @@ await test('a good round trip sends the manifest, the history and the schema', a
   assert.equal(reply.actions.length, 1)
 })
 
+await test('a looping model costs a sentence, not the card', () => {
+  // gemini-2.5-flash really did this: the same line, hundreds of times.
+  const loop = 'Right, here it is. ' + "I'm ready when you are. ".repeat(200)
+  const tidy = tidySay(loop)
+  assert.ok(tidy.length < 460, `still ${tidy.length} chars`)
+  assert.match(tidy, /^Right, here it is\./)
+  assert.equal((tidy.match(/ready when you are/g) ?? []).length, 1)
+  // Ordinary replies are left alone.
+  assert.equal(tidySay('Two Kimi tabs open. Anything else?'), 'Two Kimi tabs open. Anything else?')
+  // The draft is emitted before the chatter, so truncation cannot eat it.
+  const order = RESPONSE_SCHEMA.propertyOrdering
+  assert.ok(order.indexOf('draftPrompt') < order.indexOf('say'))
+})
+
+await test('a draft cut off by the output limit is rescued, not lost', async () => {
+  // Exactly what a real gemini-2.5-flash reply looked like at maxOutputTokens.
+  const truncated =
+    '{"understood":"The user wants a two-player top-down car game.","confidence":"high",' +
+    '"say":"Right, here it is.","draftPrompt":"# Goal\\nBuild a top-down car game.\\n\\n# Constraints\\n- Two players on one keyb'
+  const salvaged = salvagePartialJson(truncated)
+  assert.equal(salvaged.understood, 'The user wants a two-player top-down car game.')
+  assert.match(salvaged.say, /length limit/)
+  assert.match(salvaged.say, /Right, here it is\./)
+  assert.match(salvaged.draftPrompt, /^# Goal\nBuild a top-down car game\./)
+  assert.match(salvaged.draftPrompt, /Two players on one keyb$/)
+  assert.equal(salvaged.confidence, 'low')
+  assert.equal(salvagePartialJson('total nonsense'), null)
+  assert.equal(salvagePartialJson(''), null)
+
+  // And the brain uses it when the API says why it stopped.
+  const brain = new GeminiBrain('AIzaFAKE', 'm', async () => ({
+    ok: true,
+    text: truncated,
+    finishReason: 'MAX_TOKENS'
+  }))
+  const reply = await brain.interpret('a car game', { recentTranscript: [] })
+  assert.match(reply.draftPrompt, /# Goal/)
+})
+
 await test('malformed JSON is retried once with a nudge', async () => {
   let calls = 0
   const brain = new GeminiBrain('AIzaFAKE', 'm', async () => {
@@ -711,9 +756,9 @@ await test('API errors surface honestly, with Google’s own words', async () =>
 
   const timedOut = new GeminiBrain('AIzaFAKE', 'm', async () => ({
     ok: false,
-    error: 'Gemini did not answer within 30s'
+    error: 'Gemini did not answer within 75s'
   }))
-  await assert.rejects(() => timedOut.interpret('hello', { recentTranscript: [] }), /didn't answer/)
+  await assert.rejects(() => timedOut.interpret('hello', { recentTranscript: [] }), /took too long/)
 
   const broke = new GeminiBrain('AIzaFAKE', 'm', async () => ({ ok: false, error: '429 RESOURCE_EXHAUSTED: quota' }))
   await assert.rejects(() => broke.interpret('hello', { recentTranscript: [] }), /out of quota/)

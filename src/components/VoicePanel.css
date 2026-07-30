@@ -425,8 +425,9 @@
 .turn__draft {
   display: block;
   width: 100%;
-  min-height: 92px;
-  max-height: 320px;
+  /* The draft is the point of the panel — show it, don't peek at it. */
+  min-height: 168px;
+  max-height: 420px;
   padding: var(--s-4);
   background: var(--bg-sunken);
   border: 1px solid var(--line-hairline);

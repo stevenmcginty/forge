@@ -25,8 +25,9 @@ import type { GeminiCallRequest, GeminiCallResult, ImportedKeyResult } from '@sh
  */
 
 const HOST = 'https://generativelanguage.googleapis.com'
-const DEFAULT_TIMEOUT_MS = 30_000
-const MAX_TIMEOUT_MS = 120_000
+// A drafted prompt is a page of prose: 30s was not enough for a real answer.
+const DEFAULT_TIMEOUT_MS = 75_000
+const MAX_TIMEOUT_MS = 150_000
 
 /** Where DictationMic keeps the key. First hit wins; nothing is written. */
 function keyCandidates(): string[] {
@@ -98,8 +99,10 @@ async function callGemini(req: GeminiCallRequest): Promise<GeminiCallResult> {
   if (contents.length === 0) return { ok: false, error: 'Nothing to send' }
 
   const generationConfig: Record<string, unknown> = {
-    temperature: 0.35,
-    maxOutputTokens: 2048,
+    // Low: this is a structured task, and higher values invited repetition loops.
+    temperature: 0.2,
+    // A drafted prompt plus prose runs long; 2k truncated real answers mid-JSON.
+    maxOutputTokens: 8192,
     responseMimeType: 'application/json'
   }
   if (req.schema) generationConfig['responseSchema'] = req.schema

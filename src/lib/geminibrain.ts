@@ -37,12 +37,20 @@ const ACTION_KINDS = new Set([
   'new_project_hint'
 ])
 
-/** responseSchema for generationConfig — keeps Gemini inside the contract. */
+/**
+ * responseSchema for generationConfig — keeps Gemini inside the contract.
+ *
+ * Field order matters and is deliberate. A model that runs long (or, as
+ * gemini-2.5-flash has been seen to do, falls into repeating a sentence) loses
+ * whatever comes last. So the draft prompt is emitted *before* the chatty `say`:
+ * if anything gets cut off it is the small talk, never the deliverable.
+ */
 export const RESPONSE_SCHEMA = {
   type: 'OBJECT',
+  propertyOrdering: ['understood', 'confidence', 'actions', 'questions', 'draftPrompt', 'say'],
   properties: {
     understood: { type: 'STRING' },
-    say: { type: 'STRING' },
+    confidence: { type: 'STRING' },
     questions: { type: 'ARRAY', items: { type: 'STRING' } },
     actions: {
       type: 'ARRAY',
@@ -62,10 +70,30 @@ export const RESPONSE_SCHEMA = {
       }
     },
     draftPrompt: { type: 'STRING' },
-    confidence: { type: 'STRING' }
+    say: { type: 'STRING' }
   },
   required: ['understood', 'confidence']
 } as const
+
+/** How much conversational reply is worth showing. */
+const SAY_LIMIT = 420
+
+/**
+ * Tame the `say` field. Models sometimes loop ("I'm ready when you are." over
+ * and over) — collapse immediate repeats and cap the length, so a bad generation
+ * costs a sentence rather than the whole card.
+ */
+export function tidySay(text: string): string {
+  const collapsed = text
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence, i, all) => i === 0 || sentence.trim() !== all[i - 1]?.trim())
+    .join(' ')
+    .trim()
+  if (collapsed.length <= SAY_LIMIT) return collapsed
+  const cut = collapsed.slice(0, SAY_LIMIT)
+  const lastStop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '))
+  return `${(lastStop > 120 ? cut.slice(0, lastStop + 1) : cut).trim()}…`
+}
 
 const JSON_NUDGE =
   'Your last reply was not valid JSON. Reply again with the JSON object only — no prose, no markdown fence.'
@@ -86,6 +114,58 @@ export function extractJsonObject(raw: string): string | null {
 
 function asString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined
+}
+
+function unescapeJsonString(body: string): string {
+  try {
+    return JSON.parse(`"${body}"`) as string
+  } catch {
+    return body
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+  }
+}
+
+/**
+ * Rescue a reply that ran out of output tokens mid-JSON.
+ *
+ * This happens for real: a long drafted prompt can hit the model's output limit,
+ * leaving valid-but-unterminated JSON. Throwing that away would lose a perfectly
+ * good draft, so each top-level string is pulled out on its own, allowing the
+ * last one to be unterminated.
+ */
+export function salvagePartialJson(raw: string): BrainReply | null {
+  if (!raw) return null
+  let text = raw.trim()
+  const fence = /```(?:json)?\s*([\s\S]*)$/i.exec(text)
+  if (fence?.[1]) text = fence[1]!.trim()
+  const start = text.indexOf('{')
+  if (start < 0) return null
+  text = text.slice(start)
+
+  const field = (name: string): string | undefined => {
+    const m = new RegExp(`"${name}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)(?:"|$)`).exec(text)
+    if (!m) return undefined
+    const value = unescapeJsonString(m[1] ?? '').trim()
+    return value ? value : undefined
+  }
+
+  const understood = field('understood')
+  const say = field('say')
+  const draftPrompt = field('draftPrompt')
+  if (!understood && !say && !draftPrompt) return null
+
+  const reply: BrainReply = {
+    understood: understood ?? 'Gemini’s reply was cut off',
+    confidence: 'low'
+  }
+  const note = 'Gemini hit its length limit, so this was cut off.'
+  reply.say = say ? `${note} ${tidySay(say)}` : note
+  if (draftPrompt) reply.draftPrompt = draftPrompt
+  return reply
 }
 
 function asCount(v: unknown, fallback = 1): number {
@@ -172,7 +252,8 @@ export function parseBrainJson(raw: string): BrainReply | null {
     ? (o['questions'] as unknown[]).map(asString).filter((q): q is string => Boolean(q)).slice(0, 5)
     : []
 
-  const say = asString(o['say'])
+  const rawSay = asString(o['say'])
+  const say = rawSay ? tidySay(rawSay) : undefined
   const understood = asString(o['understood']) ?? say ?? '(no summary)'
   const draftPrompt = asString(o['draftPrompt'])
 
@@ -236,6 +317,12 @@ export class GeminiBrain implements VoiceBrain {
     const reply = parseBrainJson(first.text)
     if (reply) return reply
 
+    // Ran out of room mid-JSON? Keep what it did manage to say.
+    if (first.finishReason === 'MAX_TOKENS') {
+      const salvaged = salvagePartialJson(first.text)
+      if (salvaged) return salvaged
+    }
+
     // One nudge, then take what we are given rather than losing the answer.
     const retry = await this.transport({
       ...base,
@@ -244,7 +331,12 @@ export class GeminiBrain implements VoiceBrain {
     if (retry.ok) {
       const second = parseBrainJson(retry.text)
       if (second) return second
+      const salvaged = salvagePartialJson(retry.text)
+      if (salvaged) return salvaged
     }
+
+    const salvaged = salvagePartialJson(first.text)
+    if (salvaged) return salvaged
 
     return {
       understood: 'Gemini replied, but not in the JSON shape I asked for',
@@ -262,7 +354,10 @@ function friendly(error: string): string {
   if (/quota|RESOURCE_EXHAUSTED|429/i.test(error)) {
     return `Gemini is out of quota for now. (${error})`
   }
-  if (/did not answer|ENOTFOUND|EAI_AGAIN|reach Gemini|network/i.test(error)) {
+  if (/did not answer/i.test(error)) {
+    return `Gemini took too long — try again, or ask for something smaller. (${error})`
+  }
+  if (/ENOTFOUND|EAI_AGAIN|reach Gemini|network/i.test(error)) {
     return `Gemini didn't answer — check your connection. (${error})`
   }
   if (/404|NOT_FOUND/i.test(error)) {

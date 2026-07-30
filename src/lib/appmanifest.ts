@@ -198,7 +198,7 @@ export function buildManifest(s: ManifestSnapshot): string {
     'Reply with JSON only — no prose outside it, no markdown fence:',
     '{',
     '  "understood": "one line: what you think he wants",',
-    '  "say": "your conversational reply to him, plain text, a sentence or two",',
+    '  "say": "one or two sentences to him — NEVER the drafted prompt itself, that goes in draftPrompt only",',
     '  "questions": ["only if you genuinely need to ask"],',
     '  "actions": [ /* zero or more actions from the list above */ ],',
     '  "draftPrompt": "a full, structured prompt for a coding agent — only when he is describing something to build",',
@@ -206,7 +206,9 @@ export function buildManifest(s: ManifestSnapshot): string {
     '}',
     'If he is commanding the app, return actions and a short say, and leave draftPrompt out.',
     'If he is describing something to build, return draftPrompt (markdown, with goal, constraints and acceptance',
-    'criteria) and no actions. If you are unsure which, ask one question instead of guessing.'
+    'criteria) and no actions. If you are unsure which, ask one question instead of guessing.',
+    'Never promise a prompt you have not written. There is no "next message": if say mentions drafting, writing or',
+    'preparing a prompt, then draftPrompt MUST contain the finished prompt in this same reply.'
   )
 
   return lines.join('\n')
