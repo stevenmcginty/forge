@@ -44,6 +44,7 @@ export const IPC = {
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
   openPath: 'shell:open-path',
+  openExternal: 'shell:open-external',
 
   // window
   appInfo: 'app:info',

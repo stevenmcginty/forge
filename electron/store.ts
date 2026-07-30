@@ -54,7 +54,9 @@ const DEFAULT_SETTINGS: Settings = {
   // Mirrors DEFAULT_OPENROUTER_MODEL in src/lib/voicebrain.ts, the same way
   // geminiModel above mirrors DEFAULT_GEMINI_MODEL — main cannot import a
   // renderer module, and voice-check asserts the two literals still agree.
-  openrouterModel: 'google/gemini-2.5-flash-lite'
+  openrouterModel: 'google/gemini-2.5-flash-lite',
+  // Steve wants his Claude panes reachable from his phone out of the box.
+  remoteControlDefault: true
 }
 
 let dataDir = ''
@@ -153,6 +155,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // Adopt a new built-in default (e.g. the Gemini bridge) into a settings.json
     // written before the flag existed, without overriding a deliberate opt-out.
     if (p.mcpBridge === undefined && builtin?.mcpBridge !== undefined) p.mcpBridge = builtin.mcpBridge
+    if (p.remoteControl === undefined && builtin?.remoteControl !== undefined) p.remoteControl = builtin.remoteControl
   }
 
   const win = s.window ?? DEFAULT_SETTINGS.window
@@ -197,7 +200,8 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     openrouterModel:
       typeof s.openrouterModel === 'string' && s.openrouterModel.trim()
         ? s.openrouterModel.trim()
-        : DEFAULT_SETTINGS.openrouterModel
+        : DEFAULT_SETTINGS.openrouterModel,
+    remoteControlDefault: s.remoteControlDefault ?? DEFAULT_SETTINGS.remoteControlDefault
   }
 }
 

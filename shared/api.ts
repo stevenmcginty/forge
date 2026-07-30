@@ -122,6 +122,12 @@ export interface ForgeApi {
 
   pickFolder(): Promise<string | null>
   openPath(target: string): Promise<string>
+  /**
+   * Open an http(s) URL in the default browser. Anything else is refused in the
+   * main process — the renderer must never be able to hand the OS an arbitrary
+   * scheme to launch.
+   */
+  openExternal(url: string): Promise<boolean>
 
   /**
    * Absolute path of a dropped `File`. Typed as `unknown` because this contract

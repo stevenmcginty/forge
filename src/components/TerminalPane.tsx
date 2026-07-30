@@ -4,6 +4,7 @@ import { isPaneDead, paneStatusLabel, usePaneRuntime } from '@/hooks/usePaneRunt
 import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { droppedFilePaths } from '@/lib/paths'
 import { terminalHost, type TerminalSpec } from '@/lib/terminals'
+import { isClaudeCommand, remoteControlName, REMOTE_CONTROL_URL } from '@shared/remote'
 import { useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
@@ -33,8 +34,10 @@ export function TerminalPane({
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const splitBtnRef = useRef<HTMLButtonElement | null>(null)
+  const phoneBtnRef = useRef<HTMLButtonElement | null>(null)
   const menuAnchorRef = useRef<HTMLSpanElement | null>(null)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
+  const [phoneOpen, setPhoneOpen] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
   const [dropping, setDropping] = useState(false)
   const runtime = usePaneRuntime(leaf.id)
@@ -48,14 +51,18 @@ export function TerminalPane({
     bootstrapCommand: profile.command,
     fontSize: state.settings.terminalFontSize,
     fontFamily: state.settings.terminalFontFamily,
-    accent: profile.accent
+    accent: profile.accent,
+    projectName: project.name,
+    paneTitle: paneDisplayTitle(profile, leaf.title)
   })
   specRef.current = {
     cwd: project.path,
     bootstrapCommand: profile.command,
     fontSize: state.settings.terminalFontSize,
     fontFamily: state.settings.terminalFontFamily,
-    accent: profile.accent
+    accent: profile.accent,
+    projectName: project.name,
+    paneTitle: paneDisplayTitle(profile, leaf.title)
   }
 
   /* ------------------------------------------------------------- attach */
@@ -119,6 +126,32 @@ export function TerminalPane({
 
   const statusLabel = paneStatusLabel(runtime)
 
+  /* ------------------------------------------------------ remote control */
+
+  /**
+   * Mirrors `wantsRemoteControl` in electron/bridge/remote-control.ts: the
+   * app-wide switch, the profile flag, and a command that really is Claude
+   * Code. Recomputed rather than reported back from main so the header updates
+   * the moment the setting changes, without a round trip.
+   */
+  const remoteOn =
+    state.settings.remoteControlDefault && profile.remoteControl === true && isClaudeCommand(profile.command)
+
+  // The title the session was launched under, not the one it now wears — see
+  // terminalHost.launchedAs.
+  const launched = terminalHost.launchedAs(leaf.id)
+  const remoteName = remoteControlName(
+    launched?.projectName ?? project.name,
+    launched?.paneTitle ?? paneDisplayTitle(profile, leaf.title)
+  )
+
+  // Claude prints its session URL once Remote Control connects, and the pane
+  // reads it off its own screen (see terminalHost.scanForRemoteUrl). Until it
+  // appears — not signed in, still starting, no network — the button falls back
+  // to the session list, which is never wrong, only less direct.
+  const remoteUrl = runtime.remoteUrl ?? REMOTE_CONTROL_URL
+  const remoteConnected = runtime.remoteUrl !== null
+
   return (
     <section
       className="pane"
@@ -180,6 +213,28 @@ export function TerminalPane({
         <ActivityDot paneId={leaf.id} status={runtime.status} />
 
         {statusLabel ? <span className="pane__status mono">{statusLabel}</span> : null}
+
+        {/* Outside .pane__actions: the actions strip only appears on hover, and
+            "you can pick this up on your phone" is a property of the pane worth
+            seeing at a glance. */}
+        {remoteOn ? (
+          <button
+            ref={phoneBtnRef}
+            type="button"
+            className="ghost-btn pane__phone"
+            data-open={phoneOpen ? 'true' : undefined}
+            data-connected={remoteConnected ? 'true' : undefined}
+            title={
+              remoteConnected
+                ? 'Remote Control is live — drivable from the Claude app'
+                : 'Remote-controllable from the Claude app'
+            }
+            aria-label={`Remote control — this session appears as ${remoteName}`}
+            onClick={() => setPhoneOpen((v) => !v)}
+          >
+            <Icon name="phone" size={12} />
+          </button>
+        ) : null}
 
         <div className="pane__actions">
           {isPaneDead(runtime) ? (
@@ -265,6 +320,45 @@ export function TerminalPane({
         <PopoverRow onClick={() => runFromMenu(() => terminalHost.clear(leaf.id))}>
           <span className="pane__menu-name">Clear</span>
         </PopoverRow>
+      </Popover>
+
+      <Popover
+        anchor={phoneBtnRef.current}
+        open={phoneOpen}
+        onClose={() => setPhoneOpen(false)}
+        align="end"
+        width={272}
+        label="Remote control"
+      >
+        <div className="popover__hint pane__remote-body">
+          <p>
+            This session is remote-controllable — open the Claude app on your phone → <strong>Code</strong> tab.
+          </p>
+          <p>
+            Sessions appear as <span className="mono pane__remote-name">{remoteName}</span>
+          </p>
+          <p className="pane__remote-note">
+            While a Forge window has focus, notifications stay on this machine. Walk away and they follow you.
+          </p>
+          {remoteConnected ? null : (
+            <p className="pane__remote-note">
+              Waiting for Claude to connect — the direct link appears here once it has.
+            </p>
+          )}
+        </div>
+        <div className="popover__actions">
+          <button
+            type="button"
+            className="cta-btn"
+            title={remoteUrl}
+            onClick={() => {
+              setPhoneOpen(false)
+              void window.forge.openExternal(remoteUrl)
+            }}
+          >
+            {remoteConnected ? 'Open this session' : 'Open claude.ai/code'}
+          </button>
+        </div>
       </Popover>
 
       <AgentChooser

@@ -87,7 +87,8 @@ const FALLBACK_SETTINGS: Settings = {
   geminiModel: 'gemini-2.5-flash',
   geminiImageModel: '',
   openrouterKey: '',
-  openrouterModel: 'google/gemini-2.5-flash-lite'
+  openrouterModel: 'google/gemini-2.5-flash-lite',
+  remoteControlDefault: true
 }
 
 /** The voice panel never gets narrower than this, nor wider. */

@@ -30,6 +30,12 @@ export interface ManagerOptions {
   shell?: string
   /** Extra args. Defaults to `['-NoLogo']`. */
   shellArgs?: string[]
+  /**
+   * Variables added to every session's environment, after the denylist has run
+   * and therefore able to set a name that would otherwise be stripped. Forge
+   * uses it for `CLAUDE_CLIENT_PRESENCE_FILE` (see electron/presence.ts).
+   */
+  env?: Record<string, string>
   maxSessions?: number
   onData: (id: string, data: string) => void
   onExit: (id: string, exitCode: number, signal?: number) => void
@@ -66,6 +72,7 @@ export class PtySessionManager {
   private sessions = new Map<string, Session>()
   private readonly shell: string
   private readonly shellArgs: string[]
+  private readonly extraEnv: Record<string, string>
   private readonly maxSessions: number
   private readonly onData: ManagerOptions['onData']
   private readonly onExit: ManagerOptions['onExit']
@@ -73,6 +80,7 @@ export class PtySessionManager {
   constructor(options: ManagerOptions) {
     this.shell = options.shell || 'pwsh.exe'
     this.shellArgs = options.shellArgs ?? ['-NoLogo']
+    this.extraEnv = options.env ?? {}
     this.maxSessions = options.maxSessions ?? 16
     this.onData = options.onData
     this.onExit = options.onExit
@@ -124,7 +132,7 @@ export class PtySessionManager {
         cwd,
         cols,
         rows,
-        env: buildEnv()
+        env: buildEnv(this.extraEnv)
       })
     } catch (err) {
       return { ok: false, id: spec.id, error: describe(err) }
@@ -262,16 +270,61 @@ function resolveCwd(cwd: string): string | null {
 }
 
 /**
- * Electron injects variables that confuse child Node processes (notably
- * ELECTRON_RUN_AS_NODE, which would make `claude` boot as a bare Node script).
- * Strip them and add the usual terminal hints.
+ * Names never passed down to a pane, whatever the parent process has set.
+ *
+ * Three groups, one rule — a pane is a *fresh* agent session, not a child of
+ * whatever launched Forge:
+ *
+ *  1. Remote Control killers. `--remote-control` needs feature-flag evaluation
+ *     and a claude.ai OAuth login talking to api.anthropic.com; each of these
+ *     silently removes one of those, and Steve has DO_NOT_TRACK and friends set
+ *     globally. Inheriting them would make the phone feature simply not appear,
+ *     with no error to explain why. (Mirrors REMOTE_CONTROL_KILLERS in
+ *     shared/remote.ts — duplicated rather than imported because this module is
+ *     bundled stand-alone by scripts/pty-smoke.mjs.)
+ *  2. Claude session markers. Forge itself is often started from inside a
+ *     Claude Code session; without stripping these, every pane would think it
+ *     was a nested child of that session and report against its id.
+ *  3. Electron's own injections, which confuse child Node processes — notably
+ *     ELECTRON_RUN_AS_NODE, which would make `claude` boot as a bare script.
  */
-function buildEnv(): Record<string, string> {
+export const ENV_DENYLIST: readonly string[] = [
+  // 1. Remote Control killers
+  'DISABLE_TELEMETRY',
+  'DO_NOT_TRACK',
+  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+  'DISABLE_GROWTHBOOK',
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  // 2. Claude session markers
+  'CLAUDECODE',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_BRIDGE_SESSION_ID',
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_SESSION_ACCESS_TOKEN',
+  'CLAUDE_CODE_SSE_PORT',
+  // 3. Electron / Node injections
+  'NODE_OPTIONS',
+  'ELECTRON_RUN_AS_NODE',
+  'ELECTRON_NO_ATTACH_CONSOLE',
+  'ELECTRON_IS_DEV',
+  'ELECTRON_ENABLE_LOGGING'
+]
+
+const DENIED = new Set(ENV_DENYLIST)
+
+/**
+ * The environment every pane is spawned with: the parent's, minus everything on
+ * ENV_DENYLIST, plus the usual terminal hints and whatever the caller adds.
+ */
+function buildEnv(extra: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (v === undefined) continue
-    if (/^ELECTRON_(RUN_AS_NODE|NO_ATTACH_CONSOLE|IS_DEV|ENABLE_LOGGING)$/.test(k)) continue
-    if (k === 'NODE_OPTIONS') continue
+    if (DENIED.has(k)) continue
     // Forge is a truecolor terminal, so an inherited NO_COLOR is simply wrong
     // here — and Steve's is set globally, which was quietly draining the colour
     // out of every pane.
@@ -286,6 +339,11 @@ function buildEnv(): Record<string, string> {
   // paint themselves white. 15;0 = light ink on a dark ground.
   if (!env.COLORFGBG) env.COLORFGBG = '15;0'
   if (!env.TERM_PROGRAM) env.TERM_PROGRAM = 'Forge'
+  // Last, so a caller can deliberately set a name the denylist would have
+  // stripped — and so an empty value means "leave it unset" rather than "".
+  for (const [k, v] of Object.entries(extra)) {
+    if (v) env[k] = v
+  }
   return env
 }
 

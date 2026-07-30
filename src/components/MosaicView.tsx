@@ -290,14 +290,18 @@ function MosaicTile({
     bootstrapCommand: profile.command,
     fontSize: state.settings.terminalFontSize,
     fontFamily: state.settings.terminalFontFamily,
-    accent: profile.accent
+    accent: profile.accent,
+    projectName: project.name,
+    paneTitle: paneDisplayTitle(profile, cell.leaf.title)
   })
   specRef.current = {
     cwd: project.path,
     bootstrapCommand: profile.command,
     fontSize: state.settings.terminalFontSize,
     fontFamily: state.settings.terminalFontFamily,
-    accent: profile.accent
+    accent: profile.accent,
+    projectName: project.name,
+    paneTitle: paneDisplayTitle(profile, cell.leaf.title)
   }
 
   /*

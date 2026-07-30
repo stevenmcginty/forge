@@ -1,6 +1,7 @@
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { PtyDataEvent, PtyExitEvent } from '@shared/types'
+import { findRemoteSessionUrl } from '@shared/remote'
 
 /**
  * TerminalHost — the renderer-side owner of every xterm instance.
@@ -20,6 +21,12 @@ export interface PaneRuntime {
   pid: number | null
   exitCode: number | null
   error: string | null
+  /**
+   * The claude.ai/code URL for this pane's Remote Control session, once Claude
+   * has printed it. Null until then — and for every pane that is not a
+   * remote-controlled Claude session.
+   */
+  remoteUrl: string | null
 }
 
 export interface TerminalSpec {
@@ -29,6 +36,13 @@ export interface TerminalSpec {
   fontFamily: string
   /** Profile accent — used for the cursor and selection wash. */
   accent: string
+  /**
+   * What this pane is, in words. Sent to the main process purely so the
+   * bootstrap transforms can name things after it — today that is the Remote
+   * Control session name Steve's phone shows.
+   */
+  projectName: string
+  paneTitle: string
 }
 
 /**
@@ -48,7 +62,14 @@ export interface PaneGeometry {
   height: number
 }
 
-const IDLE_RUNTIME: PaneRuntime = { status: 'idle', pid: null, exitCode: null, error: null }
+const IDLE_RUNTIME: PaneRuntime = { status: 'idle', pid: null, exitCode: null, error: null, remoteUrl: null }
+
+/**
+ * How much of the previous chunk to re-scan for the Remote Control URL. PTY
+ * output arrives in arbitrary slices, so the URL can straddle two of them; a
+ * short overlap costs nothing and means we never miss it by one byte.
+ */
+const URL_SCAN_OVERLAP = 256
 
 const ACTIVITY_THROTTLE_MS = 90
 
@@ -73,6 +94,8 @@ interface Entry {
   /** Last full-size layout, remembered so a peek tile can scale against it. */
   geometry: PaneGeometry | null
   resizeObserver: ResizeObserver | null
+  /** Tail of the last output chunk, kept only until the RC URL is found. */
+  scanTail: string
   lastActivityNotify: number
   activityTimer: number | null
   /** The WebGL renderer, when this terminal currently has one. */
@@ -180,6 +203,7 @@ class TerminalHost {
       if (!entry) return
       entry.term.write(e.data)
       if (entry.runtime.status === 'starting') this.setRuntime(entry, { status: 'live' })
+      this.scanForRemoteUrl(entry, e.data)
       this.pulse(entry)
     })
 
@@ -206,6 +230,26 @@ class TerminalHost {
     entry.runtime = { ...entry.runtime, ...patch }
     const l = this.listeners.get(entry.paneId)
     if (l) for (const cb of l.runtime) cb(entry.runtime)
+  }
+
+  /**
+   * Watch a pane's output for the URL Claude prints when Remote Control
+   * connects, so the pane's phone popover can deep-link to *that* session.
+   *
+   * Reading the terminal is the whole trick: the id is not in the environment
+   * Forge can see and there is no IPC for it, but Claude announces it on screen
+   * — and Forge is the terminal. Nothing is written to the user's hooks or
+   * settings, and the scan stops the moment it finds one.
+   */
+  private scanForRemoteUrl(entry: Entry, data: string): void {
+    if (entry.runtime.remoteUrl) return
+    const found = findRemoteSessionUrl(entry.scanTail + data)
+    if (found) {
+      entry.scanTail = ''
+      this.setRuntime(entry, { remoteUrl: found })
+      return
+    }
+    entry.scanTail = (entry.scanTail + data).slice(-URL_SCAN_OVERLAP)
   }
 
   private pulse(entry: Entry): void {
@@ -366,6 +410,7 @@ class TerminalHost {
       mode: 'tab',
       geometry: null,
       resizeObserver: null,
+      scanTail: '',
       lastActivityNotify: 0,
       activityTimer: null,
       webgl: null,
@@ -522,13 +567,18 @@ class TerminalHost {
   }
 
   private async start(entry: Entry): Promise<void> {
-    this.setRuntime(entry, { status: 'starting', error: null, exitCode: null })
+    // A relaunch is a new Claude session with a new Remote Control id, so the
+    // old URL must not survive it.
+    entry.scanTail = ''
+    this.setRuntime(entry, { status: 'starting', error: null, exitCode: null, remoteUrl: null })
     const result = await window.forge.pty.create({
       id: entry.paneId,
       cwd: entry.spec.cwd,
       cols: entry.term.cols,
       rows: entry.term.rows,
-      bootstrapCommand: entry.spec.bootstrapCommand
+      bootstrapCommand: entry.spec.bootstrapCommand,
+      projectName: entry.spec.projectName,
+      paneTitle: entry.spec.paneTitle
     })
     if (result.ok) {
       this.setRuntime(entry, { status: 'live', pid: result.pid })
@@ -673,6 +723,18 @@ class TerminalHost {
 
   has(paneId: string): boolean {
     return this.entries.has(paneId)
+  }
+
+  /**
+   * The naming context this pane was actually created with. Renaming a pane
+   * afterwards does not rename its Remote Control session — Claude was told the
+   * name once, at launch — so the phone popover reads it from here rather than
+   * recomputing it from the current title and lying about what to look for.
+   */
+  launchedAs(paneId: string): { projectName: string; paneTitle: string } | null {
+    const entry = this.entries.get(paneId)
+    if (!entry) return null
+    return { projectName: entry.spec.projectName, paneTitle: entry.spec.paneTitle }
   }
 
   scrollToBottom(paneId: string): void {

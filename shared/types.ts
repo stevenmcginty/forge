@@ -29,6 +29,14 @@ export interface AgentProfile {
    * `--mcp-config` flag. Set `false` explicitly to opt a built-in out.
    */
   mcpBridge?: boolean
+  /**
+   * Launch this agent with Claude Code's Remote Control, so the session can be
+   * watched and driven from Steve's phone (see docs/REMOTE.md). Only meaningful
+   * for agents that accept `--remote-control`; set `false` to opt a built-in
+   * out. Undefined means off, so a custom profile never gets a flag its tool
+   * has never heard of.
+   */
+  remoteControl?: boolean
 }
 
 /* ---------------------------------------------------------------- projects */
@@ -266,6 +274,15 @@ export interface Settings {
    */
   openrouterKey: string
   openrouterModel: string
+
+  /* ------------------------------------------------ remote control (M7) */
+  /**
+   * Master switch for Claude Code's Remote Control. On by default: Steve wants
+   * to be able to pick a pane up on his phone. Turning it off suppresses the
+   * flag for every pane regardless of the per-profile setting, which is the
+   * switch you want when you are on a plan or a network where it cannot work.
+   */
+  remoteControlDefault: boolean
 }
 
 /* -------------------------------------------------------------------- ipc */
@@ -289,6 +306,13 @@ export interface CreateSessionRequest {
   rows: number
   /** Command written into the shell once it is ready. Empty = nothing. */
   bootstrapCommand?: string
+  /**
+   * Naming context for the bootstrap transforms. Only Remote Control uses it
+   * today, to label the session Steve's phone will show — see
+   * `remoteControlName` in shared/remote.ts.
+   */
+  projectName?: string
+  paneTitle?: string
 }
 
 export type CreateSessionResult =

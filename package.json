@@ -16,7 +16,8 @@
     "shots:smoke": "node scripts/shots-smoke.mjs",
     "voice:check": "node scripts/voice-check.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
-    "bridge:register": "node scripts/bridge-register-check.mjs"
+    "bridge:register": "node scripts/bridge-register-check.mjs",
+    "remote:check": "node scripts/remote-check.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

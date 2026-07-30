@@ -28,6 +28,7 @@ export type IconName =
   | 'viewMosaic'
   | 'chevronLeft'
   | 'expand'
+  | 'phone'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -135,6 +136,14 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M9.6 2.6h3.8v3.8M13.4 2.6L8.5 7.5" />
       <path d="M6.4 13.4H2.6V9.6M2.6 13.4l4.9-4.9" />
+    </>
+  ),
+  // A handset: this pane can be driven from the Claude app.
+  phone: (
+    <>
+      <rect x="4.4" y="1.8" width="7.2" height="12.4" rx="1.6" />
+      <path d="M6.9 3.7h2.2" />
+      <circle cx="8" cy="11.9" r=".75" fill="currentColor" stroke="none" />
     </>
   )
 }
