@@ -1,0 +1,200 @@
+import { app } from 'electron'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
+import type { Project, Settings, StoreSnapshot, Workspace } from '@shared/types'
+
+/**
+ * Dead-simple JSON persistence in %APPDATA%\Forge.
+ *
+ *   settings.json          app settings + agent profiles + window bounds
+ *   projects.json          the project list (ordered)
+ *   layouts/<id>.json      one terminal workspace per project
+ *
+ * Writes are atomic (tmp file + rename) and debounced by the caller where it
+ * matters. Reads are tolerant: a corrupt file falls back to defaults rather
+ * than crashing the app, and the bad file is kept as `<name>.corrupt`.
+ */
+
+const DEFAULT_SETTINGS: Settings = {
+  agentProfiles: BUILTIN_AGENT_PROFILES,
+  lastProjectId: null,
+  railCollapsed: false,
+  terminalFontSize: 13,
+  terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
+  shell: 'pwsh.exe',
+  window: { width: 1440, height: 900, maximized: false }
+}
+
+let dataDir = ''
+let layoutDir = ''
+
+function ensureDirs(): void {
+  if (!dataDir) {
+    dataDir = join(app.getPath('appData'), 'Forge')
+    layoutDir = join(dataDir, 'layouts')
+  }
+  mkdirSync(layoutDir, { recursive: true })
+}
+
+function filePath(name: string): string {
+  ensureDirs()
+  return join(dataDir, name)
+}
+
+function readJson<T>(name: string, fallback: T): T {
+  const p = filePath(name)
+  if (!existsSync(p)) return fallback
+  try {
+    return JSON.parse(readFileSync(p, 'utf8')) as T
+  } catch (err) {
+    console.error(`[store] ${name} is unreadable, falling back to defaults:`, err)
+    try {
+      renameSync(p, `${p}.corrupt`)
+    } catch {
+      /* best effort */
+    }
+    return fallback
+  }
+}
+
+function writeJson(name: string, value: unknown): void {
+  const p = filePath(name)
+  const tmp = `${p}.tmp`
+  try {
+    writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf8')
+    renameSync(tmp, p)
+  } catch (err) {
+    console.error(`[store] failed to write ${name}:`, err)
+  }
+}
+
+/* ------------------------------------------------------------------ merging */
+
+/** Keep unknown/extra keys out, fill missing keys in, never trust the file. */
+function normaliseSettings(raw: Partial<Settings> | null): Settings {
+  const s = raw ?? {}
+  const profiles = Array.isArray(s.agentProfiles) ? s.agentProfiles.filter((p) => p && p.id && p.name) : []
+  // Re-seed any built-in the user deleted by hand, preserving their edits.
+  for (const builtin of BUILTIN_AGENT_PROFILES) {
+    if (!profiles.some((p) => p.id === builtin.id)) profiles.push({ ...builtin })
+  }
+  for (const p of profiles) {
+    if (typeof p.command !== 'string') p.command = ''
+    if (!p.accent) p.accent = '#C6FF4A'
+    if (!p.badge) p.badge = p.name.slice(0, 2).toUpperCase()
+    p.builtin = BUILTIN_AGENT_PROFILES.some((b) => b.id === p.id)
+  }
+
+  const win = s.window ?? DEFAULT_SETTINGS.window
+  return {
+    agentProfiles: profiles,
+    lastProjectId: s.lastProjectId ?? null,
+    railCollapsed: s.railCollapsed ?? false,
+    terminalFontSize: clamp(s.terminalFontSize ?? DEFAULT_SETTINGS.terminalFontSize, 9, 28),
+    terminalFontFamily: s.terminalFontFamily || DEFAULT_SETTINGS.terminalFontFamily,
+    shell: s.shell || DEFAULT_SETTINGS.shell,
+    window: {
+      x: typeof win.x === 'number' ? win.x : undefined,
+      y: typeof win.y === 'number' ? win.y : undefined,
+      width: clamp(win.width ?? 1440, 720, 10000),
+      height: clamp(win.height ?? 900, 480, 10000),
+      maximized: Boolean(win.maximized)
+    }
+  }
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : lo
+}
+
+/* ------------------------------------------------------------------- public */
+
+let settingsCache: Settings | null = null
+let projectsCache: Project[] | null = null
+
+export function getSettings(): Settings {
+  if (!settingsCache) settingsCache = normaliseSettings(readJson<Partial<Settings> | null>('settings.json', null))
+  return settingsCache
+}
+
+export function setSettings(patch: Partial<Settings>): Settings {
+  settingsCache = normaliseSettings({ ...getSettings(), ...patch })
+  writeJson('settings.json', settingsCache)
+  return settingsCache
+}
+
+export function getProjects(): Project[] {
+  if (!projectsCache) {
+    const raw = readJson<Project[]>('projects.json', [])
+    projectsCache = Array.isArray(raw) ? raw.filter((p) => p && p.id && p.path) : []
+  }
+  return projectsCache
+}
+
+export function setProjects(projects: Project[]): Project[] {
+  projectsCache = projects
+  writeJson('projects.json', projects)
+  // Drop layout files for projects that no longer exist.
+  try {
+    const ids = new Set(projects.map((p) => p.id))
+    for (const f of readdirSync(layoutDir)) {
+      if (f.endsWith('.json') && !ids.has(f.replace(/\.json$/, ''))) {
+        unlinkSync(join(layoutDir, f))
+      }
+    }
+  } catch {
+    /* best effort */
+  }
+  return projects
+}
+
+function layoutFile(projectId: string): string {
+  ensureDirs()
+  return join(layoutDir, `${sanitiseId(projectId)}.json`)
+}
+
+function sanitiseId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, '_')
+}
+
+export function getWorkspace(projectId: string): Workspace | null {
+  const p = layoutFile(projectId)
+  if (!existsSync(p)) return null
+  try {
+    const parsed = JSON.parse(readFileSync(p, 'utf8')) as Workspace
+    if (!parsed || !Array.isArray(parsed.tabs)) return null
+    return parsed
+  } catch (err) {
+    console.error(`[store] layout for ${projectId} unreadable:`, err)
+    return null
+  }
+}
+
+export function setWorkspace(projectId: string, workspace: Workspace): void {
+  const p = layoutFile(projectId)
+  const tmp = `${p}.tmp`
+  try {
+    writeFileSync(tmp, JSON.stringify(workspace, null, 2), 'utf8')
+    renameSync(tmp, p)
+  } catch (err) {
+    console.error(`[store] failed to write layout for ${projectId}:`, err)
+  }
+}
+
+export function deleteWorkspace(projectId: string): void {
+  try {
+    unlinkSync(layoutFile(projectId))
+  } catch {
+    /* not there — fine */
+  }
+}
+
+export function snapshot(): StoreSnapshot {
+  return { settings: getSettings(), projects: getProjects() }
+}
+
+export function getDataDir(): string {
+  ensureDirs()
+  return dataDir
+}

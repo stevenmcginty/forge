@@ -1,0 +1,165 @@
+.pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg-terminal);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+/* Focus is the one thing that gets the volt treatment. */
+.pane[data-focused='true'] {
+  border-color: color-mix(in srgb, var(--pane-accent, var(--accent)) 40%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, transparent);
+}
+
+.pane__header {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  height: var(--pane-header-h);
+  padding: 0 var(--s-2) 0 var(--s-4);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.pane[data-focused='true'] .pane__header {
+  background: #14161c;
+  border-bottom-color: var(--line-hairline);
+}
+
+.pane__title {
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--s-1);
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+  text-align: left;
+  border-radius: var(--r-xs);
+}
+
+.pane[data-focused='true'] .pane__title {
+  color: var(--text-primary);
+}
+
+.pane__title:hover {
+  background: var(--bg-hover);
+}
+
+.pane__title-input {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  padding: 0 var(--s-2);
+  font-size: var(--t-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-xs);
+}
+
+/* ------------------------------------------------------------ activity dot */
+
+.pane__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--text-dim);
+  transition:
+    background var(--dur-med) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out);
+}
+
+.pane__dot.is-active {
+  background: var(--pane-accent, var(--accent));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, transparent);
+  animation: dot-pulse 620ms var(--ease-out);
+}
+
+.pane[data-status='exited'] .pane__dot,
+.pane[data-status='error'] .pane__dot {
+  background: var(--danger);
+  box-shadow: none;
+  animation: none;
+}
+
+.pane[data-status='starting'] .pane__dot {
+  background: var(--warn);
+}
+
+@keyframes dot-pulse {
+  0% {
+    transform: scale(0.7);
+  }
+  40% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane__dot.is-active {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------- status */
+
+.pane__status {
+  flex: none;
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
+.pane[data-status='exited'] .pane__status,
+.pane[data-status='error'] .pane__status {
+  color: var(--danger);
+}
+
+/* --------------------------------------------------------------- actions */
+
+.pane__actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.pane:hover .pane__actions,
+.pane[data-focused='true'] .pane__actions,
+.pane:focus-within .pane__actions {
+  opacity: 1;
+}
+
+.pane__action {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+}
+
+/* -------------------------------------------------------------- terminal */
+
+.pane__terminal {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal-surface {
+  position: absolute;
+  inset: 0;
+}

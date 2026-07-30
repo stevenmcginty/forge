@@ -1,0 +1,194 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--t-md);
+  letter-spacing: var(--tracking-tight);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+/* Nothing in a desktop shell should be draggable or selectable by accident. */
+img,
+svg {
+  -webkit-user-drag: none;
+}
+
+button {
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: default;
+}
+
+input {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+/* ------------------------------------------------------------ focus ring */
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 1px solid var(--accent-line);
+  outline-offset: 1px;
+  border-radius: var(--r-xs);
+}
+
+/* -------------------------------------------------------------- scrollbar */
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #24272f;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--r-full);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #333742;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* -------------------------------------------------------------- primitives */
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Ghost button: the default interactive chrome across the app. */
+.ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  height: 24px;
+  padding: 0 var(--s-3);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.ghost-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.ghost-btn:active {
+  background: var(--bg-active);
+}
+
+.ghost-btn[data-danger='true']:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.ghost-btn[disabled] {
+  color: var(--text-dim);
+  background: none;
+}
+
+/* Primary call to action — volt on volt-wash, never a solid slab. */
+.cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-4);
+  height: 32px;
+  padding: 0 var(--s-6);
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: var(--t-md);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.cta-btn:hover {
+  background: rgba(198, 255, 74, 0.2);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+.cta-btn:active {
+  background: rgba(198, 255, 74, 0.26);
+}
+
+.cta-btn[disabled] {
+  background: none;
+  border-color: var(--line-hairline);
+  color: var(--text-dim);
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------------------ xterm */
+
+.xterm {
+  padding: var(--s-3) var(--s-4) var(--s-2) var(--s-5);
+  height: 100%;
+}
+
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+  scrollbar-gutter: stable;
+}
+
+.xterm .xterm-screen {
+  user-select: text;
+}

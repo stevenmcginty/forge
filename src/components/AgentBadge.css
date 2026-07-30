@@ -1,0 +1,27 @@
+.agent-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--badge-accent, var(--accent));
+  background: color-mix(in srgb, var(--badge-accent, var(--accent)) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--badge-accent, var(--accent)) 34%, transparent);
+  border-radius: var(--r-xs);
+}
+
+.agent-badge[data-size='md'] {
+  height: 17px;
+  min-width: 24px;
+  padding: 0 var(--s-2);
+  font-size: var(--t-eyebrow);
+}
+
+.agent-badge[data-size='sm'] {
+  height: 15px;
+  min-width: 21px;
+  padding: 0 3px;
+  font-size: 9px;
+}

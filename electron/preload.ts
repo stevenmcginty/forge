@@ -1,0 +1,71 @@
+/// <reference lib="dom" />
+import { contextBridge, ipcRenderer } from 'electron'
+import { IPC } from '@shared/ipc'
+import type { ForgeApi } from '@shared/api'
+
+function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
+  const listener = (_e: Electron.IpcRendererEvent, payload: T): void => cb(payload)
+  ipcRenderer.on(channel, listener)
+  return () => {
+    ipcRenderer.removeListener(channel, listener)
+  }
+}
+
+const api: ForgeApi = {
+  info: () => ipcRenderer.invoke(IPC.appInfo),
+
+  pty: {
+    create: (req) => ipcRenderer.invoke(IPC.ptyCreate, req),
+    write: (id, data) => ipcRenderer.send(IPC.ptyWrite, id, data),
+    resize: (id, cols, rows) => ipcRenderer.send(IPC.ptyResize, id, cols, rows),
+    kill: (id) => ipcRenderer.invoke(IPC.ptyKill, id),
+    list: () => ipcRenderer.invoke(IPC.ptyList),
+    onData: (cb) => subscribe(IPC.ptyData, cb),
+    onExit: (cb) => subscribe(IPC.ptyExit, cb)
+  },
+
+  store: {
+    snapshot: () => ipcRenderer.invoke(IPC.storeSnapshot),
+    setSettings: (patch) => ipcRenderer.invoke(IPC.storeSetSettings, patch),
+    setProjects: (projects) => ipcRenderer.invoke(IPC.storeSetProjects, projects),
+    getWorkspace: (projectId) => ipcRenderer.invoke(IPC.storeGetWorkspace, projectId),
+    setWorkspace: (projectId, workspace) => ipcRenderer.invoke(IPC.storeSetWorkspace, projectId, workspace),
+    deleteWorkspace: (projectId) => ipcRenderer.invoke(IPC.storeDeleteWorkspace, projectId),
+    revealDataDir: () => ipcRenderer.invoke(IPC.storeReveal)
+  },
+
+  pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
+  openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
+
+  window: {
+    minimize: () => ipcRenderer.send(IPC.windowMinimize),
+    toggleMaximize: () => ipcRenderer.send(IPC.windowToggleMaximize),
+    close: () => ipcRenderer.send(IPC.windowClose),
+    onState: (cb) => subscribe(IPC.windowState, cb)
+  }
+}
+
+contextBridge.exposeInMainWorld('forge', api)
+
+/**
+ * Anything that blows up in the renderer is reported to the main process, which
+ * prints it in the terminal running `npm run dev`. Without this, a React crash
+ * is invisible unless DevTools happens to be open.
+ */
+window.addEventListener('error', (e) => {
+  ipcRenderer.send(IPC.rendererError, {
+    kind: 'error',
+    message: e.message,
+    source: `${e.filename}:${e.lineno}:${e.colno}`,
+    stack: e.error instanceof Error ? e.error.stack : undefined
+  })
+})
+
+window.addEventListener('unhandledrejection', (e) => {
+  const reason: unknown = e.reason
+  ipcRenderer.send(IPC.rendererError, {
+    kind: 'unhandledrejection',
+    message: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined
+  })
+})

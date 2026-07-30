@@ -1,0 +1,97 @@
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  min-height: 28px;
+  padding: 0 var(--s-4);
+}
+
+.setting-row__label {
+  flex: 1;
+  font-size: var(--t-md);
+  color: var(--text-secondary);
+}
+
+.setting-row__value {
+  flex: none;
+  max-width: 140px;
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+  padding: 1px;
+}
+
+.stepper__btn {
+  width: 20px;
+  height: 20px;
+  font-size: var(--t-lg);
+  line-height: 1;
+}
+
+.stepper__value {
+  min-width: 22px;
+  text-align: center;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+/* ---------------------------------------------------------- profile rows */
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  min-height: 28px;
+  padding: 0 var(--s-4);
+  border-radius: var(--r-sm);
+}
+
+.profile-row:hover {
+  background: var(--bg-hover);
+}
+
+.profile-row__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-md);
+}
+
+.profile-row__cmd {
+  flex: none;
+  max-width: 92px;
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.profile-row__lock {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.profile-row__del {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+}
+
+.profile-row:hover .profile-row__del {
+  opacity: 1;
+}
+
+.settings__version {
+  padding: var(--s-3) var(--s-4) var(--s-2);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  border-top: 1px solid var(--line-soft);
+  margin-top: var(--s-2);
+}

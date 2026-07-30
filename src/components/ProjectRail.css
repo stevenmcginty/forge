@@ -1,0 +1,211 @@
+.rail {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rail__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  height: 32px;
+  padding: 0 var(--s-3) 0 var(--s-5);
+}
+
+.rail[data-collapsed='true'] .rail__head {
+  justify-content: center;
+  padding: 0;
+}
+
+.rail__count {
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.rail__head-add {
+  margin-left: auto;
+  width: 24px;
+}
+
+.rail[data-collapsed='true'] .rail__head-add {
+  margin-left: 0;
+}
+
+.rail__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-2) var(--s-3) var(--s-4);
+}
+
+.rail[data-collapsed='true'] .rail__list {
+  padding: var(--s-2) 0 var(--s-4);
+}
+
+.rail__foot {
+  flex: none;
+  padding: var(--s-3);
+  border-top: 1px solid var(--line-soft);
+}
+
+.rail__add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  width: 100%;
+  height: 30px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  font-size: var(--t-md);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.rail__add:hover {
+  border-color: var(--accent-line);
+  border-style: solid;
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
+/* ------------------------------------------------------------ project row */
+
+.prow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  height: 44px;
+  padding: 0 var(--s-2) 0 var(--s-4);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.prow + .prow {
+  margin-top: var(--s-1);
+}
+
+.rail[data-collapsed='true'] .prow {
+  justify-content: center;
+  gap: 0;
+  height: 38px;
+  padding: 0;
+  margin-left: var(--s-3);
+  margin-right: var(--s-3);
+}
+
+.prow:hover {
+  background: var(--bg-hover);
+}
+
+.prow[data-active='true'] {
+  background: #171a20;
+  border-color: var(--line-hairline);
+}
+
+/* Volt seam on the live project. */
+.prow[data-active='true']::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+.prow[data-dragover='true'] {
+  box-shadow: inset 0 2px 0 var(--accent-line);
+}
+
+.prow__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-full);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.03);
+}
+
+.rail[data-collapsed='true'] .prow__dot {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 6px;
+  height: 6px;
+}
+
+.prow__initial {
+  font-family: var(--font-mono);
+  font-size: var(--t-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.prow[data-active='true'] .prow__initial {
+  color: var(--text-primary);
+}
+
+.prow__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.prow__name {
+  font-size: var(--t-md);
+  color: var(--text-secondary);
+}
+
+.prow[data-active='true'] .prow__name {
+  color: var(--text-primary);
+}
+
+.prow__path {
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.prow__panes {
+  flex: none;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 var(--s-2);
+  display: grid;
+  place-items: center;
+  font-size: var(--t-eyebrow);
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+}
+
+.prow__menu {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.prow:hover .prow__menu,
+.prow[data-active='true'] .prow__menu {
+  opacity: 1;
+}
+
+.prow__menu-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-md);
+}

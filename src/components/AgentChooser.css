@@ -1,0 +1,16 @@
+.agent-chooser__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-md);
+}
+
+.agent-chooser__cmd {
+  flex: none;
+  max-width: 96px;
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.popover__row:hover .agent-chooser__cmd {
+  color: var(--text-muted);
+}

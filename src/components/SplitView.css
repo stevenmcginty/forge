@@ -1,0 +1,83 @@
+.split {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split[data-direction='row'] {
+  flex-direction: row;
+}
+
+.split[data-direction='column'] {
+  flex-direction: column;
+}
+
+.split__side {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-grow: 0;
+  flex-shrink: 1;
+}
+
+.split__side > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------- divider */
+
+.split__divider {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-divider);
+}
+
+.split[data-direction='row'] > .split__divider {
+  width: 6px;
+  cursor: col-resize;
+}
+
+.split[data-direction='column'] > .split__divider {
+  height: 6px;
+  cursor: row-resize;
+}
+
+.split__grip {
+  border-radius: var(--r-full);
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.split[data-direction='row'] > .split__divider .split__grip {
+  width: 2px;
+  height: 26px;
+}
+
+.split[data-direction='column'] > .split__divider .split__grip {
+  width: 26px;
+  height: 2px;
+}
+
+.split__divider:hover .split__grip {
+  background: var(--line-strong);
+}
+
+.split[data-dragging='true'] .split__divider .split__grip {
+  background: var(--accent-line);
+}
+
+/* While dragging, don't let the terminals eat the pointer or flash a caret. */
+.split[data-dragging='true'] {
+  cursor: inherit;
+}
+
+.split[data-dragging='true'] .pane {
+  pointer-events: none;
+}
