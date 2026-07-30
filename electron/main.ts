@@ -17,6 +17,7 @@ import {
 import { registerMemoryHandlers, setMemoryDir } from './memory-store'
 import { disposePtyHost, registerPtyHandlers, setPtyTarget } from './pty-host'
 import { writeBridgeConfig } from './bridge/mcp-config'
+import { disposePresence, initPresence, setPresence } from './presence'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
 import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-sidecar'
 import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './stt-model'
@@ -125,6 +126,21 @@ function schedulePersistBounds(): void {
   boundsTimer = setTimeout(persistBounds, 400)
 }
 
+/**
+ * "Is Steve at the PC?" — true while *any* Forge window has focus and is not
+ * minimised. The walk-away debounce lives in presence.ts, so a blur followed
+ * straight away by another Forge window focusing never registers as an absence.
+ *
+ * Minimised counts as away even when Windows still reports the window as
+ * focused, which it sometimes does: a window you cannot see is not a window you
+ * are watching, and without this the phone could stay silent all afternoon.
+ */
+function syncPresence(): void {
+  setPresence(
+    BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isFocused() && !w.isMinimized())
+  )
+}
+
 function createWindow(): void {
   const settings = getSettings()
   // Paint the window in the theme it will be wearing a frame from now, rather
@@ -185,6 +201,10 @@ function createWindow(): void {
     if (!mainWindow) return
     if (settings.window.maximized) mainWindow.maximize()
     mainWindow.show()
+    // show() does not always emit 'focus' on Windows, and a first launch that
+    // never claimed presence would leave the phone buzzing while Steve sits in
+    // front of the app.
+    syncPresence()
   })
 
   const emitWindowState = (): void => {
@@ -211,8 +231,20 @@ function createWindow(): void {
     schedulePersistBounds()
     emitWindowState()
   })
-  mainWindow.on('focus', emitWindowState)
-  mainWindow.on('blur', emitWindowState)
+  mainWindow.on('focus', () => {
+    emitWindowState()
+    syncPresence()
+  })
+  mainWindow.on('blur', () => {
+    emitWindowState()
+    syncPresence()
+  })
+  // Minimising does not reliably emit `blur` on Windows, and a minimised Forge
+  // is the clearest "I have walked away" there is.
+  mainWindow.on('minimize', syncPresence)
+  mainWindow.on('restore', syncPresence)
+  mainWindow.on('hide', syncPresence)
+  mainWindow.on('show', syncPresence)
 
   mainWindow.on('close', () => {
     if (boundsTimer) clearTimeout(boundsTimer)
@@ -224,6 +256,7 @@ function createWindow(): void {
     setPtyTarget(null)
     setSttTarget(null)
     setSttModelTarget(null)
+    syncPresence()
   })
 
   // Never let the renderer navigate away or spawn windows.
@@ -315,6 +348,18 @@ function registerAppHandlers(): void {
 
   ipcMain.handle(IPC.openPath, async (_e, target: string) => shell.openPath(String(target)))
 
+  // http(s) only. openExternal hands a string straight to the OS launcher, so
+  // an unfiltered channel would let any renderer bug turn into "run this".
+  ipcMain.handle(IPC.openExternal, async (_e, url: string): Promise<boolean> => {
+    const target = String(url ?? '')
+    if (!/^https?:\/\//i.test(target)) {
+      console.error(`[shell] refused to open non-http url: ${target.slice(0, 80)}`)
+      return false
+    }
+    await shell.openExternal(target)
+    return true
+  })
+
   // The renderer never touches navigator.clipboard: it needs a permission
   // handler, rejects silently when the window is not focused, and cannot do
   // images at all.
@@ -372,6 +417,14 @@ void app.whenReady().then(() => {
   // Regenerate the cross-agent bridge's MCP config with absolute paths before
   // any pane can launch, so Claude panes pick it up on the first bootstrap.
   writeBridgeConfig()
+  // Before the PTY host builds its manager: the marker path goes into every
+  // pane's CLAUDE_CLIENT_PRESENCE_FILE, and init also clears a marker left
+  // behind by a crash (a stale one would mute the phone for good).
+  initPresence(getDataDir())
+  // App-level, so presence follows *any* Forge window rather than only the one
+  // createWindow happens to be holding.
+  app.on('browser-window-focus', syncPresence)
+  app.on('browser-window-blur', syncPresence)
   registerPtyHandlers()
   registerShotsHandlers()
   registerSttHandlers()
@@ -391,6 +444,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  disposePresence()
   disposePtyHost()
   disposeShotsWatcher()
   disposeSttSidecar()

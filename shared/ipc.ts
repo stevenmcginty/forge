@@ -53,6 +53,7 @@ export const IPC = {
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
   openPath: 'shell:open-path',
+  openExternal: 'shell:open-external',
 
   // onboarding — is `claude` / `kimi` / `gemini` on this machine's PATH?
   agentsProbe: 'agents:probe',

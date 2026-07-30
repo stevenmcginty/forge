@@ -92,6 +92,7 @@ const api: ForgeApi = {
 
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
+  openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 
   // File.path was removed in Electron 32; webUtils is the sanctioned way and
   // it only works from the preload.

@@ -26,6 +26,7 @@
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
     "bridge:register": "node scripts/bridge-register-check.mjs",
     "bridge:build": "node scripts/build-bridge.mjs",
+    "remote:check": "node scripts/remote-check.mjs",
     "packaged:check": "node scripts/packaged-check.mjs",
     "secrets:test": "node scripts/secrets-audit-test.mjs",
     "theme:check": "node scripts/theme-check.mjs"

@@ -65,7 +65,7 @@ async function main() {
     absWorkingDir: ROOT
   })
 
-  const { PtySessionManager } = await import(pathToFileURL(bundle).href)
+  const { PtySessionManager, ENV_DENYLIST } = await import(pathToFileURL(bundle).href)
 
   /* ---------------------------------------------------- 1. plain session */
 
@@ -144,7 +144,66 @@ async function main() {
   await waitFor(() => (output.get('smoke-3') ?? '').includes('forge-cwd-probe.txt'), 15000, 'cwd listing')
   log(true, 'session cwd is the project folder')
 
-  /* ------------------------------------------------------- 4. the caps */
+  /* -------------------------------------------- 4. the environment audit */
+
+  // Remote Control dies quietly if any of these reach the pane, and Steve has
+  // several of them set globally. Prove buildEnv strips them even when the
+  // parent process is carrying them, and that a caller-supplied variable
+  // (CLAUDE_CLIENT_PRESENCE_FILE) survives.
+  //
+  // A second manager, because these have to be set before the shell is spawned
+  // and the first three sessions are already running.
+  const presencePath = join(probeDir, 'presence')
+  for (const name of ENV_DENYLIST) process.env[name] = `forge-should-strip-${name}`
+
+  const envOut = new Map()
+  const envManager = new PtySessionManager({
+    maxSessions: 2,
+    env: { CLAUDE_CLIENT_PRESENCE_FILE: presencePath },
+    onData: (id, data) => envOut.set(id, (envOut.get(id) ?? '') + data),
+    onExit: () => {}
+  })
+  envManager.create({ id: 'env-1', cwd: ROOT, cols: 200, rows: 30 })
+  await waitFor(() => (envOut.get('env-1') ?? '').length > 0, 15000, 'env prompt')
+
+  // One line per denied name, printed as `NAME=<value or empty>`; `Get-Item
+  // env:X` throws when unset, so read the provider dictionary directly.
+  const names = [...ENV_DENYLIST, 'CLAUDE_CLIENT_PRESENCE_FILE'].join(',')
+  //
+  // Two defences against reading the *echo* of the command rather than its
+  // output — PSReadLine both echoes what is typed and offers the previous run's
+  // identical line as an inline suggestion, so a naive marker is on screen
+  // before PowerShell has run anything:
+  //   - a per-run nonce, which no history entry can contain, and
+  //   - an end marker spelled as a concatenation, so even this run's echo of
+  //     the command does not contain the finished token.
+  const nonce = Math.random().toString(36).slice(2, 10)
+  const tag = `ENVPROBE-${nonce}`
+  const probe =
+    `foreach ($n in "${names}".Split(",")) ` +
+    `{ "${tag}:$n=[" + [Environment]::GetEnvironmentVariable($n) + "]" }; "${tag}" + "-DONE"`
+  envManager.write('env-1', `${probe}\r`)
+  await waitFor(() => (envOut.get('env-1') ?? '').includes(`${tag}-DONE`), 15000, 'env probe')
+
+  // ConPTY hard-wraps at the terminal width, so strip the wrapping before
+  // matching — a long path would otherwise arrive with a newline through it.
+  const envText = (envOut.get('env-1') ?? '').replace(/\r?\n/g, '')
+  const leaked = ENV_DENYLIST.filter((name) => !envText.includes(`${tag}:${name}=[]`))
+  log(
+    leaked.length === 0,
+    leaked.length === 0
+      ? `all ${ENV_DENYLIST.length} denied variables absent from the pane (telemetry, auth and session markers)`
+      : `denied variables leaked into the pane: ${leaked.join(', ')}`
+  )
+  log(
+    envText.includes(`${tag}:CLAUDE_CLIENT_PRESENCE_FILE=[${presencePath}]`),
+    'CLAUDE_CLIENT_PRESENCE_FILE points at the presence marker'
+  )
+
+  envManager.killAll()
+  for (const name of ENV_DENYLIST) delete process.env[name]
+
+  /* ------------------------------------------------------- 5. the caps */
 
   const overflow = manager.create({ id: 'smoke-4', cwd: ROOT, cols: 80, rows: 24 })
   log(overflow.ok === false, `session cap enforced (${overflow.error ?? 'no error?'})`)
@@ -152,7 +211,7 @@ async function main() {
   const missing = manager.create({ id: 'smoke-5', cwd: join(ROOT, 'definitely-not-here'), cols: 80, rows: 24 })
   log(missing.ok === false, 'missing cwd rejected cleanly')
 
-  /* ------------------------------------------------------- 5. teardown */
+  /* ------------------------------------------------------- 6. teardown */
 
   log(manager.count === 3, `manager reports ${manager.count} live sessions`)
   manager.killAll()

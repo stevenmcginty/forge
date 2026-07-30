@@ -30,6 +30,12 @@ export interface ManagerOptions {
   shell?: string
   /** Extra args. Defaults to `['-NoLogo']`. */
   shellArgs?: string[]
+  /**
+   * Variables added to every session's environment, after the denylist has run
+   * and therefore able to set a name that would otherwise be stripped. Forge
+   * uses it for `CLAUDE_CLIENT_PRESENCE_FILE` (see electron/presence.ts).
+   */
+  env?: Record<string, string>
   maxSessions?: number
   onData: (id: string, data: string) => void
   onExit: (id: string, exitCode: number, signal?: number) => void
@@ -66,6 +72,7 @@ export class PtySessionManager {
   private sessions = new Map<string, Session>()
   private readonly shell: string
   private readonly shellArgs: string[]
+  private readonly extraEnv: Record<string, string>
   private readonly maxSessions: number
   private readonly onData: ManagerOptions['onData']
   private readonly onExit: ManagerOptions['onExit']
@@ -73,6 +80,7 @@ export class PtySessionManager {
   constructor(options: ManagerOptions) {
     this.shell = options.shell || 'pwsh.exe'
     this.shellArgs = options.shellArgs ?? ['-NoLogo']
+    this.extraEnv = options.env ?? {}
     this.maxSessions = options.maxSessions ?? 16
     this.onData = options.onData
     this.onExit = options.onExit
@@ -124,7 +132,7 @@ export class PtySessionManager {
         cwd,
         cols,
         rows,
-        env: buildEnv()
+        env: buildEnv(this.extraEnv)
       })
     } catch (err) {
       return { ok: false, id: spec.id, error: describe(err) }
@@ -262,40 +270,75 @@ function resolveCwd(cwd: string): string | null {
 }
 
 /**
- * Markers Claude Code sets on its own child processes to say "you are running
- * inside an agent session".
+ * Names never passed down to a pane, whatever the parent process has set.
  *
- * They are correct for the process Claude spawned — and wrong for everything
- * that process goes on to launch. Start Forge from a Claude pane and every
- * terminal in it inherits them, so a fresh `claude` in one of Forge's panes
- * believes it is a child of a session that is nothing to do with it and turns
- * transcript saving off: "⚠ Transcript saving is off — inherited
- * CLAUDE_CODE_CHILD_SESSION marker".
+ * Three groups, one rule — a pane is a *fresh* top-level agent session, not a
+ * continuation of whatever launched Forge:
  *
- * A pane is a new top-level shell, not a continuation of whatever launched
- * Forge, so the markers are dropped. Only these four, by name: authentication
- * (`CLAUDE_CODE_OAUTH_TOKEN` and friends) and any deliberate configuration the
- * user exported are left exactly as they are.
+ *  1. Claude session markers. Claude Code sets these on its own children to say
+ *     "you are running inside an agent session". They are correct for the
+ *     process Claude spawned and wrong for everything that process goes on to
+ *     launch: start Forge from a Claude pane and every terminal in it inherits
+ *     them, so a fresh `claude` in a Forge pane believes it is a child of a
+ *     session that is nothing to do with it and turns transcript saving off
+ *     ("⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION
+ *     marker").
+ *
+ *  2. Remote Control killers. `--remote-control` needs feature-flag evaluation
+ *     and a claude.ai OAuth login talking to api.anthropic.com; each of these
+ *     silently removes one of those, and Steve has DO_NOT_TRACK and friends set
+ *     globally. Inheriting them would make the phone feature simply not appear,
+ *     with no error to explain why. (Mirrors REMOTE_CONTROL_KILLERS in
+ *     shared/remote.ts — duplicated rather than imported because this module is
+ *     bundled stand-alone by scripts/pty-smoke.mjs.)
+ *
+ *     This group includes the authentication variables, which is a deliberate
+ *     call and the one thing here a user could miss: **a Forge pane always
+ *     authenticates with the claude.ai login**, never with an inherited API key
+ *     or gateway URL. That is what Remote Control requires. A pane that needs a
+ *     key should set it inside the pane, or via a wrapper the profile's command
+ *     points at. See docs/REMOTE.md.
+ *
+ *  3. Electron's own injections, which confuse child Node processes — notably
+ *     ELECTRON_RUN_AS_NODE, which would make `claude` boot as a bare script.
  */
-const CLAUDE_SESSION_MARKERS = [
-  'CLAUDE_CODE_CHILD_SESSION',
+export const ENV_DENYLIST: readonly string[] = [
+  // 1. Claude session markers
   'CLAUDECODE',
+  'CLAUDE_CODE_CHILD_SESSION',
   'CLAUDE_CODE_ENTRYPOINT',
-  'CLAUDE_CODE_SSE_PORT'
+  'CLAUDE_CODE_SSE_PORT',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_BRIDGE_SESSION_ID',
+  'CLAUDE_CODE_SESSION_ACCESS_TOKEN',
+  // 2. Remote Control killers
+  'DISABLE_TELEMETRY',
+  'DO_NOT_TRACK',
+  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+  'DISABLE_GROWTHBOOK',
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  // 3. Electron / Node injections
+  'NODE_OPTIONS',
+  'ELECTRON_RUN_AS_NODE',
+  'ELECTRON_NO_ATTACH_CONSOLE',
+  'ELECTRON_IS_DEV',
+  'ELECTRON_ENABLE_LOGGING'
 ]
 
+const DENIED = new Set(ENV_DENYLIST)
+
 /**
- * Electron injects variables that confuse child Node processes (notably
- * ELECTRON_RUN_AS_NODE, which would make `claude` boot as a bare Node script).
- * Strip them and add the usual terminal hints.
+ * The environment every pane is spawned with: the parent's, minus everything on
+ * ENV_DENYLIST, plus the usual terminal hints and whatever the caller adds.
  */
-function buildEnv(): Record<string, string> {
+function buildEnv(extra: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (v === undefined) continue
-    if (/^ELECTRON_(RUN_AS_NODE|NO_ATTACH_CONSOLE|IS_DEV|ENABLE_LOGGING)$/.test(k)) continue
-    if (k === 'NODE_OPTIONS') continue
-    if (CLAUDE_SESSION_MARKERS.includes(k)) continue
+    if (DENIED.has(k)) continue
     // Forge is a truecolor terminal, so an inherited NO_COLOR is simply wrong
     // here — and Steve's is set globally, which was quietly draining the colour
     // out of every pane.
@@ -310,6 +353,11 @@ function buildEnv(): Record<string, string> {
   // paint themselves white. 15;0 = light ink on a dark ground.
   if (!env.COLORFGBG) env.COLORFGBG = '15;0'
   if (!env.TERM_PROGRAM) env.TERM_PROGRAM = 'Forge'
+  // Last, so a caller can deliberately set a name the denylist would have
+  // stripped — and so an empty value means "leave it unset" rather than "".
+  for (const [k, v] of Object.entries(extra)) {
+    if (v) env[k] = v
+  }
   return env
 }
 
