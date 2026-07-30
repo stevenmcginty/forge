@@ -20,6 +20,8 @@ const TITLEBAR_HEIGHT = 38
 
 let mainWindow: BrowserWindow | null = null
 let boundsTimer: NodeJS.Timeout | null = null
+/** Set only by user-driven resize/move — see persistBounds(). */
+let boundsDirty = false
 
 /* -------------------------------------------------------------- app single instance */
 
@@ -51,9 +53,20 @@ function usableBounds(win: Settings['window']): Electron.Rectangle | null {
   return visible ? { x, y, width, height } : null
 }
 
+/**
+ * At fractional display scaling, getBounds() can come back a pixel or two off
+ * what setBounds() was given. Persisting that unconditionally makes the window
+ * grow a little on every launch, forever. So we only write a new rectangle
+ * after the *user* has resized or moved the window ('resized'/'moved' fire for
+ * user gestures; 'resize'/'move' also fire for our own setBounds call).
+ */
 function persistBounds(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return
   const maximized = mainWindow.isMaximized()
+  if (!boundsDirty) {
+    setSettings({ window: { ...getSettings().window, maximized } })
+    return
+  }
   const b = maximized ? mainWindow.getNormalBounds() : mainWindow.getBounds()
   setSettings({ window: { x: b.x, y: b.y, width: b.width, height: b.height, maximized } })
 }
@@ -129,8 +142,14 @@ function createWindow(): void {
     })
   }
 
-  mainWindow.on('resize', schedulePersistBounds)
-  mainWindow.on('move', schedulePersistBounds)
+  mainWindow.on('resized', () => {
+    boundsDirty = true
+    schedulePersistBounds()
+  })
+  mainWindow.on('moved', () => {
+    boundsDirty = true
+    schedulePersistBounds()
+  })
   mainWindow.on('maximize', () => {
     schedulePersistBounds()
     emitWindowState()
