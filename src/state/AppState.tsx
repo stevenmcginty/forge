@@ -132,6 +132,9 @@ const FALLBACK_SETTINGS: Settings = {
   openrouterKey: '',
   openrouterModel: 'google/gemini-2.5-flash-lite',
   memoryLlmSummarize: false,
+  // Filled in by the store on hydrate — main knows the real data root.
+  skillsLibraryDir: '',
+  skillsEnabled: [],
   remoteControlDefault: true,
   // Companion (M9): the phone link, off and unconfigured until Steve says
   // otherwise. This fallback is only ever used before the first snapshot

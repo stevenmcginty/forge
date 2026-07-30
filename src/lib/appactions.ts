@@ -1,4 +1,5 @@
 import type { AgentProfile, SplitDirection } from '@shared/types'
+import { skillHandler } from './skillbus'
 
 /**
  * The things the voice agent is allowed to do to Forge.
@@ -44,6 +45,18 @@ export type AppAction =
    * seconds, so there is deliberately no `count`.
    */
   | { kind: 'make_video'; description: string; aspect?: string; duration?: number }
+  /**
+   * Type `/<name>` into a pane, unsubmitted.
+   *
+   * Never submitted, deliberately: a skill is a long instruction the agent is
+   * about to follow, and the last look at it belongs to Steve — so unlike
+   * `send_prompt` there is no `submit` here at all, not even an opt-in.
+   *
+   * `target` is spoken and goes through the same `resolvePaneTarget` as
+   * `send_prompt`: "terminal two", "the kimi one", or nothing at all for the
+   * focused pane.
+   */
+  | { kind: 'use_skill'; name: string; target?: string }
   /**
    * Read this project's memory back, and wipe it.
    *
@@ -174,6 +187,20 @@ export interface ActionRunner {
    */
   recallMemory?(): Promise<ActionOutcome>
   forgetMemory?(): Promise<ActionOutcome>
+  /**
+   * Type a skill into an already-resolved pane. Synchronous, like the layout
+   * actions — it types and returns; nothing is submitted and nothing is awaited.
+   *
+   * It is handed an `ActionPane` rather than a spoken target for the same reason
+   * `sendPrompt` is: `resolvePaneTarget` has already refused to guess, so by the
+   * time a runner sees this there is exactly one pane it can mean.
+   *
+   * Optional, and when a runner does not supply it the executor falls back to
+   * whatever the renderer registered on `skillbus`. That indirection exists
+   * because the runner is assembled inside VoicePanel while the thing that can
+   * reach a terminal lives with the skills rail — see src/lib/skillbus.ts.
+   */
+  useSkill?(request: { name: string; pane: ActionPane }): ActionOutcome
   /**
    * Deliver a prompt to a pane. Asynchronous for the same reason the media
    * actions are, but for a nicer reason: when `submit` is true the caller holds
@@ -914,6 +941,37 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
         done: 0,
         pending: run.editImage({ path, instruction })
       }
+    }
+
+    /**
+     * "Use the release checklist in terminal two."
+     *
+     * Shares `send_prompt`'s target resolution exactly — same spoken handles,
+     * same refusal to guess between two panes — because the two actions differ
+     * only in what gets typed, and having "terminal two" mean one pane for a
+     * prompt and another for a skill would be indefensible.
+     *
+     * Where it does NOT follow send_prompt is Enter: a skill is never submitted,
+     * whatever auto-relay says. It is a long instruction the agent is about to
+     * act on, and the last look at it is Steve's.
+     */
+    case 'use_skill': {
+      const name = action.name.trim().replace(/^\//, '')
+      if (!name) return fail('Which skill?')
+
+      const resolved = resolvePaneTarget(action.target ?? '', ctx.panes ?? [], ctx.focusedPaneId)
+      if (resolved.kind === 'none') {
+        if (resolved.candidates.length === 0) return fail('No terminals open — say “open a claude terminal” first')
+        return fail(`No terminal called “${action.target}”. Open now: ${listPanes(resolved.candidates)}`)
+      }
+      if (resolved.kind === 'ambiguous') return fail(`Which one? ${listPanes(resolved.candidates)}`)
+
+      const pane = resolved.pane
+      if (!pane.live) return fail(`${paneLabel(pane)}’s shell has exited — nothing to type it into`)
+
+      const use = run.useSkill ?? skillHandler()
+      if (!use) return fail('Skills are not available here')
+      return use({ name, pane })
     }
 
     case 'make_video': {

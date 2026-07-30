@@ -1718,10 +1718,12 @@ await test('the manifest describes the app, the actions, the limits and the stat
   // Small enough to send every turn — about 2.4k tokens. It grew when
   // send_prompt, the COUNTS rules and the closing/creating actions landed,
   // again for the two lines that tell the model its per-project memory is real,
-  // and again for make_video (which has to warn that a clip takes minutes);
+  // and again for make_video (which has to warn that a clip takes minutes), and
+  // again for the SKILLS roster and use_skill — a skill the model is never told
+  // about is a skill it will never reach for;
   // each one earns its room, but the ceiling still has to bite, because this
   // goes up the wire on every single thing Steve says.
-  assert.ok(text.length < 10300, `manifest is ${text.length} chars`)
+  assert.ok(text.length < 10800, `manifest is ${text.length} chars`)
 })
 
 await test('the manifest gives every pane the spoken handle Steve uses', () => {
@@ -2243,7 +2245,7 @@ await test('OpenRouterBrain folds it in the same way, before the JSON reminder',
 await test('the manifest tells the model the memory exists, and stays small', () => {
   const text = buildManifest(SNAPSHOT)
   assert.match(text, /WHAT YOU REMEMBER ABOUT THIS PROJECT/, 'one line naming the section it will arrive under')
-  assert.ok(text.length < 10300, `manifest is ${text.length} chars`)
+  assert.ok(text.length < 10800, `manifest is ${text.length} chars`)
 })
 
 await test('the markdown format round-trips through parse and format', () => {

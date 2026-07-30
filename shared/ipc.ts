@@ -98,6 +98,16 @@ export const IPC = {
    */
   companionUtterance: 'companion:utterance',
 
+  // skills library (M8) — %APPDATA%\Forge\skills, junctioned into
+  // ~/.claude/skills so every claude and kimi session on the machine sees them.
+  skillsList: 'skills:list',
+  skillsRead: 'skills:read',
+  skillsCreate: 'skills:create',
+  skillsImport: 'skills:import',
+  skillsRemove: 'skills:remove',
+  skillsSetEnabled: 'skills:set-enabled',
+  skillsOpenFolder: 'skills:open-folder',
+
   // system probes (M6 settings page)
   systemUserName: 'system:user-name',
   systemClaudeVersion: 'system:claude-version',

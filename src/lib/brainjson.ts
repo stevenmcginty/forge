@@ -61,6 +61,7 @@ export const ACTION_KINDS: ReadonlySet<string> = new Set([
   'new_project_hint',
   'make_image',
   'edit_image',
+  'use_skill',
   'make_video',
   'send_prompt',
   'close_tabs',
@@ -315,6 +316,20 @@ export function sanitiseActions(value: unknown): AppAction[] {
         const instruction = asString(a['instruction'])
         if (!path || !instruction) continue
         out.push({ kind: 'edit_image', path, instruction })
+        break
+      }
+      case 'use_skill': {
+        // A model that writes "/writing" instead of "writing" meant the same
+        // thing; the executor is the one place that decides what a name is.
+        const name = asString(a['name'])?.replace(/^\//, '')
+        if (!name) continue
+        const action: AppAction = { kind: 'use_skill', name }
+        // Same spoken handles as send_prompt, and the same default: no target
+        // means the focused terminal, which resolvePaneTarget already does for
+        // an empty string.
+        const target = asString(a['target'])
+        if (target) action.target = target
+        out.push(action)
         break
       }
       case 'make_video': {
