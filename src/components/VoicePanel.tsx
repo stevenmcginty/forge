@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { MAX_PANES_PER_TAB, MAX_SESSIONS } from '@shared/ipc'
-import type { AgentProfile } from '@shared/types'
+import { isShellProfile } from '@shared/agents'
+import { isSttSetupError, type AgentProfile, type SttStatus, type VoiceReplyMode } from '@shared/types'
 import { agentMemory } from '@/lib/agentmemory'
+import { claimsCompletedAction } from '@/lib/brainjson'
+import { speaker } from '@/lib/speech'
 import { resolveProfile } from '@/lib/agents'
 import { buildManifest, type ManifestSnapshot } from '@/lib/appmanifest'
 import {
+  paneLabel,
   runAppAction,
   type ActionContext,
   type ActionOutcome,
+  type ActionPane,
   type ActionRunner,
   type AppAction
 } from '@/lib/appactions'
@@ -71,7 +76,44 @@ interface BrainTurnState extends TurnBase {
   outcomes?: ActionOutcome[]
 }
 
-type Turn = CommandTurn | BrainTurnState
+/** A one-line note from the agent itself — "held, nothing sent". */
+interface NoteTurn extends TurnBase {
+  kind: 'note'
+  tone: 'ok' | 'warn'
+}
+
+type Turn = CommandTurn | BrainTurnState | NoteTurn
+
+/**
+ * Agent mode, as a state machine.
+ *
+ *   off      nothing is armed; the button is a grey circle
+ *   warming  the sidecar is loading Parakeet (3–6s the first time)
+ *   listening the mic is open and the ring is driven by real levels
+ *   thinking a phrase is with the brain; after 5s it starts counting out loud
+ *   speaking the agent is talking back — and the microphone is SHUT
+ *   replied  a brief flash, then straight back to listening
+ *   error    an amber blip, then straight back to listening
+ *
+ * The whole point is that `listening` is the resting state: every other state
+ * returns to it by itself. Steve tapped once to start a conversation, not to
+ * dictate one phrase.
+ *
+ * `speaking` is the one that must not be got wrong. The microphone is a foot
+ * from the speakers, so while the agent talks the sidecar is stopped and any
+ * phrase that still arrives is dropped. Without that, Forge transcribes its own
+ * reply, answers it, and talks to itself until you close the app.
+ */
+type AgentPhase = 'off' | 'warming' | 'listening' | 'thinking' | 'speaking' | 'replied' | 'error'
+
+/** How long the flash states hold before falling back to listening. */
+const REPLIED_MS = 900
+const ERROR_MS = 1800
+/** Silence counts as a dead circle after this, so start showing the clock. */
+const THINKING_PATIENCE_MS = 5000
+
+/** Spoken brakes — these hold a prompt that is about to be submitted. */
+const CANCEL_WORDS = /^(?:wait|stop|no|nope|hold|hold on|cancel|don't|dont|abort|scratch that)\b/i
 
 interface PaneOption {
   paneId: string
@@ -94,12 +136,14 @@ export function VoicePanel(): ReactNode {
   const logRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
 
-  /* ----------------------------------------------------------------- mic
+  /* --------------------------------------------------------- agent mode
    *
-   * The mic button arms *routing*: while it is on and this panel is open,
-   * dictated phrases are the agent's rather than the focused pane's (the rule
-   * lives in useDictation). Arming also starts the sidecar, because a mic button
-   * that does not turn the mic on would be a strange thing to ship.
+   * One button, one idea: tap it and you are *in a conversation*. It arms
+   * routing (while it is on and this panel is open, dictated phrases are the
+   * agent's rather than the focused pane's — the rule lives in useDictation),
+   * it starts the sidecar, and crucially it re-arms the sidecar every time the
+   * engine's own silence timeout ends a phrase. Without that last part the mic
+   * quietly dies after ten seconds and you are talking to nobody.
    *
    * The engine is driven by IPC rather than through useDictation on purpose:
    * that hook owns the global dictation hotkey, and a second copy of it would
@@ -107,16 +151,133 @@ export function VoicePanel(): ReactNode {
    */
 
   const armed = state.agentListening
-  const [micLive, setMicLive] = useState(false)
+  const armedRef = useRef(armed)
+  armedRef.current = armed
 
-  useEffect(() => window.forge.stt.onStatus((s) => setMicLive(s.phase === 'listening')), [])
+  const [phase, setPhase] = useState<AgentPhase>('off')
+  const [stt, setStt] = useState<SttStatus>({ phase: 'off', level: 0, error: null, ready: false })
+  const sttRef = useRef(stt)
+  sttRef.current = stt
+  /** Live mic level, read by the ring's rAF loop without re-rendering. */
+  const levelRef = useRef(0)
+  /** Non-null while a phrase is with the brain. */
+  const thinkingSince = useRef<number | null>(null)
+  const [thinkingFor, setThinkingFor] = useState(0)
+  const flashTimer = useRef<number | null>(null)
+  const rearmTimer = useRef<number | null>(null)
 
-  const toggleMic = useCallback(() => {
-    const next = !armed
+  /* ------------------------------------------------------------ speaking */
+
+  const replyMode = state.settings.voiceReplyMode
+  const speaksAloud = replyMode !== 'text'
+  /** True from just before the first syllable to just after the last. */
+  const speakingRef = useRef(false)
+  const [speaking, setSpeaking] = useState(false)
+
+  /**
+   * Say something, with the microphone shut for the duration.
+   *
+   * The stop/start around the utterance is the anti-feedback loop; `speakingRef`
+   * is the second belt, because a phrase the sidecar had already cut can still
+   * be delivered after `stop()`.
+   */
+  const sayAloud = useCallback(
+    async (key: string, text: string): Promise<void> => {
+      if (!speaksAloud || !text.trim() || !speaker.available) return
+      speakingRef.current = true
+      setSpeaking(true)
+      if (armedRef.current) setPhase('speaking')
+      void window.forge.stt.stop()
+      try {
+        // Keyed by turn: a re-render cannot make it say the same thing twice.
+        await speaker.speakOnce(key, text, { voiceName: state.settings.voiceReplyVoice })
+      } finally {
+        // A short tail: the sidecar cuts a phrase on silence, so the last word
+        // can land a beat after the audio stops.
+        await new Promise((r) => window.setTimeout(r, 220))
+        speakingRef.current = false
+        setSpeaking(false)
+      }
+    },
+    [speaksAloud, state.settings.voiceReplyVoice]
+  )
+
+  useEffect(() => {
+    let alive = true
+    void window.forge.stt.status().then((s) => {
+      if (alive) setStt(s)
+    })
+    const off = window.forge.stt.onStatus((s) => {
+      levelRef.current = s.level
+      setStt(s)
+    })
+    return () => {
+      alive = false
+      off()
+    }
+  }, [])
+
+  /** Move to a flash state, then fall back to listening by itself. */
+  const flash = useCallback((to: AgentPhase, ms: number) => {
+    if (flashTimer.current) window.clearTimeout(flashTimer.current)
+    setPhase(to)
+    flashTimer.current = window.setTimeout(() => {
+      flashTimer.current = null
+      if (!armedRef.current) return
+      setPhase(sttRef.current.phase === 'starting' ? 'warming' : 'listening')
+    }, ms)
+  }, [])
+
+  /**
+   * The loop. Parakeet stops itself after `sttAutoStopSeconds` of silence, which
+   * is right for dictation and wrong for a conversation — so in agent mode an
+   * idle engine is immediately asked to listen again. The small delay keeps a
+   * refusing sidecar from becoming a spin.
+   */
+  useEffect(() => {
+    if (!armed || speaking) return undefined
+    if (stt.phase !== 'idle' && stt.phase !== 'off') return undefined
+    if (stt.error && isSttSetupError(stt.error.kind)) return undefined
+    const timer = window.setTimeout(() => void window.forge.stt.start(), 260)
+    rearmTimer.current = timer
+    return () => window.clearTimeout(timer)
+  }, [armed, speaking, stt.phase, stt.error])
+
+  // The button's resting appearance follows the engine, except while a flash, a
+  // think or an utterance is deliberately holding it somewhere else.
+  useEffect(() => {
+    if (!armed) {
+      setPhase('off')
+      return
+    }
+    if (thinkingSince.current !== null || flashTimer.current !== null || speaking) return
+    setPhase(stt.phase === 'starting' ? 'warming' : 'listening')
+  }, [armed, speaking, stt.phase])
+
+  const toggleAgent = useCallback(() => {
+    // Barge-in: pressing the button while it is talking shuts it up first, and
+    // does not also turn the agent off. Interrupting is a conversation move.
+    if (speakingRef.current) {
+      speaker.cancel()
+      speakingRef.current = false
+      setSpeaking(false)
+      return
+    }
+    const next = !armedRef.current
     actions.setAgentListening(next)
-    if (next) void window.forge.stt.start()
-    else void window.forge.stt.stop()
-  }, [armed, actions])
+    if (next) {
+      setPhase('warming')
+      void window.forge.stt.start()
+    } else {
+      thinkingSince.current = null
+      if (flashTimer.current) window.clearTimeout(flashTimer.current)
+      flashTimer.current = null
+      if (rearmTimer.current) window.clearTimeout(rearmTimer.current)
+      speaker.cancel()
+      setPhase('off')
+      void window.forge.stt.stop()
+    }
+  }, [actions])
 
   // Closing the panel disarms, so it never reopens secretly pointed at the
   // agent. The sidecar is left alone: the pill may still be dictating into a
@@ -124,6 +285,32 @@ export function VoicePanel(): ReactNode {
   useEffect(() => {
     if (!open && armed) actions.setAgentListening(false)
   }, [open, armed, actions])
+
+  // Esc leaves the conversation — the same key that closes everything else.
+  useEffect(() => {
+    if (!open || !armed) return undefined
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      toggleAgent()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, armed, toggleAgent])
+
+  // "still thinking… 12s" — Gemini can take a minute on a real draft, and a
+  // circle that says nothing for a minute looks broken.
+  useEffect(() => {
+    if (phase !== 'thinking') {
+      setThinkingFor(0)
+      return undefined
+    }
+    const tick = window.setInterval(() => {
+      const since = thinkingSince.current
+      if (since !== null) setThinkingFor(Math.floor((Date.now() - since) / 1000))
+    }, 500)
+    return () => window.clearInterval(tick)
+  }, [phase])
 
   /* --------------------------------------------------------------- brain */
 
@@ -162,10 +349,63 @@ export function VoicePanel(): ReactNode {
     return n
   }, [state.workspaces])
 
+  /**
+   * Which pane he was in, and when.
+   *
+   * "the claude one" with three Claude panes open is a genuine ambiguity, and
+   * the executor refuses to guess — but "the one I was just in" is a real
+   * answer, so focus order is remembered here. A monotonic counter, not a clock:
+   * all that matters is the ordering.
+   */
+  const focusSeq = useRef(0)
+  const focusedAt = useRef<Map<string, number>>(new Map())
+  const focusedPaneId = activeTab?.activePaneId ?? null
+  useEffect(() => {
+    if (!focusedPaneId) return
+    focusSeq.current += 1
+    focusedAt.current.set(focusedPaneId, focusSeq.current)
+  }, [focusedPaneId])
+
+  /**
+   * Every open terminal, numbered the way the manifest numbers them and the way
+   * Steve says them out loud. Built once, then used for both — the numbering
+   * cannot drift because there is only one walk.
+   */
+  const panes = useMemo<ActionPane[]>(() => {
+    if (!workspace) return []
+    const out: ActionPane[] = []
+    workspace.tabs.forEach((tab, tabIndex) => {
+      for (const leaf of collectLeaves(tab.root)) {
+        const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
+        const status = terminalHost.runtime(leaf.id).status
+        out.push({
+          paneId: leaf.id,
+          tabId: tab.id,
+          tabNumber: tabIndex + 1,
+          tabTitle: tab.title,
+          number: out.length + 1,
+          title: leaf.title.trim() || profile.name,
+          profileId: profile.id,
+          profileName: profile.name,
+          // Reachable, not visible — a background tab's pane is 'idle' because
+          // nothing has mounted it yet, and the runner will wake it.
+          live: status !== 'exited' && status !== 'error',
+          focused: leaf.id === tab.activePaneId && tab.id === workspace.activeTabId,
+          agent: !isShellProfile(profile),
+          lastFocusedAt: focusedAt.current.get(leaf.id) ?? 0
+        })
+      }
+    })
+    return out
+    // paneCount changes whenever a pane is added or removed; the rest is state.
+  }, [workspace, state.settings.agentProfiles, paneCount, focusedPaneId])
+
   // Snapshotted every render and read through a ref, so the transcript
   // subscription never has to be torn down and rebuilt.
   const ctxRef = useRef<ActionContext | null>(null)
   ctxRef.current = {
+    panes,
+    autoRelay: state.settings.voiceAutoRelay,
     projects: state.projects.map((p) => ({ id: p.id, name: p.name })),
     profiles: state.settings.agentProfiles,
     defaultProfileId: project?.defaultProfileId ?? state.settings.agentProfiles[0]?.id ?? 'pwsh',
@@ -181,6 +421,47 @@ export function VoicePanel(): ReactNode {
     maxPanesPerTab: MAX_PANES_PER_TAB
   }
 
+  /**
+   * Prompts that have been typed into a pane and are waiting out their grace
+   * beat before Enter is pressed. A spoken "wait" or a click on the chip empties
+   * this; anything still in it when the timer fires goes.
+   */
+  const holds = useRef(new Set<() => void>())
+  const cancelAllHolds = useCallback((): number => {
+    const n = holds.current.size
+    for (const cancel of [...holds.current]) cancel()
+    holds.current.clear()
+    return n
+  }, [])
+  const [holding, setHolding] = useState(0)
+
+  /**
+   * The countdown before something irreversible happens.
+   *
+   * Resolves true if it was stopped ("wait", or a click on the chip) and false
+   * if it ran out. Both the auto-relay Enter and a bulk tab close hang off this,
+   * because they are the same promise to Steve: you have a beat to change your
+   * mind, and I will tell you what I am about to do.
+   */
+  const graceBeat = useCallback((ms: number): Promise<boolean> => {
+    const wait = Math.max(0, ms)
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      const finish = (wasHeld: boolean): void => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        holds.current.delete(cancel)
+        setHolding(holds.current.size)
+        resolve(wasHeld)
+      }
+      const cancel = (): void => finish(true)
+      const timer = window.setTimeout(() => finish(false), wait)
+      holds.current.add(cancel)
+      setHolding(holds.current.size)
+    })
+  }, [])
+
   const runnerRef = useRef<ActionRunner | null>(null)
   runnerRef.current = {
     newTab: (profileId) => actions.newTab(profileId),
@@ -189,6 +470,9 @@ export function VoicePanel(): ReactNode {
     closeTab: (tabId) => actions.closeTab(tabId),
     selectProject: (projectId) => actions.selectProject(projectId),
     selectTab: (tabId) => actions.selectTab(tabId),
+    renameTab: (tabId, title) => actions.renameTab(tabId, title),
+    setViewMode: (mode) => actions.setViewMode(mode),
+    openSettings: (section) => actions.openSettings(section as Parameters<typeof actions.openSettings>[0]),
     // Media generation goes to the main process, which holds the key, writes
     // into the project's assets/generated/ and puts the result in the tray.
     makeImage: async (request) => {
@@ -217,7 +501,92 @@ export function VoicePanel(): ReactNode {
       }
     },
     recallMemory: () => agentMemory.recall(project?.id ?? null),
-    forgetMemory: () => agentMemory.forget(project?.id ?? null)
+    forgetMemory: () => agentMemory.forget(project?.id ?? null),
+
+    /**
+     * Deliver a prompt to a terminal.
+     *
+     * The text always goes in immediately — that part is safe and Steve can see
+     * it land. The Enter is what waits: the pane is brought to the front, the
+     * chip counts down, and for `voiceRelayGraceMs` a spoken "wait" (or a click
+     * on the chip) can still hold it. Nothing is submitted to a plain shell, and
+     * nothing is submitted at all unless Settings says so — by then the executor
+     * has already decided that and passed `submit` false with a reason.
+     */
+    sendPrompt: async ({ pane, text, submit, holdReason, flesh }) => {
+      const label = paneLabel(pane)
+      // Bring it forward first. A pane in a background tab has no terminal at
+      // all until it is mounted, so this is what makes it exist.
+      if (workspace && workspace.activeTabId !== pane.tabId) actions.selectTab(pane.tabId)
+      actions.focusPane(pane.paneId)
+      if (!(await waitForShell(pane.paneId))) {
+        return {
+          ok: false,
+          summary: `${label} did not come up in time — open its tab and try again`,
+          requested: 1,
+          done: 0
+        }
+      }
+      if (!terminalHost.type(pane.paneId, text)) {
+        return { ok: false, summary: `${label} would not take the text — is its shell still alive?`, requested: 1, done: 0 }
+      }
+      terminalHost.focus(pane.paneId)
+      terminalHost.scrollToBottom(pane.paneId)
+
+      const prefix = flesh ? 'Fleshed out and typed into' : 'Typed into'
+      if (!submit) {
+        return {
+          ok: true,
+          summary: `${prefix} ${label} — ${holdReason ?? 'press Enter there to run it'}`,
+          requested: 1,
+          done: 1
+        }
+      }
+
+      const held = await graceBeat(state.settings.voiceRelayGraceMs)
+
+      if (held) {
+        return { ok: true, summary: `${prefix} ${label} — held, not sent. Press Enter there yourself.`, requested: 1, done: 1 }
+      }
+      if (!terminalHost.submit(pane.paneId)) {
+        return { ok: false, summary: `${prefix} ${label}, but its shell went away before I could send it`, requested: 1, done: 0 }
+      }
+      return { ok: true, summary: `Sent to ${label}`, requested: 1, done: 1 }
+    },
+
+    /** Bulk close, behind the same countdown a submitted prompt gets. */
+    closeMany: async ({ tabIds, label }) => {
+      const held = await graceBeat(state.settings.voiceRelayGraceMs)
+      if (held) {
+        return { ok: true, summary: `Held — ${tabIds.length} tabs left alone`, requested: tabIds.length, done: 0 }
+      }
+      for (const id of tabIds) actions.closeTab(id)
+      return {
+        ok: true,
+        summary: `Closed ${tabIds.length} tabs (${label})`,
+        requested: tabIds.length,
+        done: tabIds.length
+      }
+    },
+
+    /**
+     * Make a folder and put it in the rail.
+     *
+     * Creating is the main process's job (it owns the allow-list); adding it to
+     * the rail is this one's, and it goes through the same dispatch the folder
+     * picker uses, so a spoken project and a picked one are the same thing.
+     */
+    createProject: async ({ name, parentDir }) => {
+      const res = await window.forge.makeProjectFolder(parentDir ? { name, parentDir } : { name })
+      if (!res.ok) return { ok: false, summary: res.error, requested: 1, done: 0 }
+      const existing = state.projects.find((p) => p.path.toLowerCase() === res.path.toLowerCase())
+      if (existing) {
+        actions.selectProject(existing.id)
+        return { ok: true, summary: `${existing.name} was already in the rail — switched to it`, requested: 1, done: 1 }
+      }
+      actions.addProjectPath(res.path, res.name)
+      return { ok: true, summary: `Created “${res.name}” in ${res.path} and opened it`, requested: 1, done: 1 }
+    }
   }
 
   const manifestRef = useRef<string>('')
@@ -226,19 +595,22 @@ export function VoicePanel(): ReactNode {
       appVersion: state.info?.version ?? null,
       projects: state.projects.map((p) => ({ name: p.name, path: p.path, active: p.id === project?.id })),
       profiles: state.settings.agentProfiles,
+      // Built from the same `panes` array the executor resolves against, so the
+      // "Terminal 3" the model is shown is the "Terminal 3" it will get.
       tabs: (workspace?.tabs ?? []).map((tab, i) => ({
         number: i + 1,
         title: tab.title,
         active: tab.id === workspace?.activeTabId,
-        panes: collectLeaves(tab.root).map((leaf) => {
-          const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
-          return {
-            title: leaf.title.trim() || profile.name,
-            profileName: profile.name,
-            status: terminalHost.runtime(leaf.id).status,
-            focused: leaf.id === tab.activePaneId
-          }
-        })
+        panes: panes
+          .filter((p) => p.tabId === tab.id)
+          .map((p) => ({
+            number: p.number,
+            title: p.title,
+            profileName: p.profileName,
+            status: terminalHost.runtime(p.paneId).status,
+            focused: p.focused,
+            agent: p.agent
+          }))
       })),
       paneCount,
       maxSessions: MAX_SESSIONS,
@@ -268,6 +640,7 @@ export function VoicePanel(): ReactNode {
   const historyRef = useRef<BrainTurn[]>([])
   historyRef.current = turns.flatMap((turn): BrainTurn[] => {
     const mine: BrainTurn = { role: 'user', text: turn.said }
+    if (turn.kind === 'note') return [{ role: 'agent', text: turn.said }]
     if (turn.kind === 'command') {
       return [mine, { role: 'agent', text: turn.outcomes.map((o) => o.summary).join('; ') }]
     }
@@ -327,12 +700,12 @@ export function VoicePanel(): ReactNode {
   const patchOutcome = useCallback((turnId: string, index: number, outcome: ActionOutcome): void => {
     setTurns((prev) =>
       prev.map((t) => {
-        if (t.id !== turnId) return t
-        const current = t.kind === 'command' ? t.outcomes : t.outcomes
+        if (t.id !== turnId || t.kind === 'note') return t
+        const current = t.outcomes
         if (!current || !current[index]) return t
         const next = [...current]
         next[index] = outcome
-        return t.kind === 'command' ? { ...t, outcomes: next } : { ...t, outcomes: next }
+        return { ...t, outcomes: next }
       })
     )
   }, [])
@@ -342,6 +715,28 @@ export function VoicePanel(): ReactNode {
   const handlePhrase = useCallback(
     (said: string) => {
       const id = makeId('turn')
+
+      // 0a — anything heard while the agent was talking is the agent. The
+      // sidecar is stopped for the duration, but a phrase it had already cut
+      // can still arrive; dropping it here is what stops Forge answering itself.
+      if (speakingRef.current) return
+
+      // 0 — the brake. While a prompt is counting down into a terminal, "wait"
+      // means stop that, not "start a new conversation about waiting".
+      if (holds.current.size > 0 && CANCEL_WORDS.test(said.trim())) {
+        const n = cancelAllHolds()
+        setTurns((prev) => [
+          ...prev,
+          {
+            id,
+            said: n === 1 ? 'Held — not sent. It is typed in, waiting for you.' : `Held ${n} prompts — none sent.`,
+            at: Date.now(),
+            kind: 'note',
+            tone: 'warn'
+          }
+        ])
+        return
+      }
 
       // 1 — plain commands never touch a model.
       const ctx = ctxRef.current
@@ -353,10 +748,16 @@ export function VoicePanel(): ReactNode {
           { id, said, at: Date.now(), kind: 'command', actions: hit.actions, outcomes }
         ])
         void agentMemory.record({ projectId: ctx?.activeProjectId ?? null, utterance: said, at: Date.now(), outcomes })
+        // A command's outcome is its own answer — "Opened 3 Claude Code tabs" is
+        // exactly what he wants to hear, and it needed no model to say it.
+        const spoken = outcomes.map((o) => o.summary).join('. ')
+        if (spoken) void sayAloud(id, spoken)
         return
       }
 
       // 2 — everything else is a conversation with the brain.
+      thinkingSince.current = Date.now()
+      if (armedRef.current) setPhase('thinking')
       setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'brain', phase: 'thinking', draft: '' }])
 
       const context: BrainContext = {
@@ -371,9 +772,30 @@ export function VoicePanel(): ReactNode {
       brain
         .interpret(said, context)
         .then((reply) => {
-          const outcomes = reply.actions?.length
-            ? runActions(reply.actions, (index, outcome) => patchOutcome(id, index, outcome))
+          thinkingSince.current = null
+          if (armedRef.current && !speaksAloud) flash('replied', REPLIED_MS)
+          // A send_prompt with no text of its own means "the draft in this same
+          // reply" — the model is told to write the brief once, not twice.
+          const list = (reply.actions ?? []).map((action) =>
+            action.kind === 'send_prompt' && !action.text.trim() && reply.draftPrompt
+              ? { ...action, text: reply.draftPrompt }
+              : action
+          )
+          let outcomes = list.length
+            ? runActions(list, (index, outcome) => patchOutcome(id, index, outcome))
             : undefined
+          // "Opening three Claude Code terminals for you." with an empty
+          // actions array is a lie, and a silent one. Contradict it.
+          if (!list.length && claimsCompletedAction(reply.say ?? reply.understood)) {
+            outcomes = [
+              {
+                ok: false,
+                summary: 'It said it did that, but sent no action — say it again',
+                requested: 1,
+                done: 0
+              }
+            ]
+          }
           setTurns((prev) =>
             prev.map((t) =>
               t.id === id && t.kind === 'brain'
@@ -382,8 +804,19 @@ export function VoicePanel(): ReactNode {
             )
           )
           void agentMemory.record({ projectId: ctx?.activeProjectId ?? null, utterance: said, at: Date.now(), reply, outcomes })
+          // What gets read out, and only this: the one line meant for him, plus
+          // anything it actually needs to ask. Not the drafted prompt (a page of
+          // markdown), not `understood` (which is on screen right next to it),
+          // and not the outcome chips — reading out what he can already see is
+          // exactly the "on and on" he complained about.
+          const parts = [reply.say, ...(reply.questions ?? [])].filter(Boolean)
+          void sayAloud(id, parts.join(' '))
         })
-        .catch((err: unknown) =>
+        .catch((err: unknown) => {
+          thinkingSince.current = null
+          // An amber blip, and the conversation carries on. A brain that failed
+          // is not a reason to stop listening to him.
+          if (armedRef.current) flash('error', ERROR_MS)
           setTurns((prev) =>
             prev.map((t) =>
               t.id === id && t.kind === 'brain'
@@ -391,9 +824,10 @@ export function VoicePanel(): ReactNode {
                 : t
             )
           )
-        )
+          void sayAloud(`${id}:error`, 'That did not work — the brain failed. Try again?')
+        })
     },
-    [brain, patchOutcome, project?.path, runActions]
+    [brain, cancelAllHolds, flash, patchOutcome, project?.path, runActions, sayAloud, speaksAloud]
   )
 
   // One subscription for every source that ever registers with the bus — which
@@ -441,24 +875,24 @@ export function VoicePanel(): ReactNode {
 
   /* --------------------------------------------------------------- panes */
 
-  const paneOptions = useCallback((): PaneOption[] => {
-    if (!workspace) return []
-    const out: PaneOption[] = []
-    for (const tab of workspace.tabs) {
-      for (const leaf of collectLeaves(tab.root)) {
-        const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
-        out.push({
-          paneId: leaf.id,
-          tabId: tab.id,
-          tabTitle: tab.title,
-          title: leaf.title.trim() || profile.name,
-          profile,
-          status: terminalHost.runtime(leaf.id).status
-        })
-      }
-    }
-    return out
-  }, [workspace, state.settings.agentProfiles])
+  // Derived from the same numbered list the agent uses, so the popover and the
+  // spoken "terminal two" can never disagree about which pane that is.
+  const panesRef = useRef(panes)
+  panesRef.current = panes
+  const profilesRef = useRef(state.settings.agentProfiles)
+  profilesRef.current = state.settings.agentProfiles
+  const paneOptions = useCallback(
+    (): PaneOption[] =>
+      panesRef.current.map((p) => ({
+        paneId: p.paneId,
+        tabId: p.tabId,
+        tabTitle: p.tabTitle,
+        title: `${p.number}. ${p.title}`,
+        profile: resolveProfile(profilesRef.current, p.profileId),
+        status: terminalHost.runtime(p.paneId).status
+      })),
+    []
+  )
 
   /** Type a draft into a pane. Never appends Enter — Steve presses that. */
   const sendToPane = useCallback(
@@ -516,22 +950,11 @@ export function VoicePanel(): ReactNode {
         <h2 className="voice__title">Voice Agent</h2>
         <BrainChip status={status} brainName={brain.name} />
         <span className="voice__spacer" />
-        <button
-          type="button"
-          className="ghost-btn voice__icon-btn voice__mic"
-          title={
-            armed
-              ? 'Dictation is feeding the agent — click to send it back to the focused pane'
-              : 'Send dictation to the agent instead of the focused pane'
-          }
-          aria-pressed={armed}
-          aria-label="Send dictation to the agent"
-          data-on={armed ? 'true' : undefined}
-          data-live={armed && micLive ? 'true' : undefined}
-          onClick={toggleMic}
-        >
-          <Icon name="voice" size={13} />
-        </button>
+        <ReplyModeToggle
+          mode={replyMode}
+          canSpeak={speaker.available}
+          onPick={(next) => actions.patchSettings({ voiceReplyMode: next })}
+        />
         <button
           type="button"
           className="ghost-btn voice__icon-btn"
@@ -573,6 +996,31 @@ export function VoicePanel(): ReactNode {
         </button>
       ) : null}
 
+      <AgentButton
+        phase={phase}
+        armed={armed}
+        levelRef={levelRef}
+        thinkingFor={thinkingFor}
+        holding={holding}
+        sttError={stt.error?.msg ?? null}
+        onToggle={toggleAgent}
+        onHold={cancelAllHolds}
+      />
+
+      {/*
+        Voice-only mode is a different panel, not a decorated one. If the agent
+        is talking to you, the transcript and the text box are just furniture in
+        front of your terminals — so they go, and one line of status stays.
+      */}
+      {replyMode === 'voice' ? <LastLine turns={turns} /> : null}
+
+      {/* Not `hidden`: .voice__log sets `display: flex`, which wins over the
+          attribute's default `display: none`. Unmounting is unambiguous. */}
+      {replyMode === 'voice' ? (
+        <div className="voice__voiceonly">
+          Spoken replies only. Switch to <span className="mono">Aa</span> in the header to see the conversation.
+        </div>
+      ) : (
       <div className="voice__log" ref={logRef}>
         {turns.length === 0 ? (
           <EmptyState
@@ -584,7 +1032,9 @@ export function VoicePanel(): ReactNode {
           />
         ) : (
           turns.map((turn) =>
-            turn.kind === 'command' ? (
+            turn.kind === 'note' ? (
+              <NoteCard key={turn.id} turn={turn} />
+            ) : turn.kind === 'command' ? (
               <CommandCard key={turn.id} turn={turn} />
             ) : (
               <TurnCard
@@ -602,7 +1052,9 @@ export function VoicePanel(): ReactNode {
           )
         )}
       </div>
+      )}
 
+      {replyMode !== 'voice' ? (
       <div className="voice__composer">
         <textarea
           ref={composerRef}
@@ -622,19 +1074,43 @@ export function VoicePanel(): ReactNode {
         />
         <div className="voice__composer-foot">
           <span className="voice__composer-hint">Enter to send · Shift+Enter for a new line</span>
+          {/* "Say it" read like the agent would speak back. It does not — this
+              is the same door the microphone uses, so it is just Send. */}
           <button
             type="button"
             className="cta-btn voice__say"
             disabled={!draftPhrase.trim()}
             onClick={submitPhrase}
           >
-            Say it
+            Send
             <Icon name="send" size={13} />
           </button>
         </div>
       </div>
+      ) : null}
     </aside>
   )
+}
+
+/* ------------------------------------------------------------- dispatch */
+
+/**
+ * Wait for a pane's shell to exist.
+ *
+ * Selecting a tab is a React state change: the pane mounts on the next render,
+ * xterm is created, and only then does the PTY spawn and report `live`. Typing
+ * into the gap would put the prompt nowhere at all, so this polls for a couple
+ * of seconds — long enough for a cold pwsh, short enough to say so if the shell
+ * never arrives.
+ */
+async function waitForShell(paneId: string, timeoutMs = 4000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const status = terminalHost.runtime(paneId).status
+    if (status === 'live' || status === 'starting') return true
+    if (Date.now() >= deadline) return false
+    await new Promise((r) => window.setTimeout(r, 80))
+  }
 }
 
 /* ---------------------------------------------------------------- failures */
@@ -647,6 +1123,175 @@ export function VoicePanel(): ReactNode {
 function mediaFailure(error: string): string {
   const first = (error ?? '').split('\n')[0]?.trim() || (error ?? '').trim() || 'Image generation failed'
   return first.length > 180 ? `${first.slice(0, 177)}…` : first
+}
+
+/* -------------------------------------------------------- reply mode */
+
+const REPLY_MODES: Array<{ id: VoiceReplyMode; label: string; hint: string }> = [
+  { id: 'text', label: 'Aa', hint: 'Written replies only' },
+  { id: 'both', label: 'Aa+', hint: 'Written and spoken' },
+  { id: 'voice', label: '♪', hint: 'Spoken only — hides the log and the text box' }
+]
+
+/** Three-way switch, in the header where the mic used to be. */
+function ReplyModeToggle({
+  mode,
+  canSpeak,
+  onPick
+}: {
+  mode: VoiceReplyMode
+  canSpeak: boolean
+  onPick: (mode: VoiceReplyMode) => void
+}): ReactNode {
+  return (
+    <div className="replymode" role="group" aria-label="How the agent replies">
+      {REPLY_MODES.map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          className="replymode__btn"
+          data-on={m.id === mode ? 'true' : undefined}
+          aria-pressed={m.id === mode}
+          disabled={m.id !== 'text' && !canSpeak}
+          title={canSpeak ? m.hint : 'No speech voices are installed on this PC'}
+          onClick={() => onPick(m.id)}
+        >
+          {m.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Voice-only mode's whole transcript: the most recent thing that happened. */
+function LastLine({ turns }: { turns: Turn[] }): ReactNode {
+  const last = turns[turns.length - 1]
+  let text = 'Nothing yet — tap the circle and talk.'
+  let tone: 'idle' | 'ok' | 'warn' = 'idle'
+  if (last?.kind === 'command') {
+    text = last.outcomes.map((o) => o.summary).join(' · ') || last.said
+    tone = last.outcomes.every((o) => o.ok) ? 'ok' : 'warn'
+  } else if (last?.kind === 'note') {
+    text = last.said
+    tone = last.tone
+  } else if (last?.kind === 'brain') {
+    text =
+      last.phase === 'thinking'
+        ? 'thinking…'
+        : last.phase === 'error'
+          ? (last.error ?? 'that failed')
+          : (last.reply?.say ?? last.reply?.understood ?? '—')
+    tone = last.phase === 'error' ? 'warn' : 'ok'
+  }
+  return (
+    <div className="voice__lastline" data-tone={tone} title={text}>
+      {text}
+    </div>
+  )
+}
+
+/* ----------------------------------------------------------- agent button */
+
+/** What the circle says about itself, by state. */
+const AGENT_LABEL: Record<AgentPhase, { title: string; sub: string }> = {
+  off: { title: 'Agent', sub: 'Tap to talk to your agent' },
+  warming: { title: 'Warming up', sub: 'loading the speech engine…' },
+  listening: { title: 'Listening', sub: 'say what you want — tap to stop' },
+  thinking: { title: 'Thinking', sub: 'working on it…' },
+  speaking: { title: 'Speaking', sub: 'mic off while I talk — tap to interrupt' },
+  replied: { title: 'Answered', sub: 'still listening' },
+  error: { title: 'That failed', sub: 'still listening — try again' }
+}
+
+/**
+ * The hero. One big round button that says, without a manual, "this is the
+ * agent, and it is either on or it is not".
+ *
+ * The ring is driven straight from the mic level inside a rAF loop rather than
+ * through React state: levels arrive ten times a second and the panel has a
+ * conversation in it. Nothing here re-renders while you speak.
+ */
+function AgentButton({
+  phase,
+  armed,
+  levelRef,
+  thinkingFor,
+  holding,
+  sttError,
+  onToggle,
+  onHold
+}: {
+  phase: AgentPhase
+  armed: boolean
+  levelRef: React.RefObject<number>
+  thinkingFor: number
+  holding: number
+  sttError: string | null
+  onToggle: () => void
+  onHold: () => number
+}): ReactNode {
+  const ringRef = useRef<HTMLSpanElement | null>(null)
+
+  useEffect(() => {
+    const ring = ringRef.current
+    if (!ring) return undefined
+    if (phase !== 'listening') {
+      ring.style.transform = ''
+      ring.style.opacity = ''
+      return undefined
+    }
+    let raf = 0
+    let smoothed = 0
+    const frame = (t: number): void => {
+      // A slow breathe underneath, so silence still looks alive.
+      const breathe = 0.06 + 0.04 * Math.sin(t / 620)
+      const level = Math.max(breathe, Math.min(1, levelRef.current * 1.9))
+      smoothed += (level - smoothed) * 0.28
+      ring.style.transform = `scale(${(1 + smoothed * 0.22).toFixed(3)})`
+      ring.style.opacity = (0.35 + smoothed * 0.65).toFixed(3)
+      raf = requestAnimationFrame(frame)
+    }
+    raf = requestAnimationFrame(frame)
+    return () => cancelAnimationFrame(raf)
+  }, [phase, levelRef])
+
+  const label = AGENT_LABEL[phase]
+  // Never a silent dead circle: past five seconds it starts counting out loud.
+  const sub =
+    phase === 'thinking' && thinkingFor >= THINKING_PATIENCE_MS / 1000
+      ? `still thinking… ${thinkingFor}s`
+      : phase === 'error' && sttError
+        ? sttError
+        : label.sub
+
+  return (
+    <div className="agentdial" data-phase={phase}>
+      <button
+        type="button"
+        className="agentdial__btn"
+        data-phase={phase}
+        aria-pressed={armed}
+        aria-label={armed ? 'Stop talking to the agent' : 'Talk to your agent'}
+        title={armed ? 'Agent mode is on — tap or press Esc to stop' : 'Tap to talk to your agent'}
+        onClick={onToggle}
+      >
+        <span className="agentdial__ring" ref={ringRef} aria-hidden="true" />
+        <span className="agentdial__spin" aria-hidden="true" />
+        <span className="agentdial__core" aria-hidden="true">
+          <Icon name={armed ? 'voice' : 'mic'} size={26} />
+        </span>
+      </button>
+      <div className="agentdial__labels">
+        <span className="agentdial__title">{label.title}</span>
+        <span className="agentdial__sub">{sub}</span>
+      </div>
+      {holding > 0 ? (
+        <button type="button" className="agentdial__hold" onClick={() => onHold()}>
+          {holding === 1 ? 'Sending a prompt…' : `Sending ${holding} prompts…`} tap or say “wait” to hold
+        </button>
+      ) : null}
+    </div>
+  )
 }
 
 /* ------------------------------------------------------------------- chip */
@@ -684,6 +1329,15 @@ function CommandCard({ turn }: { turn: CommandTurn }): ReactNode {
     <article className="turn">
       <p className="turn__said">{turn.said}</p>
       <OutcomeChips outcomes={turn.outcomes} />
+    </article>
+  )
+}
+
+/** The agent speaking for itself — "held, nothing sent". */
+function NoteCard({ turn }: { turn: NoteTurn }): ReactNode {
+  return (
+    <article className="turn turn--note" data-tone={turn.tone}>
+      <p className="turn__note">{turn.said}</p>
     </article>
   )
 }

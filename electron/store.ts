@@ -113,6 +113,11 @@ function defaultSettings(): Settings {
     themeInk: '#e8eaed',
     voiceAutoRelay: false,
     voiceRelayGraceMs: 2500,
+    // Spoken replies on by default: an agent you have to read is not one you can
+    // talk to while you work.
+    voiceReplyMode: 'both',
+    voiceReplyVoice: '',
+    projectsRoot: '',
     // Empty = use gemini-media.ts's built-in default, which the MCP bridge shares.
     geminiImageModel: '',
     openrouterKey: '',
@@ -340,6 +345,12 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     themeBg: hex(s.themeBg, DEFAULT_SETTINGS.themeBg),
     themeInk: hex(s.themeInk, DEFAULT_SETTINGS.themeInk),
     voiceAutoRelay: Boolean(s.voiceAutoRelay),
+    voiceReplyMode:
+      s.voiceReplyMode === 'text' || s.voiceReplyMode === 'voice' || s.voiceReplyMode === 'both'
+        ? s.voiceReplyMode
+        : DEFAULT_SETTINGS.voiceReplyMode,
+    voiceReplyVoice: typeof s.voiceReplyVoice === 'string' ? s.voiceReplyVoice.slice(0, 120) : '',
+    projectsRoot: typeof s.projectsRoot === 'string' ? s.projectsRoot.slice(0, 400) : '',
     voiceRelayGraceMs: Number.isFinite(s.voiceRelayGraceMs)
       ? clamp(s.voiceRelayGraceMs as number, 0, 60_000)
       : DEFAULT_SETTINGS.voiceRelayGraceMs,
