@@ -3,30 +3,30 @@
  * forge-bridge — the cross-agent bridge.
  *
  * A standalone MCP server (stdio transport) that Forge registers into every
- * Claude Code pane, so Claude can hand work to the Gemini CLI: things Claude
- * cannot do itself (watch a YouTube video, generate an image) and second
- * opinions from a different model family.
+ * Claude Code pane, so Claude can hand work to Google Gemini: things Claude
+ * cannot do itself (watch a YouTube video, generate an image or a video) and
+ * second opinions from a different model family.
  *
- * Auth model, in two halves:
+ * Auth model: one key, one road. Every tool here calls Google's REST API
+ * directly and needs GEMINI_API_KEY in the environment; Forge puts it there via
+ * the mcp.json it generates under %APPDATA%\Forge\bridge\. Nothing is written to
+ * disk by this file except the images and videos themselves.
  *
- *   • `ask_gemini` / `summarize_video` shell out to the `gemini` binary on PATH,
- *     which uses whatever login *it* holds in %USERPROFILE%\.gemini. If a
- *     GEMINI_API_KEY is in the environment it is passed straight through, so the
- *     CLI works even when nobody has run `gemini` to sign in.
- *   • `make_image` / `edit_image` / `make_video` call Google's REST API
- *     directly, because the CLI has no media tools at all (see README). They
- *     need GEMINI_API_KEY in the environment; Forge puts it there via the
- *     mcp.json it generates under %APPDATA%\Forge\bridge\. Nothing is written to
- *     disk by this file except the images and videos themselves.
+ * `ask_gemini` and `summarize_video` used to shell out to the `gemini` CLI. They
+ * no longer can: Google retired the free individual-account tier behind it, and
+ * the CLI now answers UNSUPPORTED_CLIENT with an instruction to migrate to the
+ * Antigravity suite. Every trace of it is gone from this file — no spawn, no npm
+ * shim resolution, no exit codes — leaving pure REST plus the node standard
+ * library. (Forge's interactive *Gemini launch profile* is a different thing
+ * entirely and is untouched by this.)
  *
  * Run standalone (for testing):  node bridge/gemini-bridge.mjs
  * It speaks JSON-RPC over stdin/stdout, so stdout must stay clean — every
  * diagnostic in this file goes to stderr.
  */
 
-import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
-import { delimiter, dirname, extname, isAbsolute, join, resolve } from 'node:path'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { extname, isAbsolute, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -34,13 +34,6 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 
 const SERVER_NAME = 'forge-bridge'
 const SERVER_VERSION = '1.0.0'
-
-/** Hard ceiling on any single Gemini invocation. */
-const TIMEOUT_MS = 120_000
-/** Gemini CLI exit codes (packages/core/src/utils/exitCodes.ts, v0.53). */
-const EXIT_AUTH = 41
-const EXIT_INPUT = 42
-const EXIT_CONFIG = 52
 
 /* ------------------------------------------------------------- media config
  *
@@ -116,17 +109,85 @@ function defaultOutDir() {
   return join(homedir(), '.forge', 'bridge-out')
 }
 
+/* -------------------------------------------------------------- text config
+ *
+ * `ask_gemini` and `summarize_video`. Unlike the media constants above, none of
+ * this is duplicated anywhere — electron/gemini-media.ts is media-only — so
+ * there is nothing here for the drift guard to police.
+ */
+
+/**
+ * The model behind both text tools. `gemini-3.6-flash` is fast and cheap, reads
+ * images, PDFs, audio and video, and is verified working on this key. Override
+ * with FORGE_GEMINI_ASK_MODEL.
+ */
+const DEFAULT_ASK_MODEL = 'gemini-3.6-flash'
+/** Generous, because a long video is watched end to end before the first token. */
+const ASK_TIMEOUT_MS = 300_000
+/** Files API: the upload itself, then the wait for Google to finish ingesting it. */
+const UPLOAD_TIMEOUT_MS = 300_000
+const FILE_READY_TIMEOUT_MS = 180_000
+const FILE_POLL_MS = 2_000
+/** Total bytes `ask_gemini` will inline into one request before uploading instead. */
+const MAX_INLINE_TOTAL_BYTES = 15 * 1024 * 1024
+/** A text file bigger than this is uploaded rather than pasted into the prompt. */
+const MAX_TEXT_INLINE_BYTES = 1024 * 1024
+/**
+ * Our own ceiling on an upload, not the API's (which is 2 GB). The body is
+ * buffered in memory in one shot, so this keeps a stray 4 GB capture from
+ * taking the bridge down with it.
+ */
+const MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+
+/**
+ * What the Files API will take, on top of the images already listed above.
+ * Anything not in here is refused by name rather than uploaded hopefully.
+ */
+const UPLOAD_MIME = {
+  ...INPUT_MIME,
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.csv': 'text/csv',
+  '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.mpeg': 'video/mpeg',
+  '.mpg': 'video/mpeg',
+  '.avi': 'video/x-msvideo',
+  '.wmv': 'video/x-ms-wmv',
+  '.flv': 'video/x-flv',
+  '.3gp': 'video/3gpp',
+  '.mp3': 'audio/mp3',
+  '.wav': 'audio/wav',
+  '.aiff': 'audio/aiff',
+  '.aac': 'audio/aac',
+  '.ogg': 'audio/ogg',
+  '.flac': 'audio/flac',
+  '.m4a': 'audio/mp4'
+}
+
+/** The subset of the above that `summarize_video` will accept off disk. */
+const VIDEO_EXTENSIONS = Object.keys(UPLOAD_MIME).filter((e) => UPLOAD_MIME[e].startsWith('video/'))
+
+function askModel() {
+  const chosen = (process.env['FORGE_GEMINI_ASK_MODEL'] ?? '').trim() || DEFAULT_ASK_MODEL
+  return /^[a-zA-Z0-9][a-zA-Z0-9.\-_]{1,64}$/.test(chosen) ? chosen : DEFAULT_ASK_MODEL
+}
+
 /* --------------------------------------------------------------- messaging */
 
-const NOT_INSTALLED =
-  'Gemini CLI not installed. Tell the user: Forge needs the Gemini CLI on PATH — ' +
-  'run `npm install -g @google/gemini-cli` in a terminal, then run `gemini` once to sign in ' +
-  'with their Google account.'
-
-const NOT_LOGGED_IN =
-  'Gemini CLI not logged in. Tell the user: run `gemini` once in a terminal to sign in with ' +
-  'their Google account (a browser window opens), then retry. Nothing is stored by Forge — ' +
-  'the CLI keeps its own credentials.'
+/**
+ * The text tools' no-key message. Deliberately parallel to NO_KEY / NO_KEY_VIDEO
+ * further down: same fix, same insistence that nothing be faked in its place.
+ */
+const NO_KEY_TEXT =
+  'Cannot ask Gemini: no Gemini API key is available to the bridge.\n\n' +
+  'Tell the user plainly that Gemini was never reached, and how to fix it: open Forge’s voice-agent settings, ' +
+  'paste a Google AI Studio key (or press “Import from DictationMic”), and restart the pane — Forge writes the key ' +
+  'into the MCP config it generates at %APPDATA%\\Forge\\bridge\\mcp.json, which is read when the pane launches. ' +
+  'Running the bridge by hand? Set GEMINI_API_KEY in the environment.\n\n' +
+  'Do not answer as though Gemini had replied, and do not invent a summary.'
 
 /** Every failure comes back as readable prose, never as a fabricated success. */
 function fail(text) {
@@ -135,236 +196,6 @@ function fail(text) {
 
 function ok(text) {
   return { content: [{ type: 'text', text }] }
-}
-
-/* ------------------------------------------------------------- gemini shell */
-
-/**
- * How to invoke the CLI: `{ file, prefixArgs }`.
- *
- * On Windows the npm global binary is `gemini.cmd`, and since the 2024 argument-
- * injection fix Node refuses to spawn a `.cmd` at all without `shell: true` —
- * which would reintroduce quoting bugs for prompts full of quotes and newlines.
- * So we read the shim, pull out the real `gemini.js` it points at, and run that
- * under Node directly. `shell` stays off, and prompts are passed as a literal
- * argv entry that nothing can reinterpret.
- *
- * Resolved once and cached; `null` means "not installed".
- */
-let launcherCache
-
-function nodeExe() {
-  // Under Electron-as-node, execPath is electron.exe — not something to hand a
-  // CLI script to. Fall back to PATH's node in that case.
-  const p = process.execPath
-  return /node(\.exe)?$/i.test(p) ? p : 'node'
-}
-
-/**
- * Pull the real target out of an npm cmd-shim / bash shim. npm points these at
- * either a JS entry (run it under Node) or a native launcher (run it directly),
- * so both are matched and the caller decides.
- */
-function targetFromShim(shimPath) {
-  let text
-  try {
-    text = readFileSync(shimPath, 'utf8')
-  } catch {
-    return null
-  }
-  const base = dirname(shimPath)
-  for (const m of text.matchAll(/"?(?:%dp0%|\$basedir|%~dp0)[\\/]?([^"\s]+\.(?:[cm]?js|exe))"?/g)) {
-    const candidate = resolve(base, m[1].replace(/\\/g, '/'))
-    if (existsSync(candidate)) return candidate
-  }
-  return null
-}
-
-/** Turn a shim target into a spawnable `{ file, prefixArgs }`. */
-function launcherFor(target) {
-  return /\.exe$/i.test(target) ? { file: target, prefixArgs: [] } : { file: nodeExe(), prefixArgs: [target] }
-}
-
-function resolveLauncher() {
-  if (launcherCache !== undefined) return launcherCache
-  launcherCache = null
-
-  const override = process.env['FORGE_GEMINI_JS']
-  if (override && existsSync(override)) {
-    launcherCache = { file: nodeExe(), prefixArgs: [override] }
-    return launcherCache
-  }
-
-  const dirs = (process.env['PATH'] ?? '').split(delimiter).filter(Boolean)
-  const names = process.platform === 'win32' ? ['gemini.cmd', 'gemini.exe', 'gemini'] : ['gemini']
-
-  for (const dir of dirs) {
-    for (const name of names) {
-      const p = join(dir, name)
-      if (!existsSync(p)) continue
-      if (name.endsWith('.exe')) {
-        launcherCache = { file: p, prefixArgs: [] }
-        return launcherCache
-      }
-      const target = targetFromShim(p)
-      if (target) {
-        launcherCache = launcherFor(target)
-        return launcherCache
-      }
-      // A real executable (POSIX) — spawn it as-is.
-      if (process.platform !== 'win32') {
-        launcherCache = { file: p, prefixArgs: [] }
-        return launcherCache
-      }
-    }
-  }
-  return launcherCache
-}
-
-/**
- * Spawn the Gemini CLI with the given argv. Never uses a shell, so prompts
- * containing quotes, backticks or newlines cannot be reinterpreted.
- */
-function runGemini(args, { cwd } = {}) {
-  return new Promise((done) => {
-    const launcher = resolveLauncher()
-    if (!launcher) {
-      done({ spawnFailed: true, code: null, stdout: '', stderr: 'gemini not found on PATH' })
-      return
-    }
-
-    let child
-    try {
-      child = spawn(launcher.file, [...launcher.prefixArgs, ...args], {
-        cwd: cwd && existsSync(cwd) ? cwd : process.cwd(),
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: cleanEnv()
-      })
-    } catch (err) {
-      done({ spawnFailed: true, code: null, stdout: '', stderr: String(err?.message ?? err) })
-      return
-    }
-
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-    const finish = (result) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      done(result)
-    }
-
-    const timer = setTimeout(() => {
-      try {
-        child.kill()
-      } catch {
-        /* already gone */
-      }
-      finish({ timedOut: true, code: null, stdout, stderr })
-    }, TIMEOUT_MS)
-
-    child.stdout.on('data', (d) => {
-      stdout += d.toString()
-    })
-    child.stderr.on('data', (d) => {
-      stderr += d.toString()
-    })
-    child.on('error', (err) => {
-      // ENOENT here is the "CLI is not installed" signal.
-      finish({ spawnFailed: err?.code === 'ENOENT', code: null, stdout, stderr: String(err?.message ?? err) })
-    })
-    child.on('close', (code) => finish({ code, stdout, stderr }))
-  })
-}
-
-/**
- * Electron injects variables that break child Node processes (notably
- * ELECTRON_RUN_AS_NODE). Claude Code spawns us, and it may itself have been
- * started from a Forge pane, so scrub them before reaching Gemini.
- */
-function cleanEnv() {
-  const env = {}
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v === undefined) continue
-    if (/^ELECTRON_(RUN_AS_NODE|NO_ATTACH_CONSOLE|IS_DEV|ENABLE_LOGGING)$/.test(k)) continue
-    if (k === 'NODE_OPTIONS') continue
-    env[k] = v
-  }
-  // Gemini's TUI does clever things with a live terminal; we want plain text.
-  env['NO_COLOR'] = '1'
-  env['TERM'] = 'dumb'
-  // GEMINI_API_KEY (when Forge put one in our environment) is passed straight
-  // through by the copy above: the CLI reads it and works signed-out, which
-  // makes ask_gemini/summarize_video usable without a browser login.
-  return env
-}
-
-/**
- * The single funnel every tool goes through: run a non-interactive prompt and
- * turn the outcome into either the model's answer or a human-readable
- * explanation of why there isn't one.
- *
- * `-p/--prompt` is the Gemini CLI's documented headless flag (verified against
- * `gemini --help`, v0.53.0). `-o text` keeps output free of JSON wrapping.
- */
-async function ask(prompt, { cwd, extraArgs = [] } = {}) {
-  const args = ['-p', prompt, '-o', 'text', ...extraArgs]
-  const r = await runGemini(args, { cwd })
-
-  if (r.spawnFailed) return { ok: false, text: NOT_INSTALLED }
-  if (r.timedOut) {
-    return {
-      ok: false,
-      text:
-        `Gemini timed out after ${Math.round(TIMEOUT_MS / 1000)}s and was killed. ` +
-        'Tell the user the request was too large or the network stalled; a shorter prompt or ' +
-        'fewer attached files usually fixes it.' +
-        tail(r.stderr)
-    }
-  }
-  if (r.code === EXIT_AUTH || looksLoggedOut(r.stderr) || looksLoggedOut(r.stdout)) {
-    return { ok: false, text: `${NOT_LOGGED_IN}\n\nGemini said:${tail(r.stderr || r.stdout)}` }
-  }
-  if (r.code === EXIT_INPUT) {
-    return { ok: false, text: `Gemini rejected the input (exit 42).${tail(r.stderr)}` }
-  }
-  if (r.code === EXIT_CONFIG) {
-    return {
-      ok: false,
-      text:
-        'Gemini CLI is misconfigured (exit 52) — check %USERPROFILE%\\.gemini\\settings.json.' +
-        tail(r.stderr)
-    }
-  }
-  if (r.code !== 0) {
-    return { ok: false, text: `Gemini exited ${r.code}.${tail(r.stderr || r.stdout)}` }
-  }
-
-  const answer = r.stdout.trim()
-  if (!answer) {
-    return { ok: false, text: `Gemini returned nothing (exit 0).${tail(r.stderr)}` }
-  }
-  return { ok: true, text: answer, stderr: r.stderr }
-}
-
-/** The CLI reports the auth wall on stderr; match it without relying on exit codes alone. */
-function looksLoggedOut(s) {
-  if (!s) return false
-  return (
-    /set an auth method/i.test(s) ||
-    /GEMINI_API_KEY/.test(s) ||
-    /please (sign|log) ?in/i.test(s) ||
-    /not authenticated/i.test(s) ||
-    /oauth/i.test(s) && /expired|invalid/i.test(s)
-  )
-}
-
-function tail(s, limit = 1200) {
-  const t = (s ?? '').trim()
-  if (!t) return ''
-  return `\n\n${t.length > limit ? `…${t.slice(t.length - limit)}` : t}`
 }
 
 /* ------------------------------------------------------------------- inputs */
@@ -383,28 +214,48 @@ function asStringArray(v, field) {
   }).filter(Boolean)
 }
 
+function absPath(p) {
+  return isAbsolute(p) ? p : resolve(process.cwd(), p)
+}
+
 /**
- * Turn caller-supplied paths into Gemini `@path` references. The CLI resolves
- * `@`-prefixed tokens in the prompt into file contents (atCommandUtils, v0.53),
- * which is the only file-attach route the headless mode offers.
- *
- * Returns the prompt suffix plus the list of directories Gemini must be allowed
- * to read (`--include-directories`), since `@` only reaches inside the workspace.
+ * Is this file text, whatever its extension says? Source, logs, config and
+ * `.env` files all arrive with extensions no mime table can enumerate, so the
+ * bytes decide instead: a NUL byte, or more than 2% odd control characters in
+ * the first 8 KB, means binary. UTF-8 high bytes are left alone, so accented
+ * text and emoji stay text.
  */
-function attachFiles(files) {
-  const refs = []
-  const dirs = new Set()
-  const missing = []
-  for (const f of files) {
-    const abs = isAbsolute(f) ? f : resolve(process.cwd(), f)
-    if (!existsSync(abs)) {
-      missing.push(abs)
-      continue
+function looksTextual(head) {
+  if (head.length === 0) return true
+  if (head.includes(0)) return false
+  let odd = 0
+  for (const b of head) if (b < 9 || (b > 13 && b < 32)) odd += 1
+  return odd / head.length < 0.02
+}
+
+/** The same question, asked without reading a 200 MB file to answer it. */
+function headLooksTextual(path) {
+  let fd
+  try {
+    fd = openSync(path, 'r')
+    const buf = Buffer.alloc(8192)
+    const read = readSync(fd, buf, 0, buf.length, 0)
+    return looksTextual(buf.subarray(0, read))
+  } catch {
+    return false
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd)
+      } catch {
+        /* already gone */
+      }
     }
-    refs.push(`@${abs.replace(/\\/g, '/')}`)
-    dirs.add(statSync(abs).isDirectory() ? abs : join(abs, '..'))
   }
-  return { refs, dirs: [...dirs], missing }
+}
+
+function mb(bytes) {
+  return `${(bytes / 1e6).toFixed(1)} MB`
 }
 
 /* -------------------------------------------------------------------- tools */
@@ -413,11 +264,13 @@ const TOOLS = [
   {
     name: 'ask_gemini',
     description:
-      'Ask Google Gemini (via the local Gemini CLI, using the user\'s own Google login) any question. ' +
-      'Use this for a genuine second opinion from a different model family, for Google-flavoured knowledge, ' +
-      'or when you want an independent review of a design or a diagnosis. Optionally attach local files or ' +
-      'directories, which are inlined into the prompt for Gemini to read. ' +
-      'Returns Gemini\'s plain-text answer, or a plain-English explanation if the CLI is missing or signed out.',
+      'Ask Google Gemini any question and get its answer back as plain text. Use this for a genuine second opinion ' +
+      'from a different model family, for Google-flavoured knowledge, or when you want an independent review of a ' +
+      'design or a diagnosis. Optionally attach local FILES — source code, logs, images, PDFs, audio or video — ' +
+      'which are sent to Gemini alongside the prompt; small text and images ride inline, anything larger is ' +
+      'uploaded first. Directories are not accepted: name the files you want read. Calls Google\'s REST API ' +
+      'directly with the Gemini API key Forge supplies, and its errors are honest and specific (no key, out of ' +
+      'quota, refused) — it never invents an answer and attributes it to Gemini.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -425,7 +278,7 @@ const TOOLS = [
         files: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional absolute paths to files or directories for Gemini to read alongside the prompt.'
+          description: 'Optional absolute paths to FILES (not directories) for Gemini to read alongside the prompt.'
         }
       },
       required: ['prompt']
@@ -434,11 +287,12 @@ const TOOLS = [
   {
     name: 'summarize_video',
     description:
-      'Summarize a video that Claude cannot watch. Accepts a YouTube (or other public video) URL, which Gemini ' +
-      'ingests natively, or an absolute path to a local video file. Returns a structured summary: one-line gist, ' +
-      'chapter-by-chapter beats with timestamps, key claims, and anything actionable. Pass `focus` to steer it ' +
-      '(e.g. "just the wiring diagram steps", "only the pricing"). Local-file support depends on the signed-in ' +
-      'account\'s upload limits; URLs are the reliable path.',
+      'Summarize a video that Claude cannot watch. Accepts a YouTube URL (ingested natively by Gemini — the ' +
+      'cheapest and most reliable path), any other public https video URL, or an absolute path to a local video ' +
+      'file, which is uploaded first. Returns a structured summary: one-line gist, chapter-by-chapter beats with ' +
+      'timestamps, key claims, and anything actionable. Pass `focus` to steer it (e.g. "just the wiring diagram ' +
+      'steps", "only the pricing"). Needs the Gemini API key Forge supplies. If the video cannot be reached — ' +
+      'private, deleted, age-gated or region-locked — it says so rather than guessing at the contents.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -452,7 +306,7 @@ const TOOLS = [
     name: 'make_image',
     description:
       'Really generate an image from a text description and save it to disk, returning absolute file paths. ' +
-      'Calls Google\'s image-generation API directly (not the Gemini CLI, which has no image tool), so it needs a ' +
+      'Calls Google\'s image-generation API directly, so it needs a ' +
       'Gemini API key in the environment — Forge supplies one from its settings. Use it whenever the user wants a ' +
       'picture, mockup, texture, icon, placeholder art or reference image. Describe subject, style, framing, lighting ' +
       'and mood; a fuller description gives a much better image. Errors are honest and specific (no key, out of ' +
@@ -522,57 +376,447 @@ const TOOLS = [
   }
 ]
 
+/* ------------------------------------------------------------- text (REST)
+ *
+ * Everything below here is `ask_gemini` and `summarize_video`, on the same
+ * `:generateContent` endpoint the image tools use — only asking for words back
+ * instead of pixels. Nothing is duplicated from electron/gemini-media.ts.
+ */
+
+/** Classify a text-route HTTP failure. Same spirit as videoHttpError. */
+function textHttpError(status, message, model) {
+  if (status === 429 || /RESOURCE_EXHAUSTED|quota/i.test(message)) {
+    return (
+      `Gemini is out of quota for this key (${status}): ${message}\n\n` +
+      'No answer was produced. Tell the user the quota is spent and to retry later, or to use a key with billing ' +
+      'enabled. Do not answer in Gemini’s place.'
+    )
+  }
+  if (status === 401 || status === 403 || /API_KEY_INVALID|API key not valid/i.test(message)) {
+    return `Gemini refused the key (${status}): ${message}\n\nTell the user to check the Gemini key in Forge’s voice-agent settings.`
+  }
+  if (status === 404) {
+    return (
+      `The model “${model}” is not available to this key (404): ${message}\n\n` +
+      'Set FORGE_GEMINI_ASK_MODEL to a model this key can use.'
+    )
+  }
+  if (status === 400) {
+    return (
+      `Gemini rejected the request as invalid (400): ${message}\n\n` +
+      'When a video or file was attached this is usually the file itself: a private, deleted, age-gated or ' +
+      'region-locked video returns exactly this bare error. Nothing was read — do not guess at its contents.'
+    )
+  }
+  return `Gemini rejected the request (${status}): ${message}`
+}
+
+/**
+ * One `:generateContent` round trip expected to return words. The single
+ * network funnel for both text tools, so every failure is classified once.
+ * Resolves `{ ok: true, text }` or `{ ok: false, error }`.
+ */
+async function postText(model, key, parts) {
+  let res
+  try {
+    res = await fetch(`${GEMINI_HOST}/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({ contents: [{ role: 'user', parts }] }),
+      signal: AbortSignal.timeout(ASK_TIMEOUT_MS)
+    })
+  } catch (err) {
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+      return {
+        ok: false,
+        error:
+          `Gemini did not answer within ${Math.round(ASK_TIMEOUT_MS / 1000)}s, so there is no answer. ` +
+          'A shorter prompt, fewer attached files or a shorter video usually fixes it.'
+      }
+    }
+    return { ok: false, error: `Could not reach Gemini: ${scrubKey(err?.message ?? err, key)}` }
+  }
+
+  const raw = await res.text()
+  let parsed = null
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    /* keep raw */
+  }
+
+  if (!res.ok) {
+    const err = parsed?.error
+    const message = scrubKey(err?.message ?? raw.slice(0, 500) ?? res.statusText, key)
+    return { ok: false, error: textHttpError(res.status, `${err?.status ?? ''} ${message}`.trim(), model) }
+  }
+
+  if (parsed?.promptFeedback?.blockReason) {
+    return {
+      ok: false,
+      error:
+        `Gemini blocked the prompt (${parsed.promptFeedback.blockReason}) and did not answer. ` +
+        'Tell the user it was refused on safety grounds, and do not answer in its place.'
+    }
+  }
+
+  const candidate = parsed?.candidates?.[0]
+  // `thought: true` parts are the model's private reasoning, not its answer —
+  // gemini-3.x returns them alongside the real text and they must not be shown.
+  const answer = (candidate?.content?.parts ?? [])
+    .filter((p) => p?.thought !== true && typeof p?.text === 'string')
+    .map((p) => p.text)
+    .join('')
+    .trim()
+
+  if (!answer) {
+    const why = candidate?.finishReason ?? 'no reason given'
+    return {
+      ok: false,
+      error:
+        `Gemini returned no text (${why}). ` +
+        (why === 'MAX_TOKENS'
+          ? 'It spent its whole output budget before saying anything usable; try a narrower question.'
+          : 'This is usually a refusal.') +
+        ' Do not invent an answer and attribute it to Gemini.'
+    }
+  }
+  return { ok: true, text: answer }
+}
+
+/* ----------------------------------------------------------------- Files API
+ *
+ * How a local file reaches Gemini. Verified live 2026-07-30 against Steve's key.
+ * Three steps, and the first one's answer is in the HEADERS — its body is empty:
+ *
+ *   1. POST /upload/v1beta/files
+ *        X-Goog-Upload-Protocol: resumable
+ *        X-Goog-Upload-Command: start
+ *        X-Goog-Upload-Header-Content-Length: <size>
+ *        X-Goog-Upload-Header-Content-Type: <mime>
+ *        body { "file": { "display_name": "…" } }
+ *      → 200, header x-goog-upload-url: <one-shot session URL>
+ *
+ *   2. POST <that URL>
+ *        X-Goog-Upload-Command: "upload, finalize"
+ *        X-Goog-Upload-Offset: 0
+ *        body = the raw bytes
+ *      → { "file": { "name": "files/<id>", "uri": "…", "state": "PROCESSING" } }
+ *
+ *   3. GET /v1beta/files/<id> until state is ACTIVE — a 4.9 MB mp4 took ~2 s.
+ *      Handing a PROCESSING file to generateContent is an error, not a wait.
+ *
+ * Then reference it as `{ file_data: { file_uri, mime_type } }`. Google expires
+ * uploads after 48 h on its own; the bridge deletes them as soon as it is done,
+ * so nothing of the user's lingers on Google's side.
+ */
+
+async function uploadFile(path, mime, key, displayName) {
+  const size = statSync(path).size
+  if (size > MAX_UPLOAD_BYTES) {
+    return { ok: false, error: `${path} is ${mb(size)} — the bridge uploads at most ${mb(MAX_UPLOAD_BYTES)}.` }
+  }
+
+  let start
+  try {
+    start = await fetch(`${GEMINI_HOST}/upload/v1beta/files`, {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': key,
+        'content-type': 'application/json',
+        'X-Goog-Upload-Protocol': 'resumable',
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': String(size),
+        'X-Goog-Upload-Header-Content-Type': mime
+      },
+      body: JSON.stringify({ file: { display_name: displayName } }),
+      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS)
+    })
+  } catch (err) {
+    return { ok: false, error: `Could not start the upload to Gemini: ${scrubKey(err?.message ?? err, key)}` }
+  }
+  if (!start.ok) {
+    const body = scrubKey((await start.text()).slice(0, 400), key)
+    return { ok: false, error: textHttpError(start.status, body, askModel()) }
+  }
+  const sessionUrl = start.headers.get('x-goog-upload-url')
+  if (!sessionUrl) {
+    return { ok: false, error: 'Gemini accepted the upload request but returned no upload URL, so nothing was sent.' }
+  }
+
+  let bytes
+  try {
+    bytes = readFileSync(path)
+  } catch (err) {
+    return { ok: false, error: `${path} could not be read: ${err?.message ?? err}` }
+  }
+
+  let up
+  try {
+    up = await fetch(sessionUrl, {
+      method: 'POST',
+      headers: {
+        'content-length': String(size),
+        'X-Goog-Upload-Offset': '0',
+        'X-Goog-Upload-Command': 'upload, finalize'
+      },
+      body: bytes,
+      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS)
+    })
+  } catch (err) {
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+      return { ok: false, error: `Uploading ${mb(size)} to Gemini timed out after ${Math.round(UPLOAD_TIMEOUT_MS / 1000)}s.` }
+    }
+    return { ok: false, error: `The upload to Gemini failed: ${scrubKey(err?.message ?? err, key)}` }
+  }
+  const upRaw = await up.text()
+  if (!up.ok) {
+    return { ok: false, error: textHttpError(up.status, scrubKey(upRaw.slice(0, 400), key), askModel()) }
+  }
+  let file = null
+  try {
+    file = JSON.parse(upRaw).file
+  } catch {
+    /* handled below */
+  }
+  if (!file?.name || !file?.uri) {
+    return { ok: false, error: `Gemini accepted the upload but described it oddly: ${upRaw.slice(0, 200)}` }
+  }
+
+  /* Wait for ingestion. */
+  const deadline = Date.now() + FILE_READY_TIMEOUT_MS
+  let current = file
+  while (current.state !== 'ACTIVE') {
+    if (current.state === 'FAILED') {
+      await deleteFile(current.name, key)
+      return {
+        ok: false,
+        error:
+          `Gemini could not process ${path}: ${current.error?.message ?? 'no reason given'}. ` +
+          'The file was uploaded but is unusable — nothing was read from it.'
+      }
+    }
+    if (Date.now() > deadline) {
+      await deleteFile(current.name, key)
+      return {
+        ok: false,
+        error:
+          `Gemini was still processing ${path} after ${Math.round(FILE_READY_TIMEOUT_MS / 1000)}s, so it was never ` +
+          'read. Try a shorter or smaller file.'
+      }
+    }
+    await new Promise((r) => setTimeout(r, FILE_POLL_MS))
+    let res
+    try {
+      res = await fetch(`${GEMINI_HOST}/v1beta/${current.name}`, {
+        headers: { 'x-goog-api-key': key },
+        signal: AbortSignal.timeout(VIDEO_REQUEST_TIMEOUT_MS)
+      })
+    } catch (err) {
+      return { ok: false, error: `Lost contact with Gemini while it processed the upload: ${scrubKey(err?.message ?? err, key)}` }
+    }
+    const raw = await res.text()
+    if (!res.ok) return { ok: false, error: textHttpError(res.status, scrubKey(raw.slice(0, 400), key), askModel()) }
+    try {
+      current = JSON.parse(raw)
+    } catch {
+      return { ok: false, error: `Checking the uploaded file returned non-JSON: ${raw.slice(0, 200)}` }
+    }
+  }
+
+  return { ok: true, file: current, part: { file_data: { file_uri: current.uri, mime_type: mime } } }
+}
+
+/** Best-effort tidy-up. A failure here is not worth telling anyone about. */
+async function deleteFile(name, key) {
+  if (!name) return
+  try {
+    await fetch(`${GEMINI_HOST}/v1beta/${name}`, {
+      method: 'DELETE',
+      headers: { 'x-goog-api-key': key },
+      signal: AbortSignal.timeout(30_000)
+    })
+  } catch {
+    /* it expires in 48 h regardless */
+  }
+}
+
 /* -------------------------------------------------------------- ask_gemini */
+
+/**
+ * Turn caller-supplied paths into request parts, by three roads:
+ *
+ *   • text of any extension, up to 1 MB → a text part, headed by its path
+ *   • an image inside the inline budget → an inline_data part (no upload hop)
+ *   • anything else Gemini reads        → uploaded, then a file_data part
+ *
+ * Whatever cannot travel any of the three is *reported*, never dropped in
+ * silence. Returns the parts, the notes, and the uploads to clean up after.
+ */
+async function attachFiles(files, key) {
+  const parts = []
+  const notes = []
+  const uploads = []
+  let inlineLeft = MAX_INLINE_TOTAL_BYTES
+
+  for (const f of files) {
+    const abs = absPath(f)
+    let st
+    try {
+      st = statSync(abs)
+    } catch {
+      notes.push(`no such path: ${abs}`)
+      continue
+    }
+    if (st.isDirectory()) {
+      notes.push(`${abs} is a directory — name the individual files you want read`)
+      continue
+    }
+    if (!st.isFile()) {
+      notes.push(`${abs} is not a regular file`)
+      continue
+    }
+
+    const ext = extname(abs).toLowerCase()
+    let mime = UPLOAD_MIME[ext]
+    if (!mime) {
+      // No table entry, so the bytes decide. Source, logs, config and `.env`
+      // files are all welcome as text; unknown binary is not.
+      if (!headLooksTextual(abs)) {
+        notes.push(
+          `${abs} is neither text nor a file type Gemini reads — those are ${Object.keys(UPLOAD_MIME).join(' ')}`
+        )
+        continue
+      }
+      mime = 'text/plain'
+    }
+
+    /* 1 — text small enough to paste straight into the prompt. */
+    if (mime.startsWith('text/') && st.size <= MAX_TEXT_INLINE_BYTES) {
+      if (st.size > inlineLeft) {
+        notes.push(`${abs} did not fit in the ${mb(MAX_INLINE_TOTAL_BYTES)} attachment budget`)
+        continue
+      }
+      let bytes
+      try {
+        bytes = readFileSync(abs)
+      } catch (err) {
+        notes.push(`${abs} could not be read: ${err?.message ?? err}`)
+        continue
+      }
+      inlineLeft -= bytes.length
+      parts.push({ text: `--- ${abs} ---\n${bytes.toString('utf8')}` })
+      continue
+    }
+
+    /* 2 — an image small enough to ride along inline, skipping the upload hop. */
+    if (INPUT_MIME[ext] && st.size <= MAX_INPUT_BYTES && st.size <= inlineLeft) {
+      try {
+        const bytes = readFileSync(abs)
+        inlineLeft -= bytes.length
+        parts.push({ inline_data: { mime_type: mime, data: bytes.toString('base64') } })
+        continue
+      } catch (err) {
+        notes.push(`${abs} could not be read: ${err?.message ?? err}`)
+        continue
+      }
+    }
+
+    /* 3 — everything else goes up to the Files API. */
+    const up = await uploadFile(abs, mime, key, abs.split(/[\\/]/).pop())
+    if (!up.ok) {
+      notes.push(`${abs} was not attached — ${up.error}`)
+      continue
+    }
+    uploads.push(up.file.name)
+    parts.push(up.part)
+  }
+
+  return { parts, notes, uploads }
+}
 
 async function askGemini(args) {
   const prompt = asString(args?.['prompt'], 'prompt')
   const files = asStringArray(args?.['files'], 'files')
 
-  let finalPrompt = prompt
-  const extraArgs = []
-  let notes = ''
+  const key = apiKey()
+  if (!key) return fail(NO_KEY_TEXT)
 
-  if (files.length) {
-    const { refs, dirs, missing } = attachFiles(files)
-    if (missing.length) notes += `\n\n(Not attached — no such path: ${missing.join(', ')})`
-    if (refs.length) {
-      finalPrompt = `${prompt}\n\nRelevant files:\n${refs.join('\n')}`
-      for (const d of dirs) extraArgs.push('--include-directories', d)
-    }
+  const attached = files.length ? await attachFiles(files, key) : { parts: [], notes: [], uploads: [] }
+  const notes = attached.notes.length ? `\n\n(Not attached — ${attached.notes.join('; ')})` : ''
+
+  const model = askModel()
+  try {
+    const r = await postText(model, key, [...attached.parts, { text: prompt }])
+    return r.ok ? ok(r.text + notes) : fail(r.error + notes)
+  } finally {
+    for (const name of attached.uploads) await deleteFile(name, key)
   }
-
-  const r = await ask(finalPrompt, { extraArgs })
-  return r.ok ? ok(r.text + notes) : fail(r.text + notes)
 }
 
 /* --------------------------------------------------------- summarize_video */
+
+function isYouTube(url) {
+  let host
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return /(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com)$/.test(host)
+}
+
+/**
+ * Gemini fetches a plain https URL itself but wants to be told what it is;
+ * YouTube links are the exception and must carry no mime type at all.
+ */
+function urlVideoPart(url) {
+  if (isYouTube(url)) return { file_data: { file_uri: url } }
+  let ext = ''
+  try {
+    ext = extname(new URL(url).pathname).toLowerCase()
+  } catch {
+    /* leave it blank */
+  }
+  const mime = UPLOAD_MIME[ext]
+  return { file_data: { file_uri: url, mime_type: mime?.startsWith('video/') ? mime : 'video/mp4' } }
+}
 
 async function summarizeVideo(args) {
   const target = asString(args?.['url_or_path'], 'url_or_path')
   const focus = typeof args?.['focus'] === 'string' ? args['focus'].trim() : ''
 
-  const isUrl = /^https?:\/\//i.test(target)
-  const extraArgs = []
-  let reference
+  const key = apiKey()
+  if (!key) return fail(NO_KEY_TEXT)
 
-  if (isUrl) {
-    reference = target
+  let videoPart
+  let uploaded = ''
+
+  if (/^https?:\/\//i.test(target)) {
+    videoPart = urlVideoPart(target)
+  } else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+    return fail(`${target} is not a URL the bridge will fetch — pass an https link or an absolute file path.`)
   } else {
-    const abs = isAbsolute(target) ? target : resolve(process.cwd(), target)
+    const abs = absPath(target)
     if (!existsSync(abs)) {
       return fail(
-        `No such file: ${abs}. Pass a public video URL (YouTube is handled natively) or an absolute path ` +
+        `No such file: ${abs}. Pass a public video URL (YouTube is ingested natively) or an absolute path ` +
           'to a video file that exists on this machine.'
       )
     }
-    reference = `@${abs.replace(/\\/g, '/')}`
-    extraArgs.push('--include-directories', join(abs, '..'))
+    const ext = extname(abs).toLowerCase()
+    const mime = UPLOAD_MIME[ext]
+    if (!mime?.startsWith('video/')) {
+      return fail(`${ext || 'That file'} is not a video type Gemini reads (${VIDEO_EXTENSIONS.join(' ')}).`)
+    }
+    const up = await uploadFile(abs, mime, key, abs.split(/[\\/]/).pop())
+    if (!up.ok) return fail(up.error)
+    uploaded = up.file.name
+    videoPart = up.part
   }
 
   const prompt = [
     'Watch this video and summarize it for a software engineer who cannot watch it.',
-    '',
-    `Video: ${reference}`,
     focus ? `Concentrate on: ${focus}` : '',
     '',
     'Reply in Markdown with exactly these sections:',
@@ -587,8 +831,14 @@ async function summarizeVideo(args) {
     .filter((l) => l !== '')
     .join('\n')
 
-  const r = await ask(prompt, { extraArgs })
-  if (!r.ok) return fail(r.text)
+  const model = askModel()
+  let r
+  try {
+    r = await postText(model, key, [videoPart, { text: prompt }])
+  } finally {
+    await deleteFile(uploaded, key)
+  }
+  if (!r.ok) return fail(r.error)
 
   // Gemini is prone to answering "I can't watch videos" — surface that rather
   // than passing an apology off as a summary.
@@ -1164,9 +1414,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   await server.connect(new StdioServerTransport())
   process.stderr.write(
-    `[${SERVER_NAME}] ready (out dir: ${defaultOutDir()}, image model: ${imageModel()}, ` +
-      `video model: ${videoModel()}, ` +
-      `api key: ${apiKey() ? 'present' : 'ABSENT — make_image/edit_image/make_video will refuse'})\n`
+    `[${SERVER_NAME}] ready (out dir: ${defaultOutDir()}, ask model: ${askModel()}, ` +
+      `image model: ${imageModel()}, video model: ${videoModel()}, ` +
+      `api key: ${apiKey() ? 'present' : 'ABSENT — every tool will refuse'})\n`
   )
 }
 
