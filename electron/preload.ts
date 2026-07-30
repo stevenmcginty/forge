@@ -101,6 +101,7 @@ const api: ForgeApi = {
   probeAgents: () => ipcRenderer.invoke(IPC.agentsProbe),
 
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
+  makeProjectFolder: (req) => ipcRenderer.invoke(IPC.makeProjectFolder, req),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 

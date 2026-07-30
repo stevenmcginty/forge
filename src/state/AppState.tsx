@@ -122,6 +122,9 @@ const FALLBACK_SETTINGS: Settings = {
   themeInk: '#e8eaed',
   voiceAutoRelay: false,
   voiceRelayGraceMs: 2500,
+  voiceReplyMode: 'both',
+  voiceReplyVoice: '',
+  projectsRoot: '',
   geminiImageModel: '',
   openrouterKey: '',
   openrouterModel: 'google/gemini-2.5-flash-lite',
@@ -543,6 +546,14 @@ function reducer(state: AppState, action: Action): AppState {
 
 export interface AppActions {
   addProject(): Promise<void>
+  /**
+   * Add a folder that already exists, without a picker.
+   *
+   * The voice agent's `create_project` uses this: the main process has already
+   * made the folder and checked it is somewhere Forge is allowed to write, so
+   * all that is left is the same dispatch `addProject` does after the dialog.
+   */
+  addProjectPath(path: string, name?: string): void
   updateProject(id: string, patch: Partial<Project>): void
   removeProject(id: string): void
   moveProject(from: number, to: number): void
@@ -786,6 +797,24 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
             name,
             path: folder,
             color,
+            defaultProfileId: DEFAULT_PROFILE_ID,
+            createdAt: Date.now()
+          }
+        })
+      },
+      addProjectPath(path, name) {
+        const existing = state.projects.find((p) => p.path.toLowerCase() === path.toLowerCase())
+        if (existing) {
+          dispatch({ type: 'selectProject', projectId: existing.id })
+          return
+        }
+        dispatch({
+          type: 'addProject',
+          project: {
+            id: makeId('proj'),
+            name: name?.trim() || basename(path),
+            path,
+            color: ACCENT_PALETTE[state.projects.length % ACCENT_PALETTE.length]!,
             defaultProfileId: DEFAULT_PROFILE_ID,
             createdAt: Date.now()
           }

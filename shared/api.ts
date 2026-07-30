@@ -13,6 +13,8 @@ import type {
   ImportedKeyResult,
   KeySource,
   MakeImageRequest,
+  MakeProjectFolderRequest,
+  MakeProjectFolderResult,
   MediaCallResult,
   MemorySection,
   OpenRouterCallRequest,
@@ -207,6 +209,8 @@ export interface ForgeApi {
   probeAgents(): Promise<AgentPresence[]>
 
   pickFolder(): Promise<string | null>
+  /** Create a project folder from a spoken name. Fenced hard — see main.ts. */
+  makeProjectFolder(req: MakeProjectFolderRequest): Promise<MakeProjectFolderResult>
   openPath(target: string): Promise<string>
   /**
    * Open an http(s) URL in the default browser. Anything else is refused in the
