@@ -1,0 +1,256 @@
+/* ------------------------------------------------------------- section */
+
+.skills {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Never more than a third of the rail: projects are the thing you navigate,
+     skills are the thing you keep. A long library scrolls inside itself. */
+  max-height: 34%;
+  border-top: 1px solid var(--line-soft);
+}
+
+.skills[data-open='false'] {
+  max-height: none;
+}
+
+.skills__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  height: 30px;
+  padding: 0 var(--s-3) 0 var(--s-4);
+}
+
+.skills__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 100%;
+  padding-right: var(--s-2);
+  color: var(--text-muted);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.skills__toggle:hover {
+  color: var(--text-secondary);
+}
+
+.skills__toggle svg {
+  transition: transform var(--dur-med) var(--ease-out);
+}
+
+.skills[data-open='false'] .skills__toggle svg {
+  transform: rotate(-90deg);
+}
+
+.skills__count {
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.skills__add {
+  margin-left: auto;
+  width: 24px;
+}
+
+.skills__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--s-3) var(--s-4);
+}
+
+/* ------------------------------------------------------------- skill row */
+
+.srow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 38px;
+  padding: 0 var(--s-2) 0 var(--s-2);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  cursor: grab;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.srow:active {
+  cursor: grabbing;
+}
+
+.srow:hover {
+  background: var(--bg-hover);
+}
+
+/* An enabled skill is live in every session on the machine — worth a seam. */
+.srow[data-enabled='true']::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+.srow__grip {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.srow:hover .srow__grip {
+  opacity: 1;
+}
+
+.srow__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.srow__name {
+  font-size: var(--t-md);
+  color: var(--text-secondary);
+}
+
+.srow[data-enabled='true'] .srow__name {
+  color: var(--text-primary);
+}
+
+.srow__desc {
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.srow[data-problem='true'] .srow__desc {
+  color: var(--warn);
+}
+
+/* "this name exists in another agent's folder too" — a hint, never a blocker */
+.srow__dupe {
+  flex: none;
+  height: 15px;
+  padding: 0 var(--s-2);
+  display: grid;
+  place-items: center;
+  font-size: var(--t-eyebrow);
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-full);
+}
+
+/* ---------------------------------------------------------------- switch */
+
+.srow__switch {
+  flex: none;
+  position: relative;
+  width: 26px;
+  height: 15px;
+  border-radius: var(--r-full);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-strong);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.srow__switch:hover {
+  border-color: var(--accent-line);
+}
+
+.srow__switch[aria-checked='true'] {
+  background: var(--accent-wash);
+  border-color: var(--accent-line);
+}
+
+.srow__switch[data-conflict='true'],
+.srow__switch[data-conflict='true']:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger-line);
+}
+
+.srow__switch[disabled] {
+  opacity: 0.5;
+}
+
+.srow__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--r-full);
+  background: var(--text-muted);
+  transition:
+    transform var(--dur-med) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.srow__switch[aria-checked='true'] .srow__knob {
+  transform: translateX(11px);
+  background: var(--accent);
+}
+
+.srow__menu {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.srow:hover .srow__menu {
+  opacity: 1;
+}
+
+.srow__menu-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-md);
+}
+
+/* ------------------------------------------------------- drop on a pane
+ *
+ * Set by installSkillDropTarget straight onto the pane element, because that
+ * component belongs to another milestone and this feature borrows it without
+ * leaving a mark. The ring is drawn on ::after so it cannot disturb whatever
+ * the pane is already doing with its own borders.
+ */
+
+.pane[data-skill-drop='true']::after,
+.mtile[data-skill-drop='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: inherit;
+  /* Two pixels and a wash, not one: the pane you are dropping onto is almost
+     always the focused one, and a 1px accent ring is exactly what focus already
+     looks like. This has to read as a different thing at a glance. */
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  box-shadow:
+    inset 0 0 0 1px var(--bg-terminal),
+    0 0 0 1px var(--accent-glow);
+}
+
+/* ----------------------------------------------------------- menu bits */
+
+.popover__hint[data-danger='true'] {
+  color: var(--danger);
+}

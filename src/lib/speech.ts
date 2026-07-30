@@ -99,6 +99,46 @@ export function speakable(text: string, limit = 340): string {
   return (stop > 80 ? out.slice(0, stop + 1) : out).trim()
 }
 
+/**
+ * Did the microphone just hear Forge?
+ *
+ * The panel already refuses phrases that arrive *while* it is talking, and the
+ * sidecar is stopped for the duration. Neither is enough on laptop speakers:
+ * the sidecar cuts a phrase on silence, so the words land a beat *after* the
+ * audio stops, by which time the guard has lifted. Seen live — Forge said
+ * "Typed into Terminal 6 Claude Code, auto-relay is off in Settings", heard it,
+ * and sent it to the brain as though Steve had said it.
+ *
+ * Compared on words rather than characters because speech-to-text mangles the
+ * spelling and not the shape: "Claude Code" comes back "clawed code". A
+ * transcript that is mostly words Forge just said, within a few seconds of it
+ * saying them, is Forge. Deliberately blunt: the cost of a false positive is
+ * one repeated sentence, and the cost of a false negative is the app talking
+ * to itself in a loop.
+ */
+export function echoOverlap(heard: string, spoken: string): number {
+  const words = (t: string): string[] =>
+    t
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]+/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean)
+  const mine = words(heard)
+  if (mine.length === 0) return 0
+  const said = new Set(words(spoken))
+  if (said.size === 0) return 0
+  let shared = 0
+  for (const w of mine) if (said.has(w)) shared += 1
+  return shared / mine.length
+}
+
+/** How long after Forge stops talking its own words can still arrive. */
+export const ECHO_WINDOW_MS = 6000
+/** Below three words there is nothing to be confident about. */
+const ECHO_MIN_WORDS = 3
+/** Most of it has to be Forge's own words. */
+const ECHO_RATIO = 0.7
+
 export interface SpeakOptions {
   voiceName?: string
   rate?: number
@@ -128,6 +168,20 @@ class Speaker {
   private spoken = new Set<string>()
   /** How many utterances are queued. Must never exceed one. */
   private queued = 0
+  /** The last thing said out loud, and when it stopped. For echo rejection. */
+  private lastText = ''
+  private lastEndedAt = 0
+  /**
+   * True while a *neural* clip is playing.
+   *
+   * Echo rejection has to cover both engines or it covers neither: the words
+   * coming back through the microphone are the same words whether SAPI or
+   * Gemini said them, and `gemini` is the default. Since a Gemini clip goes
+   * through Web Audio and never touches `speechSynthesis`, `this.current` is
+   * null for the whole of it — hence this second flag, set by
+   * `rememberSpoken`/`finishedSpeaking` in src/lib/tts.ts.
+   */
+  private externalSpeaking = false
 
   get available(): boolean {
     return typeof window !== 'undefined' && 'speechSynthesis' in window
@@ -153,6 +207,57 @@ class Speaker {
     if (!this.available) return
     window.speechSynthesis.cancel()
     this.settle()
+  }
+
+  /**
+   * Is this transcript Forge's own voice coming back through the microphone?
+   *
+   * True only just after it finished talking, and only for a phrase that is
+   * mostly the words it used. `now` is injectable so this is testable without
+   * a clock.
+   */
+  heardItself(text: string, now: number = Date.now()): boolean {
+    if (!this.lastText) return false
+    const since = now - this.lastEndedAt
+    // While it is still talking the window is open too: the panel's own guard
+    // handles that case, but a phrase cut mid-sentence must not slip past here.
+    // "Still talking" means either engine — see `externalSpeaking`.
+    if (!this.speaking && !this.externalSpeaking && (since < 0 || since > ECHO_WINDOW_MS)) return false
+    const words = text.trim().split(/\s+/).filter(Boolean)
+    if (words.length < ECHO_MIN_WORDS) return false
+    return echoOverlap(text, this.lastText) >= ECHO_RATIO
+  }
+
+  /**
+   * Forget what was just said, so the next phrase is taken at face value.
+   *
+   * Called when Steve interrupts: cancelling means the sentence is over and
+   * whatever comes next is his, even if it happens to use the same words.
+   */
+  forgetLastSpoken(): void {
+    this.lastText = ''
+    this.lastEndedAt = 0
+    this.externalSpeaking = false
+  }
+
+  /**
+   * Tell the echo guard what another engine is about to say.
+   *
+   * The neural voice in src/lib/tts.ts plays through Web Audio, so nothing here
+   * would otherwise know a word had been spoken — and the microphone a foot
+   * from the speakers does not care which engine said it. Called around
+   * playback, in that order, so the window stays open until the clip ends.
+   */
+  rememberSpoken(text: string): void {
+    this.lastText = speakable(text)
+    this.lastEndedAt = 0
+    this.externalSpeaking = true
+  }
+
+  /** The other engine has stopped. Starts the echo window running. */
+  finishedSpeaking(): void {
+    this.externalSpeaking = false
+    this.lastEndedAt = Date.now()
   }
 
   /** How many utterances are in flight — 0 or 1, and a test asserts it. */
@@ -190,6 +295,8 @@ class Speaker {
     if (voice) utterance.voice = voice as SpeechSynthesisVoice
     utterance.rate = options.rate ?? 1.05
     this.current = utterance
+    this.lastText = body
+    this.lastEndedAt = 0
     this.announce(true)
 
     this.queued += 1
@@ -200,6 +307,7 @@ class Speaker {
         done = true
         this.queued = Math.max(0, this.queued - 1)
         window.clearTimeout(guard)
+        this.lastEndedAt = Date.now()
         this.settle()
         resolve(spoke)
       }
