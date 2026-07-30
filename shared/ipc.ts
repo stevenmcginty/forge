@@ -41,10 +41,22 @@ export const IPC = {
   sttStatusEvent: 'stt:status-event',
   sttPhrase: 'stt:phrase',
 
+  // speech model download (main process owns it, so it survives the popover
+  // that started it being closed)
+  sttDownloadModel: 'stt:download-model',
+  sttDownloadCancel: 'stt:download-cancel',
+  sttDownloadState: 'stt:download-state',
+  sttDownloadProgress: 'stt:download-progress',
+  sttDownloadDone: 'stt:download-done',
+  sttDownloadError: 'stt:download-error',
+
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
   openPath: 'shell:open-path',
   openExternal: 'shell:open-external',
+
+  // onboarding — is `claude` / `kimi` / `gemini` on this machine's PATH?
+  agentsProbe: 'agents:probe',
 
   // window
   appInfo: 'app:info',
@@ -52,6 +64,7 @@ export const IPC = {
   windowToggleMaximize: 'window:toggle-maximize',
   windowClose: 'window:close',
   windowState: 'window:state',
+  windowTitlebar: 'window:titlebar',
 
   // voice agent (M4)
   voiceGemini: 'voice:gemini',
@@ -62,6 +75,10 @@ export const IPC = {
   // voice agent's executor can generate images too.
   voiceMakeImage: 'voice:make-image',
   voiceEditImage: 'voice:edit-image',
+
+  // system probes (M6 settings page)
+  systemUserName: 'system:user-name',
+  systemClaudeVersion: 'system:claude-version',
 
   // diagnostics
   rendererError: 'diag:renderer-error'

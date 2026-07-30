@@ -1,4 +1,4 @@
-import type { LayoutNode, PaneLeaf, SplitDirection } from '@shared/types'
+import type { ClaudePermissionMode, LayoutNode, PaneLeaf, SplitDirection } from '@shared/types'
 import { makeId } from './ids'
 
 /**
@@ -7,8 +7,12 @@ import { makeId } from './ids'
  * trees — nothing is mutated, so React sees real changes.
  */
 
-export function makeLeaf(profileId: string, title = ''): PaneLeaf {
-  return { type: 'leaf', id: makeId('pane'), profileId, title }
+export function makeLeaf(profileId: string, title = '', permissionMode?: ClaudePermissionMode): PaneLeaf {
+  const leaf: PaneLeaf = { type: 'leaf', id: makeId('pane'), profileId, title }
+  // Only carried when the chooser actually overrode the profile's default, so a
+  // saved layout does not freeze today's default into every pane forever.
+  if (permissionMode) leaf.permissionMode = permissionMode
+  return leaf
 }
 
 export function collectLeaves(node: LayoutNode, out: PaneLeaf[] = []): PaneLeaf[] {

@@ -71,6 +71,33 @@
 
 /* The activity dot itself lives in ActivityDot.css — the mosaic wears it too. */
 
+/* ------------------------------------------------------- permission chip
+ *
+ * A pane running with reduced prompting says so in its own header. Bypass gets
+ * the danger colour and a solid rim: it is the one setting in Forge that can
+ * cost you a folder, and it must never be something you discover afterwards.
+ */
+
+.pane__perm {
+  flex: none;
+  padding: 0 var(--s-2);
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-xs);
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+  border: 1px solid var(--warn-line);
+  background: var(--warn-soft);
+}
+
+.pane__perm[data-danger='true'] {
+  color: var(--danger);
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+}
+
 /* ---------------------------------------------------------------- status */
 
 .pane__status {

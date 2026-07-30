@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { PaneLeaf, Project } from '@shared/types'
 import { isPaneDead, paneStatusLabel, usePaneRuntime } from '@/hooks/usePaneRuntime'
-import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import {
+  isClaudeCommand,
+  launchCommand,
+  leafPermissionMode,
+  paneDisplayTitle,
+  permissionChip,
+  resolveProfile
+} from '@/lib/agents'
 import { droppedFilePaths } from '@/lib/paths'
 import { terminalHost, type TerminalSpec } from '@/lib/terminals'
-import { isClaudeCommand, remoteControlName, REMOTE_CONTROL_URL } from '@shared/remote'
+import { remoteControlName, REMOTE_CONTROL_URL } from '@shared/remote'
 import { useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
@@ -31,6 +38,10 @@ export function TerminalPane({
 }): ReactNode {
   const { state, actions } = useApp()
   const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
+  // The pane's own permission override beats the profile's default, and is what
+  // actually goes on the command line — see launchCommand.
+  const override = leafPermissionMode(leaf)
+  const chip = permissionChip(profile, override)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const splitBtnRef = useRef<HTMLButtonElement | null>(null)
@@ -48,7 +59,7 @@ export function TerminalPane({
   // change never tears the terminal down.
   const specRef = useRef<TerminalSpec>({
     cwd: project.path,
-    bootstrapCommand: profile.command,
+    bootstrapCommand: launchCommand(profile, override),
     fontSize: state.settings.terminalFontSize,
     fontFamily: state.settings.terminalFontFamily,
     accent: profile.accent,
@@ -57,7 +68,7 @@ export function TerminalPane({
   })
   specRef.current = {
     cwd: project.path,
-    bootstrapCommand: profile.command,
+    bootstrapCommand: launchCommand(profile, override),
     fontSize: state.settings.terminalFontSize,
     fontFamily: state.settings.terminalFontFamily,
     accent: profile.accent,
@@ -209,6 +220,21 @@ export function TerminalPane({
             {paneDisplayTitle(profile, leaf.title)}
           </button>
         )}
+
+        {/* A pane that never asks permission says so, always. */}
+        {chip ? (
+          <span
+            className="pane__perm mono"
+            data-danger={chip.danger ? 'true' : undefined}
+            title={
+              chip.danger
+                ? 'Launched with --dangerously-skip-permissions: this agent will not ask before acting'
+                : `Launched in ${chip.label.toLowerCase()} mode`
+            }
+          >
+            {chip.label}
+          </span>
+        ) : null}
 
         <ActivityDot paneId={leaf.id} status={runtime.status} />
 
@@ -367,8 +393,8 @@ export function TerminalPane({
         align="end"
         title={chooser === 'column' ? 'Split down with' : 'Split right with'}
         onClose={() => setChooser(null)}
-        onPick={(profileId) => {
-          if (chooser) actions.splitPane(leaf.id, chooser, profileId)
+        onPick={(profileId, permissionMode) => {
+          if (chooser) actions.splitPane(leaf.id, chooser, profileId, permissionMode)
         }}
       />
     </section>

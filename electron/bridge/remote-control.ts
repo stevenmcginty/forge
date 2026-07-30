@@ -1,4 +1,5 @@
-import { commandExe, composeRemoteControl, remoteControlName } from '@shared/remote'
+import { commandExe } from '@shared/agents'
+import { composeRemoteControl, remoteControlName } from '@shared/remote'
 import { getSettings } from '../store'
 
 /**

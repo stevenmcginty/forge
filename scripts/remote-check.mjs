@@ -76,7 +76,7 @@ async function main() {
     '@lydell/node-pty'
   ])
 
-  const { REMOTE_NAME_MAX, composeRemoteControl, findRemoteSessionUrl, isClaudeCommand, remoteControlName } = remote
+  const { REMOTE_NAME_MAX, composeRemoteControl, findRemoteSessionUrl, remoteControlName } = remote
 
   /* ------------------------------------------------------------ 1. naming */
 
@@ -120,7 +120,11 @@ async function main() {
     `C:\\tools\\claude.exe --remote-control 'Forge — Claude Code'`,
     'an absolute path to claude.exe is recognised'
   )
-  log(isClaudeCommand('claude.cmd --resume') && !isClaudeCommand('gemini'), 'isClaudeCommand agrees with the composer')
+  eq(
+    composeRemoteControl('claude.cmd --resume', name),
+    `claude.cmd --resume --remote-control 'Forge — Claude Code'`,
+    "npm's .cmd shim is recognised as Claude too"
+  )
 
   // The order pty-host.ts applies them in: Remote Control, then the bridge,
   // whose `--mcp-config <configs...>` is variadic and has to stay last.

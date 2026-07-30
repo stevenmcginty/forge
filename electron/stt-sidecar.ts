@@ -14,11 +14,17 @@ import {
   reduceSttEvent,
   sttStatusEqual
 } from './stt-protocol'
+import { activeModelDir } from './stt-model'
 import { getSettings } from './store'
 
 /**
- * The dictation host: owns the Python STT sidecar (stt/stt_service.py) and
- * bridges its newline-JSON protocol to the renderer.
+ * The dictation host: owns the STT sidecar and bridges its newline-JSON
+ * protocol to the renderer.
+ *
+ * The sidecar is one of two things — the frozen `forge-stt.exe` we ship, or
+ * stt/stt_service.py under a configured interpreter (see resolveLaunch). Both
+ * speak the identical protocol, so everything below this point is the same
+ * either way.
  *
  * Three things this file exists to get right:
  *
@@ -102,33 +108,93 @@ function resolveScript(): string | null {
   return candidates.find((p) => p && existsSync(p)) ?? null
 }
 
+/**
+ * The frozen sidecar — stt/stt_service.py run through PyInstaller (see
+ * scripts/build-stt.mjs), shipped as resources/stt-bin. Its whole point is that
+ * a packaged Forge needs no Python on the target machine at all.
+ */
+function resolveFrozen(): string | null {
+  const candidates = [
+    // Packaged: extraResources puts the one-folder build here.
+    process.resourcesPath ? join(process.resourcesPath, 'stt-bin', 'forge-stt.exe') : '',
+    // Dev: whatever `node scripts/build-stt.mjs` last produced.
+    join(__dirname, '..', '..', 'stt-dist', 'forge-stt', 'forge-stt.exe'),
+    join(app.getAppPath(), 'stt-dist', 'forge-stt', 'forge-stt.exe')
+  ]
+  return candidates.find((p) => p && existsSync(p)) ?? null
+}
+
+interface Launch {
+  exe: string
+  /** Everything before the sidecar's own flags. */
+  lead: string[]
+  frozen: boolean
+}
+
+/** The configured interpreter plus stt/stt_service.py, if both are usable. */
+function resolveInterpreted(): Launch | null {
+  const settings = getSettings()
+  if (pythonLooksMissing(settings.sttPython, existsSync)) return null
+  const script = resolveScript()
+  if (!script) return null
+  return { exe: settings.sttPython, lead: [script], frozen: false }
+}
+
+/**
+ * How to start the sidecar.
+ *
+ * Packaged, the frozen exe wins: no interpreter needed, no version skew, and
+ * the only thing a friend who has never installed Python is going to have. The
+ * configured python + stt/stt_service.py is the fallback, for anyone whose own
+ * venv is better than our freeze.
+ *
+ * In *development* the order flips, because `npm run dev` with a stale
+ * stt-dist/ next door would otherwise silently run last week's frozen copy and
+ * ignore every edit to stt_service.py. Set FORGE_STT_FROZEN=1 to test the
+ * shipped path from a dev checkout.
+ *
+ * Returns null with the reason already reported when neither is available.
+ */
+function resolveLaunch(): Launch | null {
+  const preferFrozen = app.isPackaged || process.env['FORGE_STT_FROZEN'] === '1'
+  const frozen = resolveFrozen()
+
+  if (preferFrozen && frozen) return { exe: frozen, lead: [], frozen: true }
+
+  const interpreted = resolveInterpreted()
+  if (interpreted) return interpreted
+  if (frozen) return { exe: frozen, lead: [], frozen: true }
+
+  // Neither route is open — say which one the user can do something about.
+  const settings = getSettings()
+  if (!resolveScript()) {
+    fail('sidecar-missing', 'Neither the packaged speech engine nor stt_service.py could be found next to the app')
+    return null
+  }
+  fail(
+    'python-missing',
+    settings.sttPython
+      ? `No Python interpreter at ${settings.sttPython}`
+      : 'Dictation needs either the packaged speech engine or a Python interpreter with onnx-asr installed'
+  )
+  return null
+}
+
 /* -------------------------------------------------------------- lifecycle */
 
 function ensure(): void {
   if (child || disposing || retired) return
 
   const settings = getSettings()
-
-  if (pythonLooksMissing(settings.sttPython, existsSync)) {
-    fail(
-      'python-missing',
-      settings.sttPython
-        ? `No Python interpreter at ${settings.sttPython}`
-        : 'No Python interpreter configured for dictation'
-    )
-    return
-  }
-
-  const script = resolveScript()
-  if (!script) {
-    fail('sidecar-missing', 'stt_service.py could not be found next to the app')
-    return
-  }
+  const launch = resolveLaunch()
+  if (!launch) return
 
   const args = [
-    script,
+    ...launch.lead,
+    // Empty is a legitimate answer — "nothing configured, nothing found" — and
+    // the sidecar turns it into a clean model-missing rather than guessing.
     '--model-dir',
-    settings.sttModelDir,
+    activeModelDir(),
     '--auto-stop',
     String(settings.sttAutoStopSeconds)
   ]
@@ -140,9 +206,9 @@ function ensure(): void {
 
   let proc: ChildProcess
   try {
-    proc = spawn(settings.sttPython, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+    proc = spawn(launch.exe, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   } catch (err) {
-    fail('python-missing', err instanceof Error ? err.message : String(err))
+    fail(launch.frozen ? 'sidecar-missing' : 'python-missing', err instanceof Error ? err.message : String(err))
     return
   }
   child = proc
@@ -150,8 +216,12 @@ function ensure(): void {
   proc.on('error', (err: NodeJS.ErrnoException) => {
     if (proc !== child) return
     child = null
-    if (err.code === 'ENOENT') fail('python-missing', `Could not launch ${settings.sttPython}`)
-    else fail('internal', err.message)
+    if (err.code === 'ENOENT') {
+      fail(
+        launch.frozen ? 'sidecar-missing' : 'python-missing',
+        `Could not launch ${launch.exe}`
+      )
+    } else fail('internal', err.message)
   })
 
   proc.stdout?.setEncoding('utf8')

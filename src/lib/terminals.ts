@@ -112,8 +112,8 @@ interface Listeners {
 
 /**
  * The palette comes off the design tokens rather than being written twice.
- * Read once per terminal creation (a getComputedStyle call is not free) and
- * cached, because tokens.css is static for the life of the window.
+ * Read once (a getComputedStyle call is not free) and cached — the tokens only
+ * move when the theme does, and `refreshTheme()` below is what tells us.
  */
 let paletteCache: Record<string, string> | null = null
 
@@ -743,6 +743,26 @@ class TerminalHost {
 
   runtime(paneId: string): PaneRuntime {
     return this.entries.get(paneId)?.runtime ?? IDLE_RUNTIME
+  }
+
+  /**
+   * Re-read the terminal tokens and repaint every live terminal.
+   *
+   * Switching theme has to reach the terminals or the app ends up light with
+   * four black holes in it. The palette is cached at create time for speed, so
+   * the cache is dropped first; each terminal then gets a fresh ITheme built
+   * against its own accent, and a forced refresh, because xterm only repaints
+   * the rows it thinks changed and a colour swap changes none of them.
+   *
+   * Call *after* the new tokens are on the document — this reads computed
+   * style, so it sees whatever is there at the moment it runs.
+   */
+  refreshTheme(): void {
+    paletteCache = null
+    for (const entry of this.entries.values()) {
+      entry.term.options.theme = baseTheme(entry.spec.accent)
+      entry.term.refresh(0, entry.term.rows - 1)
+    }
   }
 
   applyTypography(fontSize: number, fontFamily: string): void {

@@ -16,6 +16,7 @@
  *                             enabled (optionally named)
  *   --rc                      alias (the CLI reads `remoteControl ?? rc`)
  */
+import { isClaudeCommand } from './agents'
 
 /** The session list — where the popover's button goes before we know better. */
 export const REMOTE_CONTROL_URL = 'https://claude.ai/code'
@@ -65,25 +66,6 @@ export function remoteControlName(projectName: string, paneTitle: string): strin
   const joined = project && pane && project !== pane ? `${project} — ${pane}` : project || pane
   const name = joined || 'Forge'
   return name.length > REMOTE_NAME_MAX ? tidy(name.slice(0, REMOTE_NAME_MAX)) : name
-}
-
-/** The executable a bootstrap command runs, lower-cased and de-suffixed. */
-export function commandExe(command: string): string {
-  const first = command.trim().split(/\s+/)[0] ?? ''
-  return first
-    .replace(/^.*[\\/]/, '')
-    .replace(/^["']|["']$/g, '')
-    .toLowerCase()
-    .replace(/\.(exe|cmd|bat|ps1)$/, '')
-}
-
-/**
- * Is this really Claude Code? A profile whose command Steve has rewritten to
- * `claude --resume` still is; one he has pointed at another tool is not, and
- * handing that tool an unknown flag would only break the pane.
- */
-export function isClaudeCommand(command: string): boolean {
-  return commandExe(command) === 'claude'
 }
 
 /** Already asked for Remote Control by hand — leave the command alone. */

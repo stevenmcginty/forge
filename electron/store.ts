@@ -1,9 +1,9 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
-import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
-import type { Project, Settings, StoreSnapshot, Workspace } from '@shared/types'
+import { BUILTIN_AGENT_PROFILES, inferKind, isClaudeCommand, isPermissionMode } from '@shared/agents'
+import type { AgentProfile, Project, Settings, StoreSnapshot, ThemeCore, Workspace } from '@shared/types'
 import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
 
 /**
@@ -20,43 +20,109 @@ import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
  */
 
 /**
- * Dictation reuses DictationMic's interpreter and its already-downloaded
- * Parakeet model rather than shipping a second 660 MB copy. Both are editable
- * in settings.json (and from the pill's setup card) for anyone whose install
- * lives elsewhere.
+ * Dictation's two paths default to *nothing found*, and are filled in only when
+ * this particular machine happens to have something usable.
+ *
+ * A packaged Forge carries its own frozen sidecar and downloads its own model,
+ * so the normal answer on a fresh install is the empty string — which the
+ * dictation host reports as a clean setup state rather than pointing at a folder
+ * that only exists on the machine Forge was written on.
+ *
+ * The fast path is for that machine: an install of DictationMic already has an
+ * interpreter with onnx-asr in it and has already paid for the 660 MB model, so
+ * if it is there, use it. Both are editable in settings.json and from Settings.
  */
-const DICTATION_HOME = join(homedir(), 'Desktop', 'DictationMic')
+const PARAKEET_NAME = 'parakeet-tdt-0.6b-v2'
 
-const DEFAULT_SETTINGS: Settings = {
-  agentProfiles: BUILTIN_AGENT_PROFILES,
-  lastProjectId: null,
-  railCollapsed: false,
-  terminalFontSize: 13,
-  terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
-  shell: 'pwsh.exe',
-  catchShots: true,
-  shotsKeep: DEFAULT_KEEP,
-  window: { width: 1440, height: 900, maximized: false },
-  sttPython: join(DICTATION_HOME, 'venv', 'Scripts', 'python.exe'),
-  sttModelDir: join(DICTATION_HOME, 'models', 'parakeet-tdt-0.6b-v2'),
-  sttAutoStopSeconds: 10,
-  sttHotkey: 'ControlRight',
-  voicePanelOpen: false,
-  voicePanelWidth: 380,
-  // Gemini is the live brain; with no key set it degrades to the stub.
-  voiceBrain: 'gemini',
-  anthropicKey: '',
-  geminiKey: '',
-  geminiModel: 'gemini-2.5-flash',
-  // Empty = use gemini-media.ts's built-in default, which the MCP bridge shares.
-  geminiImageModel: '',
-  openrouterKey: '',
-  // Mirrors DEFAULT_OPENROUTER_MODEL in src/lib/voicebrain.ts, the same way
-  // geminiModel above mirrors DEFAULT_GEMINI_MODEL — main cannot import a
-  // renderer module, and voice-check asserts the two literals still agree.
-  openrouterModel: 'google/gemini-2.5-flash-lite',
-  // Steve wants his Claude panes reachable from his phone out of the box.
-  remoteControlDefault: true
+/** The Windows account name, for the account chip's first run. */
+function defaultAccountName(): string {
+  try {
+    const name = userInfo().username.trim()
+    if (!name) return 'You'
+    // "steve" reads better with a capital on a chip you look at all day.
+    return name.charAt(0).toUpperCase() + name.slice(1)
+  } catch {
+    return 'You'
+  }
+}
+
+function dictationMicHome(): string {
+  return join(homedir(), 'Desktop', 'DictationMic')
+}
+
+/** An interpreter that can import onnx-asr, if one is sitting on this disk. */
+function detectSttPython(): string {
+  const candidate = join(dictationMicHome(), 'venv', 'Scripts', 'python.exe')
+  return existsSync(candidate) ? candidate : ''
+}
+
+/**
+ * A Parakeet model already on this disk: Forge's own download first, then
+ * DictationMic's copy. Empty when neither is there.
+ *
+ * Deliberately not shared with electron/stt-model.ts's defaultModelDir(): that
+ * one is evaluated live on every spawn, this one only seeds a fresh
+ * settings.json. Keeping them apart means downloading the model does not have to
+ * rewrite a setting the user may have pointed somewhere else on purpose.
+ */
+function detectSttModelDir(): string {
+  for (const candidate of [
+    join(resolveDataRoot(), 'models', PARAKEET_NAME),
+    join(dictationMicHome(), 'models', PARAKEET_NAME)
+  ]) {
+    if (existsSync(candidate)) return candidate
+  }
+  return ''
+}
+
+/**
+ * A fresh settings.json, computed rather than frozen: two of these values are
+ * answers about *this* machine (is there a DictationMic to borrow from, what is
+ * this Windows account called), and a constant evaluated at import time would
+ * bake the authoring machine's answers into everybody else's install.
+ */
+function defaultSettings(): Settings {
+  return {
+    agentProfiles: BUILTIN_AGENT_PROFILES,
+    lastProjectId: null,
+    railCollapsed: false,
+    terminalFontSize: 13,
+    terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
+    shell: 'pwsh.exe',
+    catchShots: true,
+    shotsKeep: DEFAULT_KEEP,
+    window: { width: 1440, height: 900, maximized: false },
+    onboarded: false,
+    sttPython: detectSttPython(),
+    sttModelDir: detectSttModelDir(),
+    sttAutoStopSeconds: 10,
+    sttHotkey: 'ControlRight',
+    voicePanelOpen: false,
+    voicePanelWidth: 380,
+    // Gemini is the live brain; with no key set it degrades to the stub.
+    voiceBrain: 'gemini',
+    anthropicKey: '',
+    geminiKey: '',
+    geminiModel: 'gemini-2.5-flash',
+    accountName: defaultAccountName(),
+    accountColor: '#C6FF4A',
+    themeId: 'volt',
+    customThemes: [],
+    reducedMotion: false,
+    themeBg: '#0b0c0e',
+    themeInk: '#e8eaed',
+    voiceAutoRelay: false,
+    voiceRelayGraceMs: 2500,
+    // Empty = use gemini-media.ts's built-in default, which the MCP bridge shares.
+    geminiImageModel: '',
+    openrouterKey: '',
+    // Mirrors DEFAULT_OPENROUTER_MODEL in src/lib/voicebrain.ts, the same way
+    // geminiModel above mirrors DEFAULT_GEMINI_MODEL — main cannot import a
+    // renderer module, and voice-check asserts the two literals still agree.
+    openrouterModel: 'google/gemini-2.5-flash-lite',
+    // Steve wants his Claude panes reachable from his phone out of the box.
+    remoteControlDefault: true
+  }
 }
 
 let dataDir = ''
@@ -138,10 +204,51 @@ function writeJson(name: string, value: unknown): void {
 
 /* ------------------------------------------------------------------ merging */
 
+/** A hex colour, or the fallback. Nothing off disk gets to be a CSS injection. */
+function hex(value: unknown, fallback: string): string {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(value.trim())
+    ? value.trim()
+    : fallback
+}
+
+/**
+ * A theme the user made. Every colour is re-validated: these end up as inline
+ * custom properties on the document, so "it came out of our own settings file"
+ * is not a good enough reason to trust the string.
+ */
+function normaliseTheme(raw: unknown): ThemeCore | null {
+  if (!raw || typeof raw !== 'object') return null
+  const t = raw as Partial<ThemeCore>
+  if (typeof t.id !== 'string' || !t.id.trim()) return null
+  const ansi = Array.isArray(t.ansi) ? t.ansi : []
+  if (ansi.length !== 16) return null
+  return {
+    id: t.id.trim().slice(0, 64),
+    name: (typeof t.name === 'string' && t.name.trim() ? t.name.trim() : t.id).slice(0, 48),
+    appearance: t.appearance === 'light' ? 'light' : 'dark',
+    bg: hex(t.bg, '#0b0c0e'),
+    panel: hex(t.panel, '#121317'),
+    text: hex(t.text, '#e8eaed'),
+    accent: hex(t.accent, '#c6ff4a'),
+    danger: hex(t.danger, '#ff5c48'),
+    warn: hex(t.warn, '#ffb347'),
+    info: hex(t.info, '#7fd1ff'),
+    ok: hex(t.ok, '#5ee6a8'),
+    termBg: hex(t.termBg, '#0e0f12'),
+    termFg: hex(t.termFg, '#e8eaed'),
+    ansi: ansi.map((c) => hex(c, '#e8eaed')),
+    custom: true,
+    ...(typeof t.basedOn === 'string' ? { basedOn: t.basedOn } : {})
+  }
+}
+
 /** Keep unknown/extra keys out, fill missing keys in, never trust the file. */
 function normaliseSettings(raw: Partial<Settings> | null): Settings {
   const s = raw ?? {}
-  const profiles = Array.isArray(s.agentProfiles) ? s.agentProfiles.filter((p) => p && p.id && p.name) : []
+  const DEFAULT_SETTINGS = defaultSettings()
+  const profiles: AgentProfile[] = Array.isArray(s.agentProfiles)
+    ? s.agentProfiles.filter((p) => p && p.id && p.name)
+    : []
   // Re-seed any built-in the user deleted by hand, preserving their edits.
   for (const builtin of BUILTIN_AGENT_PROFILES) {
     if (!profiles.some((p) => p.id === builtin.id)) profiles.push({ ...builtin })
@@ -156,6 +263,12 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // written before the flag existed, without overriding a deliberate opt-out.
     if (p.mcpBridge === undefined && builtin?.mcpBridge !== undefined) p.mcpBridge = builtin.mcpBridge
     if (p.remoteControl === undefined && builtin?.remoteControl !== undefined) p.remoteControl = builtin.remoteControl
+    // Profiles written before the shell/agent split get a kind from their
+    // command; a built-in's kind is not up for negotiation.
+    p.kind = builtin?.kind ?? inferKind(p)
+    // A permission mode on something that is not Claude is noise: drop it, so
+    // renaming a profile's command cannot leave a stale flag behind.
+    if (!isClaudeCommand(p.command) || !isPermissionMode(p.permissionMode)) delete p.permissionMode
   }
 
   const win = s.window ?? DEFAULT_SETTINGS.window
@@ -169,6 +282,11 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     shell: s.shell || DEFAULT_SETTINGS.shell,
     catchShots: s.catchShots ?? true,
     shotsKeep: clampKeep(s.shotsKeep),
+    // "First run" means no settings.json, not "no `onboarded` key". A
+    // settings.json written before onboarding existed belongs to somebody who
+    // has been using Forge for months, and showing them the welcome card would
+    // be the merge announcing itself rather than the feature working.
+    onboarded: raw === null ? false : s.onboarded !== false,
     sttPython: typeof s.sttPython === 'string' ? s.sttPython : DEFAULT_SETTINGS.sttPython,
     sttModelDir: typeof s.sttModelDir === 'string' ? s.sttModelDir : DEFAULT_SETTINGS.sttModelDir,
     // 0 legitimately means "never auto-stop", so a junk value has to fall back
@@ -194,6 +312,24 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     geminiKey: typeof s.geminiKey === 'string' ? s.geminiKey.trim() : '',
     geminiModel:
       typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel,
+    accountName:
+      typeof s.accountName === 'string' && s.accountName.trim()
+        ? s.accountName.trim().slice(0, 40)
+        : DEFAULT_SETTINGS.accountName,
+    accountColor: hex(s.accountColor, DEFAULT_SETTINGS.accountColor),
+    themeId:
+      typeof s.themeId === 'string' && s.themeId.trim() ? s.themeId.trim().slice(0, 64) : DEFAULT_SETTINGS.themeId,
+    customThemes: (Array.isArray(s.customThemes) ? s.customThemes : [])
+      .map(normaliseTheme)
+      .filter((t): t is ThemeCore => t !== null)
+      .slice(0, 40),
+    reducedMotion: Boolean(s.reducedMotion),
+    themeBg: hex(s.themeBg, DEFAULT_SETTINGS.themeBg),
+    themeInk: hex(s.themeInk, DEFAULT_SETTINGS.themeInk),
+    voiceAutoRelay: Boolean(s.voiceAutoRelay),
+    voiceRelayGraceMs: Number.isFinite(s.voiceRelayGraceMs)
+      ? clamp(s.voiceRelayGraceMs as number, 0, 60_000)
+      : DEFAULT_SETTINGS.voiceRelayGraceMs,
     // Blank is meaningful here — it means "whatever gemini-media.ts defaults to".
     geminiImageModel: typeof s.geminiImageModel === 'string' ? s.geminiImageModel.trim() : '',
     openrouterKey: typeof s.openrouterKey === 'string' ? s.openrouterKey.trim() : '',

@@ -1,0 +1,179 @@
+/*
+ * The account chip. Sits at the very bottom of the left column, under the
+ * shelf: the last thing in the rail, the way a status light is the last thing
+ * on a machine.
+ */
+
+.achip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  width: 100%;
+  height: var(--chip-h);
+  padding: 0 var(--s-5);
+  border-top: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.achip:hover,
+.achip[data-open='true'] {
+  background: var(--bg-hover);
+}
+
+.achip[data-collapsed='true'] {
+  justify-content: center;
+  padding: 0;
+  position: relative;
+}
+
+.achip__avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--avatar, var(--accent));
+  background: color-mix(in srgb, var(--avatar, var(--accent)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--avatar, var(--accent)) 38%, transparent);
+}
+
+.achip__avatar--lg {
+  width: 34px;
+  height: 34px;
+  font-size: var(--t-md);
+}
+
+.achip__name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: var(--t-md);
+  color: var(--text-primary);
+}
+
+.achip__status {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+.achip__status[data-ok='false'] {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+}
+
+/* Collapsed rail: the dot rides the avatar's shoulder. */
+.achip__status--pip {
+  position: absolute;
+  right: 12px;
+  top: 10px;
+}
+
+/* ------------------------------------------------------------------- menu */
+
+.achip__header {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-5);
+}
+
+.achip__header-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.achip__header-name {
+  font-size: var(--t-lg);
+  font-weight: 600;
+}
+
+.achip__header-sub {
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+}
+
+.achip__conn {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  width: 100%;
+  min-height: 26px;
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.achip__conn:hover:not([disabled]) {
+  background: var(--bg-hover);
+}
+
+.achip__conn[disabled] {
+  cursor: default;
+}
+
+.achip__conn-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+}
+
+.achip__themes {
+  display: flex;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-4) var(--s-3);
+  flex-wrap: wrap;
+}
+
+.achip__theme {
+  position: relative;
+  width: 26px;
+  height: 20px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--line-strong);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.achip__theme:hover {
+  transform: translateY(-1px);
+}
+
+.achip__theme[data-selected='true'] {
+  border-width: 1px;
+  box-shadow: 0 0 0 1px currentColor;
+}
+
+.achip__theme span {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 3px;
+  border-radius: var(--r-full);
+}
+
+.achip__row-name {
+  flex: 1;
+  text-align: left;
+  font-size: var(--t-md);
+}
+
+.achip__row-keys {
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}

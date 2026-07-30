@@ -272,24 +272,46 @@ function resolveCwd(cwd: string): string | null {
 /**
  * Names never passed down to a pane, whatever the parent process has set.
  *
- * Three groups, one rule — a pane is a *fresh* agent session, not a child of
- * whatever launched Forge:
+ * Three groups, one rule — a pane is a *fresh* top-level agent session, not a
+ * continuation of whatever launched Forge:
  *
- *  1. Remote Control killers. `--remote-control` needs feature-flag evaluation
+ *  1. Claude session markers. Claude Code sets these on its own children to say
+ *     "you are running inside an agent session". They are correct for the
+ *     process Claude spawned and wrong for everything that process goes on to
+ *     launch: start Forge from a Claude pane and every terminal in it inherits
+ *     them, so a fresh `claude` in a Forge pane believes it is a child of a
+ *     session that is nothing to do with it and turns transcript saving off
+ *     ("⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION
+ *     marker").
+ *
+ *  2. Remote Control killers. `--remote-control` needs feature-flag evaluation
  *     and a claude.ai OAuth login talking to api.anthropic.com; each of these
  *     silently removes one of those, and Steve has DO_NOT_TRACK and friends set
  *     globally. Inheriting them would make the phone feature simply not appear,
  *     with no error to explain why. (Mirrors REMOTE_CONTROL_KILLERS in
  *     shared/remote.ts — duplicated rather than imported because this module is
  *     bundled stand-alone by scripts/pty-smoke.mjs.)
- *  2. Claude session markers. Forge itself is often started from inside a
- *     Claude Code session; without stripping these, every pane would think it
- *     was a nested child of that session and report against its id.
+ *
+ *     This group includes the authentication variables, which is a deliberate
+ *     call and the one thing here a user could miss: **a Forge pane always
+ *     authenticates with the claude.ai login**, never with an inherited API key
+ *     or gateway URL. That is what Remote Control requires. A pane that needs a
+ *     key should set it inside the pane, or via a wrapper the profile's command
+ *     points at. See docs/REMOTE.md.
+ *
  *  3. Electron's own injections, which confuse child Node processes — notably
  *     ELECTRON_RUN_AS_NODE, which would make `claude` boot as a bare script.
  */
 export const ENV_DENYLIST: readonly string[] = [
-  // 1. Remote Control killers
+  // 1. Claude session markers
+  'CLAUDECODE',
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_SSE_PORT',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_BRIDGE_SESSION_ID',
+  'CLAUDE_CODE_SESSION_ACCESS_TOKEN',
+  // 2. Remote Control killers
   'DISABLE_TELEMETRY',
   'DO_NOT_TRACK',
   'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
@@ -298,14 +320,6 @@ export const ENV_DENYLIST: readonly string[] = [
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',
-  // 2. Claude session markers
-  'CLAUDECODE',
-  'CLAUDE_CODE_SESSION_ID',
-  'CLAUDE_CODE_BRIDGE_SESSION_ID',
-  'CLAUDE_CODE_CHILD_SESSION',
-  'CLAUDE_CODE_ENTRYPOINT',
-  'CLAUDE_CODE_SESSION_ACCESS_TOKEN',
-  'CLAUDE_CODE_SSE_PORT',
   // 3. Electron / Node injections
   'NODE_OPTIONS',
   'ELECTRON_RUN_AS_NODE',
