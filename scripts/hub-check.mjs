@@ -252,6 +252,11 @@ ok(H.DEFAULT_HUB.x === 0 && H.DEFAULT_HUB.y === 0, 'and the renderer default mat
 const css = read('src/components/VoiceHub.css')
 ok(css.includes(`--hub-snap: ${H.HUB_SNAP_MS}ms`), 'the snap-home duration in CSS matches the one in code')
 ok(css.includes('prefers-reduced-motion'), 'the hub respects reduced motion')
+ok(css.includes('z-index: var(--z-hub)'), 'the hub sits on the shared z scale, not a magic number')
+const tokens = read('src/theme/tokens.css')
+const z = (name) => Number(new RegExp(`--z-${name}: (\\d+)`).exec(tokens)?.[1] ?? NaN)
+ok(z('hub') > z('settings'), 'the hub floats over the panes and the settings page', `${z('hub')} vs ${z('settings')}`)
+ok(z('hub') < z('popover') && z('hub') < z('toast'), 'and under popovers and toasts, which open on top of it')
 ok(/width: 180px/.test(css) && /height: 56px/.test(css), 'the floating pill is the size the code clamps for')
 ok(/width: 380px/.test(css) && /height: 520px/.test(css), 'and so is the card')
 

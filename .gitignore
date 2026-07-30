@@ -30,3 +30,6 @@ scripts/fixtures/
 companion/.firebaserc
 # Emulator state, if anyone ever runs with --export-on-exit
 companion/.emulator-data/
+
+# Throwaway FORGE_DATA_DIR for live UI checks — never a real install.
+isolated/

@@ -171,6 +171,27 @@ const HANDS_BACK: ReadonlySet<AgentPhase> = new Set<AgentPhase>([
   'warming'
 ])
 
+/**
+ * Is this Escape ours to act on?
+ *
+ * Escape has to be listened for in the *capture* phase, because by the time it
+ * has bubbled to the window a terminal or a text box has usually swallowed it —
+ * which is how the voice agent's documented "Esc leaves the conversation" quietly
+ * stopped working whenever the focus was in a pane.
+ *
+ * Capturing it, though, means taking it off whatever has focus, and Escape
+ * inside a terminal belongs to the program running there: stealing it would
+ * break vim, which is not a trade anybody would accept for a floating card. So
+ * the rule is the obvious one — if you are typing in a terminal, Escape is the
+ * terminal's; anywhere else (including inside the hub itself), it is ours.
+ */
+export function escapeIsOurs(e: KeyboardEvent): boolean {
+  if (e.key !== 'Escape' || e.defaultPrevented) return false
+  const target = e.target
+  if (!(target instanceof Element)) return true
+  return !target.closest('.xterm') || !!target.closest('.vhub')
+}
+
 export interface PaneOption {
   paneId: string
   tabId: string
@@ -456,12 +477,12 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   useEffect(() => {
     if (!surfaceOpen || !armed || hubExpanded) return undefined
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
+      if (!escapeIsOurs(e)) return
       e.preventDefault()
       toggleAgent()
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [surfaceOpen, armed, hubExpanded, toggleAgent])
 
   // "still thinking… 12s" — Gemini can take a minute on a real draft, and a

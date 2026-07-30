@@ -16,7 +16,7 @@ import {
 } from '@/lib/voicehub'
 import { useApp } from '@/state/AppState'
 import { useDictation } from '@/state/Dictation'
-import { useVoiceAgent } from '@/state/VoiceAgent'
+import { escapeIsOurs, useVoiceAgent } from '@/state/VoiceAgent'
 import { DictationGlyph } from './DictationPill'
 import { Icon } from './Icon'
 import {
@@ -230,13 +230,15 @@ export function VoiceHub(): ReactNode {
   useEffect(() => {
     if (mode !== 'expanded') return undefined
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
+      if (!escapeIsOurs(e)) return
       e.preventDefault()
       e.stopPropagation()
       actions.setVoiceHub({ mode: nextHubMode('expanded', 'escape') })
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // Capture, because a card whose composer has focus would otherwise never
+    // see the key that closes it — see escapeIsOurs.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [mode, actions])
 
   if (!isFloatingHub(mode)) return null
@@ -309,8 +311,19 @@ export function VoiceHub(): ReactNode {
       data-phase={phase}
       role="dialog"
       aria-label="Voice hub"
+      /* Focusable so grabbing the header puts the focus *in the card*. Without
+         it the focus stays wherever it was — usually a terminal — and Escape
+         would belong to that terminal rather than to the card he is holding. */
+      tabIndex={-1}
     >
-      <header className="vhub__head" onPointerDown={onDragDown} onDoubleClick={() => setMode('minimise')}>
+      <header
+        className="vhub__head"
+        onPointerDown={(e) => {
+          rootRef.current?.focus()
+          onDragDown(e)
+        }}
+        onDoubleClick={() => setMode('minimise')}
+      >
         <span className="vhub__mark" aria-hidden="true">
           <Icon name="mic" size={13} />
         </span>

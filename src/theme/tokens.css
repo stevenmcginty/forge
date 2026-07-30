@@ -178,6 +178,10 @@
   --z-divider: 5;
   --z-tabbar: 10;
   --z-settings: 40;
+  /* The floating voice hub: over the panes, the tab bar and the settings page —
+     it is the one thing you can carry across all of them — but under popovers,
+     because its own pane picker has to open on top of it. */
+  --z-hub: 50;
   --z-popover: 60;
   --z-toast: 90;
 }

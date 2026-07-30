@@ -19,6 +19,15 @@
   /* A little overshoot, so picking it up and putting it down feels sprung
      rather than mechanical. Used for the lift and the snap home. */
   --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+  /*
+   * Floating over a near-black terminal, one card shadow is invisible. These
+   * stack the same two tokens rather than inventing a darker literal, so the
+   * hub still reads as lifted in Paper — where a hard-coded black would look
+   * like a smudge.
+   */
+  --hub-shadow: var(--shadow-inset-top), var(--shadow-key), var(--shadow-ambient), var(--shadow-ambient);
+  --hub-shadow-held: var(--shadow-inset-top), var(--shadow-key), var(--shadow-ambient), var(--shadow-ambient),
+    var(--shadow-ambient);
 }
 
 .vhub {
@@ -27,14 +36,12 @@
   top: 0;
   /* Above the panes, the tab bar and the settings page; below popovers and
      toasts, which have to be able to open *over* the hub. */
-  z-index: 50;
+  z-index: var(--z-hub);
   display: flex;
   border-radius: var(--r-full);
   border: 1px solid var(--line-hairline);
   background: linear-gradient(180deg, var(--bg-panel-raised), var(--bg-sunken));
-  box-shadow:
-    var(--shadow-card),
-    var(--shadow-inset-top);
+  box-shadow: var(--hub-shadow);
   will-change: transform;
   -webkit-app-region: no-drag;
 }
@@ -75,7 +82,7 @@
 .vhub[data-phase='listening'] {
   border-color: var(--accent-line);
   box-shadow:
-    var(--shadow-card),
+    var(--hub-shadow),
     0 0 0 2px var(--accent-softer),
     0 0 22px var(--accent-glow);
 }
@@ -90,9 +97,7 @@
 /* While it is in your hand. */
 .vhub[data-dragging='true'] {
   cursor: grabbing;
-  box-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.5),
-    var(--shadow-inset-top);
+  box-shadow: var(--hub-shadow-held);
   scale: 1.02;
 }
 
@@ -100,6 +105,7 @@
 .vhub[data-magnet='true'] {
   border-color: var(--accent);
   box-shadow:
+    var(--hub-shadow),
     0 0 0 2px var(--accent-soft),
     0 0 26px var(--accent-glow);
   scale: 0.88;
@@ -252,6 +258,12 @@
   animation: vhub-rise 190ms var(--ease-spring);
 }
 
+/* It is focusable (see the tabIndex in VoiceHub.tsx) but it is not a control —
+   a ring round the whole card every time you pick it up would be noise. */
+.vhub--card:focus {
+  outline: none;
+}
+
 .vhub__head {
   display: flex;
   align-items: center;
@@ -300,6 +312,28 @@
 .vhub--card .voice__log {
   flex: 1;
   min-height: 0;
+}
+
+/*
+ * The empty state is written for a panel that is as tall as the window. In a
+ * 520px card its own padding plus the log's pushes it into a scrollbar, and the
+ * first thing he ever sees of the hub is a clipped icon. Same words, less air.
+ */
+.vhub--card .voice__log .empty {
+  height: auto;
+  margin: auto 0;
+  gap: var(--s-3);
+  padding: var(--s-3);
+}
+
+/* The plate is the first thing to go: it is decoration, and the sentence under
+   it is the part that teaches him what to say. */
+.vhub--card .voice__log .empty__plate {
+  display: none;
+}
+
+.vhub--card .voice__log .empty__body {
+  max-width: 32ch;
 }
 
 /* ------------------------------------------------------------------ foot

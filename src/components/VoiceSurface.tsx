@@ -307,7 +307,15 @@ export function VoiceComposer({ autoFocus }: { autoFocus?: boolean } = {}): Reac
         value={draftPhrase}
         onChange={(e) => setDraftPhrase(e.target.value)}
         onKeyDown={(e) => {
-          e.stopPropagation()
+          // Everything a composer swallows, except Escape.
+          //
+          // React attaches its listeners at the root container, so
+          // stopPropagation here stops the *native* event before it ever
+          // reaches window — which is where every escape hatch in the app
+          // lives. Swallowing the app's shortcuts while he types a sentence is
+          // right; swallowing the key that closes the thing he is typing into
+          // is how you trap somebody inside a floating card.
+          if (e.key !== 'Escape') e.stopPropagation()
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
             submitPhrase()
@@ -436,7 +444,10 @@ function TurnCard({
                 spellCheck={false}
                 value={turn.draft}
                 onChange={(e) => onEdit(e.target.value)}
-                onKeyDown={(e) => e.stopPropagation()}
+                /* Escape gets through — see the note on the composer. */
+                onKeyDown={(e) => {
+                  if (e.key !== 'Escape') e.stopPropagation()
+                }}
               />
 
               <div className="turn__actions">
