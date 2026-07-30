@@ -2,13 +2,14 @@
 
 An MCP server that Forge ships and registers into every **Claude Code** pane, so
 Claude can do things it otherwise cannot: watch a video, generate and edit real
-images, and get a second opinion from a different model family.
+images, generate real video, and get a second opinion from a different model
+family.
 
 `bridge/gemini-bridge.mjs` is a plain Node script speaking MCP over stdio, with
 no dependencies beyond the MCP SDK and no state of its own. `ask_gemini` and
-`summarize_video` shell out to the `gemini` binary on PATH; `make_image` and
-`edit_image` call Google's REST API directly, because the CLI has no image tool
-at all.
+`summarize_video` shell out to the `gemini` binary on PATH; `make_image`,
+`edit_image` and `make_video` call Google's REST API directly, because the CLI
+has no media tools at all.
 
 ---
 
@@ -36,8 +37,8 @@ Install the CLI itself with:
 npm install -g @google/gemini-cli
 ```
 
-**`make_image` and `edit_image` call Google's REST API directly** and need
-`GEMINI_API_KEY` in the environment. Forge writes it into the `env` block of the
+**`make_image`, `edit_image` and `make_video` call Google's REST API directly**
+and need `GEMINI_API_KEY` in the environment. Forge writes it into the `env` block of the
 `mcp.json` it generates (see *How Forge registers it* below) from the same
 Gemini key the voice agent uses. That generated file, under
 `%APPDATA%\Forge\bridge\`, and `settings.json` beside it are the only two places
@@ -128,16 +129,87 @@ Accepts `.png .jpg .jpeg .webp .gif .bmp .heic .heif` under 20 MB (the inline
 `generateContent` ceiling); anything else is refused before the call. The result
 is named `<original stem>-edited-<timestamp>.<ext>`.
 
-### Video
+### `make_video(description, out_dir?, aspect?, duration?)`
 
-**Not built, deliberately.** Google's Veo models *are* reachable with a Gemini
-API key — `veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview` and
-`veo-3.1-lite-generate-preview` all appear in `/v1beta/models`, and a live
-`:predictLongRunning` submission with Steve's key returned an operation that
-completed with a downloadable video. But it is a *different shape*: submit, poll
-an operation, then download a file from a second URL, rather than the single
-inline call both image tools use. Building that properly is its own job, so no
-half-tool ships here. `summarize_video` can still *watch* a video.
+Really generates a short video (Google **Veo**) and returns the absolute path of
+the `.mp4` it was saved to. Same default output directory as the image tools.
+
+**It takes 1–3 minutes.** The tool description says so in capitals, the voice
+agent's manifest says so, and the provisional chip in the voice panel says so —
+because an agent that thinks this is as quick as `make_image` will call it twice
+and then narrate a wait nobody was warned about.
+
+`aspect` is `16:9` or `9:16` — **not** the image list. `duration` is 4–8
+seconds. Both are validated locally before the call, because a Veo request is
+far more expensive than an image one.
+
+**The API's shape**, all verified live against Steve's key (2026-07-30) rather
+than taken from documentation. This is the part that made it a separate job from
+the image tools — three calls, not one:
+
+```
+1. POST /v1beta/models/<model>:predictLongRunning
+     { "instances": [{ "prompt": "…" }],
+       "parameters": { "aspectRatio": "16:9", "durationSeconds": 4 } }
+   → 200 { "name": "models/<model>/operations/<id>" }        ← nothing else
+
+2. GET /v1beta/models/<model>/operations/<id>
+   → { "name": … }                                          ← still running
+   → { "name": …, "done": true, "response": { "generateVideoResponse": {
+        "generatedSamples": [ { "video": { "uri": "…" } } ] } } }
+   → { "name": …, "done": true, "error": { "code", "message" } }   ← failed
+
+3. GET <that uri>
+   → video/mp4 bytes
+```
+
+There is **no progress percentage** — `done` is the only signal, so the tool
+polls at 5 s, 10 s, then every 15 s, giving up after 6 minutes with a message
+that says the render may still be running on Google's side and that no file
+exists.
+
+**Download auth** was the one genuinely unknown piece, so all three plausible
+forms were tried against a real result URI:
+
+| Request | Result |
+| --- | --- |
+| the URI bare, no auth | **403** `PERMISSION_DENIED` — "Method doesn't allow unregistered callers" |
+| `x-goog-api-key: <key>` header | **200** `video/mp4` |
+| `?key=<key>` appended | **200** `video/mp4` |
+
+The header is used, for the same reason as everywhere else in Forge: a key in a
+URL ends up in logs. Note the URI already arrives carrying `:download?alt=media`
+— nothing needs appending. Because that URI is chosen by the *API* and is then
+sent an API key, it is parsed and checked against
+`generativelanguage.googleapis.com` before the request is made; anything else is
+refused rather than fetched.
+
+**Model.** `veo-3.1-lite-generate-preview` — the cheapest of the three and the
+one proven to work on this key. `veo-3.1-fast-generate-preview` and
+`veo-3.1-generate-preview` are also present in `/v1beta/models` for the same
+key; reach them with `FORGE_GEMINI_VIDEO_MODEL`.
+
+Measured on a live run: lite, 4 s of 16:9 → operation `done` at ~47 s, 4.9 MB,
+`ftypisom`, `mvhd` duration exactly 4.00 s.
+
+Limits, confirmed by deliberately invalid requests (which are rejected at
+*submit* time, so they cost nothing):
+
+- `aspectRatio` accepts **only** `16:9` and `9:16`. `1:1`, `4:3`, `3:4`, `21:9`
+  and `16:10` are all refused with *"`aspectRatio` does not support `x`"*.
+- `durationSeconds` must be **4–8 inclusive** — *"out of bound. Please provide a
+  value between 4 and 8, inclusive"*.
+- An empty prompt is refused with *"Text to video requires prompt to be set."*
+
+Failure modes get their own sentences, as with the image tools, plus one the
+images do not need: **`tier`**. Veo is billing-only on a plain AI Studio key, and
+that is neither a quota problem (waiting will not fix it) nor a bad key, so it is
+reported as exactly what it is — *enable billing on the Google Cloud project
+behind the key*. The bytes are checked for the ISO `ftyp` signature before
+anything is written, so an error page can never land on disk named `.mp4`, and
+the file is written tmp-then-renamed like every other artefact here.
+
+`summarize_video` remains the tool for *watching* a video.
 
 ---
 
@@ -181,7 +253,8 @@ On app start (`electron/bridge/mcp-config.ts`) Forge writes
       "env": {
         "FORGE_BRIDGE_OUT": "<abs>/bridge-out",
         "GEMINI_API_KEY": "<the key from settings, omitted when unset>",
-        "FORGE_GEMINI_IMAGE_MODEL": "<only when overridden in settings>"
+        "FORGE_GEMINI_IMAGE_MODEL": "<only when overridden in settings>",
+        "FORGE_GEMINI_VIDEO_MODEL": "<only when set in Forge's own environment>"
       }
     }
   }
@@ -205,8 +278,9 @@ To opt a profile out, set `"mcpBridge": false` on it in
 ## Testing
 
 ```pwsh
-npm run bridge:smoke        # MCP protocol + graceful degradation  (89 checks)
-npm run bridge:smoke -- --live-image       # + a real image generated and edited (92)
+npm run bridge:smoke        # MCP protocol + graceful degradation  (129 checks)
+npm run bridge:smoke -- --live-image       # + a real image generated and edited
+npm run bridge:smoke -- --live-video       # + a real ~4s Veo clip (~35s, costs more)
 npm run bridge:register     # config generation + claude accepts it (17 checks)
 npm run bridge:register -- --live-claude   # + a real headless Claude run (20)
 node scripts/bridge-smoke.mjs --force-absent   # only the not-installed path
@@ -226,14 +300,25 @@ make a broken test pass): `initialize` → `tools/list` → `tools/call`.
    exact message when signed out).
 3. **Drift guard** — reads both `gemini-bridge.mjs` and
    `electron/gemini-media.ts` and asserts the duplicated constants still agree:
-   the default model, the aspect list, the count and size ceilings, the accepted
-   input types, and that each file still points at the other. The duplication is
-   deliberate (the bridge must run under bare `node`); silent divergence is not.
+   the default image *and* video models, both aspect lists, the count, size,
+   clip-length and timeout ceilings, the poll schedule, the accepted input
+   types, and that each file still points at the other. Two behaviours are
+   pinned by name as well, because neither can be proven on a working key: the
+   **`tier`** (paid-only) branch, and `safeVideoUri` — the host check that stops
+   the API key being sent to whatever URL the operation happened to return. The
+   duplication is deliberate (the bridge must run under bare `node`); silent
+   divergence is not.
 4. **`--live-image`** — generates a real image, asserts the file exists, is over
    10 KB and starts with real PNG/JPEG magic bytes (not an apology saved with a
    `.png` name), then edits it and asserts the edit is a *new* file and the
    original is byte-for-byte unchanged. The key comes from `GEMINI_API_KEY` or,
    failing that, `Desktop\DictationMic\gemini.key`. Opt-in: it spends quota.
+5. **`--live-video`** — generates one real ~4 s clip and asserts the file exists,
+   is over 100 KB and carries the ISO `ftyp` signature at offset 4. A **refusal
+   is a pass** here, but only an honest one: if the key is not billed for Veo the
+   suite asserts the tool named a cause and did *not* claim a file. Verified on
+   Steve's key 2026-07-30: 32.1 s, 1.8 MB, H.264 + AAC, `mvhd` duration exactly
+   4.00 s.
 
 ### `scripts/bridge-register-check.mjs`
 

@@ -92,6 +92,13 @@ export function writeBridgeConfig(): string | null {
   // bridge's own default stays the single source of truth otherwise.
   const imageModel = (settings.geminiImageModel ?? '').trim()
   if (imageModel) env['FORGE_GEMINI_IMAGE_MODEL'] = imageModel
+  // There is deliberately no *setting* for the video model — the cheapest Veo
+  // variant is the right default and nobody should be picking one from a
+  // dropdown. But Forge's own environment is forwarded, so starting Forge with
+  // FORGE_GEMINI_VIDEO_MODEL set reaches the panes too, which is what makes the
+  // override testable end to end rather than only inside the main process.
+  const videoModel = (process.env['FORGE_GEMINI_VIDEO_MODEL'] ?? '').trim()
+  if (videoModel) env['FORGE_GEMINI_VIDEO_MODEL'] = videoModel
 
   const config = {
     mcpServers: {

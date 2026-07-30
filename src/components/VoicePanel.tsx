@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { MAX_PANES_PER_TAB, MAX_SESSIONS } from '@shared/ipc'
 import { isShellProfile } from '@shared/agents'
-import { isSttSetupError, type AgentProfile, type SttStatus, type VoiceReplyMode } from '@shared/types'
+import {
+  isSttSetupError,
+  type AgentProfile,
+  type CompanionUtteranceEvent,
+  type SttStatus,
+  type VoiceReplyMode
+} from '@shared/types'
 import { agentMemory } from '@/lib/agentmemory'
-import { claimsCompletedAction } from '@/lib/brainjson'
+import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
 import { speaker } from '@/lib/speech'
 import { resolveProfile } from '@/lib/agents'
 import { buildManifest, type ManifestSnapshot } from '@/lib/appmanifest'
@@ -489,6 +495,21 @@ export function VoicePanel(): ReactNode {
         paths: res.paths
       }
     },
+    // Same road as makeImage, but Veo takes one to three minutes rather than
+    // six seconds, so the provisional chip the executor writes says so and this
+    // only replaces it when the file is actually on disk. Nothing is adopted
+    // into the shot shelf: that holds still images.
+    makeVideo: async (request) => {
+      const res = await window.forge.voice.makeVideo({ ...request, projectPath: project?.path })
+      if (!res.ok) return { ok: false, summary: mediaFailure(res.error), requested: 1, done: 0 }
+      return {
+        ok: true,
+        summary: `Video saved to assets/generated${res.note ? ` (${res.note})` : ''}`,
+        requested: 1,
+        done: res.paths.length,
+        paths: res.paths
+      }
+    },
     editImage: async (request) => {
       const res = await window.forge.voice.editImage({ ...request, projectPath: project?.path })
       if (!res.ok) return { ok: false, summary: mediaFailure(res.error), requested: 1, done: 0 }
@@ -712,30 +733,36 @@ export function VoicePanel(): ReactNode {
 
   /* ---------------------------------------------------- transcript intake */
 
-  const handlePhrase = useCallback(
-    (said: string) => {
+  /**
+   * One phrase, all the way through: brake, grammar, brain.
+   *
+   * Resolves with the line that answers it — the same words that get read out.
+   * That return value exists for the Companion: a phrase arriving from the
+   * phone has to be answered *back to the phone*, and the only honest answer is
+   * the one Forge actually gave. `silent` is for exactly that case: he is not
+   * at the machine, so talking to an empty room helps nobody.
+   */
+  const runPhrase = useCallback(
+    async (said: string, opts?: { silent?: boolean }): Promise<string> => {
       const id = makeId('turn')
+      const speak = async (key: string, text: string): Promise<void> => {
+        if (opts?.silent) return
+        await sayAloud(key, text)
+      }
 
       // 0a — anything heard while the agent was talking is the agent. The
       // sidecar is stopped for the duration, but a phrase it had already cut
       // can still arrive; dropping it here is what stops Forge answering itself.
-      if (speakingRef.current) return
+      // A typed phrase from the phone is never the agent, so it is let through.
+      if (speakingRef.current && !opts?.silent) return ''
 
       // 0 — the brake. While a prompt is counting down into a terminal, "wait"
       // means stop that, not "start a new conversation about waiting".
       if (holds.current.size > 0 && CANCEL_WORDS.test(said.trim())) {
         const n = cancelAllHolds()
-        setTurns((prev) => [
-          ...prev,
-          {
-            id,
-            said: n === 1 ? 'Held — not sent. It is typed in, waiting for you.' : `Held ${n} prompts — none sent.`,
-            at: Date.now(),
-            kind: 'note',
-            tone: 'warn'
-          }
-        ])
-        return
+        const held = n === 1 ? 'Held — not sent. It is typed in, waiting for you.' : `Held ${n} prompts — none sent.`
+        setTurns((prev) => [...prev, { id, said: held, at: Date.now(), kind: 'note', tone: 'warn' }])
+        return held
       }
 
       // 1 — plain commands never touch a model.
@@ -751,8 +778,8 @@ export function VoicePanel(): ReactNode {
         // A command's outcome is its own answer — "Opened 3 Claude Code tabs" is
         // exactly what he wants to hear, and it needed no model to say it.
         const spoken = outcomes.map((o) => o.summary).join('. ')
-        if (spoken) void sayAloud(id, spoken)
-        return
+        if (spoken) await speak(id, spoken)
+        return spoken
       }
 
       // 2 — everything else is a conversation with the brain.
@@ -769,9 +796,9 @@ export function VoicePanel(): ReactNode {
         projectMemory: agentMemory.cached(ctx?.activeProjectId ?? null)
       }
 
-      brain
+      return brain
         .interpret(said, context)
-        .then((reply) => {
+        .then(async (reply) => {
           thinkingSince.current = null
           if (armedRef.current && !speaksAloud) flash('replied', REPLIED_MS)
           // A send_prompt with no text of its own means "the draft in this same
@@ -810,9 +837,11 @@ export function VoicePanel(): ReactNode {
           // and not the outcome chips — reading out what he can already see is
           // exactly the "on and on" he complained about.
           const parts = [reply.say, ...(reply.questions ?? [])].filter(Boolean)
-          void sayAloud(id, parts.join(' '))
+          const answer = parts.join(' ')
+          await speak(id, answer)
+          return answer || reply.understood || ''
         })
-        .catch((err: unknown) => {
+        .catch(async (err: unknown) => {
           thinkingSince.current = null
           // An amber blip, and the conversation carries on. A brain that failed
           // is not a reason to stop listening to him.
@@ -824,15 +853,75 @@ export function VoicePanel(): ReactNode {
                 : t
             )
           )
-          void sayAloud(`${id}:error`, 'That did not work — the brain failed. Try again?')
+          const failed = 'That did not work — the brain failed. Try again?'
+          await speak(`${id}:error`, failed)
+          return failed
         })
     },
     [brain, cancelAllHolds, flash, patchOutcome, project?.path, runActions, sayAloud, speaksAloud]
   )
 
+  const handlePhrase = useCallback((said: string) => void runPhrase(said), [runPhrase])
+
   // One subscription for every source that ever registers with the bus — which
   // is how M3's dictation joins in without this component changing.
   useEffect(() => transcriptBus.onPhrase(handlePhrase), [handlePhrase])
+
+  /* ------------------------------------------------------- the phone (M9) */
+
+  /**
+   * A message typed on the phone, answered by the same agent.
+   *
+   * Two levels, and the difference is honest rather than hidden. If the phone
+   * names the project that is already open, this *is* the voice pipeline —
+   * grammar, brain, executor, chips in the panel, memory written — and the
+   * answer that comes back is the answer Forge gave. If it names any other
+   * project, Forge cannot open its tabs from here: the executor drives the
+   * panes of the active project only, and quietly running "open three
+   * terminals" against the wrong project would be worse than saying no. So
+   * that case goes to the brain with *that* project's memory, comes back with
+   * words and any drafted brief, and says plainly what it did not do.
+   *
+   * It never speaks aloud. He is holding the phone, not sitting here.
+   */
+  const handleUtterance = useCallback(
+    async (e: CompanionUtteranceEvent): Promise<void> => {
+      const say = async (text: string): Promise<void> => {
+        await window.forge.companion.reply(e.itemId, text.trim() || 'Done.')
+      }
+      const text = e.text.trim()
+      if (!text) return
+
+      // Level 1 — the project on screen. The whole pipeline, unchanged.
+      if (project && e.projectId === project.id) {
+        try {
+          await say(await runPhrase(text, { silent: true }))
+        } catch (err) {
+          await say(`That did not work: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        return
+      }
+
+      // Level 2 — a project that is not open. Words, drafts and memory, but no
+      // actions, and it says so instead of pretending.
+      try {
+        const memory = await agentMemory.prime(e.projectId)
+        const reply = await brain.interpret(text, {
+          projectName: e.projectName,
+          recentTranscript: [text],
+          manifest: manifestRef.current,
+          projectMemory: memory
+        })
+        await say(companionReplyText(reply, e.projectName))
+        void agentMemory.record({ projectId: e.projectId, utterance: text, at: Date.now(), reply })
+      } catch (err) {
+        await say(`The brain failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    },
+    [brain, project, runPhrase]
+  )
+
+  useEffect(() => window.forge.companion.onUtterance((e) => void handleUtterance(e)), [handleUtterance])
 
   useEffect(() => {
     const log = logRef.current

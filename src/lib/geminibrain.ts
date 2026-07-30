@@ -92,6 +92,7 @@ export const RESPONSE_SCHEMA = {
           'section',
           'description',
           'aspect',
+          'duration',
           'path',
           'instruction'
         ],
@@ -112,11 +113,15 @@ export const RESPONSE_SCHEMA = {
           parentDir: { type: 'STRING' },
           mode: { type: 'STRING' },
           section: { type: 'STRING' },
-          // make_image / edit_image. One flat property bag for every action
-          // kind, because responseSchema has no union type — the executor's
-          // sanitiser is what actually enforces per-kind requirements.
+          // make_image / edit_image / make_video. One flat property bag for
+          // every action kind, because responseSchema has no union type — the
+          // executor's sanitiser is what actually enforces per-kind
+          // requirements. `description` and `aspect` are shared with the image
+          // actions; `duration` is the only field make_video adds, and without
+          // it here the model physically cannot ask for a clip length.
           description: { type: 'STRING' },
           aspect: { type: 'STRING' },
+          duration: { type: 'INTEGER' },
           path: { type: 'STRING' },
           instruction: { type: 'STRING' }
         },

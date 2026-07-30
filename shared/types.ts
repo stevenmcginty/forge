@@ -312,6 +312,15 @@ export interface EditImageRequest {
   projectPath?: string
 }
 
+export interface MakeVideoRequest {
+  description: string
+  /** `16:9` or `9:16` — Veo takes no other shape. */
+  aspect?: string
+  /** Seconds, 4–8. */
+  duration?: number
+  projectPath?: string
+}
+
 export type MediaCallResult =
   | {
       ok: true

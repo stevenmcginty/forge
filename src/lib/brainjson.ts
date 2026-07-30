@@ -1,4 +1,4 @@
-import type { AppAction } from './appactions'
+import { MAX_VIDEO_SECONDS, MIN_VIDEO_SECONDS, VIDEO_ASPECT_RATIOS, type AppAction } from './appactions'
 import type { BrainReply } from './voicebrain'
 
 /**
@@ -61,6 +61,7 @@ export const ACTION_KINDS: ReadonlySet<string> = new Set([
   'new_project_hint',
   'make_image',
   'edit_image',
+  'make_video',
   'send_prompt',
   'close_tabs',
   'create_project',
@@ -113,6 +114,26 @@ const OFFER = /\b(?:can|could|would|shall|will|want|like me to|should i|do you)\
 export function claimsCompletedAction(text: string | undefined): boolean {
   if (!text) return false
   return CLAIM.test(text) && !OFFER.test(text)
+}
+
+/**
+ * What the phone gets back when it asked about a project Forge is not showing.
+ *
+ * The Companion can address any project in the rail, but the executor drives
+ * the panes of the *active* one — so a request that needs an action against
+ * some other project cannot be honoured from here, and pretending otherwise
+ * would be the worst kind of quiet failure. The words and any drafted brief
+ * still come back, because they cost nothing and are the useful part; the
+ * refusal is one plain sentence on the end, and only when actions were
+ * actually asked for. A pure question gets a pure answer with no nagging.
+ */
+export function companionReplyText(reply: BrainReply, projectName: string): string {
+  const parts = [reply.say, ...(reply.questions ?? [])].filter(Boolean)
+  const body = [parts.join(' ') || reply.understood || '']
+  const draft = reply.draftPrompt?.trim()
+  if (draft) body.push(draft)
+  if ((reply.actions ?? []).length > 0) body.push(`Switch to ${projectName} in Forge to run app actions.`)
+  return body.filter(Boolean).join('\n\n')
 }
 
 /**
@@ -294,6 +315,25 @@ export function sanitiseActions(value: unknown): AppAction[] {
         const instruction = asString(a['instruction'])
         if (!path || !instruction) continue
         out.push({ kind: 'edit_image', path, instruction })
+        break
+      }
+      case 'make_video': {
+        const description = asString(a['description'])
+        if (!description) continue
+        const action: AppAction = { kind: 'make_video', description }
+        // Veo takes landscape or portrait only, and 4-8 seconds. Anything else
+        // is dropped rather than passed on: the API would refuse it anyway, and
+        // a silently-corrected request is worse than a plain default.
+        const aspect = asString(a['aspect'])
+        if (aspect && VIDEO_ASPECT_RATIOS.includes(aspect)) action.aspect = aspect
+        const rawDuration = a['duration']
+        if (rawDuration !== undefined && rawDuration !== null) {
+          const n = typeof rawDuration === 'number' ? rawDuration : Number(rawDuration)
+          if (Number.isFinite(n)) {
+            action.duration = Math.min(MAX_VIDEO_SECONDS, Math.max(MIN_VIDEO_SECONDS, Math.round(n)))
+          }
+        }
+        out.push(action)
         break
       }
       case 'send_prompt': {
