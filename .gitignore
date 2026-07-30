@@ -5,3 +5,5 @@ dist/
 *.tsbuildinfo
 *.log
 .DS_Store
+# Temp probe files written into the root by scripts/bridge-register-check.mjs
+.bridge-check-*.cjs

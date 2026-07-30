@@ -3,6 +3,7 @@ import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import type { CreateSessionRequest, CreateSessionResult } from '@shared/types'
 import { PtySessionManager } from './pty/session-manager'
 import { getSettings } from './store'
+import { applyMcpBridge } from './bridge/mcp-config'
 
 /**
  * The PTY host: owns one PtySessionManager and bridges it to the renderer.
@@ -101,7 +102,9 @@ export function registerPtyHandlers(): void {
       cwd: String(req?.cwd ?? ''),
       cols: Number(req?.cols ?? 80),
       rows: Number(req?.rows ?? 24),
-      bootstrapCommand: req?.bootstrapCommand ?? ''
+      // Profiles flagged `mcpBridge` get Forge's Gemini bridge appended here —
+      // the one place every pane's launch command passes through.
+      bootstrapCommand: applyMcpBridge(req?.bootstrapCommand ?? '')
     }
 
     // A session can already exist when the renderer reloads (dev HMR) or after

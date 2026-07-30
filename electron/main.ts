@@ -13,6 +13,7 @@ import {
   snapshot
 } from './store'
 import { disposePtyHost, registerPtyHandlers, setPtyTarget } from './pty-host'
+import { writeBridgeConfig } from './bridge/mcp-config'
 
 const isDev = !app.isPackaged
 const BG = '#0B0C0E'
@@ -272,6 +273,9 @@ void app.whenReady().then(() => {
   // No application menu at all: every accelerator belongs to the renderer.
   Menu.setApplicationMenu(null)
   registerAppHandlers()
+  // Regenerate the cross-agent bridge's MCP config with absolute paths before
+  // any pane can launch, so Claude panes pick it up on the first bootstrap.
+  writeBridgeConfig()
   registerPtyHandlers()
   createWindow()
 
