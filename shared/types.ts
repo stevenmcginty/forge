@@ -125,6 +125,16 @@ export interface Settings {
   /** How many shots the shelf keeps before pruning the oldest. */
   shotsKeep: number
   window: WindowBounds
+
+  /* ------------------------------------------------------ dictation (M3) */
+  /** Python interpreter that can import onnx-asr + sounddevice. */
+  sttPython: string
+  /** Folder holding the Parakeet ONNX model files. */
+  sttModelDir: string
+  /** Stop listening after this many seconds of silence (0 = never). */
+  sttAutoStopSeconds: number
+  /** KeyboardEvent.code that toggles dictation while Forge is focused. */
+  sttHotkey: string
 }
 
 /* -------------------------------------------------------------------- ipc */
@@ -179,4 +189,67 @@ export interface WindowStateEvent {
 export interface StoreSnapshot {
   settings: Settings
   projects: Project[]
+}
+
+/* -------------------------------------------------------------- dictation */
+
+/**
+ * The dictation sidecar's life in one word.
+ *
+ *   off        never started (it is spawned lazily, on first use)
+ *   starting   process up, model loading — a few seconds
+ *   idle       ready and waiting for the hotkey
+ *   listening  mic open, `level` is live
+ *   finishing  mic closed, the last phrase is still being transcribed
+ *   error      see `error`; setup-shaped kinds need the user to fix a path
+ */
+export type SttPhase = 'off' | 'starting' | 'idle' | 'listening' | 'finishing' | 'error'
+
+export type SttErrorKind =
+  /** The configured interpreter is not there, or refused to launch. */
+  | 'python-missing'
+  /** stt_service.py could not be found next to the app. */
+  | 'sidecar-missing'
+  /** The model folder is absent, or its files are missing/truncated. */
+  | 'model-missing'
+  /** onnx-asr found the files but would not load them. */
+  | 'model-load'
+  /** The microphone could not be opened (in use, or no permission). */
+  | 'audio'
+  /** Asked to listen while the model was still loading. */
+  | 'not-ready'
+  /** Restarted too many times too quickly — we stopped trying. */
+  | 'crash-loop'
+  | 'internal'
+
+export interface SttError {
+  kind: SttErrorKind
+  msg: string
+}
+
+export interface SttStatus {
+  phase: SttPhase
+  /** Smoothed 0..1 mic level. Only meaningful while listening. */
+  level: number
+  error: SttError | null
+  /** True once the model has reported ready in the current sidecar process. */
+  ready: boolean
+}
+
+export interface SttPhraseEvent {
+  text: string
+}
+
+/**
+ * Errors the user has to *fix something* about, rather than retry. These put
+ * the pill in its amber state and open the setup card.
+ */
+export function isSttSetupError(kind: SttErrorKind): boolean {
+  return (
+    kind === 'python-missing' ||
+    kind === 'sidecar-missing' ||
+    kind === 'model-missing' ||
+    kind === 'model-load' ||
+    kind === 'crash-loop'
+  )
 }

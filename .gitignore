@@ -8,3 +8,7 @@ dist/
 
 # Agent worktrees (Claude Code)
 .claude/worktrees/
+
+# Generated test audio for the dictation smoke test — regenerate with
+# scripts/make-speech-wav.ps1 rather than carrying a WAV in the repo.
+scripts/fixtures/

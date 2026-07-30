@@ -52,6 +52,15 @@ const api: ForgeApi = {
     onUpdated: (cb) => subscribe(IPC.shotsUpdated, cb)
   },
 
+  stt: {
+    start: () => ipcRenderer.invoke(IPC.sttStart),
+    stop: () => ipcRenderer.invoke(IPC.sttStop),
+    reload: (force) => ipcRenderer.invoke(IPC.sttReload, force === true),
+    status: () => ipcRenderer.invoke(IPC.sttStatus),
+    onStatus: (cb) => subscribe(IPC.sttStatusEvent, cb),
+    onPhrase: (cb) => subscribe(IPC.sttPhrase, cb)
+  },
+
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
 

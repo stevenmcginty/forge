@@ -8,6 +8,8 @@ import type {
   Settings,
   Shot,
   StoreSnapshot,
+  SttPhraseEvent,
+  SttStatus,
   WindowStateEvent,
   Workspace
 } from './types'
@@ -64,6 +66,25 @@ export interface ForgeApi {
     openFolder(): Promise<string>
     /** Returns an unsubscribe function. */
     onUpdated(cb: (shots: Shot[]) => void): () => void
+  }
+
+  /**
+   * On-device dictation. The Python sidecar is spawned lazily by the first
+   * start() — nobody who never dictates pays for loading a 660 MB model.
+   */
+  stt: {
+    start(): Promise<SttStatus>
+    stop(): Promise<SttStatus>
+    /**
+     * Drop the running sidecar so freshly saved python/model paths take effect.
+     * `force` also starts a new one immediately — that is the setup card's
+     * "Retry"; without it a sidecar that was never running stays that way, and
+     * the new paths are simply used by the next start().
+     */
+    reload(force?: boolean): Promise<SttStatus>
+    status(): Promise<SttStatus>
+    onStatus(cb: (s: SttStatus) => void): () => void
+    onPhrase(cb: (e: SttPhraseEvent) => void): () => void
   }
 
   pickFolder(): Promise<string | null>

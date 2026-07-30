@@ -33,6 +33,14 @@ export const IPC = {
   shotsDrag: 'shots:drag',
   shotsOpenFolder: 'shots:open-folder',
 
+  // dictation (stt sidecar)
+  sttStart: 'stt:start',
+  sttStop: 'stt:stop',
+  sttReload: 'stt:reload',
+  sttStatus: 'stt:status',
+  sttStatusEvent: 'stt:status-event',
+  sttPhrase: 'stt:phrase',
+
   // shell / dialogs
   pickFolder: 'dialog:pick-folder',
   openPath: 'shell:open-path',

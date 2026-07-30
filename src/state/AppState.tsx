@@ -61,7 +61,11 @@ const FALLBACK_SETTINGS: Settings = {
   shell: 'pwsh.exe',
   catchShots: true,
   shotsKeep: 12,
-  window: { width: 1440, height: 900, maximized: false }
+  window: { width: 1440, height: 900, maximized: false },
+  sttPython: '',
+  sttModelDir: '',
+  sttAutoStopSeconds: 10,
+  sttHotkey: 'ControlRight'
 }
 
 const INITIAL: AppState = {
@@ -386,6 +390,8 @@ export interface AppActions {
   setFontSize(size: number): void
   setCatchShots(on: boolean): void
   setShotsKeep(keep: number): void
+  /** Generic settings write — used by the dictation setup card. Persisted. */
+  patchSettings(patch: Partial<Settings>): void
   saveProfile(profile: AgentProfile): void
   deleteProfile(id: string): void
   newTab(profileId?: string): void
@@ -571,6 +577,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       setCatchShots: (on) => dispatch({ type: 'patchSettings', patch: { catchShots: on } }),
       setShotsKeep: (keep) =>
         dispatch({ type: 'patchSettings', patch: { shotsKeep: Math.min(60, Math.max(1, Math.round(keep))) } }),
+      patchSettings: (patch) => dispatch({ type: 'patchSettings', patch }),
       saveProfile: (profile) => dispatch({ type: 'saveProfile', profile }),
       deleteProfile: (id) => dispatch({ type: 'deleteProfile', id }),
       newTab: (profileId) => dispatch({ type: 'newTab', profileId: profileId ?? defaultProfileFor(activeProjectId) }),

@@ -2,6 +2,7 @@ import { type ReactNode } from 'react'
 import { resolveProfile } from '@/lib/agents'
 import { findLeaf } from '@/lib/splitTree'
 import { useActiveProject, useActiveTab, useApp, usePaneCount } from '@/state/AppState'
+import { DictationPill } from './DictationPill'
 import './StatusBar.css'
 
 /** Thin bar of truth: where you are, how many shells are alive, what just happened. */
@@ -33,6 +34,7 @@ export function StatusBar(): ReactNode {
       </div>
 
       <div className="statusbar__right">
+        <DictationPill />
         <span className="statusbar__hint mono">Ctrl+T tab · Ctrl+W close · Alt+↑↓←→ focus</span>
         {profile ? (
           <span className="statusbar__agent mono" style={{ color: profile.accent }}>

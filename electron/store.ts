@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
 import type { Project, Settings, StoreSnapshot, Workspace } from '@shared/types'
@@ -18,6 +19,14 @@ import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
  * than crashing the app, and the bad file is kept as `<name>.corrupt`.
  */
 
+/**
+ * Dictation reuses DictationMic's interpreter and its already-downloaded
+ * Parakeet model rather than shipping a second 660 MB copy. Both are editable
+ * in settings.json (and from the pill's setup card) for anyone whose install
+ * lives elsewhere.
+ */
+const DICTATION_HOME = join(homedir(), 'Desktop', 'DictationMic')
+
 const DEFAULT_SETTINGS: Settings = {
   agentProfiles: BUILTIN_AGENT_PROFILES,
   lastProjectId: null,
@@ -27,7 +36,11 @@ const DEFAULT_SETTINGS: Settings = {
   shell: 'pwsh.exe',
   catchShots: true,
   shotsKeep: DEFAULT_KEEP,
-  window: { width: 1440, height: 900, maximized: false }
+  window: { width: 1440, height: 900, maximized: false },
+  sttPython: join(DICTATION_HOME, 'venv', 'Scripts', 'python.exe'),
+  sttModelDir: join(DICTATION_HOME, 'models', 'parakeet-tdt-0.6b-v2'),
+  sttAutoStopSeconds: 10,
+  sttHotkey: 'ControlRight'
 }
 
 let dataDir = ''
@@ -112,6 +125,14 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     shell: s.shell || DEFAULT_SETTINGS.shell,
     catchShots: s.catchShots ?? true,
     shotsKeep: clampKeep(s.shotsKeep),
+    sttPython: typeof s.sttPython === 'string' ? s.sttPython : DEFAULT_SETTINGS.sttPython,
+    sttModelDir: typeof s.sttModelDir === 'string' ? s.sttModelDir : DEFAULT_SETTINGS.sttModelDir,
+    // 0 legitimately means "never auto-stop", so a junk value has to fall back
+    // to the default rather than to clamp()'s floor.
+    sttAutoStopSeconds: Number.isFinite(s.sttAutoStopSeconds)
+      ? clamp(s.sttAutoStopSeconds as number, 0, 600)
+      : DEFAULT_SETTINGS.sttAutoStopSeconds,
+    sttHotkey: s.sttHotkey || DEFAULT_SETTINGS.sttHotkey,
     window: {
       x: typeof win.x === 'number' ? win.x : undefined,
       y: typeof win.y === 'number' ? win.y : undefined,

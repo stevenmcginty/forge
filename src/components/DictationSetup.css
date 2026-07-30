@@ -1,0 +1,101 @@
+/* Dictation settings form — lives in the pill's setup card and in Settings. */
+
+.dsetup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-2) 0;
+}
+
+/* --------------------------------------------------------------- problem */
+
+.dsetup__problem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  margin: 0 var(--s-4) var(--s-3);
+  padding: var(--s-4);
+  border-radius: var(--r-md);
+  background: rgba(255, 179, 71, 0.09);
+  border: 1px solid rgba(255, 179, 71, 0.32);
+}
+
+.dsetup__problem-title {
+  font-size: var(--t-md);
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.dsetup__problem-msg {
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  /* A path in an error message must be readable, not clipped. */
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- fields */
+
+.dsetup__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.dsetup__row .field__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dsetup__browse {
+  flex: none;
+  font-size: var(--t-xs);
+}
+
+.dsetup__select {
+  flex: none;
+  height: 24px;
+  padding: 0 var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+
+.dsetup__select:focus-visible {
+  border-color: var(--accent-line);
+}
+
+/* --------------------------------------------------------------- actions */
+
+.dsetup__actions {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-4) var(--s-2);
+  margin-top: var(--s-2);
+  border-top: 1px solid var(--line-soft);
+}
+
+.dsetup__hint {
+  flex: 1;
+  font-size: var(--t-eyebrow);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.dsetup__retry {
+  flex: none;
+  height: 26px;
+  padding: 0 var(--s-5);
+  font-size: var(--t-sm);
+}
+
+/* In the Settings popover the form is one section among many: no top border,
+   and the labels sit tighter. */
+.dsetup[data-compact='true'] {
+  gap: var(--s-1);
+}

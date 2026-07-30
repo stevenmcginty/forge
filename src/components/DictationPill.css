@@ -1,0 +1,182 @@
+/*
+ * The dictation pill. DictationMic's obsidian capsule, shrunk to status-bar
+ * height: a machined dark pebble with a hairline rim, bone dots at rest and one
+ * volt accent that only ever means "live".
+ */
+
+.dpill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 50px;
+  height: 16px;
+  padding: 0 var(--s-4);
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-hairline);
+  background: linear-gradient(180deg, var(--bg-panel-raised), var(--bg-sunken));
+  box-shadow: var(--shadow-inset-top);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.dpill:hover {
+  border-color: var(--line-strong);
+}
+
+/* ------------------------------------------------------------------- dots */
+
+.dpill__dots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* At rest: DictationMic's three sleeping dots, at its own bone-ink alpha. */
+.dpill__dot {
+  width: 3px;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: var(--text-primary);
+  opacity: 0.33;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.dpill:hover .dpill__dot {
+  opacity: 0.6;
+}
+
+/*
+ * Model still loading. DictationMic draws its LOADING state as the idle pill
+ * *dimmed*, so this stays strictly below the resting alpha — a still frame has
+ * to read as "not ready yet", not merely "animated".
+ */
+.dpill[data-phase='starting'] .dpill__dot {
+  opacity: 0.12;
+  animation: dpill-load 1.5s var(--ease-in-out) infinite;
+}
+
+.dpill[data-phase='starting'] .dpill__dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dpill[data-phase='starting'] .dpill__dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dpill-load {
+  0%,
+  100% {
+    opacity: 0.1;
+  }
+  50% {
+    opacity: 0.26;
+  }
+}
+
+/* Finishing: "your words are coming" — volt dots, pulsing in sequence. */
+.dpill[data-phase='finishing'] {
+  border-color: var(--accent-line);
+}
+
+.dpill[data-phase='finishing'] .dpill__dot {
+  background: var(--accent);
+  opacity: 0.8;
+  animation: dpill-think 1.05s var(--ease-in-out) infinite;
+}
+
+.dpill[data-phase='finishing'] .dpill__dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.dpill[data-phase='finishing'] .dpill__dot:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes dpill-think {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: scale(0.8);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+}
+
+/* ------------------------------------------------------------------ meter */
+
+.dpill[data-phase='listening'] {
+  border-color: var(--accent-line);
+  box-shadow:
+    var(--shadow-inset-top),
+    0 0 0 2px var(--accent-softer),
+    0 0 10px var(--accent-glow);
+}
+
+/* Six bars rather than DictationMic's eleven, with a gap as wide as the bar: at
+   status-bar size, eleven hairlines saturate into a solid grill instead of
+   reading as a meter. */
+.dpill__meter {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 10px;
+}
+
+.dpill__bar {
+  width: 3px;
+  height: 100%;
+  border-radius: 1.5px;
+  background: var(--accent);
+  /* Bars grow from the middle, like the pill's own meter. */
+  transform: scaleY(0.08);
+  transform-origin: center;
+  will-change: transform;
+}
+
+/* --------------------------------------------------------------- needs setup */
+
+.dpill[data-setup='true'] {
+  border-color: rgba(255, 179, 71, 0.45);
+  background: linear-gradient(180deg, rgba(255, 179, 71, 0.1), var(--bg-sunken));
+}
+
+.dpill[data-setup='true'] .dpill__dot {
+  background: var(--warn);
+  opacity: 0.85;
+}
+
+/* A single amber dot reads as one problem, not three sleeping ones. */
+.dpill[data-setup='true'] .dpill__dot:nth-child(1),
+.dpill[data-setup='true'] .dpill__dot:nth-child(3) {
+  width: 3px;
+  height: 1px;
+  border-radius: 0;
+  opacity: 0.3;
+}
+
+.dpill[data-setup='true'] .dpill__dot:nth-child(2) {
+  width: 5px;
+  height: 5px;
+  animation: dpill-warn 2.4s var(--ease-in-out) infinite;
+}
+
+@keyframes dpill-warn {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dpill__dot {
+    animation: none !important;
+  }
+}
