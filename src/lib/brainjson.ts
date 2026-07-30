@@ -67,6 +67,28 @@ export function asCount(v: unknown, fallback = 1, max = 64): number {
 }
 
 /**
+ * Does this reply *claim* to have driven the app?
+ *
+ * Models are not reliable about this. Asked for three Claude Code terminals,
+ * gemini-2.5-flash has answered "Opening three Claude Code terminals for you."
+ * with an empty `actions` array — a plain untruth, and an invisible one, because
+ * a reply with no actions renders no outcome chips at all. So when a claim is
+ * made and nothing was returned to back it, the panel says so rather than
+ * leaving the sentence standing and Steve waiting for tabs that never come.
+ *
+ * Deliberately narrow: only verbs that mean an app action, and only in the
+ * present or past. "I can open three tabs for you" is an offer, not a claim.
+ */
+const CLAIM =
+  /\b(?:opening|opened|closing|closed|creating|created|made|making|switching|switched|renaming|renamed|sending|sent|splitting|split)\b/i
+const OFFER = /\b(?:can|could|would|shall|will|want|like me to|should i|do you)\b/i
+
+export function claimsCompletedAction(text: string | undefined): boolean {
+  if (!text) return false
+  return CLAIM.test(text) && !OFFER.test(text)
+}
+
+/**
  * Tame the `say` field. Models sometimes loop ("I'm ready when you are." over
  * and over) — collapse immediate repeats and cap the length, so a bad generation
  * costs a sentence rather than the whole card.

@@ -141,14 +141,14 @@ function SpokenRepliesCard(): ReactNode {
         </select>
       </Row>
 
-      <Row label="Try it" hint="Say something in the chosen voice">
+      <Row label="Try it" hint="Say a line in the chosen voice">
         <button
           type="button"
           className="ghost-btn"
           disabled={voices.length === 0}
           onClick={() => void speaker.speak('Right. Three Claude Code terminals open.', { voiceName: s.voiceReplyVoice })}
         >
-          Speak a test line
+          Hear a sample
         </button>
       </Row>
     </Card>

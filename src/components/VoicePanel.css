@@ -408,6 +408,18 @@
   color: var(--warn);
 }
 
+/* What is left of the panel once the transcript and the composer are gone. */
+.voice__voiceonly {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: var(--s-8) var(--s-7);
+  text-align: center;
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
 /* Motion off still has to distinguish "thinking" from "off", so the sweep
  * becomes a static three-quarter ring rather than nothing at all. */
 @media (prefers-reduced-motion: reduce) {

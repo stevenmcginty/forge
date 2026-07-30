@@ -8,6 +8,7 @@ import type { BrainContext, BrainReply, BrainStatus, VoiceBrain } from './voiceb
  * arrived and needed exactly the same defensive parsing.
  */
 export {
+  claimsCompletedAction,
   extractJsonObject,
   parseBrainJson,
   salvagePartialJson,

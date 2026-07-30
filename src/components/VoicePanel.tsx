@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { MAX_PANES_PER_TAB, MAX_SESSIONS } from '@shared/ipc'
 import { isShellProfile } from '@shared/agents'
 import { isSttSetupError, type AgentProfile, type SttStatus, type VoiceReplyMode } from '@shared/types'
+import { claimsCompletedAction } from '@/lib/brainjson'
 import { speaker } from '@/lib/speech'
 import { resolveProfile } from '@/lib/agents'
 import { buildManifest, type ManifestSnapshot } from '@/lib/appmanifest'
@@ -180,14 +181,15 @@ export function VoicePanel(): ReactNode {
    * be delivered after `stop()`.
    */
   const sayAloud = useCallback(
-    async (text: string): Promise<void> => {
+    async (key: string, text: string): Promise<void> => {
       if (!speaksAloud || !text.trim() || !speaker.available) return
       speakingRef.current = true
       setSpeaking(true)
       if (armedRef.current) setPhase('speaking')
       void window.forge.stt.stop()
       try {
-        await speaker.speak(text, { voiceName: state.settings.voiceReplyVoice })
+        // Keyed by turn: a re-render cannot make it say the same thing twice.
+        await speaker.speakOnce(key, text, { voiceName: state.settings.voiceReplyVoice })
       } finally {
         // A short tail: the sidecar cuts a phrase on silence, so the last word
         // can land a beat after the audio stops.
@@ -741,7 +743,7 @@ export function VoicePanel(): ReactNode {
         // A command's outcome is its own answer — "Opened 3 Claude Code tabs" is
         // exactly what he wants to hear, and it needed no model to say it.
         const spoken = outcomes.map((o) => o.summary).join('. ')
-        if (spoken) void sayAloud(spoken)
+        if (spoken) void sayAloud(id, spoken)
         return
       }
 
@@ -770,9 +772,21 @@ export function VoicePanel(): ReactNode {
               ? { ...action, text: reply.draftPrompt }
               : action
           )
-          const outcomes = list.length
+          let outcomes = list.length
             ? runActions(list, (index, outcome) => patchOutcome(id, index, outcome))
             : undefined
+          // "Opening three Claude Code terminals for you." with an empty
+          // actions array is a lie, and a silent one. Contradict it.
+          if (!list.length && claimsCompletedAction(reply.say ?? reply.understood)) {
+            outcomes = [
+              {
+                ok: false,
+                summary: 'It said it did that, but sent no action — say it again',
+                requested: 1,
+                done: 0
+              }
+            ]
+          }
           setTurns((prev) =>
             prev.map((t) =>
               t.id === id && t.kind === 'brain'
@@ -780,11 +794,13 @@ export function VoicePanel(): ReactNode {
                 : t
             )
           )
-          // What gets read out: the chat, the questions, and what actually
-          // happened — never the drafted prompt, which is a page of markdown.
-          const parts = [reply.say ?? reply.understood, ...(reply.questions ?? [])]
-          if (outcomes?.length) parts.push(outcomes.map((o) => o.summary).join('. '))
-          void sayAloud(parts.filter(Boolean).join('. '))
+          // What gets read out, and only this: the one line meant for him, plus
+          // anything it actually needs to ask. Not the drafted prompt (a page of
+          // markdown), not `understood` (which is on screen right next to it),
+          // and not the outcome chips — reading out what he can already see is
+          // exactly the "on and on" he complained about.
+          const parts = [reply.say, ...(reply.questions ?? [])].filter(Boolean)
+          void sayAloud(id, parts.join(' '))
         })
         .catch((err: unknown) => {
           thinkingSince.current = null
@@ -798,7 +814,7 @@ export function VoicePanel(): ReactNode {
                 : t
             )
           )
-          void sayAloud('That did not work — the brain failed. Try again?')
+          void sayAloud(`${id}:error`, 'That did not work — the brain failed. Try again?')
         })
     },
     [brain, cancelAllHolds, flash, patchOutcome, project?.path, runActions, sayAloud, speaksAloud]
@@ -988,7 +1004,14 @@ export function VoicePanel(): ReactNode {
       */}
       {replyMode === 'voice' ? <LastLine turns={turns} /> : null}
 
-      <div className="voice__log" ref={logRef} hidden={replyMode === 'voice'}>
+      {/* Not `hidden`: .voice__log sets `display: flex`, which wins over the
+          attribute's default `display: none`. Unmounting is unambiguous. */}
+      {replyMode === 'voice' ? (
+        <div className="voice__voiceonly">
+          Spoken replies only. Switch to <span className="mono">Aa</span> in the header to see the conversation.
+        </div>
+      ) : (
+      <div className="voice__log" ref={logRef}>
         {turns.length === 0 ? (
           <EmptyState
             icon="voice"
@@ -1019,8 +1042,10 @@ export function VoicePanel(): ReactNode {
           )
         )}
       </div>
+      )}
 
-      <div className="voice__composer" hidden={replyMode === 'voice'}>
+      {replyMode !== 'voice' ? (
+      <div className="voice__composer">
         <textarea
           ref={composerRef}
           className="voice__input"
@@ -1052,6 +1077,7 @@ export function VoicePanel(): ReactNode {
           </button>
         </div>
       </div>
+      ) : null}
     </aside>
   )
 }

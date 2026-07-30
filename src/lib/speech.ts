@@ -27,12 +27,30 @@ export interface VoiceLike {
 
 /**
  * Windows names its neural voices "Microsoft Aria Online (Natural) - English",
- * "Microsoft Sonia Natural", and so on. Anything matching is worth having over
- * the legacy David/Zira pair.
+ * "Microsoft Sonia Natural", and so on. Worth several of anything else.
  */
-const NATURAL = /natural|neural|aria|jenny|sonia|ryan|libby|guy|michelle/i
+const NATURAL = /natural|neural/i
 
-/** British first, then any English, then whatever there is. */
+/**
+ * The legacy SAPI voices, split by which ones are bearable.
+ *
+ * This is not tidy and it should not be: `SpeechSynthesisVoice` carries no
+ * gender, no quality and no rating, so the only signal available is the name.
+ * Measured on Steve's machine, Chromium exposes exactly three — George, Hazel
+ * and Susan — and Windows marks **George as the default**, which is how the
+ * first thing he heard was the robotic male voice he called "awful". So
+ * `default` is worth nothing here, and the male legacy voices are pushed below
+ * everything else rather than merely not preferred.
+ */
+const GOOD_VOICES = /\b(aria|jenny|sonia|libby|michelle|zira|hazel|susan|catherine|linda|eva|clara)\b/i
+const ROBOTIC_MALE = /\b(david|mark|george|guy|ryan|richard|ravi|james|william)\b/i
+
+/**
+ * Pick a voice: an explicit choice, else the best-sounding English one.
+ *
+ * Ranking, highest first — neural, then a known-good (female) legacy voice,
+ * then British, and a hard penalty for the male legacy voices.
+ */
 export function chooseVoice(voices: VoiceLike[], preferred = ''): VoiceLike | null {
   const all = voices ?? []
   if (all.length === 0) return null
@@ -47,9 +65,10 @@ export function chooseVoice(voices: VoiceLike[], preferred = ''): VoiceLike | nu
   const pool = english.length ? english : all
   const rank = (v: VoiceLike): number => {
     let score = 0
-    if (NATURAL.test(v.name)) score += 4
+    if (NATURAL.test(v.name)) score += 8
+    if (GOOD_VOICES.test(v.name)) score += 4
+    if (ROBOTIC_MALE.test(v.name)) score -= 6
     if (/^en-GB/i.test(v.lang ?? '')) score += 2
-    if (v.default) score += 1
     return score
   }
   // Stable: equal scores keep the platform's own order.
@@ -96,6 +115,19 @@ export interface SpeakOptions {
 class Speaker {
   private current: SpeechSynthesisUtterance | null = null
   private listeners = new Set<(speaking: boolean) => void>()
+  /**
+   * Turns already spoken.
+   *
+   * Steve's words: "he keeps going on and on, over and over again". A React
+   * component re-renders for any number of reasons, and anything that speaks
+   * from a render path can speak twice. So a turn is a *key*, and a key is
+   * spoken exactly once for the life of the app — belt over the braces of
+   * calling `speak` from one place per turn. Bounded so a long session cannot
+   * grow it forever.
+   */
+  private spoken = new Set<string>()
+  /** How many utterances are queued. Must never exceed one. */
+  private queued = 0
 
   get available(): boolean {
     return typeof window !== 'undefined' && 'speechSynthesis' in window
@@ -123,9 +155,34 @@ class Speaker {
     this.settle()
   }
 
+  /** How many utterances are in flight — 0 or 1, and a test asserts it. */
+  get pending(): number {
+    return this.queued
+  }
+
+  /**
+   * Say something once, keyed by a turn id.
+   *
+   * Returns false without a sound if that key has already been spoken. Every
+   * caller in the app goes through here rather than `speak`, so a re-render
+   * cannot say the same sentence twice.
+   */
+  async speakOnce(key: string, text: string, options: SpeakOptions = {}): Promise<boolean> {
+    if (this.spoken.has(key)) return false
+    this.spoken.add(key)
+    if (this.spoken.size > 400) {
+      // Oldest first — Sets iterate in insertion order.
+      const oldest = this.spoken.values().next().value
+      if (oldest !== undefined) this.spoken.delete(oldest)
+    }
+    return this.speak(text, options)
+  }
+
+  /** Only for the settings page's sample line. Turns use `speakOnce`. */
   async speak(text: string, options: SpeakOptions = {}): Promise<boolean> {
     const body = speakable(text)
     if (!body || !this.available) return false
+    // Cancel whatever was talking before queueing: the queue is never a queue.
     this.cancel()
 
     const utterance = new SpeechSynthesisUtterance(body)
@@ -135,11 +192,13 @@ class Speaker {
     this.current = utterance
     this.announce(true)
 
+    this.queued += 1
     return new Promise<boolean>((resolve) => {
       let done = false
       const finish = (spoke: boolean): void => {
         if (done) return
         done = true
+        this.queued = Math.max(0, this.queued - 1)
         window.clearTimeout(guard)
         this.settle()
         resolve(spoke)

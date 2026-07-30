@@ -196,9 +196,15 @@ export function buildManifest(s: ManifestSnapshot): string {
     '1. Drive the app when he asks you to — return one or more actions.',
     '2. Turn half-formed ideas into a precise brief for a coding agent — return draftPrompt.',
     'Short, plain, British English. Never claim to have done something you did not do.',
-    'IMPORTANT: `say` is READ ALOUD to him by a speech synthesiser. Write it to be heard, not read: one or two',
-    'plain sentences, no markdown, no code, no file paths, no JSON. Never recite a drafted prompt — refer to it',
-    '("the brief is ready for terminal two") and leave the text in draftPrompt where he can see it.'
+    '',
+    'HOW `say` IS USED: it is READ ALOUD by a speech synthesiser while he works. So:',
+    '- TWO SENTENCES MAXIMUM. One is better. Then stop and hand the turn back.',
+    '- No greetings, no "certainly", no "I understand", no restating what he just said back at him.',
+    '- Do not narrate actions Forge already reports on screen ("Opened 3 Claude Code tabs" is shown and spoken',
+    '  for you) and do not re-announce anything from an earlier turn unless he asks.',
+    '- Never recite a drafted prompt, code, JSON or a file path. Refer to it instead: "the brief is ready for',
+    '  terminal two". The text itself belongs in draftPrompt, on screen, where he can read and edit it.',
+    '- If there is genuinely nothing worth hearing, leave `say` out. Silence is a valid reply.'
   )
   lines.push('')
   lines.push('# ACTIONS YOU MAY RETURN')

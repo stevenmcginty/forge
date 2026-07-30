@@ -71,6 +71,7 @@ const {
   RESPONSE_SCHEMA
 } = await import('../src/lib/geminibrain.ts')
 const brainjson = await import('../src/lib/brainjson.ts')
+const { claimsCompletedAction } = brainjson
 const { chooseVoice, speakable } = await import('../src/lib/speech.ts')
 const { planProjectFolder, sanitiseFolderName } = await import('../electron/projectfolder.ts')
 const { OpenRouterBrain } = await import('../src/lib/openrouterbrain.ts')
@@ -1190,21 +1191,107 @@ await test('a spoken folder name cannot escape the folders Forge may write to', 
 
 console.log('\nSpeaking back (TTS)')
 
-await test('the best installed voice is chosen, not the first one', () => {
-  const voices = [
-    { name: 'Microsoft David Desktop - English (United States)', lang: 'en-US', default: true },
-    { name: 'Microsoft Hazel Desktop - English (Great Britain)', lang: 'en-GB' },
-    { name: 'Microsoft Sonia Online (Natural) - English (United Kingdom)', lang: 'en-GB' },
-    { name: 'Microsoft Hortense - French', lang: 'fr-FR' }
+await test('the default voice is never the robotic male one', () => {
+  // Exactly what Electron's renderer exposes on Steve's PC, `default` and all.
+  // Windows marks George as the default, and George is the voice he called
+  // "awful" — so `default` must count for nothing here.
+  const HIS_MACHINE = [
+    { name: 'Microsoft George - English (United Kingdom)', lang: 'en-GB', default: true },
+    { name: 'Microsoft Hazel - English (United Kingdom)', lang: 'en-GB' },
+    { name: 'Microsoft Susan - English (United Kingdom)', lang: 'en-GB' }
   ]
-  assert.equal(chooseVoice(voices).name, 'Microsoft Sonia Online (Natural) - English (United Kingdom)')
-  // An explicit choice always wins.
-  assert.equal(chooseVoice(voices, 'Microsoft Hazel Desktop - English (Great Britain)').lang, 'en-GB')
+  assert.equal(chooseVoice(HIS_MACHINE).name, 'Microsoft Hazel - English (United Kingdom)')
+  assert.ok(!/George|David|Mark/.test(chooseVoice(HIS_MACHINE).name))
+
+  // A neural voice, where one exists, beats every legacy voice.
+  const withNeural = [...HIS_MACHINE, { name: 'Microsoft Sonia Online (Natural) - English (UK)', lang: 'en-GB' }]
+  assert.match(chooseVoice(withNeural).name, /Natural/)
+
+  // David is the US default and must lose to Zira for the same reason.
+  const usa = [
+    { name: 'Microsoft David Desktop - English (United States)', lang: 'en-US', default: true },
+    { name: 'Microsoft Zira Desktop - English (United States)', lang: 'en-US' }
+  ]
+  assert.match(chooseVoice(usa).name, /Zira/)
+
+  // An explicit choice always wins, even a male one — it is his ear.
+  assert.match(chooseVoice(HIS_MACHINE, 'Microsoft George - English (United Kingdom)').name, /George/)
   // A saved name that is no longer installed falls back rather than failing.
-  assert.match(chooseVoice(voices, 'Microsoft Gone').name, /Sonia/)
+  assert.match(chooseVoice(HIS_MACHINE, 'Microsoft Gone').name, /Hazel/)
   // No English at all: take what there is rather than staying silent.
   assert.equal(chooseVoice([{ name: 'Hortense', lang: 'fr-FR' }]).name, 'Hortense')
   assert.equal(chooseVoice([]), null)
+})
+
+await test('a turn is spoken exactly once, however often it re-renders', async () => {
+  // The bug Steve heard as "he keeps going on and on, over and over again".
+  // A React component re-renders freely; anything that speaks from a render
+  // path speaks twice. Speaking is therefore keyed by turn id.
+  const spoken = []
+  let queuedAtSpeak = []
+  global.window = {
+    speechSynthesis: {
+      speak(u) {
+        spoken.push(u.text)
+        queuedAtSpeak.push(spk.pending)
+        window.setTimeout(() => u.onend?.(), 0)
+      },
+      cancel() {},
+      getVoices: () => [{ name: 'Microsoft Hazel - English (United Kingdom)', lang: 'en-GB' }]
+    },
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (t) => clearTimeout(t)
+  }
+  global.SpeechSynthesisUtterance = class {
+    constructor(text) {
+      this.text = text
+    }
+  }
+  const { speaker: spk } = await import('../src/lib/speech.ts?once')
+
+  await spk.speakOnce('turn_1', 'Three Claude Code tabs open.')
+  await spk.speakOnce('turn_1', 'Three Claude Code tabs open.')
+  await spk.speakOnce('turn_1', 'Three Claude Code tabs open.')
+  assert.deepEqual(spoken, ['Three Claude Code tabs open.'], 'one turn, one utterance')
+
+  await spk.speakOnce('turn_2', 'Two Kimi tabs open.')
+  assert.equal(spoken.length, 2)
+  // The queue is never a queue: nothing is ever waiting behind something else.
+  assert.ok(
+    queuedAtSpeak.every((n) => n <= 1),
+    `queue reached ${Math.max(...queuedAtSpeak)}`
+  )
+  assert.equal(spk.pending, 0)
+
+  delete global.window
+  delete global.SpeechSynthesisUtterance
+})
+
+await test('a reply that claims to have acted, but did not, is contradicted', () => {
+  // Seen live from gemini-2.5-flash: "Opening three Claude Code terminals for
+  // you." with an empty actions array. With no actions there are no chips, so
+  // without this the untruth is the only thing on screen.
+  for (const claim of [
+    'Opening three Claude Code terminals for you.',
+    'Opened 3 tabs.',
+    'Closing the tab now.',
+    'Created the project and switched to it.',
+    'Sending that to terminal two.'
+  ]) {
+    assert.equal(claimsCompletedAction(claim), true, claim)
+  }
+  // Offers, questions and plain talk are not claims.
+  for (const innocent of [
+    'I can open three tabs if you like.',
+    'Would you like me to open three terminals?',
+    'Shall I close it?',
+    'Yes, I can hear you.',
+    'That is a big job — what should it do first?',
+    undefined,
+    ''
+  ]) {
+    assert.equal(claimsCompletedAction(innocent), false, String(innocent))
+  }
 })
 
 await test('a drafted prompt is never read aloud', () => {
