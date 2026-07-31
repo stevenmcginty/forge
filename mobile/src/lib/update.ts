@@ -119,6 +119,45 @@ export async function check(): Promise<void> {
   }
 }
 
+/**
+ * How long before a foregrounded app bothers asking again. Long, because the
+ * answer changes about once a fortnight and a phone is foregrounded dozens of
+ * times a day.
+ */
+const RECHECK_AFTER_MS = 30 * 60_000
+
+let lastCheckedAt = 0
+
+/**
+ * Ask about updates without being asked to.
+ *
+ * The version chip was reachable from the moment updating existed, and Steve
+ * still could not find it — he assumed he had to *unpair* to get at it. The
+ * lesson is not that the button needed to be bigger. It is that a self-updating
+ * app which waits to be interrogated will never be interrogated: nobody opens a
+ * terminal client wondering what version it is. So the app checks on its own
+ * and *says* when there is something, and the chip stops being the discovery
+ * mechanism and becomes merely the way in.
+ *
+ * Deliberately quiet. A failed check leaves `unreachable`, which no screen
+ * shouts about — being offline is a normal Tuesday, not a problem to report.
+ * It never runs while a download is in flight or a verified file is waiting to
+ * install, because re-checking would discard the path that was just hashed.
+ */
+export function startAutoCheck(): () => void {
+  const run = (): void => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+    if (state.phase === 'downloading' || state.phase === 'ready') return
+    if (lastCheckedAt && Date.now() - lastCheckedAt < RECHECK_AFTER_MS) return
+    lastCheckedAt = Date.now()
+    void check()
+  }
+  run()
+  if (typeof document === 'undefined') return () => {}
+  document.addEventListener('visibilitychange', run)
+  return () => document.removeEventListener('visibilitychange', run)
+}
+
 export async function download(): Promise<void> {
   const manifest = state.manifest
   if (!manifest || state.phase !== 'available') return

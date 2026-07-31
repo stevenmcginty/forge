@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { MOBILE_PORT, type MobileSession } from '@shared/mobile'
 import { Link, deviceId, type LinkPicture, type LinkState } from './lib/link'
 import { forgetToken, pairTokenOf, readOrigin, readToken, toOrigin, writeOrigin, writeToken } from './lib/secure'
@@ -6,7 +6,7 @@ import { canScan, scanPairingCode } from './lib/scan'
 import { Browser, leavesOf } from './components/Browser'
 import { PaneView, paneListeners } from './components/PaneView'
 import { UpdateSheet } from './components/Update'
-import { CURRENT_VERSION_NAME } from './lib/update'
+import { CURRENT_VERSION_NAME, startAutoCheck, updateStore } from './lib/update'
 
 /**
  * Forge Mobile.
@@ -46,6 +46,15 @@ export function App(): React.JSX.Element {
   // on screen until it has been acted on or superseded.
   const [hint, setHint] = useState('')
   const [showUpdate, setShowUpdate] = useState(false)
+  // Whether there is a newer APK, asked and answered without the user's
+  // involvement. This is the fix for a real complaint: the update control
+  // existed on every screen and was still undiscoverable, because "v0.2.0" in
+  // a pill reads as a label, and nothing ever volunteered that a new version
+  // was out. See startAutoCheck.
+  const updatePhase = useSyncExternalStore(updateStore.subscribe, () => updateStore.getState().phase)
+  const updateReady = updatePhase === 'available' || updatePhase === 'ready'
+
+  useEffect(() => startAutoCheck(), [])
   // Mirrors the secure store, because readToken() is module state and React
   // cannot see it change. What it decides: a stamped, unpaired APK gets the
   // one-tap screen; everything else gets the form.
@@ -213,6 +222,7 @@ export function App(): React.JSX.Element {
               abandon()
               setManual(true)
             }}
+            updateReady={updateReady}
             onUpdate={() => setShowUpdate(true)}
           />
         ) : (
@@ -227,6 +237,7 @@ export function App(): React.JSX.Element {
             onCode={setCode}
             onPair={pair}
             onScan={() => void scan()}
+            updateReady={updateReady}
             onUpdate={() => setShowUpdate(true)}
             onOneTap={BAKED !== '' && !hasToken ? () => setManual(false) : undefined}
           />
@@ -242,6 +253,7 @@ export function App(): React.JSX.Element {
         state={state}
         detail={detail}
         version={picture.appVersion}
+        updateReady={updateReady}
         onForget={forget}
         onUpdate={() => setShowUpdate(true)}
       />
@@ -280,12 +292,14 @@ function StatusStrip({
   state,
   detail,
   version,
+  updateReady,
   onForget,
   onUpdate
 }: {
   state: LinkState
   detail: string
   version: string
+  updateReady: boolean
   onForget: () => void
   onUpdate: () => void
 }): React.JSX.Element {
@@ -295,10 +309,17 @@ function StatusStrip({
       <span className="status-text">
         {state === 'live' ? `Forge ${version}` : detail || state}
       </span>
-      {/* The app's own version, not the desktop's — tapping it is how the
-          APK checks for and installs a newer self. */}
-      <button type="button" className="status-version" onClick={onUpdate}>
-        v{CURRENT_VERSION_NAME}
+      {/* The app's own version, not the desktop's — tapping it is how the APK
+          checks for and installs a newer self.
+          When there is something to install it stops being a version label and
+          says so in words. Not a coloured dot: Steve is red-green colourblind,
+          and a badge that only differs by hue is a badge he cannot see. */}
+      <button
+        type="button"
+        className={`status-version${updateReady ? ' is-update' : ''}`}
+        onClick={onUpdate}
+      >
+        {updateReady ? 'Update' : `v${CURRENT_VERSION_NAME}`}
       </button>
       <button type="button" className="status-forget" onClick={onForget}>
         Unpair
@@ -324,7 +345,8 @@ function FirstRun({
   onConnect,
   onCancel,
   onManual,
-  onUpdate
+  onUpdate,
+  updateReady
 }: {
   state: LinkState
   detail: string
@@ -333,6 +355,7 @@ function FirstRun({
   onCancel: () => void
   onManual: () => void
   onUpdate: () => void
+  updateReady: boolean
 }): React.JSX.Element {
   if (state === 'awaiting') {
     // The words arrive as one string and are shown exactly as sent — the
@@ -400,8 +423,14 @@ function FirstRun({
       <button type="button" className="connect-version" onClick={onManual}>
         Other ways to connect
       </button>
-      <button type="button" className="connect-version" onClick={onUpdate}>
-        Forge Mobile v{CURRENT_VERSION_NAME} · check for updates
+      <button
+        type="button"
+        className={`connect-version${updateReady ? ' is-update' : ''}`}
+        onClick={onUpdate}
+      >
+        {updateReady
+          ? 'A newer Forge Mobile is ready · tap to update'
+          : `Forge Mobile v${CURRENT_VERSION_NAME} · check for updates`}
       </button>
     </div>
   )
@@ -419,7 +448,8 @@ function Connect({
   onPair,
   onScan,
   onUpdate,
-  onOneTap
+  onOneTap,
+  updateReady
 }: {
   state: LinkState
   detail: string
@@ -434,6 +464,7 @@ function Connect({
   onUpdate: () => void
   /** Present only on a stamped, unpaired build: the way back to one-tap connect. */
   onOneTap?: () => void
+  updateReady: boolean
 }): React.JSX.Element {
   const busy = state === 'connecting' || state === 'retrying'
   // The camera is the primary path where there is one (the APK); the browser
@@ -499,8 +530,14 @@ function Connect({
         </button>
       )}
 
-      <button type="button" className="connect-version" onClick={onUpdate}>
-        Forge Mobile v{CURRENT_VERSION_NAME} · check for updates
+      <button
+        type="button"
+        className={`connect-version${updateReady ? ' is-update' : ''}`}
+        onClick={onUpdate}
+      >
+        {updateReady
+          ? 'A newer Forge Mobile is ready · tap to update'
+          : `Forge Mobile v${CURRENT_VERSION_NAME} · check for updates`}
       </button>
     </div>
   )

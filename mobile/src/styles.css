@@ -474,8 +474,21 @@ body {
   color: var(--dim);
   font-size: 11px;
   padding: 4px 10px;
-  min-height: 28px;
+  /* 44px is the touch floor. 28px was a control you had to aim at, in a strip
+     that also holds Unpair — and a mis-tap there is a re-pair. */
+  min-height: 44px;
   flex: 0 0 auto;
+}
+
+/* There is something to install. The word carries it, not the colour: Steve is
+   red-green colourblind, so an accent that only differs by hue is one he cannot
+   see. Weight, fill and the change from "v0.3.1" to "Update" all read without
+   it. */
+.status-version.is-update {
+  background: var(--volt);
+  border-color: var(--volt);
+  color: #10130a;
+  font-weight: 700;
 }
 
 .connect-version {
@@ -486,6 +499,19 @@ body {
   padding: 12px 4px;
   text-decoration: underline;
   align-self: center;
+}
+
+/* Same promotion as the status chip, but this one starts life as underlined
+   dim text, so the underline has to go or the filled pill reads as a link that
+   someone has coloured in by accident. */
+.connect-version.is-update {
+  background: var(--volt);
+  border-radius: 999px;
+  color: #10130a;
+  font-weight: 700;
+  min-height: 44px;
+  padding: 12px 18px;
+  text-decoration: none;
 }
 
 /* ----------------------------------------------------------- approval wait */
