@@ -137,8 +137,19 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
  *
  * Done here rather than by making `.xterm-viewport` natively scrollable,
  * because native scrolling moves the DOM viewport underneath a canvas that
- * xterm paints by row index — they desynchronise and you get a smear. Driving
- * `scrollLines` keeps the renderer the only thing that decides what a row is.
+ * xterm paints by row index — they desynchronise and you get a smear.
+ *
+ * The drag becomes synthetic `WheelEvent`s, not `term.scrollLines` calls.
+ * `scrollLines` moves the viewport over the *normal* buffer's scrollback — and
+ * an agent's TUI (Claude Code, vim, htop) runs on the alternate screen, which
+ * has no scrollback, so there it is a silent no-op: the first version of this
+ * gesture shipped calling it, and dragging a Claude pane did nothing at all.
+ * xterm's own wheel pipeline is the one route that does the right thing in
+ * every state — viewport scroll in the normal buffer, mouse-wheel reports when
+ * the TUI tracks the mouse, arrow keys when it does not — and it is exactly
+ * what the desktop's physical wheel goes through. So the finger is turned into
+ * the event that pipeline already understands, one whole row per event, aimed
+ * at the element under the touch so col/row-carrying reports come out true.
  *
  * Two details that stop it fighting the rest of the app:
  *
@@ -162,6 +173,8 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
   let lastY = 0
   let startY = 0
   let carry = 0
+  /** Where the finger landed — the wheel events are dispatched from there. */
+  let target: EventTarget | null = null
 
   /** The height of one row, measured rather than assumed. */
   const rowHeight = (): number => {
@@ -181,6 +194,7 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
     tracking = true
     scrolling = false
     carry = 0
+    target = event.target
     startY = event.touches[0].clientY
     lastY = startY
   }
@@ -194,7 +208,8 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
       scrolling = true
     }
 
-    // Dragging down reveals older output, which is scrolling *up* the buffer.
+    // Dragging down reveals older output, which is scrolling *up* the buffer —
+    // a negative wheel delta, same as a physical wheel.
     carry += lastY - y
     lastY = y
 
@@ -202,7 +217,23 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
     const lines = Math.trunc(carry / height)
     if (lines !== 0) {
       carry -= lines * height
-      term.scrollLines(lines)
+      const at = (target instanceof Element ? target : null) ?? container
+      const touch = event.touches[0]
+      // One event per row rather than one carrying the total: the alt-screen
+      // path answers an event with a keypress, not a distance, so a fast flick
+      // batched into one event would scroll a TUI by a single line.
+      for (let i = Math.abs(lines); i > 0; i--) {
+        at.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: Math.sign(lines) * height,
+            deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+            bubbles: true,
+            cancelable: true
+          })
+        )
+      }
     }
     event.preventDefault()
   }
