@@ -297,7 +297,15 @@ const PROFILE_ALIASES: Record<string, string> = {
   posh: 'pwsh',
   cc: 'claude',
   claudecode: 'claude',
-  ki: 'kimi'
+  ki: 'kimi',
+  oc: 'opencode',
+  // "deep seek" and "deepseek v4" both norm() down to something that is not the
+  // profile id, and "v4" on its own is the shortest thing anyone will actually
+  // say for it.
+  deepseek: 'deepseek',
+  deepseekv4: 'deepseek',
+  ds: 'deepseek',
+  v4: 'deepseek'
 }
 
 /** Resolve a spoken name to a profile: exact, prefix, then sounds-close. */

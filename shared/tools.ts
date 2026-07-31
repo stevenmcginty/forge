@@ -89,6 +89,19 @@ export const TOOL_SPECS: ToolSpec[] = [
     updateCommand: null
   },
   {
+    id: 'opencode',
+    name: 'OpenCode',
+    blurb: 'the `opencode` CLI — also what the DeepSeek V4 pane runs',
+    command: 'opencode',
+    versionArgs: ['--version'],
+    latest: { source: 'npm', npmPackage: 'opencode-ai' },
+    // Derived (`npm i -g opencode-ai`), which both installs and updates it.
+    // Worth knowing when this row disagrees with reality: OpenCode self-updates
+    // by default, so it can move underneath you between two glances at this
+    // panel. `"autoupdate": false` in ~/.config/opencode/opencode.json stops it.
+    updateCommand: null
+  },
+  {
     id: 'node',
     name: 'Node',
     blurb: 'runs the MCP bridge — update it however you installed it',
@@ -150,15 +163,9 @@ export const KNOWN_TOOLS: ToolSpec[] = [
     latest: { source: 'npm', npmPackage: 'firebase-tools' },
     updateCommand: null
   },
-  {
-    id: 'opencode',
-    name: 'opencode',
-    blurb: 'another terminal agent — a candidate for an agent profile',
-    command: 'opencode',
-    versionArgs: ['--version'],
-    latest: { source: 'npm', npmPackage: 'opencode-ai' },
-    updateCommand: null
-  },
+  // opencode was here as a suggestion, described as "a candidate for an agent
+  // profile". It is now a built-in profile and a built-in TOOL_SPEC, so leaving
+  // the suggestion would offer a row that allToolSpecs drops as a duplicate.
   {
     id: 'qwen',
     name: 'Qwen Code',

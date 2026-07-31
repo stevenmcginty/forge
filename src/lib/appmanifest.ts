@@ -76,7 +76,11 @@ export interface ManifestSnapshot {
 const SPOKEN_ALIASES: Record<string, string[]> = {
   pwsh: ['powershell', 'pwsh', 'ps', 'shell', 'posh'],
   claude: ['claude', 'claude code', 'cc'],
-  kimi: ['kimi', 'kimmy', 'ki']
+  kimi: ['kimi', 'kimmy', 'ki'],
+  // Dictation splits compound names, so the two-word spellings are not optional:
+  // "open code" and "deep seek" are what actually comes out of the microphone.
+  opencode: ['opencode', 'open code', 'oc'],
+  deepseek: ['deepseek', 'deep seek', 'v4', 'ds']
 }
 
 interface ActionSpec {

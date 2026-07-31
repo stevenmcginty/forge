@@ -48,6 +48,36 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     badge: 'GM',
     builtin: true,
     kind: 'agent'
+  },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    command: 'opencode',
+    accent: '#5EE6A8',
+    badge: 'OC',
+    builtin: true,
+    kind: 'agent'
+    // No mcpBridge: OpenCode does speak MCP, but through its own config file
+    // rather than Claude Code's `--mcp-config` flag, so handing it the flag
+    // would only make it refuse to start.
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek V4',
+    // DeepSeek ships no CLI of its own, so "DeepSeek as an agent" is OpenCode
+    // pointed at it — a first-class pairing on both sides: OpenCode has a
+    // built-in `deepseek` provider, and DeepSeek's own release notes name
+    // OpenCode as an integration target.
+    //
+    // The other route — Claude Code with ANTHROPIC_BASE_URL aimed at
+    // api.deepseek.com/anthropic — does work, but Anthropic's gateway docs say
+    // plainly that routing Claude Code to non-Claude models is not supported.
+    // An agent that breaks on somebody else's release day is not a built-in.
+    command: 'opencode -m deepseek/deepseek-v4-flash',
+    accent: '#FFB347',
+    badge: 'DS',
+    builtin: true,
+    kind: 'agent'
   }
 ]
 
