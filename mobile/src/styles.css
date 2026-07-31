@@ -59,7 +59,16 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  /* Clear Android's own status bar.
+     `viewport-fit=cover` was set so the key bar could sit under the gesture
+     bar — but it cuts both ways, and targetSdk 35 (Android 15) makes
+     edge-to-edge mandatory rather than opt-in. The top of this strip was
+     therefore drawn *underneath* the clock and the signal icons, which do not
+     pass touches through: the version chip and Unpair were not merely hard to
+     read, they were unreachable, and the update button being untappable is
+     exactly how a self-updating app stops being able to update itself.
+     Every other inset in this file is `-bottom`; this one was simply missed. */
+  padding: calc(6px + env(safe-area-inset-top)) 12px 6px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   font-size: 12px;
@@ -393,7 +402,9 @@ body {
 .connect {
   justify-content: center;
   gap: 14px;
-  padding: 24px;
+  /* Same edge-to-edge story as .status — the unpaired screens own the top of
+     the window themselves, with no strip above them to absorb the inset. */
+  padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
   overflow-y: auto;
 }
 
