@@ -285,6 +285,12 @@ body {
   padding: 4px 0 0 6px;
   background: var(--bg);
   overflow: hidden;
+  /* The scrollback is dragged by hand (enableTouchScroll in lib/term.ts), so
+     the browser must not also try. Without this, Android answers a downward
+     drag with overscroll glow or pull-to-refresh and the terminal stutters
+     against a gesture it is already handling. */
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 
 .term-holder .xterm {
