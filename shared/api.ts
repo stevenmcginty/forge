@@ -18,6 +18,9 @@ import type {
   MakeVideoRequest,
   MediaCallResult,
   MemorySection,
+  MobileCommandEvent,
+  MobilePairOffer,
+  MobileStatus,
   OpenRouterCallRequest,
   OpenRouterCallResult,
   Project,
@@ -32,6 +35,7 @@ import type {
   ToolId,
   ToolLatest,
   ToolProbe,
+  StaleStatus,
   UpdateStatus,
   VoiceSpeakRequest,
   VoiceSpeakResult,
@@ -39,6 +43,7 @@ import type {
   Workspace
 } from './types'
 import type { SkillSource, SkillsList } from './skills'
+import type { CommandsFeed } from './commands'
 
 /** What every skills mutation hands back: the outcome, and the fresh list. */
 export interface SkillMutation extends SkillsList {
@@ -261,6 +266,48 @@ export interface ForgeApi {
   }
 
   /**
+   * Forge Mobile — the phone's *terminal* link (M11). The Companion above
+   * carries messages and images over Firebase; this carries real PTY bytes over
+   * a real socket. Off until switched on; every method is safe to call in that
+   * state. See docs/MOBILE.md.
+   */
+  mobile: {
+    status(): Promise<MobileStatus>
+    /** Bind the port and start listening. Persists `mobileEnabled: true`. */
+    start(): Promise<MobileStatus>
+    /** Stop listening and close every socket. Persists `mobileEnabled: false`. */
+    stop(): Promise<MobileStatus>
+    /**
+     * Mint a single-use pairing token for the QR. The raw token crosses this
+     * boundary exactly once and is never persisted — only its hash is, and only
+     * after a phone has actually used it.
+     */
+    pair(): Promise<MobilePairOffer>
+    pairCancel(): Promise<boolean>
+    /** Drop a device. Its live socket is closed immediately, not next time. */
+    revoke(deviceId: string): Promise<MobileStatus>
+    /**
+     * Save the ngrok authtoken and/or domain. Omitted fields are left alone.
+     * A running tunnel is restarted under the new identity, so a corrected
+     * token takes effect now rather than on the next launch.
+     */
+    setTunnel(config: { authtoken?: string; domain?: string }): Promise<MobileStatus>
+    /** Persist `mobileTunnel: 'ngrok'` and bring the tunnel up. */
+    startTunnel(): Promise<MobileStatus>
+    /** Persist `mobileTunnel: 'off'` and take it down, killing the agent. */
+    stopTunnel(): Promise<MobileStatus>
+    onStatus(cb: (s: MobileStatus) => void): () => void
+    /**
+     * A layout operation arrived from a phone. The renderer owns tabs and panes,
+     * so it performs the op and answers with `commandResult` — the phone takes
+     * the same code path a local click takes.
+     */
+    onCommand(cb: (e: MobileCommandEvent) => void): () => void
+    /** Answer an `onCommand`. `error` empty means it worked. */
+    commandResult(requestId: string, error?: string): void
+  }
+
+  /**
    * Read-only probes of the machine, for the Account section's state chips.
    * Nothing here writes, installs or signs anything in.
    */
@@ -288,6 +335,18 @@ export interface ForgeApi {
   }
 
   /**
+   * The slash-command reference and the Claude Code changelog, as published.
+   *
+   * One call answers both, because the flyout shows both and the version
+   * numbers they are read against are the same two numbers. Cached in the main
+   * process and on disk; `refresh` forces the network and still falls back to
+   * the last good answer if it cannot get through.
+   */
+  commands: {
+    feed(refresh?: boolean): Promise<CommandsFeed>
+  }
+
+  /**
    * Forge updating itself. Packaged builds only — in a dev run every one of
    * these is safe to call and the status stays `unsupported`, which is what
    * keeps the banner off screen while you are working on the app.
@@ -300,6 +359,17 @@ export interface ForgeApi {
     /** Quit and run the installer. False when there is nothing ready. */
     install(): Promise<boolean>
     onStatus(cb: (s: UpdateStatus) => void): () => void
+  }
+
+  /**
+   * The dev-run half of the same question: is the *running* app still the code
+   * on disk? Safe to call in a packaged build, where the answer is always no.
+   */
+  dev: {
+    staleStatus(): Promise<StaleStatus>
+    onStale(cb: (s: StaleStatus) => void): () => void
+    /** Quit and come back on the new bundle. Every pane dies — ask first. */
+    restart(): Promise<boolean>
   }
 
   /**

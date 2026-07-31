@@ -1,0 +1,11 @@
+{
+  "name": "forge-mobile",
+  "private": true,
+  "description": "Marker for the Capacitor CLI, which insists on running inside an npm package and reads this dependency list to decide which native plugins to wire into mobile/android. Nothing installs here — every package resolves up to the repo root's node_modules, and versions must match the root package.json. The app's real version is mobile/version.json.",
+  "version": "0.0.0",
+  "dependencies": {
+    "@capacitor/android": "^7.6.8",
+    "@capacitor/core": "^7.6.8",
+    "@capacitor/preferences": "^7.0.4"
+  }
+}

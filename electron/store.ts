@@ -4,8 +4,11 @@ import { homedir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 import { BUILTIN_AGENT_PROFILES, inferKind, isClaudeCommand, isPermissionMode } from '@shared/agents'
 import { isValidSkillName } from '@shared/skills'
+import { sanitiseCustomTools } from '@shared/tools'
+import { MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
 import type {
   AgentProfile,
+  MobileDeviceRecord,
   Project,
   Settings,
   StoreSnapshot,
@@ -98,6 +101,12 @@ function defaultSettings(): Settings {
     railCollapsed: false,
     terminalFontSize: 13,
     terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
+    // Life-size out of the box: a wall you cannot read is a wall you will not
+    // use, and that is the whole point of the mosaic.
+    mosaicText: 'lifesize',
+    // Colours on out of the box: telling two Claudes apart by the colour they
+    // print in is the reason the tints exist.
+    tabTextColours: true,
     shell: 'pwsh.exe',
     catchShots: true,
     shotsKeep: DEFAULT_KEEP,
@@ -155,6 +164,12 @@ function defaultSettings(): Settings {
     skillsEnabled: [],
     // Steve wants his Claude panes reachable from his phone out of the box.
     remoteControlDefault: true,
+    // Closing Forge should not be the end of the conversation. On by default:
+    // a restored layout that starts four empty Claudes is a restored *shape*,
+    // not restored work. See shared/session.ts.
+    resumeSessions: true,
+    // …and the backstop for everything resuming cannot bring back.
+    confirmOnQuit: true,
     // The phone link (M9) is off, unconfigured and credential-less out of the
     // box. Nothing in electron/companion-sync.ts runs until all three change.
     companionEnabled: false,
@@ -165,10 +180,27 @@ function defaultSettings(): Settings {
     companionEmail: '',
     companionRefreshToken: '',
     companionUid: '',
+    // Forge Mobile (M11) — the phone's terminal link. Off, unpaired, and not
+    // listening out of the box; nothing in electron/mobile/ binds a port until
+    // this is switched on. The bind host is broad on purpose — see the note on
+    // `mobileBindHost` in shared/types.ts, and isAllowedSource in
+    // electron/mobile/server.ts, which is what actually decides who gets in.
+    mobileEnabled: false,
+    mobilePort: MOBILE_PORT,
+    mobileBindHost: '0.0.0.0',
+    mobileDevices: [],
+    // The ngrok tunnel: off, and holding no account material, until Steve does
+    // the one-time setup in Settings › Forge Mobile. See mobile-tunnel.ts.
+    mobileTunnel: 'off',
+    mobileNgrokAuthtoken: '',
+    mobileNgrokDomain: '',
     // The Update button types the command and stops. Turning this on is opting
     // in to a settings page that can start an installer with one click.
     updatesAutoRun: false,
-    updateDismissedVersion: ''
+    updateDismissedVersion: '',
+    // Empty on purpose: the built-in catalogue covers what Forge itself runs,
+    // and everything else is Steve's to add.
+    customTools: []
   }
 }
 
@@ -331,6 +363,8 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     railCollapsed: s.railCollapsed ?? false,
     terminalFontSize: clamp(s.terminalFontSize ?? DEFAULT_SETTINGS.terminalFontSize, 9, 28),
     terminalFontFamily: s.terminalFontFamily || DEFAULT_SETTINGS.terminalFontFamily,
+    mosaicText: s.mosaicText === 'scaled' ? 'scaled' : DEFAULT_SETTINGS.mosaicText,
+    tabTextColours: s.tabTextColours ?? DEFAULT_SETTINGS.tabTextColours,
     shell: s.shell || DEFAULT_SETTINGS.shell,
     catchShots: s.catchShots ?? true,
     shotsKeep: clampKeep(s.shotsKeep),
@@ -422,6 +456,11 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       .filter((n, i, all) => all.indexOf(n) === i)
       .slice(0, 200),
     remoteControlDefault: s.remoteControlDefault ?? DEFAULT_SETTINGS.remoteControlDefault,
+    // Both undefined in any settings.json written before resume existed, and
+    // the answer for that file is the default (on) rather than a silent off —
+    // same reasoning as voiceEarcons above.
+    resumeSessions: s.resumeSessions === undefined ? DEFAULT_SETTINGS.resumeSessions : Boolean(s.resumeSessions),
+    confirmOnQuit: s.confirmOnQuit === undefined ? DEFAULT_SETTINGS.confirmOnQuit : Boolean(s.confirmOnQuit),
     // Companion (M9). Trimmed, because every one of these is pasted by hand out
     // of the Firebase console and a trailing space in a URL is a mystery bug.
     // `enabled` is coerced rather than defaulted: a settings.json written before
@@ -434,17 +473,59 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     companionEmail: str(s.companionEmail),
     companionRefreshToken: str(s.companionRefreshToken),
     companionUid: str(s.companionUid),
+    // Forge Mobile (M11). Coerced rather than defaulted, like companionEnabled:
+    // a settings.json written before M11 has no key, and the answer is "off".
+    mobileEnabled: Boolean(s.mobileEnabled),
+    mobilePort: clamp(Number(s.mobilePort ?? MOBILE_PORT), 1024, 65535),
+    mobileBindHost: str(s.mobileBindHost) || DEFAULT_SETTINGS.mobileBindHost,
+    mobileDevices: mobileDevices(s.mobileDevices),
+    // The domain is shape-checked, not just trimmed: it ends up on ngrok's
+    // command line, and a junk value degrading to '' (tunnel refuses to start
+    // with a sentence) beats a junk value degrading to an argument.
+    mobileTunnel: s.mobileTunnel === 'ngrok' ? 'ngrok' : 'off',
+    mobileNgrokAuthtoken: str(s.mobileNgrokAuthtoken),
+    mobileNgrokDomain: normaliseNgrokDomain(s.mobileNgrokDomain),
     // Coerced rather than defaulted, like companionEnabled above: a settings.json
     // written before M10 has no key, and the answer for that file is "no".
     updatesAutoRun: Boolean(s.updatesAutoRun),
     // A version string goes into a comparison, never into markup — but it also
     // never needs to be longer than "10.20.30-rc.1", so it is capped.
-    updateDismissedVersion: str(s.updateDismissedVersion).slice(0, 40)
+    updateDismissedVersion: str(s.updateDismissedVersion).slice(0, 40),
+    // Validated in shared/tools.ts rather than here, because the settings page
+    // has to apply exactly the same rules to what it is about to save as this
+    // does to what it just loaded — a form that accepts a row the store then
+    // silently drops is worse than one that refuses it.
+    customTools: sanitiseCustomTools(s.customTools)
   }
 }
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
+}
+
+/**
+ * Paired phones, made safe off disk.
+ *
+ * The one field worth being strict about is `tokenHash`: it is compared with
+ * `timingSafeEqual` over a hex buffer in electron/mobile/auth.ts, so anything
+ * that is not exactly 64 hex characters is dropped rather than carried into a
+ * comparison it would make throw. A malformed entry is a device that can no
+ * longer connect, which is the correct failure — it is not a device that gets
+ * in by being malformed.
+ */
+function mobileDevices(raw: unknown): MobileDeviceRecord[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((d) => (d && typeof d === 'object' ? (d as Record<string, unknown>) : {}))
+    .map((d) => ({
+      id: str(d.id).slice(0, 128),
+      name: str(d.name).slice(0, 64) || 'Phone',
+      tokenHash: str(d.tokenHash).toLowerCase(),
+      createdAt: Number(d.createdAt) || 0,
+      lastSeenAt: Number(d.lastSeenAt) || 0
+    }))
+    .filter((d) => d.id && /^[0-9a-f]{64}$/.test(d.tokenHash))
+    .slice(0, 20)
 }
 
 function clamp(n: number, lo: number, hi: number): number {

@@ -102,6 +102,17 @@ export interface PaneLeaf {
    * chooser. Absent = whatever the profile says.
    */
   permissionMode?: ClaudePermissionMode
+  /**
+   * The Claude Code session this pane owns, as a uuid Forge minted when the
+   * pane was created.
+   *
+   * This is the whole of resume-on-restore: because it is saved with the
+   * layout, reopening Forge can hand the same id back to Claude and get the
+   * same conversation, rather than the same empty box. Optional so panes
+   * written before it existed still load — they are given one on load, and
+   * simply start fresh that once. See shared/session.ts.
+   */
+  sessionId?: string
 }
 
 export interface PaneSplit {
@@ -122,6 +133,17 @@ export interface TerminalTab {
   title: string
   root: LayoutNode
   activePaneId: string
+  /**
+   * The tab's own colour in the strip. Optional so tabs written before colours
+   * existed still load, and absent — not empty — when the tab is untinted.
+   */
+  color?: string
+  /**
+   * Terminal text colour for every pane in this tab: the default foreground
+   * xterm paints uncoloured output in, which is most of what an agent prints.
+   * Output that names its own ANSI colour keeps it — that is the point of it.
+   */
+  textColor?: string
 }
 
 /**
@@ -159,6 +181,22 @@ export interface MosaicTile extends MosaicRect {
  * `custom` freeform: every tile has a box the user put it in.
  */
 export type MosaicLayoutMode = 'auto' | 'custom'
+
+/**
+ * How the mosaic draws terminal text — the wall's one legibility decision.
+ *
+ * `lifesize` every tile refits its PTY to its own box, so the type is exactly
+ *            the size it is in tab view no matter how many tiles are up. You
+ *            trade columns for letters: eight tiles means eight narrow
+ *            terminals, not eight unreadable ones.
+ * `scaled`   every tile is a scale model — the PTY keeps the cols and rows it
+ *            had in tab view and the whole picture is shrunk to fit, so a
+ *            full-screen TUI never reflows. Truthful, and past four or five
+ *            tiles, tiny.
+ *
+ * A tile the user double-clicked overrides this either way — see MosaicTile.
+ */
+export type MosaicTextMode = 'lifesize' | 'scaled'
 
 /** A project's freeform wall. Absent until the user first moves a tile. */
 export interface MosaicState {
@@ -366,7 +404,16 @@ export type ClaudeCliState =
 /* ------------------------------------------------------ updates & tools */
 
 /** The tools the Updates & Tools section reports on. See shared/tools.ts. */
-export type ToolId = 'pwsh' | 'claude' | 'kimi' | 'gemini' | 'node'
+/**
+ * A tool's id.
+ *
+ * A plain string rather than a union of the five Forge shipped with, because the
+ * catalogue is no longer fixed: a row can be one of ours or one that was added
+ * in Settings, and a union would have made "the thing I use is not on this list"
+ * a code change. Ids added by hand are prefixed `x:` by `sanitiseCustomTool`, so
+ * a custom row can never collide with or shadow a built-in one.
+ */
+export type ToolId = string
 
 /** Where "the latest version" comes from for a given tool. */
 export type ToolLatestSource = 'npm' | 'winget' | 'local' | 'none'
@@ -388,11 +435,20 @@ export interface ToolSpec {
     wingetIds?: string[]
   }
   /**
-   * The command the Update button types into a pane. Null means Forge has no
-   * business updating this one — a local shim, or something whose installer it
-   * cannot know (Node from nvm is not Node from winget).
+   * The command the Update button types into a pane, when the obvious one from
+   * `latest.source` is wrong. Null is not "no update button": for an npm or
+   * winget tool `updateCommandFor()` derives one. It means "nothing better than
+   * the derived command" — and, when there is no source to derive from either,
+   * that this is a local shim Forge has no business updating.
    */
   updateCommand: string | null
+  /**
+   * What to type when the tool is *not* installed. Same rule: usually derived
+   * from the source, set here only when the obvious command is wrong.
+   */
+  installCommand?: string | null
+  /** Added in Settings rather than shipped. Only these can be edited or removed. */
+  custom?: boolean
 }
 
 /** What is on this machine right now. */
@@ -447,6 +503,25 @@ export interface UpdateStatus {
   error?: string
   /** True when this status came from FORGE_FAKE_UPDATE rather than a real feed. */
   simulated?: boolean
+}
+
+/** The two bundles a dev run rebuilds but cannot hot-reload into itself. */
+export type StaleBundle = 'main' | 'preload'
+
+/**
+ * "The bundle on disk is newer than the one this process is running."
+ *
+ * The dev-run counterpart to UpdateStatus, and mutually exclusive with it: a
+ * packaged build is always `{ stale: false }` because its bundles cannot change
+ * underneath it, and a checkout is always `unsupported` for updates. See
+ * electron/stale-watcher.ts.
+ */
+export interface StaleStatus {
+  stale: boolean
+  /** Which bundles changed since boot. Empty when the app is current. */
+  changed: StaleBundle[]
+  /** mtime of the newest rebuild, or null when nothing has changed. */
+  at: number | null
 }
 
 /* --------------------------------------------------------- media generation */
@@ -567,6 +642,14 @@ export interface Settings {
   railCollapsed: boolean
   terminalFontSize: number
   terminalFontFamily: string
+  /** Life-size type on the mosaic wall, or scale models. See MosaicTextMode. */
+  mosaicText: MosaicTextMode
+  /**
+   * Master switch for per-tab terminal text colours. Off prints every terminal
+   * in the theme's default foreground; each tab keeps the colour it was given,
+   * and gets it back the moment this goes on again.
+   */
+  tabTextColours: boolean
   /** Shell executable. Defaults to pwsh.exe (PowerShell 7). */
   shell: string
   /** Watch the clipboard for screenshots and copied images. */
@@ -741,6 +824,24 @@ export interface Settings {
    */
   remoteControlDefault: boolean
 
+  /* ------------------------------------------------ closing and resuming */
+  /**
+   * Give every Claude pane a session id of Forge's own, so reopening a saved
+   * layout resumes each conversation instead of starting a new one. On by
+   * default — it is the difference between a restored workspace and a restored
+   * *session*. See shared/session.ts.
+   *
+   * Turning it off is the escape hatch: panes launch exactly as they used to,
+   * with no `--session-id` and no `--resume`.
+   */
+  resumeSessions: boolean
+  /**
+   * Ask before closing Forge while panes are still running. On by default, and
+   * the backstop for everything `resumeSessions` cannot bring back — a build
+   * halfway through, a shell with unsaved work, an agent that is not Claude.
+   */
+  confirmOnQuit: boolean
+
   /* ------------------------------------------------- forge companion (M9)
    *
    * The phone link. Every field is inert until `companionEnabled` is true AND
@@ -780,6 +881,59 @@ export interface Settings {
   companionRefreshToken: string
   companionUid: string
 
+  /* --------------------------------------------------- forge mobile (M11)
+   *
+   * The phone's *terminal* link — a real socket carrying real PTY bytes, as
+   * opposed to the Companion above, which carries discrete messages and images
+   * over Firebase. The two are complements, not rivals: the Companion channel
+   * is what tells the phone where to find this socket. See docs/MOBILE.md.
+   *
+   * Same posture as the Companion: inert until `mobileEnabled` is true. Nothing
+   * here binds a port, mints a token or accepts a connection on its own.
+   */
+
+  /** Master switch. False = the server never listens and no token is minted. */
+  mobileEnabled: boolean
+  /** Listen port. */
+  mobilePort: number
+  /**
+   * Interface to bind. `0.0.0.0` — the default — means "every interface", which
+   * sounds alarming and is not: `isAllowedSource` in electron/mobile/server.ts
+   * refuses every connection that is not loopback, LAN or tailnet, so binding
+   * broadly is what makes the phone work on home wifi without also making a
+   * forwarded router port into a public shell. Set to `127.0.0.1` to accept
+   * only a local tunnel (cloudflared) and nothing else.
+   */
+  mobileBindHost: string
+  /**
+   * Paired phones. Each entry holds a SHA-256 of the device's token and never
+   * the token itself — see electron/mobile/auth.ts, and the check in
+   * scripts/mobile-auth-check.mjs that reads this file back to prove it.
+   */
+  mobileDevices: MobileDeviceRecord[]
+  /**
+   * The permanent way in from outside the house. `'ngrok'` runs a supervised
+   * ngrok agent against the account's permanent dev domain whenever the link
+   * is up, so the phone keeps one address forever — see
+   * electron/mobile-tunnel.ts. Off by default, like everything else here.
+   */
+  mobileTunnel: MobileTunnelMode
+  /**
+   * The ngrok authtoken, from the dashboard. Stored like the other keys in
+   * this file (geminiKey, companionRefreshToken): plain, local, and revocable
+   * at the far end. It is handed to ngrok as an argument — never written into
+   * an ngrok config file — and redacted from every log line and status detail
+   * this app emits.
+   */
+  mobileNgrokAuthtoken: string
+  /**
+   * The account's auto-assigned permanent domain (`<name>.ngrok-free.app`,
+   * some accounts see `.ngrok-free.dev`), copied off the ngrok dashboard —
+   * not invented. Normalised and shape-checked by the store, because it ends
+   * up on a command line.
+   */
+  mobileNgrokDomain: string
+
   /* ------------------------------------------------ updates & tools (M10) */
   /**
    * What the Update button does with the command it puts in a pane.
@@ -798,6 +952,121 @@ export interface Settings {
    * purpose: saying "not now" to 0.2.0 must not silence 0.3.0 as well.
    */
   updateDismissedVersion: string
+  /**
+   * Tools added by hand, alongside the built-in catalogue.
+   *
+   * The whole point: the list of things worth keeping up to date is not one
+   * Forge gets to close. A CLI released next month, a shim of Steve's own, the
+   * thing he installed yesterday — each is a row here, checked and updated by
+   * exactly the same code path as PowerShell. Validated by `sanitiseCustomTool`
+   * on the way in, because this is a file a person edits.
+   */
+  customTools: ToolSpec[]
+}
+
+/* ------------------------------------------------------ forge mobile (M11) */
+
+/**
+ * A paired phone, as persisted in settings.json.
+ *
+ * `tokenHash` is a SHA-256 hex digest. The raw token exists in exactly two
+ * places: the phone's Keystore-backed storage, and the single `hello-ok` frame
+ * that delivered it. Never here, and never in a log line.
+ */
+export interface MobileDeviceRecord {
+  id: string
+  name: string
+  tokenHash: string
+  createdAt: number
+  lastSeenAt: number
+}
+
+/**
+ * A pairing offer, on its way to the QR in Settings.
+ *
+ * `token` is the only time a raw credential crosses an IPC boundary. It is
+ * never persisted: what reaches settings.json is a SHA-256 of the *device*
+ * token this one is exchanged for, and only once a phone has actually used it.
+ */
+export type MobilePairOffer =
+  | {
+      ok: true
+      token: string
+      expiresAt: number
+      ttlMs: number
+      host: string
+      /**
+       * 0 when `url` is a tunnel — meaning "the scheme's default port", never
+       * "append 8420". See pairEndpoint in electron/mobile-tunnel.ts and
+       * toOrigin in mobile/src/lib/secure.ts, which treat a port-less secure
+       * URL as exactly that.
+       */
+      port: number
+      /**
+       * `wss://<domain>` when the tunnel is live, '' otherwise. When present it
+       * is THE address to pair against — it works from anywhere, forever,
+       * which is what makes pairing one-and-done.
+       */
+      url: string
+    }
+  | { ok: false; error: string }
+
+/** A layout operation from a phone, on its way to the renderer that owns tabs. */
+export interface MobileCommandEvent {
+  requestId: string
+  deviceName: string
+  op: {
+    op: 'create-tab' | 'create-pane' | 'close-pane' | 'select-tab'
+    projectId: string
+    profileId?: string
+    tabId?: string
+    paneId?: string
+  }
+}
+
+export type MobileState = 'off' | 'starting' | 'listening' | 'error'
+
+/* ------------------------------------------------------- the ngrok tunnel */
+
+/** Which transport carries the link past the front door. See mobile-tunnel.ts. */
+export type MobileTunnelMode = 'off' | 'ngrok'
+
+export type MobileTunnelState = 'off' | 'starting' | 'live' | 'retrying' | 'error'
+
+/**
+ * The tunnel's slice of MobileStatus. `error` is terminal on purpose: it means
+ * a door that will not open (bad authtoken, someone else's domain, no session
+ * allowance left), where retrying buys nothing — `detail` says which key to go
+ * and fix. Transient trouble shows as `retrying` and never needs Steve.
+ */
+export interface MobileTunnelStatus {
+  state: MobileTunnelState
+  /** The public https URL ngrok reported, while live. */
+  url: string
+  /** A human sentence, or empty when there is nothing to say. Never a token. */
+  detail: string
+}
+
+/** What the Settings panel shows about the link. */
+export interface MobileStatus {
+  enabled: boolean
+  state: MobileState
+  /** Where it is actually listening, once it is. */
+  host: string
+  port: number
+  /**
+   * The addresses a phone can reach this machine on right now — LAN and
+   * tailnet, worked out from the live interface list. The Settings panel shows
+   * these because "it's listening" is not an answer to "what do I type".
+   */
+  addresses: string[]
+  devices: MobileDeviceRecord[]
+  /** Phones with a socket open this second. */
+  connected: number
+  /** A human sentence, or empty when there is nothing to say. */
+  detail: string
+  /** The ngrok tunnel, when one is configured. `state: 'off'` otherwise. */
+  tunnel: MobileTunnelStatus
 }
 
 /* ---------------------------------------------------- companion ipc (M9) */
@@ -867,6 +1136,12 @@ export interface CreateSessionRequest {
    */
   projectName?: string
   paneTitle?: string
+  /**
+   * The pane's saved Claude session id. The main process decides what to do
+   * with it — claim it on a first launch, resume it on every one after — in
+   * electron/bridge/claude-session.ts.
+   */
+  sessionId?: string
 }
 
 export type CreateSessionResult =

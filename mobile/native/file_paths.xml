@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What the FileProvider is allowed to serve. Exactly one thing: the updates
+  folder inside this app's external files dir, which is where ForgeUpdater's
+  DownloadManager request lands the new APK. The system installer reads the
+  file through a content:// URI minted against this path — nothing else in the
+  app's storage is reachable that way.
+
+  scripts/apk-init.mjs merges this entry into the res/xml/file_paths.xml that
+  `cap add android` generates, so a regenerated project keeps it.
+-->
+<paths>
+  <external-files-path name="updates" path="updates/" />
+</paths>

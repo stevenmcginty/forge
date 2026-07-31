@@ -110,6 +110,34 @@ export const IPC = {
    */
   companionUtterance: 'companion:utterance',
 
+  /* forge mobile (M11) — the phone's terminal link. The Companion above carries
+   * messages and images over Firebase; this carries real PTY bytes over a real
+   * socket. See docs/MOBILE.md. */
+  mobileStatus: 'mobile:status',
+  mobileStatusEvent: 'mobile:status-event',
+  mobileStart: 'mobile:start',
+  mobileStop: 'mobile:stop',
+  /** Mint a single-use pairing token for the QR in Settings. */
+  mobilePair: 'mobile:pair',
+  mobilePairCancel: 'mobile:pair-cancel',
+  mobileRevoke: 'mobile:revoke',
+  /**
+   * A layout operation arriving from a phone. Main → renderer, because the
+   * renderer owns tabs and panes and persists them; the phone must take the
+   * same code path a local click takes, not a second one that can disagree.
+   */
+  mobileCommand: 'mobile:command',
+  /** The renderer's answer to a mobileCommand. */
+  mobileCommandResult: 'mobile:command-result',
+  /**
+   * The ngrok tunnel — config, and its own on/off. Status rides the existing
+   * mobileStatusEvent broadcast; there is no second event stream to subscribe
+   * to and no second one to forget to.
+   */
+  mobileTunnelConfig: 'mobile:tunnel-config',
+  mobileTunnelStart: 'mobile:tunnel-start',
+  mobileTunnelStop: 'mobile:tunnel-stop',
+
   // skills library (M8) — %APPDATA%\Forge\skills, junctioned into
   // ~/.claude/skills so every claude and kimi session on the machine sees them.
   skillsList: 'skills:list',
@@ -130,6 +158,10 @@ export const IPC = {
   toolsProbe: 'tools:probe',
   toolsLatest: 'tools:latest',
 
+  // the slash-command reference and the Claude Code changelog, fetched from
+  // the published docs and cached. Read-only; nothing here installs anything.
+  commandsFeed: 'commands:feed',
+
   // forge self-update (M10). Packaged builds only; every one of these is safe
   // to call in a dev run and answers `unsupported`.
   updateStatus: 'update:status',
@@ -137,6 +169,12 @@ export const IPC = {
   updateCheck: 'update:check',
   updateDownload: 'update:download',
   updateInstall: 'update:install',
+
+  // dev-run staleness (the other half of the above). Checkouts only; in a
+  // packaged build these are safe to call and answer "not stale", forever.
+  staleStatus: 'stale:status',
+  staleStatusEvent: 'stale:status-event',
+  staleRestart: 'stale:restart',
 
   // diagnostics
   rendererError: 'diag:renderer-error'

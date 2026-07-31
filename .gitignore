@@ -19,7 +19,12 @@ bridge-dist/
 
 # Generated test audio for the dictation smoke test — regenerate with
 # scripts/make-speech-wav.ps1 rather than carrying a WAV in the repo.
-scripts/fixtures/
+#
+# The WAV, not the folder. `scripts/fixtures/` swallowed the hand-written
+# entry points beside it — mobile-entry.ts and tunnel-entry.ts, which are what
+# mobile:smoke and tunnel:check bundle to reach the real modules — so both
+# checks were unrunnable from a clean clone while passing perfectly here.
+scripts/fixtures/*.wav
 
 # Temp probe files written into the root by scripts/bridge-register-check.mjs
 .bridge-check-*.cjs
@@ -33,3 +38,20 @@ companion/.emulator-data/
 
 # Throwaway FORGE_DATA_DIR for live UI checks — never a real install.
 isolated/
+
+# Forge Mobile APK. Built artefacts land in dist-apk/; the Android tree keeps
+# its machine-local SDK pointer and build output out of the repo. The release
+# keystore lives in %APPDATA%\Forge\android and must NEVER be committed — it
+# is the only key that can ever ship an update to an installed Forge Mobile,
+# so the ignore covers the whole class of key material, not one filename.
+dist-apk/
+mobile/android/local.properties
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/app/src/main/assets/public/
+mobile/android/app/src/main/assets/capacitor.config.json
+mobile/android/app/src/main/assets/capacitor.plugins.json
+*.jks
+*.keystore
+keystore.properties

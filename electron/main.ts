@@ -26,6 +26,7 @@ import {
 import { registerMemoryHandlers, setMemoryDir } from './memory-store'
 import { registerSkillsHandlers, setSkillsDirs } from './skills-store'
 import { disposePtyHost, registerPtyHandlers, setPtyTarget } from './pty-host'
+import { askBeforeClose, shouldConfirmClose } from './quit-guard'
 import { writeBridgeConfig } from './bridge/mcp-config'
 import { disposePresence, initPresence, setPresence } from './presence'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
@@ -34,8 +35,16 @@ import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './
 import { registerAgentProbeHandlers } from './agent-probe'
 import { registerVoiceHandlers } from './voice-bridge'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
+import { applyMobileSettings, disposeMobile, registerMobileHandlers } from './mobile-host'
 import { registerSystemHandlers } from './system'
 import { registerToolsHandlers } from './tools'
+import { registerCommandsHandlers } from './commands'
+import {
+  disposeStaleWatcher,
+  initStaleWatcher,
+  registerStaleHandlers,
+  setStaleTarget
+} from './stale-watcher'
 import { disposeUpdater, initUpdater, registerUpdateHandlers, setUpdateTarget } from './updater'
 
 const isDev = !app.isPackaged
@@ -259,9 +268,14 @@ function createWindow(): void {
   mainWindow.on('hide', syncPresence)
   mainWindow.on('show', syncPresence)
 
-  mainWindow.on('close', () => {
+  mainWindow.on('close', (event) => {
     if (boundsTimer) clearTimeout(boundsTimer)
     persistBounds()
+    if (!mainWindow || !shouldConfirmClose()) return
+    // Nothing is closed yet: the dialog is asynchronous, so the window has to
+    // be kept alive until it comes back with an answer. See quit-guard.ts.
+    event.preventDefault()
+    void askBeforeClose(mainWindow)
   })
 
   mainWindow.on('closed', () => {
@@ -270,6 +284,7 @@ function createWindow(): void {
     setSttTarget(null)
     setSttModelTarget(null)
     setUpdateTarget(null)
+    setStaleTarget(null)
     syncPresence()
   })
 
@@ -288,12 +303,40 @@ function createWindow(): void {
   setSttTarget(mainWindow)
   setSttModelTarget(mainWindow)
   setUpdateTarget(mainWindow)
+  setStaleTarget(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
-    void mainWindow.loadURL(devUrl)
+    void loadDevUrl(mainWindow, devUrl)
   } else {
     void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+}
+
+/**
+ * Load the Vite dev server, retrying while it is still coming up.
+ *
+ * `loadURL` rejects if nothing is listening yet and then does nothing further,
+ * which is a **blank window that never recovers** — you have to close Forge and
+ * start it again. Normally electron-vite starts Vite before it starts Electron
+ * so the race cannot happen, but anything that brings Electron up on its own —
+ * `app.relaunch()` from the stale-build Restart button, most of all — reaches
+ * this line a second or two before the new dev server is answering.
+ *
+ * Retrying is the whole fix. Ten attempts over ~10s covers a cold Vite start on
+ * a busy machine; past that the error is real and worth printing rather than
+ * hiding behind another retry.
+ */
+async function loadDevUrl(win: BrowserWindow, url: string, attempt = 0): Promise<void> {
+  try {
+    await win.loadURL(url)
+  } catch (err) {
+    if (win.isDestroyed()) return
+    if (attempt >= 10) {
+      console.error(`[main] dev server never answered at ${url}:`, err)
+      return
+    }
+    setTimeout(() => void loadDevUrl(win, url, attempt + 1), 1000)
   }
 }
 
@@ -548,14 +591,26 @@ void app.whenReady().then(() => {
   // Off by default: this reads settings, sees `companionEnabled: false`, and
   // returns without touching the network or a credential.
   registerCompanionHandlers()
+  // Same posture as the Companion above, and the same one-line reason: this
+  // reads settings, sees `mobileEnabled: false`, and returns without binding a
+  // port or minting a credential. See docs/MOBILE.md.
+  registerMobileHandlers()
+  applyMobileSettings()
   registerSystemHandlers()
   registerToolsHandlers()
+  registerCommandsHandlers()
   registerUpdateHandlers()
+  registerStaleHandlers()
   createWindow()
   // After the window, so the first status event has somewhere to go — and it
   // is a no-op in a dev run: initUpdater() returns immediately unless this is
   // a packaged build or FORGE_FAKE_UPDATE is set. See electron/updater.ts.
   initUpdater()
+  // The other side of that coin, and a no-op in a packaged build for the exact
+  // opposite reason: there, out/ cannot change under the running process. In a
+  // checkout it takes the mtimes of the bundles we just booted from, which is
+  // why it goes here rather than earlier — after the build that produced them.
+  initStaleWatcher()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -573,5 +628,7 @@ app.on('before-quit', () => {
   disposeSttSidecar()
   disposeSttModel()
   disposeCompanion()
+  void disposeMobile()
   disposeUpdater()
+  disposeStaleWatcher()
 })

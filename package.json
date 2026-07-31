@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
-    "typecheck": "tsc --noEmit --composite false -p tsconfig.node.json && tsc --noEmit --composite false -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit --composite false -p tsconfig.node.json && tsc --noEmit --composite false -p tsconfig.web.json && tsc --noEmit --composite false -p tsconfig.mobile.json",
     "build": "npm run typecheck && electron-vite build",
     "icon": "node scripts/make-icon.mjs",
     "stt:build": "node scripts/build-stt.mjs",
@@ -28,20 +28,38 @@
     "bridge:register": "node scripts/bridge-register-check.mjs",
     "bridge:build": "node scripts/build-bridge.mjs",
     "remote:check": "node scripts/remote-check.mjs",
+    "session:check": "node scripts/session-check.mjs",
     "packaged:check": "node scripts/packaged-check.mjs",
     "secrets:test": "node scripts/secrets-audit-test.mjs",
     "theme:check": "node scripts/theme-check.mjs",
     "updates:check": "node scripts/updates-check.mjs",
+    "commands:check": "node scripts/commands-check.mjs",
     "mosaic:check": "node scripts/mosaic-check.mjs",
     "hub:check": "node scripts/hub-check.mjs",
     "companion:smoke": "node scripts/companion-smoke.mjs",
     "companion:icons": "node scripts/companion-icons.mjs",
-    "companion:serve": "node scripts/companion-serve.mjs"
+    "companion:serve": "node scripts/companion-serve.mjs",
+    "mobile:smoke": "node scripts/mobile-smoke.mjs",
+    "mobile:dev": "vite --config mobile/vite.config.ts",
+    "mobile:build": "vite build --config mobile/vite.config.ts",
+    "mobile:serve": "node scripts/mobile-serve.mjs",
+    "mobile:tunnel": "node scripts/mobile-tunnel.mjs",
+    "mobile:go": "node scripts/mobile-go.mjs",
+    "tunnel:check": "node scripts/tunnel-check.mjs",
+    "apk:init": "node scripts/apk-init.mjs",
+    "apk:build": "node scripts/apk-build.mjs",
+    "apk:release": "node scripts/apk-release.mjs",
+    "apk:check": "node scripts/apk-check.mjs"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.6.8",
+    "@capacitor/cli": "^7.6.8",
+    "@capacitor/core": "^7.6.8",
+    "@capacitor/preferences": "^7.0.4",
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
@@ -58,6 +76,7 @@
     "@xterm/xterm": "^6.0.0",
     "electron-updater": "^6.8.9",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "ws": "^8.21.1"
   }
 }

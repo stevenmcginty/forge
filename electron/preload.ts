@@ -107,6 +107,22 @@ const api: ForgeApi = {
     onUtterance: (cb) => subscribe(IPC.companionUtterance, cb)
   },
 
+  mobile: {
+    status: () => ipcRenderer.invoke(IPC.mobileStatus),
+    start: () => ipcRenderer.invoke(IPC.mobileStart),
+    stop: () => ipcRenderer.invoke(IPC.mobileStop),
+    pair: () => ipcRenderer.invoke(IPC.mobilePair),
+    pairCancel: () => ipcRenderer.invoke(IPC.mobilePairCancel),
+    revoke: (deviceId) => ipcRenderer.invoke(IPC.mobileRevoke, deviceId ?? ''),
+    setTunnel: (config) => ipcRenderer.invoke(IPC.mobileTunnelConfig, config ?? {}),
+    startTunnel: () => ipcRenderer.invoke(IPC.mobileTunnelStart),
+    stopTunnel: () => ipcRenderer.invoke(IPC.mobileTunnelStop),
+    onStatus: (cb) => subscribe(IPC.mobileStatusEvent, cb),
+    onCommand: (cb) => subscribe(IPC.mobileCommand, cb),
+    commandResult: (requestId, error) =>
+      ipcRenderer.send(IPC.mobileCommandResult, { requestId, error: error ?? '' })
+  },
+
   system: {
     userName: () => ipcRenderer.invoke(IPC.systemUserName),
     claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion)
@@ -117,12 +133,22 @@ const api: ForgeApi = {
     latest: (ids, refresh) => ipcRenderer.invoke(IPC.toolsLatest, ids ?? null, refresh === true)
   },
 
+  commands: {
+    feed: (refresh) => ipcRenderer.invoke(IPC.commandsFeed, refresh === true)
+  },
+
   updates: {
     status: () => ipcRenderer.invoke(IPC.updateStatus),
     check: () => ipcRenderer.invoke(IPC.updateCheck),
     download: () => ipcRenderer.invoke(IPC.updateDownload),
     install: () => ipcRenderer.invoke(IPC.updateInstall),
     onStatus: (cb) => subscribe(IPC.updateStatusEvent, cb)
+  },
+
+  dev: {
+    staleStatus: () => ipcRenderer.invoke(IPC.staleStatus),
+    onStale: (cb) => subscribe(IPC.staleStatusEvent, cb),
+    restart: () => ipcRenderer.invoke(IPC.staleRestart)
   },
 
   probeAgents: () => ipcRenderer.invoke(IPC.agentsProbe),

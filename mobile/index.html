@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      `viewport-fit=cover` so the key bar can sit under the gesture bar and pad
+      itself back out with env(safe-area-inset-bottom); `user-scalable=no` because
+      a pinch-zoom on a terminal is a mis-scroll, not a gesture anyone wanted.
+      `interactive-widget=resizes-content` is what makes Android's soft keyboard
+      shrink the viewport instead of sliding it — which is what drives fit() and
+      therefore the real pty:resize.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0c0e" />
+    <title>Forge Mobile</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

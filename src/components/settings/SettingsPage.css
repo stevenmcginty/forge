@@ -1150,16 +1150,28 @@
   flex-direction: column;
 }
 
+/*
+ * The separator moved from the row to the item when rows grew an editor: a
+ * custom tool's form belongs *inside* the rule, under the row it edits, not
+ * floating between two of them.
+ */
+.stool__item {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.stool__item:last-child {
+  border-bottom: 0;
+}
+
 .stool__row {
   display: flex;
   align-items: center;
   gap: var(--s-5);
   padding: var(--s-4) 0;
-  border-bottom: 1px solid var(--line-soft);
 }
 
-.stool__row:last-child {
-  border-bottom: 0;
+/* The last row keeps its old flush bottom — unless its editor is open. */
+.stool__item:last-child > .stool__row:only-child {
   padding-bottom: 0;
 }
 
@@ -1226,4 +1238,201 @@
 .stool__update[data-behind='true'] {
   color: var(--accent);
   border-color: var(--accent-line);
+}
+
+/* ------------------------------------------------------- added tools */
+
+/* Which rows are Steve's, said quietly — it is the only thing separating a
+   custom row from a built-in one, and it only matters when you go looking. */
+.stool__tag {
+  margin-left: var(--s-3);
+  color: var(--text-dim);
+}
+
+.stool__chev {
+  color: var(--text-dim);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.stool__chev--open {
+  transform: rotate(180deg);
+}
+
+.stool__edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-4) 0 var(--s-5);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.stool__edit .srow__control .field__input,
+.stool__edit .srow__control .select {
+  width: 260px;
+}
+
+.stool__preview {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-3) var(--s-4);
+  background: var(--bg-terminal);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+  overflow-x: auto;
+}
+
+.stool__preview code {
+  font-size: var(--t-sm);
+  color: var(--term-green);
+  white-space: nowrap;
+}
+
+.stool__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding-top: var(--s-2);
+}
+
+.stool__foot-right {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+/* The suggestion strip: a dozen one-click rows, wrapped rather than scrolled,
+   because a list you have to drag through is a list you stop reading. */
+.stool__known {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+
+.stool__add {
+  flex: none;
+}
+
+/* ------------------------------------------------------------ forge mobile
+ *
+ * The one thing this panel has to get right typographically is the pairing
+ * code: it is read off a screen and typed into a phone, character by character,
+ * by someone who will not enjoy doing it twice. So it is monospace, large, and
+ * loosely tracked — the shapes that get confused (0/O, 1/l, rn/m) need the air.
+ */
+
+.mobile-addresses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  justify-content: flex-end;
+}
+
+.mobile-address {
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  padding: 2px var(--s-2);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.mobile-address.is-empty {
+  border: 0;
+  color: var(--text-dim);
+  font-family: inherit;
+}
+
+/* The tunnel's public URL: the one string that gets copied to a phone, so it
+   keeps the address styling and the copy button sits beside it, not under. */
+.mobile-tunnel-url {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  justify-content: flex-end;
+}
+
+.mobile-tunnel-url .mobile-address {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mobile-pair {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-4) 0 var(--s-2);
+}
+
+.mobile-pair__lead {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--text-dim);
+}
+
+.mobile-pair__code {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-sm);
+  color: var(--accent);
+  user-select: all;
+  word-break: break-all;
+  text-align: center;
+}
+
+.mobile-pair__ttl {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.mobile-error {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-sm);
+  color: var(--danger, #ff5c5c);
+}
+
+.mobile-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-device {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.mobile-device:first-child {
+  border-top: 0;
+}
+
+.mobile-device__name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-device__seen {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.sbtn--danger {
+  color: var(--danger, #ff5c5c);
+  border-color: color-mix(in srgb, var(--danger, #ff5c5c) 40%, transparent);
 }

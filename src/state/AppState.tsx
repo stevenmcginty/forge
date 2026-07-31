@@ -15,6 +15,7 @@ import type {
   ClaudePermissionMode,
   LayoutNode,
   MosaicState,
+  MosaicTextMode,
   MosaicTile,
   Project,
   Settings,
@@ -26,7 +27,9 @@ import type {
   Workspace,
   WorkspaceViewMode
 } from '@shared/types'
-import { BUILTIN_AGENT_PROFILES, isShellProfile } from '@shared/agents'
+import { BUILTIN_AGENT_PROFILES, TAB_TEXT_PALETTE, isShellProfile } from '@shared/agents'
+import { isSessionId, newSessionId } from '@shared/session'
+import { MOBILE_PORT } from '@shared/mobile'
 import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
 import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
@@ -56,6 +59,7 @@ export type SettingsSection =
   | 'voice'
   | 'appearance'
   | 'screenshots'
+  | 'mobile'
   | 'updates'
   | 'advanced'
 
@@ -121,6 +125,8 @@ const FALLBACK_SETTINGS: Settings = {
   railCollapsed: false,
   terminalFontSize: 13,
   terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, monospace",
+  mosaicText: 'lifesize',
+  tabTextColours: true,
   shell: 'pwsh.exe',
   catchShots: true,
   shotsKeep: 12,
@@ -164,6 +170,8 @@ const FALLBACK_SETTINGS: Settings = {
   skillsLibraryDir: '',
   skillsEnabled: [],
   remoteControlDefault: true,
+  resumeSessions: true,
+  confirmOnQuit: true,
   // Companion (M9): the phone link, off and unconfigured until Steve says
   // otherwise. This fallback is only ever used before the first snapshot
   // arrives, so "off" is also the only safe answer here.
@@ -175,6 +183,17 @@ const FALLBACK_SETTINGS: Settings = {
   companionEmail: '',
   companionRefreshToken: '',
   companionUid: '',
+  // Forge Mobile (M11) — off, unpaired, not listening. Mirrors defaultSettings()
+  // in electron/store.ts; this fallback is only ever used before the real
+  // settings have arrived from main.
+  mobileEnabled: false,
+  mobilePort: MOBILE_PORT,
+  mobileBindHost: '0.0.0.0',
+  mobileDevices: [],
+  mobileTunnel: 'off',
+  mobileNgrokAuthtoken: '',
+  mobileNgrokDomain: '',
+  customTools: [],
   updatesAutoRun: false,
   updateDismissedVersion: ''
 }
@@ -212,6 +231,7 @@ type Action =
   | { type: 'closeTab'; tabId: string }
   | { type: 'selectTab'; tabId: string }
   | { type: 'renameTab'; tabId: string; title: string }
+  | { type: 'paintTab'; tabId: string; patch: TabPaint }
   | { type: 'moveTab'; from: number; to: number }
   | {
       type: 'splitPane'
@@ -301,13 +321,31 @@ function totalPanes(state: AppState): number {
   return n
 }
 
-function makeTab(profileId: string, index: number, permissionMode?: ClaudePermissionMode): TerminalTab {
+/**
+ * The terminal-text colour a new tab is born with: the first one nobody in this
+ * project is already using, cycling once they are all spoken for.
+ *
+ * Taken rather than random, because random hands you two near-identical blues
+ * often enough to be annoying, and the point of the colour is that no two
+ * terminals on the mosaic wall look alike. A tab whose colour the user cleared
+ * counts as using none, so the colour it gave up is free again.
+ */
+function nextTextColor(tabs: TerminalTab[]): string {
+  const taken = new Set(tabs.map((t) => t.textColor?.toLowerCase()).filter(Boolean))
+  return (
+    TAB_TEXT_PALETTE.find((c) => !taken.has(c.toLowerCase())) ??
+    TAB_TEXT_PALETTE[tabs.length % TAB_TEXT_PALETTE.length]!
+  )
+}
+
+function makeTab(profileId: string, tabs: TerminalTab[], permissionMode?: ClaudePermissionMode): TerminalTab {
   const leaf = makeLeaf(profileId, '', permissionMode)
   return {
     id: makeId('tab'),
-    title: `Tab ${index + 1}`,
+    title: `Tab ${tabs.length + 1}`,
     root: leaf,
-    activePaneId: leaf.id
+    activePaneId: leaf.id,
+    textColor: nextTextColor(tabs)
   }
 }
 
@@ -334,12 +372,49 @@ function mapActiveTab(state: AppState, fn: (tab: TerminalTab) => TerminalTab | n
   })
 }
 
+/**
+ * A colour change to a tab. `null` means "take the colour off" — distinct from
+ * `undefined`, which means "leave that one alone", so the two colours can be
+ * set independently through one action.
+ */
+export interface TabPaint {
+  color?: string | null
+  textColor?: string | null
+}
+
+function painted(tab: TerminalTab, patch: TabPaint): TerminalTab {
+  const next: TerminalTab = { ...tab }
+  // Deleted rather than set to '' — an absent colour is what every reader
+  // treats as "untinted", and a blank string would be a colour that paints
+  // nothing.
+  if (patch.color !== undefined) {
+    if (patch.color) next.color = patch.color
+    else delete next.color
+  }
+  if (patch.textColor !== undefined) {
+    if (patch.textColor) next.textColor = patch.textColor
+    else delete next.textColor
+  }
+  return next
+}
+
 function move<T>(list: T[], from: number, to: number): T[] {
   if (from === to || from < 0 || from >= list.length || to < 0 || to >= list.length) return list
   const next = [...list]
   const [item] = next.splice(from, 1)
   next.splice(to, 0, item!)
   return next
+}
+
+/**
+ * A hex colour, and nothing else.
+ *
+ * xterm is handed these straight, and an unparseable theme colour throws inside
+ * the renderer rather than being ignored — so the gate is on the way in, not at
+ * the paint.
+ */
+function isColor(v: unknown): v is string {
+  return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v.trim())
 }
 
 /** Trust nothing that came off disk. */
@@ -354,11 +429,27 @@ function sanitiseWorkspace(ws: Workspace | null, profileIds: Set<string>): Works
       if (!profileIds.has(leaf.profileId)) {
         root = updateLeaf(root, leaf.id, { profileId: DEFAULT_PROFILE_ID })
       }
+      // A session id ends up on a command line typed into a live shell, so a
+      // layout file does not get to put anything but a real uuid there. Panes
+      // written before resume existed have none: they get one here and start
+      // fresh that once, then resume like everything else.
+      if (!isSessionId(leaf.sessionId)) {
+        root = updateLeaf(root, leaf.id, { sessionId: newSessionId() })
+      }
     }
     const leaves = collectLeaves(root)
     if (leaves.length === 0 || leaves.length > MAX_PANES_PER_TAB) continue
     const activePaneId = leaves.some((l) => l.id === tab.activePaneId) ? tab.activePaneId : leaves[0]!.id
-    tabs.push({ id: tab.id, title: typeof tab.title === 'string' ? tab.title : 'Tab', root, activePaneId })
+    tabs.push({
+      id: tab.id,
+      title: typeof tab.title === 'string' ? tab.title : 'Tab',
+      root,
+      activePaneId,
+      // Colours survive a restart, but only as colours: anything that is not a
+      // CSS colour string is dropped rather than handed to xterm.
+      ...(isColor(tab.color) ? { color: tab.color } : {}),
+      ...(isColor(tab.textColor) ? { textColor: tab.textColor } : {})
+    })
   }
   const activeTabId = tabs.some((t) => t.id === ws.activeTabId) ? ws.activeTabId : (tabs[0]?.id ?? null)
   const viewMode: WorkspaceViewMode = ws.viewMode === 'mosaic' ? 'mosaic' : 'tabs'
@@ -465,7 +556,7 @@ function reducer(state: AppState, action: Action): AppState {
         return { ...state, notice: `Session limit reached (${MAX_SESSIONS})` }
       }
       return mapActiveWorkspace(state, (ws) => {
-        const tab = makeTab(action.profileId, ws.tabs.length, action.permissionMode)
+        const tab = makeTab(action.profileId, ws.tabs, action.permissionMode)
         return { ...ws, tabs: [...ws.tabs, tab], activeTabId: tab.id }
       })
     }
@@ -491,7 +582,8 @@ function reducer(state: AppState, action: Action): AppState {
         id: makeId('tab'),
         title: action.title,
         root: leaf,
-        activePaneId: leaf.id
+        activePaneId: leaf.id,
+        textColor: nextTextColor(workspaceOf(state, state.activeProjectId).tabs)
       }
       const next = mapActiveWorkspace(state, (ws) => ({
         ...ws,
@@ -542,6 +634,12 @@ function reducer(state: AppState, action: Action): AppState {
       return mapActiveWorkspace(state, (ws) => ({
         ...ws,
         tabs: ws.tabs.map((t) => (t.id === action.tabId ? { ...t, title: action.title } : t))
+      }))
+
+    case 'paintTab':
+      return mapActiveWorkspace(state, (ws) => ({
+        ...ws,
+        tabs: ws.tabs.map((t) => (t.id === action.tabId ? painted(t, action.patch) : t))
       }))
 
     case 'moveTab':
@@ -735,6 +833,13 @@ export interface AppActions {
   setGeminiKey(key: string): void
   setGeminiModel(model: string): void
   setFontSize(size: number): void
+  /** Life-size type on the mosaic wall, or scale models. Persisted, app-wide. */
+  setMosaicText(mode: MosaicTextMode): void
+  /**
+   * Show or hide every tab's terminal text colour at once. The colours
+   * themselves are untouched — this is a lens, not an eraser.
+   */
+  setTabTextColours(on: boolean): void
   setCatchShots(on: boolean): void
   setShotsKeep(keep: number): void
   /** Generic settings write — used by the dictation setup card. Persisted. */
@@ -753,6 +858,8 @@ export interface AppActions {
   closeTab(tabId: string): void
   selectTab(tabId: string): void
   renameTab(tabId: string, title: string): void
+  /** Recolour a tab's chip, its terminals' text, or both. `null` clears one. */
+  paintTab(tabId: string, patch: TabPaint): void
   moveTab(from: number, to: number): void
   splitPane(
     paneId: string,
@@ -1097,6 +1204,8 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         dispatch({ type: 'patchSettings', patch: { geminiModel: model.trim() || 'gemini-2.5-flash' } }),
       setFontSize: (size) =>
         dispatch({ type: 'patchSettings', patch: { terminalFontSize: Math.min(24, Math.max(9, size)) } }),
+      setMosaicText: (mode) => dispatch({ type: 'patchSettings', patch: { mosaicText: mode } }),
+      setTabTextColours: (on) => dispatch({ type: 'patchSettings', patch: { tabTextColours: on } }),
       setCatchShots: (on) => dispatch({ type: 'patchSettings', patch: { catchShots: on } }),
       setShotsKeep: (keep) =>
         dispatch({ type: 'patchSettings', patch: { shotsKeep: Math.min(60, Math.max(1, Math.round(keep))) } }),
@@ -1147,6 +1256,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       closeTab: (tabId) => dispatch({ type: 'closeTab', tabId }),
       selectTab: (tabId) => dispatch({ type: 'selectTab', tabId }),
       renameTab: (tabId, title) => dispatch({ type: 'renameTab', tabId, title }),
+      paintTab: (tabId, patch) => dispatch({ type: 'paintTab', tabId, patch }),
       moveTab: (from, to) => dispatch({ type: 'moveTab', from, to }),
       splitPane: (paneId, direction, profileId, permissionMode) =>
         dispatch({
@@ -1210,6 +1320,60 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     state.settings.railCollapsed,
     state.settings.voiceHub
   ])
+
+  /* ------------------------------------------------- forge mobile commands
+   *
+   * A phone asked for a layout change. The renderer owns the split tree and
+   * persists the workspace, so the phone joins *this* code path rather than a
+   * parallel one in the main process that could disagree with it — an op ends
+   * up dispatching exactly what a click on the same control dispatches.
+   *
+   * Note the deliberate side effect: an op naming a project that is not the
+   * active one selects it first. Dispatches reach the reducer in order, so the
+   * op that follows sees the newly selected project. It does mean a phone can
+   * change what the desktop is showing — correct for "my computer is at home",
+   * and documented in docs/MOBILE.md rather than hidden.
+   */
+
+  useEffect(() => {
+    return window.forge.mobile.onCommand(({ requestId, op }) => {
+      const answer = (error?: string): void => window.forge.mobile.commandResult(requestId, error)
+      const project = state.projects.find((p) => p.id === op.projectId)
+      if (!project) return answer('That project is no longer open on the desktop.')
+      if (state.activeProjectId !== project.id) dispatch({ type: 'selectProject', projectId: project.id })
+
+      // The cap is checked here as well as in the reducer, because the reducer
+      // reports it by setting a `notice` on the desktop — which the phone
+      // cannot see. Refusing here is what turns it into an answer.
+      const atLimit = totalPanes(state) >= MAX_SESSIONS
+
+      switch (op.op) {
+        case 'create-tab':
+          if (atLimit) return answer(`Forge is at its ${MAX_SESSIONS}-session limit.`)
+          actions.newTab(op.profileId ?? project.defaultProfileId)
+          return answer()
+        case 'select-tab':
+          if (!op.tabId) return answer('No tab named.')
+          actions.selectTab(op.tabId)
+          return answer()
+        case 'create-pane': {
+          if (atLimit) return answer(`Forge is at its ${MAX_SESSIONS}-session limit.`)
+          const workspace = workspaceOf(state, project.id)
+          const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId)
+          const paneId = op.paneId ?? activeTab?.activePaneId
+          if (!paneId) return answer('There is no pane open to split.')
+          actions.splitPane(paneId, 'row', op.profileId ?? project.defaultProfileId)
+          return answer()
+        }
+        case 'close-pane':
+          if (!op.paneId) return answer('No pane named.')
+          actions.closePane(op.paneId)
+          return answer()
+        default:
+          return answer('Forge does not know that command.')
+      }
+    })
+  }, [actions, state])
 
   const value = useMemo<Ctx>(() => ({ state, actions }), [state, actions])
 
