@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isSttSetupError, type SttStatus } from '@shared/types'
 import { insertPhrase, resolveInsertTarget, type InsertTarget } from '@/lib/dictation'
+import { earconDictationOff, earconDictationOn } from '@/lib/earcon'
 import { dictationTranscript, transcriptBus } from '@/lib/transcriptSource'
 import { useActiveTab, useApp } from '@/state/AppState'
 
@@ -128,6 +129,59 @@ export function useDictationEngine(): Dictation {
     lastErrorKey.current = key
     if (err && !isSttSetupError(err.kind)) noticeRef.current(err.msg)
   }, [status.error])
+
+  /* ---------------------------------------------------------------- earcons
+   *
+   * A beep when the mic opens and a beep when it shuts, so the hotkey answers
+   * for itself. Right Ctrl is pressed while looking at a terminal, not at the
+   * status bar, and a toggle you have to go and *look at* is one you press
+   * twice.
+   *
+   * Driven off the phase rather than off `toggle`, for three reasons:
+   *
+   *   • the pill, the hub and the hotkey all end up here, so they cannot drift
+   *     apart — clicking sounds exactly like pressing the key, which is what
+   *     was asked for, and it is true by construction rather than by three
+   *     call sites remembering to do the same thing;
+   *   • the sidecar is spawned lazily and the model takes a few seconds to
+   *     load the first time. A beep on the keypress would be a promise the mic
+   *     had not kept yet; this one lands when it is genuinely open;
+   *   • dictation stops itself after `sttAutoStopSeconds` of silence, and that
+   *     is precisely the case where he has no idea it went off. The falling
+   *     beep covers it, and nothing else could.
+   *
+   * `finishing` is deliberately not treated as still-on: the mic is shut by
+   * then and only the tail phrase is still being transcribed, so the sound
+   * belongs at the edge out of `listening`.
+   */
+
+  const capturing = status.phase === 'listening'
+  const wasCapturing = useRef<boolean | null>(null)
+  /**
+   * Did *we* open this mic?
+   *
+   * The agent shares the sidecar, and while it is armed it re-starts listening
+   * after every auto-stop. Beeping on that would turn the pair into the
+   * metronome VoiceAgent's HANDS_BACK note describes — an armed agent in an
+   * empty room, chirping every few seconds at nobody. So an agent-owned session
+   * gets no opening beep, and this flag makes sure it gets no closing one
+   * either: the beeps are always a matched pair or absent entirely.
+   */
+  const ourSession = useRef(false)
+
+  useEffect(() => {
+    const before = wasCapturing.current
+    wasCapturing.current = capturing
+    if (before === null || before === capturing) return // first look is not a change
+    if (capturing) {
+      ourSession.current = !toAgentRef.current
+      if (ourSession.current) earconDictationOn()
+      return
+    }
+    if (!ourSession.current) return
+    ourSession.current = false
+    earconDictationOff()
+  }, [capturing])
 
   /* --------------------------------------------------------------- actions */
 

@@ -516,6 +516,29 @@ ok(/else if \(toAgent\) toggleAgent\(\)/.test(dockedPill), 'and clicking it whil
 const handsBack = provider.split('const HANDS_BACK')[1]?.split(']')[0] ?? ''
 ok(!handsBack.includes("'warming'"), 'and a warm-up does not blip — only a turn coming back does')
 
+/*
+ * Dictation gets its own pair — mic open, mic shut — because Right Ctrl is
+ * pressed while looking at a terminal, not at the status bar.
+ *
+ * Two properties, and both matter. It hangs off the *phase*, so the hotkey, the
+ * docked pill and the hub cannot sound different from each other and the beep
+ * cannot arrive before the model has finished loading. And it is skipped while
+ * the agent is armed: the agent shares this sidecar and re-starts it after
+ * every auto-stop, which is the same metronome the assertion above guards.
+ */
+ok(
+  dictation.includes('earconDictationOn()') && dictation.includes('earconDictationOff()'),
+  'dictation beeps when the mic opens and when it shuts'
+)
+ok(
+  /const capturing = status\.phase === 'listening'/.test(dictation),
+  'and it beeps off the phase, so pressing the key sounds exactly like clicking the pill'
+)
+ok(
+  /ourSession\.current = !toAgentRef\.current/.test(dictation),
+  'an agent-owned session is not a dictation session, and does not beep'
+)
+
 console.log('\nfull duplex')
 const bargein = read('src/lib/bargein.ts')
 ok(provider.includes('bargeIn.arm('), 'the agent opens the echo-cancelled mic while it speaks')

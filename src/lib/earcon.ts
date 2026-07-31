@@ -1,5 +1,10 @@
 /**
- * The listening-again blip.
+ * The blips.
+ *
+ * Two of them now: the agent's "your turn" handover, and the pair that brackets
+ * a dictation session — see `earconDictationOn`/`earconDictationOff` at the
+ * bottom. Everything below about *why* these are synthesised, and how quiet they
+ * are, applies to all three.
  *
  * This replaces something worse. The agent used to *say* it was ready for the
  * next thing — a spoken sentence, word for word the same every time, which is
@@ -94,4 +99,46 @@ export function earconListening(): void {
   const half = EARCON_MS / 2000
   note(ctx, 880, now, half * 1.6, PEAK)
   note(ctx, 1318.5, now + half * 0.75, half * 1.6, PEAK * 0.8)
+}
+
+/* ------------------------------------------------------------- dictation
+ *
+ * The microphone opening and closing, as a sound.
+ *
+ * Steve's complaint was simple: he presses Right Ctrl and has to look at the
+ * status bar to find out whether he is now dictating. A hotkey with no answer
+ * is a hotkey you second-guess, and the pill is at the other end of the screen
+ * from whatever he is actually looking at.
+ *
+ * So: a rising pair when the mic opens, the same two notes falling when it
+ * closes. Rising/falling rather than two different tones because direction is
+ * the one thing you can read without having learned the sound — up is on.
+ *
+ * A fourth below the agent's blip, and a fifth apart rather than the agent's
+ * wider interval, so the two are not mistaken for each other: the agent handing
+ * a turn back and dictation opening mean very different things about where your
+ * next sentence is going to land.
+ */
+
+/** D5 and A5 — under the agent's blip, and out of the way of speech. */
+const DICT_LOW = 587.3
+const DICT_HIGH = 880
+
+function pair(from: number, to: number): void {
+  const ctx = audio()
+  if (!ctx) return
+  const now = ctx.currentTime
+  const half = EARCON_MS / 2000
+  note(ctx, from, now, half * 1.4, PEAK)
+  note(ctx, to, now + half * 0.7, half * 1.4, PEAK * 0.85)
+}
+
+/** "The mic is open." Rising. */
+export function earconDictationOn(): void {
+  pair(DICT_LOW, DICT_HIGH)
+}
+
+/** "The mic is shut." The same two notes, the other way up. */
+export function earconDictationOff(): void {
+  pair(DICT_HIGH, DICT_LOW)
 }
