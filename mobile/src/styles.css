@@ -263,8 +263,11 @@ body {
   flex: 0 0 auto;
 }
 
+/* The bottom inset matters as much here as it does on the key bar: without it
+   the New tab button sits under Android's gesture bar, where the system eats
+   the touch and the button reads as broken rather than covered. */
 .screen-foot {
-  padding: 12px;
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
   background: var(--panel);
   flex: 0 0 auto;
