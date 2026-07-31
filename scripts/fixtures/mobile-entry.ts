@@ -9,3 +9,6 @@
 export { MobileServer, isAllowedSource, resolveWithin } from '../../electron/mobile/server'
 export { MobileAuth, PAIR_TTL_MS, hashToken } from '../../electron/mobile/auth'
 export { PtySessionManager } from '../../electron/pty/session-manager'
+// Re-exported so the approval checks arm for exactly the shipped window rather
+// than a number that could drift from it.
+export { ACCEPT_WINDOW_MS } from '../../shared/mobile'

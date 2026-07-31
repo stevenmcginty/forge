@@ -66,10 +66,19 @@ export const IPC = {
   windowClose: 'window:close',
   windowState: 'window:state',
   windowTitlebar: 'window:titlebar',
+  /**
+   * Un-minimise the main window and bring it to the front.
+   *
+   * For the overlay: it floats over Chrome while Forge is minimised, so a link
+   * in it that opens Settings has to *show* Forge as well, or the click looks
+   * like it did nothing at all.
+   */
+  windowRestoreFocus: 'window:restore-focus',
 
   // voice agent (M4)
   voiceGemini: 'voice:gemini',
   voiceOpenRouter: 'voice:openrouter',
+  voiceGroq: 'voice:groq',
   voiceImportKey: 'voice:import-key',
 
   // media generation (M6) — the same REST calls the MCP bridge makes, so the
@@ -190,6 +199,44 @@ export const IPC = {
   staleStatus: 'stale:status',
   staleStatusEvent: 'stale:status-event',
   staleRestart: 'stale:restart',
+
+  /* ----------------------------------------------------------- voice overlay
+   *
+   * The undocked voice hub, as a real Windows window rather than a div inside
+   * Forge — always on top, above Chrome, still there when Forge is minimised.
+   *
+   * There is still exactly ONE voice agent, and it is the one in the main
+   * window's renderer (src/state/VoiceAgent.tsx). The overlay is a *view* of it:
+   * a second renderer that owns no subscription, no sidecar and no mouth. So
+   * every channel below is a relay with the main process in the middle —
+   *
+   *   host renderer  --overlayState-->  main  --overlayState-->  overlay
+   *   overlay        --overlayCall--->  main  --overlayCall--->  host renderer
+   *
+   * and the main process never interprets a payload, it only forwards it. That
+   * is what keeps the two windows from becoming two agents talking over each
+   * other, which is the exact failure the hub was built to avoid.
+   */
+  /** Show the overlay window (and move/resize it). Host renderer → main. */
+  overlayOpen: 'overlay:open',
+  /** Hide and destroy it — the hub was docked, or Forge is closing. */
+  overlayClose: 'overlay:close',
+  /** Screen-space bounds, both ways: main pushes after a user drag/resize. */
+  overlaySetBounds: 'overlay:set-bounds',
+  overlayBoundsEvent: 'overlay:bounds-event',
+  /**
+   * The whole mirrored snapshot — phase, turns, draft, brain status. Pushed by
+   * the host on change and forwarded verbatim. Typed in the renderer only (see
+   * src/lib/overlaystate.ts); main treats it as opaque.
+   */
+  overlayState: 'overlay:state',
+  /**
+   * The mic level on its own channel, ~15/s. Kept out of the snapshot so the
+   * ring can breathe without re-rendering a conversation ten times a second.
+   */
+  overlayLevel: 'overlay:level',
+  /** A callback invoked on the overlay, run against the real engine on the host. */
+  overlayCall: 'overlay:call',
 
   // diagnostics
   rendererError: 'diag:renderer-error'

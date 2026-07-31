@@ -1,6 +1,7 @@
 import type { VoiceBrainId } from '@shared/types'
 import type { AppAction } from './appactions'
 import { GeminiBrain } from './geminibrain'
+import { GroqBrain } from './groqbrain'
 import { OpenRouterBrain } from './openrouterbrain'
 
 /**
@@ -92,6 +93,8 @@ export interface BrainSettings {
   geminiModel?: string
   openrouterKey?: string
   openrouterModel?: string
+  groqKey?: string
+  groqModel?: string
   /** Not a setting yet — reserved for OpenAIBrain. */
   openaiKey?: string
 }
@@ -109,6 +112,21 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
  * which cannot import this module; voice-check asserts the two agree.
  */
 export const DEFAULT_OPENROUTER_MODEL = 'google/gemini-2.5-flash-lite'
+
+/**
+ * Groq's default, chosen on the constraint that actually bites.
+ *
+ * Groq's free tier is capped on tokens-per-minute, not requests, and Forge's
+ * capability manifest is ~3,000 tokens of every single turn. `llama-3.1-8b-instant`
+ * is quicker and cheaper but gets 6,000 TPM, which leaves room for roughly one
+ * exchange a minute — unusable for talking. `llama-3.3-70b-versatile` gets
+ * 12,000, and is markedly better at returning the JSON this app requires.
+ *
+ * Both are Groq production models as of 2026-07-31, and `openai/gpt-oss-20b` is
+ * the one to try for raw speed. Mirrored in electron/store.ts's defaults, which
+ * cannot import this module.
+ */
+export const DEFAULT_GROQ_MODEL = 'llama-3.3-70b-versatile'
 
 /**
  * The offline fallback. Understands nothing, admits it, and hands the transcript
@@ -222,6 +240,11 @@ function openRouterBrain(s: BrainSettings): VoiceBrain | null {
   return key ? new OpenRouterBrain(key, s.openrouterModel?.trim() || DEFAULT_OPENROUTER_MODEL) : null
 }
 
+function groqBrain(s: BrainSettings): VoiceBrain | null {
+  const key = (s.groqKey ?? '').trim()
+  return key ? new GroqBrain(key, s.groqModel?.trim() || DEFAULT_GROQ_MODEL) : null
+}
+
 /**
  * The brain named in settings. Never returns null, and never returns a brain
  * that cannot be used: a live engine without a key degrades to the stub, so the
@@ -240,6 +263,8 @@ export function getActiveBrain(settings: BrainSettings | null | undefined): Voic
       return geminiBrain(s) ?? new StubBrain('no-key')
     case 'openrouter':
       return openRouterBrain(s) ?? new StubBrain('no-key')
+    case 'groq':
+      return groqBrain(s) ?? new StubBrain('no-key')
     case 'claude':
       return new ClaudeBrain(s.anthropicKey ?? '')
     case 'openai':
@@ -249,7 +274,7 @@ export function getActiveBrain(settings: BrainSettings | null | undefined): Voic
     default:
       // Nothing chosen, or nonsense from a hand-edited settings.json: use
       // whichever live brain has a key, Gemini first.
-      return geminiBrain(s) ?? openRouterBrain(s) ?? new StubBrain('no-key')
+      return geminiBrain(s) ?? openRouterBrain(s) ?? groqBrain(s) ?? new StubBrain('no-key')
   }
 }
 

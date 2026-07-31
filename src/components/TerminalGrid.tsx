@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { TerminalTab, WorkspaceViewMode } from '@shared/types'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
-import { resolveProfile } from '@/lib/agents'
+import { ACCENT_PALETTE, TAB_TEXT_PALETTE, resolveProfile } from '@/lib/agents'
 import { TAB_DRAG_TYPE } from '@/lib/mosaicLayout'
+import { terminalHost } from '@/lib/terminals'
 import {
   useActiveProject,
   useActiveTab,
@@ -15,9 +16,12 @@ import {
 } from '@/state/AppState'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
+import { CommandsButton } from './CommandsFlyout'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { MosaicView } from './MosaicView'
+import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
+import { SkillsButton } from './SkillsFlyout'
 import { SplitView } from './SplitView'
 import './TerminalGrid.css'
 
@@ -46,6 +50,24 @@ export function TerminalGrid(): ReactNode {
     window.addEventListener(NEW_TAB_EVENT, open)
     return () => window.removeEventListener(NEW_TAB_EVENT, open)
   }, [project])
+
+  /*
+   * Tab text colours reach the terminals from here rather than from
+   * TerminalPane, because in mosaic view there are no panes — there are tiles,
+   * and TerminalPane is not mounted at all. This is the one component that is
+   * up in both views and knows every tab, so it is the one that paints.
+   */
+  const tabs = workspace.tabs
+  const tinted = state.settings.tabTextColours
+  useEffect(() => {
+    for (const t of tabs) {
+      for (const leaf of collectLeaves(t.root)) {
+        // Off means null, not "no call": flipping the switch has to repaint the
+        // terminals that are already coloured, not merely stop colouring new ones.
+        terminalHost.setForeground(leaf.id, tinted ? (t.textColor ?? null) : null)
+      }
+    }
+  }, [tabs, tinted])
 
   if (!state.ready) return <div className="grid grid--booting" />
 
@@ -100,6 +122,9 @@ export function TerminalGrid(): ReactNode {
 
         <div className="tabstrip__spacer" />
 
+        {/* The wall's legibility switch, next to the toggle that gets you there. */}
+        {viewMode === 'mosaic' ? <MosaicTextToggle /> : null}
+
         {/*
           The freeform wall's one control, parked here rather than over the
           tiles: the mosaic must not gain a toolbar the moment you drag
@@ -116,6 +141,16 @@ export function TerminalGrid(): ReactNode {
             Reset to grid
           </button>
         ) : null}
+
+        {/* The two references, next to the switches rather than in Settings:
+            what `claude` understands changes weekly, what it *knows* is a
+            folder you curate, and the moment you want either is the moment you
+            are looking at a pane. Skills first — it is the one you feed. */}
+        <SkillsButton />
+
+        <CommandsButton />
+
+        <TabTintToggle />
 
         <ViewToggle mode={viewMode} />
       </div>
@@ -160,6 +195,73 @@ export function TerminalGrid(): ReactNode {
         selectedId={project.defaultProfileId}
       />
     </div>
+  )
+}
+
+/* ------------------------------------------------------ mosaic text size */
+
+/**
+ * Full-size text on the wall, or whole terminals shrunk to fit.
+ *
+ * Lives in the tab strip rather than in Settings alone because it is the answer
+ * to "why can I not read this", and the place you ask that is while looking at
+ * the wall. Settings → Appearance has the same switch for anyone who goes
+ * looking there first.
+ */
+function MosaicTextToggle(): ReactNode {
+  const { state, actions } = useApp()
+  const lifesize = state.settings.mosaicText !== 'scaled'
+
+  return (
+    <button
+      type="button"
+      className="ghost-btn tabstrip__text"
+      data-on={lifesize ? 'true' : undefined}
+      aria-pressed={lifesize}
+      title={
+        lifesize
+          ? 'Full-size text: every tile is a window onto its terminal at the same type size as tab view, cropped to the tile with the latest output showing. Click to shrink whole terminals to fit instead.'
+          : 'Shrunk to fit: every tile keeps its terminal’s full width and shrinks the picture, so nothing reflows and the text gets smaller with every tile you add. Click for full-size text.'
+      }
+      onClick={() => actions.setMosaicText(lifesize ? 'scaled' : 'lifesize')}
+    >
+      <span className="tabstrip__aa">Aa</span>
+      {lifesize ? 'Full size' : 'Shrink to fit'}
+    </button>
+  )
+}
+
+/* ------------------------------------------------------- tab text colours */
+
+/**
+ * Every tab's terminal colour, on or off, in one click.
+ *
+ * The tints are excellent for telling four Claudes apart and a distraction when
+ * you are reading one of them closely, and that flips several times an hour —
+ * so it is a switch in the strip, not a setting you go and find. It hides the
+ * colours rather than clearing them: each tab keeps whatever it was painted,
+ * the right-click palettes still work while it is off, and turning it back on
+ * restores the lot. Nothing to redo, so nothing to fear about pressing it.
+ */
+function TabTintToggle(): ReactNode {
+  const { state, actions } = useApp()
+  const on = state.settings.tabTextColours
+
+  return (
+    <button
+      type="button"
+      className="ghost-btn tabstrip__tint"
+      data-on={on ? 'true' : undefined}
+      aria-pressed={on}
+      title={
+        on
+          ? 'Tab text colours are on: each tab’s terminals print in its own colour. Click to put every terminal back to the default text colour — the colours are kept, not cleared.'
+          : 'Tab text colours are off: every terminal prints in the default text colour. Click to bring each tab’s colour back.'
+      }
+      onClick={() => actions.setTabTextColours(!on)}
+    >
+      <Icon name="palette" size={12} />
+    </button>
   )
 }
 
@@ -253,6 +355,8 @@ function Tab({
   const { state, actions } = useApp()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(tab.title)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
 
   const leaves = collectLeaves(tab.root)
   const badges = leaves.slice(0, 3).map((leaf) => resolveProfile(state.settings.agentProfiles, leaf.profileId))
@@ -263,12 +367,26 @@ function Tab({
     if (next && next !== tab.title) actions.renameTab(tab.id, next)
   }
 
+  const rename = (): void => {
+    setDraft(tab.title)
+    setEditing(true)
+  }
+
   return (
     <div
+      ref={ref}
       className="tab"
       role="tab"
       aria-selected={active}
       data-active={active}
+      data-tint={tab.color ? 'true' : undefined}
+      title="Double-click to rename · Right-click for colours"
+      style={
+        {
+          ...(tab.color ? { '--tab-tint': tab.color } : {}),
+          ...(tab.textColor ? { '--tab-text-tint': tab.textColor } : {})
+        } as React.CSSProperties
+      }
       data-onwall={onWall ? 'true' : undefined}
       data-dragover={dragFrom !== null && dragFrom !== index ? 'true' : undefined}
       draggable={!editing}
@@ -294,9 +412,11 @@ function Tab({
       onPointerDown={() => {
         if (!active) actions.selectTab(tab.id)
       }}
-      onDoubleClick={() => {
-        setDraft(tab.title)
-        setEditing(true)
+      onDoubleClick={rename}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        if (!active) actions.selectTab(tab.id)
+        setMenuOpen(true)
       }}
       onAuxClick={(e) => {
         if (e.button === 1) actions.closeTab(tab.id)
@@ -330,6 +450,21 @@ function Tab({
         <span className="tab__title truncate">{tab.title}</span>
       )}
 
+      {/* Hollow while colours are off, so the strip never claims a colour the
+          terminals are not actually printing in. */}
+      {tab.textColor ? (
+        <span
+          className="tab__textdot"
+          data-off={state.settings.tabTextColours ? undefined : 'true'}
+          title={
+            state.settings.tabTextColours
+              ? `This tab’s terminals print in ${tab.textColor}`
+              : `This tab is painted ${tab.textColor} — tab text colours are off`
+          }
+          aria-label="Terminal text colour"
+        />
+      ) : null}
+
       {onWall ? (
         <span className="tab__wall" title="On the mosaic wall" aria-label="On the mosaic wall">
           <Icon name="viewMosaic" size={10} />
@@ -348,6 +483,133 @@ function Tab({
       >
         <Icon name="close" size={11} />
       </button>
+
+      <TabMenu tab={tab} anchor={ref.current} open={menuOpen} onClose={() => setMenuOpen(false)} onRename={rename} />
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------- tab menu */
+
+/**
+ * Right-click a tab: two colours, a rename and a close.
+ *
+ * They are deliberately separate colours rather than one that drives both. A
+ * tab's colour is how you find it in the strip; its terminal colour is how you
+ * know which session you are typing into once you are looking at the terminal
+ * and the strip is out of mind. Wanting one without the other is the normal
+ * case — two Claudes on the same project, one tinted so you cannot confuse
+ * them — so neither implies the other.
+ */
+function TabMenu({
+  tab,
+  anchor,
+  open,
+  onClose,
+  onRename
+}: {
+  tab: TerminalTab
+  anchor: HTMLElement | null
+  open: boolean
+  onClose: () => void
+  onRename: () => void
+}): ReactNode {
+  const { actions } = useApp()
+
+  return (
+    <Popover anchor={anchor} open={open} onClose={onClose} align="start" width={264} label="Tab colours">
+      <PopoverSection title="Tab colour">
+        <Swatches
+          label="Tab colour"
+          value={tab.color ?? null}
+          onPick={(color) => actions.paintTab(tab.id, { color })}
+        />
+      </PopoverSection>
+
+      <PopoverSection title="Terminal text">
+        {/* The auto-assigned tints, so a new tab's colour is one of the swatches. */}
+        <Swatches
+          label="Terminal text colour"
+          palette={TAB_TEXT_PALETTE}
+          value={tab.textColor ?? null}
+          onPick={(textColor) => actions.paintTab(tab.id, { textColor })}
+        />
+        <div className="popover__hint">
+          Repaints this tab’s terminals. New tabs pick their own colour so no two look alike; this overrides it.
+          Output that picks its own colour — Claude’s highlights, a diff, an error — keeps it.
+        </div>
+      </PopoverSection>
+
+      <PopoverDivider />
+
+      <PopoverRow
+        onClick={() => {
+          onClose()
+          onRename()
+        }}
+      >
+        <span className="tab__menu-name">Rename…</span>
+      </PopoverRow>
+      <PopoverRow
+        danger
+        onClick={() => {
+          onClose()
+          actions.closeTab(tab.id)
+        }}
+      >
+        <span className="tab__menu-name">Close tab</span>
+      </PopoverRow>
+    </Popover>
+  )
+}
+
+/**
+ * The palette, a custom well, and a way back out.
+ *
+ * "None" first and always present: a colour you cannot remove is a colour you
+ * will not risk trying, and the whole feature is only useful if it is cheap to
+ * change your mind.
+ */
+function Swatches({
+  value,
+  onPick,
+  label,
+  palette = ACCENT_PALETTE
+}: {
+  value: string | null
+  onPick: (color: string | null) => void
+  label: string
+  palette?: string[]
+}): ReactNode {
+  return (
+    <div className="swatches" role="group" aria-label={label}>
+      <button
+        type="button"
+        className="swatch swatch--none"
+        aria-label={`${label}: none`}
+        title="No colour"
+        data-selected={value === null ? 'true' : undefined}
+        onClick={() => onPick(null)}
+      />
+      {palette.map((c) => (
+        <button
+          key={c}
+          type="button"
+          className="swatch"
+          aria-label={`${label}: ${c}`}
+          data-selected={value?.toLowerCase() === c.toLowerCase() ? 'true' : undefined}
+          style={{ background: c }}
+          onClick={() => onPick(c)}
+        />
+      ))}
+      <label className="swatch swatch--custom" title="Custom colour">
+        <input
+          type="color"
+          value={value ?? '#c6ff4a'}
+          aria-label={`${label}: custom`}
+          onChange={(e) => onPick(e.target.value)}
+        />
+      </label>
     </div>
   )
 }

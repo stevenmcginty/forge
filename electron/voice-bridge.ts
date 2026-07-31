@@ -12,6 +12,8 @@ import type {
   MakeImageRequest,
   MakeVideoRequest,
   MediaCallResult,
+  GroqCallRequest,
+  GroqCallResult,
   OpenRouterCallRequest,
   OpenRouterCallResult,
   VoiceSpeakRequest,
@@ -48,6 +50,7 @@ import { getDataDir, getSettings } from './store'
 
 const HOST = 'https://generativelanguage.googleapis.com'
 const OPENROUTER_HOST = 'https://openrouter.ai/api/v1'
+const GROQ_HOST = 'https://api.groq.com/openai/v1'
 // A drafted prompt is a page of prose: 30s was not enough for a real answer.
 const DEFAULT_TIMEOUT_MS = 75_000
 const MAX_TIMEOUT_MS = 150_000
@@ -70,6 +73,9 @@ function keyCandidates(which: KeySource): string[] {
   const desktop = join(homedir(), 'Desktop')
   if (which === 'openrouter') {
     return [join(getDataDir(), 'openrouter.key'), join(homedir(), '.kimi-key'), join(homedir(), '.openrouter-key')]
+  }
+  if (which === 'groq') {
+    return [join(getDataDir(), 'groq.key'), join(homedir(), '.groq-key')]
   }
   return [
     join(getDataDir(), 'gemini.key'),
@@ -215,20 +221,43 @@ async function callGemini(req: GeminiCallRequest): Promise<GeminiCallResult> {
   }
 }
 
-/* ------------------------------------------------------------- openrouter */
+/* ------------------------------------------------- openai-shaped providers */
 
 /**
- * OpenRouter speaks the OpenAI chat-completions API, so this is a much plainer
- * call than Gemini's: system prompt as the first message, JSON asked for with
- * `response_format`, answer at `choices[0].message.content`.
+ * Who we are talking to. Everything else about the call is identical.
  *
- * The two optional headers are OpenRouter's own convention for attributing
- * traffic to an app; they carry nothing about Steve or his machine.
+ * OpenRouter and Groq both serve the OpenAI chat-completions API verbatim, so
+ * there is one implementation below and a provider record per host. Copying the
+ * function would have been fewer lines today and two subtly different retry,
+ * scrub and error-mapping paths by the end of the month — the same reasoning as
+ * the shared `GroqCallRequest = OpenRouterCallRequest` alias in shared/types.ts.
  */
-async function callOpenRouter(req: OpenRouterCallRequest): Promise<OpenRouterCallResult> {
+interface ChatProvider {
+  /** Used in every error message the panel shows, so it must be the brand name. */
+  name: string
+  host: string
+  /** Anything the provider wants beyond auth. Never carries anything about Steve. */
+  headers?: Record<string, string>
+}
+
+const OPENROUTER: ChatProvider = {
+  name: 'OpenRouter',
+  host: OPENROUTER_HOST,
+  // OpenRouter's own convention for attributing traffic to an app.
+  headers: { 'HTTP-Referer': 'https://forge.local', 'X-Title': 'Forge' }
+}
+
+const GROQ: ChatProvider = { name: 'Groq', host: GROQ_HOST }
+
+/**
+ * One POST to an OpenAI-shaped chat-completions endpoint: system prompt as the
+ * first message, JSON asked for with `response_format`, answer at
+ * `choices[0].message.content`. Much plainer than Gemini's call.
+ */
+async function callChat(req: OpenRouterCallRequest, provider: ChatProvider): Promise<OpenRouterCallResult> {
   const key = typeof req?.key === 'string' ? req.key.trim() : ''
   const model = typeof req?.model === 'string' ? req.model.trim() : ''
-  if (!key) return { ok: false, error: 'No OpenRouter API key set' }
+  if (!key) return { ok: false, error: `No ${provider.name} API key set` }
   // Model ids look like `vendor/model:variant`, so this is looser than Gemini's.
   if (!/^[a-zA-Z0-9][a-zA-Z0-9./\-_:]{1,96}$/.test(model)) {
     return { ok: false, error: `Not a usable model id: “${model}”` }
@@ -256,13 +285,12 @@ async function callOpenRouter(req: OpenRouterCallRequest): Promise<OpenRouterCal
   const timeout = Math.min(MAX_TIMEOUT_MS, Math.max(2_000, req.timeoutMs ?? DEFAULT_TIMEOUT_MS))
 
   try {
-    const res = await fetch(`${OPENROUTER_HOST}/chat/completions`, {
+    const res = await fetch(`${provider.host}/chat/completions`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${key}`,
-        'HTTP-Referer': 'https://forge.local',
-        'X-Title': 'Forge'
+        ...(provider.headers ?? {})
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeout)
@@ -290,7 +318,7 @@ async function callOpenRouter(req: OpenRouterCallRequest): Promise<OpenRouterCal
     } | null
 
     if (data?.error?.message) {
-      return { ok: false, error: `OpenRouter: ${scrub(data.error.message, key)}`, status: data.error.code }
+      return { ok: false, error: `${provider.name}: ${scrub(data.error.message, key)}`, status: data.error.code }
     }
 
     const choice = data?.choices?.[0]
@@ -298,7 +326,7 @@ async function callOpenRouter(req: OpenRouterCallRequest): Promise<OpenRouterCal
     if (!text) {
       return {
         ok: false,
-        error: `OpenRouter returned no text${choice?.finish_reason ? ` (${choice.finish_reason})` : ''}`
+        error: `${provider.name} returned no text${choice?.finish_reason ? ` (${choice.finish_reason})` : ''}`
       }
     }
     const result: OpenRouterCallResult = { ok: true, text }
@@ -308,9 +336,9 @@ async function callOpenRouter(req: OpenRouterCallRequest): Promise<OpenRouterCal
   } catch (err) {
     const e = err as Error
     if (e.name === 'TimeoutError' || e.name === 'AbortError') {
-      return { ok: false, error: `OpenRouter did not answer within ${Math.round(timeout / 1000)}s` }
+      return { ok: false, error: `${provider.name} did not answer within ${Math.round(timeout / 1000)}s` }
     }
-    return { ok: false, error: `Could not reach OpenRouter: ${scrub(e.message, key)}` }
+    return { ok: false, error: `Could not reach ${provider.name}: ${scrub(e.message, key)}` }
   }
 }
 
@@ -357,13 +385,14 @@ const speaking = new Map<string, AbortController>()
 
 export function registerVoiceHandlers(): void {
   ipcMain.handle(IPC.voiceImportKey, (_e, which: KeySource): ImportedKeyResult =>
-    importKey(which === 'openrouter' ? 'openrouter' : 'gemini')
+    importKey(which === 'openrouter' || which === 'groq' ? which : 'gemini')
   )
   ipcMain.handle(IPC.voiceGemini, async (_e, req: GeminiCallRequest): Promise<GeminiCallResult> => callGemini(req))
   ipcMain.handle(
     IPC.voiceOpenRouter,
-    async (_e, req: OpenRouterCallRequest): Promise<OpenRouterCallResult> => callOpenRouter(req)
+    async (_e, req: OpenRouterCallRequest): Promise<OpenRouterCallResult> => callChat(req, OPENROUTER)
   )
+  ipcMain.handle(IPC.voiceGroq, async (_e, req: GroqCallRequest): Promise<GroqCallResult> => callChat(req, GROQ))
 
   ipcMain.handle(IPC.voiceMakeImage, async (_e, req: MakeImageRequest): Promise<MediaCallResult> => {
     const settings = getSettings()

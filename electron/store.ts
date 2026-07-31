@@ -120,6 +120,12 @@ function defaultSettings(): Settings {
     // out (or Ctrl+Shift+G) is the opt-in; see src/lib/voicehub.ts. There is no
     // voicePanelOpen/Width any more: the right-hand panel is gone.
     voiceHub: { mode: 'docked', x: 0, y: 0, w: 0, h: 0 },
+    // On: undocking is meant to put the hub over Chrome and keep it there when
+    // Forge is minimised, and only a real window can. See overlay-window.ts.
+    voiceOverlayWindow: true,
+    // On: "always listening and ready to interrupt" is the ask, and half duplex
+    // cannot do the second half. See src/lib/bargein.ts.
+    voiceBargeIn: true,
     // Gemini is the live brain; with no key set it degrades to the stub.
     voiceBrain: 'gemini',
     anthropicKey: '',
@@ -154,6 +160,13 @@ function defaultSettings(): Settings {
     // geminiModel above mirrors DEFAULT_GEMINI_MODEL — main cannot import a
     // renderer module, and voice-check asserts the two literals still agree.
     openrouterModel: 'google/gemini-2.5-flash-lite',
+    groqKey: '',
+    // Mirrors DEFAULT_GROQ_MODEL in src/lib/voicebrain.ts, for the same reason
+    // as the two model literals above. 70b rather than the quicker 8b because
+    // Forge's free-tier ceiling is tokens-per-minute, not requests: the manifest
+    // alone is ~3k tokens a turn, and 8b-instant's 6k TPM leaves room for barely
+    // one exchange a minute. 70b-versatile gets 12k.
+    groqModel: 'llama-3.3-70b-versatile',
     // Heuristic memory is free and predictable; letting a model rewrite the
     // project summary is neither, so it is opt-in.
     memoryLlmSummarize: false,
@@ -400,6 +413,15 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // read and not written: normalising builds this object from scratch, so the
     // first save after the update quietly drops them from an existing file.
     voiceHub: hubPlacement(s.voiceHub),
+    // Undefined means a settings.json written before the overlay window
+    // existed; that file gets the default (on), not a silent off — same
+    // reasoning as voiceEarcons below.
+    voiceOverlayWindow:
+      s.voiceOverlayWindow === undefined
+        ? DEFAULT_SETTINGS.voiceOverlayWindow
+        : Boolean(s.voiceOverlayWindow),
+    voiceBargeIn:
+      s.voiceBargeIn === undefined ? DEFAULT_SETTINGS.voiceBargeIn : Boolean(s.voiceBargeIn),
     voiceBrain:
       brain === 'claude' || brain === 'openai' || brain === 'stub' || brain === 'gemini' || brain === 'openrouter'
         ? brain
@@ -446,6 +468,9 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       typeof s.openrouterModel === 'string' && s.openrouterModel.trim()
         ? s.openrouterModel.trim()
         : DEFAULT_SETTINGS.openrouterModel,
+    groqKey: typeof s.groqKey === 'string' ? s.groqKey.trim() : '',
+    groqModel:
+      typeof s.groqModel === 'string' && s.groqModel.trim() ? s.groqModel.trim() : DEFAULT_SETTINGS.groqModel,
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
     skillsLibraryDir:
       typeof s.skillsLibraryDir === 'string' && s.skillsLibraryDir.trim()

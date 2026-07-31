@@ -1,16 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { hotkeyLabel } from '@/hooks/useDictation'
 import { hubDrag } from '@/lib/hubdrag'
-import {
-  agentSurfaceOpen,
-  clampHubPos,
-  HUB_DRAG_THRESHOLD,
-  HUB_PILL_SIZE,
-  hubBounds,
-  isFloatingHub
-} from '@/lib/voicehub'
+import { clampHubPos, HUB_DRAG_THRESHOLD, HUB_PILL_SIZE, hubBounds, isFloatingHub } from '@/lib/voicehub'
 import { useApp } from '@/state/AppState'
 import { useDictation } from '@/state/Dictation'
+import { useVoiceAgent } from '@/state/VoiceAgent'
 import { DictationSetup } from './DictationSetup'
 import { Popover } from './Popover'
 import './DictationPill.css'
@@ -107,6 +101,7 @@ export function DictationGlyph({ listening, level }: { listening: boolean; level
 export function DictationPill(): ReactNode {
   const { state, actions } = useApp()
   const { status, needsSetup, listening, toggle } = useDictation()
+  const { toggleAgent } = useVoiceAgent()
   const [cardOpen, setCardOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement | null>(null)
   /** Set by a drag, read by the click that follows it, cleared straight after. */
@@ -124,10 +119,19 @@ export function DictationPill(): ReactNode {
   /**
    * Two microphones in one app is the confusion Steve ran into: he could not
    * tell whether his words were being typed into a terminal or handed to the
-   * agent. Same rule as useDictation's routing, shown as a word — while an
-   * agent surface is open with agent mode on, the pill says so.
+   * agent. This has to be *exactly* useDictation's routing rule, shown as a
+   * word.
+   *
+   * It was `agentSurfaceOpen(settings) && state.agentListening`, and when the
+   * agent stopped disarming itself on a docked hub the two rules came apart:
+   * routing asked only whether the agent was armed, this asked whether the hub
+   * was also on screen. Dock the hub while armed and the pill went back to
+   * looking like plain dictation — "Dictate — Right Ctrl", meter and all —
+   * while every phrase was still going to the agent. He pressed the key, spoke,
+   * and nothing was typed, because the words had gone somewhere the status bar
+   * had just stopped mentioning.
    */
-  const toAgent = agentSurfaceOpen(state.settings) && state.agentListening
+  const toAgent = state.agentListening
 
   /**
    * Lift it out.
@@ -208,7 +212,7 @@ export function DictationPill(): ReactNode {
   const title = needsSetup
     ? `Dictation needs setting up — ${status.error?.msg ?? ''}`
     : toAgent
-      ? `Agent mode — what you say goes to the voice agent, not this pane (${key})`
+      ? 'Agent mode — what you say goes to the voice agent, not this pane. Click to turn it off'
       : status.phase === 'listening'
         ? `Listening — ${key} to stop`
         : status.phase === 'finishing'
@@ -237,6 +241,18 @@ export function DictationPill(): ReactNode {
             return
           }
           if (needsSetup) setCardOpen((v) => !v)
+          // The off switch, and the reason this branch exists at all.
+          //
+          // Nothing disarms the agent by itself any more — that was deliberate,
+          // and it is the right call — but the only *button* that disarms it
+          // lives on the floating hub. Dock the hub while armed and there was
+          // no button anywhere: every phrase went to the agent, which acted on
+          // what it heard, and the one control still on screen was this pill,
+          // which offered to start a second microphone. This is the state Steve
+          // got stuck in — "I can't stop it listening". Arming is still the
+          // only thing that arms; there is now always something in reach that
+          // un-arms.
+          else if (toAgent) toggleAgent()
           else toggle()
         }}
         onContextMenu={(e) => {

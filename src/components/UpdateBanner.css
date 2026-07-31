@@ -119,3 +119,33 @@
 .ubanner__close:hover {
   color: var(--text-primary);
 }
+
+/*
+ * The dev-run variant — src/components/StaleBanner.tsx. Same strip, same
+ * geometry, warn tones instead of accent: "you are looking at old code" is a
+ * different kind of news from "a new version exists", and colour says which one
+ * faster than the sentence does.
+ *
+ * The button is outlined rather than filled, unlike its accent counterpart. A
+ * solid amber bar across the chrome every time you touch main-process code
+ * would be the advertisement this file's header rules out, and this strip
+ * appears far more often than an update ever will.
+ */
+.ubanner[data-phase='stale'] {
+  border-bottom-color: var(--warn-line);
+}
+
+.ubanner[data-phase='stale'] .ubanner__mark {
+  color: var(--warn);
+}
+
+.ubanner[data-phase='stale'] .ubanner__btn--go {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: var(--warn-line-strong);
+}
+
+.ubanner[data-phase='stale'] .ubanner__btn--go:hover:not(:disabled) {
+  background: var(--warn-line);
+  border-color: var(--warn);
+}

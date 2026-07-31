@@ -152,6 +152,27 @@ body {
   color: var(--dim);
 }
 
+/* Raises and drops the key bar. `margin-left: auto` rather than a flex-grow on
+   the title, so a long pane name still truncates against the button instead of
+   pushing it off the bar. Lit when the keys are up, because an unlit icon that
+   does nothing visible is how you end up tapping it twice. */
+.bar-keys {
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 18px;
+}
+
+.bar-keys[aria-pressed='true'] {
+  border-color: var(--volt);
+  color: var(--volt);
+}
+
 /* ------------------------------------------------------------------ lists */
 
 .screen {

@@ -16,6 +16,8 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import java.io.File
 import java.io.FileInputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.security.MessageDigest
 
 /**
@@ -44,6 +46,13 @@ import java.security.MessageDigest
  */
 @CapacitorPlugin(name = "ForgeUpdater")
 class ForgeUpdaterPlugin : Plugin() {
+
+  private companion object {
+    /** Long enough for a phone on a train, short enough not to hang the sheet. */
+    const val TIMEOUT_MS = 15000
+    /** github.com → github.com → release-assets…: three hops, with room spare. */
+    const val MAX_REDIRECTS = 5
+  }
 
   private val poller = Handler(Looper.getMainLooper())
 
@@ -80,6 +89,86 @@ class ForgeUpdaterPlugin : Plugin() {
     } catch (e: Exception) {
       call.reject("Could not open the install-permission settings.", "settings-unavailable")
     }
+  }
+
+  /**
+   * Fetch the update manifest and hand back its body as text.
+   *
+   * This exists because the WebView cannot. Capacitor serves the bundle from
+   * `https://localhost`, so a `fetch()` at the GitHub release asset is a
+   * cross-origin request — and the host GitHub finally redirects to
+   * (`release-assets.githubusercontent.com`) sends no
+   * `Access-Control-Allow-Origin`. Chromium therefore blocks the response
+   * before any JS sees it, and the only thing `fetch()` can report is a
+   * TypeError indistinguishable from having no signal. That is the whole of
+   * "could not reach the update feed — probably offline": the phone was online
+   * every time, and the check could never have succeeded on any network.
+   *
+   * A plain HttpURLConnection is subject to none of that. It also keeps the
+   * feed where it is: no second copy of the manifest to publish and keep
+   * honest, and the sha256 in it still governs the download either way.
+   *
+   * Redirects are followed by hand because HttpURLConnection silently refuses
+   * to follow one that changes protocol, and the GitHub chain is three hops
+   * across two hosts — exactly the shape that would otherwise return a 302
+   * body and look like a malformed feed.
+   */
+  @PluginMethod
+  fun fetchManifest(call: PluginCall) {
+    val url = call.getString("url")
+    if (url.isNullOrEmpty()) {
+      call.reject("fetchManifest() needs a url.", "bad-args")
+      return
+    }
+    Thread {
+      var connection: HttpURLConnection? = null
+      try {
+        var target = URL(url)
+        var hops = 0
+        var status = 0
+        while (true) {
+          val open = target.openConnection() as HttpURLConnection
+          open.instanceFollowRedirects = false
+          open.connectTimeout = TIMEOUT_MS
+          open.readTimeout = TIMEOUT_MS
+          open.setRequestProperty("Accept", "application/json")
+          // The app's own no-store, restated for the HTTP stack: a cached
+          // manifest turns "check for updates" into a button that repeats
+          // whatever it said last time.
+          open.setRequestProperty("Cache-Control", "no-cache")
+          status = open.responseCode
+          val location = open.getHeaderField("Location")
+          if (status in 300..399 && !location.isNullOrEmpty()) {
+            open.disconnect()
+            if (hops >= MAX_REDIRECTS) {
+              call.reject("The update feed redirected too many times.", "too-many-redirects")
+              return@Thread
+            }
+            hops++
+            target = URL(target, location)
+            continue
+          }
+          connection = open
+          break
+        }
+
+        val live = connection
+        if (live == null || status !in 200..299) {
+          call.reject("The update feed answered $status.", "bad-status")
+          return@Thread
+        }
+        val body = live.inputStream.bufferedReader().use { it.readText() }
+        val out = JSObject()
+        out.put("body", body)
+        call.resolve(out)
+      } catch (e: Exception) {
+        // Genuinely offline, DNS failure, TLS refusal — the honest version of
+        // the message the CORS block used to fake.
+        call.reject("Could not reach the update feed: ${e.message}", "unreachable")
+      } finally {
+        connection?.disconnect()
+      }
+    }.start()
   }
 
   /**

@@ -1,5 +1,5 @@
 import { activityBody, parseMemory } from '@shared/memory'
-import type { MemorySection } from '@shared/types'
+import type { MemorySection, Settings } from '@shared/types'
 import type { ActionOutcome } from './appactions'
 import type { BrainReply } from './voicebrain'
 
@@ -191,6 +191,39 @@ const SUMMARISE_SYSTEM = [
   'Use only what the memory actually says. Invent nothing. If it says almost nothing, say almost nothing.'
 ].join('\n')
 
+/** A provider that can actually be called: chosen, keyed, and given a model. */
+type SummariserRoute = { via: 'gemini' | 'openrouter' | 'groq'; key: string; model: string }
+
+/**
+ * Which provider summarises, given the brain setting and the keys that exist.
+ *
+ * This follows `getActiveBrain` rather than inventing its own rule: the brain
+ * you picked wins whenever its key is present, and only a provider you never
+ * chose — or one you chose but left unkeyed — falls through to something else.
+ * Getting this wrong is quiet and expensive; it used to consult `voiceBrain`
+ * for the single string 'openrouter', so picking Groq summarised on Gemini and
+ * spent a key you may not have meant to spend.
+ *
+ * `stub` and the not-yet-ready brains have nothing to call, so they take the
+ * fallback too — a summary from whatever is keyed beats no summary at all.
+ */
+function summariserRoute(settings: Settings): SummariserRoute | null {
+  const gemini = (settings.geminiKey ?? '').trim()
+  const openrouter = (settings.openrouterKey ?? '').trim()
+  const groq = (settings.groqKey ?? '').trim()
+
+  const routes: Record<SummariserRoute['via'], SummariserRoute | null> = {
+    gemini: gemini ? { via: 'gemini', key: gemini, model: settings.geminiModel } : null,
+    openrouter: openrouter
+      ? { via: 'openrouter', key: openrouter, model: settings.openrouterModel }
+      : null,
+    groq: groq ? { via: 'groq', key: groq, model: settings.groqModel } : null
+  }
+
+  const chosen = routes[settings.voiceBrain as SummariserRoute['via']] ?? null
+  return chosen ?? routes.gemini ?? routes.openrouter ?? routes.groq
+}
+
 /**
  * The default summariser: one plain-text call to whichever brain is configured,
  * with no manifest and no schema attached. Returns null whenever it cannot or
@@ -202,29 +235,26 @@ async function defaultSummariser(markdown: string): Promise<string | null> {
     const { settings } = await window.forge.store.snapshot()
     if (!settings.memoryLlmSummarize) return null
 
-    const gemini = (settings.geminiKey ?? '').trim()
-    const openrouter = (settings.openrouterKey ?? '').trim()
-    const useOpenRouter = settings.voiceBrain === 'openrouter' || (!gemini && Boolean(openrouter))
+    const route = summariserRoute(settings)
+    if (!route) return null
 
-    if (useOpenRouter) {
-      if (!openrouter) return null
-      const res = await window.forge.voice.openrouter({
-        key: openrouter,
-        model: settings.openrouterModel,
-        system: SUMMARISE_SYSTEM,
-        turns: [{ role: 'user', text: markdown }],
-        maxTokens: 400
-      })
-      return res.ok ? res.text.trim() || null : null
-    }
-
-    if (!gemini) return null
-    const res = await window.forge.voice.gemini({
-      key: gemini,
-      model: settings.geminiModel,
-      system: SUMMARISE_SYSTEM,
-      turns: [{ role: 'user', text: markdown }]
-    })
+    // Groq and OpenRouter take the same request verbatim; Gemini's differs only
+    // in the role name it gives its own past replies, which this call has none of.
+    const res =
+      route.via === 'gemini'
+        ? await window.forge.voice.gemini({
+            key: route.key,
+            model: route.model,
+            system: SUMMARISE_SYSTEM,
+            turns: [{ role: 'user', text: markdown }]
+          })
+        : await window.forge.voice[route.via]({
+            key: route.key,
+            model: route.model,
+            system: SUMMARISE_SYSTEM,
+            turns: [{ role: 'user', text: markdown }],
+            maxTokens: 400
+          })
     return res.ok ? res.text.trim() || null : null
   } catch {
     return null

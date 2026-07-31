@@ -27,7 +27,13 @@ import type {
   Workspace,
   WorkspaceViewMode
 } from '@shared/types'
-import { BUILTIN_AGENT_PROFILES, TAB_TEXT_PALETTE, isPermissionMode, isShellProfile } from '@shared/agents'
+import {
+  BUILTIN_AGENT_PROFILES,
+  TAB_NAME_POOL,
+  TAB_TEXT_PALETTE,
+  isPermissionMode,
+  isShellProfile
+} from '@shared/agents'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
 import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
@@ -139,6 +145,8 @@ const FALLBACK_SETTINGS: Settings = {
   sttAutoStopSeconds: 10,
   sttHotkey: 'ControlRight',
   voiceHub: DEFAULT_HUB,
+  voiceOverlayWindow: true,
+  voiceBargeIn: true,
   voiceBrain: 'gemini',
   anthropicKey: '',
   geminiKey: '',
@@ -165,6 +173,8 @@ const FALLBACK_SETTINGS: Settings = {
   geminiImageModel: '',
   openrouterKey: '',
   openrouterModel: 'google/gemini-2.5-flash-lite',
+  groqKey: '',
+  groqModel: 'llama-3.3-70b-versatile',
   memoryLlmSummarize: false,
   // Filled in by the store on hydrate — main knows the real data root.
   skillsLibraryDir: '',
@@ -339,14 +349,50 @@ function nextTextColor(tabs: TerminalTab[]): string {
   )
 }
 
-function makeTab(profileId: string, tabs: TerminalTab[], permissionMode?: ClaudePermissionMode): TerminalTab {
+/**
+ * The name a new tab is born with, and where the project's cursor lands after
+ * handing it out: the next name in the pool nobody in this project is already
+ * wearing, wrapping when the hundred run out.
+ *
+ * The cursor only ever moves forward, so closing a tab does not put its name
+ * back at the front of the queue — kill Otis and the next tab is whoever comes
+ * after Otis, not Otis again. Names in use are skipped rather than duplicated,
+ * which also covers the case where the user has renamed a tab by hand onto a
+ * name the pool was about to reach.
+ */
+function nextTabName(tabs: TerminalTab[], cursor: number): { title: string; cursor: number } {
+  const taken = new Set(tabs.map((t) => t.title.trim().toLowerCase()))
+  const start = ((cursor % TAB_NAME_POOL.length) + TAB_NAME_POOL.length) % TAB_NAME_POOL.length
+  for (let i = 0; i < TAB_NAME_POOL.length; i++) {
+    const at = (start + i) % TAB_NAME_POOL.length
+    const name = TAB_NAME_POOL[at]!
+    if (!taken.has(name.toLowerCase())) return { title: name, cursor: at + 1 }
+  }
+  // A hundred open tabs is well past the session limit, but a name is not worth
+  // crashing over: fall back to the next free numbered variant of the one due.
+  const base = TAB_NAME_POOL[start]!
+  let n = 2
+  while (taken.has(`${base} ${n}`.toLowerCase())) n++
+  return { title: `${base} ${n}`, cursor: start + 1 }
+}
+
+function makeTab(
+  profileId: string,
+  tabs: TerminalTab[],
+  cursor: number,
+  permissionMode?: ClaudePermissionMode
+): { tab: TerminalTab; cursor: number } {
   const leaf = makeLeaf(profileId, '', permissionMode)
+  const name = nextTabName(tabs, cursor)
   return {
-    id: makeId('tab'),
-    title: `Tab ${tabs.length + 1}`,
-    root: leaf,
-    activePaneId: leaf.id,
-    textColor: nextTextColor(tabs)
+    tab: {
+      id: makeId('tab'),
+      title: name.title,
+      root: leaf,
+      activePaneId: leaf.id,
+      textColor: nextTextColor(tabs)
+    },
+    cursor: name.cursor
   }
 }
 
@@ -457,7 +503,12 @@ function sanitiseWorkspace(ws: Workspace | null, profileIds: Set<string>): Works
   const livePanes = new Set<string>()
   for (const t of tabs) for (const l of collectLeaves(t.root)) livePanes.add(l.id)
   const mosaic = sanitiseMosaic(ws.mosaic, livePanes, new Set(tabs.map((t) => t.id)))
-  return { tabs, activeTabId, viewMode, mosaic }
+  // Where the name pool had got to. Anything that is not a real position in it
+  // starts the project back at the top of the list rather than off the end.
+  const raw = ws.nameCursor
+  const nameCursor =
+    typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) % TAB_NAME_POOL.length : 0
+  return { tabs, activeTabId, viewMode, mosaic, nameCursor }
 }
 
 /* ------------------------------------------------------------- reducer */
@@ -557,8 +608,8 @@ function reducer(state: AppState, action: Action): AppState {
         return { ...state, notice: `Session limit reached (${MAX_SESSIONS})` }
       }
       return mapActiveWorkspace(state, (ws) => {
-        const tab = makeTab(action.profileId, ws.tabs, action.permissionMode)
-        return { ...ws, tabs: [...ws.tabs, tab], activeTabId: tab.id }
+        const made = makeTab(action.profileId, ws.tabs, ws.nameCursor ?? 0, action.permissionMode)
+        return { ...ws, tabs: [...ws.tabs, made.tab], activeTabId: made.tab.id, nameCursor: made.cursor }
       })
     }
 

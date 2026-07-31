@@ -46,17 +46,29 @@ import './MosaicView.css'
  * The mosaic: every pane in the project, from every tab, as a small live tile.
  *
  * The tiles are the real terminals — not snapshots, not a second render of the
- * scrollback. Each one is laid out at the size it had in tab view and then
- * shrunk with a CSS transform, which is the whole trick: the PTY keeps its
- * cols/rows, so nothing reflows and a full-screen TUI carries on drawing into
- * the same grid it always had. You are looking at a scale model of the real
- * thing.
+ * scrollback. How they are drawn is the wall's one legibility setting, and it
+ * applies to every tile at once (Settings → Appearance, or the Aa button in the
+ * tab strip):
+ *
+ *   life-size  the default. Each tile is a window onto its terminal at scale 1:
+ *              the same type size as tab view, cropped to the tile and anchored
+ *              at the bottom-left, where the prompt and the live region are.
+ *              Nothing is ever resized to achieve this — a ConPTY resize
+ *              reflows destructively, and a glance must not rewrite a pane.
+ *   scaled     each tile is a scale model — the PTY keeps the cols/rows it had
+ *              in tab view and the whole picture is shrunk with a CSS
+ *              transform, so nothing reflows and a full-screen TUI carries on
+ *              drawing into the grid it always had. Truthful, and past four or
+ *              five tiles, too small to read.
+ *
+ * Double-clicking a tile's header overrides the setting for that one tile,
+ * either way — see MosaicTile.
  *
  * The wall has two layouts, per project:
  *
  *   auto    Forge places the tiles in a uniform grid. Nothing to arrange, and
- *           the type is the same size on every tile because they all scale
- *           against the biggest pane on the wall.
+ *           in scaled mode the type is the same size on every tile because they
+ *           all scale against the biggest pane on the wall.
  *   custom  you place them. Drag a header, drag an edge, drop a whole tab out
  *           of the strip onto the wall. The first move or resize seeds custom
  *           mode from exactly where the auto grid had put everything, so
@@ -153,6 +165,9 @@ export function MosaicView({
 
   const mosaic = workspace.mosaic ?? emptyMosaic()
   const custom = mosaic.mode === 'custom'
+
+  /** The wall's default: refit every terminal to its tile at life-size type. */
+  const lifesize = state.settings.mosaicText !== 'scaled'
 
   const zoomId = state.mosaicZoom
   const zoomCell = cells.find((c) => c.leaf.id === zoomId) ?? null
@@ -461,13 +476,21 @@ export function MosaicView({
     }
   }, [])
 
+  /*
+   * Double-click a header: this one tile goes the other way from the wall.
+   *
+   * Flipped against the wall's current default rather than against `false`, so
+   * a double-click always visibly changes the tile you double-clicked — in
+   * life-size mode it turns that tile back into a scale model, in scaled mode
+   * it fits it for real.
+   */
   const toggleFit = useCallback(
     (paneId: string): void => {
       const rects = currentRects()
       if (!custom) actions.setMosaicTiles(rects, { custom: true })
-      actions.setMosaicFit(paneId, !(tiles[paneId]?.fit ?? false))
+      actions.setMosaicFit(paneId, !(tiles[paneId]?.fit ?? lifesize))
     },
-    [actions, currentRects, custom, tiles]
+    [actions, currentRects, custom, lifesize, tiles]
   )
 
   /* ------------------------------------------------------ tab → wall drop */
@@ -625,6 +648,7 @@ export function MosaicView({
           cell={zoomCell}
           project={project}
           reference={reference}
+          lifesize={lifesize}
           zoomed
           selected={false}
           onZoom={zoom}
@@ -667,6 +691,7 @@ export function MosaicView({
               cell={cell}
               project={project}
               reference={reference}
+              lifesize={lifesize}
               zoomed={false}
               selected={cell.leaf.id === selectedId}
               {...(custom && tiles[cell.leaf.id] ? { rect: tiles[cell.leaf.id]! } : {})}
@@ -702,6 +727,7 @@ function MosaicTile({
   cell,
   project,
   reference,
+  lifesize,
   zoomed,
   selected,
   rect,
@@ -716,6 +742,8 @@ function MosaicTile({
   project: Project
   /** The wall's shared scaling reference — ignored when zoomed or refitted. */
   reference: PaneGeometry
+  /** The wall's default: refit rather than scale. A tile may override it. */
+  lifesize: boolean
   zoomed: boolean
   selected: boolean
   /** Where this tile sits on a freeform wall. Absent = the auto grid places it. */
@@ -749,7 +777,8 @@ function MosaicTile({
     fontFamily: state.settings.terminalFontFamily,
     accent: profile.accent,
     projectName: project.name,
-    paneTitle: paneDisplayTitle(profile, cell.leaf.title)
+    paneTitle: paneDisplayTitle(profile, cell.leaf.title),
+    sessionId: cell.leaf.sessionId
   })
   specRef.current = {
     cwd: project.path,
@@ -758,7 +787,8 @@ function MosaicTile({
     fontFamily: state.settings.terminalFontFamily,
     accent: profile.accent,
     projectName: project.name,
-    paneTitle: paneDisplayTitle(profile, cell.leaf.title)
+    paneTitle: paneDisplayTitle(profile, cell.leaf.title),
+    sessionId: cell.leaf.sessionId
   }
 
   /*
@@ -770,19 +800,22 @@ function MosaicTile({
   const geometry = useMemo(() => terminalHost.geometryFor(paneId), [paneId])
 
   /**
-   * Refit mode, opted into by double-clicking the header.
+   * Life-size: the tile is a scale-1 window onto the terminal, cropped to the
+   * tile's box and anchored bottom-left, where the live region is. The
+   * alternative is the scale model: the whole picture shrunk with a transform,
+   * everything visible, at the price of type nobody can read past a few tiles.
+   * Neither ever resizes the terminal — glancing at a pane must not reflow
+   * somebody's vim, and a ConPTY reflow eats scrollback (see apply()).
    *
-   * Normally a tile is a scale model: the PTY keeps the cols and rows it had in
-   * tab view and the whole picture is shrunk with a transform, so glancing at a
-   * pane can never reflow somebody's vim. Refit says "no, I want this one for
-   * real": the terminal is fitted to the tile's actual stage, gets real cols and
-   * rows at life-size type, and follows the tile from then on — resize it and
-   * the shell reflows to match, once you stop moving. Double-click again and it
-   * goes back to being a scale model. Per tile, and remembered per project.
+   * The wall's setting decides; a tile the user double-clicked has its own
+   * answer in `rect.fit` and keeps it, remembered per project.
    *
-   * Never on while zoomed: zoom is its own deal and must not rewrite the PTY.
+   * A zoomed tile has no box, so it follows the wall's setting: in life-size
+   * mode it genuinely refits to the big stage — the one deliberate,
+   * near-tab-size resize left, because typing needs real cols — and in
+   * scale-model mode it stays a scale model: magnified, never reflowed.
    */
-  const refit = !zoomed && (rect?.fit ?? false)
+  const refit = rect?.fit ?? lifesize
 
   useLayoutEffect(() => {
     const el = naturalRef.current
@@ -828,7 +861,9 @@ function MosaicTile({
       const h = stage.clientHeight
       if (w < 4 || h < 4) return
 
-      if (refit) {
+      if (refit && zoomed) {
+        // The one surface that truly refits: zoom is a deliberate act on one
+        // pane, nearly tab-sized, and typing into it needs real cols and rows.
         el.style.width = `${w}px`
         el.style.height = `${h}px`
         el.style.transform = 'none'
@@ -839,6 +874,29 @@ function MosaicTile({
           settle = null
           terminalHost.fit(paneId)
         }, REFIT_SETTLE_MS)
+        return
+      }
+
+      if (refit) {
+        /*
+         * Life-size on the wall is a *window*, not a refit: the terminal keeps
+         * the exact cols and rows it had in tab view and the tile shows its
+         * bottom-left corner at scale 1 — the bottom because that is where the
+         * prompt and the live region are.
+         *
+         * This used to fit the terminal to the tile for real, which read
+         * beautifully and quietly destroyed the pane: every column change
+         * makes ConPTY reflow and re-emit its screen, and a mosaic↔tab round
+         * trip ate a screenful of scrollback each time — measured at twenty
+         * lines gone per flip, plus the prompt re-homed to mid-screen. A crop
+         * costs a truncated right edge; a refit cost history. See the tab-copy
+         * of this reasoning on attachPeek: glancing at a pane must never
+         * rewrite it.
+         */
+        el.style.width = `${geometry.width}px`
+        el.style.height = `${geometry.height}px`
+        el.style.transform = `translate(0px, ${Math.min(0, h - geometry.height)}px)`
+        el.style.opacity = '1'
         return
       }
 
@@ -877,6 +935,8 @@ function MosaicTile({
 
   const statusLabel = paneStatusLabel(runtime)
   const placed = !zoomed && rect
+  /** This tile was pointed the other way from the rest of the wall by hand. */
+  const override = !zoomed && refit !== lifesize
 
   return (
     <section
@@ -886,6 +946,7 @@ function MosaicTile({
       data-selected={selected}
       data-placed={placed ? 'true' : undefined}
       data-refit={refit ? 'true' : undefined}
+      data-override={override ? 'true' : undefined}
       data-status={runtime.status}
       style={
         {
@@ -906,6 +967,13 @@ function MosaicTile({
           if ((e.target as HTMLElement).closest('button')) return
           onToggleFit(paneId)
         }}
+        title={
+          zoomed
+            ? undefined
+            : lifesize
+              ? 'Double-click: show this one shrunk to fit instead of at full size'
+              : 'Double-click: show this one at full size, cropped to the tile'
+        }
       >
         {zoomed ? (
           <button type="button" className="ghost-btn mtile__back" title="Back to the mosaic (Esc)" onClick={onBack}>
@@ -922,7 +990,8 @@ function MosaicTile({
             {permChip.label}
           </span>
         ) : null}
-        {refit ? <span className="mtile__refit mono">fitted</span> : null}
+        {/* Only ever says how this tile differs from the wall — see toggleFit. */}
+        {override ? <span className="mtile__refit mono">{refit ? 'full size' : 'scaled'}</span> : null}
         <span className="mtile__tab truncate">{cell.tab.title}</span>
         <ActivityDot paneId={paneId} status={runtime.status} />
         {statusLabel ? <span className="mtile__status mono">{statusLabel}</span> : null}

@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import type { MachineSkillInfo, SkillBase, SkillInfo, SkillSource, SkillsList } from '@shared/skills'
 import {
   dedupeSkills,
@@ -30,14 +30,6 @@ export interface ResolvedSkill {
  * the main process and comes back with the fresh list attached, so there is
  * exactly one round trip per action and no polling.
  */
-
-/**
- * The drag payload. A private MIME type, so a skill dragged onto a pane is
- * unmistakably a skill: the pane's own file-drop handling keys off `Files` and
- * ignores this completely, which is what lets the two coexist without either
- * one knowing about the other.
- */
-export const SKILL_DRAG_MIME = 'application/x-forge-skill'
 
 const EMPTY: SkillsList = { skills: [], machineSkills: [] }
 
@@ -154,27 +146,44 @@ function paneUnder(target: EventTarget | null): { el: HTMLElement; paneId: strin
   return { el: target.closest<HTMLElement>('.pane, .mtile') ?? holder, paneId }
 }
 
-function carriesSkill(dt: DataTransfer | null): boolean {
-  return dt ? Array.from(dt.types).includes(SKILL_DRAG_MIME) : false
-}
+/** Pixels the pointer must travel before a press on a row becomes a drag. */
+const DRAG_SLOP = 4
 
 /**
- * Let skills be dropped on terminal panes — without a single line inside
- * TerminalPane.
+ * Drag a skill onto a pane — with pointer events, not HTML5 drag-and-drop.
  *
- * The pane's own `onDragOver` only calls `preventDefault()` for `Files`, so a
- * skill drag would be rejected by the browser before any React handler saw it.
- * These listeners sit on the document in the *capture* phase, which runs before
- * React's delegated handlers at the root, so the drop is accepted here and the
- * pane's file handling never fires (it re-checks for `Files` and bails).
+ * This used to be a `draggable` row and a document-level drop target, and on
+ * this machine it did nothing at all: a native drag has to satisfy Chromium's
+ * own drag-source rules before a single event is dispatched, and when it
+ * declines there is no event, no error and nothing to debug. Between a
+ * portalled popover, an `-webkit-user-drag` rule inherited from the reset, a
+ * WebGL canvas for a drop target and Electron underneath, "nothing happened"
+ * had too many candidate causes to keep guessing at.
  *
- * The highlight is a data attribute set straight on the pane element rather than
- * React state, for the same reason: this is a foreign feature borrowing a
- * component it does not own, and it should leave no trace when it lets go.
+ * So the gesture is ours end to end. A press, four pixels of travel, and from
+ * then on the app is drawing the chip, hit-testing the pane under the cursor
+ * and deciding what a release means. Nothing about it can be vetoed by the
+ * platform, and every part of it is visible while it happens.
  *
- * Returns an unsubscribe function.
+ * Called from a row's `onPointerDown`; it wires and unwires its own listeners.
  */
-export function installSkillDropTarget(onDrop: (paneId: string, skillName: string) => void): () => void {
+export function startSkillDrag(
+  event: ReactPointerEvent<HTMLElement>,
+  name: string,
+  onDrop: (paneId: string, skillName: string) => void
+): void {
+  // Left button only, and never from a control inside the row: the switch and
+  // the ⋯ button are things you press, not handles you pull.
+  if (event.button !== 0) return
+  if (event.target instanceof Element && event.target.closest('button, input')) return
+
+  const row = event.currentTarget
+  const pointerId = event.pointerId
+  const fromX = event.clientX
+  const fromY = event.clientY
+
+  /** Non-null exactly while the press has become a drag. */
+  let chip: HTMLElement | null = null
   let lit: HTMLElement | null = null
 
   const light = (el: HTMLElement | null): void => {
@@ -184,42 +193,76 @@ export function installSkillDropTarget(onDrop: (paneId: string, skillName: strin
     if (lit) lit.dataset['skillDrop'] = 'true'
   }
 
-  const onDragOver = (e: DragEvent): void => {
-    if (!carriesSkill(e.dataTransfer)) return
-    const hit = paneUnder(e.target)
+  /**
+   * The pane under a point. `elementFromPoint` rather than the event target
+   * because the pointer is captured by the row for the length of the drag —
+   * which is what keeps these events away from xterm, and what makes the target
+   * a question of geometry instead of event routing.
+   */
+  const paneAt = (x: number, y: number): { el: HTMLElement; paneId: string } | null =>
+    paneUnder(document.elementFromPoint(x, y))
+
+  const begin = (): void => {
+    // Popovers go pointer-transparent for the length of the drag, so a skill
+    // pulled out of the flyout is hit-tested against the pane underneath it
+    // rather than against the flyout it came from.
+    document.body.dataset['skillDragging'] = 'true'
+    chip = document.createElement('div')
+    chip.className = 'skilldrag mono'
+    chip.textContent = `/${name}`
+    document.body.append(chip)
+    try {
+      row.setPointerCapture(pointerId)
+    } catch {
+      // A row that went away mid-press; the listeners below still clean up.
+    }
+  }
+
+  const move = (e: PointerEvent): void => {
+    if (e.pointerId !== pointerId) return
+    if (!chip) {
+      if (Math.abs(e.clientX - fromX) < DRAG_SLOP && Math.abs(e.clientY - fromY) < DRAG_SLOP) return
+      begin()
+    }
+    const hit = paneAt(e.clientX, e.clientY)
+    // Offset from the cursor, so the chip never covers the thing being aimed at.
+    chip!.style.transform = `translate(${e.clientX + 14}px, ${e.clientY + 12}px)`
+    if (hit) chip!.dataset['over'] = 'true'
+    else delete chip!.dataset['over']
     light(hit?.el ?? null)
-    if (!hit) return
-    // Accepting the drag is exactly this call — without it the browser shows a
-    // "no entry" cursor and never fires a drop event at all.
-    e.preventDefault()
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
   }
 
-  const onDropEvent = (e: DragEvent): void => {
-    if (!carriesSkill(e.dataTransfer)) return
-    const hit = paneUnder(e.target)
+  const stop = (): void => {
+    document.removeEventListener('pointermove', move, true)
+    document.removeEventListener('pointerup', up, true)
+    document.removeEventListener('pointercancel', stop, true)
+    window.removeEventListener('keydown', key, true)
+    try {
+      row.releasePointerCapture(pointerId)
+    } catch {
+      /* already released */
+    }
     light(null)
-    if (!hit) return
-    e.preventDefault()
-    e.stopPropagation()
-    const name = e.dataTransfer?.getData(SKILL_DRAG_MIME) ?? ''
-    if (name) onDrop(hit.paneId, name)
+    chip?.remove()
+    chip = null
+    delete document.body.dataset['skillDragging']
   }
 
-  const onEnd = (): void => light(null)
-
-  // No dragleave listener: `dragover` fires continuously wherever the pointer
-  // is, so moving off a pane already reports a target that is not one, and
-  // light(null) puts the highlight out. A leave handler as well would only
-  // fight it across child-element boundaries.
-  document.addEventListener('dragover', onDragOver, true)
-  document.addEventListener('drop', onDropEvent, true)
-  document.addEventListener('dragend', onEnd, true)
-
-  return () => {
-    light(null)
-    document.removeEventListener('dragover', onDragOver, true)
-    document.removeEventListener('drop', onDropEvent, true)
-    document.removeEventListener('dragend', onEnd, true)
+  const up = (e: PointerEvent): void => {
+    if (e.pointerId !== pointerId) return
+    // A press that never travelled is a click, not a drop — the row's own
+    // handlers get to mean what they mean.
+    const hit = chip ? paneAt(e.clientX, e.clientY) : null
+    stop()
+    if (hit) onDrop(hit.paneId, name)
   }
+
+  const key = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') stop()
+  }
+
+  document.addEventListener('pointermove', move, true)
+  document.addEventListener('pointerup', up, true)
+  document.addEventListener('pointercancel', stop, true)
+  window.addEventListener('keydown', key, true)
 }

@@ -27,6 +27,7 @@ import { isNewer, parseManifest, type UpdateManifest } from './manifest'
 interface ForgeUpdaterNative {
   canInstall(): Promise<{ allowed: boolean }>
   requestInstallPermission(): Promise<void>
+  fetchManifest(options: { url: string }): Promise<{ body: string }>
   download(options: { url: string; sha256: string }): Promise<{ path: string }>
   install(options: { path: string }): Promise<void>
   openExternal(options: { url: string }): Promise<void>
@@ -85,23 +86,57 @@ export function isNativeApp(): boolean {
   return Capacitor.isNativePlatform()
 }
 
+/**
+ * The manifest body, fetched the only way that works on each surface.
+ *
+ * On the phone that means the native side. The bundle is served from
+ * `https://localhost`, so `fetch()` at the release asset is cross-origin, and
+ * the host GitHub redirects to sends no `Access-Control-Allow-Origin` — the
+ * response is blocked before any JS sees it and the rejection is a bare
+ * TypeError. That was reported as "probably offline", which was never true:
+ * the request could not have succeeded on any network, so the shipped app
+ * could never see an update at all. HttpURLConnection in the plugin has no
+ * such rule.
+ *
+ * The browser debug route keeps `fetch()`, because it has no plugin to call.
+ * It is subject to the same CORS block, so a manifest check there only works
+ * against a feed that allows the origin — which is a debug-route limitation
+ * worth having over pretending the two surfaces behave alike.
+ */
+async function readManifest(): Promise<string> {
+  if (isNativeApp()) {
+    const { body } = await native.fetchManifest({ url: __APK_MANIFEST_URL__ })
+    return body
+  }
+  // no-store: the WebView caching an old manifest would make "check for
+  // updates" a button that confirms whatever it said last time.
+  const response = await fetch(__APK_MANIFEST_URL__, { cache: 'no-store' })
+  if (!response.ok) throw new Error(`The update feed answered ${response.status}.`)
+  return await response.text()
+}
+
 export async function check(): Promise<void> {
   if (state.phase === 'checking' || state.phase === 'downloading') return
   set({ phase: 'checking', detail: '' })
 
-  let raw: unknown
+  let body: string
   try {
-    // no-store: the WebView caching an old manifest would make "check for
-    // updates" a button that confirms whatever it said last time.
-    const response = await fetch(__APK_MANIFEST_URL__, { cache: 'no-store' })
-    if (!response.ok) {
-      set({ phase: 'unreachable', detail: `The update feed answered ${response.status}.` })
-      return
-    }
-    raw = await response.json()
-  } catch {
-    set({ phase: 'unreachable', detail: 'Could not reach the update feed — probably offline.' })
+    body = await readManifest()
+  } catch (error) {
+    // Now that the request is a real one, the sentence can be what actually
+    // happened rather than a guess — a timeout, a DNS failure, an HTTP status.
+    set({ phase: 'unreachable', detail: describe(error, 'Could not reach the update feed — probably offline.') })
     return
+  }
+
+  // Reached the feed but it is not JSON: that is a bad release, not a bad
+  // network, and it belongs in the malformed branch below rather than being
+  // reported as being offline.
+  let raw: unknown = null
+  try {
+    raw = JSON.parse(body)
+  } catch {
+    raw = null
   }
 
   const manifest = parseManifest(raw)

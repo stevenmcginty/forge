@@ -257,6 +257,41 @@ log(
 const envDts = readFileSync(join(MOBILE, 'src', 'env.d.ts'), 'utf8')
 log(envDts.includes('__APK_MANIFEST_URL__') && envDts.includes('__BAKED_ORIGIN__'), 'the defines are declared for TypeScript')
 
+/* ------------------------------------------- the manifest fetch dodges CORS */
+
+/*
+ * The shipped app fetched the manifest with `fetch()` from an https://localhost
+ * origin. GitHub's release-asset host sends no Access-Control-Allow-Origin, so
+ * Chromium blocked every response and the app reported "probably offline" on a
+ * phone that was online — an update check that could not have succeeded on any
+ * network. These three assertions are what stop that regressing: the plugin
+ * must offer fetchManifest, the app must call it, and it must only fall back to
+ * fetch() off-device.
+ */
+const updateTs = readFileSync(join(MOBILE, 'src', 'lib', 'update.ts'), 'utf8')
+const pluginKt = readFileSync(join(MOBILE, 'native', 'ForgeUpdaterPlugin.kt'), 'utf8')
+log(
+  /@PluginMethod\s+fun fetchManifest\(/.test(pluginKt),
+  'the native plugin exposes fetchManifest — the WebView cannot fetch the feed itself'
+)
+log(
+  updateTs.includes('native.fetchManifest({ url: __APK_MANIFEST_URL__ })'),
+  'update.ts reads the manifest through the plugin, not through a CORS-blocked fetch'
+)
+log(
+  /if \(isNativeApp\(\)\) \{\s*const \{ body \} = await native\.fetchManifest/.test(updateTs),
+  'fetch() is the browser-debug fallback only — the APK never takes that path'
+)
+
+const androidKt = readFileSync(
+  join(MOBILE, 'android', 'app', 'src', 'main', 'java', 'com', 'forge', 'mobile', 'ForgeUpdaterPlugin.kt'),
+  'utf8'
+)
+log(
+  androidKt === pluginKt,
+  'the copy Gradle compiles matches mobile/native — apk:init has been run since the last edit'
+)
+
 /* -------------------------------------- no key material inside the repo */
 
 const suspects = []

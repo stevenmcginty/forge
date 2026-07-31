@@ -24,6 +24,8 @@ import type {
   MobileStatus,
   OpenRouterCallRequest,
   OpenRouterCallResult,
+  GroqCallRequest,
+  GroqCallResult,
   Project,
   PtyDataEvent,
   PtyExitEvent,
@@ -157,6 +159,8 @@ export interface ForgeApi {
     gemini(req: GeminiCallRequest): Promise<GeminiCallResult>
     /** OpenRouter's OpenAI-compatible chat completions, for OpenRouterBrain. */
     openrouter(req: OpenRouterCallRequest): Promise<OpenRouterCallResult>
+    /** Groq's, which is the same API on a different host. See GroqBrain. */
+    groq(req: GroqCallRequest): Promise<GroqCallResult>
     /**
      * Read a key Steve already has on disk — DictationMic's `gemini.key`, or
      * `~/.kimi-key` for OpenRouter. Read-only; never writes.
@@ -427,5 +431,67 @@ export interface ForgeApi {
      * buttons welded into its top-right corner.
      */
     setTitlebar(color: string, symbolColor: string): void
+    /**
+     * Un-minimise Forge and raise it. Called from the overlay, which can be on
+     * screen while the main window is minimised behind Chrome.
+     */
+    restoreAndFocus(): void
   }
+
+  /**
+   * The undocked voice hub, as its own always-on-top Windows window.
+   *
+   * Every method here is a relay, and the shape is deliberately lopsided: the
+   * *host* (the main window, which owns the one and only voice agent) pushes
+   * state out, and the *overlay* sends callbacks back. Neither side ever runs
+   * the other's half — an overlay that subscribed to the transcript bus would
+   * be a second agent, and two agents means two voices answering one sentence.
+   *
+   * The payloads are `unknown` on purpose. Both windows run the same renderer
+   * bundle, so they share the precise types from src/lib/overlaystate.ts; the
+   * main process in the middle is a wire and has no business knowing them.
+   */
+  overlay: {
+    /** True in the overlay window, false in the main one. Read from the URL. */
+    isOverlay(): boolean
+
+    /* ------------------------------------------------------ host → main */
+    /** Show it, at these screen-space bounds. Idempotent — also moves/resizes. */
+    open(bounds: OverlayBounds): Promise<void>
+    /** Destroy it. The hub went home, or Forge is shutting down. */
+    close(): Promise<void>
+    /** Move/resize it without a round trip through open(). */
+    setBounds(bounds: OverlayBounds): void
+    /** Push the mirrored snapshot. Called on change, not on a timer. */
+    pushState(snapshot: unknown): void
+    /** Push the mic level alone, so the ring animates without a re-render. */
+    pushLevel(level: number): void
+    /** A callback the overlay asked for, arriving at the real engine. */
+    onCall(cb: (message: unknown) => void): () => void
+    /** The user dragged or resized the overlay; persist it into settings. */
+    onBounds(cb: (bounds: OverlayBounds) => void): () => void
+
+    /* --------------------------------------------------- overlay → main */
+    onState(cb: (snapshot: unknown) => void): () => void
+    onLevel(cb: (level: number) => void): () => void
+    /** Ask the host to run something on the real engine. Fire and forget. */
+    call(message: unknown): void
+  }
+}
+
+/**
+ * Where the overlay sits, in *screen* pixels.
+ *
+ * Screen, not viewport — that is the whole point of the thing. The in-window
+ * hub clamped itself to Forge's client area (src/lib/voicehub.ts); this one is
+ * clamped to the work area of whichever display it was dropped on, which is
+ * what lets it sit over Chrome on the second monitor.
+ */
+export interface OverlayBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+  /** Expanded cards can be resized by their edge; pills cannot. */
+  resizable?: boolean
 }

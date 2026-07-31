@@ -131,6 +131,25 @@
   box-shadow: 0 0 0 2px var(--bg-panel-raised), 0 0 0 3px var(--text-secondary);
 }
 
+/* "No colour" — a swatch with the strike a colour picker's empty slot wears
+   everywhere else, so it reads as off rather than as a very dark colour. */
+.swatch--none {
+  position: relative;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.swatch--none::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 50%;
+  height: 1px;
+  background: var(--text-dim);
+  transform: rotate(-45deg);
+}
+
 .popover__actions {
   display: flex;
   justify-content: flex-end;

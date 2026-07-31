@@ -9,8 +9,20 @@
  * icon is drawn here in code — a few filled rectangles rasterised into RGBA,
  * PNG-encoded with node:zlib, and packed into a multi-size .ico.
  *
+ * Three things stop it looking stamped rather than made:
+ *
+ *   - the plate edge is lit, running from a bevel highlight at the top to the
+ *     plain hairline at the bottom, so it reads as a machined face catching a
+ *     light rather than a rounded rectangle with a border
+ *   - the F carries its own top-to-bottom gradient (--accent-bright to
+ *     --accent) instead of inheriting the plate's darkening, which is what kept
+ *     the old glyph's foot looking dirty
+ *   - 16/20/24px are drawn with a thinner inset and a slightly larger glyph.
+ *     Optical sizing, not a bug: at 16px the plate margin costs a whole pixel
+ *     of counter, and the arms close up into a bar.
+ *
  * Colours come from src/theme/tokens.css (--bg-panel-raised, --accent,
- * --line-strong); change them there and here together.
+ * --accent-bright, --line-strong); change them there and here together.
  *
  * Why hand-rolled: an .ico is a 6-byte header plus one 16-byte directory entry
  * per image, and since Vista the images may be whole PNG files. That is ~40
@@ -24,42 +36,72 @@ const ROOT = resolve(import.meta.dirname, '..')
 const OUT_DIR = join(ROOT, 'build')
 const OUT = join(OUT_DIR, 'icon.ico')
 
-/** Sizes Windows actually asks for: tray/tab, taskbar, alt-tab, shell tiles. */
-const SIZES = [16, 24, 32, 48, 64, 128, 256]
+/**
+ * Sizes Windows actually asks for: tray/tab, taskbar, alt-tab, shell tiles.
+ * 20 and 40 are the 125%/250% taskbar steps — without them Windows downsamples
+ * 24 and 48, and a hairline edge does not survive being scaled by 0.83.
+ */
+const SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 
-const PLATE_TOP = [0x1e, 0x21, 0x27, 0xff] // slightly lifted --bg-panel-raised
-const PLATE_BOTTOM = [0x0d, 0x0e, 0x11, 0xff] // toward --bg-base
-const EDGE = [0x3a, 0x3f, 0x49, 0xff] // --line-strong, a touch brighter
+const PLATE_TOP = [0x20, 0x23, 0x28, 0xff] // slightly lifted --bg-panel-raised
+const PLATE_BOTTOM = [0x0c, 0x0d, 0x10, 0xff] // toward --bg-base
+const EDGE = [0x33, 0x36, 0x3c, 0xff] // --line-strong
+const BEVEL = [0x4c, 0x52, 0x5d, 0xff] // the lit top of that same edge
 const VOLT = [0xc6, 0xff, 0x4a, 0xff] // --accent
+const VOLT_BRIGHT = [0xd6, 0xff, 0x7d, 0xff] // --accent-bright
 const CLEAR = [0, 0, 0, 0]
 
+/**
+ * The F, as fractions of the icon's side.
+ *
+ * The bounding box is centred on the plate in both axes, which for an F is the
+ * right call — its mass sits top-left, but shifting to correct for that makes
+ * the top arm look like it is falling off the edge.
+ *
+ * The middle arm is a hair lighter than the stem and top arm, and its centre
+ * sits just above the cap's midpoint. Both are the standard corrections for
+ * this letter: equal weights read as bottom-heavy, and a geometrically centred
+ * crossbar reads as sagging.
+ */
+const CAP = 0.57 // cap height
+const WIDTH = 0.475 // top arm, the widest part
+const STEM = 0.125 // stem width, and the top arm's height
+const MID_H = 0.113 // middle arm
+const MID_W = 0.395
+const MID_Y = 0.448 // top of the middle arm
+
 /* ---------------------------------------------------------------- raster */
+
+const lerp = (a, b, t) => a + (b - a) * t
+const mix = (a, b, t) => [0, 1, 2].map((i) => Math.round(lerp(a[i], b[i], t)))
 
 /**
  * One RGBA buffer for the icon at `size`.
  *
- * Everything is expressed as a fraction of the size and then sampled 4x4 per
+ * Everything is expressed as a fraction of the size and then sampled 8x8 per
  * pixel, which is what stops the 16px version from turning the F's arms into
  * grey mush: coverage-based antialiasing on a shape this thin beats any attempt
- * at snapping to whole pixels.
+ * at snapping to whole pixels. 64 samples is free at these dimensions — the
+ * largest icon here is a quarter of a megapixel.
  */
 function render(size) {
   const px = Buffer.alloc(size * size * 4)
-  const S = 4 // supersamples per axis
-  const r = size * 0.22 // plate corner radius
-  const inset = size * 0.055
+  const S = 8 // supersamples per axis
+  const r = size * 0.215 // plate corner radius
+  // See the header: the small sizes cannot afford the full margin.
+  const small = size <= 24
+  // Snapped to whole pixels up to 64. The plate is the only straight edge in
+  // the icon, and an inset of 0.56px puts it down the middle of the first
+  // column — a half-lit ring that reads as a blur rather than a border. Above
+  // 64 there is enough resolution that the antialiased edge just looks smooth.
+  const margin = size * (small ? 0.035 : 0.055)
+  const inset = size <= 64 ? Math.max(Math.round(margin), 1) : margin
+  const grow = small ? 1.09 : 1
   const edge = Math.max(size / 32, 1) // hairline width
 
-  // The F, in plate-relative units (0..1 across the inner square).
-  const stemX0 = 0.3
-  const stemX1 = 0.44
-  const armX1 = 0.73
-  const midArmX1 = 0.64
-  const top = 0.24
-  const bottom = 0.78
-  const armH = 0.14
-  const midY0 = 0.44
-  const midY1 = midY0 + armH * 0.92
+  const left = 0.5 - WIDTH / 2
+  const top = 0.5 - CAP / 2
+  const bottom = top + CAP
 
   const inRoundRect = (x, y, x0, y0, x1, y1, rad) => {
     if (x < x0 || x > x1 || y < y0 || y > y1) return false
@@ -70,14 +112,18 @@ function render(size) {
     return dx * dx + dy * dy <= rad * rad
   }
 
-  const inF = (u, v) => {
+  const inF = (u0, v0) => {
+    // The optical enlargement is a scale about the plate's centre, so the F
+    // grows without drifting off it.
+    const u = 0.5 + (u0 - 0.5) / grow
+    const v = 0.5 + (v0 - 0.5) / grow
+    if (u < left || v < top || v > bottom) return false
     // stem
-    if (u >= stemX0 && u <= stemX1 && v >= top && v <= bottom) return true
+    if (u <= left + STEM) return true
     // top arm
-    if (u >= stemX0 && u <= armX1 && v >= top && v <= top + armH) return true
+    if (v <= top + STEM) return u <= left + WIDTH
     // middle arm
-    if (u >= stemX0 && u <= midArmX1 && v >= midY0 && v <= midY1) return true
-    return false
+    return v >= MID_Y && v <= MID_Y + MID_H && u <= left + MID_W
   }
 
   for (let y = 0; y < size; y++) {
@@ -117,16 +163,19 @@ function render(size) {
         px[o + 3] = CLEAR[3]
         continue
       }
-      // Vertical gradient across the plate, so it reads as machined metal
-      // rather than a flat square.
-      const t = y / (size - 1)
-      const base = [0, 1, 2].map((i) => Math.round(PLATE_TOP[i] + (PLATE_BOTTOM[i] - PLATE_TOP[i]) * t))
-      let colour = base
-      if (edgeHit / plate > 0.5) colour = [EDGE[0], EDGE[1], EDGE[2]]
+      // Vertical gradients across the whole plate, so it reads as machined
+      // metal catching a light from above rather than a flat square. The edge
+      // gets one too — that is the bevel — and the glyph gets its own, which is
+      // why the F's foot stays lime instead of going olive.
+      const t = size > 1 ? y / (size - 1) : 0
+      let colour = mix(PLATE_TOP, PLATE_BOTTOM, t)
+      // A 1px ring is 7% of a 16px icon against 3% of a 32px one, so the same
+      // contrast that reads as a machined edge up close reads as a halo down
+      // there. The lift comes off with the size.
+      const e = (edgeHit / plate) * (small ? 0.45 : 1)
+      if (e > 0) colour = mix(colour, mix(BEVEL, EDGE, Math.min(t * 1.35, 1)), e)
       const g = glyph / total
-      if (g > 0) {
-        colour = [0, 1, 2].map((i) => Math.round(colour[i] * (1 - g) + VOLT[i] * g))
-      }
+      if (g > 0) colour = mix(colour, mix(VOLT_BRIGHT, VOLT, t), g)
       px[o] = colour[0]
       px[o + 1] = colour[1]
       px[o + 2] = colour[2]
@@ -207,7 +256,6 @@ function ico(images) {
     dir[e + 3] = 0 // reserved
     dir.writeUInt16LE(1, e + 4) // colour planes
     dir.writeUInt16LE(32, e + 6) // bits per pixel
-    dir.writeUInt32BE(0, e + 8)
     dir.writeUInt32LE(data.length, e + 8)
     dir.writeUInt32LE(offset, e + 12)
     offset += data.length

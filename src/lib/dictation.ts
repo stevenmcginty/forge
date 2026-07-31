@@ -89,14 +89,28 @@ export type InsertOutcome = 'terminal' | 'field' | 'clipboard'
  * Nothing focused means nothing gets typed into the void: the text goes to the
  * clipboard and the caller says so, which is recoverable. Losing the words is
  * not.
+ *
+ * **The insertion takes focus with it.** Dictation is started by clicking the
+ * pill or pressing the hotkey, and a click leaves DOM focus on the pill — so the
+ * words appeared at the prompt while the keyboard was still pointed at a button.
+ * The tell was the cursor: xterm draws a hollow outline box instead of its
+ * blinking bar when the terminal is unfocused, and Enter went to the pill rather
+ * than the shell (on the pill, Enter re-triggers it — so dictation toggled off
+ * instead of the command running). You had to click into the pane to say what
+ * you had already said. Landing the text and handing focus to the same place is
+ * what makes "dictate, read it back, press Enter" work.
  */
 export function insertPhrase(text: string, target: InsertTarget): InsertOutcome {
   const payload = `${text.trim()} `
 
   if (target.kind === 'terminal' && terminalHost.type(target.paneId, payload)) {
+    terminalHost.focus(target.paneId)
     return 'terminal'
   }
   if (target.kind === 'field' && target.el.isConnected) {
+    // Focus first, then insert: the insert leaves the caret after the phrase,
+    // and taking focus afterwards is the one order that can move it back.
+    target.el.focus()
     insertIntoField(target.el, payload)
     return 'field'
   }

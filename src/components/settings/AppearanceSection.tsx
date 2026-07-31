@@ -76,6 +76,16 @@ export function AppearanceSection(): ReactNode {
             onChange={actions.setFontSize}
           />
         </Row>
+        <Row
+          label="Full-size text in the mosaic"
+          hint="Same type size however many tiles are up — each tile is a window onto its terminal, showing the latest output. Off shrinks whole terminals to fit instead. Neither reflows a running TUI. Double-click a tile’s header to override one tile."
+        >
+          <Toggle
+            checked={s.mosaicText !== 'scaled'}
+            onChange={(on) => actions.setMosaicText(on ? 'lifesize' : 'scaled')}
+            label="Full-size text in the mosaic"
+          />
+        </Row>
         <Row label="Reduce motion" hint="Windows already asks for this; here it can be forced on">
           <Toggle checked={s.reducedMotion} onChange={actions.setReducedMotion} label="Reduce motion" />
         </Row>

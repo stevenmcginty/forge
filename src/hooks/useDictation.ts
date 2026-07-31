@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isSttSetupError, type SttStatus } from '@shared/types'
 import { insertPhrase, resolveInsertTarget, type InsertTarget } from '@/lib/dictation'
 import { dictationTranscript, transcriptBus } from '@/lib/transcriptSource'
-import { agentSurfaceOpen } from '@/lib/voicehub'
 import { useActiveTab, useApp } from '@/state/AppState'
 
 /**
@@ -53,16 +52,22 @@ export function useDictationEngine(): Dictation {
 
   /* ------------------------------------------------------------- routing
    *
-   * Two places a phrase can go, and exactly one rule for choosing: an agent
-   * surface on screen *and* the mic armed means the words are meant for the
-   * agent; anything else means they are meant for whatever you are looking at.
+   * Two places a phrase can go, and now exactly one thing decides: IS THE AGENT
+   * ARMED. On, and the words are the agent's. Off, and they are dictation into
+   * whatever pane you are looking at, which is what this hook has always done.
    *
-   * "Agent surface" is the part the floating hub changed. It used to be "the
-   * voice panel is open", which was the same question while the panel was the
-   * only place the round button lived. The hub carries that button too, so a
-   * pill floating over the terminals with agent mode on has to route the same
-   * way — otherwise arming it there would quietly type his half of the
-   * conversation into whatever pane was behind it.
+   * It used to also require an agent surface to be on screen — first the voice
+   * panel, then the floating hub. That condition is gone, and deliberately.
+   * Steve, asked what should decide whether something was meant for Forge:
+   * "everything that I say needs to go into forge... it's all going to be
+   * relevant to forge". The switch is the switch, and a switch that quietly
+   * flips itself back when you dock the hub or click on Chrome is not one.
+   *
+   * The two microphones stay two microphones, which is the other half of what
+   * he said — dictation "works slightly different". Right Ctrl still opens the
+   * mic for a pane; arming the agent still routes to the agent. What changed is
+   * only that the agent's claim no longer expires when its window is not
+   * visible.
    *
    * The registration is the switch. While it holds, dictation is a source on
    * the transcript bus and the agent picks phrases up like any other source;
@@ -70,7 +75,7 @@ export function useDictationEngine(): Dictation {
    * does what M3 always did. Nothing can reach both.
    */
 
-  const toAgent = agentSurfaceOpen(state.settings) && state.agentListening
+  const toAgent = state.agentListening
   const toAgentRef = useRef(toAgent)
   toAgentRef.current = toAgent
 

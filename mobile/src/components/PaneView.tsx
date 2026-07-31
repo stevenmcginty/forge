@@ -14,6 +14,10 @@ import { KeyBar } from './KeyBar'
  * Replay is why this works away from the desk: the desktop answers every `sub`
  * with its 192KB catch-up buffer, so the first thing painted is the screen as
  * it actually is, not an empty box waiting for the next keystroke.
+ *
+ * The key bar is raised from the header rather than always present — see
+ * KEYBAR_PREF below. The compose row still lives inside it, so opening the keys
+ * is also how you reach "type a line and send it".
  */
 
 export interface PaneViewProps {
@@ -24,11 +28,31 @@ export interface PaneViewProps {
   onBack: () => void
 }
 
+/**
+ * Whether the key bar is up, remembered across screens and launches.
+ *
+ * Off by default. The bar exists because a phone keyboard has no Esc, Tab, Ctrl
+ * or arrows — but most of the time you are reading an agent's output, not
+ * sending control codes, and two rows of keys is a third of a phone screen spent
+ * on something you are not using. So it is a thing you raise when you need it.
+ */
+const KEYBAR_PREF = 'forge.keybar'
+
+function keybarWanted(): boolean {
+  try {
+    return localStorage.getItem(KEYBAR_PREF) === 'on'
+  } catch {
+    // Private mode / storage disabled. The default is the honest answer.
+    return false
+  }
+}
+
 export function PaneView({ link, session, title, fontSize, onBack }: PaneViewProps): React.JSX.Element {
   const holder = useRef<HTMLDivElement | null>(null)
   const host = useRef<TermHost | null>(null)
   const [composing, setComposing] = useState(false)
   const [draft, setDraft] = useState('')
+  const [keys, setKeys] = useState(keybarWanted)
 
   useEffect(() => {
     const container = holder.current
@@ -61,6 +85,25 @@ export function PaneView({ link, session, title, fontSize, onBack }: PaneViewPro
     }
   }, [link, session.id, fontSize])
 
+  // Raising or dropping the bar changes the terminal's height by two rows'
+  // worth, so the PTY has to be told — otherwise the shell keeps drawing to a
+  // geometry that is no longer on screen.
+  useEffect(() => {
+    host.current?.fit()
+  }, [keys, composing])
+
+  const toggleKeys = (): void => {
+    setKeys((on) => {
+      const next = !on
+      try {
+        localStorage.setItem(KEYBAR_PREF, next ? 'on' : 'off')
+      } catch {
+        /* the preference is a convenience, not a requirement */
+      }
+      return next
+    })
+  }
+
   const send = (data: string): void => {
     link.write(session.id, data)
     host.current?.focus()
@@ -84,6 +127,15 @@ export function PaneView({ link, session, title, fontSize, onBack }: PaneViewPro
             {session.cols}×{session.rows}
           </span>
         </div>
+        <button
+          type="button"
+          className="bar-keys"
+          aria-pressed={keys}
+          title={keys ? 'Hide the terminal keys' : 'Show Ctrl, Esc, Tab and arrows'}
+          onClick={toggleKeys}
+        >
+          ⌨︎
+        </button>
       </header>
 
       <div className="term-holder" ref={holder} onClick={() => host.current?.focus()} />
@@ -112,9 +164,9 @@ export function PaneView({ link, session, title, fontSize, onBack }: PaneViewPro
             ✕
           </button>
         </div>
-      ) : (
+      ) : keys ? (
         <KeyBar onSend={send} onCompose={() => setComposing(true)} />
-      )}
+      ) : null}
     </div>
   )
 }

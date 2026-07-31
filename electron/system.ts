@@ -28,23 +28,38 @@ export function windowsUserName(): string {
 }
 
 /**
- * Run `claude --version`. On Windows the executable is usually a `.cmd` shim,
- * which CreateProcess will not run directly — hence `shell: true`, with a fixed
- * argument list that nothing user-supplied ever reaches.
+ * Run `claude --version`.
  *
  * Whether `claude` exists at all is not decided here: agent-probe.ts already
  * walks PATH for exactly that, and it is what the first-run welcome shows. Two
  * implementations of "is it installed" is two answers, and the one time they
  * disagreed the welcome said "installed" while Settings said "not found". So
  * this asks the probe first and only spawns a process to learn the *version*.
+ *
+ * It also spawns the exact file the probe found, rather than the name `claude`
+ * through a shell. On Windows the CLI is usually a `.cmd` shim that
+ * CreateProcess will not run directly, which used to mean `shell: true` — and
+ * `shell: true` alongside an argument list is what Node warns about in DEP0190,
+ * because the arguments go back through a command line to be re-parsed. Handing
+ * cmd.exe the shim as an argv entry gets the shim run without ever building a
+ * command string. On anything else the resolved path is executable as it is.
  */
 export function claudeVersion(): Promise<ClaudeCliState> {
-  if (!whichCommand('claude')) return Promise.resolve({ ok: false, error: 'not found on PATH' })
+  const exe = whichCommand('claude')
+  if (!exe) return Promise.resolve({ ok: false, error: 'not found on PATH' })
+
+  // .cmd and .bat are scripts for the command interpreter, not images the OS
+  // can load; everything else — claude.exe, or a real binary on macOS/Linux —
+  // runs on its own.
+  const viaCmd = /\.(cmd|bat)$/i.test(exe)
+  const file = viaCmd ? (process.env['ComSpec'] ?? 'cmd.exe') : exe
+  const args = viaCmd ? ['/d', '/s', '/c', exe, '--version'] : ['--version']
+
   return new Promise((resolve) => {
     execFile(
-      'claude',
-      ['--version'],
-      { timeout: PROBE_TIMEOUT_MS, windowsHide: true, shell: process.platform === 'win32' },
+      file,
+      args,
+      { timeout: PROBE_TIMEOUT_MS, windowsHide: true },
       (err, stdout, stderr) => {
         if (err) {
           const code = (err as NodeJS.ErrnoException).code

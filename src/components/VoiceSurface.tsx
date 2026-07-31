@@ -48,7 +48,10 @@ const AGENT_LABEL: Record<AgentPhase, { title: string; sub: string }> = {
   warming: { title: 'Warming up', sub: 'loading the speech engine…' },
   listening: { title: 'Listening', sub: 'say what you want — tap to stop' },
   thinking: { title: 'Thinking', sub: 'working on it…' },
-  speaking: { title: 'Speaking', sub: 'mic off while I talk — tap to interrupt' },
+  // Not "mic off while I talk" any more — it is not. The AEC'd microphone is
+  // open for the whole reply and talking over it is the intended way to stop
+  // it, so the hint says so. See src/lib/bargein.ts.
+  speaking: { title: 'Speaking', sub: 'talk over me any time' },
   replied: { title: 'Answered', sub: 'still listening' },
   error: { title: 'That failed', sub: 'still listening — try again' }
 }

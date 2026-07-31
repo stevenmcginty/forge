@@ -64,7 +64,8 @@ export function TerminalPane({
     fontFamily: state.settings.terminalFontFamily,
     accent: profile.accent,
     projectName: project.name,
-    paneTitle: paneDisplayTitle(profile, leaf.title)
+    paneTitle: paneDisplayTitle(profile, leaf.title),
+    sessionId: leaf.sessionId
   })
   specRef.current = {
     cwd: project.path,
@@ -73,7 +74,8 @@ export function TerminalPane({
     fontFamily: state.settings.terminalFontFamily,
     accent: profile.accent,
     projectName: project.name,
-    paneTitle: paneDisplayTitle(profile, leaf.title)
+    paneTitle: paneDisplayTitle(profile, leaf.title),
+    sessionId: leaf.sessionId
   }
 
   /* ------------------------------------------------------------- attach */
@@ -342,6 +344,11 @@ export function TerminalPane({
         <PopoverDivider />
         <PopoverRow onClick={() => runFromMenu(() => terminalHost.selectAll(leaf.id))}>
           <span className="pane__menu-name">Select all</span>
+        </PopoverRow>
+        {/* For a TUI that has come out garbled: makes the program repaint,
+            without touching the scrollback the way Clear does. */}
+        <PopoverRow onClick={() => runFromMenu(() => terminalHost.redraw(leaf.id))}>
+          <span className="pane__menu-name">Redraw</span>
         </PopoverRow>
         <PopoverRow onClick={() => runFromMenu(() => terminalHost.clear(leaf.id))}>
           <span className="pane__menu-name">Clear</span>

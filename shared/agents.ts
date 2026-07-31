@@ -65,6 +65,51 @@ export const ACCENT_PALETTE = [
   '#9AA3AF'
 ]
 
+/**
+ * Terminal-text tints handed out to new tabs, in the order they are handed out.
+ *
+ * Every tab in a project is born a different colour, because the mosaic's whole
+ * job is telling four sessions apart at a glance and four identical greys do not
+ * do that. Right-click a tab to change or clear it — this is only the starting
+ * point, never a lock.
+ *
+ * Red is deliberately absent: in a terminal, red text already means something.
+ */
+export const TAB_TEXT_PALETTE = ['#C6FF4A', '#7FD1FF', '#C08BFF', '#FFB347', '#5EE6A8', '#F2E56B', '#FF9ED2']
+
+/**
+ * The names new tabs are given, in the order they are handed out.
+ *
+ * A number is a bad name for a session. "Tab 4" tells you nothing about what is
+ * running in it, reads the same as every other tab in the strip, and — because
+ * numbers get reused as tabs close — can end up on two tabs at once. A name is
+ * something you can hold in your head and say out loud: "kill Marlow", "what
+ * did Otis say", which is also exactly what voice control needs.
+ *
+ * Four walks of the alphabet, so consecutive tabs never start with the same
+ * letter and are as easy to tell apart in the strip as they are to speak. All
+ * short, all one word, all phonetically distinct — a title bar is narrow and
+ * dictation has to survive them.
+ */
+export const TAB_NAME_POOL = [
+  // A→Z
+  'Ada', 'Bo', 'Cleo', 'Dara', 'Eli', 'Fern', 'Gus', 'Hana', 'Iris', 'Jude',
+  'Kai', 'Lena', 'Mira', 'Nico', 'Otis', 'Pia', 'Quinn', 'Rex', 'Sana', 'Tobin',
+  'Uma', 'Vera', 'Wren', 'Xan', 'Yara', 'Zane',
+  // and again
+  'Alma', 'Bram', 'Cass', 'Dez', 'Esme', 'Finn', 'Greta', 'Hugo', 'Ines', 'Juno',
+  'Kira', 'Lars', 'Mae', 'Nell', 'Olen', 'Pax', 'Quill', 'Remy', 'Soren', 'Thea',
+  'Ulla', 'Vance', 'Wyatt', 'Xander', 'Yusuf', 'Zora',
+  // and again
+  'Anders', 'Beau', 'Colm', 'Dot', 'Elsa', 'Faye', 'Gil', 'Hollis', 'Ivo', 'Jonah',
+  'Kess', 'Lior', 'Mona', 'Noor', 'Orla', 'Perry', 'Rhys', 'Sable', 'Tam', 'Ursa',
+  'Viggo', 'Wanda', 'Yates', 'Zeb',
+  // and again
+  'Arlo', 'Bess', 'Cyrus', 'Dane', 'Elia', 'Frida', 'Gwen', 'Hale', 'Isla', 'Jax',
+  'Kofi', 'Luca', 'Marlow', 'Nadia', 'Omar', 'Petra', 'Rune', 'Silas', 'Tomas', 'Umi',
+  'Vida', 'Wells', 'Yoko', 'Zola'
+]
+
 /** The neutral badge tint every shell profile wears, whatever its accent. */
 export const SHELL_BADGE_COLOR = '#9AA3AF'
 

@@ -1,9 +1,17 @@
 import { execFile } from 'node:child_process'
 import { ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
-import { npmLatestUrl, parseNpmLatest, parseVersion, parseWingetList, TOOL_SPECS } from '@shared/tools'
-import type { ToolId, ToolLatest, ToolProbe } from '@shared/types'
+import {
+  allToolSpecs,
+  isPlainCommand,
+  npmLatestUrl,
+  parseNpmLatest,
+  parseVersion,
+  parseWingetList
+} from '@shared/tools'
+import type { ToolId, ToolLatest, ToolProbe, ToolSpec } from '@shared/types'
 import { whichCommand } from './agent-probe'
+import { getSettings } from './store'
 
 /**
  * What is installed on this machine, and what is available.
@@ -24,6 +32,12 @@ import { whichCommand } from './agent-probe'
  * not live in this file at all: it types a command into a terminal pane in the
  * renderer, which is the only place in Forge where "run an installer" is a
  * thing a person does rather than a thing that happens.
+ *
+ * The catalogue is no longer fixed. `specs()` is the built-ins plus whatever
+ * has been added in Settings, which means every function below already works
+ * for a tool nobody had heard of when this file was written — and why the one
+ * command that gets *spawned* is checked against `isPlainCommand` at the point
+ * of use rather than trusted because a form validated it earlier.
  */
 
 /** A hung shim must not hold the settings page open. */
@@ -41,6 +55,34 @@ const LATEST_TTL_MS = 30 * 60 * 1000
 
 const probeCache = new Map<ToolId, ToolProbe>()
 const latestCache = new Map<ToolId, ToolLatest>()
+
+/**
+ * The catalogue *right now*: what Forge ships with, plus whatever is in
+ * settings.json.
+ *
+ * Read on every call rather than captured at startup, because a tool added in
+ * the settings page has to appear in the list the same second it is added, and
+ * the alternative — an IPC that pushes the catalogue into this module whenever
+ * settings change — is a second copy of the truth for no benefit.
+ */
+function specs(): ToolSpec[] {
+  return allToolSpecs(getSettings().customTools)
+}
+
+/**
+ * What a cached answer was an answer *to*.
+ *
+ * Editing a row's npm package and pressing Check must not hand back the reply
+ * for the old one. The id alone cannot see that change, so the cache key carries
+ * the part of the spec the answer depends on.
+ */
+function fingerprint(spec: ToolSpec): string {
+  return `${spec.id}|${spec.latest.source}|${spec.latest.npmPackage ?? ''}|${(spec.latest.wingetIds ?? []).join(',')}`
+}
+
+function probeFingerprint(spec: ToolSpec): string {
+  return `${spec.id}|${spec.command}|${(spec.versionArgs ?? ['~none']).join(' ')}`
+}
 
 /* ------------------------------------------------------------ installed */
 
@@ -75,9 +117,16 @@ function runVersion(command: string, args: string[]): Promise<{ ok: true; text: 
   })
 }
 
-async function probeOne(id: ToolId): Promise<ToolProbe> {
-  const spec = TOOL_SPECS.find((t) => t.id === id)
-  if (!spec) return { id, found: false, error: 'unknown tool' }
+async function probeOne(spec: ToolSpec): Promise<ToolProbe> {
+  const id = spec.id
+  // A custom row's command is a string from a config file, and this is the one
+  // place Forge would *execute* it. `sanitiseCustomTool` already refused
+  // anything shell-shaped on the way in; this is the same rule enforced at the
+  // point of use, so a settings.json edited by hand cannot smuggle a pipeline
+  // past a validator it never went through.
+  if (!isPlainCommand(spec.command)) {
+    return { id, found: false, error: 'not a plain command — name the program, nothing more' }
+  }
 
   const resolved = whichCommand(spec.command)
   if (!resolved) return { id, found: false, error: 'not found on PATH' }
@@ -99,15 +148,29 @@ async function probeOne(id: ToolId): Promise<ToolProbe> {
  * six-second ceiling, so run in series the worst case is half a minute of a
  * settings page saying "…" because one shim on the machine is wedged. In
  * parallel the worst case is six seconds.
+ *
+ * `only` narrows it to the ids the caller actually reads, and it is not a
+ * micro-optimisation. A tool that is *absent* costs a full PATH × PATHEXT walk
+ * — on Steve's machine 39 directories × 15 extensions = 585 synchronous
+ * `statSync`/`accessSync` calls each, and ten of the eighteen specs are absent.
+ * `whichCommand` runs before the first await inside `probeOne`, so the whole
+ * sweep is one uninterrupted block on the main process's event loop: 322ms
+ * measured, during which no `pty:create` and no keystroke is serviced.
+ *
+ * The settings page genuinely wants all of them. The commands flyout wants
+ * exactly one, and asking it for eighteen is what made the first terminal of
+ * every session slow to appear.
  */
-export async function probeTools(refresh = false): Promise<ToolProbe[]> {
+export async function probeTools(refresh = false, only?: readonly string[]): Promise<ToolProbe[]> {
   if (refresh) probeCache.clear()
+  const wanted = only && only.length ? specs().filter((s) => only.includes(s.id)) : specs()
   return Promise.all(
-    TOOL_SPECS.map(async (spec) => {
-      const cached = probeCache.get(spec.id)
+    wanted.map(async (spec) => {
+      const key = probeFingerprint(spec)
+      const cached = probeCache.get(key)
       if (cached) return cached
-      const probe = await probeOne(spec.id)
-      probeCache.set(spec.id, probe)
+      const probe = await probeOne(spec)
+      probeCache.set(key, probe)
       return probe
     })
   )
@@ -204,9 +267,8 @@ async function npmLatest(id: ToolId, pkg: string): Promise<ToolLatest> {
   }
 }
 
-async function latestOne(id: ToolId): Promise<ToolLatest> {
-  const spec = TOOL_SPECS.find((t) => t.id === id)
-  if (!spec) return { id, source: 'none', error: 'unknown tool', checkedAt: Date.now() }
+async function latestOne(spec: ToolSpec): Promise<ToolLatest> {
+  const id = spec.id
   switch (spec.latest.source) {
     case 'npm':
       return npmLatest(id, spec.latest.npmPackage ?? '')
@@ -228,14 +290,16 @@ async function latestOne(id: ToolId): Promise<ToolLatest> {
  * and taking most of a minute.
  */
 export async function latestFor(ids?: ToolId[] | null, refresh = false): Promise<ToolLatest[]> {
-  const wanted = ids?.length ? TOOL_SPECS.filter((t) => ids.includes(t.id)) : TOOL_SPECS
+  const all = specs()
+  const wanted = ids?.length ? all.filter((t) => ids.includes(t.id)) : all
   const now = Date.now()
   return Promise.all(
     wanted.map(async (spec) => {
-      const cached = latestCache.get(spec.id)
+      const key = fingerprint(spec)
+      const cached = latestCache.get(key)
       if (!refresh && cached && now - cached.checkedAt < LATEST_TTL_MS) return cached
-      const fresh = await latestOne(spec.id)
-      latestCache.set(spec.id, fresh)
+      const fresh = await latestOne(spec)
+      latestCache.set(key, fresh)
       return fresh
     })
   )

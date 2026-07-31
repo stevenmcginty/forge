@@ -6,9 +6,10 @@ import {
   TTS_SAMPLE_LINE,
   TTS_VOICES
 } from '@shared/tts'
-import type { VoiceEngine, VoiceReplyMode } from '@shared/types'
+import type { Settings, VoiceEngine, VoiceReplyMode } from '@shared/types'
 import { chooseVoice, speaker } from '@/lib/speech'
 import { earconListening } from '@/lib/earcon'
+import { DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENROUTER_MODEL } from '@/lib/voicebrain'
 import { voiceSpeaker, type VoiceConfig } from '@/lib/tts'
 import { useApp } from '@/state/AppState'
 import { DictationSetup } from '../DictationSetup'
@@ -20,6 +21,15 @@ import { SpeechEngineCard } from './SpeechEngineCard'
  *
  * The engine card comes first because it is the thing that is either working or
  * not; the paths below it are the fix when it is not.
+ *
+ * One thing this page has to keep saying out loud: a spoken turn is three
+ * different providers, not one. Hearing you is Parakeet, on this machine.
+ * Thinking is whichever brain is set in Models & APIs. Talking back is Gemini
+ * or Windows. They are chosen independently, and the only reason to know that
+ * is that picking Groq as your brain does not — cannot — change the voice, and
+ * a page that lists a Gemini model under a card called "Voice agent" reads like
+ * it just ignored you. Hence the brain row below and the "voice, not the brain"
+ * hints further down: nothing here changes what thinks.
  */
 export function VoiceSection(): ReactNode {
   const { state, actions } = useApp()
@@ -28,7 +38,7 @@ export function VoiceSection(): ReactNode {
   return (
     <Section
       title="Voice"
-      blurb="Dictation runs on this machine — the model, the microphone and the transcription never leave it."
+      blurb="Hearing you happens on this machine — the model, the microphone and the transcription never leave it. Thinking and talking back are set separately."
     >
       <SpeechEngineCard />
 
@@ -40,6 +50,47 @@ export function VoiceSection(): ReactNode {
         title="Voice agent"
         hint="The hub itself is Ctrl+Shift+G. Relay hands a finished agent turn back to the voice agent without you having to ask."
       >
+        <Row
+          label="Thinking model"
+          hint="What actually answers you. Set in Models & APIs, because the same brains serve the rest of Forge — nothing on this page changes it."
+        >
+          <div className="seg" role="group" aria-label="Thinking model">
+            <span className="field__input" style={{ pointerEvents: 'none' }}>
+              {describeBrain(s)}
+            </span>
+            <button
+              type="button"
+              className="ghost-btn"
+              title="Open Models & APIs"
+              onClick={() => actions.setSettingsSection('models')}
+            >
+              Change
+            </button>
+          </div>
+        </Row>
+
+        <Row
+          label="Float over other apps when undocked"
+          hint="Undocking opens a real always-on-top window, so the hub stays visible over Chrome and while Forge is minimised. Off keeps it inside Forge."
+        >
+          <Toggle
+            checked={s.voiceOverlayWindow}
+            onChange={(on) => actions.patchSettings({ voiceOverlayWindow: on })}
+            label="Float over other apps when undocked"
+          />
+        </Row>
+
+        <Row
+          label="Let me talk over it"
+          hint="Keeps an echo-cancelled mic open while the agent speaks, so interrupting it out loud works. Turn off if your speakers bleed into your mic."
+        >
+          <Toggle
+            checked={s.voiceBargeIn}
+            onChange={(on) => actions.patchSettings({ voiceBargeIn: on })}
+            label="Let me talk over it"
+          />
+        </Row>
+
         <Row label="Auto-relay finished turns" hint="Off means you decide what gets sent back">
           <Toggle
             checked={s.voiceAutoRelay}
@@ -87,6 +138,35 @@ export function VoiceSection(): ReactNode {
       <SpokenRepliesCard />
     </Section>
   )
+}
+
+/**
+ * The brain, in one line, the way the hub's own badge says it.
+ *
+ * It names the model and not just the provider because "Groq" alone is exactly
+ * the ambiguity this row exists to kill — and it says when a key is missing,
+ * since an unkeyed brain answers with a stub and looks broken rather than
+ * unconfigured.
+ */
+function describeBrain(s: Settings): string {
+  switch (s.voiceBrain) {
+    case 'groq':
+      return (s.groqKey ?? '').trim()
+        ? `Groq · ${s.groqModel?.trim() || DEFAULT_GROQ_MODEL}`
+        : 'Groq · no key yet'
+    case 'openrouter':
+      return (s.openrouterKey ?? '').trim()
+        ? `OpenRouter · ${s.openrouterModel?.trim() || DEFAULT_OPENROUTER_MODEL}`
+        : 'OpenRouter · no key yet'
+    case 'gemini':
+      return (s.geminiKey ?? '').trim()
+        ? `Gemini · ${s.geminiModel?.trim() || DEFAULT_GEMINI_MODEL}`
+        : 'Gemini · no key yet'
+    case 'stub':
+      return 'Stub · offline, echoes you'
+    default:
+      return String(s.voiceBrain)
+  }
 }
 
 const MODES: Array<{ id: VoiceReplyMode; label: string; hint: string }> = [
@@ -158,7 +238,7 @@ function SpokenRepliesCard(): ReactNode {
       title="Spoken replies"
       hint={
         neural
-          ? 'The agent speaks with a Gemini voice. Only the words it is about to say leave this machine — never the transcript, never a drafted prompt.'
+          ? 'The agent speaks with a Gemini voice — it reads out whatever your chosen brain wrote, and does not think for itself. Only the words it is about to say leave this machine — never the transcript, never a drafted prompt.'
           : 'Speech comes from the voices installed on this PC — nothing is sent anywhere to say it. Drafted prompts are never read aloud.'
       }
     >
@@ -260,7 +340,10 @@ function SpokenRepliesCard(): ReactNode {
             </div>
           </Row>
 
-          <Row label="Speech model" hint="Newest is quickest. Forge falls to the next one when a model is out of quota.">
+          <Row
+            label="Voice model"
+            hint="The model that does the talking, not the thinking — these are Google's only, whatever brain you picked. Newest is quickest, and Forge falls to the next one when a model is out of quota."
+          >
             <select
               className="field__input"
               value={s.voiceTtsModel}

@@ -43,6 +43,35 @@ export function AdvancedSection(): ReactNode {
         </Row>
       </Card>
 
+      <Card
+        title="Closing Forge"
+        hint={
+          <>
+            A pane&rsquo;s shell dies when Forge closes — that part is not negotiable. What is negotiable is whether the
+            conversation dies with it. Claude Code writes every session to disk, so Forge gives each pane a session id
+            of its own and hands it back on the way in: the tabs come back, and so does what was said in them.
+          </>
+        }
+      >
+        <Row
+          label="Resume Claude sessions"
+          hint="Reopening a project picks each Claude pane up where it left off, instead of starting a new one"
+        >
+          <Toggle
+            checked={state.settings.resumeSessions}
+            onChange={(next) => actions.patchSettings({ resumeSessions: next })}
+            label="Resume Claude sessions on restart"
+          />
+        </Row>
+        <Row label="Ask before closing" hint="Only when panes are actually running, and it says which ones survive">
+          <Toggle
+            checked={state.settings.confirmOnQuit}
+            onChange={(next) => actions.patchSettings({ confirmOnQuit: next })}
+            label="Ask before closing Forge"
+          />
+        </Row>
+      </Card>
+
       <Card title="Right now">
         <Row label="Terminal sessions" hint="A hard ceiling — panes past it are refused, not queued">
           <span className="mono srow__readout">

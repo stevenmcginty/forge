@@ -1,4 +1,4 @@
-import type { ToolId, ToolLatestSource, ToolSpec } from './types'
+import type { ToolId, ToolLatest, ToolLatestSource, ToolSpec } from './types'
 
 /**
  * The tools Forge knows how to *report on*, and the pure logic for reading
@@ -23,6 +23,14 @@ import type { ToolId, ToolLatestSource, ToolSpec } from './types'
  * would write them yourself, not the way a script would: no `--silent`, no
  * `--accept-package-agreements`, nothing that suppresses a prompt you should
  * be reading.
+ *
+ * Most rows below no longer spell their update command out at all: `npm i -g
+ * <the package we already ask the registry about>` and `winget upgrade <the id
+ * that just answered>` are derivable from the `latest` block, so
+ * `updateCommandFor()` derives them. A literal `updateCommand` here means the
+ * derived one would be *wrong*, and the comment says why. That is what lets a
+ * tool added in Settings get a working Update button without anyone writing
+ * code for it.
  */
 export const TOOL_SPECS: ToolSpec[] = [
   {
@@ -32,7 +40,8 @@ export const TOOL_SPECS: ToolSpec[] = [
     command: 'pwsh',
     versionArgs: ['--version'],
     latest: { source: 'winget', wingetIds: ['Microsoft.PowerShell'] },
-    updateCommand: 'winget upgrade Microsoft.PowerShell'
+    // Derived: one winget id, so there is nothing to disambiguate.
+    updateCommand: null
   },
   {
     id: 'claude',
@@ -46,6 +55,17 @@ export const TOOL_SPECS: ToolSpec[] = [
     // from npm or from the native build, which `npm i -g` does not, so it is
     // the better command even though the npm one would usually work.
     updateCommand: 'claude update'
+  },
+  {
+    id: 'codex',
+    name: 'Codex CLI',
+    blurb: 'OpenAI’s `codex` CLI',
+    command: 'codex',
+    versionArgs: ['--version'],
+    latest: { source: 'npm', npmPackage: '@openai/codex' },
+    // Derived both ways: `npm i -g @openai/codex` updates it and installs it,
+    // which is why this row works at all on a machine that has never had it.
+    updateCommand: null
   },
   {
     id: 'kimi',
@@ -66,7 +86,7 @@ export const TOOL_SPECS: ToolSpec[] = [
     command: 'gemini',
     versionArgs: ['--version'],
     latest: { source: 'npm', npmPackage: '@google/gemini-cli' },
-    updateCommand: 'npm i -g @google/gemini-cli'
+    updateCommand: null
   },
   {
     id: 'node',
@@ -79,12 +99,379 @@ export const TOOL_SPECS: ToolSpec[] = [
     // answers; if neither is, Node came from the .msi or from nvm and winget
     // has nothing to say about it — which the UI reports rather than guessing.
     latest: { source: 'winget', wingetIds: ['OpenJS.NodeJS.LTS', 'OpenJS.NodeJS'] },
+    // Still null, and still for the original reason: nvm's Node is not winget's
+    // Node, and `winget upgrade` aimed at the wrong one either does nothing or
+    // installs a second copy. What has changed is that the button is no longer
+    // permanently absent — `updateCommandFor` derives one *once a check has come
+    // back naming the id winget actually has*. No answer, no button.
+    updateCommand: null
+  }
+]
+
+/**
+ * Tools Forge does not run itself, offered as one-click additions in Settings.
+ *
+ * The catalogue above is "what Forge needs to work". This is "what Steve is
+ * likely to want a row for anyway" — and the only thing separating the two is
+ * that adding one of these writes a custom tool into settings.json rather than
+ * shipping in the binary. Each is exactly the same shape, so an entry here is a
+ * suggestion, never a special case: pick it and it becomes an ordinary custom
+ * row that can then be edited or deleted like any other.
+ *
+ * Version arguments and package ids are the ones these tools actually use —
+ * `git version 2.43.0` and `ffmpeg version 7.1` both parse, which is the only
+ * thing that has to be right for a row to work.
+ */
+export const KNOWN_TOOLS: ToolSpec[] = [
+  {
+    id: 'git',
+    name: 'Git',
+    blurb: 'version control — every agent in every pane uses it',
+    command: 'git',
+    versionArgs: ['--version'],
+    latest: { source: 'winget', wingetIds: ['Git.Git'] },
+    updateCommand: null
+  },
+  {
+    id: 'gh',
+    name: 'GitHub CLI',
+    blurb: 'the `gh` CLI — PRs, issues, releases',
+    command: 'gh',
+    versionArgs: ['--version'],
+    latest: { source: 'winget', wingetIds: ['GitHub.cli'] },
+    updateCommand: null
+  },
+  {
+    id: 'firebase',
+    name: 'Firebase CLI',
+    blurb: 'deploys the phone companion’s database rules',
+    command: 'firebase',
+    versionArgs: ['--version'],
+    latest: { source: 'npm', npmPackage: 'firebase-tools' },
+    updateCommand: null
+  },
+  {
+    id: 'opencode',
+    name: 'opencode',
+    blurb: 'another terminal agent — a candidate for an agent profile',
+    command: 'opencode',
+    versionArgs: ['--version'],
+    latest: { source: 'npm', npmPackage: 'opencode-ai' },
+    updateCommand: null
+  },
+  {
+    id: 'qwen',
+    name: 'Qwen Code',
+    blurb: 'Qwen’s terminal agent',
+    command: 'qwen',
+    versionArgs: ['--version'],
+    latest: { source: 'npm', npmPackage: '@qwen-code/qwen-code' },
+    updateCommand: null
+  },
+  {
+    id: 'uv',
+    name: 'uv',
+    blurb: 'the Python installer the dictation sidecar is built with',
+    command: 'uv',
+    versionArgs: ['--version'],
+    latest: { source: 'winget', wingetIds: ['astral-sh.uv'] },
+    updateCommand: null
+  },
+  {
+    id: 'rg',
+    name: 'ripgrep',
+    blurb: 'the search every coding agent reaches for first',
+    command: 'rg',
+    versionArgs: ['--version'],
+    latest: { source: 'winget', wingetIds: ['BurntSushi.ripgrep.MSVC'] },
+    updateCommand: null
+  },
+  {
+    id: 'ffmpeg',
+    name: 'FFmpeg',
+    blurb: 'video and audio, behind the media tools',
+    command: 'ffmpeg',
+    versionArgs: ['-version'],
+    latest: { source: 'winget', wingetIds: ['Gyan.FFmpeg'] },
+    updateCommand: null
+  },
+  {
+    id: 'ollama',
+    name: 'Ollama',
+    blurb: 'local models',
+    command: 'ollama',
+    versionArgs: ['--version'],
+    latest: { source: 'winget', wingetIds: ['Ollama.Ollama'] },
+    updateCommand: null
+  },
+  {
+    id: 'bun',
+    name: 'Bun',
+    blurb: 'a faster npm, when a project wants one',
+    command: 'bun',
+    versionArgs: ['--version'],
+    latest: { source: 'winget', wingetIds: ['Oven-sh.Bun'] },
+    updateCommand: null
+  },
+  {
+    id: 'deno',
+    name: 'Deno',
+    blurb: 'the other JavaScript runtime',
+    command: 'deno',
+    versionArgs: ['--version'],
+    latest: { source: 'winget', wingetIds: ['DenoLand.Deno'] },
+    updateCommand: null
+  },
+  {
+    id: 'code',
+    name: 'VS Code',
+    blurb: 'the editor, for when a pane is not the right shape',
+    command: 'code',
+    versionArgs: ['--version'],
+    latest: { source: 'winget', wingetIds: ['Microsoft.VisualStudioCode'] },
     updateCommand: null
   }
 ]
 
 export function toolSpec(id: ToolId): ToolSpec | undefined {
   return TOOL_SPECS.find((t) => t.id === id)
+}
+
+/**
+ * The whole catalogue: what Forge ships with, then whatever was added by hand.
+ *
+ * One function so main and renderer can never disagree about what the rows are.
+ * A custom tool whose id collides with a built-in is dropped rather than
+ * shadowing it — `sanitiseCustomTool` prefixes every custom id with `x:` so this
+ * can only happen to a settings.json edited by hand, and quietly replacing
+ * PowerShell's update command from a config file is not a thing this should
+ * allow.
+ */
+export function allToolSpecs(custom?: readonly ToolSpec[] | null): ToolSpec[] {
+  const seen = new Set(TOOL_SPECS.map((t) => t.id))
+  const extra: ToolSpec[] = []
+  for (const tool of custom ?? []) {
+    if (!tool || seen.has(tool.id)) continue
+    seen.add(tool.id)
+    extra.push({ ...tool, custom: true })
+  }
+  return [...TOOL_SPECS, ...extra]
+}
+
+/* ------------------------------------------------------- what to type */
+
+/**
+ * The command the Update button puts in a pane, or null when there honestly
+ * isn't one.
+ *
+ * Derived from the same `latest` block that the check uses, so the two can
+ * never drift: if Forge knows enough to tell you a newer version exists, it
+ * knows enough to tell you how to get it. A spec's own `updateCommand` wins,
+ * for the cases where the obvious command is the wrong one — `claude update`
+ * knows whether that install came from npm or the native build, and `npm i -g`
+ * does not.
+ *
+ * `latest` is passed in for the winget case with more than one candidate id
+ * (Node: current or LTS). The id that *answered* a check is the installed one;
+ * with no check yet and no way to choose, this returns null and the row shows a
+ * Check button instead of guessing which Node to upgrade.
+ */
+export function updateCommandFor(spec: ToolSpec, latest?: ToolLatest | null): string | null {
+  const explicit = (spec.updateCommand ?? '').trim()
+  if (explicit) return explicit
+  switch (spec.latest.source) {
+    case 'npm': {
+      const pkg = (spec.latest.npmPackage ?? '').trim()
+      return pkg ? `npm i -g ${pkg}` : null
+    }
+    case 'winget': {
+      const id = wingetIdFor(spec, latest)
+      return id ? `winget upgrade --id ${id} --exact` : null
+    }
+    default:
+      return null
+  }
+}
+
+/**
+ * What to type when the tool is not on the machine at all.
+ *
+ * Rows for things you have not installed are the point rather than an oversight:
+ * "Codex CLI — not installed — [Install]" is how a tool Forge has never seen
+ * becomes a tool Forge keeps up to date, without a trip to a browser to find out
+ * what the incantation is this month.
+ *
+ * Unlike the update case, an ambiguous winget id resolves to the first one —
+ * there is nothing installed to be wrong about, and for Node the first id is the
+ * LTS, which is the right default for somebody who has not chosen.
+ */
+export function installCommandFor(spec: ToolSpec): string | null {
+  const explicit = (spec.installCommand ?? '').trim()
+  if (explicit) return explicit
+  switch (spec.latest.source) {
+    case 'npm': {
+      const pkg = (spec.latest.npmPackage ?? '').trim()
+      return pkg ? `npm i -g ${pkg}` : null
+    }
+    case 'winget': {
+      const id = (spec.latest.wingetIds ?? []).find((w) => w.trim())
+      return id ? `winget install --id ${id.trim()} --exact` : null
+    }
+    default:
+      return null
+  }
+}
+
+/** The winget id to act on: the one that answered, or the only candidate. */
+function wingetIdFor(spec: ToolSpec, latest?: ToolLatest | null): string | null {
+  const ids = (spec.latest.wingetIds ?? []).map((w) => w.trim()).filter(Boolean)
+  const via = (latest?.via ?? '').trim()
+  if (via && ids.includes(via)) return via
+  return ids.length === 1 ? ids[0]! : null
+}
+
+/* ------------------------------------------------------------ custom tools */
+
+/** Every id written from Settings carries this, so it cannot shadow a built-in. */
+export const CUSTOM_TOOL_PREFIX = 'x:'
+
+/** Nothing bigger than this is a tools list; it is a corrupted file. */
+export const MAX_CUSTOM_TOOLS = 40
+
+/**
+ * Is this a command Forge is willing to *spawn* to read a version?
+ *
+ * Probing runs `execFile(command, versionArgs, { shell: true })` — shell:true
+ * because npm's shims are .cmd files that CreateProcess refuses to run directly.
+ * That makes the command string shell syntax, so anything that could end one
+ * statement and begin another is refused here: a tools list is a place to name a
+ * program, not a place to write a pipeline.
+ *
+ * Update commands are deliberately *not* held to this. They are typed into a
+ * terminal for a person to read and press Enter on, which is the correct place
+ * for `winget upgrade X; npm i -g Y` — and no more privileged than the same
+ * person typing it themselves.
+ */
+export function isPlainCommand(command: string): boolean {
+  const c = String(command ?? '').trim()
+  if (!c || c.length > 200) return false
+  return !/[|&;<>^"'`$(){}\[\]*?!\n\r\t%]/.test(c)
+}
+
+/** A version argument: a flag or a word, never a fragment of shell. */
+function isPlainArg(arg: string): boolean {
+  const a = String(arg ?? '').trim()
+  return a.length > 0 && a.length <= 40 && /^[A-Za-z0-9._=\-\/]+$/.test(a)
+}
+
+/**
+ * One line, no control characters — it is going into a terminal verbatim.
+ *
+ * The newline strip is the load-bearing part of this. With "press Enter for
+ * me" turned on, a stored command containing a line break would submit its
+ * first line and then run whatever followed — a two-line command wearing the
+ * costume of one. Every string that can reach a pane goes through here.
+ */
+function oneLine(value: unknown, max: number): string {
+  // Written as a loop rather than a regex because the character class it would
+  // need is the one thing a source file cannot hold literally.
+  let out = ''
+  for (const ch of String(value ?? '')) {
+    const code = ch.codePointAt(0) ?? 0
+    out += code < 0x20 || code === 0x7f ? ' ' : ch
+  }
+  return out.trim().slice(0, max)
+}
+
+/** `Windows Terminal` → `x:windows-terminal`. Stable, so editing keeps the row. */
+export function customToolId(seed: string): string {
+  const slug = String(seed ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+  return `${CUSTOM_TOOL_PREFIX}${slug || 'tool'}`
+}
+
+/**
+ * A tool row out of whatever a form or a hand-edited settings.json offered.
+ *
+ * Returns null rather than a half-built row: a tool with no name or no command
+ * is not a tool, and a settings file that has one should lose that entry, not
+ * put a blank line in the settings page. Everything else is clamped rather than
+ * rejected, because a 300-character blurb is a mistake worth surviving.
+ */
+export function sanitiseCustomTool(raw: unknown): ToolSpec | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+
+  const name = oneLine(r['name'], 40)
+  const command = oneLine(r['command'], 200)
+  if (!name || !isPlainCommand(command)) return null
+
+  const rawId = oneLine(r['id'], 60)
+  const id = rawId.startsWith(CUSTOM_TOOL_PREFIX) ? rawId : customToolId(rawId || name || command)
+
+  const source = r['latest'] as Record<string, unknown> | undefined
+  const declared = oneLine(source?.['source'], 12)
+  const kind: ToolLatestSource =
+    declared === 'npm' || declared === 'winget' || declared === 'local' ? (declared as ToolLatestSource) : 'none'
+
+  const latest: ToolSpec['latest'] = { source: kind }
+  if (kind === 'npm') {
+    const pkg = oneLine(source?.['npmPackage'], 120)
+    // The registry's own rules, near enough: a name that cannot be a package is
+    // a check that will 404 forever, so it becomes "not checked" instead.
+    if (/^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i.test(pkg)) latest.npmPackage = pkg
+    else latest.source = 'none'
+  }
+  if (kind === 'winget') {
+    const ids = (Array.isArray(source?.['wingetIds']) ? (source!['wingetIds'] as unknown[]) : [])
+      .map((w) => oneLine(w, 120))
+      .filter((w) => /^[A-Za-z0-9._+-]+$/.test(w))
+      .slice(0, 3)
+    if (ids.length) latest.wingetIds = ids
+    else latest.source = 'none'
+  }
+
+  // `null` is meaningful — "never spawn this one" — and is not the same as the
+  // key being absent, which means "the usual --version".
+  const rawArgs = r['versionArgs']
+  const versionArgs: string[] | null =
+    rawArgs === null
+      ? null
+      : Array.isArray(rawArgs)
+        ? (rawArgs.map((a) => oneLine(a, 40)).filter(isPlainArg).slice(0, 4) as string[])
+        : ['--version']
+
+  const tool: ToolSpec = {
+    id,
+    name,
+    blurb: oneLine(r['blurb'], 120),
+    command,
+    versionArgs: versionArgs === null ? null : versionArgs.length ? versionArgs : ['--version'],
+    latest,
+    updateCommand: oneLine(r['updateCommand'], 300) || null,
+    custom: true
+  }
+  const install = oneLine(r['installCommand'], 300)
+  if (install) tool.installCommand = install
+  return tool
+}
+
+/** A settings.json's worth of them: valid, unique, and not a thousand of them. */
+export function sanitiseCustomTools(raw: unknown): ToolSpec[] {
+  const list = Array.isArray(raw) ? raw : []
+  const out: ToolSpec[] = []
+  const seen = new Set<string>(TOOL_SPECS.map((t) => t.id))
+  for (const entry of list) {
+    const tool = sanitiseCustomTool(entry)
+    if (!tool || seen.has(tool.id)) continue
+    seen.add(tool.id)
+    out.push(tool)
+    if (out.length >= MAX_CUSTOM_TOOLS) break
+  }
+  return out
 }
 
 /** What `latest` means for this tool, in one word, for the UI to caption with. */

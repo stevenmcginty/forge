@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
 import { isNoFeedError, updaterMode } from '@shared/tools'
 import type { UpdateStatus } from '@shared/types'
+import { allowClose } from './quit-guard'
 
 /**
  * Forge updating itself.
@@ -214,6 +215,9 @@ export async function downloadUpdate(): Promise<UpdateStatus> {
  */
 export function installUpdate(): boolean {
   if (mode !== 'real' || status.phase !== 'ready' || !autoUpdater) return false
+  // "Restart to finish" is the confirmation; being asked a second time whether
+  // to close Forge would be the update dialog arguing with itself.
+  allowClose()
   // isSilent: false so the NSIS installer's window is visible — an unsigned
   // installer running invisibly is exactly the shape SmartScreen dislikes, and
   // exactly the shape a person should be able to see happening.

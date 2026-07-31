@@ -1,67 +1,52 @@
-/* ------------------------------------------------------------- section
+/* ------------------------------------------------------- the strip button
  *
- * One row. That is the whole brief: the rail is for projects, and skills used
- * to eat a third of it. Everything the section used to show now lives in the
- * flyout below, which floats and so costs the rail nothing at all.
+ * Word-shaped, and dimensioned to match `.tabstrip__cmds` exactly — same
+ * height, same gaps, same margins, same muted-to-secondary hover. The two sit
+ * side by side in the strip and are the same *kind* of control (a reference you
+ * open, read and dismiss), so anything that made one a pixel taller than the
+ * other would read as a mistake rather than a distinction.
  */
 
-.skills {
+.tabstrip__skills {
+  gap: var(--s-2);
   flex: none;
-  padding: var(--s-2) var(--s-3);
-  border-top: 1px solid var(--line-soft);
+  height: 20px;
+  margin-bottom: var(--s-2);
+  margin-right: var(--s-2);
+  padding: 0 var(--s-3) 0 var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--text-dim);
 }
 
-.skills__btn {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  width: 100%;
-  height: 28px;
-  padding: 0 var(--s-2) 0 var(--s-3);
-  border-radius: var(--r-md);
-  color: var(--text-muted);
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
-}
-
-.skills__btn:hover,
-.skills__btn[aria-expanded='true'] {
-  background: var(--bg-hover);
+.tabstrip__skills:hover,
+.tabstrip__skills[data-on='true'] {
   color: var(--text-secondary);
 }
 
-.skills__label {
-  font-size: var(--t-md);
+/* The icon takes the accent on hover, where Commands gives it to its slash —
+   each control lighting the one glyph it is named by. */
+.tabstrip__skills svg {
+  color: var(--text-muted);
 }
 
-.skills__count {
-  min-width: 17px;
-  height: 16px;
-  padding: 0 var(--s-2);
+.tabstrip__skills:hover svg,
+.tabstrip__skills[data-on='true'] svg {
+  color: var(--accent);
+}
+
+/* How many skills there are. Muted, not accent: this is a standing count of
+   something you own, not news — the accent pill next door means "releases you
+   have not seen", and two identical-looking badges would flatten that. */
+.tabstrip__tally {
+  min-width: 14px;
+  height: 13px;
+  padding: 0 3px;
   display: grid;
   place-items: center;
   font-size: var(--t-eyebrow);
   color: var(--text-muted);
   background: var(--bg-sunken);
   border-radius: var(--r-full);
-}
-
-.skills__chev {
-  display: grid;
-  place-items: center;
-  margin-left: auto;
-  color: var(--text-dim);
-}
-
-/* Points at the flyout: closed it sits to the side, open it lies flat. */
-.skills__chev svg {
-  transform: rotate(-90deg);
-  transition: transform var(--dur-med) var(--ease-out);
-}
-
-.skills__btn[aria-expanded='true'] .skills__chev svg {
-  transform: none;
 }
 
 /* -------------------------------------------------------------- flyout */
@@ -175,11 +160,15 @@
   color: var(--text-dim);
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
+  /* Out of the hit test, so a press on the grip is a press on the row — the
+     drag reads `event.currentTarget`, and the grip is decoration. */
+  pointer-events: none;
 }
 
 .srow:hover .srow__grip {
   opacity: 1;
 }
+
 
 .srow__text {
   display: flex;
@@ -348,9 +337,34 @@
 
 /* A skill dragged out of the flyout must not be dropped back onto it. For the
    length of the drag every popover is transparent to the pointer, so the
-   document-level target underneath sees the pane it was aimed at. */
+   hit test under the cursor finds the pane it was aimed at. */
 body[data-skill-dragging='true'] .popover {
   pointer-events: none;
+}
+
+/* The chip that follows the cursor. Positioned by transform from the top-left
+   of the viewport, so a move is one composited property and nothing lays out. */
+.skilldrag {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: calc(var(--z-toast) + 1);
+  pointer-events: none;
+  padding: 3px var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-card);
+}
+
+/* Over a pane: this is what a release would do. The chip says so as loudly as
+   the ring around the pane does. */
+.skilldrag[data-over='true'] {
+  color: var(--bg-base);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 /* ----------------------------------------------------------- menu bits */

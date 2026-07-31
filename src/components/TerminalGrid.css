@@ -78,6 +78,61 @@
   color: var(--text-secondary);
 }
 
+/* The mosaic's text-size switch — same weight as the reset beside it. */
+.tabstrip__text {
+  gap: var(--s-2);
+  flex: none;
+  height: 20px;
+  margin-bottom: var(--s-2);
+  padding: 0 var(--s-3) 0 var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.tabstrip__text:hover {
+  color: var(--text-secondary);
+}
+
+/* On is the readable state, so it is the one that gets the accent. */
+.tabstrip__text[data-on='true'] {
+  color: var(--accent);
+}
+
+.tabstrip__aa {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/*
+ * Tab text colours, on or off. Icon-only and square: it sits against the view
+ * toggle, and two word-shaped controls in a row would read as one menu. Aligned
+ * to the toggle's baseline via the same margin, so the pair looks machined
+ * rather than merely adjacent.
+ */
+.tabstrip__tint {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-bottom: var(--s-2);
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+}
+
+.tabstrip__tint:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+/* On is the colourful state, so it is the one that carries colour. */
+.tabstrip__tint[data-on='true'] {
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
 /* ------------------------------------------------------------ view toggle */
 
 .viewtoggle {
@@ -168,6 +223,59 @@
 
 .tab[data-dragover='true'] {
   box-shadow: inset 2px 0 0 var(--accent-line);
+}
+
+/* ------------------------------------------------------------- tab colour
+ *
+ * A tinted tab replaces the volt seam with its own, because two accents on one
+ * tab is one too many — the seam already means "this is the live tab", and the
+ * tint should not fight it for the same pixel. Everything is mixed against the
+ * surface underneath rather than laid on flat: at full strength a tab colour
+ * out-shouts the terminal it belongs to.
+ */
+
+.tab[data-tint='true'] {
+  color: color-mix(in srgb, var(--tab-tint) 72%, var(--text-secondary));
+}
+
+.tab[data-tint='true']:hover {
+  background: color-mix(in srgb, var(--tab-tint) 10%, var(--bg-panel));
+  color: var(--tab-tint);
+}
+
+.tab[data-tint='true'][data-active='true'] {
+  background: color-mix(in srgb, var(--tab-tint) 13%, var(--bg-sunken));
+  border-color: color-mix(in srgb, var(--tab-tint) 38%, transparent);
+  color: var(--tab-tint);
+}
+
+.tab[data-tint='true'][data-active='true']::before {
+  background: var(--tab-tint);
+  opacity: 1;
+}
+
+/* The terminal-text colour, said in the strip. Its own element rather than a
+   pseudo on the title, which truncates — a dot that disappears on a long tab
+   name is worse than no dot. */
+.tab__textdot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: var(--tab-text-tint);
+}
+
+/* Colours off: the dot goes hollow. Still there — the colour is still assigned,
+   and you can still repaint it — but no longer claiming to describe the type. */
+.tab__textdot[data-off='true'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-dim);
+}
+
+.tab__menu-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-md);
 }
 
 .tab__badges {

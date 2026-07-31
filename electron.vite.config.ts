@@ -30,6 +30,16 @@ export default defineConfig({
   renderer: {
     root: '.',
     plugins: [react()],
+    server: {
+      watch: {
+        // The renderer's root is the repo root, so vite's watcher sees every
+        // file in the tree — and a *.html landing anywhere triggers a full
+        // page reload of the desktop window. mobile/APK builds write html
+        // into these folders, and a reload mid-op is a phone told "the
+        // desktop did not answer in time". Build outputs are not sources.
+        ignored: ['**/mobile/dist/**', '**/mobile/android/**', '**/dist-apk/**', '**/.claude/**']
+      }
+    },
     resolve: {
       alias: {
         ...sharedAlias,

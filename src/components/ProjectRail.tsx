@@ -8,13 +8,19 @@ import { AgentBadge } from './AgentBadge'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
-import { SkillsRail } from './SkillsRail'
 import './ProjectRail.css'
 
 /**
  * The left rail: every project Forge knows about. Each one owns its own
  * terminal workspace, so selecting a project swaps the whole grid while its
  * shells keep running in the background.
+ *
+ * **One way to add a project, not two.** The + in the header is it. There used
+ * to be a dashed "Add project" button pinned to the foot as well, which meant
+ * the rail carried the same action twice for anyone with projects already —
+ * clutter, and a permanent strip of chrome charged against the list. The empty
+ * state still spells it out, because that is the one moment the + needs
+ * explaining rather than just being there.
  */
 export function ProjectRail(): ReactNode {
   const { state, actions } = useApp()
@@ -69,19 +75,6 @@ export function ProjectRail(): ReactNode {
           ))
         )}
       </div>
-
-      {/* Skills sit under the projects because that is the order of the day:
-          you pick where you are working, then what the agent knows. */}
-      <SkillsRail />
-
-      {collapsed ? null : (
-        <footer className="rail__foot">
-          <button type="button" className="rail__add" onClick={() => void actions.addProject()}>
-            <Icon name="plus" size={14} />
-            Add project
-          </button>
-        </footer>
-      )}
     </div>
   )
 }
@@ -118,6 +111,14 @@ function ProjectRow({
       className="prow"
       data-active={active}
       data-dragover={dragFrom !== null && dragFrom !== index ? 'true' : undefined}
+      /*
+       * The project's colour, handed to CSS once and spent in several places:
+       * the dot, the seam, the selected row's wash, the pane-count chip. Set
+       * here rather than on each of them so the row has one colour and cannot
+       * disagree with itself, and so a colour change from the menu repaints the
+       * lot in a single style write.
+       */
+      style={{ '--prow-tint': project.color } as React.CSSProperties}
       draggable
       onDragStart={(e) => {
         setDragFrom(index)

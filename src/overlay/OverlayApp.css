@@ -1,0 +1,245 @@
+/**
+ * The overlay window's own chrome.
+ *
+ * Different constraints from VoiceHub.css, which paints a div inside Forge:
+ *
+ *   • THE PAGE IS THE WINDOW. There is no app behind this, and the window is
+ *     `transparent: true`, so `html`/`body` must have no background at all —
+ *     any colour there becomes an opaque rectangle sitting over Chrome, which
+ *     is the single most obvious way to get this wrong.
+ *
+ *   • THE SHAPE IS DRAWN, NOT POSITIONED. Where it sits is Windows' business
+ *     (electron/overlay-window.ts), so there is no transform, no z-index and no
+ *     clamping here. What is left is the paint.
+ *
+ *   • DRAGGING IS THE OS's. `-webkit-app-region: drag` on the body of the pill
+ *     and the header of the card, `no-drag` on every control inside them. Miss
+ *     one and that control cannot be clicked at all — the drag region eats the
+ *     press before it reaches the button, which reads as a dead button rather
+ *     than as a misconfigured region.
+ */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  /* Not a colour, not even the theme's. See the note above. */
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  /* The window is sized to the content by the main process; nothing inside it
+     should ever produce a scrollbar over somebody else's application. */
+  user-select: none;
+}
+
+.ovl {
+  height: 100%;
+  width: 100%;
+  display: flex;
+}
+
+/* --------------------------------------------------------------- the pill */
+
+.ovl__pill {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 10px auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 0;
+  border-radius: 28px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-strong);
+  /* Its own shadow, because `hasShadow: false` on the window — Windows' native
+     shadow is drawn around the *rectangle*, not around a 28px-radius pill, so
+     leaving it on puts a faint square halo around a round thing. */
+  box-shadow:
+    0 8px 28px rgb(0 0 0 / 45%),
+    0 2px 6px rgb(0 0 0 / 30%);
+  -webkit-app-region: drag;
+  overflow: hidden;
+}
+
+/* The ribbed handle at the left edge — the affordance that says "move me". */
+.ovl__grip {
+  height: 22px;
+  width: 3px;
+  margin-left: 7px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--line-strong) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+.ovl__dial,
+.ovl__pillbtns {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+}
+
+.ovl__pillbody {
+  min-width: 0;
+  padding-right: 2px;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--text-secondary);
+}
+
+/* The status line is two rows at most, then it is cut — the pill is 56px tall
+   and a reply that grew it would push the buttons off the end. */
+.ovl__pillbody .voice__lastline {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------------- the card */
+
+.ovl__card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line-strong);
+  box-shadow:
+    0 18px 48px rgb(0 0 0 / 52%),
+    0 4px 10px rgb(0 0 0 / 32%);
+  overflow: hidden;
+}
+
+.ovl__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--line-hairline);
+  background: var(--bg-header-live);
+  -webkit-app-region: drag;
+}
+
+.ovl__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.ovl__spacer {
+  flex: 1;
+}
+
+.ovl__headbtns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+}
+
+/* The chip in the header is a label, not a handle — but it is inside the drag
+   region, and a tooltip you cannot hover because the OS is dragging the window
+   is a tooltip that does not exist. */
+.ovl__head .voice__chip {
+  -webkit-app-region: no-drag;
+}
+
+.ovl__dialrow {
+  padding: 14px 12px 10px;
+  -webkit-app-region: no-drag;
+}
+
+/* The log and the composer are the same parts the in-window card uses, so they
+   arrive already styled by VoiceSurface.css. All they need here is to be told
+   which one takes the leftover height. */
+.ovl__card .voice__log {
+  flex: 1;
+  min-height: 0;
+  -webkit-app-region: no-drag;
+}
+
+.ovl__card .voice__composer,
+.ovl__card .voice__degraded,
+.ovl__card .voice__voiceonly {
+  -webkit-app-region: no-drag;
+}
+
+/* Text has to be selectable again inside the conversation — `user-select: none`
+   on the body is right for chrome and wrong for a drafted prompt you want to
+   copy half of. */
+.ovl__card .voice__log,
+.ovl__card .voice__composer {
+  user-select: text;
+}
+
+/* ------------------------------------------------------------- the buttons */
+
+.ovl__icon {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.ovl__icon:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.ovl__icon:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------ the listening
+ *
+ * A quiet accent ring while the agent is armed. This is the one piece of state
+ * that has to read from across the room and through another application's
+ * window, so it is on the outside edge of the whole shape rather than on the
+ * button.
+ */
+
+.ovl[data-phase='listening'] .ovl__pill,
+.ovl[data-phase='listening'] .ovl__card {
+  border-color: var(--accent-line);
+}
+
+.ovl[data-phase='speaking'] .ovl__pill,
+.ovl[data-phase='speaking'] .ovl__card {
+  border-color: var(--accent);
+}
+
+.ovl[data-phase='error'] .ovl__pill,
+.ovl[data-phase='error'] .ovl__card {
+  border-color: var(--danger, #e5484d);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ovl__icon {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .ovl__icon {
+  transition: none;
+}

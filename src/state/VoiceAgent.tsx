@@ -19,6 +19,7 @@ import {
   type VoiceReplyMode
 } from '@shared/types'
 import { agentMemory } from '@/lib/agentmemory'
+import { bargeIn } from '@/lib/bargein'
 import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
 import { earconListening } from '@/lib/earcon'
 import { speaker } from '@/lib/speech'
@@ -39,7 +40,6 @@ import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { terminalHost, type PaneStatus } from '@/lib/terminals'
 import { transcriptBus, typedTranscript } from '@/lib/transcriptSource'
 import { parseUtterance } from '@/lib/voicecommands'
-import { agentSurfaceOpen } from '@/lib/voicehub'
 import {
   getActiveBrain,
   type BrainContext,
@@ -133,6 +133,17 @@ export type Turn = CommandTurn | BrainTurnState | NoteTurn
  */
 export type AgentPhase = 'off' | 'warming' | 'listening' | 'thinking' | 'speaking' | 'replied' | 'error'
 
+/**
+ * How far the reply drops the instant somebody talks over it.
+ *
+ * Not zero. Silence would be indistinguishable from the agent having stopped,
+ * and the whole point of ducking is that it is reversible — if the noise turns
+ * out to have been a door, the sentence has to still be there to come back to.
+ * A fifth of the volume is quiet enough to talk over comfortably and loud
+ * enough to prove it did not crash. See src/lib/bargein.ts.
+ */
+const DUCK_LEVEL = 0.2
+
 /** How long the flash states hold before falling back to listening. */
 const REPLIED_MS = 900
 const ERROR_MS = 1800
@@ -158,17 +169,25 @@ const BRAIN_FAILED = [
 ]
 
 /**
- * Phases that mean the microphone has just been given back.
+ * Phases that mean the microphone has just been given back *after a turn*.
  *
  * A short blip marks the handover instead of a spoken announcement. Coming from
  * `off` is not in the list: arming is a deliberate tap and it needs no sound.
+ *
+ * `warming` is not in the list either, and that omission is load-bearing. It
+ * used to be, and it turned the blip into a metronome: Parakeet stops itself
+ * after `sttAutoStopSeconds` of silence, the re-arm loop below immediately
+ * starts it again, and every one of those cycles runs warming → listening. So
+ * an armed agent sitting in an empty room beeped every few seconds, forever,
+ * with nobody having said anything to it. A warm-up is the engine clearing its
+ * throat, not the agent handing the turn back, and only the second one is worth
+ * a sound.
  */
 const HANDS_BACK: ReadonlySet<AgentPhase> = new Set<AgentPhase>([
   'speaking',
   'replied',
   'error',
-  'thinking',
-  'warming'
+  'thinking'
 ])
 
 /**
@@ -233,7 +252,20 @@ export interface VoiceAgentCtx {
   canSpeak: boolean
 }
 
-const VoiceAgentContext = createContext<VoiceAgentCtx | null>(null)
+/**
+ * Exported for one caller only: the overlay window (src/overlay/OverlayApp.tsx).
+ *
+ * The overlay is a second *renderer* showing this same conversation, and it
+ * must never run a second engine — so instead of a provider it builds a
+ * `VoiceAgentCtx` out of the snapshot relayed from this window and provides
+ * *that*. Every part in VoiceSurface.tsx then works there unchanged, because
+ * all of them take their data from the context and nothing else.
+ *
+ * Exporting the context rather than the provider is the point: there is no way
+ * to get a second `VoiceAgentProvider` out of this module, so the overlay
+ * cannot accidentally become an agent.
+ */
+export const VoiceAgentContext = createContext<VoiceAgentCtx | null>(null)
 
 export function VoiceAgentProvider({ children }: { children: ReactNode }): ReactNode {
   const { state, actions } = useApp()
@@ -318,6 +350,24 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   const speakingRef = useRef(false)
   const [speaking, setSpeaking] = useState(false)
 
+  /**
+   * Whether to open the AEC'd microphone while speaking.
+   *
+   * Read through a ref so `sayAloud` is not rebuilt — and therefore the
+   * transcript subscription not torn down — every time the switch is flipped.
+   */
+  const bargeInRef = useRef(state.settings.voiceBargeIn)
+  bargeInRef.current = state.settings.voiceBargeIn
+
+  // A reply that was mid-sentence when the switch went off should not be left
+  // ducked at a fifth of its volume with nothing listening to bring it back.
+  useEffect(() => {
+    if (!state.settings.voiceBargeIn && bargeIn.running) {
+      bargeIn.disarm()
+      voiceSpeaker.duck(1)
+    }
+  }, [state.settings.voiceBargeIn])
+
   const noticeRef = useRef(actions.setNotice)
   noticeRef.current = actions.setNotice
 
@@ -344,14 +394,57 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       setSpeaking(true)
       if (armedRef.current) setPhase('speaking')
       void window.forge.stt.stop()
+
+      /*
+       * Full duplex, the GPT-Live way.
+       *
+       * The sidecar is still stopped above — it has no echo cancellation and an
+       * open one would transcribe this reply and answer it. What replaces it
+       * for the duration is a *different* microphone: Chromium's, with the
+       * WebRTC AEC on, which subtracts what the speakers are playing before we
+       * see the signal. It transcribes nothing. It answers one question ten
+       * times a second — is somebody talking? — and that is a question no
+       * amount of Forge's own voice can make it answer wrong.
+       *
+       * So `speaking` stops meaning "deaf". Talking over the agent works the
+       * way talking over a person works, which is the whole of what was asked
+       * for. See src/lib/bargein.ts for the two thresholds.
+       */
+      let interrupted = false
+      if (bargeInRef.current) {
+        void bargeIn.arm({
+          onDuck: () => voiceSpeaker.duck(DUCK_LEVEL),
+          onRelease: () => voiceSpeaker.duck(1),
+          onInterrupt: () => {
+            interrupted = true
+            voiceSpeaker.cancel()
+            // The sentence was cut off, so nothing that follows is an echo of
+            // it — the same reasoning as interrupting by typing, and without
+            // this the echo guard would eat his first words for being too
+            // similar to the reply he just talked over.
+            speaker.forgetLastSpoken()
+            // Hand the microphone straight back rather than waiting out the
+            // re-arm debounce. He is already mid-sentence; every millisecond
+            // here is a syllable of his that nothing is listening to.
+            if (armedRef.current) void window.forge.stt.start()
+          }
+        })
+      }
+
       try {
         // Keyed by turn: a re-render — or a second surface showing the same
         // conversation — cannot make it say the same thing twice.
         await voiceSpeaker.speakOnce(key, text, config, (msg) => noticeRef.current(msg))
       } finally {
+        bargeIn.disarm()
         // A short tail: the sidecar cuts a phrase on silence, so the last word
         // can land a beat after the audio stops.
-        await new Promise((r) => window.setTimeout(r, 220))
+        //
+        // Skipped when he interrupted, and that exception is the point. There
+        // is no trailing echo to wait out — the audio was cancelled — and 220ms
+        // of deafness after somebody starts talking is 220ms taken off the
+        // front of their sentence.
+        if (!interrupted) await new Promise((r) => window.setTimeout(r, 220))
         speakingRef.current = false
         setSpeaking(false)
       }
@@ -459,23 +552,38 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     }
   }, [actions])
 
-  // Losing every agent surface disarms, so nothing reopens secretly pointed at
-  // the agent. "Every" is the word that changed when the hub arrived: closing
-  // the panel while the hub floats leaves the round button on screen, and the
-  // conversation carries on. The sidecar is left alone either way — the pill
-  // may still be dictating into a pane, and that is not this engine's business
-  // to stop.
-  const surfaceOpen = agentSurfaceOpen(state.settings)
-  useEffect(() => {
-    if (!surfaceOpen && armed) actions.setAgentListening(false)
-  }, [surfaceOpen, armed, actions])
+  /*
+   * There used to be an auto-disarm here.
+   *
+   * The rule was "losing every agent surface disarms", and it made sense while
+   * the agent was a thing you opened: with nothing on screen there was nowhere
+   * for a phrase to go, so an armed agent with a docked hub would have been
+   * sending every sentence into a terminal by surprise.
+   *
+   * It is deleted, because it directly contradicts what the agent is for now.
+   * Steve: "everything that I say needs to go into forge... everything I say to
+   * forge in the forge agent is meant for forge". The switch is the switch. It
+   * is not undone by docking the hub, by closing the card, by clicking on
+   * Chrome, or by minimising the app — all four of which used to silently stop
+   * the agent listening, and three of which are things you do *because* you
+   * want to carry on talking to it while you work somewhere else.
+   *
+   * So arming is now the only thing that arms and the button is the only thing
+   * that disarms. `agentSurfaceOpen` still exists and still answers what it
+   * always answered — is any of this on screen — it just no longer decides
+   * whether the microphone is live — which is why this file no longer imports
+   * it at all.
+   */
 
   // Esc leaves the conversation — the same key that closes everything else.
   // Except while the hub card is open, where Esc means "collapse the card"
   // first; VoiceHub owns that press, and a second one lands here.
   const hubExpanded = state.settings.voiceHub.mode === 'expanded'
+  // No `surfaceOpen` in the condition any more: the agent can be armed with the
+  // hub docked now, and that is precisely the state you would most want one
+  // keypress out of.
   useEffect(() => {
-    if (!surfaceOpen || !armed || hubExpanded) return undefined
+    if (!armed || hubExpanded) return undefined
     const onKey = (e: KeyboardEvent): void => {
       if (!escapeIsOurs(e)) return
       e.preventDefault()
@@ -483,7 +591,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [surfaceOpen, armed, hubExpanded, toggleAgent])
+  }, [armed, hubExpanded, toggleAgent])
 
   // "still thinking… 12s" — Gemini can take a minute on a real draft, and a
   // circle that says nothing for a minute looks broken.
@@ -509,7 +617,9 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         geminiKey: state.settings.geminiKey,
         geminiModel: state.settings.geminiModel,
         openrouterKey: state.settings.openrouterKey,
-        openrouterModel: state.settings.openrouterModel
+        openrouterModel: state.settings.openrouterModel,
+        groqKey: state.settings.groqKey,
+        groqModel: state.settings.groqModel
       }),
     [
       state.settings.voiceBrain,
@@ -517,7 +627,9 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       state.settings.geminiKey,
       state.settings.geminiModel,
       state.settings.openrouterKey,
-      state.settings.openrouterModel
+      state.settings.openrouterModel,
+      state.settings.groqKey,
+      state.settings.groqModel
     ]
   )
   const brainStatus: BrainStatus = brain.ready()

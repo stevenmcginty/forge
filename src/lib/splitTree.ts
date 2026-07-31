@@ -1,4 +1,5 @@
 import type { ClaudePermissionMode, LayoutNode, PaneLeaf, SplitDirection } from '@shared/types'
+import { newSessionId } from '@shared/session'
 import { makeId } from './ids'
 
 /**
@@ -8,7 +9,11 @@ import { makeId } from './ids'
  */
 
 export function makeLeaf(profileId: string, title = '', permissionMode?: ClaudePermissionMode): PaneLeaf {
-  const leaf: PaneLeaf = { type: 'leaf', id: makeId('pane'), profileId, title }
+  // Every pane is born with a session id, whatever it is going to run. Minting
+  // it here rather than at launch is the point: it is saved with the layout, so
+  // the pane that comes back after a restart can ask for the same conversation.
+  // A pane running a shell simply never uses it.
+  const leaf: PaneLeaf = { type: 'leaf', id: makeId('pane'), profileId, title, sessionId: newSessionId() }
   // Only carried when the chooser actually overrode the profile's default, so a
   // saved layout does not freeze today's default into every pane forever.
   if (permissionMode) leaf.permissionMode = permissionMode

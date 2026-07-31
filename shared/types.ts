@@ -219,6 +219,15 @@ export interface Workspace {
   viewMode?: WorkspaceViewMode
   /** Optional so workspaces written before the freeform wall existed still load. */
   mosaic?: MosaicState
+  /**
+   * How far through TAB_NAME_POOL this project has got. Kept on the workspace
+   * rather than recomputed from the open tabs so that closing a tab does not
+   * hand its name straight back to the next one — the name you just killed
+   * should not reappear on something else a second later.
+   *
+   * Optional so workspaces written before tabs had names still load.
+   */
+  nameCursor?: number
 }
 
 /* ------------------------------------------------------------------- shots */
@@ -258,7 +267,7 @@ export interface WindowBounds {
  * Which interpreter the voice agent talks to. `gemini` and `openrouter` are the
  * live ones; `stub` is the offline fallback used whenever no key is set.
  */
-export type VoiceBrainId = 'stub' | 'gemini' | 'openrouter' | 'claude' | 'openai'
+export type VoiceBrainId = 'stub' | 'gemini' | 'openrouter' | 'groq' | 'claude' | 'openai'
 
 /**
  * How the voice agent answers.
@@ -346,8 +355,20 @@ export type OpenRouterCallResult =
   | { ok: true; text: string; finishReason?: string; model?: string }
   | { ok: false; error: string; status?: number }
 
+/**
+ * Groq's call, which is the same call.
+ *
+ * Groq serves the OpenAI chat-completions API verbatim, so the wire shape is
+ * byte-for-byte what OpenRouter takes — and these are aliases rather than a
+ * second interface on purpose. One shape means one implementation in
+ * electron/voice-bridge.ts (`callChat`), and a field added for one provider
+ * cannot go missing for the other.
+ */
+export type GroqCallRequest = OpenRouterCallRequest
+export type GroqCallResult = OpenRouterCallResult
+
 /** Which on-disk key a `voice:import-key` call is after. */
-export type KeySource = 'gemini' | 'openrouter'
+export type KeySource = 'gemini' | 'openrouter' | 'groq'
 
 export type ImportedKeyResult =
   | { ok: true; key: string; last4: string; source: string }
@@ -687,6 +708,34 @@ export interface Settings {
    * so an existing settings.json simply loses them on its next write.
    */
   voiceHub: VoiceHubPlacement
+  /**
+   * Does undocking the hub open a real Windows window, or a div inside Forge?
+   *
+   * On by default, because it is what was actually asked for: an undocked hub
+   * that floats above Chrome and stays on screen while Forge is minimised. A
+   * `<div>` cannot do either — it is inside the window Chrome is covering.
+   * See electron/overlay-window.ts.
+   *
+   * The switch exists because a transparent always-on-top window depends on the
+   * compositor behaving, and on a machine where it does not, the fix should be
+   * a toggle rather than a downgrade. Off falls back to the in-window hub,
+   * which is kept working for exactly that reason.
+   */
+  voiceOverlayWindow: boolean
+  /**
+   * Listen while speaking, so you can cut in mid-sentence.
+   *
+   * On by default. With it off the agent is half duplex — the microphone is
+   * shut for the whole reply and the only way to interrupt is to click the
+   * button, which is how Forge worked before and is still the right answer on a
+   * machine with no working echo cancellation (a cheap USB speakerphone, an
+   * HDMI monitor's speakers with the mic across the desk from them).
+   *
+   * When it is on, the reply ducks the instant it hears you and cancels once it
+   * is sure. See src/lib/bargein.ts for why an open microphone here cannot
+   * bring back the feedback loop the old rule existed to prevent.
+   */
+  voiceBargeIn: boolean
   voiceBrain: VoiceBrainId
   /**
    * Anthropic key for the (unbuilt) ClaudeBrain. Stored here and used nowhere:
@@ -792,6 +841,19 @@ export interface Settings {
    */
   openrouterKey: string
   openrouterModel: string
+  /**
+   * Groq key for GroqBrain. Sent only to api.groq.com, only when Groq is the
+   * selected brain.
+   *
+   * Groq is here for one reason: it is the cheapest way to keep the voice agent
+   * talking. Its free tier costs nothing and needs no card, and its paid tier is
+   * pennies a month at Forge's volume — against Gemini's free tier, which caps
+   * at twenty requests a minute and takes the whole turn down with it when it
+   * runs out. It is also the fastest thing available, which for a voice agent is
+   * not a luxury: latency here is a pause in a conversation.
+   */
+  groqKey: string
+  groqModel: string
 
   /* -------------------------------------------------------- agent memory */
   /**

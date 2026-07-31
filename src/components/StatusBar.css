@@ -31,6 +31,14 @@
   flex: none;
 }
 
+/* Agent switch + dictation pill, closer to each other than to anything else. */
+.statusbar__voice {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+}
+
 .statusbar__dot {
   width: 6px;
   height: 6px;

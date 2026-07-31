@@ -495,10 +495,23 @@ function releaseBlocker(): void {
  * Called from the renderer after it has actually applied and persisted a
  * change — including one the phone asked for, so the phone learns the result
  * from the same broadcast a second phone would.
+ *
+ * `projectId` names the workspace that just changed, and carrying it is not
+ * optional decoration: the phone's tab list comes from the `workspaces` map in
+ * `hello-ok`, so a broadcast of only projects+sessions leaves that list frozen
+ * at whatever it was when the phone connected. Opening a tab — from the desk or
+ * from the phone itself — then showed up everywhere except the device that
+ * asked for it, until the phone reconnected. The `workspace` field has been on
+ * StateFrame all along and link.ts already merges it; nothing ever filled it in.
  */
-export function publishMobileState(): void {
+export function publishMobileState(projectId?: string): void {
   if (!server) return
-  server.pushState({ projects: getProjects(), sessions: getManager().list() })
+  const workspace = projectId ? getWorkspace(projectId) : null
+  server.pushState({
+    projects: getProjects(),
+    sessions: getManager().list(),
+    ...(projectId && workspace ? { workspace: { projectId, workspace } } : {})
+  })
 }
 
 /* ------------------------------------------------------------------- IPC */

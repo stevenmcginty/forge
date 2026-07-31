@@ -71,6 +71,7 @@ const api: ForgeApi = {
   voice: {
     gemini: (req) => ipcRenderer.invoke(IPC.voiceGemini, req),
     openrouter: (req) => ipcRenderer.invoke(IPC.voiceOpenRouter, req),
+    groq: (req) => ipcRenderer.invoke(IPC.voiceGroq, req),
     importKey: (which) => ipcRenderer.invoke(IPC.voiceImportKey, which ?? 'gemini'),
     makeImage: (req) => ipcRenderer.invoke(IPC.voiceMakeImage, req),
     editImage: (req) => ipcRenderer.invoke(IPC.voiceEditImage, req),
@@ -173,7 +174,33 @@ const api: ForgeApi = {
     toggleMaximize: () => ipcRenderer.send(IPC.windowToggleMaximize),
     close: () => ipcRenderer.send(IPC.windowClose),
     onState: (cb) => subscribe(IPC.windowState, cb),
-    setTitlebar: (color, symbolColor) => ipcRenderer.send(IPC.windowTitlebar, color, symbolColor)
+    setTitlebar: (color, symbolColor) => ipcRenderer.send(IPC.windowTitlebar, color, symbolColor),
+    restoreAndFocus: () => ipcRenderer.send(IPC.windowRestoreFocus)
+  },
+
+  /**
+   * The undocked voice hub's own window. A relay, both ways — see the header of
+   * electron/overlay-window.ts for why the main process sits in the middle.
+   *
+   * `isOverlay` is read off the URL rather than fetched over IPC because
+   * src/main.tsx has to decide which tree to render *before* it can await
+   * anything: the alternative is the whole app mounting for a moment inside a
+   * 180×56 pill.
+   */
+  overlay: {
+    isOverlay: () => location.hash === '#overlay',
+
+    open: (bounds) => ipcRenderer.invoke(IPC.overlayOpen, bounds),
+    close: () => ipcRenderer.invoke(IPC.overlayClose),
+    setBounds: (bounds) => ipcRenderer.send(IPC.overlaySetBounds, bounds),
+    pushState: (snapshot) => ipcRenderer.send(IPC.overlayState, snapshot),
+    pushLevel: (level) => ipcRenderer.send(IPC.overlayLevel, level),
+    onCall: (cb) => subscribe(IPC.overlayCall, cb),
+    onBounds: (cb) => subscribe(IPC.overlayBoundsEvent, cb),
+
+    onState: (cb) => subscribe(IPC.overlayState, cb),
+    onLevel: (cb) => subscribe(IPC.overlayLevel, cb),
+    call: (message) => ipcRenderer.send(IPC.overlayCall, message)
   }
 }
 

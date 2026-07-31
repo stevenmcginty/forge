@@ -303,6 +303,24 @@ export function VoiceHub(): ReactNode {
 
   if (!isFloatingHub(mode)) return null
 
+  /*
+   * Undocked means a real window now.
+   *
+   * Steve's ask was that an undocked hub float over *Windows* — above Chrome,
+   * still there with Forge minimised — and no div inside Forge can do that, by
+   * construction: Forge is the thing Chrome is covering. So while
+   * `voiceOverlayWindow` is on, the pill and the card below are drawn by
+   * src/overlay/OverlayApp.tsx in a window of their own, and this returns null
+   * rather than painting a second copy inside the app.
+   *
+   * The in-window hub is kept, not deleted, and the setting is the reason: an
+   * always-on-top transparent window is at the mercy of the compositor, and if
+   * it ever misbehaves on a particular machine the answer should be a toggle in
+   * Settings rather than a version rollback. Everything below this line is that
+   * fallback, unchanged and still exercised by `npm run hub:check`.
+   */
+  if (state.settings.voiceOverlayWindow) return null
+
   const setMode = (event: Parameters<typeof nextHubMode>[1]): void =>
     actions.setVoiceHub({ mode: nextHubMode(mode, event) })
 

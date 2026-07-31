@@ -1,0 +1,383 @@
+/* ------------------------------------------------------- the strip button
+ *
+ * Word-shaped, like the mosaic controls it sits beside, and carrying a `/`
+ * where those carry an icon — because the thing it opens is a list of names
+ * that all start with one, and no glyph in the set says "slash command" as
+ * plainly as the character itself.
+ */
+
+.tabstrip__cmds {
+  gap: var(--s-2);
+  flex: none;
+  height: 20px;
+  margin-bottom: var(--s-2);
+  margin-right: var(--s-2);
+  padding: 0 var(--s-3) 0 var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.tabstrip__cmds:hover,
+.tabstrip__cmds[data-on='true'] {
+  color: var(--text-secondary);
+}
+
+.tabstrip__slash {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.tabstrip__cmds:hover .tabstrip__slash,
+.tabstrip__cmds[data-on='true'] .tabstrip__slash {
+  color: var(--accent);
+}
+
+/* Releases you have not got. Accent, because it is the one thing in the strip
+   that is genuinely news rather than a state you set yourself. */
+.tabstrip__news {
+  min-width: 14px;
+  height: 13px;
+  padding: 0 3px;
+  display: grid;
+  place-items: center;
+  font-size: var(--t-eyebrow);
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-radius: var(--r-full);
+}
+
+/* ------------------------------------------------------------- the panel */
+
+.cfly {
+  display: flex;
+  flex-direction: column;
+  /* Tall enough to be a reference, short enough to leave the terminals
+     visible behind it — you are usually reading this *about* a pane. */
+  max-height: min(560px, 70vh);
+}
+
+.cfly__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-3) var(--s-2) var(--s-4);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.cfly__tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.cfly__tab {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 22px;
+  padding: 0 var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.cfly__tab:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.cfly__tab[aria-selected='true'] {
+  color: var(--text-primary);
+  background: var(--bg-active);
+}
+
+.cfly__badge {
+  min-width: 15px;
+  height: 14px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  font-size: var(--t-eyebrow);
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-radius: var(--r-full);
+}
+
+.cfly__refresh {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+}
+
+.cfly__refresh:hover:not(:disabled) {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.cfly__refresh[data-busy='true'] {
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------- search */
+
+.cfly__search {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.cfly__search-slash {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.cfly__input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.cfly__input::placeholder {
+  color: var(--text-dim);
+}
+
+.cfly__clear {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: var(--r-xs);
+  color: var(--text-dim);
+}
+
+.cfly__clear:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+/* ---------------------------------------------------------------- lists */
+
+.cfly__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-2) var(--s-2) var(--s-3);
+}
+
+.cfly__empty {
+  padding: var(--s-6) var(--s-5);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------ a command */
+
+/* Four columns: the row itself, then the three optional marks that can hang
+   off it. Named here rather than left to auto-placement because a missing
+   chip must not shuffle the ones beside it. */
+.crow {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  border-radius: var(--r-sm);
+}
+
+.crow:hover {
+  background: var(--bg-hover);
+}
+
+.crow[data-open='true'] {
+  background: var(--bg-hover);
+}
+
+/* The whole row types. It is a button rather than a div with a handler so it
+   is reachable by keyboard, which for a searchable list matters: you filter
+   with the box and take the first hit without leaving the keys. */
+.crow__main {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  min-width: 0;
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.crow__sig {
+  flex: none;
+  font-size: var(--t-sm);
+  color: var(--accent);
+}
+
+.crow__summary {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+}
+
+.crow:hover .crow__summary {
+  color: var(--text-secondary);
+}
+
+/* "2.1.212+" — a command your CLI is too old for. Warn, not danger: it is a
+   thing to know, not a thing that has gone wrong, and typing it anyway is a
+   perfectly reasonable way to find out. */
+.crow__since {
+  flex: none;
+  padding: 0 var(--s-2);
+  font-size: var(--t-eyebrow);
+  color: var(--warn);
+}
+
+.crow[data-too-new='true'] .crow__sig {
+  color: var(--text-muted);
+}
+
+.crow__alias {
+  flex: none;
+  padding: 0 var(--s-2);
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.crow__more {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: var(--s-2);
+  border-radius: var(--r-xs);
+  color: var(--text-dim);
+}
+
+.crow__more:hover {
+  color: var(--text-secondary);
+  background: var(--bg-active);
+}
+
+.crow__more svg {
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.crow[data-open='true'] .crow__more svg {
+  transform: rotate(180deg);
+}
+
+/* Spans all three columns — the detail belongs to the row, not to a column. */
+.crow__detail {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 var(--s-4) var(--s-3) var(--s-3);
+  font-size: var(--t-xs);
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ----------------------------------------------------------------- news */
+
+.cfly__version {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.cfly__version-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+}
+
+.cfly__version-note {
+  font-size: var(--t-eyebrow);
+  color: var(--text-muted);
+}
+
+.cfly__update {
+  flex: none;
+  height: 22px;
+  padding: 0 var(--s-4);
+  font-size: var(--t-xs);
+}
+
+.nrow {
+  padding: var(--s-3) var(--s-3) var(--s-4);
+}
+
+.nrow + .nrow {
+  border-top: 1px solid var(--line-soft);
+}
+
+.nrow__version {
+  margin-bottom: var(--s-2);
+  font-size: var(--t-sm);
+  color: var(--accent);
+}
+
+.nrow__bullets {
+  margin: 0;
+  padding-left: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.nrow__bullets li::marker {
+  color: var(--text-dim);
+}
+
+/* ----------------------------------------------------------- provenance */
+
+.cfly__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: none;
+  padding: var(--s-2) var(--s-4) var(--s-3);
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--t-eyebrow);
+}
+
+.cfly__origin {
+  color: var(--text-dim);
+}
+
+.cfly__error {
+  color: var(--warn);
+}

@@ -58,7 +58,8 @@ const {
   brainStatusLabel,
   maskKey,
   NOT_CONNECTED,
-  DEFAULT_OPENROUTER_MODEL
+  DEFAULT_OPENROUTER_MODEL,
+  DEFAULT_GROQ_MODEL
 } = await import('../src/lib/voicebrain.ts')
 const { createPushSource, transcriptBus, typedTranscript } = await import('../src/lib/transcriptSource.ts')
 const { parseCommand, parseUtterance } = await import('../src/lib/voicecommands.ts')
@@ -82,6 +83,7 @@ const { claimsCompletedAction, companionReplyText } = brainjson
 const { chooseVoice, speakable, echoOverlap, ECHO_WINDOW_MS } = await import('../src/lib/speech.ts')
 const { planProjectFolder, sanitiseFolderName } = await import('../electron/projectfolder.ts')
 const { OpenRouterBrain } = await import('../src/lib/openrouterbrain.ts')
+const { GroqBrain } = await import('../src/lib/groqbrain.ts')
 const {
   agentMemory,
   describeMemory,
@@ -279,6 +281,46 @@ await test('the OpenRouter default model is one string, written in two places', 
   assert.ok(m, 'store.ts has no openrouterModel default')
   assert.equal(m[1], DEFAULT_OPENROUTER_MODEL)
   assert.match(DEFAULT_OPENROUTER_MODEL, /^[a-z0-9-]+\/[a-z0-9.\-:]+$/i, 'looks like an OpenRouter id')
+})
+
+await test('the Groq default model is one string, written in two places', () => {
+  // Same trap as the two above, and the same cheap assertion.
+  const store = readFileSync(join(ROOT, 'electron', 'store.ts'), 'utf8')
+  const m = /groqModel:\s*'([^']+)'/.exec(store)
+  assert.ok(m, 'store.ts has no groqModel default')
+  assert.equal(m[1], DEFAULT_GROQ_MODEL)
+})
+
+await test('Groq is selectable, and says what is missing when it has no key', () => {
+  assert.equal(getActiveBrain({ voiceBrain: 'groq', groqKey: 'gsk_FAKE' }).name, 'Groq')
+  // An explicit choice never silently falls back onto another provider's key —
+  // a brain swapping itself out is the kind of thing you notice from the bill.
+  const stub = getActiveBrain({ voiceBrain: 'groq', geminiKey: 'AIzaFAKE' })
+  assert.equal(stub.name, 'Stub')
+  assert.equal(stub.ready().reason, 'no-key')
+})
+
+await test('the Groq chip reports the model, and its 429 explains the real cause', async () => {
+  const live = new GroqBrain('gsk_FAKE', DEFAULT_GROQ_MODEL, async () => ({ ok: true, text: '{}' })).ready()
+  assert.equal(live.ok, true)
+  assert.equal(live.label, DEFAULT_GROQ_MODEL)
+
+  // Groq's free tier runs out of tokens-per-minute long before it runs out of
+  // requests. "Rate limited" alone would send you to the wrong fix — talking
+  // less often, rather than picking a model with a bigger bucket.
+  const brain = new GroqBrain('gsk_FAKE', DEFAULT_GROQ_MODEL, async () => ({
+    ok: false,
+    error: '429: Rate limit reached for model, limit 6000 tokens per minute',
+    status: 429
+  }))
+  await assert.rejects(
+    () => brain.interpret('hello', {}),
+    (err) => {
+      assert.match(err.message, /tokens-per-minute/i)
+      assert.match(err.message, /switch to a model/i)
+      return true
+    }
+  )
 })
 
 await test('the reported model is the chip label when live', () => {
@@ -2873,7 +2915,11 @@ function fakeTts(reply = () => ({ ok: true, audio: fakePcm(0.2).toString('base64
       },
       play: (pcm, rate, channels) => {
         calls.play.push({ frames: pcm.length, rate, channels })
-        return { done: Promise.resolve(), stop: () => calls.play.push('stopped') }
+        return {
+          done: Promise.resolve(),
+          stop: () => calls.play.push('stopped'),
+          duck: (level) => calls.play.push(`duck:${level}`)
+        }
       }
     }
   }
@@ -3009,6 +3055,26 @@ await test('barge-in aborts the request in flight and never plays the late reply
   assert.equal(fake.calls.cancel[0], fake.calls.speak[0].requestId)
   assert.equal(fake.calls.play.length, 0, 'the clip that landed late is discarded')
   fake.hold = false
+})
+
+await test('ducking rides the volume without giving up the clip', async () => {
+  // The first half of barge-in. `cancel()` is final — an AudioBufferSource that
+  // has been stopped cannot be resumed — so a detector that only had cancel
+  // could never change its mind, and every cough would cost a whole reply.
+  fake = fakeTts()
+  setTtsBackend(fake.backend)
+  voiceSpeaker.clearCache()
+
+  await voiceSpeaker.speak('A sentence he might talk over.', GEMINI)
+  voiceSpeaker.duck(0.2)
+  voiceSpeaker.duck(1)
+  // The clip played, was turned down, and came back up — with no stop in it.
+  assert.ok(!fake.calls.play.includes('stopped'), 'ducking must not stop the clip')
+
+  // And once it really is over, ducking is a no-op rather than a crash: the
+  // detector's release can easily land after the last word.
+  voiceSpeaker.cancel()
+  assert.doesNotThrow(() => voiceSpeaker.duck(1))
 })
 
 await test('a turn is spoken exactly once, however often the panel re-renders', async () => {
@@ -3176,6 +3242,128 @@ await test('the speech settings default to the good engine, and survive a hand-e
   // Blank is meaningful for both — "whatever gemini-tts.ts defaults to" — so
   // neither may be seeded with a literal model or voice name.
   assert.ok(!/voiceTtsVoice: 'Sulafat'/.test(store))
+
+  // Full duplex and the overlay window are both on out of the box: they are
+  // what "always listening, ready to interrupt, floating over Chrome" means,
+  // and a default of off would ship the feature switched off.
+  for (const line of ['voiceBargeIn: true', 'voiceOverlayWindow: true']) {
+    assert.ok(store.includes(line), `electron/store.ts is missing ${line}`)
+    assert.ok(state.includes(line), `AppState.tsx is missing ${line}`)
+  }
+})
+
+/* ============================================================ barge-in (VAD)
+ *
+ * The detector that lets Steve talk over the agent. Driven frame by frame with
+ * made-up levels, because the alternative — talking at it and remembering how
+ * it felt — is not a way to tune a threshold, and every one of the failures
+ * below is silent in a way you would not notice until it mattered.
+ */
+
+const { VoiceDetector } = await import('../src/lib/bargein.ts')
+
+/** Push `n` frames of one level and collect whatever the detector emitted. */
+function drive(det, level, n) {
+  const events = []
+  for (let i = 0; i < n; i++) {
+    const e = det.push(level)
+    if (e) events.push(e)
+  }
+  return events
+}
+
+/** Comfortably above the threshold — somebody actually speaking. */
+const SPEECH = 0.2
+/** A quiet room after echo cancellation. */
+const ROOM = 0.001
+/**
+ * What the AEC leaves behind on a loud reply — audible to a meter, not a voice.
+ * Deliberately just under the 0.012 absolute floor in src/lib/bargein.ts.
+ */
+const ECHO_RESIDUE = 0.01
+
+await test('talking over the agent ducks immediately and interrupts once it is sure', () => {
+  const det = new VoiceDetector()
+  drive(det, ROOM, 50)
+
+  // The very first loud frame gets quiet. This is the part he perceives as
+  // "it heard me" — waiting for certainty before reacting at all is what made
+  // the old half-duplex agent feel like it was ignoring him.
+  assert.deepEqual(det.push(SPEECH), 'duck')
+
+  // Then it wants evidence before throwing the reply away.
+  const rest = drive(det, SPEECH, 10)
+  assert.deepEqual(rest, ['interrupt'], 'exactly one interrupt, and only after the duck')
+})
+
+await test('a cough is ducked, not obeyed — and the reply comes back up', () => {
+  // The reason ducking exists at all. If the only move were cancel, every
+  // door slam would cost a whole answer.
+  const det = new VoiceDetector()
+  drive(det, ROOM, 50)
+  assert.equal(det.push(SPEECH), 'duck')
+  // Two loud frames is 40ms. Nothing human says a word that short.
+  det.push(SPEECH)
+
+  const after = drive(det, ROOM, 40)
+  assert.deepEqual(after, ['release'], 'it comes back up, and does not interrupt')
+})
+
+await test('the release waits out the gap between words', () => {
+  // "open — three — tabs" has silence in it. A detector that restored the
+  // volume in those gaps would make the agent stutter back to full blast
+  // while he was still mid-sentence.
+  const det = new VoiceDetector()
+  drive(det, ROOM, 50)
+  det.push(SPEECH)
+  assert.deepEqual(drive(det, ROOM, 6), [], 'a 120ms gap is not the end of a sentence')
+})
+
+await test('once it has interrupted, nothing turns the cancelled reply back up', () => {
+  // `release` calls duck(1). Firing one after the clip has been cancelled
+  // would be harmless today and exactly the sort of thing that stops being
+  // harmless the moment the next clip starts.
+  const det = new VoiceDetector()
+  drive(det, ROOM, 50)
+  drive(det, SPEECH, 10)
+  assert.deepEqual(drive(det, ROOM, 60), [], 'no release after an interrupt')
+})
+
+await test('the echo residue left by cancellation cannot interrupt the agent', () => {
+  // THE ONE THAT MATTERS. The AEC is very good and not perfect; what leaks
+  // through on a loud reply is a real signal. If the adaptive threshold could
+  // tune itself down onto that residue, the agent would interrupt itself —
+  // which is the original "Forge talks to itself" bug wearing a new hat.
+  const det = new VoiceDetector()
+  // A long reply, with residue the whole way through and no human in the room.
+  const events = drive(det, ECHO_RESIDUE, 500)
+  assert.deepEqual(events, [], 'residue below the floor must never fire anything')
+  assert.ok(det.threshold >= 0.012, 'the threshold can never fall below the absolute floor')
+})
+
+await test('the noise floor does not climb during speech and deafen the detector', () => {
+  // If the floor tracked loud frames, the longer he talked the higher the bar
+  // would go — so a long interruption would be heard at the start and ignored
+  // by the end.
+  const det = new VoiceDetector()
+  drive(det, ROOM, 50)
+  const quietThreshold = det.threshold
+  drive(det, SPEECH, 200)
+  assert.ok(
+    det.threshold <= quietThreshold * 1.05,
+    `threshold drifted upward during speech: ${quietThreshold} → ${det.threshold}`
+  )
+})
+
+await test('reset makes it ready for the next reply', () => {
+  const det = new VoiceDetector()
+  drive(det, SPEECH, 20)
+  det.reset()
+  // A fresh utterance must be able to duck again; without the reset the
+  // `ducked` latch would still be set from last time and the first frame of
+  // the next interruption would go unremarked.
+  drive(det, ROOM, 5)
+  assert.equal(det.push(SPEECH), 'duck')
 })
 
 /* ------------------------------------------------------------------- live */

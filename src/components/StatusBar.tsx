@@ -2,6 +2,7 @@ import { type ReactNode } from 'react'
 import { resolveProfile } from '@/lib/agents'
 import { findLeaf } from '@/lib/splitTree'
 import { useActiveProject, useActiveTab, useApp, usePaneCount } from '@/state/AppState'
+import { AgentButton } from './AgentButton'
 import { DictationPill } from './DictationPill'
 import './StatusBar.css'
 
@@ -34,7 +35,15 @@ export function StatusBar(): ReactNode {
       </div>
 
       <div className="statusbar__right">
-        <DictationPill />
+        {/* The two microphones, as a pair. Tighter than the bar's own gap so
+            they read as one control group — "talk to the agent" and "type into
+            this pane" are the same decision, made twice a minute. The pill keeps
+            the right-hand slot it has always had: it is the voice hub's dock,
+            and dragging starts from a place your hand already knows. */}
+        <div className="statusbar__voice">
+          <AgentButton />
+          <DictationPill />
+        </div>
         <span className="statusbar__hint mono">Ctrl+T tab · Ctrl+W close · Alt+↑↓←→ focus</span>
         {profile ? (
           <span className="statusbar__agent mono" style={{ color: profile.accent }}>

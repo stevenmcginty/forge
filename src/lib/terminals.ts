@@ -43,6 +43,13 @@ export interface TerminalSpec {
    */
   projectName: string
   paneTitle: string
+  /**
+   * The pane's saved Claude session id. Passed straight through to the main
+   * process, which decides whether it means "claim this id" or "resume it" —
+   * see electron/bridge/claude-session.ts. Absent for a pane whose layout entry
+   * somehow has none; the launch is then exactly what it always was.
+   */
+  sessionId?: string
 }
 
 /**
@@ -74,6 +81,20 @@ const URL_SCAN_OVERLAP = 256
 const ACTIVITY_THROTTLE_MS = 90
 
 /**
+ * How long the geometry must hold still before ConPTY is told about it.
+ *
+ * xterm itself is refitted on every observation — the picture has to track the
+ * drag — but the *PTY* is not. Dragging a window edge fires the observer dozens
+ * of times a second, and each resize makes ConPTY reflow its buffer while the
+ * TUI inside is repainting its live region: the two interleave and the screen
+ * comes out overlapped and duplicated. One resize, once the pointer stops.
+ */
+const RESIZE_SETTLE_MS = 200
+
+/** Gap between the short size and the true one in the repaint jiggle. */
+const REDRAW_JIGGLE_MS = 60
+
+/**
  * Geometry handed to a pane that has never been laid out at full size — only
  * reachable by opening a project straight into the mosaic. Roughly the classic
  * 80×24 at our default type size, which is both a sane width for a shell's
@@ -94,6 +115,13 @@ interface Entry {
   /** Last full-size layout, remembered so a peek tile can scale against it. */
   geometry: PaneGeometry | null
   resizeObserver: ResizeObserver | null
+  /** The size xterm has settled on but ConPTY has not been told about yet. */
+  pendingResize: { cols: number; rows: number } | null
+  resizeTimer: number | null
+  /** The last size actually sent down the PTY, so a no-op never jiggles. */
+  ptyDims: { cols: number; rows: number } | null
+  /** Pending second half of a repaint jiggle — see resizePty. */
+  jiggleTimer: number | null
   /** Tail of the last output chunk, kept only until the RC URL is found. */
   scanTail: string
   lastActivityNotify: number
@@ -155,15 +183,27 @@ function palette(): Record<string, string> {
 }
 
 /**
+ * Per-pane text colour, set by the tab that owns the pane — see
+ * `setForeground`. A module-level map rather than a field on the entry because
+ * a colour can be chosen for a pane that has not been attached yet (a fresh
+ * split in an already-coloured tab), and it has to be waiting when it is.
+ */
+const foregrounds = new Map<string, string>()
+
+/**
  * A complete 16-colour dark theme. Handing xterm every slot explicitly is what
  * lets a TUI that probes the terminal (Claude Code does) see a dark background
  * and pick its dark theme, instead of defaulting to white.
+ *
+ * `foreground` overrides the theme's default text colour only. Output that
+ * names its own ANSI colour still gets it — recolouring those sixteen slots as
+ * well would not tint an agent's output, it would erase its syntax highlighting.
  */
-function baseTheme(accent: string): ITheme {
+function baseTheme(accent: string, foreground?: string): ITheme {
   const p = palette()
   return {
     background: p['bg']!,
-    foreground: p['fg']!,
+    foreground: foreground ?? p['fg']!,
     cursor: accent,
     cursorAccent: p['cursor-accent']!,
     selectionBackground: p['selection']!,
@@ -299,11 +339,16 @@ class TerminalHost {
 
     const existing = entry
     existing.mode = 'tab'
-    if (existing.container !== container) {
+    const moved = existing.container !== container
+    if (moved) {
       container.appendChild(existing.wrapper)
       existing.container = container
-      this.observe(existing, container)
     }
+    // Re-observe whenever there is no live observer, not only when the box
+    // changed: a peek attach drops the observer (see attachPeek) without
+    // clearing the container, so "same container" is not proof of "still
+    // watched" — and a tab-mode pane that nothing watches never refits again.
+    if (moved || !existing.resizeObserver) this.observe(existing, container)
     this.setWebgl(paneId, true)
     requestAnimationFrame(() => {
       this.fit(paneId)
@@ -393,7 +438,7 @@ class TerminalHost {
       convertEol: false,
       macOptionIsMeta: false,
       windowsPty: { backend: 'conpty' },
-      theme: baseTheme(spec.accent)
+      theme: baseTheme(spec.accent, foregrounds.get(paneId))
     })
 
     const fit = new FitAddon()
@@ -410,6 +455,10 @@ class TerminalHost {
       mode: 'tab',
       geometry: null,
       resizeObserver: null,
+      pendingResize: null,
+      resizeTimer: null,
+      ptyDims: null,
+      jiggleTimer: null,
       scanTail: '',
       lastActivityNotify: 0,
       activityTimer: null,
@@ -429,8 +478,10 @@ class TerminalHost {
     })
     entry.disposers.push(() => dataSub.dispose())
 
+    // Not sent straight down: xterm resizes with the drag, ConPTY waits for it
+    // to finish. See queuePtyResize.
     const resizeSub = term.onResize(({ cols, rows }) => {
-      window.forge.pty.resize(paneId, cols, rows)
+      this.queuePtyResize(entry, cols, rows)
     })
     entry.disposers.push(() => resizeSub.dispose())
 
@@ -454,7 +505,9 @@ class TerminalHost {
    */
   private answerColour(paneId: string, code: 10 | 11, data: string): boolean {
     if (data.trim() !== '?') return false
-    const hex = palette()[code === 10 ? 'fg' : 'bg'] ?? ''
+    // A pane wearing a text colour answers with *that* — the honest reply, and
+    // the one that keeps a probing TUI's own palette in step with the tab.
+    const hex = code === 10 ? (foregrounds.get(paneId) ?? palette()['fg'] ?? '') : (palette()['bg'] ?? '')
     const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim())
     if (!m) return false
     const [, r, g, b] = m
@@ -566,11 +619,102 @@ class TerminalHost {
     entry.resizeObserver = ro
   }
 
+  /* --------------------------------------------------------------- resize */
+
+  /**
+   * Remember the size xterm just took, and tell ConPTY about it once the
+   * geometry has held still for RESIZE_SETTLE_MS.
+   *
+   * The pending size is held on the entry rather than captured in the timer
+   * because `onResize` only fires when cols/rows actually *change*: the last
+   * observation of a drag is often a repeat, and the flush has to send the
+   * dimensions the terminal ended up at, not the ones the timer was armed with.
+   */
+  private queuePtyResize(entry: Entry, cols: number, rows: number): void {
+    entry.pendingResize = { cols, rows }
+    if (entry.resizeTimer !== null) clearTimeout(entry.resizeTimer)
+    entry.resizeTimer = window.setTimeout(() => {
+      entry.resizeTimer = null
+      const next = entry.pendingResize
+      entry.pendingResize = null
+      if (!next) return
+      const prev = entry.ptyDims
+      // Nothing moved in the end (a drag that came back to where it started, or
+      // a fit that only confirmed the size we spawned at) — leave the TUI alone.
+      if (prev && prev.cols === next.cols && prev.rows === next.rows) return
+      entry.ptyDims = next
+      this.resizePty(entry, next.cols, next.rows)
+    }, RESIZE_SETTLE_MS)
+  }
+
+  /**
+   * Hand a settled size to ConPTY, in two steps, so whatever is drawing in the
+   * pane repaints from scratch at it.
+   *
+   * A TUI that keeps a live region on screen — Ink, so Claude Code — only
+   * rewrites the rows it believes changed, and ConPTY's buffer reflow during a
+   * resize leaves fragments of the previous frame behind. Nothing clears them,
+   * so the mess persists until the program next redraws everything. There is no
+   * "please repaint" sequence a program is obliged to honour, but a *size
+   * change* is an event every TUI redraws for. So: one row short, then the true
+   * size a beat later. The pane lands on exactly the geometry it asked for,
+   * having repainted at it.
+   */
+  private resizePty(entry: Entry, cols: number, rows: number): void {
+    if (entry.jiggleTimer !== null) {
+      clearTimeout(entry.jiggleTimer)
+      entry.jiggleTimer = null
+    }
+    // Nothing to jiggle *into* on a pane with no program in it, and a two-row
+    // terminal has no row to spare.
+    if (entry.runtime.status !== 'live' || rows < 3) {
+      window.forge.pty.resize(entry.paneId, cols, rows)
+      return
+    }
+    window.forge.pty.resize(entry.paneId, cols, rows - 1)
+    entry.jiggleTimer = window.setTimeout(() => {
+      entry.jiggleTimer = null
+      window.forge.pty.resize(entry.paneId, cols, rows)
+    }, REDRAW_JIGGLE_MS)
+  }
+
+  /**
+   * Name the pane on its own first line, before the shell says anything.
+   *
+   * Restoring a workspace used to give you several tabs that were, for as long
+   * as the agent took to boot, visually identical: the same prompt at the same
+   * cwd, then the same launch line, whose only unique part is a session uuid
+   * buried mid-line ahead of a long `--mcp-config` path that wraps. Three
+   * restored tabs and a brand-new one all read the same, and only diverged once
+   * each agent had painted — which reads as the tabs being broken and then
+   * quietly fixing themselves.
+   *
+   * They were never wrong; there was simply nothing on screen that belonged to
+   * *this* pane. So the pane introduces itself. Written to xterm rather than
+   * down the PTY: it is a label, not input, so it can never reach the shell or
+   * a program's stdin. An agent that takes the alternate buffer covers it a
+   * moment later, which is exactly when it has stopped being needed.
+   */
+  private writeBootHeader(entry: Entry): void {
+    const name = entry.spec.paneTitle.trim()
+    if (!name) return
+    const colour = foregrounds.get(entry.paneId) ?? entry.spec.accent
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(colour.trim())
+    const rgb = m ? `38;2;${parseInt(m[1]!, 16)};${parseInt(m[2]!, 16)};${parseInt(m[3]!, 16)}` : '2'
+    entry.term.write(`\x1b[${rgb}m── ${name}\x1b[0m\r\n`)
+  }
+
   private async start(entry: Entry): Promise<void> {
-    // A relaunch is a new Claude session with a new Remote Control id, so the
-    // old URL must not survive it.
+    // A relaunch gets a new Remote Control id, so the old URL must not survive
+    // it. The *conversation* does: the pane keeps its session id, so restarting
+    // a pane picks its Claude back up rather than starting over.
     entry.scanTail = ''
+    // The size we are about to spawn at *is* the PTY's size, recorded before
+    // the await so the fit that queued this one flushes as a no-op rather than
+    // resizing a shell that is already right.
+    entry.ptyDims = { cols: entry.term.cols, rows: entry.term.rows }
     this.setRuntime(entry, { status: 'starting', error: null, exitCode: null, remoteUrl: null })
+    this.writeBootHeader(entry)
     const result = await window.forge.pty.create({
       id: entry.paneId,
       cwd: entry.spec.cwd,
@@ -578,7 +722,8 @@ class TerminalHost {
       rows: entry.term.rows,
       bootstrapCommand: entry.spec.bootstrapCommand,
       projectName: entry.spec.projectName,
-      paneTitle: entry.spec.paneTitle
+      paneTitle: entry.spec.paneTitle,
+      ...(entry.spec.sessionId ? { sessionId: entry.spec.sessionId } : {})
     })
     if (result.ok) {
       this.setRuntime(entry, { status: 'live', pid: result.pid })
@@ -588,7 +733,13 @@ class TerminalHost {
     }
   }
 
-  /** Kill the shell (if any) and launch a fresh one in the same pane. */
+  /**
+   * Kill the shell (if any) and launch a fresh one in the same pane.
+   *
+   * Fresh *shell*, same conversation: the pane keeps its session id, so a
+   * restarted Claude resumes rather than starting over. A genuinely new session
+   * is a new pane — that is what mints a new id (see makeLeaf).
+   */
   async restart(paneId: string): Promise<void> {
     const entry = this.entries.get(paneId)
     if (!entry) return
@@ -605,6 +756,7 @@ class TerminalHost {
     const entry = this.entries.get(paneId)
     this.entries.delete(paneId)
     this.listeners.delete(paneId)
+    foregrounds.delete(paneId)
     if (!entry) {
       // Never created (e.g. a restored pane that was closed before being
       // viewed) — still make sure no orphan session lingers.
@@ -612,6 +764,8 @@ class TerminalHost {
       return
     }
     if (entry.activityTimer !== null) clearTimeout(entry.activityTimer)
+    if (entry.resizeTimer !== null) clearTimeout(entry.resizeTimer)
+    if (entry.jiggleTimer !== null) clearTimeout(entry.jiggleTimer)
     entry.resizeObserver?.disconnect()
     entry.webglWanted = false
     this.unloadWebgl(entry)
@@ -650,6 +804,24 @@ class TerminalHost {
 
   fitAll(): void {
     for (const id of this.entries.keys()) this.fit(id)
+  }
+
+  /**
+   * Rescue a pane whose screen is already a mess.
+   *
+   * Same trick a settled resize uses (see resizePty), at the size the pane
+   * already has, so nothing reflows — the program simply redraws everything.
+   * Scrollback is deliberately left alone: the garbled lines above the live
+   * region are history, and history is not ours to delete.
+   */
+  redraw(paneId: string): void {
+    const entry = this.entries.get(paneId)
+    if (!entry) return
+    const { cols, rows } = entry.term
+    entry.ptyDims = { cols, rows }
+    // The renderer's own copy first, in case the corruption is only on screen.
+    entry.term.refresh(0, rows - 1)
+    this.resizePty(entry, cols, rows)
   }
 
   focus(paneId: string): void {
@@ -778,7 +950,7 @@ class TerminalHost {
   refreshTheme(): void {
     paletteCache = null
     for (const entry of this.entries.values()) {
-      entry.term.options.theme = baseTheme(entry.spec.accent)
+      entry.term.options.theme = baseTheme(entry.spec.accent, foregrounds.get(entry.paneId))
       entry.term.refresh(0, entry.term.rows - 1)
     }
   }
@@ -797,7 +969,27 @@ class TerminalHost {
     const entry = this.entries.get(paneId)
     if (!entry || entry.spec.accent === accent) return
     entry.spec = { ...entry.spec, accent }
-    entry.term.options.theme = baseTheme(accent)
+    entry.term.options.theme = baseTheme(accent, foregrounds.get(paneId))
+  }
+
+  /**
+   * Paint a pane's default text colour, or `null` to hand it back to the theme.
+   *
+   * Remembered whether or not the pane is attached, because tab colours are
+   * applied for every pane in the project at once (see TerminalGrid) and half
+   * of those are, at any moment, tabs you are not looking at.
+   */
+  setForeground(paneId: string, color: string | null): void {
+    const current = foregrounds.get(paneId) ?? null
+    if (current === color) return
+    if (color) foregrounds.set(paneId, color)
+    else foregrounds.delete(paneId)
+    const entry = this.entries.get(paneId)
+    if (!entry) return
+    entry.term.options.theme = baseTheme(entry.spec.accent, color ?? undefined)
+    // xterm only repaints rows it believes changed, and a colour swap changes
+    // none of them — same reason refreshTheme forces it.
+    entry.term.refresh(0, entry.term.rows - 1)
   }
 
   /* ------------------------------------------------------ subscriptions */

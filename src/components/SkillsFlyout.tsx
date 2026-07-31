@@ -4,41 +4,38 @@ import { resolveProfile } from '@/lib/agents'
 import { paneLabel } from '@/lib/appactions'
 import { collectLeaves } from '@/lib/splitTree'
 import { setSkillCatalogue, setSkillHandler } from '@/lib/skillbus'
-import {
-  SKILL_DRAG_MIME,
-  dedupeSkills,
-  installSkillDropTarget,
-  skillLibrary,
-  typeSkillIntoPane,
-  useSkills
-} from '@/lib/skills'
+import { dedupeSkills, skillLibrary, startSkillDrag, typeSkillIntoPane, useSkills } from '@/lib/skills'
 import { terminalHost } from '@/lib/terminals'
-import { useApp } from '@/state/AppState'
+import { useActiveTab, useApp } from '@/state/AppState'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
-import './SkillsRail.css'
+import './SkillsFlyout.css'
 
 /**
- * SKILLS — one row at the foot of the rail, and a flyout behind it.
+ * SKILLS — a word in the tab strip, and a flyout under it.
  *
  * A skill here is not a Forge feature. It is a folder that every `claude` and
  * `kimi` on this machine reads, whether Forge opened the session or not, and the
  * toggle in each library row is the switch that puts it there.
  *
- * It used to be an inline section, and it ate a third of the rail. The rail is
- * for *navigating* — projects — and skills are a thing you keep, reach for
- * occasionally and otherwise want out of the way. So the section collapsed to a
- * single button and everything it used to show moved into a flyout: a popover
- * takes no rail height at all (an inline expander still owns its row plus the
- * space it grows into), it can be wider than the rail, which is what lets the
- * descriptions actually read, and it closes itself the moment you look away.
- * Every behaviour survived the move — drag to a pane, toggles, add/import, the
- * ⋯ menus — because the flyout is where they live now, not a summary of them.
+ * It has moved twice, and both moves were the same argument. First out of an
+ * inline rail section, which ate a third of the rail, into a button and a
+ * flyout — a popover costs no height at all, can be wider than whatever opened
+ * it, and closes itself the moment you look away. Then out of the rail
+ * altogether and into the strip beside Commands, because the rail is for
+ * *navigating* (which project am I in) and a skill is a thing you reach for
+ * while looking at a pane. It now sits with the other reference control, and
+ * the strip had the room.
+ *
+ * Every behaviour survived both moves — drag to a pane, toggles, add/import,
+ * the ⋯ menus — because the flyout is where they live, not a summary of them.
+ * The one thing that changed with this move is which way it opens: from the
+ * foot of the rail it grew upward, from the strip it drops, exactly like
+ * Commands does.
  */
-export function SkillsRail(): ReactNode {
+export function SkillsButton(): ReactNode {
   const { state, actions } = useApp()
-  const collapsed = state.settings.railCollapsed
   const { skills, machineSkills } = useSkills()
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
@@ -48,36 +45,7 @@ export function SkillsRail(): ReactNode {
      roster is both groups, machine skills shadowed by the library. */
   useEffect(() => setSkillCatalogue(() => skillLibrary.catalogue()), [])
 
-  /* ------------------------------------------------------- drag onto a pane
-   *
-   * Both halves of "drop a skill on a terminal" are installed from here rather
-   * than from TerminalPane, which belongs to somebody else: the document-level
-   * drop target (see installSkillDropTarget) and the profile lookup that decides
-   * whether the pane gets `/name` or the skill's prose.
-   */
-  const workspaces = state.workspaces
   const profiles = state.settings.agentProfiles
-  useEffect(() => {
-    return installSkillDropTarget((paneId, name) => {
-      const found = skillLibrary.find(name)
-      if (!found) return
-      for (const ws of Object.values(workspaces)) {
-        for (const tab of ws.tabs) {
-          const leaf = collectLeaves(tab.root).find((l) => l.id === paneId)
-          if (!leaf) continue
-          const profile = resolveProfile(profiles, leaf.profileId)
-          actions.focusPane(paneId)
-          void typeSkillIntoPane(paneId, found, profile).then((ok) => {
-            terminalHost.focus(paneId)
-            if (!ok) {
-              actions.setNotice(`${found.skill.title} could not be typed — that pane is not running`)
-            }
-          })
-          return
-        }
-      }
-    })
-  }, [actions, profiles, workspaces])
 
   /* --------------------------------------------------------- use_skill
    *
@@ -116,8 +84,6 @@ export function SkillsRail(): ReactNode {
     })
   }, [actions, profiles])
 
-  if (collapsed) return null
-
   // The badge counts what is actually reachable: the library, plus the machine
   // skills the library is not already shadowing. Counting both raw would claim
   // a name twice.
@@ -125,25 +91,23 @@ export function SkillsRail(): ReactNode {
   const live = skills.filter((s) => s.enabled).length + dedupeSkills(skills, machineSkills).length
 
   return (
-    <section className="skills">
+    <>
       <button
         ref={buttonRef}
         type="button"
-        className="skills__btn"
+        className="ghost-btn tabstrip__skills"
         aria-expanded={open}
+        data-on={open ? 'true' : undefined}
         title={`${total} skill${total === 1 ? '' : 's'} — ${live} live in every Claude and Kimi session`}
         onClick={() => setOpen((v) => !v)}
       >
-        <Icon name="panel" size={13} />
-        <span className="skills__label">Skills</span>
-        {total > 0 ? <span className="skills__count mono">{total}</span> : null}
-        <span className="skills__chev" aria-hidden="true">
-          <Icon name="chevronDown" size={12} />
-        </span>
+        <Icon name="panel" size={12} />
+        Skills
+        {total > 0 ? <span className="tabstrip__tally mono">{total}</span> : null}
       </button>
 
-      <SkillsFlyout anchor={buttonRef.current} open={open} onClose={() => setOpen(false)} />
-    </section>
+      <SkillsPanel anchor={buttonRef.current} open={open} onClose={() => setOpen(false)} />
+    </>
   )
 }
 
@@ -159,7 +123,7 @@ export function SkillsRail(): ReactNode {
  * its click ever fired. Counting the open children and refusing to close while
  * any of them are up is what makes a menu inside a flyout behave like a menu.
  */
-function SkillsFlyout({
+function SkillsPanel({
   anchor,
   open,
   onClose
@@ -185,18 +149,23 @@ function SkillsFlyout({
       onClose={() => {
         if (nested === 0) onClose()
       }}
-      align="start"
-      side="top"
-      // Wider than the rail on purpose — that is half of why this is a flyout
-      // and not an inline expander. A skill's description is the only thing
-      // that tells you which of "fable-loop" and "fable-method" you want.
+      // Anchored to the button's right edge and dropping, which is what the
+      // Commands flyout beside it does — two controls a few pixels apart that
+      // opened in different directions would read as two unrelated things.
+      align="end"
+      // Wide on purpose — that is half of why this is a flyout and not an
+      // inline expander. A skill's description is the only thing that tells you
+      // which of "fable-loop" and "fable-method" you want.
       width={404}
       label="Skills"
     >
       <div className="sfly">
         <header className="sfly__head">
           <span className="eyebrow">Skills</span>
-          <span className="sfly__hint">Available to every Claude and Kimi session</span>
+          {/* The one line of the flyout that has to teach something: a skill is
+              only useful once it is in a terminal, and neither way of getting
+              it there is visible until you know it. */}
+          <span className="sfly__hint">Drag one onto a terminal — or double-click</span>
           <button
             ref={addRef}
             type="button"
@@ -274,31 +243,69 @@ function SkillsFlyout({
   )
 }
 
-/* ------------------------------------------------------------------- row */
-
-/**
- * The drag payload, and the reason the flyout gets out of the way.
+/* ---------------------------------------------------------- drop on a pane
  *
- * A popover is a real element with real pointer events, so a skill dragged out
- * of it would be dropped *on the flyout* the moment the pointer crossed back
- * over one. Marking the body for the length of the drag turns every popover
- * transparent to it, and the document-level drop target underneath sees the
- * pane it was actually aimed at.
+ * The other half of the drag: the pane id comes back from the gesture, and this
+ * is the profile lookup that decides whether that pane gets `/name` or the
+ * skill's prose. It searches every loaded workspace, not just the active one,
+ * because the mosaic wall shows panes from tabs you are not currently in.
  */
-function beginSkillDrag(e: React.DragEvent, name: string): void {
-  e.dataTransfer.setData(SKILL_DRAG_MIME, name)
-  // A plain-text fallback so dropping on a text field is still useful.
-  e.dataTransfer.setData('text/plain', `/${name}`)
-  e.dataTransfer.effectAllowed = 'copy'
-  document.body.dataset['skillDragging'] = 'true'
+function useDropSkill(): (paneId: string, name: string) => void {
+  const { state, actions } = useApp()
+
+  return (paneId: string, name: string): void => {
+    const found = skillLibrary.find(name)
+    if (!found) return
+    for (const ws of Object.values(state.workspaces)) {
+      for (const tab of ws.tabs) {
+        const leaf = collectLeaves(tab.root).find((l) => l.id === paneId)
+        if (!leaf) continue
+        const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
+        actions.focusPane(paneId)
+        void typeSkillIntoPane(paneId, found, profile).then((ok) => {
+          terminalHost.focus(paneId)
+          if (!ok) actions.setNotice(`${found.skill.title} could not be typed — that pane is not running`)
+        })
+        return
+      }
+    }
+  }
 }
 
-function endSkillDrag(): void {
-  delete document.body.dataset['skillDragging']
+/* ------------------------------------------------------ send to a terminal
+ *
+ * The drag is the quick way. This is the one that always works: no pointer
+ * gymnastics across a flyout, no question of which pane you were over. It types
+ * into the pane that already has focus, which is nearly always the pane you
+ * meant — and it is what the ⋯ menu and a double-click on a row both call.
+ */
+function useSendSkill(): (name: string) => void {
+  const { state, actions } = useApp()
+  const tab = useActiveTab()
+
+  return (name: string): void => {
+    const found = skillLibrary.find(name)
+    if (!found) return
+    const leaf = tab ? collectLeaves(tab.root).find((l) => l.id === tab.activePaneId) : undefined
+    if (!leaf) {
+      actions.setNotice('Open a terminal first — a skill has to be typed into something')
+      return
+    }
+    const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
+    actions.focusPane(leaf.id)
+    void typeSkillIntoPane(leaf.id, found, profile).then((ok) => {
+      terminalHost.focus(leaf.id)
+      if (!ok) actions.setNotice(`${found.skill.title} could not be typed — that pane is not running`)
+    })
+  }
 }
+
+/* ------------------------------------------------------------------- row */
 
 function SkillRow({ skill, onMenu }: { skill: SkillInfo; onMenu: (up: boolean) => void }): ReactNode {
   const { actions } = useApp()
+  const send = useSendSkill()
+  const drop = useDropSkill()
   const rowRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLButtonElement | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -335,9 +342,8 @@ function SkillRow({ skill, onMenu }: { skill: SkillInfo; onMenu: (up: boolean) =
       data-enabled={skill.enabled}
       data-problem={skill.problem ? 'true' : undefined}
       title={title}
-      draggable
-      onDragStart={(e) => beginSkillDrag(e, skill.name)}
-      onDragEnd={endSkillDrag}
+      onPointerDown={(e) => startSkillDrag(e, skill.name, drop)}
+      onDoubleClick={() => send(skill.name)}
       onContextMenu={(e) => {
         e.preventDefault()
         openMenu()
@@ -418,6 +424,8 @@ function MachineSkillRow({
   skill: MachineSkillInfo
   onMenu: (up: boolean) => void
 }): ReactNode {
+  const send = useSendSkill()
+  const drop = useDropSkill()
   const rowRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLButtonElement | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -438,9 +446,8 @@ function MachineSkillRow({
       data-machine="true"
       data-problem={skill.problem ? 'true' : undefined}
       title={[skill.description || 'No description in this skill’s frontmatter.', skill.problem ? `\n\n⚠ ${skill.problem}` : ''].join('')}
-      draggable
-      onDragStart={(e) => beginSkillDrag(e, skill.name)}
-      onDragEnd={endSkillDrag}
+      onPointerDown={(e) => startSkillDrag(e, skill.name, drop)}
+      onDoubleClick={() => send(skill.name)}
       onContextMenu={(e) => {
         e.preventDefault()
         openMenu()
@@ -494,6 +501,7 @@ function SkillMenu({
   skill: SkillInfo
 }): ReactNode {
   const { actions } = useApp()
+  const send = useSendSkill()
   const [confirm, setConfirm] = useState(false)
 
   return (
@@ -505,6 +513,16 @@ function SkillMenu({
             : 'In your library only. Turn the switch on to make it live everywhere.'}
         </div>
       </PopoverSection>
+
+      <PopoverRow
+        onClick={() => {
+          send(skill.name)
+          onClose()
+        }}
+      >
+        <Icon name="terminal" size={14} />
+        <span className="srow__menu-name">Type into this terminal</span>
+      </PopoverRow>
 
       <PopoverRow
         onClick={() => {
@@ -573,6 +591,7 @@ function MachineSkillMenu({
   skill: MachineSkillInfo
 }): ReactNode {
   const { actions } = useApp()
+  const send = useSendSkill()
 
   return (
     <Popover anchor={anchor} open={open} onClose={onClose} align="start" width={288} label="Skill actions">
@@ -581,6 +600,16 @@ function MachineSkillMenu({
           Yours, in ~/.claude/skills — every Claude and Kimi session already has it. Forge only reads this folder.
         </div>
       </PopoverSection>
+
+      <PopoverRow
+        onClick={() => {
+          send(skill.name)
+          onClose()
+        }}
+      >
+        <Icon name="terminal" size={14} />
+        <span className="srow__menu-name">Type into this terminal</span>
+      </PopoverRow>
 
       <PopoverRow
         onClick={() => {

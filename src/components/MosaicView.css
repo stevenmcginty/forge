@@ -124,7 +124,8 @@
   cursor: grabbing;
 }
 
-.mtile[data-refit='true'] {
+/* A tile the user pointed the other way from the rest of the wall. */
+.mtile[data-override='true'] {
   border-color: var(--accent-line);
 }
 

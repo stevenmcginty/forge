@@ -12,7 +12,7 @@ import { getSettings, getShotsDir } from './store'
  * clipboard — and Windows offers no cross-process "clipboard changed" event to
  * a sandboxed app. DictationMic polls GetClipboardSequenceNumber; Electron has
  * no equivalent, so we poll the content itself. Measured on a 2560x1440 image:
- * readImage 15ms, getBitmap 5ms, sha1 8ms — cheap enough at 700ms, and
+ * readImage 15ms, toBitmap 5ms, sha1 8ms — cheap enough at 700ms, and
  * `availableFormats()` costs nothing when the clipboard holds plain text, which
  * is nearly always. Only a genuine catch pays for toPNG (~40ms).
  */
@@ -29,19 +29,13 @@ const thumbCache = new Map<string, Shot>()
 
 /* --------------------------------------------------------------- helpers */
 
-/**
- * electron.d.ts declares `getBitmap(): void`; it has always returned a Buffer of
- * BGRA pixels. The cast is the bug, not the call.
- */
-function bitmapOf(img: NativeImage): Uint8Array {
-  const raw = img.getBitmap() as unknown as Uint8Array | undefined
-  return raw ?? new Uint8Array(0)
-}
-
 function hashOfImage(img: NativeImage): string {
   const { width, height } = img.getSize()
   if (width === 0 || height === 0) return ''
-  const bitmap = bitmapOf(img)
+  // toBitmap, not the getBitmap alias: same BGRA pixels, but getBitmap warns on
+  // every call in Electron 43 and is typed `void`, which cost us a cast that
+  // pretended to handle an undefined the call never returns.
+  const bitmap = img.toBitmap()
   if (bitmap.length === 0) return ''
   return contentHash(`${width}x${height}`, bitmap)
 }

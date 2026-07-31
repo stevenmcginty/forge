@@ -44,6 +44,16 @@ const H = await import('../src/lib/voicehub.ts')
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8')
 const count = (text, needle) => text.split(needle).length - 1
+/**
+ * Code with the comments taken out.
+ *
+ * Needed by the checks that forbid a *call*, because the comment right above
+ * such a call almost always has to name the thing it is forbidding — "never
+ * `show()`", "it is tempting to pass `parent:`". A check that read the comments
+ * too would be a check that punished the explanation, which is exactly
+ * backwards: those comments are the reason the rule survives.
+ */
+const decomment = (text) => text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(?<!:)\/\/[^\n]*/g, ' ')
 
 let pass = 0
 let fail = 0
@@ -356,6 +366,186 @@ ok(/width: 180px/.test(css) && /height: 56px/.test(css), 'the floating pill is t
 ok(!/\.vhub--card\s*\{[^}]*width:/.test(css), 'the card takes its size from the placement, not from CSS')
 ok(hub.includes('style={{ width: hubSize(hub).w, height: hubSize(hub).h }}'), 'and the card really is sized from it')
 ok(css.includes('.vhub__grow'), 'the corner resizer that replaced the panel resizer is styled')
+
+/* ------------------------------------------------- the overlay is a window */
+
+/*
+ * Undocking opens a real always-on-top Windows window now, because that is the
+ * only way to be over Chrome and to survive Forge being minimised — a <div>
+ * inside Forge is behind whatever is covering Forge, by construction.
+ *
+ * That buys three new ways to break the hub, and none of them is visible in a
+ * screenshot:
+ *
+ *   1. THE WINDOW STOPS FLOATING. A child window, or the default 'floating'
+ *      level, and it slips behind a maximised Chrome — which is the exact case
+ *      that was asked for.
+ *   2. THE WINDOW BECOMES OPAQUE. One background declaration on body and the
+ *      pill is a black rectangle sitting over somebody else's application.
+ *   3. THE OVERLAY BECOMES A SECOND AGENT. This is the bad one. It is a second
+ *      renderer running the same bundle, so one stray provider gives it its own
+ *      transcript subscription, its own sidecar loop and its own mouth — and
+ *      the symptom is every sentence answered twice, in two voices, a beat
+ *      apart. The whole architecture exists to make that impossible; these
+ *      checks are what keep it impossible.
+ */
+
+console.log('\nthe overlay is a real window')
+const overlayMain = read('electron/overlay-window.ts')
+const overlayApp = read('src/overlay/OverlayApp.tsx')
+const overlayHost = read('src/state/OverlayHost.tsx')
+const overlayCss = read('src/overlay/OverlayApp.css')
+const entryMain = read('src/main.tsx')
+
+ok(overlayMain.includes("setAlwaysOnTop(true, 'screen-saver')"), "it floats at the screen-saver level, which beats a maximised Chrome")
+ok(/alwaysOnTop:\s*true/.test(overlayMain), 'and is created always-on-top rather than promoted later')
+ok(/skipTaskbar:\s*true/.test(overlayMain), 'it is not a taskbar button')
+ok(/transparent:\s*true/.test(overlayMain), 'it is transparent, so the pill is a pill and not a box')
+ok(/frame:\s*false/.test(overlayMain), 'and frameless')
+ok(overlayMain.includes('showInactive()'), 'it appears without stealing focus from whatever he is typing in')
+// Code only — the comment above the call has to name the thing it forbids.
+const overlayCode = decomment(overlayMain)
+ok(!/\.show\(\)/.test(overlayCode), 'and never show(), which would')
+ok(overlayMain.includes('backgroundThrottling: false'), 'Chromium does not throttle it for being in the background — which it always is')
+ok(overlayMain.includes('visibleOnFullScreen: true'), 'it stays up over a fullscreen window')
+
+/*
+ * The one that makes "works when the app is minimised" true. A child window
+ * minimises, hides and restores WITH its parent, so `parent: mainWindow` would
+ * quietly delete the headline feature while looking tidier.
+ */
+ok(!/\bparent:/.test(overlayCode), 'the overlay is NOT a child window — a child would minimise with Forge')
+
+// The relay must stay a relay. The moment main starts reading a snapshot, the
+// contract between the two renderers has a third opinion in it.
+ok(
+  !/snapshot\.(phase|turns|armed|draftPhrase)/.test(overlayMain),
+  'the main process forwards payloads without looking inside them'
+)
+ok(overlayMain.includes('disposeOverlay'), 'and an always-on-top window cannot outlive the app')
+ok(read('electron/main.ts').includes('disposeOverlay()'), 'which main actually calls on the way out')
+ok(read('electron/main.ts').includes('setOverlayHost(null)'), 'losing the host takes the overlay with it')
+
+console.log('\nthe overlay paints nothing opaque')
+ok(/body[^{]*\{[^}]*background:\s*transparent/s.test(overlayCss), 'body is transparent, not themed')
+ok(overlayCss.includes('-webkit-app-region: drag'), 'the pill body is a drag region — Windows moves the window')
+ok(count(overlayCss, '-webkit-app-region: no-drag') >= 4, 'and every control inside it opts back out, or it cannot be clicked')
+
+console.log('\nthe overlay is a view, not a second agent')
+ok(entryMain.includes('window.forge.overlay.isOverlay()'), 'the entry branches on which window it is in')
+ok(
+  /isOverlay\(\)\s*\)\s*\{\s*root\.render\(<OverlayApp \/>\)/.test(entryMain),
+  'and the overlay gets OverlayApp alone — no providers'
+)
+for (const provider of ['AppStateProvider', 'DictationProvider', 'VoiceAgentProvider']) {
+  ok(!overlayApp.includes(`<${provider}`), `the overlay does not mount ${provider}`)
+}
+// The same singleton list the in-window surfaces are held to. A second copy of
+// any of these in the other renderer is the two-voices bug.
+for (const [needle, what] of [
+  ['transcriptBus.onPhrase(', 'the transcript subscription'],
+  ['companion.onUtterance(', 'the phone subscription'],
+  ['voiceSpeaker.speakOnce(', 'the mouth'],
+  ['stt.onPhrase(', 'the dictated-phrase subscription'],
+  ['stt.onStatus(', 'the sidecar status subscription'],
+  ['stt.start(', 'starting the microphone']
+]) {
+  ok(count(overlayApp, needle) === 0, `the overlay does not own ${what}`)
+}
+ok(overlayApp.includes('VoiceAgentContext.Provider'), 'it provides a mirrored context instead')
+ok(provider.includes('export const VoiceAgentContext'), 'which the agent exports for exactly that')
+ok(!provider.includes('export function VoiceAgentProvider') || count(entryMain, '<VoiceAgentProvider>') === 1, 'and the real provider is still mounted exactly once')
+
+// The parts are shared rather than reimplemented — that is what stops the two
+// surfaces drifting apart the first time either is tuned.
+for (const part of ['VoiceDial', 'VoiceLog', 'VoiceComposer', 'ReplyModeToggle', 'BrainChip', 'LastLine']) {
+  ok(overlayApp.includes(`<${part}`), `the overlay reuses ${part} rather than copying it`)
+}
+
+console.log('\nthe host owns the window and the state')
+ok(overlayHost.includes('return null'), 'OverlayHost renders nothing — it is wiring')
+ok(overlayHost.includes('useVoiceAgent()'), 'it reads the one real agent')
+ok(overlayHost.includes("kind: 'hello'") || overlayHost.includes("case 'hello'"), 'a freshly opened overlay is sent the current state, not just the next change')
+ok(overlayHost.includes('pushLevel'), 'the mic level rides its own channel')
+ok(
+  !/turns:.*level/s.test(read('src/lib/overlaystate.ts').split('export interface OverlaySnapshot')[1]?.split('}')[0] ?? ''),
+  'and is NOT in the snapshot, which would re-render a conversation 15 times a second'
+)
+
+/* ------------------------------------------------- always on, and full duplex */
+
+console.log('\nalways listening')
+/*
+ * Steve, on what should decide whether something was meant for Forge:
+ * "everything that I say needs to go into forge". So the surface-open condition
+ * that used to gate routing is gone — a switch that flips itself back when you
+ * dock the hub or click on Chrome is not a switch.
+ */
+ok(
+  !/agentSurfaceOpen\(state\.settings\)\s*&&\s*state\.agentListening/.test(dictation),
+  'dictation routes on the switch alone, not on whether a surface is visible'
+)
+ok(/const toAgent = state\.agentListening/.test(dictation), 'and the switch is the switch')
+ok(
+  !/if \(!surfaceOpen && armed\) actions\.setAgentListening\(false\)/.test(provider),
+  'nothing disarms the agent behind his back'
+)
+
+/*
+ * The other half of "nothing disarms it for you": something must still be able
+ * to disarm it *when he asks*. The only agent button lives on the floating hub,
+ * so an armed agent with the hub docked had no off switch on screen at all —
+ * every phrase went to the agent, the agent acted on what it heard, and the one
+ * control left in the status bar offered to open a second microphone. The
+ * docked pill is the guarantee, and these two assertions are its terms: it must
+ * tell the truth about where the words are going, and it must be able to stop
+ * them going there.
+ */
+const dockedPill = read('src/components/DictationPill.tsx')
+ok(
+  /const toAgent = state\.agentListening/.test(dockedPill),
+  'the docked pill shows agent mode by the same rule dictation routes by'
+)
+ok(/else if \(toAgent\) toggleAgent\(\)/.test(dockedPill), 'and clicking it while armed is the off switch')
+
+/*
+ * The blip means "your turn". A warm-up is not a turn: the sidecar stops itself
+ * on silence and the re-arm loop restarts it, so an armed agent in an empty
+ * room ran warming → listening every few seconds — and beeped every time.
+ */
+const handsBack = provider.split('const HANDS_BACK')[1]?.split(']')[0] ?? ''
+ok(!handsBack.includes("'warming'"), 'and a warm-up does not blip — only a turn coming back does')
+
+console.log('\nfull duplex')
+const bargein = read('src/lib/bargein.ts')
+ok(provider.includes('bargeIn.arm('), 'the agent opens the echo-cancelled mic while it speaks')
+ok(provider.includes('bargeIn.disarm()'), 'and closes it after — it is not held open all day')
+ok(bargein.includes('echoCancellation: true'), 'echo cancellation is on, which is the entire reason this is safe')
+/*
+ * The anti-feedback rule that predates all of this MUST survive. The sidecar
+ * has no AEC; if it were left running during a reply, Forge would transcribe
+ * itself, answer itself, and keep going until the app was closed.
+ */
+ok(provider.includes('void window.forge.stt.stop()'), 'the raw sidecar is still stopped while speaking')
+/*
+ * Code only, and this one is worth being careful about rather than loose: the
+ * property is that the AEC'd stream reaches a level meter and nothing else. If
+ * it ever reached the sidecar, the transcript bus or a phrase handler, an open
+ * microphone during a reply would be the old feedback loop again — Forge
+ * hearing itself, answering, and never stopping.
+ */
+const bargeinCode = decomment(bargein)
+for (const forbidden of ['transcri', 'sttPhrase', 'transcriptBus', 'forge.stt', 'onPhrase']) {
+  ok(count(bargeinCode, forbidden) === 0, `the barge-in mic never touches ${forbidden} — it is a VAD, not an ASR`)
+}
+ok(bargeinCode.includes('getFloatTimeDomainData'), 'all it ever reads is a level')
+ok(bargein.includes('ABSOLUTE_FLOOR'), 'there is an absolute floor the adaptive threshold cannot sink below')
+ok(bargein.includes('setInterval'), 'it polls on a timer, not rAF — rAF does not run in a minimised window')
+ok(read('electron/main.ts').includes("callback(permission === 'media')"), 'the renderer is actually allowed a microphone')
+ok(
+  read('src/lib/tts.ts').includes('duck(level: number)'),
+  'and the reply can be turned down without being thrown away'
+)
 
 /* -------------------------------------------------------------- summary */
 

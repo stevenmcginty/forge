@@ -11,6 +11,7 @@ import { TitleBar } from '@/components/TitleBar'
 import { StaleBanner } from '@/components/StaleBanner'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { VoiceHub } from '@/components/VoiceHub'
+import { OverlayHost } from '@/state/OverlayHost'
 import { useShortcuts } from '@/hooks/useShortcuts'
 import { terminalHost } from '@/lib/terminals'
 import { useApp } from '@/state/AppState'
@@ -68,6 +69,15 @@ export function App(): ReactNode {
         this is on screen or not. See src/components/VoiceHub.tsx.
       */}
       <VoiceHub />
+      {/*
+        The other half of the same hub: while it is undocked, the thing you
+        actually see is an always-on-top Windows window that floats over Chrome
+        and stays up when Forge is minimised. This component renders nothing —
+        it opens and closes that window and mirrors the one agent into it. The
+        agent stays here, in this window, for the reason above.
+        See src/state/OverlayHost.tsx.
+      */}
+      <OverlayHost />
       <Onboarding />
       {/*
         The Forge Mobile pairing prompt — "a phone calling itself X wants to
