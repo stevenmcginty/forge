@@ -65,15 +65,22 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     id: 'deepseek',
     name: 'DeepSeek V4',
     // DeepSeek ships no CLI of its own, so "DeepSeek as an agent" is OpenCode
-    // pointed at it — a first-class pairing on both sides: OpenCode has a
-    // built-in `deepseek` provider, and DeepSeek's own release notes name
-    // OpenCode as an integration target.
+    // pointed at it. Which of OpenCode's two routes to the same model matters:
     //
-    // The other route — Claude Code with ANTHROPIC_BASE_URL aimed at
+    // The `deepseek/` provider wants a DeepSeek API key. Without one the pane
+    // opens and dies on the first message, and a built-in whose whole job is to
+    // work when someone is handed a copy cannot ask for a key first.
+    //
+    // The `opencode/` provider is OpenCode Zen, which serves this model free and
+    // answers with zero credentials configured. It costs a free tier's usual
+    // fragility — rate limits, and no promise it stays free — but a rate limit
+    // is a bad afternoon and a missing key is a dead profile.
+    //
+    // The third route — Claude Code with ANTHROPIC_BASE_URL aimed at
     // api.deepseek.com/anthropic — does work, but Anthropic's gateway docs say
     // plainly that routing Claude Code to non-Claude models is not supported.
     // An agent that breaks on somebody else's release day is not a built-in.
-    command: 'opencode -m deepseek/deepseek-v4-flash',
+    command: 'opencode -m opencode/deepseek-v4-flash-free',
     accent: '#FFB347',
     badge: 'DS',
     builtin: true,
