@@ -94,14 +94,35 @@ The APK lives at
 2. Tap the download. Android will refuse the first time and offer a settings
    screen — allow your browser to install unknown apps, then tap it again. This
    is the normal price of an app that does not come from a store.
-3. Open **Forge** on the phone.
-4. On the desktop, **Settings › Forge Mobile › Pair a phone**. It shows a QR
-   that carries the address and the code together — scan it from the phone.
-   No camera? The same two values are printed under the QR: type the
-   **Desktop address** and the pairing code into the phone's two fields.
+3. On the desktop, **Settings › Forge Mobile**, flick **Accept new phones**.
+4. Open **Forge** on the phone and tap **Connect**. It shows two words, large —
+   say, `OTTER RIVER`.
+5. Your desktop asks whether to allow a phone that *should be showing those two
+   words*. Check they match, then **Allow**.
+
+Nothing is typed and nothing is read off a screen, because the APK was built on
+this machine and ships already knowing this desktop's address.
+
+**Compare the words.** That is the whole check. The desktop is on the public
+internet while the tunnel is up, so anyone who found the address could ring the
+doorbell — but only the phone in your hand knows which words it is showing. A
+prompt whose words do not match yours is somebody else, and the answer is Deny.
+
+**"Accept new phones" disarms itself after ten minutes**, and is off the rest of
+the time. Unarmed, a stranger's request is refused exactly like any other
+unpaired phone — no prompt appears at all, so there is nothing to mis-tap.
+
+### If that does not suit
+
+Both older routes are still there, under **Other ways to connect** on the phone:
+
+- **Scan a QR** — the desktop's *Pair a phone* button shows one carrying the
+  address and a single-use code. This is the answer for a second desktop, or an
+  APK built somewhere else.
+- **Type it** — the **Desktop address** and the code, printed under the QR.
 
 Either way, that is the last time the phone is told an address. It stores a
-256-bit device token and the URL, and reconnects on its own from then on.
+256-bit device token, and reconnects on its own from then on.
 
 ### Updating it afterwards
 

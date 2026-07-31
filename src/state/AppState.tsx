@@ -27,7 +27,7 @@ import type {
   Workspace,
   WorkspaceViewMode
 } from '@shared/types'
-import { BUILTIN_AGENT_PROFILES, TAB_TEXT_PALETTE, isShellProfile } from '@shared/agents'
+import { BUILTIN_AGENT_PROFILES, TAB_TEXT_PALETTE, isPermissionMode, isShellProfile } from '@shared/agents'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
 import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
@@ -190,6 +190,7 @@ const FALLBACK_SETTINGS: Settings = {
   mobilePort: MOBILE_PORT,
   mobileBindHost: '0.0.0.0',
   mobileDevices: [],
+  mobileAcceptUntil: 0,
   mobileTunnel: 'off',
   mobileNgrokAuthtoken: '',
   mobileNgrokDomain: '',
@@ -1347,10 +1348,16 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       // cannot see. Refusing here is what turns it into an answer.
       const atLimit = totalPanes(state) >= MAX_SESSIONS
 
+      // The phone's chooser sends a permission mode alongside the profile. It
+      // is wire data, so it is *checked*, never cast: anything that is not one
+      // of the four modes falls back to undefined, which means "whatever the
+      // profile says" — exactly what a phone that never sent the field gets.
+      const mode = isPermissionMode(op.permissionMode) ? op.permissionMode : undefined
+
       switch (op.op) {
         case 'create-tab':
           if (atLimit) return answer(`Forge is at its ${MAX_SESSIONS}-session limit.`)
-          actions.newTab(op.profileId ?? project.defaultProfileId)
+          actions.newTab(op.profileId ?? project.defaultProfileId, mode)
           return answer()
         case 'select-tab':
           if (!op.tabId) return answer('No tab named.')
@@ -1362,7 +1369,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId)
           const paneId = op.paneId ?? activeTab?.activePaneId
           if (!paneId) return answer('There is no pane open to split.')
-          actions.splitPane(paneId, 'row', op.profileId ?? project.defaultProfileId)
+          actions.splitPane(paneId, 'row', op.profileId ?? project.defaultProfileId, mode)
           return answer()
         }
         case 'close-pane':

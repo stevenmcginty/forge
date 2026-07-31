@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { BUILTIN_AGENT_PROFILES, inferKind, isClaudeCommand, isPermissionMode } from '@shared/agents'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
-import { MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
+import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
 import type {
   AgentProfile,
   MobileDeviceRecord,
@@ -189,6 +189,9 @@ function defaultSettings(): Settings {
     mobilePort: MOBILE_PORT,
     mobileBindHost: '0.0.0.0',
     mobileDevices: [],
+    // "Accept new phones" is disarmed. 0 rather than false because the armed
+    // state is a deadline, not a switch — see the note in shared/types.ts.
+    mobileAcceptUntil: 0,
     // The ngrok tunnel: off, and holding no account material, until Steve does
     // the one-time setup in Settings › Forge Mobile. See mobile-tunnel.ts.
     mobileTunnel: 'off',
@@ -479,6 +482,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     mobilePort: clamp(Number(s.mobilePort ?? MOBILE_PORT), 1024, 65535),
     mobileBindHost: str(s.mobileBindHost) || DEFAULT_SETTINGS.mobileBindHost,
     mobileDevices: mobileDevices(s.mobileDevices),
+    mobileAcceptUntil: acceptUntil(s.mobileAcceptUntil),
     // The domain is shape-checked, not just trimmed: it ends up on ngrok's
     // command line, and a junk value degrading to '' (tunnel refuses to start
     // with a sentence) beats a junk value degrading to an argument.
@@ -530,6 +534,22 @@ function mobileDevices(raw: unknown): MobileDeviceRecord[] {
 
 function clamp(n: number, lo: number, hi: number): number {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : lo
+}
+
+/**
+ * The "Accept new phones" deadline, made safe off disk.
+ *
+ * Two rules, both about the same failure: this timestamp is the only thing
+ * standing between "nobody can summon a pairing prompt" and "anyone who finds
+ * the tunnel can". A deadline in the past is dead and reads back as 0 — so a
+ * window armed before a crash does not quietly reopen days later. And a
+ * deadline further out than one window from *now* is clamped, so a hand-edited
+ * (or corrupted) file cannot arm the desktop for a week.
+ */
+function acceptUntil(raw: unknown): number {
+  const until = Number(raw ?? 0)
+  if (!Number.isFinite(until) || until <= Date.now()) return 0
+  return Math.min(until, Date.now() + ACCEPT_WINDOW_MS)
 }
 
 /** The voice hub's saved placement, made safe. See src/lib/voicehub.ts. */

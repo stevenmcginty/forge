@@ -1,6 +1,8 @@
-import type { LayoutNode, PaneLeaf, Project, Workspace } from '@shared/types'
+import { useState } from 'react'
+import type { ClaudePermissionMode, LayoutNode, PaneLeaf, Project, Workspace } from '@shared/types'
 import type { MobileSession } from '@shared/mobile'
 import type { LinkPicture } from '../lib/link'
+import { NewTabSheet } from './NewTab'
 
 /**
  * Projects → tabs → panes: the phone's way into the desktop.
@@ -24,7 +26,8 @@ export interface BrowserProps {
   projectId: string | null
   onOpenProject: (projectId: string) => void
   onOpenPane: (session: MobileSession, title: string) => void
-  onNewTab: (projectId: string) => void
+  /** The chooser has already decided both of these; the caller only sends them. */
+  onNewTab: (projectId: string, profileId: string, permissionMode?: ClaudePermissionMode) => void
   onBack: () => void
 }
 
@@ -36,6 +39,9 @@ export function Browser({
   onNewTab,
   onBack
 }: BrowserProps): React.JSX.Element {
+  // Declared above the project-list branch below, because a hook cannot live
+  // after an early return.
+  const [choosing, setChoosing] = useState(false)
   const project = picture.projects.find((p) => p.id === projectId) ?? null
 
   if (!project) {
@@ -114,10 +120,22 @@ export function Browser({
       </ul>
 
       <div className="screen-foot">
-        <button type="button" className="primary" onClick={() => onNewTab(project.id)}>
+        <button type="button" className="primary" onClick={() => setChoosing(true)}>
           New tab
         </button>
       </div>
+
+      {choosing && (
+        <NewTabSheet
+          project={project}
+          profiles={picture.profiles}
+          onCancel={() => setChoosing(false)}
+          onOpen={(profileId, permissionMode) => {
+            setChoosing(false)
+            onNewTab(project.id, profileId, permissionMode)
+          }}
+        />
+      )}
     </div>
   )
 }

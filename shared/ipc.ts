@@ -122,6 +122,21 @@ export const IPC = {
   mobilePairCancel: 'mobile:pair-cancel',
   mobileRevoke: 'mobile:revoke',
   /**
+   * Arm or disarm "Accept new phones" — the tap-to-pair window. Arming writes
+   * `mobileAcceptUntil` and the window closes itself; the resulting deadline
+   * rides mobileStatusEvent like everything else here.
+   */
+  mobileAccept: 'mobile:accept',
+  /**
+   * A phone is asking to pair. Main → renderer, carrying the word pair the
+   * phone is showing; the renderer raises the prompt and answers with
+   * `mobileApprovalResult`. The prompt replaces the typing, not the
+   * authorisation — nothing is minted until the answer says allow.
+   */
+  mobileApproval: 'mobile:approval',
+  /** The renderer's verdict on a mobileApproval. Absence of an answer is a deny. */
+  mobileApprovalResult: 'mobile:approval-result',
+  /**
    * A layout operation arriving from a phone. Main → renderer, because the
    * renderer owns tabs and panes and persists them; the phone must take the
    * same code path a local click takes, not a second one that can disagree.

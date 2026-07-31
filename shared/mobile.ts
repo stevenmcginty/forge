@@ -80,6 +80,60 @@ export const HEARTBEAT_GRACE_MS = 10_000
 export const AUTH_MAX_FAILURES = 5
 export const AUTH_LOCKOUT_MS = 60_000
 
+/**
+ * How long "Accept new phones" stays armed before disarming itself.
+ *
+ * A switch that stays on is a switch that is on forever, because nobody
+ * remembers to turn it off — and left on, the desktop will raise a prompt for
+ * anyone on the internet who finds the tunnel. Ten minutes is longer than
+ * setting up a phone takes and shorter than an afternoon.
+ */
+export const ACCEPT_WINDOW_MS = 10 * 60_000
+
+/**
+ * How long a phone waits at the "showing OTTER RIVER" screen before giving up.
+ *
+ * Bounded because the socket is held open and unauthenticated for the whole
+ * duration: an approval nobody is standing next to must not pin a connection
+ * open until the process restarts.
+ */
+export const APPROVAL_TIMEOUT_MS = 2 * 60_000
+
+/**
+ * The word pair shown on both screens during approval.
+ *
+ * Short, concrete, unambiguous when read aloud, and deliberately free of words
+ * that look alike on a phone screen at arm's length. 64 words is 4096 pairs —
+ * not a secret, and not trying to be. Its job is to make "the prompt in front
+ * of me belongs to the phone in my hand" checkable at a glance, which is a
+ * comparison a human will actually perform. A 6-digit code is not.
+ */
+export const PAIR_WORDS = [
+  'otter', 'river', 'copper', 'lantern', 'meadow', 'anchor', 'velvet', 'cobalt',
+  'harbour', 'thistle', 'ember', 'quarry', 'saffron', 'walnut', 'beacon', 'marble',
+  'cinder', 'gallop', 'pewter', 'orchard', 'tundra', 'basalt', 'nectar', 'plover',
+  'sable', 'trellis', 'juniper', 'kettle', 'lagoon', 'mantle', 'nutmeg', 'oyster',
+  'pelican', 'quiver', 'rafter', 'sorrel', 'tinder', 'umber', 'vellum', 'willow',
+  'zephyr', 'bramble', 'cedar', 'dapple', 'elder', 'fathom', 'granite', 'hollow',
+  'indigo', 'jasper', 'kelp', 'linnet', 'mallow', 'nimbus', 'onyx', 'pumice',
+  'quince', 'rowan', 'sienna', 'teasel', 'upland', 'verbena', 'wicker', 'yarrow'
+] as const
+
+/**
+ * Pick a word pair from bytes.
+ *
+ * Takes the randomness rather than making it, so the caller stays the one
+ * place that decides where entropy comes from — `node:crypto` on the desktop,
+ * `crypto.getRandomValues` on the phone — and so this file stays free of both.
+ * Needs two bytes; anything shorter is padded rather than throwing, because a
+ * frame this is rendering into is not a place to fail.
+ */
+export function wordPair(bytes: ArrayLike<number>): string {
+  const first = PAIR_WORDS[(bytes[0] ?? 0) % PAIR_WORDS.length]
+  const second = PAIR_WORDS[(bytes[1] ?? 1) % PAIR_WORDS.length]
+  return `${first} ${second}`.toUpperCase()
+}
+
 /* ------------------------------------------------------------ client frames */
 
 /** First frame on every connection. No frame before it is honoured. */
@@ -92,6 +146,21 @@ export interface HelloFrame {
   token?: string
   /** Human name shown in Settings' device list. */
   deviceName?: string
+  /**
+   * "I have no credential — ask Steve whether to let me in."
+   *
+   * The alternative to reading a code off one screen and typing it into
+   * another. A phone that knows where the desktop is (the APK is stamped with
+   * it at build time) but holds no token sets this, and the desktop answers
+   * with `awaiting-approval` while a prompt goes up on its own screen.
+   *
+   * **This is not a way in.** The desktop refuses it outright unless Steve has
+   * armed it, and even armed it mints nothing until he taps Allow. What the
+   * flag removes is the typing, not the authorisation — possession of the
+   * desktop is still the whole trust root, exactly as it is for a pairing
+   * code. See ACCEPT_WINDOW_MS.
+   */
+  requestPair?: boolean
 }
 
 /** Subscribe to a session's output. Answered with `replay`, then live `data`. */
@@ -137,6 +206,14 @@ export interface OpFrame {
   op: 'create-tab' | 'create-pane' | 'close-pane' | 'select-tab'
   projectId: string
   profileId?: string
+  /**
+   * Per-open Claude permission mode, the same override the desktop's
+   * AgentChooser sets. Typed as a plain string on purpose: this arrives off the
+   * wire, so the renderer decides what it means by running it through
+   * `isPermissionMode` and dropping anything else. Optional, and an older
+   * desktop simply ignores it — which is why MOBILE_PROTO does not move.
+   */
+  permissionMode?: string
   tabId?: string
   paneId?: string
 }
@@ -229,8 +306,30 @@ export interface ErrFrame {
   msg: string
 }
 
+/**
+ * "Steve is being asked about you. Hold on."
+ *
+ * Sent instead of `hello-ok` when a phone asks to pair by approval. The socket
+ * stays open and unauthenticated until he answers — so the ten-second
+ * drop-if-no-hello rule in the server must not apply to a connection that is
+ * already waiting on a human.
+ *
+ * `words` is the anti-confusion device, and it is the only reason this is
+ * safe to leave facing the internet at all. The phone shows the pair in large
+ * type, the desktop shows the same pair in its prompt, and Steve is told to
+ * compare them. Without it, a stranger who guessed the ngrok hostname could
+ * make a prompt appear at the moment Steve happened to be pairing his own
+ * phone, and "Allow" would go to the wrong device. With it, that attack
+ * requires guessing the pair too.
+ */
+export interface AwaitingApprovalFrame {
+  t: 'awaiting-approval'
+  words: string
+}
+
 export type ServerFrame =
   | HelloOkFrame
+  | AwaitingApprovalFrame
   | ReplayFrame
   | DataFrame
   | ExitFrame

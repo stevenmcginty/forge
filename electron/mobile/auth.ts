@@ -168,7 +168,13 @@ export class MobileAuth {
     if (input.pairToken) return this.pair(input)
     if (input.token) return this.resume(input)
 
-    return this.fail(input.source, 'No credential presented')
+    // Also the answer an unarmed desktop gives to `requestPair` (server.ts
+    // ignores the flag when "Accept new phones" is off, so that hello lands
+    // here). The sentence is therefore written for both readers: a phone with
+    // no token learns the desktop is not accepting it right now, and a probe
+    // learns nothing it could not learn by omitting the flag — the two
+    // refusals are one refusal.
+    return this.fail(input.source, 'This phone is not paired, and the desktop is not accepting new phones right now.')
   }
 
   private pair(input: { source: string; deviceId: string; deviceName: string; pairToken?: string }): AuthResult {
@@ -181,11 +187,32 @@ export class MobileAuth {
     // Single-use: burn it before issuing anything, so even a re-entrant caller
     // cannot spend the same offer twice.
     this.pending = null
+    this.clearStrikes(input.source)
 
+    const { device, issuedToken } = this.mintDevice(input.deviceId, input.deviceName)
+    return { ok: true, device, issuedToken }
+  }
+
+  /**
+   * Mint a device credential and persist its hash — the one place a device
+   * token is ever created.
+   *
+   * Both doors end here: the code path (`pair()` above, once the offer is
+   * burned) and the approval path (server.ts, once Steve has tapped Allow).
+   * One routine rather than two similar ones, because two nearly-identical
+   * credential paths is how one of them quietly stops hashing — and because
+   * the phone must not be able to tell afterwards which door it came through.
+   *
+   * The authorisation happened before this was called; nothing here checks
+   * anything. What it guarantees is the invariant the rest of the app leans
+   * on: the raw token goes to the return value, and only its SHA-256 goes to
+   * `save`.
+   */
+  mintDevice(deviceId: string, deviceName: string): { device: MobileDevice; issuedToken: string } {
     const raw = newToken(TOKEN_BYTES)
     const device: MobileDevice = {
-      id: input.deviceId || newToken(8),
-      name: input.deviceName || 'Phone',
+      id: deviceId || newToken(8),
+      name: deviceName || 'Phone',
       tokenHash: sha256(raw),
       createdAt: this.now(),
       lastSeenAt: this.now()
@@ -195,8 +222,7 @@ export class MobileAuth {
     const devices = this.host.load().filter((d) => d.id !== device.id)
     devices.push(device)
     this.host.save(devices)
-    this.clearStrikes(input.source)
-    return { ok: true, device, issuedToken: raw }
+    return { device, issuedToken: raw }
   }
 
   private resume(input: { source: string; deviceId: string; token?: string }): AuthResult {

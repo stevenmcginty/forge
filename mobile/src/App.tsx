@@ -14,7 +14,22 @@ import { CURRENT_VERSION_NAME } from './lib/update'
  * One socket, three screens: connect → projects/tabs → a terminal. The Link is
  * built once and kept for the life of the app, because a phone that rebuilds
  * its socket on every render is a phone that never finishes connecting.
+ *
+ * The connect screen has two shapes. An APK built by scripts/apk-build.mjs is
+ * *stamped* with its desktop's tunnel address, so its first run is one button:
+ * Connect, then a word pair to approve at the desk — nothing typed, nothing
+ * read off a screen. The QR and typed paths stay behind "Other ways to
+ * connect", because they remain the whole story for an unstamped build, a
+ * second desktop, or a camera that will not cooperate.
  */
+
+/**
+ * The stamped desktop, normalised by the same `toOrigin` every other address
+ * source goes through — the stamp is trusted to be an origin, not proven to be
+ * one. '' (browser builds, unstamped APKs) simply means the one-tap screen
+ * never exists.
+ */
+const BAKED = toOrigin(__BAKED_ORIGIN__, MOBILE_PORT)
 
 type Screen = { at: 'browse'; projectId: string | null } | { at: 'pane'; session: MobileSession; title: string }
 
@@ -31,6 +46,19 @@ export function App(): React.JSX.Element {
   // on screen until it has been acted on or superseded.
   const [hint, setHint] = useState('')
   const [showUpdate, setShowUpdate] = useState(false)
+  // Mirrors the secure store, because readToken() is module state and React
+  // cannot see it change. What it decides: a stamped, unpaired APK gets the
+  // one-tap screen; everything else gets the form.
+  const [hasToken, setHasToken] = useState(() => readToken() !== '')
+  // "Other ways to connect" — the QR and typed paths, folded away rather than
+  // deleted on a stamped build. Sticky until the user leaves it, so a failed
+  // manual attempt does not bounce them back to the one-tap screen.
+  const [manual, setManual] = useState(false)
+  // Whether words were on screen this attempt. It is how a close after the
+  // prompt (Steve said no) reads differently from a close before it (the
+  // desktop is not accepting new phones) — the two need different sentences,
+  // and the desktop's close code alone does not distinguish them.
+  const [sawWords, setSawWords] = useState(false)
 
   // Built once. The callbacks below close over setState only, which React
   // guarantees is stable, so the Link never needs rebuilding.
@@ -40,6 +68,7 @@ export function App(): React.JSX.Element {
         onState: (next, why) => {
           setState(next)
           setDetail(why)
+          if (next === 'awaiting') setSawWords(true)
         },
         onPicture: setPicture,
         onData: (id, data, replay) => paneListeners.get(id)?.(data, replay),
@@ -49,7 +78,10 @@ export function App(): React.JSX.Element {
           // list that tells the truth.
           setScreen((current) => (current.at === 'pane' && current.session.id === id ? { at: 'browse', projectId: null } : current))
         },
-        onPaired: writeToken,
+        onPaired: (token) => {
+          writeToken(token)
+          setHasToken(true)
+        },
         onNotice: setNotice
       }),
     []
@@ -127,9 +159,29 @@ export function App(): React.JSX.Element {
     link.connect({ origin, token, deviceId: deviceId(), deviceName: deviceName() })
   }, [link])
 
+  /**
+   * The one-tap path. No code and no QR: an empty token makes the Link send
+   * `requestPair`, the desktop raises its prompt, and everything after that
+   * arrives as state — 'awaiting' with the words, then either a pairing or a
+   * sentence explaining why not.
+   */
+  const approve = useCallback((): void => {
+    setSawWords(false)
+    writeOrigin(BAKED)
+    setAddress(BAKED)
+    link.connect({ origin: BAKED, token: '', deviceId: deviceId(), deviceName: deviceName() })
+  }, [link])
+
+  /** Walk away from the waiting screen. The desktop's prompt times out on its own. */
+  const abandon = useCallback((): void => {
+    link.disconnect()
+    setSawWords(false)
+  }, [link])
+
   const forget = useCallback((): void => {
     link.disconnect()
     forgetToken()
+    setHasToken(false)
     setPicture(null)
     setScreen({ at: 'browse', projectId: null })
     setNotice('This phone is no longer paired.')
@@ -138,24 +190,47 @@ export function App(): React.JSX.Element {
   /* ------------------------------------------------------------- rendering */
 
   if (!picture) {
+    // A stamped, unpaired APK opens on one button. A paired phone that is
+    // merely reconnecting, an unstamped build, and anyone who chose "Other
+    // ways to connect" all get the form instead — a paired phone must never
+    // see a button that would ask the desktop to pair it again.
+    const oneTap = BAKED !== '' && !hasToken && !manual
     // The update sheet is reachable from here too, deliberately: if a bad
     // build ever ships, "the desktop is unreachable" must not also mean "the
     // fix is unreachable".
     return (
       <>
-        <Connect
-          state={state}
-          detail={detail}
-          address={address}
-          code={code}
-          notice={notice}
-          hint={hint}
-          onAddress={setAddress}
-          onCode={setCode}
-          onPair={pair}
-          onScan={() => void scan()}
-          onUpdate={() => setShowUpdate(true)}
-        />
+        {oneTap ? (
+          <FirstRun
+            state={state}
+            detail={detail}
+            sawWords={sawWords}
+            onConnect={approve}
+            onCancel={abandon}
+            onManual={() => {
+              // Leave any pending approval behind before showing the form —
+              // two simultaneous ways of asking is two prompts on the desktop.
+              abandon()
+              setManual(true)
+            }}
+            onUpdate={() => setShowUpdate(true)}
+          />
+        ) : (
+          <Connect
+            state={state}
+            detail={detail}
+            address={address}
+            code={code}
+            notice={notice}
+            hint={hint}
+            onAddress={setAddress}
+            onCode={setCode}
+            onPair={pair}
+            onScan={() => void scan()}
+            onUpdate={() => setShowUpdate(true)}
+            onOneTap={BAKED !== '' && !hasToken ? () => setManual(false) : undefined}
+          />
+        )}
         {showUpdate && <UpdateSheet onClose={() => setShowUpdate(false)} />}
       </>
     )
@@ -185,8 +260,8 @@ export function App(): React.JSX.Element {
           projectId={screen.projectId}
           onOpenProject={(projectId) => setScreen({ at: 'browse', projectId })}
           onOpenPane={(session, title) => setScreen({ at: 'pane', session, title })}
-          onNewTab={(projectId) => {
-            link.op({ op: 'create-tab', projectId })
+          onNewTab={(projectId, profileId, permissionMode) => {
+            link.op({ op: 'create-tab', projectId, profileId, ...(permissionMode ? { permissionMode } : {}) })
             setNotice('Asked the desktop for a new tab…')
           }}
           onBack={() => setScreen({ at: 'browse', projectId: null })}
@@ -232,6 +307,106 @@ function StatusStrip({
   )
 }
 
+/**
+ * The stamped APK's first run. One decision on screen at a time: a Connect
+ * button, then the word pair, then — only if something went wrong — a sentence
+ * saying exactly what and a way to try again.
+ *
+ * This is the screen Steve stares at wondering whether it worked, so every
+ * state says what happens next, and no state spins forever: the Link bounds
+ * the wait with APPROVAL_TIMEOUT_MS and reports 'expired' when nobody answers.
+ * Refusal, denial and expiry are all carried by words, never by colour alone.
+ */
+function FirstRun({
+  state,
+  detail,
+  sawWords,
+  onConnect,
+  onCancel,
+  onManual,
+  onUpdate
+}: {
+  state: LinkState
+  detail: string
+  sawWords: boolean
+  onConnect: () => void
+  onCancel: () => void
+  onManual: () => void
+  onUpdate: () => void
+}): React.JSX.Element {
+  if (state === 'awaiting') {
+    // The words arrive as one string and are shown exactly as sent — the
+    // desktop minted them; this screen only has to make them legible from
+    // arm's length while Steve looks across at the prompt.
+    const words = detail.split(' ')
+    return (
+      <div className="connect">
+        <p className="approve-title">Approve this on your desktop</p>
+        <div className="approve-words">
+          {/* Keyed by position, not by word: nothing stops the pair being the
+              same word twice, and a duplicate key would drop one of them. */}
+          {words.map((word, at) => (
+            <span key={at} className="approve-word">
+              {word}
+            </span>
+          ))}
+        </div>
+        <p className="connect-lead approve-lead">
+          Forge on your desktop is asking about this phone and showing the same two words. Check they
+          match, then choose <strong>Allow</strong> there. This screen moves on by itself.
+        </p>
+        <button type="button" className="ghost" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    )
+  }
+
+  const busy = state === 'connecting' || state === 'retrying'
+  // Three distinct endings, three distinct truths. `sawWords` is what tells a
+  // "no" after the prompt apart from a door that never opened.
+  let trouble = ''
+  let coach = ''
+  if (state === 'refused') {
+    if (sawWords) {
+      trouble = detail || 'The desktop said no to this phone.'
+      coach = 'If that was a mis-tap, Connect asks again with fresh words.'
+    } else {
+      trouble = detail || 'The desktop is not accepting new phones right now.'
+      coach = 'At the desk, flick "Accept new phones" under Settings › Forge Mobile, then tap Connect again.'
+    }
+  } else if (state === 'expired') {
+    trouble = detail || 'Nobody answered on the desktop, so those words have expired.'
+    coach = 'Tap Connect for a fresh pair when you are back at the desk.'
+  }
+
+  return (
+    <div className="connect">
+      <h1>Forge</h1>
+      <p className="connect-lead">
+        This app was built for your desktop and already knows its address. One tap asks it to let this
+        phone in — nothing to type, nothing to scan.
+      </p>
+      <button type="button" className="primary" disabled={busy} onClick={onConnect}>
+        {busy ? 'Reaching your desktop…' : 'Connect'}
+      </button>
+      {busy && detail && <p className="connect-detail">{detail}</p>}
+      {trouble && (
+        <>
+          <p className="connect-detail">{trouble}</p>
+          <p className="connect-lead">{coach}</p>
+        </>
+      )}
+      <button type="button" className="connect-version" onClick={onManual}>
+        Other ways to connect
+      </button>
+      <button type="button" className="connect-version" onClick={onUpdate}>
+        Forge Mobile v{CURRENT_VERSION_NAME} · check for updates
+      </button>
+    </div>
+  )
+}
+
 function Connect({
   state,
   detail,
@@ -243,7 +418,8 @@ function Connect({
   onCode,
   onPair,
   onScan,
-  onUpdate
+  onUpdate,
+  onOneTap
 }: {
   state: LinkState
   detail: string
@@ -256,6 +432,8 @@ function Connect({
   onPair: () => void
   onScan: () => void
   onUpdate: () => void
+  /** Present only on a stamped, unpaired build: the way back to one-tap connect. */
+  onOneTap?: () => void
 }): React.JSX.Element {
   const busy = state === 'connecting' || state === 'retrying'
   // The camera is the primary path where there is one (the APK); the browser
@@ -314,6 +492,12 @@ function Connect({
       </button>
 
       {(detail || notice) && <p className="connect-detail">{notice || detail}</p>}
+
+      {onOneTap && (
+        <button type="button" className="connect-version" onClick={onOneTap}>
+          Back to one-tap connect
+        </button>
+      )}
 
       <button type="button" className="connect-version" onClick={onUpdate}>
         Forge Mobile v{CURRENT_VERSION_NAME} · check for updates

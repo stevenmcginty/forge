@@ -2,12 +2,19 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, powerSaveBlocker } from 'electron'
+import { app, BrowserWindow, ipcMain, Notification, powerSaveBlocker } from 'electron'
 import { IPC } from '@shared/ipc'
-import { MOBILE_PORT, pairLink, type HelloOkFrame, type OpFrame } from '@shared/mobile'
-import type { MobileDeviceRecord, MobileStatus, MobileTunnelStatus, Settings } from '@shared/types'
+import {
+  ACCEPT_WINDOW_MS,
+  APPROVAL_TIMEOUT_MS,
+  MOBILE_PORT,
+  pairLink,
+  type HelloOkFrame,
+  type OpFrame
+} from '@shared/mobile'
+import type { MobileApprovalEvent, MobileDeviceRecord, MobileStatus, MobileTunnelStatus, Settings } from '@shared/types'
 import { MobileAuth, PAIR_TTL_MS } from './mobile/auth'
-import { MobileServer } from './mobile/server'
+import { MobileServer, type MobileApprovalAsk } from './mobile/server'
 import { NgrokTunnel, ensureNgrokExe, pairEndpoint, resolveNgrokExe } from './mobile-tunnel'
 import { addPtySink, getManager, getReplay } from './pty-host'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
@@ -29,6 +36,10 @@ import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from 
  *     answer. Tabs and panes are the renderer's to own — it holds the split
  *     tree and persists the workspace — so the phone joins that code path
  *     instead of growing a parallel one in main that could disagree with it.
+ *  4. Ask the human. When a credential-less phone requests to pair (and only
+ *     while "Accept new phones" is armed), the server's question becomes a
+ *     renderer prompt here, by the same request/response shape as the ops —
+ *     and every outcome that is not an explicit Allow is a deny.
  */
 
 let server: MobileServer | null = null
@@ -107,6 +118,7 @@ export function mobileStatus(): MobileStatus {
     addresses: address ? reachableAddresses() : [],
     devices: settings.mobileDevices,
     connected: server?.connectedCount ?? 0,
+    acceptUntil: armedUntil(),
     detail: lastDetail,
     tunnel: tunnelStatus
   }
@@ -151,6 +163,129 @@ async function dispatchOp(op: OpFrame, deviceName: string): Promise<string | nul
   })
 }
 
+/* ------------------------------------------------------ accept new phones
+ *
+ * The tap-to-pair window. Armed = `mobileAcceptUntil` holds a deadline in the
+ * future; the deadline is a *setting* so a Forge restarted mid-window stays
+ * armed for the remainder, and the store's normaliser zeroes anything stale
+ * or absurd on the way in. Two things enforce the window: the server reads
+ * `armedUntil()` on every requestPair (so disarming is instant), and the
+ * timer below zeroes the setting when the window lapses (so the Settings
+ * toggle visibly switches itself off rather than silently meaning nothing).
+ */
+
+let acceptTimer: NodeJS.Timeout | null = null
+
+function armedUntil(): number {
+  const until = getSettings().mobileAcceptUntil
+  return until > Date.now() ? until : 0
+}
+
+function syncAcceptTimer(): void {
+  if (acceptTimer) {
+    clearTimeout(acceptTimer)
+    acceptTimer = null
+  }
+  const until = armedUntil()
+  if (!until) return
+  // A short grace past the deadline, so the timer fires on the disarmed side
+  // of the comparison the server makes rather than racing it.
+  acceptTimer = setTimeout(() => {
+    acceptTimer = null
+    setSettings({ mobileAcceptUntil: 0 })
+    report('')
+  }, until - Date.now() + 250)
+}
+
+function disarmAccept(): void {
+  setSettings({ mobileAcceptUntil: 0 })
+  syncAcceptTimer()
+}
+
+/* ------------------------------------------------------- pairing approval
+ *
+ * The server asks; this turns the question into a renderer prompt and waits
+ * for the verdict — the same request/response-with-timeout shape as
+ * dispatchOp above, because two pending-map patterns in one file is one too
+ * many. The one rule that must survive every edit: **no path in here resolves
+ * true except an explicit Allow from the renderer.** Timeout is a deny. No
+ * window is a deny. Shutdown is a deny. A default-allow anywhere below would
+ * be the whole feature undone.
+ */
+
+interface PendingApproval {
+  resolve: (allow: boolean) => void
+  timer: NodeJS.Timeout
+}
+
+const pendingApprovals = new Map<string, PendingApproval>()
+
+/** The single exit: withdraw the prompt everywhere, then deliver the verdict. */
+function settleApproval(requestId: string, allow: boolean): void {
+  const pending = pendingApprovals.get(requestId)
+  if (!pending) return
+  pendingApprovals.delete(requestId)
+  clearTimeout(pending.timer)
+  // Every window hears the withdrawal, including the one that answered — a
+  // prompt left up in a second window would offer an Allow that lands on a
+  // question already closed.
+  broadcast(IPC.mobileApproval, {
+    requestId,
+    deviceName: '',
+    words: '',
+    open: false
+  } satisfies MobileApprovalEvent)
+  pending.resolve(allow)
+}
+
+function requestApproval(ask: MobileApprovalAsk): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => settleApproval(ask.requestId, false), APPROVAL_TIMEOUT_MS)
+    pendingApprovals.set(ask.requestId, { resolve, timer })
+    broadcast(IPC.mobileApproval, {
+      requestId: ask.requestId,
+      deviceName: ask.deviceName,
+      words: ask.words,
+      open: true
+    } satisfies MobileApprovalEvent)
+    notifyApproval(ask)
+  })
+}
+
+/** The server's "the phone hung up / the wait is over" — a deny like any other. */
+function cancelApproval(requestId: string): void {
+  settleApproval(requestId, false)
+}
+
+/**
+ * The out-of-window fallback: an OS notification when no Forge window is
+ * focused to show the prompt. It is a doorbell, not a control — it carries no
+ * buttons and can approve nothing; clicking it brings the app (and the real
+ * prompt, with the words to compare) to the front. If nobody comes, the
+ * approval times out as a deny, which is the only acceptable answer to an
+ * unattended question.
+ */
+function notifyApproval(ask: MobileApprovalAsk): void {
+  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+  if (windows.some((w) => w.isFocused())) return
+  if (!Notification.isSupported()) return
+  const note = new Notification({
+    title: 'A phone wants to connect to Forge',
+    body: `"${ask.deviceName}" is asking to pair. Its screen should be showing ${ask.words}. Open Forge to allow or deny.`
+  })
+  note.on('click', () => {
+    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    } else {
+      app.focus({ steal: true })
+    }
+  })
+  note.show()
+}
+
 /* ------------------------------------------------------------- lifecycle */
 
 async function start(): Promise<void> {
@@ -170,6 +305,9 @@ async function start(): Promise<void> {
     resize: (id, cols, rows) => getManager().resize(id, cols, rows),
     snapshot: () => snapshotForPhone(),
     dispatchOp,
+    acceptUntil: () => armedUntil(),
+    requestApproval,
+    cancelApproval,
     ...(mobileWebRoot() ? { webRoot: mobileWebRoot() } : {}),
     onPresence: (connected) => {
       if (connected > 0) holdBlocker()
@@ -207,12 +345,19 @@ async function start(): Promise<void> {
   })
 
   report('')
+  // A restart mid-window stays armed for the remainder — re-hang the disarm
+  // timer so the remainder still ends itself.
+  syncAcceptTimer()
   // The tunnel wants the server listening before it advertises a way in.
   void startTunnel()
 }
 
 async function stop(): Promise<void> {
   stopTunnel()
+  // Switching the link off disarms it too: "off" must mean off, not "off but
+  // primed to accept strangers the moment it is switched back on".
+  disarmAccept()
+  for (const requestId of [...pendingApprovals.keys()]) settleApproval(requestId, false)
   unsubscribePty?.()
   unsubscribePty = null
   releaseBlocker()
@@ -414,6 +559,27 @@ export function registerMobileHandlers(): void {
   })
 
   /**
+   * Arm or disarm "Accept new phones". Arming needs a listening server — an
+   * armed door on a stopped server would be a toggle that lies — and always
+   * arms for exactly one window from now; there is no "arm forever".
+   */
+  ipcMain.handle(IPC.mobileAccept, (_e, on: unknown): MobileStatus => {
+    if (on === true) {
+      if (!server) {
+        report('Turn the phone link on first.')
+        return mobileStatus()
+      }
+      setSettings({ mobileAcceptUntil: Date.now() + ACCEPT_WINDOW_MS })
+      syncAcceptTimer()
+      report('Accepting new phones — open the Forge app on the phone.')
+    } else {
+      disarmAccept()
+      report('')
+    }
+    return mobileStatus()
+  })
+
+  /**
    * Save tunnel credentials. A running tunnel is restarted under the new
    * identity — a corrected authtoken that only applies after the next reboot
    * is a support ticket from the future.
@@ -456,6 +622,15 @@ export function registerMobileHandlers(): void {
     return mobileStatus()
   })
 
+  /**
+   * The human's verdict on a pairing prompt. `=== true` twice over (here and
+   * in preload), because the difference between truthy and true is the
+   * difference between a paired stranger and none.
+   */
+  ipcMain.on(IPC.mobileApprovalResult, (_e, payload: { requestId?: string; allow?: boolean }) => {
+    settleApproval(String(payload?.requestId ?? ''), payload?.allow === true)
+  })
+
   /** The renderer's verdict on a `mobileCommand`. */
   ipcMain.on(IPC.mobileCommandResult, (_e, payload: { requestId?: string; error?: string }) => {
     const pending = pendingOps.get(String(payload?.requestId ?? ''))
@@ -486,6 +661,9 @@ export async function disposeMobile(): Promise<void> {
     pending.resolve('Forge is shutting down.')
   }
   pendingOps.clear()
+  // stop() below also settles these (as denies — shutdown is not consent),
+  // but dispose must not depend on stop being reached.
+  for (const requestId of [...pendingApprovals.keys()]) settleApproval(requestId, false)
   await stop()
 }
 

@@ -15,10 +15,11 @@ import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTon
  *   2. What do I type?     the reachable addresses, because `0.0.0.0` is not one
  *      — and, once, the ngrok card: paste the authtoken and the account's
  *      auto-assigned domain, and the answer becomes one URL, forever
- *   3. How do I pair?      a QR that carries the whole handshake, because the
- *      first attempt at this — read a 40-character wss URL off one card and a
- *      code off another, type both into a phone — confused the only user it
- *      has. The text stays underneath as the no-camera fallback.
+ *   3. How do I pair?      "Accept new phones" first — arm it, open the app on
+ *      the phone, tap Allow on the prompt that appears here. Nothing typed,
+ *      nothing read off a screen; the tap replaces the code, not the
+ *      authorisation. The QR card stays below it as the fallback for a phone
+ *      that has no stamped address (a browser, an old build).
  *   4. Which phones?       the device list, and the button that removes one
  *
  * One naming rule, learned the hard way: the phone's field is called
@@ -42,6 +43,11 @@ function secondsLeft(expiresAt: number, now: number): number {
   return Math.max(0, Math.ceil((expiresAt - now) / 1000))
 }
 
+/** `9:42` — the accept window is minutes long, so seconds alone would mislead. */
+function countdown(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
 export function MobileSection(): ReactNode {
   const { state, actions } = useApp()
   const [status, setStatus] = useState<MobileStatus | null>(null)
@@ -58,13 +64,28 @@ export function MobileSection(): ReactNode {
     return window.forge.mobile.onStatus(setStatus)
   }, [])
 
-  // Only ticks while a code is on screen — there is nothing else on this page
-  // that changes second by second.
+  // Two countdowns share this clock: the pairing code's TTL and the accept
+  // window. When the window lapses, `armed` flips false and the tick stops.
+  const acceptUntil = status?.acceptUntil ?? 0
+  const armed = acceptUntil > now
+
+  // Main owns `mobileAcceptUntil` (it arms, disarms, and expires it), but the
+  // renderer's debounced full-object settings save would write a stale copy
+  // straight back over it — the same hazard the tunnel fields dodge with
+  // patchSettings below. Mirror what main reports, so a manual disarm cannot
+  // be silently re-armed by an unrelated settings change a moment later.
   useEffect(() => {
-    if (!offer) return
+    if (status && state.settings.mobileAcceptUntil !== status.acceptUntil) {
+      actions.patchSettings({ mobileAcceptUntil: status.acceptUntil })
+    }
+  }, [status, state.settings.mobileAcceptUntil, actions])
+
+  // Only ticks while something on this page changes second by second.
+  useEffect(() => {
+    if (!offer && !armed) return
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [offer])
+  }, [offer, armed])
 
   // A code that has expired is worse than no code: it looks usable and is not.
   useEffect(() => {
@@ -110,6 +131,12 @@ export function MobileSection(): ReactNode {
     } finally {
       setBusy(false)
     }
+  }, [])
+
+  const toggleAccept = useCallback(async (on: boolean) => {
+    setError('')
+    setNow(Date.now())
+    setStatus(await window.forge.mobile.setAccept(on))
   }, [])
 
   const pair = useCallback(async () => {
@@ -316,6 +343,37 @@ export function MobileSection(): ReactNode {
           </p>
         )}
       </Card>
+
+      {status.state === 'listening' && (
+        <Card
+          title="Accept new phones"
+          actions={
+            /* The chip says "Accepting" and counts down — state carried in
+               words and numbers, with the tone as reinforcement only. */
+            <StateChip tone={armed ? 'ok' : 'off'}>
+              {armed ? (
+                <>
+                  Accepting · <span className="mobile-accept__left">{countdown(secondsLeft(acceptUntil, now))}</span>
+                </>
+              ) : (
+                'Off'
+              )}
+            </StateChip>
+          }
+          hint={
+            armed
+              ? 'Open the Forge app on the phone. It connects and shows two words; a prompt appears on this screen with the same words. Nothing pairs until you press Allow on that prompt.'
+              : 'The no-typing way to pair. While this is on, a phone running the Forge app can ask to connect — each one still needs your Allow on a prompt here, so switching it on pairs nothing by itself.'
+          }
+        >
+          <Row
+            label="Accept new phones"
+            hint={armed ? 'On — it switches itself off when the countdown ends.' : 'Arms for ten minutes, then switches itself off.'}
+          >
+            <Toggle checked={armed} onChange={(on) => void toggleAccept(on)} label="Accept new phones" />
+          </Row>
+        </Card>
+      )}
 
       {status.state === 'listening' && (
         <Card

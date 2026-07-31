@@ -1,0 +1,120 @@
+/*
+ * The pairing prompt. Same scrim-and-capsule family as Onboarding — this is a
+ * question the whole app stops for, not a toast — and one notch above the
+ * toast layer so nothing the app draws can sit over an authorisation decision.
+ */
+
+.approval {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-toast) + 1);
+  display: grid;
+  place-items: center;
+  padding: var(--s-8);
+  background: var(--bg-scrim);
+  backdrop-filter: blur(3px);
+  animation: approval-in var(--dur-med) var(--ease-out);
+}
+
+@keyframes approval-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.approval__card {
+  width: min(440px, 100%);
+  padding: var(--s-8);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+
+.approval__eyebrow {
+  color: var(--text-dim);
+}
+
+.approval__title {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-display);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+}
+
+.approval__body {
+  margin: var(--s-5) 0 0;
+  font-size: var(--t-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.approval__name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/*
+ * The word pair, at the size of the decision it carries. Large type is the
+ * feature: the check is "do these match the phone in my hand", and it has to
+ * be readable from wherever the phone is being held.
+ */
+.approval__words {
+  margin: var(--s-6) 0;
+  padding: var(--s-6) var(--s-4);
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-primary);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-lg);
+}
+
+.approval__grant {
+  margin: 0;
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.approval__actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--s-4);
+  margin-top: var(--s-7);
+}
+
+/*
+ * Deny is the plain button and holds default focus; Allow is the accented one
+ * and spells out what it does. Told apart by position and wording, never by a
+ * red/green pair — see the component note.
+ */
+.approval__deny {
+  min-width: 110px;
+  height: 32px;
+  padding: 0 var(--s-6);
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
+
+.approval__deny:hover {
+  color: var(--text-primary);
+  border-color: var(--line-soft);
+}
+
+.approval__deny:focus-visible {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+.approval__allow {
+  height: 32px;
+}

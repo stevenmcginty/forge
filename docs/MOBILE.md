@@ -56,7 +56,7 @@ is left exactly as it was.
 | `mobile/native/*.kt` | The updater's native half, kept here as the source of truth and copied into the android tree; `apk:check` fails if the two drift. |
 | `mobile/version.json` | The one place a version number is written. Vite defines and `build.gradle` are both stamped from it, so web and native cannot disagree. |
 | `src/components/settings/MobileSection.tsx` | Settings › Forge Mobile: the switch, the address, the tunnel, pairing, devices. |
-| `scripts/mobile-smoke.mjs` | 43 checks against the real server, real auth, real PTY, real socket. |
+| `scripts/mobile-smoke.mjs` | 62 checks against the real server, real auth, real PTY, real socket — including the whole approval handshake. |
 | `scripts/apk-*.mjs` | Init, build, publish, check. Signing keys live outside the repo — see below. |
 
 `companion/`'s protocol lives in two hand-kept files and its README lists that
@@ -187,6 +187,28 @@ network posture defends the fact that the port exists at all.
    **5-minute TTL**, shown as a QR on the desktop screen — possession of the
    screen is the trust root. The phone exchanges it once for a 256-bit device
    token.
+3a. **Approval pairing keeps that trust root and drops the typing.** A phone
+   whose APK was stamped with this desktop's address can ask to be let in
+   (`requestPair`) instead of carrying a code. What it gets is not entry: the
+   desktop refuses outright unless Steve has armed **Accept new phones** — which
+   self-disarms after ten minutes — and even armed it mints nothing until he
+   taps Allow. Refused, the answer is byte-identical to any other unpaired
+   phone's, so the flag cannot be used to probe whether the feature exists.
+
+   The **word pair** shown on both screens is what makes the tap safe. With the
+   tunnel up the doorbell faces the internet, so a stranger who found the
+   address can ring it while it is armed; what they cannot do is guess which two
+   words the phone in Steve's hand is displaying. Mismatch means Deny.
+
+   Two limits exist because a prompt is a thing a human clicks without reading:
+   **at most one approval pending**, and **at most one prompt per 60 seconds**.
+   And every path that is not an explicit Allow — timeout, no window, shutdown,
+   the phone hanging up — resolves to *deny*. The OS notification is a doorbell
+   with no buttons: it can only bring the real prompt to the front.
+
+   Both routes mint through the same `mintDevice`, so an approved phone is
+   indistinguishable from a coded one afterwards, and the only-hashes-persist
+   invariant lives in one routine rather than two that might drift.
 4. **Only hashes on disk.** `settings.json` holds SHA-256 of each device token
    and never the token. The smoke test records everything ever handed to
    persistence and fails if the raw token appears in any of it.
@@ -267,7 +289,7 @@ goes back to being ephemeral.
 ## Checking it
 
 ```
-npm run mobile:smoke    # 43 checks: the address rules, pairing expiry and
+npm run mobile:smoke    # 62 checks: the address rules, pairing expiry and
                         # lockout release on a fake clock, refusal, pairing
                         # over the wire, replay-before-live, a real keystroke
                         # into a real pwsh and back, resize, late subscribers,

@@ -1,8 +1,10 @@
+import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join, normalize, sep } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import {
+  APPROVAL_TIMEOUT_MS,
   HEARTBEAT_GRACE_MS,
   HEARTBEAT_MS,
   MAX_WRITE_CHARS,
@@ -11,6 +13,7 @@ import {
   parseFrame,
   wireDim,
   wireString,
+  wordPair,
   type ClientFrame,
   type MobileSession,
   type OpFrame,
@@ -74,9 +77,55 @@ export interface MobileServerHost {
    */
   onPresence?: (connected: number) => void
 
+  /* ------------------------------------------------- pairing by approval
+   *
+   * The tap-to-pair flow: a phone with no credential asks, a prompt goes up
+   * on the desktop, and Steve's tap replaces the typed code — it does not
+   * replace the authorisation. All four hooks are optional; a host that
+   * provides none of them simply has no approval door at all.
+   */
+
+  /**
+   * When "Accept new phones" disarms itself (ms epoch), 0 when it is not
+   * armed. Read on every `requestPair`, so disarming takes effect on the very
+   * next hello rather than whenever a timer happens to fire.
+   */
+  acceptUntil?: () => number
+  /**
+   * Put the question to the human, and resolve with the verdict. The server
+   * treats a rejection exactly like a false — every path that is not an
+   * explicit allow is a deny.
+   */
+  requestApproval?: (ask: MobileApprovalAsk) => Promise<boolean>
+  /**
+   * The question is moot — the phone hung up or the wait timed out. The host
+   * takes the prompt down; a prompt that outlives its socket is one whose
+   * Allow lands on nothing.
+   */
+  cancelApproval?: (requestId: string) => void
+
+  /**
+   * Injected so the smoke test can drive a fake clock (arming expiry, the
+   * prompt cooldown) and real-but-short timers (the approval wait) without
+   * sleeping through the production values. Defaults are the shipped ones.
+   */
+  now?: () => number
+  approvalTimeoutMs?: number
+  promptCooldownMs?: number
+
   /** Where the phone bundle lives on disk. Static hosting is off when absent. */
   webRoot?: string
   log?: (line: string) => void
+}
+
+/** What the desktop prompt needs to ask a human the question. */
+export interface MobileApprovalAsk {
+  requestId: string
+  deviceId: string
+  /** What the phone calls itself. Untrusted text — display it, never obey it. */
+  deviceName: string
+  /** The pair both screens show, e.g. "OTTER RIVER". */
+  words: string
 }
 
 export interface MobileServerOptions {
@@ -90,7 +139,33 @@ interface Client {
   device: MobileDevice | null
   subs: Set<string>
   alive: boolean
+  /** Set while a human is being asked about this socket. See beginApproval. */
+  approval: ApprovalWait | null
 }
+
+interface ApprovalWait {
+  requestId: string
+  /** Captured at hello time, so the mint on Allow needs nothing off the wire. */
+  deviceId: string
+  deviceName: string
+  /** Closes the socket if nobody answers. See APPROVAL_TIMEOUT_MS. */
+  timer: NodeJS.Timeout
+  /**
+   * The wait has exactly one outcome, whichever of allow / deny / timeout /
+   * hangup arrives first. Everything that can settle it checks this flag, so
+   * a timeout racing a tap can never mint after a close — or close after a
+   * mint.
+   */
+  settled: boolean
+}
+
+/**
+ * Floor between approval prompts, sharing a rationale with the single-pending
+ * rule below: a script must not be able to queue a thousand prompts so that
+ * Steve taps Allow on one by accident. Prompt fatigue is how people get owned,
+ * and one prompt a minute is slower than anyone fatigues.
+ */
+const PROMPT_COOLDOWN_MS = 60_000
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -105,14 +180,23 @@ const MIME: Record<string, string> = {
 
 export class MobileServer {
   private readonly host: MobileServerHost
+  private readonly now: () => number
   private http: Server | null = null
   private wss: WebSocketServer | null = null
   private clients = new Set<Client>()
   private heartbeat: NodeJS.Timeout | null = null
   private listening: { host: string; port: number } | null = null
+  /**
+   * At most one approval in flight, ever. The second phone to ask while one is
+   * pending is refused before any prompt exists — see beginApproval.
+   */
+  private pendingApproval: Client | null = null
+  /** When the last prompt was raised, for PROMPT_COOLDOWN_MS. */
+  private lastPromptAt = 0
 
   constructor(host: MobileServerHost) {
     this.host = host
+    this.now = host.now ?? ((): number => Date.now())
   }
 
   get connectedCount(): number {
@@ -208,12 +292,15 @@ export class MobileServer {
   /* --------------------------------------------------------------- inbound */
 
   private accept(socket: WebSocket, source: string): void {
-    const client: Client = { socket, source, device: null, subs: new Set(), alive: true }
+    const client: Client = { socket, source, device: null, subs: new Set(), alive: true, approval: null }
     this.clients.add(client)
 
-    // An unauthenticated socket is not allowed to sit there holding a slot.
+    // An unauthenticated socket is not allowed to sit there holding a slot —
+    // with one exception: a socket *waiting on a human* has said its hello and
+    // must not be cut off mid-question. It is not immortal either; its own
+    // wait is bounded by APPROVAL_TIMEOUT_MS in beginApproval.
     const helloTimer = setTimeout(() => {
-      if (!client.device) this.drop(client, 4001, 'No hello')
+      if (!client.device && !client.approval) this.drop(client, 4001, 'No hello')
     }, HEARTBEAT_GRACE_MS)
 
     socket.on('message', (raw) => {
@@ -230,6 +317,10 @@ export class MobileServer {
     socket.on('close', () => {
       clearTimeout(helloTimer)
       this.clients.delete(client)
+      // A phone that hangs up mid-approval takes its question with it — the
+      // desktop prompt is withdrawn, or Steve would be left approving a socket
+      // that no longer exists (and priming an Allow for the next asker).
+      this.abandonApproval(client)
       if (client.device) {
         this.log(`${client.device.name} disconnected`)
         this.host.onPresence?.(this.connectedCount)
@@ -241,10 +332,18 @@ export class MobileServer {
   private async handle(client: Client, frame: ClientFrame): Promise<void> {
     if (frame.t === 'hello') return this.onHello(client, frame)
 
-    // Everything below this line requires authentication. No exceptions, and
-    // the check is here rather than in each handler so a new frame type cannot
-    // be added without one.
+    // Everything below this line requires authentication — with one carve-out.
+    // A socket waiting on approval is unauthenticated by definition, but the
+    // phone pings every ~15 seconds through the wait to keep the link warm;
+    // hanging up on that ping would make the phone reconnect and ask again,
+    // minting *fresh words* while Steve is still comparing the old ones. So a
+    // waiting socket may ping, and nothing else. The blanket drop stays here
+    // rather than in each handler so a new frame type cannot arrive without it.
     if (!client.device) {
+      if (frame.t === 'ping' && client.approval) {
+        this.send(client, { t: 'pong' })
+        return
+      }
       this.drop(client, 4001, 'Not authenticated')
       return
     }
@@ -299,7 +398,7 @@ export class MobileServer {
   }
 
   private onHello(client: Client, frame: Extract<ClientFrame, { t: 'hello' }>): void {
-    if (client.device) return // one hello per socket
+    if (client.device || client.approval) return // one hello per socket
 
     if (Number(frame.proto) !== MOBILE_PROTO) {
       this.send(client, {
@@ -312,6 +411,19 @@ export class MobileServer {
     }
 
     const token = wireString(frame.token, 512)
+
+    // Pairing by approval — only for a hello with no credential at all, and
+    // only while "Accept new phones" is armed. When it is not armed (the
+    // default state, and the common one), the flag is *ignored* rather than
+    // answered: the hello falls through to the ordinary no-credential refusal
+    // below, indistinguishable from one that never carried the flag. Anyone
+    // probing the tunnel hostname learns nothing about whether this door
+    // exists, and — the point — cannot make prompts appear on Steve's screen.
+    if (frame.requestPair === true && !token && this.acceptingPairs()) {
+      this.beginApproval(client, frame)
+      return
+    }
+
     const result = this.host.auth.authenticate({
       source: client.source,
       deviceId: wireString(frame.deviceId, 128),
@@ -330,20 +442,128 @@ export class MobileServer {
       return
     }
 
-    client.device = result.device
+    this.welcome(client, result.device, result.issuedToken)
+  }
+
+  /**
+   * The single successful ending to a hello, whichever door it came through —
+   * a stored token, the QR code, or a tapped Allow. One routine on purpose:
+   * the phone must not be able to tell the routes apart afterwards, and a
+   * shared ending is what makes that a structural fact rather than a hope.
+   */
+  private welcome(client: Client, device: MobileDevice, issuedToken?: string): void {
+    client.device = device
     const snapshot = this.host.snapshot()
-    this.log(`${result.device.name} connected from ${client.source}`)
+    this.log(`${device.name} connected from ${client.source}`)
     this.send(client, {
       t: 'hello-ok',
       proto: MOBILE_PROTO,
       appVersion: this.host.appVersion,
-      deviceName: result.device.name,
+      deviceName: device.name,
       sessions: this.host.sessions(),
       ...snapshot,
       // Present exactly once, on the connection that paired.
-      ...(result.issuedToken ? { deviceToken: result.issuedToken } : {})
+      ...(issuedToken ? { deviceToken: issuedToken } : {})
     })
     this.host.onPresence?.(this.connectedCount)
+  }
+
+  /* ------------------------------------------------- pairing by approval */
+
+  /** Is the tap-to-pair door open right now? Read per-hello, never cached. */
+  private acceptingPairs(): boolean {
+    if (!this.host.requestApproval) return false
+    return (this.host.acceptUntil?.() ?? 0) > this.now()
+  }
+
+  /**
+   * A credential-less phone asked to pair while the desktop is armed: mint the
+   * word pair, tell the phone to show it, and hold the socket open —
+   * unauthenticated — while a human is asked.
+   */
+  private beginApproval(client: Client, frame: Extract<ClientFrame, { t: 'hello' }>): void {
+    // At most one pending approval, and no more than one prompt a minute.
+    // Both rules exist for the same reason (see PROMPT_COOLDOWN_MS), and both
+    // refuse with the same sentence, so a caller cannot tell which one it hit.
+    const cooldownMs = this.host.promptCooldownMs ?? PROMPT_COOLDOWN_MS
+    if (this.pendingApproval || this.now() - this.lastPromptAt < cooldownMs) {
+      const msg = 'The desktop is already handling a pairing — try again in a minute.'
+      this.send(client, { t: 'err', code: 'limit', msg })
+      this.drop(client, 4001, msg)
+      return
+    }
+
+    const deviceId = wireString(frame.deviceId, 128)
+    const deviceName = wireString(frame.deviceName, 64) || 'Phone'
+    // The pair is not a secret (4096 possibilities is not entropy), but it
+    // must be unpredictable, or a stranger timing their ask to Steve's real
+    // pairing could show the matching words. So: node:crypto, not Math.random.
+    const words = wordPair(randomBytes(2))
+    const requestId = randomUUID()
+
+    const wait: ApprovalWait = {
+      requestId,
+      deviceId,
+      deviceName,
+      settled: false,
+      // A socket waiting on a human escaped the 10-second no-hello drop in
+      // accept(), so this is its bound instead: nobody standing at the desktop
+      // must not mean a connection pinned open until the process restarts.
+      timer: setTimeout(
+        () => this.settleApproval(client, false, 'Nobody answered on the desktop — open Forge and try again.'),
+        this.host.approvalTimeoutMs ?? APPROVAL_TIMEOUT_MS
+      )
+    }
+    client.approval = wait
+    this.pendingApproval = client
+    this.lastPromptAt = this.now()
+
+    this.send(client, { t: 'awaiting-approval', words })
+    this.log(`"${deviceName}" is asking to pair from ${client.source}`)
+
+    this.host.requestApproval!({ requestId, deviceId, deviceName, words })
+      .then((allowed) => this.settleApproval(client, allowed === true, 'The desktop said no.'))
+      .catch(() => this.settleApproval(client, false, 'The desktop could not ask.'))
+  }
+
+  /**
+   * The one exit from an approval wait. Allow mints and welcomes; everything
+   * else — deny, timeout, a host that threw — closes 4001 with a sentence the
+   * phone can show. `settled` makes the outcomes race-proof: whichever of
+   * tap / timeout / hangup lands first wins, and the rest are no-ops.
+   */
+  private settleApproval(client: Client, allowed: boolean, refusal: string): void {
+    const wait = client.approval
+    if (!wait || wait.settled) return
+    wait.settled = true
+    clearTimeout(wait.timer)
+    if (this.pendingApproval === client) this.pendingApproval = null
+    // Withdraw the desktop prompt whichever way this ended — a no-op when the
+    // prompt itself is what answered.
+    this.host.cancelApproval?.(wait.requestId)
+
+    if (!allowed || client.socket.readyState !== client.socket.OPEN) {
+      this.send(client, { t: 'err', code: 'auth', msg: refusal })
+      this.drop(client, 4001, refusal)
+      return
+    }
+
+    // Steve said yes: mint through the same routine the code path uses, and
+    // answer with the same hello-ok. From here the phone is any paired phone.
+    const { device, issuedToken } = this.host.auth.mintDevice(wait.deviceId, wait.deviceName)
+    client.approval = null
+    this.welcome(client, device, issuedToken)
+  }
+
+  /** The phone hung up mid-question. Withdraw the prompt; deny by default. */
+  private abandonApproval(client: Client): void {
+    const wait = client.approval
+    if (!wait || wait.settled) return
+    wait.settled = true
+    clearTimeout(wait.timer)
+    if (this.pendingApproval === client) this.pendingApproval = null
+    this.host.cancelApproval?.(wait.requestId)
+    client.approval = null
   }
 
   /* --------------------------------------------------------------- plumbing */

@@ -912,6 +912,16 @@ export interface Settings {
    */
   mobileDevices: MobileDeviceRecord[]
   /**
+   * When "Accept new phones" disarms itself — a ms-epoch timestamp, 0 when it
+   * is not armed. A timestamp rather than a boolean on purpose: a boolean that
+   * someone forgot to switch off would leave the desktop raising pairing
+   * prompts for anyone on the internet who found the tunnel, forever. Written
+   * as now + ACCEPT_WINDOW_MS when Steve arms it, zeroed when the window
+   * lapses, and clamped by the store so a hand-edited file cannot arm it for a
+   * week. See electron/mobile-host.ts.
+   */
+  mobileAcceptUntil: number
+  /**
    * The permanent way in from outside the house. `'ngrok'` runs a supervised
    * ngrok agent against the account's permanent dev domain whenever the link
    * is up, so the phone keeps one address forever — see
@@ -1027,6 +1037,8 @@ export interface MobileCommandEvent {
     op: 'create-tab' | 'create-pane' | 'close-pane' | 'select-tab'
     projectId: string
     profileId?: string
+    /** Still a wire value at this point: the renderer checks it, never casts it. */
+    permissionMode?: string
     tabId?: string
     paneId?: string
   }
@@ -1071,10 +1083,36 @@ export interface MobileStatus {
   devices: MobileDeviceRecord[]
   /** Phones with a socket open this second. */
   connected: number
+  /**
+   * When "Accept new phones" disarms itself (ms epoch), or 0 while it is not
+   * armed. Rides this status rather than a stream of its own, so the Settings
+   * toggle and its countdown stay honest through the one broadcast the panel
+   * already watches.
+   */
+  acceptUntil: number
   /** A human sentence, or empty when there is nothing to say. */
   detail: string
   /** The ngrok tunnel, when one is configured. `state: 'off'` otherwise. */
   tunnel: MobileTunnelStatus
+}
+
+/**
+ * "A phone is asking to pair — put the question on screen."  Main → renderer.
+ *
+ * `open: true` raises the prompt; `open: false` withdraws it (the phone gave
+ * up, the approval timed out, or another window already answered), because a
+ * prompt that outlives its question is a prompt whose Allow lands on nothing —
+ * or worse, on the next question. The renderer answers over
+ * `mobileApprovalResult`, and silence is a deny: nothing anywhere in this flow
+ * approves by default.
+ */
+export interface MobileApprovalEvent {
+  requestId: string
+  /** What the phone calls itself. Untrusted text — display it, never obey it. */
+  deviceName: string
+  /** The word pair both screens show, e.g. "OTTER RIVER". Empty on withdraw. */
+  words: string
+  open: boolean
 }
 
 /* ---------------------------------------------------- companion ipc (M9) */

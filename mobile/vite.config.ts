@@ -40,7 +40,15 @@ export default defineConfig({
     __APK_MANIFEST_URL__: JSON.stringify(
       process.env.FORGE_APK_MANIFEST_URL ??
         'https://github.com/stevenmcginty/forge-mobile-releases/releases/latest/download/latest.json'
-    )
+    ),
+    // The desktop this APK belongs to, stamped by scripts/apk-build.mjs as a
+    // `wss://<domain>` origin with **no port** — the tunnel answers on the
+    // implicit 443, and a port here becomes an address nothing listens on
+    // (the exact bug toOrigin in src/lib/secure.ts documents). Empty in every
+    // other build on purpose: the browser route is already *at* the desktop,
+    // and an unstamped APK still pairs by QR or typing. Nothing outside
+    // apk-build sets the env, so nothing else can bake an address by accident.
+    __BAKED_ORIGIN__: JSON.stringify(process.env.FORGE_BAKED_ORIGIN ?? '')
   },
   root: resolve(import.meta.dirname),
   base: './',

@@ -17,7 +17,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { build } from 'esbuild'
-import { readVersion, sha256File, ANDROID, DIST_APK, APK_ASSET, MOBILE } from './apk-lib.mjs'
+import { bakedOriginOf, readVersion, sha256File, ANDROID, DIST_APK, APK_ASSET, MOBILE } from './apk-lib.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const scratch = join(ROOT, 'node_modules', '.forge-apk-check')
@@ -136,6 +136,10 @@ if (!existsSync(manifestXml)) {
   )
   log(gradle.includes(`versionName "${version.versionName}"`), `gradle versionName matches mobile/version.json ("${version.versionName}")`)
   log(gradle.includes('org.jetbrains.kotlin.android'), 'the kotlin-android plugin is applied')
+  log(
+    gradle.includes("abiFilters 'arm64-v8a', 'armeabi-v7a'"),
+    'build.gradle keeps the phone-only abiFilters — losing it is an invisible 11.6 MB of emulator libraries'
+  )
 
   const javaDir = join(ANDROID, 'app', 'src', 'main', 'java', 'com', 'forge', 'mobile')
   const plugin = readFileSync(join(javaDir, 'ForgeUpdaterPlugin.kt'), 'utf8')
@@ -200,6 +204,49 @@ log(
 )
 log(pairTokenOf('https://example.com/menu') === '', 'a QR that is not a Forge pairing link yields no code, so the scan is refused')
 
+/* ------------------------------------------- the baked-in desktop origin */
+
+// One-tap pairing rests on the address stamped into the APK being one the
+// phone can actually dial. `bakedOriginOf` is the resolver apk-build really
+// uses (and it runs the real normaliseNgrokDomain out of shared/mobile.ts),
+// so these are checks on the shipping code path, not on a restatement of it.
+// The check that matters most is the same one the QR path has: **no port.**
+log(
+  (await bakedOriginOf('cure-task-legroom.ngrok-free.dev')) === 'wss://cure-task-legroom.ngrok-free.dev',
+  'a bare tunnel domain bakes as wss://<domain>'
+)
+log(
+  (await bakedOriginOf('https://cure-task-legroom.ngrok-free.dev/')) === 'wss://cure-task-legroom.ngrok-free.dev',
+  'a pasted https URL bakes to the same origin'
+)
+log(
+  (await bakedOriginOf('wss://steve.ngrok-free.dev')) === 'wss://steve.ngrok-free.dev',
+  'a wss paste is accepted rather than mangled'
+)
+log(!/:\d/.test(await bakedOriginOf('steve.ngrok-free.dev')), 'no port is ever appended to a baked origin')
+log(
+  (await bakedOriginOf('')) === '' && (await bakedOriginOf(undefined)) === '',
+  'an absent mobileNgrokDomain bakes nothing — the build stays unstamped and works'
+)
+log((await bakedOriginOf('not a domain!')) === '', 'garbage never becomes a baked address')
+// Round-trip through the phone's own decoder: the stamp must survive toOrigin
+// verbatim, or the APK dials somewhere other than what was stamped.
+log(
+  toOrigin(await bakedOriginOf('steve.ngrok-free.dev'), 8420) === 'wss://steve.ngrok-free.dev',
+  'the phone reads the baked origin back with no port — toOrigin’s tunnel rule holds'
+)
+log(toOrigin('', 8420) === '', 'an unstamped build yields no origin, so the QR/typed connect screen still renders')
+
+const viteBaked = readFileSync(join(MOBILE, 'vite.config.ts'), 'utf8')
+log(
+  viteBaked.includes('__BAKED_ORIGIN__') && viteBaked.includes("FORGE_BAKED_ORIGIN ?? ''"),
+  'vite defines __BAKED_ORIGIN__ from FORGE_BAKED_ORIGIN, defaulting to empty'
+)
+log(
+  readFileSync(join(MOBILE, 'src', 'App.tsx'), 'utf8').includes('__BAKED_ORIGIN__'),
+  'App.tsx consumes the baked origin define'
+)
+
 /* ------------------------------------------------ version define wiring */
 
 const viteConfig = readFileSync(join(MOBILE, 'vite.config.ts'), 'utf8')
@@ -207,7 +254,8 @@ log(
   viteConfig.includes('__APK_VERSION_CODE__') && viteConfig.includes("readFileSync(resolve(import.meta.dirname, 'version.json')"),
   'the Vite define is driven by version.json — web and native cannot drift'
 )
-log(readFileSync(join(MOBILE, 'src', 'env.d.ts'), 'utf8').includes('__APK_MANIFEST_URL__'), 'the defines are declared for TypeScript')
+const envDts = readFileSync(join(MOBILE, 'src', 'env.d.ts'), 'utf8')
+log(envDts.includes('__APK_MANIFEST_URL__') && envDts.includes('__BAKED_ORIGIN__'), 'the defines are declared for TypeScript')
 
 /* -------------------------------------- no key material inside the repo */
 
@@ -247,6 +295,20 @@ if (!existsSync(latestPath)) {
     log(sha256File(apk) === manifest.sha256, 'latest.json sha256 matches the APK beside it')
     log(statSync(apk).size === manifest.sizeBytes, 'latest.json sizeBytes matches the APK beside it')
     log(manifest.versionCode === readVersion().versionCode, 'latest.json versionCode matches mobile/version.json')
+
+    // Which ABIs actually shipped. Zip entry names are stored uncompressed in
+    // the archive, so a plain byte scan of the APK finds `lib/<abi>/…` paths
+    // with certainty — no unzip dependency, and no trusting build.gradle to
+    // describe a file it might not have produced. This is the check that
+    // catches `cap sync` regenerating the gradle file without the ndk block:
+    // the build succeeds, the APK works, and it is silently 11.6 MB heavier.
+    const bytes = readFileSync(apk)
+    log(bytes.includes('lib/arm64-v8a/'), 'the built APK carries arm64-v8a native libraries')
+    log(bytes.includes('lib/armeabi-v7a/'), 'the built APK carries armeabi-v7a native libraries')
+    log(
+      !bytes.includes('lib/x86/') && !bytes.includes('lib/x86_64/'),
+      'the built APK carries no x86/x86_64 emulator libraries'
+    )
   } else {
     log(false, `dist-apk/${APK_ASSET} is missing next to latest.json`)
   }

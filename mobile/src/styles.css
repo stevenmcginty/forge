@@ -488,6 +488,43 @@ body {
   align-self: center;
 }
 
+/* ----------------------------------------------------------- approval wait */
+
+/* The screen Steve stares at while glancing between phone and desktop. Two
+   jobs: the words legible from arm's length (they are being *compared*, not
+   read), and calm — no spinner, no motion, nothing that suggests it might not
+   be working. State is carried by the words themselves and by sentences,
+   never by colour alone (red/green reads as one colour at this desk). */
+
+.approve-title {
+  margin: 0;
+  font-size: 16px;
+  color: var(--dim);
+  text-align: center;
+}
+
+.approve-words {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 10px 0;
+}
+
+/* 54px bold fits the longest word in PAIR_WORDS (7 characters) on a 360px
+   screen with room to spare; uppercase because that is how the desktop's
+   prompt renders the same string, and the two must look like the same thing. */
+.approve-word {
+  font: 700 54px/1.1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--volt);
+}
+
+.approve-lead {
+  text-align: center;
+}
+
 /* ----------------------------------------------------------- update sheet */
 
 /* One card over a scrim, bottom-anchored where a thumb already is. The card
@@ -592,6 +629,116 @@ body {
   background: var(--volt);
   border-radius: 999px;
   transition: width 0.3s ease;
+}
+
+/* ------------------------------------------------------- new-tab chooser */
+
+/* Same sheet frame as the updater, filled with two radio groups. Rows are
+   52px slabs rather than list lines: this is a sheet you tap twice and
+   dismiss, so every target is a whole row and the tick never moves the text
+   (it is hidden, not removed). */
+
+.pick-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* Head + the two buttons take the rest; a long profile list scrolls inside
+     the sheet rather than pushing the confirm button off the screen. */
+  max-height: 56dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pick-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pick-label {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 12px;
+  background: #1b1e24;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+
+.pick-row[data-selected] {
+  background: #262e10;
+  border-color: var(--volt);
+}
+
+.pick-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pick-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pick-note {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.pick-tick {
+  flex: 0 0 auto;
+  color: var(--volt);
+  font-weight: 700;
+  visibility: hidden;
+}
+
+.pick-row[data-selected] .pick-tick {
+  visibility: visible;
+}
+
+/* Bypass is not a fourth option, it is a decision — so it is red before it is
+   picked, louder once it is, and it takes the confirm button with it. */
+.pick-row[data-danger] {
+  border-color: rgb(255 92 92 / 0.45);
+}
+
+.pick-row[data-danger] .pick-name {
+  color: var(--bad);
+  font-weight: 600;
+}
+
+.pick-row[data-danger] .pick-note {
+  color: rgb(255 92 92 / 0.75);
+}
+
+.pick-row[data-danger][data-selected] {
+  background: rgb(255 92 92 / 0.14);
+  border-color: var(--bad);
+}
+
+.pick-row[data-danger][data-selected] .pick-tick {
+  color: var(--bad);
+}
+
+.primary-danger {
+  background: var(--bad);
+  color: #1a0606;
 }
 
 /* ------------------------------------------------------------------ toast */

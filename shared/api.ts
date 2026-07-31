@@ -18,6 +18,7 @@ import type {
   MakeVideoRequest,
   MediaCallResult,
   MemorySection,
+  MobileApprovalEvent,
   MobileCommandEvent,
   MobilePairOffer,
   MobileStatus,
@@ -284,6 +285,14 @@ export interface ForgeApi {
      */
     pair(): Promise<MobilePairOffer>
     pairCancel(): Promise<boolean>
+    /**
+     * Arm or disarm "Accept new phones" — the tap-to-pair window. While armed,
+     * a phone with no credential may *ask* to connect, which raises the
+     * approval prompt on this desktop; nothing is minted until Allow is
+     * tapped. Arms for ACCEPT_WINDOW_MS and then disarms itself — the
+     * countdown is `acceptUntil` on MobileStatus.
+     */
+    setAccept(on: boolean): Promise<MobileStatus>
     /** Drop a device. Its live socket is closed immediately, not next time. */
     revoke(deviceId: string): Promise<MobileStatus>
     /**
@@ -305,6 +314,15 @@ export interface ForgeApi {
     onCommand(cb: (e: MobileCommandEvent) => void): () => void
     /** Answer an `onCommand`. `error` empty means it worked. */
     commandResult(requestId: string, error?: string): void
+    /**
+     * A phone is asking to pair. `open: true` raises the prompt (device name
+     * and the word pair its screen is showing); `open: false` withdraws it.
+     * Answer with `approvalResult` — an unanswered prompt times out on the
+     * main side as a deny, never an allow.
+     */
+    onApproval(cb: (e: MobileApprovalEvent) => void): () => void
+    /** The human's verdict on an `onApproval`. */
+    approvalResult(requestId: string, allow: boolean): void
   }
 
   /**

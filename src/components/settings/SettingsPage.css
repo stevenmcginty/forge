@@ -1442,6 +1442,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The accept chip's countdown: tabular digits, or the header shifts a pixel
+   every second as 9:59 becomes 9:58. */
+.mobile-accept__left {
+  font-variant-numeric: tabular-nums;
+}
+
 .mobile-error {
   margin: var(--s-2) 0 0;
   font-size: var(--t-sm);

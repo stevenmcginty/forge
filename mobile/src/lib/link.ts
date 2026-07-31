@@ -1,7 +1,9 @@
 import {
+  APPROVAL_TIMEOUT_MS,
   MOBILE_PROTO,
   MOBILE_WS_PATH,
   type ClientFrame,
+  type HelloFrame,
   type HelloOkFrame,
   type MobileSession,
   type ServerFrame
@@ -23,12 +25,25 @@ import type { AgentProfile, Project, Workspace } from '@shared/types'
  *    did I miss" — see `getReplay` in electron/pty-host.ts.
  *  - **The token is held by the caller**, not by this class, so it can live in
  *    Android's Keystore rather than in a closure.
+ *  - **A link that has been asleep is assumed broken until it says otherwise.**
+ *    Android freezes a backgrounded WebView's timers — so a pending retry can
+ *    still be pending an hour later — and tears down the TCP connection under
+ *    a socket that goes on reporting `OPEN` and firing nothing. Neither failure
+ *    announces itself, so this class carries its own heartbeat and treats every
+ *    wake-shaped event as a reason to re-check (`nudge`).
+ *  - **No token is itself a way to connect.** Credentials with an empty token
+ *    send `requestPair` instead of failing: the desktop raises a prompt on its
+ *    own screen and answers `awaiting-approval` with the word pair both screens
+ *    show. That wait is bounded by APPROVAL_TIMEOUT_MS on this side too —
+ *    a phone left face-up on the waiting screen must eventually say "nobody
+ *    answered" rather than spin — and it ends in a deliberate, non-retrying
+ *    stop, because fresh words should cost a tap, not appear on a loop.
  *
  * Deliberately not an EventEmitter or a store: a phone app with one socket
  * needs callbacks, not an architecture.
  */
 
-export type LinkState = 'idle' | 'connecting' | 'live' | 'retrying' | 'refused'
+export type LinkState = 'idle' | 'connecting' | 'live' | 'retrying' | 'refused' | 'awaiting' | 'expired'
 
 export interface LinkPicture {
   appVersion: string
@@ -40,7 +55,12 @@ export interface LinkPicture {
 }
 
 export interface LinkHandlers {
-  /** Connection state changed. `detail` carries the reason on 'refused'. */
+  /**
+   * Connection state changed. `detail` carries the reason on 'refused' and
+   * 'expired', and the word pair on 'awaiting' — the desktop minted the words
+   * and this side only displays them, so the frame's string is passed through
+   * untouched.
+   */
   onState: (state: LinkState, detail: string) => void
   /** The desktop's picture — on connect, and again whenever it changes. */
   onPicture: (picture: LinkPicture) => void
@@ -56,7 +76,11 @@ export interface LinkHandlers {
 export interface LinkCredentials {
   /** `ws://host:port` — no path; this class appends it. */
   origin: string
-  /** A device token, or a pairing code on the very first connection. */
+  /**
+   * A device token, or a pairing code on the very first connection. Empty
+   * means "ask to be let in": `hello` goes out with `requestPair` instead of
+   * a token, and the desktop decides on its own screen.
+   */
   token: string
   deviceId: string
   deviceName: string
@@ -64,6 +88,26 @@ export interface LinkCredentials {
 
 /** Backoff schedule, in ms. Caps rather than growing forever. */
 const BACKOFF = [500, 1000, 2000, 4000, 8000, 15000]
+
+/**
+ * The client heartbeat. The desktop already pings an idle socket every 20s and
+ * gives it 10s to answer (HEARTBEAT_MS in shared/mobile.ts); this is the same
+ * arrangement pointing the other way, because the half of the link that goes
+ * quiet without saying so is usually the phone's.
+ *
+ * `SILENCE_MS` is judged against a *timestamp*, never a count of ticks: Android
+ * throttles a backgrounded WebView's timers to minutes apart, so "three ticks
+ * with no answer" can mean three seconds or three minutes. A clock cannot be
+ * throttled.
+ */
+const PING_MS = 15_000
+const SILENCE_MS = 30_000
+
+/** After a resume ping, how long the socket has to say anything at all. */
+const VERDICT_MS = 4_000
+
+/** A connect still unresolved this long after a resume was frozen mid-dial. */
+const STUCK_MS = 10_000
 
 export class Link {
   private socket: WebSocket | null = null
@@ -74,6 +118,30 @@ export class Link {
   private retryTimer: number | null = null
   private closedByUs = false
   private picture: LinkPicture | null = null
+  /** When anything last arrived on this socket. The liveness clock. */
+  private lastFrameAt = 0
+  /**
+   * How many frames have arrived, ever. Only its *changing* matters: "did
+   * anything answer my ping" is a question about sequence, not about time, and
+   * two frames inside the same millisecond would make a timestamp say no.
+   */
+  private received = 0
+  private beatTimer: number | null = null
+  private verdictTimer: number | null = null
+  /** When the current socket started dialling, for the stuck-connect check. */
+  private openedAt = 0
+  /** The desktop said no (4001–4003). A wake nudge must not re-knock. */
+  private refused = false
+  private listening = false
+  /**
+   * An `awaiting-approval` frame is on screen. While set, the silence rule is
+   * suspended — the socket is *supposed* to be quiet while Steve reads the
+   * prompt, and hanging up on that quiet would re-dial, re-request, and mint
+   * a fresh word pair every 30 seconds, right under the eyes of someone
+   * comparing the old one. The wait is bounded by `approvalTimer` instead.
+   */
+  private awaiting = false
+  private approvalTimer: number | null = null
 
   constructor(handlers: LinkHandlers) {
     this.handlers = handlers
@@ -86,7 +154,9 @@ export class Link {
   connect(credentials: LinkCredentials): void {
     this.credentials = credentials
     this.closedByUs = false
+    this.refused = false
     this.attempt = 0
+    this.listen()
     this.open()
   }
 
@@ -96,10 +166,78 @@ export class Link {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
     }
-    this.socket?.close()
-    this.socket = null
+    this.unlisten()
+    this.dropSocket()
     this.subscriptions.clear()
     this.handlers.onState('idle', '')
+  }
+
+  /**
+   * "The phone is awake again — is this link real?"
+   *
+   * Called on every wake-shaped browser event (see `listen`), which on a real
+   * resume all fire within milliseconds of each other. Each branch is therefore
+   * written to collapse a storm into one attempt: a pending retry is claimed by
+   * the first call and the rest find no timer; an open socket is pinged by the
+   * first call and the rest find a verdict already armed; a fresh dial is young
+   * enough that the rest leave it alone.
+   */
+  nudge(): void {
+    // Unpaired, or told no by the desktop. Neither is a state a resume fixes,
+    // and re-knocking on every focus event is how a revoked phone becomes a
+    // battery complaint.
+    if (this.closedByUs || this.refused || !this.credentials) return
+
+    // A backoff timer that was frozen with the app has already waited long
+    // enough — the wait it was measuring happened while the screen was off.
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
+      this.attempt = 0
+      this.open()
+      return
+    }
+
+    const socket = this.socket
+    if (!socket) {
+      this.attempt = 0
+      this.open()
+      return
+    }
+
+    if (socket.readyState === WebSocket.CONNECTING) {
+      // A dial frozen mid-handshake can sit in CONNECTING forever; a young one
+      // is simply in progress and must be left alone.
+      if (Date.now() - this.openedAt > STUCK_MS) {
+        this.attempt = 0
+        this.open()
+      }
+      return
+    }
+
+    if (socket.readyState === WebSocket.OPEN) {
+      // An approval wait is not a stale link — reopening it would spend the
+      // words on screen and mint different ones the moment the phone wakes.
+      if (this.awaiting) return
+      if (this.verdictTimer !== null) return
+      const mark = this.received
+      this.send({ t: 'ping' })
+      this.verdictTimer = window.setTimeout(() => {
+        this.verdictTimer = null
+        // Not "is the last frame recent" but "did *anything* arrive since the
+        // ping": a socket that was busy a second ago still looks recent.
+        if (this.received === mark) {
+          this.attempt = 0
+          this.open()
+        }
+      }, VERDICT_MS)
+      return
+    }
+
+    // CLOSING or CLOSED, and no retry armed: the `onclose` that would have
+    // armed one never came, which is exactly the state this method exists for.
+    this.attempt = 0
+    this.open()
   }
 
   /** Watch a session. Idempotent, and remembered across reconnects. */
@@ -132,6 +270,9 @@ export class Link {
     const credentials = this.credentials
     if (!credentials) return
 
+    // Whatever was there is finished with: detached, closed, and unable to
+    // schedule anything behind this new socket's back.
+    this.dropSocket()
     this.handlers.onState(this.attempt === 0 ? 'connecting' : 'retrying', '')
 
     let socket: WebSocket
@@ -142,28 +283,38 @@ export class Link {
       return
     }
     this.socket = socket
+    this.openedAt = Date.now()
+    this.lastFrameAt = Date.now()
 
     socket.onopen = () => {
-      socket.send(
-        JSON.stringify({
-          t: 'hello',
-          proto: MOBILE_PROTO,
-          deviceId: credentials.deviceId,
-          deviceName: credentials.deviceName,
-          token: credentials.token
-        })
-      )
+      this.lastFrameAt = Date.now()
+      this.startBeating()
+      // No token is not a malformed hello, it is a different request: ask
+      // Steve. `requestPair` raises a prompt on the desktop's screen and the
+      // answer comes back as `awaiting-approval` — or as a close with a
+      // sentence, never as a silent auth failure against an empty string.
+      const hello: HelloFrame = {
+        t: 'hello',
+        proto: MOBILE_PROTO,
+        deviceId: credentials.deviceId,
+        deviceName: credentials.deviceName,
+        ...(credentials.token ? { token: credentials.token } : { requestPair: true })
+      }
+      socket.send(JSON.stringify(hello))
     }
 
     socket.onmessage = (event) => this.receive(String(event.data))
 
     socket.onclose = (event) => {
       this.socket = null
+      this.stopBeating()
+      this.stopWaitingForApproval()
       if (this.closedByUs) return
       // 4001/4002/4003 are the desktop saying no — retrying would be a loop
       // against a door that is not going to open, and would burn the phone's
       // battery doing it.
       if (event.code >= 4001 && event.code <= 4003) {
+        this.refused = true
         this.handlers.onState('refused', event.reason || 'The desktop refused the connection.')
         return
       }
@@ -186,7 +337,120 @@ export class Link {
     }, wait)
   }
 
+  /* -------------------------------------------------------- staying alive */
+
+  /**
+   * Poke an idle socket, and hang up on one that has stopped answering.
+   *
+   * The hang-up is deliberate rather than hopeful: a WebSocket over a TCP
+   * connection Android tore down while the screen was off can stay `OPEN`
+   * forever, firing no `onclose` and delivering nothing. Silence past
+   * `SILENCE_MS` — two missed pings plus grace — is the only evidence of that
+   * there is, so it is treated as the close the socket never sent.
+   */
+  private startBeating(): void {
+    this.stopBeating()
+    this.beatTimer = window.setInterval(() => {
+      const socket = this.socket
+      if (!socket || socket.readyState !== WebSocket.OPEN) return
+      // Not while an approval is pending: that socket is quiet by design, and
+      // its deadline is APPROVAL_TIMEOUT_MS, not the silence rule.
+      if (!this.awaiting && Date.now() - this.lastFrameAt > SILENCE_MS) {
+        this.dropSocket()
+        this.scheduleRetry()
+        return
+      }
+      this.send({ t: 'ping' })
+    }, PING_MS)
+  }
+
+  private stopBeating(): void {
+    if (this.beatTimer === null) return
+    clearInterval(this.beatTimer)
+    this.beatTimer = null
+  }
+
+  /**
+   * The approval wait is over — approved, denied, hung up, or abandoned.
+   * Every path off the waiting screen funnels through here so no orphaned
+   * timer can fire "expired" over the top of a link that already moved on.
+   */
+  private stopWaitingForApproval(): void {
+    this.awaiting = false
+    if (this.approvalTimer === null) return
+    clearTimeout(this.approvalTimer)
+    this.approvalTimer = null
+  }
+
+  /**
+   * Finish with the current socket, without letting it act on the way out.
+   *
+   * The handlers are detached before `close()` so a half-open socket cannot
+   * fire a late `onclose` into a link that has already moved on and arm a
+   * second retry behind it. Retrying is the caller's decision, made here in the
+   * open, rather than a side effect arriving whenever the browser gives up.
+   */
+  private dropSocket(): void {
+    const socket = this.socket
+    this.socket = null
+    this.stopBeating()
+    this.stopWaitingForApproval()
+    if (this.verdictTimer !== null) {
+      clearTimeout(this.verdictTimer)
+      this.verdictTimer = null
+    }
+    if (!socket) return
+    socket.onopen = null
+    socket.onmessage = null
+    socket.onclose = null
+    socket.onerror = null
+    try {
+      socket.close()
+    } catch {
+      /* already gone; there is nothing to close */
+    }
+  }
+
+  /**
+   * The wake signals, all four of them.
+   *
+   * No Capacitor plugin: `visibilitychange` is what the WebView actually fires
+   * when Android brings the app back, `online` covers wifi returning without
+   * the app ever having left the screen, and `focus`/`pageshow` catch the
+   * browser route and a WebView restored from the back-forward cache. They
+   * overlap heavily on purpose — `nudge` is built to be called four times.
+   */
+  private listen(): void {
+    if (this.listening) return
+    this.listening = true
+    document.addEventListener('visibilitychange', this.onVisibility)
+    window.addEventListener('online', this.onWake)
+    window.addEventListener('focus', this.onWake)
+    window.addEventListener('pageshow', this.onWake)
+  }
+
+  private unlisten(): void {
+    if (!this.listening) return
+    this.listening = false
+    document.removeEventListener('visibilitychange', this.onVisibility)
+    window.removeEventListener('online', this.onWake)
+    window.removeEventListener('focus', this.onWake)
+    window.removeEventListener('pageshow', this.onWake)
+  }
+
+  // Bound once, so removeEventListener can find the same function again.
+  private readonly onWake = (): void => this.nudge()
+  private readonly onVisibility = (): void => {
+    if (document.visibilityState === 'visible') this.nudge()
+  }
+
   private receive(raw: string): void {
+    // Before parsing, and whatever the frame turns out to be: bytes arriving
+    // *are* the liveness signal. That includes the `pong` the desktop sends
+    // back for no other reason than this.
+    this.lastFrameAt = Date.now()
+    this.received += 1
+
     let frame: ServerFrame
     try {
       frame = JSON.parse(raw) as ServerFrame
@@ -197,6 +461,7 @@ export class Link {
     switch (frame.t) {
       case 'hello-ok': {
         this.attempt = 0
+        this.stopWaitingForApproval()
         // A token is issued exactly once, on the connection that paired. Store
         // it before anything else can go wrong, or the pairing is lost and the
         // single-use code is already spent.
@@ -210,6 +475,29 @@ export class Link {
         // Re-arm every subscription the UI still believes it has. Each answers
         // with a replay frame, which is what repaints the terminal.
         for (const id of this.subscriptions) this.send({ t: 'sub', id })
+        return
+      }
+
+      case 'awaiting-approval': {
+        // Steve is being asked. The words are shown exactly as sent — the
+        // desktop minted them, and both screens rendering the same string is
+        // the entire anti-confusion property (see AwaitingApprovalFrame).
+        //
+        // The wait gets a deadline because this socket is open and
+        // unauthenticated for its whole duration: when nobody answers, the
+        // phone must say so and stop, not spin until the battery decides.
+        // The stop is deliberate (`closedByUs`) rather than a retry, so fresh
+        // words cost a tap on Connect instead of appearing on a loop.
+        this.stopWaitingForApproval()
+        this.awaiting = true
+        this.approvalTimer = window.setTimeout(() => {
+          this.approvalTimer = null
+          this.awaiting = false
+          this.closedByUs = true
+          this.dropSocket()
+          this.handlers.onState('expired', 'Nobody answered on the desktop, so those words have expired.')
+        }, APPROVAL_TIMEOUT_MS)
+        this.handlers.onState('awaiting', frame.words)
         return
       }
 

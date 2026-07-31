@@ -113,6 +113,7 @@ const api: ForgeApi = {
     stop: () => ipcRenderer.invoke(IPC.mobileStop),
     pair: () => ipcRenderer.invoke(IPC.mobilePair),
     pairCancel: () => ipcRenderer.invoke(IPC.mobilePairCancel),
+    setAccept: (on) => ipcRenderer.invoke(IPC.mobileAccept, on === true),
     revoke: (deviceId) => ipcRenderer.invoke(IPC.mobileRevoke, deviceId ?? ''),
     setTunnel: (config) => ipcRenderer.invoke(IPC.mobileTunnelConfig, config ?? {}),
     startTunnel: () => ipcRenderer.invoke(IPC.mobileTunnelStart),
@@ -120,7 +121,12 @@ const api: ForgeApi = {
     onStatus: (cb) => subscribe(IPC.mobileStatusEvent, cb),
     onCommand: (cb) => subscribe(IPC.mobileCommand, cb),
     commandResult: (requestId, error) =>
-      ipcRenderer.send(IPC.mobileCommandResult, { requestId, error: error ?? '' })
+      ipcRenderer.send(IPC.mobileCommandResult, { requestId, error: error ?? '' }),
+    onApproval: (cb) => subscribe(IPC.mobileApproval, cb),
+    // `=== true` so nothing short of an explicit allow crosses as one — a
+    // truthy accident on this boundary would be a paired stranger.
+    approvalResult: (requestId, allow) =>
+      ipcRenderer.send(IPC.mobileApprovalResult, { requestId, allow: allow === true })
   },
 
   system: {

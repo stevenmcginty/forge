@@ -9,11 +9,14 @@
  *
  *   npm run mobile:smoke
  *
- * Two phases, because the lockout is per source address and every socket here
- * comes from 127.0.0.1: phase A spends the strikes proving refusal works, then
- * is torn down, and phase B starts a fresh server whose auth has no strikes
- * against it. Sharing one server between the two would mean the lockout from
- * phase A silently failing every check in phase B.
+ * Three phases, because the lockout is per source address and every socket
+ * here comes from 127.0.0.1: phase A spends the strikes proving refusal works,
+ * then is torn down, and phase B starts a fresh server whose auth has no
+ * strikes against it. Sharing one server between the two would mean the
+ * lockout from phase A silently failing every check in phase B. Phase C is
+ * pairing by approval — "Accept new phones" — on a third server whose clock
+ * and approval hooks are injected, so arming expiry and the prompt cooldown
+ * run on a fake clock and the bounded approval wait on a short real one.
  */
 import { mkdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -46,13 +49,14 @@ function waitFor(predicate, timeoutMs, label) {
   })
 }
 
-/** A phone. Collects every frame it is sent, and its close code. */
+/** A phone. Collects every frame it is sent, its close code, and the reason. */
 function connect() {
   const socket = new WebSocket(`ws://127.0.0.1:${PORT}${WS_PATH}`)
   const phone = {
     socket,
     frames: [],
     closed: null,
+    closeReason: '',
     send: (frame) => socket.send(JSON.stringify(frame)),
     of: (t) => phone.frames.filter((f) => f.t === t),
     first: (t) => phone.frames.find((f) => f.t === t),
@@ -63,8 +67,11 @@ function connect() {
         .join('')
   }
   socket.on('message', (raw) => phone.frames.push(JSON.parse(String(raw))))
-  socket.on('close', (code) => {
+  socket.on('close', (code, reason) => {
     phone.closed = code
+    // The phone app shows this sentence word-for-word, so the checks assert on
+    // it being a sentence and on refusals being distinguishable to a human.
+    phone.closeReason = String(reason ?? '')
   })
   socket.on('error', () => {
     /* a refused socket closes; the close handler is the assertion */
@@ -94,9 +101,8 @@ async function main() {
     absWorkingDir: ROOT
   })
 
-  const { MobileServer, MobileAuth, PtySessionManager, isAllowedSource, resolveWithin } = await import(
-    pathToFileURL(join(scratch, 'mobile.mjs')).href
-  )
+  const { MobileServer, MobileAuth, PtySessionManager, isAllowedSource, resolveWithin, ACCEPT_WINDOW_MS } =
+    await import(pathToFileURL(join(scratch, 'mobile.mjs')).href)
 
   /* ------------------------------------------------- the desktop, once */
 
@@ -361,10 +367,166 @@ async function main() {
     'no raw device token was ever handed to persistence'
   )
 
+  await server.stop()
+
+  /* ====================================== PHASE C — pairing by approval */
+
+  // The clock is fake so arming expiry and the 60-second prompt cooldown can
+  // be crossed by assignment; the approval wait itself runs on a real timer,
+  // injected short where the check needs it to actually fire.
+  let clockC = 50_000_000
+  let acceptUntilC = 0
+  const prompts = []
+  const withdrawn = []
+  let verdict = () => new Promise(() => {})
+  const authC = new MobileAuth({ load: store.load, save: store.save, now: () => clockC })
+  const hostC = {
+    auth: authC,
+    appVersion: '0.0.0-smoke',
+    sessions: () => manager.list(),
+    replay: () => '',
+    write: () => true,
+    resize: () => true,
+    snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: {} }),
+    dispatchOp: async () => null,
+    now: () => clockC,
+    acceptUntil: () => acceptUntilC,
+    approvalTimeoutMs: 30_000,
+    requestApproval: (ask) => {
+      prompts.push(ask)
+      return verdict(ask)
+    },
+    cancelApproval: (requestId) => withdrawn.push(requestId)
+  }
+  const serverC = new MobileServer(hostC)
+  active = serverC
+  await serverC.start({ host: '127.0.0.1', port: PORT })
+
+  /* -------------------------------------------- 13. unarmed = no such door */
+
+  const cold = await connect()
+  cold.send({ t: 'hello', proto: 1, deviceId: 'stray', deviceName: 'Stray', requestPair: true })
+  await waitFor(() => cold.closed !== null, 5000, 'unarmed requestPair to be refused')
+  log(cold.closed === 4001 && cold.first('err')?.code === 'auth', 'an unarmed desktop refuses requestPair and closes 4001')
+  log(prompts.length === 0, 'and raises no prompt')
+
+  const bare = await connect()
+  bare.send({ t: 'hello', proto: 1, deviceId: 'bare' })
+  await waitFor(() => bare.closed !== null, 5000, 'flag-less hello to be refused')
+  log(
+    bare.first('err')?.msg === cold.first('err')?.msg && bare.closed === cold.closed,
+    'and that refusal is indistinguishable from a plain no-credential hello'
+  )
+
+  /* --------------------------------------------------- 14. armed + Allow */
+
+  acceptUntilC = clockC + ACCEPT_WINDOW_MS
+  verdict = async () => true
+  const pixel = await connect()
+  pixel.send({ t: 'hello', proto: 1, deviceId: 'pixel-8', deviceName: 'Pixel 8', requestPair: true })
+  await waitFor(() => pixel.first('hello-ok'), 5000, 'approval hello-ok')
+  const showing = pixel.first('awaiting-approval')
+  log(!!showing && /^[A-Z]+ [A-Z]+$/.test(showing.words), 'an armed desktop answers awaiting-approval with a word pair')
+  log(
+    prompts.length === 1 && prompts[0].words === showing.words && prompts[0].deviceName === 'Pixel 8',
+    'exactly one prompt was raised, carrying the same words and the device name'
+  )
+  const granted = pixel.first('hello-ok').deviceToken
+  log(
+    typeof granted === 'string' && granted.length === issued.length && /^[A-Za-z0-9_-]+$/.test(granted),
+    "Allow issues a token identical in shape to the code path's"
+  )
+  const grantedRecord = saved.find((d) => d.id === 'pixel-8')
+  log(
+    !!grantedRecord && /^[0-9a-f]{64}$/.test(grantedRecord.tokenHash),
+    'and persists only a SHA-256 hash, exactly like the code path'
+  )
+  log(pixel.first('hello-ok').projects?.[0]?.name === 'forge', 'and its hello-ok carries the same opening picture')
+
+  /* ------------------------------------------------ 15. the prompt floor */
+
+  const eager = await connect()
+  eager.send({ t: 'hello', proto: 1, deviceId: 'eager', requestPair: true })
+  await waitFor(() => eager.closed !== null, 5000, 'cooldown refusal')
+  log(
+    eager.closed === 4001 && eager.first('err')?.code === 'limit' && prompts.length === 1,
+    'a second request inside 60 seconds is refused without a second prompt'
+  )
+
+  /* ----------------------------- 16. one pending; the wait may keep warm */
+
+  clockC += 61_000
+  let settleSecond = null
+  verdict = () => new Promise((r) => (settleSecond = r))
+  const second = await connect()
+  second.send({ t: 'hello', proto: 1, deviceId: 'second', deviceName: 'Second', requestPair: true })
+  await waitFor(() => prompts.length === 2, 5000, 'second prompt')
+
+  // The phone pings through the wait; hanging up on that would make it
+  // reconnect and mint fresh words mid-comparison.
+  second.send({ t: 'ping' })
+  await waitFor(() => second.of('pong').length > 0, 5000, 'pong during the approval wait')
+  log(second.closed === null, 'a socket waiting on a human may ping and is not dropped for it')
+
+  clockC += 61_000 // past the cooldown, so only the single-pending rule refuses
+  const third = await connect()
+  third.send({ t: 'hello', proto: 1, deviceId: 'third', requestPair: true })
+  await waitFor(() => third.closed !== null, 5000, 'single-pending refusal')
+  log(third.closed === 4001 && prompts.length === 2, 'only one approval can be pending at a time')
+
+  settleSecond(false)
+  await waitFor(() => second.closed !== null, 5000, 'denied socket to close')
+  log(second.closed === 4001 && !second.first('hello-ok'), 'Deny issues nothing and closes the socket')
+  log(!saved.some((d) => d.id === 'second'), 'and nothing was persisted for the denied phone')
+
+  /* ------------------------------------------- 17. an unanswered prompt */
+
+  clockC += 61_000
+  hostC.approvalTimeoutMs = 300
+  verdict = () => new Promise(() => {})
+  const idle = await connect()
+  idle.send({ t: 'hello', proto: 1, deviceId: 'idle', deviceName: 'Idle', requestPair: true })
+  await waitFor(() => prompts.length === 3, 5000, 'third prompt')
+  await waitFor(() => idle.closed !== null, 5000, 'unanswered approval to time out')
+  log(
+    idle.closed === 4001 && !idle.first('hello-ok'),
+    'an approval nobody answers times out and closes rather than holding the socket'
+  )
+  log(withdrawn.includes(prompts[2].requestId), 'and the desktop prompt is withdrawn when it does')
+  log(
+    idle.closeReason.length > 0 && second.closeReason.length > 0 && idle.closeReason !== second.closeReason,
+    'timeout and Deny close with distinct human sentences'
+  )
+
+  /* ------------------------------------------------- 18. arming expires */
+
+  clockC = acceptUntilC + 1
+  const late2 = await connect()
+  late2.send({ t: 'hello', proto: 1, deviceId: 'late', requestPair: true })
+  await waitFor(() => late2.closed !== null, 5000, 'post-window refusal')
+  log(
+    late2.closed === 4001 && late2.first('err')?.code === 'auth' && prompts.length === 3,
+    'arming expires: after the window the same request is refused with no prompt'
+  )
+
+  /* --------------------------------- 19. the minted token is a real one */
+
+  const back = await connect()
+  back.send({ t: 'hello', proto: 1, deviceId: 'pixel-8', token: granted })
+  await waitFor(() => back.first('hello-ok'), 5000, 'approved token to authenticate')
+  log(
+    !!back.first('hello-ok') && back.first('hello-ok').deviceToken === undefined,
+    'the approved token authenticates a later connection, with no second token issued'
+  )
+  log(
+    persisted.length > 0 && persisted.every((json) => !json.includes(granted)),
+    'no raw approval-minted token was ever handed to persistence'
+  )
+
   /* ---------------------------------------------------------------- done */
 
   manager.killAll()
-  await server.stop()
+  await serverC.stop()
 }
 
 main()

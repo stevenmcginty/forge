@@ -5,6 +5,11 @@
  *   npm run apk:build                  # build the version in mobile/version.json
  *   npm run apk:build -- --bump        # bump versionCode/patch first, then build
  *   npm run apk:build -- --bump minor  # a feature release: 0.1.3 → 0.2.0
+ *   npm run apk:build -- --host x.dev  # bake a different desktop's tunnel domain
+ *
+ * Every build also stamps the desktop's permanent tunnel address into the
+ * bundle (see step 3), which is what lets a fresh install pair with one tap
+ * instead of a QR — the APK already knows where home is.
  *
  * The order matters and is the point of scripting it: version.json is the
  * single source of truth, so the web bundle (Vite define), the native
@@ -39,6 +44,7 @@ import {
   MOBILE,
   RELEASE_REPO,
   ROOT,
+  bakedOriginOf,
   buildToolsDir,
   capture,
   ensureDir,
@@ -66,6 +72,10 @@ const bumpPart = (() => {
 })()
 const notesArg = (() => {
   const at = args.indexOf('--notes')
+  return at !== -1 ? (args[at + 1] ?? '') : ''
+})()
+const hostArg = (() => {
+  const at = args.indexOf('--host')
   return at !== -1 ? (args[at + 1] ?? '') : ''
 })()
 
@@ -148,20 +158,51 @@ const props = Object.fromEntries(
     .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)])
 )
 
-/* ------------------------------------------- 3. web bundle + native sync */
+/* ------------------------------------------- 3. the baked-in desktop */
+
+// The address the APK dials with nothing typed and nothing scanned. It comes
+// from `mobileNgrokDomain` in this machine's own settings.json — the build is
+// running on the very desktop the phone must reach, so the live setting *is*
+// the answer — with `--host <domain>` to override when building for another
+// machine. Absence is not an error: an unstamped APK still pairs by QR and by
+// typing, exactly as before. A `--host` that normalises to nothing, though,
+// is refused loudly — a dud address inside a signed APK fails on the phone,
+// weeks later, looking like the desktop is down.
+const settingsDomain = (() => {
+  if (!process.env.APPDATA) return ''
+  try {
+    const settings = JSON.parse(readFileSync(join(process.env.APPDATA, 'Forge', 'settings.json'), 'utf8'))
+    return typeof settings.mobileNgrokDomain === 'string' ? settings.mobileNgrokDomain : ''
+  } catch {
+    return ''
+  }
+})()
+const bakedOrigin = await bakedOriginOf(hostArg || settingsDomain)
+if (hostArg && !bakedOrigin) {
+  console.error(`--host "${hostArg}" does not normalise to a domain — refusing to stamp a dud address into an APK.`)
+  process.exit(1)
+}
+console.log(
+  bakedOrigin
+    ? `Baked-in desktop: ${bakedOrigin}${hostArg ? ' (from --host)' : ' (from settings.json mobileNgrokDomain)'}`
+    : 'No --host and no mobileNgrokDomain in settings.json — building unstamped; the app pairs by QR or typing.'
+)
+
+/* ------------------------------------------- 4. web bundle + native sync */
 
 // The FORGE_APK_* envs make the defines byte-certain even though version.json
 // was just written — the bundle must describe the build it is inside.
 const env = {
   ...process.env,
   FORGE_APK_VERSION_CODE: String(version.versionCode),
-  FORGE_APK_VERSION_NAME: version.versionName
+  FORGE_APK_VERSION_NAME: version.versionName,
+  FORGE_BAKED_ORIGIN: bakedOrigin
 }
 const npx = 'npx'
 run(npx, ['vite', 'build', '--config', 'mobile/vite.config.ts'], { cwd: ROOT, env, shell: true })
 run(npx, ['cap', 'sync', 'android'], { cwd: MOBILE, env, shell: true })
 
-/* -------------------------------------------------------- 4. gradle */
+/* -------------------------------------------------------- 5. gradle */
 
 writeLocalProperties()
 run(join(ANDROID, 'gradlew.bat'), ['assembleRelease', '--no-daemon'], { cwd: ANDROID, shell: true })
@@ -172,7 +213,7 @@ if (!existsSync(unsigned)) {
   process.exit(1)
 }
 
-/* ---------------------------------------------------- 5. align and sign */
+/* ---------------------------------------------------- 6. align and sign */
 
 ensureDir(DIST_APK)
 const tools = buildToolsDir()
@@ -197,7 +238,7 @@ rmSync(aligned)
 // remain identifiable on disk after the next one overwrites forge-mobile.apk.
 copyFileSync(signed, join(DIST_APK, `forge-mobile-v${version.versionName}.apk`))
 
-/* -------------------------------------------------------- 6. latest.json */
+/* -------------------------------------------------------- 7. latest.json */
 
 // apkUrl is pinned to this release's tag, not to `latest/download`: the
 // sha256 below is a promise about one exact file, and a floating URL could

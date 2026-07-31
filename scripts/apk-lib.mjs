@@ -12,6 +12,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 export const ROOT = resolve(import.meta.dirname, '..')
 export const MOBILE = join(ROOT, 'mobile')
@@ -120,6 +121,51 @@ export function stampGradleVersion({ versionCode, versionName }) {
     throw new Error('Could not find versionCode/versionName in app/build.gradle to stamp.')
   }
   if (gradle !== before) writeFileSync(APP_GRADLE, gradle)
+}
+
+/**
+ * The desktop origin stamped into an APK at build time: `wss://<domain>`, or
+ * '' when there is nothing sane to stamp — and '' is a working build, one that
+ * pairs by QR and typing instead of by one tap.
+ *
+ * The domain rule is not restated here. It is the *real*
+ * `normaliseNgrokDomain` out of shared/mobile.ts, bundled with esbuild the
+ * same way apk-check runs the phone's real manifest parser — because a copy
+ * of the rule is how the desktop's settings and the build script would come
+ * to disagree about what a valid domain is, and the disagreement would ship
+ * inside a signed APK. The only addition is stripping a `ws(s)://` prefix
+ * first: `--host wss://x` is a plausible paste, and mobile.ts only strips
+ * http(s).
+ *
+ * No port, ever. The tunnel answers on the implicit 443; `wss://<domain>:8420`
+ * is an address nothing listens on, and it fails with a connection error that
+ * looks like the desktop being down (see toOrigin in mobile/src/lib/secure.ts).
+ */
+export async function bakedOriginOf(raw) {
+  const { normaliseNgrokDomain } = await sharedMobile()
+  const host = normaliseNgrokDomain(String(raw ?? '').replace(/^wss?:\/\//i, ''))
+  return host ? `wss://${host}` : ''
+}
+
+/** shared/mobile.ts as importable ESM, bundled once per process on first use. */
+let sharedMobilePromise = null
+function sharedMobile() {
+  sharedMobilePromise ??= (async () => {
+    const { build } = await import('esbuild')
+    const outfile = join(ROOT, 'node_modules', '.forge-apk-check', 'shared-mobile.mjs')
+    mkdirSync(join(ROOT, 'node_modules', '.forge-apk-check'), { recursive: true })
+    await build({
+      entryPoints: [join(ROOT, 'shared', 'mobile.ts')],
+      outfile,
+      bundle: true,
+      platform: 'neutral',
+      format: 'esm',
+      logLevel: 'silent',
+      absWorkingDir: ROOT
+    })
+    return import(pathToFileURL(outfile).href)
+  })()
+  return sharedMobilePromise
 }
 
 /** Streaming SHA-256 of a file, lowercase hex — the same shape the manifest carries. */

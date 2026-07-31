@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { AccountChip } from '@/components/AccountChip'
+import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { Onboarding } from '@/components/Onboarding'
 import { ProjectRail } from '@/components/ProjectRail'
 import { ScreenshotTray } from '@/components/ScreenshotTray'
@@ -7,6 +8,7 @@ import { StatusBar } from '@/components/StatusBar'
 import { TerminalGrid } from '@/components/TerminalGrid'
 import { SettingsPage } from '@/components/settings/SettingsPage'
 import { TitleBar } from '@/components/TitleBar'
+import { StaleBanner } from '@/components/StaleBanner'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { VoiceHub } from '@/components/VoiceHub'
 import { useShortcuts } from '@/hooks/useShortcuts'
@@ -38,6 +40,13 @@ export function App(): ReactNode {
         never. See src/components/UpdateBanner.tsx.
       */}
       <UpdateBanner />
+      {/*
+        Its dev-run twin, and mutually exclusive with it in practice: a packaged
+        build can offer an update and can never be stale, a checkout is the
+        reverse. Same 30px strip, so the two can never both push the app down.
+        See src/components/StaleBanner.tsx.
+      */}
+      <StaleBanner />
       <div className="app__body">
         <aside className="app__left" data-collapsed={state.settings.railCollapsed}>
           <ProjectRail />
@@ -60,6 +69,13 @@ export function App(): ReactNode {
       */}
       <VoiceHub />
       <Onboarding />
+      {/*
+        The Forge Mobile pairing prompt — "a phone calling itself X wants to
+        connect". Mounted at the root and last, so an authorisation question is
+        asked over whatever else is on screen, settings page included. It
+        renders nothing until main raises one.
+      */}
+      <ApprovalPrompt />
     </div>
   )
 }
