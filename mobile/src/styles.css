@@ -415,6 +415,26 @@ body {
   font-size: 13px;
 }
 
+/* The seam between the scan path and the typed fallback: a labelled rule, so
+   the fields read as "still here if you need them" rather than a second step. */
+.connect-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--dim);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.connect-or::before,
+.connect-or::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--line);
+}
+
 .field {
   display: flex;
   flex-direction: column;

@@ -4,7 +4,7 @@ import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, powerSaveBlocker } from 'electron'
 import { IPC } from '@shared/ipc'
-import { MOBILE_PORT, type HelloOkFrame, type OpFrame } from '@shared/mobile'
+import { MOBILE_PORT, pairLink, type HelloOkFrame, type OpFrame } from '@shared/mobile'
 import type { MobileDeviceRecord, MobileStatus, MobileTunnelStatus, Settings } from '@shared/types'
 import { MobileAuth, PAIR_TTL_MS } from './mobile/auth'
 import { MobileServer } from './mobile/server'
@@ -400,7 +400,10 @@ export function registerMobileHandlers(): void {
       ttlMs: PAIR_TTL_MS,
       host: endpoint.host,
       port: endpoint.port,
-      url: endpoint.url
+      url: endpoint.url,
+      // `port === 0` is pairEndpoint's "tunnel" marker, and pairLink turns it
+      // into the port-less wss link the phone's toOrigin expects of one.
+      link: pairLink(endpoint.host, endpoint.port, endpoint.port === 0, offer.token)
     }
   })
 

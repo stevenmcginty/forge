@@ -291,6 +291,39 @@ export function wireDim(value: unknown, fallback: number): number {
 export const MOBILE_WS_PATH = '/link'
 
 /**
+ * The pairing link — the whole handshake in one string, built for a QR.
+ *
+ * The consumer is `toOrigin`/`pairTokenOf` in mobile/src/lib/secure.ts, and
+ * this function exists so the two sides can never drift: the desktop builds
+ * the link here, the phone parses it there, and both compile against this
+ * file. `scripts/tunnel-check.mjs` round-trips the real builder through the
+ * real parser, because a QR that encodes an address the phone reads
+ * differently pairs against nothing — silently.
+ *
+ * Two shapes, and the difference is load-bearing:
+ *
+ *  - tunnel: `forge://pair?host=<domain>&scheme=wss&pt=<token>` — **no port**.
+ *    `toOrigin` treats a port-less secure link as "the scheme's default 443";
+ *    a `port` param would win over `scheme` and turn the link into
+ *    `ws://<domain>:<port>`, an address nothing listens on. So when `secure`
+ *    is set, any port passed in is deliberately dropped, not encoded.
+ *  - LAN: `forge://pair?host=<ip>&port=<port>&pt=<token>`, which `toOrigin`
+ *    reads back as `ws://<ip>:<port>`, exactly what typing the address would
+ *    have produced.
+ *
+ * Returns '' rather than a half-link when the host or token is missing — a QR
+ * of a broken link scans fine and then fails in the phone's hands, which is
+ * worse than no QR at all.
+ */
+export function pairLink(host: string, port: number, secure: boolean, token: string): string {
+  if (!host || !token) return ''
+  const h = encodeURIComponent(host)
+  const pt = encodeURIComponent(token)
+  if (secure) return `forge://pair?host=${h}&scheme=wss&pt=${pt}`
+  return `forge://pair?host=${h}&port=${encodeURIComponent(String(port))}&pt=${pt}`
+}
+
+/**
  * The ngrok domain as a human supplies it, made safe — or '' when it cannot be.
  *
  * Lives here rather than in the store because two sides need the same answer:

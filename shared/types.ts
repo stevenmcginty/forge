@@ -1008,6 +1008,14 @@ export type MobilePairOffer =
        * which is what makes pairing one-and-done.
        */
       url: string
+      /**
+       * The whole handshake as one `forge://pair?…` string — what the QR in
+       * Settings encodes. Built by `pairLink` in shared/mobile.ts, parsed by
+       * `toOrigin`/`pairTokenOf` on the phone; carrying it pre-built means the
+       * renderer never assembles a link the phone might read differently.
+       * Note it embeds `token`, so it is as much a credential as the token is.
+       */
+      link: string
     }
   | { ok: false; error: string }
 

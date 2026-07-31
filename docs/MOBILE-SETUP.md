@@ -71,9 +71,10 @@ Copy both. That is everything ngrok needs from you, forever.
 The first start downloads the ngrok agent (~12 MB) into
 `%APPDATA%\Forge\bin\`. After that it is local.
 
-When the chip says **Live**, the **Public address** row shows your permanent
-`wss://…` URL with a Copy button. That URL is the only address you will ever
-give the phone.
+When the chip says **Live**, the **Desktop address** row shows your permanent
+`wss://…` URL with a Copy button — the same name the phone's pairing form uses,
+because it is the same value. That URL is the only address you will ever give
+the phone, and the pairing QR carries it for you.
 
 ### Optional, and worth doing
 
@@ -94,11 +95,13 @@ The APK lives at
    screen — allow your browser to install unknown apps, then tap it again. This
    is the normal price of an app that does not come from a store.
 3. Open **Forge** on the phone.
-4. On the desktop, **Settings › Forge Mobile › Pair a phone**. Paste the
-   **Public address** URL and the pairing code into the phone.
+4. On the desktop, **Settings › Forge Mobile › Pair a phone**. It shows a QR
+   that carries the address and the code together — scan it from the phone.
+   No camera? The same two values are printed under the QR: type the
+   **Desktop address** and the pairing code into the phone's two fields.
 
-That is the last time you type an address. The phone stores a 256-bit device
-token and the URL, and reconnects on its own from then on.
+Either way, that is the last time the phone is told an address. It stores a
+256-bit device token and the URL, and reconnects on its own from then on.
 
 ### Updating it afterwards
 

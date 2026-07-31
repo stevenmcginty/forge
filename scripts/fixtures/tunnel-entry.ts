@@ -20,4 +20,12 @@ export {
   BACKOFF_CAP_MS,
   HEALTHY_RESET_MS
 } from '../../electron/mobile-tunnel'
-export { normaliseNgrokDomain } from '../../shared/mobile'
+export { normaliseNgrokDomain, pairLink } from '../../shared/mobile'
+/**
+ * The phone's own parsers, not a re-implementation. The QR encodes what
+ * `pairLink` builds and the phone decodes it with these two — bundling the
+ * real functions is the only way the check can promise the two sides agree,
+ * which is the whole hazard: a builder and parser that drift produce a QR
+ * that scans cleanly and pairs against a dead address.
+ */
+export { pairTokenOf, toOrigin } from '../../mobile/src/lib/secure'

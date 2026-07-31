@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MOBILE_PORT, type MobileSession } from '@shared/mobile'
 import { Link, deviceId, type LinkPicture, type LinkState } from './lib/link'
 import { forgetToken, pairTokenOf, readOrigin, readToken, toOrigin, writeOrigin, writeToken } from './lib/secure'
+import { canScan, scanPairingCode } from './lib/scan'
 import { Browser, leavesOf } from './components/Browser'
 import { PaneView, paneListeners } from './components/PaneView'
 import { UpdateSheet } from './components/Update'
@@ -25,6 +26,10 @@ export function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>({ at: 'browse', projectId: null })
   const [address, setAddress] = useState(() => readOrigin())
   const [code, setCode] = useState('')
+  // Scan guidance is state of its own, not a `notice`: notices self-dismiss
+  // after 4s, and "go to Android Settings and re-allow the camera" must stay
+  // on screen until it has been acted on or superseded.
+  const [hint, setHint] = useState('')
   const [showUpdate, setShowUpdate] = useState(false)
 
   // Built once. The callbacks below close over setState only, which React
@@ -82,10 +87,45 @@ export function App(): React.JSX.Element {
       setNotice('Both the address and the pairing code are needed.')
       return
     }
+    setHint('')
     writeOrigin(origin)
     setAddress(origin)
     link.connect({ origin, token, deviceId: deviceId(), deviceName: deviceName() })
   }, [address, code, link])
+
+  /**
+   * The camera path: one scan of the desktop's QR carries the address and the
+   * single-use code, so pairing is one tap and a point. The payload goes
+   * through the same `toOrigin`/`pairTokenOf` a typed value does — and both
+   * must decode, or the scan is refused. Accepting anything looser would let
+   * a random QR (every URL is one scan away) be "paired against" as if it
+   * were a desktop, and fail looking like a network problem.
+   */
+  const scan = useCallback(async (): Promise<void> => {
+    setHint('')
+    const outcome = await scanPairingCode()
+    if (outcome.at === 'cancelled') return
+    if (outcome.at === 'denied') {
+      setHint(
+        'The camera is switched off for Forge. Allow it under Android Settings → Apps → Forge → Permissions, then scan again — or type the two fields below; they still work.'
+      )
+      return
+    }
+    if (outcome.at === 'failed') {
+      setHint('The camera could not read a code. Try again, or type the two fields below.')
+      return
+    }
+    const origin = toOrigin(outcome.text, MOBILE_PORT)
+    const token = pairTokenOf(outcome.text)
+    if (!origin || !token) {
+      setHint('That QR is not a Forge pairing code. Scan the one the desktop shows after Settings → Forge Mobile → Pair a phone.')
+      return
+    }
+    writeOrigin(origin)
+    setAddress(origin)
+    setCode('')
+    link.connect({ origin, token, deviceId: deviceId(), deviceName: deviceName() })
+  }, [link])
 
   const forget = useCallback((): void => {
     link.disconnect()
@@ -109,9 +149,11 @@ export function App(): React.JSX.Element {
           address={address}
           code={code}
           notice={notice}
+          hint={hint}
           onAddress={setAddress}
           onCode={setCode}
           onPair={pair}
+          onScan={() => void scan()}
           onUpdate={() => setShowUpdate(true)}
         />
         {showUpdate && <UpdateSheet onClose={() => setShowUpdate(false)} />}
@@ -196,9 +238,11 @@ function Connect({
   address,
   code,
   notice,
+  hint,
   onAddress,
   onCode,
   onPair,
+  onScan,
   onUpdate
 }: {
   state: LinkState
@@ -206,19 +250,39 @@ function Connect({
   address: string
   code: string
   notice: string
+  hint: string
   onAddress: (value: string) => void
   onCode: (value: string) => void
   onPair: () => void
+  onScan: () => void
   onUpdate: () => void
 }): React.JSX.Element {
   const busy = state === 'connecting' || state === 'retrying'
+  // The camera is the primary path where there is one (the APK); the browser
+  // route cannot scan (see canScan in lib/scan.ts) and keeps its typed flow.
+  const scannable = canScan()
   return (
     <div className="connect">
       <h1>Forge</h1>
       <p className="connect-lead">
         On the desktop, open <strong>Settings → Forge Mobile</strong>, turn the link on and tap
-        <strong> Pair a phone</strong>. Then type what it shows you here.
+        <strong> Pair a phone</strong>.{' '}
+        {scannable
+          ? 'The QR code it shows carries the desktop address and the pairing code — one scan fills in both.'
+          : 'Then type what it shows you here.'}
       </p>
+
+      {scannable && (
+        <>
+          <button type="button" className="primary" disabled={busy} onClick={onScan}>
+            {busy ? 'Connecting…' : 'Scan the code on your desktop'}
+          </button>
+          {hint && <p className="connect-detail">{hint}</p>}
+          <div className="connect-or">
+            <span>or type it in</span>
+          </div>
+        </>
+      )}
 
       <label className="field">
         <span>Desktop address</span>
@@ -245,7 +309,7 @@ function Connect({
         />
       </label>
 
-      <button type="button" className="primary" disabled={busy} onClick={onPair}>
+      <button type="button" className={scannable ? 'ghost' : 'primary'} disabled={busy} onClick={onPair}>
         {busy ? 'Connecting…' : 'Pair'}
       </button>
 

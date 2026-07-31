@@ -15,6 +15,11 @@
  *   - the refuse-don't-retry rule (the desktop-side twin of the phone's
  *     4001–4003 rule in mobile/src/lib/link.ts)
  *   - that pairing hands out the tunnel URL with no port appended
+ *   - that the QR's forge://pair link round-trips through the phone's *own*
+ *     toOrigin/pairTokenOf (bundled from mobile/src/lib/secure.ts, not
+ *     re-implemented) — for both the tunnel and the LAN shape. This is the
+ *     one that matters most: builder and parser drifting produces a QR that
+ *     scans cleanly and then pairs against a dead address, silently.
  *
  * What it cannot claim: that a real ngrok account accepts the token and binds
  * the domain. That needs the account, and is the one part only Steve can run.
@@ -81,7 +86,10 @@ async function main() {
     resolveNgrokExe,
     BACKOFF_CAP_MS,
     HEALTHY_RESET_MS,
-    normaliseNgrokDomain
+    normaliseNgrokDomain,
+    pairLink,
+    pairTokenOf,
+    toOrigin
   } = await import(pathToFileURL(join(scratch, 'tunnel.mjs')).href)
 
   /* -------------------------------------------------- 1. finding the binary */
@@ -298,6 +306,46 @@ async function main() {
   log(lan.host === '192.168.1.5' && lan.port === 8420 && lan.url === '', 'no tunnel pairs against the LAN, as before')
   const retrying = pairEndpoint({ state: 'retrying', url: '', detail: '' }, '192.168.1.5', 8420)
   log(retrying.url === '', 'a tunnel that is down does not hand out a dead URL')
+
+  /* -------------------------------------- 8b. the QR link round-trips */
+
+  // Built exactly as electron/mobile-host.ts builds it — from pairEndpoint's
+  // output, with `port === 0` as the tunnel marker — then handed to the
+  // phone's real parsers. Both sides here are the shipped functions.
+  const CODE = 'k7RgV2mQ4tXz'
+  const tunnelLink = pairLink(live.host, live.port, live.port === 0, CODE)
+  log(
+    tunnelLink === `forge://pair?host=${DOMAIN}&scheme=wss&pt=${CODE}`,
+    'a live tunnel builds forge://pair?host=<domain>&scheme=wss&pt=<code> — no port param'
+  )
+  log(
+    toOrigin(tunnelLink, 8420) === `wss://${DOMAIN}`,
+    "the phone's toOrigin reads the tunnel link back as wss://<domain>, never appending :8420"
+  )
+  log(pairTokenOf(tunnelLink) === CODE, "and the phone's pairTokenOf recovers the exact code")
+
+  const lanLink = pairLink(lan.host, lan.port, lan.port === 0, CODE)
+  log(
+    lanLink === `forge://pair?host=192.168.1.5&port=8420&pt=${CODE}`,
+    'no tunnel builds forge://pair?host=<ip>&port=<port>&pt=<code>'
+  )
+  log(
+    toOrigin(lanLink, 9999) === 'ws://192.168.1.5:8420',
+    'the LAN link keeps its explicit port even against a different phone default'
+  )
+  log(pairTokenOf(lanLink) === CODE, 'and its code survives the trip too')
+
+  // The encoding is not decorative: a token that happens to contain URL
+  // metacharacters must still come out the other side byte-for-byte.
+  const oddCode = 'a+b&c=d? e'
+  const oddLink = pairLink('192.168.1.5', 8420, false, oddCode)
+  log(pairTokenOf(oddLink) === oddCode, 'a code full of URL metacharacters round-trips intact')
+  log(toOrigin(oddLink, 8420) === 'ws://192.168.1.5:8420', 'without disturbing the address beside it')
+
+  log(
+    pairLink('', 8420, false, CODE) === '' && pairLink(DOMAIN, 0, true, '') === '',
+    'a missing host or code yields no link at all, never a half-link a QR would happily encode'
+  )
 
   /* ----------------------------------------------------- 9. domain shape */
 

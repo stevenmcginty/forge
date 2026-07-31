@@ -8,9 +8,18 @@ android {
         applicationId "com.forge.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.1.0"
+        versionCode 2
+        versionName "0.2.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Phones only. The QR scanner pulls in ML Kit's barhopper native library
+        // for every architecture Google ships, and x86 + x86_64 alone were
+        // 11.6 MB of a 30.6 MB APK — architectures that exist for emulators and
+        // that no handset will ever load. Forge Mobile is sideloaded onto a
+        // phone from a GitHub release and updates itself over the network, so
+        // the download is a cost Steve pays personally, every release.
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61

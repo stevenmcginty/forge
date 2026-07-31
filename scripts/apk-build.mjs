@@ -2,8 +2,9 @@
  * Build a signed, installable Forge Mobile APK plus the `latest.json` the
  * shipped app polls for updates.
  *
- *   npm run apk:build            # build the version in mobile/version.json
- *   npm run apk:build -- --bump  # bump versionCode/patch first, then build
+ *   npm run apk:build                  # build the version in mobile/version.json
+ *   npm run apk:build -- --bump        # bump versionCode/patch first, then build
+ *   npm run apk:build -- --bump minor  # a feature release: 0.1.3 → 0.2.0
  *
  * The order matters and is the point of scripting it: version.json is the
  * single source of truth, so the web bundle (Vite define), the native
@@ -51,6 +52,18 @@ import {
 
 const args = process.argv.slice(2)
 const bump = args.includes('--bump')
+// `--bump` alone is a patch; `--bump minor` zeroes the patch as semver
+// expects, so a feature release reads as 0.2.0 rather than a 0.1.x that
+// happens to contain a feature. Anything else after --bump is refused loudly:
+// silently treating a typo as "patch" would stamp the wrong number into an
+// APK that then ships.
+const bumpPart = (() => {
+  const next = args[args.indexOf('--bump') + 1] ?? ''
+  if (!bump || next.startsWith('--') || next === '') return 'patch'
+  if (next === 'patch' || next === 'minor') return next
+  console.error(`--bump takes "patch" (default) or "minor", not "${next}".`)
+  process.exit(1)
+})()
 const notesArg = (() => {
   const at = args.indexOf('--notes')
   return at !== -1 ? (args[at + 1] ?? '') : ''
@@ -66,7 +79,12 @@ if (!existsSync(join(ANDROID, 'app'))) {
 let version = readVersion()
 if (bump) {
   const parts = version.versionName.split('.')
-  parts[parts.length - 1] = String(Number(parts[parts.length - 1] ?? 0) + 1)
+  if (bumpPart === 'minor' && parts.length >= 2) {
+    parts[parts.length - 2] = String(Number(parts[parts.length - 2] ?? 0) + 1)
+    parts[parts.length - 1] = '0'
+  } else {
+    parts[parts.length - 1] = String(Number(parts[parts.length - 1] ?? 0) + 1)
+  }
   version = { versionCode: version.versionCode + 1, versionName: parts.join('.') }
   writeVersion(version)
   console.log(`Bumped to v${version.versionName} (build ${version.versionCode}).`)

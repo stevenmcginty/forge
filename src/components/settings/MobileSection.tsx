@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { toDataURL } from 'qrcode'
 import { normaliseNgrokDomain } from '@shared/mobile'
 import type { MobileDeviceRecord, MobilePairOffer, MobileStatus } from '@shared/types'
 import { useApp } from '@/state/AppState'
@@ -14,7 +15,16 @@ import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTon
  *   2. What do I type?     the reachable addresses, because `0.0.0.0` is not one
  *      — and, once, the ngrok card: paste the authtoken and the account's
  *      auto-assigned domain, and the answer becomes one URL, forever
- *   3. Which phones?       the device list, and the button that removes one
+ *   3. How do I pair?      a QR that carries the whole handshake, because the
+ *      first attempt at this — read a 40-character wss URL off one card and a
+ *      code off another, type both into a phone — confused the only user it
+ *      has. The text stays underneath as the no-camera fallback.
+ *   4. Which phones?       the device list, and the button that removes one
+ *
+ * One naming rule, learned the hard way: the phone's field is called
+ * **Desktop address**, so every card here that shows a value destined for that
+ * field calls it the same thing. "Public address" here and "Desktop address"
+ * there read as two different questions, and Steve answered neither.
  *
  * The authtoken field is write-only: what was saved is shown masked and is
  * never rendered back in full, because a settings page is exactly where a
@@ -36,6 +46,7 @@ export function MobileSection(): ReactNode {
   const { state, actions } = useApp()
   const [status, setStatus] = useState<MobileStatus | null>(null)
   const [offer, setOffer] = useState<Extract<MobilePairOffer, { ok: true }> | null>(null)
+  const [qr, setQr] = useState('')
   const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -59,6 +70,36 @@ export function MobileSection(): ReactNode {
   useEffect(() => {
     if (offer && secondsLeft(offer.expiresAt, now) === 0) setOffer(null)
   }, [offer, now])
+
+  // The QR is derived state: it exists exactly as long as the offer does, so
+  // expiry and Cancel clear it through the same `offer` path — a QR outliving
+  // its code would look scannable and pair nothing. Encoding happens here, on
+  // this machine; the link embeds the pairing credential and must never go to
+  // some QR-rendering service. Dark modules on a light ground with a real
+  // quiet zone, whatever theme the card is drawn in — inverted codes fail on
+  // many scanner libraries, and a margin-less code fails on most.
+  useEffect(() => {
+    if (!offer?.link) {
+      setQr('')
+      return
+    }
+    let stale = false
+    toDataURL(offer.link, {
+      errorCorrectionLevel: 'M',
+      margin: 3,
+      width: 256,
+      color: { dark: '#000000', light: '#ffffff' }
+    })
+      .then((url) => {
+        if (!stale) setQr(url)
+      })
+      .catch(() => {
+        if (!stale) setQr('')
+      })
+    return () => {
+      stale = true
+    }
+  }, [offer?.link])
 
   const toggle = useCallback(async (on: boolean) => {
     setBusy(true)
@@ -176,13 +217,16 @@ export function MobileSection(): ReactNode {
           <Toggle checked={status.enabled} onChange={(on) => void toggle(on)} label="Enable Forge Mobile" />
         </Row>
 
+        {/* "Desktop address" because that is what the phone's pairing form
+            calls its field — one name on both screens, or it reads as two
+            different questions. */}
         {status.state === 'listening' && (
           <Row
-            label="Reach it at"
+            label="Desktop address"
             hint={
               status.addresses.length > 1
-                ? 'A 100.x address is your tailnet and works anywhere; the others are this network only.'
-                : 'Type this into the phone app.'
+                ? 'What the phone asks for. A 100.x address is your tailnet and works anywhere; the others are this network only.'
+                : 'What the phone asks for — works while it is on this network.'
             }
           >
             <div className="mobile-addresses">
@@ -236,7 +280,7 @@ export function MobileSection(): ReactNode {
           <TextField
             value={domain}
             mono
-            placeholder="assigned-name.ngrok-free.app"
+            placeholder="assigned-name.ngrok-free.dev"
             onCommit={saveDomain}
           />
         </Row>
@@ -248,7 +292,10 @@ export function MobileSection(): ReactNode {
         </Row>
 
         {tunnel.state === 'live' && (
-          <Row label="Public address" hint="Paste this whole URL into the phone app — no port on the end.">
+          <Row
+            label="Desktop address"
+            hint="The phone's Desktop address, from anywhere in the world — the whole URL, no port on the end. It replaces the LAN address above."
+          >
             <div className="mobile-tunnel-url">
               <code className="mobile-address">{tunnel.url}</code>
               <button type="button" className="sbtn" onClick={() => void copyTunnelUrl(tunnel.url)}>
@@ -273,7 +320,7 @@ export function MobileSection(): ReactNode {
       {status.state === 'listening' && (
         <Card
           title="Pair a phone"
-          hint="The code is single-use and expires in five minutes. Anyone who can read it before then can pair a phone, so treat it like a password you are saying out loud."
+          hint="The QR and the code under it are the same single-use credential, and it expires in five minutes. Anyone who can see this screen before then can pair a phone, so treat it like a password you are saying out loud."
           actions={
             offer ? (
               <button type="button" className="sbtn" onClick={() => void cancelPairing()}>
@@ -288,19 +335,33 @@ export function MobileSection(): ReactNode {
         >
           {offer ? (
             <div className="mobile-pair">
+              {/* The QR carries the whole handshake — address and code in one
+                  forge://pair link, built in main by the same shared/mobile.ts
+                  builder the phone parses with. The text below is the same two
+                  values for a camera that will not cooperate, not a second
+                  source of truth. */}
+              {qr && <img className="mobile-pair__qr" src={qr} alt="Pairing QR code" width={256} height={256} />}
               <p className="mobile-pair__lead">
-                {tunnel.state === 'live'
-                  ? 'In the phone app, enter the public tunnel address and this code:'
-                  : 'In the phone app, enter the address above and this code:'}
+                Scan this from the Forge app on the phone — it carries the address and the code, so pairing is one scan.
               </p>
-              <code className="mobile-pair__code">{offer.token}</code>
+              <div className="mobile-pair__fallback">
+                <p className="mobile-pair__lead">No camera? Type these into the phone instead:</p>
+                <div className="mobile-pair__value">
+                  <span className="mobile-pair__label">Desktop address</span>
+                  <code className="mobile-address">{offer.url || `${offer.host}:${offer.port}`}</code>
+                </div>
+                <div className="mobile-pair__value">
+                  <span className="mobile-pair__label">Pairing code</span>
+                  <code className="mobile-pair__code">{offer.token}</code>
+                </div>
+              </div>
               <p className="mobile-pair__ttl">
                 Expires in {secondsLeft(offer.expiresAt, now)}s
               </p>
             </div>
           ) : (
             <p className="scard__hint">
-              Open Forge Mobile on the phone, then tap this to get a code.
+              Open Forge Mobile on the phone, then tap this — you get a QR to scan, and the address and code to type if you would rather.
             </p>
           )}
           {error && <p className="mobile-error">{error}</p>}

@@ -31,6 +31,7 @@ import { ANDROID, MOBILE, ROOT, run, writeLocalProperties, readVersion, stampGra
 
 const KOTLIN_VERSION = '1.9.25'
 const MANIFEST = join(ANDROID, 'app', 'src', 'main', 'AndroidManifest.xml')
+const VARIABLES_GRADLE = join(ANDROID, 'variables.gradle')
 const ROOT_GRADLE = join(ANDROID, 'build.gradle')
 const APP_GRADLE = join(ANDROID, 'app', 'build.gradle')
 const JAVA_DIR = join(ANDROID, 'app', 'src', 'main', 'java', 'com', 'forge', 'mobile')
@@ -96,6 +97,59 @@ patch(MANIFEST, 'REQUEST_INSTALL_PACKAGES permission', (text) => {
   return text.replace(
     /(\s*)(<uses-permission android:name="android\.permission\.INTERNET")/,
     `$1<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />$1$2`
+  )
+})
+
+// The QR scanner library (ionbarcode-android, inside @capacitor/barcode-
+// scanner) declares minSdk 26, and the manifest merger refuses to build an
+// app claiming 23 against it — rightly, since a 23 install would crash on
+// first scan. 26 is Android 8.0 (2017); Capacitor 8 raises the floor there
+// anyway, so this is early rather than exotic. The stock template writes 23,
+// which is why this is a patch and not a hand edit that `cap add` would undo.
+patch(VARIABLES_GRADLE, 'minSdkVersion 26 (QR scanner library floor)', (text) => {
+  return text.replace(/minSdkVersion = 2[0-5]\b/, 'minSdkVersion = 26')
+})
+
+// Ship phone architectures only.
+//
+// ML Kit's barcode reader carries a native library (`libbarhopper_v3.so`) built
+// for every ABI Google supports. Measured on the v0.2.0 build: x86 and x86_64
+// together were 11.6 MB of a 30.6 MB APK — architectures that exist for
+// emulators, on an app that is only ever sideloaded onto a handset. Nothing
+// warns about this; the APK is simply four times the size it needs to be, and
+// the in-app updater re-downloads it in full on every release.
+//
+// A patch rather than a hand edit because `cap add`/`cap sync` regenerate the
+// app's build.gradle, and the failure mode of losing it is invisible — a build
+// that works perfectly and is 20 MB heavier.
+patch(APP_GRADLE, 'phone ABIs only (drop x86 emulator builds)', (text) => {
+  if (/abiFilters/.test(text)) return text
+  return text.replace(
+    /(testInstrumentationRunner "androidx\.test\.runner\.AndroidJUnitRunner")/,
+    "$1\n        ndk {\n            abiFilters 'arm64-v8a', 'armeabi-v7a'\n        }"
+  )
+})
+
+// The QR pairing scanner. Declared here rather than trusted to manifest
+// merging from the scanner library's AAR, so the permission is visible in the
+// tree apk-check reads — a permission that only exists after a merge step is
+// one a check script cannot see and a review cannot diff. The <uses-feature>
+// keeps the camera optional: declaring the permission alone would implicitly
+// mark the hardware required, and a camera-less device can still pair by
+// typing.
+patch(MANIFEST, 'CAMERA permission (QR pairing)', (text) => {
+  if (text.includes('android.permission.CAMERA')) return text
+  return text.replace(
+    /(\s*)(<uses-permission android:name="android\.permission\.INTERNET")/,
+    `$1<uses-permission android:name="android.permission.CAMERA" />$1$2`
+  )
+})
+
+patch(MANIFEST, 'camera <uses-feature> marked optional', (text) => {
+  if (text.includes('android.hardware.camera')) return text
+  return text.replace(
+    /(\s*)(<uses-permission android:name="android\.permission\.CAMERA")/,
+    `$1<uses-feature android:name="android.hardware.camera" android:required="false" />$1$2`
   )
 })
 

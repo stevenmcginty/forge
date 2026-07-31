@@ -107,6 +107,20 @@ if (!existsSync(manifestXml)) {
 } else {
   const xml = readFileSync(manifestXml, 'utf8')
   log(xml.includes('android.permission.REQUEST_INSTALL_PACKAGES'), 'AndroidManifest declares REQUEST_INSTALL_PACKAGES')
+  log(xml.includes('android.permission.CAMERA'), 'AndroidManifest declares CAMERA — without it the QR scanner opens and shows black')
+  log(
+    /uses-feature[^>]*android\.hardware\.camera[^>]*android:required="false"/.test(xml),
+    'the camera feature is optional — a camera-less device can still pair by typing'
+  )
+  const capSettings = join(ANDROID, 'capacitor.settings.gradle')
+  log(
+    existsSync(capSettings) && readFileSync(capSettings, 'utf8').includes('capacitor-barcode-scanner'),
+    'cap sync wired the barcode-scanner native project into the gradle build'
+  )
+  log(
+    /minSdkVersion = 26/.test(readFileSync(join(ANDROID, 'variables.gradle'), 'utf8')),
+    'minSdkVersion is 26 — the scanner library refuses to merge below it'
+  )
   log(xml.includes('androidx.core.content.FileProvider'), 'AndroidManifest declares the FileProvider')
   log(xml.includes('android:grantUriPermissions="true"'), 'the FileProvider grants URI permissions')
   log(xml.includes('android:usesCleartextTraffic="true"'), 'cleartext ws:// to the LAN survives targetSdk 28+')
@@ -153,6 +167,38 @@ const capConfig = readFileSync(join(MOBILE, 'capacitor.config.js'), 'utf8')
 log(capConfig.includes("androidScheme: 'https'"), 'the WebView is a secure context (androidScheme https)')
 log(capConfig.includes('cleartext: true'), 'cleartext is allowed for the ws:// LAN route')
 log(capConfig.includes('allowMixedContent: true'), 'mixed content is allowed (https origin → ws:// socket)')
+
+/* -------------------------------------- the scanned payload, end to end */
+
+// The QR path must feed the *real* decoder, so these run against secure.ts
+// bundled the same way manifest.ts is above — not a re-statement of its
+// rules. The check that matters most: a tunnel payload must come out with
+// **no port**. `wss://host:8420` is an address nothing listens on, and it
+// fails with a connection error that looks like the desktop being down —
+// the exact bug toOrigin's comment records from the first time round.
+// `browser`, not `neutral`: secure.ts imports @capacitor/*, whose package
+// exports only resolve under a browser-shaped condition — which is also the
+// platform the real bundle targets, so the check compiles what ships.
+await build({
+  entryPoints: [join(MOBILE, 'src', 'lib', 'secure.ts')],
+  outfile: join(scratch, 'secure.mjs'),
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  logLevel: 'silent',
+  absWorkingDir: ROOT
+})
+const { toOrigin, pairTokenOf } = await import(pathToFileURL(join(scratch, 'secure.mjs')).href)
+
+const tunnelScan = 'forge://pair?host=steve.ngrok-free.dev&scheme=wss&pt=single-use-code'
+log(toOrigin(tunnelScan, 8420) === 'wss://steve.ngrok-free.dev', 'a scanned tunnel payload becomes wss://<host> with no port appended')
+log(!toOrigin(tunnelScan, 8420).includes(':8420'), 'the LAN default port never leaks into a tunnel origin')
+log(pairTokenOf(tunnelScan) === 'single-use-code', 'the single-use code survives the same scanned payload')
+log(
+  toOrigin('forge://pair?host=192.168.1.10&port=8420&pt=single-use-code', 8420) === 'ws://192.168.1.10:8420',
+  'a scanned LAN payload keeps its explicit port'
+)
+log(pairTokenOf('https://example.com/menu') === '', 'a QR that is not a Forge pairing link yields no code, so the scan is refused')
 
 /* ------------------------------------------------ version define wiring */
 

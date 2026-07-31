@@ -1316,10 +1316,16 @@
 
 /* ------------------------------------------------------------ forge mobile
  *
- * The one thing this panel has to get right typographically is the pairing
- * code: it is read off a screen and typed into a phone, character by character,
- * by someone who will not enjoy doing it twice. So it is monospace, large, and
- * loosely tracked — the shapes that get confused (0/O, 1/l, rn/m) need the air.
+ * Pairing is a QR first and text second. The QR is the thing this panel must
+ * get right optically: it is scanned off a monitor by a phone camera, so it
+ * stays dark-on-white whatever the app theme (inverted codes fail on many
+ * scanners) and keeps its own white surround as the quiet zone the spec
+ * demands — a dark card pressed against the modules reads as part of them.
+ *
+ * The text fallback keeps the old rule: the code is read off a screen and
+ * typed into a phone, character by character, by someone who will not enjoy
+ * doing it twice. So it is monospace, large, and loosely tracked — the shapes
+ * that get confused (0/O, 1/l, rn/m) need the air.
  */
 
 .mobile-addresses {
@@ -1367,10 +1373,53 @@
   padding: var(--s-4) 0 var(--s-2);
 }
 
+/* The image already carries its own quiet zone (the encoder's margin), but a
+   white padding ring on top makes the zone theme-proof: however dark the card,
+   the camera sees modules on an unbroken light field. */
+.mobile-pair__qr {
+  display: block;
+  width: 256px;
+  height: 256px;
+  padding: var(--s-2);
+  background: #fff;
+  border-radius: var(--r-md);
+}
+
 .mobile-pair__lead {
   margin: 0;
   font-size: var(--t-sm);
   color: var(--text-dim);
+}
+
+.mobile-pair__fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line-hairline);
+  align-self: stretch;
+}
+
+.mobile-pair__value {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+/* The tunnel address is forty-odd characters of hostname; nowrap (right for
+   the address chips elsewhere) would push it out of a narrow pane here. */
+.mobile-pair__value .mobile-address {
+  white-space: normal;
+  word-break: break-all;
+}
+
+.mobile-pair__label {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+  min-width: 110px;
+  text-align: right;
 }
 
 .mobile-pair__code {

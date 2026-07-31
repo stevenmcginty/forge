@@ -5,6 +5,7 @@
   "version": "0.0.0",
   "dependencies": {
     "@capacitor/android": "^7.6.8",
+    "@capacitor/barcode-scanner": "^2.2.6",
     "@capacitor/core": "^7.6.8",
     "@capacitor/preferences": "^7.0.4"
   }
