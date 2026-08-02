@@ -142,7 +142,7 @@ function defaultSettings(): Settings {
     // resolves it to whatever is current, and it costs no key: the Agent SDK
     // session signs in with the machine's own `claude` login. Sonnet because
     // this is a conversation, and latency is the thing you notice.
-    voiceClaudeModel: 'sonnet',
+    voiceClaudeModel: 'opus',
     // Off: the wake-word listener is new and unproven, so it stays an opt-in
     // rather than something that starts eavesdropping on everyone's upgrade.
     voiceWakeWord: false,

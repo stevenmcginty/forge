@@ -30,6 +30,15 @@ import {
   openDesktopTarget,
   sendKeysToWindow
 } from '../desktop-control'
+import {
+  browserClick,
+  browserOpen,
+  browserRead,
+  browserScreenshot,
+  browserType,
+  closeBrowser,
+  defaultChromeProfileDir
+} from './chrome-control'
 import { defaultAssetsDir, listFiles, runCommand, saveAsset, writeTextFile } from './file-tools'
 import { VOICE_PERSONA } from './persona'
 
@@ -85,8 +94,12 @@ const TOOL_TIMEOUT_MS = 15_000
  */
 const MAX_TURNS = 50
 
-/** Matches every other model literal in Forge: an alias, not a pinned id. */
-export const DEFAULT_VOICE_CLAUDE_MODEL = 'sonnet'
+/**
+ * Matches every other model literal in Forge: an alias, not a pinned id.
+ * Opus, deliberately — Steve chose intelligence over latency for the brain
+ * (2026-08-02), and the header toggle makes dropping to Sonnet one click.
+ */
+export const DEFAULT_VOICE_CLAUDE_MODEL = 'opus'
 
 /* ------------------------------------------------------------------- deps */
 
@@ -127,6 +140,15 @@ export interface VoiceAgentDeps {
    * used instead, which is only wrong under a non-default --data-dir.
    */
   getAssetsDir?(): string
+  /**
+   * Where Jarvis's own Chrome profile lives — `<data dir>\chrome-jarvis`. It is
+   * a dedicated, persistent profile rather than Steve's daily browser, so the
+   * sign-ins it accumulates survive Forge closing; see ../voice-agent/
+   * chrome-control.ts for why it cannot be his own. Absent, chrome-control's
+   * `defaultChromeProfileDir()` guess is used, on the same terms as the assets
+   * dir above.
+   */
+  getChromeProfileDir?(): string
 }
 
 /* --------------------------------------------------------------- utilities */
@@ -291,6 +313,11 @@ export class VoiceAgentHost {
     this.teardown()
     this.closing = true
     this.givenUp = true
+    // The browser is a window on the desktop rather than part of the
+    // conversation, so nothing else ever closes it. Fire and forget: the app is
+    // on its way out and a Chrome that will not go quietly is not worth waiting
+    // for. The profile on disk survives either way, which is the point of it.
+    void closeBrowser().catch(() => undefined)
   }
 
   /* ------------------------------------------------------------- internals */
@@ -826,6 +853,90 @@ export class VoiceAgentHost {
           'What you actually are and what you can actually do, from live state rather than from memory. Call this whenever Steve asks what you are, what model you are running, or what you can do, and answer from what it says. Never guess at your own capabilities and never undersell them. Takes no arguments.',
           {},
           async () => text(this.selfDescription())
+        ),
+
+        /* ------------------------------------------------- the browser (T4)
+         *
+         * Tier four: a real Chrome window, driven for real. The jobs Steve
+         * actually wants — book a table, check an order — live behind sign-ins,
+         * which is why this is a dedicated persistent profile and not a fetch;
+         * see ./chrome-control.ts. The descriptions below carry the loop the
+         * model has to work in, because nothing else can teach it: read the
+         * page, act on a number it just read, read again. And the two that act
+         * carry the confirm-first rule, in the same words the persona uses.
+         */
+
+        tool(
+          'browser_open',
+          [
+            'Open a page in your own Chrome window. This is a real browser with its own sign-ins, separate from the one Steve uses himself, and it stays signed in to whatever he has signed in to there.',
+            'Give a url to go somewhere — "example.com" is fine, the scheme is filled in. Call it with no url to bring the window up and see where a previous turn left off.',
+            'It tells you where you landed, not what is on the page. browser_read is the next call, always.'
+          ].join('\n'),
+          { url: z.string().optional().describe('Where to go. Omit to see where the browser already is.') },
+          async (args) => text(await browserOpen(this.chromeProfileDir(), args.url ?? ''))
+        ),
+
+        tool(
+          'browser_read',
+          [
+            'Look at the page you are on. This is your eyes on the web: the address and title, then a numbered list of everything you can click or type into, then what the page actually says.',
+            'Those numbers are the only way to act on the page — browser_click and browser_type take nothing else. They restart at 1 on EVERY read, and they die the moment the page navigates or changes, so a number from an earlier read is either gone or points somewhere else entirely.',
+            'So: read before you act, and read again after anything that moves the page. Never act on a number you did not just receive. Takes no arguments.'
+          ].join('\n'),
+          {},
+          async () => text(await browserRead(this.chromeProfileDir()))
+        ),
+
+        tool(
+          'browser_click',
+          [
+            'Click one of the numbered elements from your last browser_read — a real mouse click in the middle of it, so the page reacts exactly as it would to Steve.',
+            'Read the page immediately before this. A number from an older read has expired, and clicking an expired one is how you end up somewhere nobody asked for.',
+            'Afterwards the result says where you ended up; browser_read tells you what is there now, and browser_screenshot shows you when the layout is the question.',
+            'Anything that submits a payment, sends a message, or confirms a booking needs Steve’s spoken yes for that specific action first.'
+          ].join('\n'),
+          { ref: z.number().describe('The number in square brackets from the last browser_read') },
+          async (args) => text(await browserClick(this.chromeProfileDir(), args.ref))
+        ),
+
+        tool(
+          'browser_type',
+          [
+            'Type into the page, one real keystroke at a time. With `ref` — a number from the last browser_read — that field is focused and emptied first, so you are replacing what is in it rather than appending to it. Without `ref` the keys go wherever the focus already is.',
+            '`press_enter` sends Enter afterwards, which on most search boxes and forms is the submit.',
+            'Read the page first for the same reason as clicking, and read it again after: a form that has been typed into is not the page you last read.',
+            'Anything that submits a payment, sends a message, or confirms a booking needs Steve’s spoken yes for that specific action first.'
+          ].join('\n'),
+          {
+            text: z.string().describe('The text to type, exactly as it should appear'),
+            ref: z.number().optional().describe('The field to type into. Omit to type wherever the focus is.'),
+            press_enter: z.boolean().optional().describe('Press Enter after typing')
+          },
+          async (args) =>
+            text(await browserType(this.chromeProfileDir(), args.text, args.ref, args.press_enter ?? false))
+        ),
+
+        tool(
+          'browser_screenshot',
+          [
+            'Photograph your Chrome window as it looks right now. For the questions text cannot answer — a seat map, a date picker, a layout that will not behave — and for checking what a click actually did when the page says nothing.',
+            'browser_read is cheaper and exact for anything you could read, so reach for this when looking is genuinely the point. Takes no arguments.'
+          ].join('\n'),
+          {},
+          async () => {
+            try {
+              const shot = await browserScreenshot(this.chromeProfileDir())
+              if (!shot) {
+                return text('The browser window could not be photographed. Open a page first, or read it to see whether one is loaded.')
+              }
+              return {
+                content: [{ type: 'image' as const, data: shot.base64, mimeType: shot.mime }]
+              }
+            } catch (err) {
+              return text(`The browser window could not be photographed: ${errText(err)}`)
+            }
+          }
         )
       ]
     })
@@ -848,6 +959,11 @@ export class VoiceAgentHost {
     return this.deps.getAssetsDir?.() ?? defaultAssetsDir()
   }
 
+  /** Jarvis's own Chrome profile: the injected data dir, or the same guess. */
+  private chromeProfileDir(): string {
+    return this.deps.getChromeProfileDir?.() ?? defaultChromeProfileDir()
+  }
+
   private selfDescription(): string {
     const model = this.model || this.deps.getModel().trim() || DEFAULT_VOICE_CLAUDE_MODEL
     const cwd = this.cwd || this.wantedCwd || homedir()
@@ -862,6 +978,8 @@ export class VoiceAgentHost {
         `list installed applications, launch one, list open windows, bring one to the front, type real keystrokes ` +
         `into it, open a file, folder or link, and close a window. Files: list what is in a folder, copy or move a ` +
         `file somewhere, write a text file, read a file, and find files by name or by what is inside them. The ` +
+        `browser: a Chrome window of your own, with its own sign-ins — open a page, read it, click, type, and ` +
+        `photograph it. The ` +
         `machine: run one PowerShell command and read what it printed. Media, through Gemini: make an image, edit ` +
         `an image, make a video, ask Gemini a question, and summarise a video. The web: search it, and fetch a page.`,
       `What you do not have: you cannot edit code directly. Changing a project is work for a coding agent in one of ` +
@@ -940,6 +1058,11 @@ export class VoiceAgentHost {
       'mcp__forge__write_file',
       'mcp__forge__run_command',
       'mcp__forge__describe_self',
+      'mcp__forge__browser_open',
+      'mcp__forge__browser_read',
+      'mcp__forge__browser_click',
+      'mcp__forge__browser_type',
+      'mcp__forge__browser_screenshot',
       ...(bridge
         ? [
             'mcp__forge-bridge__make_image',

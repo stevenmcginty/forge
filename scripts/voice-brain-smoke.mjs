@@ -32,7 +32,11 @@ registerHooks({
     if (spec.startsWith('@shared/')) {
       return next(new URL(`../shared/${spec.slice('@shared/'.length)}.ts`, import.meta.url).href, context)
     }
-    if (spec.startsWith('.') && !/\.[a-z]+$/i.test(spec)) return next(`${spec}.ts`, context)
+    // Only Forge's own extensionless relative imports become .ts. A dependency's
+    // internal require('./lib/utils') must pass through untouched — playwright-core
+    // resolves dozens of those, and rewriting them to .ts is a crash on import.
+    const fromDependency = (context?.parentURL ?? '').includes('/node_modules/')
+    if (!fromDependency && spec.startsWith('.') && !/\.[a-z]+$/i.test(spec)) return next(`${spec}.ts`, context)
     return next(spec, context)
   },
   load(url, context, next) {

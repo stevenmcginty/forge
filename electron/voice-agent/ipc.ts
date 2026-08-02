@@ -89,7 +89,11 @@ function ensureHost(): VoiceAgentHost {
     // The same `<data dir>\bridge-out` the bridge subprocess is told to write
     // to (electron/bridge/mcp-config.ts), so list_files and make_image can
     // never disagree about where an image went — --data-dir runs included.
-    getAssetsDir: () => join(getDataDir(), 'bridge-out')
+    getAssetsDir: () => join(getDataDir(), 'bridge-out'),
+    // Jarvis's own Chrome profile, beside the data dir rather than inside
+    // Steve's own browser: it is a dedicated persistent profile, so the
+    // sign-ins he does in that window are still there next time Forge opens.
+    getChromeProfileDir: () => join(getDataDir(), 'chrome-jarvis')
   })
   return host
 }

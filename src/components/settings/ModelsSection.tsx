@@ -52,8 +52,8 @@ const GROQ_MODELS = [
  * note on `voiceClaudeModel` in shared/types.ts.
  */
 const CLAUDE_MODELS = [
-  { id: 'sonnet', label: 'Sonnet — fastest, the default' },
-  { id: 'opus', label: 'Opus — smartest, heavier on usage' },
+  { id: 'opus', label: 'Opus — smartest, the default' },
+  { id: 'sonnet', label: 'Sonnet — faster, lighter on usage' },
   { id: 'haiku', label: 'Haiku — lightest' }
 ]
 

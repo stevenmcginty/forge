@@ -154,7 +154,7 @@ const FALLBACK_SETTINGS: Settings = {
   anthropicKey: '',
   // Mirrors electron/store.ts. The Claude voice brain needs no key — it signs
   // in with the machine's own `claude` login — so this is the only knob it has.
-  voiceClaudeModel: 'sonnet',
+  voiceClaudeModel: 'opus',
   // Mirrors electron/store.ts — off until the wake-word listener has earned
   // trust the way barge-in and earcons already have.
   voiceWakeWord: false,
