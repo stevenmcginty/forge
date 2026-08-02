@@ -108,6 +108,11 @@ const host = new VoiceAgentHost({
         host.resolveTool({ id: request.id, ok: true, result: APP_STATE })
       } else if (request.name === 'get_project_memory') {
         host.resolveTool({ id: request.id, ok: true, result: 'Nothing remembered yet.' })
+      } else if (request.name === 'remember') {
+        // Nothing is written here — there is no memory store without a
+        // renderer — but a turn that decides to remember something must not
+        // hit the else and come back as a failed tool.
+        host.resolveTool({ id: request.id, ok: true, result: 'Noted.' })
       } else if (request.name === 'run_app_action') {
         host.resolveTool({ id: request.id, ok: true, result: 'OK: pretended to do that.' })
       } else {

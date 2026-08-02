@@ -4,6 +4,7 @@ import {
   createSdkMcpServer,
   query,
   tool,
+  type AgentDefinition,
   type McpServerConfig,
   type Options,
   type PermissionResult,
@@ -435,6 +436,8 @@ export class VoiceAgentHost {
       case 'assistant': {
         // Subagent chatter carries a parent id. Only the main thread is Steve's
         // conversation; forwarding the rest would speak two voices at once.
+        // The Task tool in options() depends on this line: without it every
+        // sentence the researcher thinks would be read out loud.
         if (message.parent_tool_use_id) return
         const parts: string[] = []
         for (const block of message.message.content) {
@@ -581,6 +584,17 @@ export class VoiceAgentHost {
           'Read what Forge has learned about the active project in earlier sessions — decisions made, standing preferences, what has been happening. Call this when the answer depends on history rather than on what is on screen. Takes no arguments.',
           {},
           async () => text(await this.askRenderer('get_project_memory', {}))
+        ),
+
+        tool(
+          'remember',
+          [
+            'Write one fact into the active project’s memory, where the next session will read it back through get_project_memory.',
+            'One plain fact per call, written for a session that saw none of this conversation: "Steve releases with the dist script, never electron-builder directly" — not "the thing we decided earlier".',
+            'Use it when he says remember this, and whenever a decision or a standing preference surfaces that a later session would have to be told again. Never for chit-chat, and never for something get_app_state already shows — the memory is small and everything in it is read on every turn.'
+          ].join('\n'),
+          { note: z.string().describe('The fact, as one plain sentence') },
+          async (args) => text(await this.askRenderer('remember', { note: args.note }))
         ),
 
         tool(
@@ -844,7 +858,7 @@ export class VoiceAgentHost {
         `session hears every utterance until Forge closes. Your working directory is ${cwd}, and generated images ` +
         `and videos are saved to ${this.assetsDir()}.`,
       `Your tools, in groups. Forge itself: read the app's live state, act on tabs, panes, projects and prompts, ` +
-        `read what the project remembers from earlier sessions, and take a screenshot of the screen. The desktop: ` +
+        `read what the project remembers from earlier sessions and add to it, and take a screenshot of the screen. The desktop: ` +
         `list installed applications, launch one, list open windows, bring one to the front, type real keystrokes ` +
         `into it, open a file, folder or link, and close a window. Files: list what is in a folder, copy or move a ` +
         `file somewhere, write a text file, read a file, and find files by name or by what is inside them. The ` +
@@ -868,7 +882,9 @@ export class VoiceAgentHost {
    *  - `tools` names the only built-ins that exist at all, and every one of
    *    them is read-only: Read, Glob, Grep, WebSearch, WebFetch. Bash, Edit and
    *    Write are not restricted, they are *absent*: the model cannot request
-   *    what it was never given.
+   *    what it was never given. Task (Agent) is the one addition, and it widens
+   *    nothing: the only subagent it can reach is `researcher`, whose own tool
+   *    list is those same five.
    *  - Writing files and running commands do exist — the agent would be useless
    *    without them — but only through our own tools: `write_file`,
    *    `save_asset` and `run_command`. That is a much narrower door than the
@@ -901,9 +917,16 @@ export class VoiceAgentHost {
       'Grep',
       'WebSearch',
       'WebFetch',
+      // Delegation, under both of its names: the CLI calls this tool Agent and
+      // keeps Task as a legacy alias for it. Naming both is cheap, and a
+      // backstop that guessed the wrong one would deny the only tool that can
+      // reach the researcher.
+      'Task',
+      'Agent',
       'mcp__forge__get_app_state',
       'mcp__forge__run_app_action',
       'mcp__forge__get_project_memory',
+      'mcp__forge__remember',
       'mcp__forge__take_screenshot',
       'mcp__forge__list_desktop_apps',
       'mcp__forge__open_desktop_app',
@@ -928,6 +951,31 @@ export class VoiceAgentHost {
         : [])
     ])
 
+    /**
+     * The one subagent, and the reason Task is allowed at all.
+     *
+     * "What does this codebase do about X" is twenty greps and four long
+     * reads — a minute of silence on a thread whose only interface is a
+     * microphone. Handed to a subagent it costs one tool call, the
+     * conversation stays live, and what comes back is the answer rather than
+     * the search. Its own tools are the read-only five: a subagent has no
+     * persona, no voice and nobody to ask, so it gets eyes and nothing else.
+     */
+    const agents: Record<string, AgentDefinition> = {
+      researcher: {
+        description:
+          'Deep research and codebase reconnaissance — many searches and reads distilled into a short factual answer',
+        prompt: [
+          'You are the voice agent’s researcher. One question in, one answer out; there is no conversation here.',
+          'Read and search as widely as the question needs. That breadth is the whole point of you: the thread that asked is talking to someone while you work.',
+          'Answer in dense facts — paths, names, numbers, and what they mean — not in a description of how you looked. Markdown is fine; another agent reads this and nobody speaks it.',
+          'Report only what you actually found. If the answer is not there, say so plainly: whatever you write will be repeated to a human as fact.',
+          'You cannot change anything, and you are never being asked to.'
+        ].join('\n'),
+        tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch']
+      }
+    }
+
     const options: Options = {
       model,
       cwd,
@@ -941,7 +989,8 @@ export class VoiceAgentHost {
       maxTurns: MAX_TURNS,
       includePartialMessages: true,
       mcpServers: servers,
-      tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+      tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task', 'Agent'],
+      agents,
       allowedTools: [...allowed],
       permissionMode: 'dontAsk',
       canUseTool: async (name): Promise<PermissionResult> =>

@@ -49,6 +49,13 @@ export interface VoiceAgentToolDeps {
   runAction(action: AppAction): ActionOutcome | Promise<ActionOutcome>
   /** This project's memory file, verbatim. Empty for a project with no history. */
   getProjectMemory(): string | Promise<string>
+  /**
+   * Add one fact to the active project's memory, through the same append the
+   * learning loop uses. False means there was no active project to write to —
+   * the only refusal this side can know about; anything that actually breaks
+   * throws and is reported as itself.
+   */
+  remember(note: string): boolean | Promise<boolean>
 }
 
 /** Undo the registration. Safe to call twice. */
@@ -185,6 +192,22 @@ export function registerVoiceAgentTools(deps: VoiceAgentToolDeps): Unregister {
             ok: true,
             result: memory || 'Nothing remembered about this project yet.'
           }
+          break
+        }
+
+        case 'remember': {
+          const note = String((request.args as { note?: unknown })?.note ?? '').trim()
+          if (!note) {
+            result = { id, ok: false, error: 'that note was empty — there was nothing to remember' }
+            break
+          }
+          result = (await deps.remember(note))
+            ? { id, ok: true, result: 'Noted — that is in this project’s memory now.' }
+            : {
+                id,
+                ok: false,
+                error: 'no project is open, so there is nowhere to keep that'
+              }
           break
         }
 

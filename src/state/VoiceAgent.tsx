@@ -1415,7 +1415,19 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
           requested: 1,
           done: 0
         },
-      getProjectMemory: () => agentMemory.prime(projectIdRef.current)
+      getProjectMemory: () => agentMemory.prime(projectIdRef.current),
+      // Written through the same append the learning loop uses, so there is
+      // still exactly one writer to the file. It lands under preferences
+      // because that is where an entry Steve actually asked for belongs — the
+      // last thing pruning gives up — and re-priming afterwards keeps the warm
+      // copy the other brains read in step with what is now on disk.
+      remember: async (note) => {
+        const projectId = projectIdRef.current
+        if (!projectId) return false
+        await window.forge.memory.append(projectId, 'preferences', note)
+        await agentMemory.prime(projectId)
+        return true
+      }
     })
   }, [runActions])
 
