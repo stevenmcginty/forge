@@ -2,6 +2,9 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { PtyDataEvent, PtyExitEvent } from '@shared/types'
 import { findRemoteSessionUrl } from '@shared/remote'
+import { commandExe } from '@shared/agents'
+import { earconTaskAttention, earconTaskDone } from './earcon'
+import { getLiveSettings } from './livesettings'
 
 /**
  * TerminalHost — the renderer-side owner of every xterm instance.
@@ -69,6 +72,17 @@ export interface PaneGeometry {
   height: number
 }
 
+/**
+ * How far apart two wheel-driven PgUp/PgDn keypresses must be, in a pane whose
+ * TUI has taken the mouse (see the wheel handler in `create`).
+ *
+ * A mouse notch is one wheel event; a trackpad is a burst of many. Each event
+ * is a full page of scroll once converted, so the burst is throttled — the
+ * page-key reaches the TUI at a rate it can keep up with, instead of a flick
+ * rocketing the whole history past.
+ */
+const TUI_WHEEL_THROTTLE_MS = 28
+
 const IDLE_RUNTIME: PaneRuntime = { status: 'idle', pid: null, exitCode: null, error: null, remoteUrl: null }
 
 /**
@@ -79,6 +93,21 @@ const IDLE_RUNTIME: PaneRuntime = { status: 'idle', pid: null, exitCode: null, e
 const URL_SCAN_OVERLAP = 256
 
 const ACTIVITY_THROTTLE_MS = 90
+
+/**
+ * What separates "a shell said something" from "an agent is working".
+ *
+ * A keystroke echo is one chunk and then silence. An agent thinking is a
+ * spinner repainting ten times a second for as long as it takes. So busy is a
+ * *run* of output, not a byte of it: ONSET is how long the run has to keep
+ * going before it counts, GAP is how big a hole ends the run and starts a new
+ * one, and QUIET is how long the silence must last before the pane goes back to
+ * idle. The numbers are deliberately slow — this drives a light on the project
+ * rail, and a light that flickers as you type is worse than no light.
+ */
+const BUSY_ONSET_MS = 600
+const BUSY_GAP_MS = 400
+const BUSY_QUIET_MS = 1200
 
 /**
  * How long the geometry must hold still before ConPTY is told about it.
@@ -126,10 +155,19 @@ interface Entry {
   scanTail: string
   lastActivityNotify: number
   activityTimer: number | null
+  /** True while this pane counts as working — see the BUSY_* constants. */
+  busy: boolean
+  /** When the current unbroken run of output began. */
+  busyRunStart: number
+  /** When the last chunk arrived, so a gap can be measured. */
+  busyLastOutput: number
+  busyTimer: number | null
   /** The WebGL renderer, when this terminal currently has one. */
   webgl: { dispose(): void } | null
   webglWanted: boolean
   webglLoading: boolean
+  /** When the last wheel-driven page key was sent — see TUI_WHEEL_THROTTLE_MS. */
+  lastTuiWheel: number
   disposers: Array<() => void>
 }
 
@@ -230,6 +268,14 @@ function baseTheme(accent: string, foreground?: string): ITheme {
 class TerminalHost {
   private entries = new Map<string, Entry>()
   private listeners = new Map<string, Listeners>()
+  /**
+   * "Something, somewhere, changed busy state." One set for the whole app
+   * rather than one per pane: the flag only moves on a 600ms onset and a 1.2s
+   * quiet, so the callers can afford to re-read whichever panes they care
+   * about — and what a project rail row cares about changes every time a tab
+   * is split.
+   */
+  private busyListeners = new Set<() => void>()
   private wired = false
 
   /* ----------------------------------------------------------- plumbing */
@@ -245,6 +291,7 @@ class TerminalHost {
       if (entry.runtime.status === 'starting') this.setRuntime(entry, { status: 'live' })
       this.scanForRemoteUrl(entry, e.data)
       this.pulse(entry)
+      this.markOutput(entry)
     })
 
     window.forge.pty.onExit((e: PtyExitEvent) => {
@@ -254,7 +301,24 @@ class TerminalHost {
         `\r\n\x1b[38;2;106;112;120m── session ended (exit ${e.exitCode}) ─ press Enter to relaunch\x1b[0m\r\n`
       )
       this.setRuntime(entry, { status: 'exited', exitCode: e.exitCode, pid: null })
+      // A dead shell is not working, whatever it was doing a moment ago.
+      this.clearBusy(entry)
+      this.chimeOnExit(e.exitCode)
     })
+  }
+
+  /**
+   * The little "your task is over" blip. Two rules and no more: it only plays
+   * when Forge is not the focused window (a chime is for the moment you were
+   * looking at something else), and the direction carries the news — up for a
+   * clean exit, down for anything that ended badly. Fires and forgets; the
+   * earcon returns immediately and nothing here waits on it.
+   */
+  private chimeOnExit(exitCode: number): void {
+    if (getLiveSettings()?.terminalExitChime === false) return
+    if (document.hasFocus()) return
+    if (exitCode === 0) earconTaskDone()
+    else earconTaskAttention()
   }
 
   private listenersFor(paneId: string): Listeners {
@@ -309,6 +373,61 @@ class TerminalHost {
       const live = this.listeners.get(entry.paneId)
       if (live) for (const cb of live.activity) cb()
     }, ACTIVITY_THROTTLE_MS)
+  }
+
+  /* --------------------------------------------------------------- busy */
+
+  /**
+   * Fold one chunk of output into the pane's busy state.
+   *
+   * The run is extended while chunks keep arriving within BUSY_GAP_MS of each
+   * other; once that run is BUSY_ONSET_MS old the pane is working. A single
+   * timer, rearmed on every chunk, is what calls it idle again — so silence
+   * ends the run without anything having to poll for it.
+   */
+  private markOutput(entry: Entry): void {
+    const now = performance.now()
+    if (now - entry.busyLastOutput > BUSY_GAP_MS) entry.busyRunStart = now
+    entry.busyLastOutput = now
+
+    if (entry.busyTimer !== null) clearTimeout(entry.busyTimer)
+    entry.busyTimer = window.setTimeout(() => {
+      entry.busyTimer = null
+      this.setBusy(entry, false)
+    }, BUSY_QUIET_MS)
+
+    if (!entry.busy && now - entry.busyRunStart >= BUSY_ONSET_MS) this.setBusy(entry, true)
+  }
+
+  private setBusy(entry: Entry, busy: boolean): void {
+    if (entry.busy === busy) return
+    entry.busy = busy
+    for (const cb of this.busyListeners) cb()
+  }
+
+  private clearBusy(entry: Entry): void {
+    if (entry.busyTimer !== null) {
+      clearTimeout(entry.busyTimer)
+      entry.busyTimer = null
+    }
+    this.setBusy(entry, false)
+  }
+
+  /** True while this pane is sustainedly printing — an agent mid-thought. */
+  isBusy(paneId: string): boolean {
+    return this.entries.get(paneId)?.busy ?? false
+  }
+
+  anyBusy(paneIds: Iterable<string>): boolean {
+    for (const id of paneIds) if (this.isBusy(id)) return true
+    return false
+  }
+
+  subscribeBusy(cb: () => void): () => void {
+    this.busyListeners.add(cb)
+    return () => {
+      this.busyListeners.delete(cb)
+    }
   }
 
   /* ---------------------------------------------------------- lifecycle */
@@ -426,6 +545,12 @@ class TerminalHost {
       allowProposedApi: true,
       cursorBlink: true,
       cursorStyle: 'bar',
+      // xterm's default for a terminal without keyboard focus is a hollow
+      // block, which reads as "this pane is broken" rather than "this pane is
+      // not listening" — and is the square Steve kept finding after clicking
+      // away and back. A bar either way: focused it blinks, unfocused it sits
+      // still, so the shape never changes and the blink carries the state.
+      cursorInactiveStyle: 'bar',
       cursorWidth: 2,
       fontFamily: spec.fontFamily,
       fontSize: spec.fontSize,
@@ -462,9 +587,14 @@ class TerminalHost {
       scanTail: '',
       lastActivityNotify: 0,
       activityTimer: null,
+      busy: false,
+      busyRunStart: 0,
+      busyLastOutput: 0,
+      busyTimer: null,
       webgl: null,
       webglWanted: false,
       webglLoading: false,
+      lastTuiWheel: 0,
       disposers: []
     }
 
@@ -484,6 +614,40 @@ class TerminalHost {
       this.queuePtyResize(entry, cols, rows)
     })
     entry.disposers.push(() => resizeSub.dispose())
+
+    /*
+     * opencode is a full-screen TUI on the alternate screen. Unlike Claude Code,
+     * which writes into the normal buffer so the terminal's own scrollback
+     * scrolls under the wheel, it takes the alternate screen — which keeps no
+     * scrollback — and enables mouse tracking, so the wheel stops meaning
+     * "scroll the terminal" and is handed to the program as a mouse report.
+     * opencode receives those reports but does not scroll its message viewport
+     * from them (its bug, on every terminal, not just ours), so the wheel does
+     * nothing and the pane can never be scrolled up.
+     *
+     * So an opencode pane on the alternate screen has its wheel re-aimed at the
+     * one scroll gesture opencode reliably answers: PgUp/PgDn, sent down the PTY
+     * exactly as though they had been pressed. Captured before xterm so the
+     * event is neither scrolled as scrollback (there is none here) nor forwarded
+     * as a mouse report to a program that drops it.
+     *
+     * Every other pane is left entirely alone: a shell or Claude Code scrolls
+     * natively, and a TUI that handles the wheel itself (vim, htop) still gets
+     * the reports it asked for. Only the panes that misbehave are worked around,
+     * so fixing opencode never means rebreaking something that already works.
+     */
+    const wheelToPageKey = (e: WheelEvent): void => {
+      if (commandExe(entry.spec.bootstrapCommand) !== 'opencode') return
+      if (entry.term.buffer.active.type !== 'alternate') return
+      e.preventDefault()
+      e.stopPropagation()
+      const now = performance.now()
+      if (now - entry.lastTuiWheel < TUI_WHEEL_THROTTLE_MS) return
+      entry.lastTuiWheel = now
+      window.forge.pty.write(entry.paneId, e.deltaY < 0 ? '\x1b[5~' : '\x1b[6~')
+    }
+    wrapper.addEventListener('wheel', wheelToPageKey, { capture: true })
+    entry.disposers.push(() => wrapper.removeEventListener('wheel', wheelToPageKey, { capture: true }))
 
     term.attachCustomKeyEventHandler((e) => this.handleKey(paneId, term, e))
 
@@ -764,6 +928,9 @@ class TerminalHost {
       return
     }
     if (entry.activityTimer !== null) clearTimeout(entry.activityTimer)
+    // Off the map already, so nobody can read this pane's flag again — but the
+    // rail is still showing the ring it turned on, and must be told.
+    this.clearBusy(entry)
     if (entry.resizeTimer !== null) clearTimeout(entry.resizeTimer)
     if (entry.jiggleTimer !== null) clearTimeout(entry.jiggleTimer)
     entry.resizeObserver?.disconnect()
@@ -826,6 +993,15 @@ class TerminalHost {
 
   focus(paneId: string): void {
     this.entries.get(paneId)?.term.focus()
+  }
+
+  /**
+   * Drop a pane's keyboard focus. A mosaic tile that stops being interactive
+   * must give the caret back, or it keeps eating keystrokes that now belong to
+   * the wall again.
+   */
+  blur(paneId: string): void {
+    this.entries.get(paneId)?.term.blur()
   }
 
   clear(paneId: string): void {

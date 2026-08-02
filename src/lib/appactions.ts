@@ -297,6 +297,11 @@ const PROFILE_ALIASES: Record<string, string> = {
   posh: 'pwsh',
   cc: 'claude',
   claudecode: 'claude',
+  // norm() strips the space out of "open ai", so both spellings land here — and
+  // "openai" must not be left to the sounds-close pass, which would otherwise
+  // hand it to `opencode` (same first syllable, one edit apart once vowels go).
+  openai: 'codex',
+  cx: 'codex',
   ki: 'kimi',
   oc: 'opencode',
   // "deep seek" and "deepseek v4" both norm() down to something that is not the

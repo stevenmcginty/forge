@@ -23,6 +23,16 @@ export interface SessionSpec {
   rows: number
   /** Written into the shell once it looks ready. Empty/undefined = nothing. */
   bootstrapCommand?: string
+  /**
+   * Painted into the pane at bootstrap time *instead of* running anything.
+   *
+   * For the one case where the honest thing to do is nothing: the command a
+   * profile launches is not installed. Typing it would print the shell's
+   * "not recognized" splat, which reads as Forge being broken; this says what
+   * is actually wrong. It is written to the pane, never to the shell — see
+   * runBootstrap.
+   */
+  bootstrapNotice?: string
 }
 
 export interface ManagerOptions {
@@ -48,6 +58,8 @@ export interface SessionInfo {
   cols: number
   rows: number
   bootstrapCommand: string
+  /** Shown in the pane in place of the command, when there is nothing to run. */
+  bootstrapNotice: string
   bootstrapped: boolean
   startedAt: number
 }
@@ -148,6 +160,9 @@ export class PtySessionManager {
         cols,
         rows,
         bootstrapCommand: spec.bootstrapCommand?.trim() ?? '',
+        // Not trimmed: it is pre-formatted terminal output, leading blank line
+        // and all.
+        bootstrapNotice: spec.bootstrapNotice ?? '',
         bootstrapped: false,
         startedAt: Date.now()
       }
@@ -168,7 +183,7 @@ export class PtySessionManager {
       this.onExit(spec.id, exitCode ?? 0, signal)
     })
 
-    if (session.info.bootstrapCommand) {
+    if (session.info.bootstrapCommand || session.info.bootstrapNotice) {
       // Hard deadline: even if the shell never emits (odd profiles, slow disk)
       // we still start the agent.
       session.bootstrapDeadline = setTimeout(() => this.runBootstrap(session), BOOTSTRAP_MAX_WAIT_MS)
@@ -228,7 +243,8 @@ export class PtySessionManager {
   /* ------------------------------------------------------------- bootstrap */
 
   private nudgeBootstrap(session: Session): void {
-    if (session.info.bootstrapped || !session.info.bootstrapCommand) return
+    if (session.info.bootstrapped) return
+    if (!session.info.bootstrapCommand && !session.info.bootstrapNotice) return
     if (session.bootstrapTimer) clearTimeout(session.bootstrapTimer)
     session.bootstrapTimer = setTimeout(() => this.runBootstrap(session), BOOTSTRAP_QUIET_MS)
   }
@@ -238,6 +254,16 @@ export class PtySessionManager {
     session.info.bootstrapped = true
     this.clearBootstrapTimers(session)
     try {
+      if (session.info.bootstrapNotice) {
+        // Painted into the pane, not typed into the shell: the whole point is
+        // that nothing ran, so running something to say so would be a lie — and
+        // would put a command nobody chose in the shell's history.
+        this.onData(session.info.id, session.info.bootstrapNotice)
+        // The notice landed where the prompt already was. An empty line brings
+        // a fresh prompt back underneath it, ready to type in.
+        session.proc.write('\r')
+        return
+      }
       session.proc.write(`${session.info.bootstrapCommand}\r`)
     } catch (err) {
       console.error(`[pty] bootstrap of ${session.info.id} failed:`, describe(err))

@@ -8,6 +8,7 @@ import { AppearanceSection } from './AppearanceSection'
 import { ModelsSection } from './ModelsSection'
 import { ShotsSection } from './ShotsSection'
 import { MobileSection } from './MobileSection'
+import { TerminalSection } from './TerminalSection'
 import { UpdatesSection } from './UpdatesSection'
 import { VoiceSection } from './VoiceSection'
 import './SettingsPage.css'
@@ -27,6 +28,7 @@ import './SettingsPage.css'
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName; blurb: string }> = [
   { id: 'account', label: 'Account', icon: 'user', blurb: 'name, avatar, connections' },
   { id: 'agents', label: 'Agents', icon: 'terminal', blurb: 'launch profiles' },
+  { id: 'terminal', label: 'Terminal', icon: 'panel', blurb: 'how panes behave' },
   { id: 'models', label: 'Models & APIs', icon: 'key', blurb: 'keys and brains' },
   { id: 'voice', label: 'Voice', icon: 'voice', blurb: 'dictation and relay' },
   { id: 'appearance', label: 'Appearance', icon: 'palette', blurb: 'themes and type' },
@@ -113,6 +115,7 @@ export function SettingsPage(): ReactNode {
           <div className="spage__column">
             {section === 'account' ? <AccountSection /> : null}
             {section === 'agents' ? <AgentsSection /> : null}
+            {section === 'terminal' ? <TerminalSection /> : null}
             {section === 'models' ? <ModelsSection /> : null}
             {section === 'voice' ? <VoiceSection /> : null}
             {section === 'appearance' ? <AppearanceSection /> : null}

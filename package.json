@@ -22,6 +22,7 @@
     "stt:manager": "node scripts/stt-manager-test.mjs",
     "stt:download": "node scripts/stt-download-test.mjs",
     "voice:check": "node scripts/voice-check.mjs",
+    "voice:brain": "node scripts/voice-brain-smoke.mjs",
     "memory:smoke": "node scripts/memory-smoke.mjs",
     "skills:smoke": "node scripts/skills-smoke.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
@@ -33,6 +34,7 @@
     "secrets:test": "node scripts/secrets-audit-test.mjs",
     "theme:check": "node scripts/theme-check.mjs",
     "updates:check": "node scripts/updates-check.mjs",
+    "agents:check": "node scripts/agents-check.mjs",
     "commands:check": "node scripts/commands-check.mjs",
     "mosaic:check": "node scripts/mosaic-check.mjs",
     "hub:check": "node scripts/hub-check.mjs",
@@ -70,6 +72,7 @@
     "vite": "^7.3.6"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.220",
     "@capacitor/barcode-scanner": "^2.2.6",
     "@lydell/node-pty": "^1.2.0-beta.14",
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -80,6 +83,7 @@
     "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "ws": "^8.21.1"
+    "ws": "^8.21.1",
+    "zod": "^4.4.3"
   }
 }

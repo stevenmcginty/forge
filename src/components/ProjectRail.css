@@ -25,12 +25,19 @@
   color: var(--text-dim);
 }
 
-.rail__head-add {
+.rail__head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
   margin-left: auto;
+}
+
+.rail__head-add,
+.rail__head-new {
   width: 24px;
 }
 
-.rail[data-collapsed='true'] .rail__head-add {
+.rail[data-collapsed='true'] .rail__head-actions {
   margin-left: 0;
 }
 
@@ -110,6 +117,7 @@
 }
 
 .prow__dot {
+  position: relative;
   flex: none;
   width: 8px;
   height: 8px;
@@ -127,10 +135,95 @@
 }
 
 .prow__initial {
+  position: relative;
   font-family: var(--font-mono);
   font-size: var(--t-md);
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+/*
+ * ------------------------------------------------------------- working ring
+ *
+ * One or more of this project's terminals is mid-thought. The rail already
+ * says how many shells a project has; this says whether any of them is still
+ * going, for a project you are not looking at.
+ *
+ * An arc rather than a full ring, because a full ring in the project's own
+ * colour would just read as a slightly fatter dot — the sweep is what carries
+ * "still going". It orbits the mark that identifies the project in that layout:
+ * the colour dot when the rail is open, the initial when it is collapsed, where
+ * a ring around the 6px corner dot would be too small to notice.
+ *
+ * Absolutely positioned and outside the flex flow, so a row that starts working
+ * does not move by a pixel.
+ */
+.prow__dot::after,
+.rail[data-collapsed='true'] .prow__initial::after {
+  content: '';
+  position: absolute;
+  border-radius: var(--r-full);
+  border: 1.5px solid transparent;
+  border-top-color: var(--prow-tint, var(--accent));
+  border-right-color: color-mix(in srgb, var(--prow-tint, var(--accent)) 40%, transparent);
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease-out);
+  pointer-events: none;
+}
+
+.prow__dot::after {
+  inset: -5px;
+}
+
+/* Only the open rail rings the dot… */
+.rail[data-collapsed='true'] .prow__dot::after {
+  content: none;
+}
+
+/*
+ * …and only the collapsed one rings the letter. Sized and centred rather than
+ * inset, because the letter's box is taller than it is wide and an inset ring
+ * would come out as an oval.
+ */
+.rail[data-collapsed='true'] .prow__initial::after {
+  top: 50%;
+  left: 50%;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+}
+
+.prow[data-working='true'] .prow__dot::after,
+.rail[data-collapsed='true'] .prow[data-working='true'] .prow__initial::after {
+  opacity: 1;
+  animation: prow-orbit 1100ms linear infinite;
+}
+
+@keyframes prow-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * Motion off still has to answer the question, so the arc becomes a complete,
+ * still ring — visibly different from an idle row, without anything moving.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .prow[data-working='true'] .prow__dot::after,
+  .rail[data-collapsed='true'] .prow[data-working='true'] .prow__initial::after {
+    animation: none;
+    border-color: color-mix(in srgb, var(--prow-tint, var(--accent)) 70%, transparent);
+  }
+}
+
+:root[data-reduced-motion='true'] .prow[data-working='true'] .prow__dot::after,
+:root[data-reduced-motion='true']
+  .rail[data-collapsed='true']
+  .prow[data-working='true']
+  .prow__initial::after {
+  animation: none;
+  border-color: color-mix(in srgb, var(--prow-tint, var(--accent)) 70%, transparent);
 }
 
 .prow[data-active='true'] .prow__initial {

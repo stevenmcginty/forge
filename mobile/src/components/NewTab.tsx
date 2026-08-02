@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { PERMISSION_MODES, isClaudeCommand, isPermissionMode } from '@shared/agents'
+import { isPermissionMode, permissionModes } from '@shared/agents'
 import type { AgentProfile, ClaudePermissionMode, Project } from '@shared/types'
 
 /**
  * The phone's answer to the desktop's AgentChooser: which agent, and — when
- * that agent is Claude — which permission mode the tab is born in.
+ * that agent has a permission ladder — which mode the tab is born in.
  *
  * A bottom sheet rather than a menu, for the same reason the update sheet is
  * one: it lands where the thumb already is, and every row is a full-width
@@ -12,9 +12,9 @@ import type { AgentProfile, ClaudePermissionMode, Project } from '@shared/types'
  *
  * Two rules the desktop chooser also follows:
  *
- *  - **The permission section only exists for Claude.** The flags mean nothing
- *    to a PowerShell prompt (see `isClaudeCommand`), so offering them there
- *    would be offering a choice that does nothing.
+ *  - **The permission section only exists for agents that have one.** The flags
+ *    mean nothing to a PowerShell prompt or to Gemini (see `permissionModes`),
+ *    so offering them there would be offering a choice that does nothing.
  *  - **Bypass never looks like the other three.** It is the one mode that can
  *    do anything the user can, so it is red where it sits, red when it is
  *    picked, and it turns the confirm button red with it.
@@ -25,7 +25,7 @@ export interface NewTabSheetProps {
   /** The desktop's profiles, straight off `hello-ok`. */
   profiles: AgentProfile[]
   onCancel: () => void
-  /** `permissionMode` is absent for anything that is not Claude. */
+  /** `permissionMode` is absent for anything with no permission ladder. */
   onOpen: (profileId: string, permissionMode?: ClaudePermissionMode) => void
 }
 
@@ -39,7 +39,10 @@ export function NewTabSheet({ project, profiles, onCancel, onOpen }: NewTabSheet
   const [mode, setMode] = useState<ClaudePermissionMode>(initial ? modeOf(initial) : 'default')
 
   const chosen = profiles.find((p) => p.id === profileId) ?? null
-  const modal = chosen ? isClaudeCommand(chosen.command) : false
+  // Each agent spells its own ladder, and something Forge has no flags for
+  // offers none at all — so the section is driven by the list, not by a name.
+  const modes = chosen ? permissionModes(chosen.command) : []
+  const modal = modes.length > 0
 
   const pick = (profile: AgentProfile): void => {
     setProfileId(profile.id)
@@ -84,7 +87,7 @@ export function NewTabSheet({ project, profiles, onCancel, onOpen }: NewTabSheet
           {modal && (
             <div className="pick-group" role="radiogroup" aria-label="Permissions">
               <span className="pick-label">Permissions</span>
-              {PERMISSION_MODES.map((m) => (
+              {modes.map((m) => (
                 <button
                   key={m.id}
                   type="button"
@@ -127,6 +130,6 @@ export function NewTabSheet({ project, profiles, onCancel, onOpen }: NewTabSheet
 
 /** The mode a profile would launch in on its own — the honest preselection. */
 function modeOf(profile: AgentProfile): ClaudePermissionMode {
-  if (!isClaudeCommand(profile.command)) return 'default'
+  if (permissionModes(profile.command).length === 0) return 'default'
   return isPermissionMode(profile.permissionMode) ? profile.permissionMode : 'default'
 }

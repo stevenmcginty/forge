@@ -1,3 +1,4 @@
+import { commandExe } from './agents'
 import type { ToolId, ToolLatest, ToolLatestSource, ToolSpec } from './types'
 
 /**
@@ -242,6 +243,21 @@ export const KNOWN_TOOLS: ToolSpec[] = [
 
 export function toolSpec(id: ToolId): ToolSpec | undefined {
   return TOOL_SPECS.find((t) => t.id === id)
+}
+
+/**
+ * The catalogue row for whatever a *launch command* runs — `codex` for
+ * `codex --full-auto`, `opencode` for the DeepSeek profile's long line.
+ *
+ * This is the join between two lists that were written for different reasons:
+ * agent profiles (what a pane launches) and tool specs (what Forge can check
+ * and install). Without it, "Codex is not installed" and "here is the command
+ * that installs it" would be two facts Forge holds and cannot put together.
+ */
+export function toolSpecForCommand(command: string, custom?: readonly ToolSpec[] | null): ToolSpec | null {
+  const exe = commandExe(command)
+  if (!exe) return null
+  return allToolSpecs(custom).find((t) => commandExe(t.command) === exe) ?? null
 }
 
 /**

@@ -76,6 +76,9 @@ export interface ManifestSnapshot {
 const SPOKEN_ALIASES: Record<string, string[]> = {
   pwsh: ['powershell', 'pwsh', 'ps', 'shell', 'posh'],
   claude: ['claude', 'claude code', 'cc'],
+  // "open AI" is what dictation makes of OpenAI, and it is what Steve actually
+  // says for this one — the CLI's own name is the alias he has to remember.
+  codex: ['codex', 'openai', 'open ai', 'cx'],
   kimi: ['kimi', 'kimmy', 'ki'],
   // Dictation splits compound names, so the two-word spellings are not optional:
   // "open code" and "deep seek" are what actually comes out of the microphone.
@@ -248,6 +251,46 @@ function paneLine(pane: ManifestPane): string {
   return `Terminal ${pane.number} — "${pane.title}" (${bits.join(', ')})`
 }
 
+/**
+ * What is open right now — projects, tabs, panes, focus — as the model reads it.
+ *
+ * Split out of `buildManifest` because the two brains need it at different
+ * times. The manifest brains are *told* this on every single turn, whether it
+ * matters or not; the Claude Agent SDK brain has no manifest at all and asks
+ * for it through `get_app_state` only when it needs to know (see
+ * src/lib/agenttools.ts). Same text either way, deliberately: two renderings
+ * of "which terminal is which" would eventually disagree, and the whole point
+ * of the Terminal numbering is that everyone means the same pane by it.
+ */
+export function buildStateSection(s: ManifestSnapshot): string {
+  const lines: string[] = []
+  lines.push('# CURRENT STATE')
+  lines.push(`forge version: ${s.appVersion ?? 'unknown'} · shell: ${s.view.shell}`)
+  if (s.projects.length === 0) {
+    lines.push('projects: none yet — the rail is empty')
+  } else {
+    lines.push('projects:')
+    for (const p of s.projects) {
+      lines.push(`- ${p.name} — ${p.path}${p.active ? '  [ACTIVE]' : ''}`)
+    }
+  }
+  if (s.tabs.length === 0) {
+    lines.push('tabs: none open in the active project')
+  } else {
+    lines.push('tabs in the active project:')
+    for (const tab of s.tabs) {
+      lines.push(`- ${tab.number}. "${tab.title}"${tab.active ? ' [CURRENT]' : ''}`)
+      for (const pane of tab.panes) lines.push(`  · ${paneLine(pane)}`)
+    }
+    lines.push('These Terminal numbers are what he says out loud. Use them verbatim as send_prompt targets.')
+  }
+  lines.push(
+    `view: projects rail ${s.view.railCollapsed ? 'collapsed' : 'open'}, ` +
+      `voice hub ${s.view.voiceHub}, terminal font ${s.view.terminalFontSize}px`
+  )
+  return lines.join('\n')
+}
+
 export function buildManifest(s: ManifestSnapshot): string {
   const lines: string[] = []
 
@@ -326,30 +369,7 @@ export function buildManifest(s: ManifestSnapshot): string {
     }
   }
   lines.push('')
-  lines.push('# CURRENT STATE')
-  lines.push(`forge version: ${s.appVersion ?? 'unknown'} · shell: ${s.view.shell}`)
-  if (s.projects.length === 0) {
-    lines.push('projects: none yet — the rail is empty')
-  } else {
-    lines.push('projects:')
-    for (const p of s.projects) {
-      lines.push(`- ${p.name} — ${p.path}${p.active ? '  [ACTIVE]' : ''}`)
-    }
-  }
-  if (s.tabs.length === 0) {
-    lines.push('tabs: none open in the active project')
-  } else {
-    lines.push('tabs in the active project:')
-    for (const tab of s.tabs) {
-      lines.push(`- ${tab.number}. "${tab.title}"${tab.active ? ' [CURRENT]' : ''}`)
-      for (const pane of tab.panes) lines.push(`  · ${paneLine(pane)}`)
-    }
-    lines.push('These Terminal numbers are what he says out loud. Use them verbatim as send_prompt targets.')
-  }
-  lines.push(
-    `view: projects rail ${s.view.railCollapsed ? 'collapsed' : 'open'}, ` +
-      `voice hub ${s.view.voiceHub}, terminal font ${s.view.terminalFontSize}px`
-  )
+  lines.push(buildStateSection(s))
   lines.push('')
   lines.push('# NOT YET POSSIBLE (do not emit these)')
   for (const point of EXTENSION_POINTS) lines.push(`- ${point}`)

@@ -16,14 +16,24 @@ import {
   type AgentProfile,
   type CompanionUtteranceEvent,
   type SttStatus,
+  type VoiceAgentEvent,
   type VoiceReplyMode
 } from '@shared/types'
+import {
+  agentBrainAvailable,
+  interruptAgentBrain,
+  onAgentBrainEvent,
+  sendUtterance,
+  startAgentBrain,
+  stopAgentBrain
+} from '@/lib/agentbrain'
+import { registerVoiceAgentTools } from '@/lib/agenttools'
 import { agentMemory } from '@/lib/agentmemory'
 import { bargeIn } from '@/lib/bargein'
 import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
 import { earconListening } from '@/lib/earcon'
 import { speaker } from '@/lib/speech'
-import { chooseEngine, pickVaried, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
+import { chooseEngine, pickVaried, takeSpeechChunks, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
 import { resolveProfile } from '@/lib/agents'
 import { buildManifest, type ManifestSnapshot } from '@/lib/appmanifest'
 import {
@@ -39,7 +49,7 @@ import { makeId } from '@/lib/ids'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { terminalHost, type PaneStatus } from '@/lib/terminals'
 import { transcriptBus, typedTranscript } from '@/lib/transcriptSource'
-import { parseUtterance } from '@/lib/voicecommands'
+import { parseDictation, parseUtterance } from '@/lib/voicecommands'
 import {
   getActiveBrain,
   type BrainContext,
@@ -79,6 +89,22 @@ import { useActiveProject, useApp } from '@/state/AppState'
  *     otherwise the stub, which echoes and says so. A brain may return actions
  *     too; they run through the same executor, so it can never do more than the
  *     grammar could.
+ *
+ * Step 2 now forks, and the fork is the whole of what changed here:
+ *
+ *   • The JSON brains (gemini, openrouter, groq, stub) are unchanged. One
+ *     request, one reply object, actions run through `runActions`, the words
+ *     read out when it is all back.
+ *   • The **claude** brain is a persistent Claude Agent SDK session in the main
+ *     process (src/lib/agentbrain.ts). It streams, and it runs its own actions
+ *     through the tool bridge (src/lib/agenttools.ts) rather than handing back
+ *     a list for this file to execute. So it is routed *around* `interpret()`,
+ *     not through it: a stream squeezed into a one-shot signature is a stream
+ *     you have to wait for the end of, which is precisely the two-second
+ *     silence sentence-by-sentence speech exists to remove.
+ *
+ * Both forks end at the same mouth and the same turn log, and the grammar still
+ * runs first for both — an app command costs nothing whichever brain is on.
  */
 
 interface TurnBase {
@@ -110,6 +136,62 @@ export interface NoteTurn extends TurnBase {
 }
 
 export type Turn = CommandTurn | BrainTurnState | NoteTurn
+
+/**
+ * One turn with the Claude session, while it is happening.
+ *
+ * Held in a ref and mutated by the event stream rather than kept in state:
+ * every field here is written many times a second by `delta`, and none of it is
+ * rendered from this object — what the card shows goes out through `onText`,
+ * which is the caller's business, at the caller's pace.
+ */
+interface ClaudeRun {
+  /** The turn id, which is also the mouth's dedupe key prefix. */
+  id: string
+  /** The phone: answered in text, never out loud. */
+  silent: boolean
+  /** Deltas that are not yet a whole sentence. Never spoken until they are. */
+  buffer: string
+  /** The authoritative text, one entry per assistant block. */
+  said: string[]
+  /** How many chunks have gone to the mouth, so no two share a key. */
+  chunk: number
+  /** Talked over. Nothing more from this turn reaches the mouth. */
+  aborted: boolean
+  onText?: (text: string) => void
+  /** Why it ended badly, or null for the ordinary end. Undefined until it ends. */
+  error?: string | null
+  /** Resolves the moment the event stream has finished this turn. A turn that
+   * is superseded is awaited on this before the next one is installed, so the
+   * superseded turn's unwound `result` lands on *it*, not on the new turn. */
+  done: Promise<void>
+  /** Ends the turn. The first reason given wins; later ones are ignored. */
+  finish: (error?: string) => void
+}
+
+/**
+ * How long a single Claude turn may take before it is written off.
+ *
+ * Generous on purpose — the session can spend minutes on a real piece of work
+ * and it is still talking to him about it. This is not a timeout in the usual
+ * sense: it is the guarantee that `runPhrase` always resolves, because the
+ * phone is waiting on that promise for its reply and a hung turn would leave
+ * it waiting for ever.
+ */
+const CLAUDE_TURN_TIMEOUT_MS = 5 * 60_000
+
+/**
+ * How long a superseded turn's unwinding may take before the next turn is
+ * installed anyway.
+ *
+ * When a new utterance supersedes one still with the model, `interruptAgentBrain`
+ * unwinds the old turn — and the SDK reports that unwind as an error `result`
+ * with no text. That result must land on the *old* run, not the new one, so the
+ * new turn waits on the old run's `done` here. The wait is bounded: an
+ * interrupt normally settles in a few hundred milliseconds, and a session that
+ * emits nothing must not stall the new turn waiting for it.
+ */
+const INTERRUPT_UNWIND_MS = 5_000
 
 /**
  * Agent mode, as a state machine.
@@ -169,28 +251,6 @@ const BRAIN_FAILED = [
 ]
 
 /**
- * Phases that mean the microphone has just been given back *after a turn*.
- *
- * A short blip marks the handover instead of a spoken announcement. Coming from
- * `off` is not in the list: arming is a deliberate tap and it needs no sound.
- *
- * `warming` is not in the list either, and that omission is load-bearing. It
- * used to be, and it turned the blip into a metronome: Parakeet stops itself
- * after `sttAutoStopSeconds` of silence, the re-arm loop below immediately
- * starts it again, and every one of those cycles runs warming → listening. So
- * an armed agent sitting in an empty room beeped every few seconds, forever,
- * with nobody having said anything to it. A warm-up is the engine clearing its
- * throat, not the agent handing the turn back, and only the second one is worth
- * a sound.
- */
-const HANDS_BACK: ReadonlySet<AgentPhase> = new Set<AgentPhase>([
-  'speaking',
-  'replied',
-  'error',
-  'thinking'
-])
-
-/**
  * Is this Escape ours to act on?
  *
  * Escape has to be listened for in the *capture* phase, because by the time it
@@ -247,9 +307,32 @@ export interface VoiceAgentCtx {
   /* ----------------------------------------------------------- status */
   brainName: string
   brainStatus: BrainStatus
+  /**
+   * `voiceClaudeModel`: which model the Claude session runs, as an alias rather
+   * than a pinned id (see shared/types.ts). Only the Claude brain has one — the
+   * others name their model in Settings — so a surface shows it off `brainName`.
+   */
+  brainModel: string
+  setBrainModel(model: string): void
   replyMode: VoiceReplyMode
   setReplyMode(mode: VoiceReplyMode): void
   canSpeak: boolean
+  /**
+   * The sidecar is sitting on an open microphone waiting for "hey Jarvis"
+   * rather than taking dictation. Together with `capturing` this is the whole
+   * of what a surface needs to tell calm monitoring apart from active
+   * listening — they look identical in `phase`, which says `listening` for both.
+   */
+  wakeMode: boolean
+  /** Audio is actually going to the speech engine right now. */
+  capturing: boolean
+  /**
+   * Buffer mode: every phrase is held verbatim and nothing is acted on until
+   * "stop dictation" (or leaving the agent) lets it all out as one prompt.
+   */
+  dictating: boolean
+  /** Everything held since dictation began, as one live string. */
+  dictationBuffer: string
 }
 
 /**
@@ -296,6 +379,43 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   const armedRef = useRef(armed)
   armedRef.current = armed
 
+  /**
+   * Always-listening, as a setting rather than as a session state.
+   *
+   * Read through a ref by everything that opens the microphone, so wake mode
+   * cannot be on in Settings and off in the sidecar because one call site was
+   * missed. It is deliberately *not* `armed && voiceWakeWord`: arming is a
+   * `setState` and the tap that arms starts the sidecar in the same breath,
+   * before `armed` has come back true.
+   */
+  const wakeWord = state.settings.voiceWakeWord
+  const wakeWordRef = useRef(wakeWord)
+  wakeWordRef.current = wakeWord
+
+  /* ------------------------------------------------------------ dictation
+   *
+   * Buffer mode, toggled by voice ("start/stop dictation"). The refs are the
+   * source of truth inside `runPhrase` and the state is the mirror for the
+   * surfaces: `runPhrase` runs long after the render that set it, and a
+   * `setState` that has not committed yet would re-buffer the very flush it
+   * was told to make. The pair is why begin/end are one call, not two.
+   */
+
+  const [dictating, setDictating] = useState(false)
+  const dictatingRef = useRef(false)
+  const [dictationBuffer, setDictationBuffer] = useState('')
+  const dictationBufferRef = useRef('')
+
+  const beginDictation = useCallback(() => {
+    dictatingRef.current = true
+    setDictating(true)
+  }, [])
+
+  const endDictation = useCallback(() => {
+    dictatingRef.current = false
+    setDictating(false)
+  }, [])
+
   const [phase, setPhase] = useState<AgentPhase>('off')
   const [stt, setStt] = useState<SttStatus>({ phase: 'off', level: 0, error: null, ready: false })
   const sttRef = useRef(stt)
@@ -311,6 +431,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
 
   const replyMode = state.settings.voiceReplyMode
   const speaksAloud = replyMode !== 'text'
+  const speaksAloudRef = useRef(speaksAloud)
+  speaksAloudRef.current = speaksAloud
 
   /**
    * Which engine, which voice, which model — the whole of what the speaker
@@ -322,6 +444,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     () => ({
       engine: state.settings.voiceEngine,
       hasKey: state.settings.geminiKey.trim().length > 0,
+      edgeVoice: state.settings.voiceEdgeVoice,
       geminiVoice: state.settings.voiceTtsVoice,
       ttsModel: state.settings.voiceTtsModel,
       localVoice: state.settings.voiceReplyVoice
@@ -329,6 +452,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     [
       state.settings.voiceEngine,
       state.settings.geminiKey,
+      state.settings.voiceEdgeVoice,
       state.settings.voiceTtsVoice,
       state.settings.voiceTtsModel,
       state.settings.voiceReplyVoice
@@ -341,10 +465,10 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    * Can anything speak at all?
    *
    * Not the same question as "is speechSynthesis present" any more: with a
-   * Gemini key the agent has a voice even on a machine with no SAPI voices
-   * installed, and the reply-mode buttons must not be greyed out on it.
+   * neural engine resolved the agent has a voice even on a machine with no
+   * SAPI voices installed, and the reply-mode buttons must not be greyed out.
    */
-  const canSpeak = speaker.available || chooseEngine(voiceConfig) === 'gemini'
+  const canSpeak = speaker.available || chooseEngine(voiceConfig) !== 'local'
 
   /** True from just before the first syllable to just after the last. */
   const speakingRef = useRef(false)
@@ -372,7 +496,73 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   noticeRef.current = actions.setNotice
 
   /**
-   * Say something, with the microphone shut for the duration.
+   * Open the microphone the way this moment wants it opened.
+   *
+   * Every start the agent makes goes through here. Dictation's own start (the
+   * hotkey, in useDictation) does not and must not: that one is push-to-talk
+   * and passes no options at all, which is what keeps it bit-for-bit what it
+   * always was.
+   *
+   * `conversation: true` is the whole of why the agent and dictation differ on
+   * the same microphone: the sidecar waits out thinking pauses — a few seconds
+   * of silence — before it decides the phrase is over, instead of cutting at
+   * the ~1 s dictation gap that splits "go outside and open the Gemini app…
+   * and make me some buses" into fragments. The agent gets the whole sentence;
+   * dictation keeps its snappy cuts.
+   */
+  const startListening = useCallback((): void => {
+    void window.forge.stt.start(
+      wakeWordRef.current ? { mode: 'wake', conversation: true } : { conversation: true }
+    )
+  }, [])
+
+  /**
+   * The Claude turn in flight, if any. Declared here because the mouth's
+   * barge-in handler has to be able to stop it — see `runMouth`.
+   */
+  const claudeRun = useRef<ClaudeRun | null>(null)
+
+  /* --------------------------------------------------------------- the mouth
+   *
+   * One mouth, one queue, and the queue is what makes streaming possible.
+   *
+   * The JSON brains hand over a finished reply, so for them this is a queue of
+   * one and behaves exactly as the old single-shot `sayAloud` did. The Claude
+   * session streams, and chunks are pushed as sentences complete — so it starts
+   * talking on the first sentence rather than after the last, while the
+   * microphone stays shut and barge-in stays armed *for the whole reply* rather
+   * than being torn down and rebuilt in the gap between sentences.
+   */
+
+  /** Chunks waiting their turn, in the order they must be said. */
+  const speakQueue = useRef<{ key: string; text: string }[]>([])
+  /** Set while more chunks may still arrive: the drain waits instead of ending. */
+  const speakOpen = useRef(false)
+  /** Wakes the drain the instant there is something to say. */
+  const speakWake = useRef<(() => void) | null>(null)
+  /** The running drain, so a caller can wait for the mouth to fall silent. */
+  const speakRun = useRef<Promise<void> | null>(null)
+
+  /** More is coming — hold the mouth open between chunks. */
+  const openMouth = useCallback((): void => {
+    speakOpen.current = true
+  }, [])
+
+  /** Nothing more is coming. The drain says what it has, then stops. */
+  const closeMouth = useCallback((): void => {
+    speakOpen.current = false
+    speakWake.current?.()
+  }, [])
+
+  /** Barge-in: throw away everything not yet said. */
+  const dropSpeech = useCallback((): void => {
+    speakQueue.current = []
+    speakOpen.current = false
+    speakWake.current?.()
+  }, [])
+
+  /**
+   * Say the queue, with the microphone shut for the duration.
    *
    * The stop/start around the utterance is the anti-feedback loop; `speakingRef`
    * is the second belt, because a phrase the sidecar had already cut can still
@@ -385,71 +575,136 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    * and answer it. `voiceSpeaker` owns the engine chain — Gemini, then the local
    * voice if that cannot run — so this never has to care which one is talking.
    */
+  const runMouth = useCallback(async (): Promise<void> => {
+    speakingRef.current = true
+    setSpeaking(true)
+    if (armedRef.current) setPhase('speaking')
+    void window.forge.stt.stop()
+
+    /*
+     * Full duplex, the GPT-Live way.
+     *
+     * The sidecar is still stopped above — it has no echo cancellation and an
+     * open one would transcribe this reply and answer it. What replaces it
+     * for the duration is a *different* microphone: Chromium's, with the
+     * WebRTC AEC on, which subtracts what the speakers are playing before we
+     * see the signal. It transcribes nothing. It answers one question ten
+     * times a second — is somebody talking? — and that is a question no
+     * amount of Forge's own voice can make it answer wrong.
+     *
+     * So `speaking` stops meaning "deaf". Talking over the agent works the
+     * way talking over a person works, which is the whole of what was asked
+     * for. See src/lib/bargein.ts for the two thresholds.
+     */
+    let interrupted = false
+    if (bargeInRef.current) {
+      void bargeIn.arm({
+        onDuck: () => voiceSpeaker.duck(DUCK_LEVEL),
+        onRelease: () => voiceSpeaker.duck(1),
+        onInterrupt: () => {
+          interrupted = true
+          voiceSpeaker.cancel()
+          // The Claude session is still generating into a mouth that has
+          // stopped. Kill the generation, not the session: the conversation
+          // survives being talked over, this sentence does not — and the
+          // sentences already queued behind it go with it, or he would be
+          // answered a paragraph he interrupted ten seconds ago.
+          const run = claudeRun.current
+          if (run) run.aborted = true
+          if (agentBrainAvailable()) void interruptAgentBrain().catch(() => undefined)
+          dropSpeech()
+          // The sentence was cut off, so nothing that follows is an echo of
+          // it — the same reasoning as interrupting by typing, and without
+          // this the echo guard would eat his first words for being too
+          // similar to the reply he just talked over.
+          speaker.forgetLastSpoken()
+          // Hand the microphone straight back rather than waiting out the
+          // re-arm debounce. He is already mid-sentence; every millisecond
+          // here is a syllable of his that nothing is listening to.
+          if (armedRef.current) startListening()
+          // ...and in wake mode, handing it back is not enough: the session
+          // that comes up is *monitoring*, so without this he would have to
+          // say "hey Jarvis" again to finish the sentence he interrupted with.
+          if (armedRef.current && wakeWordRef.current) wantFollowUp.current = true
+        }
+      })
+    }
+
+    try {
+      for (;;) {
+        if (interrupted) break
+        const next = speakQueue.current.shift()
+        if (!next) {
+          if (!speakOpen.current) break
+          // Nothing ready, but the turn is not over: wait for the next chunk
+          // rather than shutting the mouth and re-opening it a beat later. The
+          // timeout is a backstop — `closeMouth` and `pushSpeech` both wake it.
+          await new Promise<void>((resolve) => {
+            speakWake.current = resolve
+            window.setTimeout(resolve, 120)
+          })
+          speakWake.current = null
+          continue
+        }
+        // Keyed by turn (and by chunk within it): a re-render — or a second
+        // surface showing the same conversation — cannot make it say the same
+        // thing twice.
+        await voiceSpeaker.speakOnce(next.key, next.text, voiceConfigRef.current, (msg) => noticeRef.current(msg))
+      }
+    } finally {
+      bargeIn.disarm()
+      speakQueue.current = []
+      speakOpen.current = false
+      // A short tail: the sidecar cuts a phrase on silence, so the last word
+      // can land a beat after the audio stops.
+      //
+      // Skipped when he interrupted, and that exception is the point. There
+      // is no trailing echo to wait out — the audio was cancelled — and 220ms
+      // of deafness after somebody starts talking is 220ms taken off the
+      // front of their sentence.
+      if (!interrupted) await new Promise((r) => window.setTimeout(r, 220))
+      speakingRef.current = false
+      setSpeaking(false)
+    }
+  }, [dropSpeech, startListening])
+
+  /**
+   * Start the drain if it is not already running, and wake it if it is.
+   *
+   * The restart at the end matters: a chunk pushed during the 220ms tail would
+   * otherwise sit in a queue nobody was draining any more.
+   */
+  const pump = useCallback((): void => {
+    if (speakRun.current) {
+      speakWake.current?.()
+      return
+    }
+    speakRun.current = runMouth().finally(() => {
+      speakRun.current = null
+      if (speakQueue.current.length) pump()
+    })
+  }, [runMouth])
+
+  /** Hand one finished chunk to the mouth. Silent when nothing can speak. */
+  const pushSpeech = useCallback(
+    (key: string, text: string): void => {
+      if (!speaksAloudRef.current || !text.trim()) return
+      if (!speaker.available && chooseEngine(voiceConfigRef.current) === 'local') return
+      speakQueue.current.push({ key, text })
+      pump()
+    },
+    [pump]
+  )
+
+  /** Say one whole thing and wait for it to be said. The one-shot brains' mouth. */
   const sayAloud = useCallback(
     async (key: string, text: string): Promise<void> => {
       if (!speaksAloud || !text.trim()) return
-      const config = voiceConfigRef.current
-      if (!speaker.available && chooseEngine(config) !== 'gemini') return
-      speakingRef.current = true
-      setSpeaking(true)
-      if (armedRef.current) setPhase('speaking')
-      void window.forge.stt.stop()
-
-      /*
-       * Full duplex, the GPT-Live way.
-       *
-       * The sidecar is still stopped above — it has no echo cancellation and an
-       * open one would transcribe this reply and answer it. What replaces it
-       * for the duration is a *different* microphone: Chromium's, with the
-       * WebRTC AEC on, which subtracts what the speakers are playing before we
-       * see the signal. It transcribes nothing. It answers one question ten
-       * times a second — is somebody talking? — and that is a question no
-       * amount of Forge's own voice can make it answer wrong.
-       *
-       * So `speaking` stops meaning "deaf". Talking over the agent works the
-       * way talking over a person works, which is the whole of what was asked
-       * for. See src/lib/bargein.ts for the two thresholds.
-       */
-      let interrupted = false
-      if (bargeInRef.current) {
-        void bargeIn.arm({
-          onDuck: () => voiceSpeaker.duck(DUCK_LEVEL),
-          onRelease: () => voiceSpeaker.duck(1),
-          onInterrupt: () => {
-            interrupted = true
-            voiceSpeaker.cancel()
-            // The sentence was cut off, so nothing that follows is an echo of
-            // it — the same reasoning as interrupting by typing, and without
-            // this the echo guard would eat his first words for being too
-            // similar to the reply he just talked over.
-            speaker.forgetLastSpoken()
-            // Hand the microphone straight back rather than waiting out the
-            // re-arm debounce. He is already mid-sentence; every millisecond
-            // here is a syllable of his that nothing is listening to.
-            if (armedRef.current) void window.forge.stt.start()
-          }
-        })
-      }
-
-      try {
-        // Keyed by turn: a re-render — or a second surface showing the same
-        // conversation — cannot make it say the same thing twice.
-        await voiceSpeaker.speakOnce(key, text, config, (msg) => noticeRef.current(msg))
-      } finally {
-        bargeIn.disarm()
-        // A short tail: the sidecar cuts a phrase on silence, so the last word
-        // can land a beat after the audio stops.
-        //
-        // Skipped when he interrupted, and that exception is the point. There
-        // is no trailing echo to wait out — the audio was cancelled — and 220ms
-        // of deafness after somebody starts talking is 220ms taken off the
-        // front of their sentence.
-        if (!interrupted) await new Promise((r) => window.setTimeout(r, 220))
-        speakingRef.current = false
-        setSpeaking(false)
-      }
+      pushSpeech(key, text)
+      closeMouth()
+      await speakRun.current
     },
-    [speaksAloud]
+    [closeMouth, pushSpeech, speaksAloud]
   )
 
   useEffect(() => {
@@ -483,15 +738,27 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    * is right for dictation and wrong for a conversation — so in agent mode an
    * idle engine is immediately asked to listen again. The small delay keeps a
    * refusing sidecar from becoming a spin.
+   *
+   * OFF IN WAKE MODE, and that is the point of wake mode. A wake session never
+   * auto-stops: the silence timeout ends the *capture* and the microphone stays
+   * open, monitoring, for as long as the agent is armed. The sidecar loops
+   * itself, so this poll would be a second thing starting sessions — and it is
+   * this poll, cycling an idle engine through warming → listening every few
+   * seconds, that turned the handover blip into the metronome described on
+   * `HANDS_BACK`. The gate is on the *session's* mode rather than on the
+   * setting, so the poll is still there to restart the sidecar after the mouth
+   * stopped it (a stop drops the session back to `phrase`), which is what makes
+   * wake mode survive every reply.
    */
   useEffect(() => {
     if (!armed || speaking) return undefined
+    if (wakeWord && stt.mode === 'wake') return undefined
     if (stt.phase !== 'idle' && stt.phase !== 'off') return undefined
     if (stt.error && isSttSetupError(stt.error.kind)) return undefined
-    const timer = window.setTimeout(() => void window.forge.stt.start(), 260)
+    const timer = window.setTimeout(() => startListening(), 260)
     rearmTimer.current = timer
     return () => window.clearTimeout(timer)
-  }, [armed, speaking, stt.phase, stt.error])
+  }, [armed, speaking, startListening, stt.phase, stt.error, stt.mode, wakeWord])
 
   // The button's resting appearance follows the engine, except while a flash, a
   // think or an utterance is deliberately holding it somewhere else.
@@ -504,22 +771,65 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     setPhase(stt.phase === 'starting' ? 'warming' : 'listening')
   }, [armed, speaking, stt.phase])
 
-  /**
-   * The handover blip.
-   *
-   * This is what "returning to listening" sounds like now. It used to be a
-   * spoken sentence — the same words every time — and that was the single most
-   * robotic thing the agent did. 120 ms of quiet sine says it better, and it
-   * only fires coming *back* from a turn, never on the tap that arms the agent
-   * (`HANDS_BACK`), so a session does not open with a noise.
+  /*
+   * There used to be a handover blip here — a 120 ms sine every time the phase
+   * fell back to `listening` after a turn. It replaced a spoken announcement
+   * and was an improvement on THAT, but in a real conversation "after a turn"
+   * is after every single exchange, and Steve's verdict was "it keeps
+   * beeping". A person you are talking to does not chime when they finish a
+   * sentence. So the only blip left is the wake acknowledgment below — the one
+   * sound that carries information he cannot see (a foot from the keyboard,
+   * eyes elsewhere, did it hear "hey Jarvis" or not) and the only one that
+   * fires because *he* did something rather than because a state machine
+   * changed lanes.
    */
-  const previousPhase = useRef<AgentPhase>('off')
+
+  /**
+   * "Hey Jarvis" landed.
+   *
+   * Watched as a *change* in the count, never as a value: a wake is
+   * instantaneous, there is no un-wake to pair it with, and the counter is the
+   * only thing there is to latch onto (see SttStatus.wakeCount). The blip is the
+   * same one the handover uses — it is the same promise, that the microphone is
+   * his now — and unlike the poll-driven one it only ever sounds because
+   * somebody said the words.
+   */
+  const lastWakeCount = useRef(stt.wakeCount ?? 0)
   useEffect(() => {
-    const before = previousPhase.current
-    previousPhase.current = phase
-    if (phase !== 'listening' || !HANDS_BACK.has(before)) return
+    const count = stt.wakeCount ?? 0
+    if (count === lastWakeCount.current) return
+    lastWakeCount.current = count
+    if (!armedRef.current) return
     if (state.settings.voiceEarcons) earconListening()
-  }, [phase, state.settings.voiceEarcons])
+    // Not while it is talking: the phase belongs to the reply until the mouth
+    // is finished with it, and barge-in is what ends that.
+    if (!speakingRef.current) setPhase('listening')
+  }, [stt.wakeCount, state.settings.voiceEarcons])
+
+  /**
+   * The follow-up window.
+   *
+   * A conversation is not a series of unrelated commands, and having to say
+   * "hey Jarvis" again to answer a question it just asked is the thing that
+   * makes a wake word feel like a vending machine. So after a reply the sidecar
+   * is told to capture once, without the wake word.
+   *
+   * Once, and never in a loop: a capture that hears nothing auto-stops back to
+   * monitoring by itself, which is exactly the behaviour that makes this safe to
+   * fire and forget. The flag is cleared before the call, so a status change
+   * arriving mid-flight cannot fire a second one.
+   */
+  const wantFollowUp = useRef(false)
+  useEffect(() => {
+    if (!armed) {
+      wantFollowUp.current = false
+      return
+    }
+    if (!wantFollowUp.current || speaking) return
+    if (stt.mode !== 'wake' || stt.phase !== 'listening' || stt.capturing) return
+    wantFollowUp.current = false
+    void window.forge.stt.capture()
+  }, [armed, speaking, stt.mode, stt.phase, stt.capturing])
 
   const toggleAgent = useCallback(() => {
     // Barge-in: pressing the button while it is talking shuts it up first, and
@@ -532,6 +842,13 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     // interrupted would otherwise play over him.
     if (speakingRef.current) {
       voiceSpeaker.cancel()
+      // The same move as talking over it: whatever is still being generated
+      // was going to be said out loud, and he has just said he does not want
+      // to hear it.
+      const run = claudeRun.current
+      if (run) run.aborted = true
+      if (agentBrainAvailable()) void interruptAgentBrain().catch(() => undefined)
+      dropSpeech()
       speakingRef.current = false
       setSpeaking(false)
       return
@@ -540,17 +857,18 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     actions.setAgentListening(next)
     if (next) {
       setPhase('warming')
-      void window.forge.stt.start()
+      startListening()
     } else {
       thinkingSince.current = null
       if (flashTimer.current) window.clearTimeout(flashTimer.current)
       flashTimer.current = null
       if (rearmTimer.current) window.clearTimeout(rearmTimer.current)
       voiceSpeaker.cancel()
+      dropSpeech()
       setPhase('off')
       void window.forge.stt.stop()
     }
-  }, [actions])
+  }, [actions, dropSpeech, startListening])
 
   /*
    * There used to be an auto-disarm here.
@@ -633,6 +951,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     ]
   )
   const brainStatus: BrainStatus = brain.ready()
+  const brainModel = state.settings.voiceClaudeModel
 
   // Agent memory (M7). Warmed here so the brain context can be built without an
   // await; everything that decides what to remember lives in lib/agentmemory.ts.
@@ -921,9 +1240,18 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     }
   }
 
-  const manifestRef = useRef<string>('')
-  manifestRef.current = useMemo(() => {
-    const snapshot: ManifestSnapshot = {
+  /**
+   * The app as a model should read it.
+   *
+   * One object, two readers. The JSON brains get it rendered into the ~3,000
+   * token manifest below; the Claude session gets the *same* object rendered by
+   * `buildStateSection` when it calls `get_app_state`. Two constructions of
+   * "which pane is Terminal 2" would eventually disagree, and the whole point
+   * of the numbering is that Steve, the model and the executor mean the same
+   * pane by it.
+   */
+  const snapshot = useMemo<ManifestSnapshot>(() => {
+    return {
       appVersion: state.info?.version ?? null,
       projects: state.projects.map((p) => ({ name: p.name, path: p.path, active: p.id === project?.id })),
       profiles: state.settings.agentProfiles,
@@ -954,7 +1282,6 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         shell: state.info?.shell ?? state.settings.shell
       }
     }
-    return buildManifest(snapshot)
   }, [
     state.info,
     state.projects,
@@ -967,6 +1294,14 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     project?.id,
     paneCount
   ])
+  // Read by the tool bridge, which is registered once and outlives every
+  // render: a snapshot captured at registration time would be answering about a
+  // Forge from ten minutes ago.
+  const snapshotRef = useRef(snapshot)
+  snapshotRef.current = snapshot
+
+  const manifestRef = useRef<string>('')
+  manifestRef.current = useMemo(() => buildManifest(snapshot), [snapshot])
 
   // Conversation so far, for multi-turn context.
   const historyRef = useRef<BrainTurn[]>([])
@@ -1042,6 +1377,217 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     )
   }, [])
 
+  /* --------------------------------------------------------- claude session */
+
+  /**
+   * Which fork step 2 takes. Read through a ref by the intake, so changing the
+   * brain in Settings does not tear down the transcript subscription.
+   */
+  const usingClaude = state.settings.voiceBrain === 'claude'
+  const usingClaudeRef = useRef(usingClaude)
+  usingClaudeRef.current = usingClaude
+
+  const projectPathRef = useRef(project?.path ?? null)
+  projectPathRef.current = project?.path ?? null
+  const projectIdRef = useRef(project?.id ?? null)
+  projectIdRef.current = project?.id ?? null
+
+  /**
+   * The brain's half of the conversation with the app.
+   *
+   * Registered once, at mount, with accessors rather than values — the session
+   * outlives every render. It is registered whether or not claude is the
+   * selected brain: the cost is one IPC subscription, and the alternative is a
+   * tool bridge that arrives a render *after* the first utterance that needed
+   * it.
+   */
+  useEffect(() => {
+    if (!agentBrainAvailable()) return undefined
+    return registerVoiceAgentTools({
+      getSnapshot: () => snapshotRef.current,
+      // Straight through the executor every other path uses — including the
+      // grace beat on a submitted prompt, so a spoken "wait" holds the brain's
+      // send_prompt exactly as it holds the grammar's.
+      runAction: (action) =>
+        runActions([action])[0] ?? {
+          ok: false,
+          summary: 'The executor was not ready — try that again',
+          requested: 1,
+          done: 0
+        },
+      getProjectMemory: () => agentMemory.prime(projectIdRef.current)
+    })
+  }, [runActions])
+
+  /**
+   * The brain, as it happens.
+   *
+   * `delta` drives the mouth and nothing else; `assistant` is the authoritative
+   * text and drives everything written down. That split is the contract in
+   * src/lib/agentbrain.ts, and it matters: the deltas of a turn that also called
+   * tools arrive in several runs, and treating any one `assistant` block as the
+   * whole reply would silently drop the rest.
+   */
+  const handleBrainEvent = useCallback(
+    (event: VoiceAgentEvent): void => {
+      const run = claudeRun.current
+      if (!run) return
+      switch (event.type) {
+        case 'delta': {
+          if (run.silent || run.aborted) return
+          run.buffer += event.text
+          const { chunks, rest } = takeSpeechChunks(run.buffer)
+          run.buffer = rest
+          for (const chunk of chunks) {
+            openMouth()
+            pushSpeech(`${run.id}:s${run.chunk++}`, chunk)
+          }
+          return
+        }
+        case 'assistant':
+          run.said.push(event.text)
+          run.onText?.(run.said.join('\n'))
+          return
+        case 'tool':
+          // Working, not talking. Only when the mouth is idle: a tool call in
+          // the middle of a spoken reply must not blank the speaking phase.
+          if (event.phase === 'start' && armedRef.current && !speakingRef.current) setPhase('thinking')
+          return
+        case 'result':
+          // The SDK's own summary is the fallback, for the turn that acted and
+          // said nothing — there is still something to tell the phone.
+          if (!run.said.length && event.text.trim()) run.said.push(event.text.trim())
+          // A turn HE ended is not a turn that failed. Interrupting — talking
+          // over it, typing, tapping the button — unwinds the SDK's turn, and
+          // the SDK reports that unwinding as an error result. Treating it as
+          // one had the agent saying "that one did not go through, say it
+          // again?" every single time Steve barged in, which he heard as the
+          // brain failing constantly. It ended because he moved on: clean end.
+          run.finish(run.aborted ? undefined : event.ok ? undefined : event.text.trim() || 'That turn did not come back')
+          return
+        case 'error':
+          // Same shape: an error that lands on a turn he already cancelled is
+          // the cancellation echoing back, not news worth speaking.
+          run.finish(run.aborted ? undefined : event.message)
+          return
+      }
+    },
+    [openMouth, pushSpeech]
+  )
+
+  useEffect(() => {
+    if (!agentBrainAvailable()) return undefined
+    return onAgentBrainEvent(handleBrainEvent)
+  }, [handleBrainEvent])
+
+  /** True once a session has been opened and not yet stopped. */
+  const sessionOpen = useRef(false)
+
+  // Disarming ends the session. The next utterance opens a fresh one — a voice
+  // agent nobody is talking to has no reason to hold a subprocess.
+  useEffect(() => {
+    if (armed || !sessionOpen.current) return
+    sessionOpen.current = false
+    void stopAgentBrain().catch(() => undefined)
+  }, [armed])
+
+  /**
+   * One turn with the Claude session, start to finish.
+   *
+   * Resolves with what it said, once it has finished saying it — the same
+   * contract `interpret()` + `speak()` gives the other fork, so `runPhrase`
+   * treats both the same and the phone gets a real answer either way.
+   */
+  const runClaudeTurn = useCallback(
+    async (
+      id: string,
+      said: string,
+      opts: { silent?: boolean; onText?: (text: string) => void }
+    ): Promise<string> => {
+      if (!agentBrainAvailable()) {
+        throw new Error('The voice session is unavailable — the preload bundle is stale. Rebuild and restart.')
+      }
+      // One session, one mouth: a turn that arrives while another is in flight
+      // replaces it. The newer thing he said is the one he meant — so the old
+      // one is unwound and settled with whatever it had managed to say, not
+      // failed. It was superseded, which is not the same as broken, and the
+      // difference is audible: a failure says so out loud.
+      const previous = claudeRun.current
+      if (previous) {
+        previous.aborted = true
+        await interruptAgentBrain().catch(() => undefined)
+        // The SDK unwinds the superseded turn as an error result. That result
+        // must land on IT, not on the new run below — the event handler reads
+        // `claudeRun.current`, which is still `previous` until this await
+        // returns. Waiting here is what stops a barge-in from killing the very
+        // sentence that followed it. See INTERRUPT_UNWIND_MS.
+        await Promise.race([
+          previous.done,
+          new Promise<void>((r) => window.setTimeout(r, INTERRUPT_UNWIND_MS))
+        ])
+        // A session that never emitted the unwind: settle it here so its own
+        // turn resolves instead of hanging on a result that is not coming.
+        if (previous.error === undefined) previous.finish()
+      }
+
+      let settle: (() => void) | null = null
+      const done = new Promise<void>((resolve) => {
+        settle = resolve
+      })
+      const run: ClaudeRun = {
+        id,
+        silent: opts.silent === true,
+        buffer: '',
+        said: [],
+        chunk: 0,
+        aborted: false,
+        onText: opts.onText,
+        done,
+        finish: (error?: string) => {
+          if (run.error === undefined) run.error = error ?? null
+          settle?.()
+        }
+      }
+      claudeRun.current = run
+
+      const watchdog = window.setTimeout(() => {
+        if (agentBrainAvailable()) void interruptAgentBrain().catch(() => undefined)
+        run.finish(run.aborted ? undefined : 'The brain did not come back')
+      }, CLAUDE_TURN_TIMEOUT_MS)
+
+      try {
+        if (!sessionOpen.current) {
+          sessionOpen.current = true
+          try {
+            // A session that could not be opened says so in its status rather
+            // than throwing — and waiting five minutes for events that will
+            // never come is not how he should find out.
+            const status = await startAgentBrain(projectPathRef.current ?? undefined)
+            if (status.error) throw new Error(status.error)
+          } catch (err) {
+            sessionOpen.current = false
+            throw err
+          }
+        }
+        await sendUtterance(said)
+        await done
+      } finally {
+        window.clearTimeout(watchdog)
+        if (claudeRun.current === run) claudeRun.current = null
+        // Whatever was left in the buffer never made a full sentence. Say it
+        // anyway: a reply that ends without a full stop is still a reply.
+        const tail = run.buffer.trim()
+        if (tail && !run.silent && !run.aborted) pushSpeech(`${run.id}:s${run.chunk++}`, tail)
+        closeMouth()
+        await speakRun.current
+      }
+
+      if (run.error) throw new Error(run.error)
+      return run.said.join('\n').trim()
+    },
+    [closeMouth, pushSpeech]
+  )
+
   /* ---------------------------------------------------- transcript intake */
 
   /**
@@ -1074,6 +1620,45 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       if (!opts?.silent && said !== lastTypedRef.current && speaker.heardItself(said)) return ''
       if (said === lastTypedRef.current) lastTypedRef.current = null
 
+      // 0c — dictation. While it is on, nothing is acted on: every phrase is
+      // held verbatim, and only "stop dictation" (or leaving the agent) lets
+      // it out, all at once, through the exact pipeline below. This is what
+      // stops a long prompt being cut into premature turns by the sidecar's
+      // silence cuts. Phone messages ride `silent`, so they never enter the
+      // buffer — he is dictating at the machine, not on the phone.
+      if (!opts?.silent) {
+        const dictCmd = parseDictation(said)
+        if (dictatingRef.current) {
+          if (dictCmd === 'stop') {
+            const buffered = dictationBufferRef.current
+            endDictation()
+            setDictationBuffer('')
+            if (buffered.trim()) return runPhrase(buffered)
+            return ''
+          }
+          // A second "start" is a no-op: already holding.
+          if (dictCmd === 'start') return ''
+          const next = dictationBufferRef.current ? `${dictationBufferRef.current} ${said}` : said
+          dictationBufferRef.current = next
+          setDictationBuffer(next)
+          return ''
+        }
+        if (dictCmd === 'start') {
+          dictationBufferRef.current = ''
+          setDictationBuffer('')
+          beginDictation()
+          setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'note', tone: 'ok' }])
+          const line = 'Dictation on. Every word is held — say stop dictation to send it all.'
+          void speak(`${id}:dictate`, line)
+          return ''
+        }
+        // "stop dictation" when it is already off: say so once, on the card.
+        if (dictCmd === 'stop') {
+          setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'note', tone: 'warn' }])
+          return 'Not in dictation.'
+        }
+      }
+
       // 0 — the brake. While a prompt is counting down into a terminal, "wait"
       // means stop that, not "start a new conversation about waiting".
       if (holds.current.size > 0 && CANCEL_WORDS.test(said.trim())) {
@@ -1101,6 +1686,67 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       thinkingSince.current = Date.now()
       if (armedRef.current) setPhase('thinking')
       setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'brain', phase: 'thinking', draft: '' }])
+
+      /** What a failed turn looks like, whichever brain failed. */
+      const failed = async (err: unknown): Promise<string> => {
+        thinkingSince.current = null
+        // An amber blip, and the conversation carries on. A brain that failed
+        // is not a reason to stop listening to him.
+        if (armedRef.current) flash('error', ERROR_MS)
+        setTurns((prev) =>
+          prev.map((t) =>
+            t.id === id && t.kind === 'brain'
+              ? { ...t, phase: 'error', error: err instanceof Error ? err.message : String(err) }
+              : t
+          )
+        )
+        // Never the same words twice running: this is the one line Forge
+        // writes for itself often enough for the repetition to grate.
+        const line = pickVaried(BRAIN_FAILED, lastFailure.current)
+        lastFailure.current = line
+        await speak(`${id}:error`, line)
+        return line
+      }
+
+      // 2a — the Claude session. It streams (so it is spoken sentence by
+      // sentence, from here, as it is written) and it runs its own actions
+      // through the tool bridge, so there is no actions array to execute and
+      // nothing to contradict: `claimsCompletedAction` guards the JSON brains
+      // against announcing an action they never sent, and a real tool call is
+      // not that kind of claim.
+      if (usingClaudeRef.current) {
+        try {
+          const text = await runClaudeTurn(id, said, {
+            silent: opts?.silent,
+            onText: (partial) =>
+              setTurns((prev) =>
+                prev.map((t) =>
+                  t.id === id && t.kind === 'brain'
+                    ? { ...t, reply: { understood: partial, confidence: 'high' } }
+                    : t
+                )
+              )
+          })
+          thinkingSince.current = null
+          if (armedRef.current && !speaksAloud) flash('replied', REPLIED_MS)
+          const reply: BrainReply = { understood: text, confidence: 'high' }
+          setTurns((prev) =>
+            prev.map((t) => (t.id === id && t.kind === 'brain' ? { ...t, phase: 'done', reply } : t))
+          )
+          void agentMemory.record({
+            projectId: ctx?.activeProjectId ?? null,
+            utterance: said,
+            at: Date.now(),
+            reply
+          })
+          // Hands-free follow-up: he answered a question, he can answer the
+          // next one without saying the wake word again.
+          if (!opts?.silent && wakeWordRef.current && armedRef.current) wantFollowUp.current = true
+          return text
+        } catch (err) {
+          return failed(err)
+        }
+      }
 
       const context: BrainContext = {
         projectName: ctx?.activeProjectName ?? undefined,
@@ -1158,27 +1804,19 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
           await speak(id, answer)
           return answer || reply.understood || ''
         })
-        .catch(async (err: unknown) => {
-          thinkingSince.current = null
-          // An amber blip, and the conversation carries on. A brain that failed
-          // is not a reason to stop listening to him.
-          if (armedRef.current) flash('error', ERROR_MS)
-          setTurns((prev) =>
-            prev.map((t) =>
-              t.id === id && t.kind === 'brain'
-                ? { ...t, phase: 'error', error: err instanceof Error ? err.message : String(err) }
-                : t
-            )
-          )
-          // Never the same words twice running: this is the one line Forge
-          // writes for itself often enough for the repetition to grate.
-          const failed = pickVaried(BRAIN_FAILED, lastFailure.current)
-          lastFailure.current = failed
-          await speak(`${id}:error`, failed)
-          return failed
-        })
+        .catch(failed)
     },
-    [brain, cancelAllHolds, flash, patchOutcome, project?.path, runActions, sayAloud, speaksAloud]
+    [
+      brain,
+      cancelAllHolds,
+      flash,
+      patchOutcome,
+      project?.path,
+      runActions,
+      runClaudeTurn,
+      sayAloud,
+      speaksAloud
+    ]
   )
 
   const handlePhrase = useCallback((said: string) => void runPhrase(said), [runPhrase])
@@ -1188,6 +1826,17 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   // here, once, rather than in a panel: two subscriptions would run every phrase
   // through the brain twice and speak both answers.
   useEffect(() => transcriptBus.onPhrase(handlePhrase), [handlePhrase])
+
+  // Leaving the agent mid-dictation must not lose what was held: it goes out as
+  // one last prompt, because a conversation he was composing when he tapped
+  // "stand down" is still a conversation he was having.
+  useEffect(() => {
+    if (armed || !dictatingRef.current) return
+    const buffered = dictationBufferRef.current
+    endDictation()
+    setDictationBuffer('')
+    if (buffered.trim()) void runPhrase(buffered)
+  }, [armed, endDictation, runPhrase])
 
   /* ------------------------------------------------------- the phone (M9) */
 
@@ -1228,6 +1877,29 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       // actions, and it says so instead of pretending.
       try {
         const memory = await agentMemory.prime(e.projectId)
+
+        // The Claude session has no `interpret()` to call — it is a
+        // conversation, not a request — so the same caveat is put to it in
+        // words, at the top of the message. It has the tools to act, and the
+        // sentence is what stops it acting on the wrong project's terminals.
+        if (usingClaudeRef.current) {
+          const answer = await runClaudeTurn(
+            makeId('turn'),
+            `[From Steve's phone, about the project "${e.projectName}". That project is NOT the one open in Forge, ` +
+              `so do not open, close or type into any terminal — the panes you can see belong to a different project. ` +
+              `Answer in words, and say plainly if something has to wait until he opens it.]\n\n${text}`,
+            { silent: true }
+          )
+          await say(answer)
+          void agentMemory.record({
+            projectId: e.projectId,
+            utterance: text,
+            at: Date.now(),
+            reply: { understood: answer, confidence: 'high' }
+          })
+          return
+        }
+
         const reply = await brain.interpret(text, {
           projectName: e.projectName,
           recentTranscript: [text],
@@ -1240,7 +1912,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         await say(`The brain failed: ${err instanceof Error ? err.message : String(err)}`)
       }
     },
-    [brain, project, runPhrase]
+    [brain, project, runClaudeTurn, runPhrase]
   )
 
   useEffect(() => window.forge.companion.onUtterance((e) => void handleUtterance(e)), [handleUtterance])
@@ -1308,6 +1980,13 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     // sound, aborts the request in flight and discards a clip that lands late.
     if (speakingRef.current) {
       voiceSpeaker.cancel()
+      // And stop what is still being written, for the same reason: he has
+      // moved on, and the rest of that reply was only ever going to be said
+      // out loud over the top of his next one.
+      const run = claudeRun.current
+      if (run) run.aborted = true
+      if (agentBrainAvailable()) void interruptAgentBrain().catch(() => undefined)
+      dropSpeech()
       speakingRef.current = false
       setSpeaking(false)
     }
@@ -1315,10 +1994,18 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     speaker.forgetLastSpoken()
     lastTypedRef.current = text
     typedTranscript.push(text)
-  }, [draftPhrase])
+  }, [draftPhrase, dropSpeech])
 
   const setReplyMode = useCallback(
     (mode: VoiceReplyMode) => actions.patchSettings({ voiceReplyMode: mode }),
+    [actions]
+  )
+
+  // Nothing to restart here: the host reads the setting again at the next turn
+  // boundary (electron/voice-agent/host.ts), so switching mid-sentence lets the
+  // sentence finish in the model that started it.
+  const setBrainModel = useCallback(
+    (model: string) => actions.patchSettings({ voiceClaudeModel: model }),
     [actions]
   )
 
@@ -1341,9 +2028,18 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       submitPhrase,
       brainName: brain.name,
       brainStatus,
+      brainModel,
+      setBrainModel,
       replyMode,
       setReplyMode,
-      canSpeak
+      canSpeak,
+      // Straight off the sidecar's status rather than off the setting: what a
+      // surface has to draw is what the microphone is actually doing, and the
+      // two differ for a beat every time a session is opened or closed.
+      wakeMode: stt.mode === 'wake',
+      capturing: stt.capturing ?? stt.phase === 'listening',
+      dictating,
+      dictationBuffer
     }),
     [
       phase,
@@ -1361,9 +2057,16 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       submitPhrase,
       brain.name,
       brainStatus,
+      brainModel,
+      setBrainModel,
       replyMode,
       setReplyMode,
-      canSpeak
+      canSpeak,
+      stt.mode,
+      stt.capturing,
+      stt.phase,
+      dictating,
+      dictationBuffer
     ]
   )
 

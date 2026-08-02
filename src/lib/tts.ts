@@ -63,6 +63,13 @@ export interface TtsBackend {
   cancelSpeak(requestId: string): Promise<boolean>
   /** Play raw PCM. Returns as soon as playback has *started*. */
   play(pcm: Int16Array, sampleRate: number, channels: number): Playing
+  /**
+   * Decode a compressed clip (the edge engine returns MP3) to the same raw PCM
+   * shape everything downstream — the cache, `play`, ducking — already speaks.
+   * Decoding once at arrival rather than at each replay is what keeps a cached
+   * confirmation instant.
+   */
+  decode(bytes: ArrayBuffer): Promise<{ pcm: Int16Array; sampleRate: number; channels: number }>
 }
 
 /* --------------------------------------------------------------- Web Audio */
@@ -98,11 +105,17 @@ export function pcmToFloat32(pcm: Int16Array): Float32Array<ArrayBuffer> {
   return out
 }
 
-/** base64 → Int16Array, in one pass, without a Buffer polyfill. */
-export function base64ToPcm(b64: string): Int16Array {
+/** base64 → bytes, in one pass, without a Buffer polyfill. */
+export function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(b64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+/** base64 → Int16Array. */
+export function base64ToPcm(b64: string): Int16Array {
+  const bytes = base64ToBytes(b64)
   // Little-endian is what the API sends and what every x86 machine reads
   // natively, so the underlying buffer can be reinterpreted rather than copied —
   // but only when it happens to be 2-byte aligned, which a fresh Uint8Array is.
@@ -177,11 +190,34 @@ function webAudioPlay(pcm: Int16Array, sampleRate: number, channels: number): Pl
   }
 }
 
+/**
+ * MP3 → raw PCM, through the browser's own decoder.
+ *
+ * `decodeAudioData` hands back planar Float32; downstream wants interleaved
+ * Int16 because that is the one shape the cache and `play` already handle for
+ * Gemini's raw clips. One conversion here beats two code paths everywhere else.
+ */
+async function webAudioDecode(bytes: ArrayBuffer): Promise<{ pcm: Int16Array; sampleRate: number; channels: number }> {
+  const decoded = await context().decodeAudioData(bytes)
+  const channels = Math.max(1, Math.min(2, decoded.numberOfChannels))
+  const frames = decoded.length
+  const pcm = new Int16Array(frames * channels)
+  for (let c = 0; c < channels; c++) {
+    const plane = decoded.getChannelData(c)
+    for (let i = 0; i < frames; i++) {
+      const sample = Math.max(-1, Math.min(1, plane[i] ?? 0))
+      pcm[i * channels + c] = Math.round(sample * 32767)
+    }
+  }
+  return { pcm, sampleRate: decoded.sampleRate, channels }
+}
+
 function rendererBackend(): TtsBackend {
   return {
     speak: (req) => window.forge.voice.speak(req),
     cancelSpeak: (id) => window.forge.voice.cancelSpeak(id),
-    play: webAudioPlay
+    play: webAudioPlay,
+    decode: webAudioDecode
   }
 }
 
@@ -323,12 +359,72 @@ export function pickVaried(options: readonly string[], previous?: string): strin
   return list[Math.floor(Math.random() * list.length)] ?? options[0] ?? ''
 }
 
+/* ------------------------------------------------------------- streaming */
+
+/**
+ * Longest chunk that is allowed to wait for a full stop.
+ *
+ * A model writing a list, or a paragraph with no terminal punctuation in it,
+ * would otherwise hold the mouth shut until the whole turn was finished — which
+ * is exactly the several-second silence streaming exists to remove. Cut at the
+ * last comma or space before this instead, so the break still lands between
+ * words rather than inside one.
+ */
+export const SPEAK_CHUNK_MAX = 220
+
+/**
+ * A sentence end: `.`, `!` or `?` (plus any closing quote) followed by
+ * whitespace. The whitespace has to be *there*, not merely possible — a buffer
+ * ending in "3." might be the start of "3.14", and the next delta decides.
+ */
+const SENTENCE_END = /[.!?]["')\]]?(?=\s)/
+
+/**
+ * Split a growing reply into the parts that can already be spoken.
+ *
+ * The contract is what makes sentence-by-sentence speech safe: everything
+ * returned in `chunks` is finished — no later delta can change it — and `rest`
+ * is what the caller must hold onto and pass back in with the next delta
+ * appended. Nothing is ever dropped, and nothing is ever said twice.
+ *
+ * Deliberately *not* a full sentence tokeniser. "e.g." and "Dr." will
+ * occasionally cut a chunk early; the cost of that is a comma-length pause in
+ * the middle of a sentence, and the cost of the alternative is a page of
+ * abbreviation tables. Wrong pauses are cheap here in a way wrong words are not.
+ */
+export function takeSpeechChunks(buffer: string, max: number = SPEAK_CHUNK_MAX): {
+  chunks: string[]
+  rest: string
+} {
+  const chunks: string[] = []
+  let rest = buffer
+
+  for (;;) {
+    const hit = SENTENCE_END.exec(rest)
+    let cut = hit ? hit.index + hit[0].length : -1
+    // No sentence end yet — but an over-long run still has to be let out.
+    if (cut < 0) {
+      if (rest.length <= max) break
+      const window = rest.slice(0, max)
+      const soft = Math.max(window.lastIndexOf(', '), window.lastIndexOf('; '), window.lastIndexOf(' '))
+      cut = soft > 0 ? soft + 1 : max
+    }
+    const head = rest.slice(0, cut).trim()
+    rest = rest.slice(cut)
+    if (head) chunks.push(head)
+  }
+
+  return { chunks, rest }
+}
+
 /* ---------------------------------------------------------------- the chain */
 
 export interface VoiceConfig {
   engine: VoiceEngine
-  /** Whether a Gemini key exists. No key means `local`, whatever `engine` says. */
+  /** Whether a Gemini key exists. Gemini without one means `local` (or edge). */
   hasKey: boolean
+  /** Edge neural voice short name. Empty means the main process's default. */
+  edgeVoice: string
   /** Prebuilt Gemini voice name. Empty means the main process's default. */
   geminiVoice: string
   /** Gemini TTS model id. Empty means the main process's default. */
@@ -351,7 +447,26 @@ export interface SpokenResult {
 
 /** Which engine a config resolves to before anything is attempted. */
 export function chooseEngine(config: VoiceConfig): VoiceEngine {
+  if (config.engine === 'edge') return 'edge'
   return config.engine === 'gemini' && config.hasKey ? 'gemini' : 'local'
+}
+
+/**
+ * The neural engines to try, in order, before the local voice is allowed near
+ * the microphone.
+ *
+ * The second entry is the point: a neural engine that fails must fall to the
+ * OTHER neural engine, not to SAPI. The old chain went Gemini → SAPI, and on a
+ * free key Gemini's quota dies about six sentences in — so a streamed reply
+ * would open in a warm neural voice and finish in a robot, which Steve heard
+ * as "it keeps swapping voices". Neural → neural keeps the reply in a real
+ * voice; the local engine speaks only when the network itself is gone.
+ */
+export function neuralChain(config: VoiceConfig): Array<'edge' | 'gemini'> {
+  const chosen = chooseEngine(config)
+  if (chosen === 'edge') return config.hasKey ? ['edge', 'gemini'] : ['edge']
+  if (chosen === 'gemini') return ['gemini', 'edge']
+  return []
 }
 
 let requestSeq = 0
@@ -425,12 +540,20 @@ class VoiceSpeaker {
     const generation = ++this.generation
     const started = Date.now()
 
-    if (chooseEngine(config) === 'gemini') {
-      const key = ttsCacheKey(body, config.geminiVoice, config.ttsModel)
+    // Neural first — and on failure, the OTHER neural engine, so a quota or a
+    // refused key changes which datacentre is talking, not whether the reply
+    // sounds human. See neuralChain for why that ordering is the whole fix.
+    let lastFailureKind: string | null = null
+    let lastFailureError = ''
+    for (const engine of neuralChain(config)) {
+      const key =
+        engine === 'edge'
+          ? ttsCacheKey(body, config.edgeVoice || 'default', 'edge-neural')
+          : ttsCacheKey(body, config.geminiVoice, config.ttsModel)
       const hit = this.cache.get(key)
       if (hit) {
         const played = await this.playClip(hit, body, generation)
-        return { spoke: played, engine: 'gemini', cached: true, latencyMs: Date.now() - started }
+        return { spoke: played, engine, cached: true, latencyMs: Date.now() - started }
       }
 
       const requestId = `say_${++requestSeq}`
@@ -439,8 +562,9 @@ class VoiceSpeaker {
       try {
         result = await io().speak({
           text: body,
-          voice: config.geminiVoice,
-          model: config.ttsModel,
+          engine,
+          voice: engine === 'edge' ? config.edgeVoice : config.geminiVoice,
+          model: engine === 'gemini' ? config.ttsModel : '',
           requestId
         })
       } catch (err) {
@@ -451,45 +575,59 @@ class VoiceSpeaker {
 
       // Barge-in while the request was out: he is talking, so nothing is said.
       if (generation !== this.generation) {
-        return { spoke: false, engine: 'gemini', cached: false, latencyMs: Date.now() - started }
+        return { spoke: false, engine, cached: false, latencyMs: Date.now() - started }
       }
 
       if (result.ok) {
-        const clip: CachedClip = {
-          pcm: base64ToPcm(result.audio),
-          sampleRate: result.sampleRate,
-          channels: result.channels,
-          voice: result.voice,
-          model: result.model
+        let clip: CachedClip
+        if (result.format === 'mp3') {
+          try {
+            const decoded = await io().decode(base64ToBytes(result.audio).buffer)
+            clip = { ...decoded, voice: result.voice, model: result.model }
+          } catch {
+            // A clip that will not decode is this engine failing, not the end
+            // of the chain.
+            lastFailureKind = 'no-audio'
+            lastFailureError = 'The audio clip could not be decoded'
+            continue
+          }
+          // Decoding awaited too — he may have started talking during it.
+          if (generation !== this.generation) {
+            return { spoke: false, engine, cached: false, latencyMs: Date.now() - started }
+          }
+        } else {
+          clip = {
+            pcm: base64ToPcm(result.audio),
+            sampleRate: result.sampleRate,
+            channels: result.channels,
+            voice: result.voice,
+            model: result.model
+          }
         }
         this.cache.set(key, clip)
         const played = await this.playClip(clip, body, generation)
-        return { spoke: played, engine: 'gemini', cached: false, latencyMs: Date.now() - started }
+        return { spoke: played, engine, cached: false, latencyMs: Date.now() - started }
       }
 
       // A cancellation is not a failure and must not drag him onto SAPI.
       if (result.kind === 'cancelled') {
-        return { spoke: false, engine: 'gemini', cached: false, latencyMs: Date.now() - started }
+        return { spoke: false, engine, cached: false, latencyMs: Date.now() - started }
       }
 
-      // Everything else falls through to the local voice rather than saying
-      // nothing. Once per session it explains itself; after that it just works.
-      if (!this.warned) {
-        this.warned = true
-        onNotice?.(`Neural voice unavailable — using the built-in one. ${firstSentence(result.error)}`)
-      }
-      const spoke = await this.speakLocal(body, config, generation)
-      return {
-        spoke,
-        engine: 'local',
-        cached: false,
-        latencyMs: Date.now() - started,
-        fellBackBecause: result.kind
-      }
+      lastFailureKind = result.kind
+      lastFailureError = result.error
     }
 
+    // Every neural engine failed (or none was configured). The local voice
+    // rather than dead air — and once per session it explains itself.
+    if (lastFailureKind && !this.warned) {
+      this.warned = true
+      onNotice?.(`Neural voice unavailable — using the built-in one. ${firstSentence(lastFailureError)}`)
+    }
     const spoke = await this.speakLocal(body, config, generation)
-    return { spoke, engine: 'local', cached: false, latencyMs: Date.now() - started }
+    const out: SpokenResult = { spoke, engine: 'local', cached: false, latencyMs: Date.now() - started }
+    if (lastFailureKind) out.fellBackBecause = lastFailureKind
+    return out
   }
 
   /**

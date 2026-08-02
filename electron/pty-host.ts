@@ -1,7 +1,9 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import type { CreateSessionRequest, CreateSessionResult } from '@shared/types'
+import { installCommandFor, toolSpecForCommand } from '@shared/tools'
 import { PtySessionManager } from './pty/session-manager'
+import { checkableExe, whichCommand } from './which'
 import { getSettings } from './store'
 import { applyMcpBridge } from './bridge/mcp-config'
 import { applyRemoteControl } from './bridge/remote-control'
@@ -198,6 +200,49 @@ export function setPtyTarget(win: BrowserWindow | null): void {
   target = win
 }
 
+/* ------------------------------------------------- the CLI that isn't there */
+
+/**
+ * What a pane says when the agent it was opened for is not installed.
+ *
+ * The alternative — and what Forge did until this existed — is to type `codex`
+ * into PowerShell and let it answer:
+ *
+ *   codex : The term 'codex' is not recognized as the name of a cmdlet…
+ *
+ * which is red, six lines long, mentions a spelling check, and reads as *Forge*
+ * having failed. It is also the first thing a new copy of Forge does on a
+ * machine that has only ever had Claude Code installed, which makes it the
+ * single most expensive six lines in the app.
+ *
+ * So: the command is not run at all, and the pane explains itself instead. The
+ * shell underneath is untouched and still yours — including for pasting the
+ * install line, which is why the install line is right there.
+ */
+function missingCommandNotice(exe: string, install: string | null): string {
+  const dim = '\x1b[2m'
+  const amber = '\x1b[33m'
+  const green = '\x1b[32m'
+  const off = '\x1b[0m'
+  const line = (text = ''): string => `  ${text}\r\n`
+
+  const out = [
+    '\r\n',
+    line(`${amber}${exe} is not installed on this machine.${off}`),
+    line(`${dim}Forge did not run it — this pane is a working PowerShell, nothing has failed.${off}`),
+    line()
+  ]
+  if (install) {
+    out.push(line(`Install it:  ${green}${install}${off}`))
+    out.push(line(`${dim}Then type ${exe} here, or open a new pane.${off}`))
+  } else {
+    out.push(line(`${dim}Forge has no install command for it — see the tool's own docs.${off}`))
+  }
+  out.push(line(`${dim}Settings › Updates & tools lists every CLI Forge can launch, and installs them.${off}`))
+  out.push('\r\n')
+  return out.join('')
+}
+
 export function registerPtyHandlers(): void {
   ipcMain.handle(IPC.ptyCreate, (_e, req: CreateSessionRequest): CreateSessionResult => {
     // The one place every pane's launch command passes through, and therefore
@@ -214,12 +259,25 @@ export function registerPtyHandlers(): void {
     })
     const bootstrapCommand = applyMcpBridge(plan.command)
 
+    // The pane is about to type a command into a shell. If the program behind
+    // it is not on this machine, typing it produces PowerShell's "not
+    // recognized" — so it is not typed, and the pane says why instead.
+    // `checkableExe` returns null for anything PATH cannot settle (a quoted
+    // path, a pipeline), and those launch exactly as before.
+    const exe = checkableExe(bootstrapCommand)
+    const missingExe = exe !== null && whichCommand(exe) === null ? exe : null
+    // A CLI Forge has a catalogue row for gets its install command quoted in
+    // the notice; one it has never heard of gets the rest of the notice anyway.
+    const tool = missingExe ? toolSpecForCommand(bootstrapCommand, getSettings().customTools) : null
+    const notice = missingExe ? missingCommandNotice(missingExe, tool ? installCommandFor(tool) : null) : null
+
     const spec = {
       id: String(req?.id ?? ''),
       cwd,
       cols: Number(req?.cols ?? 80),
       rows: Number(req?.rows ?? 24),
-      bootstrapCommand
+      bootstrapCommand: notice ? '' : bootstrapCommand,
+      ...(notice ? { bootstrapNotice: notice } : {})
     }
 
     // Remembered for the quit confirmation, which needs to say what is running
@@ -229,8 +287,10 @@ export function registerPtyHandlers(): void {
       id: spec.id,
       projectName,
       paneTitle,
-      agent: Boolean(plan.command.trim()),
-      resumes: plan.managed
+      // A pane whose agent is not installed is a plain shell, and the quit
+      // confirmation must not claim an agent is running in it.
+      agent: Boolean(plan.command.trim()) && !notice,
+      resumes: plan.managed && !notice
     })
 
     // A session can already exist when the renderer reloads (dev HMR) or after

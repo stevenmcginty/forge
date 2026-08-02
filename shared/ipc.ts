@@ -36,6 +36,8 @@ export const IPC = {
   // dictation (stt sidecar)
   sttStart: 'stt:start',
   sttStop: 'stt:stop',
+  /** Wake mode only: start taking a phrase down now, without the wake word. */
+  sttCapture: 'stt:capture',
   sttReload: 'stt:reload',
   sttStatus: 'stt:status',
   sttStatusEvent: 'stt:status-event',
@@ -58,6 +60,9 @@ export const IPC = {
 
   // onboarding — is `claude` / `kimi` / `gemini` on this machine's PATH?
   agentsProbe: 'agents:probe',
+  // the same question about an arbitrary profile command, for the chooser and
+  // the Agents settings, which have custom profiles to answer for too
+  agentsWhich: 'agents:which',
 
   // window
   appInfo: 'app:info',
@@ -99,6 +104,37 @@ export const IPC = {
    * nobody will ever hear.
    */
   voiceSpeakCancel: 'voice:speak-cancel',
+
+  /* ------------------------------------------------------- claude voice brain
+   *
+   * The persistent Claude Agent SDK session in the main process — one session
+   * for the life of the app, not a call per turn. See electron/voice-agent/.
+   *
+   * Two directions, and they are not symmetrical:
+   *
+   *   renderer --start/utterance/interrupt--> main      (invoke, R→M)
+   *   main     --event-------------------->  renderer   (push,   M→R)
+   *   main     --tool-request------------->  renderer   (push,   M→R)
+   *   renderer --tool-result------------->   main       (invoke, R→M)
+   *
+   * The tool pair is the interesting one: only the renderer knows what is on
+   * screen, so when the brain wants app state or wants to *do* something, it
+   * asks and waits rather than the main process guessing.
+   */
+  voiceAgentStart: 'voice-agent:start',
+  voiceAgentStop: 'voice-agent:stop',
+  /** One thing Steve said. Lazily opens the session if it is not running. */
+  voiceAgentUtterance: 'voice-agent:utterance',
+  /** Barge-in. Ends the turn; the session itself survives. */
+  voiceAgentInterrupt: 'voice-agent:interrupt',
+  /**
+   * The streaming channel — text deltas, tool starts and stops, the result.
+   * Typed as VoiceAgentEvent in shared/types.ts.
+   */
+  voiceAgentEvent: 'voice-agent:event',
+  /** The brain asking the renderer something. Answered exactly once. */
+  voiceAgentToolRequest: 'voice-agent:tool-request',
+  voiceAgentToolResult: 'voice-agent:tool-result',
 
   // per-project agent memory (M7) — one markdown file per project, read into
   // the brain's system text and written back after every exchange.

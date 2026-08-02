@@ -169,36 +169,35 @@ export class StubBrain implements VoiceBrain {
 /* --------------------------------------------------------------- scaffolds */
 
 /**
- * Anthropic-backed brain. Scaffold only: it holds the key from settings and
- * reports itself as not implemented.
+ * The Claude brain, as the *selector* sees it.
  *
- * When this is built, `interpret()` is the only body that needs writing — one
- * Messages API call with `context.manifest` as the system prompt, returning
- * `understood`, `say`, `questions`, `actions` and `draftPrompt` exactly as
- * `GeminiBrain` already does (copy its request/parse shape). Nothing else in
- * Forge changes. The key must be read from settings here and nowhere else.
+ * Everything real about this one lives somewhere else, and that is the point.
+ * It is a persistent Claude Agent SDK session in the main process
+ * (electron/voice-agent/), reached from the renderer through
+ * `src/lib/agentbrain.ts`, and it streams its reply and runs its own actions
+ * through MCP tools rather than returning a JSON object for somebody else to
+ * execute. `src/state/VoiceAgent.tsx` routes to it directly for exactly that
+ * reason: squeezing a stream through `interpret()`'s one-shot signature would
+ * serialise away the thing that makes it feel alive.
+ *
+ * So what is left here is the two questions the rest of the app asks a brain
+ * without caring how it works — what is it called, and can it be used —
+ * answered honestly. It needs no key: the session authenticates with the
+ * `claude` login this machine already has, the same one every Forge pane uses.
+ * `anthropicKey` in settings is untouched by it, as Settings says.
  */
 export class ClaudeBrain implements VoiceBrain {
   readonly name = 'Claude'
 
-  /** Read from settings and kept here. It leaves this object never. */
-  private readonly apiKey: string
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey
-  }
-
   ready(): BrainStatus {
-    if (!this.apiKey) {
-      return { ok: false, reason: 'no-key', detail: 'Add an Anthropic key — and the engine still has to be built.' }
-    }
-    return { ok: false, reason: 'not-implemented', detail: 'Key stored. The interpreter itself is not built yet.' }
+    return { ok: true, label: 'claude session', detail: 'The Claude Agent SDK session — no API key needed.' }
   }
 
   async interpret(_transcript: string, _context: BrainContext): Promise<BrainReply> {
-    // ▸ Real interpretation goes here. Deliberately empty in v1 — no network
-    //   code ships until the brain is actually designed.
-    throw new Error('ClaudeBrain.interpret() is not implemented yet')
+    // Unreachable from the app: VoiceAgent never routes a claude turn through
+    // here. Left throwing rather than faked, because a plausible-looking empty
+    // reply would hide a mis-wired caller instead of showing it.
+    throw new Error('ClaudeBrain does not interpret — the session in VoiceAgent answers instead')
   }
 }
 
@@ -266,7 +265,8 @@ export function getActiveBrain(settings: BrainSettings | null | undefined): Voic
     case 'groq':
       return groqBrain(s) ?? new StubBrain('no-key')
     case 'claude':
-      return new ClaudeBrain(s.anthropicKey ?? '')
+      // No key to check: the session logs in as the CLI does. See ClaudeBrain.
+      return new ClaudeBrain()
     case 'openai':
       return new OpenAIBrain(s.openaiKey ?? '')
     case 'stub':

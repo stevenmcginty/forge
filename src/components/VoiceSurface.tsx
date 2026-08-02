@@ -40,13 +40,61 @@ import './VoiceSurface.css'
  * `npm run hub:check` fails the build if one appears.
  */
 
+/* ------------------------------------------------------------- presence */
+
+/**
+ * Jarvis, as one word.
+ *
+ * `phase` alone cannot tell calm monitoring apart from active listening — it
+ * says `listening` for both (see VoiceAgentCtx). Folding `wakeMode` and
+ * `capturing` in here, once, is what lets every surface — the status-bar
+ * button, the dial, the desktop orb — speak the same nine-state grammar
+ * without three copies of the same ifs.
+ *
+  *   monitoring   sitting on an open mic waiting for "hey Jarvis" — calm
+  *   listening    armed and attentive, nothing arriving yet
+  *   capturing    speech is actually going to the engine right now
+  *   dictating    buffer mode is on — every word is being held, not acted on
+ */
+export type JarvisPresence =
+  | 'off'
+  | 'warming'
+  | 'monitoring'
+  | 'listening'
+  | 'capturing'
+  | 'dictating'
+  | 'thinking'
+  | 'speaking'
+  | 'replied'
+  | 'error'
+
+export function jarvisPresence(
+  phase: AgentPhase,
+  wakeMode: boolean,
+  capturing: boolean,
+  dictating: boolean
+): JarvisPresence {
+  // Buffer mode is the most load-bearing thing a surface can show — every word
+  // he says is being held, which looks identical to plain capturing without it.
+  if (dictating && phase === 'listening') return 'dictating'
+  if (phase === 'listening') {
+    if (capturing) return 'capturing'
+    return wakeMode ? 'monitoring' : 'listening'
+  }
+  if (phase === 'off') return wakeMode ? 'monitoring' : 'off'
+  return phase
+}
+
 /* ----------------------------------------------------------- agent button */
 
-/** What the circle says about itself, by state. */
-const AGENT_LABEL: Record<AgentPhase, { title: string; sub: string }> = {
-  off: { title: 'Agent', sub: 'Tap to talk to your agent' },
-  warming: { title: 'Warming up', sub: 'loading the speech engine…' },
+/** What the orb says about itself, by presence. */
+const AGENT_LABEL: Record<JarvisPresence, { title: string; sub: string }> = {
+  off: { title: 'Jarvis', sub: 'tap to wake him' },
+  warming: { title: 'Waking', sub: 'loading the speech engine…' },
+  monitoring: { title: 'On watch', sub: 'say “hey Jarvis” — or tap' },
   listening: { title: 'Listening', sub: 'say what you want — tap to stop' },
+  capturing: { title: 'Listening', sub: 'got you — keep going' },
+  dictating: { title: 'Dictating', sub: 'holding every word — say “stop dictation” to send it all' },
   thinking: { title: 'Thinking', sub: 'working on it…' },
   // Not "mic off while I talk" any more — it is not. The AEC'd microphone is
   // open for the whole reply and talking over it is the intended way to stop
@@ -57,31 +105,43 @@ const AGENT_LABEL: Record<AgentPhase, { title: string; sub: string }> = {
 }
 
 /**
- * The hero. One big round button that says, without a manual, "this is the
- * agent, and it is either on or it is not".
+ * The hero: Jarvis himself, as an obsidian sphere with a volt-lit iris.
  *
- * The ring is driven straight from the mic level inside a rAF loop rather than
- * through React state: levels arrive ten times a second and the panel has a
- * conversation in it. Nothing here re-renders while you speak.
+ * No icon and no glyph on purpose. A microphone drawing makes it a control; a
+ * lit eye set in dark glass makes it a presence, and every state he can be in
+ * is a different quality of that light — dark asleep, an ember while he
+ * monitors for his name, blooming with your voice while he takes it down, an
+ * orbiting arc while he works, a spoken cadence while he talks, amber when
+ * something failed.
  *
- * `compact` is the floating pill's version: the same circle and the same
- * states, at 34px, with the words left off — the pill is 56px tall and there is
- * nowhere to put them.
+ * The ring and the halo are driven straight from the mic level inside a rAF
+ * loop rather than through React state: levels arrive ten times a second and
+ * the card has a conversation in it. Nothing here re-renders while you speak.
+ * The loop only runs while he is actually listening — the idle states breathe
+ * on pure compositor animation and cost nothing.
  *
- * Both sizes are one component on purpose. The pill's circle and the card's are
- * the same agent in the same phase, and two copies of this rAF loop would drift
- * apart the first time either was tuned.
+ * `compact` is the floating pill's version: the same orb with the words left
+ * off. All sizes are one component on purpose — the pill's orb, the card's and
+ * the desktop overlay's are the same being in the same state, and two copies
+ * of this rAF loop would drift apart the first time either was tuned.
  */
 export function VoiceDial({ compact }: { compact?: boolean } = {}): ReactNode {
-  const { phase, armed, levelRef, thinkingFor, holding, sttError, cancelAllHolds, toggleAgent } = useVoiceAgent()
+  const { phase, armed, wakeMode, capturing, dictating, levelRef, thinkingFor, holding, sttError, cancelAllHolds, toggleAgent } =
+    useVoiceAgent()
   const ringRef = useRef<HTMLSpanElement | null>(null)
+  const haloRef = useRef<HTMLSpanElement | null>(null)
+  const presence = jarvisPresence(phase, wakeMode, capturing, dictating)
+  const live = presence === 'listening' || presence === 'capturing' || presence === 'dictating'
 
   useEffect(() => {
     const ring = ringRef.current
-    if (!ring) return undefined
-    if (phase !== 'listening') {
+    const halo = haloRef.current
+    if (!ring || !halo) return undefined
+    if (!live) {
       ring.style.transform = ''
       ring.style.opacity = ''
+      halo.style.transform = ''
+      halo.style.opacity = ''
       return undefined
     }
     let raf = 0
@@ -93,36 +153,39 @@ export function VoiceDial({ compact }: { compact?: boolean } = {}): ReactNode {
       smoothed += (level - smoothed) * 0.28
       ring.style.transform = `scale(${(1 + smoothed * 0.22).toFixed(3)})`
       ring.style.opacity = (0.35 + smoothed * 0.65).toFixed(3)
+      halo.style.transform = `scale(${(1 + smoothed * 0.3).toFixed(3)})`
+      halo.style.opacity = (0.18 + smoothed * 0.72).toFixed(3)
       raf = requestAnimationFrame(frame)
     }
     raf = requestAnimationFrame(frame)
     return () => cancelAnimationFrame(raf)
-  }, [phase, levelRef])
+  }, [live, levelRef])
 
-  const label = AGENT_LABEL[phase]
-  // Never a silent dead circle: past five seconds it starts counting out loud.
+  const label = AGENT_LABEL[presence]
+  // Never a silent dead orb: past five seconds it starts counting out loud.
   const sub =
-    phase === 'thinking' && thinkingFor >= THINKING_PATIENCE_MS / 1000
+    presence === 'thinking' && thinkingFor >= THINKING_PATIENCE_MS / 1000
       ? `still thinking… ${thinkingFor}s`
-      : phase === 'error' && sttError
+      : presence === 'error' && sttError
         ? sttError
         : label.sub
 
   return (
-    <div className="agentdial" data-phase={phase} data-compact={compact ? 'true' : undefined}>
+    <div className="agentdial" data-presence={presence} data-compact={compact ? 'true' : undefined}>
       <button
         type="button"
         className="agentdial__btn"
-        data-phase={phase}
+        data-presence={presence}
         aria-pressed={armed}
-        aria-label={armed ? 'Stop talking to the agent' : 'Talk to your agent'}
-        title={armed ? 'Agent mode is on — tap or press Esc to stop' : 'Tap to talk to your agent'}
+        aria-label={armed ? 'Stop talking to Jarvis' : 'Talk to Jarvis'}
+        title={armed ? 'Jarvis is on — tap or press Esc to stop' : 'Tap to talk to Jarvis'}
         onClick={toggleAgent}
       >
+        <span className="agentdial__halo" ref={haloRef} aria-hidden="true" />
+        <span className="agentdial__orbit" aria-hidden="true" />
         <span className="agentdial__ring" ref={ringRef} aria-hidden="true" />
-        <span className="agentdial__spin" aria-hidden="true" />
-        <span className="agentdial__core" aria-hidden="true">
-          <Icon name={armed ? 'voice' : 'mic'} size={compact ? 14 : 26} />
+        <span className="agentdial__sphere" aria-hidden="true">
+          <span className="agentdial__iris" />
         </span>
       </button>
       {compact ? null : (
@@ -187,6 +250,47 @@ export function ReplyModeToggle(): ReactNode {
   )
 }
 
+/* ------------------------------------------------------------ brain model */
+
+const CLAUDE_MODELS: Array<{ id: string; label: string; hint: string }> = [
+  { id: 'sonnet', label: 'Sonnet', hint: 'Sonnet — faster' },
+  { id: 'opus', label: 'Opus', hint: 'Opus — smarter; takes effect on your next phrase' }
+]
+
+/**
+ * Which Claude is answering, in the header rather than in Settings.
+ *
+ * It is the same `voiceClaudeModel` the Models page writes, so the two never
+ * disagree — and a model typed in there by hand lights neither segment rather
+ * than pretending to be one of them. Clicking still writes the alias, because
+ * that is what these two buttons mean.
+ *
+ * Only shown for the Claude brain: the others take their model from Settings
+ * and a Sonnet/Opus switch over a Gemini session would be a lie.
+ */
+export function ModelToggle(): ReactNode {
+  const { brainName, brainModel, setBrainModel } = useVoiceAgent()
+  if (brainName !== 'Claude') return null
+  const current = brainModel.trim().toLowerCase()
+  return (
+    <div className="modelpick" role="group" aria-label="Which Claude model answers">
+      {CLAUDE_MODELS.map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          className="modelpick__btn"
+          data-on={m.id === current ? 'true' : undefined}
+          aria-pressed={m.id === current}
+          title={m.hint}
+          onClick={() => setBrainModel(m.id)}
+        >
+          {m.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /* ------------------------------------------------------------- degraded */
 
 /**
@@ -218,7 +322,7 @@ export function DegradedLink(): ReactNode {
 export function LastLine(): ReactNode {
   const { turns } = useVoiceAgent()
   const last = turns[turns.length - 1]
-  let text = 'Nothing yet — tap the circle and talk.'
+  let text = 'Nothing yet — tap the orb and talk.'
   let tone: 'idle' | 'ok' | 'warn' = 'idle'
   if (last?.kind === 'command') {
     text = last.outcomes.map((o) => o.summary).join(' · ') || last.said
@@ -298,7 +402,7 @@ export function VoiceOnlyNote(): ReactNode {
 
 /** `autoFocus` puts the caret in it as the card opens. */
 export function VoiceComposer({ autoFocus }: { autoFocus?: boolean } = {}): ReactNode {
-  const { draftPhrase, setDraftPhrase, submitPhrase } = useVoiceAgent()
+  const { draftPhrase, setDraftPhrase, submitPhrase, dictating, dictationBuffer } = useVoiceAgent()
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
@@ -307,6 +411,12 @@ export function VoiceComposer({ autoFocus }: { autoFocus?: boolean } = {}): Reac
 
   return (
     <div className="voice__composer">
+      {dictating && (
+        <div className="voice__dictating" role="status">
+          <span className="voice__dictating-word">holding</span>
+          <span className="voice__dictating-text">{dictationBuffer || '…'}</span>
+        </div>
+      )}
       <textarea
         ref={composerRef}
         className="voice__input"

@@ -35,6 +35,11 @@ import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './
 import { registerAgentProbeHandlers } from './agent-probe'
 import { disposeOverlay, registerOverlayIpc, setOverlayHost } from './overlay-window'
 import { registerVoiceHandlers } from './voice-bridge'
+import {
+  disposeVoiceAgent,
+  registerVoiceAgentHandlers,
+  setVoiceAgentTarget
+} from './voice-agent/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import { applyMobileSettings, disposeMobile, publishMobileState, registerMobileHandlers } from './mobile-host'
 import { registerSystemHandlers } from './system'
@@ -98,8 +103,36 @@ let boundsDirty = false
  * so it is a feature rather than the one-line arg parse it looks like.
  */
 
-if (!app.requestSingleInstanceLock()) {
-  app.quit()
+/**
+ * `exit(0)` and not `quit()`, and the flag is read again inside whenReady.
+ *
+ * Losing the lock used to call `app.quit()` and fall through. Two things go
+ * wrong with that, and between them they produce a Forge that cannot be opened
+ * again at all:
+ *
+ *  - `quit()` is a *request*. It runs the before-quit disposers, and it can be
+ *    out-raced by `whenReady` resolving. Lose that race the wrong way and the
+ *    losing copy stays alive with no window, no renderer and no error printed —
+ *    while still holding this very lock, so every later launch loses it too and
+ *    hangs the same way. The only way out is Task Manager, which is exactly
+ *    what a "Forge won't open" morning looks like.
+ *  - Win that race the other way and the losing copy runs the whole startup
+ *    below first: binds 8420 (EADDRINUSE), rewrites the bridge config and
+ *    clears the running Forge's presence marker out from under it.
+ *
+ * `exit(0)` is immediate and cannot be blocked or out-raced.
+ *
+ * The lock is per data root (userData was pointed at DATA_ROOT above), so the
+ * packaged Forge and `npm run dev` share one — starting one while the other is
+ * up is the ordinary way to arrive here, and the sentence says so.
+ */
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  console.log(
+    `[main] Another Forge is already using ${DATA_ROOT} — focusing that window instead of starting a second copy.\n` +
+      '[main] If no Forge window appears, an earlier Forge is stuck: end electron.exe / Forge.exe in Task Manager and start again.'
+  )
+  app.exit(0)
 } else {
   app.on('second-instance', () => {
     if (mainWindow) {
@@ -307,6 +340,7 @@ function createWindow(): void {
     setSttModelTarget(null)
     setUpdateTarget(null)
     setStaleTarget(null)
+    setVoiceAgentTarget(null)
     // Takes the overlay down with it. A topmost pill wired to a renderer that
     // no longer exists would be a dead button floating over every other app,
     // and — because it is skipTaskbar — one with no obvious way to close it.
@@ -330,6 +364,7 @@ function createWindow(): void {
   setSttModelTarget(mainWindow)
   setUpdateTarget(mainWindow)
   setStaleTarget(mainWindow)
+  setVoiceAgentTarget(mainWindow)
   // The main window is the overlay's *host*: it holds the one voice agent, so
   // it is the end the relay pushes state from and delivers callbacks to.
   setOverlayHost(mainWindow)
@@ -613,79 +648,125 @@ function registerAppHandlers(): void {
 // A terminal grid is not a place for background throttling or GPU surprises.
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 
-void app.whenReady().then(() => {
-  // No application menu at all: every accelerator belongs to the renderer.
-  Menu.setApplicationMenu(null)
+/**
+ * Startup went wrong somewhere it cannot be recovered from silently.
+ *
+ * The console line is for the dev terminal; the dialog is for the shortcut,
+ * where there is no terminal to read. Without both, a throw anywhere in the
+ * block below leaves a running process with no window and nothing said about
+ * it — indistinguishable, from the outside, from Forge simply not opening.
+ */
+function reportStartupFailure(what: string, err: unknown): void {
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err)
+  console.error(`[main] ${what}:`, detail)
+  try {
+    dialog.showErrorBox('Forge', `${what}.\n\n${detail}`)
+  } catch {
+    /* no dialog before ready, and the console line has already been printed */
+  }
+}
 
-  /*
-   * The microphone, for barge-in.
-   *
-   * Talking over the agent needs `getUserMedia` in the renderer — that is where
-   * the echo cancellation lives, and it is the only reason an open microphone
-   * during a reply does not make Forge answer itself (see src/lib/bargein.ts).
-   *
-   * Electron's default handler would grant this, and a good deal else besides.
-   * An explicit allow-list of one is worth the six lines: Forge renders no
-   * remote content, so nothing should ever be asking for the camera, the
-   * screen, notifications or a location, and the honest answer to all of them
-   * is no rather than whatever the default happens to be this major version.
-   */
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === 'media')
-  })
-  // The synchronous half of the same question — `getUserMedia` consults this
-  // one first, and a handler that only answers the async form leaves the
-  // request denied before it is ever asked.
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media')
-  registerAppHandlers()
-  // Regenerate the cross-agent bridge's MCP config with absolute paths before
-  // any pane can launch, so Claude panes pick it up on the first bootstrap.
-  writeBridgeConfig()
-  // Before the PTY host builds its manager: the marker path goes into every
-  // pane's CLAUDE_CLIENT_PRESENCE_FILE, and init also clears a marker left
-  // behind by a crash (a stale one would mute the phone for good).
-  initPresence(getDataDir())
-  // App-level, so presence follows *any* Forge window rather than only the one
-  // createWindow happens to be holding.
-  app.on('browser-window-focus', syncPresence)
-  app.on('browser-window-blur', syncPresence)
-  registerPtyHandlers()
-  registerShotsHandlers()
-  registerSttHandlers()
-  registerSttModelHandlers()
-  registerAgentProbeHandlers()
-  registerVoiceHandlers()
-  // Off by default: this reads settings, sees `companionEnabled: false`, and
-  // returns without touching the network or a credential.
-  registerCompanionHandlers()
-  // Same posture as the Companion above, and the same one-line reason: this
-  // reads settings, sees `mobileEnabled: false`, and returns without binding a
-  // port or minting a credential. See docs/MOBILE.md.
-  registerMobileHandlers()
-  applyMobileSettings()
-  registerSystemHandlers()
-  registerToolsHandlers()
-  registerCommandsHandlers()
-  registerUpdateHandlers()
-  registerStaleHandlers()
-  // Only the relay is registered here. No overlay window exists until the hub
-  // is actually undocked — see electron/overlay-window.ts.
-  registerOverlayIpc()
-  createWindow()
-  // After the window, so the first status event has somewhere to go — and it
-  // is a no-op in a dev run: initUpdater() returns immediately unless this is
-  // a packaged build or FORGE_FAKE_UPDATE is set. See electron/updater.ts.
-  initUpdater()
-  // The other side of that coin, and a no-op in a packaged build for the exact
-  // opposite reason: there, out/ cannot change under the running process. In a
-  // checkout it takes the mtimes of the bundles we just booted from, which is
-  // why it goes here rather than earlier — after the build that produced them.
-  initStaleWatcher()
+void app
+  .whenReady()
+  .then(() => {
+    // The losing copy of a double-launch gets no further. app.exit(0) above has
+    // already been called; whenReady can still resolve first, and everything
+    // below binds ports, starts sidecars and writes into the shared data root.
+    if (!gotSingleInstanceLock) return
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    // No application menu at all: every accelerator belongs to the renderer.
+    Menu.setApplicationMenu(null)
+
+    /*
+     * The microphone, for barge-in.
+     *
+     * Talking over the agent needs `getUserMedia` in the renderer — that is where
+     * the echo cancellation lives, and it is the only reason an open microphone
+     * during a reply does not make Forge answer itself (see src/lib/bargein.ts).
+     *
+     * Electron's default handler would grant this, and a good deal else besides.
+     * An explicit allow-list of one is worth the six lines: Forge renders no
+     * remote content, so nothing should ever be asking for the camera, the
+     * screen, notifications or a location, and the honest answer to all of them
+     * is no rather than whatever the default happens to be this major version.
+     */
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+      callback(permission === 'media')
+    })
+    // The synchronous half of the same question — `getUserMedia` consults this
+    // one first, and a handler that only answers the async form leaves the
+    // request denied before it is ever asked.
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media')
+
+    /*
+     * Every subsystem, and then the window — but the window happens either way.
+     *
+     * All of this used to run bare. One throw anywhere in it (a port, a bad
+     * settings file, a sidecar that will not start) skipped createWindow(), and
+     * because the whole chain was `void`ed the rejection was swallowed too: a
+     * live process, no window, not one line of output. A visibly broken Forge
+     * with a dialog naming the failure is worth far more than an invisible one,
+     * so the failure is reported and the window is opened regardless.
+     */
+    try {
+      registerAppHandlers()
+      // Regenerate the cross-agent bridge's MCP config with absolute paths before
+      // any pane can launch, so Claude panes pick it up on the first bootstrap.
+      writeBridgeConfig()
+      // Before the PTY host builds its manager: the marker path goes into every
+      // pane's CLAUDE_CLIENT_PRESENCE_FILE, and init also clears a marker left
+      // behind by a crash (a stale one would mute the phone for good).
+      initPresence(getDataDir())
+      // App-level, so presence follows *any* Forge window rather than only the one
+      // createWindow happens to be holding.
+      app.on('browser-window-focus', syncPresence)
+      app.on('browser-window-blur', syncPresence)
+      registerPtyHandlers()
+      registerShotsHandlers()
+      registerSttHandlers()
+      registerSttModelHandlers()
+      registerAgentProbeHandlers()
+      registerVoiceHandlers()
+      // Registers the handlers only. No session, no subprocess and no Claude
+      // login is touched until the renderer actually starts the brain — see
+      // electron/voice-agent/host.ts.
+      registerVoiceAgentHandlers()
+      // Off by default: this reads settings, sees `companionEnabled: false`, and
+      // returns without touching the network or a credential.
+      registerCompanionHandlers()
+      // Same posture as the Companion above, and the same one-line reason: this
+      // reads settings, sees `mobileEnabled: false`, and returns without binding a
+      // port or minting a credential. See docs/MOBILE.md.
+      registerMobileHandlers()
+      applyMobileSettings()
+      registerSystemHandlers()
+      registerToolsHandlers()
+      registerCommandsHandlers()
+      registerUpdateHandlers()
+      registerStaleHandlers()
+      // Only the relay is registered here. No overlay window exists until the hub
+      // is actually undocked — see electron/overlay-window.ts.
+      registerOverlayIpc()
+    } catch (err) {
+      reportStartupFailure('Part of Forge failed to start, so some of it will not work', err)
+    }
+
+    createWindow()
+    // After the window, so the first status event has somewhere to go — and it
+    // is a no-op in a dev run: initUpdater() returns immediately unless this is
+    // a packaged build or FORGE_FAKE_UPDATE is set. See electron/updater.ts.
+    initUpdater()
+    // The other side of that coin, and a no-op in a packaged build for the exact
+    // opposite reason: there, out/ cannot change under the running process. In a
+    // checkout it takes the mtimes of the bundles we just booted from, which is
+    // why it goes here rather than earlier — after the build that produced them.
+    initStaleWatcher()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
   })
-})
+  .catch((err) => reportStartupFailure('Forge could not start', err))
 
 app.on('window-all-closed', () => {
   app.quit()
@@ -697,6 +778,9 @@ app.on('before-quit', () => {
   disposeShotsWatcher()
   disposeSttSidecar()
   disposeSttModel()
+  // Ends the Agent SDK session and its subprocess. A voice brain outliving the
+  // app would hold a `claude` process open with nobody to talk to.
+  disposeVoiceAgent()
   disposeCompanion()
   void disposeMobile()
   disposeUpdater()

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import { terminalHost, type PaneRuntime } from '@/lib/terminals'
 
 /**
@@ -16,6 +16,21 @@ export function usePaneRuntime(paneId: string): PaneRuntime {
   }, [paneId])
 
   return runtime
+}
+
+/**
+ * True while any of these panes is working — sustainedly producing output, as
+ * opposed to merely having said something. See the BUSY_* rules in terminals.ts.
+ *
+ * Subscribes to the host's one global busy signal and re-reads the ids on
+ * render, rather than holding a subscription per pane: the flag only moves on a
+ * 600ms onset and a 1.2s quiet, so the re-render is rare, and the set of panes a
+ * caller cares about changes every time a tab is split or closed.
+ */
+export function useAnyBusy(paneIds: string[]): boolean {
+  const [, bump] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => terminalHost.subscribeBusy(bump), [])
+  return terminalHost.anyBusy(paneIds)
 }
 
 /** True once the shell is gone and the pane is showing a corpse. */

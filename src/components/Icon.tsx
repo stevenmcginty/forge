@@ -13,6 +13,7 @@ export type IconName =
   | 'splitRight'
   | 'splitDown'
   | 'folder'
+  | 'folderPlus'
   | 'gear'
   | 'dots'
   | 'restart'
@@ -64,6 +65,13 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   folder: <path d="M2.2 4.6h3.6l1.2 1.4h6.8v5.6a.8.8 0 0 1-.8.8H3a.8.8 0 0 1-.8-.8z" />,
+  // A folder with a plus on the flap: make a brand-new project folder.
+  folderPlus: (
+    <>
+      <path d="M2.2 4.6h3.6l1.2 1.4h6.8v5.6a.8.8 0 0 1-.8.8H3a.8.8 0 0 1-.8-.8z" />
+      <path d="M8 7.3v3.4M6.3 9h3.4" />
+    </>
+  ),
   gear: (
     <>
       <circle cx="8" cy="8" r="2.1" />

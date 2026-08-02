@@ -15,6 +15,18 @@
   color: var(--text-muted);
 }
 
+/*
+ * Not a warning and not a block: the row still opens a pane. It is the one
+ * thing you would otherwise learn from a shell error three seconds later, said
+ * before you click instead of after.
+ */
+.agent-chooser__missing {
+  flex: none;
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.02em;
+  color: var(--warn);
+}
+
 /* ------------------------------------------------------- permission modes
  *
  * A Claude row carries a second affordance: open it *now* in a mode other than

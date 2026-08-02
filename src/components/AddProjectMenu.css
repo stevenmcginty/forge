@@ -1,0 +1,18 @@
+.apm__error {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin: 0 var(--s-4) var(--s-3);
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-sm);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+}
+
+.apm__error-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--danger);
+  font-size: var(--t-sm);
+  line-height: 1.4;
+}

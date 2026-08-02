@@ -427,6 +427,37 @@
   user-select: none;
 }
 
+/*
+ * A tile being typed into flips that: the terminal is live, takes its own
+ * clicks, and the accent ring says "this one is listening" the way the blinking
+ * cursor inside does. The rules sit after the scenery rule above so the equal-
+ * specificity overrides win.
+ */
+.mtile[data-interactive='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-softer);
+}
+
+.mtile[data-interactive='true'] .mtile__head {
+  background: var(--bg-header-live);
+  border-bottom-color: var(--line-hairline);
+}
+
+.mtile[data-interactive='true'] .mtile__natural {
+  pointer-events: auto;
+  user-select: text;
+}
+
+/* The exit button has to stay reachable while you are typing. */
+.mtile[data-interactive='true'] .mtile__actions {
+  opacity: 1;
+}
+
+.mtile__action[data-open='true'] {
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
 /* ------------------------------------------------------------------ hit sheet */
 
 .mtile__hit {

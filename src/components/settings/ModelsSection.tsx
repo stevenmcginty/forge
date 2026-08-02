@@ -47,12 +47,22 @@ const GROQ_MODELS = [
   { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B — cheapest, but only 6k tokens/min free' }
 ]
 
+/**
+ * The Claude voice brain's model choices. Aliases, not pinned ids — see the
+ * note on `voiceClaudeModel` in shared/types.ts.
+ */
+const CLAUDE_MODELS = [
+  { id: 'sonnet', label: 'Sonnet — fastest, the default' },
+  { id: 'opus', label: 'Opus — smartest, heavier on usage' },
+  { id: 'haiku', label: 'Haiku — lightest' }
+]
+
 const BRAINS: Array<{ id: VoiceBrainId; name: string; note: string; ready: boolean }> = [
   { id: 'gemini', name: 'Gemini', note: 'live — needs a key', ready: true },
   { id: 'groq', name: 'Groq', note: 'live — free tier, no card', ready: true },
   { id: 'openrouter', name: 'OpenRouter', note: 'live — any model', ready: true },
   { id: 'stub', name: 'Stub', note: 'offline, echoes you', ready: true },
-  { id: 'claude', name: 'Claude', note: 'coming soon', ready: false },
+  { id: 'claude', name: 'Claude', note: 'live — no key needed', ready: true },
   { id: 'openai', name: 'OpenAI', note: 'coming soon', ready: false }
 ]
 
@@ -232,14 +242,27 @@ export function ModelsSection(): ReactNode {
         ) : null}
       </Card>
 
-      <Card title="Anthropic" tone="quiet">
-        <KeyField
-          label="API key"
-          value={s.anthropicKey}
-          onCommit={actions.setAnthropicKey}
-          placeholder="sk-ant-…"
-          note="Stored and used nowhere. No code in Forge sends this anywhere — it is here for the Claude brain that has not been built."
-        />
+      <Card
+        title="Claude"
+        hint="No key to enter here — it signs in with the `claude` login already on this machine, the same subscription every Forge pane uses."
+      >
+        <Row
+          label="Model"
+          hint="An alias, not a pinned model — the CLI resolves it to whatever is current. Sonnet is the one to pick for a conversation; Opus costs more of your usage for the times it is worth it."
+        >
+          <select
+            className="select"
+            value={s.voiceClaudeModel}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={(e) => actions.patchSettings({ voiceClaudeModel: e.target.value })}
+          >
+            {CLAUDE_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </Row>
       </Card>
 
       <Card title="OpenRouter">

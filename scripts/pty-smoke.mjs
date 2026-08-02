@@ -107,6 +107,37 @@ async function main() {
   await waitFor(() => (output.get('smoke-2') ?? '').includes(marker), 15000, 'bootstrap output')
   log(true, 'bootstrap command typed itself and produced output')
 
+  /* ------------------------------- 2a. the agent that is not installed */
+
+  // What a pane does when the CLI its profile launches is not on the machine
+  // (electron/pty-host.ts decides that; this is the half that carries it out).
+  // The notice must be *painted* and the command must never be typed — typing
+  // it is what produced the red "not recognized" splat that made a missing
+  // Codex look like a broken Forge.
+  const noticeText = '\r\n  codex is not installed on this machine.\r\n'
+  const quiet = manager.create({
+    id: 'smoke-notice',
+    cwd: ROOT,
+    cols: 100,
+    rows: 30,
+    bootstrapCommand: `echo forge-should-never-run`,
+    bootstrapNotice: noticeText
+  })
+  log(quiet.ok === true, 'spawned a session with a notice instead of a command')
+  await waitFor(() => (output.get('smoke-notice') ?? '').includes('not installed'), 15000, 'the notice')
+  log(true, 'the notice reached the pane')
+  // The empty line the notice sends brings a prompt back, so give the shell a
+  // moment to prove it typed nothing of its own.
+  await new Promise((r) => setTimeout(r, 600))
+  log(
+    !(output.get('smoke-notice') ?? '').includes('forge-should-never-run'),
+    'the bootstrap command was never typed into the shell'
+  )
+  manager.write('smoke-notice', 'echo still-alive\r')
+  await waitFor(() => (output.get('smoke-notice') ?? '').includes('still-alive'), 15000, 'shell still usable')
+  log(true, 'the shell underneath is live and usable')
+  manager.kill('smoke-notice')
+
   /* --------------------------------------- 2b. inherited Claude markers */
 
   // A pane is a new top-level shell, not a continuation of whatever launched

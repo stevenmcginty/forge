@@ -55,3 +55,4 @@ mobile/android/app/src/main/assets/capacitor.plugins.json
 *.jks
 *.keystore
 keystore.properties
+__pycache__/

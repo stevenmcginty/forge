@@ -25,6 +25,7 @@ import {
   BrainChip,
   DegradedLink,
   LastLine,
+  ModelToggle,
   ReplyModeToggle,
   VoiceComposer,
   VoiceDial,
@@ -359,10 +360,10 @@ export function VoiceHub(): ReactNode {
           }}
         >
           <DictationGlyph listening={listening} level={status.level} />
-          <span className="vhub__word">{listening ? 'listening' : armed ? 'agent' : 'dictate'}</span>
+          <span className="vhub__word">{listening ? 'listening' : armed ? 'jarvis' : 'dictate'}</span>
         </button>
 
-        {/* The agent's own circle — the same one the panel shows, at 34px. */}
+        {/* Jarvis himself — the same orb the card shows, at 36px. */}
         <VoiceDial compact />
 
         <button
@@ -404,13 +405,13 @@ export function VoiceHub(): ReactNode {
         }}
         onDoubleClick={() => setMode('minimise')}
       >
-        <span className="vhub__mark" aria-hidden="true">
-          <Icon name="mic" size={13} />
-        </span>
-        <h2 className="vhub__title">Voice Hub</h2>
+        {/* A 10px still of the orb — the wordmark's full stop, not a control. */}
+        <span className="vhub__mark" aria-hidden="true" />
+        <h2 className="vhub__title">Jarvis</h2>
         <BrainChip />
         <span className="vhub__spacer" />
         <ReplyModeToggle />
+        <ModelToggle />
         <button
           type="button"
           className="ghost-btn vhub__icon-btn"

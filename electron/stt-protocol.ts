@@ -1,4 +1,4 @@
-import type { SttError, SttErrorKind, SttStatus } from '@shared/types'
+import type { SttError, SttErrorKind, SttMode, SttStatus } from '@shared/types'
 
 /**
  * The decision-making half of the dictation host, kept free of Electron and of
@@ -14,7 +14,15 @@ import type { SttError, SttErrorKind, SttStatus } from '@shared/types'
 export const RAPID_WINDOW_MS = 60_000
 export const MAX_RAPID_RESTARTS = 3
 
-export const OFF_STATUS: SttStatus = { phase: 'off', level: 0, error: null, ready: false }
+export const OFF_STATUS: SttStatus = {
+  phase: 'off',
+  level: 0,
+  error: null,
+  ready: false,
+  mode: 'phrase',
+  wakeCount: 0,
+  capturing: false
+}
 
 /**
  * Errors worth another go on the next keypress, as opposed to ones the user has
@@ -30,6 +38,9 @@ export function sttStatusEqual(a: SttStatus, b: SttStatus): boolean {
     a.phase === b.phase &&
     a.level === b.level &&
     a.ready === b.ready &&
+    a.mode === b.mode &&
+    a.wakeCount === b.wakeCount &&
+    a.capturing === b.capturing &&
     a.error?.kind === b.error?.kind &&
     a.error?.msg === b.error?.msg
   )
@@ -106,14 +117,27 @@ export function reduceSttEvent(status: SttStatus, msg: Record<string, unknown>):
     case 'state': {
       const v = String(msg['v'] ?? '')
       if (v !== 'idle' && v !== 'listening' && v !== 'finishing') return { status }
+      // A sidecar that predates wake mode says neither of these, and everything
+      // it does say is a phrase-mode capture.
+      const mode: SttMode = msg['mode'] === 'wake' ? 'wake' : 'phrase'
+      const capturing =
+        v === 'listening' && (mode === 'phrase' || msg['capturing'] === true)
       // The sidecar greets a new connection with its state, and that state is
       // "idle" for the several seconds it spends loading the model. Taking it at
       // face value would have the pill claim it was ready to listen before it
       // was — so until `ready` lands, idle still means starting.
       if (v === 'idle' && !status.ready) {
-        return { status: { ...status, phase: 'starting', level: 0 } }
+        return { status: { ...status, phase: 'starting', level: 0, mode, capturing } }
       }
-      return { status: { ...status, phase: v, level: v === 'listening' ? status.level : 0 } }
+      return {
+        status: {
+          ...status,
+          phase: v,
+          level: v === 'listening' ? status.level : 0,
+          mode,
+          capturing
+        }
+      }
     }
 
     case 'level': {
@@ -127,9 +151,18 @@ export function reduceSttEvent(status: SttStatus, msg: Record<string, unknown>):
       return text ? { status, phrase: text } : { status }
     }
 
+    // Instantaneous by nature: there is no "un-wake" event to pair it with, so
+    // it is counted rather than flagged and listeners watch for the change.
+    case 'wake':
+      return { status: { ...status, wakeCount: (status.wakeCount ?? 0) + 1 } }
+
     case 'error': {
       const kind = String(msg['kind'] ?? 'internal') as SttErrorKind
       const error: SttError = { kind, msg: String(msg['msg'] ?? 'Dictation failed') }
+      // Losing the wake word is not losing dictation: the sidecar downgrades the
+      // session to plain phrase capture and keeps going, so the phase must
+      // survive it. The state event that follows says what it downgraded to.
+      if (kind === 'wake-unavailable') return { status: { ...status, error } }
       const transient = isTransientSttError(kind)
       return {
         status: {

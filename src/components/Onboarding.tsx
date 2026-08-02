@@ -179,16 +179,17 @@ export function Onboarding(): ReactNode {
           {/* ---------------------------------------------------- 3. voice */}
           <Step n={3} title="Voice — optional" state={voiceStep}>
             <p className="onboard__body">
-              Dictation runs on this machine; the voice agent asks Gemini. Both are off until you set them up, and
-              neither is needed to use Forge.
+              Dictation runs on this machine. The voice agent — say “hey Jarvis” — thinks with the same Claude
+              login your terminals use and speaks with a free neural voice, so neither needs a key. Both are off
+              until you turn them on, and neither is needed to use Forge.
             </p>
 
             <div className="onboard__field">
-              <span className="onboard__label">Gemini API key</span>
+              <span className="onboard__label">Gemini API key — optional</span>
               <p className="onboard__note">
                 {hasKey
-                  ? 'A key is already stored — the voice agent has a brain.'
-                  : 'Without one the voice agent still obeys spoken commands, but cannot hold a conversation.'}
+                  ? 'A key is already stored — image and video generation are live.'
+                  : 'Only image and video generation need one; talking, acting and answering do not.'}
               </p>
               <button type="button" className="ghost-btn onboard__ghost" onClick={() => handOver('models')}>
                 {hasKey ? 'Change it in Settings' : 'Add a key in Settings'} &rarr;

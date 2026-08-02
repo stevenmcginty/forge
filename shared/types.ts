@@ -18,13 +18,19 @@
 export type ProfileKind = 'shell' | 'agent'
 
 /**
- * How much Claude Code is allowed to do without asking, chosen per profile and
+ * How much an agent is allowed to do without asking, chosen per profile and
  * overridable per pane.
  *
- *   default      Claude's own prompting — no flag
- *   acceptEdits  --permission-mode acceptEdits
- *   plan         --permission-mode plan
- *   bypass       --dangerously-skip-permissions
+ * The four names are Claude Code's, because it got here first — but they are
+ * rungs on a ladder, not Claude's flags, and every agent that has a comparable
+ * ladder is mapped onto them. `shared/agents.ts` owns that mapping (see
+ * PERMISSION_FAMILIES); today Claude Code and Codex both have one:
+ *
+ *                Claude Code                        Codex
+ *   default      (no flag)                          (no flag)
+ *   acceptEdits  --permission-mode acceptEdits      --full-auto
+ *   plan         --permission-mode plan             --sandbox read-only
+ *   bypass       --dangerously-skip-permissions     --dangerously-bypass-…
  *
  * `bypass` is exactly as advertised: the agent stops asking. Panes launched
  * with it are badged BYPASS in the header, because the one thing worse than a
@@ -60,7 +66,7 @@ export interface AgentProfile {
    * it in from the command (empty command = shell).
    */
   kind?: ProfileKind
-  /** Default permission mode for claude-shaped commands. */
+  /** Default permission mode, for commands that have one (see permissionFamily). */
   permissionMode?: ClaudePermissionMode
   /**
    * Launch this agent with Claude Code's Remote Control, so the session can be
@@ -98,8 +104,8 @@ export interface PaneLeaf {
   /** User-editable title. Empty = derive from the profile name. */
   title: string
   /**
-   * Per-open override of the profile's Claude permission mode, chosen in the
-   * chooser. Absent = whatever the profile says.
+   * Per-open override of the profile's permission mode, chosen in the chooser.
+   * Absent = whatever the profile says.
    */
   permissionMode?: ClaudePermissionMode
   /**
@@ -593,22 +599,37 @@ export type MediaCallResult =
 /**
  * Which engine says the agent's replies out loud.
  *
- *   gemini  Google's TTS models — a real voice, needs a key and the network
+ *   edge    Microsoft's neural voices, over the same endpoint Edge's own Read
+ *           Aloud uses — a real voice, no key, and no meaningful quota. The
+ *           default, because it is the only neural engine that cannot run out
+ *           mid-conversation.
+ *   gemini  Google's TTS models — a real voice, needs a key and the network,
+ *           and a free key runs out after ~6 sentences a minute. Kept for the
+ *           thirty prebuilt voices.
  *   local   Chromium's `speechSynthesis`, i.e. Windows SAPI — no key, no
  *           network, and the thing Steve called robotic
  *
- * `gemini` is the default whenever a key exists, and `local` is not merely the
- * other choice: it is what speaks when the key is missing, the network is down
- * or the quota has run out. Falling back is automatic and announced once —
- * dead air would be worse than a robot.
+ * `local` is not merely a choice: it is what speaks when every neural engine is
+ * missing, refused or unreachable. Falling back is automatic and announced
+ * once — dead air would be worse than a robot. What the fallback chain must
+ * never do is swap voices casually: the quota-driven Gemini→SAPI swap mid-reply
+ * is the exact bug that made the edge engine the default.
  */
-export type VoiceEngine = 'gemini' | 'local'
+export type VoiceEngine = 'edge' | 'gemini' | 'local'
 
 export interface VoiceSpeakRequest {
   text: string
-  /** A prebuilt Gemini voice name, e.g. `Sulafat`. Empty means the default. */
+  /**
+   * Which neural engine to ask. Empty means Gemini, because every caller
+   * predates the edge engine and that is what they meant.
+   */
+  engine?: 'edge' | 'gemini'
+  /**
+   * A voice name the chosen engine knows — `Sulafat` for Gemini,
+   * `en-GB-SoniaNeural` for edge. Empty means that engine's default.
+   */
   voice?: string
-  /** Empty means the model in settings, which itself defaults to 3.1 flash. */
+  /** Gemini only. Empty means the model in settings, which defaults to 3.1 flash. */
   model?: string
   /**
    * Barge-in handle. Pass the same id to `voice:speak-cancel` to abort this
@@ -621,13 +642,21 @@ export type VoiceSpeakResult =
   | {
       ok: true
       /**
-       * Base64 raw PCM — signed 16-bit little-endian, `channels` interleaved,
-       * with no WAV header. Base64 rather than a typed array because it is what
+       * Base64 audio. For `format: 'pcm16'` it is raw PCM — signed 16-bit
+       * little-endian, `channels` interleaved, no WAV header. For
+       * `format: 'mp3'` it is an MP3 file the renderer decodes with
+       * `decodeAudioData`. Base64 rather than a typed array because it is what
        * the API already returned and what survives contextBridge unambiguously.
        */
       audio: string
-      /** The mime Google sent, verbatim. Spellings differ between models. */
+      /**
+       * How `audio` is encoded. Absent means `pcm16` — the only format that
+       * existed before the edge engine.
+       */
+      format?: 'pcm16' | 'mp3'
+      /** The mime the provider sent, verbatim. Spellings differ between models. */
       mime: string
+      /** For pcm16. An mp3 carries its own rate; the decoder finds it. */
       sampleRate: number
       channels: number
       /** The model that actually spoke, which is not always the one asked for. */
@@ -638,6 +667,88 @@ export type VoiceSpeakResult =
       note?: string
     }
   | { ok: false; error: string; kind: string }
+
+/* ------------------------------------------------- the Claude voice brain */
+
+/**
+ * The persistent Claude Agent SDK session that lives in the main process.
+ *
+ * Everything below is the wire between it and the renderer. Two things about
+ * the shape are deliberate:
+ *
+ *  - **Events go one way, tools go the other.** The brain streams its reply out
+ *    on `voice-agent:event`; when it wants to *know* something about Forge it
+ *    asks, on `voice-agent:tool-request`, and the renderer answers. Only the
+ *    renderer knows what is on screen, so the main process never guesses.
+ *
+ *  - **No manifest.** The old brains posted ~3,000 tokens of app state as the
+ *    system prompt on every turn. This one has a static persona and a
+ *    `get_app_state` tool, which is why the prompt caches and why the session
+ *    can stay open across turns for free.
+ */
+
+/**
+ * One thing the brain has to say, in the order it happened.
+ *
+ * `delta` arrives many times a second while the model writes; the renderer
+ * chunks it into sentences for speech. Everything else is once-per-event.
+ */
+export type VoiceAgentEvent =
+  /** A fragment of the reply as it is generated. Order is guaranteed. */
+  | { type: 'delta'; text: string }
+  /** A whole assistant turn has landed. The authoritative text. */
+  | { type: 'assistant'; text: string }
+  /** A tool call started or finished — for the "thinking" affordance. */
+  | { type: 'tool'; name: string; phase: 'start' | 'end' }
+  /** The turn is over. `text` is the SDK's own summary of the result. */
+  | {
+      type: 'result'
+      ok: boolean
+      text: string
+      turns: number
+      costUsd: number
+      durationMs: number
+    }
+  /** Something went wrong. The session survives; the turn did not. */
+  | { type: 'error'; message: string }
+
+/** Starting the session. Everything here is optional. */
+export interface VoiceAgentStartRequest {
+  /**
+   * The active project's folder, so `Read` and the bridge's tools resolve
+   * relative paths where Steve is actually working. Falls back to home.
+   */
+  cwd?: string
+}
+
+/** What `voice-agent:start` / `stop` answer with. */
+export interface VoiceAgentStatus {
+  running: boolean
+  /** The model the live session was started with — not the current setting. */
+  model: string
+  /** Set when the session gave up (crash loop, spawn failure, no login). */
+  error: string | null
+}
+
+/**
+ * The brain asking the renderer a question, on `voice-agent:tool-request`.
+ * `id` is answered exactly once, with a `VoiceAgentToolResult`.
+ */
+export interface VoiceAgentToolRequest {
+  id: string
+  /** Bare tool name — `get_app_state`, not `mcp__forge__get_app_state`. */
+  name: string
+  args: unknown
+}
+
+/** The renderer's answer. An error is a *result*, never a rejection. */
+export interface VoiceAgentToolResult {
+  id: string
+  ok: boolean
+  /** Text the model sees. Stringified by the host if it is not already text. */
+  result?: unknown
+  error?: string
+}
 
 /* --------------------------------------------------------- agent memory */
 
@@ -671,6 +782,12 @@ export interface Settings {
    * and gets it back the moment this goes on again.
    */
   tabTextColours: boolean
+  /**
+   * Ring the project's dot in the rail while any of its panes is working, so
+   * "is the agent still going?" is answerable from a project you are not
+   * looking at. Off leaves the rail perfectly still.
+   */
+  railBusyRing: boolean
   /** Shell executable. Defaults to pwsh.exe (PowerShell 7). */
   shell: string
   /** Watch the clipboard for screenshots and copied images. */
@@ -743,6 +860,29 @@ export interface Settings {
    */
   anthropicKey: string
   /**
+   * Which model the Claude voice brain runs.
+   *
+   * Note what this is *not*: an API-key setting. The brain is a Claude Agent
+   * SDK session, and it authenticates with the `claude` login already on this
+   * machine — the same subscription every Forge pane uses. `anthropicKey`
+   * above is untouched by it.
+   *
+   * An alias (`sonnet`, `opus`, `haiku`) rather than a pinned id, because the
+   * CLI resolves aliases to whatever is current and a pinned id here would
+   * quietly go stale. Changing it restarts the session on the next turn.
+   */
+  voiceClaudeModel: string
+  /**
+   * Keep the mic open at ~1% CPU and wake the agent on "hey Jarvis", instead of
+   * only ever starting from the dictation hotkey.
+   *
+   * Off by default — opt-in until the wake-word model has proven itself the
+   * way barge-in and earcons already have. Dictation and its hotkey are
+   * unaffected either way; this only adds a second way in. See the STT
+   * sidecar's openwakeword integration for the listener itself.
+   */
+  voiceWakeWord: boolean
+  /**
    * Google AI Studio key for GeminiBrain — the one brain that really talks to a
    * model. Sent only to generativelanguage.googleapis.com, only when Gemini is
    * the selected brain.
@@ -799,10 +939,17 @@ export interface Settings {
    */
   voiceReplyVoice: string
   /**
-   * Which engine says it. `gemini` out of the box — with no key it degrades to
-   * `local` by itself, so this can safely default to the good one.
+   * Which engine says it. `edge` out of the box: it needs no key, and it is the
+   * only neural engine with no per-minute quota — which is what stops the voice
+   * swapping to SAPI mid-reply. If the network is down it degrades to `local`
+   * by itself, so this can safely default to the good one.
    */
   voiceEngine: VoiceEngine
+  /**
+   * An Edge neural voice name. Empty means `DEFAULT_EDGE_VOICE` in
+   * shared/tts.ts — en-GB-SoniaNeural, a warm British female voice.
+   */
+  voiceEdgeVoice: string
   /**
    * A prebuilt Gemini voice name. Empty means `DEFAULT_TTS_VOICE` in
    * electron/gemini-tts.ts — Sulafat, the one Google documents as "Warm".
@@ -823,6 +970,13 @@ export interface Settings {
    * thing and never says it twice the same way you can get sick of.
    */
   voiceEarcons: boolean
+  /**
+   * A two-note blip when a terminal's process finishes — the same pair rising
+   * for a clean exit (code 0), falling for anything else. Played only while
+   * Forge is not the focused window, because a chime is only useful when you
+   * were not going to see it anyway.
+   */
+  terminalExitChime: boolean
   /**
    * Where `create_project` puts a new folder when he does not say. Empty means
    * the Desktop. Only this, the Desktop and Documents are ever writable from a
@@ -1310,6 +1464,12 @@ export type SttErrorKind =
   | 'audio'
   /** Asked to listen while the model was still loading. */
   | 'not-ready'
+  /**
+   * The wake word cannot be heard — openWakeWord is not installed, or its
+   * models could not be fetched. Dictation itself is unaffected: the sidecar
+   * downgrades the session to ordinary phrase capture and carries on.
+   */
+  | 'wake-unavailable'
   /** Restarted too many times too quickly — we stopped trying. */
   | 'crash-loop'
   | 'internal'
@@ -1319,6 +1479,32 @@ export interface SttError {
   msg: string
 }
 
+/**
+ * What kind of listening session the sidecar is in.
+ *
+ *   phrase   push-to-talk: the mic opens, phrases come back, silence ends it
+ *   wake     always-listening: the mic stays open and only what follows
+ *            "hey Jarvis" (or an explicit capture) is transcribed
+ */
+export type SttMode = 'phrase' | 'wake'
+
+/**
+ * How to open the microphone. Everything here is optional, and an absent (or
+ * empty) request is exactly the push-to-talk start dictation has always made —
+ * that is what keeps the hotkey's behaviour bit-for-bit unchanged.
+ */
+export interface SttStartOptions {
+  /** Defaults to `phrase`. `wake` is the always-listening session. */
+  mode?: SttMode
+  /**
+   * A conversation, not dictation: the sidecar waits out thinking pauses (a
+   * few seconds of silence) before deciding a phrase is over, instead of
+   * cutting at the ~1 s dictation gap that splits a long sentence into
+   * fragments. The agent sets it; the dictation hotkey leaves it absent.
+   */
+  conversation?: boolean
+}
+
 export interface SttStatus {
   phase: SttPhase
   /** Smoothed 0..1 mic level. Only meaningful while listening. */
@@ -1326,6 +1512,24 @@ export interface SttStatus {
   error: SttError | null
   /** True once the model has reported ready in the current sidecar process. */
   ready: boolean
+  /**
+   * The current session's mode. Absent from statuses built before wake mode
+   * existed, where it always meant `phrase`.
+   */
+  mode?: SttMode
+  /**
+   * How many times the wake word has fired in this sidecar process. It only
+   * ever goes up: a wake is detected by noticing that this number *changed*,
+   * never by its value, because the event itself is instantaneous and there is
+   * nothing else to latch onto.
+   */
+  wakeCount?: number
+  /**
+   * True while audio is actually on its way to the speech engine. Always true
+   * in `phrase` mode while listening; in `wake` mode it is the difference
+   * between idle monitoring and taking down what was just said.
+   */
+  capturing?: boolean
 }
 
 export interface SttPhraseEvent {
@@ -1410,6 +1614,32 @@ export interface AgentPresence {
   path?: string
   /** Where to go and get it. */
   installUrl: string
+}
+
+/**
+ * What Forge can say about *any* command line without becoming a shell.
+ *
+ * `AgentPresence` answers for the built-ins the welcome card lists. This answers
+ * for whatever a profile actually launches, including one typed in by hand, and
+ * is what lets the chooser and the Agents settings say "not installed" on the
+ * row you are about to click rather than in a pane three seconds later.
+ *
+ * `unknown` is the honest third state and matters more than it looks. A command
+ * like `conda activate x; claude` or `& "C:\tools\my agent.exe"` cannot be
+ * resolved by looking at PATH — answering "not installed" for it would be a
+ * confident lie about a profile that works perfectly.
+ */
+export interface CommandPresence {
+  /** The command line exactly as it was asked about. */
+  command: string
+  /** The program it launches — empty when the line is not a plain command. */
+  exe: string
+  /** True only when we looked and found it. */
+  found: boolean
+  /** True when nothing was looked up, because the line is not resolvable. */
+  unknown: boolean
+  /** Absolute path of what we found. */
+  path?: string
 }
 
 /**

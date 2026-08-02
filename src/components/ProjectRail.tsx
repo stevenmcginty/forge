@@ -1,9 +1,11 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import type { Project } from '@shared/types'
+import { useAnyBusy } from '@/hooks/usePaneRuntime'
 import { ACCENT_PALETTE, resolveProfile } from '@/lib/agents'
 import { shortPath } from '@/lib/paths'
-import { countLeaves } from '@/lib/splitTree'
+import { collectLeaves } from '@/lib/splitTree'
 import { useApp } from '@/state/AppState'
+import { AddProjectMenu } from './AddProjectMenu'
 import { AgentBadge } from './AgentBadge'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
@@ -15,17 +17,25 @@ import './ProjectRail.css'
  * terminal workspace, so selecting a project swaps the whole grid while its
  * shells keep running in the background.
  *
- * **One way to add a project, not two.** The + in the header is it. There used
- * to be a dashed "Add project" button pinned to the foot as well, which meant
- * the rail carried the same action twice for anyone with projects already —
- * clutter, and a permanent strip of chrome charged against the list. The empty
- * state still spells it out, because that is the one moment the + needs
- * explaining rather than just being there.
+ * **Two buttons, one job each.** The + opens a folder that already exists; the
+ * folder-plus next to it makes a brand-new one from a name (see
+ * AddProjectMenu). There used to be a dashed "Add project" button pinned to the
+ * foot as well, which meant the rail carried the same action twice for anyone
+ * with projects already — clutter, and a permanent strip of chrome charged
+ * against the list. The empty state spells the two buttons out, because that is
+ * the one moment they need explaining rather than just being there.
  */
 export function ProjectRail(): ReactNode {
   const { state, actions } = useApp()
   const collapsed = state.settings.railCollapsed
   const [dragFrom, setDragFrom] = useState<number | null>(null)
+  const [addMenu, setAddMenu] = useState<{ open: boolean; anchor: HTMLElement | null }>({
+    open: false,
+    anchor: null
+  })
+
+  const openAddMenu = (e: MouseEvent<HTMLElement>): void =>
+    setAddMenu({ open: true, anchor: e.currentTarget })
 
   return (
     <div className="rail" data-collapsed={collapsed}>
@@ -36,14 +46,24 @@ export function ProjectRail(): ReactNode {
             <span className="rail__count mono">{state.projects.length}</span>
           </>
         )}
-        <button
-          type="button"
-          className="ghost-btn rail__head-add"
-          title="Add project folder"
-          onClick={() => void actions.addProject()}
-        >
-          <Icon name="plus" size={14} />
-        </button>
+        <div className="rail__head-actions">
+          <button
+            type="button"
+            className="ghost-btn rail__head-new"
+            title="New project"
+            onClick={openAddMenu}
+          >
+            <Icon name="folderPlus" size={14} />
+          </button>
+          <button
+            type="button"
+            className="ghost-btn rail__head-add"
+            title="Open existing folder"
+            onClick={() => void actions.addProject()}
+          >
+            <Icon name="plus" size={14} />
+          </button>
+        </div>
       </header>
 
       <div className="rail__list">
@@ -53,10 +73,10 @@ export function ProjectRail(): ReactNode {
               icon="folder"
               size="sm"
               title="No projects"
-              body="Point Forge at a folder to get started."
+              body="Create a new project, or open a folder you already have."
               action={
-                <button type="button" className="cta-btn" onClick={() => void actions.addProject()}>
-                  Add project
+                <button type="button" className="cta-btn" onClick={openAddMenu}>
+                  Create project
                 </button>
               }
             />
@@ -75,6 +95,12 @@ export function ProjectRail(): ReactNode {
           ))
         )}
       </div>
+
+      <AddProjectMenu
+        anchor={addMenu.anchor}
+        open={addMenu.open}
+        onClose={() => setAddMenu((m) => ({ ...m, open: false }))}
+      />
     </div>
   )
 }
@@ -102,14 +128,24 @@ function ProjectRow({
   const [menuOpen, setMenuOpen] = useState(false)
 
   const workspace = state.workspaces[project.id]
-  const panes = workspace ? workspace.tabs.reduce((n, t) => n + countLeaves(t.root), 0) : 0
+  const paneIds = workspace ? workspace.tabs.flatMap((t) => collectLeaves(t.root).map((l) => l.id)) : []
+  const panes = paneIds.length
   const profile = resolveProfile(state.settings.agentProfiles, project.defaultProfileId)
+
+  /*
+   * "One or more of this project's terminals is still working." Every pane in
+   * every tab counts, not just the visible one — the whole point is to answer
+   * for a project you are not currently looking at. The hook always runs; the
+   * setting only decides whether the answer is allowed to show.
+   */
+  const working = useAnyBusy(paneIds) && state.settings.railBusyRing
 
   return (
     <div
       ref={rowRef}
       className="prow"
       data-active={active}
+      data-working={working ? 'true' : undefined}
       data-dragover={dragFrom !== null && dragFrom !== index ? 'true' : undefined}
       /*
        * The project's colour, handed to CSS once and spent in several places:
@@ -140,7 +176,9 @@ function ProjectRow({
         e.preventDefault()
         setMenuOpen(true)
       }}
-      title={collapsed ? `${project.name} — ${project.path}` : project.path}
+      title={`${collapsed ? `${project.name} — ${project.path}` : project.path}${
+        working ? ' · working' : ''
+      }`}
     >
       <span className="prow__dot" style={{ background: project.color }} />
 
@@ -155,7 +193,7 @@ function ProjectRow({
 
           <AgentBadge profile={profile} size="sm" />
 
-          {panes > 0 ? <span className="prow__panes mono">{panes}</span> : null}
+          <span className="prow__panes mono">{panes}</span>
 
           <button
             ref={menuRef}

@@ -179,6 +179,8 @@ export function MosaicView({
 
   const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId)
   const [picked, setPicked] = useState<string | null>(null)
+  /** The tile the user is typing into in place — null means the wall is read-only. */
+  const [interactiveId, setInteractiveId] = useState<string | null>(null)
   const selectedId =
     (picked && cells.some((c) => c.leaf.id === picked) ? picked : null) ??
     activeTab?.activePaneId ??
@@ -380,6 +382,11 @@ export function MosaicView({
   const beginDrag = useCallback(
     (paneId: string, e: ReactPointerEvent<HTMLElement>, mode: 'move' | 'resize', edges: MosaicEdges): void => {
       if (e.button !== 0 || dragRef.current) return
+      // Moving or resizing a tile while you are typing in it stops the typing.
+      if (interactiveId) {
+        terminalHost.blur(interactiveId)
+        setInteractiveId(null)
+      }
       const el = (e.currentTarget.closest('.mtile') as HTMLElement | null) ?? null
       if (!el) return
       // Deliberately no preventDefault on the press: it would suppress the
@@ -460,7 +467,7 @@ export function MosaicView({
       window.addEventListener('pointerup', session.onUp)
       window.addEventListener('pointercancel', session.onUp)
     },
-    [actions, currentRects, custom, frame, tiles]
+    [actions, currentRects, custom, frame, interactiveId, tiles]
   )
 
   // A drag must not outlive the view it started in.
@@ -486,11 +493,15 @@ export function MosaicView({
    */
   const toggleFit = useCallback(
     (paneId: string): void => {
+      if (interactiveId) {
+        terminalHost.blur(interactiveId)
+        setInteractiveId(null)
+      }
       const rects = currentRects()
       if (!custom) actions.setMosaicTiles(rects, { custom: true })
       actions.setMosaicFit(paneId, !(tiles[paneId]?.fit ?? lifesize))
     },
-    [actions, currentRects, custom, lifesize, tiles]
+    [actions, currentRects, custom, interactiveId, lifesize, tiles]
   )
 
   /* ------------------------------------------------------ tab → wall drop */
@@ -537,26 +548,56 @@ export function MosaicView({
 
   const zoom = useCallback(
     (paneId: string) => {
+      // Leaving the wall for the zoom or a tab is also leaving whatever tile
+      // was being typed into — hand the caret back so the keyboard follows.
+      if (interactiveId) terminalHost.blur(interactiveId)
+      setInteractiveId(null)
       // Zooming *is* selecting: the pane becomes the app's current pane, so
       // Ctrl+W and friends act on the thing you are looking at.
       actions.revealPane(paneId)
       actions.setMosaicZoom(paneId)
     },
-    [actions]
+    [actions, interactiveId]
   )
 
   const openInTab = useCallback(
     (paneId: string) => {
+      if (interactiveId) terminalHost.blur(interactiveId)
+      setInteractiveId(null)
       actions.revealPane(paneId)
       actions.setViewMode('tabs')
     },
-    [actions]
+    [actions, interactiveId]
+  )
+
+  /**
+   * Enter or leave a tile's in-place interactive mode: its terminal takes the
+   * keyboard right there on the wall, without leaving the mosaic. One tile at a
+   * time — entering a second hands focus over rather than leaving two live.
+   * Like zoom, entering *is* selecting, so the app's current pane tracks the
+   * tile you are talking to.
+   */
+  const toggleInteract = useCallback(
+    (paneId: string) => {
+      if (interactiveId === paneId) {
+        terminalHost.blur(paneId)
+        setInteractiveId(null)
+        return
+      }
+      if (interactiveId) terminalHost.blur(interactiveId)
+      actions.revealPane(paneId)
+      setInteractiveId(paneId)
+    },
+    [actions, interactiveId]
   )
 
   /* ------------------------------------------------------- keyboard: wall */
 
   useEffect(() => {
     if (zoomCell) return
+    // While a tile is being typed into, the keys belong to it — arrows must
+    // reach the shell, not move the selection ring.
+    if (interactiveId) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return
       if (document.activeElement instanceof HTMLInputElement) return
@@ -597,7 +638,30 @@ export function MosaicView({
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cells, columns, custom, selectedId, tiles, zoom, zoomCell])
+  }, [cells, columns, custom, interactiveId, selectedId, tiles, zoom, zoomCell])
+
+  /* ---------------------------------------------------- keyboard: interact */
+
+  useEffect(() => {
+    if (!interactiveId) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.ctrlKey || e.altKey || e.metaKey) return
+      // Same deal as a zoomed tile: a full-screen TUI owns Escape — in vim it
+      // means "leave insert mode" — so it is only stolen when nobody is in one.
+      if (terminalHost.isAltBuffer(interactiveId)) return
+      e.preventDefault()
+      e.stopPropagation()
+      setInteractiveId(null)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [interactiveId])
+
+  // A pane being typed into can vanish (closed from a shortcut, its tab went
+  // away). A stale id must not leave the wall keyboard-suspended.
+  useEffect(() => {
+    if (interactiveId && !cells.some((c) => c.leaf.id === interactiveId)) setInteractiveId(null)
+  }, [cells, interactiveId])
 
   /* ------------------------------------------------------- keyboard: zoom */
 
@@ -651,12 +715,14 @@ export function MosaicView({
           lifesize={lifesize}
           zoomed
           selected={false}
+          interactive={false}
           onZoom={zoom}
           onOpenInTab={openInTab}
           onBack={() => actions.setMosaicZoom(null)}
           onSelect={setPicked}
           onBeginDrag={beginDrag}
           onToggleFit={toggleFit}
+          onToggleInteract={toggleInteract}
         />
       </div>
     )
@@ -694,12 +760,14 @@ export function MosaicView({
               lifesize={lifesize}
               zoomed={false}
               selected={cell.leaf.id === selectedId}
+              interactive={interactiveId === cell.leaf.id}
               {...(custom && tiles[cell.leaf.id] ? { rect: tiles[cell.leaf.id]! } : {})}
               onZoom={zoom}
               onOpenInTab={openInTab}
               onSelect={setPicked}
               onBeginDrag={beginDrag}
               onToggleFit={toggleFit}
+              onToggleInteract={toggleInteract}
             />
           ))}
           <div className="mosaic__ghost" ref={ghostRef} />
@@ -730,13 +798,15 @@ function MosaicTile({
   lifesize,
   zoomed,
   selected,
+  interactive,
   rect,
   onZoom,
   onOpenInTab,
   onBack,
   onSelect,
   onBeginDrag,
-  onToggleFit
+  onToggleFit,
+  onToggleInteract
 }: {
   cell: Cell
   project: Project
@@ -746,6 +816,8 @@ function MosaicTile({
   lifesize: boolean
   zoomed: boolean
   selected: boolean
+  /** This tile is being typed into in place — see toggleInteract. */
+  interactive: boolean
   /** Where this tile sits on a freeform wall. Absent = the auto grid places it. */
   rect?: MosaicTileRect
   onZoom: (paneId: string) => void
@@ -759,6 +831,7 @@ function MosaicTile({
     edges: MosaicEdges
   ) => void
   onToggleFit: (paneId: string) => void
+  onToggleInteract: (paneId: string) => void
 }): ReactNode {
   const { state, actions } = useApp()
   const paneId = cell.leaf.id
@@ -839,6 +912,18 @@ function MosaicTile({
     terminalHost.setWebgl(paneId, false)
     if (zoomed) terminalHost.focus(paneId)
   }, [paneId, zoomed])
+
+  /*
+   * In-place typing: while a tile is interactive the terminal takes the keyboard
+   * right on the wall. Focused on entry, blurred on exit and on unmount — the
+   * blur matters, or the tile would keep swallowing keystrokes that belong to
+   * the wall again.
+   */
+  useEffect(() => {
+    if (!interactive) return
+    terminalHost.focus(paneId)
+    return () => terminalHost.blur(paneId)
+  }, [interactive, paneId])
 
   /*
    * Fit into whatever the tile ended up being.
@@ -944,6 +1029,7 @@ function MosaicTile({
       data-pane-id={paneId}
       data-zoomed={zoomed}
       data-selected={selected}
+      data-interactive={interactive ? 'true' : undefined}
       data-placed={placed ? 'true' : undefined}
       data-refit={refit ? 'true' : undefined}
       data-override={override ? 'true' : undefined}
@@ -1007,6 +1093,21 @@ function MosaicTile({
               <Icon name="restart" size={12} />
             </button>
           ) : null}
+          {zoomed ? null : (
+            <button
+              type="button"
+              className="ghost-btn mtile__action"
+              data-open={interactive ? 'true' : undefined}
+              title={
+                interactive
+                  ? 'Stop typing in this tile (Esc)'
+                  : 'Type in this tile without leaving the mosaic'
+              }
+              onClick={() => onToggleInteract(paneId)}
+            >
+              <Icon name="terminal" size={12} />
+            </button>
+          )}
           <button
             type="button"
             className="ghost-btn mtile__action"
@@ -1025,9 +1126,11 @@ function MosaicTile({
       {/*
         On the wall the terminal is scenery: this sheet sits over it so a click
         zooms in rather than dropping a cursor into somebody's shell. Zoomed, it
-        is gone and the terminal takes its own clicks again.
+        is gone and the terminal takes its own clicks again. Same for a tile
+        being typed into — the whole point of interactive mode is that the
+        terminal takes the clicks.
       */}
-      {zoomed ? null : (
+      {zoomed || interactive ? null : (
         <button
           type="button"
           className="mtile__hit"

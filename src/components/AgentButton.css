@@ -1,8 +1,13 @@
 /*
- * The agent switch. The dictation pill's machined pebble, stretched to hold a
- * word — because the one thing this control has to do at a glance is say which
- * of Forge's two microphones it is. Same height, same rim, same volt accent that
- * only ever means "live".
+ * Jarvis's docked presence. The dictation pill's machined pebble, stretched to
+ * hold his name and a 9px miniature of the orb every other surface draws —
+ * because the one thing this control has to do at a glance is say which of
+ * Forge's two microphones it is, and what state he is in, without a word.
+ *
+ * The presence grammar is the orb's, shrunk: ember breathing while he monitors,
+ * voice-driven bloom while he captures (the scale is written by rAF in the
+ * component), an on-its-own pulse while he thinks, a spoken cadence while he
+ * talks, amber when something failed.
  */
 
 .agentbtn {
@@ -41,24 +46,39 @@
   color: var(--text-secondary);
 }
 
-/* The tell. One dot, which is dark until the agent is actually listening —
-   so "is it on" is answerable from the far side of the room. */
-.agentbtn__dot {
-  width: 5px;
-  height: 5px;
+/* ------------------------------------------------------------ the orb
+ *
+ * Dark glass with a specular catch, exactly like his bigger self. The iris is
+ * the light; the sphere never changes. Scale during capture is rAF-driven, so
+ * `transform` stays free for the component to write.
+ */
+
+.agentbtn__orb {
+  position: relative;
+  width: 9px;
+  height: 9px;
   flex: none;
   border-radius: var(--r-full);
-  background: var(--text-primary);
-  opacity: 0.28;
+  background:
+    radial-gradient(circle at 34% 28%, color-mix(in srgb, var(--text-primary) 22%, transparent), transparent 52%),
+    radial-gradient(circle at 50% 45%, var(--bg-panel-raised), var(--bg-sunken) 85%);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   transform-origin: center;
   will-change: transform;
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    opacity var(--dur-fast) var(--ease-out);
+  transition: box-shadow var(--dur-med) var(--ease-out);
 }
 
-.agentbtn:hover .agentbtn__dot {
-  opacity: 0.5;
+.agentbtn__iris {
+  position: absolute;
+  inset: 2px;
+  border-radius: var(--r-full);
+  background: radial-gradient(circle, var(--accent-bright) 0%, var(--accent) 45%, transparent 78%);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.agentbtn:hover .agentbtn__iris {
+  opacity: 0.25;
 }
 
 /* ----------------------------------------------------------- warming
@@ -68,36 +88,47 @@
  * ready yet", never as "listening".
  */
 
-.agentbtn[data-phase='warming'] .agentbtn__word {
-  color: var(--text-dim);
-}
-
-.agentbtn[data-phase='warming'] .agentbtn__dot {
-  background: var(--accent);
+.agentbtn[data-presence='warming'] .agentbtn__iris {
+  opacity: 0.3;
   animation: agentbtn-warm 1.5s var(--ease-in-out) infinite;
 }
 
 @keyframes agentbtn-warm {
-  0%,
-  100% {
-    opacity: 0.16;
-  }
   50% {
-    opacity: 0.42;
+    opacity: 0.1;
   }
 }
 
-/* ---------------------------------------------------------- listening
+/* --------------------------------------------------------- monitoring
  *
- * The resting state of a conversation, and the loudest thing in the status bar.
- * The dot's scale is driven from the mic level by the rAF loop in the component;
- * everything static lives here.
+ * The all-day state: an ember on the orb's 6.4s period, and the shell stays
+ * quiet — no rim, no glow. Alive in the corner of an eye, invisible to a mind
+ * on something else.
  */
 
-.agentbtn[data-phase='listening'],
-.agentbtn[data-phase='replied'],
-.agentbtn[data-phase='thinking'],
-.agentbtn[data-phase='speaking'] {
+.agentbtn[data-presence='monitoring'] .agentbtn__iris {
+  opacity: 0.5;
+  animation: agentbtn-ember 6.4s var(--ease-in-out) infinite;
+}
+
+@keyframes agentbtn-ember {
+  50% {
+    opacity: 0.22;
+  }
+}
+
+/* ------------------------------------------- listening and everything after
+ *
+ * Armed is loud: the volt rim on the shell says "your words go to Jarvis now"
+ * for as long as that is true, across every live state.
+ */
+
+.agentbtn[data-presence='listening'],
+.agentbtn[data-presence='capturing'],
+.agentbtn[data-presence='dictating'],
+.agentbtn[data-presence='replied'],
+.agentbtn[data-presence='thinking'],
+.agentbtn[data-presence='speaking'] {
   border-color: var(--accent-line);
   background: linear-gradient(180deg, var(--accent-softer), var(--bg-sunken));
   box-shadow:
@@ -106,73 +137,86 @@
     0 0 10px var(--accent-glow);
 }
 
-.agentbtn[data-phase='listening'] .agentbtn__word,
-.agentbtn[data-phase='replied'] .agentbtn__word,
-.agentbtn[data-phase='thinking'] .agentbtn__word,
-.agentbtn[data-phase='speaking'] .agentbtn__word {
+.agentbtn[data-presence='listening'] .agentbtn__word,
+.agentbtn[data-presence='capturing'] .agentbtn__word,
+.agentbtn[data-presence='dictating'] .agentbtn__word,
+.agentbtn[data-presence='replied'] .agentbtn__word,
+.agentbtn[data-presence='thinking'] .agentbtn__word,
+.agentbtn[data-presence='speaking'] .agentbtn__word {
   color: var(--accent);
 }
 
-.agentbtn[data-phase='listening'] .agentbtn__dot,
-.agentbtn[data-phase='replied'] .agentbtn__dot {
-  background: var(--accent);
+.agentbtn[data-presence='listening'] .agentbtn__iris {
+  opacity: 0.75;
+}
+
+/* Capturing: iris full, glow on the orb itself; the swell is rAF's. */
+.agentbtn[data-presence='capturing'] .agentbtn__iris,
+.agentbtn[data-presence='dictating'] .agentbtn__iris,
+.agentbtn[data-presence='replied'] .agentbtn__iris {
   opacity: 1;
 }
 
-/* Thinking: the dot pulses on its own, because nothing is coming in to drive it. */
-.agentbtn[data-phase='thinking'] .agentbtn__dot {
-  background: var(--accent);
+.agentbtn[data-presence='capturing'] .agentbtn__orb,
+.agentbtn[data-presence='dictating'] .agentbtn__orb,
+.agentbtn[data-presence='replied'] .agentbtn__orb {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    0 0 6px var(--accent-glow);
+}
+
+/* Thinking: the iris pulses on its own, because nothing is coming in to drive it. */
+.agentbtn[data-presence='thinking'] .agentbtn__iris {
   opacity: 0.9;
-  animation: agentbtn-think 1.05s var(--ease-in-out) infinite;
+  animation: agentbtn-think 1.15s var(--ease-in-out) infinite;
 }
 
 @keyframes agentbtn-think {
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: scale(0.75);
-  }
-  45% {
-    opacity: 1;
-    transform: scale(1.3);
+  50% {
+    opacity: 0.35;
   }
 }
 
-/* Speaking: steady and full, the one state where the microphone is shut. */
-.agentbtn[data-phase='speaking'] .agentbtn__dot {
-  background: var(--accent);
+/* Speaking: the spoken cadence — same 720ms beat as the orb's voice pulse. */
+.agentbtn[data-presence='speaking'] .agentbtn__iris {
   opacity: 1;
-  animation: agentbtn-talk 0.9s var(--ease-in-out) infinite;
+  animation: agentbtn-talk 720ms var(--ease-in-out) infinite;
+}
+
+.agentbtn[data-presence='speaking'] .agentbtn__orb {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    0 0 6px var(--accent-glow);
 }
 
 @keyframes agentbtn-talk {
-  0%,
-  100% {
-    transform: scale(1);
-  }
   50% {
-    transform: scale(1.35);
+    opacity: 0.55;
   }
 }
 
 /* -------------------------------------------------------------- error */
 
-.agentbtn[data-phase='error'] {
+.agentbtn[data-presence='error'] {
   border-color: var(--warn-line-strong);
   background: linear-gradient(180deg, var(--warn-soft), var(--bg-sunken));
 }
 
-.agentbtn[data-phase='error'] .agentbtn__word {
+.agentbtn[data-presence='error'] .agentbtn__word {
   color: var(--warn);
 }
 
-.agentbtn[data-phase='error'] .agentbtn__dot {
-  background: var(--warn);
+.agentbtn[data-presence='error'] .agentbtn__iris {
   opacity: 0.9;
+  background: radial-gradient(circle, var(--warn) 0%, var(--warn) 45%, transparent 78%);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agentbtn__dot {
+  .agentbtn__iris {
     animation: none !important;
   }
+}
+
+:root[data-reduced-motion='true'] .agentbtn__iris {
+  animation: none !important;
 }

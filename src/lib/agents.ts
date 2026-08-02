@@ -3,16 +3,19 @@ import {
   ACCENT_PALETTE,
   BUILTIN_AGENT_PROFILES,
   DEFAULT_PROFILE_ID,
-  PERMISSION_FLAGS,
-  PERMISSION_MODES,
+  PERMISSION_FAMILIES,
   SHELL_BADGE_COLOR,
   TAB_TEXT_PALETTE,
   commandExe,
   deriveBadge,
+  hasExplicitPermissionFlag,
   inferKind,
   isClaudeCommand,
   isPermissionMode,
-  isShellProfile
+  isShellProfile,
+  permissionFamily,
+  permissionModes,
+  permissionSpec
 } from '@shared/agents'
 import { makeId } from './ids'
 
@@ -20,8 +23,7 @@ export {
   ACCENT_PALETTE,
   BUILTIN_AGENT_PROFILES,
   DEFAULT_PROFILE_ID,
-  PERMISSION_FLAGS,
-  PERMISSION_MODES,
+  PERMISSION_FAMILIES,
   SHELL_BADGE_COLOR,
   TAB_TEXT_PALETTE,
   commandExe,
@@ -29,7 +31,10 @@ export {
   inferKind,
   isClaudeCommand,
   isPermissionMode,
-  isShellProfile
+  isShellProfile,
+  permissionFamily,
+  permissionModes,
+  permissionSpec
 }
 
 /** Never return undefined for a pane: fall back to the plain shell. */
@@ -92,7 +97,12 @@ export function badgeColor(profile: AgentProfile): string {
 
 /** Whether this profile can take permission-mode flags at all. */
 export function supportsPermissionModes(profile: AgentProfile): boolean {
-  return isClaudeCommand(profile.command)
+  return permissionFamily(profile.command) !== null
+}
+
+/** The rungs this profile offers, in chooser order. Empty when it has none. */
+export function profilePermissionModes(profile: AgentProfile): ReturnType<typeof permissionModes> {
+  return permissionModes(profile.command)
 }
 
 /**
@@ -113,21 +123,21 @@ export function effectivePermissionMode(
  * The line typed into the fresh shell.
  *
  * The flag is appended rather than inserted, so a profile whose command already
- * carries arguments (`claude --resume`, `claude -c`) keeps them and simply gains
- * the mode. A profile that is not Claude gets its command back untouched — the
- * flags mean nothing to anything else, and quietly passing
- * `--dangerously-skip-permissions` to a strange binary is not a risk worth
- * taking for a tidier code path.
+ * carries arguments (`claude --resume`, `codex resume --last`) keeps them and
+ * simply gains the mode. A profile whose command Forge has no ladder for gets
+ * it back untouched — the flags mean nothing to anything else, and quietly
+ * passing `--dangerously-skip-permissions` to a strange binary is not a risk
+ * worth taking for a tidier code path.
  */
 export function launchCommand(profile: AgentProfile, override?: ClaudePermissionMode | null): string {
   const command = profile.command.trim()
   if (!command || !supportsPermissionModes(profile)) return command
-  const mode = effectivePermissionMode(profile, override)
-  const flag = PERMISSION_FLAGS[mode]
-  if (!flag) return command
-  // Already spelled out by hand in the command? Leave it alone.
-  if (command.includes('--dangerously-skip-permissions') || command.includes('--permission-mode')) return command
-  return `${command} ${flag}`
+  const spec = permissionSpec(command, effectivePermissionMode(profile, override))
+  if (!spec?.flag) return command
+  // Already spelled out by hand in the command? Leave it alone — a hand-written
+  // `--sandbox workspace-write` beats anything the chooser thinks it wants.
+  if (hasExplicitPermissionFlag(command)) return command
+  return `${command} ${spec.flag}`
 }
 
 /** The pane-header chip, or null when there is nothing worth shouting about. */
@@ -135,10 +145,9 @@ export function permissionChip(
   profile: AgentProfile,
   override?: ClaudePermissionMode | null
 ): { label: string; danger: boolean } | null {
-  const mode = effectivePermissionMode(profile, override)
-  if (mode === 'default') return null
-  if (mode === 'bypass') return { label: 'BYPASS', danger: true }
-  return { label: mode === 'plan' ? 'PLAN' : 'EDITS', danger: false }
+  const spec = permissionSpec(profile.command, effectivePermissionMode(profile, override))
+  if (!spec || !spec.chip) return null
+  return { label: spec.chip, danger: spec.danger === true }
 }
 
 /** The mode a leaf carries, if any — kept here so callers need not import types. */

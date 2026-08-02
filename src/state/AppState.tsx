@@ -54,6 +54,7 @@ import {
   updateLeaf
 } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
+import { setLiveSettings } from '@/lib/livesettings'
 
 /* ------------------------------------------------------------------ state */
 
@@ -61,6 +62,7 @@ import { terminalHost } from '@/lib/terminals'
 export type SettingsSection =
   | 'account'
   | 'agents'
+  | 'terminal'
   | 'models'
   | 'voice'
   | 'appearance'
@@ -133,6 +135,7 @@ const FALLBACK_SETTINGS: Settings = {
   terminalFontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, monospace",
   mosaicText: 'lifesize',
   tabTextColours: true,
+  railBusyRing: true,
   shell: 'pwsh.exe',
   catchShots: true,
   shotsKeep: 12,
@@ -149,6 +152,12 @@ const FALLBACK_SETTINGS: Settings = {
   voiceBargeIn: true,
   voiceBrain: 'gemini',
   anthropicKey: '',
+  // Mirrors electron/store.ts. The Claude voice brain needs no key — it signs
+  // in with the machine's own `claude` login — so this is the only knob it has.
+  voiceClaudeModel: 'sonnet',
+  // Mirrors electron/store.ts — off until the wake-word listener has earned
+  // trust the way barge-in and earcons already have.
+  voiceWakeWord: false,
   geminiKey: '',
   geminiModel: 'gemini-2.5-flash',
   accountName: 'You',
@@ -162,13 +171,16 @@ const FALLBACK_SETTINGS: Settings = {
   voiceRelayGraceMs: 2500,
   voiceReplyMode: 'both',
   voiceReplyVoice: '',
-  // Neural speech is the default, and with no key the engine chain in
-  // src/lib/tts.ts drops to the local voice on its own — so preferring the good
-  // one here cannot leave a keyless install silent.
-  voiceEngine: 'gemini',
+  // Neural speech is the default — the Edge engine, which needs no key and has
+  // no quota, so a keyless install gets the good voice and a keyed one cannot
+  // swap to SAPI mid-reply. The chain in src/lib/tts.ts still drops to the
+  // local voice on its own if the network is gone.
+  voiceEngine: 'edge',
+  voiceEdgeVoice: '',
   voiceTtsVoice: '',
   voiceTtsModel: '',
   voiceEarcons: true,
+  terminalExitChime: true,
   projectsRoot: '',
   geminiImageModel: '',
   openrouterKey: '',
@@ -1083,6 +1095,16 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       clearInterval(timer)
     }
   }, [state.pendingTypes])
+
+  /* ----------------------------------------------------- live settings */
+
+  // The settings, mirrored for renderer modules that live outside the React
+  // tree. The terminal host reads the exit-chime toggle back through this —
+  // panes keep running with no component mounted, so a hook could never reach
+  // them. Runs on every change, hydrate included.
+  useEffect(() => {
+    setLiveSettings(state.settings)
+  }, [state.settings])
 
   /* --------------------------------------------------------- persistence */
 

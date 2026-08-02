@@ -86,6 +86,16 @@ export function AppearanceSection(): ReactNode {
             label="Full-size text in the mosaic"
           />
         </Row>
+        <Row
+          label="Show working projects in the rail"
+          hint="A thin arc sweeps the project’s dot while any of its terminals is still producing output — an agent mid-thought, a build running. It ignores your own typing, and settles about a second after the work stops."
+        >
+          <Toggle
+            checked={s.railBusyRing}
+            onChange={(on) => actions.patchSettings({ railBusyRing: on })}
+            label="Show working projects in the rail"
+          />
+        </Row>
         <Row label="Reduce motion" hint="Windows already asks for this; here it can be forced on">
           <Toggle checked={s.reducedMotion} onChange={actions.setReducedMotion} label="Reduce motion" />
         </Row>

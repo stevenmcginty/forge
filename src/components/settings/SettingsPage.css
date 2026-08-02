@@ -561,6 +561,24 @@
   white-space: nowrap;
 }
 
+.sprof__presence {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  justify-content: flex-end;
+  max-width: 320px;
+}
+
+.sprof__presence-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
 .sprof__warn {
   margin: 0;
   padding: var(--s-4);

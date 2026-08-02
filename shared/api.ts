@@ -2,6 +2,7 @@ import type {
   AgentPresence,
   AppInfo,
   ClaudeCliState,
+  CommandPresence,
   CompanionSignInResult,
   CompanionStatus,
   CompanionUtteranceEvent,
@@ -34,12 +35,18 @@ import type {
   StoreSnapshot,
   SttModelState,
   SttPhraseEvent,
+  SttStartOptions,
   SttStatus,
   ToolId,
   ToolLatest,
   ToolProbe,
   StaleStatus,
   UpdateStatus,
+  VoiceAgentEvent,
+  VoiceAgentStartRequest,
+  VoiceAgentStatus,
+  VoiceAgentToolRequest,
+  VoiceAgentToolResult,
   VoiceSpeakRequest,
   VoiceSpeakResult,
   WindowStateEvent,
@@ -117,8 +124,20 @@ export interface ForgeApi {
    * start() — nobody who never dictates pays for loading a 660 MB model.
    */
   stt: {
-    start(): Promise<SttStatus>
+    /**
+     * Open the microphone. With no options this is the push-to-talk session
+     * dictation has always used; `{ mode: 'wake' }` opens the always-listening
+     * one instead, which loops by itself until stop().
+     */
+    start(options?: SttStartOptions): Promise<SttStatus>
     stop(): Promise<SttStatus>
+    /**
+     * Wake mode only: take down what is said now, without "hey Jarvis" in front
+     * of it — the hands-free follow-up after a reply. A capture that hears
+     * nothing goes back to monitoring on its own, so this is never a loop.
+     * Ignored (with a log line) when the session is not in wake mode.
+     */
+    capture(): Promise<SttStatus>
     /**
      * Drop the running sidecar so freshly saved python/model paths take effect.
      * `force` also starts a new one immediately — that is the setup card's
@@ -191,6 +210,32 @@ export interface ForgeApi {
     speak(req: VoiceSpeakRequest): Promise<VoiceSpeakResult>
     /** Abort an in-flight `speak`. Unknown ids are a no-op, never an error. */
     cancelSpeak(requestId: string): Promise<boolean>
+  }
+
+  /**
+   * The Claude voice brain: one persistent Agent SDK session in the main
+   * process, authenticated by the machine's own `claude` login.
+   *
+   * Unlike `voice` above, this is not a call per turn. `start` opens a session
+   * that lives for as long as Forge does, `utterance` pushes into it, and the
+   * reply streams back on `onEvent` a fragment at a time.
+   *
+   * `onToolRequest` is the half that makes the manifest unnecessary: the brain
+   * asks the renderer for app state, or asks it to run an action, and the
+   * renderer answers with `toolResult`. Exactly one answer per request id — and
+   * an answer that says `ok: false` is still an answer. See src/lib/agenttools.ts.
+   */
+  voiceAgent: {
+    /** Open the session. Safe to call again; also clears a crash-loop stop. */
+    start(req?: VoiceAgentStartRequest): Promise<VoiceAgentStatus>
+    stop(): Promise<VoiceAgentStatus>
+    /** Say something. Opens the session first if it is not already running. */
+    utterance(text: string): Promise<VoiceAgentStatus>
+    /** Barge-in: end the turn. The session survives and resumes on the next. */
+    interrupt(): Promise<boolean>
+    onEvent(cb: (event: VoiceAgentEvent) => void): () => void
+    onToolRequest(cb: (request: VoiceAgentToolRequest) => void): () => void
+    toolResult(result: VoiceAgentToolResult): Promise<boolean>
   }
 
   /**
@@ -400,6 +445,13 @@ export interface ForgeApi {
    * open onto `'claude' is not recognized`.
    */
   probeAgents(): Promise<AgentPresence[]>
+
+  /**
+   * The same question about whatever a profile launches — including a custom
+   * one. One entry per command line asked about, in the order asked. Cheap: it
+   * stats files along PATH and spawns nothing.
+   */
+  probeCommands(commands: string[]): Promise<CommandPresence[]>
 
   pickFolder(): Promise<string | null>
   /** Create a project folder from a spoken name. Fenced hard — see main.ts. */

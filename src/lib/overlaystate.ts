@@ -50,8 +50,18 @@ export interface OverlaySnapshot {
   /* -------------------------------------------------------------- the state */
   brainName: string
   brainStatus: BrainStatus
+  /** `voiceClaudeModel` — the alias the Claude session runs. See VoiceAgentCtx. */
+  brainModel: string
   replyMode: VoiceReplyMode
   canSpeak: boolean
+  /** Monitoring for "hey Jarvis" rather than dictating. See VoiceAgentCtx. */
+  wakeMode: boolean
+  /** Audio is on its way to the speech engine right now. */
+  capturing: boolean
+  /** Buffer mode is on: every word is held until "stop dictation". */
+  dictating: boolean
+  /** Everything held since dictation began, as one live string. */
+  dictationBuffer: string
 
   /**
    * The theme, as the resolved token map `applyTheme` already produces.
@@ -92,6 +102,7 @@ export type OverlayCall =
   | { kind: 'setDraftPhrase'; text: string }
   | { kind: 'submitPhrase' }
   | { kind: 'setReplyMode'; mode: VoiceReplyMode }
+  | { kind: 'setBrainModel'; model: string }
   | { kind: 'editDraft'; turnId: string; draft: string }
   | { kind: 'setMode'; mode: VoiceHubMode }
   | { kind: 'openSettings'; section: string }
@@ -100,8 +111,16 @@ export type OverlayCall =
 
 /* ------------------------------------------------------------------ bounds */
 
-/** The floating pill, in screen pixels. Matches HUB_PILL_SIZE. */
-export const OVERLAY_PILL = { width: 180, height: 56 }
+/**
+ * The floating orb form, in screen pixels.
+ *
+ * Bigger than HUB_PILL_SIZE on purpose: the in-window pill sits over Forge's
+ * own chrome, but this is Jarvis on the desktop — a 64px sphere with a readout
+ * plate beside it, drawn by OverlayApp against a transparent window. The
+ * height is the orb plus its breathing room; the width is two clamped lines of
+ * "what was said".
+ */
+export const OVERLAY_PILL = { width: 300, height: 88 }
 /** The expanded card. Matches HUB_CARD_SIZE. */
 export const OVERLAY_CARD = { width: 420, height: 560 }
 

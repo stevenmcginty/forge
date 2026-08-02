@@ -637,6 +637,35 @@ function parseSwitchProject(text: string): CommandHit | null {
   return { action: { kind: 'switch_project', name }, confidence: explicit ? 'high' : 'medium' }
 }
 
+/* ------------------------------------------------------------- dictation */
+
+/**
+ * Entering and leaving buffer mode, by voice.
+ *
+ * A long dictation is one prompt even when it takes ten pauses to say, so while
+ * the buffer is on every phrase is held verbatim and nothing is acted on — the
+ * agent only speaks again once "stop dictation" lets the whole thing out as a
+ * single prompt (see the 0c branch of `runPhrase` in VoiceAgent.tsx).
+ *
+ * Narrow on purpose, and checked before `parseUtterance`: this is a mode
+ * switch, not an app command, so it must never fall through to the grammar and
+ * open a terminal called "dictation".
+ */
+export type DictationCommand = 'start' | 'stop'
+
+export function parseDictation(transcript: string): DictationCommand | null {
+  const text = transcript
+    .trim()
+    .toLowerCase()
+    // The wake word is consumed by the sidecar and normally never appears in
+    // the transcript — this is the one case where a beat of it can leak in.
+    .replace(/^hey(?:,)?\s*(?:jarvis)?[,\s]+/, '')
+
+  if (/^(?:start|begin|enter|turn on|switch on)\s+dictation\b/.test(text)) return 'start'
+  if (/^(?:stop|end|finish|exit|leave|turn off|switch off)\s+dictation\b/.test(text)) return 'stop'
+  return null
+}
+
 function parseOpen(text: string, tokens: string[], ctx: CommandContext): CommandHit | null {
   const verbIndex = tokens.findIndex((t) => OPEN_WORDS.has(t))
   const nounIndex = tokens.findIndex((t) => PANE_WORDS.has(t) || TAB_WORDS.has(t))

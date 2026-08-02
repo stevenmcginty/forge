@@ -62,7 +62,7 @@ const {
   DEFAULT_GROQ_MODEL
 } = await import('../src/lib/voicebrain.ts')
 const { createPushSource, transcriptBus, typedTranscript } = await import('../src/lib/transcriptSource.ts')
-const { parseCommand, parseUtterance } = await import('../src/lib/voicecommands.ts')
+const { parseCommand, parseUtterance, parseDictation } = await import('../src/lib/voicecommands.ts')
 const { runAppAction, matchProfile, matchProject, resolvePaneTarget, paneLabel } = await import(
   '../src/lib/appactions.ts'
 )
@@ -231,13 +231,29 @@ await test('StubBrain echoes the transcript as the draft prompt', async () => {
   assert.equal(reply.actions, undefined)
 })
 
-await test('scaffolds exist, hold a key, and admit they are not implemented', async () => {
-  assert.equal(new ClaudeBrain('').ready().reason, 'no-key')
+await test('the Claude brain is ready with no key at all', () => {
+  // It is the Claude Agent SDK session, and it logs in the way the CLI does —
+  // see the note on `voiceClaudeModel` in shared/types.ts. A "no API key" chip
+  // over a working brain is the settings page lying to him.
+  const status = new ClaudeBrain().ready()
+  assert.equal(status.ok, true)
+  assert.equal(status.reason, undefined)
+  assert.equal(brainStatusLabel(status), 'claude session')
+})
+
+await test('the Claude brain never answers through interpret()', async () => {
+  // The session streams and runs its own tools, so VoiceAgent routes around
+  // interpret() entirely. Throwing keeps a mis-wired caller visible instead of
+  // letting it get a plausible-looking empty reply.
+  await assert.rejects(() => new ClaudeBrain().interpret('hi', { recentTranscript: [] }), /does not interpret/)
+})
+
+await test('the OpenAI scaffold holds a key and admits it is not implemented', async () => {
   // The key-shaped strings below and in the masking test are invented, and are
   // declared to the packaging gate as such: SECRETS-AUDIT: fixtures
-  assert.equal(new ClaudeBrain('sk-ant-test').ready().reason, 'not-implemented')
+  assert.equal(new OpenAIBrain('').ready().reason, 'no-key')
   assert.equal(new OpenAIBrain('sk-test').ready().reason, 'not-implemented')
-  await assert.rejects(() => new ClaudeBrain('k').interpret('hi', { recentTranscript: [] }), /not implemented/)
+  await assert.rejects(() => new OpenAIBrain('k').interpret('hi', { recentTranscript: [] }), /not implemented/)
 })
 
 await test('getActiveBrain: gemini with a key, stub without', () => {
@@ -627,6 +643,29 @@ await test('two orders in one breath both get obeyed', () => {
   assert.deepEqual(parseUtterance('open three kimi tabs', C).actions, [
     { kind: 'open_tabs', profileId: 'kimi', count: 3 }
   ])
+})
+
+await test('dictation toggles are recognised before the app grammar', () => {
+  assert.equal(parseDictation('start dictation'), 'start')
+  assert.equal(parseDictation('hey jarvis, start dictation'), 'start')
+  assert.equal(parseDictation('hey jarvis begin dictation'), 'start')
+  assert.equal(parseDictation('turn on dictation'), 'start')
+  assert.equal(parseDictation('stop dictation'), 'stop')
+  assert.equal(parseDictation('hey jarvis, stop dictation'), 'stop')
+  assert.equal(parseDictation('end dictation'), 'stop')
+  assert.equal(parseDictation('finish dictation'), 'stop')
+  assert.equal(parseDictation('exit dictation'), 'stop')
+  // Nothing else is a dictation toggle — especially not a command about a
+  // terminal, and not conversation that happens to contain the word.
+  assert.equal(parseDictation('open two kimi tabs'), null)
+  assert.equal(parseDictation(''), null)
+  assert.equal(parseDictation('dictation is useful'), null)
+  assert.equal(parseDictation('start the dictation'), null)
+  // And the mode switch must never be claimed by the app grammar: "start
+  // dictation" is not an order to open a terminal, and must fall through
+  // to the buffer logic in VoiceAgent, not to the executor.
+  assert.equal(parseCommand('start dictation', C), null)
+  assert.equal(parseCommand('stop dictation', C), null)
 })
 
 /* ---------------------------------------------------------- count matrix */
@@ -2888,6 +2927,8 @@ const {
   chooseEngine,
   stripFiller,
   pickVaried,
+  takeSpeechChunks,
+  SPEAK_CHUNK_MAX,
   ttsCacheKey,
   LruCache,
   base64ToPcm,
@@ -3235,7 +3276,7 @@ await test('the speech settings default to the good engine, and survive a hand-e
   // literals that must agree, exactly as geminiModel and openrouterModel do.
   const store = readFileSync(join(ROOT, 'electron', 'store.ts'), 'utf8')
   const state = readFileSync(join(ROOT, 'src', 'state', 'AppState.tsx'), 'utf8')
-  for (const line of ["voiceEngine: 'gemini'", 'voiceEarcons: true', "voiceTtsVoice: ''", "voiceTtsModel: ''"]) {
+  for (const line of ["voiceEngine: 'edge'", 'voiceEarcons: true', 'terminalExitChime: true', "voiceEdgeVoice: ''", "voiceTtsVoice: ''", "voiceTtsModel: ''"]) {
     assert.ok(store.includes(line), `electron/store.ts is missing ${line}`)
     assert.ok(state.includes(line), `AppState.tsx is missing ${line}`)
   }
@@ -3364,6 +3405,143 @@ await test('reset makes it ready for the next reply', () => {
   // the next interruption would go unremarked.
   drive(det, ROOM, 5)
   assert.equal(det.push(SPEECH), 'duck')
+})
+
+/* ------------------------------------------------- the Claude brain (M10) */
+
+/**
+ * The always-listening pipeline, held to the four rules that make it safe.
+ *
+ * These are read off the source rather than driven, and that is a deliberate
+ * trade: the engine is a React provider wired to a sidecar, an Electron
+ * preload and a subprocess, so exercising it here would mean faking all three
+ * and testing the fakes. What can be proved cheaply and exactly is that the
+ * four decisions the design turns on are still written in the file — each one
+ * of them is a thing that, if it were quietly dropped, would leave the app
+ * working well enough that nobody would notice until it was in his ear.
+ *
+ * The sentence chunker underneath them is real code with no environment in it,
+ * so that one is driven properly.
+ */
+
+console.log('\nThe Claude brain and wake mode')
+
+const agentSrc = readFileSync(join(ROOT, 'src', 'state', 'VoiceAgent.tsx'), 'utf8')
+/** Source with the comments taken out — a rule must be in the code, not in a note about it. */
+const agentCode = agentSrc.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(?<!:)\/\/[^\n]*/g, ' ')
+
+await test('the claude path never runs the JSON brains\' did-it-really guard', () => {
+  // `claimsCompletedAction` contradicts a brain that says it opened three tabs
+  // while sending no actions. The Claude session sends no actions *by design* —
+  // it calls the tools itself — so applying it there would contradict every
+  // successful turn it ever has.
+  const claudeBranch = /if \(usingClaudeRef\.current\) \{[\s\S]*?\n      \}/.exec(agentCode)
+  assert.ok(claudeBranch, 'the claude fork in runPhrase must be findable')
+  assert.ok(
+    !claudeBranch[0].includes('claimsCompletedAction'),
+    'claimsCompletedAction must not be applied to the claude path'
+  )
+  // And it is still guarding the fork it was written for.
+  assert.ok(agentCode.includes('claimsCompletedAction(reply.say'), 'the JSON brains keep the guard')
+})
+
+await test('barge-in stops the mouth AND the generation behind it', () => {
+  const handler = /onInterrupt: \(\) => \{[\s\S]*?\n          \}/.exec(agentCode)
+  assert.ok(handler, 'the barge-in interrupt handler must be findable')
+  assert.ok(handler[0].includes('voiceSpeaker.cancel()'), 'it stops the sound')
+  assert.ok(handler[0].includes('interruptAgentBrain('), 'it stops the generation')
+  assert.ok(handler[0].includes('dropSpeech()'), 'and throws away the sentences queued behind it')
+  // The session must survive: interrupting is a conversation move, not a hang-up.
+  assert.ok(!handler[0].includes('stopAgentBrain('), 'it must not end the session')
+})
+
+await test('wake mode is what the agent asks the sidecar for', () => {
+  assert.ok(
+    /stt\.start\(\s*wakeWordRef\.current \? \{ mode: 'wake', conversation: true \} : \{ conversation: true \}/.test(
+      agentCode
+    ),
+    "the agent's start passes mode:'wake' (and conversation) when the setting is on"
+  )
+  // Conversation, not dictation: every agent start — wake word or not — tells
+  // the sidecar to wait out thinking pauses instead of cutting at the ~1 s
+  // dictation gap that splits long sentences into fragments.
+  assert.ok(agentCode.includes('conversation: true'), 'the agent start marks itself as a conversation')
+  // One call site, so the setting cannot be honoured in some places only.
+  assert.equal(
+    agentCode.split('window.forge.stt.start(').length - 1,
+    1,
+    'the agent opens the microphone in exactly one place'
+  )
+  assert.ok(agentCode.includes('window.forge.stt.capture()'), 'and the follow-up window uses the capture command')
+})
+
+await test('the re-arm poll is off in wake mode — no earcon metronome', () => {
+  const poll = /useEffect\(\(\) => \{\s*if \(!armed \|\| speaking\) return undefined[\s\S]*?\}, \[armed, speaking/.exec(
+    agentCode
+  )
+  assert.ok(poll, 'the re-arm poll must be findable')
+  assert.ok(
+    /if \(wakeWord && stt\.mode === 'wake'\) return undefined/.test(poll[0]),
+    'a live wake session is never poll-started: the sidecar loops itself'
+  )
+})
+
+await test('the sidecar only hears "mode" when wake mode was asked for', () => {
+  // An older sidecar has never heard of the key, and dictation must be
+  // bit-for-bit what it was: `{cmd:'start', autoStop:N}` and nothing else.
+  const sidecar = readFileSync(join(ROOT, 'electron', 'stt-sidecar.ts'), 'utf8')
+  assert.ok(/if \(wantedMode === 'wake'\) msg\['mode'\] = 'wake'/.test(sidecar))
+  assert.ok(/cmd: 'capture'/.test(sidecar), 'and capture is wired through to the sidecar')
+})
+
+await test('the tool bridge answers about the app it is looking at now', () => {
+  // Accessors, not values: the session outlives every render, so a snapshot
+  // captured at registration time would answer about a Forge from ten minutes
+  // ago. And it is the same snapshot the manifest is built from, or the
+  // "Terminal 3" the model is told about is not the one it would get.
+  assert.ok(/getSnapshot: \(\) => snapshotRef\.current/.test(agentCode))
+  assert.ok(/manifestRef\.current = useMemo\(\(\) => buildManifest\(snapshot\)/.test(agentCode))
+  assert.ok(/runAction: \(action\) =>\s*runActions\(\[action\]\)/.test(agentCode), 'actions go through the one executor')
+})
+
+await test('a reply is chunked into sentences, in order, losing nothing', () => {
+  const first = takeSpeechChunks('Opened three tabs. Now I will ')
+  assert.deepEqual(first.chunks, ['Opened three tabs.'])
+  assert.equal(first.rest, ' Now I will ')
+
+  // The contract: rest + the next delta, and nothing said twice.
+  const second = takeSpeechChunks(`${first.rest}run the build! Anything else?`)
+  assert.deepEqual(second.chunks, ['Now I will run the build!'])
+  assert.equal(second.rest, ' Anything else?', 'no trailing whitespace makes a sentence final')
+
+  // Nothing is dropped and nothing is invented: the chunks plus the rest are
+  // the original text back, give or take the whitespace at the joins.
+  const tidy = (s) => s.replace(/\s+/g, ' ').trim()
+  const text = 'One. Two! Three? Four'
+  const { chunks, rest } = takeSpeechChunks(text)
+  assert.deepEqual(chunks, ['One.', 'Two!', 'Three?'])
+  assert.equal(tidy([...chunks, rest].join(' ')), tidy(text))
+})
+
+await test('a paragraph with no full stop in it still gets spoken', () => {
+  const tidy = (s) => s.replace(/\s+/g, ' ').trim()
+  const long = `${'word '.repeat(80)}and on it goes`
+  const { chunks, rest } = takeSpeechChunks(long)
+  assert.ok(chunks.length >= 1, 'an over-long run is let out rather than held to the end of the turn')
+  assert.ok(chunks[0].length <= SPEAK_CHUNK_MAX, `chunk was ${chunks[0].length}`)
+  assert.ok(
+    long.startsWith(chunks[0]) && /\s/.test(long[chunks[0].length]),
+    'the cut lands between words, never inside one'
+  )
+  assert.equal(tidy([...chunks, rest].join(' ')), tidy(long))
+})
+
+await test('a decimal point is not a sentence, and an unfinished one waits', () => {
+  // "3." might be the start of "3.14" — the next delta decides, so nothing is
+  // spoken until the whitespace that proves it was a full stop has arrived.
+  assert.deepEqual(takeSpeechChunks('It costs 3.').chunks, [])
+  assert.deepEqual(takeSpeechChunks('It costs 3.14 pounds').chunks, [])
+  assert.deepEqual(takeSpeechChunks('It costs 3.14 pounds. ').chunks, ['It costs 3.14 pounds.'])
 })
 
 /* ------------------------------------------------------------------- live */

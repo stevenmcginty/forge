@@ -1,10 +1,10 @@
 /**
  * The blips.
  *
- * Two of them now: the agent's "your turn" handover, and the pair that brackets
- * a dictation session — see `earconDictationOn`/`earconDictationOff` at the
- * bottom. Everything below about *why* these are synthesised, and how quiet they
- * are, applies to all three.
+ * Five of them now: the agent's "your turn" handover, the pair that brackets a
+ * dictation session, and the pair a finished terminal plays — the last two at
+ * the bottom. Everything below about *why* these are synthesised, and how quiet
+ * they are, applies to all five.
  *
  * This replaces something worse. The agent used to *say* it was ready for the
  * next thing — a spoken sentence, word for word the same every time, which is
@@ -141,4 +141,32 @@ export function earconDictationOn(): void {
 /** "The mic is shut." The same two notes, the other way up. */
 export function earconDictationOff(): void {
   pair(DICT_HIGH, DICT_LOW)
+}
+
+/* ------------------------------------------------------------- terminals
+ *
+ * A task finishing, as a sound. Steve asked for it directly: a terminal that
+ * completes while he is looking at anything else should say so, or the first
+ * he knows of a finished build is the moment he looks at it. The two shapes are
+ * the same pair of notes — up when a session ends cleanly (exit 0), down when
+ * it did not. Direction is the one thing you can read before learning a sound,
+ * the rule the dictation pair already follows, so "done" and "broken" need no
+ * second thought.
+ *
+ * The register is deliberately a fifth above the dictation pair: this is a
+ * completion, not a toggle, and the two must never be mistaken for each other.
+ */
+
+/** C6 and G6 — a perfect fifth, a register above the dictation pair. */
+const TASK_LOW = 1046.5
+const TASK_HIGH = 1568
+
+/** "A session ended cleanly." Rising, the way "finished" should sound. */
+export function earconTaskDone(): void {
+  pair(TASK_LOW, TASK_HIGH)
+}
+
+/** "A session ended badly." The same two notes, the other way up. */
+export function earconTaskAttention(): void {
+  pair(TASK_HIGH, TASK_LOW)
 }

@@ -115,3 +115,58 @@ export function isTtsModel(id: string): boolean {
  * is how the agent will sound saying the thing it says most.
  */
 export const TTS_SAMPLE_LINE = 'Right — three Claude Code terminals, up and running.'
+
+/* ------------------------------------------------------------- edge voices */
+
+/**
+ * The default Edge neural voice: warm, female, British — the character Steve
+ * described wanting back when the agent "went back to a robot voice". Sonia is
+ * the voice Edge's own Read Aloud defaults to for en-GB, which is as
+ * road-tested as a free voice gets.
+ */
+export const DEFAULT_EDGE_VOICE = 'en-GB-SoniaNeural'
+
+export interface EdgeVoice {
+  /** The short name the endpoint wants, e.g. `en-GB-SoniaNeural`. */
+  name: string
+  /** What the picker shows. */
+  label: string
+  /** One-line character note, same shape as the Gemini list. */
+  character: string
+}
+
+/**
+ * A curated dozen rather than the full ~500 the endpoint serves: a picker of
+ * five hundred names nobody can audition is worse than one of twelve you can.
+ * All are multilingual-capable neural voices that exist on the readaloud
+ * endpoint today; an unknown name fails the request cleanly and the chain
+ * falls to the next engine, so a voice Microsoft retires costs a sentence,
+ * not silence.
+ */
+export const EDGE_VOICES: readonly EdgeVoice[] = [
+  { name: 'en-GB-SoniaNeural', label: 'Sonia — British', character: 'Warm. The default' },
+  { name: 'en-GB-LibbyNeural', label: 'Libby — British', character: 'Bright' },
+  { name: 'en-GB-MaisieNeural', label: 'Maisie — British', character: 'Youthful' },
+  { name: 'en-GB-RyanNeural', label: 'Ryan — British', character: 'Calm, male' },
+  { name: 'en-GB-ThomasNeural', label: 'Thomas — British', character: 'Even, male' },
+  { name: 'en-IE-EmilyNeural', label: 'Emily — Irish', character: 'Gentle' },
+  { name: 'en-AU-NatashaNeural', label: 'Natasha — Australian', character: 'Easy-going' },
+  { name: 'en-US-AriaNeural', label: 'Aria — American', character: 'Expressive' },
+  { name: 'en-US-JennyNeural', label: 'Jenny — American', character: 'Friendly' },
+  { name: 'en-US-MichelleNeural', label: 'Michelle — American', character: 'Clear' },
+  { name: 'en-US-GuyNeural', label: 'Guy — American', character: 'Newsreader, male' },
+  { name: 'en-US-ChristopherNeural', label: 'Christopher — American', character: 'Deep, male' }
+]
+
+const EDGE_VOICE_NAMES = new Set(EDGE_VOICES.map((v) => v.name))
+
+/**
+ * A name we are willing to send. Looser than the Gemini check on purpose: the
+ * endpoint knows hundreds of voices this list does not, and someone who types
+ * `de-DE-KatjaNeural` into settings.json should get Katja, not Sonia. The
+ * shape check is what keeps arbitrary strings out of the SSML.
+ */
+export function isEdgeVoice(name: string): boolean {
+  const v = (name ?? '').trim()
+  return EDGE_VOICE_NAMES.has(v) || /^[a-z]{2,3}-[A-Za-z]{2,10}-[A-Za-z0-9]{2,40}Neural$/.test(v)
+}

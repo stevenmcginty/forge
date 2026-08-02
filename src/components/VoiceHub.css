@@ -221,10 +221,12 @@
   background: var(--bg-hover);
 }
 
-/* ------------------------------------------------------- compact dial
+/* ------------------------------------------------------- compact orb
  *
- * The panel's 72px circle, shrunk to sit on the pill. Same component, same
- * states, same rAF ring — only the furniture around it is dropped.
+ * The card's 84px orb, shrunk to sit on the pill. Same component, same
+ * presence grammar, same rAF ring — only the furniture around it is dropped.
+ * The sphere and iris are sized in percentages, so the button's box is the
+ * whole of the resize.
  */
 
 .agentdial[data-compact='true'] {
@@ -236,13 +238,14 @@
 }
 
 .agentdial[data-compact='true'] .agentdial__btn {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
 }
 
-.agentdial[data-compact='true'] .agentdial__core {
-  width: 30px;
-  height: 30px;
+/* Hairline arcs and rings at pebble scale, or they read as smudges. */
+.agentdial[data-compact='true'] .agentdial__orbit,
+.agentdial[data-compact='true'] .agentdial__ring {
+  border-width: 1.5px;
 }
 
 /* ------------------------------------------------------------------ card */
@@ -330,11 +333,19 @@
   cursor: grabbing;
 }
 
+/* A 10px still of the orb: dark glass, lit iris. The card's wordmark. */
 .vhub__mark {
-  display: grid;
-  place-items: center;
   flex: none;
-  color: var(--accent);
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-full);
+  background:
+    radial-gradient(circle at 34% 28%, color-mix(in srgb, var(--text-primary) 22%, transparent), transparent 52%),
+    radial-gradient(circle, var(--accent-bright) 0%, var(--accent) 26%, transparent 46%),
+    radial-gradient(circle at 50% 45%, var(--bg-panel-raised), var(--bg-sunken) 85%);
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    0 0 6px var(--accent-glow);
 }
 
 .vhub__title {

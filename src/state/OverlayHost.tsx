@@ -122,8 +122,13 @@ export function OverlayHost(): ReactNode {
       draftPhrase: agent.draftPhrase,
       brainName: agent.brainName,
       brainStatus: agent.brainStatus,
+      brainModel: agent.brainModel,
       replyMode: agent.replyMode,
       canSpeak: agent.canSpeak,
+      wakeMode: agent.wakeMode,
+      capturing: agent.capturing,
+      dictating: agent.dictating,
+      dictationBuffer: agent.dictationBuffer,
       theme: currentTheme()
     }),
     [
@@ -137,8 +142,13 @@ export function OverlayHost(): ReactNode {
       agent.draftPhrase,
       agent.brainName,
       agent.brainStatus,
+      agent.brainModel,
       agent.replyMode,
-      agent.canSpeak
+      agent.canSpeak,
+      agent.wakeMode,
+      agent.capturing,
+      agent.dictating,
+      agent.dictationBuffer
     ]
   )
 
@@ -194,6 +204,9 @@ export function OverlayHost(): ReactNode {
           return
         case 'setReplyMode':
           agent.setReplyMode(call.mode)
+          return
+        case 'setBrainModel':
+          agent.setBrainModel(call.model)
           return
         case 'editDraft':
           agent.editDraft(call.turnId, call.draft)

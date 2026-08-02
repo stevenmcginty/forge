@@ -26,6 +26,11 @@ messages a WebSocket would.)
 client -> server
     {"cmd": "start"}                 begin listening
     {"cmd": "start", "autoStop": 10}  ...and set the silence timeout for it
+    {"cmd": "start", "mode": "wake"}  ...always-listening instead (see below)
+    {"cmd": "start", "conversation": true}
+                                     ...a conversation, not dictation: wait out
+                                     thinking pauses instead of cutting at 1 s
+    {"cmd": "capture"}               wake mode: start capturing now, no wake word
     {"cmd": "stop"}                  stop listening, transcribe what is left
     {"cmd": "status"}                 re-send the current state
     {"cmd": "shutdown"}              exit cleanly
@@ -34,16 +39,36 @@ server -> client
     {"evt": "ready"}                            model loaded, start is allowed
     {"evt": "level", "rms": 0.42}               ~10/s while listening
     {"evt": "phrase", "text": "..."}            one chunked phrase
-    {"evt": "state", "v": "idle|listening|finishing"}
+    {"evt": "wake", "score": 0.98}              "hey Jarvis" was heard
+    {"evt": "state", "v": "idle|listening|finishing",
+                     "mode": "phrase|wake", "capturing": true|false}
     {"evt": "error", "msg": "...", "kind": "..."}
+
+------------------------------------------------------------------- wake mode
+
+`{"cmd": "start", "mode": "wake"}` opens the microphone and leaves it open. The
+session then alternates between two halves, both of them `v: "listening"`:
+
+    capturing: false   monitoring — openWakeWord listens for "hey Jarvis" and
+                       nothing else runs; Parakeet is not fed a single sample
+    capturing: true    the wake word (or `{"cmd": "capture"}`) landed, and this
+                       is ordinary phrase capture
+
+The auto-stop silence timeout ends the *capture*, not the session: the mic stays
+open and monitoring resumes, forever, until `{"cmd": "stop"}`. `capture` is the
+follow-up window — after the agent has answered, the reply does not need to be
+prefixed with the wake word again.
 
 `error.kind` is what lets Forge tell "you have not got the model" (show a setup
 card) apart from "the mic is busy" (transient):
 
-    model-missing   the model directory has no usable model files in it
-    model-load      onnx-asr refused to load the model
-    audio           the microphone could not be opened
-    internal        anything else
+    model-missing     the model directory has no usable model files in it
+    model-load        onnx-asr refused to load the model
+    audio             the microphone could not be opened
+    wake-unavailable  openWakeWord is not installed, or its models could not be
+                      fetched. Carries a `hint`. Dictation is untouched: the
+                      session simply falls back to plain phrase capture.
+    internal          anything else
 
 Exit status 0 always means "asked to leave". Anything else is a crash and the
 parent restarts us.
@@ -60,6 +85,7 @@ import re
 import sys
 import threading
 import time
+import types
 import wave
 from collections import deque
 
@@ -75,6 +101,11 @@ PAUSE_CUT_S = 1.0           # silence gap that ends a phrase: a real sentence
                             # pause, not a breath. Shorter gaps split sentences
                             # into fragments the engine punctuates as
                             # "Full. Stops."
+# Conversation mode (the agent, wake word or the re-armed tap-to-talk loop) is
+# a different deal: Steve thinks mid-sentence, and a 1 s cut turns one request
+# into three fragments the brain has to reassemble. Wait out the thinking
+# pauses, so the whole utterance arrives whole.
+AGENT_PAUSE_CUT_S = 3.0
 SOFT_CUT_S = 0.55           # mid-speech dip that's enough to split at...
 SOFT_CUT_AFTER_S = 7.0      # ...once the phrase is already this long
 MIN_VOICED_BLOCKS = 2       # ~130 ms of speech before a phrase counts
@@ -82,6 +113,13 @@ MAX_PHRASE_S = 18           # force a cut on very long phrases
 MIC_MAX_BOOST = 12.0        # software mic gain cap (~ +21 dB)
 
 PARAKEET_NAME = "parakeet-tdt-0.6b-v2"
+
+# Wake word — openWakeWord's pretrained "hey jarvis".
+WAKE_WORD = "hey_jarvis"
+WAKE_THRESHOLD = 0.5        # openWakeWord's own recommended operating point
+WAKE_REARM = 0.3            # ...and it has to fall back under this before the
+                            # next fire, so one "hey Jarvis" is one wake and not
+                            # the eight consecutive blocks that score over 0.5
 
 # file -> minimum plausible size, so a stray HTML error page or a half-finished
 # download can never pass for a model
@@ -112,12 +150,23 @@ def log(msg: str) -> None:
 class LiveRecorder:
     """Streams the mic and puts ("audio", phrase) / ("end", None) on a queue."""
 
-    def __init__(self, out_queue: "queue.Queue", device=None):
+    def __init__(self, out_queue: "queue.Queue", device=None, conversation: bool = False):
         self.out = out_queue
         self.device = device
         self.stream = None
         self.level = 0.0            # smoothed 0..1, drives the pill's meter
         self.last_voice_time = 0.0
+        # Conversation mode waits out thinking pauses and never splits on a
+        # breath; dictation keeps the snappy cuts that make push-to-talk feel
+        # like pushing and talking.
+        self.pause_cut_s = AGENT_PAUSE_CUT_S if conversation else PAUSE_CUT_S
+        self.soft_cut_s = None if conversation else SOFT_CUT_S
+        self.soft_cut_after_s = SOFT_CUT_AFTER_S
+        # Wake mode's two hooks. `monitor` sees every raw block whatever the
+        # state; `capturing` is what says whether the block is also being
+        # collected into a phrase. Plain dictation never touches either.
+        self.monitor = None
+        self.capturing = True
         self._pending: list = []
         self._voiced_blocks = 0
         self._noise_floor = 0.004
@@ -168,6 +217,23 @@ class LiveRecorder:
         self.level = 0.0
         self.last_voice_time = time.time()
 
+    def set_capturing(self, on: bool) -> None:
+        """Wake mode: flip between monitoring and collecting phrases.
+
+        Turning capture off flushes whatever was being said, exactly as stop()
+        would; turning it on starts from an empty buffer, so the wake word
+        itself never reaches the engine.
+        """
+        if on == self.capturing:
+            return
+        if not on and self._voiced_blocks >= MIN_VOICED_BLOCKS:
+            self._emit()
+        self._pending = []
+        self._voiced_blocks = 0
+        self._recent_voiced.clear()
+        self.last_voice_time = time.time()
+        self.capturing = on
+
     # -- the audio thread --------------------------------------------------
 
     def _callback(self, indata, frames, t, status) -> None:  # noqa: ARG002
@@ -204,6 +270,20 @@ class LiveRecorder:
             1.0, (rms / max(threshold, 1e-4)) * 0.35
         )
 
+        # The wake detector wants the raw block, not the boosted one, and it
+        # wants it in both halves of wake mode: fed continuously, its score for
+        # the last "hey Jarvis" has decayed away again by the time the capture
+        # it triggered is over.
+        if self.monitor is not None:
+            self.monitor(block)
+
+        if not self.capturing:
+            # Idle-monitoring. The floor and the meter above are the whole job:
+            # collecting blocks nobody is going to transcribe would only grow a
+            # buffer, and letting the AGC adapt to a room nobody is dictating
+            # into would wind the gain onto whatever the television is doing.
+            return
+
         # Software mic boost for the engine's benefit: aim the loudest recent
         # audio at a healthy peak so quiet mics transcribe like loud ones.
         # Adapt ONLY while the window holds real signal — during silence the
@@ -226,13 +306,17 @@ class LiveRecorder:
         pending_s = len(self._pending) * BLOCK / SAMPLE_RATE
         silent_for = now - self.last_voice_time
 
-        if self._voiced_blocks >= MIN_VOICED_BLOCKS and silent_for > PAUSE_CUT_S:
-            # A real pause: the phrase already carries ~1 s of trailing silence
-            # and the next one keeps everything from here on, so nothing can be
+        if self._voiced_blocks >= MIN_VOICED_BLOCKS and silent_for > self.pause_cut_s:
+            # A real pause: the phrase already carries its trailing silence and
+            # the next one keeps everything from here on, so nothing can be
             # clipped at this kind of cut.
             self._emit()
         elif self._voiced_blocks >= MIN_VOICED_BLOCKS and (
-            (pending_s > SOFT_CUT_AFTER_S and silent_for > SOFT_CUT_S)
+            (
+                self.soft_cut_s is not None
+                and pending_s > self.soft_cut_after_s
+                and silent_for > self.soft_cut_s
+            )
             or pending_s > MAX_PHRASE_S
         ):
             # Forced cut during (near-)continuous speech: never slice at "now"
@@ -281,8 +365,8 @@ class WavRecorder(LiveRecorder):
     microphone access. Enabled with --fake-mic.
     """
 
-    def __init__(self, out_queue, path: str, realtime: bool = True):
-        super().__init__(out_queue)
+    def __init__(self, out_queue, path: str, realtime: bool = True, conversation: bool = False):
+        super().__init__(out_queue, conversation=conversation)
         self.path = path
         self.realtime = realtime
         self._thread: threading.Thread | None = None
@@ -349,6 +433,188 @@ class WavRecorder(LiveRecorder):
             self._emit()
         self._pending = []
         self.out.put(("end", None))
+
+
+# --------------------------------------------------------------------------
+# Wake word — openWakeWord's pretrained "hey jarvis".
+# --------------------------------------------------------------------------
+
+
+#: openWakeWord's package __init__ imports its custom-verifier trainer, which
+#: imports scikit-learn, which imports SciPy. We use none of the three — and
+#: loading SciPy here does not merely cost 40 MB of RSS, it *hangs*: on Windows,
+#: pulling in scipy.linalg's OpenBLAS DLL while another thread sits blocked in a
+#: read on stdin deadlocks, and this process always has such a thread
+#: (watch_stdin, the parent-death watchdog). Reproduced on Python 3.14 /
+#: SciPy 1.18 / Windows 11; the import never returns, on any thread.
+_WAKE_STUBBED_IMPORTS = (
+    "scipy",
+    "sklearn",
+    "sklearn.linear_model",
+    "sklearn.pipeline",
+    "sklearn.preprocessing",
+)
+
+
+class _AnythingModule(types.ModuleType):
+    """A module that answers every attribute with a fresh empty class, which is
+    all `from sklearn.pipeline import make_pipeline` actually needs."""
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return type(name, (), {})
+
+
+def _import_wake_model():
+    """openWakeWord's Model class, imported without its scientific stack.
+
+    The stubs are removed again afterwards, so nothing else in the process ever
+    sees them: openwakeword's own module body has already bound the names it
+    wanted by then, and it only wanted them for the trainer.
+    """
+    added = [n for n in _WAKE_STUBBED_IMPORTS if n not in sys.modules]
+    for name in added:
+        sys.modules[name] = _AnythingModule(name)
+    try:
+        from openwakeword.model import Model
+
+        return Model
+    finally:
+        for name in added:
+            sys.modules.pop(name, None)
+
+
+class WakeDetector:
+    """Listens for "hey Jarvis" in the blocks the recorder is already producing.
+
+    Three ONNX graphs — melspectrogram, Google's speech embedding, and the wake
+    model itself — costing about 2% of one core at 16 kHz, which is what makes
+    leaving the microphone open all day affordable. They run on their own thread
+    rather than in the sounddevice callback: a callback that overruns its 64 ms
+    drops microphone blocks, and dropped blocks are dropped words.
+
+    Optional by design. If openwakeword is not installed, or its models cannot
+    be fetched, `error` is set and the caller falls back to plain dictation.
+    """
+
+    def __init__(self, models_dir: str, on_wake):
+        self.models_dir = models_dir
+        self.on_wake = on_wake
+        self.model = None
+        self.error: str | None = None
+        self.hint: str | None = None
+        self.armed = True
+        self.q: "queue.Queue" = queue.Queue()
+        self._thread: threading.Thread | None = None
+        self._stopping = False
+
+    @property
+    def ready(self) -> bool:
+        return self.model is not None
+
+    # -- loading -----------------------------------------------------------
+
+    def _model_paths(self) -> dict:
+        """The three ONNX files, downloaded on first use if they are not here.
+
+        openWakeWord's own downloader wants a directory rather than a file list,
+        and drops the tflite copies in beside the ONNX ones; the ONNX ones are
+        what we load, because tflite-runtime has no Windows wheel.
+        """
+        want = {
+            "wake": f"{WAKE_WORD}_v0.1.onnx",
+            "melspec": "melspectrogram.onnx",
+            "embedding": "embedding_model.onnx",
+        }
+        paths = {k: os.path.join(self.models_dir, v) for k, v in want.items()}
+        if not all(os.path.isfile(p) for p in paths.values()):
+            from openwakeword.utils import download_models
+
+            os.makedirs(self.models_dir, exist_ok=True)
+            log(f"fetching wake models into {self.models_dir}")
+            download_models([WAKE_WORD], target_directory=self.models_dir)
+        missing = [os.path.basename(p) for p in paths.values() if not os.path.isfile(p)]
+        if missing:
+            raise RuntimeError("missing after download: " + ", ".join(missing))
+        return paths
+
+    def load(self) -> None:
+        """Blocking; the caller runs it on a thread because the first call may
+        have ~7 MB to download."""
+        try:
+            Model = _import_wake_model()
+        except Exception as e:                      # noqa: BLE001
+            log(f"openwakeword unavailable: {e}")
+            # Not always literally "not installed" — a broken install imports
+            # just as badly — but that is the case worth naming, and the reason
+            # why is on stderr either way.
+            self.error = "openWakeWord is not available, so the wake word cannot be heard"
+            self.hint = "pip install openwakeword"
+            return
+        try:
+            t0 = time.time()
+            paths = self._model_paths()
+            self.model = Model(
+                wakeword_models=[paths["wake"]],
+                inference_framework="onnx",
+                melspec_model_path=paths["melspec"],
+                embedding_model_path=paths["embedding"],
+            )
+            log(f"wake model ready in {time.time() - t0:.1f}s")
+        except Exception as e:                      # noqa: BLE001
+            log(f"wake model failed: {e}")
+            self.error = f"The wake-word model could not be loaded: {e}"
+            self.hint = f"Delete {self.models_dir} and try again while online"
+            return
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    # -- scoring -----------------------------------------------------------
+
+    def feed(self, block: np.ndarray) -> None:
+        """One raw 64 ms float32 block, from whichever thread owns the mic."""
+        if self.model is None:
+            return
+        if self.q.qsize() > 32:
+            return          # a late wake beats a stalled microphone
+        self.q.put(block)
+
+    def drain(self) -> None:
+        """Forget anything left over from a previous session, the way the audio
+        queue is drained: half a wake word heard as the mic was released must not
+        fire the instant it is opened again."""
+        while not self.q.empty():
+            try:
+                self.q.get_nowait()
+            except queue.Empty:
+                break
+
+    def _loop(self) -> None:
+        while not self._stopping:
+            try:
+                block = self.q.get(timeout=0.25)
+            except queue.Empty:
+                continue
+            if block is None:
+                return
+            try:
+                pcm = np.clip(block * 32767.0, -32768, 32767).astype(np.int16)
+                scores = self.model.predict(pcm)
+            except Exception as e:                  # noqa: BLE001
+                log(f"wake scoring failed: {e}")
+                continue
+            score = max(scores.values()) if scores else 0.0
+            if score >= WAKE_THRESHOLD:
+                if self.armed:
+                    self.armed = False
+                    self.on_wake(float(score))
+            elif score < WAKE_REARM:
+                self.armed = True
+
+    def close(self) -> None:
+        self._stopping = True
+        self.q.put(None)
 
 
 # --------------------------------------------------------------------------
@@ -457,6 +723,7 @@ class StubEngine(ParakeetEngine):
 # --------------------------------------------------------------------------
 
 IDLE, LISTENING, FINISHING = "idle", "listening", "finishing"
+PHRASE_MODE, WAKE_MODE = "phrase", "wake"
 
 
 class SttService:
@@ -466,6 +733,9 @@ class SttService:
         self.loop = None
         self.clients: set = set()
         self.state = IDLE
+        self.mode = PHRASE_MODE
+        self.wake = WakeDetector(opts.wake_dir, self._on_wake)
+        self._wake_loading = False
         self.ready = False
         self.audio_q: "queue.Queue" = queue.Queue()
         self.recorder: LiveRecorder | None = None
@@ -489,9 +759,26 @@ class SttService:
         if self.loop is not None:
             self.loop.call_soon_threadsafe(self.send, obj)
 
+    @property
+    def capturing(self) -> bool:
+        """Whether audio is on its way to Parakeet right now. Always true while
+        a plain dictation session is listening; in wake mode, only between the
+        wake word and the auto-stop that follows it."""
+        rec = self.recorder
+        return self.state == LISTENING and rec is not None and rec.capturing
+
+    def _state_msg(self, state: str, **extra) -> dict:
+        return {
+            "evt": "state",
+            "v": state,
+            "mode": self.mode,
+            "capturing": self.capturing,
+            **extra,
+        }
+
     def set_state(self, state: str, **extra) -> None:
         self.state = state
-        self.send({"evt": "state", "v": state, **extra})
+        self.send(self._state_msg(state, **extra))
 
     # -- model -------------------------------------------------------------
 
@@ -516,11 +803,17 @@ class SttService:
 
     # -- listening ---------------------------------------------------------
 
-    def start_listening(self, auto_stop: float | None = None) -> None:
+    def start_listening(
+        self,
+        auto_stop: float | None = None,
+        mode: str = PHRASE_MODE,
+        conversation: bool = False,
+    ) -> None:
         if auto_stop is not None:
             # Forge sends the current silence timeout with every start, so
             # changing it in Settings takes effect without a respawn.
             self.opts.auto_stop = auto_stop
+        self.opts.conversation = conversation
         if self.state == LISTENING:
             return
         if not self.ready:
@@ -539,14 +832,27 @@ class SttService:
             except queue.Empty:
                 break
 
+        self.mode = WAKE_MODE if mode == WAKE_MODE else PHRASE_MODE
         if self.opts.fake_mic:
-            self.recorder = WavRecorder(self.audio_q, self.opts.fake_mic)
+            rec: LiveRecorder = WavRecorder(
+                self.audio_q, self.opts.fake_mic, conversation=self.opts.conversation
+            )
         else:
-            self.recorder = LiveRecorder(self.audio_q, device=self.opts.device)
+            rec = LiveRecorder(
+                self.audio_q, device=self.opts.device, conversation=self.opts.conversation
+            )
+        if self.mode == WAKE_MODE:
+            # Open the mic already monitoring: nothing is collected, and nothing
+            # is transcribed, until "hey Jarvis" turns up.
+            rec.capturing = False
+            self.wake.drain()
+            rec.monitor = self.wake.feed
+        self.recorder = rec
         try:
-            self.recorder.start()
+            rec.start()
         except Exception as e:                      # noqa: BLE001
             self.recorder = None
+            self.mode = PHRASE_MODE
             log(f"microphone failed: {e}")
             self.send({"evt": "error", "msg": str(e), "kind": "audio"})
             self.set_state(IDLE)
@@ -554,17 +860,100 @@ class SttService:
 
         self.session_start = time.time()
         self._ensure_worker()
+        if self.mode == WAKE_MODE:
+            self._ensure_wake()
         self.set_state(LISTENING)
 
     def stop_listening(self, reason: str | None = None) -> None:
         if self.state != LISTENING or self.recorder is None:
             return
         rec, self.recorder = self.recorder, None
+        rec.monitor = None
+        self.mode = PHRASE_MODE
         extra = {"reason": reason} if reason else {}
         self.set_state(FINISHING, **extra)
         # rec.stop() flushes the tail phrase and queues the ("end", None) that
         # returns us to idle once the worker has drained everything.
         threading.Thread(target=rec.stop, daemon=True).start()
+
+    # -- wake mode ---------------------------------------------------------
+
+    def begin_capture(self) -> None:
+        """Start collecting a phrase inside an open wake-mode session — what the
+        wake word does, and what `{"cmd": "capture"}` does without one."""
+        rec = self.recorder
+        if self.mode != WAKE_MODE or self.state != LISTENING or rec is None:
+            log("capture ignored: not monitoring for the wake word")
+            return
+        # The silence timeout counts from here, not from the start of the
+        # session, or a long quiet monitor would auto-stop the capture instantly.
+        self.session_start = time.time()
+        if rec.capturing:
+            return
+        rec.set_capturing(True)
+        self.set_state(LISTENING)
+
+    def end_capture(self) -> None:
+        """Wake mode's auto-stop: flush the phrase, keep the microphone, go back
+        to waiting for the wake word."""
+        rec = self.recorder
+        if rec is None or not rec.capturing:
+            return
+        rec.set_capturing(False)
+        self.session_start = time.time()
+        self.set_state(LISTENING)
+
+    def _on_wake(self, score: float) -> None:
+        """Called on the wake detector's thread."""
+        self.loop_call(lambda: self._wake_fired(score))
+
+    def _wake_fired(self, score: float) -> None:
+        if self.mode != WAKE_MODE or self.state != LISTENING:
+            return
+        if self.capturing:
+            return          # already taking this one down
+        log(f"wake word heard ({score:.2f})")
+        self.send({"evt": "wake", "score": round(float(score), 3)})
+        self.begin_capture()
+
+    def _ensure_wake(self) -> None:
+        """Load the wake model on first use, off the event loop: the very first
+        call may have models to download."""
+        if self.wake.ready or self._wake_loading:
+            return
+        if self.wake.error:
+            self._wake_unavailable()
+            return
+        self._wake_loading = True
+        threading.Thread(target=self._load_wake, daemon=True).start()
+
+    def _load_wake(self) -> None:
+        self.wake.load()
+        self._wake_loading = False
+        if self.wake.error:
+            self.loop_call(self._wake_unavailable)
+
+    def _wake_unavailable(self) -> None:
+        """No ear for the wake word. Say so — with something the user can act on
+        — and let the session carry on as plain dictation, so whoever is talking
+        right now still gets transcribed."""
+        self.send(
+            {
+                "evt": "error",
+                "kind": "wake-unavailable",
+                "msg": self.wake.error or "The wake word is unavailable",
+                "hint": self.wake.hint or "",
+            }
+        )
+        if self.mode != WAKE_MODE or self.state != LISTENING:
+            return
+        self.mode = PHRASE_MODE
+        rec = self.recorder
+        if rec is not None:
+            rec.monitor = None
+            rec.set_capturing(True)
+        self.session_start = time.time()
+        self.set_state(LISTENING)
 
     def _ensure_worker(self) -> None:
         if self._worker and self._worker.is_alive():
@@ -614,11 +1003,16 @@ class SttService:
                 continue
             self.send({"evt": "level", "rms": round(float(rec.level), 3)})
             limit = self.opts.auto_stop
-            if limit and limit > 0:
+            # Monitoring for the wake word is silence by definition — the
+            # timeout only ever ends a capture.
+            if limit and limit > 0 and rec.capturing:
                 quiet = time.time() - max(rec.last_voice_time, self.session_start)
                 if quiet > limit:
                     log(f"auto-stop after {quiet:.1f}s of silence")
-                    self.stop_listening(reason="autostop")
+                    if self.mode == WAKE_MODE:
+                        self.end_capture()
+                    else:
+                        self.stop_listening(reason="autostop")
 
     # -- clients -----------------------------------------------------------
 
@@ -656,7 +1050,7 @@ class SttService:
     def greet(self) -> None:
         """Tell a fresh client where things stand, so a reconnect after a
         renderer reload doesn't leave the pill guessing."""
-        self.send({"evt": "state", "v": self.state})
+        self.send(self._state_msg(self.state))
         if self.ready:
             self.send({"evt": "ready"})
         elif self.engine.error:
@@ -673,8 +1067,12 @@ class SttService:
         if cmd == "start":
             raw = msg.get("autoStop")
             self.start_listening(
-                float(raw) if isinstance(raw, (int, float)) and raw >= 0 else None
+                float(raw) if isinstance(raw, (int, float)) and raw >= 0 else None,
+                mode=str(msg.get("mode") or PHRASE_MODE),
+                conversation=msg.get("conversation") is True,
             )
+        elif cmd == "capture":
+            self.begin_capture()
         elif cmd == "stop":
             self.stop_listening()
         elif cmd == "status":
@@ -688,6 +1086,7 @@ class SttService:
 
     def quit(self) -> None:
         self._stopping = True
+        self.wake.close()
         if self.recorder is not None:
             rec, self.recorder = self.recorder, None
             try:
@@ -776,6 +1175,17 @@ def default_model_dir() -> str:
     return ""
 
 
+def default_wake_dir() -> str:
+    """Where the openWakeWord models live — Forge's own data directory, beside
+    the Parakeet download it normally sits next to. Unlike Parakeet these are a
+    few megabytes and are fetched on first use, so there is nothing to configure
+    and no borrowing from DictationMic to do."""
+    env = os.environ.get("FORGE_STT_WAKE_DIR")
+    if env:
+        return env
+    return os.path.join(_forge_data_dir(), "models", "openwakeword")
+
+
 def import_check() -> int:
     """Prove the frozen build carries everything a real model load needs.
 
@@ -807,6 +1217,11 @@ def import_check() -> int:
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Forge on-device dictation sidecar")
     p.add_argument("--model-dir", default=default_model_dir())
+    p.add_argument(
+        "--wake-dir",
+        default=default_wake_dir(),
+        help="where the wake-word models are cached (downloaded on first use)",
+    )
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=0, help="0 = let the OS pick")
     p.add_argument(

@@ -14,24 +14,27 @@
  * deletion look like a rewrite in the diff.
  */
 
-/* ---------------------------------------------------------- agent dial
+/* ------------------------------------------------------------- the orb
  *
- * The one thing in the hub you cannot miss.
+ * Jarvis. An obsidian sphere with a volt-lit iris — a lens set into dark
+ * glass, not a button with an icon on it. Every state he can be in is a
+ * different quality of the same light, so each reads from the corner of an
+ * eye without a word of text:
  *
- * Steve's complaint was not that the voice agent lacked features — it was
- * "where is the agent?". So the agent is a 72px circle at the top of the card
- * with a word underneath it, and every state it can be in looks different
- * enough to read across the room:
+ *   off         dark glass, specular catch only
+ *   warming     a slow dim orbit — the engine clearing its throat
+ *   monitoring  a low ember breathing on a 6s period — calm, all day
+ *   listening   the iris up, halo lit — armed and attentive
+ *   capturing   iris full, ring and halo swelling with the actual voice
+ *   thinking    a thin arc orbiting the sphere — visibly working
+ *   speaking    the whole orb lit, pulsing on two interfering periods so the
+ *               cadence reads as talking rather than as a metronome
+ *   replied     a bright flash, then straight back to listening
+ *   error       the iris turns amber; everything else goes still
  *
- *   off        grey ring, no glow
- *   warming    dim volt, the spinner sweeping (the model takes 3–6s to load)
- *   listening  volt ring scaled by the real microphone level
- *   thinking   volt spinner sweeping, core dimmed
- *   replied    a bright flash, then straight back to listening
- *   error      amber, then straight back to listening
- *
- * The ring's transform/opacity are written by rAF from the mic level; the CSS
- * here only sets what it looks like at rest.
+ * Ring and halo transform/opacity are written by rAF from the mic level while
+ * he is listening; every idle state is pure compositor animation. The CSS here
+ * only sets what each state looks like at rest.
  */
 
 .agentdial {
@@ -51,8 +54,8 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 72px;
-  height: 72px;
+  width: 84px;
+  height: 84px;
   padding: 0;
   border: 0;
   border-radius: var(--r-full);
@@ -66,34 +69,30 @@
   outline-offset: 4px;
 }
 
-/* The core disc — the part that always looks like a button. */
-.agentdial__core {
-  position: relative;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 60px;
-  height: 60px;
+/* The halo — the light he throws on the desk around him. Driven by rAF while
+   listening; by keyframes while idle; off when he is. */
+.agentdial__halo {
+  position: absolute;
+  inset: -22%;
+  z-index: 0;
   border-radius: var(--r-full);
-  background: var(--bg-panel-raised);
-  color: var(--text-secondary);
-  box-shadow:
-    inset 0 0 0 1px var(--line-strong),
-    var(--shadow-card);
-  transition:
-    color var(--dur-med) var(--ease-out),
-    background var(--dur-med) var(--ease-out),
-    box-shadow var(--dur-med) var(--ease-out),
-    transform var(--dur-med) var(--ease-out);
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 62%);
+  opacity: 0;
+  will-change: transform, opacity;
+  transition: opacity var(--dur-med) var(--ease-out);
+  pointer-events: none;
 }
 
-.agentdial__btn:hover .agentdial__core {
-  color: var(--text-primary);
-  background: var(--bg-hover);
-}
-
-.agentdial__btn:active .agentdial__core {
-  transform: scale(0.95);
+/* The working arc — one thin orbit going round, nothing else. */
+.agentdial__orbit {
+  position: absolute;
+  inset: -6%;
+  z-index: 1;
+  border-radius: var(--r-full);
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* The live ring. Scale and opacity are driven from the mic level in JS. */
@@ -111,101 +110,246 @@
   pointer-events: none;
 }
 
-/* The thinking sweep — one arc going round, nothing else. */
-.agentdial__spin {
-  position: absolute;
-  inset: -4px;
-  z-index: 0;
+/* The body: dark glass. One specular catch top-left, a faint accent
+   under-light at the south pole, machined hairline rim. */
+.agentdial__sphere {
+  position: relative;
+  z-index: 2;
+  width: 86%;
+  height: 86%;
   border-radius: var(--r-full);
-  border: 2px solid transparent;
-  border-top-color: var(--accent);
+  background:
+    radial-gradient(circle at 32% 26%, color-mix(in srgb, var(--text-primary) 15%, transparent), transparent 46%),
+    radial-gradient(circle at 50% 118%, var(--accent-soft), transparent 58%),
+    radial-gradient(circle at 50% 42%, var(--bg-panel-raised), var(--bg-sunken) 82%);
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    var(--shadow-card);
+  transition:
+    box-shadow var(--dur-med) var(--ease-out),
+    transform var(--dur-med) var(--ease-out);
+}
+
+.agentdial__btn:active .agentdial__sphere {
+  transform: scale(0.96);
+}
+
+/* The iris — the light that says which state he is in. */
+.agentdial__iris {
+  position: absolute;
+  inset: 26%;
+  border-radius: var(--r-full);
+  background: radial-gradient(circle at 50% 46%, var(--accent-bright) 0%, var(--accent) 38%, transparent 72%);
+  box-shadow: 0 0 16px var(--accent-glow);
   opacity: 0;
-  pointer-events: none;
+  transform: scale(0.8);
+  will-change: transform, opacity;
+  transition:
+    opacity var(--dur-med) var(--ease-out),
+    transform var(--dur-med) var(--ease-out);
 }
 
-.agentdial[data-phase='listening'] .agentdial__core {
-  color: var(--accent);
-  box-shadow:
-    inset 0 0 0 1px var(--accent-line),
-    var(--shadow-card);
+/* Asleep, a hover hints that there is somebody in there. Declared before the
+   presence blocks so any lit state below wins the cascade. */
+.agentdial__btn:hover .agentdial__iris {
+  opacity: 0.2;
 }
 
-.agentdial[data-phase='warming'] .agentdial__core,
-.agentdial[data-phase='thinking'] .agentdial__core {
-  color: var(--accent);
-  box-shadow:
-    inset 0 0 0 1px var(--accent-line),
-    var(--shadow-card);
-}
+/* ------------------------------------------------------ presence: warming */
 
-.agentdial[data-phase='warming'] .agentdial__spin,
-.agentdial[data-phase='thinking'] .agentdial__spin {
-  opacity: 1;
-  animation: agentdial-spin 900ms linear infinite;
-}
-
-.agentdial[data-phase='warming'] .agentdial__spin {
+.agentdial[data-presence='warming'] .agentdial__orbit {
+  opacity: 0.6;
   border-top-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  animation-duration: 1600ms;
+  animation: jorb-orbit 1800ms linear infinite;
 }
 
-/* Speaking. Distinct from listening on purpose — the ring is *solid* and the
- * core is filled, because the one thing that must be obvious is that the
- * microphone is shut while it talks. */
-.agentdial[data-phase='speaking'] .agentdial__ring {
-  opacity: 1;
-  transform: scale(1.08);
-  border-color: var(--accent-bright);
-  animation: agentdial-speak 760ms var(--ease-in-out) infinite;
+.agentdial[data-presence='warming'] .agentdial__iris {
+  opacity: 0.25;
 }
 
-.agentdial[data-phase='speaking'] .agentdial__core {
-  color: var(--text-on-accent);
-  background: var(--accent);
-  box-shadow:
-    inset 0 0 0 1px var(--accent-bright),
-    0 0 26px var(--accent-glow);
+/* --------------------------------------------------- presence: monitoring
+ *
+ * The 8-hours-a-day state. An ember on a 6.4s period, nothing faster: alive
+ * from the corner of an eye, invisible to a mind on something else.
+ */
+
+.agentdial[data-presence='monitoring'] .agentdial__iris {
+  opacity: 0.42;
+  transform: scale(0.86);
+  animation: jorb-ember 6.4s var(--ease-in-out) infinite;
 }
 
-@keyframes agentdial-speak {
+.agentdial[data-presence='monitoring'] .agentdial__halo {
+  opacity: 0.1;
+  animation: jorb-breathe 6.4s var(--ease-in-out) infinite;
+}
+
+@keyframes jorb-ember {
   50% {
-    transform: scale(1.2);
+    opacity: 0.22;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes jorb-breathe {
+  50% {
+    opacity: 0.04;
+    transform: scale(0.95);
+  }
+}
+
+/* --------------------------------------- presence: listening / capturing
+ *
+ * Halo and ring belong to the rAF loop here — the only two states where the
+ * real microphone drives the picture.
+ */
+
+.agentdial[data-presence='listening'] .agentdial__iris {
+  opacity: 0.75;
+  transform: scale(0.92);
+}
+
+.agentdial[data-presence='capturing'] .agentdial__iris,
+.agentdial[data-presence='dictating'] .agentdial__iris {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.agentdial[data-presence='listening'] .agentdial__sphere,
+.agentdial[data-presence='capturing'] .agentdial__sphere,
+.agentdial[data-presence='dictating'] .agentdial__sphere {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    var(--shadow-card);
+}
+
+/* ------------------------------------------------ presence: dictating
+ *
+ * Buffer mode: the same voice-driven bloom as capturing (the mic is open and
+ * the levels are real), but the iris holds a slow, steady pulse over it —
+ * words are being taken down, not acted on, and that patience is the tell.
+ */
+.agentdial[data-presence='dictating'] .agentdial__iris {
+  opacity: 0.85;
+  animation: agentdial-hold 2.4s var(--ease-in-out) infinite;
+}
+
+@keyframes agentdial-hold {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* ----------------------------------------------------- presence: thinking */
+
+.agentdial[data-presence='thinking'] .agentdial__orbit {
+  opacity: 1;
+  animation: jorb-orbit 1150ms linear infinite;
+}
+
+.agentdial[data-presence='thinking'] .agentdial__iris {
+  opacity: 0.85;
+  transform: scale(0.9);
+  animation: jorb-work 1150ms var(--ease-in-out) infinite;
+}
+
+.agentdial[data-presence='thinking'] .agentdial__halo {
+  opacity: 0.14;
+}
+
+.agentdial[data-presence='thinking'] .agentdial__sphere {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    var(--shadow-card);
+}
+
+@keyframes jorb-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes jorb-work {
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+/* ----------------------------------------------------- presence: speaking
+ *
+ * Two animations on two elements with periods that do not divide — the
+ * interference is what makes it read as a voice rather than a beacon.
+ */
+
+.agentdial[data-presence='speaking'] .agentdial__iris {
+  opacity: 1;
+  transform: scale(1);
+  animation: jorb-voice 720ms var(--ease-in-out) infinite;
+}
+
+.agentdial[data-presence='speaking'] .agentdial__halo {
+  opacity: 0.5;
+  animation: jorb-voice-halo 1900ms var(--ease-in-out) infinite;
+}
+
+.agentdial[data-presence='speaking'] .agentdial__sphere {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    0 0 26px var(--accent-glow),
+    var(--shadow-card);
+}
+
+@keyframes jorb-voice {
+  50% {
+    transform: scale(1.12);
+  }
+}
+
+@keyframes jorb-voice-halo {
+  33% {
+    opacity: 0.24;
+  }
+  66% {
     opacity: 0.55;
   }
 }
 
-.agentdial[data-phase='replied'] .agentdial__ring {
+/* ------------------------------------------------------ presence: replied */
+
+.agentdial[data-presence='replied'] .agentdial__iris {
   opacity: 1;
-  transform: scale(1.16);
-  border-color: var(--accent-bright);
+  transform: scale(1.06);
 }
 
-.agentdial[data-phase='replied'] .agentdial__core {
-  color: var(--text-on-accent);
-  background: var(--accent);
-  box-shadow:
-    inset 0 0 0 1px var(--accent-bright),
-    0 0 24px var(--accent-glow);
+.agentdial[data-presence='replied'] .agentdial__halo {
+  opacity: 0.45;
 }
 
-.agentdial[data-phase='error'] .agentdial__ring {
+.agentdial[data-presence='replied'] .agentdial__ring {
   opacity: 1;
   transform: scale(1.1);
+}
+
+/* -------------------------------------------------------- presence: error */
+
+.agentdial[data-presence='error'] .agentdial__iris {
+  opacity: 0.9;
+  transform: scale(0.95);
+  background: radial-gradient(circle at 50% 46%, var(--warn) 0%, var(--warn) 32%, transparent 72%);
+  box-shadow: 0 0 14px var(--warn-soft);
+}
+
+.agentdial[data-presence='error'] .agentdial__ring {
+  opacity: 1;
   border-color: var(--warn);
   box-shadow: 0 0 18px var(--warn-soft);
 }
 
-.agentdial[data-phase='error'] .agentdial__core {
-  color: var(--warn);
+.agentdial[data-presence='error'] .agentdial__sphere {
   box-shadow:
     inset 0 0 0 1px var(--warn-line-strong),
     var(--shadow-card);
-}
-
-@keyframes agentdial-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* --------------------------------------------------------- dial labels */
@@ -227,12 +371,18 @@
   transition: color var(--dur-med) var(--ease-out);
 }
 
-.agentdial[data-phase='listening'] .agentdial__title,
-.agentdial[data-phase='replied'] .agentdial__title {
+.agentdial[data-presence='listening'] .agentdial__title,
+.agentdial[data-presence='capturing'] .agentdial__title,
+.agentdial[data-presence='dictating'] .agentdial__title,
+.agentdial[data-presence='replied'] .agentdial__title {
   color: var(--accent);
 }
 
-.agentdial[data-phase='error'] .agentdial__title {
+.agentdial[data-presence='monitoring'] .agentdial__title {
+  color: var(--text-secondary);
+}
+
+.agentdial[data-presence='error'] .agentdial__title {
   color: var(--warn);
 }
 
@@ -264,8 +414,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agentdial__spin,
-  .agentdial__ring {
+  .agentdial__orbit,
+  .agentdial__ring,
+  .agentdial__halo,
+  .agentdial__iris {
     animation: none !important;
   }
 
@@ -274,15 +426,23 @@
   }
 }
 
-:root[data-reduced-motion='true'] .agentdial__spin,
+:root[data-reduced-motion='true'] .agentdial__orbit,
 :root[data-reduced-motion='true'] .agentdial__ring,
+:root[data-reduced-motion='true'] .agentdial__halo,
+:root[data-reduced-motion='true'] .agentdial__iris,
 :root[data-reduced-motion='true'] .agentdial__hold {
   animation: none;
 }
 
-/* -------------------------------------------------------- reply mode */
+/* --------------------------------------------- reply mode, and which brain
+ *
+ * One segmented pill, two uses: how he replies, and which Claude answers. They
+ * sit side by side in the same header, so they share every rule but the width —
+ * two full words need more room than "Aa+" does.
+ */
 
-.replymode {
+.replymode,
+.modelpick {
   display: inline-flex;
   flex: none;
   height: 18px;
@@ -291,7 +451,8 @@
   overflow: hidden;
 }
 
-.replymode__btn {
+.replymode__btn,
+.modelpick__btn {
   min-width: 24px;
   padding: 0 var(--s-3);
   border: 0;
@@ -305,17 +466,24 @@
     color var(--dur-fast) var(--ease-out);
 }
 
-.replymode__btn:hover:not(:disabled) {
+.modelpick__btn {
+  min-width: 46px;
+}
+
+.replymode__btn:hover:not(:disabled),
+.modelpick__btn:hover:not(:disabled) {
   color: var(--text-primary);
   background: var(--bg-hover);
 }
 
-.replymode__btn[data-on='true'] {
+.replymode__btn[data-on='true'],
+.modelpick__btn[data-on='true'] {
   color: var(--text-on-accent);
   background: var(--accent);
 }
 
-.replymode__btn:disabled {
+.replymode__btn:disabled,
+.modelpick__btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
@@ -354,14 +522,29 @@
   color: var(--text-dim);
 }
 
-/* Motion off still has to distinguish "thinking" from "off", so the sweep
+/* Motion off still has to distinguish "thinking" from "off", so the orbit
  * becomes a static three-quarter ring rather than nothing at all. */
 @media (prefers-reduced-motion: reduce) {
-  .agentdial[data-phase='warming'] .agentdial__spin,
-  .agentdial[data-phase='thinking'] .agentdial__spin {
+  .agentdial[data-presence='warming'] .agentdial__orbit,
+  .agentdial[data-presence='thinking'] .agentdial__orbit {
     border-color: var(--accent-line);
     border-top-color: var(--accent);
   }
+  .agentdial[data-presence='dictating'] .agentdial__iris {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+
+:root[data-reduced-motion='true'] .agentdial[data-presence='warming'] .agentdial__orbit,
+:root[data-reduced-motion='true'] .agentdial[data-presence='thinking'] .agentdial__orbit {
+  border-color: var(--accent-line);
+  border-top-color: var(--accent);
+}
+
+:root[data-reduced-motion='true'] .agentdial[data-presence='dictating'] .agentdial__iris {
+  animation: none;
+  opacity: 0.8;
 }
 
 /* ----------------------------------------------------------------- chip */
@@ -709,6 +892,42 @@
   align-items: center;
   gap: var(--s-4);
   padding-top: var(--s-4);
+}
+
+/* ------------------------------------------------- the dictation hold
+ *
+ * While buffer mode is on, everything he says is accumulating here rather than
+ * being acted on. It reads as a live transcript-in-progress: the label says
+ * what is happening, and the text is the proof he can keep talking.
+ */
+.voice__dictating {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, var(--accent-softer), transparent);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+}
+
+.voice__dictating-word {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.voice__dictating-text {
+  min-width: 0;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .voice__composer-hint {

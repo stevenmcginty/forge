@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentProfile, ClaudePermissionMode } from '@shared/types'
 import {
   ACCENT_PALETTE,
-  PERMISSION_MODES,
   effectivePermissionMode,
   makeCustomProfile,
+  permissionSpec,
+  profilePermissionModes,
   splitProfiles,
   supportsPermissionModes
 } from '@/lib/agents'
+import { useCommandPresence } from '@/hooks/useCommandPresence'
 import { useApp } from '@/state/AppState'
 import { AgentBadge } from './AgentBadge'
 import { Icon } from './Icon'
@@ -79,23 +81,37 @@ export function AgentChooser({
 
   const { shells, agents } = splitProfiles(state.settings.agentProfiles)
 
+  // Asked while the popover is open — a chooser that offers Codex on a machine
+  // without Codex is the exact moment the fact is worth having. Nothing is
+  // disabled by it: opening the pane is still allowed, and now says why.
+  const probe = useCommandPresence(open ? agents.map((p) => p.command) : [])
+
   const row = (profile: AgentProfile): ReactNode => {
-    const claude = supportsPermissionModes(profile)
+    const ladder = supportsPermissionModes(profile)
     const mode = effectivePermissionMode(profile)
+    const spec = permissionSpec(profile.command, mode)
+    const missing = probe.missing(profile.command)
     return (
       <div className="agent-chooser__line" key={profile.id}>
         <PopoverRow selected={profile.id === selectedId} onClick={() => pick(profile)}>
           <AgentBadge profile={profile} />
           <span className="agent-chooser__name truncate">{profile.name}</span>
-          {claude && mode !== 'default' ? (
-            <span className="agent-chooser__mode mono" data-danger={mode === 'bypass' ? 'true' : undefined}>
-              {shortMode(mode)}
+          {missing ? (
+            <span
+              className="agent-chooser__missing"
+              title={`${profile.command} is not on this machine — the pane will open as a shell and tell you how to install it`}
+            >
+              not installed
+            </span>
+          ) : spec && spec.chip ? (
+            <span className="agent-chooser__mode mono" data-danger={spec.danger ? 'true' : undefined}>
+              {spec.chip}
             </span>
           ) : (
             <span className="agent-chooser__cmd mono truncate">{profile.command || 'shell'}</span>
           )}
         </PopoverRow>
-        {claude ? (
+        {ladder ? (
           <button
             type="button"
             className="ghost-btn agent-chooser__modes"
@@ -109,7 +125,7 @@ export function AgentChooser({
 
         {modeFor === profile.id ? (
           <div className="agent-chooser__submenu" role="group" aria-label={`${profile.name} permission mode`}>
-            {PERMISSION_MODES.map((m) => (
+            {profilePermissionModes(profile).map((m) => (
               <button
                 key={m.id}
                 type="button"
@@ -210,10 +226,4 @@ export function AgentChooser({
       )}
     </Popover>
   )
-}
-
-function shortMode(mode: ClaudePermissionMode): string {
-  if (mode === 'bypass') return 'BYPASS'
-  if (mode === 'plan') return 'plan'
-  return 'edits'
 }

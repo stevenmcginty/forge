@@ -32,6 +32,25 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     remoteControl: true
   },
   {
+    id: 'codex',
+    name: 'Codex',
+    // OpenAI's CLI. Bare `codex` on purpose: like Claude Code it reads the
+    // permission mode off a flag Forge appends at launch (see
+    // PERMISSION_FAMILIES), so baking one in here would only fight the chooser.
+    command: 'codex',
+    // Near-white, because OpenAI's own mark is monochrome and because nothing
+    // else in the roster is: at badge size a hue is how you tell six agents
+    // apart, and the neutral greys are spoken for by shells.
+    accent: '#E8EAED',
+    badge: 'CX',
+    builtin: true,
+    kind: 'agent',
+    permissionMode: 'default'
+    // No mcpBridge: Codex speaks MCP through its own config.toml (and the
+    // `codex mcp` subcommand) rather than Claude Code's `--mcp-config` flag,
+    // so handing it the flag would only make it refuse to start.
+  },
+  {
     id: 'kimi',
     name: 'Kimi',
     command: 'kimi',
@@ -89,6 +108,36 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
 ]
 
 export const DEFAULT_PROFILE_ID = 'claude'
+
+/**
+ * Commands a built-in used to ship with, keyed by profile id.
+ *
+ * settings.json remembers every profile, so a built-in whose default command was
+ * wrong stays wrong on the machines that already ran it: `normaliseSettings`
+ * re-seeds a built-in that was *deleted*, but a stored one is left alone —
+ * correctly, since that is where a deliberate edit lives.
+ *
+ * The distinction this table draws is between an edit and a leftover. A stored
+ * command that is character-for-character a default Forge itself once wrote was
+ * never chosen by anybody, so replacing it with the current default takes
+ * nothing away. Anything else — including a hand-edit that merely resembles one —
+ * is the user's and is never touched.
+ *
+ * Only ever append. Removing a row strands the people still carrying that value,
+ * which is the exact bug this exists to fix.
+ */
+export const SUPERSEDED_BUILTIN_COMMANDS: Record<string, string[]> = {
+  // Shipped for one commit. `deepseek/` is DeepSeek's own API, which wants a key
+  // nobody handed a copy of Forge has, so the pane opened and died on its first
+  // message. The current default routes to the same model through OpenCode Zen,
+  // which answers with no credentials configured.
+  deepseek: ['opencode -m deepseek/deepseek-v4-flash']
+}
+
+/** The current default for a built-in whose stored command is a stale default. */
+export function migrateBuiltinCommand(id: string, command: string, builtinCommand: string): string {
+  return (SUPERSEDED_BUILTIN_COMMANDS[id] ?? []).includes(command.trim()) ? builtinCommand : command
+}
 
 /** Palette offered when creating a custom profile or a project. */
 export const ACCENT_PALETTE = [
@@ -185,33 +234,143 @@ export function commandExe(command: string): string {
 }
 
 /**
- * Whether a profile's command is Claude Code — i.e. whether the permission-mode
- * flags mean anything to it. Matches `claude`, a full path to it, and the .cmd
- * shim npm drops on Windows.
+ * Whether a profile's command is Claude Code specifically. Matches `claude`, a
+ * full path to it, and the .cmd shim npm drops on Windows.
+ *
+ * This is the narrow test, and the callers that want it want it: the session-id
+ * handshake, Remote Control and the `--mcp-config` bridge are Claude Code
+ * features, not "agent" features. For "does this thing have permission modes?"
+ * use `permissionFamily` — Codex has them too, and they are not these flags.
  */
 export function isClaudeCommand(command: string): boolean {
-  return commandExe(command) === 'claude'
+  return permissionFamily(command) === 'claude'
 }
 
-/** The flag each mode adds. `default` adds nothing at all. */
-export const PERMISSION_FLAGS: Record<ClaudePermissionMode, string> = {
-  default: '',
-  acceptEdits: '--permission-mode acceptEdits',
-  plan: '--permission-mode plan',
-  bypass: '--dangerously-skip-permissions'
-}
+/* ------------------------------------------------------------------ families */
 
-export const PERMISSION_MODES: Array<{
+/**
+ * A CLI whose permission ladder Forge knows how to drive.
+ *
+ * Adding one is: a key here, a row in PERMISSION_FAMILIES, and nothing else —
+ * every chooser, sheet and settings row reads the table rather than testing for
+ * a particular agent.
+ */
+export type PermissionFamily = 'claude' | 'codex'
+
+export interface PermissionModeSpec {
   id: ClaudePermissionMode
+  /** What the row is called in the chooser. */
   label: string
+  /** The one-line explanation under it. */
   note: string
+  /** What the pane header is badged with. Empty for the mode that is silent. */
+  chip: string
+  /** The flag appended to the command. Empty means "add nothing". */
+  flag: string
   danger?: boolean
-}> = [
-  { id: 'default', label: 'Default', note: 'Claude asks before it acts' },
-  { id: 'acceptEdits', label: 'Accept edits', note: 'file edits go through, commands still ask' },
-  { id: 'plan', label: 'Plan', note: 'read and think, change nothing' },
-  { id: 'bypass', label: 'Bypass', note: 'never asks — it can do anything you can', danger: true }
-]
+}
+
+/**
+ * The ladder each family climbs, rung by rung.
+ *
+ * The rungs are Claude Code's names because Claude Code got here first, but
+ * each family spells its own flags and — importantly — its own *words*. Codex's
+ * middle rung is not "accept edits": `--full-auto` lets it run commands too, so
+ * long as they stay inside the folder. Calling that "accept edits" would be
+ * describing Claude's mode while launching Codex's.
+ */
+export const PERMISSION_FAMILIES: Record<PermissionFamily, PermissionModeSpec[]> = {
+  claude: [
+    { id: 'default', label: 'Default', note: 'Claude asks before it acts', chip: '', flag: '' },
+    {
+      id: 'acceptEdits',
+      label: 'Accept edits',
+      note: 'file edits go through, commands still ask',
+      chip: 'EDITS',
+      flag: '--permission-mode acceptEdits'
+    },
+    { id: 'plan', label: 'Plan', note: 'read and think, change nothing', chip: 'PLAN', flag: '--permission-mode plan' },
+    {
+      id: 'bypass',
+      label: 'Bypass',
+      note: 'never asks — it can do anything you can',
+      chip: 'BYPASS',
+      flag: '--dangerously-skip-permissions',
+      danger: true
+    }
+  ],
+  codex: [
+    { id: 'default', label: 'Default', note: 'Codex asks before it acts', chip: '', flag: '' },
+    {
+      id: 'acceptEdits',
+      label: 'Full auto',
+      // --full-auto is workspace-write plus on-failure approval: it edits and
+      // runs without asking, but the sandbox keeps it inside this folder, and
+      // anything that needs out comes back to you.
+      note: 'edits and runs inside this folder without asking',
+      chip: 'AUTO',
+      flag: '--full-auto'
+    },
+    {
+      id: 'plan',
+      label: 'Read-only',
+      // Codex has no plan mode. A read-only sandbox is the honest equivalent:
+      // it can look at everything and change nothing, and anything that would
+      // write comes back as an approval request rather than happening.
+      note: 'read and think, change nothing',
+      chip: 'READ-ONLY',
+      flag: '--sandbox read-only'
+    },
+    {
+      id: 'bypass',
+      label: 'Bypass',
+      note: 'no approvals, no sandbox — it can do anything you can',
+      chip: 'BYPASS',
+      flag: '--dangerously-bypass-approvals-and-sandbox',
+      danger: true
+    }
+  ]
+}
+
+/**
+ * Which ladder this command climbs, or null for something Forge has no flags
+ * for. A bare PowerShell, `gemini`, a batch file: null, and every permission
+ * control disappears rather than offering a choice that does nothing.
+ */
+export function permissionFamily(command: string): PermissionFamily | null {
+  const exe = commandExe(command)
+  if (exe === 'claude') return 'claude'
+  if (exe === 'codex') return 'codex'
+  return null
+}
+
+/** The modes offered for a command — empty for anything with no ladder. */
+export function permissionModes(command: string): PermissionModeSpec[] {
+  const family = permissionFamily(command)
+  return family ? PERMISSION_FAMILIES[family] : []
+}
+
+/** One rung, by id. Null when the command has no ladder or the id is junk. */
+export function permissionSpec(command: string, mode: ClaudePermissionMode): PermissionModeSpec | null {
+  return permissionModes(command).find((m) => m.id === mode) ?? null
+}
+
+/**
+ * Flags a command already carries by hand, which Forge must not duplicate or
+ * contradict. Written per family because they share no spelling at all — and
+ * Codex's are short options too, so `-s read-only` has to count.
+ */
+const EXPLICIT_FLAGS: Record<PermissionFamily, RegExp> = {
+  claude: /--permission-mode\b|--dangerously-skip-permissions\b/,
+  codex:
+    /--full-auto\b|--yolo\b|--dangerously-bypass-approvals-and-sandbox\b|--sandbox\b|--ask-for-approval\b|(?:^|\s)-[as](?:\s|=|$)/
+}
+
+/** True when the command line already says what mode it wants. */
+export function hasExplicitPermissionFlag(command: string): boolean {
+  const family = permissionFamily(command)
+  return family ? EXPLICIT_FLAGS[family].test(command) : false
+}
 
 export function isPermissionMode(value: unknown): value is ClaudePermissionMode {
   return value === 'default' || value === 'acceptEdits' || value === 'plan' || value === 'bypass'

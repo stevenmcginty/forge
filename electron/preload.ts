@@ -53,8 +53,12 @@ const api: ForgeApi = {
   },
 
   stt: {
-    start: () => ipcRenderer.invoke(IPC.sttStart),
+    // `?? {}` rather than passing undefined through: the handler treats an
+    // empty request as the plain push-to-talk start, which is what an old
+    // caller with no arguments means.
+    start: (options) => ipcRenderer.invoke(IPC.sttStart, options ?? {}),
     stop: () => ipcRenderer.invoke(IPC.sttStop),
+    capture: () => ipcRenderer.invoke(IPC.sttCapture),
     reload: (force) => ipcRenderer.invoke(IPC.sttReload, force === true),
     status: () => ipcRenderer.invoke(IPC.sttStatus),
     onStatus: (cb) => subscribe(IPC.sttStatusEvent, cb),
@@ -78,6 +82,16 @@ const api: ForgeApi = {
     makeVideo: (req) => ipcRenderer.invoke(IPC.voiceMakeVideo, req),
     speak: (req) => ipcRenderer.invoke(IPC.voiceSpeak, req),
     cancelSpeak: (requestId) => ipcRenderer.invoke(IPC.voiceSpeakCancel, requestId)
+  },
+
+  voiceAgent: {
+    start: (req) => ipcRenderer.invoke(IPC.voiceAgentStart, req ?? {}),
+    stop: () => ipcRenderer.invoke(IPC.voiceAgentStop),
+    utterance: (text) => ipcRenderer.invoke(IPC.voiceAgentUtterance, String(text ?? '')),
+    interrupt: () => ipcRenderer.invoke(IPC.voiceAgentInterrupt),
+    onEvent: (cb) => subscribe(IPC.voiceAgentEvent, cb),
+    onToolRequest: (cb) => subscribe(IPC.voiceAgentToolRequest, cb),
+    toolResult: (result) => ipcRenderer.invoke(IPC.voiceAgentToolResult, result)
   },
 
   memory: {
@@ -159,6 +173,7 @@ const api: ForgeApi = {
   },
 
   probeAgents: () => ipcRenderer.invoke(IPC.agentsProbe),
+  probeCommands: (commands) => ipcRenderer.invoke(IPC.agentsWhich, commands),
 
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   makeProjectFolder: (req) => ipcRenderer.invoke(IPC.makeProjectFolder, req),

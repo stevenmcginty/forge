@@ -4,7 +4,7 @@ import { createConnection, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { app, ipcMain, type BrowserWindow } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { SttErrorKind, SttPhase, SttStatus } from '@shared/types'
+import type { SttErrorKind, SttMode, SttPhase, SttStartOptions, SttStatus } from '@shared/types'
 import {
   MAX_RAPID_RESTARTS,
   OFF_STATUS,
@@ -58,6 +58,19 @@ let status: SttStatus = { ...OFF_STATUS }
 const budget = new RestartBudget()
 /** A start() that arrived before the model was ready; fired on `ready`. */
 let pendingStart = false
+/**
+ * What the last start() asked for, so a start deferred until `ready` opens the
+ * session the caller wanted rather than a plain one. Reset to `phrase` by every
+ * start with no mode, which is what keeps dictation's behaviour untouched.
+ */
+let wantedMode: SttMode = 'phrase'
+/**
+ * Whether the last start() was a conversation (the agent) rather than
+ * dictation. Read when the start is actually sent — including a start deferred
+ * until the model is ready — and reset to false by any plain start, which is
+ * what keeps the dictation hotkey's behaviour untouched.
+ */
+let wantedConversation = false
 /** Set while we are deliberately tearing the sidecar down. */
 let disposing = false
 /** Set by disposeSttSidecar: the app is leaving, never respawn. */
@@ -388,7 +401,9 @@ function handleLine(line: string): void {
 
 /* ---------------------------------------------------------------- actions */
 
-function startListening(): SttStatus {
+function startListening(options?: SttStartOptions): SttStatus {
+  wantedMode = options?.mode === 'wake' ? 'wake' : 'phrase'
+  wantedConversation = options?.conversation === true
   if (status.phase === 'error' && status.error && !isTransientSttError(status.error.kind)) {
     // A setup problem. Don't spawn again until the user fixes the path, which
     // routes through reload().
@@ -411,14 +426,35 @@ function startListening(): SttStatus {
  * The silence timeout rides along with every start rather than only being an
  * argv flag: otherwise changing it in Settings would do nothing until the
  * sidecar happened to be respawned.
+ *
+ * `mode` is only ever *added*, never sent as `phrase`: an older sidecar has
+ * never heard of it, and a start it does not recognise a key in is a start it
+ * would otherwise refuse.
  */
 function sendStart(): void {
-  write({ cmd: 'start', autoStop: getSettings().sttAutoStopSeconds })
+  const msg: Json = { cmd: 'start', autoStop: getSettings().sttAutoStopSeconds }
+  if (wantedMode === 'wake') msg['mode'] = 'wake'
+  if (wantedConversation) msg['conversation'] = true
+  write(msg)
 }
 
 function stopListening(): SttStatus {
   pendingStart = false
+  wantedMode = 'phrase'
+  wantedConversation = false
   if (child && status.ready) write({ cmd: 'stop' })
+  return status
+}
+
+/**
+ * Jump straight into capture inside an open wake session.
+ *
+ * Never starts anything: with no sidecar, or a session that is not in wake
+ * mode, there is nothing to capture into and the sidecar says so in its log
+ * rather than the app conjuring a session nobody asked for.
+ */
+function captureNow(): SttStatus {
+  if (child && status.ready) write({ cmd: 'capture' })
   return status
 }
 
@@ -469,8 +505,9 @@ function kill(): void {
 /* -------------------------------------------------------------------- ipc */
 
 export function registerSttHandlers(): void {
-  ipcMain.handle(IPC.sttStart, () => startListening())
+  ipcMain.handle(IPC.sttStart, (_e, options?: SttStartOptions) => startListening(options))
   ipcMain.handle(IPC.sttStop, () => stopListening())
+  ipcMain.handle(IPC.sttCapture, () => captureNow())
   ipcMain.handle(IPC.sttReload, (_e, force: boolean) => reload(force === true))
   ipcMain.handle(IPC.sttStatus, () => status)
 }

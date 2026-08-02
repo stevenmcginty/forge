@@ -5,12 +5,15 @@ import { Icon } from '@/components/Icon'
 import type { BrainStatus } from '@/lib/voicebrain'
 import {
   BrainChip,
+  jarvisPresence,
   LastLine,
+  ModelToggle,
   ReplyModeToggle,
   VoiceComposer,
   VoiceDial,
   VoiceLog,
-  VoiceOnlyNote
+  VoiceOnlyNote,
+  type JarvisPresence
 } from '@/components/VoiceSurface'
 import { VoiceAgentContext, type PaneOption, type VoiceAgentCtx } from '@/state/VoiceAgent'
 import './OverlayApp.css'
@@ -101,9 +104,15 @@ function useMirroredAgent(snap: OverlaySnapshot | null, levelRef: React.RefObjec
 
       brainName: snap?.brainName ?? '',
       brainStatus: snap?.brainStatus ?? { ok: false, detail: 'connecting…' },
+      brainModel: snap?.brainModel ?? '',
+      setBrainModel: (model: string) => send({ kind: 'setBrainModel', model }),
       replyMode: snap?.replyMode ?? 'both',
       setReplyMode: (mode: VoiceReplyMode) => send({ kind: 'setReplyMode', mode }),
-      canSpeak: snap?.canSpeak ?? false
+      canSpeak: snap?.canSpeak ?? false,
+      wakeMode: snap?.wakeMode ?? false,
+      capturing: snap?.capturing ?? false,
+      dictating: snap?.dictating ?? false,
+      dictationBuffer: snap?.dictationBuffer ?? ''
     }),
     [snap, levelRef]
   )
@@ -142,6 +151,7 @@ export function OverlayApp(): ReactNode {
   const ctx = useMirroredAgent(snap, levelRef)
   const mode: VoiceHubMode = snap?.mode ?? 'floating'
   const voiceOnly = ctx.replyMode === 'voice'
+  const presence = jarvisPresence(ctx.phase, ctx.wakeMode, ctx.capturing, ctx.dictating)
 
   const setMode = useCallback((next: VoiceHubMode) => send({ kind: 'setMode', mode: next }), [])
 
@@ -161,57 +171,95 @@ export function OverlayApp(): ReactNode {
 
   return (
     <VoiceAgentContext.Provider value={ctx}>
-      <div className="ovl" data-mode={mode} data-phase={ctx.phase}>
+      <div className="ovl" data-mode={mode} data-presence={presence}>
         {mode === 'expanded' ? (
           <OverlayCard voiceOnly={voiceOnly} status={ctx.brainStatus} setMode={setMode} />
         ) : (
-          <OverlayPill setMode={setMode} />
+          <OverlayPill presence={presence} thinkingFor={ctx.thinkingFor} setMode={setMode} />
         )}
       </div>
     </VoiceAgentContext.Provider>
   )
 }
 
-/* ---------------------------------------------------------------- the pill */
+/* ----------------------------------------------------------------- the orb */
 
 /**
- * The small shape: a round button, a line of status, and two chevrons.
- *
- * Its body is a drag region (`-webkit-app-region: drag` in the stylesheet), so
- * Windows moves the window itself — there is no pointermove handler in this
- * file at all, which is the one real simplification of being a window rather
- * than a div. Everything you can click is marked `no-drag` or it would be
- * swallowed by the drag region and never fire.
+ * What each presence is called on the readout, in one or two words. The orb
+ * already says all of this as light; the word is for the first week, and for
+ * telling "thinking" apart from "hung" once the count starts.
  */
-function OverlayPill({ setMode }: { setMode: (m: VoiceHubMode) => void }): ReactNode {
+const PRESENCE_WORD: Record<JarvisPresence, string> = {
+  off: 'asleep',
+  warming: 'waking…',
+  monitoring: 'on watch',
+  listening: 'listening',
+  capturing: 'hearing you',
+  dictating: 'dictating',
+  thinking: 'thinking…',
+  speaking: 'speaking',
+  replied: 'answered',
+  error: 'error'
+}
+
+/**
+ * Jarvis on the desktop: the orb standing free of any chrome, with a small
+ * obsidian readout plate beside it — his name, what he is doing, and the last
+ * thing that passed between you. This is the shape that lives over every other
+ * application, so the window is transparent and the orb really is a sphere
+ * against whatever is behind it.
+ *
+ * The plate and the orb's margin are drag regions (`-webkit-app-region: drag`
+ * in the stylesheet), so Windows moves the window itself — there is no
+ * pointermove handler in this file at all. Everything you can click is marked
+ * `no-drag` or it would be swallowed by the drag region and never fire.
+ */
+function OverlayPill({
+  presence,
+  thinkingFor,
+  setMode
+}: {
+  presence: JarvisPresence
+  thinkingFor: number
+  setMode: (m: VoiceHubMode) => void
+}): ReactNode {
+  const word =
+    presence === 'thinking' && thinkingFor >= 5 ? `thinking ${thinkingFor}s` : PRESENCE_WORD[presence]
   return (
-    <div className="ovl__pill">
-      <div className="ovl__grip" aria-hidden="true" />
-      <div className="ovl__dial">
+    <div className="ovl__jarvis">
+      <div className="ovl__orbwell">
         <VoiceDial compact />
       </div>
-      <div className="ovl__pillbody">
-        <LastLine />
-      </div>
-      <div className="ovl__pillbtns">
-        <button
-          type="button"
-          className="ovl__icon"
-          title="Open the conversation"
-          aria-label="Open the conversation"
-          onClick={() => setMode('expanded')}
-        >
-          <Icon name="expand" size={12} />
-        </button>
-        <button
-          type="button"
-          className="ovl__icon"
-          title="Send it back to the status bar"
-          aria-label="Send it back to the status bar"
-          onClick={() => setMode('docked')}
-        >
-          <Icon name="close" size={13} />
-        </button>
+      <div className="ovl__plate">
+        <div className="ovl__plate-head">
+          <span className="ovl__name">Jarvis</span>
+          <span className="ovl__word" data-presence={presence}>
+            {word}
+          </span>
+          <span className="ovl__platebtns">
+            <button
+              type="button"
+              className="ovl__icon"
+              title="Open the conversation"
+              aria-label="Open the conversation"
+              onClick={() => setMode('expanded')}
+            >
+              <Icon name="expand" size={12} />
+            </button>
+            <button
+              type="button"
+              className="ovl__icon"
+              title="Send him back to the status bar"
+              aria-label="Send him back to the status bar"
+              onClick={() => setMode('docked')}
+            >
+              <Icon name="close" size={13} />
+            </button>
+          </span>
+        </div>
+        <div className="ovl__pillbody">
+          <LastLine />
+        </div>
       </div>
     </div>
   )
@@ -231,16 +279,18 @@ function OverlayCard({
   return (
     <div className="ovl__card">
       <header className="ovl__head" onDoubleClick={() => setMode('floating')}>
-        <span className="ovl__title">Voice</span>
+        <span className="ovl__mark" aria-hidden="true" />
+        <span className="ovl__title">Jarvis</span>
         <BrainChip />
         <span className="ovl__spacer" />
         <div className="ovl__headbtns">
           <ReplyModeToggle />
+          <ModelToggle />
           <button
             type="button"
             className="ovl__icon"
-            title="Shrink to the pill"
-            aria-label="Shrink to the pill"
+            title="Shrink to the orb"
+            aria-label="Shrink to the orb"
             onClick={() => setMode('floating')}
           >
             <Icon name="chevronDown" size={13} />

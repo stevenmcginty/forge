@@ -2,7 +2,13 @@ import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
-import { BUILTIN_AGENT_PROFILES, inferKind, isClaudeCommand, isPermissionMode } from '@shared/agents'
+import {
+  BUILTIN_AGENT_PROFILES,
+  inferKind,
+  isPermissionMode,
+  migrateBuiltinCommand,
+  permissionFamily
+} from '@shared/agents'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
@@ -107,6 +113,9 @@ function defaultSettings(): Settings {
     // Colours on out of the box: telling two Claudes apart by the colour they
     // print in is the reason the tints exist.
     tabTextColours: true,
+    // On out of the box: the rail already tells you how many shells a project
+    // has, and "are any of them still thinking" is the other half of that.
+    railBusyRing: true,
     shell: 'pwsh.exe',
     catchShots: true,
     shotsKeep: DEFAULT_KEEP,
@@ -129,6 +138,14 @@ function defaultSettings(): Settings {
     // Gemini is the live brain; with no key set it degrades to the stub.
     voiceBrain: 'gemini',
     anthropicKey: '',
+    // The Claude voice brain's model. An alias, not a pinned id — the CLI
+    // resolves it to whatever is current, and it costs no key: the Agent SDK
+    // session signs in with the machine's own `claude` login. Sonnet because
+    // this is a conversation, and latency is the thing you notice.
+    voiceClaudeModel: 'sonnet',
+    // Off: the wake-word listener is new and unproven, so it stays an opt-in
+    // rather than something that starts eavesdropping on everyone's upgrade.
+    voiceWakeWord: false,
     geminiKey: '',
     geminiModel: 'gemini-2.5-flash',
     accountName: defaultAccountName(),
@@ -144,14 +161,20 @@ function defaultSettings(): Settings {
     // talk to while you work.
     voiceReplyMode: 'both',
     voiceReplyVoice: '',
-    // Neural speech by default. With no Gemini key the renderer's engine chain
-    // degrades to the local SAPI voice on its own, so this is safe to prefer.
-    voiceEngine: 'gemini',
+    // Neural speech by default — the Edge engine, because it needs no key and
+    // has no per-minute quota, so the voice cannot swap to SAPI mid-reply the
+    // way the quota-capped Gemini default used to. If the network is down the
+    // renderer's engine chain degrades to the local voice on its own.
+    voiceEngine: 'edge',
+    // Empty = DEFAULT_EDGE_VOICE in shared/tts.ts (en-GB-SoniaNeural).
+    voiceEdgeVoice: '',
     // Empty = the built-ins in electron/gemini-tts.ts (Sulafat, 3.1 flash TTS).
     voiceTtsVoice: '',
     voiceTtsModel: '',
     // On: it is what replaced the spoken "listening again" announcement.
     voiceEarcons: true,
+    // A finished terminal should say so — but only when nobody is looking.
+    terminalExitChime: true,
     projectsRoot: '',
     // Empty = use gemini-media.ts's built-in default, which the MCP bridge shares.
     geminiImageModel: '',
@@ -359,6 +382,10 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     if (!p.badge) p.badge = p.name.slice(0, 2).toUpperCase()
     const builtin = BUILTIN_AGENT_PROFILES.find((b) => b.id === p.id)
     p.builtin = Boolean(builtin)
+    // A built-in still carrying a command Forge itself shipped and then fixed
+    // gets the fix. Without this the correction only ever reaches machines that
+    // had never run the broken version — i.e. not the ones that hit the bug.
+    if (builtin) p.command = migrateBuiltinCommand(p.id, p.command, builtin.command)
     // Adopt a new built-in default (e.g. the Gemini bridge) into a settings.json
     // written before the flag existed, without overriding a deliberate opt-out.
     if (p.mcpBridge === undefined && builtin?.mcpBridge !== undefined) p.mcpBridge = builtin.mcpBridge
@@ -366,9 +393,12 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // Profiles written before the shell/agent split get a kind from their
     // command; a built-in's kind is not up for negotiation.
     p.kind = builtin?.kind ?? inferKind(p)
-    // A permission mode on something that is not Claude is noise: drop it, so
-    // renaming a profile's command cannot leave a stale flag behind.
-    if (!isClaudeCommand(p.command) || !isPermissionMode(p.permissionMode)) delete p.permissionMode
+    // A permission mode on something with no ladder to climb is noise: drop it,
+    // so renaming a profile's command cannot leave a stale flag behind. Note
+    // this is the *family* test, not the Claude one — Codex has modes of its
+    // own, and stripping them on load would silently reset the profile every
+    // time Forge started.
+    if (permissionFamily(p.command) === null || !isPermissionMode(p.permissionMode)) delete p.permissionMode
   }
 
   const win = s.window ?? DEFAULT_SETTINGS.window
@@ -381,6 +411,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     terminalFontFamily: s.terminalFontFamily || DEFAULT_SETTINGS.terminalFontFamily,
     mosaicText: s.mosaicText === 'scaled' ? 'scaled' : DEFAULT_SETTINGS.mosaicText,
     tabTextColours: s.tabTextColours ?? DEFAULT_SETTINGS.tabTextColours,
+    railBusyRing: s.railBusyRing ?? DEFAULT_SETTINGS.railBusyRing,
     shell: s.shell || DEFAULT_SETTINGS.shell,
     catchShots: s.catchShots ?? true,
     shotsKeep: clampKeep(s.shotsKeep),
@@ -422,11 +453,25 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
         : Boolean(s.voiceOverlayWindow),
     voiceBargeIn:
       s.voiceBargeIn === undefined ? DEFAULT_SETTINGS.voiceBargeIn : Boolean(s.voiceBargeIn),
+    // Every member of VoiceBrainId, and it has to stay that way: `groq` was
+    // missing from this list, so choosing Groq in Settings was written to disk
+    // and then silently normalised back to Gemini on the next read — the brain
+    // you picked was never the brain you got.
     voiceBrain:
-      brain === 'claude' || brain === 'openai' || brain === 'stub' || brain === 'gemini' || brain === 'openrouter'
+      brain === 'claude' ||
+      brain === 'openai' ||
+      brain === 'stub' ||
+      brain === 'gemini' ||
+      brain === 'openrouter' ||
+      brain === 'groq'
         ? brain
         : DEFAULT_SETTINGS.voiceBrain,
     anthropicKey: typeof s.anthropicKey === 'string' ? s.anthropicKey : '',
+    voiceClaudeModel:
+      typeof s.voiceClaudeModel === 'string' && s.voiceClaudeModel.trim()
+        ? s.voiceClaudeModel.trim().slice(0, 80)
+        : DEFAULT_SETTINGS.voiceClaudeModel,
+    voiceWakeWord: Boolean(s.voiceWakeWord),
     geminiKey: typeof s.geminiKey === 'string' ? s.geminiKey.trim() : '',
     geminiModel:
       typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel,
@@ -450,13 +495,28 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
         ? s.voiceReplyMode
         : DEFAULT_SETTINGS.voiceReplyMode,
     voiceReplyVoice: typeof s.voiceReplyVoice === 'string' ? s.voiceReplyVoice.slice(0, 120) : '',
-    voiceEngine: s.voiceEngine === 'local' || s.voiceEngine === 'gemini' ? s.voiceEngine : DEFAULT_SETTINGS.voiceEngine,
+    // A stored 'gemini' with no voice ever picked is the OLD default, not a
+    // choice — every settings.json written before the Edge engine existed says
+    // exactly that, and those users were the ones hearing the quota swap the
+    // voice to SAPI mid-reply. They get the new default. A 'gemini' WITH a
+    // picked voice is somebody's deliberate selection and is kept — and the
+    // Settings page pins voiceTtsVoice the moment anyone picks the Gemini
+    // engine, so a deliberate choice made after this shipped sticks too.
+    voiceEngine:
+      s.voiceEngine === 'local' || s.voiceEngine === 'edge'
+        ? s.voiceEngine
+        : s.voiceEngine === 'gemini' && typeof s.voiceTtsVoice === 'string' && s.voiceTtsVoice.trim()
+          ? 'gemini'
+          : DEFAULT_SETTINGS.voiceEngine,
+    voiceEdgeVoice: typeof s.voiceEdgeVoice === 'string' ? s.voiceEdgeVoice.trim().slice(0, 60) : '',
     // Blank is meaningful for both: "whatever gemini-tts.ts defaults to".
     voiceTtsVoice: typeof s.voiceTtsVoice === 'string' ? s.voiceTtsVoice.trim().slice(0, 40) : '',
     voiceTtsModel: typeof s.voiceTtsModel === 'string' ? s.voiceTtsModel.trim().slice(0, 80) : '',
     // Undefined means a settings.json written before earcons existed, and the
     // answer for that file is the default (on) rather than a silent off.
     voiceEarcons: s.voiceEarcons === undefined ? DEFAULT_SETTINGS.voiceEarcons : Boolean(s.voiceEarcons),
+    terminalExitChime:
+      s.terminalExitChime === undefined ? DEFAULT_SETTINGS.terminalExitChime : Boolean(s.terminalExitChime),
     projectsRoot: typeof s.projectsRoot === 'string' ? s.projectsRoot.slice(0, 400) : '',
     voiceRelayGraceMs: Number.isFinite(s.voiceRelayGraceMs)
       ? clamp(s.voiceRelayGraceMs as number, 0, 60_000)

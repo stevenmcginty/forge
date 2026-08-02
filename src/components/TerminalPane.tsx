@@ -101,6 +101,31 @@ export function TerminalPane({
     if (!focused) actions.focusPane(leaf.id)
   }, [actions, focused, leaf.id])
 
+  /**
+   * Put the caret back in the terminal, whether or not React thinks anything
+   * changed.
+   *
+   * `claimFocus` only dispatches when the pane is *not* the focused one, and
+   * the effect above only fires when that flag moves — so a pane that is
+   * already "focused" in app state but has lost DOM focus (you opened a
+   * popover, renamed a tab, alt-tabbed away) had nothing left to hand the caret
+   * back. That is the state where the cursor sits there as a still bar and
+   * keystrokes go nowhere. Clicking the terminal now always re-asserts it.
+   */
+  const grabCaret = useCallback(() => {
+    claimFocus()
+    terminalHost.focus(leaf.id)
+  }, [claimFocus, leaf.id])
+
+  // Coming back to Forge from another app should land you where you left off,
+  // not in a pane that is up but deaf.
+  useEffect(() => {
+    if (!focused) return
+    const onWindowFocus = (): void => terminalHost.focus(leaf.id)
+    window.addEventListener('focus', onWindowFocus)
+    return () => window.removeEventListener('focus', onWindowFocus)
+  }, [focused, leaf.id])
+
   /* -------------------------------------------------------------- title */
 
   const commitTitle = (): void => {
@@ -119,22 +144,56 @@ export function TerminalPane({
 
   /* --------------------------------------------------------- dropped files */
 
-  const carriesFiles = (e: React.DragEvent): boolean => Array.from(e.dataTransfer.types).includes('Files')
+  /**
+   * Whether a drag is worth taking. Deliberately generous: a drag whose
+   * payload we cannot see yet counts as maybe-files.
+   *
+   * Being strict here is what made dropping an image a coin toss. The `drop`
+   * event only fires at all if something called `preventDefault` on `dragover`
+   * first — so any drag we decline mid-flight is a drop that never happens,
+   * silently. An OS drag out of Explorer, and Electron's own `startDrag` from
+   * the screenshot tray, do not always advertise `Files` in `types` on every
+   * dragover. So we accept anything that is not plainly *not* a file, and sort
+   * it out at drop time, where the real payload is finally readable.
+   */
+  const maybeFiles = (e: React.DragEvent): boolean => {
+    const types = Array.from(e.dataTransfer.types)
+    if (types.includes('Files')) return true
+    // A tab being dragged around the strip is ours and is not a file.
+    if (types.some((t) => t.startsWith('application/'))) return false
+    return !types.includes('text/plain') && !types.includes('text/uri-list')
+  }
+
+  const acceptDrag = (e: React.DragEvent): void => {
+    if (!maybeFiles(e)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setDropping(true)
+  }
 
   /**
    * A file dropped on a pane types its quoted path at the cursor — which is
    * exactly what you want when you have just dragged a screenshot out of the
    * tray and onto an agent.
+   *
+   * Focus first, text second, and a frame between them. The path is delivered
+   * as a bracketed paste, and an agent that has just been told the terminal
+   * lost focus (xterm reports focus in/out to the program, DECSET 1004) can
+   * drop the paste that follows — which is why this only ever worked reliably
+   * on a pane you had already typed into. Now the pane is made focused, the
+   * focus-in byte goes down the PTY, and the path arrives at a prompt that is
+   * listening for it.
    */
   const onDropFiles = (e: React.DragEvent): void => {
-    if (!carriesFiles(e)) return
+    // Unconditional: an unprevented file drop makes Chromium navigate the
+    // window to the file, which would take the whole app down with it.
     e.preventDefault()
     setDropping(false)
     const quoted = droppedFilePaths(e).map((p) => `"${p}"`)
     if (quoted.length === 0) return
     claimFocus()
-    terminalHost.paste(leaf.id, `${quoted.join(' ')} `)
     terminalHost.focus(leaf.id)
+    requestAnimationFrame(() => terminalHost.paste(leaf.id, `${quoted.join(' ')} `))
   }
 
   const statusLabel = paneStatusLabel(runtime)
@@ -175,12 +234,8 @@ export function TerminalPane({
       style={{ '--pane-accent': profile.accent } as React.CSSProperties}
       onPointerDownCapture={claimFocus}
       onFocusCapture={claimFocus}
-      onDragOver={(e) => {
-        if (!carriesFiles(e)) return
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'copy'
-        setDropping(true)
-      }}
+      onDragEnter={acceptDrag}
+      onDragOver={acceptDrag}
       onDragLeave={(e) => {
         // Ignore the flurry of leave events from crossing child elements.
         if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
@@ -307,6 +362,7 @@ export function TerminalPane({
       <div
         className="pane__terminal"
         ref={containerRef}
+        onPointerDown={grabCaret}
         onContextMenu={(e) => {
           e.preventDefault()
           claimFocus()

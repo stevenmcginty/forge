@@ -21,6 +21,7 @@ import type {
 } from '@shared/types'
 import { editImage, makeImage, makeVideo, type MediaResult } from './gemini-media'
 import { speak as speakGemini } from './gemini-tts'
+import { speakEdge } from './edge-tts'
 import { adoptShotFiles } from './shots-watcher'
 import { getDataDir, getSettings } from './store'
 
@@ -459,6 +460,29 @@ export function registerVoiceHandlers(): void {
       speaking.set(id, controller)
     }
     try {
+      // The free engine takes a different road entirely: no key, one socket,
+      // MP3 back. The renderer's chain decides which engine to ask; this
+      // handler only answers for the one named.
+      if (req?.engine === 'edge') {
+        const result = await speakEdge({
+          text: String(req?.text ?? ''),
+          voice: req?.voice || settings.voiceEdgeVoice,
+          signal: controller.signal
+        })
+        if (!result.ok) return { ok: false, error: result.error, kind: result.kind }
+        return {
+          ok: true,
+          audio: result.audio.toString('base64'),
+          format: 'mp3',
+          mime: result.mime,
+          // An MP3 carries its own rate; these two are for pcm16 only.
+          sampleRate: 0,
+          channels: 1,
+          model: 'edge-neural',
+          voice: result.voice,
+          ms: result.ms
+        }
+      }
       const result = await speakGemini({
         // Read here, not passed from the renderer — same rule as the media calls.
         key: settings.geminiKey,
@@ -471,6 +495,7 @@ export function registerVoiceHandlers(): void {
       const out: VoiceSpeakResult = {
         ok: true,
         audio: result.audio.toString('base64'),
+        format: 'pcm16',
         mime: result.mime,
         sampleRate: result.sampleRate,
         channels: result.channels,

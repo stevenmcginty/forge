@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
+  DEFAULT_EDGE_VOICE,
   DEFAULT_TTS_MODEL,
   DEFAULT_TTS_VOICE,
+  EDGE_VOICES,
   TTS_MODELS,
   TTS_SAMPLE_LINE,
   TTS_VOICES
@@ -44,6 +46,26 @@ export function VoiceSection(): ReactNode {
 
       <Card title="Dictation" hint="Push the toggle key, talk, and the words are typed into the focused pane.">
         <DictationSetup />
+      </Card>
+
+      <Card
+        title="Wake word"
+        hint="Say “hey Jarvis” and the agent activates on its own — no hotkey. Dictation and its toggle key work exactly as before, whether this is on or off."
+      >
+        <Row
+          label="Listen for “hey Jarvis”"
+          hint="Keeps the mic open in the STT sidecar at about 1% CPU, just listening for the phrase, until it hears it."
+        >
+          <Toggle
+            checked={s.voiceWakeWord}
+            onChange={(on) => actions.patchSettings({ voiceWakeWord: on })}
+            label="Listen for “hey Jarvis”"
+          />
+        </Row>
+        <p className="scard__hint">
+          Needs the <span className="mono">openwakeword</span> package in the STT Python environment set up under
+          Dictation above.
+        </p>
       </Card>
 
       <Card
@@ -176,7 +198,8 @@ const MODES: Array<{ id: VoiceReplyMode; label: string; hint: string }> = [
 ]
 
 const ENGINES: Array<{ id: VoiceEngine; label: string; hint: string }> = [
-  { id: 'gemini', label: 'Neural', hint: 'A real voice from Google. Needs the Gemini key and the network' },
+  { id: 'edge', label: 'Neural — free', hint: 'Microsoft’s Edge voices. No key, no quota — the default' },
+  { id: 'gemini', label: 'Neural — Gemini', hint: 'Google’s voices. Needs the Gemini key, and a free key runs out after a few sentences a minute' },
   { id: 'local', label: 'Built-in', hint: 'Windows’ own voices. No key, no network — and it sounds like it' }
 ]
 
@@ -210,10 +233,11 @@ function SpokenRepliesCard(): ReactNode {
 
   const picked = chooseVoice(voices, s.voiceReplyVoice)
   const hasKey = s.geminiKey.trim().length > 0
-  const neural = s.voiceEngine === 'gemini' && hasKey
+  const neural = s.voiceEngine === 'edge' || (s.voiceEngine === 'gemini' && hasKey)
   const config: VoiceConfig = {
     engine: s.voiceEngine,
     hasKey,
+    edgeVoice: s.voiceEdgeVoice,
     geminiVoice: s.voiceTtsVoice,
     ttsModel: s.voiceTtsModel,
     localVoice: s.voiceReplyVoice
@@ -233,12 +257,34 @@ function SpokenRepliesCard(): ReactNode {
       .finally(() => setSampling(''))
   }
 
+  /** The same audition, for the free engine's voices. */
+  const sampleEdge = (voice: string): void => {
+    setSampling(voice || DEFAULT_EDGE_VOICE)
+    void voiceSpeaker
+      .speak(TTS_SAMPLE_LINE, { ...config, engine: 'edge', edgeVoice: voice }, (msg) => actions.setNotice(msg))
+      .finally(() => setSampling(''))
+  }
+
+  /**
+   * Picking the Gemini engine also pins its voice. Load-bearing, not a
+   * nicety: the store treats "engine gemini, no voice picked" as the stale
+   * pre-Edge default and migrates it to Edge on the next load — so a
+   * deliberate choice of Gemini has to write a voice name to survive.
+   */
+  const pickEngine = (id: VoiceEngine): void => {
+    if (id === 'gemini' && !s.voiceTtsVoice.trim()) {
+      actions.patchSettings({ voiceEngine: id, voiceTtsVoice: DEFAULT_TTS_VOICE })
+      return
+    }
+    actions.patchSettings({ voiceEngine: id })
+  }
+
   return (
     <Card
       title="Spoken replies"
       hint={
         neural
-          ? 'The agent speaks with a Gemini voice — it reads out whatever your chosen brain wrote, and does not think for itself. Only the words it is about to say leave this machine — never the transcript, never a drafted prompt.'
+          ? 'The agent speaks with a neural voice — it reads out whatever your chosen brain wrote, and does not think for itself. Only the words it is about to say leave this machine — never the transcript, never a drafted prompt.'
           : 'Speech comes from the voices installed on this PC — nothing is sent anywhere to say it. Drafted prompts are never read aloud.'
       }
     >
@@ -266,7 +312,7 @@ function SpokenRepliesCard(): ReactNode {
         hint={
           s.voiceEngine === 'gemini' && !hasKey
             ? 'No Gemini key yet — the built-in voice is speaking until there is one'
-            : 'Neural falls back to the built-in voice by itself if the key, the network or the quota gives out'
+            : 'A neural engine that fails falls to the other neural engine first, and only then to the built-in voice — so the voice stays human unless the network itself is gone'
         }
       >
         <div className="seg" role="group" aria-label="Voice engine">
@@ -278,13 +324,67 @@ function SpokenRepliesCard(): ReactNode {
               data-on={s.voiceEngine === e.id ? 'true' : undefined}
               aria-pressed={s.voiceEngine === e.id}
               title={e.hint}
-              onClick={() => actions.patchSettings({ voiceEngine: e.id })}
+              onClick={() => pickEngine(e.id)}
             >
               {e.label}
             </button>
           ))}
         </div>
       </Row>
+
+      {s.voiceEngine === 'edge' ? (
+        <>
+          <Row
+            label="Neural voice"
+            hint="Microsoft’s Edge voices — free, no key, no quota. Sonia, warm and British, is the default."
+          >
+            <select
+              className="field__input"
+              value={s.voiceEdgeVoice}
+              onChange={(e) => actions.patchSettings({ voiceEdgeVoice: e.target.value })}
+            >
+              <option value="">Default — Sonia (warm, British)</option>
+              {EDGE_VOICES.map((v) => (
+                <option key={v.name} value={v.name}>
+                  {`${v.label} — ${v.character.toLowerCase()}`}
+                </option>
+              ))}
+            </select>
+          </Row>
+
+          <Row label="Hear it" hint="Says a real reply, so you are judging the thing you will actually hear">
+            <button
+              type="button"
+              className="ghost-btn"
+              disabled={sampling !== ''}
+              onClick={() => sampleEdge(s.voiceEdgeVoice)}
+            >
+              {sampling ? 'Speaking…' : 'Hear a sample'}
+            </button>
+          </Row>
+
+          <Row label="Compare three" hint="Plays without changing the setting above">
+            <div className="seg" role="group" aria-label="Sample an Edge voice">
+              {[
+                ['en-GB-SoniaNeural', 'Sonia'],
+                ['en-IE-EmilyNeural', 'Emily'],
+                ['en-US-AriaNeural', 'Aria']
+              ].map(([name, label]) => (
+                <button
+                  key={name}
+                  type="button"
+                  className="seg__btn"
+                  disabled={sampling !== ''}
+                  title={`Hear ${label}`}
+                  onClick={() => sampleEdge(name as string)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </Row>
+        </>
+      ) : null}
 
       {s.voiceEngine === 'gemini' ? (
         <>
