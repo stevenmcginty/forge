@@ -451,6 +451,12 @@ export class VoiceAgentHost {
 
   /* -------------------------------------------------------------- messages */
 
+  /**
+   * Tool calls in flight, tool_use id → short name, so the `end` event can say
+   * which tool finished — the SDK's tool_result block carries only the id.
+   */
+  private toolCalls = new Map<string, string>()
+
   /** Turn one SDK message into zero or more renderer events. */
   private emit(message: SDKMessage): void {
     switch (message.type) {
@@ -470,7 +476,9 @@ export class VoiceAgentHost {
         for (const block of message.message.content) {
           if (block.type === 'text' && block.text.trim()) parts.push(block.text)
           if (block.type === 'tool_use') {
-            this.deps.sendEvent({ type: 'tool', name: shortToolName(block.name), phase: 'start' })
+            const name = shortToolName(block.name)
+            this.toolCalls.set(block.id, name)
+            this.deps.sendEvent({ type: 'tool', name, phase: 'start' })
           }
         }
         if (parts.length) this.deps.sendEvent({ type: 'assistant', text: parts.join('\n') })
@@ -483,7 +491,9 @@ export class VoiceAgentHost {
         if (typeof content === 'string') return
         for (const block of content) {
           if (block.type === 'tool_result') {
-            this.deps.sendEvent({ type: 'tool', name: '', phase: 'end' })
+            const name = this.toolCalls.get(block.tool_use_id) ?? ''
+            this.toolCalls.delete(block.tool_use_id)
+            this.deps.sendEvent({ type: 'tool', name, phase: 'end', ok: block.is_error !== true })
           }
         }
         return
@@ -501,6 +511,8 @@ export class VoiceAgentHost {
         // A turn that came back at all means the session works. Whatever went
         // wrong before is not evidence about the next crash.
         this.budget.clear()
+        // An aborted turn can leave starts with no results; the ids are dead.
+        this.toolCalls.clear()
         return
       }
 

@@ -769,23 +769,43 @@ void app
   .catch((err) => reportStartupFailure('Forge could not start', err))
 
 app.on('window-all-closed', () => {
+  // Backstop for the disposers below: the last window is gone, so nothing of
+  // value is left to lose — if quit has not finished in a couple of seconds
+  // (a disposer wedged, an emit threw), take the process down regardless. A
+  // quit that silently aborts here is a windowless Forge that survives to hold
+  // port 5173 against every later `npm run dev`. Armed here and not in
+  // before-quit, because the stale-watcher can request a quit while a window
+  // is still open behind the close-confirm dialog, and that quit is allowed
+  // to take as long as the user does.
+  setTimeout(() => app.exit(0), 2500).unref()
   app.quit()
 })
 
 app.on('before-quit', () => {
-  disposePresence()
-  disposePtyHost()
-  disposeShotsWatcher()
-  disposeSttSidecar()
-  disposeSttModel()
+  // Each disposer behind its own catch: a throw from any of them propagates
+  // out of the 'before-quit' emit and aborts app.quit() itself — skipping the
+  // remaining disposers and leaving the app alive with no window. That is how
+  // a closed Forge kept its whole dev tree (and port 5173) alive.
+  const safely = (name: string, dispose: () => unknown): void => {
+    try {
+      void dispose()
+    } catch (err) {
+      console.error(`[main] ${name} failed during shutdown:`, err)
+    }
+  }
+  safely('disposePresence', disposePresence)
+  safely('disposePtyHost', disposePtyHost)
+  safely('disposeShotsWatcher', disposeShotsWatcher)
+  safely('disposeSttSidecar', disposeSttSidecar)
+  safely('disposeSttModel', disposeSttModel)
   // Ends the Agent SDK session and its subprocess. A voice brain outliving the
   // app would hold a `claude` process open with nobody to talk to.
-  disposeVoiceAgent()
-  disposeCompanion()
-  void disposeMobile()
-  disposeUpdater()
-  disposeStaleWatcher()
+  safely('disposeVoiceAgent', disposeVoiceAgent)
+  safely('disposeCompanion', disposeCompanion)
+  safely('disposeMobile', disposeMobile)
+  safely('disposeUpdater', disposeUpdater)
+  safely('disposeStaleWatcher', disposeStaleWatcher)
   // Last, and unconditional: an always-on-top window that outlived the app
   // would sit over everything with nothing behind it to close it.
-  disposeOverlay()
+  safely('disposeOverlay', disposeOverlay)
 })

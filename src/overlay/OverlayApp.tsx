@@ -9,13 +9,14 @@ import {
   LastLine,
   ModelToggle,
   ReplyModeToggle,
+  ToolActivityBar,
   VoiceComposer,
   VoiceDial,
   VoiceLog,
   VoiceOnlyNote,
   type JarvisPresence
 } from '@/components/VoiceSurface'
-import { VoiceAgentContext, type PaneOption, type VoiceAgentCtx } from '@/state/VoiceAgent'
+import { IDLE_TOOL_ACTIVITY, VoiceAgentContext, type PaneOption, type VoiceAgentCtx } from '@/state/VoiceAgent'
 import './OverlayApp.css'
 
 /**
@@ -92,6 +93,7 @@ function useMirroredAgent(snap: OverlaySnapshot | null, levelRef: React.RefObjec
       },
 
       turns: snap?.turns ?? [],
+      toolActivity: snap?.toolActivity ?? IDLE_TOOL_ACTIVITY,
       editDraft: (turnId: string, draft: string) => send({ kind: 'editDraft', turnId, draft }),
       paneOptions: (): PaneOption[] => [],
       sendToPane: () => {
@@ -314,9 +316,13 @@ function OverlayCard({
       <OverlayDegraded status={status} />
 
       {voiceOnly ? (
-        <VoiceOnlyNote />
+        <>
+          <ToolActivityBar />
+          <VoiceOnlyNote />
+        </>
       ) : (
         <>
+          <ToolActivityBar />
           <VoiceLog />
           <VoiceComposer />
         </>

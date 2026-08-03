@@ -27,6 +27,7 @@ import {
   LastLine,
   ModelToggle,
   ReplyModeToggle,
+  ToolActivityBar,
   VoiceComposer,
   VoiceDial,
   VoiceLog,
@@ -448,10 +449,12 @@ export function VoiceHub(): ReactNode {
       {replyMode === 'voice' ? (
         <>
           <LastLine />
+          <ToolActivityBar />
           <VoiceOnlyNote />
         </>
       ) : (
         <>
+          <ToolActivityBar />
           <VoiceLog />
           <VoiceComposer autoFocus />
         </>

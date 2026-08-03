@@ -1,7 +1,7 @@
 import type { VoiceHubMode, VoiceReplyMode } from '@shared/types'
 import type { OverlayBounds } from '@shared/api'
 import type { BrainStatus } from './voicebrain'
-import type { AgentPhase, Turn } from '@/state/VoiceAgent'
+import type { AgentPhase, ToolActivity, Turn } from '@/state/VoiceAgent'
 
 /**
  * The wire between the two windows.
@@ -43,6 +43,8 @@ export interface OverlaySnapshot {
 
   /* ---------------------------------------------------------------- the log */
   turns: Turn[]
+  /** Tool work in flight — the strip under the dial. See VoiceAgentCtx. */
+  toolActivity: ToolActivity
 
   /* ----------------------------------------------------------- the composer */
   draftPhrase: string

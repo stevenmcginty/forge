@@ -698,8 +698,12 @@ export type VoiceAgentEvent =
   | { type: 'delta'; text: string }
   /** A whole assistant turn has landed. The authoritative text. */
   | { type: 'assistant'; text: string }
-  /** A tool call started or finished — for the "thinking" affordance. */
-  | { type: 'tool'; name: string; phase: 'start' | 'end' }
+  /**
+   * A tool call started or finished — the "thinking" affordance and the hub's
+   * activity strip. `end` carries the name back (matched by tool_use id in the
+   * host) and whether the call succeeded; `ok` is meaningless on `start`.
+   */
+  | { type: 'tool'; name: string; phase: 'start' | 'end'; ok?: boolean }
   /** The turn is over. `text` is the SDK's own summary of the result. */
   | {
       type: 'result'

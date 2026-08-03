@@ -72,17 +72,6 @@ export interface PaneGeometry {
   height: number
 }
 
-/**
- * How far apart two wheel-driven PgUp/PgDn keypresses must be, in a pane whose
- * TUI has taken the mouse (see the wheel handler in `create`).
- *
- * A mouse notch is one wheel event; a trackpad is a burst of many. Each event
- * is a full page of scroll once converted, so the burst is throttled — the
- * page-key reaches the TUI at a rate it can keep up with, instead of a flick
- * rocketing the whole history past.
- */
-const TUI_WHEEL_THROTTLE_MS = 28
-
 const IDLE_RUNTIME: PaneRuntime = { status: 'idle', pid: null, exitCode: null, error: null, remoteUrl: null }
 
 /**
@@ -166,8 +155,6 @@ interface Entry {
   webgl: { dispose(): void } | null
   webglWanted: boolean
   webglLoading: boolean
-  /** When the last wheel-driven page key was sent — see TUI_WHEEL_THROTTLE_MS. */
-  lastTuiWheel: number
   disposers: Array<() => void>
 }
 
@@ -594,7 +581,6 @@ class TerminalHost {
       webgl: null,
       webglWanted: false,
       webglLoading: false,
-      lastTuiWheel: 0,
       disposers: []
     }
 
@@ -616,40 +602,28 @@ class TerminalHost {
     entry.disposers.push(() => resizeSub.dispose())
 
     /*
-     * opencode is a full-screen TUI on the alternate screen. Unlike Claude Code,
-     * which writes into the normal buffer so the terminal's own scrollback
-     * scrolls under the wheel, it takes the alternate screen — which keeps no
-     * scrollback — and enables mouse tracking, so the wheel stops meaning
-     * "scroll the terminal" and is handed to the program as a mouse report.
-     * opencode receives those reports but does not scroll its message viewport
-     * from them (its bug, on every terminal, not just ours), so the wheel does
-     * nothing and the pane can never be scrolled up.
+     * opencode (the DeepSeek V4 pane) is a full-screen TUI on the alternate
+     * screen. Unlike Claude Code, which writes into the normal buffer so the
+     * terminal's own scrollback scrolls under the wheel, it takes the alternate
+     * screen — which keeps no scrollback — and enables every mouse tracking
+     * mode (DECSET 1000/1002/1003 + SGR 1006, verified against 1.18.11), so
+     * the wheel stops meaning "scroll the terminal" and is handed to the
+     * program as a mouse report.
      *
-     * So an opencode pane on the alternate screen has its wheel re-aimed at the
-     * one scroll gesture opencode reliably answers: PgUp/PgDn, sent down the PTY
-     * exactly as though they had been pressed. Captured before xterm so the
-     * event is neither scrolled as scrollback (there is none here) nor forwarded
-     * as a mouse report to a program that drops it.
+     * There used to be a wheel→PgUp workaround here, written against an older
+     * opencode that dropped those wheel reports on the floor. Since at least
+     * 1.18.11 it scrolls its message viewport from them (a few lines per
+     * notch, verified end-to-end through ConPTY), so the right thing is to
+     * stay out of the way and let xterm deliver the reports the TUI asked
+     * for — exactly what vim and htop already get. Intercepting here would
+     * only re-break a program that has fixed itself.
      *
-     * Every other pane is left entirely alone: a shell or Claude Code scrolls
-     * natively, and a TUI that handles the wheel itself (vim, htop) still gets
-     * the reports it asked for. Only the panes that misbehave are worked around,
-     * so fixing opencode never means rebreaking something that already works.
+     * What opencode cannot get natively are the chords xterm reserves or
+     * mangles — Shift+PageUp scrolls xterm's own (empty) scrollback, and
+     * Ctrl+Home/End have no default TUI meaning. Those are re-aimed at
+     * opencode's message navigation in handleKey below.
      */
-    const wheelToPageKey = (e: WheelEvent): void => {
-      if (commandExe(entry.spec.bootstrapCommand) !== 'opencode') return
-      if (entry.term.buffer.active.type !== 'alternate') return
-      e.preventDefault()
-      e.stopPropagation()
-      const now = performance.now()
-      if (now - entry.lastTuiWheel < TUI_WHEEL_THROTTLE_MS) return
-      entry.lastTuiWheel = now
-      window.forge.pty.write(entry.paneId, e.deltaY < 0 ? '\x1b[5~' : '\x1b[6~')
-    }
-    wrapper.addEventListener('wheel', wheelToPageKey, { capture: true })
-    entry.disposers.push(() => wrapper.removeEventListener('wheel', wheelToPageKey, { capture: true }))
-
-    term.attachCustomKeyEventHandler((e) => this.handleKey(paneId, term, e))
+    term.attachCustomKeyEventHandler((e) => this.handleKey(entry, e))
 
     // Answer "what colour are you?" — see answerColour.
     for (const code of [10, 11] as const) {
@@ -680,6 +654,18 @@ class TerminalHost {
   }
 
   /**
+   * True while this pane is opencode with its full-screen TUI up — the state
+   * in which the terminal has no scrollback of its own and scrolling means
+   * driving opencode's message viewport. See the long note in `create`.
+   */
+  private isOpencodeTui(entry: Entry): boolean {
+    return (
+      commandExe(entry.spec.bootstrapCommand) === 'opencode' &&
+      entry.term.buffer.active.type === 'alternate'
+    )
+  }
+
+  /**
    * Windows-terminal clipboard conventions, intercepted per pane so a key only
    * stops reaching the shell when we actually handled it.
    *
@@ -688,12 +674,39 @@ class TerminalHost {
    *   Ctrl+V          pastes (bracketed-paste safe, via term.paste)
    *   Ctrl+Shift+C/V  the same, unconditionally — the classic aliases
    *
+   * Plus, for an opencode pane on the alternate screen only, the scroll chords
+   * the TUI cannot receive natively, re-aimed at its message navigation
+   * (keybind defaults verified against opencode 1.18.11):
+   *
+   *   Shift+PageUp/PageDown  a page — xterm would aim these at its own
+   *                          scrollback, which the alternate screen does not
+   *                          have, so they are sent as the plain page keys
+   *                          opencode binds to messages_page_up/down
+   *   Ctrl+Home / Ctrl+End   first / last message, via the plain Home/End
+   *                          opencode binds to messages_first/messages_last
+   *
    * Returning false stops xterm sending the key to the PTY; preventDefault is
    * also needed, because Chromium would otherwise run its own paste command on
    * the textarea and we would paste twice.
    */
-  private handleKey(paneId: string, term: Terminal, e: KeyboardEvent): boolean {
-    if (e.type !== 'keydown' || !e.ctrlKey || e.altKey || e.metaKey) return true
+  private handleKey(entry: Entry, e: KeyboardEvent): boolean {
+    if (e.type !== 'keydown' || e.metaKey) return true
+    const { paneId, term } = entry
+
+    if (this.isOpencodeTui(entry) && !e.altKey) {
+      if (e.shiftKey && !e.ctrlKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
+        e.preventDefault()
+        window.forge.pty.write(paneId, e.key === 'PageUp' ? '\x1b[5~' : '\x1b[6~')
+        return false
+      }
+      if (e.ctrlKey && !e.shiftKey && (e.key === 'Home' || e.key === 'End')) {
+        e.preventDefault()
+        window.forge.pty.write(paneId, e.key === 'Home' ? '\x1b[H' : '\x1b[F')
+        return false
+      }
+    }
+
+    if (!e.ctrlKey || e.altKey) return true
     const key = e.key.toLowerCase()
 
     if (key === 'v') {

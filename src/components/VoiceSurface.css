@@ -629,6 +629,135 @@
   color: var(--danger);
 }
 
+/* ------------------------------------------------------------- activity
+ *
+ * The tool strip under the dial. The outer element is always in the column and
+ * animates its one grid row between 0fr and 1fr, so the log below slides
+ * rather than jumps when the strip comes and goes. The clip does the hiding
+ * (it cannot carry vertical padding, or the row would never fully close —
+ * padding lives on the strip inside it).
+ */
+
+.voice__activity {
+  flex: none;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-med) var(--ease-out);
+}
+
+.voice__activity[data-on='true'] {
+  grid-template-rows: 1fr;
+}
+
+.voice__activity-clip {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.voice__activity-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-5);
+  border-bottom: 1px solid var(--line-hairline);
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.voice__activity-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+  animation: voice-activity-pulse 1.2s var(--ease-out) infinite;
+}
+
+@keyframes voice-activity-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Indeterminate: a sheen sweeping the words, not a spinner faking progress. */
+.voice__activity-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: linear-gradient(90deg, var(--text-muted) 30%, var(--text-primary) 50%, var(--text-muted) 70%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: voice-activity-sheen 1.8s linear infinite;
+}
+
+@keyframes voice-activity-sheen {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.voice__activity-count {
+  flex: none;
+  color: var(--text-dim);
+}
+
+/* A failed call: amber, still, and read in full before the strip clears. */
+.voice__activity-strip[data-fail='true'] .voice__activity-label {
+  animation: none;
+  background: none;
+  color: var(--warn);
+}
+
+.voice__activity-strip[data-fail='true'] .voice__activity-dot {
+  animation: none;
+  background: var(--warn);
+  box-shadow: none;
+}
+
+/* The failed strip keeps its amber either way — :not() keeps these from
+   outranking the data-fail rules above. */
+@media (prefers-reduced-motion: reduce) {
+  .voice__activity {
+    transition: none;
+  }
+  .voice__activity-dot {
+    animation: none !important;
+  }
+  .voice__activity-strip:not([data-fail='true']) .voice__activity-label {
+    animation: none;
+    background: none;
+    color: var(--text-muted);
+  }
+}
+
+:root[data-reduced-motion='true'] .voice__activity {
+  transition: none;
+}
+
+:root[data-reduced-motion='true'] .voice__activity-dot {
+  animation: none;
+}
+
+:root[data-reduced-motion='true'] .voice__activity-strip:not([data-fail='true']) .voice__activity-label {
+  animation: none;
+  background: none;
+  color: var(--text-muted);
+}
+
 /* ------------------------------------------------------------------ log */
 
 .voice__log {
@@ -640,6 +769,53 @@
   display: flex;
   flex-direction: column;
   gap: var(--s-6);
+}
+
+/* Focusable for PageUp/PageDown paging; the ring only for keyboard focus. */
+.voice__log:focus {
+  outline: none;
+}
+
+.voice__log:focus-visible {
+  outline: 1px solid var(--accent-line);
+  outline-offset: -1px;
+}
+
+/* "Jump to latest" — rendered only while scrolled up, riding the bottom edge
+   of the viewport. pointer-events split so the row never blocks the wheel. */
+.voice__jump-row {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  flex: none;
+  pointer-events: none;
+}
+
+.voice__jump {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-full);
+  background: var(--bg-panel-raised);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: var(--shadow-key), var(--shadow-ambient);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.voice__jump:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-line);
 }
 
 /* ----------------------------------------------------------------- turn */

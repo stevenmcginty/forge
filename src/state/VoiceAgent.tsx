@@ -48,6 +48,7 @@ import {
 import { makeId } from '@/lib/ids'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { terminalHost, type PaneStatus } from '@/lib/terminals'
+import { toolLabel } from '@/lib/toolLabels'
 import { transcriptBus, typedTranscript } from '@/lib/transcriptSource'
 import { parseDictation, parseUtterance } from '@/lib/voicecommands'
 import {
@@ -229,6 +230,10 @@ const DUCK_LEVEL = 0.2
 /** How long the flash states hold before falling back to listening. */
 const REPLIED_MS = 900
 const ERROR_MS = 1800
+/** How long the activity strip lingers after the last tool call ends. */
+const TOOL_LINGER_MS = 1200
+/** Longer when the last word was a failure — amber needs time to be read. */
+const TOOL_FAIL_LINGER_MS = 1600
 /** Silence counts as a dead circle after this, so start showing the clock. */
 export const THINKING_PATIENCE_MS = 5000
 
@@ -280,6 +285,21 @@ export interface PaneOption {
   status: PaneStatus
 }
 
+/**
+ * What the activity strip under the dial shows: the tool running right now, in
+ * words (see src/lib/toolLabels.ts), and how many calls have finished this
+ * turn. `on: false` with a label still set is the strip mid-slide-out — the
+ * surface keeps painting the last line while its row collapses.
+ */
+export interface ToolActivity {
+  on: boolean
+  label: string
+  failed: boolean
+  done: number
+}
+
+export const IDLE_TOOL_ACTIVITY: ToolActivity = { on: false, label: '', failed: false, done: 0 }
+
 export interface VoiceAgentCtx {
   /* ------------------------------------------------------------ the dial */
   phase: AgentPhase
@@ -298,6 +318,8 @@ export interface VoiceAgentCtx {
   editDraft(turnId: string, draft: string): void
   paneOptions(): PaneOption[]
   sendToPane(option: PaneOption, text: string): void
+  /** Tool work in flight, for the strip under the dial. */
+  toolActivity: ToolActivity
 
   /* ---------------------------------------------------- the composer */
   draftPhrase: string
@@ -356,6 +378,47 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
 
   const [turns, setTurns] = useState<Turn[]>([])
   const [draftPhrase, setDraftPhrase] = useState('')
+
+  /* ------------------------------------------------------- tool activity
+   *
+   * The strip under the dial. Driven by the host's `tool` events; the refs
+   * carry the counters because start/end pairs arrive faster than a render.
+   * The strip lingers for a beat after the last call ends — long enough to
+   * read, longer when the last word was a failure — then `on: false` slides
+   * it away with its last line still painted.
+   */
+  const [toolActivity, setToolActivity] = useState<ToolActivity>(IDLE_TOOL_ACTIVITY)
+  const toolsInFlight = useRef(0)
+  const toolsDone = useRef(0)
+  const toolClearTimer = useRef<number | null>(null)
+
+  const cancelToolClear = useCallback((): void => {
+    if (toolClearTimer.current !== null) {
+      window.clearTimeout(toolClearTimer.current)
+      toolClearTimer.current = null
+    }
+  }, [])
+
+  const scheduleToolClear = useCallback(
+    (delayMs: number): void => {
+      cancelToolClear()
+      toolClearTimer.current = window.setTimeout(() => {
+        toolClearTimer.current = null
+        setToolActivity((s) => (s.on ? { ...s, on: false } : s))
+      }, delayMs)
+    },
+    [cancelToolClear]
+  )
+
+  /** A new turn: empty counters, and whatever the strip was showing is stale. */
+  const resetToolActivity = useCallback((): void => {
+    cancelToolClear()
+    toolsInFlight.current = 0
+    toolsDone.current = 0
+    setToolActivity(IDLE_TOOL_ACTIVITY)
+  }, [cancelToolClear])
+
+  useEffect(() => cancelToolClear, [cancelToolClear])
 
   /** The last thing he typed, so echo rejection never eats his own keystrokes. */
   const lastTypedRef = useRef<string | null>(null)
@@ -1460,11 +1523,28 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
           run.said.push(event.text)
           run.onText?.(run.said.join('\n'))
           return
-        case 'tool':
+        case 'tool': {
           // Working, not talking. Only when the mouth is idle: a tool call in
           // the middle of a spoken reply must not blank the speaking phase.
           if (event.phase === 'start' && armedRef.current && !speakingRef.current) setPhase('thinking')
+          if (event.phase === 'start') {
+            toolsInFlight.current += 1
+            cancelToolClear()
+            setToolActivity({ on: true, label: toolLabel(event.name), failed: false, done: toolsDone.current })
+          } else {
+            toolsInFlight.current = Math.max(0, toolsInFlight.current - 1)
+            const failed = event.ok === false
+            if (!failed) toolsDone.current += 1
+            setToolActivity((s) => ({
+              on: true,
+              label: failed ? `${toolLabel(event.name)} failed` : s.label,
+              failed,
+              done: toolsDone.current
+            }))
+            if (toolsInFlight.current === 0) scheduleToolClear(failed ? TOOL_FAIL_LINGER_MS : TOOL_LINGER_MS)
+          }
           return
+        }
         case 'result':
           // The SDK's own summary is the fallback, for the turn that acted and
           // said nothing — there is still something to tell the phone.
@@ -1476,6 +1556,11 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
           // again?" every single time Steve barged in, which he heard as the
           // brain failing constantly. It ended because he moved on: clean end.
           run.finish(run.aborted ? undefined : event.ok ? undefined : event.text.trim() || 'That turn did not come back')
+          // An aborted turn can leave starts with no ends; the strip must not
+          // shimmer forever over a turn that is finished. The timer's updater
+          // is a no-op when the strip is already off.
+          toolsInFlight.current = 0
+          scheduleToolClear(TOOL_LINGER_MS)
           return
         case 'error':
           // Same shape: an error that lands on a turn he already cancelled is
@@ -1484,7 +1569,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
           return
       }
     },
-    [openMouth, pushSpeech]
+    [openMouth, pushSpeech, cancelToolClear, scheduleToolClear]
   )
 
   useEffect(() => {
@@ -1697,6 +1782,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       // 2 — everything else is a conversation with the brain.
       thinkingSince.current = Date.now()
       if (armedRef.current) setPhase('thinking')
+      // A fresh turn starts its tool count at zero, whatever the last one showed.
+      resetToolActivity()
       setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'brain', phase: 'thinking', draft: '' }])
 
       /** What a failed turn looks like, whichever brain failed. */
@@ -1824,6 +1911,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       flash,
       patchOutcome,
       project?.path,
+      resetToolActivity,
       runActions,
       runClaudeTurn,
       sayAloud,
@@ -2035,6 +2123,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       editDraft,
       paneOptions,
       sendToPane,
+      toolActivity,
       draftPhrase,
       setDraftPhrase,
       submitPhrase,
@@ -2065,6 +2154,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       editDraft,
       paneOptions,
       sendToPane,
+      toolActivity,
       draftPhrase,
       submitPhrase,
       brain.name,

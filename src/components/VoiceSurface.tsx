@@ -316,6 +316,33 @@ export function DegradedLink(): ReactNode {
   )
 }
 
+/* -------------------------------------------------------- tool activity */
+
+/**
+ * The activity strip: which tool Jarvis has his hands on right now, in words
+ * (src/lib/toolLabels.ts), with a count of the calls finished this turn.
+ *
+ * Sits directly under the dial, above the conversation. It is always rendered
+ * so its row can slide open and shut (grid-template-rows in the CSS) — an
+ * unmounted strip would pop the log up and down instead. `on: false` with a
+ * label still set is the slide-out, painting its last line on the way.
+ */
+export function ToolActivityBar(): ReactNode {
+  const { toolActivity } = useVoiceAgent()
+  const { on, label, failed, done } = toolActivity
+  return (
+    <div className="voice__activity" data-on={on ? 'true' : undefined} aria-hidden={on ? undefined : 'true'}>
+      <div className="voice__activity-clip">
+        <div className="voice__activity-strip" data-fail={failed ? 'true' : undefined} role="status">
+          <span className="voice__activity-dot" aria-hidden="true" />
+          <span className="voice__activity-label">{label}</span>
+          {done > 0 ? <span className="voice__activity-count mono">{done} done</span> : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ------------------------------------------------------- voice-only line */
 
 /** Voice-only mode's whole transcript: the most recent thing that happened. */
@@ -348,18 +375,56 @@ export function LastLine(): ReactNode {
 
 /* ------------------------------------------------------------------ log */
 
-/** The conversation. Scrolls itself to the bottom whenever a turn lands. */
+/** Within this many px of the bottom still counts as "at the bottom". */
+const PIN_SLACK = 48
+
+/**
+ * The conversation.
+ *
+ * It follows the newest turn only while the reader is already at the bottom.
+ * `turns` is a fresh array on every streamed token (see the onText callback in
+ * VoiceAgent.tsx), so an unconditional scroll-to-bottom here would drag the
+ * view down mid-read the whole time a reply is streaming — which it did.
+ * Scrolled up, their place is held and a "latest" chip offers the way back.
+ */
 export function VoiceLog(): ReactNode {
   const { turns, brainStatus, paneOptions, sendToPane, editDraft } = useVoiceAgent()
   const logRef = useRef<HTMLDivElement | null>(null)
+  const pinnedRef = useRef(true)
+  const [away, setAway] = useState(false)
 
-  useEffect(() => {
+  const jumpToLatest = (): void => {
     const log = logRef.current
     if (log) log.scrollTop = log.scrollHeight
+  }
+
+  useEffect(() => {
+    if (pinnedRef.current) jumpToLatest()
   }, [turns])
 
+  // A resized card or window keeps the newest turn in view while following.
+  useEffect(() => {
+    const log = logRef.current
+    if (!log) return undefined
+    const ro = new ResizeObserver(() => {
+      if (pinnedRef.current) jumpToLatest()
+    })
+    ro.observe(log)
+    return () => ro.disconnect()
+  }, [])
+
+  const onScroll = (): void => {
+    const log = logRef.current
+    if (!log) return
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < PIN_SLACK
+    pinnedRef.current = atBottom
+    setAway(!atBottom)
+  }
+
   return (
-    <div className="voice__log" ref={logRef}>
+    /* tabIndex puts PageUp/Home paging on the log itself once it is clicked
+       into, without taking a single keystroke from the composer. */
+    <div className="voice__log" ref={logRef} onScroll={onScroll} role="log" aria-label="Conversation" tabIndex={0}>
       {turns.length === 0 ? (
         <EmptyState
           icon="voice"
@@ -385,6 +450,14 @@ export function VoiceLog(): ReactNode {
           )
         )
       )}
+      {away ? (
+        <div className="voice__jump-row">
+          <button type="button" className="voice__jump" onClick={jumpToLatest}>
+            <Icon name="chevronDown" size={11} />
+            latest
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
