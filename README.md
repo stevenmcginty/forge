@@ -27,10 +27,10 @@ the top of the window: click it to download, then click **Restart to finish**.
 Nothing is downloaded or installed behind your back — the check is automatic,
 the megabytes are not. Saying no to one version does not mute the next one.
 
-**Install with the `.exe` if you want this.** The `.zip` on the release page is
-a portable copy for handing to someone on a memory stick: it runs without
-installing anything, and it never updates itself. Whatever you unzip is what
-you keep.
+Releases up to and including v0.2.0 also carried a `Forge-<version>-win.zip`,
+a portable copy that ran without installing anything. It could never update
+itself, so it is no longer built. If you are running one, install the `.exe`
+over it — the zip will sit at its own version indefinitely.
 
 ## Forge Mobile
 
