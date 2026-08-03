@@ -1,13 +1,17 @@
 # Packaging Forge for Windows.
 #
-# Two artifacts, on purpose:
+# One artifact, on purpose:
 #   Forge-<ver>-setup.exe   NSIS, per-user, no admin prompt
-#   Forge-<ver>-win.zip     unzip and run — nothing installed, nothing written
-#                           outside %APPDATA%\Forge
 #
-# The zip is the one you give to a friend. See GIVE-TO-A-FRIEND.md.
+# There was a Forge-<ver>-win.zip here too — unzip and run, nothing installed.
+# It is gone because it could not update itself: latest.yml advertises only the
+# NSIS artifact and electron-updater has no zip path on Windows, so anyone who
+# took the zip stayed on that build forever while the app cheerfully reported
+# it was up to date. It was also the larger, more obvious download of the two.
+# One artifact that nobody can pick wrongly beats two and a caveat in a README.
 #
-#   npm run dist
+#   npm run dist      build into release/
+#   npm run release   build, verify the feed, tag and publish
 #
 # Everything below has a matching path-resolution site in the source; if you
 # change a `to:` here, change the resolver too:
@@ -99,8 +103,8 @@ afterPack: ./scripts/after-pack.cjs
 #
 # Forge is unsigned, so an auto-update replaces an unsigned exe with another
 # unsigned exe. SmartScreen will have opinions and Smart App Control may refuse
-# outright — GIVE-TO-A-FRIEND.md says so plainly, and so does the Updates &
-# tools settings section.
+# outright — README.md says so plainly, and so does the Updates & tools
+# settings section.
 publish:
   provider: github
   owner: stevenmcginty
@@ -109,12 +113,11 @@ publish:
 
 win:
   icon: build/icon.ico
-  # Forge-0.1.0-win.zip — the give-to-a-friend one. NSIS overrides this below.
+  # Unused while NSIS is the only target — nsis.artifactName below wins — but
+  # kept so that adding a target back never silently yields "Forge-0.2.0.exe".
   artifactName: ${productName}-${version}-win.${ext}
   target:
     - target: nsis
-      arch: [x64]
-    - target: zip
       arch: [x64]
 
 nsis:
@@ -132,5 +135,5 @@ nsis:
   # app is not a request to throw those away.
 
 # Forge is not code-signed: there is no certificate, and a self-signed one buys
-# nothing but a different SmartScreen dialog. GIVE-TO-A-FRIEND.md explains the
+# nothing but a different SmartScreen dialog. README.md explains the
 # "More info → Run anyway" click that follows from that.
