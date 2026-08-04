@@ -25,6 +25,7 @@
     "stt:download": "node scripts/stt-download-test.mjs",
     "voice:check": "node scripts/voice-check.mjs",
     "voice:brain": "node scripts/voice-brain-smoke.mjs",
+    "voice:luna": "node scripts/voice-luna-smoke.mjs",
     "memory:smoke": "node scripts/memory-smoke.mjs",
     "skills:smoke": "node scripts/skills-smoke.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",

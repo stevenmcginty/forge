@@ -1,5 +1,6 @@
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import {
   createSdkMcpServer,
   query,
@@ -101,6 +102,9 @@ const MAX_TURNS = 50
  */
 export const DEFAULT_VOICE_CLAUDE_MODEL = 'opus'
 
+/** Models served by the installed Codex CLI rather than Claude Code. */
+export const CODEX_VOICE_MODELS = new Set(['gpt-5.6-luna'])
+
 /* ------------------------------------------------------------------- deps */
 
 /** A screenshot, already encoded. Null means "could not take one". */
@@ -182,6 +186,9 @@ export class VoiceAgentHost {
   /** The live session. Null whenever there is not one. */
   private session: Query | null = null
 
+  /** One-shot Codex turn used by OpenAI voice models. */
+  private codexProcess: ChildProcessWithoutNullStreams | null = null
+
   /** Utterances waiting to be pulled by the input generator. */
   private readonly inbox: SDKUserMessage[] = []
   /** Resolves the generator's current await, when it is parked. */
@@ -213,7 +220,7 @@ export class VoiceAgentHost {
   /* ------------------------------------------------------------- lifecycle */
 
   status(): VoiceAgentStatus {
-    return { running: this.session !== null, model: this.model, error: this.lastError }
+    return { running: this.session !== null || this.codexProcess !== null, model: this.model, error: this.lastError }
   }
 
   /**
@@ -249,6 +256,11 @@ export class VoiceAgentHost {
    * model had finished.
    */
   async interrupt(): Promise<boolean> {
+    if (this.codexProcess) {
+      this.codexProcess.kill()
+      this.codexProcess = null
+      return true
+    }
     const q = this.session
     if (!q) return false
     try {
@@ -275,11 +287,22 @@ export class VoiceAgentHost {
 
     // The setting moved under a live session. Take the new model at the turn
     // boundary — the only safe place — rather than ignoring it until restart.
+    if (this.codexProcess) {
+      this.codexProcess.kill()
+      this.codexProcess = null
+    }
     if (this.session && this.deps.getModel().trim() !== this.model) {
       this.teardown()
     }
 
     this.closing = false
+    const model = this.deps.getModel().trim() || DEFAULT_VOICE_CLAUDE_MODEL
+    if (CODEX_VOICE_MODELS.has(model)) {
+      this.model = model
+      this.lastError = null
+      void this.sendCodexUtterance(say, model, this.wantedCwd || homedir())
+      return this.status()
+    }
     this.ensure()
     if (!this.session) return this.status()
 
@@ -328,6 +351,11 @@ export class VoiceAgentHost {
     this.session = null
     this.inbox.length = 0
     this.model = ''
+
+    if (this.codexProcess) {
+      this.codexProcess.kill()
+      this.codexProcess = null
+    }
 
     // Unblock the generator so it can return and let the SDK close the
     // subprocess down cleanly.
@@ -383,6 +411,10 @@ export class VoiceAgentHost {
     if (this.session || this.givenUp) return
 
     const model = this.deps.getModel().trim() || DEFAULT_VOICE_CLAUDE_MODEL
+    if (CODEX_VOICE_MODELS.has(model)) {
+      this.model = model
+      return
+    }
     const cwd = this.wantedCwd || homedir()
 
     let q: Query
@@ -399,6 +431,57 @@ export class VoiceAgentHost {
     this.lastError = null
 
     void this.consume(q)
+  }
+
+  /** Run one streamed Codex turn for an OpenAI model selected in Settings. */
+  private async sendCodexUtterance(text: string, model: string, cwd: string): Promise<void> {
+    if (this.closing) return
+    const codexArgs = ['exec', '--model', model, '--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '--json', '-']
+    const child = process.platform === 'win32'
+      ? spawn('cmd.exe', ['/d', '/s', '/c', `codex.cmd ${codexArgs.join(' ')}`], { cwd, windowsHide: true })
+      : spawn('codex', codexArgs, { cwd, windowsHide: true })
+    this.codexProcess = child
+    child.stdin.end(text)
+    let buffer = ''
+    let answer = ''
+    const consume = (chunk: Buffer): void => {
+      buffer += chunk.toString('utf8')
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        try {
+          const event = JSON.parse(line) as { type?: string; item?: { type?: string; text?: string } }
+          if (event.type === 'item.completed' && event.item?.type === 'agent_message' && event.item.text) {
+            answer = event.item.text
+            this.deps.sendEvent({ type: 'assistant', text: event.item.text })
+          }
+        } catch {
+          // Codex may print a non-JSON diagnostic; the final close/error below
+          // is the useful signal for the voice surface.
+        }
+      }
+    }
+    child.stdout.on('data', consume)
+    child.stderr.on('data', (data: Buffer) => {
+      const line = data.toString('utf8').trim()
+      if (line) console.error(`[voice-agent:codex] ${line}`)
+    })
+    await new Promise<void>((resolve) => {
+      child.once('error', (err) => {
+        if (this.codexProcess === child) this.codexProcess = null
+        this.fail(`The Luna voice brain could not start: ${errText(err)}`)
+        resolve()
+      })
+      child.once('close', (code) => {
+        if (this.codexProcess === child) this.codexProcess = null
+        if (code === 0 && answer.trim()) {
+          this.deps.sendEvent({ type: 'result', ok: true, text: answer, turns: 1, costUsd: 0, durationMs: 0 })
+        } else if (!this.closing) {
+          this.fail(`The Luna voice brain ended without a reply${code === null ? '' : ` (exit ${code})`}`)
+        }
+        resolve()
+      })
+    })
   }
 
   /**
