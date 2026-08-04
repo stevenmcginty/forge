@@ -1,9 +1,35 @@
 // Kills leftover processes from a previous dev session before starting a new one.
 // A crashed or half-closed Forge can leave the vite dev server (5173) and the
 // mobile server (8420) alive, which blocks the next `npm run dev` from binding.
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
+import { resolve } from 'node:path'
 
 const PORTS = [5173, 8420]
+const ROOT = resolve(import.meta.dirname, '..').toLowerCase()
+
+/**
+ * A port is not proof that a process belongs to this checkout. In particular,
+ * 8420 is also the packaged Forge Mobile port. The old version blindly used
+ * taskkill on every listener and starting dev therefore closed the real Forge.
+ * Only processes whose command line points into this checkout are eligible.
+ */
+function commandLineFor(pid) {
+  try {
+    const encoded = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`
+      ],
+      { encoding: 'utf8', windowsHide: true }
+    )
+    return encoded.trim().toLowerCase()
+  } catch {
+    return ''
+  }
+}
 
 function pidsOnPorts() {
   let out = ''
@@ -24,6 +50,11 @@ function pidsOnPorts() {
 
 const pids = pidsOnPorts()
 for (const pid of pids) {
+  const commandLine = commandLineFor(pid)
+  if (!commandLine.includes(ROOT)) {
+    console.log(`[predev] left pid ${pid} alone (port belongs to another Forge/app)`)
+    continue
+  }
   try {
     // /t takes the whole zombie tree (node + electron children) down with it
     execSync(`taskkill /f /t /pid ${pid}`, { stdio: 'ignore' })

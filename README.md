@@ -44,5 +44,25 @@ npm install
 npm run dev
 ```
 
-A dev run never updates itself — it is a checkout, and an updater that
+A dev run opens as **Forge Dev** and uses `%APPDATA%\Forge Dev` for its
+settings, projects, browser profile, screenshots, logs, and single-instance
+lock. Stable Forge uses `%APPDATA%\Forge`, so both can run at the same time
+without touching each other. The `FORGE_DATA_DIR` environment variable or
+`--data-dir <path>` argument can still override the Dev data root for tests.
+
+Forge Dev never updates itself — it is a checkout, and an updater that
 overwrote uncommitted work would be a bug, not a feature.
+
+### Promoting Dev to a new Forge version
+
+Forge Dev is the workspace. Stable Forge is a packaged release, not the
+checkout used to write Forge. When the Dev build is ready:
+
+1. Run the typecheck and packaged checks.
+2. Commit the approved Dev changes.
+3. Bump `package.json` to the next version and commit it.
+4. Run `npm run release` from `master`.
+
+That produces and publishes the new Forge version. Existing stable installs
+then receive it through the normal updater; the Dev checkout remains isolated
+and continues to be the place where the next version is built.

@@ -16,16 +16,32 @@
 
 Option Explicit
 
-Dim sh, fso, root, dir, logFile, started, elapsed, code
+Dim sh, fso, root, dir, logFile, started, elapsed, code, marker, profile, ts, line
 
 Set sh  = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 
 root = fso.GetParentFolderName(WScript.ScriptFullName)
 
-' %APPDATA%\Forge is the app's own data folder - the log belongs with it, not
-' in the repo working tree.
-dir = sh.ExpandEnvironmentStrings("%APPDATA%") & "\Forge"
+' Which profile this checkout owns, from the untracked .forge-profile file -
+' the same one scripts/dev.mjs reads. No marker means the stable checkout and
+' the real data. This must not be hardcoded: this file is tracked, so a
+' hardcoded "Forge Dev" travels to the stable checkout on the next pull and
+' sends the everyday app to an empty profile.
+profile = "Forge"
+marker = fso.BuildPath(root, ".forge-profile")
+If fso.FileExists(marker) Then
+  Set ts = fso.OpenTextFile(marker, 1)
+  If Not ts.AtEndOfStream Then
+    line = Trim(ts.ReadLine)
+    If line <> "" Then profile = line
+  End If
+  ts.Close
+End If
+
+' The app's own data folder - the log belongs with it, not in the repo
+' working tree.
+dir = sh.ExpandEnvironmentStrings("%APPDATA%") & "\" & profile
 If Not fso.FolderExists(dir) Then fso.CreateFolder(dir)
 logFile = dir & "\dev.log"
 

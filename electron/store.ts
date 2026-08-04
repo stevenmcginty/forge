@@ -265,6 +265,14 @@ export function resolveDataRoot(): string {
   if (flag) return resolve(flag)
   const override = process.env['FORGE_DATA_DIR']
   if (override && override.trim()) return resolve(override.trim())
+  // The default is always the real profile. A development checkout gets its own
+  // by naming one in an untracked .forge-profile file, which scripts/dev.mjs
+  // reads and passes down as FORGE_DATA_DIR.
+  //
+  // Deciding it here on app.isPackaged instead would be wrong: the everyday
+  // Forge is launched from source too, so an unpackaged run is not the same
+  // thing as a development run, and keying on it sent the real app to an empty
+  // profile the moment this file was pulled into the stable checkout.
   return join(app.getPath('appData'), 'Forge')
 }
 

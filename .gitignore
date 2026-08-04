@@ -39,6 +39,16 @@ companion/.emulator-data/
 # Throwaway FORGE_DATA_DIR for live UI checks — never a real install.
 isolated/
 
+# Which %APPDATA% profile THIS checkout runs against — one line, e.g.
+# "Forge Dev". A checkout without it gets %APPDATA%\Forge, the real data.
+#
+# It has to be untracked. The development and stable checkouts share every
+# tracked file, so any redirect written into tracked code (a path in the
+# launcher, an app.isPackaged test in store.ts) reaches stable on the next
+# pull and opens the everyday app on an empty profile. This file is the one
+# thing that stays behind.
+.forge-profile
+
 # Forge Mobile APK. Built artefacts land in dist-apk/; the Android tree keeps
 # its machine-local SDK pointer and build output out of the repo. The release
 # keystore lives in %APPDATA%\Forge\android and must NEVER be committed — it

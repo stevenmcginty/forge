@@ -54,6 +54,14 @@ import {
 import { disposeUpdater, initUpdater, registerUpdateHandlers, setUpdateTarget } from './updater'
 
 const isDev = !app.isPackaged
+// The development checkout announces itself, so the taskbar and title bar say
+// which of the two is in front. That comes from FORGE_CHANNEL, set by
+// scripts/dev.mjs from the untracked .forge-profile marker - not from
+// app.isPackaged, which is also true of the everyday app when it is launched
+// from source, and would rename it the moment this file reached that checkout.
+const isDevChannel = process.env['FORGE_CHANNEL'] === 'dev'
+const APP_NAME = isDevChannel ? 'Forge Dev' : 'Forge'
+const APP_ID = isDevChannel ? 'dev.forge.app.dev' : 'dev.forge.app'
 /** Only the very first launch, before a theme has ever been recorded. */
 const FALLBACK_BG = '#0B0C0E'
 const TITLEBAR_HEIGHT = 38
@@ -71,8 +79,8 @@ const DATA_ROOT = resolveDataRoot()
 // setPath throws on a directory that is not there yet.
 mkdirSync(DATA_ROOT, { recursive: true })
 
-app.setName('Forge')
-if (process.platform === 'win32') app.setAppUserModelId('dev.forge.app')
+app.setName(APP_NAME)
+if (process.platform === 'win32') app.setAppUserModelId(APP_ID)
 app.setPath('userData', DATA_ROOT)
 // Keep Chromium's caches out of the way so the data root stays readable:
 // settings.json, projects.json, layouts/ and shots/ at the top, browser guts
@@ -230,7 +238,7 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 560,
     show: false,
-    title: 'Forge',
+    title: APP_NAME,
     icon: windowIcon(),
     backgroundColor: bg,
     autoHideMenuBar: true,

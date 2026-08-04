@@ -9,7 +9,7 @@
   "main": "out/main/index.js",
   "scripts": {
     "predev": "node scripts/predev-cleanup.mjs",
-    "dev": "electron-vite dev",
+    "dev": "node scripts/dev.mjs",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit --composite false -p tsconfig.node.json && tsc --noEmit --composite false -p tsconfig.web.json && tsc --noEmit --composite false -p tsconfig.mobile.json",
     "build": "npm run typecheck && electron-vite build",
