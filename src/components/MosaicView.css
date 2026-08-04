@@ -66,6 +66,22 @@
   background: var(--accent-softer);
 }
 
+/* A file is overhead — this tile is the drop target. Same wash as a pane. */
+.mtile[data-dropping='true'] {
+  border-color: var(--accent-line);
+}
+
+.mtile[data-dropping='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-md);
+  background: var(--accent-softer);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  pointer-events: none;
+  z-index: var(--z-divider);
+}
+
 .mosaic--zoomed {
   min-height: 0;
 }

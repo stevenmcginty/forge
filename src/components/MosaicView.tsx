@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from 'react'
@@ -34,6 +35,7 @@ import {
   type MosaicEdges
 } from '@/lib/mosaicLayout'
 import { collectLeaves } from '@/lib/splitTree'
+import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { terminalHost, type PaneGeometry, type TerminalSpec } from '@/lib/terminals'
 import { useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
@@ -839,6 +841,7 @@ function MosaicTile({
   const runtime = usePaneRuntime(paneId)
   const dead = isPaneDead(runtime)
   const permChip = permissionChip(profile, leafPermissionMode(cell.leaf))
+  const [dropping, setDropping] = useState(false)
 
   const stageRef = useRef<HTMLDivElement | null>(null)
   const naturalRef = useRef<HTMLDivElement | null>(null)
@@ -1018,6 +1021,42 @@ function MosaicTile({
     }
   }, [against, geometry, paneId, refit, zoomed])
 
+  /* --------------------------------------------------------- dropped files */
+
+  /*
+   * Same contract as a tab-view pane: a file dropped on a tile types its
+   * quoted path into that tile's session. The tile has to speak for itself —
+   * the wall's drag handlers only accept TAB_DRAG_TYPE, so a file drag over
+   * the mosaic was declined on dragover and its drop never fired at all.
+   * maybeFiles (lib/paths) carries the story of why acceptance is generous.
+   */
+  const acceptDrag = (e: ReactDragEvent): void => {
+    if (!maybeFiles(e)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setDropping(true)
+  }
+
+  const onDropFiles = (e: ReactDragEvent): void => {
+    // Unconditional: an unprevented file drop makes Chromium navigate the
+    // window to the file, which would take the whole app down with it.
+    e.preventDefault()
+    setDropping(false)
+    const quoted = droppedFilePaths(e).map((p) => `"${p}"`)
+    if (quoted.length === 0) return
+    /*
+     * Focus first, text a frame later — the path arrives as a bracketed
+     * paste, and an agent that was just told its terminal lost focus (DECSET
+     * 1004) will drop it. See the same dance in TerminalPane. On the wall,
+     * taking focus *is* interactive mode: the tile you just handed a file to
+     * is the tile you are now talking to, so it should also take the keys
+     * for the Enter that usually follows. A zoomed tile is already focused.
+     */
+    if (!zoomed && !interactive) onToggleInteract(paneId)
+    terminalHost.focus(paneId)
+    requestAnimationFrame(() => terminalHost.paste(paneId, `${quoted.join(' ')} `))
+  }
+
   const statusLabel = paneStatusLabel(runtime)
   const placed = !zoomed && rect
   /** This tile was pointed the other way from the rest of the wall by hand. */
@@ -1034,6 +1073,15 @@ function MosaicTile({
       data-refit={refit ? 'true' : undefined}
       data-override={override ? 'true' : undefined}
       data-status={runtime.status}
+      data-dropping={dropping ? 'true' : undefined}
+      onDragEnter={acceptDrag}
+      onDragOver={acceptDrag}
+      onDragLeave={(e) => {
+        // Ignore the flurry of leave events from crossing child elements.
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+        setDropping(false)
+      }}
+      onDrop={onDropFiles}
       style={
         {
           '--pane-accent': profile.accent,

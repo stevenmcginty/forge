@@ -9,7 +9,7 @@ import {
   permissionChip,
   resolveProfile
 } from '@/lib/agents'
-import { droppedFilePaths } from '@/lib/paths'
+import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { terminalHost, type TerminalSpec } from '@/lib/terminals'
 import { remoteControlName, REMOTE_CONTROL_URL } from '@shared/remote'
 import { useApp } from '@/state/AppState'
@@ -144,26 +144,7 @@ export function TerminalPane({
 
   /* --------------------------------------------------------- dropped files */
 
-  /**
-   * Whether a drag is worth taking. Deliberately generous: a drag whose
-   * payload we cannot see yet counts as maybe-files.
-   *
-   * Being strict here is what made dropping an image a coin toss. The `drop`
-   * event only fires at all if something called `preventDefault` on `dragover`
-   * first — so any drag we decline mid-flight is a drop that never happens,
-   * silently. An OS drag out of Explorer, and Electron's own `startDrag` from
-   * the screenshot tray, do not always advertise `Files` in `types` on every
-   * dragover. So we accept anything that is not plainly *not* a file, and sort
-   * it out at drop time, where the real payload is finally readable.
-   */
-  const maybeFiles = (e: React.DragEvent): boolean => {
-    const types = Array.from(e.dataTransfer.types)
-    if (types.includes('Files')) return true
-    // A tab being dragged around the strip is ours and is not a file.
-    if (types.some((t) => t.startsWith('application/'))) return false
-    return !types.includes('text/plain') && !types.includes('text/uri-list')
-  }
-
+  // maybeFiles (lib/paths) carries the story of why acceptance is generous.
   const acceptDrag = (e: React.DragEvent): void => {
     if (!maybeFiles(e)) return
     e.preventDefault()
