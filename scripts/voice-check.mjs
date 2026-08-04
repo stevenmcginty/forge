@@ -761,7 +761,15 @@ await test('every count route agrees: grammar, brain, executor, clamp', () => {
     { spoken: 'open two claude tabs', count: 2, paneCount: 2, done: 2, summary: /^Opened 2 Claude Code tabs$/ },
     { spoken: 'open 5 claude tabs', count: 5, paneCount: 14, done: 2, summary: /Opened 2 of 5 .* session limit \(16\)/ },
     { spoken: 'open one claude tab', count: 1, paneCount: 0, done: 1, summary: /^Opened 1 Claude Code tab$/ },
-    { spoken: 'open sixteen claude tabs', count: 16, paneCount: 0, done: 16, summary: /^Opened 16 Claude Code tabs$/ }
+    // The workspace fixture already holds 2 tabs, and a project holds at most
+    // 8 — so sixteen asked-for tabs honestly become six.
+    {
+      spoken: 'open sixteen claude tabs',
+      count: 16,
+      paneCount: 0,
+      done: 6,
+      summary: /Opened 6 of 16 Claude Code tabs — a project holds at most 8 tabs/
+    }
   ]
   for (const c of cases) {
     const hit = parseUtterance(c.spoken, C)

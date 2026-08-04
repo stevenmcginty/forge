@@ -278,8 +278,9 @@ goes back to being ephemeral.
   nothing here can wake a PC that was already asleep, and if Forge is not
   running there are no sessions to attach to. Same limit Remote Control has.
 - **Layout ops need the Forge window to exist** (minimised is fine). See above.
-- **`MAX_SESSIONS` is shared** — panes the phone creates count against the same
-  cap of 16 as panes created at the desk.
+- **The limits are shared** — tabs the phone creates count against the same
+  8-tab-per-project cap as tabs created at the desk, and panes against the same
+  app-wide `MAX_SESSIONS` backstop.
 - **One desktop.** Nothing distinguishes two machines on one account yet.
 - **Last write wins** if the phone and the desktop change the same workspace at
   the same moment. One user, one desktop; stated rather than solved.

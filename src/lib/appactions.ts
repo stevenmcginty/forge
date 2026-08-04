@@ -1,3 +1,4 @@
+import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import type { AgentProfile, SplitDirection } from '@shared/types'
 import { skillHandler } from './skillbus'
 
@@ -310,7 +311,14 @@ const PROFILE_ALIASES: Record<string, string> = {
   deepseek: 'deepseek',
   deepseekv4: 'deepseek',
   ds: 'deepseek',
-  v4: 'deepseek'
+  v4: 'deepseek',
+  // What dictation actually produces for "Qwen". These have to be spelled out
+  // rather than left to the sounds-close pass, which hands "gwen" to `gemini`
+  // (same first letter, one edit apart once the vowels go).
+  qwin: 'qwen',
+  gwen: 'qwen',
+  quen: 'qwen',
+  qw: 'qwen'
 }
 
 /** Resolve a spoken name to a profile: exact, prefix, then sounds-close. */
@@ -675,6 +683,10 @@ function plural(n: number, one: string): string {
   return n === 1 ? one : `${one}s`
 }
 
+function capitalise(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
 function fail(summary: string, requested = 1): ActionOutcome {
   return { ok: false, summary, requested, done: 0 }
 }
@@ -708,17 +720,25 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
         return fail('No project open — add a folder with + in the rail first', requested)
       }
 
-      const room = Math.max(0, ctx.maxSessions - ctx.paneCount)
+      // Two ceilings: the project's tab cap is the one people actually meet;
+      // the app-wide session backstop still applies underneath it.
+      const tabRoom = Math.max(0, MAX_TABS_PER_PROJECT - ctx.tabs.length)
+      const sessionRoom = Math.max(0, ctx.maxSessions - ctx.paneCount)
+      const room = Math.min(tabRoom, sessionRoom)
       const done = Math.min(requested, room)
       for (let i = 0; i < done; i++) run.newTab(profile.id)
 
+      const ceiling =
+        tabRoom <= sessionRoom
+          ? `a project holds at most ${MAX_TABS_PER_PROJECT} tabs`
+          : `session limit (${ctx.maxSessions}) reached`
       if (done === 0) {
-        return { ok: false, summary: `Session limit (${ctx.maxSessions}) reached — nothing opened`, requested, done }
+        return { ok: false, summary: `${capitalise(ceiling)} — nothing opened`, requested, done }
       }
       if (done < requested) {
         return {
           ok: true,
-          summary: `Opened ${done} of ${requested} ${profile.name} ${plural(requested, 'tab')} — session limit (${ctx.maxSessions}) reached`,
+          summary: `Opened ${done} of ${requested} ${profile.name} ${plural(requested, 'tab')} — ${ceiling}`,
           requested,
           done
         }

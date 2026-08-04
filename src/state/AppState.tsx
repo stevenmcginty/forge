@@ -8,7 +8,7 @@ import {
   useRef,
   type ReactNode
 } from 'react'
-import { MAX_PANES_PER_TAB, MAX_SESSIONS } from '@shared/ipc'
+import { MAX_PANES_PER_TAB, MAX_SESSIONS, MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import type {
   AgentProfile,
   AppInfo,
@@ -619,6 +619,9 @@ function reducer(state: AppState, action: Action): AppState {
       if (totalPanes(state) >= MAX_SESSIONS) {
         return { ...state, notice: `Session limit reached (${MAX_SESSIONS})` }
       }
+      if (workspaceOf(state, state.activeProjectId).tabs.length >= MAX_TABS_PER_PROJECT) {
+        return { ...state, notice: `A project holds at most ${MAX_TABS_PER_PROJECT} tabs` }
+      }
       return mapActiveWorkspace(state, (ws) => {
         const made = makeTab(action.profileId, ws.tabs, ws.nameCursor ?? 0, action.permissionMode)
         return { ...ws, tabs: [...ws.tabs, made.tab], activeTabId: made.tab.id, nameCursor: made.cursor }
@@ -640,6 +643,9 @@ function reducer(state: AppState, action: Action): AppState {
       }
       if (!state.activeProjectId) {
         return { ...state, notice: 'Open a project first — a command needs somewhere to run' }
+      }
+      if (workspaceOf(state, state.activeProjectId).tabs.length >= MAX_TABS_PER_PROJECT) {
+        return { ...state, notice: `A project holds at most ${MAX_TABS_PER_PROJECT} tabs` }
       }
       const leaf = makeLeaf(action.profileId, '')
       const tab: TerminalTab = {
@@ -1430,6 +1436,8 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       switch (op.op) {
         case 'create-tab':
           if (atLimit) return answer(`Forge is at its ${MAX_SESSIONS}-session limit.`)
+          if (workspaceOf(state, project.id).tabs.length >= MAX_TABS_PER_PROJECT)
+            return answer(`That project already holds its ${MAX_TABS_PER_PROJECT} tabs.`)
           actions.newTab(op.profileId ?? project.defaultProfileId, mode)
           return answer()
         case 'select-tab':

@@ -278,5 +278,12 @@ export const IPC = {
   rendererError: 'diag:renderer-error'
 } as const
 
-export const MAX_SESSIONS = 16
+/**
+ * App-wide backstop, not the working limit — the limit a user actually meets is
+ * MAX_TABS_PER_PROJECT. This one exists because every pane is a real ConPTY
+ * with a real console host process behind it, so "unlimited" has to stop
+ * somewhere before the machine does.
+ */
+export const MAX_SESSIONS = 128
+export const MAX_TABS_PER_PROJECT = 8
 export const MAX_PANES_PER_TAB = 8

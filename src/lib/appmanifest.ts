@@ -1,3 +1,4 @@
+import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import { skillBlurb } from '@shared/skills'
 import type { AgentProfile } from '@shared/types'
 import { skillCatalogue } from './skillbus'
@@ -83,7 +84,12 @@ const SPOKEN_ALIASES: Record<string, string[]> = {
   // Dictation splits compound names, so the two-word spellings are not optional:
   // "open code" and "deep seek" are what actually comes out of the microphone.
   opencode: ['opencode', 'open code', 'oc'],
-  deepseek: ['deepseek', 'deep seek', 'v4', 'ds']
+  deepseek: ['deepseek', 'deep seek', 'v4', 'ds'],
+  // Dictation has no idea what to do with "Qwen" — it comes out as Gwen, Quen
+  // or Qwin about as often as it comes out right. "When" is deliberately not on
+  // the list: it is a word Steve says in ordinary sentences, and a profile alias
+  // that fires on it would open a pane every time he asked when something ran.
+  qwen: ['qwen', 'qwin', 'gwen', 'quen', 'qw']
 }
 
 interface ActionSpec {
@@ -331,6 +337,7 @@ export function buildManifest(s: ManifestSnapshot): string {
   lines.push('# LIMITS')
   lines.push(
     `- ${s.maxSessions} shells maximum across the whole app; ${s.paneCount} are open now.`,
+    `- ${MAX_TABS_PER_PROJECT} tabs maximum per project.`,
     `- ${s.maxPanesPerTab} panes maximum per tab.`,
     '- Over-ask and it is fulfilled partially; you will be told what actually happened.',
     '- You cannot pick an existing folder, read files, or run commands yourself.',

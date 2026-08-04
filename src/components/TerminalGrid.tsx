@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import type { TerminalTab, WorkspaceViewMode } from '@shared/types'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
@@ -42,14 +43,21 @@ export function TerminalGrid(): ReactNode {
   const [chooserOpen, setChooserOpen] = useState(false)
   const [dragFrom, setDragFrom] = useState<number | null>(null)
 
-  // Ctrl+T pops the same chooser as the + button.
+  const atTabLimit = workspace.tabs.length >= MAX_TABS_PER_PROJECT
+
+  // Ctrl+T pops the same chooser as the + button — and meets the same ceiling.
   useEffect(() => {
     const open = (): void => {
-      if (project) setChooserOpen(true)
+      if (!project) return
+      if (atTabLimit) {
+        actions.setNotice(`A project holds at most ${MAX_TABS_PER_PROJECT} tabs`)
+        return
+      }
+      setChooserOpen(true)
     }
     window.addEventListener(NEW_TAB_EVENT, open)
     return () => window.removeEventListener(NEW_TAB_EVENT, open)
-  }, [project])
+  }, [project, atTabLimit, actions])
 
   /*
    * Tab text colours reach the terminals from here rather than from
@@ -113,9 +121,23 @@ export function TerminalGrid(): ReactNode {
           ref={newTabRef}
           type="button"
           className="ghost-btn tabstrip__new"
-          title={atLimit ? `Session limit reached (${max})` : 'New terminal tab (Ctrl+T)'}
+          title={
+            atLimit
+              ? `Session limit reached (${max})`
+              : atTabLimit
+                ? `A project holds at most ${MAX_TABS_PER_PROJECT} tabs`
+                : 'New terminal tab (Ctrl+T)'
+          }
           disabled={atLimit}
-          onClick={() => setChooserOpen(true)}
+          onClick={() => {
+            // Still clickable at the tab cap: the press is how you find out
+            // there is one, rather than a button that quietly went dead.
+            if (atTabLimit) {
+              actions.setNotice(`A project holds at most ${MAX_TABS_PER_PROJECT} tabs`)
+              return
+            }
+            setChooserOpen(true)
+          }}
         >
           <Icon name="plus" size={14} />
         </button>
@@ -157,7 +179,17 @@ export function TerminalGrid(): ReactNode {
 
       <div className="grid__body">
         {viewMode === 'mosaic' ? (
-          <MosaicView project={project} workspace={workspace} onNewTerminal={() => setChooserOpen(true)} />
+          <MosaicView
+            project={project}
+            workspace={workspace}
+            onNewTerminal={() => {
+              if (atTabLimit) {
+                actions.setNotice(`A project holds at most ${MAX_TABS_PER_PROJECT} tabs`)
+                return
+              }
+              setChooserOpen(true)
+            }}
+          />
         ) : tab ? (
           <SplitView
             node={tab.root}
