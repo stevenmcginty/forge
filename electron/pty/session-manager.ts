@@ -351,7 +351,24 @@ export const ENV_DENYLIST: readonly string[] = [
   'ELECTRON_RUN_AS_NODE',
   'ELECTRON_NO_ATTACH_CONSOLE',
   'ELECTRON_IS_DEV',
-  'ELECTRON_ENABLE_LOGGING'
+  'ELECTRON_ENABLE_LOGGING',
+  // 4. This Forge's own identity.
+  //
+  // A pane is a place to work on Forge, so `npm run dev` and `Start Forge.cmd`
+  // get run from inside one constantly — and every one of those is a *different*
+  // Forge that must choose its own profile and its own binary. Inheriting these
+  // hands it this one's.
+  //
+  // FORGE_DATA_DIR is the worse of the two, because it fails silently: the
+  // second Forge adopts this one's data root, finds it already locked, focuses
+  // this window and exits. Nothing opens, nothing is logged where anyone looks,
+  // and the app appears to be broken. ELECTRON_EXEC_PATH is the same mistake
+  // one level down — electron-vite prefers it over the checkout's own Electron,
+  // so a pane-launched dev run boots the wrong binary and fails outright if that
+  // checkout has moved.
+  'FORGE_DATA_DIR',
+  'FORGE_CHANNEL',
+  'ELECTRON_EXEC_PATH'
 ]
 
 const DENIED = new Set(ENV_DENYLIST)
