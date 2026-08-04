@@ -30,7 +30,8 @@ const INSTALL_URLS: Record<string, string> = {
   opencode: 'https://opencode.ai/docs/',
   // The DeepSeek profile *is* OpenCode with a model flag, so what has to be
   // installed — and therefore what the welcome card should link to — is OpenCode.
-  deepseek: 'https://opencode.ai/docs/'
+  deepseek: 'https://opencode.ai/docs/',
+  qwen: 'https://github.com/QwenLM/qwen-code'
 }
 
 /**

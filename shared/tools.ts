@@ -103,6 +103,21 @@ export const TOOL_SPECS: ToolSpec[] = [
     updateCommand: null
   },
   {
+    id: 'qwen',
+    name: 'Qwen Code',
+    blurb: 'Alibaba’s `qwen` CLI — what the Qwen pane runs',
+    command: 'qwen',
+    versionArgs: ['--version'],
+    latest: { source: 'npm', npmPackage: '@qwen-code/qwen-code' },
+    // Derived (`npm i -g @qwen-code/qwen-code`), which both installs and
+    // updates it. `qwen update` is a real subcommand — but it updates the
+    // standalone build from Alibaba's own bucket, not an npm global, so the
+    // button would be right for one install method and quietly wrong for the
+    // other. npm is what the Install button here types, so npm is what the
+    // Update button has to keep working on.
+    updateCommand: null
+  },
+  {
     id: 'node',
     name: 'Node',
     blurb: 'runs the MCP bridge — update it however you installed it',
@@ -167,15 +182,9 @@ export const KNOWN_TOOLS: ToolSpec[] = [
   // opencode was here as a suggestion, described as "a candidate for an agent
   // profile". It is now a built-in profile and a built-in TOOL_SPEC, so leaving
   // the suggestion would offer a row that allToolSpecs drops as a duplicate.
-  {
-    id: 'qwen',
-    name: 'Qwen Code',
-    blurb: 'Qwen’s terminal agent',
-    command: 'qwen',
-    versionArgs: ['--version'],
-    latest: { source: 'npm', npmPackage: '@qwen-code/qwen-code' },
-    updateCommand: null
-  },
+  // qwen was here as a suggestion too, and left for the same reason opencode
+  // did: it is now a built-in profile and a built-in TOOL_SPEC, so a suggestion
+  // row would only offer something allToolSpecs drops as a duplicate.
   {
     id: 'uv',
     name: 'uv',

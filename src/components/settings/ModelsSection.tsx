@@ -54,7 +54,8 @@ const GROQ_MODELS = [
 const CLAUDE_MODELS = [
   { id: 'opus', label: 'Opus — smartest, the default' },
   { id: 'sonnet', label: 'Sonnet — faster, lighter on usage' },
-  { id: 'haiku', label: 'Haiku — lightest' }
+  { id: 'haiku', label: 'Haiku — lightest' },
+  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna — fastest OpenAI option' }
 ]
 
 const BRAINS: Array<{ id: VoiceBrainId; name: string; note: string; ready: boolean }> = [
@@ -248,7 +249,7 @@ export function ModelsSection(): ReactNode {
       >
         <Row
           label="Model"
-          hint="An alias, not a pinned model — the CLI resolves it to whatever is current. Sonnet is the one to pick for a conversation; Opus costs more of your usage for the times it is worth it."
+          hint="Opus, Sonnet and Haiku use the Claude login. GPT-5.6 Luna uses the installed Codex login and is a faster OpenAI voice route; changing it takes effect on the next turn."
         >
           <select
             className="select"

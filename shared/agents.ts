@@ -104,6 +104,37 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     badge: 'DS',
     builtin: true,
     kind: 'agent'
+  },
+  {
+    id: 'qwen',
+    name: 'Qwen',
+    // Alibaba's own terminal agent, so unlike DeepSeek above this is not a
+    // wrapper around somebody else's CLI: `qwen` *is* the thing, and it carries
+    // its own sign-in (`/auth` on first run, or `qwen` opens straight into the
+    // provider picker) rather than reading a key out of the environment. Which
+    // matters here more than it looks: Forge strips inherited `ANTHROPIC_*` from
+    // every pane (ENV_DENYLIST in electron/pty/session-manager.ts), so an agent
+    // that authenticates itself is one that cannot be broken by that rule.
+    //
+    // Bare, and deliberately not `qwen -m qwen3.8-max-preview`. Qwen3.8-Max is
+    // the model this profile exists for, but it is served only to Alibaba's
+    // Token Plan tier — verified in the CLI's own provider table, where
+    // `qwen3.8-max-preview` appears in TOKEN_PLAN_MODELS and in no other preset
+    // (Coding Plan stops at qwen3.7-plus). Pinning a model the account cannot
+    // reach is exactly the dead-profile bug the DeepSeek note above is about, so
+    // the model stays a `-m` flag or a `/model` away for the machines that have
+    // the subscription, and the pane opens for the machines that do not.
+    command: 'qwen',
+    // Magenta, because it is the hue left: the six accents above have the
+    // blues, greens, purples and oranges, and at badge size a free colour is
+    // the whole of how a pane is told apart at a glance.
+    accent: '#FF7AC8',
+    badge: 'QW',
+    builtin: true,
+    kind: 'agent'
+    // No mcpBridge, for the Codex and OpenCode reason: qwen speaks MCP through
+    // `qwen mcp` and its own settings file, not Claude Code's --mcp-config, so
+    // handing it the flag would only make it refuse to start.
   }
 ]
 
