@@ -18,6 +18,7 @@ import {
   MOSAIC_MIN_W,
   NO_EDGES,
   TAB_DRAG_TYPE,
+  TASK_DRAG_TYPE,
   cascadeAt,
   clampResize,
   collides,
@@ -37,7 +38,7 @@ import {
 import { collectLeaves } from '@/lib/splitTree'
 import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { terminalHost, type PaneGeometry, type TerminalSpec } from '@/lib/terminals'
-import { useApp } from '@/state/AppState'
+import { useActiveWorkspace, useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
 import { EmptyState } from './EmptyState'
@@ -836,6 +837,7 @@ function MosaicTile({
   onToggleInteract: (paneId: string) => void
 }): ReactNode {
   const { state, actions } = useApp()
+  const workspaceTasks = useActiveWorkspace().tasks
   const paneId = cell.leaf.id
   const profile = resolveProfile(state.settings.agentProfiles, cell.leaf.profileId)
   const runtime = usePaneRuntime(paneId)
@@ -1048,7 +1050,7 @@ function MosaicTile({
    * maybeFiles (lib/paths) carries the story of why acceptance is generous.
    */
   const acceptDrag = (e: ReactDragEvent): void => {
-    if (!maybeFiles(e)) return
+    if (!maybeFiles(e) && !e.dataTransfer.types.includes(TASK_DRAG_TYPE)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
     setDropping(true)
@@ -1059,6 +1061,21 @@ function MosaicTile({
     // window to the file, which would take the whole app down with it.
     e.preventDefault()
     setDropping(false)
+    // A task card first: dealing work onto the wall is the tray's whole point.
+    // Same contract as the pane version in TerminalPane — typed, flattened,
+    // never submitted, card off the tray only once the text really landed.
+    const taskId = e.dataTransfer.getData(TASK_DRAG_TYPE)
+    if (taskId) {
+      const card = (workspaceTasks ?? []).find((t) => t.id === taskId)
+      if (!card) return
+      if (!zoomed && !interactive) onToggleInteract(paneId)
+      terminalHost.focus(paneId)
+      requestAnimationFrame(() => {
+        if (terminalHost.type(paneId, `${card.text} `)) actions.removeTask(card.id)
+        else actions.setNotice('That pane has no live shell to hand the task to')
+      })
+      return
+    }
     const quoted = droppedFilePaths(e).map((p) => `"${p}"`)
     if (quoted.length === 0) return
     /*

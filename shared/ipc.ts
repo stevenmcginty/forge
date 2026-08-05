@@ -291,3 +291,12 @@ export const IPC = {
 export const MAX_SESSIONS = 128
 export const MAX_TABS_PER_PROJECT = 8
 export const MAX_PANES_PER_TAB = 8
+
+/**
+ * The delegation tray's backstops. A tray is a handful of things you are about
+ * to do, not a backlog — 32 cards is already a smell — and a card's text is
+ * typed into a real terminal, so it stops well short of "someone pasted a
+ * novel".
+ */
+export const MAX_TASK_CARDS = 32
+export const MAX_TASK_TEXT = 4000

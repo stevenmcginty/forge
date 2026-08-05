@@ -218,9 +218,22 @@ export interface MosaicState {
 }
 
 /** One project's terminal workspace. */
+/**
+ * One task on the delegation tray: a prompt written once, waiting to be
+ * dragged onto whichever agent should do it. The card *is* the delegation
+ * mechanism — there is no queue engine behind it, deliberately.
+ */
+export interface TaskCard {
+  id: string
+  text: string
+  createdAt: number
+}
+
 export interface Workspace {
   tabs: TerminalTab[]
   activeTabId: string | null
+  /** The delegation tray. Optional so workspaces written before it existed still load. */
+  tasks?: TaskCard[]
   /** Optional so workspaces written before the mosaic existed still load. */
   viewMode?: WorkspaceViewMode
   /** Optional so workspaces written before the freeform wall existed still load. */

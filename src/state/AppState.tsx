@@ -8,7 +8,7 @@ import {
   useRef,
   type ReactNode
 } from 'react'
-import { MAX_PANES_PER_TAB, MAX_SESSIONS, MAX_TABS_PER_PROJECT } from '@shared/ipc'
+import { MAX_PANES_PER_TAB, MAX_SESSIONS, MAX_TABS_PER_PROJECT, MAX_TASK_CARDS, MAX_TASK_TEXT } from '@shared/ipc'
 import type {
   AgentProfile,
   AppInfo,
@@ -20,6 +20,7 @@ import type {
   Project,
   Settings,
   SplitDirection,
+  TaskCard,
   TerminalTab,
   ThemeCore,
   VoiceBrainId,
@@ -279,6 +280,8 @@ type Action =
   | { type: 'mosaicTiles'; tiles: Record<string, MosaicTile>; custom?: boolean; wallTab?: string }
   | { type: 'mosaicFit'; paneId: string; fit: boolean }
   | { type: 'mosaicReset' }
+  | { type: 'taskAdd'; text: string }
+  | { type: 'taskRemove'; id: string }
   | { type: 'setAgentListening'; on: boolean }
   | { type: 'drainKills'; ids: string[] }
   | { type: 'notice'; message: string | null }
@@ -520,7 +523,21 @@ function sanitiseWorkspace(ws: Workspace | null, profileIds: Set<string>): Works
   const raw = ws.nameCursor
   const nameCursor =
     typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) % TAB_NAME_POOL.length : 0
-  return { tabs, activeTabId, viewMode, mosaic, nameCursor }
+  // Task cards are typed into live terminals, so a layout file only gets to
+  // put strings of bounded size on the tray — and never more tray than the
+  // reducer would have allowed it to accumulate.
+  const tasks: TaskCard[] = []
+  if (Array.isArray(ws.tasks)) {
+    for (const t of ws.tasks) {
+      if (!t || typeof t.id !== 'string' || typeof t.text !== 'string') continue
+      const text = t.text.trim().slice(0, MAX_TASK_TEXT)
+      if (!text) continue
+      const createdAt = typeof t.createdAt === 'number' && Number.isFinite(t.createdAt) ? t.createdAt : Date.now()
+      tasks.push({ id: t.id, text, createdAt })
+      if (tasks.length >= MAX_TASK_CARDS) break
+    }
+  }
+  return { tabs, activeTabId, viewMode, mosaic, nameCursor, ...(tasks.length > 0 ? { tasks } : {}) }
 }
 
 /* ------------------------------------------------------------- reducer */
@@ -844,6 +861,24 @@ function reducer(state: AppState, action: Action): AppState {
     case 'mosaicReset':
       return mapMosaic(state, (m) => (m.mode === 'auto' && m.wallTabs.length === 0 ? null : emptyMosaic()))
 
+    case 'taskAdd': {
+      const text = action.text.trim().slice(0, MAX_TASK_TEXT)
+      if (!text) return state
+      if ((workspaceOf(state, state.activeProjectId).tasks?.length ?? 0) >= MAX_TASK_CARDS) {
+        return { ...state, notice: `The tray holds at most ${MAX_TASK_CARDS} tasks — deliver some first` }
+      }
+      const card: TaskCard = { id: crypto.randomUUID(), text, createdAt: Date.now() }
+      // Newest first, same as the shots shelf: the card you just wrote is the
+      // one you are about to drag.
+      return mapActiveWorkspace(state, (ws) => ({ ...ws, tasks: [card, ...(ws.tasks ?? [])] }))
+    }
+
+    case 'taskRemove':
+      return mapActiveWorkspace(state, (ws) => {
+        const tasks = (ws.tasks ?? []).filter((t) => t.id !== action.id)
+        return tasks.length === (ws.tasks?.length ?? 0) ? null : { ...ws, tasks }
+      })
+
     case 'setAgentListening':
       return state.agentListening === action.on ? state : { ...state, agentListening: action.on }
 
@@ -973,6 +1008,13 @@ export interface AppActions {
   setMosaicFit(paneId: string, fit: boolean): void
   /** Back to the auto grid, forgetting every hand-placed box. */
   resetMosaicLayout(): void
+
+  /* ----------------------------------------------------- delegation tray */
+  /** Put a task card on the tray, ready to be dragged onto an agent. */
+  addTask(text: string): void
+  /** Take a card off the tray — delivered or dismissed, same door. */
+  removeTask(id: string): void
+
   setNotice(message: string | null): void
   openDataDir(): void
 
@@ -1377,6 +1419,8 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           ...(opts?.wallTab ? { wallTab: opts.wallTab } : {})
         }),
       setMosaicFit: (paneId, fit) => dispatch({ type: 'mosaicFit', paneId, fit }),
+      addTask: (text) => dispatch({ type: 'taskAdd', text }),
+      removeTask: (id) => dispatch({ type: 'taskRemove', id }),
       resetMosaicLayout: () => dispatch({ type: 'mosaicReset' }),
       setNotice: (message) => dispatch({ type: 'notice', message }),
       openDataDir: () => void window.forge.store.revealDataDir(),

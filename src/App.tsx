@@ -4,6 +4,7 @@ import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { Onboarding } from '@/components/Onboarding'
 import { ProjectRail } from '@/components/ProjectRail'
 import { ScreenshotTray } from '@/components/ScreenshotTray'
+import { TaskTray } from '@/components/TaskTray'
 import { StatusBar } from '@/components/StatusBar'
 import { TerminalGrid } from '@/components/TerminalGrid'
 import { SettingsPage } from '@/components/settings/SettingsPage'
@@ -51,6 +52,7 @@ export function App(): ReactNode {
       <div className="app__body">
         <aside className="app__left" data-collapsed={state.settings.railCollapsed}>
           <ProjectRail />
+          <TaskTray />
           <ScreenshotTray />
           <AccountChip />
         </aside>

@@ -47,6 +47,8 @@ export const MOSAIC_GAP = 8
  * rather than a surprise.
  */
 export const TAB_DRAG_TYPE = 'application/x-forge-tab'
+/** A task card from the delegation tray, riding a drag. The payload is its id. */
+export const TASK_DRAG_TYPE = 'application/x-forge-task'
 
 export type MosaicDir = 'left' | 'right' | 'up' | 'down'
 

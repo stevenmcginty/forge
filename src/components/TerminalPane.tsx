@@ -9,7 +9,7 @@ import {
   permissionChip,
   resolveProfile
 } from '@/lib/agents'
-import { TAB_DRAG_TYPE } from '@/lib/mosaicLayout'
+import { TAB_DRAG_TYPE, TASK_DRAG_TYPE } from '@/lib/mosaicLayout'
 import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost, type TerminalSpec } from '@/lib/terminals'
@@ -149,10 +149,30 @@ export function TerminalPane({
 
   // maybeFiles (lib/paths) carries the story of why acceptance is generous.
   const acceptDrag = (e: React.DragEvent): void => {
-    if (!maybeFiles(e) && !e.dataTransfer.types.includes(TAB_DRAG_TYPE)) return
+    const types = e.dataTransfer.types
+    if (!maybeFiles(e) && !types.includes(TAB_DRAG_TYPE) && !types.includes(TASK_DRAG_TYPE)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
     setDropping(true)
+  }
+
+  /**
+   * A task card dropped on a pane is the delegation: type the card's text into
+   * this agent — flattened, because a newline would submit — and take the card
+   * off the tray. Typed, never submitted: the brief sits at the prompt for
+   * Steve to read and Enter, the same contract dictation and the tab handover
+   * honour. And because it went through type(), "Take back typed" can rescue a
+   * card dealt to the wrong pane.
+   */
+  const onDropTask = (taskId: string): void => {
+    const card = (workspace.tasks ?? []).find((t) => t.id === taskId)
+    if (!card) return
+    claimFocus()
+    terminalHost.focus(leaf.id)
+    requestAnimationFrame(() => {
+      if (terminalHost.type(leaf.id, `${card.text} `)) actions.removeTask(card.id)
+      else actions.setNotice('That pane has no live shell to hand the task to')
+    })
   }
 
   /**
@@ -218,6 +238,11 @@ export function TerminalPane({
     const tabId = e.dataTransfer.getData(TAB_DRAG_TYPE)
     if (tabId) {
       void onDropTab(tabId)
+      return
+    }
+    const taskId = e.dataTransfer.getData(TASK_DRAG_TYPE)
+    if (taskId) {
+      onDropTask(taskId)
       return
     }
     const quoted = droppedFilePaths(e).map((p) => `"${p}"`)

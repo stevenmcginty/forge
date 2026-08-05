@@ -1,0 +1,122 @@
+/*
+ * The delegation tray. Sits in the left rail above the shots shelf and leans
+ * on the same .tray__head / .tray__count / .tray__pip vocabulary (defined in
+ * ScreenshotTray.css, loaded app-wide) so the two shelves read as siblings.
+ */
+
+.tasktray {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  border-top: 1px solid var(--line-hairline);
+  background: linear-gradient(180deg, var(--panel-grad-a) 0%, var(--panel-grad-b) 100%);
+}
+
+.tasktray--collapsed {
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- compose */
+
+.tasktray__compose {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s-2);
+  padding: 0 var(--s-4) var(--s-3) var(--s-5);
+}
+
+.tasktray__input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  font: inherit;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-md);
+  padding: var(--s-2) var(--s-3);
+  outline: none;
+}
+
+.tasktray__input:focus {
+  border-color: var(--accent-line);
+}
+
+.tasktray__add {
+  flex: none;
+}
+
+/* ------------------------------------------------------------------ cards */
+
+.tasktray__list {
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: 0 var(--s-4) var(--s-3) var(--s-5);
+}
+
+.taskcard {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-md);
+  background: var(--panel-grad-a);
+  cursor: grab;
+}
+
+.taskcard:active {
+  cursor: grabbing;
+}
+
+.taskcard:hover {
+  border-color: var(--accent-line);
+}
+
+.taskcard__grip {
+  flex: none;
+  color: var(--text-dim);
+  display: inline-flex;
+}
+
+.taskcard__text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  /* Two lines of the brief, then an ellipsis — the title attribute has the rest. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.taskcard__kill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.taskcard__kill:hover {
+  color: var(--text-primary);
+  background: var(--accent-softer);
+}
