@@ -48,7 +48,48 @@ function pidsOnPorts() {
   return [...pids]
 }
 
-const pids = pidsOnPorts()
+/**
+ * Ports are not the only thing a zombie holds. A dev tree whose window died
+ * ugly (renderer crash, half-finished shutdown) keeps the log file's write
+ * handle even after its ports are gone — and a launch that cannot open its
+ * log dies before this script would ever run via npm. So besides port
+ * holders, sweep for this checkout's own dev toolchain by command line:
+ * anything running our electron-vite or our scripts/dev.mjs predates this
+ * launch (npm runs predev to completion before the dev script starts) and is
+ * either a zombie or about to be replaced. Panes, agents and editors that
+ * merely have this folder as cwd never match — their command lines do not
+ * name the dev toolchain.
+ */
+function devToolchainPids() {
+  try {
+    const out = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ForEach-Object { "$($_.ProcessId)\t$($_.CommandLine)" }`
+      ],
+      { encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024 }
+    )
+    const pids = []
+    for (const line of out.split('\n')) {
+      const tab = line.indexOf('\t')
+      if (tab === -1) continue
+      const pid = Number(line.slice(0, tab))
+      const cl = line.slice(tab + 1).toLowerCase()
+      if (!cl.includes(ROOT)) continue
+      if (!cl.includes('electron-vite') && !cl.includes('dev.mjs')) continue
+      if (pid === process.pid || pid === process.ppid) continue
+      pids.push(pid)
+    }
+    return pids
+  } catch {
+    return []
+  }
+}
+
+const pids = [...new Set([...pidsOnPorts(), ...devToolchainPids()])]
 let killedAny = false
 for (const pid of pids) {
   const commandLine = commandLineFor(pid)

@@ -357,6 +357,39 @@ function createWindow(): void {
     syncPresence()
   })
 
+  /**
+   * A dead renderer must not become an immortal app.
+   *
+   * When the renderer process crashes — an update pulled under a running app,
+   * npm install rewriting node_modules beneath vite, a plain Chromium OOM —
+   * the OS process is gone but the BrowserWindow object is not. Electron
+   * therefore never fires 'window-all-closed', so none of the shutdown
+   * machinery runs, and what is left is a windowless Forge holding port 5173
+   * and the dev log against every later launch. That is the zombie behind
+   * every "Forge won't open" evening.
+   *
+   * So: one reload, because a crash during a dev-server hiccup usually comes
+   * straight back. A second death without a healthy load in between means the
+   * ground is bad; destroy the window so 'window-all-closed' fires and the
+   * quit path (with its hard-exit backstop) takes the process down honestly.
+   */
+  let rendererDeaths = 0
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit' || !mainWindow || mainWindow.isDestroyed()) return
+    rendererDeaths += 1
+    console.error(`[main] renderer gone (${details.reason}), death #${rendererDeaths}`)
+    if (rendererDeaths === 1) {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload()
+      }, 1500)
+    } else {
+      mainWindow.destroy()
+    }
+  })
+  mainWindow.webContents.on('did-finish-load', () => {
+    rendererDeaths = 0
+  })
+
   // Never let the renderer navigate away or spawn windows.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) void shell.openExternal(url)

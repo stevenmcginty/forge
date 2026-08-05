@@ -47,6 +47,27 @@ logFile = dir & "\dev.log"
 
 sh.CurrentDirectory = root
 
+' Reap zombies BEFORE the log is opened. A dev tree whose window died ugly
+' still holds dev.log's write handle; the `> log` redirect below then fails
+' with a sharing violation before npm - and the cleanup it would run - ever
+' starts. Nothing can be launched until someone kills the zombie, so that
+' someone is this line, whose own output goes to nul precisely because the
+' log may be the thing that is stuck.
+sh.Run "cmd /c node ""scripts\predev-cleanup.mjs"" >nul 2>&1", 0, True
+
+' Belt and braces: if dev.log is still locked (a holder the cleanup could not
+' see), take a sibling name rather than dying on the redirect. A launch must
+' never fail because of where its log goes.
+On Error Resume Next
+Set ts = fso.OpenTextFile(logFile, 8, True)
+If Err.Number <> 0 Then
+  Err.Clear
+  logFile = dir & "\dev-2.log"
+Else
+  ts.Close
+End If
+On Error GoTo 0
+
 ' Two attempts, not one. The common startup failure is not broken code - it is
 ' closing Forge and reopening it before the old process tree has finished
 ' dying, so the new one loses the fight over a port or the single-instance
