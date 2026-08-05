@@ -144,6 +144,13 @@ export class PtySessionManager {
         cwd,
         cols,
         rows,
+        // The conpty.dll shipped inside the node-pty package (from the Windows
+        // Terminal project), not the OS-inbox one. The inbox ConPTY's resize
+        // reflow is lossy — it re-emits the buffer with duplicated and
+        // overlapped fragments, which is where "jumbled after a resize" comes
+        // from. The bundled DLL reflows faithfully. It is loaded by path from
+        // the package directory, which electron-builder already asar-unpacks.
+        useConptyDll: true,
         env: buildEnv(this.extraEnv)
       })
     } catch (err) {
