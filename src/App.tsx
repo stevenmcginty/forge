@@ -4,7 +4,8 @@ import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { Onboarding } from '@/components/Onboarding'
 import { ProjectRail } from '@/components/ProjectRail'
 import { ScreenshotTray } from '@/components/ScreenshotTray'
-import { TaskTray } from '@/components/TaskTray'
+import { TasksPanel } from '@/components/tasks/TasksPanel'
+import { TasksWorkspace } from '@/components/tasks/TasksWorkspace'
 import { StatusBar } from '@/components/StatusBar'
 import { TerminalGrid } from '@/components/TerminalGrid'
 import { SettingsPage } from '@/components/settings/SettingsPage'
@@ -30,7 +31,7 @@ export function App(): ReactNode {
   useEffect(() => {
     const t = setTimeout(() => terminalHost.fitAll(), 200)
     return () => clearTimeout(t)
-  }, [state.settings.railCollapsed, state.view])
+  }, [state.settings.railCollapsed, state.view, state.tasksMaximized])
 
   return (
     <div className="app" data-ready={state.ready}>
@@ -52,12 +53,24 @@ export function App(): ReactNode {
       <div className="app__body">
         <aside className="app__left" data-collapsed={state.settings.railCollapsed}>
           <ProjectRail />
-          <TaskTray />
+          <TasksPanel />
           <ScreenshotTray />
           <AccountChip />
         </aside>
         <main className="app__main">
-          {state.view === 'settings' ? <SettingsPage /> : <TerminalGrid />}
+          {/*
+            Settings wins outright; under it, the delegation desk (the Tasks
+            panel maximized) swaps in for the grid the same way mosaicZoom
+            swaps a tile to full bleed — a React flag, and the terminals keep
+            running unmounted because terminalHost owns them.
+          */}
+          {state.view === 'settings' ? (
+            <SettingsPage />
+          ) : state.tasksMaximized ? (
+            <TasksWorkspace />
+          ) : (
+            <TerminalGrid />
+          )}
         </main>
       </div>
       <StatusBar />

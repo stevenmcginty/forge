@@ -27,6 +27,7 @@ import type {
   OpenRouterCallResult,
   GroqCallRequest,
   GroqCallResult,
+  PlannerUpdate,
   Project,
   PtyDataEvent,
   PtyExitEvent,
@@ -37,8 +38,6 @@ import type {
   SttPhraseEvent,
   SttStartOptions,
   SttStatus,
-  TaskPlanBrainRequest,
-  TaskPlanResult,
   ToolId,
   ToolLatest,
   ToolProbe,
@@ -394,14 +393,18 @@ export interface ForgeApi {
     claudeTranscript(cwd: string, sessionId: string): Promise<{ path: string; exists: boolean }>
   }
 
-  /** The delegation tray's brain. See electron/task-planner.ts. */
-  tasks: {
-    /**
-     * One model turn: a goal in, self-contained task briefs out. The brain is
-     * the tray's pick — the Claude CLI (no key), or Gemini with the key and
-     * model from settings.
-     */
-    plan(goal: string, projectName: string, cwd: string, brain: TaskPlanBrainRequest): Promise<TaskPlanResult>
+  /**
+   * The tasks panel's planning session, watched rather than driven.
+   *
+   * The panel runs a real, visible `claude` pane; the plan is whatever that
+   * session writes into a ```tasks fence. Nothing here starts, prompts or stops
+   * a terminal — it tails the transcript Claude Code is already keeping for that
+   * session id and pushes each plan it finds. See electron/planner-watcher.ts.
+   */
+  planner: {
+    watch(req: { projectId: string; cwd: string; sessionId: string }): Promise<{ ok: boolean; error?: string }>
+    unwatch(projectId: string): void
+    onUpdate(cb: (e: PlannerUpdate) => void): () => void
   }
 
   /**

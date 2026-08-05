@@ -3,6 +3,7 @@ import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import type { CreateSessionRequest, CreateSessionResult } from '@shared/types'
 import { installCommandFor, toolSpecForCommand } from '@shared/tools'
 import { PtySessionManager } from './pty/session-manager'
+import { withoutQuestions } from './pty/replay'
 import { checkableExe, whichCommand } from './which'
 import { getSettings } from './store'
 import { applyMcpBridge } from './bridge/mcp-config'
@@ -106,9 +107,13 @@ export function addPtySink(sink: PtySink): () => void {
  * Already used for renderer reloads; exported so a phone connecting from a
  * train gets the identical answer rather than a second mechanism that can
  * disagree with this one.
+ *
+ * Everything that would provoke a reply is stripped on the way out — see
+ * electron/pty/replay.ts. A repaint must not re-ask a live program's startup
+ * questions on its behalf.
  */
 export function getReplay(id: string): string {
-  return replay.get(id) ?? ''
+  return withoutQuestions(replay.get(id) ?? '')
 }
 
 function send(channel: string, payload: unknown): void {
@@ -253,10 +258,17 @@ export function registerPtyHandlers(): void {
     const projectName = String(req?.projectName ?? '')
     const paneTitle = String(req?.paneTitle ?? '')
     const cwd = String(req?.cwd ?? '')
-    const plan = applyClaudeSession(applyRemoteControl(req?.bootstrapCommand ?? '', { projectName, paneTitle }), {
-      sessionId: typeof req?.sessionId === 'string' ? req.sessionId : undefined,
-      cwd
-    })
+    const plan = applyClaudeSession(
+      applyRemoteControl(req?.bootstrapCommand ?? '', {
+        projectName,
+        paneTitle,
+        ...(req?.remoteControl === false ? { remoteControl: false as const } : {})
+      }),
+      {
+        sessionId: typeof req?.sessionId === 'string' ? req.sessionId : undefined,
+        cwd
+      }
+    )
     const bootstrapCommand = applyMcpBridge(plan.command)
 
     // The pane is about to type a command into a shell. If the program behind
@@ -305,7 +317,10 @@ export function registerPtyHandlers(): void {
 
     if (existed) {
       getManager().resize(spec.id, spec.cols, spec.rows)
-      const buffered = replay.get(spec.id)
+      // Through getReplay rather than the raw map: the questions in it have to
+      // come out, or the reload answers them into a program that has long since
+      // stopped listening and reads the answers as typing.
+      const buffered = getReplay(spec.id)
       if (buffered) setImmediate(() => send(IPC.ptyData, { id: spec.id, data: buffered }))
       return { ...result, restored: true }
     }

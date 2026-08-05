@@ -6,6 +6,10 @@
  * create a pwsh session in a project folder, let the bootstrap command type
  * itself, and assert the output comes back.
  *
+ * Plus the one piece of the host that is pure and therefore testable here:
+ * electron/pty/replay.ts, which takes the questions out of a replayed screen so
+ * a renderer reload cannot answer them into a live program's stdin.
+ *
  *   npm run pty:smoke
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -22,6 +26,8 @@ const SOURCE = join(ROOT, 'electron', 'pty', 'session-manager.ts')
 const scratch = join(ROOT, 'node_modules', '.forge-smoke')
 mkdirSync(scratch, { recursive: true })
 const bundle = join(scratch, 'session-manager.mjs')
+const REPLAY_SOURCE = join(ROOT, 'electron', 'pty', 'replay.ts')
+const replayBundle = join(scratch, 'replay.mjs')
 
 let failures = 0
 const log = (ok, message) => {
@@ -66,6 +72,45 @@ async function main() {
   })
 
   const { PtySessionManager, ENV_DENYLIST } = await import(pathToFileURL(bundle).href)
+
+  /* ------------------------------------------------- 0. the replay screen */
+
+  /*
+   * What a renderer reload feeds back through xterm. The bug this holds dead:
+   * the buffer is raw *output*, and a TUI's startup output contains its
+   * terminal probes — so replaying it made xterm answer questions nobody had
+   * asked, and the answers arrived at a live Codex as though Steve had typed
+   * `[?1;2c]10;rgb:e8e8/eaea/eded\` into its composer.
+   */
+  await build({
+    entryPoints: [REPLAY_SOURCE],
+    outfile: replayBundle,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    logLevel: 'silent',
+    absWorkingDir: ROOT
+  })
+  const { withoutQuestions } = await import(pathToFileURL(replayBundle).href)
+
+  const screen =
+    'welcome\r\n' +
+    '\x1b[c' + // primary Device Attributes
+    '\x1b[>0c' + // secondary
+    '\x1b[6n' + // cursor position report
+    '\x1b[?2026$p' + // DECRQM: synchronised output
+    '\x1b]10;?\x1b\\' + // foreground colour
+    '\x1b]11;?\x07' + // background colour, BEL-terminated
+    '\x1bZ' + // the obsolete DA
+    '\x1b[1;32mgreen\x1b[0m done\r\n'
+  const cleaned = withoutQuestions(screen)
+  log(!/\x1b\[[?>=]?[0-9;]*[cn]/.test(cleaned), 'a replayed screen carries no Device Attributes or status query')
+  log(!cleaned.includes('$p'), 'nor a DECRQM mode query')
+  log(!/\x1b\][0-9;]*\?/.test(cleaned), 'nor an OSC colour query')
+  log(!cleaned.includes('\x1bZ'), 'nor the obsolete DA')
+  log(cleaned === 'welcome\r\n\x1b[1;32mgreen\x1b[0m done\r\n', `the picture itself survives intact`)
+  log(withoutQuestions('') === '', 'an empty replay stays empty')
 
   /* ---------------------------------------------------- 1. plain session */
 

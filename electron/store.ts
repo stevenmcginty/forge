@@ -148,8 +148,6 @@ function defaultSettings(): Settings {
     voiceWakeWord: false,
     geminiKey: '',
     geminiModel: 'gemini-2.5-flash',
-    // Claude: the CLI is Forge's native agent and needs no key at all.
-    taskPlannerBrain: 'claude',
     accountName: defaultAccountName(),
     accountColor: '#C6FF4A',
     themeId: 'volt',
@@ -485,7 +483,6 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     geminiKey: typeof s.geminiKey === 'string' ? s.geminiKey.trim() : '',
     geminiModel:
       typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel,
-    taskPlannerBrain: s.taskPlannerBrain === 'gemini' ? 'gemini' : 'claude',
     accountName:
       typeof s.accountName === 'string' && s.accountName.trim()
         ? s.accountName.trim().slice(0, 40)

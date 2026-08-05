@@ -229,28 +229,16 @@ export interface TaskCard {
   createdAt: number
 }
 
-/** What the tray's Plan button gets back: briefs to become cards, or the reason not. */
-export type TaskPlanResult =
-  | {
-      ok: true
-      tasks: string[]
-      /**
-       * The plan in prose — what the model intends and in what order — shown
-       * for review before any card exists. Older prompts and stubborn models
-       * sometimes answer with a bare task array, so it stays optional.
-       */
-      plan?: string
-    }
-  | { ok: false; error: string }
-
-/** The two models the tray can plan with. */
-export type TaskPlannerBrain = 'claude' | 'gemini'
-
-/**
- * How the renderer asks for a plan. The Gemini arm carries key and model
- * because keys live in renderer-owned settings, same as the voice brains.
- */
-export type TaskPlanBrainRequest = { kind: 'claude' } | { kind: 'gemini'; key: string; model: string }
+/** A plan the tasks-panel planner session emitted in a ```tasks fence. */
+export type PlannerUpdate = {
+  projectId: string
+  /** Prose plan, when the model sent one. */
+  plan: string | null
+  /** Self-contained task briefs, ready to become cards. */
+  tasks: string[]
+  /** Monotonic per-watch sequence so the renderer can ignore stale pushes. */
+  seq: number
+}
 
 export interface Workspace {
   tabs: TerminalTab[]
@@ -270,6 +258,14 @@ export interface Workspace {
    * Optional so workspaces written before tabs had names still load.
    */
   nameCursor?: number
+  /**
+   * The Claude session id of the tasks panel's planner terminal, so the panel
+   * resumes the same conversation across restarts rather than starting a new
+   * one — and so the watcher knows which transcript on disk to tail.
+   *
+   * Optional so workspaces written before the panel existed still load.
+   */
+  plannerSessionId?: string
 }
 
 /* ------------------------------------------------------------------- shots */
@@ -952,12 +948,6 @@ export interface Settings {
    */
   geminiKey: string
   geminiModel: string
-  /**
-   * Which model the delegation tray's Plan button thinks with: the Claude CLI
-   * (no key needed, Steve's login) or Gemini (geminiKey above, same key the
-   * voice brain uses).
-   */
-  taskPlannerBrain: TaskPlannerBrain
 
   /* --------------------------------------------------- account + themes (M6) */
   /** Display name on the account chip. Seeded from the Windows username. */
@@ -1451,6 +1441,13 @@ export interface AppInfo {
   dataDir: string
   maxSessions: number
   shell: string
+  /**
+   * Which checkout this window is — the same FORGE_CHANNEL discriminator
+   * StaleStatus.channel carries. Required, and always sent: the title bar wears
+   * its dev marks off this, and a renderer that has not hydrated yet has no
+   * AppInfo at all, so absence already means "assume stable, show nothing".
+   */
+  channel: 'dev' | 'stable'
 }
 
 export interface CreateSessionRequest {
@@ -1473,6 +1470,14 @@ export interface CreateSessionRequest {
    * electron/bridge/claude-session.ts.
    */
   sessionId?: string
+  /**
+   * `false` keeps this pane out of Remote Control regardless of profile and
+   * settings. A bridged session routes its conversation through claude.ai and
+   * writes no messages to the local transcript — fatal for any pane whose
+   * transcript is read by Forge itself (the planner). Absent means the
+   * profile/settings decide, as ever.
+   */
+  remoteControl?: false
 }
 
 export type CreateSessionResult =

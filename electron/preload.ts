@@ -150,8 +150,12 @@ const api: ForgeApi = {
     claudeTranscript: (cwd, sessionId) => ipcRenderer.invoke(IPC.claudeTranscript, cwd, sessionId)
   },
 
-  tasks: {
-    plan: (goal, projectName, cwd, brain) => ipcRenderer.invoke(IPC.tasksPlan, goal, projectName, cwd, brain)
+  planner: {
+    watch: (req) => ipcRenderer.invoke(IPC.plannerWatch, req),
+    // send, not invoke: dropping a watch has no answer worth waiting for, and
+    // it is called from teardown paths that cannot await anything.
+    unwatch: (projectId) => ipcRenderer.send(IPC.plannerUnwatch, projectId),
+    onUpdate: (cb) => subscribe(IPC.plannerUpdate, cb)
   },
 
   tools: {

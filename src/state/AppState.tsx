@@ -21,7 +21,6 @@ import type {
   Settings,
   SplitDirection,
   TaskCard,
-  TaskPlannerBrain,
   TerminalTab,
   ThemeCore,
   VoiceBrainId,
@@ -42,6 +41,7 @@ import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
 import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
 import { emptyMosaic, sanitiseMosaic } from '@/lib/mosaicLayout'
+import { plannerPaneId } from '@/lib/planner'
 import { DEFAULT_HUB, nextHubMode } from '@/lib/voicehub'
 import { basename } from '@/lib/paths'
 import {
@@ -116,6 +116,14 @@ export interface AppState {
    */
   mosaicZoom: string | null
   /**
+   * The Tasks panel blown up to fill the main content area — the delegation
+   * desk. Same shape as `mosaicZoom`, for the same reason: a viewing mode,
+   * transient on purpose, because booting straight into a maximized panel is
+   * not something anyone asked for. It survives a project switch — the desk
+   * is per-app, its contents are per-project.
+   */
+  tasksMaximized: boolean
+  /**
    * True when the voice hub's mic is armed, i.e. dictated phrases are the
    * agent's rather than the focused pane's. Transient on purpose: booting with
    * the mic already pointed at the agent is not something anyone asked for.
@@ -162,7 +170,6 @@ const FALLBACK_SETTINGS: Settings = {
   voiceWakeWord: false,
   geminiKey: '',
   geminiModel: 'gemini-2.5-flash',
-  taskPlannerBrain: 'claude',
   accountName: 'You',
   accountColor: '#C6FF4A',
   themeId: 'volt',
@@ -234,6 +241,7 @@ const INITIAL: AppState = {
   pendingKills: [],
   pendingTypes: [],
   mosaicZoom: null,
+  tasksMaximized: false,
   agentListening: false,
   notice: null,
   view: 'terminals',
@@ -284,6 +292,9 @@ type Action =
   | { type: 'mosaicReset' }
   | { type: 'taskAdd'; text: string }
   | { type: 'taskRemove'; id: string }
+  | { type: 'tasksMaximized'; on: boolean }
+  /** Remember the planner terminal's Claude session id on the workspace. */
+  | { type: 'plannerSession'; sessionId: string }
   | { type: 'setAgentListening'; on: boolean }
   | { type: 'drainKills'; ids: string[] }
   | { type: 'notice'; message: string | null }
@@ -539,7 +550,19 @@ function sanitiseWorkspace(ws: Workspace | null, profileIds: Set<string>): Works
       if (tasks.length >= MAX_TASK_CARDS) break
     }
   }
-  return { tabs, activeTabId, viewMode, mosaic, nameCursor, ...(tasks.length > 0 ? { tasks } : {}) }
+  return {
+    tabs,
+    activeTabId,
+    viewMode,
+    mosaic,
+    nameCursor,
+    ...(tasks.length > 0 ? { tasks } : {}),
+    // The planner terminal's session id ends up on a command line typed into a
+    // live shell, so a layout file only gets to put a real uuid there — same
+    // rule as the pane ids above. A bad one is dropped, and the panel simply
+    // mints a fresh session on next use.
+    ...(isSessionId(ws.plannerSessionId) ? { plannerSessionId: ws.plannerSessionId } : {})
+  }
 }
 
 /* ------------------------------------------------------------- reducer */
@@ -590,7 +613,10 @@ function reducer(state: AppState, action: Action): AppState {
 
     case 'removeProject': {
       const ws = workspaceOf(state, action.id)
-      const kills = ws.tabs.flatMap((t) => collectLeaves(t.root).map((l) => l.id))
+      // The project's layout panes, plus its planner terminal — the one pane
+      // that lives outside the layout tree. Deleting the project is the single
+      // moment the planner session is disposed rather than detached.
+      const kills = [...ws.tabs.flatMap((t) => collectLeaves(t.root).map((l) => l.id)), plannerPaneId(action.id)]
       const projects = state.projects.filter((p) => p.id !== action.id)
       const workspaces = { ...state.workspaces }
       delete workspaces[action.id]
@@ -881,6 +907,16 @@ function reducer(state: AppState, action: Action): AppState {
         return tasks.length === (ws.tasks?.length ?? 0) ? null : { ...ws, tasks }
       })
 
+    case 'tasksMaximized':
+      return state.tasksMaximized === action.on ? state : { ...state, tasksMaximized: action.on }
+
+    case 'plannerSession': {
+      if (!isSessionId(action.sessionId)) return state
+      return mapActiveWorkspace(state, (ws) =>
+        ws.plannerSessionId === action.sessionId ? null : { ...ws, plannerSessionId: action.sessionId }
+      )
+    }
+
     case 'setAgentListening':
       return state.agentListening === action.on ? state : { ...state, agentListening: action.on }
 
@@ -1011,13 +1047,19 @@ export interface AppActions {
   /** Back to the auto grid, forgetting every hand-placed box. */
   resetMosaicLayout(): void
 
-  /* ----------------------------------------------------- delegation tray */
+  /* ---------------------------------------------------- delegation panel */
   /** Put a task card on the tray, ready to be dragged onto an agent. */
   addTask(text: string): void
   /** Take a card off the tray — delivered or dismissed, same door. */
   removeTask(id: string): void
-  /** Which model the tray's Plan button thinks with. */
-  setTaskPlannerBrain(brain: TaskPlannerBrain): void
+  /** Blow the Tasks panel up into the delegation desk, or dock it back. */
+  setTasksMaximized(on: boolean): void
+  /**
+   * Remember the planner terminal's Claude session id on the active project's
+   * workspace, so the same conversation resumes across restarts. Minted by the
+   * panel on first use; validated by the reducer.
+   */
+  setPlannerSessionId(sessionId: string): void
 
   setNotice(message: string | null): void
   openDataDir(): void
@@ -1314,6 +1356,9 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       updateProject: (id, patch) => dispatch({ type: 'updateProject', id, patch }),
       removeProject: (id) => {
         dispatch({ type: 'removeProject', id })
+        // The reducer queues the project's planner pane for disposal; the
+        // transcript watch is main-process state, so it is dropped here.
+        window.forge.planner.unwatch(id)
         void window.forge.store.deleteWorkspace(id)
         persisted.current.workspaces.delete(id)
       },
@@ -1425,7 +1470,8 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       setMosaicFit: (paneId, fit) => dispatch({ type: 'mosaicFit', paneId, fit }),
       addTask: (text) => dispatch({ type: 'taskAdd', text }),
       removeTask: (id) => dispatch({ type: 'taskRemove', id }),
-      setTaskPlannerBrain: (brain) => dispatch({ type: 'patchSettings', patch: { taskPlannerBrain: brain } }),
+      setTasksMaximized: (on) => dispatch({ type: 'tasksMaximized', on }),
+      setPlannerSessionId: (sessionId) => dispatch({ type: 'plannerSession', sessionId }),
       resetMosaicLayout: () => dispatch({ type: 'mosaicReset' }),
       setNotice: (message) => dispatch({ type: 'notice', message }),
       openDataDir: () => void window.forge.store.revealDataDir(),

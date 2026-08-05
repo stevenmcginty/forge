@@ -1,5 +1,5 @@
 /**
- * Generate build/icon.ico — Forge's app icon.
+ * Generate build/icon.ico and build/icon-dev.ico — Forge's app icons.
  *
  *   node scripts/make-icon.mjs
  *
@@ -24,6 +24,12 @@
  * Colours come from src/theme/tokens.css (--bg-panel-raised, --accent,
  * --accent-bright, --line-strong); change them there and here together.
  *
+ * The dev icon is the same drawing with the F recoloured to ember. Steve keeps
+ * the everyday Forge and the dev checkout pinned side by side, and at 16px a
+ * taskbar icon is a colour before it is a shape — a hue shift is legible where
+ * an added badge or letter would just be three grey pixels. Nothing else moves,
+ * so the two stay recognisably the same application.
+ *
  * Why hand-rolled: an .ico is a 6-byte header plus one 16-byte directory entry
  * per image, and since Vista the images may be whole PNG files. That is ~40
  * lines, against a native-dependency image library for a file that changes once.
@@ -34,7 +40,6 @@ import { join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const OUT_DIR = join(ROOT, 'build')
-const OUT = join(OUT_DIR, 'icon.ico')
 
 /**
  * Sizes Windows actually asks for: tray/tab, taskbar, alt-tab, shell tiles.
@@ -49,7 +54,19 @@ const EDGE = [0x33, 0x36, 0x3c, 0xff] // --line-strong
 const BEVEL = [0x4c, 0x52, 0x5d, 0xff] // the lit top of that same edge
 const VOLT = [0xc6, 0xff, 0x4a, 0xff] // --accent
 const VOLT_BRIGHT = [0xd6, 0xff, 0x7d, 0xff] // --accent-bright
+const EMBER = [0xff, 0x9d, 0x4a, 0xff] // the Ember theme's accent, src/theme/themes.ts
+const EMBER_BRIGHT = [0xff, 0xb8, 0x7d, 0xff] // ...lifted 28% toward white, as themes.ts derives --accent-bright
 const CLEAR = [0, 0, 0, 0]
+
+/**
+ * One .ico per channel. `icon.ico` is the name electron-builder stamps onto
+ * Forge.exe and must keep — the dev icon is an extra file beside it, never a
+ * substitution, so a packaged build cannot pick up the wrong one.
+ */
+const VARIANTS = [
+  { file: 'icon.ico', mark: { base: VOLT, bright: VOLT_BRIGHT } },
+  { file: 'icon-dev.ico', mark: { base: EMBER, bright: EMBER_BRIGHT } }
+]
 
 /**
  * The F, as fractions of the icon's side.
@@ -76,7 +93,8 @@ const lerp = (a, b, t) => a + (b - a) * t
 const mix = (a, b, t) => [0, 1, 2].map((i) => Math.round(lerp(a[i], b[i], t)))
 
 /**
- * One RGBA buffer for the icon at `size`.
+ * One RGBA buffer for the icon at `size`, with the F drawn in `mark`
+ * (`{ base, bright }` — the ends of the glyph's own gradient).
  *
  * Everything is expressed as a fraction of the size and then sampled 8x8 per
  * pixel, which is what stops the 16px version from turning the F's arms into
@@ -84,7 +102,7 @@ const mix = (a, b, t) => [0, 1, 2].map((i) => Math.round(lerp(a[i], b[i], t)))
  * at snapping to whole pixels. 64 samples is free at these dimensions — the
  * largest icon here is a quarter of a megapixel.
  */
-function render(size) {
+function render(size, mark) {
   const px = Buffer.alloc(size * size * 4)
   const S = 8 // supersamples per axis
   const r = size * 0.215 // plate corner radius
@@ -175,7 +193,7 @@ function render(size) {
       const e = (edgeHit / plate) * (small ? 0.45 : 1)
       if (e > 0) colour = mix(colour, mix(BEVEL, EDGE, Math.min(t * 1.35, 1)), e)
       const g = glyph / total
-      if (g > 0) colour = mix(colour, mix(VOLT_BRIGHT, VOLT, t), g)
+      if (g > 0) colour = mix(colour, mix(mark.bright, mark.base, t), g)
       px[o] = colour[0]
       px[o + 1] = colour[1]
       px[o + 2] = colour[2]
@@ -267,7 +285,10 @@ function ico(images) {
 /* ------------------------------------------------------------------- run */
 
 mkdirSync(OUT_DIR, { recursive: true })
-const images = SIZES.map((size) => ({ size, data: png(size, render(size)) }))
-const bytes = ico(images)
-writeFileSync(OUT, bytes)
-console.log(`  ok   wrote ${OUT} — ${SIZES.join('/')} px, ${(bytes.length / 1024).toFixed(1)} KB`)
+for (const { file, mark } of VARIANTS) {
+  const images = SIZES.map((size) => ({ size, data: png(size, render(size, mark)) }))
+  const bytes = ico(images)
+  const out = join(OUT_DIR, file)
+  writeFileSync(out, bytes)
+  console.log(`  ok   wrote ${out} — ${SIZES.join('/')} px, ${(bytes.length / 1024).toFixed(1)} KB`)
+}

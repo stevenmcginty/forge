@@ -1,0 +1,197 @@
+/*
+ * The delegation dock. Sits in the left rail above the shots shelf and leans
+ * on the same .tray__head / .tray__count / .tray__pip vocabulary (defined in
+ * ScreenshotTray.css, loaded app-wide) so the shelves read as siblings.
+ *
+ * --dock-h is the user's height, dragged via the top-edge handle and kept in
+ * localStorage: it is a ceiling, not a floor, so an empty dock stays compact.
+ */
+
+.taskspanel {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  max-height: var(--dock-h, 240px);
+  border-top: 1px solid var(--line-hairline);
+  background: linear-gradient(180deg, var(--panel-grad-a) 0%, var(--panel-grad-b) 100%);
+}
+
+/* A plan under review needs room to be read; the dock leans out for it. */
+.taskspanel:has(.tboard__proposal) {
+  max-height: max(var(--dock-h, 240px), 420px);
+}
+
+.taskspanel--collapsed {
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.taskspanel--collapsed[data-busy='true'] {
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------------- grow */
+
+/*
+ * The whole top edge is the handle. Invisible until touched: a centred bar
+ * lights up in accent on hover so the affordance is discoverable without the
+ * rail growing a permanent piece of chrome.
+ */
+.taskspanel__grow {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 9px;
+  cursor: ns-resize;
+  z-index: 1;
+  touch-action: none;
+}
+
+.taskspanel__grow::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 44px;
+  height: 3px;
+  transform: translateX(-50%);
+  border-radius: var(--r-full);
+  background: var(--line-strong);
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.taskspanel__grow:hover::after,
+.taskspanel__grow:active::after {
+  opacity: 1;
+  background: var(--accent-line);
+}
+
+/* ----------------------------------------------------------------- signal */
+
+/*
+ * What the planner session is doing, in one dim word. The accent only comes
+ * out while it is actually thinking — the one meaning the accent has.
+ */
+.taskspanel__signal {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.taskspanel__signal-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: var(--text-dim);
+}
+
+.taskspanel__signal[data-tone='busy'] {
+  color: var(--accent);
+}
+
+.taskspanel__signal[data-tone='busy'] .taskspanel__signal-dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+  animation: taskspanel-think 1.6s var(--ease-in-out) infinite;
+}
+
+.taskspanel__signal[data-tone='ok'] .taskspanel__signal-dot {
+  background: var(--ok);
+}
+
+.taskspanel__signal[data-tone='warm'] .taskspanel__signal-dot {
+  background: var(--warn);
+}
+
+.taskspanel__signal[data-tone='dead'] {
+  color: var(--text-muted);
+}
+
+.taskspanel__signal[data-tone='dead'] .taskspanel__signal-dot {
+  background: var(--danger);
+}
+
+@keyframes taskspanel-think {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* The pulse is decoration; reduced motion holds the dot steady. */
+@media (prefers-reduced-motion: reduce) {
+  .taskspanel__signal[data-tone='busy'] .taskspanel__signal-dot {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .taskspanel__signal[data-tone='busy'] .taskspanel__signal-dot {
+  animation: none;
+}
+
+/* ------------------------------------------------------------------- body */
+
+.taskspanel__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 var(--s-4) var(--s-3) var(--s-5);
+}
+
+/* ------------------------------------------------------------ desk-open bar */
+
+/* While the desk has the floor, the dock is a slim way back. */
+.taskspanel--desk {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--s-3);
+  height: 34px;
+  padding: 0 var(--s-4) 0 var(--s-5);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.taskspanel--desk:hover {
+  background: var(--bg-hover);
+}
+
+.taskspanel__deskmark {
+  margin-left: auto;
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------------- seed */
+
+/*
+ * Where the planner pane is born when the desk is not open: a real-sized box
+ * parked out of view, so the pty spawns against honest geometry. Never
+ * display:none — xterm needs to measure it.
+ */
+.taskspanel__seed {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 640px;
+  height: 400px;
+  overflow: hidden;
+  pointer-events: none;
+}

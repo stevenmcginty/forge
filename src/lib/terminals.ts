@@ -54,6 +54,12 @@ export interface TerminalSpec {
    * somehow has none; the launch is then exactly what it always was.
    */
   sessionId?: string
+  /**
+   * `false` opts the pane out of Remote Control (see CreateSessionRequest).
+   * The planner sets it: its plans are read out of the local transcript, which
+   * a bridged session never writes.
+   */
+  remoteControl?: false
 }
 
 /**
@@ -121,6 +127,30 @@ const REDRAW_JIGGLE_MS = 60
  * visibly two-tier.
  */
 export const DEFAULT_PANE_GEOMETRY: PaneGeometry = { width: 640, height: 400 }
+
+/**
+ * The terminal answering a question, as opposed to a person typing.
+ *
+ * A TUI probes its terminal as it starts — "what are you?", "where is the
+ * cursor?", "what is palette slot 4?" — and xterm replies down the very same
+ * `onData` channel a keystroke takes, because to the PTY they are both input.
+ * They are not typing, though, and the typed-draft tracker must not count them:
+ * "Take back typed" erases one backspace per character, and a draft holding
+ * bytes Steve never pressed would fire backspaces at a prompt on their behalf.
+ *
+ * Told apart by their opening bytes rather than by parsing them. No key on any
+ * keyboard sends a DCS, OSC, APC, PM or SOS string, and none sends a CSI ending
+ * in one of the report finals below — the arrows, the function keys and
+ * shift-tab all end in something else. So everything a keyboard can actually
+ * produce, bracketed paste included, still goes to advanceDraft, which already
+ * models it (see lib/draft.ts).
+ *
+ * Half of this is belt and braces: advanceDraft skips a CSI or SS3 whole, so
+ * the Device Attributes reply never reached the draft anyway. The string forms
+ * did — `\x1b]4;1;rgb:…\x1b\\` reads to that parser as an Alt+] chord followed
+ * by a dozen printable characters — and they are the leak this closes.
+ */
+const REPORT_RESPONSE = /^(?:\x1b[P\]_^X]|\x1b\[[?>=<]?[0-9;]*(?:\$?[cnRty]|[IOMm]))/
 
 interface Entry {
   paneId: string
@@ -478,6 +508,13 @@ class TerminalHost {
    * at its natural size inside it and the *caller* shrinks the box with a CSS
    * transform. Nothing here observes the box or refits, so cols/rows — and
    * therefore any TUI drawing itself into them — are left completely alone.
+   *
+   * "Already" is literal, and it bites hardest on the first call: a pane being
+   * created here is fitted against this box and its shell spawned at whatever
+   * that measures. A container still sitting at 0×0 fails the fit's own sanity
+   * check, spawns the agent at xterm's default 80×24, and the true size then
+   * lands a frame later as a reflow straight through the agent's first paint.
+   * MosaicTile writes the pixels before it attaches for exactly that reason.
    */
   attachPeek(paneId: string, container: HTMLElement, spec: TerminalSpec): void {
     this.wire()
@@ -600,7 +637,9 @@ class TerminalHost {
         if (data === '\r' || data === '\n') void this.restart(paneId)
         return
       }
-      entry.typed = advanceDraft(entry.typed, data)
+      // A reply xterm composed itself is still sent — the program asked for it —
+      // but it is not part of what was typed. See REPORT_RESPONSE.
+      if (!REPORT_RESPONSE.test(data)) entry.typed = advanceDraft(entry.typed, data)
       window.forge.pty.write(paneId, data)
     })
     entry.disposers.push(() => dataSub.dispose())
@@ -913,7 +952,8 @@ class TerminalHost {
       bootstrapCommand: entry.spec.bootstrapCommand,
       projectName: entry.spec.projectName,
       paneTitle: entry.spec.paneTitle,
-      ...(entry.spec.sessionId ? { sessionId: entry.spec.sessionId } : {})
+      ...(entry.spec.sessionId ? { sessionId: entry.spec.sessionId } : {}),
+      ...(entry.spec.remoteControl === false ? { remoteControl: false as const } : {})
     })
     if (result.ok) {
       this.setRuntime(entry, { status: 'live', pid: result.pid })

@@ -898,9 +898,25 @@ function MosaicTile({
   useLayoutEffect(() => {
     const el = naturalRef.current
     if (!el) return
+    /*
+     * The box gets its pixels here, before the terminal goes into it — not a
+     * frame later in apply().
+     *
+     * attachPeek fits a brand-new terminal against this element and spawns its
+     * shell at whatever that measures, so the very first prompt is already the
+     * right width. But `.mtile__natural` is absolutely positioned with no width
+     * of its own, so the instant React creates it it is 0×0: the fit bailed out
+     * on an unmeasurable box and every mosaic-born pane started life at xterm's
+     * default 80×24. The real size then arrived a frame later and resized the
+     * PTY out from under an agent that was already painting its first screen —
+     * which is the torn welcome banner, half of it drawn at one width and half
+     * reflowed into another. Sizing the box first makes that resize a no-op.
+     */
+    el.style.width = `${geometry.width}px`
+    el.style.height = `${geometry.height}px`
     terminalHost.attachPeek(paneId, el, specRef.current)
     return () => terminalHost.detach(paneId)
-  }, [paneId])
+  }, [geometry, paneId])
 
   /*
    * Nothing in the mosaic uses WebGL.

@@ -64,6 +64,36 @@
   color: var(--text-primary);
 }
 
+/* ---------------------------------------------------------------- channel
+ *
+ * The dev checkout and the everyday Forge sit next to each other all day, and
+ * the OS title is the one part of the window you stop reading after a week. So
+ * the wordmark itself changes: the mark goes ember — the same shift the dev
+ * taskbar icon makes, see scripts/make-icon.mjs — and a chip spells it out.
+ *
+ * Shaped like the pane permission chip, and for the same reason: it states what
+ * this window *is* rather than offering anything to press, so it stays outside
+ * the no-drag region and never grows a hover.
+ */
+
+.titlebar__mark[data-channel='dev'] {
+  color: var(--warn);
+}
+
+.titlebar__channel {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-xs);
+  font-size: var(--t-eyebrow);
+  line-height: 1;
+  letter-spacing: var(--tracking-eyebrow);
+  color: var(--warn);
+  border: 1px solid var(--warn-line);
+  background: var(--warn-soft);
+}
+
 .titlebar__sep {
   width: 1px;
   height: 14px;

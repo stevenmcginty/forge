@@ -14,6 +14,11 @@ export function TitleBar(): ReactNode {
   const project = useActiveProject()
   const [focused, setFocused] = useState(true)
   const inSettings = state.view === 'settings'
+  /**
+   * Before hydrate there is no info, and a window that might well be the
+   * everyday Forge must not flash a DEV chip on the way in.
+   */
+  const isDevChannel = state.info?.channel === 'dev'
   /** The hub button is a toggle for the *card*, not for the hub's existence. */
   const hubOpen = state.settings.voiceHub.mode === 'expanded'
 
@@ -33,10 +38,11 @@ export function TitleBar(): ReactNode {
           <Icon name="panel" size={15} />
         </button>
 
-        <span className="titlebar__mark">
+        <span className="titlebar__mark" data-channel={isDevChannel ? 'dev' : undefined}>
           <Icon name="forge" size={15} />
         </span>
         <span className="titlebar__wordmark">Forge</span>
+        {isDevChannel ? <span className="titlebar__channel mono">DEV</span> : null}
 
         {project ? (
           <>

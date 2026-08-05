@@ -17,9 +17,13 @@ import { getSettings } from '../store'
  * Remote Control first, then `--mcp-config`, whose value is variadic and has to
  * stay last.
  *
- * Nothing here is per-open: the chooser's "open this one with Remote Control
- * on/off" override belongs to the Settings work, and lands by threading a flag
- * into CreateSessionRequest that short-circuits `wantsRemoteControl`.
+ * One per-open override exists: `remoteControl: false` on the context (fed by
+ * the same field on CreateSessionRequest) keeps a pane out unconditionally.
+ * The planner pane sends it, because its plans are read out of the *local*
+ * transcript and a bridged session routes the conversation through claude.ai
+ * without ever writing messages to that file. A per-open "on" override — the
+ * chooser's "open this one with Remote Control" — still belongs to the
+ * Settings work.
  */
 
 export interface RemoteControlContext {
@@ -27,6 +31,8 @@ export interface RemoteControlContext {
   projectName?: string
   /** Pane title as shown in its header — the second half. */
   paneTitle?: string
+  /** `false` = never add the flag, whatever the profile and settings say. */
+  remoteControl?: false
 }
 
 /**
@@ -60,6 +66,7 @@ function wantsRemoteControl(command: string): boolean {
 export function applyRemoteControl(bootstrapCommand: string, ctx: RemoteControlContext = {}): string {
   const cmd = bootstrapCommand.trim()
   if (!cmd) return bootstrapCommand
+  if (ctx.remoteControl === false) return cmd
   if (!wantsRemoteControl(cmd)) return cmd
   return composeRemoteControl(cmd, remoteControlName(ctx.projectName ?? '', ctx.paneTitle ?? ''))
 }
