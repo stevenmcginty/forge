@@ -695,10 +695,24 @@ function reducer(state: AppState, action: Action): AppState {
       }
     }
 
-    case 'selectTab':
-      return mapActiveWorkspace(state, (ws) =>
+    case 'selectTab': {
+      const next = mapActiveWorkspace(state, (ws) =>
         ws.activeTabId === action.tabId ? null : { ...ws, activeTabId: action.tabId }
       )
+      /*
+       * The zoom follows the strip. A zoomed mosaic tile is looked up by pane
+       * id, not by tab — so left alone, clicking another tab would highlight
+       * it in the strip while the body kept showing the old pane: a click
+       * that visibly does nothing. While a tile is blown up, picking a tab
+       * means "show me that one", so the zoom moves to that tab's pane.
+       */
+      if (next === state || next.mosaicZoom === null || !next.activeProjectId) return next
+      const ws = workspaceOf(next, next.activeProjectId)
+      if (ws.viewMode !== 'mosaic') return next
+      const tab = ws.tabs.find((t) => t.id === action.tabId)
+      const paneId = tab ? (tab.activePaneId ?? collectLeaves(tab.root)[0]?.id) : undefined
+      return paneId ? { ...next, mosaicZoom: paneId } : next
+    }
 
     case 'renameTab':
       return mapActiveWorkspace(state, (ws) => ({
