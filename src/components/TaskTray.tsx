@@ -13,6 +13,11 @@ import './TaskTray.css'
  * work is something Steve does by hand, physically, the same way files and
  * screenshots already land on terminals.
  *
+ * A stated goal goes through plan mode first: the brain answers with a plan
+ * in prose plus proposed briefs, shown for approval. Nothing becomes a card
+ * until Deal — the plan is reviewable, prunable and refusable, because
+ * delegation you didn't sign off on is just automation wearing your name.
+ *
  * Cards live on the project's workspace, so they persist with the layout and
  * each project keeps its own tray.
  */
@@ -25,6 +30,15 @@ export function TaskTray(): ReactNode {
 
   const [draft, setDraft] = useState('')
   const [planning, setPlanning] = useState(false)
+  /**
+   * Plan mode. A goal does not turn straight into cards any more: the brain
+   * answers with a plan (prose + proposed briefs), it lands here, and it waits.
+   * Prune the briefs you don't want, then Deal makes them real cards — or
+   * Discard and nothing ever existed. The proposal is deliberately local state:
+   * an unapproved plan is a conversation, not data, and it should not survive
+   * a restart or follow the workspace around.
+   */
+  const [proposal, setProposal] = useState<{ plan: string | null; tasks: string[] } | null>(null)
 
   const add = (): void => {
     const text = draft.trim()
@@ -33,11 +47,7 @@ export function TaskTray(): ReactNode {
     setDraft('')
   }
 
-  /**
-   * The tray's brain: hand the goal to `claude -p` (electron/task-planner.ts)
-   * and file what comes back as cards. Added in reverse so the plan reads
-   * top-to-bottom on a newest-first tray. Dealing the cards out stays yours.
-   */
+  /** The tray's brain: hand the goal to `claude -p` (electron/task-planner.ts). */
   const brain = state.settings.taskPlannerBrain
   const brainName = brain === 'gemini' ? 'Gemini' : 'Claude'
 
@@ -59,14 +69,29 @@ export function TaskTray(): ReactNode {
         actions.setNotice(result.error)
         return
       }
-      for (const text of [...result.tasks].reverse()) actions.addTask(text)
+      setProposal({ plan: result.plan ?? null, tasks: result.tasks })
       setDraft('')
-      actions.setNotice(
-        `${brainName} split that into ${result.tasks.length} task${result.tasks.length === 1 ? '' : 's'} — drag them onto agents`
-      )
     } finally {
       setPlanning(false)
     }
+  }
+
+  /** Approve the plan: the surviving briefs become cards, newest-first tray so
+   *  they are added in reverse to read top-to-bottom. Dealing them out stays yours. */
+  const deal = (): void => {
+    if (!proposal) return
+    for (const text of [...proposal.tasks].reverse()) actions.addTask(text)
+    actions.setNotice(
+      `${proposal.tasks.length} card${proposal.tasks.length === 1 ? '' : 's'} filed — drag them onto agents`
+    )
+    setProposal(null)
+  }
+
+  const dropProposed = (index: number): void => {
+    if (!proposal) return
+    const tasks = proposal.tasks.filter((_, i) => i !== index)
+    if (tasks.length === 0) setProposal(null)
+    else setProposal({ ...proposal, tasks })
   }
 
   if (collapsed) {
@@ -108,13 +133,13 @@ export function TaskTray(): ReactNode {
           value={draft}
           rows={2}
           maxLength={MAX_TASK_TEXT}
-          placeholder="State a goal — Plan has Claude split it into task cards. + files it as one card."
+          placeholder={`State a goal — ${brainName} plans it out for your approval. + files it as one card.`}
           spellCheck={false}
           disabled={planning}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            // Enter asks Claude to plan the goal; Ctrl+Enter files it verbatim
-            // as one card; Shift+Enter is a newline in a longer brief.
+            // Enter asks the brain to plan the goal; Ctrl+Enter files it
+            // verbatim as one card; Shift+Enter is a newline in a longer brief.
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               if (e.ctrlKey) add()
@@ -126,7 +151,7 @@ export function TaskTray(): ReactNode {
           <button
             type="button"
             className="ghost-btn tasktray__plan"
-            title="Have Claude break this goal into task cards"
+            title={`Have ${brainName} plan this goal — you approve before any card is made`}
             disabled={!draft.trim() || planning || !project}
             onClick={() => void plan()}
           >
@@ -143,6 +168,45 @@ export function TaskTray(): ReactNode {
           </button>
         </div>
       </div>
+
+      {proposal ? (
+        <div className="tasktray__proposal" aria-label="Proposed plan">
+          {proposal.plan ? <p className="tasktray__plantext">{proposal.plan}</p> : null}
+          <div className="tasktray__proposed">
+            {proposal.tasks.map((text, i) => (
+              <div key={`${i}-${text.slice(0, 24)}`} className="taskcard taskcard--proposed" title={text}>
+                <span className="taskcard__text">{text}</span>
+                <button
+                  type="button"
+                  className="taskcard__kill"
+                  title="Drop this brief from the plan"
+                  onClick={() => dropProposed(i)}
+                >
+                  <Icon name="close" size={9} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="tasktray__verdict">
+            <button
+              type="button"
+              className="ghost-btn tasktray__deal"
+              title="Approve the plan — these briefs become cards you deal onto agents"
+              onClick={deal}
+            >
+              Deal {proposal.tasks.length} card{proposal.tasks.length === 1 ? '' : 's'}
+            </button>
+            <button
+              type="button"
+              className="ghost-btn tasktray__discard"
+              title="Throw the plan away — no cards are made"
+              onClick={() => setProposal(null)}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {tasks.length > 0 ? (
         <div className="tasktray__list">

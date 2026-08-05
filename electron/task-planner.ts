@@ -28,15 +28,16 @@ const PLAN_MAX_TASKS = 8
 /** The rules both brains plan by — Claude gets them inline, Gemini as system text. */
 function planRules(projectName: string): string {
   return [
-    `You are the planning step of a delegation tray in a terminal app. The user states a goal for the project "${projectName}"; you split it into tasks that will each be handed to a separate coding agent working in this same repository.`,
+    `You are the planning step of a delegation tray in a terminal app. The user states a goal for the project "${projectName}"; you plan it out, then split it into tasks that will each be handed to a separate coding agent working in this same repository.`,
     '',
     'Rules:',
-    `- 2 to ${PLAN_MAX_TASKS} tasks. Fewer, bigger tasks beat many slivers; one task is fine if the goal does not divide.`,
+    '- First write the plan itself: 2 to 5 sentences of prose saying what you intend to build and in what order, written for the user to read and approve before any work starts.',
+    `- Then 2 to ${PLAN_MAX_TASKS} tasks. Fewer, bigger tasks beat many slivers; one task is fine if the goal does not divide.`,
     '- Each task must be a self-contained brief: the agent receiving it sees ONLY that text, so restate whatever context it needs from the goal.',
     '- Tasks run in parallel by different agents, so make them as independent as you can; where order matters, say so inside the brief itself.',
     '- Write each brief as a direct instruction to the agent, in plain prose on a single line.',
     '',
-    'Reply with ONLY a JSON array of strings — no markdown fences, no commentary, no object wrapper.'
+    'Reply with ONLY a JSON object of the shape {"plan": "…", "tasks": ["…", "…"]} — no markdown fences, no commentary.'
   ].join('\n')
 }
 
@@ -44,24 +45,54 @@ function planPrompt(goal: string, projectName: string): string {
   return `${planRules(projectName)}\n\nGoal: ${goal}`
 }
 
+/** A parsed plan: the prose (when the model sent one) plus the task briefs. */
+type ParsedPlan = { plan: string | null; tasks: string[] }
+
+function cleanTasks(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  const tasks = value
+    .filter((t): t is string => typeof t === 'string')
+    .map((t) => t.trim().slice(0, MAX_TASK_TEXT))
+    .filter((t) => t.length > 0)
+    .slice(0, Math.min(PLAN_MAX_TASKS, MAX_TASK_CARDS))
+  return tasks.length > 0 ? tasks : null
+}
+
 /**
- * Pull a JSON array of strings out of a model reply that was told to send
- * exactly that — and that will, some days, wrap it in fences anyway.
+ * Pull the {plan, tasks} object out of a model reply that was told to send
+ * exactly that — and that will, some days, wrap it in fences anyway. A bare
+ * array of tasks (the old contract, and a stubborn model's favourite) still
+ * parses; it just arrives without prose.
  */
-function parseTasks(stdout: string): string[] | null {
+function parsePlan(stdout: string): ParsedPlan | null {
   const text = stdout.trim()
-  const start = text.indexOf('[')
-  const end = text.lastIndexOf(']')
-  if (start === -1 || end <= start) return null
+
+  const objStart = text.indexOf('{')
+  const objEnd = text.lastIndexOf('}')
+  if (objStart !== -1 && objEnd > objStart) {
+    try {
+      const parsed: unknown = JSON.parse(text.slice(objStart, objEnd + 1))
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const { plan, tasks } = parsed as { plan?: unknown; tasks?: unknown }
+        const cleaned = cleanTasks(tasks)
+        if (cleaned) {
+          return {
+            plan: typeof plan === 'string' && plan.trim() ? plan.trim().slice(0, MAX_TASK_TEXT) : null,
+            tasks: cleaned
+          }
+        }
+      }
+    } catch {
+      // Fall through: the reply may still contain a usable bare array.
+    }
+  }
+
+  const arrStart = text.indexOf('[')
+  const arrEnd = text.lastIndexOf(']')
+  if (arrStart === -1 || arrEnd <= arrStart) return null
   try {
-    const parsed: unknown = JSON.parse(text.slice(start, end + 1))
-    if (!Array.isArray(parsed)) return null
-    const tasks = parsed
-      .filter((t): t is string => typeof t === 'string')
-      .map((t) => t.trim().slice(0, MAX_TASK_TEXT))
-      .filter((t) => t.length > 0)
-      .slice(0, Math.min(PLAN_MAX_TASKS, MAX_TASK_CARDS))
-    return tasks.length > 0 ? tasks : null
+    const cleaned = cleanTasks(JSON.parse(text.slice(arrStart, arrEnd + 1)))
+    return cleaned ? { plan: null, tasks: cleaned } : null
   } catch {
     return null
   }
@@ -74,13 +105,17 @@ async function planWithGemini(goal: string, projectName: string, brain: { key: s
     model: brain.model,
     system: planRules(projectName),
     turns: [{ role: 'user', text: `Goal: ${goal}` }],
-    schema: { type: 'ARRAY', items: { type: 'STRING' } },
+    schema: {
+      type: 'OBJECT',
+      properties: { plan: { type: 'STRING' }, tasks: { type: 'ARRAY', items: { type: 'STRING' } } },
+      required: ['plan', 'tasks']
+    },
     timeoutMs: 60_000
   })
   if (!result.ok) return { ok: false, error: result.error }
-  const tasks = parseTasks(result.text)
-  if (!tasks) return { ok: false, error: 'Gemini answered, but not with a task list — try again' }
-  return { ok: true, tasks }
+  const parsed = parsePlan(result.text)
+  if (!parsed) return { ok: false, error: 'Gemini answered, but not with a plan — try again' }
+  return { ok: true, tasks: parsed.tasks, ...(parsed.plan ? { plan: parsed.plan } : {}) }
 }
 
 export function planTasks(goal: string, projectName: string, cwd: string): Promise<TaskPlanResult> {
@@ -110,9 +145,9 @@ export function planTasks(goal: string, projectName: string, cwd: string): Promi
             : ((stderr || (err as Error).message || '').trim().split('\n')[0] ?? 'could not run')
           return resolve({ ok: false, error: detail.slice(0, 200) })
         }
-        const tasks = parseTasks(`${stdout}`)
-        if (!tasks) return resolve({ ok: false, error: 'Claude answered, but not with a task list — try again' })
-        resolve({ ok: true, tasks })
+        const parsed = parsePlan(`${stdout}`)
+        if (!parsed) return resolve({ ok: false, error: 'Claude answered, but not with a plan — try again' })
+        resolve({ ok: true, tasks: parsed.tasks, ...(parsed.plan ? { plan: parsed.plan } : {}) })
       }
     )
     child.stdin?.write(prompt)

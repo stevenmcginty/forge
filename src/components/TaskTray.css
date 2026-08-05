@@ -14,6 +14,11 @@
   background: linear-gradient(180deg, var(--panel-grad-a) 0%, var(--panel-grad-b) 100%);
 }
 
+/* A plan under review needs room to be read; the tray leans out for it. */
+.tasktray:has(.tasktray__proposal) {
+  max-height: 420px;
+}
+
 .tasktray--collapsed {
   height: 40px;
   align-items: center;
@@ -86,6 +91,64 @@
   50% {
     opacity: 0.55;
   }
+}
+
+/* --------------------------------------------------------------- proposal */
+
+/*
+ * Plan mode's review stage. The plan reads as prose, the proposed briefs wear
+ * card chrome but are not draggable — they are an offer, and the verdict row
+ * underneath is where they become real (Deal) or vanish (Discard).
+ */
+.tasktray__proposal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: 0 var(--s-4) var(--s-3) var(--s-5);
+  padding: var(--s-3);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: var(--bg-sunken);
+  overflow-y: auto;
+  max-height: 260px;
+}
+
+.tasktray__plantext {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.tasktray__proposed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.taskcard--proposed {
+  cursor: default;
+}
+
+.taskcard--proposed:active {
+  cursor: default;
+}
+
+.tasktray__verdict {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.tasktray__deal {
+  font-size: var(--t-xs);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-sm);
+}
+
+.tasktray__discard {
+  font-size: var(--t-xs);
+  color: var(--text-muted);
 }
 
 /* ------------------------------------------------------------------ cards */
