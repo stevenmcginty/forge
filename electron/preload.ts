@@ -174,7 +174,10 @@ const api: ForgeApi = {
   dev: {
     staleStatus: () => ipcRenderer.invoke(IPC.staleStatus),
     onStale: (cb) => subscribe(IPC.staleStatusEvent, cb),
-    restart: () => ipcRenderer.invoke(IPC.staleRestart)
+    restart: () => ipcRenderer.invoke(IPC.staleRestart),
+    sourceStatus: () => ipcRenderer.invoke(IPC.sourceUpdateStatus),
+    onSourceUpdate: (cb) => subscribe(IPC.sourceUpdateEvent, cb),
+    applySourceUpdate: () => ipcRenderer.invoke(IPC.sourceUpdateApply)
   },
 
   probeAgents: () => ipcRenderer.invoke(IPC.agentsProbe),

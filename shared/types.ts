@@ -596,6 +596,20 @@ export interface StaleStatus {
   channel?: 'dev' | 'stable'
 }
 
+/**
+ * The stable checkout keeping itself level with origin — the "Update available"
+ * button for an app that is also a git repo. `available` is origin ahead of
+ * HEAD; `updating` is the click being honoured (pull, then install only when
+ * the dependency files moved); `error` is a pull or install that needs a
+ * human. See electron/source-updater.ts.
+ */
+export type SourceUpdateStatus =
+  | { phase: 'unsupported' }
+  | { phase: 'idle' }
+  | { phase: 'available'; behind: number; version?: string }
+  | { phase: 'updating'; step: 'pull' | 'install'; version?: string }
+  | { phase: 'error'; error: string }
+
 /* --------------------------------------------------------- media generation */
 
 /**

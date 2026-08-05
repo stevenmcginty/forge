@@ -244,6 +244,14 @@ export const IPC = {
   staleStatusEvent: 'stale:status-event',
   staleRestart: 'stale:restart',
 
+  // The stable checkout updating itself from origin (electron/source-updater.ts).
+  // Unsupported everywhere else: packaged builds have the real updater, and the
+  // dev checkout is where the commits come from in the first place.
+  sourceUpdateStatus: 'srcupdate:status',
+  sourceUpdateEvent: 'srcupdate:status-event',
+  sourceUpdateCheck: 'srcupdate:check',
+  sourceUpdateApply: 'srcupdate:apply',
+
   /* ----------------------------------------------------------- voice overlay
    *
    * The undocked voice hub, as a real Windows window rather than a div inside

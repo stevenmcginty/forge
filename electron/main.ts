@@ -53,6 +53,13 @@ import {
   setStaleTarget
 } from './stale-watcher'
 import { disposeUpdater, initUpdater, registerUpdateHandlers, setUpdateTarget } from './updater'
+import {
+  disposeSourceUpdater,
+  initSourceUpdater,
+  registerSourceUpdateHandlers,
+  setSourceUpdateTarget,
+  watchFocusForSourceUpdate
+} from './source-updater'
 
 const isDev = !app.isPackaged
 // The development checkout announces itself, so the taskbar and title bar say
@@ -406,6 +413,8 @@ function createWindow(): void {
   setSttModelTarget(mainWindow)
   setUpdateTarget(mainWindow)
   setStaleTarget(mainWindow)
+  setSourceUpdateTarget(mainWindow)
+  watchFocusForSourceUpdate(mainWindow)
   setVoiceAgentTarget(mainWindow)
   // The main window is the overlay's *host*: it holds the one voice agent, so
   // it is the end the relay pushes state from and delivers callbacks to.
@@ -787,6 +796,7 @@ void app
       registerCommandsHandlers()
       registerUpdateHandlers()
       registerStaleHandlers()
+      registerSourceUpdateHandlers()
       // Only the relay is registered here. No overlay window exists until the hub
       // is actually undocked — see electron/overlay-window.ts.
       registerOverlayIpc()
@@ -804,6 +814,9 @@ void app
     // checkout it takes the mtimes of the bundles we just booted from, which is
     // why it goes here rather than earlier — after the build that produced them.
     initStaleWatcher()
+    // And its outward-looking sibling: the stable checkout watching origin for
+    // pushes from Forge Dev. Guards itself out of dev runs and packaged builds.
+    initSourceUpdater()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -848,6 +861,7 @@ app.on('before-quit', () => {
   safely('disposeMobile', disposeMobile)
   safely('disposeUpdater', disposeUpdater)
   safely('disposeStaleWatcher', disposeStaleWatcher)
+  safely('disposeSourceUpdater', disposeSourceUpdater)
   // Last, and unconditional: an always-on-top window that outlived the app
   // would sit over everything with nothing behind it to close it.
   safely('disposeOverlay', disposeOverlay)

@@ -42,6 +42,7 @@ import type {
   ToolId,
   ToolLatest,
   ToolProbe,
+  SourceUpdateStatus,
   StaleStatus,
   UpdateStatus,
   VoiceAgentEvent,
@@ -455,6 +456,12 @@ export interface ForgeApi {
     onStale(cb: (s: StaleStatus) => void): () => void
     /** Quit and come back on the new bundle. Every pane dies — ask first. */
     restart(): Promise<boolean>
+
+    /** Where the stable checkout stands against origin. */
+    sourceStatus(): Promise<SourceUpdateStatus>
+    onSourceUpdate(cb: (s: SourceUpdateStatus) => void): () => void
+    /** Pull, install if needed, restart. Every pane dies — ask first. */
+    applySourceUpdate(): Promise<boolean>
   }
 
   /**

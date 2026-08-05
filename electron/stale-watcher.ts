@@ -201,7 +201,7 @@ export function initStaleWatcher(): void {
  * Windows either way, and naming the interpreter avoids the DEP0190 warning
  * that `shell: true` now raises (see POLISH.md #6).
  */
-function relaunch(): void {
+export function relaunchDevToolchain(): void {
   const devServer = process.env['ELECTRON_RENDERER_URL']
   if (app.isPackaged || !devServer) {
     app.relaunch()
@@ -276,7 +276,7 @@ export function registerStaleHandlers(): void {
     //
     // The Restart button *is* the confirmation, so the close dialog is waived.
     allowClose()
-    relaunch()
+    relaunchDevToolchain()
     app.quit()
     return true
   })
