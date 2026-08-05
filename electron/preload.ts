@@ -151,7 +151,7 @@ const api: ForgeApi = {
   },
 
   tasks: {
-    plan: (goal, projectName, cwd) => ipcRenderer.invoke(IPC.tasksPlan, goal, projectName, cwd)
+    plan: (goal, projectName, cwd, brain) => ipcRenderer.invoke(IPC.tasksPlan, goal, projectName, cwd, brain)
   },
 
   tools: {

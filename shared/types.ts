@@ -232,6 +232,15 @@ export interface TaskCard {
 /** What the tray's Plan button gets back: briefs to become cards, or the reason not. */
 export type TaskPlanResult = { ok: true; tasks: string[] } | { ok: false; error: string }
 
+/** The two models the tray can plan with. */
+export type TaskPlannerBrain = 'claude' | 'gemini'
+
+/**
+ * How the renderer asks for a plan. The Gemini arm carries key and model
+ * because keys live in renderer-owned settings, same as the voice brains.
+ */
+export type TaskPlanBrainRequest = { kind: 'claude' } | { kind: 'gemini'; key: string; model: string }
+
 export interface Workspace {
   tabs: TerminalTab[]
   activeTabId: string | null
@@ -909,6 +918,12 @@ export interface Settings {
    */
   geminiKey: string
   geminiModel: string
+  /**
+   * Which model the delegation tray's Plan button thinks with: the Claude CLI
+   * (no key needed, Steve's login) or Gemini (geminiKey above, same key the
+   * voice brain uses).
+   */
+  taskPlannerBrain: TaskPlannerBrain
 
   /* --------------------------------------------------- account + themes (M6) */
   /** Display name on the account chip. Seeded from the Windows username. */

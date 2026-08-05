@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process'
 import { ipcMain } from 'electron'
 import { IPC, MAX_TASK_CARDS, MAX_TASK_TEXT } from '@shared/ipc'
-import type { TaskPlanResult } from '@shared/types'
+import type { TaskPlanBrainRequest, TaskPlanResult } from '@shared/types'
 import { whichCommand } from './agent-probe'
+import { callGemini } from './voice-bridge'
 
 /**
  * The brain behind the delegation tray's Plan button.
@@ -24,7 +25,8 @@ const PLAN_TIMEOUT_MS = 120_000
 /** More briefs than a hand can hold stops being a plan and starts being noise. */
 const PLAN_MAX_TASKS = 8
 
-function planPrompt(goal: string, projectName: string): string {
+/** The rules both brains plan by — Claude gets them inline, Gemini as system text. */
+function planRules(projectName: string): string {
   return [
     `You are the planning step of a delegation tray in a terminal app. The user states a goal for the project "${projectName}"; you split it into tasks that will each be handed to a separate coding agent working in this same repository.`,
     '',
@@ -34,10 +36,12 @@ function planPrompt(goal: string, projectName: string): string {
     '- Tasks run in parallel by different agents, so make them as independent as you can; where order matters, say so inside the brief itself.',
     '- Write each brief as a direct instruction to the agent, in plain prose on a single line.',
     '',
-    'Reply with ONLY a JSON array of strings — no markdown fences, no commentary, no object wrapper.',
-    '',
-    `Goal: ${goal}`
+    'Reply with ONLY a JSON array of strings — no markdown fences, no commentary, no object wrapper.'
   ].join('\n')
+}
+
+function planPrompt(goal: string, projectName: string): string {
+  return `${planRules(projectName)}\n\nGoal: ${goal}`
 }
 
 /**
@@ -61,6 +65,22 @@ function parseTasks(stdout: string): string[] | null {
   } catch {
     return null
   }
+}
+
+/** The Gemini arm: same rules, same JSON contract, over the voice brain's call. */
+async function planWithGemini(goal: string, projectName: string, brain: { key: string; model: string }): Promise<TaskPlanResult> {
+  const result = await callGemini({
+    key: brain.key,
+    model: brain.model,
+    system: planRules(projectName),
+    turns: [{ role: 'user', text: `Goal: ${goal}` }],
+    schema: { type: 'ARRAY', items: { type: 'STRING' } },
+    timeoutMs: 60_000
+  })
+  if (!result.ok) return { ok: false, error: result.error }
+  const tasks = parseTasks(result.text)
+  if (!tasks) return { ok: false, error: 'Gemini answered, but not with a task list — try again' }
+  return { ok: true, tasks }
 }
 
 export function planTasks(goal: string, projectName: string, cwd: string): Promise<TaskPlanResult> {
@@ -101,9 +121,16 @@ export function planTasks(goal: string, projectName: string, cwd: string): Promi
 }
 
 export function registerTaskPlannerHandlers(): void {
-  ipcMain.handle(IPC.tasksPlan, (_e, goal: string, projectName: string, cwd: string) => {
+  ipcMain.handle(IPC.tasksPlan, (_e, goal: string, projectName: string, cwd: string, brain: TaskPlanBrainRequest) => {
     const g = String(goal).trim()
     if (!g) return { ok: false as const, error: 'Nothing to plan' }
-    return planTasks(g.slice(0, MAX_TASK_TEXT), String(projectName), String(cwd))
+    const name = String(projectName)
+    if (brain && brain.kind === 'gemini') {
+      const key = typeof brain.key === 'string' ? brain.key.trim() : ''
+      const model = typeof brain.model === 'string' ? brain.model.trim() : ''
+      if (!key) return { ok: false as const, error: 'No Gemini key — add one in Settings › Models & keys' }
+      return planWithGemini(g.slice(0, MAX_TASK_TEXT), name, { key, model })
+    }
+    return planTasks(g.slice(0, MAX_TASK_TEXT), name, String(cwd))
   })
 }

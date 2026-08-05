@@ -37,6 +37,7 @@ import type {
   SttPhraseEvent,
   SttStartOptions,
   SttStatus,
+  TaskPlanBrainRequest,
   TaskPlanResult,
   ToolId,
   ToolLatest,
@@ -394,8 +395,12 @@ export interface ForgeApi {
 
   /** The delegation tray's brain. See electron/task-planner.ts. */
   tasks: {
-    /** One headless `claude -p` turn: a goal in, self-contained task briefs out. */
-    plan(goal: string, projectName: string, cwd: string): Promise<TaskPlanResult>
+    /**
+     * One model turn: a goal in, self-contained task briefs out. The brain is
+     * the tray's pick — the Claude CLI (no key), or Gemini with the key and
+     * model from settings.
+     */
+    plan(goal: string, projectName: string, cwd: string, brain: TaskPlanBrainRequest): Promise<TaskPlanResult>
   }
 
   /**

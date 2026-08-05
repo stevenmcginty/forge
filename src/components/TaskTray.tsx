@@ -38,12 +38,23 @@ export function TaskTray(): ReactNode {
    * and file what comes back as cards. Added in reverse so the plan reads
    * top-to-bottom on a newest-first tray. Dealing the cards out stays yours.
    */
+  const brain = state.settings.taskPlannerBrain
+  const brainName = brain === 'gemini' ? 'Gemini' : 'Claude'
+
   const plan = async (): Promise<void> => {
     const goal = draft.trim()
     if (!goal || !project || planning) return
+    if (brain === 'gemini' && !state.settings.geminiKey.trim()) {
+      actions.setNotice('No Gemini key — add one in Settings › Models & keys, or switch the tray to Claude')
+      return
+    }
     setPlanning(true)
     try {
-      const result = await window.forge.tasks.plan(goal, project.name, project.path)
+      const request =
+        brain === 'gemini'
+          ? ({ kind: 'gemini', key: state.settings.geminiKey.trim(), model: state.settings.geminiModel } as const)
+          : ({ kind: 'claude' } as const)
+      const result = await window.forge.tasks.plan(goal, project.name, project.path, request)
       if (!result.ok) {
         actions.setNotice(result.error)
         return
@@ -51,7 +62,7 @@ export function TaskTray(): ReactNode {
       for (const text of [...result.tasks].reverse()) actions.addTask(text)
       setDraft('')
       actions.setNotice(
-        `Claude split that into ${result.tasks.length} task${result.tasks.length === 1 ? '' : 's'} — drag them onto agents`
+        `${brainName} split that into ${result.tasks.length} task${result.tasks.length === 1 ? '' : 's'} — drag them onto agents`
       )
     } finally {
       setPlanning(false)
@@ -76,6 +87,19 @@ export function TaskTray(): ReactNode {
       <header className="tray__head">
         <span className="eyebrow">Tasks</span>
         {tasks.length > 0 ? <span className="tray__count mono">{tasks.length}</span> : null}
+        <div className="tray__head-actions">
+          {/* The planner's brain, right where Plan lives — not buried in
+              Settings. Claude needs no key; Gemini rides the voice brain's. */}
+          <button
+            type="button"
+            className="ghost-btn tasktray__brain mono"
+            title={`Planning with ${brainName} — click to switch to ${brain === 'gemini' ? 'Claude' : 'Gemini'}`}
+            disabled={planning}
+            onClick={() => actions.setTaskPlannerBrain(brain === 'gemini' ? 'claude' : 'gemini')}
+          >
+            {brainName}
+          </button>
+        </div>
       </header>
 
       <div className="tasktray__compose" data-planning={planning ? 'true' : undefined}>

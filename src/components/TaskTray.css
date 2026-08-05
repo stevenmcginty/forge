@@ -48,6 +48,15 @@
   border-color: var(--accent-line);
 }
 
+.tasktray__brain {
+  font-size: var(--t-eyebrow);
+  color: var(--text-muted);
+}
+
+.tasktray__brain:hover {
+  color: var(--text-primary);
+}
+
 .tasktray__acts {
   flex: none;
   display: flex;

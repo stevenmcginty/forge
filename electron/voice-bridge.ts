@@ -134,7 +134,8 @@ async function listFlashModels(key: string): Promise<string> {
   }
 }
 
-async function callGemini(req: GeminiCallRequest): Promise<GeminiCallResult> {
+// Exported for the task planner, which plans with the same call and key.
+export async function callGemini(req: GeminiCallRequest): Promise<GeminiCallResult> {
   const key = typeof req?.key === 'string' ? req.key.trim() : ''
   const model = typeof req?.model === 'string' ? req.model.trim() : ''
   if (!key) return { ok: false, error: 'No Gemini API key set' }

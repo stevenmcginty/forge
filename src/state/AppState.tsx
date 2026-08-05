@@ -21,6 +21,7 @@ import type {
   Settings,
   SplitDirection,
   TaskCard,
+  TaskPlannerBrain,
   TerminalTab,
   ThemeCore,
   VoiceBrainId,
@@ -161,6 +162,7 @@ const FALLBACK_SETTINGS: Settings = {
   voiceWakeWord: false,
   geminiKey: '',
   geminiModel: 'gemini-2.5-flash',
+  taskPlannerBrain: 'claude',
   accountName: 'You',
   accountColor: '#C6FF4A',
   themeId: 'volt',
@@ -1014,6 +1016,8 @@ export interface AppActions {
   addTask(text: string): void
   /** Take a card off the tray — delivered or dismissed, same door. */
   removeTask(id: string): void
+  /** Which model the tray's Plan button thinks with. */
+  setTaskPlannerBrain(brain: TaskPlannerBrain): void
 
   setNotice(message: string | null): void
   openDataDir(): void
@@ -1421,6 +1425,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       setMosaicFit: (paneId, fit) => dispatch({ type: 'mosaicFit', paneId, fit }),
       addTask: (text) => dispatch({ type: 'taskAdd', text }),
       removeTask: (id) => dispatch({ type: 'taskRemove', id }),
+      setTaskPlannerBrain: (brain) => dispatch({ type: 'patchSettings', patch: { taskPlannerBrain: brain } }),
       resetMosaicLayout: () => dispatch({ type: 'mosaicReset' }),
       setNotice: (message) => dispatch({ type: 'notice', message }),
       openDataDir: () => void window.forge.store.revealDataDir(),
