@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, readdirSync, statSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
@@ -86,7 +86,33 @@ function newestIn(dir: string): number {
 }
 
 function same(a: StaleStatus, b: StaleStatus): boolean {
-  return a.stale === b.stale && a.at === b.at && a.changed.join() === b.changed.join()
+  return (
+    a.stale === b.stale &&
+    a.at === b.at &&
+    a.changed.join() === b.changed.join() &&
+    a.version === b.version
+  )
+}
+
+/** dev when FORGE_CHANNEL says so; everything else is the everyday app. */
+function channel(): 'dev' | 'stable' {
+  return process.env['FORGE_CHANNEL'] === 'dev' ? 'dev' : 'stable'
+}
+
+/**
+ * The version a restart would pick up: package.json as it sits on disk, read
+ * fresh each time the bundles change. After "push to the main app" pulls the
+ * checkout forward, this is the new number — the one the strip should lead
+ * with — while app.getVersion() still reports the build this process booted.
+ */
+function versionOnDisk(): string | undefined {
+  try {
+    const raw = readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')
+    const version = (JSON.parse(raw) as { version?: unknown }).version
+    return typeof version === 'string' && version ? version : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function broadcast(next: StaleStatus): void {
@@ -109,7 +135,14 @@ function recompute(): void {
       at = Math.max(at, now)
     }
   }
-  broadcast({ stale: changed.length > 0, changed, at: at || null })
+  const stale = changed.length > 0
+  broadcast({
+    stale,
+    changed,
+    at: at || null,
+    channel: channel(),
+    ...(stale ? { version: versionOnDisk() } : {})
+  })
 }
 
 /* ------------------------------------------------------------------ api */
@@ -157,11 +190,12 @@ export function initStaleWatcher(): void {
  * pointing at a URL that no longer answers — a blank screen you have to close
  * and start again by hand.
  *
- * So in a dev run the whole toolchain is restarted rather than the app: a
- * detached `npm run dev`, which brings up a fresh dev server and a fresh
- * Electron. Detached because it has to outlive the process starting it, and
- * delayed a couple of seconds because the outgoing dev server still holds its
- * port for a moment and a fight over it is a slower recovery than a short wait.
+ * So in a dev run the whole toolchain is restarted rather than the app —
+ * through the checkout's silent launcher when it has one, a detached
+ * `npm run dev` otherwise. Detached because it has to outlive the process
+ * starting it, and delayed a couple of seconds because the outgoing dev server
+ * still holds its port for a moment and a fight over it is a slower recovery
+ * than a short wait.
  *
  * `cmd.exe /c` rather than `shell: true`: spawning a `.cmd` needs a shell on
  * Windows either way, and naming the interpreter avoids the DEP0190 warning
@@ -175,17 +209,46 @@ function relaunch(): void {
   }
 
   const root = app.getAppPath()
+
+  // The respawned toolchain must not inherit this run's identity or wiring:
+  // dev.mjs prefers an inherited FORGE_DATA_DIR over the checkout's own marker,
+  // and a stale ELECTRON_RENDERER_URL / ELECTRON_EXEC_PATH points the new run
+  // at servers and binaries that belong to the process currently dying. The
+  // launcher re-derives all of these from the checkout itself.
+  const {
+    FORGE_DATA_DIR: _dataDir,
+    FORGE_CHANNEL: _channel,
+    ELECTRON_RENDERER_URL: _rendererUrl,
+    ELECTRON_EXEC_PATH: _execPath,
+    ...cleanEnv
+  } = process.env
+
+  // Prefer the silent launcher when the checkout has it: it logs to the
+  // profile's dev.log, retries once if the new run collides with this dying
+  // one, and pops the log only when a start genuinely failed — the exact
+  // safety net a bare detached `npm run dev` does not have.
+  const vbs = join(root, 'Start Forge (silent).vbs')
   try {
     const child =
       process.platform === 'win32'
-        ? spawn('cmd.exe', ['/c', 'timeout /t 2 /nobreak >nul & npm run dev'], {
-            cwd: root,
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: false
-          })
+        ? existsSync(vbs)
+          ? spawn('cmd.exe', ['/c', `timeout /t 2 /nobreak >nul & wscript.exe "${vbs}"`], {
+              cwd: root,
+              env: cleanEnv,
+              detached: true,
+              stdio: 'ignore',
+              windowsHide: true
+            })
+          : spawn('cmd.exe', ['/c', 'timeout /t 2 /nobreak >nul & npm run dev'], {
+              cwd: root,
+              env: cleanEnv,
+              detached: true,
+              stdio: 'ignore',
+              windowsHide: false
+            })
         : spawn('sh', ['-c', 'sleep 2; npm run dev'], {
             cwd: root,
+            env: cleanEnv,
             detached: true,
             stdio: 'ignore'
           })

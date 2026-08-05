@@ -230,7 +230,18 @@ export interface TaskCard {
 }
 
 /** What the tray's Plan button gets back: briefs to become cards, or the reason not. */
-export type TaskPlanResult = { ok: true; tasks: string[] } | { ok: false; error: string }
+export type TaskPlanResult =
+  | {
+      ok: true
+      tasks: string[]
+      /**
+       * The plan in prose — what the model intends and in what order — shown
+       * for review before any card exists. Older prompts and stubborn models
+       * sometimes answer with a bare task array, so it stays optional.
+       */
+      plan?: string
+    }
+  | { ok: false; error: string }
 
 /** The two models the tray can plan with. */
 export type TaskPlannerBrain = 'claude' | 'gemini'
@@ -574,6 +585,15 @@ export interface StaleStatus {
   changed: StaleBundle[]
   /** mtime of the newest rebuild, or null when nothing has changed. */
   at: number | null
+  /**
+   * The version a restart would boot into — package.json as it is on disk *now*,
+   * not as it was when this process started. On the stable checkout the strip
+   * leads with this ("Forge v0.2.2 is ready"), because there "the code changed
+   * on disk" almost always means "an update was pulled in".
+   */
+  version?: string
+  /** Which checkout this is, from FORGE_CHANNEL. Stable wording differs from dev. */
+  channel?: 'dev' | 'stable'
 }
 
 /* --------------------------------------------------------- media generation */

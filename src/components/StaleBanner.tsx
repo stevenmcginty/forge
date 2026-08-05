@@ -67,6 +67,12 @@ export function StaleBanner(): ReactNode {
     0
   )
 
+  // Same strip, two dialects. On the stable checkout "the code changed on
+  // disk" means an update was pushed from Forge Dev, and it should say so the
+  // way any app would: update ready, restart. Only the dev checkout — where
+  // the change is your own edit of ten seconds ago — earns the build-speak.
+  const stable = status.channel === 'stable'
+
   return (
     <div className="ubanner" role="status" data-phase="stale">
       <span className="ubanner__mark">
@@ -78,6 +84,11 @@ export function StaleBanner(): ReactNode {
           <>
             Restarting closes <strong>{panes === 1 ? '1 pane' : `${panes} panes`}</strong> — carry on?
           </>
+        ) : stable ? (
+          <>
+            Update available{status.version ? <> — Forge <strong>v{status.version}</strong> is ready</> : null} —
+            restart to use it
+          </>
         ) : (
           <>
             Forge&rsquo;s <strong>{describe(status.changed)}</strong> changed on disk — this window is
@@ -86,7 +97,7 @@ export function StaleBanner(): ReactNode {
         )}
       </span>
 
-      <span className="ubanner__sim mono">dev</span>
+      {stable ? null : <span className="ubanner__sim mono">dev</span>}
 
       <div className="ubanner__actions">
         <button
