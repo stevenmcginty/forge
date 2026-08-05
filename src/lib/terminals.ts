@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import type { PtyDataEvent, PtyExitEvent } from '@shared/types'
 import { findRemoteSessionUrl } from '@shared/remote'
 import { commandExe } from '@shared/agents'
+import { advanceDraft, clampDraft } from './draft'
 import { earconTaskAttention, earconTaskDone } from './earcon'
 import { getLiveSettings } from './livesettings'
 
@@ -142,6 +143,14 @@ interface Entry {
   jiggleTimer: number | null
   /** Tail of the last output chunk, kept only until the RC URL is found. */
   scanTail: string
+  /**
+   * What has been typed into this pane since the last Enter — the draft the
+   * program's line editor is holding. Reconstructed from the keystroke stream
+   * (see trackTyped), so cursor-movement keys make it approximate; that is
+   * fine, because its one consumer erases with backspaces, and a backspace at
+   * an empty prompt is a no-op in every shell and agent we launch.
+   */
+  typed: string
   lastActivityNotify: number
   activityTimer: number | null
   /** True while this pane counts as working — see the BUSY_* constants. */
@@ -572,6 +581,7 @@ class TerminalHost {
       ptyDims: null,
       jiggleTimer: null,
       scanTail: '',
+      typed: '',
       lastActivityNotify: 0,
       activityTimer: null,
       busy: false,
@@ -590,6 +600,7 @@ class TerminalHost {
         if (data === '\r' || data === '\n') void this.restart(paneId)
         return
       }
+      entry.typed = advanceDraft(entry.typed, data)
       window.forge.pty.write(paneId, data)
     })
     entry.disposers.push(() => dataSub.dispose())
@@ -886,6 +897,8 @@ class TerminalHost {
     // it. The *conversation* does: the pane keeps its session id, so restarting
     // a pane picks its Claude back up rather than starting over.
     entry.scanTail = ''
+    // A fresh shell holds no draft, whatever the old one was mid-typing.
+    entry.typed = ''
     // The size we are about to spawn at *is* the PTY's size, recorded before
     // the await so the fit that queued this one flushes as a no-op rather than
     // resizing a shell that is already right.
@@ -1066,6 +1079,33 @@ class TerminalHost {
     entry.term.scrollToBottom()
   }
 
+  /** The draft takeBack would remove — read by the pane menu to label itself. */
+  typedDraft(paneId: string): string {
+    return this.entries.get(paneId)?.typed ?? ''
+  }
+
+  /**
+   * Erase the draft typed into this pane and hand it back.
+   *
+   * The wrong-terminal rescue: a long prompt composed at the wrong pane is
+   * removed here with one backspace per character — the only deletion every
+   * shell and agent line editor understands — and returned, so the caller can
+   * put it on the clipboard or re-aim it at the pane it was meant for. Null
+   * when there is nothing to take back. Overshoot is harmless (a backspace at
+   * an empty prompt is a no-op everywhere we launch); undershoot only happens
+   * after caret gymnastics the tracker deliberately does not model.
+   */
+  takeBack(paneId: string): string | null {
+    const entry = this.entries.get(paneId)
+    if (!entry || entry.runtime.status === 'exited') return null
+    const text = entry.typed
+    if (!text) return null
+    entry.typed = ''
+    window.forge.pty.write(paneId, '\x7f'.repeat(Array.from(text).length))
+    entry.term.scrollToBottom()
+    return text
+  }
+
   /**
    * Dictation insertion. Sends text to the shell as though it had been typed —
    * and deliberately never a carriage return: Steve reads what landed and
@@ -1078,7 +1118,10 @@ class TerminalHost {
   type(paneId: string, text: string): boolean {
     const entry = this.entries.get(paneId)
     if (!entry || entry.runtime.status === 'exited') return false
-    window.forge.pty.write(paneId, text.replace(/[\r\n]+/g, ' '))
+    const flat = text.replace(/[\r\n]+/g, ' ')
+    // Dictated words are typing too: they belong to the draft takeBack removes.
+    entry.typed = clampDraft(entry.typed + flat)
+    window.forge.pty.write(paneId, flat)
     return true
   }
 
@@ -1095,6 +1138,7 @@ class TerminalHost {
   submit(paneId: string): boolean {
     const entry = this.entries.get(paneId)
     if (!entry || entry.runtime.status === 'exited') return false
+    entry.typed = '' // The Enter below sends the draft on its way.
     window.forge.pty.write(paneId, '\r')
     entry.term.scrollToBottom()
     return true
