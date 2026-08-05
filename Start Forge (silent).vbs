@@ -16,7 +16,7 @@
 
 Option Explicit
 
-Dim sh, fso, root, dir, logFile, started, elapsed, code, marker, profile, ts, line
+Dim sh, fso, root, dir, logFile, started, elapsed, code, marker, profile, ts, line, attempt
 
 Set sh  = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -47,15 +47,26 @@ logFile = dir & "\dev.log"
 
 sh.CurrentDirectory = root
 
-started = Timer
+' Two attempts, not one. The common startup failure is not broken code - it is
+' closing Forge and reopening it before the old process tree has finished
+' dying, so the new one loses the fight over a port or the single-instance
+' lock. That resolves itself in seconds, so a fast failure gets one quiet
+' retry after a pause. Only when the retry also dies fast is it a real
+' failure worth a popup and the log.
+For attempt = 1 To 2
+  started = Timer
 
-' 0 = hidden window, True = wait for it to exit. This script stays alive for the
-' life of the session as an invisible wscript.exe, which is what lets it report
-' a startup failure after the fact.
-code = sh.Run("cmd /c npm run dev > """ & logFile & """ 2>&1", 0, True)
+  ' 0 = hidden window, True = wait for it to exit. This script stays alive for
+  ' the life of the session as an invisible wscript.exe, which is what lets it
+  ' report a startup failure after the fact.
+  code = sh.Run("cmd /c npm run dev > """ & logFile & """ 2>&1", 0, True)
 
-elapsed = Timer - started
-If elapsed < 0 Then elapsed = elapsed + 86400  ' Timer resets at midnight
+  elapsed = Timer - started
+  If elapsed < 0 Then elapsed = elapsed + 86400  ' Timer resets at midnight
+
+  If code = 0 Or elapsed >= 20 Then Exit For
+  If attempt = 1 Then WScript.Sleep 4000
+Next
 
 If code <> 0 And elapsed < 20 Then
   sh.Popup "Forge could not start. Opening the log.", 10, "Forge", 48

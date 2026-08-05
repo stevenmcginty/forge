@@ -49,6 +49,7 @@ function pidsOnPorts() {
 }
 
 const pids = pidsOnPorts()
+let killedAny = false
 for (const pid of pids) {
   const commandLine = commandLineFor(pid)
   if (!commandLine.includes(ROOT)) {
@@ -59,8 +60,25 @@ for (const pid of pids) {
     // /t takes the whole zombie tree (node + electron children) down with it
     execSync(`taskkill /f /t /pid ${pid}`, { stdio: 'ignore' })
     console.log(`[predev] killed stale dev process tree (pid ${pid})`)
+    killedAny = true
   } catch {
     console.warn(`[predev] could not kill pid ${pid} — if dev fails to bind, close it manually`)
   }
 }
 if (pids.length === 0) console.log('[predev] no stale dev processes found')
+
+/**
+ * taskkill returning is not the same as the port being free: Windows releases
+ * a killed process's sockets a beat later, and starting the dev server inside
+ * that beat is exactly the close-Forge-reopen-Forge race that makes the app
+ * "not open" on the second try. So having killed anything, wait for the OS to
+ * actually let go before handing over to electron-vite.
+ */
+if (killedAny) {
+  const deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    const held = pidsOnPorts().filter((pid) => commandLineFor(pid).includes(ROOT))
+    if (held.length === 0) break
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400)
+  }
+}
