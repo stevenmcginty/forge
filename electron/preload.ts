@@ -146,7 +146,8 @@ const api: ForgeApi = {
 
   system: {
     userName: () => ipcRenderer.invoke(IPC.systemUserName),
-    claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion)
+    claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion),
+    claudeTranscript: (cwd, sessionId) => ipcRenderer.invoke(IPC.claudeTranscript, cwd, sessionId)
   },
 
   tools: {

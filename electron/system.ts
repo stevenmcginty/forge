@@ -4,6 +4,7 @@ import { ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { ClaudeCliState } from '@shared/types'
 import { whichCommand } from './agent-probe'
+import { hasTranscript, transcriptPath } from './bridge/claude-transcripts'
 
 /**
  * Read-only probes of the machine, for the Settings page's Account section.
@@ -79,4 +80,11 @@ export function claudeVersion(): Promise<ClaudeCliState> {
 export function registerSystemHandlers(): void {
   ipcMain.handle(IPC.systemUserName, () => windowsUserName())
   ipcMain.handle(IPC.systemClaudeVersion, () => claudeVersion())
+  // Both parts answered together: the renderer that is about to point one
+  // agent at another's conversation needs the path AND whether it is real,
+  // and asking twice would just be two chances for the answers to disagree.
+  ipcMain.handle(IPC.claudeTranscript, (_e, cwd: string, sessionId: string) => ({
+    path: transcriptPath(String(cwd), String(sessionId)),
+    exists: hasTranscript(String(cwd), String(sessionId))
+  }))
 }

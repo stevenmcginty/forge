@@ -214,6 +214,10 @@ export const IPC = {
   systemUserName: 'system:user-name',
   systemClaudeVersion: 'system:claude-version',
 
+  // where Claude Code filed a session's transcript — the handover door: drag a
+  // tab onto another agent's pane and the target gets pointed at this file
+  claudeTranscript: 'claude:transcript',
+
   // updates & tools (M10) — what is installed, what is available
   toolsProbe: 'tools:probe',
   toolsLatest: 'tools:latest',

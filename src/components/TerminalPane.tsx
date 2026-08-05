@@ -9,10 +9,12 @@ import {
   permissionChip,
   resolveProfile
 } from '@/lib/agents'
+import { TAB_DRAG_TYPE } from '@/lib/mosaicLayout'
 import { droppedFilePaths, maybeFiles } from '@/lib/paths'
+import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost, type TerminalSpec } from '@/lib/terminals'
 import { remoteControlName, REMOTE_CONTROL_URL } from '@shared/remote'
-import { useApp } from '@/state/AppState'
+import { useActiveWorkspace, useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
@@ -37,6 +39,7 @@ export function TerminalPane({
   onlyPane: boolean
 }): ReactNode {
   const { state, actions } = useApp()
+  const workspace = useActiveWorkspace()
   const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
   // The pane's own permission override beats the profile's default, and is what
   // actually goes on the command line — see launchCommand.
@@ -49,7 +52,7 @@ export function TerminalPane({
   const menuAnchorRef = useRef<HTMLSpanElement | null>(null)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
   const [phoneOpen, setPhoneOpen] = useState(false)
-  const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean; draft: number } | null>(null)
   const [dropping, setDropping] = useState(false)
   const runtime = usePaneRuntime(leaf.id)
   const [editing, setEditing] = useState(false)
@@ -146,10 +149,52 @@ export function TerminalPane({
 
   // maybeFiles (lib/paths) carries the story of why acceptance is generous.
   const acceptDrag = (e: React.DragEvent): void => {
-    if (!maybeFiles(e)) return
+    if (!maybeFiles(e) && !e.dataTransfer.types.includes(TAB_DRAG_TYPE)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
     setDropping(true)
+  }
+
+  /**
+   * A tab dropped on a pane is a handover: point this pane's agent at the
+   * dragged tab's Claude conversations, so a fresh Codex (or anything else)
+   * can catch up on what Claude was doing without a copy-paste relay.
+   *
+   * The mechanism is the transcript file Claude Code already keeps on disk —
+   * the same one session resume leans on — so there is nothing to export and
+   * no orchestration: the target agent just reads a file. Typed, never
+   * submitted: Steve reads the handover line and presses Enter himself, the
+   * same contract dictation honours.
+   */
+  const onDropTab = async (tabId: string): Promise<void> => {
+    const tab = workspace.tabs.find((t) => t.id === tabId)
+    if (!tab) return
+    const donors = collectLeaves(tab.root).filter((l) => l.id !== leaf.id && l.sessionId)
+    const claude = donors.filter((l) =>
+      isClaudeCommand(resolveProfile(state.settings.agentProfiles, l.profileId).command)
+    )
+    const paths: string[] = []
+    for (const l of claude) {
+      const t = await window.forge.system.claudeTranscript(project.path, l.sessionId!)
+      if (t.exists) paths.push(t.path)
+    }
+    if (paths.length === 0) {
+      actions.setNotice(
+        claude.length === 0
+          ? `No Claude panes on "${tab.title}" — only Claude sessions keep a transcript to hand over`
+          : `"${tab.title}" has not said anything yet — its transcript appears after the first exchange`
+      )
+      return
+    }
+    claimFocus()
+    terminalHost.focus(leaf.id)
+    const listing = paths.map((p) => `"${p}"`).join(' and ')
+    const what =
+      paths.length === 1
+        ? 'it is the transcript (JSONL) of the Claude Code session'
+        : 'they are the transcripts (JSONL) of the Claude Code sessions'
+    const text = `Catch up on a colleague's work: read ${listing} — ${what} on the "${tab.title}" tab, working in this same folder. Summarise where it left off, then wait for my instructions. `
+    requestAnimationFrame(() => terminalHost.paste(leaf.id, text))
   }
 
   /**
@@ -170,6 +215,11 @@ export function TerminalPane({
     // window to the file, which would take the whole app down with it.
     e.preventDefault()
     setDropping(false)
+    const tabId = e.dataTransfer.getData(TAB_DRAG_TYPE)
+    if (tabId) {
+      void onDropTab(tabId)
+      return
+    }
     const quoted = droppedFilePaths(e).map((p) => `"${p}"`)
     if (quoted.length === 0) return
     claimFocus()
@@ -347,7 +397,12 @@ export function TerminalPane({
         onContextMenu={(e) => {
           e.preventDefault()
           claimFocus()
-          setMenu({ x: e.clientX, y: e.clientY, hasSelection: terminalHost.hasSelection(leaf.id) })
+          setMenu({
+            x: e.clientX,
+            y: e.clientY,
+            hasSelection: terminalHost.hasSelection(leaf.id),
+            draft: terminalHost.typedDraft(leaf.id).length
+          })
         }}
       />
 
@@ -377,6 +432,24 @@ export function TerminalPane({
         <PopoverRow onClick={() => runFromMenu(() => void terminalHost.pasteFromClipboard(leaf.id))}>
           <span className="pane__menu-name">Paste</span>
           <span className="pane__menu-keys mono">Ctrl+V</span>
+        </PopoverRow>
+        {/* The wrong-terminal rescue: a prompt composed at the wrong pane is
+            erased here — Forge fires the backspaces — and lands on the
+            clipboard, ready to Ctrl+V at the pane it was meant for. */}
+        <PopoverRow
+          disabled={!menu?.draft}
+          onClick={() =>
+            runFromMenu(() => {
+              const text = terminalHost.takeBack(leaf.id)
+              if (!text) return
+              void window.forge.clipboard.writeText(text)
+              actions.setNotice(
+                `Took back ${text.length} character${text.length === 1 ? '' : 's'} — Ctrl+V where they belong`
+              )
+            })
+          }
+        >
+          <span className="pane__menu-name">Take back typed</span>
         </PopoverRow>
         <PopoverDivider />
         <PopoverRow onClick={() => runFromMenu(() => terminalHost.selectAll(leaf.id))}>

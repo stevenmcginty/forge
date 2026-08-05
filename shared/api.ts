@@ -383,6 +383,12 @@ export interface ForgeApi {
     userName(): Promise<string>
     /** `claude --version`, or why it could not be run. */
     claudeVersion(): Promise<ClaudeCliState>
+    /**
+     * Where Claude Code filed this session's transcript, and whether it is
+     * really there yet. The handover door: drag a tab onto another agent's
+     * pane and the target gets pointed at this file.
+     */
+    claudeTranscript(cwd: string, sessionId: string): Promise<{ path: string; exists: boolean }>
   }
 
   /**
