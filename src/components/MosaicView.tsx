@@ -1021,6 +1021,23 @@ function MosaicTile({
     }
   }, [against, geometry, paneId, refit, zoomed])
 
+  /*
+   * Undo the zoom refit the moment the zoom ends, while the pane is still on
+   * the wall. A zoom left the terminal at stage cols/rows; the crop branch
+   * above has just put the box back at `geometry` pixels, so this fit lands it
+   * back on the exact dims it had in tab view — meaning leaving the mosaic
+   * re-attaches at an unchanged size and triggers no reflow at all. On a tile
+   * that never zoomed the dims already match and this is a no-op (fit only
+   * resizes on change, and the PTY flush skips repeats).
+   *
+   * Declared after the apply() effect on purpose: effects run in order, and
+   * the box must be back at its natural size before the fit measures it.
+   */
+  useEffect(() => {
+    if (zoomed || !refit) return
+    terminalHost.fit(paneId)
+  }, [paneId, refit, zoomed])
+
   /* --------------------------------------------------------- dropped files */
 
   /*
