@@ -43,6 +43,7 @@ import {
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import { applyMobileSettings, disposeMobile, publishMobileState, registerMobileHandlers } from './mobile-host'
 import { registerSystemHandlers } from './system'
+import { registerTaskPlannerHandlers } from './task-planner'
 import { registerToolsHandlers } from './tools'
 import { registerCommandsHandlers } from './commands'
 import {
@@ -748,6 +749,7 @@ void app
       registerMobileHandlers()
       applyMobileSettings()
       registerSystemHandlers()
+      registerTaskPlannerHandlers()
       registerToolsHandlers()
       registerCommandsHandlers()
       registerUpdateHandlers()

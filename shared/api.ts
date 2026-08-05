@@ -37,6 +37,7 @@ import type {
   SttPhraseEvent,
   SttStartOptions,
   SttStatus,
+  TaskPlanResult,
   ToolId,
   ToolLatest,
   ToolProbe,
@@ -389,6 +390,12 @@ export interface ForgeApi {
      * pane and the target gets pointed at this file.
      */
     claudeTranscript(cwd: string, sessionId: string): Promise<{ path: string; exists: boolean }>
+  }
+
+  /** The delegation tray's brain. See electron/task-planner.ts. */
+  tasks: {
+    /** One headless `claude -p` turn: a goal in, self-contained task briefs out. */
+    plan(goal: string, projectName: string, cwd: string): Promise<TaskPlanResult>
   }
 
   /**

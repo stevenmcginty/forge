@@ -218,6 +218,10 @@ export const IPC = {
   // tab onto another agent's pane and the target gets pointed at this file
   claudeTranscript: 'claude:transcript',
 
+  // the delegation tray's Plan button: a goal in, task briefs out, via one
+  // headless `claude -p` turn in the main process
+  tasksPlan: 'tasks:plan',
+
   // updates & tools (M10) — what is installed, what is available
   toolsProbe: 'tools:probe',
   toolsLatest: 'tools:latest',

@@ -21,14 +21,41 @@ export function TaskTray(): ReactNode {
   const workspace = useActiveWorkspace()
   const collapsed = state.settings.railCollapsed
   const tasks = workspace.tasks ?? []
+  const project = state.projects.find((p) => p.id === state.activeProjectId) ?? null
 
   const [draft, setDraft] = useState('')
+  const [planning, setPlanning] = useState(false)
 
   const add = (): void => {
     const text = draft.trim()
     if (!text) return
     actions.addTask(text)
     setDraft('')
+  }
+
+  /**
+   * The tray's brain: hand the goal to `claude -p` (electron/task-planner.ts)
+   * and file what comes back as cards. Added in reverse so the plan reads
+   * top-to-bottom on a newest-first tray. Dealing the cards out stays yours.
+   */
+  const plan = async (): Promise<void> => {
+    const goal = draft.trim()
+    if (!goal || !project || planning) return
+    setPlanning(true)
+    try {
+      const result = await window.forge.tasks.plan(goal, project.name, project.path)
+      if (!result.ok) {
+        actions.setNotice(result.error)
+        return
+      }
+      for (const text of [...result.tasks].reverse()) actions.addTask(text)
+      setDraft('')
+      actions.setNotice(
+        `Claude split that into ${result.tasks.length} task${result.tasks.length === 1 ? '' : 's'} — drag them onto agents`
+      )
+    } finally {
+      setPlanning(false)
+    }
   }
 
   if (collapsed) {
@@ -51,32 +78,46 @@ export function TaskTray(): ReactNode {
         {tasks.length > 0 ? <span className="tray__count mono">{tasks.length}</span> : null}
       </header>
 
-      <div className="tasktray__compose">
+      <div className="tasktray__compose" data-planning={planning ? 'true' : undefined}>
         <textarea
           className="tasktray__input"
           value={draft}
           rows={2}
           maxLength={MAX_TASK_TEXT}
-          placeholder="Write a task, drag it onto an agent"
+          placeholder="State a goal — Plan has Claude split it into task cards. + files it as one card."
           spellCheck={false}
+          disabled={planning}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            // Enter files the card; Shift+Enter is a newline in a longer brief.
+            // Enter asks Claude to plan the goal; Ctrl+Enter files it verbatim
+            // as one card; Shift+Enter is a newline in a longer brief.
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
-              add()
+              if (e.ctrlKey) add()
+              else void plan()
             }
           }}
         />
-        <button
-          type="button"
-          className="ghost-btn tasktray__add"
-          title="Add this task to the tray"
-          disabled={!draft.trim()}
-          onClick={add}
-        >
-          <Icon name="plus" size={13} />
-        </button>
+        <div className="tasktray__acts">
+          <button
+            type="button"
+            className="ghost-btn tasktray__plan"
+            title="Have Claude break this goal into task cards"
+            disabled={!draft.trim() || planning || !project}
+            onClick={() => void plan()}
+          >
+            {planning ? 'Planning…' : 'Plan'}
+          </button>
+          <button
+            type="button"
+            className="ghost-btn tasktray__add"
+            title="File this text as a single card, as written (Ctrl+Enter)"
+            disabled={!draft.trim() || planning}
+            onClick={add}
+          >
+            <Icon name="plus" size={13} />
+          </button>
+        </div>
       </div>
 
       {tasks.length > 0 ? (

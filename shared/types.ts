@@ -229,6 +229,9 @@ export interface TaskCard {
   createdAt: number
 }
 
+/** What the tray's Plan button gets back: briefs to become cards, or the reason not. */
+export type TaskPlanResult = { ok: true; tasks: string[] } | { ok: false; error: string }
+
 export interface Workspace {
   tabs: TerminalTab[]
   activeTabId: string | null

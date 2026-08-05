@@ -150,6 +150,10 @@ const api: ForgeApi = {
     claudeTranscript: (cwd, sessionId) => ipcRenderer.invoke(IPC.claudeTranscript, cwd, sessionId)
   },
 
+  tasks: {
+    plan: (goal, projectName, cwd) => ipcRenderer.invoke(IPC.tasksPlan, goal, projectName, cwd)
+  },
+
   tools: {
     probe: (refresh) => ipcRenderer.invoke(IPC.toolsProbe, refresh === true),
     latest: (ids, refresh) => ipcRenderer.invoke(IPC.toolsLatest, ids ?? null, refresh === true)
