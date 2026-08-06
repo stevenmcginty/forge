@@ -40,6 +40,8 @@ const REPO = 'stevenmcginty/forge'
 const RELEASE_DIR = join(ROOT, 'release')
 const FEED = 'latest.yml'
 const dryRun = process.argv.slice(2).includes('--dry-run')
+const ci = process.argv.slice(2).includes('--ci')
+const buildScript = process.env['FORGE_RELEASE_BUILD_SCRIPT'] ?? 'dist'
 
 const die = (msg) => {
   console.error(`\n${msg}\n`)
@@ -58,7 +60,12 @@ const tag = `v${version}`
 // Parallel sessions edit this checkout. A release built from a dirty tree is a
 // binary whose source cannot be pointed at afterwards.
 const dirty = capture('git', ['status', '--porcelain'])
-if (dirty) {
+const dirtyPaths = dirty
+  .split('\n')
+  .map((line) => line.slice(3).trim())
+  .filter(Boolean)
+const ciOnlyVersionFiles = new Set(['package.json', 'package-lock.json'])
+if (dirty && !(ci && dirtyPaths.every((path) => ciOnlyVersionFiles.has(path)))) {
   die(
     `The working tree has uncommitted changes:\n${dirty}\n\n` +
       'Commit or stash them — a release must be reproducible from a commit.'
@@ -107,13 +114,13 @@ console.log(`  ok   ${tag} is unpublished`)
 
 /* ----------------------------------------------------------------- the build */
 
-step(dryRun ? 'Building (dry run — nothing will be published)' : 'Building')
+step(dryRun ? 'Building (dry run — nothing will be published)' : `Building (${buildScript})`)
 
 // shell: true because npm is a .cmd on Windows and Node has refused to spawn
 // those directly since the CVE-2024-27980 fix. run() throws on a non-zero
 // exit, which is the point: a failed build must never fall through to a
 // publish that ships whatever the last successful run left in release/.
-run('npm', ['run', 'dist'], { shell: true, cwd: ROOT })
+run('npm', ['run', buildScript], { shell: true, cwd: ROOT })
 
 /* -------------------------------------------- the feed must describe the build */
 

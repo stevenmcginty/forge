@@ -66,3 +66,11 @@ checkout used to write Forge. When the Dev build is ready:
 That produces and publishes the new Forge version. Existing stable installs
 then receive it through the normal updater; the Dev checkout remains isolated
 and continues to be the place where the next version is built.
+
+### Push-to-release
+
+The repository also publishes desktop Forge automatically on every push to
+`master`. GitHub Actions uses a clean Windows runner to build the installer,
+verify `latest.yml`, and publish the release that the updater watches. The
+first push uses the unreleased version in `package.json`; later pushes advance
+the patch version automatically. No local packaging step is needed.

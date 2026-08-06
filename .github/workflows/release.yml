@@ -1,0 +1,57 @@
+name: Publish Forge
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forge-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the pushed commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Choose the next desktop version
+        shell: pwsh
+        run: |
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          $base = [version]$package.version
+          $released = git tag --list 'v*' |
+            ForEach-Object { $_ -replace '^v', '' } |
+            Where-Object { $_ -match '^\d+\.\d+\.\d+$' } |
+            ForEach-Object { [version]$_ }
+          $latest = $released | Sort-Object -Descending | Select-Object -First 1
+          if ($latest -and $base -le $latest) {
+            $version = [version]::new($latest.Major, $latest.Minor, $latest.Build + 1)
+          } else {
+            $version = $base
+          }
+          npm version $version --no-git-tag-version --allow-same-version
+          "FORGE_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Building Forge $version"
+
+      - name: Build, verify, and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORGE_RELEASE_BUILD_SCRIPT: dist:nostt
+        run: npm run release -- --ci
