@@ -311,7 +311,7 @@ function SkillRow({ skill, onMenu }: { skill: SkillInfo; onMenu: (up: boolean) =
   const [menuOpen, setMenuOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const conflicted = skill.link === 'conflict'
+  const conflicted = skill.link === 'conflict' || skill.codexLink === 'conflict'
   const title = [
     skill.description || 'No description in this skill’s frontmatter.',
     skill.problem ? `\n\n⚠ ${skill.problem}` : '',
@@ -377,10 +377,10 @@ function SkillRow({ skill, onMenu }: { skill: SkillInfo; onMenu: (up: boolean) =
         disabled={busy}
         title={
           conflicted
-            ? `A different “${skill.name}” already exists in ~/.claude/skills — Forge will not overwrite it`
+            ? 'A different skill with this name already exists in Claude or Codex — Forge will not overwrite it'
             : skill.enabled
-              ? 'Live in every Claude and Kimi session. Click to remove.'
-              : 'Turn on to make this skill available in every Claude and Kimi session'
+              ? 'Live in Claude and Codex. Click to remove.'
+              : 'Turn on to make this skill available in Claude and Codex'
         }
         onClick={() => void toggle()}
       >

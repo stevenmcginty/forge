@@ -88,6 +88,8 @@ export interface SkillInfo extends SkillBase {
   enabled: boolean
   /** How the enabled copy is present in ~/.claude/skills. */
   link: SkillLinkState
+  /** How the enabled copy is present in ~/.codex/skills. */
+  codexLink: SkillLinkState
   /**
    * Other agents' skill folders (~/.agents/skills, ~/.gemini/skills, …) that
    * already have a folder of this name. Purely a hint: a duplicate-skill warning
@@ -319,4 +321,26 @@ export function usesSlashSkills(command: string): boolean {
     .replace(/\.(cmd|bat|exe|ps1)$/i, '')
     .toLowerCase()
   return exe === 'claude' || exe === 'kimi'
+}
+
+/** Agents that discover skills from their own native skill directory. */
+export function usesNativeSkills(command: string): boolean {
+  const exe = (command.trim().split(/\s+/)[0] ?? '')
+    .replace(/^['"]|['"]$/g, '')
+    .split(/[\\/]/)
+    .pop()!
+    .replace(/\.(cmd|bat|exe|ps1)$/i, '')
+    .toLowerCase()
+  return exe === 'claude' || exe === 'kimi' || exe === 'codex'
+}
+
+/** Explicit skill invocation for agents with native skill discovery. */
+export function skillCommandForAgent(name: string, command: string): string {
+  const exe = (command.trim().split(/\s+/)[0] ?? '')
+    .replace(/^['"]|['"]$/g, '')
+    .split(/[\\/]/)
+    .pop()!
+    .replace(/\.(cmd|bat|exe|ps1)$/i, '')
+    .toLowerCase()
+  return exe === 'codex' ? `$${name} ` : skillCommandFor(name)
 }

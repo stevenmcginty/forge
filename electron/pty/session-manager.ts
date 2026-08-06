@@ -21,6 +21,8 @@ export interface SessionSpec {
   cwd: string
   cols: number
   rows: number
+  /** Extra environment for this pane only (for example a profile's API key). */
+  env?: Record<string, string>
   /** Written into the shell once it looks ready. Empty/undefined = nothing. */
   bootstrapCommand?: string
   /**
@@ -151,7 +153,7 @@ export class PtySessionManager {
         // from. The bundled DLL reflows faithfully. It is loaded by path from
         // the package directory, which electron-builder already asar-unpacks.
         useConptyDll: true,
-        env: buildEnv(this.extraEnv)
+        env: buildEnv({ ...this.extraEnv, ...(spec.env ?? {}) })
       })
     } catch (err) {
       return { ok: false, id: spec.id, error: describe(err) }

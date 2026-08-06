@@ -5,14 +5,16 @@ import {
   skillBlurb,
   skillBody,
   skillCommandFor,
+  skillCommandForAgent,
   skillPreambleFor,
+  usesNativeSkills,
   usesSlashSkills
 } from '@shared/skills'
 import type { AgentProfile } from '@shared/types'
 import { terminalHost } from './terminals'
 
 export type { MachineSkillInfo, SkillBase, SkillInfo, SkillSource, SkillsList }
-export { dedupeSkills, skillBlurb, skillBody, skillCommandFor, skillPreambleFor, usesSlashSkills }
+export { dedupeSkills, skillBlurb, skillBody, skillCommandFor, skillCommandForAgent, skillPreambleFor, usesNativeSkills, usesSlashSkills }
 
 /** A skill plus which folder it came out of — everything below travels as one. */
 export interface ResolvedSkill {
@@ -105,9 +107,9 @@ export function useSkills(): SkillsList {
 /**
  * Put a skill into a pane, and never press Enter.
  *
- * Claude Code and Kimi both read `~/.claude/skills`, so for those the skill is
- * already a slash command and the honest thing to type is `/name` — short,
- * recognisable, and it lights up their own autocomplete. Anything else has
+ * Claude Code and Kimi read `~/.claude/skills`, while Codex reads its native
+ * skills folder and uses `$name`. For those agents the skill is already a
+ * native command. Anything else has
  * never heard of the folder, so it gets the skill's prose instead, flattened
  * onto one line because in a terminal a newline *is* Enter.
  *
@@ -119,8 +121,8 @@ export async function typeSkillIntoPane(
   { skill, source }: ResolvedSkill,
   profile: AgentProfile
 ): Promise<boolean> {
-  if (usesSlashSkills(profile.command)) {
-    return terminalHost.type(paneId, skillCommandFor(skill.name))
+  if (usesNativeSkills(profile.command)) {
+    return terminalHost.type(paneId, skillCommandForAgent(skill.name, profile.command))
   }
   const text = await window.forge.skills.read(skill.name, source)
   const body = skillBody(text)

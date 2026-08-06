@@ -146,20 +146,24 @@ async function main() {
     skillCommandFor,
     skillTemplate,
     slugSkillName,
+    skillCommandForAgent,
+    usesNativeSkills,
     usesSlashSkills
   } = await bundle(join(ROOT, 'shared', 'skills.ts'), join(scratch, 'skills.mjs'))
 
   const sandbox = mkdtempSync(join(tmpdir(), 'forge-skills-'))
   const libraryDir = join(sandbox, 'library')
   const claudeSkillsDir = join(sandbox, 'home', '.claude', 'skills')
+  const codexSkillsDir = join(sandbox, 'home', '.codex', 'skills')
   const agentsDir = join(sandbox, 'home', '.agents', 'skills')
   const geminiDir = join(sandbox, 'home', '.gemini', 'skills')
   const outside = join(sandbox, 'outside')
   mkdirSync(claudeSkillsDir, { recursive: true })
+  mkdirSync(codexSkillsDir, { recursive: true })
   mkdirSync(agentsDir, { recursive: true })
   mkdirSync(geminiDir, { recursive: true })
 
-  const store = new SkillsStore({ libraryDir, claudeSkillsDir, peerDirs: [agentsDir, geminiDir] })
+  const store = new SkillsStore({ libraryDir, claudeSkillsDir, codexSkillsDir, peerDirs: [agentsDir, geminiDir] })
 
   /* ------------------------------------------------------- 1. frontmatter */
 
@@ -268,8 +272,12 @@ async function main() {
   log(enabled.ok, 'enable() puts the skill in ~/.claude/skills')
   const linkPath = join(claudeSkillsDir, 'zz-forge-test-skill')
   log(existsSync(join(linkPath, 'SKILL.md')), 'and the SKILL.md is readable through it')
+  const codexLinkPath = join(codexSkillsDir, 'zz-forge-test-skill')
+  log(existsSync(join(codexLinkPath, 'SKILL.md')), 'and the SKILL.md is readable through Codex')
   const mode = store.linkStateFor('zz-forge-test-skill')
   log(mode === 'junction' || mode === 'copy', `the link is a junction or a marked copy (got ${mode})`)
+  const codexMode = store.codexLinkStateFor('zz-forge-test-skill')
+  log(codexMode === 'junction' || codexMode === 'copy', `Codex has a junction or marked copy (got ${codexMode})`)
   if (mode === 'junction') {
     log(lstatSync(linkPath).isSymbolicLink(), 'a junction reads back as a link, not a directory')
     // The whole point of a junction: edit the library, every session sees it.
@@ -349,7 +357,7 @@ async function main() {
 
   const handlers = new Map()
   let settingsEnabled = []
-  setSkillsDirs({ libraryDir, claudeSkillsDir, peerDirs: [agentsDir, geminiDir] })
+  setSkillsDirs({ libraryDir, claudeSkillsDir, codexSkillsDir, peerDirs: [agentsDir, geminiDir] })
   registerSkillsHandlers(
     { handle: (channel, fn) => handlers.set(channel, fn) },
     {
@@ -411,6 +419,7 @@ async function main() {
   log(skillCommandFor('tidy-up') === '/tidy-up ', 'a skill types as a slash command with a trailing space')
   log(!/\r|\n/.test(skillCommandFor('tidy-up')), 'and never carries a newline — that would submit it')
   log(usesSlashSkills('claude') && usesSlashSkills('kimi'), 'claude and kimi read ~/.claude/skills')
+  log(usesNativeSkills('codex') && skillCommandForAgent('caveman', 'codex') === '$caveman ', 'Codex uses its native skill invocation')
   log(usesSlashSkills('claude --dangerously-skip-permissions'), 'flags do not confuse the check')
   log(usesSlashSkills('C:\\npm\\claude.cmd'), 'nor does a full path to the npm shim')
   log(!usesSlashSkills('gemini') && !usesSlashSkills(''), 'nothing else claims to')

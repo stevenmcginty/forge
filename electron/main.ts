@@ -559,6 +559,7 @@ function registerAppHandlers(): void {
   setSkillsDirs({
     libraryDir: getSettings().skillsLibraryDir || join(getDataDir(), 'skills'),
     claudeSkillsDir: join(homedir(), '.claude', 'skills'),
+    codexSkillsDir: join(process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'), 'skills'),
     // Read-only, and only to say "that name exists over there too".
     peerDirs: [join(homedir(), '.agents', 'skills'), join(homedir(), '.gemini', 'skills')]
   }).syncEnabled(getSettings().skillsEnabled)

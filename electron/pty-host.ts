@@ -33,6 +33,9 @@ const FLUSH_MS = 12
 /** Safety valve: if a session dumps more than this between flushes, send early. */
 const FLUSH_BYTES = 64 * 1024
 /** Per-session replay buffer, so a renderer reload doesn't lose the screen. */
+
+/** Gemini's personal OAuth/Code Assist route is retired; API-key panes use the API. */
+const GEMINI_CLI_MODEL = 'gemini-3.6-flash'
 const REPLAY_LIMIT = 192 * 1024
 
 let manager: PtySessionManager | null = null
@@ -270,6 +273,7 @@ export function registerPtyHandlers(): void {
       }
     )
     const bootstrapCommand = applyMcpBridge(plan.command)
+    const settings = getSettings()
 
     // The pane is about to type a command into a shell. If the program behind
     // it is not on this machine, typing it produces PowerShell's "not
@@ -283,11 +287,20 @@ export function registerPtyHandlers(): void {
     const tool = missingExe ? toolSpecForCommand(bootstrapCommand, getSettings().customTools) : null
     const notice = missingExe ? missingCommandNotice(missingExe, tool ? installCommandFor(tool) : null) : null
 
+    // Gemini CLI's individual-account OAuth route now returns UNSUPPORTED_CLIENT.
+    // If Forge has a Gemini API key, pass it only to Gemini panes and select the
+    // current stable Flash model. Other panes never receive the key.
+    const geminiEnv =
+      exe?.toLowerCase() === 'gemini' && settings.geminiKey.trim()
+        ? { GEMINI_API_KEY: settings.geminiKey.trim(), GEMINI_MODEL: GEMINI_CLI_MODEL }
+        : undefined
+
     const spec = {
       id: String(req?.id ?? ''),
       cwd,
       cols: Number(req?.cols ?? 80),
       rows: Number(req?.rows ?? 24),
+      ...(geminiEnv ? { env: geminiEnv } : {}),
       bootstrapCommand: notice ? '' : bootstrapCommand,
       ...(notice ? { bootstrapNotice: notice } : {})
     }

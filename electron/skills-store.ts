@@ -32,7 +32,8 @@ import {
  * The skills library, and the machine-wide bridge to every agent session.
  *
  *   %APPDATA%\Forge\skills\<name>\SKILL.md      the library — Forge owns this
- *   ~\.claude\skills\<name>                     the bridge — Forge borrows this
+ *   ~\.claude\skills\<name>                     Claude projection
+ *   ~\.codex\skills\<name>                      Codex projection
  *
  * Two directories, and the whole design is about the difference between them.
  * The library is ours: Forge creates, imports, edits and deletes inside it
@@ -61,8 +62,10 @@ import {
 export interface SkillsDirs {
   /** %APPDATA%\Forge\skills — the library Forge owns. */
   libraryDir: string
-  /** ~\.claude\skills — read by every claude and kimi session on this machine. */
+  /** ~\.claude\skills — read by Claude and Kimi sessions on this machine. */
   claudeSkillsDir: string
+  /** ~/.codex/skills — read by Codex sessions on this machine. */
+  codexSkillsDir?: string
   /**
    * Other agents' skill folders (~/.agents/skills, ~/.gemini/skills). Read-only,
    * and only ever to say "that name also exists over there" — a duplicate-skill
@@ -112,11 +115,13 @@ function normalisePath(path: string): string {
 export class SkillsStore {
   readonly libraryDir: string
   readonly claudeSkillsDir: string
+  readonly codexSkillsDir: string | null
   private readonly peerDirs: string[]
 
   constructor(dirs: SkillsDirs) {
     this.libraryDir = dirs.libraryDir
     this.claudeSkillsDir = dirs.claudeSkillsDir
+    this.codexSkillsDir = dirs.codexSkillsDir ? resolve(dirs.codexSkillsDir) : null
     this.peerDirs = dirs.peerDirs ?? []
   }
 
@@ -137,10 +142,19 @@ export class SkillsStore {
 
   /** Where an enabled skill appears for every agent on the machine. */
   linkPathFor(name: string): string | null {
+    return this.linkPathIn(name, this.claudeSkillsDir)
+  }
+
+  /** Where an enabled skill appears in Codex's native skill directory. */
+  codexLinkPathFor(name: string): string | null {
+    return this.codexSkillsDir ? this.linkPathIn(name, this.codexSkillsDir) : null
+  }
+
+  private linkPathIn(name: string, rootDir: string): string | null {
     const clean = String(name ?? '').trim()
     if (!isValidSkillName(clean)) return null
-    const path = resolve(join(this.claudeSkillsDir, clean))
-    const root = resolve(this.claudeSkillsDir)
+    const path = resolve(join(rootDir, clean))
+    const root = resolve(rootDir)
     return path.startsWith(root + sep) ? path : null
   }
 
@@ -185,6 +199,7 @@ export class SkillsStore {
         path: dir,
         enabled: isEnabled,
         link: 'absent',
+        codexLink: 'absent',
         alsoIn: this.peersWith(name)
       }
 
@@ -203,12 +218,19 @@ export class SkillsStore {
 
       const link = this.linkState(name)
       info.link = isEnabled ? link.state : link.state === 'conflict' ? 'conflict' : 'absent'
+      const codex = this.codexLinkState(name)
+      info.codexLink = isEnabled ? codex.state : codex.state === 'conflict' ? 'conflict' : 'absent'
       if (info.link === 'conflict') {
         info.problem = `A different “${name}” already exists in ~/.claude/skills — Forge will not overwrite it`
+      } else if (info.codexLink === 'conflict') {
+        info.problem = `A different “${name}” already exists in ~/.codex/skills — Forge will not overwrite it`
       } else if (isEnabled && info.link === 'absent') {
         // Enabled but nothing on the far end: the sync has not run, or failed.
         info.link = 'error'
         info.problem = info.problem ?? 'Enabled, but not synced into ~/.claude/skills yet'
+      } else if (isEnabled && info.codexLink === 'absent') {
+        info.codexLink = 'error'
+        info.problem = info.problem ?? 'Enabled, but not synced into ~/.codex/skills yet'
       }
       out.push(info)
     }
@@ -222,7 +244,7 @@ export class SkillsStore {
    * sense the module can manage: nothing in this method, or in anything it
    * calls, opens a handle for writing, creates the directory, or removes a
    * thing. Steve has ten skills in there — some hand-written, one a junction
-   * into ~/.agents/skills — and every claude and kimi session on the machine
+   * into ~/.agents/skills — and every Claude and Kimi session on the machine
    * already has all of them loaded. Forge's job is to *show* them, not to own
    * them, so there is no toggle and no delete: the only way one of these ever
    * changes is Steve editing it himself.
@@ -400,7 +422,15 @@ export class SkillsStore {
    * name that happens to contain an identical skill, is somebody else's.
    */
   private linkState(name: string): { state: SkillLinkState; owned: boolean } {
-    const target = this.linkPathFor(name)
+    return this.linkStateIn(name, this.claudeSkillsDir)
+  }
+
+  private codexLinkState(name: string): { state: SkillLinkState; owned: boolean } {
+    return this.codexSkillsDir ? this.linkStateIn(name, this.codexSkillsDir) : { state: 'absent', owned: false }
+  }
+
+  private linkStateIn(name: string, rootDir: string): { state: SkillLinkState; owned: boolean } {
+    const target = this.linkPathIn(name, rootDir)
     const source = this.pathFor(name)
     if (!target || !source) return { state: 'absent', owned: false }
 
@@ -426,68 +456,59 @@ export class SkillsStore {
     return this.linkState(name).state
   }
 
+  codexLinkStateFor(name: string): SkillLinkState {
+    return this.codexLinkState(name).state
+  }
+
   /**
-   * Make `name` visible to every claude and kimi session on this machine.
+   * Make `name` visible to every Claude and Codex session on this machine.
    *
    * Junction first, copy second. Returns a conflict rather than replacing
    * anything Forge did not put there.
    */
   enable(name: string): SkillResult {
     const source = this.pathFor(name)
-    const target = this.linkPathFor(name)
-    if (!source || !target) return { ok: false, error: 'Unknown skill' }
+    if (!source || !this.linkPathFor(name)) return { ok: false, error: 'Unknown skill' }
     if (!isDir(source)) return { ok: false, error: 'That skill is not in your library any more' }
-
-    const current = this.linkState(name)
-    if (current.state === 'conflict') {
-      return {
-        ok: false,
-        name,
-        error: `~/.claude/skills/${name} already exists and was not created by Forge — rename one of them`
+    const targets = [this.claudeSkillsDir, ...(this.codexSkillsDir ? [this.codexSkillsDir] : [])]
+    const states = targets.map((root) => ({ root, state: this.linkStateIn(name, root) }))
+    const conflict = states.find((s) => s.state.state === 'conflict')
+    if (conflict) return { ok: false, name, error: `~/${basename(conflict.root)}/skills/${name} already exists and was not created by Forge — rename it first` }
+    for (const { root, state } of states) {
+      if (state.state !== 'junction') {
+        const result = this.enableIn(name, root)
+        if (!result.ok) return result
       }
     }
-    if (current.state === 'junction') return { ok: true, name }
+    return { ok: true, name }
+  }
 
-    safe(() => mkdirSync(this.claudeSkillsDir, { recursive: true }), undefined)
-
-    // An existing managed copy is refreshed rather than trusted: the library
-    // copy is the truth, and a copy is only ever a cache of it.
-    if (current.state === 'copy') {
-      this.removeOwned(target)
-    }
-
-    try {
-      symlinkSync(source, target, 'junction')
-      return { ok: true, name }
-    } catch {
-      /* no junctions here — fall through to a real copy */
-    }
-
+  private enableIn(name: string, rootDir: string): SkillResult {
+    const source = this.pathFor(name)
+    const target = this.linkPathIn(name, rootDir)
+    if (!source || !target) return { ok: false, error: 'Unknown skill' }
+    const current = this.linkStateIn(name, rootDir)
+    safe(() => mkdirSync(rootDir, { recursive: true }), undefined)
+    if (current.state === 'copy') this.removeOwned(target)
+    try { symlinkSync(source, target, 'junction'); return { ok: true, name } } catch { /* fall through */ }
     try {
       cpSync(source, target, { recursive: true, dereference: true, force: true })
-      writeFileSync(
-        join(target, FORGE_MANAGED_MARKER),
-        `${JSON.stringify({ source, syncedAt: new Date().toISOString() }, null, 2)}\n`,
-        'utf8'
-      )
+      writeFileSync(join(target, FORGE_MANAGED_MARKER), `${JSON.stringify({ source, syncedAt: new Date().toISOString() }, null, 2)}\n`, 'utf8')
       return { ok: true, name }
     } catch (err) {
-      return { ok: false, name, error: `Could not sync into ~/.claude/skills: ${(err as Error).message}` }
+      return { ok: false, name, error: `Could not sync ${name} into ${rootDir}: ${(err as Error).message}` }
     }
   }
 
   /** Take it back out. Anything Forge does not own is left exactly where it is. */
   disable(name: string): SkillResult {
-    const target = this.linkPathFor(name)
-    if (!target) return { ok: false, error: 'Unknown skill' }
-    const current = this.linkState(name)
-    if (current.state === 'absent') return { ok: true, name }
-    if (!current.owned) {
-      return { ok: false, name, error: `~/.claude/skills/${name} was not created by Forge — leaving it alone` }
-    }
-    return this.removeOwned(target)
-      ? { ok: true, name }
-      : { ok: false, name, error: 'Could not remove the link from ~/.claude/skills' }
+    if (!this.linkPathFor(name)) return { ok: false, error: 'Unknown skill' }
+    const roots = [this.claudeSkillsDir, ...(this.codexSkillsDir ? [this.codexSkillsDir] : [])]
+    const states = roots.map((root) => ({ root, state: this.linkStateIn(name, root) }))
+    const foreign = states.find((s) => s.state.state !== 'absent' && !s.state.owned)
+    if (foreign) return { ok: false, name, error: `~/${basename(foreign.root)}/skills/${name} was not created by Forge — leaving it alone` }
+    for (const { root, state } of states) if (state.state !== 'absent' && !this.removeOwned(this.linkPathIn(name, root)!)) return { ok: false, name, error: `Could not remove ${name} from ${root}` }
+    return { ok: true, name }
   }
 
   /**
@@ -527,14 +548,15 @@ export class SkillsStore {
       if (!dir || !isDir(dir)) continue
       wanted.add(name)
 
-      const state = this.linkState(name)
-      if (state.state === 'junction') {
+      const claudeState = this.linkState(name)
+      const codexState = this.codexLinkState(name)
+      if (claudeState.state === 'junction' && codexState.state !== 'conflict' && (codexState.state === 'junction' || !this.codexSkillsDir)) {
         synced.push(name)
         continue
       }
       const result = this.enable(name)
       if (result.ok) synced.push(name)
-      else if (state.state === 'conflict') conflicts.push(name)
+      else if (claudeState.state === 'conflict' || codexState.state === 'conflict') conflicts.push(name)
       else failed.push(name)
     }
 
@@ -545,6 +567,11 @@ export class SkillsStore {
       if (wanted.has(name)) continue
       const state = this.linkState(name)
       if (state.owned) this.removeOwned(join(this.claudeSkillsDir, name))
+    }
+    if (this.codexSkillsDir) for (const name of entries(this.codexSkillsDir)) {
+      if (wanted.has(name)) continue
+      const state = this.codexLinkState(name)
+      if (state.owned) this.removeOwned(join(this.codexSkillsDir, name))
     }
 
     return { synced, conflicts, failed }

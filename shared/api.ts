@@ -259,10 +259,9 @@ export interface ForgeApi {
   /**
    * The skills library: `%APPDATA%\Forge\skills\<name>\SKILL.md`.
    *
-   * Enabling a skill junctions it into `~/.claude/skills`, which is machine-wide
-   * — every `claude` and `kimi` session started from anywhere picks it up, not
-   * just the panes Forge opened. That is the whole point of the feature, and
-   * also why nothing here will overwrite a folder Forge did not create.
+   * Enabling a skill junctions it into the native Claude and Codex skill
+   * folders, so sessions started inside or outside Forge can discover it.
+   * Nothing here overwrites a folder Forge did not create.
    *
    * Every mutation resolves with the fresh list alongside its result, so the
    * rail never has to ask twice.
@@ -280,7 +279,7 @@ export interface ForgeApi {
     /** Omit `sourceDir` to open the native folder picker. */
     importFolder(sourceDir?: string): Promise<SkillMutation>
     remove(name: string): Promise<SkillMutation>
-    /** Sync into (or out of) ~/.claude/skills, and record the choice. */
+    /** Sync into (or out of) the Claude and Codex skill folders, and record the choice. */
     setEnabled(name: string, on: boolean): Promise<SkillMutation>
     /**
      * Copy one of Steve's own machine skills into the library, so Forge may
