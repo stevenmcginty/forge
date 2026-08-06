@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
+import { gitFailureReason } from '@shared/tools'
 import type { SourceUpdateStatus } from '@shared/types'
 import { allowClose } from './quit-guard'
 import { relaunchDevToolchain } from './stale-watcher'
@@ -129,11 +130,25 @@ export async function applySourceUpdate(): Promise<boolean> {
   const version = status.version
   broadcast({ phase: 'updating', step: 'pull', ...(version ? { version } : {}) })
 
+  // Ask before jumping. A dirty tree is the failure this updater actually hits
+  // — the stable checkout gets edited, by Steve or by an agent working in it —
+  // and catching it here means the message is a known sentence rather than
+  // whatever git happened to print. The parser below is the backstop for
+  // everything else; this is the case that must never be guessed at.
+  const dirty = await git(['status', '--porcelain', '--untracked-files=no'])
+  if (dirty.ok && dirty.out.length > 0) {
+    const count = dirty.out.split('\n').filter((line) => line.trim().length > 0).length
+    broadcast({
+      phase: 'error',
+      error: `${count} uncommitted file${count === 1 ? '' : 's'} in the Forge folder — commit or stash them, then update`
+    })
+    return false
+  }
+
   const before = await git(['rev-parse', 'HEAD'])
   const pulled = await git(['pull', '--ff-only', 'origin', 'master'])
   if (!pulled.ok) {
-    const reason = (pulled.err || pulled.out || 'git pull failed').split('\n')[0] ?? 'git pull failed'
-    broadcast({ phase: 'error', error: reason.slice(0, 200) })
+    broadcast({ phase: 'error', error: gitFailureReason(pulled.err, pulled.out) })
     return false
   }
 

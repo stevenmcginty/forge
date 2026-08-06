@@ -771,6 +771,89 @@ export function isNoFeedError(message: string): boolean {
   )
 }
 
+/* -------------------------------------------------------- source updater */
+
+/**
+ * Lines of git output that are progress, not diagnosis.
+ *
+ * `git pull` narrates the fetch on *stderr* before it says anything about what
+ * went wrong, so the first line of stderr is almost always the transport
+ * header — "From https://github.com/stevenmcginty/forge". Reading a failure
+ * off line one therefore reports the URL it succeeded in contacting, which is
+ * the one part of the operation that worked. Every pull failure looked
+ * identical on the banner until this existed.
+ */
+const GIT_NOISE = [
+  /^from\s+https?:/i,
+  /^from\s+\S+:/i,
+  /^\s*[*=+!-]\s/, // " * branch master -> FETCH_HEAD", " * [new tag] …"
+  /^remote:/i,
+  /^receiving objects/i,
+  /^resolving deltas/i,
+  /^counting objects/i,
+  /^compressing objects/i,
+  /^unpacking objects/i,
+  /^fetching/i,
+  /^updating\s+[0-9a-f]{7,}\.\.[0-9a-f]{7,}/i,
+  /^hint:/i,
+  /^warning:/i,
+  /^please commit your changes/i,
+  /^aborting\.?$/i
+]
+
+/**
+ * Turn raw git output into one sentence a person can act on.
+ *
+ * Two jobs, in order. First, skip the narration above and find the line that
+ * actually says what failed. Second, translate the handful of failures a
+ * stable checkout genuinely hits into plain English, because "Not possible to
+ * fast-forward, aborting" tells you nothing about what to do next and
+ * "uncommitted changes — commit or stash them" tells you everything.
+ *
+ * Anything unrecognised is passed through rather than swallowed: an updater
+ * that only reports the failures it anticipated is an updater that goes quiet
+ * exactly when something new is wrong.
+ */
+export function gitFailureReason(stderr: string, stdout = ''): string {
+  const lines = `${stderr ?? ''}\n${stdout ?? ''}`
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !GIT_NOISE.some((rx) => rx.test(line)))
+
+  const all = lines.join(' ').toLowerCase()
+
+  // The everyday one, and the reason this function exists: Steve edits the
+  // stable checkout, or a parallel session does, and a fast-forward cannot run
+  // over modified files. It is not a breakage — it is a sentence.
+  if (all.includes('local changes') && all.includes('would be overwritten')) {
+    return 'You have uncommitted changes in the Forge folder — commit or stash them, then update'
+  }
+  if (all.includes('untracked working tree files would be overwritten')) {
+    return 'New files in the Forge folder clash with the update — move or delete them, then update'
+  }
+  // A stable checkout with its own commits is not a thing an updater should
+  // rescue on a timer; say so and leave it to a human.
+  if (all.includes('not possible to fast-forward') || all.includes('divergent branches')) {
+    return 'This checkout has local commits that are not on GitHub — sort them out, then update'
+  }
+  if (all.includes('index.lock') || all.includes('could not lock')) {
+    return 'Another git command is running in the Forge folder — wait for it to finish, then update'
+  }
+  if (all.includes('terminal prompts disabled') || all.includes('could not read username')) {
+    return 'GitHub asked for a sign-in — run `git pull` in the Forge folder once, then update'
+  }
+  if (all.includes('authentication failed') || all.includes('permission denied')) {
+    return 'GitHub refused the connection — check your git credentials, then update'
+  }
+
+  // Nothing recognised. Return the most diagnostic line there is: git puts the
+  // real cause behind `error:` or `fatal:`, so prefer those over the first
+  // surviving line, and drop the prefix — the banner already says "failed".
+  const flagged = lines.find((line) => /^(error|fatal):/i.test(line))
+  const chosen = (flagged ?? lines[0] ?? 'git pull failed').replace(/^(error|fatal):\s*/i, '')
+  return chosen.replace(/:$/, '').slice(0, 200)
+}
+
 /* ------------------------------------------------------- self-update banner */
 
 /**

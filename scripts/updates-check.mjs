@@ -54,6 +54,7 @@ const {
   updateCommandFor,
   displayLatest,
   formatRate,
+  gitFailureReason,
   isNewer,
   isNoFeedError,
   npmLatestUrl,
@@ -437,6 +438,61 @@ ok(isNoFeedError('Unable to find latest version on GitHub'), 'no releases yet is
 ok(isNoFeedError('getaddrinfo ENOTFOUND github.com'), 'offline is "no feed"')
 ok(!isNoFeedError('ENOSPC: no space left on device'), 'a real failure is still a failure')
 ok(!isNoFeedError('sha512 checksum mismatch'), 'a corrupt download is still a failure')
+
+/* --------------------------------------------------- source-update errors */
+
+console.log('\nsource-update failure messages')
+
+// Captured from the real failure, not invented: this is exactly what
+// `git pull --ff-only origin master` printed on a dirty stable checkout, and
+// the banner used to show line one of it — the URL that worked.
+const DIRTY_TREE = `From https://github.com/stevenmcginty/forge
+ * branch            master     -> FETCH_HEAD
+error: Your local changes to the following files would be overwritten by merge:
+\telectron/main.ts
+\tshared/skills.ts
+Please commit your changes or stash them before you merge.
+Updating e7a7678..1e320b4
+Aborting`
+
+ok(
+  !gitFailureReason(DIRTY_TREE).startsWith('From https://'),
+  'THE BUG: the fetch header is never the reason',
+  gitFailureReason(DIRTY_TREE)
+)
+ok(
+  gitFailureReason(DIRTY_TREE) === 'You have uncommitted changes in the Forge folder — commit or stash them, then update',
+  'a dirty tree says what to do about it',
+  gitFailureReason(DIRTY_TREE)
+)
+ok(
+  gitFailureReason('From https://github.com/x/y\nfatal: Not possible to fast-forward, aborting.') ===
+    'This checkout has local commits that are not on GitHub — sort them out, then update',
+  'local commits are a human problem, said plainly'
+)
+ok(
+  gitFailureReason("fatal: could not read Username for 'https://github.com': terminal prompts disabled").includes(
+    'sign-in'
+  ),
+  'a blocked credential prompt is explained, not pasted'
+)
+ok(
+  gitFailureReason('fatal: Unable to create /x/.git/index.lock: File exists.').includes('Another git command'),
+  'a lock file is "wait", not "File exists."'
+)
+
+// The point of the fallback: an unrecognised failure still reaches the banner.
+ok(
+  gitFailureReason('From https://github.com/x/y\nerror: unpack-objects failed') === 'unpack-objects failed',
+  'an unknown failure is passed through, with the prefix dropped',
+  gitFailureReason('From https://github.com/x/y\nerror: unpack-objects failed')
+)
+ok(
+  gitFailureReason('From https://github.com/x/y\nremote: Counting objects\nfatal: the sky fell') === 'the sky fell',
+  'fatal: beats an earlier surviving line'
+)
+ok(gitFailureReason('', '') === 'git pull failed', 'silence still says something')
+ok(gitFailureReason('From https://github.com/x/y') === 'git pull failed', 'noise alone is not a reason')
 
 /* ------------------------------------------------------ banner dismissal */
 
