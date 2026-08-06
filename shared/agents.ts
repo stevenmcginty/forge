@@ -69,7 +69,8 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     accent: '#8AB4F8',
     badge: 'AG',
     builtin: true,
-    kind: 'agent'
+    kind: 'agent',
+    permissionMode: 'default'
   },
   {
     id: 'opencode',
@@ -303,7 +304,7 @@ export function isClaudeCommand(command: string): boolean {
  * every chooser, sheet and settings row reads the table rather than testing for
  * a particular agent.
  */
-export type PermissionFamily = 'claude' | 'codex'
+export type PermissionFamily = 'claude' | 'codex' | 'agy'
 
 export interface PermissionModeSpec {
   id: ClaudePermissionMode
@@ -377,6 +378,25 @@ export const PERMISSION_FAMILIES: Record<PermissionFamily, PermissionModeSpec[]>
       flag: '--dangerously-bypass-approvals-and-sandbox',
       danger: true
     }
+  ],
+  agy: [
+    { id: 'default', label: 'Default', note: 'Antigravity asks before it acts', chip: '', flag: '' },
+    {
+      id: 'acceptEdits',
+      label: 'Accept edits',
+      note: 'file edits go through, commands still ask',
+      chip: 'EDITS',
+      flag: '--permission-mode acceptEdits'
+    },
+    { id: 'plan', label: 'Plan', note: 'read and think, change nothing', chip: 'PLAN', flag: '--permission-mode plan' },
+    {
+      id: 'bypass',
+      label: 'Bypass',
+      note: 'never asks — it can do anything you can',
+      chip: 'BYPASS',
+      flag: '--dangerously-skip-permissions',
+      danger: true
+    }
   ]
 }
 
@@ -389,6 +409,7 @@ export function permissionFamily(command: string): PermissionFamily | null {
   const exe = commandExe(command)
   if (exe === 'claude') return 'claude'
   if (exe === 'codex') return 'codex'
+  if (exe === 'agy' || exe === 'antigravity') return 'agy'
   return null
 }
 
@@ -411,7 +432,8 @@ export function permissionSpec(command: string, mode: ClaudePermissionMode): Per
 const EXPLICIT_FLAGS: Record<PermissionFamily, RegExp> = {
   claude: /--permission-mode\b|--dangerously-skip-permissions\b/,
   codex:
-    /--full-auto\b|--yolo\b|--dangerously-bypass-approvals-and-sandbox\b|--sandbox\b|--ask-for-approval\b|(?:^|\s)-[as](?:\s|=|$)/
+    /--full-auto\b|--yolo\b|--dangerously-bypass-approvals-and-sandbox\b|--sandbox\b|--ask-for-approval\b|(?:^|\s)-[as](?:\s|=|$)/,
+  agy: /--permission-mode\b|--dangerously-skip-permissions\b/
 }
 
 /** True when the command line already says what mode it wants. */
