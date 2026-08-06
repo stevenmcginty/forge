@@ -66,6 +66,8 @@ export interface SkillsDirs {
   claudeSkillsDir: string
   /** ~/.codex/skills — read by Codex sessions on this machine. */
   codexSkillsDir?: string
+  /** ~/.gemini/antigravity-cli/skills — read by Antigravity CLI sessions. */
+  antigravitySkillsDir?: string
   /**
    * Other agents' skill folders (~/.agents/skills, ~/.gemini/skills). Read-only,
    * and only ever to say "that name also exists over there" — a duplicate-skill
@@ -116,12 +118,14 @@ export class SkillsStore {
   readonly libraryDir: string
   readonly claudeSkillsDir: string
   readonly codexSkillsDir: string | null
+  readonly antigravitySkillsDir: string | null
   private readonly peerDirs: string[]
 
   constructor(dirs: SkillsDirs) {
     this.libraryDir = dirs.libraryDir
     this.claudeSkillsDir = dirs.claudeSkillsDir
     this.codexSkillsDir = dirs.codexSkillsDir ? resolve(dirs.codexSkillsDir) : null
+    this.antigravitySkillsDir = dirs.antigravitySkillsDir ? resolve(dirs.antigravitySkillsDir) : null
     this.peerDirs = dirs.peerDirs ?? []
   }
 
@@ -148,6 +152,11 @@ export class SkillsStore {
   /** Where an enabled skill appears in Codex's native skill directory. */
   codexLinkPathFor(name: string): string | null {
     return this.codexSkillsDir ? this.linkPathIn(name, this.codexSkillsDir) : null
+  }
+
+  /** Where an enabled skill appears in Antigravity's native skill directory. */
+  antigravityLinkPathFor(name: string): string | null {
+    return this.antigravitySkillsDir ? this.linkPathIn(name, this.antigravitySkillsDir) : null
   }
 
   private linkPathIn(name: string, rootDir: string): string | null {
@@ -200,6 +209,7 @@ export class SkillsStore {
         enabled: isEnabled,
         link: 'absent',
         codexLink: 'absent',
+        antigravityLink: 'absent',
         alsoIn: this.peersWith(name)
       }
 
@@ -220,10 +230,14 @@ export class SkillsStore {
       info.link = isEnabled ? link.state : link.state === 'conflict' ? 'conflict' : 'absent'
       const codex = this.codexLinkState(name)
       info.codexLink = isEnabled ? codex.state : codex.state === 'conflict' ? 'conflict' : 'absent'
+      const antigravity = this.antigravityLinkState(name)
+      info.antigravityLink = isEnabled ? antigravity.state : antigravity.state === 'conflict' ? 'conflict' : 'absent'
       if (info.link === 'conflict') {
         info.problem = `A different “${name}” already exists in ~/.claude/skills — Forge will not overwrite it`
       } else if (info.codexLink === 'conflict') {
         info.problem = `A different “${name}” already exists in ~/.codex/skills — Forge will not overwrite it`
+      } else if (info.antigravityLink === 'conflict') {
+        info.problem = `A different “${name}” already exists in ~/.gemini/antigravity-cli/skills — Forge will not overwrite it`
       } else if (isEnabled && info.link === 'absent') {
         // Enabled but nothing on the far end: the sync has not run, or failed.
         info.link = 'error'
@@ -231,6 +245,9 @@ export class SkillsStore {
       } else if (isEnabled && info.codexLink === 'absent') {
         info.codexLink = 'error'
         info.problem = info.problem ?? 'Enabled, but not synced into ~/.codex/skills yet'
+      } else if (isEnabled && info.antigravityLink === 'absent') {
+        info.antigravityLink = 'error'
+        info.problem = info.problem ?? 'Enabled, but not synced into Antigravity yet'
       }
       out.push(info)
     }
@@ -429,6 +446,10 @@ export class SkillsStore {
     return this.codexSkillsDir ? this.linkStateIn(name, this.codexSkillsDir) : { state: 'absent', owned: false }
   }
 
+  private antigravityLinkState(name: string): { state: SkillLinkState; owned: boolean } {
+    return this.antigravitySkillsDir ? this.linkStateIn(name, this.antigravitySkillsDir) : { state: 'absent', owned: false }
+  }
+
   private linkStateIn(name: string, rootDir: string): { state: SkillLinkState; owned: boolean } {
     const target = this.linkPathIn(name, rootDir)
     const source = this.pathFor(name)
@@ -460,6 +481,10 @@ export class SkillsStore {
     return this.codexLinkState(name).state
   }
 
+  antigravityLinkStateFor(name: string): SkillLinkState {
+    return this.antigravityLinkState(name).state
+  }
+
   /**
    * Make `name` visible to every Claude and Codex session on this machine.
    *
@@ -470,7 +495,7 @@ export class SkillsStore {
     const source = this.pathFor(name)
     if (!source || !this.linkPathFor(name)) return { ok: false, error: 'Unknown skill' }
     if (!isDir(source)) return { ok: false, error: 'That skill is not in your library any more' }
-    const targets = [this.claudeSkillsDir, ...(this.codexSkillsDir ? [this.codexSkillsDir] : [])]
+    const targets = [this.claudeSkillsDir, ...(this.codexSkillsDir ? [this.codexSkillsDir] : []), ...(this.antigravitySkillsDir ? [this.antigravitySkillsDir] : [])]
     const states = targets.map((root) => ({ root, state: this.linkStateIn(name, root) }))
     const conflict = states.find((s) => s.state.state === 'conflict')
     if (conflict) return { ok: false, name, error: `~/${basename(conflict.root)}/skills/${name} already exists and was not created by Forge — rename it first` }
@@ -503,7 +528,7 @@ export class SkillsStore {
   /** Take it back out. Anything Forge does not own is left exactly where it is. */
   disable(name: string): SkillResult {
     if (!this.linkPathFor(name)) return { ok: false, error: 'Unknown skill' }
-    const roots = [this.claudeSkillsDir, ...(this.codexSkillsDir ? [this.codexSkillsDir] : [])]
+    const roots = [this.claudeSkillsDir, ...(this.codexSkillsDir ? [this.codexSkillsDir] : []), ...(this.antigravitySkillsDir ? [this.antigravitySkillsDir] : [])]
     const states = roots.map((root) => ({ root, state: this.linkStateIn(name, root) }))
     const foreign = states.find((s) => s.state.state !== 'absent' && !s.state.owned)
     if (foreign) return { ok: false, name, error: `~/${basename(foreign.root)}/skills/${name} was not created by Forge — leaving it alone` }
@@ -550,13 +575,14 @@ export class SkillsStore {
 
       const claudeState = this.linkState(name)
       const codexState = this.codexLinkState(name)
-      if (claudeState.state === 'junction' && codexState.state !== 'conflict' && (codexState.state === 'junction' || !this.codexSkillsDir)) {
+      const antigravityState = this.antigravityLinkState(name)
+      if (claudeState.state === 'junction' && codexState.state !== 'conflict' && antigravityState.state !== 'conflict' && (codexState.state === 'junction' || !this.codexSkillsDir) && (antigravityState.state === 'junction' || !this.antigravitySkillsDir)) {
         synced.push(name)
         continue
       }
       const result = this.enable(name)
       if (result.ok) synced.push(name)
-      else if (claudeState.state === 'conflict' || codexState.state === 'conflict') conflicts.push(name)
+      else if (claudeState.state === 'conflict' || codexState.state === 'conflict' || antigravityState.state === 'conflict') conflicts.push(name)
       else failed.push(name)
     }
 
@@ -572,6 +598,11 @@ export class SkillsStore {
       if (wanted.has(name)) continue
       const state = this.codexLinkState(name)
       if (state.owned) this.removeOwned(join(this.codexSkillsDir, name))
+    }
+    if (this.antigravitySkillsDir) for (const name of entries(this.antigravitySkillsDir)) {
+      if (wanted.has(name)) continue
+      const state = this.antigravityLinkState(name)
+      if (state.owned) this.removeOwned(join(this.antigravitySkillsDir, name))
     }
 
     return { synced, conflicts, failed }

@@ -90,6 +90,8 @@ export interface SkillInfo extends SkillBase {
   link: SkillLinkState
   /** How the enabled copy is present in ~/.codex/skills. */
   codexLink: SkillLinkState
+  /** How the enabled copy is present in ~/.gemini/antigravity-cli/skills. */
+  antigravityLink: SkillLinkState
   /**
    * Other agents' skill folders (~/.agents/skills, ~/.gemini/skills, …) that
    * already have a folder of this name. Purely a hint: a duplicate-skill warning
@@ -320,7 +322,7 @@ export function usesSlashSkills(command: string): boolean {
     .pop()!
     .replace(/\.(cmd|bat|exe|ps1)$/i, '')
     .toLowerCase()
-  return exe === 'claude' || exe === 'kimi'
+  return exe === 'claude' || exe === 'kimi' || exe === 'agy'
 }
 
 /** Agents that discover skills from their own native skill directory. */
@@ -331,7 +333,7 @@ export function usesNativeSkills(command: string): boolean {
     .pop()!
     .replace(/\.(cmd|bat|exe|ps1)$/i, '')
     .toLowerCase()
-  return exe === 'claude' || exe === 'kimi' || exe === 'codex'
+  return exe === 'claude' || exe === 'kimi' || exe === 'codex' || exe === 'agy'
 }
 
 /** Explicit skill invocation for agents with native skill discovery. */
@@ -344,3 +346,4 @@ export function skillCommandForAgent(name: string, command: string): string {
     .toLowerCase()
   return exe === 'codex' ? `$${name} ` : skillCommandFor(name)
 }
+

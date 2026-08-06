@@ -69,6 +69,18 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     kind: 'agent'
   },
   {
+    id: 'antigravity',
+    name: 'Antigravity',
+    // Google retired personal Gemini Code Assist sign-in in Gemini CLI.
+    // Antigravity CLI (`agy`) is the supported individual-account terminal
+    // agent and opens the browser sign-in flow on first launch.
+    command: 'agy',
+    accent: '#8AB4F8',
+    badge: 'AG',
+    builtin: true,
+    kind: 'agent'
+  },
+  {
     id: 'opencode',
     name: 'OpenCode',
     command: 'opencode',
