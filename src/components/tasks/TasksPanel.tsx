@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { MAX_SESSIONS } from '@shared/ipc'
 import { newSessionId } from '@shared/session'
 import { useAnyBusy, usePaneRuntime } from '@/hooks/usePaneRuntime'
@@ -65,6 +65,8 @@ export function TasksPanel(): ReactNode {
   const workspace = useActiveWorkspace()
   const collapsed = state.settings.railCollapsed
   const tasks = workspace.tasks ?? []
+  const [minimized, setMinimized] = useState(false)
+  const proposal = useSyncExternalStore(plannerStore.subscribe, () => (project ? plannerStore.proposal(project.id) : null))
 
   const projectId = project?.id ?? null
   const projectPath = project?.path ?? null
@@ -128,6 +130,12 @@ export function TasksPanel(): ReactNode {
     [actions, project, sessionId, state.settings]
   )
 
+  const clearTasks = useCallback((): void => {
+    for (const task of tasks) actions.removeTask(task.id)
+    if (project) plannerStore.discard(project.id)
+    setMinimized(true)
+  }, [actions, project, tasks])
+
   /* ---------------------------------------------------------------- grow */
 
   const onGrowDown = (e: React.PointerEvent<HTMLDivElement>): void => {
@@ -155,6 +163,28 @@ export function TasksPanel(): ReactNode {
   /* -------------------------------------------------------------- render */
 
   if (!project) return null
+
+  if (minimized) {
+    return (
+      <button
+        type="button"
+        className="taskspanel taskspanel--minimized"
+        title="Show the Tasks panel"
+        aria-label="Show the Tasks panel"
+        onClick={() => setMinimized(false)}
+      >
+        <span className="eyebrow">Tasks</span>
+        {tasks.length > 0 ? <span className="tray__count mono">{tasks.length}</span> : null}
+        {signal ? (
+          <span className="taskspanel__signal" data-tone={signal.tone}>
+            <span className="taskspanel__signal-dot" aria-hidden="true" />
+            {signal.word}
+          </span>
+        ) : null}
+        <Icon name="chevronDown" size={12} />
+      </button>
+    )
+  }
 
   if (collapsed) {
     if (tasks.length === 0 && !busy) return null
@@ -225,6 +255,17 @@ export function TasksPanel(): ReactNode {
           </span>
         ) : null}
         <div className="tray__head-actions">
+          {tasks.length > 0 || proposal ? (
+            <button
+              type="button"
+              className="ghost-btn taskspanel__clear"
+              title="Dismiss this planning run and minimize the Tasks panel"
+              onClick={clearTasks}
+            >
+              <Icon name="trash" size={12} />
+              <span>Dismiss</span>
+            </button>
+          ) : null}
           <button
             type="button"
             className="ghost-btn taskspanel__max"
@@ -232,6 +273,15 @@ export function TasksPanel(): ReactNode {
             onClick={() => actions.setTasksMaximized(true)}
           >
             <Icon name="expand" size={12} />
+          </button>
+          <button
+            type="button"
+            className="ghost-btn taskspanel__min"
+            title="Minimize the Tasks panel"
+            aria-label="Minimize the Tasks panel"
+            onClick={() => setMinimized(true)}
+          >
+            <Icon name="chevronDown" size={12} />
           </button>
         </div>
       </header>

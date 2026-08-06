@@ -3,7 +3,7 @@ import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import type { TerminalTab, WorkspaceViewMode } from '@shared/types'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
-import { ACCENT_PALETTE, TAB_TEXT_PALETTE, resolveProfile } from '@/lib/agents'
+import { ACCENT_PALETTE, TAB_TEXT_PALETTE, isShellProfile, resolveProfile } from '@/lib/agents'
 import { TAB_DRAG_TYPE } from '@/lib/mosaicLayout'
 import { terminalHost } from '@/lib/terminals'
 import {
@@ -392,6 +392,10 @@ function Tab({
 
   const leaves = collectLeaves(tab.root)
   const badges = leaves.slice(0, 3).map((leaf) => resolveProfile(state.settings.agentProfiles, leaf.profileId))
+  // Agent tabs inherit the profile accent; an explicit tab colour still wins.
+  const primaryProfile = leaves[0] ? resolveProfile(state.settings.agentProfiles, leaves[0].profileId) : null
+  const agentTint = primaryProfile && !isShellProfile(primaryProfile) ? primaryProfile.accent : undefined
+  const tabTint = tab.color ?? agentTint
 
   const commit = (): void => {
     setEditing(false)
@@ -411,11 +415,11 @@ function Tab({
       role="tab"
       aria-selected={active}
       data-active={active}
-      data-tint={tab.color ? 'true' : undefined}
+      data-tint={tabTint ? 'true' : undefined}
       title="Double-click to rename · Right-click for colours"
       style={
         {
-          ...(tab.color ? { '--tab-tint': tab.color } : {}),
+          ...(tabTint ? { '--tab-tint': tabTint } : {}),
           ...(tab.textColor ? { '--tab-text-tint': tab.textColor } : {})
         } as React.CSSProperties
       }

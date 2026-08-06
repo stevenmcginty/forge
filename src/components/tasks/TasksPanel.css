@@ -33,6 +33,31 @@
   color: var(--accent);
 }
 
+/* A local collapse keeps the project rail available while getting the task
+ * dock out of the way. The planner session remains mounted and keeps working. */
+.taskspanel--minimized {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--s-3);
+  height: 34px;
+  padding: 0 var(--s-4) 0 var(--s-5);
+  border: 0;
+  border-top: 1px solid var(--line-hairline);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.taskspanel--minimized:hover {
+  background: var(--bg-hover);
+}
+
+.taskspanel--minimized > svg {
+  margin-left: auto;
+  color: var(--text-dim);
+  transform: rotate(180deg);
+}
+
 /* ------------------------------------------------------------------- grow */
 
 /*
@@ -177,6 +202,23 @@
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
   color: var(--accent);
+}
+
+.taskspanel__clear,
+.taskspanel__min {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.taskspanel__clear:hover {
+  color: var(--danger);
+}
+
+.taskspanel__min:hover {
+  color: var(--text-primary);
 }
 
 /* ------------------------------------------------------------------- seed */
