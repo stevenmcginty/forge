@@ -1,10 +1,17 @@
 /*
  * The git section's body.
  *
- * Deliberately thin for now: slice 1 puts the section in the stack, slice 3
- * fills it. What is here is the padding contract the branch list, the change
- * list and the action row will all sit inside, so the section's edges do not
- * move when the content arrives.
+ * Three lists and a row of buttons inside 240px of rail, which is the whole
+ * design constraint: there is room for one mark and one name per row, so the
+ * marks have to be doing real work. Every state colour arrives through one local
+ * custom property, `--g-tone`, set once per row from a `data-tone` attribute —
+ * so a row has one colour and cannot disagree with itself, and adding a state
+ * later is one rule rather than six.
+ *
+ * Tints are mixed into a theme surface rather than laid over it. An overlay is a
+ * second surface that has to be re-checked against every theme; a mix is the
+ * theme's own surface with the tone leaning into it, and it stays correct in
+ * Paper as much as in Volt.
  */
 
 .gsec {
@@ -12,4 +19,430 @@
   flex-direction: column;
   gap: var(--s-3);
   padding: var(--s-2) var(--s-3) var(--s-4);
+}
+
+/* ------------------------------------------------------------ the tones */
+
+/*
+ * One place to say what each state is painted in. `none` is deliberately
+ * colourless rather than grey: an unpublished branch is not a warning, it is
+ * just a branch, and the panel must never make local-only work read as the
+ * degraded path.
+ */
+.gsec__head[data-tone='ok'],
+.gsec__strip[data-tone='ok'],
+.gbrow[data-tone='ok'],
+.gfrow[data-tone='ok'] {
+  --g-tone: var(--ok);
+}
+
+.gsec__head[data-tone='warn'],
+.gsec__strip[data-tone='warn'],
+.gbrow[data-tone='warn'],
+.gfrow[data-tone='warn'] {
+  --g-tone: var(--warn);
+}
+
+.gsec__head[data-tone='danger'],
+.gsec__strip[data-tone='danger'],
+.gbrow[data-tone='danger'],
+.gfrow[data-tone='danger'] {
+  --g-tone: var(--danger);
+}
+
+.gsec__head[data-tone='info'],
+.gsec__strip[data-tone='info'],
+.gbrow[data-tone='info'],
+.gfrow[data-tone='info'] {
+  --g-tone: var(--info);
+}
+
+.gsec__head[data-tone='dim'],
+.gsec__strip[data-tone='dim'],
+.gbrow[data-tone='dim'],
+.gfrow[data-tone='dim'] {
+  --g-tone: var(--text-dim);
+}
+
+.gsec__head[data-tone='none'],
+.gsec__strip[data-tone='none'],
+.gbrow[data-tone='none'],
+.gfrow[data-tone='none'] {
+  --g-tone: var(--text-muted);
+}
+
+/* ----------------------------------------------------------- the header */
+
+.gsec__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  max-width: 130px;
+}
+
+.gsec__branch {
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+}
+
+/*
+ * The upstream dot. Six pixels of the only thing the header has room to say
+ * beyond the branch name — and on a synced branch it is dim, because "nothing to
+ * do here" should be the quietest mark in the rail rather than a green light
+ * asking to be looked at.
+ */
+.gsec__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--g-tone, var(--text-muted));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--g-tone, var(--text-muted)) 16%, transparent);
+}
+
+/*
+ * The refresh mark turns while a command is in flight. Not decoration: the four
+ * action buttons go disabled at the same moment, and this is the part that says
+ * *why* they did rather than leaving a row of grey rectangles.
+ */
+.gsec__spin {
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+[data-running='true'] .gsec__spin {
+  color: var(--accent);
+  animation: gsec-turn 900ms linear infinite;
+}
+
+@keyframes gsec-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * Motion off still has to answer the question, so the mark stops and simply
+ * holds the accent — visibly different from an idle button, with nothing moving.
+ */
+@media (prefers-reduced-motion: reduce) {
+  [data-running='true'] .gsec__spin {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+:root[data-reduced-motion='true'] [data-running='true'] .gsec__spin {
+  animation: none;
+  opacity: 0.7;
+}
+
+/* ------------------------------------------------------------- the strips */
+
+/*
+ * A state that changes what the buttons below mean: conflicts, or a detached
+ * HEAD. Full width and tinted rather than another row in a list, because both
+ * are things you need to have read before you press anything.
+ */
+.gsec__strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid color-mix(in srgb, var(--g-tone, var(--line-hairline)) 40%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--g-tone, var(--text-muted)) 13%, var(--bg-active));
+}
+
+.gsec__strip[data-detached='true'] {
+  --g-tone: var(--info);
+}
+
+.gsec__strip-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.gsec__strip-note {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+}
+
+.gsec__note {
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.gsec__remote {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+
+/*
+ * A refusal from main, in the place the button that caused it is. The whole
+ * thing is the dismiss target: at rail width a separate × would cost more room
+ * than the sentence it closes.
+ */
+.gsec__error {
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--danger) 13%, var(--bg-active));
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  text-align: left;
+  color: var(--text-primary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.gsec__error:hover {
+  background: color-mix(in srgb, var(--danger) 20%, var(--bg-active));
+}
+
+/* --------------------------------------------------------------- the foot */
+
+.gsec__foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.gsec__foot-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gsec__pr {
+  color: var(--info);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.gsec__pr:hover {
+  color: var(--text-primary);
+}
+
+.gsec__menu-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------- branches */
+
+.gbr {
+  display: flex;
+  flex-direction: column;
+}
+
+.gbrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--s-2);
+  border-radius: var(--r-sm);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.gbrow:not([disabled]):hover {
+  background: var(--bg-hover);
+}
+
+.gbrow[data-current='true'] {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-active));
+}
+
+.gbrow__dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: var(--g-tone, transparent);
+}
+
+/*
+ * An unpublished branch gets a ring rather than a fill. It is the one state with
+ * no colour of its own, and an empty space where every other row has a mark
+ * would read as the row having failed to load.
+ */
+.gbrow[data-tone='none'] .gbrow__dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-dim);
+}
+
+.gbrow__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+}
+
+.gbrow[data-current='true'] .gbrow__name {
+  color: var(--text-primary);
+}
+
+.gbrow__mark {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--g-tone, var(--text-dim));
+}
+
+/*
+ * The pull request badge. Hollow when it is a draft, because "opened" and "not
+ * finished yet" are different enough to be worth telling apart at a glance, and
+ * the outline is the same distinction every git host already draws.
+ */
+.gbrow__pr {
+  flex: none;
+  padding: 0 var(--s-1);
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  font-size: var(--t-eyebrow);
+  color: var(--text-on-accent);
+  background: var(--info);
+}
+
+.gbrow__pr[data-draft='true'] {
+  color: var(--info);
+  background: transparent;
+  border-color: var(--info);
+}
+
+.gbr__more {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 22px;
+  padding: 0 var(--s-2);
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.gbr__more:hover {
+  color: var(--text-muted);
+  background: var(--bg-hover);
+}
+
+.gbr__count {
+  font-size: var(--t-eyebrow);
+}
+
+/* -------------------------------------------------------------- changes */
+
+.gchg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.gchg__dir {
+  padding: 0 var(--s-2);
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--tracking-eyebrow);
+  color: var(--text-dim);
+}
+
+.gchg__cut {
+  padding: 0 var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.gfrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  height: 22px;
+  padding: 0 var(--s-2);
+  border-radius: var(--r-sm);
+  cursor: grab;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.gfrow:hover {
+  background: var(--bg-hover);
+}
+
+.gfrow:active {
+  cursor: grabbing;
+}
+
+.gfrow__letter {
+  flex: none;
+  width: 10px;
+  font-size: var(--t-xs);
+  text-align: center;
+  color: var(--g-tone, var(--text-muted));
+}
+
+.gfrow__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+}
+
+.gfrow[data-conflicted='true'] .gfrow__name {
+  color: var(--text-primary);
+}
+
+.gfrow__tag {
+  flex: none;
+  color: var(--text-dim);
+}
+
+/* -------------------------------------------------------------- actions */
+
+.gact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.gact__row {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.gact__row > .ghost-btn {
+  flex: 1;
+  justify-content: center;
+  height: var(--chip-h);
+  font-size: var(--t-xs);
+}
+
+.gact__commit {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.gact__msg {
+  flex: 1;
+  min-width: 0;
+  height: var(--chip-h);
+  font-size: var(--t-xs);
+}
+
+.gact__go {
+  flex: none;
+  height: var(--chip-h);
+  font-size: var(--t-xs);
 }

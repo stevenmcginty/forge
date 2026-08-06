@@ -9,7 +9,7 @@ import {
   permissionChip,
   resolveProfile
 } from '@/lib/agents'
-import { TAB_DRAG_TYPE, TASK_DRAG_TYPE } from '@/lib/mosaicLayout'
+import { PATH_DRAG_TYPE, TAB_DRAG_TYPE, TASK_DRAG_TYPE } from '@/lib/mosaicLayout'
 import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost, type TerminalSpec } from '@/lib/terminals'
@@ -152,7 +152,8 @@ export function TerminalPane({
   // maybeFiles (lib/paths) carries the story of why acceptance is generous.
   const acceptDrag = (e: React.DragEvent): void => {
     const types = e.dataTransfer.types
-    if (!maybeFiles(e) && !types.includes(TAB_DRAG_TYPE) && !types.includes(TASK_DRAG_TYPE)) return
+    const ours = [TAB_DRAG_TYPE, TASK_DRAG_TYPE, PATH_DRAG_TYPE].some((t) => types.includes(t))
+    if (!maybeFiles(e) && !ours) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
     setDropping(true)
@@ -247,7 +248,12 @@ export function TerminalPane({
       onDropTask(taskId)
       return
     }
-    const quoted = droppedFilePaths(e).map((p) => `"${p}"`)
+    // A row dragged out of the rail lands exactly like a file dragged out of
+    // Explorer, because handing a file to an agent is the same gesture whichever
+    // place you picked it up. It arrives as a path rather than a file for the
+    // reason set out on PATH_DRAG_TYPE.
+    const tracked = e.dataTransfer.getData(PATH_DRAG_TYPE)
+    const quoted = tracked ? [`"${tracked}"`] : droppedFilePaths(e).map((p) => `"${p}"`)
     if (quoted.length === 0) return
     claimFocus()
     terminalHost.focus(leaf.id)

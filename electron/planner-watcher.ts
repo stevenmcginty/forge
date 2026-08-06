@@ -1,10 +1,9 @@
-import { closeSync, openSync, readSync, statSync, watch, type FSWatcher } from 'node:fs'
-import { basename, dirname } from 'node:path'
 import { ipcMain, type WebContents } from 'electron'
 import { IPC } from '@shared/ipc'
 import { isSessionId } from '@shared/session'
 import type { PlannerUpdate } from '@shared/types'
 import { transcriptPath } from './bridge/claude-transcripts'
+import { createTail, type Tail } from './jsonl-tail'
 import { parsePlan } from './task-planner'
 
 /**
@@ -28,42 +27,23 @@ import { parsePlan } from './task-planner'
  * a conversation the user can argue with; the panel just overhears it.
  *
  * Nothing here starts, prompts or kills a terminal, and nothing here writes.
+ *
+ * **The tailing lives elsewhere.** Byte offsets, the carry buffer, truncation
+ * detection, the read ceiling, the directory watch and the poll backstop are all
+ * in electron/jsonl-tail.ts now — the activity tracker follows the same files
+ * for a different reason, and two copies of that would have been two places to
+ * fix the next time one of them turned out to be subtly wrong. What is left here
+ * is the only part that was ever about planning: the fence, and what to do with
+ * what is inside it.
  */
-
-/** Coalesce the burst of change events one CLI write produces. */
-const SETTLE_MS = 200
-
-/**
- * The backstop tick. fs.watch is the fast path, but it cannot watch a directory
- * that does not exist yet — and on the first plan of a fresh project, the
- * transcript folder is created by the CLI moments after the panel asks to
- * watch. This tick attaches the real watcher once the folder appears, and
- * carries on as a slow poll in case a watch handle dies quietly (a folder moved
- * out from under us, a network path, an OS that dropped the notification).
- */
-const POLL_MS = 1000
-
-/**
- * Read ceiling per drain. A planner transcript is small, but the first read
- * after a watch starts is the whole file, and "whatever is on disk" is not a
- * size this process gets to choose.
- */
-const MAX_CHUNK = 4 * 1024 * 1024
 
 /** The fence the planner session is told to answer in. */
 const TASKS_BLOCK = /```tasks[ \t]*\r?\n([\s\S]*?)```/g
 
 type PlannerWatch = {
   projectId: string
-  file: string
   target: WebContents
-  watcher: FSWatcher | null
-  poll: NodeJS.Timeout | null
-  settle: NodeJS.Timeout | null
-  /** Bytes of the transcript already consumed. */
-  offset: number
-  /** The tail of the last read, up to but not including its newline. */
-  carry: Buffer
+  tail: Tail
   seq: number
   /** The assistant message that produced the last push, so re-reads cannot repeat it. */
   lastUuid: string
@@ -73,78 +53,6 @@ type PlannerWatch = {
 const watches = new Map<string, PlannerWatch>()
 
 /* ------------------------------------------------------------------ reading */
-
-/**
- * Read whatever has been appended since the last drain and hand each complete
- * line on. Lines are carried as bytes rather than text: a read boundary can
- * land in the middle of a multi-byte character as easily as in the middle of a
- * line, and decoding half of one produces a replacement char that no longer
- * parses as JSON.
- */
-function drain(w: PlannerWatch): void {
-  let size = 0
-  try {
-    const stat = statSync(w.file)
-    if (!stat.isFile()) return
-    size = stat.size
-  } catch {
-    // Not written yet, or gone. Either way there is nothing to read; the next
-    // tick will find it if it appears.
-    return
-  }
-
-  // Truncated or replaced (a fork, a hand-edit): start again rather than read
-  // from an offset that now means something else.
-  if (size < w.offset) {
-    w.offset = 0
-    w.carry = Buffer.alloc(0)
-  }
-  if (size === w.offset) return
-
-  // Skipping ahead means landing mid-line, so the first partial line is dropped
-  // along with anything carried from before the jump.
-  const jumped = size - w.offset > MAX_CHUNK
-  const from = jumped ? size - MAX_CHUNK : w.offset
-  const length = size - from
-
-  let buf: Buffer
-  let fd: number | null = null
-  try {
-    fd = openSync(w.file, 'r')
-    buf = Buffer.allocUnsafe(length)
-    const read = readSync(fd, buf, 0, length, from)
-    if (read < length) buf = buf.subarray(0, read)
-    w.offset = from + read
-  } catch (err) {
-    console.error('[planner] could not read the transcript:', err)
-    return
-  } finally {
-    if (fd !== null) {
-      try {
-        closeSync(fd)
-      } catch {
-        /* best effort */
-      }
-    }
-  }
-
-  let chunk = jumped ? buf : Buffer.concat([w.carry, buf])
-  if (jumped) {
-    const nl = chunk.indexOf(0x0a)
-    chunk = nl === -1 ? Buffer.alloc(0) : chunk.subarray(nl + 1)
-  }
-
-  let start = 0
-  for (let i = 0; i < chunk.length; i++) {
-    if (chunk[i] !== 0x0a) continue
-    handleLine(w, chunk.subarray(start, i).toString('utf8'))
-    start = i + 1
-  }
-  const tail = chunk.subarray(start)
-  // A "line" longer than the whole read ceiling is not a line we are waiting to
-  // complete, it is junk that would otherwise grow without bound.
-  w.carry = tail.length > MAX_CHUNK ? Buffer.alloc(0) : tail
-}
 
 /** One content part of an assistant message, if it is one the user was shown. */
 function textOf(part: unknown): string {
@@ -177,7 +85,9 @@ function handleLine(w: PlannerWatch, line: string): void {
   const parts = record.message?.content
   if (!Array.isArray(parts)) return
   // Text parts only: the same message can carry `thinking` and `tool_use` parts,
-  // and neither is something the model said to the user.
+  // and neither is something the model said to the user. The `tool_use` parts
+  // skipped here are exactly what the activity tracker reads instead — see
+  // toolUseEntries in shared/activity.ts, driven from electron/activity-watcher.ts.
   const said = parts
     .map(textOf)
     .filter((t) => t.length > 0)
@@ -209,63 +119,11 @@ function handleLine(w: PlannerWatch, line: string): void {
 
 /* ---------------------------------------------------------------- lifecycle */
 
-function schedule(w: PlannerWatch): void {
-  if (w.settle) return
-  w.settle = setTimeout(() => {
-    w.settle = null
-    if (watches.get(w.projectId) !== w) return
-    drain(w)
-  }, SETTLE_MS)
-}
-
-/**
- * Watch the *folder*, not the file: the transcript often does not exist when
- * the panel asks to watch (the session has been started but not yet spoken to),
- * and a watch on a path that is not there yet is a watch that never fires.
- */
-function attach(w: PlannerWatch): void {
-  if (w.watcher) return
-  const dir = dirname(w.file)
-  const name = basename(w.file)
-  try {
-    w.watcher = watch(dir, (_event, filename) => {
-      // Windows reports the basename; a null filename means "something in here
-      // changed", which is worth a look either way.
-      if (filename && basename(String(filename)) !== name) return
-      schedule(w)
-    })
-    w.watcher.on('error', () => {
-      // The folder went away, or the handle died. Drop it; the tick re-attaches.
-      detach(w)
-    })
-  } catch {
-    // The folder is not there yet. The tick will try again.
-    w.watcher = null
-  }
-}
-
-function detach(w: PlannerWatch): void {
-  try {
-    w.watcher?.close()
-  } catch {
-    /* best effort */
-  }
-  w.watcher = null
-}
-
-function stop(w: PlannerWatch): void {
-  detach(w)
-  if (w.poll) clearInterval(w.poll)
-  w.poll = null
-  if (w.settle) clearTimeout(w.settle)
-  w.settle = null
-}
-
 function unwatch(projectId: string): void {
   const w = watches.get(projectId)
   if (!w) return
   watches.delete(projectId)
-  stop(w)
+  w.tail.stop()
 }
 
 function start(projectId: string, cwd: string, sessionId: string, target: WebContents): void {
@@ -276,25 +134,23 @@ function start(projectId: string, cwd: string, sessionId: string, target: WebCon
 
   const w: PlannerWatch = {
     projectId,
-    file: transcriptPath(cwd, sessionId),
     target,
-    watcher: null,
-    poll: null,
-    settle: null,
-    offset: 0,
-    carry: Buffer.alloc(0),
+    // From offset zero, deliberately: the panel wants the *last* plan in the
+    // file however far back it is, so unlike the activity tracker this one has
+    // no interest in seeking near the end.
+    tail: createTail({
+      file: transcriptPath(cwd, sessionId),
+      label: 'planner',
+      onLine: (line) => handleLine(w, line)
+    }),
     seq: 0,
     lastUuid: ''
   }
   watches.set(projectId, w)
-  w.poll = setInterval(() => {
-    attach(w)
-    schedule(w)
-  }, POLL_MS)
-  attach(w)
-  // Read what is already there, so a plan the session produced before the panel
-  // was opened (or before Forge was restarted) arrives immediately.
-  drain(w)
+  // Reads what is already there before it returns, so a plan the session
+  // produced before the panel was opened (or before Forge was restarted)
+  // arrives immediately.
+  w.tail.start()
 
   // A reloaded or closed window is a watch nobody will ever unwatch.
   target.once('destroyed', () => {
@@ -322,6 +178,6 @@ export function registerPlannerWatcherHandlers(): void {
 }
 
 export function disposePlannerWatchers(): void {
-  for (const w of watches.values()) stop(w)
+  for (const w of watches.values()) w.tail.stop()
   watches.clear()
 }

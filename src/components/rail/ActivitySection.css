@@ -1,7 +1,15 @@
 /*
- * The activity section's body. Thin for the same reason as GitSection.css: the
- * padding contract the file tree will sit inside, established before the tree
- * exists so the section's edges do not move when it arrives.
+ * The activity section: a file tree scoped to what agents have touched.
+ *
+ * Two things drive every decision in here. It lives in a 240px rail, so a row
+ * has room for a glyph, a name, a few dots and four characters of time and not
+ * one thing more; and every row is a drag handle, so nothing may sit on top of a
+ * row that would swallow the grab.
+ *
+ * Agent colour arrives at runtime as an inline `--act-tint` and is *mixed into*
+ * a theme surface wherever it becomes a background, never laid over one — the
+ * same idiom as `--prow-tint` in ProjectRail.css, and the reason a tinted row
+ * stays legible in Paper as well as in Volt.
  */
 
 .asec {
@@ -9,4 +17,297 @@
   flex-direction: column;
   gap: var(--s-3);
   padding: var(--s-2) var(--s-3) var(--s-4);
+}
+
+/* ------------------------------------------------------------ header actions */
+
+.asec__act {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/*
+ * The reads switch is a dot rather than an icon because it is a two-state thing
+ * with no natural glyph, and a filled dot beside an empty one reads as on/off
+ * without a legend.
+ */
+.asec__readsdot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--text-dim);
+  background: transparent;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.asec__reads[data-on='true'] .asec__readsdot {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ the tree */
+
+.atree {
+  display: flex;
+  flex-direction: column;
+}
+
+.atree__group {
+  display: contents;
+}
+
+.atree__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  padding-right: var(--s-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.atree__row:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/*
+ * The whole row is the drag handle — there is nothing smaller to grab, and a
+ * separate grip would eat the width the filename needs. So it never shows a text
+ * caret, and the cursor says what the row is for.
+ */
+.atree__file {
+  user-select: none;
+  cursor: grab;
+}
+
+.atree__file:active {
+  background: var(--bg-active);
+  cursor: grabbing;
+}
+
+.atree__name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.atree__dir .atree__name {
+  color: var(--text-muted);
+}
+
+.atree__dir:hover .atree__name {
+  color: var(--text-secondary);
+}
+
+.atree__count,
+.atree__more,
+.atree__age {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.atree__age {
+  min-width: 26px;
+  text-align: right;
+}
+
+/* The folder twist: one glyph, rotated. Nothing new to draw. */
+.atree__twist {
+  flex: none;
+  width: 10px;
+  color: var(--text-dim);
+  font-size: var(--t-sm);
+  line-height: 1;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.atree__twist[data-open='true'] {
+  transform: rotate(90deg);
+}
+
+/* --------------------------------------------------------------- the glyphs */
+
+/*
+ * `◆` we were told, `◇` we worked out. The filled one is the brighter of the
+ * two on purpose: certainty should be the thing your eye lands on, and a guess
+ * should be quiet enough that you notice you are reading one.
+ */
+.atree__glyph {
+  flex: none;
+  width: 10px;
+  color: var(--text-dim);
+  font-size: var(--t-xs);
+  line-height: 1;
+  text-align: center;
+}
+
+.atree__glyph[data-exact='true'] {
+  color: var(--accent);
+}
+
+/* ----------------------------------------------------------------- the dots */
+
+.atree__dots {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+.atree__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--act-tint, var(--accent));
+}
+
+/*
+ * Unattributed is drawn as a hollow ring, not a grey dot. A grey dot is just
+ * another agent's colour as far as a reader is concerned; an empty one says
+ * plainly that there is nobody in it.
+ */
+.atree__dot[data-blank='true'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-dim);
+}
+
+/* --------------------------------------------------------------- freshness
+ *
+ * A file touched within the last minute. The information is "this is happening
+ * right now", and the halo carries it on its own — the pulse only makes it
+ * easier to find in a tree that is otherwise still.
+ */
+
+.atree__file[data-fresh='true'] .atree__glyph {
+  border-radius: var(--r-full);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  animation: atree-fresh 1600ms var(--ease-in-out) infinite;
+}
+
+@keyframes atree-fresh {
+  50% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 4%, transparent);
+  }
+}
+
+/*
+ * Motion off keeps the halo and drops the breathing, so a fresh row is still
+ * visibly different from a stale one without anything moving.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .atree__file[data-fresh='true'] .atree__glyph {
+    animation: none;
+  }
+
+  .atree__twist {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .atree__file[data-fresh='true'] .atree__glyph {
+  animation: none;
+}
+
+:root[data-reduced-motion='true'] .atree__twist {
+  transition: none;
+}
+
+/* --------------------------------------------------------- grouped by agent */
+
+.asec__agent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.asec__agenthead {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  height: 20px;
+  margin: 0;
+  padding: 0 var(--s-2);
+  border-radius: var(--r-sm);
+  /* Mixed into a theme surface, never laid over it — see the file header. */
+  background: color-mix(in srgb, var(--act-tint, var(--accent)) 13%, var(--bg-active));
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.asec__agent[data-blank='true'] .asec__agenthead {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.asec__agentdot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--act-tint, var(--accent));
+}
+
+.asec__agent[data-blank='true'] .asec__agentdot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-dim);
+}
+
+.asec__agentcount {
+  margin-left: auto;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+/* -------------------------------------------------------------- notes below */
+
+/*
+ * A storm is announced rather than hidden. The panel is showing a fraction of
+ * what happened, and a tree that looks complete while it is not is the one
+ * failure mode this feature cannot afford.
+ */
+.asec__strip {
+  margin: 0;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-sm);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--t-xs);
+  line-height: 1.4;
+}
+
+.asec__foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line-soft);
+}
+
+.asec__note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--t-xs);
+  line-height: 1.4;
+}
+
+.asec__glyph {
+  color: var(--text-muted);
 }

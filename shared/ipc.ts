@@ -226,6 +226,36 @@ export const IPC = {
   plannerUnwatch: 'planner:unwatch',
   plannerUpdate: 'planner:update',
 
+  /*
+   * git — the rail's GIT section.
+   *
+   * Read-mostly. `gitAction` is the only channel that can change a repository,
+   * and the five things it will do are enumerated in electron/git/git-actions.ts;
+   * nothing else in the app spawns a writing git. The existing
+   * `gitRemoteOrigin` above is untouched and stays where it is — it answers one
+   * question synchronously for the pty host and has nothing to do with this.
+   */
+  gitWatch: 'git:watch',
+  gitUnwatch: 'git:unwatch',
+  gitRefresh: 'git:refresh',
+  gitSnapshot: 'git:snapshot',
+  gitAction: 'git:action',
+  gitRemoteBranches: 'git:remote-branches',
+  gitGhRefresh: 'git:gh-refresh',
+
+  /*
+   * activity — which agent is touching which file.
+   *
+   * `activityBusy` is a send rather than an invoke because it rides a hot
+   * subscription: the renderer pushes a pane's busy edge as it happens, and
+   * awaiting an answer per edge would be a round trip for nothing.
+   */
+  activityWatch: 'activity:watch',
+  activityUnwatch: 'activity:unwatch',
+  activityBusy: 'activity:busy',
+  activityClear: 'activity:clear',
+  activityUpdate: 'activity:update',
+
   // updates & tools (M10) — what is installed, what is available
   toolsProbe: 'tools:probe',
   toolsLatest: 'tools:latest',

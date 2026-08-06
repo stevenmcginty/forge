@@ -98,6 +98,17 @@ interface PendingType {
   text: string
   /** True presses Enter afterwards. See Settings › Updates & Tools. */
   submit: boolean
+  /**
+   * Deliver as a bracketed paste rather than as typing.
+   *
+   * `type()` flattens newlines to spaces and charges the whole thing to the
+   * take-back draft, which is right for a one-line command and wrong for a
+   * multi-sentence brief — see the git section's handoff prompts, which are the
+   * only caller. `paste()` keeps the shape of the text and is bracketed-paste
+   * safe, which is why the tab handover already uses it for the same class of
+   * thing. Never submitted either way.
+   */
+  paste?: boolean
 }
 
 export interface AppState {
@@ -269,7 +280,7 @@ type Action =
   | { type: 'saveProfile'; profile: AgentProfile }
   | { type: 'deleteProfile'; id: string }
   | { type: 'newTab'; profileId: string; permissionMode?: ClaudePermissionMode }
-  | { type: 'openToolPane'; profileId: string; title: string; text: string; submit: boolean }
+  | { type: 'openToolPane'; profileId: string; title: string; text: string; submit: boolean; paste?: boolean }
   | { type: 'drainTypes'; paneIds: string[] }
   | { type: 'closeTab'; tabId: string }
   | { type: 'selectTab'; tabId: string }
@@ -771,7 +782,10 @@ function reducer(state: AppState, action: Action): AppState {
       }))
       return {
         ...next,
-        pendingTypes: [...next.pendingTypes, { paneId: leaf.id, text: action.text, submit: action.submit }],
+        pendingTypes: [
+          ...next.pendingTypes,
+          { paneId: leaf.id, text: action.text, submit: action.submit, ...(action.paste ? { paste: true } : {}) }
+        ],
         // The command is in a terminal, and the terminal is not the page you
         // are looking at. Leaving settings open would hide the thing that just
         // happened behind the button that caused it.
@@ -1088,6 +1102,16 @@ export interface AppActions {
    * Settings › Updates & Tools, which is the only caller.
    */
   openToolPane(title: string, command: string): void
+  /**
+   * Open an agent pane in the current project with `prompt` already in it,
+   * unsubmitted.
+   *
+   * A sibling of `openToolPane` rather than a flag on it, because they differ
+   * twice over: a tool pane opens on a shell and may submit itself, an agent
+   * pane opens on the project's own default agent and never does. The caller is
+   * the git section, for the jobs Forge hands to an agent instead of doing.
+   */
+  openAgentPane(title: string, prompt: string): void
   closeTab(tabId: string): void
   selectTab(tabId: string): void
   renameTab(tabId: string, title: string): void
@@ -1254,6 +1278,18 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           delivered.push(pending.paneId)
           setTimeout(() => {
             if (cancelled) return
+            // A pasted brief goes down whole; a typed command goes through the
+            // draft so "Take back typed" can rescue it. See PendingType.paste.
+            if (pending.paste) {
+              // Focus, a frame, then the text — the DECSET 1004 race documented
+              // on TerminalPane's file drop. An agent that has just been told
+              // the terminal lost focus will drop the paste that follows it.
+              terminalHost.focus(pending.paneId)
+              requestAnimationFrame(() => {
+                if (!cancelled) terminalHost.paste(pending.paneId, pending.text)
+              })
+              return
+            }
             if (!terminalHost.type(pending.paneId, pending.text)) return
             terminalHost.focus(pending.paneId)
             if (pending.submit) terminalHost.submit(pending.paneId)
@@ -1514,6 +1550,22 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           title: title.slice(0, 40),
           text: command,
           submit: state.settings.updatesAutoRun
+        })
+      },
+      openAgentPane: (title, prompt) => {
+        // The project's own default agent, not a shell and not a fixed profile:
+        // a brief written for "an agent" belongs to whichever one this project
+        // works with, and a Codex project should not have Claude opened at it.
+        dispatch({
+          type: 'openToolPane',
+          profileId: defaultProfileFor(activeProjectId),
+          title: title.slice(0, 40),
+          text: prompt,
+          // Typed, never submitted — the same contract dictation, task cards and
+          // the tab handover all honour. Pasted rather than typed because these
+          // are multi-sentence briefs; see PendingType.paste.
+          submit: false,
+          paste: true
         })
       },
       closeTab: (tabId) => dispatch({ type: 'closeTab', tabId }),

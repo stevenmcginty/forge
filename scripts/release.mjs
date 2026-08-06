@@ -60,9 +60,25 @@ const tag = `v${version}`
 // Parallel sessions edit this checkout. A release built from a dirty tree is a
 // binary whose source cannot be pointed at afterwards.
 const dirty = capture('git', ['status', '--porcelain'])
+/*
+ * Strip the status columns with a pattern rather than by counting characters.
+ *
+ * `capture` trims the whole blob, which means the *first* line — and only the
+ * first — arrives with its leading space already gone: ` M package-lock.json`
+ * comes back as `M package-lock.json`. A fixed `slice(3)` then eats a character
+ * of the filename and returns `ackage-lock.json`, which matches nothing in the
+ * allow-list below, and CI refuses to release with a message naming the two
+ * files it was supposed to be forgiving about.
+ *
+ * That is exactly what happened to v0.3.0 and v0.3.1: both builds bumped the
+ * version, both were told the tree was dirty because of the bump they had just
+ * made, and both died — so two pushes produced no release at all and the app
+ * quietly stayed where it was. The alignment only breaks on the first line,
+ * which is why it looked intermittent rather than broken.
+ */
 const dirtyPaths = dirty
   .split('\n')
-  .map((line) => line.slice(3).trim())
+  .map((line) => line.replace(/^[ MADRCU?!]{1,2}\s+/, '').trim())
   .filter(Boolean)
 const ciOnlyVersionFiles = new Set(['package.json', 'package-lock.json'])
 if (dirty && !(ci && dirtyPaths.every((path) => ciOnlyVersionFiles.has(path)))) {

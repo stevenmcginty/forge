@@ -27,6 +27,13 @@ import type {
   OpenRouterCallResult,
   GroqCallRequest,
   GroqCallResult,
+  ActivityPane,
+  ActivitySnapshot,
+  GhState,
+  GitActionRequest,
+  GitActionResult,
+  GitBranch,
+  GitSnapshot,
   PlannerUpdate,
   Project,
   PtyDataEvent,
@@ -404,6 +411,56 @@ export interface ForgeApi {
     watch(req: { projectId: string; cwd: string; sessionId: string }): Promise<{ ok: boolean; error?: string }>
     unwatch(projectId: string): void
     onUpdate(cb: (e: PlannerUpdate) => void): () => void
+  }
+
+  /**
+   * Where the selected project stands, in git's terms.
+   *
+   * Only one project is ever watched — whichever is active — and only while the
+   * GIT section is switched on. `watch` replaces any previous watch outright,
+   * which is what makes switching project cheap: one call, and the old handles
+   * and timers are gone.
+   *
+   * Read-mostly by design. `action` is the only thing here that can change a
+   * repository, it takes a project id rather than a path so the renderer cannot
+   * name an arbitrary folder, and the five things it will do are enumerated in
+   * electron/git/git-actions.ts. Everything harder than those five is handed to
+   * an agent as a prompt instead.
+   */
+  git: {
+    watch(req: { projectId: string; cwd: string }): Promise<{ ok: boolean; error?: string }>
+    /** send — teardown has nothing to await, same reason as planner.unwatch. */
+    unwatch(projectId: string): void
+    /** Re-read now, ignoring every throttle. Null when nothing is being watched. */
+    refresh(projectId: string): Promise<GitSnapshot | null>
+    action(req: GitActionRequest): Promise<GitActionResult>
+    /** refs/remotes/*, fetched only when the Remote group is expanded. */
+    remoteBranches(projectId: string): Promise<GitBranch[]>
+    /** Ask gh again now — the button that also re-checks whether it is logged in. */
+    ghRefresh(projectId: string): Promise<GhState>
+    onSnapshot(cb: (s: GitSnapshot) => void): () => void
+  }
+
+  /**
+   * Which agent is touching which file.
+   *
+   * `watch` is re-called whenever the pane set changes — a split, a closed tab —
+   * and the watcher diffs the list rather than starting over, so opening a
+   * second pane does not wipe the tree that is already there.
+   *
+   * `setBusy` is the renderer telling main that a pane started or stopped
+   * working. That is the whole of inferred attribution: main cannot see a
+   * terminal's output, and the renderer cannot see the filesystem, so each tells
+   * the other the half it knows.
+   */
+  activity: {
+    watch(req: { projectId: string; cwd: string; panes: ActivityPane[] }): Promise<{ ok: boolean; error?: string }>
+    unwatch(projectId: string): void
+    /** send — one call per busy edge, on a hot subscription. */
+    setBusy(projectId: string, paneId: string, busy: boolean): void
+    /** Forget everything recorded for this project. */
+    clear(projectId: string): void
+    onUpdate(cb: (s: ActivitySnapshot) => void): () => void
   }
 
   /**

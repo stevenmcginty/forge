@@ -50,6 +50,20 @@ export const TAB_DRAG_TYPE = 'application/x-forge-tab'
 /** A task card from the delegation tray, riding a drag. The payload is its id. */
 export const TASK_DRAG_TYPE = 'application/x-forge-task'
 
+/**
+ * A file the rail is offering, riding a drag. The payload is its absolute path.
+ *
+ * A drag that starts *inside* Forge cannot put anything in `dataTransfer.files`
+ * — only the OS can do that, and the only route to it is `webContents.startDrag`,
+ * which is reserved for the screenshot shelf because it hands the file itself
+ * over to whatever is underneath. The rail's file rows are not offering a file,
+ * they are offering a path: what should land in the pane is the quoted path,
+ * which is exactly what an agent needs and exactly what a real file drop already
+ * produces. So they carry it as their own type, and the pane treats it as one
+ * more shape of "something was dropped on me" beside a tab and a task card.
+ */
+export const PATH_DRAG_TYPE = 'application/x-forge-path'
+
 export type MosaicDir = 'left' | 'right' | 'up' | 'down'
 
 /** Which edges a resize is dragging. */

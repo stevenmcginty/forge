@@ -158,6 +158,25 @@ const api: ForgeApi = {
     onUpdate: (cb) => subscribe(IPC.plannerUpdate, cb)
   },
 
+  git: {
+    watch: (req) => ipcRenderer.invoke(IPC.gitWatch, req),
+    unwatch: (projectId) => ipcRenderer.send(IPC.gitUnwatch, projectId),
+    refresh: (projectId) => ipcRenderer.invoke(IPC.gitRefresh, projectId),
+    action: (req) => ipcRenderer.invoke(IPC.gitAction, req),
+    remoteBranches: (projectId) => ipcRenderer.invoke(IPC.gitRemoteBranches, projectId),
+    ghRefresh: (projectId) => ipcRenderer.invoke(IPC.gitGhRefresh, projectId),
+    onSnapshot: (cb) => subscribe(IPC.gitSnapshot, cb)
+  },
+
+  activity: {
+    watch: (req) => ipcRenderer.invoke(IPC.activityWatch, req),
+    unwatch: (projectId) => ipcRenderer.send(IPC.activityUnwatch, projectId),
+    // send, and on a hot path: one call per pane busy edge.
+    setBusy: (projectId, paneId, busy) => ipcRenderer.send(IPC.activityBusy, projectId, paneId, busy),
+    clear: (projectId) => ipcRenderer.send(IPC.activityClear, projectId),
+    onUpdate: (cb) => subscribe(IPC.activityUpdate, cb)
+  },
+
   tools: {
     probe: (refresh) => ipcRenderer.invoke(IPC.toolsProbe, refresh === true),
     latest: (ids, refresh) => ipcRenderer.invoke(IPC.toolsLatest, ids ?? null, refresh === true)

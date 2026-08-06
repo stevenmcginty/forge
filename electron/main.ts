@@ -45,6 +45,8 @@ import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } f
 import { applyMobileSettings, disposeMobile, publishMobileState, registerMobileHandlers } from './mobile-host'
 import { registerSystemHandlers } from './system'
 import { disposePlannerWatchers, registerPlannerWatcherHandlers } from './planner-watcher'
+import { disposeGitWatchers, registerGitWatcherHandlers } from './git-watcher'
+import { disposeActivityWatchers, registerActivityHandlers } from './activity-watcher'
 import { registerToolsHandlers } from './tools'
 import { registerCommandsHandlers } from './commands'
 import {
@@ -807,6 +809,11 @@ void app
       // Handlers only: nothing is tailed until the tasks panel opens a planning
       // session and asks for it. See electron/planner-watcher.ts.
       registerPlannerWatcherHandlers()
+      // Same deal for both of these: handlers only. Nothing watches a folder,
+      // spawns git or tails a transcript until the rail's GIT or ACTIVITY
+      // section is switched on and asks. Both default off.
+      registerGitWatcherHandlers()
+      registerActivityHandlers()
       registerToolsHandlers()
       registerCommandsHandlers()
       registerUpdateHandlers()
@@ -868,6 +875,8 @@ app.on('before-quit', () => {
   safely('disposePtyHost', disposePtyHost)
   safely('disposeShotsWatcher', disposeShotsWatcher)
   safely('disposePlannerWatchers', disposePlannerWatchers)
+  safely('disposeGitWatchers', disposeGitWatchers)
+  safely('disposeActivityWatchers', disposeActivityWatchers)
   safely('disposeSttSidecar', disposeSttSidecar)
   safely('disposeSttModel', disposeSttModel)
   // Ends the Agent SDK session and its subprocess. A voice brain outliving the
