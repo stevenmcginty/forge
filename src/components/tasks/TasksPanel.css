@@ -1,28 +1,27 @@
 /*
- * The delegation dock. Sits in the left rail above the shots shelf and leans
- * on the same .tray__head / .tray__count / .tray__pip vocabulary (defined in
- * ScreenshotTray.css, loaded app-wide) so the shelves read as siblings.
+ * The delegation dock — the Tasks section's body.
  *
- * --dock-h is the user's height, dragged via the top-edge handle and kept in
- * localStorage: it is a ceiling, not a floor, so an empty dock stays compact.
+ * The header, the count, the collapse and the drag-to-grow handle used to live
+ * here and now belong to <RailSection>, which draws the same ones for all four
+ * sections; the height that used to be `--dock-h` out of localStorage is the
+ * section's `--rsec-h` out of settings. What is left in this file is the panel's
+ * own furniture: the planner signal, the body padding and the seed box.
+ *
+ * Still leans on the .tray__count / .tray__pip vocabulary from
+ * ScreenshotTray.css (loaded app-wide) so the two shelves read as siblings.
  */
 
 .taskspanel {
   position: relative;
-  flex: none;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  max-height: var(--dock-h, 240px);
-  border-top: 1px solid var(--line-hairline);
   background: linear-gradient(180deg, var(--panel-grad-a) 0%, var(--panel-grad-b) 100%);
 }
 
-/* A plan under review needs room to be read; the dock leans out for it. */
-.taskspanel:has(.tboard__proposal) {
-  max-height: max(var(--dock-h, 240px), 420px);
-}
-
 .taskspanel--collapsed {
+  flex: none;
   height: 40px;
   align-items: center;
   justify-content: center;
@@ -31,71 +30,6 @@
 
 .taskspanel--collapsed[data-busy='true'] {
   color: var(--accent);
-}
-
-/* A local collapse keeps the project rail available while getting the task
- * dock out of the way. The planner session remains mounted and keeps working. */
-.taskspanel--minimized {
-  flex-direction: row;
-  align-items: center;
-  gap: var(--s-3);
-  height: 34px;
-  padding: 0 var(--s-4) 0 var(--s-5);
-  border: 0;
-  border-top: 1px solid var(--line-hairline);
-  color: var(--text-primary);
-  cursor: pointer;
-  text-align: left;
-}
-
-.taskspanel--minimized:hover {
-  background: var(--bg-hover);
-}
-
-.taskspanel--minimized > svg {
-  margin-left: auto;
-  color: var(--text-dim);
-  transform: rotate(180deg);
-}
-
-/* ------------------------------------------------------------------- grow */
-
-/*
- * The whole top edge is the handle. Invisible until touched: a centred bar
- * lights up in accent on hover so the affordance is discoverable without the
- * rail growing a permanent piece of chrome.
- */
-.taskspanel__grow {
-  position: absolute;
-  top: -4px;
-  left: 0;
-  right: 0;
-  height: 9px;
-  cursor: ns-resize;
-  z-index: 1;
-  touch-action: none;
-}
-
-.taskspanel__grow::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 50%;
-  width: 44px;
-  height: 3px;
-  transform: translateX(-50%);
-  border-radius: var(--r-full);
-  background: var(--line-strong);
-  opacity: 0;
-  transition:
-    opacity var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.taskspanel__grow:hover::after,
-.taskspanel__grow:active::after {
-  opacity: 1;
-  background: var(--accent-line);
 }
 
 /* ----------------------------------------------------------------- signal */
@@ -205,11 +139,8 @@
 }
 
 .taskspanel__clear,
-.taskspanel__min {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-1);
-  font-size: var(--t-eyebrow);
+.taskspanel__max {
+  width: 22px;
   color: var(--text-dim);
 }
 
@@ -217,7 +148,7 @@
   color: var(--danger);
 }
 
-.taskspanel__min:hover {
+.taskspanel__max:hover {
   color: var(--text-primary);
 }
 

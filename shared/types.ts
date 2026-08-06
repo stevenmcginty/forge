@@ -254,6 +254,225 @@ export type PlannerUpdate = {
   seq: number
 }
 
+/* ---------------------------------------------------------------- the rail */
+
+/**
+ * The left rail's four sections.
+ *
+ * `projects` and `tasks` are the rail as it has always been, rehoused; `git` and
+ * `activity` are the new ones and are off until asked for. The order is fixed
+ * and lives in shared/rail.ts, not here — this type is only the vocabulary.
+ */
+export type RailSectionId = 'projects' | 'tasks' | 'git' | 'activity'
+
+/* ----------------------------------------------------------------- git (M12) */
+
+/**
+ * Where a branch stands against its upstream.
+ *
+ * The vocabulary is GitLens', deliberately: ahead / behind / diverged / gone is
+ * already in the head of anyone who has used a git UI in the last decade, and
+ * inventing a fifth spelling of it would buy nothing.
+ *
+ * `unknown` is not a failure — it is what a detached HEAD or a repository with
+ * no commits honestly is. There is nothing to be ahead or behind of yet.
+ */
+export type GitUpstreamState =
+  | 'unpublished'
+  | 'synced'
+  | 'ahead'
+  | 'behind'
+  | 'diverged'
+  | 'gone'
+  | 'unknown'
+
+/** One record of `git status --porcelain=v2`, already interpreted. */
+export interface GitFileChange {
+  /**
+   * Repo-relative with forward slashes — exactly as git prints it, and the form
+   * the change tree is built from. Never compared against an absolute path
+   * without lowercasing both: NTFS is case-insensitive and git is not.
+   */
+  path: string
+  /** Absolute, with backslashes. What a drag onto a pane needs. */
+  absPath: string
+  /** The two porcelain columns verbatim: 'M.', '.M', 'A.', '??', 'UU'… */
+  xy: string
+  staged: boolean
+  unstaged: boolean
+  untracked: boolean
+  conflicted: boolean
+  /** A submodule entry. One row, never recursed into. */
+  submodule: boolean
+  /** The previous path, for a rename record. */
+  from?: string
+}
+
+export interface GitPullRequest {
+  number: number
+  title: string
+  url: string
+  isDraft: boolean
+  state: 'OPEN' | 'MERGED' | 'CLOSED'
+  headRefName: string
+  reviewDecision: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null
+}
+
+export interface GitBranch {
+  name: string
+  current: boolean
+  /** A refs/remotes/* entry. Only present after the Remote group is expanded. */
+  remote: boolean
+  upstream: string | null
+  ahead: number
+  behind: number
+  state: GitUpstreamState
+  /** Committer date in ms. The list is sorted by this, newest first. */
+  lastCommitAt: number
+  lastSubject: string
+  /**
+   * Only ever set when `gh` answered. Absent means "unknown", never "no pull
+   * request" — the difference matters, because gh being absent or logged out is
+   * the common case and must not be rendered as "this branch has no PR".
+   */
+  pr?: GitPullRequest
+}
+
+/**
+ * Why there is no git answer for a project.
+ *
+ * Every one of these is a perfectly ordinary state for a folder to be in, not a
+ * fault, and the UI says so in each case. A folder with no repository is the
+ * state Forge was built for first; git is the addition.
+ */
+export type GitPresence = 'ok' | 'no-git' | 'no-repo' | 'no-folder' | 'error'
+
+export interface GhState {
+  status: 'absent' | 'unauthenticated' | 'ready' | 'error'
+  login: string | null
+  /** The open pull request whose head is the current branch. */
+  currentPr: GitPullRequest | null
+  checkedAt: number | null
+}
+
+export interface GitSnapshot {
+  projectId: string
+  /** Monotonic per project. The renderer discards anything older than it holds. */
+  seq: number
+  at: number
+  presence: GitPresence
+  /** One sentence from gitFailureReason(). Only when presence is 'error'. */
+  error?: string
+  repoRoot: string | null
+  /** Null when detached or unborn. */
+  branch: string | null
+  detached: boolean
+  /** True before the very first commit — porcelain v2's `# branch.oid (initial)`. */
+  unborn: boolean
+  /** Short sha, or null when unborn. */
+  head: string | null
+  upstream: string | null
+  ahead: number
+  behind: number
+  state: GitUpstreamState
+  remoteUrl: string | null
+  /** `owner/repo`, only when remoteUrl is a github.com URL. Gates every gh call. */
+  slug: string | null
+  files: GitFileChange[]
+  /** True when `files` was cut at GIT_MAX_FILES. The counts below are still true. */
+  filesTruncated: boolean
+  changed: number
+  staged: number
+  conflicted: number
+  /** Local branches, newest commit first. Remote branches only after gitRemoteBranches. */
+  branches: GitBranch[]
+  /**
+   * The mtime of FETCH_HEAD, so "fetched 6m ago" is honest.
+   *
+   * Read off the filesystem rather than tracked in memory on purpose: a fetch an
+   * agent ran in a pane counts, and the answer survives a restart.
+   */
+  fetchedAt: number | null
+  /** Set once a status read has taken longer than GIT_SLOW_MS. Slows the poller. */
+  slow: boolean
+  gh: GhState
+}
+
+export type GitActionKind = 'fetch' | 'pull' | 'push' | 'switch' | 'commit'
+
+export interface GitActionRequest {
+  /**
+   * A project id, never a path. Main resolves it against its own project list,
+   * so the renderer cannot ask Forge to run git in an arbitrary folder.
+   */
+  projectId: string
+  action: GitActionKind
+  /** switch only. Must match a branch in the live snapshot. */
+  branch?: string
+  /** commit only. */
+  message?: string
+}
+
+export interface GitActionResult {
+  ok: boolean
+  /** From gitFailureReason() — never raw git stderr. */
+  error?: string
+  /** The freshly re-read state, so the UI can never show a pre-action answer. */
+  snapshot?: GitSnapshot
+}
+
+/* ------------------------------------------------------------ activity (M12) */
+
+export type ActivityKind = 'read' | 'edit' | 'write'
+
+/**
+ * How much we actually know about who touched a file.
+ *
+ * 'exact'    read out of a Claude Code transcript's tool_use block — the pane
+ *            and the path came from the same record, so there is no matching to
+ *            get wrong.
+ * 'inferred' seen on disk while exactly one pane happened to be working. True
+ *            often enough to be useful, and marked so it is never mistaken for
+ *            the first kind.
+ */
+export type ActivityExactness = 'exact' | 'inferred'
+
+export interface ActivityEntry {
+  /** Project-relative, forward slashes. The tree is built from this. */
+  path: string
+  absPath: string
+  /** '' when nothing could be credited — rendered under "Unattributed". */
+  paneId: string
+  profileId: string
+  exactness: ActivityExactness
+  kind: ActivityKind
+  at: number
+  hits: number
+}
+
+export interface ActivitySnapshot {
+  projectId: string
+  seq: number
+  entries: ActivityEntry[]
+  /** At least one entry is a guess — drives the footer note. */
+  hasInferred: boolean
+  /** Entries were dropped at ACTIVITY_MAX_ENTRIES. */
+  truncated: boolean
+  /** The folder watcher hit its burst brake. Say so rather than lie by omission. */
+  stormy: boolean
+}
+
+/**
+ * What the renderer tells main about a pane, because only the renderer knows
+ * which profile a pane is running and which Claude session it owns.
+ */
+export interface ActivityPane {
+  paneId: string
+  profileId: string
+  /** Set only for Claude panes with a session — the key to the exact half. */
+  sessionId?: string
+}
+
 export interface Workspace {
   tabs: TerminalTab[]
   activeTabId: string | null
@@ -861,6 +1080,50 @@ export interface Settings {
    * looking at. Off leaves the rail perfectly still.
    */
   railBusyRing: boolean
+  /**
+   * Show the Tasks section in the rail at all.
+   *
+   * On, because the delegation dock is how work gets handed out. But it is a
+   * section like any other now rather than a fixture, and a project Steve only
+   * ever types in himself does not need it charging rail height for a composer
+   * he is not using.
+   *
+   * Turning it off hides the panel. It does not touch the planner session: that
+   * belongs to the workspace, not to the panel that happens to show it.
+   */
+  railTasks: boolean
+  /**
+   * Show the Git section — branch, what has changed, whether it is pushed.
+   *
+   * Off out of the box, and deliberately: a rail that grows a new panel on a
+   * version bump has changed without being asked to. The rail's foot carries a
+   * one-line link to Appearance while this and railActivity are both off, so
+   * "off by default" does not mean "impossible to find".
+   */
+  railGit: boolean
+  /**
+   * Show the Activity section — which agent is touching which file.
+   *
+   * Off, and the one here that most deserves to be: it is the only part of
+   * Forge that watches the project folder itself, and something that recursively
+   * watches a directory you did not ask it to watch should be a choice.
+   */
+  railActivity: boolean
+  /**
+   * Which sections are open. A set, not an order — the order is fixed in
+   * shared/rail.ts, and an id in here that is not in RAIL_SECTION_ORDER is
+   * dropped by the normaliser rather than trusted.
+   */
+  railOpen: RailSectionId[]
+  /**
+   * Per-section body height in px, dragged by each section's top edge.
+   *
+   * Partial because a section that has never been dragged has no opinion and
+   * should get the default rather than a number written down at first render.
+   * Projects is absent from this by design: it is the section that takes the
+   * slack, so it has no height of its own to remember.
+   */
+  railHeights: Partial<Record<RailSectionId, number>>
   /** Shell executable. Defaults to pwsh.exe (PowerShell 7). */
   shell: string
   /** Watch the clipboard for screenshots and copied images. */

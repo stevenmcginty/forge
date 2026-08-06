@@ -10,12 +10,13 @@ import { AgentBadge } from './AgentBadge'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
+import { RailSection } from './rail/RailSection'
 import './ProjectRail.css'
 
 /**
- * The left rail: every project Forge knows about. Each one owns its own
- * terminal workspace, so selecting a project swaps the whole grid while its
- * shells keep running in the background.
+ * The left rail's first section: every project Forge knows about. Each one owns
+ * its own terminal workspace, so selecting a project swaps the whole grid while
+ * its shells keep running in the background.
  *
  * **Two buttons, one job each.** The + opens a folder that already exists; the
  * folder-plus next to it makes a brand-new one from a name (see
@@ -24,6 +25,16 @@ import './ProjectRail.css'
  * with projects already — clutter, and a permanent strip of chrome charged
  * against the list. The empty state spells the two buttons out, because that is
  * the one moment they need explaining rather than just being there.
+ *
+ * **The header moved.** The count and those two buttons used to live in a
+ * `.rail__head` this component drew for itself; they are now handed to
+ * <RailSection>, which draws the same header for all four sections. What is left
+ * here is the list. The collapsed rail is the exception and still renders bare:
+ * at 56px there is no header to speak of, and the dot column *is* the rail.
+ *
+ * This is also the only section that cannot be switched off, and the only one
+ * with no height of its own — it takes the stack's slack. Both facts live in
+ * src/lib/railstack.ts rather than here.
  */
 export function ProjectRail(): ReactNode {
   const { state, actions } = useApp()
@@ -37,22 +48,78 @@ export function ProjectRail(): ReactNode {
   const openAddMenu = (e: MouseEvent<HTMLElement>): void =>
     setAddMenu({ open: true, anchor: e.currentTarget })
 
+  const list = (
+    <div className="rail__list">
+      {state.projects.length === 0 ? (
+        collapsed ? null : (
+          <EmptyState
+            icon="folder"
+            size="sm"
+            title="No projects"
+            body="Create a new project, or open a folder you already have."
+            action={
+              <button type="button" className="cta-btn" onClick={openAddMenu}>
+                Create project
+              </button>
+            }
+          />
+        )
+      ) : (
+        state.projects.map((project, index) => (
+          <ProjectRow
+            key={project.id}
+            project={project}
+            index={index}
+            collapsed={collapsed}
+            active={project.id === state.activeProjectId}
+            dragFrom={dragFrom}
+            setDragFrom={setDragFrom}
+          />
+        ))
+      )}
+    </div>
+  )
+
+  const menu = (
+    <AddProjectMenu
+      anchor={addMenu.anchor}
+      open={addMenu.open}
+      onClose={() => setAddMenu((m) => ({ ...m, open: false }))}
+    />
+  )
+
+  /*
+   * Collapsed, the section chrome would be 28px of header saying "PROJECTS"
+   * above a column of coloured dots that already says it better. So the narrow
+   * rail keeps the shape it has always had, and the two add buttons stay with
+   * the list rather than moving into a header that is not being drawn.
+   */
+  if (collapsed) {
+    return (
+      <div className="rail" data-collapsed="true">
+        <header className="rail__head">
+          <div className="rail__head-actions">
+            <button type="button" className="ghost-btn rail__head-new" title="New project" onClick={openAddMenu}>
+              <Icon name="folderPlus" size={14} />
+            </button>
+          </div>
+        </header>
+        {list}
+        {menu}
+      </div>
+    )
+  }
+
   return (
-    <div className="rail" data-collapsed={collapsed}>
-      <header className="rail__head">
-        {collapsed ? null : (
-          <>
-            <span className="eyebrow">Projects</span>
-            <span className="rail__count mono">{state.projects.length}</span>
-          </>
-        )}
-        <div className="rail__head-actions">
-          <button
-            type="button"
-            className="ghost-btn rail__head-new"
-            title="New project"
-            onClick={openAddMenu}
-          >
+    <RailSection
+      id="projects"
+      title="Projects"
+      count={state.projects.length}
+      hint="Every folder Forge knows about"
+      growable={false}
+      actions={
+        <>
+          <button type="button" className="ghost-btn rail__head-new" title="New project" onClick={openAddMenu}>
             <Icon name="folderPlus" size={14} />
           </button>
           <button
@@ -63,45 +130,14 @@ export function ProjectRail(): ReactNode {
           >
             <Icon name="plus" size={14} />
           </button>
-        </div>
-      </header>
-
-      <div className="rail__list">
-        {state.projects.length === 0 ? (
-          collapsed ? null : (
-            <EmptyState
-              icon="folder"
-              size="sm"
-              title="No projects"
-              body="Create a new project, or open a folder you already have."
-              action={
-                <button type="button" className="cta-btn" onClick={openAddMenu}>
-                  Create project
-                </button>
-              }
-            />
-          )
-        ) : (
-          state.projects.map((project, index) => (
-            <ProjectRow
-              key={project.id}
-              project={project}
-              index={index}
-              collapsed={collapsed}
-              active={project.id === state.activeProjectId}
-              dragFrom={dragFrom}
-              setDragFrom={setDragFrom}
-            />
-          ))
-        )}
+        </>
+      }
+    >
+      <div className="rail">
+        {list}
+        {menu}
       </div>
-
-      <AddProjectMenu
-        anchor={addMenu.anchor}
-        open={addMenu.open}
-        onClose={() => setAddMenu((m) => ({ ...m, open: false }))}
-      />
-    </div>
+    </RailSection>
   )
 }
 

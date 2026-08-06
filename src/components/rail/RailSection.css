@@ -1,0 +1,165 @@
+/*
+ * One rail section. See RailSection.tsx for why the chrome lives in one place.
+ *
+ * The load-bearing rule is in the two max-height lines at the bottom: a closed
+ * section is exactly its header, and an open one is capped by its own dragged
+ * height. Projects overrides both in RailStack.css, because it is the one that
+ * takes the slack.
+ */
+
+.rsec {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+/* The rail's own top edge is the app frame; it does not need a rule as well. */
+.rsec:first-child {
+  border-top: 0;
+}
+
+/* ---------------------------------------------------------------- the head */
+
+.rsec__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+  /* Must match RAIL_HEADER_H in shared/rail.ts. */
+  height: 28px;
+  padding: 0 var(--s-3) 0 var(--s-2);
+}
+
+.rsec__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 var(--s-2);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.rsec__toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.rsec__chev {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.rsec__toggle:hover .rsec__chev {
+  color: var(--text-muted);
+}
+
+.rsec__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* .eyebrow already sets colour; inherit so hover can move it. */
+  color: inherit;
+}
+
+.rsec__count {
+  flex: none;
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.rsec__status {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+  min-width: 0;
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.rsec__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: none;
+}
+
+/*
+ * Section actions are quiet until you are in the section. The buttons are still
+ * focusable and still reachable by keyboard while invisible — :focus-within
+ * brings them back — so this is a visual weighting, not a hiding.
+ */
+.rsec__actions {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.rsec:hover .rsec__actions,
+.rsec:focus-within .rsec__actions,
+.rsec[data-open='true'] .rsec__actions {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------- the body */
+
+/*
+ * A flex column rather than a plain block, so a body whose content wants to own
+ * its own scrolling — the project list does — can be `flex: 1` inside it and
+ * scroll itself. Bodies that do not are simply shorter than the box and the
+ * overflow here never fires, which is why both can be true at once.
+ */
+.rsec__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/*
+ * A closed section is its header and nothing else — the invariant that keeps
+ * every header reachable however the others are dragged. An open one is capped
+ * by the height its own handle set.
+ */
+.rsec[data-open='true'] {
+  max-height: var(--rsec-h, 240px);
+}
+
+/* -------------------------------------------------------- the grow handle */
+
+/*
+ * Sits on the section's top edge, over the hairline. 5px of grab on a 1px rule,
+ * pulled up by 2px so the target straddles the line rather than starting below
+ * it — the same trick SplitView's divider uses, and the reason a section is easy
+ * to resize without the header underneath becoming hard to click.
+ */
+.rsec__grow {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 5px;
+  z-index: var(--z-divider);
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.rsec__grow:hover::after,
+.rsec__grow:active::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: var(--s-3);
+  right: var(--s-3);
+  height: 1px;
+  background: var(--accent-line);
+}

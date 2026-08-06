@@ -35,6 +35,11 @@ export type IconName =
   | 'mic'
   | 'panelRight'
   | 'phone'
+  | 'chevronRight'
+  | 'branch'
+  | 'file'
+  | 'history'
+  | 'refresh'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -195,6 +200,43 @@ const PATHS: Record<IconName, ReactNode> = {
       <rect x="2.4" y="2.4" width="5" height="5" rx="1.1" />
       <rect x="8.6" y="2.4" width="5" height="5" rx="1.1" />
       <rect x="2.4" y="8.6" width="11.2" height="5" rx="1.1" />
+    </>
+  ),
+  // The closed twin of chevronDown. A rail section rotates one of these rather
+  // than swapping glyphs, so the two must be the same arrow at two angles.
+  chevronRight: <path d="M6.4 4.4L10 8l-3.6 3.6" />,
+  // Two commits and a branch leaving the trunk between them: git.
+  branch: (
+    <>
+      <circle cx="5" cy="3.9" r="1.6" />
+      <circle cx="5" cy="12.1" r="1.6" />
+      <circle cx="11.4" cy="6.4" r="1.6" />
+      <path d="M5 5.5v5M11.4 8v.5a3 3 0 0 1-3 3H5" />
+    </>
+  ),
+  // A page with a turned corner: one file in a tree.
+  file: (
+    <>
+      <path d="M4 2.4h4.6L12 5.8v7.1a.9.9 0 0 1-.9.9H4a.9.9 0 0 1-.9-.9V3.3a.9.9 0 0 1 .9-.9z" />
+      <path d="M8.5 2.6v3.4H12" />
+    </>
+  ),
+  // A clock wound backwards: what has been touched, and how recently.
+  history: (
+    <>
+      <path d="M2.8 8a5.2 5.2 0 1 0 1.8-3.9" />
+      <path d="M2.6 2.9v2.7h2.7" />
+      <path d="M8 5.4V8l1.9 1.2" />
+    </>
+  ),
+  // Deliberately not `restart`, which means "start this shell again" everywhere
+  // else in the app. Same family, opposite sweep, so the two never read as one.
+  refresh: (
+    <>
+      <path d="M3 8a5 5 0 0 1 8.7-3.4" />
+      <path d="M13 8a5 5 0 0 1-8.7 3.4" />
+      <path d="M11.8 1.9v2.8H9" />
+      <path d="M4.2 14.1v-2.8H7" />
     </>
   )
 }

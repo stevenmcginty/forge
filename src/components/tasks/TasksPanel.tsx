@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { MAX_SESSIONS } from '@shared/ipc'
 import { newSessionId } from '@shared/session'
 import { useAnyBusy, usePaneRuntime } from '@/hooks/usePaneRuntime'
@@ -6,6 +6,7 @@ import { ensurePlannerPane, plannerPaneId, plannerStore, sendGoal } from '@/lib/
 import { terminalHost, type PaneStatus } from '@/lib/terminals'
 import { useActiveProject, useActiveWorkspace, useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
+import { RailSection } from '../rail/RailSection'
 import { TasksBoard } from './TasksBoard'
 import './TasksPanel.css'
 
@@ -25,23 +26,25 @@ import './TasksPanel.css'
  * offscreen seed box — the terminal is only *seen* on the desk, but the pty
  * behind it is the same either way, and it survives every dock/maximize/
  * project switch because nothing here ever calls dispose.
+ *
+ * **The chrome moved out.** The header, the count, the collapse and the
+ * drag-to-grow handle now belong to <RailSection>, which draws the same ones for
+ * all four rail sections; the height that used to live in
+ * `localStorage['forge:tasksDockHeight']` lives in `settings.railHeights.tasks`
+ * (RailStack folds the old key in once, on first run after the update). The
+ * local `minimized` flag is gone with them: closing the section is what it was
+ * for, and that is now a rail-wide gesture rather than one this panel invents.
+ *
+ * **Two things must not follow the chrome out**, and both have bitten:
+ *
+ *  - The seed box renders outside the section's collapsible body, so it stays
+ *    mounted while the section is closed. `ensurePlannerPane` spawns against a
+ *    laid-out container; if the box unmounts on collapse, stating a goal fails
+ *    silently with no pane and no error.
+ *  - Turning the Tasks section *off* in Settings hides this component. It must
+ *    not dispose the planner: the session belongs to the workspace, and removing
+ *    the project is what kills it.
  */
-
-/** How tall the dock is allowed to be dragged, in px. */
-const DOCK_MIN_H = 200
-const DOCK_MAX_H = 640
-const DOCK_DEFAULT_H = 240
-const DOCK_KEY = 'forge:tasksDockHeight'
-
-function clampDock(h: number): number {
-  const ceiling = Math.min(DOCK_MAX_H, Math.round(window.innerHeight * 0.6))
-  return Math.min(Math.max(Math.round(h), DOCK_MIN_H), Math.max(DOCK_MIN_H, ceiling))
-}
-
-function loadDockHeight(): number {
-  const raw = Number(localStorage.getItem(DOCK_KEY))
-  return Number.isFinite(raw) && raw > 0 ? clampDock(raw) : DOCK_DEFAULT_H
-}
 
 /** The one-word answer to "what is the planner doing right now". */
 function plannerSignal(status: PaneStatus, busy: boolean): { word: string; tone: string } | null {
@@ -65,7 +68,6 @@ export function TasksPanel(): ReactNode {
   const workspace = useActiveWorkspace()
   const collapsed = state.settings.railCollapsed
   const tasks = workspace.tasks ?? []
-  const [minimized, setMinimized] = useState(false)
   const proposal = useSyncExternalStore(plannerStore.subscribe, () => (project ? plannerStore.proposal(project.id) : null))
 
   const projectId = project?.id ?? null
@@ -78,8 +80,6 @@ export function TasksPanel(): ReactNode {
   const signal = plannerSignal(runtime.status, busy)
 
   const seedRef = useRef<HTMLDivElement | null>(null)
-  const [dockH, setDockH] = useState(loadDockHeight)
-  const grow = useRef<{ pointerId: number; y: number; h: number } | null>(null)
 
   // Plans arrive whether or not a board is mounted to show them — a collapsed
   // rail must not be a hole the planner's answer falls into.
@@ -130,61 +130,20 @@ export function TasksPanel(): ReactNode {
     [actions, project, sessionId, state.settings]
   )
 
+  /*
+   * Dismiss no longer minimizes on Steve's behalf. Closing the section is a rail
+   * gesture now, and a button that both discards a plan and collapses the panel
+   * was doing two things under one label — the second of which he could not
+   * undo without knowing the panel had a hidden state.
+   */
   const clearTasks = useCallback((): void => {
     for (const task of tasks) actions.removeTask(task.id)
     if (project) plannerStore.discard(project.id)
-    setMinimized(true)
   }, [actions, project, tasks])
-
-  /* ---------------------------------------------------------------- grow */
-
-  const onGrowDown = (e: React.PointerEvent<HTMLDivElement>): void => {
-    e.preventDefault()
-    e.currentTarget.setPointerCapture(e.pointerId)
-    grow.current = { pointerId: e.pointerId, y: e.clientY, h: dockH }
-  }
-
-  const onGrowMove = (e: React.PointerEvent<HTMLDivElement>): void => {
-    const g = grow.current
-    if (!g || g.pointerId !== e.pointerId) return
-    // The dock grows upward: dragging the handle up makes it taller.
-    setDockH(clampDock(g.h + (g.y - e.clientY)))
-  }
-
-  const onGrowUp = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (!grow.current || grow.current.pointerId !== e.pointerId) return
-    grow.current = null
-    setDockH((h) => {
-      localStorage.setItem(DOCK_KEY, String(h))
-      return h
-    })
-  }
 
   /* -------------------------------------------------------------- render */
 
   if (!project) return null
-
-  if (minimized) {
-    return (
-      <button
-        type="button"
-        className="taskspanel taskspanel--minimized"
-        title="Show the Tasks panel"
-        aria-label="Show the Tasks panel"
-        onClick={() => setMinimized(false)}
-      >
-        <span className="eyebrow">Tasks</span>
-        {tasks.length > 0 ? <span className="tray__count mono">{tasks.length}</span> : null}
-        {signal ? (
-          <span className="taskspanel__signal" data-tone={signal.tone}>
-            <span className="taskspanel__signal-dot" aria-hidden="true" />
-            {signal.word}
-          </span>
-        ) : null}
-        <Icon name="chevronDown" size={12} />
-      </button>
-    )
-  }
 
   if (collapsed) {
     if (tasks.length === 0 && !busy) return null
@@ -228,67 +187,49 @@ export function TasksPanel(): ReactNode {
   }
 
   return (
-    <section
-      className="taskspanel"
-      aria-label="Tasks panel"
-      style={{ '--dock-h': `${dockH}px` } as React.CSSProperties}
-    >
-      {/* Steve's "make the task panel bigger": drag the top edge. */}
-      <div
-        className="taskspanel__grow"
-        role="separator"
-        aria-orientation="horizontal"
-        title="Drag to grow the tasks panel"
-        onPointerDown={onGrowDown}
-        onPointerMove={onGrowMove}
-        onPointerUp={onGrowUp}
-        onPointerCancel={onGrowUp}
-      />
-
-      <header className="tray__head">
-        <span className="eyebrow">Tasks</span>
-        {tasks.length > 0 ? <span className="tray__count mono">{tasks.length}</span> : null}
-        {signal ? (
-          <span className="taskspanel__signal" data-tone={signal.tone}>
-            <span className="taskspanel__signal-dot" aria-hidden="true" />
-            {signal.word}
-          </span>
-        ) : null}
-        <div className="tray__head-actions">
-          {tasks.length > 0 || proposal ? (
+    <>
+      <RailSection
+        id="tasks"
+        title="Tasks"
+        count={tasks.length}
+        hint="State a goal, get cards, drag them onto agents"
+        status={
+          signal ? (
+            <span className="taskspanel__signal" data-tone={signal.tone}>
+              <span className="taskspanel__signal-dot" aria-hidden="true" />
+              {signal.word}
+            </span>
+          ) : null
+        }
+        actions={
+          <>
+            {tasks.length > 0 || proposal ? (
+              <button
+                type="button"
+                className="ghost-btn taskspanel__clear"
+                title="Dismiss this planning run"
+                onClick={clearTasks}
+              >
+                <Icon name="trash" size={12} />
+              </button>
+            ) : null}
             <button
               type="button"
-              className="ghost-btn taskspanel__clear"
-              title="Dismiss this planning run and minimize the Tasks panel"
-              onClick={clearTasks}
+              className="ghost-btn taskspanel__max"
+              title="Open the delegation desk — the planner terminal beside the board. Esc comes back."
+              onClick={() => actions.setTasksMaximized(true)}
             >
-              <Icon name="trash" size={12} />
-              <span>Dismiss</span>
+              <Icon name="expand" size={12} />
             </button>
-          ) : null}
-          <button
-            type="button"
-            className="ghost-btn taskspanel__max"
-            title="Open the delegation desk — the planner terminal beside the board. Esc comes back."
-            onClick={() => actions.setTasksMaximized(true)}
-          >
-            <Icon name="expand" size={12} />
-          </button>
-          <button
-            type="button"
-            className="ghost-btn taskspanel__min"
-            title="Minimize the Tasks panel"
-            aria-label="Minimize the Tasks panel"
-            onClick={() => setMinimized(true)}
-          >
-            <Icon name="chevronDown" size={12} />
-          </button>
-        </div>
-      </header>
-
-      <div className="taskspanel__body">
-        <TasksBoard project={project} variant="dock" onGoal={onGoal} />
-      </div>
+          </>
+        }
+      >
+        <section className="taskspanel" aria-label="Tasks panel">
+          <div className="taskspanel__body">
+            <TasksBoard project={project} variant="dock" onGoal={onGoal} />
+          </div>
+        </section>
+      </RailSection>
 
       {/*
         The planner's nursery: a real-sized, offscreen box the pane is born in
@@ -296,8 +237,13 @@ export function TasksPanel(): ReactNode {
         the desk, but the pty needs a laid-out container to spawn against —
         640×400 is the host's default pane geometry, so the shell's first
         prompt is already a sane width.
+
+        Outside <RailSection> on purpose, so it survives the section being
+        closed. Inside the collapsible body it would unmount on collapse, and
+        the next goal stated after re-opening would find no host and do nothing
+        at all — no pane, no error, no clue.
       */}
       <div ref={seedRef} className="taskspanel__seed" aria-hidden="true" />
-    </section>
+    </>
   )
 }

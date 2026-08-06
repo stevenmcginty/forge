@@ -18,6 +18,7 @@ import type {
   MosaicTextMode,
   MosaicTile,
   Project,
+  RailSectionId,
   Settings,
   SplitDirection,
   TaskCard,
@@ -37,6 +38,7 @@ import {
 } from '@shared/agents'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
+import { DEFAULT_RAIL_OPEN } from '@shared/rail'
 import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
 import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
@@ -146,6 +148,11 @@ const FALLBACK_SETTINGS: Settings = {
   mosaicText: 'lifesize',
   tabTextColours: true,
   railBusyRing: true,
+  railTasks: true,
+  railGit: false,
+  railActivity: false,
+  railOpen: [...DEFAULT_RAIL_OPEN],
+  railHeights: {},
   shell: 'pwsh.exe',
   catchShots: true,
   shotsKeep: 12,
@@ -258,6 +265,7 @@ type Action =
   | { type: 'removeProject'; id: string }
   | { type: 'moveProject'; from: number; to: number }
   | { type: 'patchSettings'; patch: Partial<Settings> }
+  | { type: 'setRailHeight'; id: RailSectionId; height: number }
   | { type: 'saveProfile'; profile: AgentProfile }
   | { type: 'deleteProfile'; id: string }
   | { type: 'newTab'; profileId: string; permissionMode?: ClaudePermissionMode }
@@ -680,6 +688,22 @@ function reducer(state: AppState, action: Action): AppState {
     case 'patchSettings':
       return { ...state, settings: { ...state.settings, ...action.patch } }
 
+    /*
+     * One rail section's dragged height.
+     *
+     * Its own case rather than a patchSettings from the component because this
+     * one arrives on every animation frame of a drag: merging a single key into
+     * railHeights here is a two-object allocation, where building the merged map
+     * in the caller would rebuild it on each frame as well. Returning `state`
+     * unchanged when the number has not moved keeps a drag that has run out of
+     * clamp from writing to disk sixty times a second.
+     */
+    case 'setRailHeight': {
+      if (state.settings.railHeights[action.id] === action.height) return state
+      const railHeights = { ...state.settings.railHeights, [action.id]: action.height }
+      return { ...state, settings: { ...state.settings, railHeights } }
+    }
+
     case 'saveProfile': {
       const exists = state.settings.agentProfiles.some((p) => p.id === action.profile.id)
       const agentProfiles = exists
@@ -1051,6 +1075,8 @@ export interface AppActions {
   setShotsKeep(keep: number): void
   /** Generic settings write — used by the dictation setup card. Persisted. */
   patchSettings(patch: Partial<Settings>): void
+  /** One rail section's body height, in px. Already clamped by the caller. */
+  setRailHeight(id: RailSectionId, height: number): void
   saveProfile(profile: AgentProfile): void
   deleteProfile(id: string): void
   /** Duplicate a profile under a new id, ready to be edited. */
@@ -1446,6 +1472,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       setShotsKeep: (keep) =>
         dispatch({ type: 'patchSettings', patch: { shotsKeep: Math.min(60, Math.max(1, Math.round(keep))) } }),
       patchSettings: (patch) => dispatch({ type: 'patchSettings', patch }),
+      setRailHeight: (id, height) => dispatch({ type: 'setRailHeight', id, height }),
       saveProfile: (profile) => dispatch({ type: 'saveProfile', profile }),
       deleteProfile: (id) => dispatch({ type: 'deleteProfile', id }),
       duplicateProfile: (id) => {

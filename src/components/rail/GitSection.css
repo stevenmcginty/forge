@@ -1,0 +1,15 @@
+/*
+ * The git section's body.
+ *
+ * Deliberately thin for now: slice 1 puts the section in the stack, slice 3
+ * fills it. What is here is the padding contract the branch list, the change
+ * list and the action row will all sit inside, so the section's edges do not
+ * move when the content arrives.
+ */
+
+.gsec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3) var(--s-4);
+}

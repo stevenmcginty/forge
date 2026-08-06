@@ -100,6 +100,41 @@ export function AppearanceSection(): ReactNode {
           <Toggle checked={s.reducedMotion} onChange={actions.setReducedMotion} label="Reduce motion" />
         </Row>
       </Card>
+
+      {/*
+        The rail's sections. Projects is absent on purpose — everything else in
+        the rail is scoped to whichever project is selected, so a rail you
+        cannot change project from is a rail where none of the rest can be
+        pointed at anything. It is the one section with no switch.
+      */}
+      <Card title="Left rail" hint="Which sections the rail carries. Each one still collapses in place.">
+        <Row
+          label="Tasks"
+          hint="The delegation dock: state a goal, get cards back, drag them onto agents. Turning it off hides the panel — it does not touch the planner session, which belongs to the project."
+        >
+          <Toggle
+            checked={s.railTasks}
+            onChange={(on) => actions.patchSettings({ railTasks: on })}
+            label="Tasks"
+          />
+        </Row>
+        <Row
+          label="Git"
+          hint="Branch, what has changed, and whether it is pushed. Reads only — the few buttons that change anything are named, and everything harder is handed to an agent. A folder with no repository simply says so."
+        >
+          <Toggle checked={s.railGit} onChange={(on) => actions.patchSettings({ railGit: on })} label="Git" />
+        </Row>
+        <Row
+          label="Activity"
+          hint="Which agent is touching which file. Exact for Claude panes, inferred from timing for the rest. This is the one part of Forge that watches the project folder itself, and it only does so while this is on."
+        >
+          <Toggle
+            checked={s.railActivity}
+            onChange={(on) => actions.patchSettings({ railActivity: on })}
+            label="Activity"
+          />
+        </Row>
+      </Card>
     </Section>
   )
 }

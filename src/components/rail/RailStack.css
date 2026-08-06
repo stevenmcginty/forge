@@ -1,0 +1,85 @@
+/*
+ * The rail's section stack.
+ *
+ * The height rule, stated once:
+ *
+ *   Projects takes the slack. Everything else is capped by its own dragged
+ *   height, and the stack scrolls only when the caps do not fit.
+ *
+ * That is the whole layout. Projects is the only `flex: 1`, so it absorbs the
+ * window growing and is the first thing to give when it shrinks; the other three
+ * are `flex: 0 0 auto` under a max-height they own. When the caps genuinely do
+ * not fit, `.rstack` scrolls — an honest overflow rather than a squeeze that
+ * leaves four sections all too short to use.
+ */
+
+.rstack {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/*
+ * Projects, and only projects. `flex: 1` with no cap, and a floor low enough
+ * that three fully-grown siblings cannot squeeze it out of existence but high
+ * enough that what is left is still a list rather than a sliver.
+ */
+.rstack > .rsec[data-id='projects'][data-open='true'] {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 96px;
+}
+
+/* --------------------------------------------------------- discovery foot */
+
+.rstack__more {
+  flex: none;
+  align-self: stretch;
+  justify-content: center;
+  height: 24px;
+  margin: var(--s-2) var(--s-3) var(--s-3);
+  font-size: var(--t-eyebrow);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border: 1px dashed var(--line-hairline);
+  border-radius: var(--r-sm);
+}
+
+.rstack__more:hover {
+  color: var(--text-secondary);
+  border-color: var(--line-strong);
+  border-style: solid;
+  background: var(--bg-hover);
+}
+
+/* ------------------------------------------------------------- 56px rail */
+
+.rstack--collapsed {
+  align-items: stretch;
+  overflow-y: auto;
+}
+
+/*
+ * A collapsed section that has no mark of its own. Sized to sit in the same
+ * column as the project initials and the shots pip, so the narrow rail reads as
+ * one strip of buttons rather than three strips that happen to be adjacent.
+ */
+.rstack__pip {
+  flex: none;
+  display: grid;
+  place-items: center;
+  height: 34px;
+  margin: var(--s-1) var(--s-3);
+  border-radius: var(--r-md);
+  color: var(--text-dim);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.rstack__pip:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}

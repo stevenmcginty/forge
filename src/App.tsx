@@ -2,9 +2,8 @@ import { useEffect, type ReactNode } from 'react'
 import { AccountChip } from '@/components/AccountChip'
 import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { Onboarding } from '@/components/Onboarding'
-import { ProjectRail } from '@/components/ProjectRail'
+import { RailStack } from '@/components/rail/RailStack'
 import { ScreenshotTray } from '@/components/ScreenshotTray'
-import { TasksPanel } from '@/components/tasks/TasksPanel'
 import { TasksWorkspace } from '@/components/tasks/TasksWorkspace'
 import { StatusBar } from '@/components/StatusBar'
 import { TerminalGrid } from '@/components/TerminalGrid'
@@ -52,8 +51,15 @@ export function App(): ReactNode {
       <StaleBanner />
       <div className="app__body">
         <aside className="app__left" data-collapsed={state.settings.railCollapsed}>
-          <ProjectRail />
-          <TasksPanel />
+          {/*
+            The rail's four sections — projects, tasks, git, activity — stacked,
+            each collapsible, each switchable off in Appearance. The shelf and
+            the account chip stay outside it: neither is scoped to a project,
+            and the stack's whole premise is that everything in it is talking
+            about the project you have selected.
+            See src/components/rail/RailStack.tsx.
+          */}
+          <RailStack />
           <ScreenshotTray />
           <AccountChip />
         </aside>

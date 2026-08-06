@@ -12,10 +12,17 @@ import {
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
+import {
+  DEFAULT_RAIL_OPEN,
+  isRailSectionId,
+  RAIL_SECTION_MAX_H,
+  RAIL_SECTION_MIN_H
+} from '@shared/rail'
 import type {
   AgentProfile,
   MobileDeviceRecord,
   Project,
+  RailSectionId,
   Settings,
   StoreSnapshot,
   ThemeCore,
@@ -116,6 +123,14 @@ function defaultSettings(): Settings {
     // On out of the box: the rail already tells you how many shells a project
     // has, and "are any of them still thinking" is the other half of that.
     railBusyRing: true,
+    // The dock is how work gets handed out, so it stays on. Git and activity are
+    // additions the user turns on rather than panels that arrive uninvited — see
+    // the comments on those fields in shared/types.ts.
+    railTasks: true,
+    railGit: false,
+    railActivity: false,
+    railOpen: [...DEFAULT_RAIL_OPEN],
+    railHeights: {},
     shell: 'pwsh.exe',
     catchShots: true,
     shotsKeep: DEFAULT_KEEP,
@@ -428,6 +443,14 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     mosaicText: s.mosaicText === 'scaled' ? 'scaled' : DEFAULT_SETTINGS.mosaicText,
     tabTextColours: s.tabTextColours ?? DEFAULT_SETTINGS.tabTextColours,
     railBusyRing: s.railBusyRing ?? DEFAULT_SETTINGS.railBusyRing,
+    // Undefined means a settings.json written before the rail had sections. The
+    // dock was always there, so its absence means "on"; git and activity were
+    // never there, so theirs means "off". Hence the two different spellings.
+    railTasks: s.railTasks ?? DEFAULT_SETTINGS.railTasks,
+    railGit: Boolean(s.railGit),
+    railActivity: Boolean(s.railActivity),
+    railOpen: Array.isArray(s.railOpen) ? s.railOpen.filter(isRailSectionId) : [...DEFAULT_RAIL_OPEN],
+    railHeights: normaliseRailHeights(s.railHeights),
     shell: s.shell || DEFAULT_SETTINGS.shell,
     catchShots: s.catchShots ?? true,
     shotsKeep: clampKeep(s.shotsKeep),
@@ -635,6 +658,33 @@ function mobileDevices(raw: unknown): MobileDeviceRecord[] {
 
 function clamp(n: number, lo: number, hi: number): number {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : lo
+}
+
+/**
+ * Dragged rail-section heights, made safe off disk.
+ *
+ * Unknown ids are dropped rather than carried, so a section renamed in a later
+ * version does not leave a dead key sitting in settings.json forever. Values are
+ * clamped to the same bounds the drag handle enforces, and anything non-finite
+ * is dropped entirely — a `NaN` reaching CSS as a custom property fails
+ * silently, and the symptom is a drag handle that looks broken for no reason.
+ *
+ * The viewport fraction that clampSectionHeight also applies is deliberately not
+ * enforced here: main has no window height to speak for, and a height saved on a
+ * big monitor should not be permanently truncated by having once been loaded on
+ * a laptop. The renderer clamps again at render time, which is where the
+ * viewport is actually known.
+ */
+function normaliseRailHeights(raw: unknown): Partial<Record<RailSectionId, number>> {
+  const out: Partial<Record<RailSectionId, number>> = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isRailSectionId(key)) continue
+    const n = Number(value)
+    if (!Number.isFinite(n) || n <= 0) continue
+    out[key] = Math.round(clamp(n, RAIL_SECTION_MIN_H, RAIL_SECTION_MAX_H))
+  }
+  return out
 }
 
 /**
