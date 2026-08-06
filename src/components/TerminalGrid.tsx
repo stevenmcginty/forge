@@ -396,6 +396,10 @@ function Tab({
   const primaryProfile = leaves[0] ? resolveProfile(state.settings.agentProfiles, leaves[0].profileId) : null
   const agentTint = primaryProfile && !isShellProfile(primaryProfile) ? primaryProfile.accent : undefined
   const tabTint = tab.color ?? agentTint
+  // Older workspaces may not have a saved text colour yet. Give those tabs a
+  // deterministic fallback so the identity dot is always visible.
+  const sessionColor = tab.textColor ?? TAB_TEXT_PALETTE[index % TAB_TEXT_PALETTE.length]!
+  const agentName = primaryProfile?.name ?? 'Terminal'
 
   const commit = (): void => {
     setEditing(false)
@@ -416,11 +420,11 @@ function Tab({
       aria-selected={active}
       data-active={active}
       data-tint={tabTint ? 'true' : undefined}
-      title="Double-click to rename · Right-click for colours"
+      title={`${agentName} · ${tab.title} · Double-click to rename · Right-click for colours`}
       style={
         {
           ...(tabTint ? { '--tab-tint': tabTint } : {}),
-          ...(tab.textColor ? { '--tab-text-tint': tab.textColor } : {})
+          '--tab-text-tint': sessionColor
         } as React.CSSProperties
       }
       data-onwall={onWall ? 'true' : undefined}
@@ -486,20 +490,13 @@ function Tab({
         <span className="tab__title truncate">{tab.title}</span>
       )}
 
-      {/* Hollow while colours are off, so the strip never claims a colour the
-          terminals are not actually printing in. */}
-      {tab.textColor ? (
-        <span
-          className="tab__textdot"
-          data-off={state.settings.tabTextColours ? undefined : 'true'}
-          title={
-            state.settings.tabTextColours
-              ? `This tab’s terminals print in ${tab.textColor}`
-              : `This tab is painted ${tab.textColor} — tab text colours are off`
-          }
-          aria-label="Terminal text colour"
-        />
-      ) : null}
+      {/* This dot identifies the individual session, independently of whether
+          terminal text colouring is enabled. */}
+      <span
+        className="tab__textdot"
+        title={`Session colour for ${tab.title}: ${sessionColor}`}
+        aria-label="Terminal session colour"
+      />
 
       {onWall ? (
         <span className="tab__wall" title="On the mosaic wall" aria-label="On the mosaic wall">

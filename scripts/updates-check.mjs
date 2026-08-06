@@ -25,6 +25,7 @@
 import { readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 registerHooks({
   resolve(spec, context, next) {
@@ -67,7 +68,10 @@ const {
   updaterMode
 } = await import('../shared/tools.ts')
 
-const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+// URL.pathname leaves percent-encoded directory names on Windows (for example
+// `Forge%20Dev`), which makes the structural updater checks fail in a valid
+// checkout. Convert the file URL with Node's platform-aware helper instead.
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 let pass = 0
 let fail = 0

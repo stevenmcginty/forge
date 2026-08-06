@@ -203,22 +203,11 @@
 }
 
 .tab[data-active='true'] {
-  background: var(--bg-sunken);
-  border-color: var(--line-hairline);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-sunken));
+  border-color: var(--accent-line);
   color: var(--text-primary);
   position: relative;
-}
-
-/* The volt seam that marks the live tab. */
-.tab[data-active='true']::before {
-  content: '';
-  position: absolute;
-  left: var(--s-4);
-  right: var(--s-4);
-  top: 0;
-  height: 1px;
-  background: var(--accent);
-  opacity: 0.75;
+  box-shadow: inset 0 0 0 1px var(--accent-softer);
 }
 
 .tab[data-dragover='true'] {
@@ -236,6 +225,7 @@
 
 .tab[data-tint='true'] {
   color: color-mix(in srgb, var(--tab-tint) 72%, var(--text-secondary));
+  background: color-mix(in srgb, var(--tab-tint) 13%, var(--bg-base));
 }
 
 .tab[data-tint='true']:hover {
@@ -244,14 +234,10 @@
 }
 
 .tab[data-tint='true'][data-active='true'] {
-  background: color-mix(in srgb, var(--tab-tint) 13%, var(--bg-sunken));
+  background: color-mix(in srgb, var(--tab-tint) 21%, var(--bg-sunken));
   border-color: color-mix(in srgb, var(--tab-tint) 38%, transparent);
   color: var(--tab-tint);
-}
-
-.tab[data-tint='true'][data-active='true']::before {
-  background: var(--tab-tint);
-  opacity: 1;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tab-tint) 24%, transparent);
 }
 
 /* The terminal-text colour, said in the strip. Its own element rather than a
@@ -259,17 +245,11 @@
    name is worse than no dot. */
 .tab__textdot {
   flex: none;
-  width: 5px;
-  height: 5px;
+  width: 8px;
+  height: 8px;
   border-radius: var(--r-full);
   background: var(--tab-text-tint);
-}
-
-/* Colours off: the dot goes hollow. Still there — the colour is still assigned,
-   and you can still repaint it — but no longer claiming to describe the type. */
-.tab__textdot[data-off='true'] {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--text-dim);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tab-text-tint) 55%, transparent);
 }
 
 .tab__menu-name {
