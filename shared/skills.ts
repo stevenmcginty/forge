@@ -38,12 +38,21 @@ export const FORGE_MANAGED_MARKER = '.forge-managed'
 export const SKILL_FILE = 'SKILL.md'
 
 /**
- * Which of the two folders a skill was read out of.
+ * Which folder a skill was read out of.
  *
  * `library`  %APPDATA%\Forge\skills — Forge's own, writable
  * `machine`  ~\.claude\skills — Steve's, read-only to Forge for ever
+ * `plugin`   ~\.claude\plugins\cache\… — installed by `/plugin install`
+ * `project`  <repo>\.claude\skills — checked into a project
+ *
+ * The last two are the *external* sources: read-only like `machine`, but with
+ * no guarantee that a name is unique, so they are addressed by path rather
+ * than by name. See ExternalSkillInfo.
  */
-export type SkillSource = 'library' | 'machine'
+export type SkillSource = 'library' | 'machine' | 'plugin' | 'project'
+
+/** The two sources Forge only ever reads, and never addresses by name. */
+export type ExternalSkillSource = 'plugin' | 'project'
 
 /** What every skill has, wherever it was read from. */
 export interface SkillBase {
@@ -76,10 +85,44 @@ export interface MachineSkillInfo extends SkillBase {
   shadowed: boolean
 }
 
-/** Both halves of the list, as one IPC round trip hands them back. */
+/**
+ * A skill Claude Code found for itself — installed as a plugin, or checked into
+ * a project — that Forge did not put anywhere and cannot move.
+ *
+ * These are the two folders Claude Code reads that are *not* `~/.claude/skills`,
+ * and they broke two assumptions the older halves of this file are built on.
+ *
+ * First, the name is not unique. Two projects may each hold a `review` skill,
+ * and a plugin skill may share a name with a library one; there is no folder
+ * Forge could derive from a name to tell them apart. So these carry an `id` —
+ * the absolute path — and every lookup, drag and read goes through that.
+ *
+ * Second, `/name` is the wrong thing to type. A plugin skill is invoked as
+ * `/<plugin>:<skill>` and a project skill only exists inside its own repo, so
+ * the exact command is worked out once, where the folder layout is known, and
+ * travels with the row rather than being guessed at by the renderer.
+ */
+export interface ExternalSkillInfo extends SkillBase {
+  source: ExternalSkillSource
+  /** Absolute path of the skill folder — unique, stable, and how it is addressed. */
+  id: string
+  /** Where it came from, for the tag on the right of the row. */
+  origin: string
+  /** Exactly what gets typed into a Claude pane, trailing space and all. */
+  command: string
+  /** A library or machine skill already answers to this name. */
+  shadowed: boolean
+}
+
+/** Every half of the list, as one IPC round trip hands them back. */
 export interface SkillsList {
   skills: SkillInfo[]
   machineSkills: MachineSkillInfo[]
+  /**
+   * Plugin and project skills. Optional so a preload built before they existed
+   * still type-checks against this shape; every reader defaults it to empty.
+   */
+  externalSkills?: ExternalSkillInfo[]
 }
 
 /** One skill as the rail draws it. */
@@ -337,6 +380,17 @@ export function usesNativeSkills(command: string): boolean {
 }
 
 /** Explicit skill invocation for agents with native skill discovery. */
+/**
+ * How Claude Code invokes a skill that came in with a plugin.
+ *
+ * The plugin namespace is not decoration: `/design-council` is not a command
+ * and never was, which is exactly why a plugin skill dragged onto a pane has to
+ * be built here rather than run through skillCommandFor.
+ */
+export function pluginSkillCommand(plugin: string, skill: string): string {
+  return `/${plugin}:${skill} `
+}
+
 export function skillCommandForAgent(name: string, command: string): string {
   const exe = (command.trim().split(/\s+/)[0] ?? '')
     .replace(/^['"]|['"]$/g, '')

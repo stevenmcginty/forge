@@ -16,6 +16,7 @@ import type {
 import {
   deleteWorkspace,
   getDataDir,
+  getProjects,
   getSettings,
   getWorkspace,
   resolveDataRoot,
@@ -565,7 +566,14 @@ function registerAppHandlers(): void {
     codexSkillsDir: join(process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'), 'skills'),
     antigravitySkillsDir: join(homedir(), '.gemini', 'antigravity-cli', 'skills'),
     // Read-only, and only to say "that name exists over there too".
-    peerDirs: [join(homedir(), '.agents', 'skills'), join(homedir(), '.gemini', 'skills')]
+    peerDirs: [join(homedir(), '.agents', 'skills'), join(homedir(), '.gemini', 'skills')],
+    // Read-only too, and the reason a plugin Steve installed used to be missing
+    // from the rail entirely: everything `/plugin install` fetches lives here
+    // and nowhere near ~/.claude/skills.
+    pluginsDir: join(homedir(), '.claude', 'plugins'),
+    // A thunk, so a project added after launch brings its `.claude/skills` with
+    // it on the very next read rather than at the next restart.
+    projectDirs: () => getProjects().map((p) => ({ name: p.name, path: p.path }))
   }).syncEnabled(getSettings().skillsEnabled)
 
   registerSkillsHandlers(

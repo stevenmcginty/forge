@@ -714,6 +714,130 @@ async function main() {
   )
   log(machineStore.listMachine().length === onMachine.length, 'so the machine count did not move')
 
+  /* ------------------------------ 13c. plugins, and skills inside projects
+   *
+   * The two folders Claude Code reads that are not ~/.claude/skills, and the
+   * reason this section exists: `/plugin install design-council` put a real,
+   * working skill on the machine and the rail could not show it, because the
+   * rail only ever looked in one folder. Everything below is about that gap —
+   * finding them, naming them the way they are actually invoked, and keeping
+   * both trees as strictly read-only as ~/.claude/skills already was.
+   */
+
+  const home3 = mkdtempSync(join(tmpdir(), 'forge-plugins-'))
+  const pluginsDir = join(home3, '.claude', 'plugins')
+  const cacheDir = join(pluginsDir, 'cache')
+  const thirdLibrary = join(home3, 'library')
+  const projectA = join(home3, 'projects', 'forge')
+  const projectB = join(home3, 'projects', 'sidething')
+  mkdirSync(thirdLibrary, { recursive: true })
+
+  // Two plugins, one of which ships a skill named after itself and one of which
+  // ships several under different names — both real shapes from the marketplace.
+  const councilDir = join(cacheDir, 'sjsyrek', 'design-council', '0.4.1')
+  writeSkill(join(councilDir, 'skills', 'design-council'), 'design-council', 'Convene a council of peers.')
+  const tasteDir = join(cacheDir, 'taste-skill', 'taste-skill', '1.0.0')
+  writeSkill(join(tasteDir, 'skills', 'brandkit'), 'brandkit', 'Premium brand-kit boards.')
+  writeSkill(join(tasteDir, 'skills', 'minimalist-skill'), 'minimalist-skill', 'Clean editorial interfaces.')
+  // A stale version the updater has not swept up. The manifest names 0.4.1, so
+  // this must not be listed as well — two rows for one skill is the bug that
+  // made everyone stop trusting the rail's count in the first place.
+  writeSkill(join(cacheDir, 'sjsyrek', 'design-council', '0.4.0', 'skills', 'design-council'), 'design-council', 'Old.')
+  writeFileSync(
+    join(pluginsDir, 'installed_plugins.json'),
+    JSON.stringify({
+      version: 2,
+      plugins: {
+        'design-council@sjsyrek': [{ scope: 'user', installPath: councilDir, version: '0.4.1' }],
+        'taste-skill@taste-skill': [{ scope: 'user', installPath: tasteDir, version: '1.0.0' }],
+        // An entry whose folder is gone: uninstalled, or a half-finished update.
+        'ghost@nowhere': [{ scope: 'user', installPath: join(cacheDir, 'nowhere', 'ghost', '9'), version: '9' }]
+      }
+    }),
+    'utf8'
+  )
+
+  // A skill checked into one project, and one in another with the same name as
+  // a plugin skill — both perfectly legal, and the reason rows are addressed by
+  // path rather than by name.
+  writeSkill(join(projectA, '.claude', 'skills', 'release-checklist'), 'release-checklist', 'Ship Forge.')
+  writeSkill(join(projectB, '.claude', 'skills', 'brandkit'), 'brandkit', 'The side project’s own.')
+  // Not a skill: no SKILL.md. An external folder like this is skipped outright
+  // — nobody is going to finish writing it inside Forge.
+  mkdirSync(join(projectA, '.claude', 'skills', 'scratch'), { recursive: true })
+
+  const pluginStore = new SkillsStore({
+    libraryDir: thirdLibrary,
+    claudeSkillsDir: join(home3, '.claude', 'skills'),
+    pluginsDir,
+    projectDirs: () => [
+      { name: 'Forge', path: projectA },
+      { name: 'Sidething', path: projectB }
+    ]
+  })
+  const pluginsBefore = fingerprint(pluginsDir)
+  const projectsBefore = fingerprint(join(home3, 'projects'))
+
+  const fromPlugins = pluginStore.listPlugins()
+  const p = (command) => fromPlugins.find((s) => s.command.trim() === command)
+  log(fromPlugins.length === 3, `every plugin skill is listed, once each (${fromPlugins.length})`)
+  log(!!p('/design-council:design-council'), 'a plugin skill is named the way it is actually invoked')
+  log(!!p('/taste-skill:brandkit') && !!p('/taste-skill:minimalist-skill'), 'a plugin with several skills lists them all')
+  log(!fromPlugins.some((s) => s.description === 'Old.'), 'and the version the manifest does not name is left out')
+  log(p('/design-council:design-council')?.description === 'Convene a council of peers.', 'the description comes through')
+  log(p('/design-council:design-council')?.origin.includes('0.4.1'), 'and the row says which version it came from')
+  log(fromPlugins.every((s) => s.source === 'plugin' && s.id === s.path), 'a plugin row is addressed by its folder path')
+
+  const fromProjects = pluginStore.listProjectSkills()
+  log(fromProjects.length === 2, `every project skill is listed (${fromProjects.length})`)
+  log(!fromProjects.some((s) => s.name === 'scratch'), 'a folder with no SKILL.md is not a skill and is skipped')
+  log(fromProjects.find((s) => s.name === 'release-checklist')?.origin === 'Forge', 'and each row names its project')
+  log(
+    fromProjects.find((s) => s.name === 'brandkit')?.command.trim() === '/brandkit',
+    'a project skill is invoked by its plain name'
+  )
+  log(
+    fromProjects.find((s) => s.name === 'brandkit').id !== p('/taste-skill:brandkit').id,
+    'two skills called brandkit stay two skills — the path is the id, not the name'
+  )
+
+  // A plugin skill whose name the library also uses is flagged, never dropped:
+  // it is a different skill with a different command, and hiding it would be
+  // the very bug this section exists to fix.
+  pluginStore.createFromTemplate('brandkit', 'Forge’s own brandkit.')
+  const all = pluginStore.listAll(['brandkit'])
+  log(all.externalSkills.length === 5, `listAll carries plugins and project skills too (${all.externalSkills.length})`)
+  log(
+    all.externalSkills.filter((s) => s.name === 'brandkit').every((s) => s.shadowed === true),
+    'a name the library also has is flagged shadowed on both external rows'
+  )
+  log(
+    all.externalSkills.find((s) => s.name === 'design-council').shadowed === false,
+    'and a name it does not have is not'
+  )
+
+  const councilPath = p('/design-council:design-council').id
+  log(pluginStore.readExternalSkillFile(councilPath).includes('Convene'), 'an external skill reads through its path')
+  log(pluginStore.externalPathFor(join(home3, 'secrets')) === null, 'a path outside both trees is refused')
+  log(pluginStore.externalPathFor(join(projectA, '.claude')) === null, 'and so is a parent of a project skills folder')
+  log(pluginStore.readExternalSkillFile(join(home3, '..')) === '', 'a traversal attempt reads as empty, not a throw')
+  log(pluginStore.readExternalSkillFile('') === '' && pluginStore.readExternalSkillFile(null) === '', 'and so does nothing at all')
+
+  log(
+    fingerprint(pluginsDir) === pluginsBefore,
+    'READ-ONLY: ~/.claude/plugins is byte-for-byte identical after listing and reading'
+  )
+  log(
+    fingerprint(join(home3, 'projects')) === projectsBefore,
+    'READ-ONLY: every project’s .claude/skills is byte-for-byte identical too'
+  )
+
+  // No plugins folder, no projects: the ordinary state of a fresh machine, and
+  // it has to be empty rather than a throw that takes the whole rail down.
+  const bareStore = new SkillsStore({ libraryDir: join(home3, 'bare'), claudeSkillsDir: join(home3, 'bare-claude') })
+  log(bareStore.listPlugins().length === 0 && bareStore.listProjectSkills().length === 0, 'no plugins and no projects lists nothing')
+  log(Array.isArray(bareStore.listAll().externalSkills), 'and listAll still hands back an array')
+
   /* --------------------------------------------------------- 13b. blurbs */
 
   // Steve's real descriptions run to paragraphs — huashu-design alone is 1.3k

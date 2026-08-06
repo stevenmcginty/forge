@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { MachineSkillInfo, SkillInfo } from '@shared/skills'
+import type { ExternalSkillInfo, MachineSkillInfo, SkillInfo } from '@shared/skills'
 import { resolveProfile } from '@/lib/agents'
 import { paneLabel } from '@/lib/appactions'
 import { collectLeaves } from '@/lib/splitTree'
@@ -36,7 +36,7 @@ import './SkillsFlyout.css'
  */
 export function SkillsButton(): ReactNode {
   const { state, actions } = useApp()
-  const { skills, machineSkills } = useSkills()
+  const { skills, machineSkills, externalSkills } = useSkills()
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
 
@@ -85,10 +85,16 @@ export function SkillsButton(): ReactNode {
   }, [actions, profiles])
 
   // The badge counts what is actually reachable: the library, plus the machine
-  // skills the library is not already shadowing. Counting both raw would claim
-  // a name twice.
-  const total = skills.length + dedupeSkills(skills, machineSkills).length
-  const live = skills.filter((s) => s.enabled).length + dedupeSkills(skills, machineSkills).length
+  // skills the library is not already shadowing, plus every plugin and project
+  // skill. Counting both halves raw would claim a name twice.
+  const external = externalSkills ?? []
+  // A plugin skill is loaded by every Claude session on the machine; a project
+  // one only inside its own repo. So plugins count as live and projects do not
+  // — the tooltip is the only place that distinction is ever stated, and it
+  // would be a lie the other way round.
+  const plugins = external.filter((s) => s.source === 'plugin').length
+  const total = skills.length + dedupeSkills(skills, machineSkills).length + external.length
+  const live = skills.filter((s) => s.enabled).length + dedupeSkills(skills, machineSkills).length + plugins
 
   return (
     <>
@@ -132,13 +138,16 @@ function SkillsPanel({
   open: boolean
   onClose: () => void
 }): ReactNode {
-  const { skills, machineSkills } = useSkills()
+  const { skills, machineSkills, externalSkills } = useSkills()
   const [nested, setNested] = useState(0)
   const [adding, setAdding] = useState(false)
   const addRef = useRef<HTMLButtonElement | null>(null)
 
   const enabled = skills.filter((s) => s.enabled).length
   const machine = dedupeSkills(skills, machineSkills)
+  const external = externalSkills ?? []
+  const plugins = external.filter((s) => s.source === 'plugin')
+  const projects = external.filter((s) => s.source === 'project')
 
   const track = (up: boolean): void => setNested((n) => Math.max(0, n + (up ? 1 : -1)))
 
@@ -226,6 +235,33 @@ function SkillsPanel({
                   {machineSkills.length - machine.length} more shadowed by a library skill of the same name
                 </div>
               ) : null}
+            </div>
+          ) : null}
+
+          {plugins.length > 0 ? (
+            <div className="sfly__group">
+              <span className="eyebrow sfly__eyebrow">
+                Plugins
+                <span className="mono sfly__tally">~/.claude/plugins</span>
+              </span>
+              {plugins.map((skill) => (
+                <ExternalSkillRow key={skill.id} skill={skill} onMenu={track} />
+              ))}
+            </div>
+          ) : null}
+
+          {projects.length > 0 ? (
+            <div className="sfly__group">
+              <span className="eyebrow sfly__eyebrow">
+                In your projects
+                <span className="mono sfly__tally">.claude/skills</span>
+              </span>
+              {projects.map((skill) => (
+                <ExternalSkillRow key={skill.id} skill={skill} onMenu={track} />
+              ))}
+              {/* The one thing a project row has to say for itself: it is listed
+                  here from every project, but it only answers inside its own. */}
+              <div className="sfly__shadow">A project skill only works in a terminal opened in that project.</div>
             </div>
           ) : null}
         </div>
@@ -488,6 +524,105 @@ function MachineSkillRow({
   )
 }
 
+/* ---------------------------------------------------------- external row */
+
+/**
+ * A skill Claude Code found for itself — installed with a plugin, or checked
+ * into one of Steve's projects.
+ *
+ * These used to be invisible, and that was the whole bug: `/plugin install`
+ * puts a skill somewhere that is not `~/.claude/skills`, so a rail that only
+ * ever read that one folder could not show it and could not explain itself
+ * either. Nothing here is writable — the plugin tree belongs to Claude Code's
+ * updater and a project's `.claude/skills` belongs to its repo — so there is no
+ * switch and no delete, exactly like the machine row above.
+ *
+ * The row is keyed and addressed by `id` (its folder path) rather than by name,
+ * because two projects may each hold a `review` skill and neither is wrong. And
+ * what it types is `skill.command`, carried down from the store: a plugin skill
+ * is `/design-council:design-council`, and `/design-council` on its own is not
+ * a command at all.
+ */
+function ExternalSkillRow({
+  skill,
+  onMenu
+}: {
+  skill: ExternalSkillInfo
+  onMenu: (up: boolean) => void
+}): ReactNode {
+  const send = useSendSkill()
+  const drop = useDropSkill()
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const menuRef = useRef<HTMLButtonElement | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  const openMenu = (): void => {
+    onMenu(true)
+    setMenuOpen(true)
+  }
+  const closeMenu = (): void => {
+    setMenuOpen(false)
+    onMenu(false)
+  }
+
+  return (
+    <div
+      ref={rowRef}
+      className="srow"
+      data-machine="true"
+      data-problem={skill.problem ? 'true' : undefined}
+      title={[
+        skill.description || 'No description in this skill’s frontmatter.',
+        `\n\nTypes ${skill.command.trim()}`,
+        `\n${skill.path}`,
+        skill.problem ? `\n\n⚠ ${skill.problem}` : '',
+        skill.shadowed ? '\n\n⚠ A skill of this name is also in your library — say the full command to be sure.' : ''
+      ].join('')}
+      onPointerDown={(e) => startSkillDrag(e, skill.id, drop)}
+      onDoubleClick={() => send(skill.id)}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        openMenu()
+      }}
+    >
+      <span className="srow__grip" aria-hidden="true">
+        <Icon name="grip" size={12} />
+      </span>
+
+      <span className="srow__text">
+        <span className="srow__name truncate">{skill.title}</span>
+        <span className="srow__desc truncate">{skill.problem ?? skill.description ?? skill.command.trim()}</span>
+      </span>
+
+      <span
+        className="srow__live"
+        title={
+          skill.source === 'plugin'
+            ? `From the ${skill.origin} plugin — every Claude session on this machine has it`
+            : `In ${skill.origin} — only a terminal opened in that project can use it`
+        }
+      >
+        {skill.origin}
+      </span>
+
+      <button
+        ref={menuRef}
+        type="button"
+        className="ghost-btn srow__menu"
+        title="Skill actions"
+        onClick={(e) => {
+          e.stopPropagation()
+          openMenu()
+        }}
+      >
+        <Icon name="dots" size={14} />
+      </button>
+
+      <ExternalSkillMenu anchor={menuRef.current ?? rowRef.current} open={menuOpen} onClose={closeMenu} skill={skill} />
+    </div>
+  )
+}
+
 /* ------------------------------------------------------------------ menu */
 
 function SkillMenu({
@@ -637,6 +772,58 @@ function MachineSkillMenu({
       >
         <Icon name="plus" size={14} />
         <span className="srow__menu-name">Copy into library</span>
+      </PopoverRow>
+    </Popover>
+  )
+}
+
+/**
+ * No copy, and no delete: Forge does not own either folder this row can come
+ * from. The plugin cache is rewritten wholesale every time Claude Code updates
+ * a plugin, and a project's `.claude/skills` is somebody's repo. Type it, or go
+ * and look at it.
+ */
+function ExternalSkillMenu({
+  anchor,
+  open,
+  onClose,
+  skill
+}: {
+  anchor: HTMLElement | null
+  open: boolean
+  onClose: () => void
+  skill: ExternalSkillInfo
+}): ReactNode {
+  const send = useSendSkill()
+
+  return (
+    <Popover anchor={anchor} open={open} onClose={onClose} align="start" width={300} label="Skill actions">
+      <PopoverSection title={skill.command.trim()}>
+        <div className="popover__hint">
+          {skill.source === 'plugin'
+            ? `Installed with the ${skill.origin} plugin. Every Claude session on this machine can use it — under the plugin’s own name, not /${skill.name}.`
+            : `Checked into ${skill.origin}. It only answers in a terminal opened in that project.`}
+        </div>
+      </PopoverSection>
+
+      <PopoverRow
+        onClick={() => {
+          send(skill.id)
+          onClose()
+        }}
+      >
+        <Icon name="terminal" size={14} />
+        <span className="srow__menu-name">Type into this terminal</span>
+      </PopoverRow>
+
+      <PopoverRow
+        onClick={() => {
+          void window.forge.skills.openFolder(skill.id, skill.source)
+          onClose()
+        }}
+      >
+        <Icon name="folder" size={14} />
+        <span className="srow__menu-name">Open folder</span>
       </PopoverRow>
     </Popover>
   )

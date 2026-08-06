@@ -20,8 +20,12 @@ import {
   SKILL_FILE,
   isValidSkillName,
   parseFrontmatter,
+  pluginSkillCommand,
+  skillCommandFor,
   skillTemplate,
   slugSkillName,
+  type ExternalSkillInfo,
+  type ExternalSkillSource,
   type MachineSkillInfo,
   type SkillInfo,
   type SkillLinkState,
@@ -35,7 +39,19 @@ import {
  *   ~\.claude\skills\<name>                     Claude projection
  *   ~\.codex\skills\<name>                      Codex projection
  *
- * Two directories, and the whole design is about the difference between them.
+ * …and two more that are read and never written, added because a skill Steve
+ * had installed was simply missing from the rail with no way to tell why:
+ *
+ *   ~\.claude\plugins\cache\<market>\<plugin>\<ver>\skills\<name>\SKILL.md
+ *   <project>\.claude\skills\<name>\SKILL.md
+ *
+ * Everything `/plugin install` puts on the machine lands in the first, and it
+ * is invoked as `/<plugin>:<skill>` rather than `/<skill>` — which is why the
+ * command travels with the row instead of being derived from the name. See
+ * listPlugins and ExternalSkillInfo.
+ *
+ * Two writable directories, and the whole design is about the difference
+ * between them.
  * The library is ours: Forge creates, imports, edits and deletes inside it
  * freely. `~/.claude/skills` is *Steve's*, shared with every `claude` and `kimi`
  * process on the machine and already full of skills he wrote by hand. So Forge
@@ -75,6 +91,23 @@ export interface SkillsDirs {
    * mystery either.
    */
   peerDirs?: string[]
+  /**
+   * ~/.claude/plugins — where `/plugin install` puts things.
+   *
+   * Read-only in the same strong sense as claudeSkillsDir, and for a blunter
+   * reason: the whole tree belongs to Claude Code's plugin manager, which
+   * rewrites it on every update. Forge lists what is in there and touches
+   * nothing.
+   */
+  pluginsDir?: string
+  /**
+   * The project folders to look for `<repo>/.claude/skills` in.
+   *
+   * A thunk, not an array, because projects are added and removed while Forge
+   * is running and the list has to be right at read time — and because taking a
+   * function keeps this module free of any import from store.ts.
+   */
+  projectDirs?: () => Array<{ name: string; path: string }>
 }
 
 export interface SkillResult {
@@ -119,14 +152,18 @@ export class SkillsStore {
   readonly claudeSkillsDir: string
   readonly codexSkillsDir: string | null
   readonly antigravitySkillsDir: string | null
+  readonly pluginsDir: string | null
   private readonly peerDirs: string[]
+  private readonly projectDirs: () => Array<{ name: string; path: string }>
 
   constructor(dirs: SkillsDirs) {
     this.libraryDir = dirs.libraryDir
     this.claudeSkillsDir = dirs.claudeSkillsDir
     this.codexSkillsDir = dirs.codexSkillsDir ? resolve(dirs.codexSkillsDir) : null
     this.antigravitySkillsDir = dirs.antigravitySkillsDir ? resolve(dirs.antigravitySkillsDir) : null
+    this.pluginsDir = dirs.pluginsDir ? resolve(dirs.pluginsDir) : null
     this.peerDirs = dirs.peerDirs ?? []
+    this.projectDirs = dirs.projectDirs ?? (() => [])
   }
 
   /* --------------------------------------------------------------- paths */
@@ -306,9 +343,190 @@ export class SkillsStore {
     return out
   }
 
-  /** Both halves in one read, which is what the list IPC hands the renderer. */
+  /* --------------------------------------------------- plugins and projects */
+
+  /**
+   * Every skill that arrived with an installed plugin.
+   *
+   *   ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills/<name>/SKILL.md
+   *
+   * `installed_plugins.json` is read first and believed: it names the exact
+   * `installPath` of the version actually in use, which is the only way to tell
+   * the live 0.4.1 from a 0.4.0 the updater has not swept up yet. It is Claude
+   * Code's file, so a missing or unparsable one is not an error — the cache is
+   * walked instead and the highest-sorting version of each plugin is taken.
+   *
+   * The command is the part worth getting right. A plugin skill is invoked as
+   * `/<plugin>:<skill>`, never `/<skill>` — the namespace comes from the plugin
+   * key (`design-council@sjsyrek` → `design-council`), not from the marketplace
+   * and not from the folder the skill sits in.
+   */
+  listPlugins(): ExternalSkillInfo[] {
+    if (!this.pluginsDir) return []
+    const out: ExternalSkillInfo[] = []
+    for (const { plugin, marketplace, version, dir } of this.pluginRoots()) {
+      const skillsDir = join(dir, 'skills')
+      for (const name of entries(skillsDir)) {
+        const info = this.readExternal(join(skillsDir, name), name, 'plugin', `${marketplace} · ${version}`)
+        if (!info) continue
+        info.command = pluginSkillCommand(plugin, name)
+        out.push(info)
+      }
+    }
+    return out.sort((a, b) => a.command.localeCompare(b.command))
+  }
+
+  /**
+   * The installed plugins, newest version of each, however we can find them.
+   *
+   * Returns the plugin's own name separately from the marketplace it came
+   * through, because only the first goes in the command.
+   */
+  private pluginRoots(): Array<{ plugin: string; marketplace: string; version: string; dir: string }> {
+    const roots: Array<{ plugin: string; marketplace: string; version: string; dir: string }> = []
+    const seen = new Set<string>()
+    const cacheDir = join(this.pluginsDir!, 'cache')
+
+    const manifest = safe(
+      () => JSON.parse(readFileSync(join(this.pluginsDir!, 'installed_plugins.json'), 'utf8')) as unknown,
+      null
+    )
+    const plugins = (manifest as { plugins?: Record<string, unknown> } | null)?.plugins
+    if (plugins && typeof plugins === 'object') {
+      for (const [key, value] of Object.entries(plugins)) {
+        const at = key.lastIndexOf('@')
+        const plugin = at > 0 ? key.slice(0, at) : key
+        const marketplace = at > 0 ? key.slice(at + 1) : ''
+        // The array is one entry per install scope; any of them that still has
+        // a folder is a real install, so the first that resolves wins.
+        for (const entry of Array.isArray(value) ? value : []) {
+          const path = (entry as { installPath?: unknown })?.installPath
+          const version = String((entry as { version?: unknown })?.version ?? '') || 'unknown'
+          if (typeof path !== 'string' || !isDir(path)) continue
+          roots.push({ plugin, marketplace, version, dir: resolve(path) })
+          seen.add(plugin)
+          break
+        }
+      }
+    }
+
+    // Anything the manifest did not account for — a hand-dropped plugin, or a
+    // manifest that would not parse — picked up off the cache directly.
+    for (const marketplace of entries(cacheDir)) {
+      for (const plugin of entries(join(cacheDir, marketplace))) {
+        if (seen.has(plugin)) continue
+        const versions = entries(join(cacheDir, marketplace, plugin))
+        const version = versions[versions.length - 1]
+        if (!version) continue
+        roots.push({ plugin, marketplace, version, dir: resolve(join(cacheDir, marketplace, plugin, version)) })
+      }
+    }
+    return roots
+  }
+
+  /**
+   * Every skill checked into a project Forge knows about.
+   *
+   * A project skill is real only inside its own repo — Claude Code reads
+   * `.claude/skills` relative to where it was started — so the row carries the
+   * project name and the list spans every project rather than the open one.
+   * Seeing a skill you installed in another repo, tagged with that repo, is the
+   * whole point; pretending it is global would be the lie.
+   */
+  listProjectSkills(): ExternalSkillInfo[] {
+    const out: ExternalSkillInfo[] = []
+    const seen = new Set<string>()
+    for (const project of safe(() => this.projectDirs(), [])) {
+      const root = String(project?.path ?? '').trim()
+      if (!root) continue
+      const skillsDir = join(resolve(root), '.claude', 'skills')
+      // Two projects pointed at the same folder would otherwise list twice.
+      if (seen.has(normalisePath(skillsDir))) continue
+      seen.add(normalisePath(skillsDir))
+      for (const name of entries(skillsDir)) {
+        const info = this.readExternal(join(skillsDir, name), name, 'project', project.name || basename(root))
+        if (info) out.push(info)
+      }
+    }
+    return out.sort((a, b) => a.origin.localeCompare(b.origin) || a.name.localeCompare(b.name))
+  }
+
+  /**
+   * One external skill folder read into a row, or null when there is nothing
+   * there at all. A folder with no SKILL.md is not a half-written skill here —
+   * unlike the library, nobody is going to finish it in Forge — so it is
+   * skipped rather than listed with a problem.
+   */
+  private readExternal(
+    dir: string,
+    name: string,
+    source: ExternalSkillSource,
+    origin: string
+  ): ExternalSkillInfo | null {
+    const path = resolve(dir)
+    const file = join(path, SKILL_FILE)
+    if (!safe(() => existsSync(file), false)) return null
+
+    const parsed = parseFrontmatter(safe(() => readFileSync(file, 'utf8'), ''))
+    const info: ExternalSkillInfo = {
+      name,
+      title: parsed.name || name,
+      description: parsed.description,
+      path,
+      id: path,
+      source,
+      origin,
+      command: skillCommandFor(name),
+      shadowed: false
+    }
+    if (!parsed.ok) info.problem = 'No YAML frontmatter — agents may ignore it'
+    return info
+  }
+
+  /** Every half in one read, which is what the list IPC hands the renderer. */
   listAll(enabled: string[] = []): SkillsList {
-    return { skills: this.list(enabled), machineSkills: this.listMachine() }
+    const skills = this.list(enabled)
+    const machineSkills = this.listMachine()
+    const externalSkills = [...this.listPlugins(), ...this.listProjectSkills()]
+    // `shadowed` is a hint on the row, not a filter: a plugin skill whose name
+    // clashes with a library one is still a different skill with a different
+    // command, and hiding it would be the same bug this whole change is fixing.
+    const taken = new Set([...skills.map((s) => s.name), ...machineSkills.map((s) => s.name)])
+    for (const skill of externalSkills) skill.shadowed = taken.has(skill.name)
+    return { skills, machineSkills, externalSkills }
+  }
+
+  /**
+   * The folder an external id addresses, or null.
+   *
+   * Externals are addressed by absolute path rather than by name, so this is
+   * the containment check that stands in for `pathFor`'s name validation: a
+   * path arriving over IPC is only ever honoured when it sits inside the plugin
+   * tree or inside a known project's `.claude/skills`, which is exactly the set
+   * of folders the list came out of.
+   */
+  externalPathFor(id: string): string | null {
+    const path = safe(() => resolve(String(id ?? '').trim()), '')
+    if (!path || !isDir(path)) return null
+    const target = normalisePath(path)
+    const roots: string[] = []
+    if (this.pluginsDir) roots.push(this.pluginsDir)
+    for (const project of safe(() => this.projectDirs(), [])) {
+      const root = String(project?.path ?? '').trim()
+      if (root) roots.push(join(resolve(root), '.claude', 'skills'))
+    }
+    for (const root of roots) {
+      const base = normalisePath(root)
+      if (target.startsWith(base + sep) || target === base) return path
+    }
+    return null
+  }
+
+  /** The raw SKILL.md of a plugin or project skill, addressed by path. */
+  readExternalSkillFile(id: string): string {
+    const dir = this.externalPathFor(id)
+    if (!dir) return ''
+    return safe(() => readFileSync(join(dir, SKILL_FILE), 'utf8'), '')
   }
 
   /**
@@ -658,15 +876,19 @@ export function registerSkillsHandlers(
     pickFolder(): Promise<string | null>
   }
 ): void {
-  const listNow = (): SkillsList => store?.listAll(deps.enabled()) ?? { skills: [], machineSkills: [] }
+  const listNow = (): SkillsList =>
+    store?.listAll(deps.enabled()) ?? { skills: [], machineSkills: [], externalSkills: [] }
 
   ipc.handle(channels.list, () => listNow())
 
-  ipc.handle(channels.read, (_e, name: string, source?: string) =>
-    (source === 'machine'
-      ? store?.readMachineSkillFile(String(name ?? ''))
-      : store?.readSkillFile(String(name ?? ''))) ?? ''
-  )
+  // Plugin and project skills arrive as a path rather than a name; the store's
+  // containment check is what makes that safe, so the path goes straight there.
+  ipc.handle(channels.read, (_e, name: string, source?: string) => {
+    const key = String(name ?? '')
+    if (source === 'plugin' || source === 'project') return store?.readExternalSkillFile(key) ?? ''
+    if (source === 'machine') return store?.readMachineSkillFile(key) ?? ''
+    return store?.readSkillFile(key) ?? ''
+  })
 
   ipc.handle(channels.create, (_e, name: string, description: string) => {
     const result = store?.createFromTemplate(String(name ?? ''), String(description ?? '')) ?? {
@@ -692,7 +914,7 @@ export function registerSkillsHandlers(
 
   ipc.handle(channels.setEnabled, (_e, name: string, on: unknown) => {
     const clean = String(name ?? '')
-    if (!store) return { ok: false, error: 'Skills are not available', skills: [], machineSkills: [] }
+    if (!store) return { ok: false, error: 'Skills are not available', skills: [], machineSkills: [], externalSkills: [] }
     const result = on === true ? store.enable(clean) : store.disable(clean)
     // The setting only moves when the filesystem agreed — a toggle that says
     // "on" while ~/.claude/skills says otherwise is the worst of both.
@@ -719,9 +941,11 @@ export function registerSkillsHandlers(
   ipc.handle(channels.openFolder, (_e, name?: string, source?: string) => {
     const dir =
       (name
-        ? source === 'machine'
-          ? store?.linkPathFor(String(name))
-          : store?.pathFor(String(name))
+        ? source === 'plugin' || source === 'project'
+          ? store?.externalPathFor(String(name))
+          : source === 'machine'
+            ? store?.linkPathFor(String(name))
+            : store?.pathFor(String(name))
         : null) ??
       store?.ensureLibrary() ??
       ''
