@@ -384,6 +384,14 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
   for (const builtin of BUILTIN_AGENT_PROFILES) {
     if (!profiles.some((p) => p.id === builtin.id)) profiles.push({ ...builtin })
   }
+  // The chooser shows profiles in this order and nothing lets a user reorder
+  // them, so a stored order is only an accident of when each row was written —
+  // a built-in added later (Antigravity) would otherwise sit below every custom
+  // profile forever, and a built-in demoted in the roster (Gemini, now
+  // API-key-only) would keep its old shelf position. Built-ins follow the
+  // roster; customs keep their creation order after them.
+  const rosterOrder = new Map(BUILTIN_AGENT_PROFILES.map((b, i) => [b.id, i]))
+  profiles.sort((a, b) => (rosterOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rosterOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER))
   for (const p of profiles) {
     if (typeof p.command !== 'string') p.command = ''
     if (!p.accent) p.accent = '#C6FF4A'

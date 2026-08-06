@@ -81,9 +81,25 @@ export const TOOL_SPECS: ToolSpec[] = [
     updateCommand: null
   },
   {
+    id: 'antigravity',
+    name: 'Antigravity CLI',
+    blurb: 'Google’s `agy` CLI — what the Antigravity pane runs',
+    command: 'agy',
+    versionArgs: ['--version'],
+    // A closed-source Go binary from Google's own installer: not on npm, not
+    // on winget, so there is no registry to ask about a newer version and the
+    // row reads "managed locally". The install command is Google's official
+    // PowerShell one-liner — it drops the binary under %LOCALAPPDATA%, no
+    // admin rights needed, and `agy` signs in with a Google account on first
+    // run.
+    latest: { source: 'local' },
+    updateCommand: null,
+    installCommand: 'irm https://antigravity.google/cli/install.ps1 | iex'
+  },
+  {
     id: 'gemini',
     name: 'Gemini CLI',
-    blurb: 'the `gemini` CLI',
+    blurb: 'the legacy `gemini` CLI — personal accounts moved to Antigravity',
     command: 'gemini',
     versionArgs: ['--version'],
     latest: { source: 'npm', npmPackage: '@google/gemini-cli' },

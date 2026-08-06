@@ -13,7 +13,7 @@ export { whichCommand }
  * Is the agent this profile launches actually installed?
  *
  * The first-run welcome shows found/not-found for every built-in that launches
- * something — `claude`, `codex`, `kimi`, `gemini`, `opencode` — which is the difference
+ * something — `claude`, `codex`, `kimi`, `agy`, `opencode`, `gemini` — which is the difference
  * between "Forge is broken" and "you have not installed Claude Code yet", the
  * single most likely thing to go wrong for the first person handed a copy.
  *
@@ -26,6 +26,7 @@ const INSTALL_URLS: Record<string, string> = {
   claude: 'https://claude.com/claude-code',
   codex: 'https://developers.openai.com/codex/cli',
   kimi: 'https://platform.moonshot.ai',
+  antigravity: 'https://antigravity.google',
   gemini: 'https://github.com/google-gemini/gemini-cli',
   opencode: 'https://opencode.ai/docs/',
   // The DeepSeek profile *is* OpenCode with a model flag, so what has to be
