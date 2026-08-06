@@ -87,6 +87,64 @@ export function upstreamTone(state: GitUpstreamState): UpstreamTone {
   }
 }
 
+/* ------------------------------------------------------------------ switching */
+
+/** What a pending switch would do, in one sentence and one tone. */
+export interface SwitchConsequence {
+  /** The sentence the armed row shows. Never empty. */
+  text: string
+  tone: UpstreamTone
+  /** True when the move would take commits out of the working tree. */
+  rewinds: boolean
+}
+
+/**
+ * The sentence an armed branch row shows before it will switch.
+ *
+ * This exists because of a real afternoon. The branch rows carried their
+ * distance from *origin* and clicking one switched immediately, and both halves
+ * of that were defensible on their own: `git switch` genuinely cannot lose a
+ * commit, and the marks genuinely describe the branch. Together they meant a row
+ * reading `▲+` — the mark for "never pushed", which is not a warning at all —
+ * was one unconfirmed click away from taking forty-six commits out of the
+ * working tree. Nothing was lost and everything looked lost, which is the same
+ * thing to the person looking at it.
+ *
+ * So the number here is measured from HEAD rather than from origin, and it is
+ * phrased as what *happens to you* rather than as what the branch is. "46
+ * commits behind" is a fact about a branch. "Takes 46 commits out of this
+ * folder" is the thing that was actually about to happen.
+ *
+ * `rewinds` is separate from the tone because the button copy keys off it: a
+ * move that only goes forward can say "Switch", and one that rewinds says what
+ * it takes with it.
+ */
+export function switchConsequence(
+  cmp: { leaving: number; gaining: number; error?: string } | null,
+  from: string | null
+): SwitchConsequence {
+  if (!cmp) return { text: 'Working out what this would change…', tone: 'none', rewinds: false }
+  if (cmp.error) return { text: cmp.error, tone: 'warn', rewinds: false }
+
+  const here = from ? `on ${from}` : 'here'
+  const commits = (n: number): string => `${n} commit${n === 1 ? '' : 's'}`
+
+  if (cmp.leaving === 0 && cmp.gaining === 0) {
+    return { text: `Same commit as ${from ?? 'here'} — nothing in the folder changes.`, tone: 'dim', rewinds: false }
+  }
+  if (cmp.leaving === 0) {
+    return { text: `Moves forward ${commits(cmp.gaining)}. Nothing goes.`, tone: 'ok', rewinds: false }
+  }
+  if (cmp.gaining === 0) {
+    return { text: `Takes ${commits(cmp.leaving)} ${here} out of this folder.`, tone: 'danger', rewinds: true }
+  }
+  return {
+    text: `Takes ${commits(cmp.leaving)} ${here} out, brings ${commits(cmp.gaining)} in.`,
+    tone: 'warn',
+    rewinds: true
+  }
+}
+
 /* ------------------------------------------------------------------ changes */
 
 export interface ChangeGroup {

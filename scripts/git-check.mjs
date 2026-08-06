@@ -684,6 +684,58 @@ console.log('\nwhich handoffs are offered')
   )
 }
 
+/* ============================================ what a switch would cost you
+ *
+ * The regression this section exists for: a branch row carried its distance
+ * from origin, clicking it switched immediately, and both of those were
+ * defensible alone. A row marked `up-plus` — never pushed, which is not a
+ * warning about anything — sat one click from taking forty-six commits out of
+ * the working tree, and the app read as having reverted itself. Nothing was
+ * lost; everything looked lost, which is the same event to the person watching.
+ *
+ * Two things are held here. The sentence, which must describe what happens to
+ * the folder rather than what the branch is, and the structural rule that a row
+ * cannot switch on its own.
+ */
+
+console.log('\nwhat switching would do')
+{
+  const c = (leaving, gaining, extra = {}) => V.switchConsequence({ leaving, gaining, ...extra }, 'master')
+
+  ok(V.switchConsequence(null, 'master').text.length > 0, 'an unmeasured branch still says something')
+  ok(V.switchConsequence(null, 'master').rewinds === false, 'and does not claim a rewind it has not measured')
+
+  ok(c(0, 0).tone === 'dim', 'the same commit is the quietest answer there is')
+  ok(c(0, 3).tone === 'ok', 'a move that only goes forward is the go colour')
+  ok(c(0, 3).rewinds === false, 'and takes nothing with it')
+
+  ok(c(46, 0).rewinds === true, 'a move that empties the folder says so')
+  ok(c(46, 0).tone === 'danger', 'and is the loudest tone in the vocabulary')
+  ok(/46 commits/.test(c(46, 0).text), 'the count is in the sentence, not only in a glyph', c(46, 0).text)
+  ok(/out of this folder/.test(c(46, 0).text), 'phrased as what happens here, not as what the branch is', c(46, 0).text)
+
+  ok(c(46, 3).rewinds === true, 'a two-way move still rewinds')
+  ok(c(46, 3).tone === 'warn', 'but warns rather than shouts, because it brings something back')
+
+  ok(/\b1 commit\b/.test(c(1, 0).text), 'one commit is not "1 commits"', c(1, 0).text)
+  ok(c(0, 0, { error: 'gone' }).text === 'gone', 'a failed comparison shows the reason rather than a made-up number')
+  ok(c(9, 9, { error: 'gone' }).rewinds === false, 'and never offers a rewind it could not verify')
+}
+
+console.log('\nthe row cannot switch on its own')
+{
+  const list = source('../src/components/rail/GitBranchList.tsx')
+  const calls = list.match(/onSwitch\(/g) ?? []
+  ok(calls.length === 1, 'exactly one place in the list can move the repository', String(calls.length))
+  ok(/onConfirm=\{\(\) => onSwitch\(/.test(list), 'and it is the confirmation button')
+  ok(/onClick=\{\(\) => canSwitch && onArm\(/.test(list), 'the branch row only arms')
+  ok(!/canSwitch && onSwitch\(/.test(list), 'the one-click switch is gone, not merely guarded')
+
+  const watcher = source('../electron/git-watcher.ts')
+  ok(watcher.includes("'rev-list', '--left-right', '--count'"), 'the measurement is one read-only rev-list')
+  ok(watcher.includes('HEAD...refs/heads/'), 'against a full ref, which cannot resolve to a tag or be read as an option')
+}
+
 /* -------------------------------------------------------------------- end */
 
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass} passed, ${fail} failed\n`)

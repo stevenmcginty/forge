@@ -33,6 +33,7 @@ import type {
   GitActionRequest,
   GitActionResult,
   GitBranch,
+  GitBranchCompare,
   GitSnapshot,
   PlannerUpdate,
   Project,
@@ -436,6 +437,11 @@ export interface ForgeApi {
     action(req: GitActionRequest): Promise<GitActionResult>
     /** refs/remotes/*, fetched only when the Remote group is expanded. */
     remoteBranches(projectId: string): Promise<GitBranch[]>
+    /**
+     * How far a branch sits from HEAD, read when a row is armed to be switched
+     * to. Null when the project is unknown or the name is not a local branch.
+     */
+    branchCompare(projectId: string, branch: string): Promise<GitBranchCompare | null>
     /** Ask gh again now — the button that also re-checks whether it is logged in. */
     ghRefresh(projectId: string): Promise<GhState>
     onSnapshot(cb: (s: GitSnapshot) => void): () => void

@@ -241,6 +241,8 @@ export const IPC = {
   gitSnapshot: 'git:snapshot',
   gitAction: 'git:action',
   gitRemoteBranches: 'git:remote-branches',
+  /** Read-only: what switching to a branch would cost, asked before it is done. */
+  gitBranchCompare: 'git:branch-compare',
   gitGhRefresh: 'git:gh-refresh',
 
   /*

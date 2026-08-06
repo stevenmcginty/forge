@@ -339,6 +339,32 @@ export interface GitBranch {
 }
 
 /**
+ * What switching to a branch would actually do, measured from where you stand.
+ *
+ * The marks on a branch row answer "how does this branch compare to *origin*",
+ * which is a genuinely different question to the one being asked at the moment
+ * a finger is over the row — that one is "how does it compare to *here*". A
+ * branch forty commits behind master and never pushed carries `▲+`, the mark
+ * for unpublished, and nothing at all about the forty commits. Switching to it
+ * empties them out of the working tree, which is how a click on an ordinary
+ * looking row turns into "the app reverted itself".
+ *
+ * So this is the number the confirmation is built on, and it is read on demand
+ * — one `rev-list` when a row is armed — rather than for every branch on every
+ * poll, which would be twenty processes a second for a number nobody is
+ * looking at yet.
+ */
+export interface GitBranchCompare {
+  branch: string
+  /** Commits HEAD has that the target does not. The rewind, stated as a count. */
+  leaving: number
+  /** Commits the target has that HEAD does not. */
+  gaining: number
+  /** Set when the two could not be compared — an unborn HEAD, a vanished ref. */
+  error?: string
+}
+
+/**
  * Why there is no git answer for a project.
  *
  * Every one of these is a perfectly ordinary state for a folder to be in, not a

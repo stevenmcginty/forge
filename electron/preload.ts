@@ -164,6 +164,7 @@ const api: ForgeApi = {
     refresh: (projectId) => ipcRenderer.invoke(IPC.gitRefresh, projectId),
     action: (req) => ipcRenderer.invoke(IPC.gitAction, req),
     remoteBranches: (projectId) => ipcRenderer.invoke(IPC.gitRemoteBranches, projectId),
+    branchCompare: (projectId, branch) => ipcRenderer.invoke(IPC.gitBranchCompare, { projectId, branch }),
     ghRefresh: (projectId) => ipcRenderer.invoke(IPC.gitGhRefresh, projectId),
     onSnapshot: (cb) => subscribe(IPC.gitSnapshot, cb)
   },

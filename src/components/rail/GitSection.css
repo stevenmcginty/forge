@@ -32,21 +32,24 @@
 .gsec__head[data-tone='ok'],
 .gsec__strip[data-tone='ok'],
 .gbrow[data-tone='ok'],
-.gfrow[data-tone='ok'] {
+.gfrow[data-tone='ok'],
+.gsw[data-tone='ok'] {
   --g-tone: var(--ok);
 }
 
 .gsec__head[data-tone='warn'],
 .gsec__strip[data-tone='warn'],
 .gbrow[data-tone='warn'],
-.gfrow[data-tone='warn'] {
+.gfrow[data-tone='warn'],
+.gsw[data-tone='warn'] {
   --g-tone: var(--warn);
 }
 
 .gsec__head[data-tone='danger'],
 .gsec__strip[data-tone='danger'],
 .gbrow[data-tone='danger'],
-.gfrow[data-tone='danger'] {
+.gfrow[data-tone='danger'],
+.gsw[data-tone='danger'] {
   --g-tone: var(--danger);
 }
 
@@ -60,14 +63,16 @@
 .gsec__head[data-tone='dim'],
 .gsec__strip[data-tone='dim'],
 .gbrow[data-tone='dim'],
-.gfrow[data-tone='dim'] {
+.gfrow[data-tone='dim'],
+.gsw[data-tone='dim'] {
   --g-tone: var(--text-dim);
 }
 
 .gsec__head[data-tone='none'],
 .gsec__strip[data-tone='none'],
 .gbrow[data-tone='none'],
-.gfrow[data-tone='none'] {
+.gfrow[data-tone='none'],
+.gsw[data-tone='none'] {
   --g-tone: var(--text-muted);
 }
 
@@ -342,6 +347,85 @@
 
 .gbr__count {
   font-size: var(--t-eyebrow);
+}
+
+/* --------------------------------------------------- the switch confirmation
+ *
+ * Opened by a branch row and closed by Escape, the Cancel button, or any git
+ * command starting. It is tinted with the row's own `--g-tone` so that it reads
+ * as that row having opened rather than as a new thing having appeared
+ * somewhere in the list -- in 240px of rail, a panel that looks unattached is a
+ * panel you have to re-read to place.
+ */
+
+.gbr__slot {
+  display: flex;
+  flex-direction: column;
+}
+
+.gbrow[data-armed='true'] {
+  background: color-mix(in srgb, var(--g-tone) 14%, var(--bg-active));
+}
+
+.gsw {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: var(--s-1) 0 var(--s-2);
+  padding: var(--s-2);
+  border-radius: var(--r-sm);
+  border-left: 2px solid var(--g-tone, var(--text-muted));
+  background: color-mix(in srgb, var(--g-tone) 8%, var(--bg-active));
+}
+
+.gsw__what {
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.gsw__line {
+  font-size: var(--t-xs);
+  line-height: 1.4;
+  color: var(--text-primary);
+  text-wrap: pretty;
+}
+
+/*
+ * The uncommitted-work line is quieter than the commit count on purpose. It is
+ * true every time and only occasionally the thing that matters, and a second
+ * loud sentence would flatten the first one.
+ */
+.gsw__carry {
+  color: var(--text-muted);
+}
+
+.gsw__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.gsw__no {
+  flex: none;
+}
+
+/*
+ * The confirm sits at the far end of the row, away from the branch name that
+ * was just clicked. A double-click on a row must not be able to arm and confirm
+ * in one gesture, and distance is the cheapest way to guarantee it.
+ */
+.gsw__yes {
+  margin-left: auto;
+}
+
+/*
+ * A move that takes commits out of the folder is painted in the warning colour
+ * rather than the accent. The accent means "the obvious next thing"; this is
+ * offering something that is occasionally right and never routine.
+ */
+.gsw__yes[data-rewinds='true'] {
+  color: var(--text-on-accent);
+  background: var(--danger);
 }
 
 /* -------------------------------------------------------------- changes */
