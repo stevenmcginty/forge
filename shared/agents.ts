@@ -379,6 +379,10 @@ export const PERMISSION_FAMILIES: Record<PermissionFamily, PermissionModeSpec[]>
       danger: true
     }
   ],
+  // Verified against `agy --help` (Antigravity CLI v1.0.0, Aug 2026): its mode
+  // flag is `--mode` with kebab-case values (accept-edits, plan), not Claude's
+  // `--permission-mode`. Full autonomy is Antigravity's own "Turbo" — same
+  // shared rung id as Claude/Codex's bypass, relabelled in its own vocabulary.
   agy: [
     { id: 'default', label: 'Default', note: 'Antigravity asks before it acts', chip: '', flag: '' },
     {
@@ -386,14 +390,14 @@ export const PERMISSION_FAMILIES: Record<PermissionFamily, PermissionModeSpec[]>
       label: 'Accept edits',
       note: 'file edits go through, commands still ask',
       chip: 'EDITS',
-      flag: '--permission-mode acceptEdits'
+      flag: '--mode accept-edits'
     },
-    { id: 'plan', label: 'Plan', note: 'read and think, change nothing', chip: 'PLAN', flag: '--permission-mode plan' },
+    { id: 'plan', label: 'Plan', note: 'read and think, change nothing', chip: 'PLAN', flag: '--mode plan' },
     {
       id: 'bypass',
-      label: 'Bypass',
-      note: 'never asks — it can do anything you can',
-      chip: 'BYPASS',
+      label: 'Turbo',
+      note: 'auto-approves everything — it can do anything you can',
+      chip: 'TURBO',
       flag: '--dangerously-skip-permissions',
       danger: true
     }
@@ -433,7 +437,9 @@ const EXPLICIT_FLAGS: Record<PermissionFamily, RegExp> = {
   claude: /--permission-mode\b|--dangerously-skip-permissions\b/,
   codex:
     /--full-auto\b|--yolo\b|--dangerously-bypass-approvals-and-sandbox\b|--sandbox\b|--ask-for-approval\b|(?:^|\s)-[as](?:\s|=|$)/,
-  agy: /--permission-mode\b|--dangerously-skip-permissions\b/
+  // \b after "mode" (not a wildcard match) so this doesn't fire on agy's
+  // separate --model flag.
+  agy: /--mode\b|--dangerously-skip-permissions\b/
 }
 
 /** True when the command line already says what mode it wants. */

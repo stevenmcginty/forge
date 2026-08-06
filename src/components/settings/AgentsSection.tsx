@@ -153,6 +153,9 @@ function ProfileRow({
   const ladder = supportsPermissionModes(profile)
   const mode = profile.permissionMode ?? 'default'
   const inUse = state.projects.filter((p) => p.defaultProfileId === profile.id).length
+  const bypassSpec = permissionSpec(profile.command, 'bypass')
+  const bypassLabel = bypassSpec?.label ?? 'Bypass'
+  const bypassChip = bypassSpec?.chip ?? 'BYPASS'
 
   const patch = (next: Partial<AgentProfile>): void => actions.saveProfile({ ...profile, ...next })
 
@@ -269,9 +272,9 @@ function ProfileRow({
               </div>
               {mode === 'bypass' ? (
                 <p className="sprof__warn">
-                  Bypass means {profile.name} never asks. It can edit, delete and run anything your account can, in
-                  whatever folder the pane is open on. Panes launched this way are badged{' '}
-                  <span className="mono">BYPASS</span> so you always know which ones they are.
+                  {bypassLabel} means {profile.name} never asks. It can edit, delete and run anything your account
+                  can, in whatever folder the pane is open on. Panes launched this way are badged{' '}
+                  <span className="mono">{bypassChip}</span> so you always know which ones they are.
                 </p>
               ) : null}
             </>
