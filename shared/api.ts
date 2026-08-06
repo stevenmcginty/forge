@@ -492,6 +492,14 @@ export interface ForgeApi {
   openExternal(url: string): Promise<boolean>
 
   /**
+   * `git remote get-url origin` in a folder, or null when there is no answer —
+   * no git, not a repo, no origin. How a project's Repository URL fills itself
+   * in once an agent has actually created the repo. Read-only: nothing here can
+   * set a remote, only ask about one.
+   */
+  gitRemoteOrigin(dir: string): Promise<string | null>
+
+  /**
    * Absolute path of a dropped `File`. Typed as `unknown` because this contract
    * is compiled for the main process too, where the DOM `File` type does not
    * exist; the renderer always hands it a real File.

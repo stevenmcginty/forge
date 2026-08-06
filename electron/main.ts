@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import { planProjectFolder } from './projectfolder'
+import { gitRemoteOrigin } from './git-remote'
 import type {
   AppInfo,
   MakeProjectFolderRequest,
@@ -646,6 +647,10 @@ function registerAppHandlers(): void {
     await shell.openExternal(target)
     return true
   })
+
+  // Read-only, and only ever a read: the renderer can ask what a folder's origin
+  // is, never set one. Everything else about the repo stays git's business.
+  ipcMain.handle(IPC.gitRemoteOrigin, (_e, dir: string) => gitRemoteOrigin(String(dir ?? '')))
 
   // The renderer never touches navigator.clipboard: it needs a permission
   // handler, rejects silently when the window is not focused, and cannot do

@@ -254,6 +254,7 @@ type Action =
   | { type: 'selectProject'; projectId: string }
   | { type: 'addProject'; project: Project }
   | { type: 'updateProject'; id: string; patch: Partial<Project> }
+  | { type: 'setProjectRepoUrl'; id: string; url: string }
   | { type: 'removeProject'; id: string }
   | { type: 'moveProject'; from: number; to: number }
   | { type: 'patchSettings'; patch: Partial<Settings> }
@@ -306,6 +307,15 @@ type Action =
 /* -------------------------------------------------------------- helpers */
 
 const EMPTY_WORKSPACE: Workspace = { tabs: [], activeTabId: null, viewMode: 'tabs' }
+
+/**
+ * Longest repo URL Forge will keep. The same 400 the store puts on a path — a
+ * clone URL is a path with a host bolted on, and anything longer than that
+ * arrived by accident (a pasted page, a stray transcript) rather than by
+ * anyone typing it. Capping here rather than at the store keeps the value the
+ * panes are handed identical to the one on disk.
+ */
+const MAX_REPO_URL = 400
 
 function mosaicOf(ws: Workspace): MosaicState {
   return ws.mosaic ?? emptyMosaic()
@@ -610,6 +620,36 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         projects: state.projects.map((p) => (p.id === action.id ? { ...p, ...action.patch } : p))
       }
+
+    /*
+     * Set or clear one project's repo URL. Its own case rather than a
+     * `updateProject` patch because clearing has to *remove* the field, not
+     * park an empty string on it: `Project.repoUrl` is optional precisely so
+     * "no remote yet" reads the same on a project saved last year as on one
+     * saved today, and a pane asked to spawn with `repoUrl: ''` would end up
+     * exporting an empty FORGE_REPO_URL instead of falling back to git.
+     *
+     * The no-change return matters more than it looks: the menu's auto-detect
+     * writes the URL git just gave it, which on every open after the first is
+     * the URL already stored. Returning `state` untouched keeps the projects
+     * array identical, so the persistence effect never fires and opening a
+     * menu costs no disk write.
+     */
+    case 'setProjectRepoUrl': {
+      const url = action.url.trim().slice(0, MAX_REPO_URL)
+      const before = state.projects.find((p) => p.id === action.id)
+      if (!before || (before.repoUrl ?? '') === url) return state
+      return {
+        ...state,
+        projects: state.projects.map((p) => {
+          if (p.id !== action.id) return p
+          const next = { ...p }
+          if (url) next.repoUrl = url
+          else delete next.repoUrl
+          return next
+        })
+      }
+    }
 
     case 'removeProject': {
       const ws = workspaceOf(state, action.id)
@@ -963,6 +1003,16 @@ export interface AppActions {
    */
   addProjectPath(path: string, name?: string): void
   updateProject(id: string, patch: Partial<Project>): void
+  /**
+   * Record where a project pushes — see `Project.repoUrl`. Two callers, both in
+   * the project menu: Steve typing a URL in, and the auto-detect that asks git
+   * when the menu opens on a project that has none.
+   *
+   * Trimmed and capped on the way through, and an empty string clears the field
+   * rather than storing one. Separate from `updateProject` because "clear it"
+   * is not something a patch can say.
+   */
+  setProjectRepoUrl(id: string, url: string): void
   removeProject(id: string): void
   moveProject(from: number, to: number): void
   selectProject(id: string): void
@@ -1354,6 +1404,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         })
       },
       updateProject: (id, patch) => dispatch({ type: 'updateProject', id, patch }),
+      setProjectRepoUrl: (id, url) => dispatch({ type: 'setProjectRepoUrl', id, url }),
       removeProject: (id) => {
         dispatch({ type: 'removeProject', id })
         // The reducer queues the project's planner pane for disposal; the

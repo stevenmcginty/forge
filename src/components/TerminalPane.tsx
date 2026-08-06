@@ -68,7 +68,8 @@ export function TerminalPane({
     accent: profile.accent,
     projectName: project.name,
     paneTitle: paneDisplayTitle(profile, leaf.title),
-    sessionId: leaf.sessionId
+    sessionId: leaf.sessionId,
+    repoUrl: project.repoUrl
   })
   specRef.current = {
     cwd: project.path,
@@ -78,7 +79,8 @@ export function TerminalPane({
     accent: profile.accent,
     projectName: project.name,
     paneTitle: paneDisplayTitle(profile, leaf.title),
-    sessionId: leaf.sessionId
+    sessionId: leaf.sessionId,
+    repoUrl: project.repoUrl
   }
 
   /* ------------------------------------------------------------- attach */

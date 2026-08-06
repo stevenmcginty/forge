@@ -58,6 +58,9 @@ export const IPC = {
   openPath: 'shell:open-path',
   openExternal: 'shell:open-external',
 
+  // git — "where does this folder push?", for the project menu's Repository URL
+  gitRemoteOrigin: 'git:remote-origin',
+
   // onboarding — is `claude` / `kimi` / `gemini` on this machine's PATH?
   agentsProbe: 'agents:probe',
   // the same question about an arbitrary profile command, for the chooser and

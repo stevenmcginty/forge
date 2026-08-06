@@ -90,6 +90,20 @@ export interface Project {
   /** Profile used when a pane is opened without an explicit choice. */
   defaultProfileId: string
   createdAt: number
+  /**
+   * Where this project pushes — its GitHub remote, shown in the project menu
+   * and handed to every pane in the workspace as `FORGE_REPO_URL`.
+   *
+   * The point is agents talking to each other without Steve in the middle:
+   * Claude sets the repo up in one tab, and the Antigravity opened in the next
+   * one already knows the URL rather than being told it. Filled in by hand, or
+   * detected from `git remote get-url origin` the first time the menu is opened
+   * on a folder that has grown an origin.
+   *
+   * Optional because projects saved before it existed have no field at all, and
+   * because a folder with no remote yet is a perfectly normal project.
+   */
+  repoUrl?: string
 }
 
 /* ------------------------------------------------------------ pane layouts */
@@ -1478,6 +1492,13 @@ export interface CreateSessionRequest {
    * profile/settings decide, as ever.
    */
   remoteControl?: false
+  /**
+   * The project's repo URL, if the renderer knows one (see `Project.repoUrl`).
+   * Absent means "ask git yourself": the PTY host falls back to
+   * `git remote get-url origin` in the pane's cwd, so a pane opened in a folder
+   * whose remote was set up five minutes ago still gets it.
+   */
+  repoUrl?: string
 }
 
 export type CreateSessionResult =

@@ -60,6 +60,12 @@ export interface TerminalSpec {
    * a bridged session never writes.
    */
   remoteControl?: false
+  /**
+   * The project's GitHub remote, passed to the main process so the pane is
+   * spawned with `FORGE_REPO_URL` set. Absent for a project that has no URL
+   * recorded yet — the main process then asks git about the cwd itself.
+   */
+  repoUrl?: string
 }
 
 /**
@@ -953,6 +959,7 @@ class TerminalHost {
       projectName: entry.spec.projectName,
       paneTitle: entry.spec.paneTitle,
       ...(entry.spec.sessionId ? { sessionId: entry.spec.sessionId } : {}),
+      ...(entry.spec.repoUrl ? { repoUrl: entry.spec.repoUrl } : {}),
       ...(entry.spec.remoteControl === false ? { remoteControl: false as const } : {})
     })
     if (result.ok) {

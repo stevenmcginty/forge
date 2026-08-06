@@ -191,6 +191,7 @@ const api: ForgeApi = {
   makeProjectFolder: (req) => ipcRenderer.invoke(IPC.makeProjectFolder, req),
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
+  gitRemoteOrigin: (dir) => ipcRenderer.invoke(IPC.gitRemoteOrigin, dir),
 
   // File.path was removed in Electron 32; webUtils is the sanctioned way and
   // it only works from the preload.

@@ -856,7 +856,8 @@ function MosaicTile({
     accent: profile.accent,
     projectName: project.name,
     paneTitle: paneDisplayTitle(profile, cell.leaf.title),
-    sessionId: cell.leaf.sessionId
+    sessionId: cell.leaf.sessionId,
+    repoUrl: project.repoUrl
   })
   specRef.current = {
     cwd: project.path,
@@ -866,7 +867,8 @@ function MosaicTile({
     accent: profile.accent,
     projectName: project.name,
     paneTitle: paneDisplayTitle(profile, cell.leaf.title),
-    sessionId: cell.leaf.sessionId
+    sessionId: cell.leaf.sessionId,
+    repoUrl: project.repoUrl
   }
 
   /*

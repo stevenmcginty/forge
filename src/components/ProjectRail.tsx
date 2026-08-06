@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import type { Project } from '@shared/types'
 import { useAnyBusy } from '@/hooks/usePaneRuntime'
 import { ACCENT_PALETTE, resolveProfile } from '@/lib/agents'
@@ -235,7 +235,56 @@ function ProjectMenu({
 }): ReactNode {
   const { state, actions } = useApp()
   const [name, setName] = useState(project.name)
+  const [repoUrl, setRepoUrl] = useState(project.repoUrl ?? '')
   const [confirmRemove, setConfirmRemove] = useState(false)
+
+  /*
+   * The project as of this render, so the effect below can read it without
+   * listing every field of it as a dependency. It wants to run when the menu
+   * opens and at no other moment — including, pointedly, not when the URL it
+   * is about to write lands back on the project.
+   */
+  const projectRef = useRef(project)
+  projectRef.current = project
+
+  /* Has Steve touched the field since this open? Detection defers to him. */
+  const editedRef = useRef(false)
+
+  const commitRepoUrl = (value: string): void => {
+    editedRef.current = true
+    actions.setProjectRepoUrl(project.id, value)
+  }
+
+  /**
+   * "You already have a repo — here it is."
+   *
+   * A project that has no URL recorded gets one asked of git the moment its
+   * menu opens, so the common case (an agent ran `gh repo create` in a tab an
+   * hour ago) needs nothing typed at all. Only on open, and only when the field
+   * is empty at that moment: detection is a first-fill, not a policy, so a URL
+   * Steve deletes stays deleted for as long as the menu is up and a URL he
+   * typed by hand is never second-guessed.
+   *
+   * Two things can happen while git is being asked, and both win over the
+   * answer: the menu closes (`live`), or the field is edited (`editedRef`).
+   * Neither is unlikely — the ask is a process spawn away.
+   */
+  useEffect(() => {
+    if (!open) return
+    editedRef.current = false
+    const { id, path, repoUrl: known } = projectRef.current
+    setRepoUrl(known ?? '')
+    if (known) return
+    let live = true
+    void window.forge.gitRemoteOrigin(path).then((found) => {
+      if (!live || !found || editedRef.current) return
+      setRepoUrl(found)
+      actions.setProjectRepoUrl(id, found)
+    })
+    return () => {
+      live = false
+    }
+  }, [open])
 
   return (
     <Popover anchor={anchor} open={open} onClose={onClose} align="start" width={276} label="Project settings">
@@ -291,6 +340,36 @@ function ProjectMenu({
             {p.id === project.defaultProfileId ? <Icon name="check" size={13} /> : null}
           </PopoverRow>
         ))}
+      </PopoverSection>
+
+      <PopoverSection title="Repository">
+        <div className="field">
+          <label className="field__label" htmlFor={`prepo-${project.id}`}>
+            URL
+          </label>
+          <input
+            id={`prepo-${project.id}`}
+            className="field__input mono"
+            value={repoUrl}
+            spellCheck={false}
+            placeholder="https://github.com/you/repo"
+            onChange={(e) => {
+              editedRef.current = true
+              setRepoUrl(e.target.value)
+            }}
+            onBlur={() => commitRepoUrl(repoUrl)}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter') {
+                commitRepoUrl(repoUrl)
+                onClose()
+              }
+            }}
+          />
+        </div>
+        {repoUrl ? null : (
+          <div className="popover__hint">Left empty, each pane asks git for the origin itself.</div>
+        )}
       </PopoverSection>
 
       <PopoverDivider />

@@ -10,6 +10,7 @@ import { applyMcpBridge } from './bridge/mcp-config'
 import { applyRemoteControl } from './bridge/remote-control'
 import { applyClaudeSession } from './bridge/claude-session'
 import { presenceFile } from './presence'
+import { gitRemoteOrigin } from './git-remote'
 
 /**
  * The PTY host: owns one PtySessionManager and bridges it to the renderer.
@@ -295,12 +296,25 @@ export function registerPtyHandlers(): void {
         ? { GEMINI_API_KEY: settings.geminiKey.trim(), GEMINI_MODEL: GEMINI_CLI_MODEL }
         : undefined
 
+    // Where this project pushes, in every pane — Claude, Antigravity, Codex, or
+    // a bare PowerShell, because any of them can read an environment variable
+    // and none of them should have to be told. It is how the second agent
+    // learns where the first one pushed. The project's own answer wins; a pane
+    // whose renderer has none (or whose project predates the field) falls back
+    // to asking git in the pane's own cwd, so a remote created five minutes ago
+    // still shows up. Nothing is set when there is no repo at all.
+    const repoUrl = String(req?.repoUrl ?? '').trim() || gitRemoteOrigin(cwd) || ''
+    const env = {
+      ...(geminiEnv ?? {}),
+      ...(repoUrl ? { FORGE_REPO_URL: repoUrl } : {})
+    }
+
     const spec = {
       id: String(req?.id ?? ''),
       cwd,
       cols: Number(req?.cols ?? 80),
       rows: Number(req?.rows ?? 24),
-      ...(geminiEnv ? { env: geminiEnv } : {}),
+      ...(Object.keys(env).length > 0 ? { env } : {}),
       bootstrapCommand: notice ? '' : bootstrapCommand,
       ...(notice ? { bootstrapNotice: notice } : {})
     }
