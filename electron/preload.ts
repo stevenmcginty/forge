@@ -137,6 +137,7 @@ const api: ForgeApi = {
     onCommand: (cb) => subscribe(IPC.mobileCommand, cb),
     commandResult: (requestId, error) =>
       ipcRenderer.send(IPC.mobileCommandResult, { requestId, error: error ?? '' }),
+    onWatched: (cb) => subscribe(IPC.mobileWatched, cb),
     onApproval: (cb) => subscribe(IPC.mobileApproval, cb),
     // `=== true` so nothing short of an explicit allow crosses as one — a
     // truthy accident on this boundary would be a paired stranger.

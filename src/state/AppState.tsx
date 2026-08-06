@@ -1654,6 +1654,18 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
    * and documented in docs/MOBILE.md rather than hidden.
    */
 
+  /**
+   * Which panes a phone is reading, so the terminal host can hand those panes'
+   * geometry over to it. Kept next to the op handler because it is the same
+   * conversation — the phone's half of a pane the desktop also has open — and
+   * separate from it because it depends on nothing in the reducer.
+   */
+  useEffect(() => {
+    return window.forge.mobile.onWatched(({ panes }) => {
+      terminalHost.setPhoneWatched(Array.isArray(panes) ? panes : [])
+    })
+  }, [])
+
   useEffect(() => {
     return window.forge.mobile.onCommand(({ requestId, op }) => {
       const answer = (error?: string): void => window.forge.mobile.commandResult(requestId, error)

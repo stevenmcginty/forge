@@ -135,6 +135,10 @@ async function main() {
 
   const ops = []
   let opAnswer = null
+  // Every set of watched panes the server has announced, in order. The desktop
+  // uses these to decide which PTYs it must stop resizing, so "it fired" and
+  // "it fired only when the set actually changed" are both worth proving.
+  const watches = []
   const makeServer = (auth) =>
     new MobileServer({
       auth,
@@ -147,7 +151,8 @@ async function main() {
       dispatchOp: async (op) => {
         ops.push(op)
         return opAnswer
-      }
+      },
+      onWatch: (ids) => watches.push(ids.join(' '))
     })
 
   /* ------------------------------------------------ 0. the address rules */
@@ -285,9 +290,13 @@ async function main() {
   log(phone.first('replay').id === 'm1', 'sub answers with the replay buffer first')
   log(phone.first('replay').data.length > 0, 'and that buffer carries the scrollback')
 
+  await waitFor(() => watches.length > 0, 5000, 'the watch announcement')
+  log(watches[watches.length - 1] === 'm1', 'a phone opening a pane says so, so the desktop can hand it the geometry')
+
   phone.send({ t: 'sub', id: 'does-not-exist' })
   await waitFor(() => phone.of('err').length > 0, 5000, 'unknown-session error')
   log(phone.of('err')[0].code === 'unknown-session', 'subscribing to a pane that is gone is refused')
+  log(watches[watches.length - 1] === 'm1', 'and a refused sub changes nothing about what is watched')
 
   /* --------------------------------------------------------- 6. write echo */
 
@@ -304,6 +313,7 @@ async function main() {
 
   /* ------------------------------------------------- 8. a late subscriber */
 
+  const watchesBeforeLate = watches.length
   const late = await connect()
   late.send({ t: 'hello', proto: 1, deviceId: 'phone-1', token: issued })
   await waitFor(() => late.first('hello-ok'), 5000, 'late hello-ok')
@@ -316,9 +326,25 @@ async function main() {
 
   /* ------------------------------------ 9. disconnect does not kill the pane */
 
+  log(
+    watches.length === watchesBeforeLate,
+    'a second phone on the same pane is not a change of ownership, and says nothing'
+  )
+
   late.socket.close()
   await waitFor(() => late.closed !== null, 5000, 'late socket to close')
   log(manager.list().some((s) => s.id === 'm1'), 'closing the phone does not kill the session')
+  log(watches[watches.length - 1] === 'm1', 'and the pane stays watched while the other phone still holds it')
+
+  /* --------------------------------------------- 9b. handing the pane back */
+
+  phone.send({ t: 'unsub', id: 'm1' })
+  await waitFor(() => watches[watches.length - 1] === '', 5000, 'the pane to be handed back')
+  log(true, 'leaving a pane hands its geometry back to the desktop')
+
+  phone.send({ t: 'sub', id: 'm1' })
+  await waitFor(() => watches[watches.length - 1] === 'm1', 5000, 'the pane to be taken again')
+  log(true, 'and opening it again takes it back')
 
   /* ---------------------------------------------------------------- 10. op */
 

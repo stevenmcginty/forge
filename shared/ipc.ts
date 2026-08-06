@@ -193,6 +193,16 @@ export const IPC = {
   /** The renderer's answer to a mobileCommand. */
   mobileCommandResult: 'mobile:command-result',
   /**
+   * Which panes a phone currently has open, and at what geometry. Main →
+   * renderer, on every change.
+   *
+   * A PTY has one size and this link gives it two viewers, so one of them has
+   * to stand down: while a pane is on this list the renderer stops refitting
+   * it and letterboxes its own terminal at the phone's size. See the note
+   * above `watched` in electron/mobile-host.ts.
+   */
+  mobileWatched: 'mobile:watched',
+  /**
    * The ngrok tunnel — config, and its own on/off. Status rides the existing
    * mobileStatusEvent broadcast; there is no second event stream to subscribe
    * to and no second one to forget to.

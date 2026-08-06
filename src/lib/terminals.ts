@@ -31,6 +31,13 @@ export interface PaneRuntime {
    * remote-controlled Claude session.
    */
   remoteUrl: string | null
+  /**
+   * True while a phone has this pane open and is therefore the one deciding
+   * its size. The pane still works normally at the desk — this is a fact worth
+   * showing (the terminal is letterboxed at phone width, which otherwise reads
+   * as a bug), not a lock.
+   */
+  phone: boolean
 }
 
 export interface TerminalSpec {
@@ -85,7 +92,14 @@ export interface PaneGeometry {
   height: number
 }
 
-const IDLE_RUNTIME: PaneRuntime = { status: 'idle', pid: null, exitCode: null, error: null, remoteUrl: null }
+const IDLE_RUNTIME: PaneRuntime = {
+  status: 'idle',
+  pid: null,
+  exitCode: null,
+  error: null,
+  remoteUrl: null,
+  phone: false
+}
 
 /**
  * How much of the previous chunk to re-scan for the Remote Control URL. PTY
@@ -177,6 +191,12 @@ interface Entry {
   ptyDims: { cols: number; rows: number } | null
   /** Pending second half of a repaint jiggle — see resizePty. */
   jiggleTimer: number | null
+  /**
+   * A phone has this pane open, so the phone owns the geometry — see
+   * setPhoneWatched. While true, nothing here refits the terminal or resizes
+   * the PTY; the pane follows what the phone asked for instead.
+   */
+  phoneOwned: boolean
   /** Tail of the last output chunk, kept only until the RC URL is found. */
   scanTail: string
   /**
@@ -308,6 +328,12 @@ class TerminalHost {
    * is split.
    */
   private busyListeners = new Set<() => void>()
+  /**
+   * Panes a phone is reading, and the size it is reading them at. Kept even
+   * for panes with no entry yet, because the phone can ask for a tab that this
+   * host is about to create — see `create`.
+   */
+  private phoneWatched = new Map<string, { cols: number; rows: number }>()
   private wired = false
 
   /* ----------------------------------------------------------- plumbing */
@@ -614,7 +640,7 @@ class TerminalHost {
       fit,
       wrapper,
       spec,
-      runtime: { ...IDLE_RUNTIME },
+      runtime: { ...IDLE_RUNTIME, phone: this.phoneWatched.has(paneId) },
       container: null,
       mode: 'tab',
       geometry: null,
@@ -623,6 +649,10 @@ class TerminalHost {
       resizeTimer: null,
       ptyDims: null,
       jiggleTimer: null,
+      // A pane can be created while a phone is already reading it — the phone
+      // asked for the tab, and the desktop is building it. It must be born
+      // owned, or the very first fit takes the geometry straight back.
+      phoneOwned: this.phoneWatched.has(paneId),
       scanTail: '',
       typed: '',
       lastActivityNotify: 0,
@@ -1030,6 +1060,11 @@ class TerminalHost {
   fit(paneId: string): void {
     const entry = this.entries.get(paneId)
     if (!entry || !entry.container) return
+    // A phone is reading this pane, so the phone's geometry is the pane's
+    // geometry until it stops — see setPhoneWatched. The observer still fires
+    // (the box is still moving, and `geometry` below would be worth having);
+    // it simply must not become a resize.
+    if (entry.phoneOwned) return
     const { clientWidth, clientHeight } = entry.container
     if (clientWidth < 8 || clientHeight < 8) return
     // Only a full-size layout is worth remembering — a peek tile's box is
@@ -1044,6 +1079,64 @@ class TerminalHost {
 
   fitAll(): void {
     for (const id of this.entries.keys()) this.fit(id)
+  }
+
+  /**
+   * Hand the panes a phone is reading over to it, and take back the ones it
+   * has let go.
+   *
+   * The problem this solves is that a PTY has one geometry and the link gives
+   * it two viewers. Both ends used to fit it to their own box, and since the
+   * desktop refits on any layout change — a window resize, a split, the boot
+   * `fitAll` — the desktop kept winning: a pane being read on a phone would
+   * have its width dragged back to the desk's without anything on the phone
+   * knowing, and every line after that arrived wrapped for a screen three
+   * times wider than the one showing it.
+   *
+   * So there is an owner. While a pane is on this list:
+   *
+   *  - `fit` is a no-op for it, so nothing here resizes the PTY, and
+   *  - the desktop's own terminal is resized *to the phone's* cols/rows, which
+   *    letterboxes it inside the pane — the same screen, at the size it is
+   *    actually being drawn at, rather than a lie the width of the window.
+   *
+   * `ptyDims` is set before `term.resize` on purpose: xterm answers a resize
+   * with `onResize`, which queues a PTY resize, and the settle check compares
+   * against `ptyDims`. Recording the size first is what makes adoption
+   * *following* the PTY rather than arguing with it.
+   *
+   * Dropping off the list refits against the real container, which sends the
+   * desktop's geometry back down with the usual repaint jiggle.
+   */
+  setPhoneWatched(panes: Array<{ id: string; cols: number; rows: number }>): void {
+    const next = new Map<string, { cols: number; rows: number }>()
+    for (const pane of panes) {
+      if (pane.cols > 0 && pane.rows > 0) next.set(pane.id, { cols: pane.cols, rows: pane.rows })
+    }
+    this.phoneWatched = next
+
+    for (const [paneId, entry] of this.entries) {
+      const watched = next.get(paneId)
+      if (watched) {
+        if (!entry.phoneOwned) {
+          entry.phoneOwned = true
+          this.setRuntime(entry, { phone: true })
+        }
+        if (entry.term.cols !== watched.cols || entry.term.rows !== watched.rows) {
+          entry.ptyDims = { cols: watched.cols, rows: watched.rows }
+          try {
+            entry.term.resize(watched.cols, watched.rows)
+          } catch {
+            /* xterm throws if measured mid-teardown — harmless */
+          }
+        }
+        continue
+      }
+      if (!entry.phoneOwned) continue
+      entry.phoneOwned = false
+      this.setRuntime(entry, { phone: false })
+      this.fit(paneId)
+    }
   }
 
   /**

@@ -77,6 +77,22 @@ export interface MobileServerHost {
    */
   onPresence?: (connected: number) => void
 
+  /**
+   * Which sessions a phone currently has open, whenever that set changes.
+   *
+   * A PTY has exactly one geometry and this link gives it two viewers. Without
+   * this, both fitted it to their own box and the last one to move won: the
+   * desktop pane refits on any layout change, so a phone reading a pane on a
+   * train would have the width yanked back to the desktop's mid-sentence, and
+   * every line after that wrapped for a screen three times wider than the one
+   * showing it. Naming the watched sessions lets the desktop stand down and
+   * adopt the phone's size for as long as the phone is the one reading.
+   *
+   * Fired on subscribe, unsubscribe, exit and hangup, with the full set each
+   * time — a diff the receiver has to reassemble is a diff that can be missed.
+   */
+  onWatch?: (ids: string[]) => void
+
   /* ------------------------------------------------- pairing by approval
    *
    * The tap-to-pair flow: a phone with no credential asks, a prompt goes up
@@ -193,6 +209,8 @@ export class MobileServer {
   private pendingApproval: Client | null = null
   /** When the last prompt was raised, for PROMPT_COOLDOWN_MS. */
   private lastPromptAt = 0
+  /** The last set handed to `onWatch`, so an unchanged set says nothing. */
+  private announcedWatch = ''
 
   constructor(host: MobileServerHost) {
     this.host = host
@@ -273,6 +291,26 @@ export class MobileServer {
         this.send(client, { t: 'exit', id, exitCode })
       }
     }
+    this.announceWatch()
+  }
+
+  /**
+   * Tell the host which sessions are being read from a phone, when that has
+   * changed. The union across every socket, because two phones on one pane is
+   * still "a phone is reading this".
+   */
+  private announceWatch(): void {
+    if (!this.host.onWatch) return
+    const ids = new Set<string>()
+    for (const client of this.clients) {
+      if (!client.device) continue
+      for (const id of client.subs) ids.add(id)
+    }
+    const list = [...ids].sort()
+    const key = list.join(' ')
+    if (key === this.announcedWatch) return
+    this.announcedWatch = key
+    this.host.onWatch(list)
   }
 
   /** Something changed on the desktop — broadcast to every authenticated phone. */
@@ -324,6 +362,9 @@ export class MobileServer {
       if (client.device) {
         this.log(`${client.device.name} disconnected`)
         this.host.onPresence?.(this.connectedCount)
+        // A phone that hangs up is no longer reading anything, so the desktop
+        // takes its panes back — including after a tunnel drops mid-pane.
+        this.announceWatch()
       }
     })
     socket.on('error', () => this.drop(client, 1011, 'Socket error'))
@@ -360,6 +401,10 @@ export class MobileServer {
           return
         }
         client.subs.add(id)
+        // Before the replay, not after: the buffer about to be sent was written
+        // at the desktop's width, and the sooner the desktop hands the geometry
+        // over the fewer lines the phone paints at a width it is not.
+        this.announceWatch()
         // Catch-up first, then live data. Same buffer a reloading renderer gets.
         this.send(client, { t: 'replay', id, data: this.host.replay(id) })
         return
@@ -367,6 +412,7 @@ export class MobileServer {
 
       case 'unsub':
         client.subs.delete(wireString(frame.id, 128))
+        this.announceWatch()
         return
 
       case 'write': {

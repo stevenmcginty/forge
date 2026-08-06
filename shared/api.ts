@@ -23,6 +23,7 @@ import type {
   MobileCommandEvent,
   MobilePairOffer,
   MobileStatus,
+  MobileWatchEvent,
   OpenRouterCallRequest,
   OpenRouterCallResult,
   GroqCallRequest,
@@ -372,6 +373,12 @@ export interface ForgeApi {
     onCommand(cb: (e: MobileCommandEvent) => void): () => void
     /** Answer an `onCommand`. `error` empty means it worked. */
     commandResult(requestId: string, error?: string): void
+    /**
+     * Which panes a phone has open, and at what size. While a pane is on this
+     * list the renderer must leave its geometry alone and follow the phone's —
+     * one PTY cannot be two widths, and the phone is the one being read.
+     */
+    onWatched(cb: (e: MobileWatchEvent) => void): () => void
     /**
      * A phone is asking to pair. `open: true` raises the prompt (device name
      * and the word pair its screen is showing); `open: false` withdraws it.

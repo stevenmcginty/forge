@@ -92,6 +92,13 @@ growing a parallel one in main that could disagree with it.
 closed is not. Layout ops then fail with a sentence saying so, rather than
 silently doing nothing. Driving an existing terminal still works either way.
 
+The phone greys out any pane it cannot find in the session list, so the list has
+to keep up with the tab it just asked for. It is pushed on three things: a
+workspace save (which the renderer debounces by 250ms), a pane **spawning**
+(`PtySink.onSpawn`), and a pane exiting. The spawn push is the one that stops a
+tab opened from the phone arriving as a row that says "not running" and stays
+that way until something unrelated moves the workspace again.
+
 ---
 
 ## The phone app
@@ -144,6 +151,48 @@ the animation** — otherwise the slide would fire a `pty:resize` per frame and 
 shell would reflow its prompt a dozen times on every tap. `fit()` also refuses
 to run against a container with no height, which is what stops a mid-layout
 measurement resizing the real PTY to nonsense.
+
+A `ResizeObserver` on the terminal's holder covers what the viewport listener
+cannot: the holder's own box changing, and — the case that mattered — the *first*
+fit of a pane's life landing before the flex layout has settled. That fit is
+refused by the rule above, and until the observer existed nothing retried it, so
+the terminal sat at xterm's default 80×24 while the PTY stayed at the desktop's
+width. Everything then arrived wrapped for a screen twice as wide as the one
+showing it, which is what "the text runs off the edge" actually was.
+
+### One PTY, two viewers
+
+A pane open on the desktop and the same pane open on a phone are one ConPTY, and
+a ConPTY has one width. Both ends fitting it to their own box means the last one
+to move wins — and the desktop moves on every layout change, so a pane being read
+on a phone would have its geometry dragged back to the desk's without the phone
+ever knowing.
+
+So there is an owner, and while a phone has a pane open the phone is it:
+
+- The server tracks the union of subscribed sessions across every socket and
+  announces it through `onWatch` whenever it changes (subscribe, unsubscribe,
+  exit, hangup). `mobile-host` forwards that to the renderer as `mobile:watched`,
+  carrying each watched pane's *current* geometry, read off the session manager
+  rather than off the phone's frame.
+- `terminalHost.setPhoneWatched` makes `fit()` a no-op for those panes and
+  resizes the desktop's own xterm **to the phone's** cols/rows. The pane is
+  letterboxed inside its box, which is honest: it is the size the pane is
+  actually being drawn at. The header says `ON PHONE` so it does not read as a
+  bug.
+- Dropping off the list refits against the real container, which hands the
+  geometry back with the usual repaint jiggle.
+
+A phone's resize goes down as `rows - 1` and then `rows`, the same jiggle
+`resizePty` does in the renderer and for the same reason: an Ink TUI only
+rewrites the rows it believes changed, and ConPTY's reflow leaves fragments of
+the old frame behind. No program honours a "please repaint" sequence; every one
+of them redraws for a size change.
+
+The last size each phone asked for is remembered in `phoneGeometry` so it can be
+re-asserted when a session is re-adopted — a renderer reload (dev HMR, a crash)
+re-creates every pane at the *desktop's* geometry, and a phone reading one of
+them would otherwise lose the width without a word.
 
 ### Reconnecting
 

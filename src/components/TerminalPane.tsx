@@ -357,6 +357,18 @@ export function TerminalPane({
           </span>
         ) : null}
 
+        {/* A pane being read on a phone is letterboxed at the phone's width —
+            deliberately, so both screens show the same thing (see
+            setPhoneWatched). Unlabelled, that reads as a broken pane. */}
+        {runtime.phone ? (
+          <span
+            className="pane__perm mono"
+            title="A phone has this pane open, so it is drawn at the phone's size until the phone leaves"
+          >
+            ON PHONE
+          </span>
+        ) : null}
+
         <ActivityDot paneId={leaf.id} status={runtime.status} />
 
         {statusLabel ? <span className="pane__status mono">{statusLabel}</span> : null}

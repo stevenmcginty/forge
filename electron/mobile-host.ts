@@ -67,6 +67,99 @@ let tunnelStarting = false
  */
 let blockerId = 0
 
+/* ---------------------------------------------------- one PTY, two viewers
+ *
+ * A pane on the desktop and the same pane on a phone are the same ConPTY, and
+ * a ConPTY has one width. Both ends used to fit it to their own box, so
+ * whichever moved last won — and the desktop moves on every layout change,
+ * which meant a phone reading a pane from a train would silently have the
+ * width dragged back to the desktop's, and everything after that was wrapped
+ * for a screen it was not being read on.
+ *
+ * The rule now: while a phone has a pane open, the phone owns its geometry.
+ * The set of watched panes and their current size is broadcast to the renderer
+ * (mobileWatched), which stops refitting those panes and letterboxes its own
+ * terminal at the phone's size — so both ends draw the same screen. Handing a
+ * pane back is the same message with the pane no longer in it.
+ */
+
+/** Session ids at least one phone currently has open. */
+let watched = new Set<string>()
+
+/**
+ * The last size each phone asked for, kept so it can be re-asserted.
+ *
+ * The case that needs it is a renderer reload (dev HMR, or a crash) while a
+ * phone is reading a pane: the renderer re-adopts every session and resizes it
+ * to its own idea of the geometry, which would take the width back from the
+ * phone without the phone ever knowing. See the `onSpawn` sink.
+ */
+const phoneGeometry = new Map<string, { cols: number; rows: number }>()
+
+/**
+ * Gap between the short size and the true one when a phone resizes — the same
+ * repaint jiggle `resizePty` does in the renderer, and for the same reason: an
+ * Ink TUI (Claude Code, Codex) only rewrites the rows it thinks changed, and
+ * ConPTY's reflow leaves fragments of the old frame behind. No program is
+ * obliged to honour a "please repaint" sequence, but every one of them redraws
+ * for a size change. Without this the phone's first screen after a resize is
+ * the desktop-width frame with a phone-width frame drawn through it.
+ */
+const REDRAW_JIGGLE_MS = 60
+
+/** Pending second halves, keyed by session id. */
+const jiggles = new Map<string, NodeJS.Timeout>()
+
+function clearJiggle(id: string): void {
+  const timer = jiggles.get(id)
+  if (timer) {
+    clearTimeout(timer)
+    jiggles.delete(id)
+  }
+}
+
+/**
+ * A phone asked for a size. Applied one row short, then true a beat later, and
+ * the renderer is told the result so its own terminal follows.
+ */
+function resizeForPhone(id: string, cols: number, rows: number): boolean {
+  clearJiggle(id)
+  phoneGeometry.set(id, { cols, rows })
+  if (rows < 3) {
+    const ok = getManager().resize(id, cols, rows)
+    publishWatched()
+    return ok
+  }
+  const ok = getManager().resize(id, cols, rows - 1)
+  jiggles.set(
+    id,
+    setTimeout(() => {
+      jiggles.delete(id)
+      getManager().resize(id, cols, rows)
+      // After the jiggle, never during it: the renderer adopts the geometry it
+      // is handed, and being handed the short size would letterbox the desktop
+      // one row shy of the phone forever.
+      publishWatched()
+    }, REDRAW_JIGGLE_MS)
+  )
+  return ok
+}
+
+/**
+ * Tell the renderer which panes a phone is reading and at what size.
+ *
+ * Sizes come from the session manager rather than from the phone's frame, so
+ * this reports what the PTY *is*, clamped and all, not what was asked for.
+ */
+function publishWatched(): void {
+  const sessions = getManager().list()
+  broadcast(IPC.mobileWatched, {
+    panes: sessions
+      .filter((s) => watched.has(s.id))
+      .map((s) => ({ id: s.id, cols: s.cols, rows: s.rows }))
+  })
+}
+
 function getAuth(): MobileAuth {
   if (!auth) {
     auth = new MobileAuth({
@@ -302,7 +395,7 @@ async function start(): Promise<void> {
     sessions: () => getManager().list(),
     replay: (id) => getReplay(id),
     write: (id, data) => getManager().write(id, data),
-    resize: (id, cols, rows) => getManager().resize(id, cols, rows),
+    resize: (id, cols, rows) => resizeForPhone(id, cols, rows),
     snapshot: () => snapshotForPhone(),
     dispatchOp,
     acceptUntil: () => armedUntil(),
@@ -313,6 +406,13 @@ async function start(): Promise<void> {
       if (connected > 0) holdBlocker()
       else releaseBlocker()
       report()
+    },
+    onWatch: (ids) => {
+      watched = new Set(ids)
+      // A pane nobody is reading has no phone geometry to remember; keeping it
+      // would let a stale size be re-asserted at the next reload.
+      for (const id of [...phoneGeometry.keys()]) if (!watched.has(id)) phoneGeometry.delete(id)
+      publishWatched()
     },
     log: (line) => console.log(line)
   })
@@ -337,7 +437,22 @@ async function start(): Promise<void> {
   // The phone sees what the window sees, from the same coalesced flush.
   unsubscribePty = addPtySink({
     onData: (id, data) => instance.pushData(id, data),
+    // A pane that has just started is as much a change to the phone's list as
+    // one that has just died — and the list is what decides whether a row can
+    // be tapped. Without this, a tab opened from the phone could sit there
+    // reading "not running" until something unrelated moved. See PtySink.
+    onSpawn: (id) => {
+      instance.pushState({ sessions: getManager().list() })
+      // Re-adoption after a renderer reload arrives here too, having just
+      // resized the session to the desktop's geometry. If a phone is reading
+      // it, that is the wrong answer and this puts it back.
+      const geometry = watched.has(id) ? phoneGeometry.get(id) : undefined
+      if (geometry) resizeForPhone(id, geometry.cols, geometry.rows)
+      else publishWatched()
+    },
     onExit: (id, exitCode) => {
+      clearJiggle(id)
+      phoneGeometry.delete(id)
       instance.pushExit(id, exitCode)
       // A dead pane changes the picture, so the phone's list is refreshed too.
       instance.pushState({ sessions: getManager().list() })
@@ -360,6 +475,15 @@ async function stop(): Promise<void> {
   for (const requestId of [...pendingApprovals.keys()]) settleApproval(requestId, false)
   unsubscribePty?.()
   unsubscribePty = null
+  // Switching the link off hands every pane back to the desktop — a pane still
+  // letterboxed at phone width by a server that no longer exists would never
+  // be given its geometry back.
+  for (const id of [...jiggles.keys()]) clearJiggle(id)
+  phoneGeometry.clear()
+  if (watched.size > 0) {
+    watched = new Set()
+    publishWatched()
+  }
   releaseBlocker()
   const instance = server
   server = null

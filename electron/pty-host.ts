@@ -92,6 +92,19 @@ export function liveSessions(): LiveSession[] {
 export interface PtySink {
   onData: (id: string, data: string) => void
   onExit: (id: string, exitCode: number) => void
+  /**
+   * A session just came into existence. Optional, because a sink that only
+   * relays bytes has no use for it.
+   *
+   * The phone needs it: its pane list greys out any pane it cannot find in the
+   * session list, and the only pushes that carried a fresh list were the
+   * workspace save (which races the spawn — it is debounced by 250ms in the
+   * renderer, the spawn is not) and the *exit* of a pane. So a tab opened from
+   * the phone could arrive in the list already dead-looking, and stay that way
+   * until something else moved. A spawn is a change to the picture exactly as
+   * much as an exit is.
+   */
+  onSpawn?: (id: string) => void
 }
 
 const sinks = new Set<PtySink>()
@@ -341,6 +354,10 @@ export function registerPtyHandlers(): void {
       console.error(`[pty] create ${spec.id} failed: ${result.error}`)
       return result
     }
+
+    // Announced for both branches below: a re-adopted session is new to
+    // anything that was not watching when it first started.
+    toSinks((sink) => sink.onSpawn?.(spec.id))
 
     if (existed) {
       getManager().resize(spec.id, spec.cols, spec.rows)

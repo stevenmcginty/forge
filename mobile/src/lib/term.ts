@@ -111,6 +111,26 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
 
   const releaseTouch = enableTouchScroll(container, term, () => options.fontSize)
 
+  /**
+   * Refit whenever the holder's own box changes — which is also the retry for a
+   * fit that arrived too early.
+   *
+   * `fit()` above refuses to measure a container under 8px, and the first call
+   * of a pane's life can easily land there: the effect that mounts the terminal
+   * runs before the flex layout has settled, and the phone then had nothing
+   * watching for the size it eventually got. The terminal stayed at xterm's
+   * default 80×24 while the PTY stayed at whatever the *desktop* last set, so
+   * output was wrapped for a screen twice as wide as the one showing it — the
+   * "typing runs off the edge" bug. The observer fires as soon as the box is
+   * real, so the early fit is never the last word.
+   *
+   * Kept alongside `onViewportSettled` in PaneView rather than replacing it: an
+   * Android soft keyboard changes the *visual viewport* without necessarily
+   * changing this element's layout box, and only one of the two sees each case.
+   */
+  const observer = new ResizeObserver(() => fit())
+  observer.observe(container)
+
   return {
     term,
     fit,
@@ -118,6 +138,7 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     reset: () => term.reset(),
     focus: () => term.focus(),
     dispose: () => {
+      observer.disconnect()
       releaseTouch()
       term.dispose()
     }

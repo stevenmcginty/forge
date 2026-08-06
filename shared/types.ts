@@ -1622,6 +1622,16 @@ export interface MobileCommandEvent {
   }
 }
 
+/**
+ * The panes a phone is reading right now, and the geometry it is reading them
+ * at — the desktop's cue to stop fitting those PTYs and follow instead.
+ *
+ * An empty list is the normal, and the message that hands everything back.
+ */
+export interface MobileWatchEvent {
+  panes: Array<{ id: string; cols: number; rows: number }>
+}
+
 export type MobileState = 'off' | 'starting' | 'listening' | 'error'
 
 /* ------------------------------------------------------- the ngrok tunnel */
