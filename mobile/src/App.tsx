@@ -6,7 +6,7 @@ import { canScan, scanPairingCode } from './lib/scan'
 import { Browser, leavesOf } from './components/Browser'
 import { PaneView, paneListeners } from './components/PaneView'
 import { UpdateSheet } from './components/Update'
-import { CURRENT_VERSION_NAME, startAutoCheck, updateStore } from './lib/update'
+import { CURRENT_VERSION_NAME, startAutoUpdate, updateStore } from './lib/update'
 
 /**
  * Forge Mobile.
@@ -47,14 +47,14 @@ export function App(): React.JSX.Element {
   const [hint, setHint] = useState('')
   const [showUpdate, setShowUpdate] = useState(false)
   // Whether there is a newer APK, asked and answered without the user's
-  // involvement. This is the fix for a real complaint: the update control
-  // existed on every screen and was still undiscoverable, because "v0.2.0" in
-  // a pill reads as a label, and nothing ever volunteered that a new version
-  // was out. See startAutoCheck.
+  // involvement — and, since startAutoUpdate, fetched and offered to the
+  // installer without it either. The pill is what is left over for the cases
+  // Android will not let an app do on its own: the install grant, and a
+  // confirmation the user declined.
   const updatePhase = useSyncExternalStore(updateStore.subscribe, () => updateStore.getState().phase)
   const updateReady = updatePhase === 'available' || updatePhase === 'ready'
 
-  useEffect(() => startAutoCheck(), [])
+  useEffect(() => startAutoUpdate(), [])
   // Mirrors the secure store, because readToken() is module state and React
   // cannot see it change. What it decides: a stamped, unpaired APK gets the
   // one-tap screen; everything else gets the form.

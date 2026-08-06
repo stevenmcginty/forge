@@ -61,6 +61,7 @@
     "apk:init": "node scripts/apk-init.mjs",
     "apk:build": "node scripts/apk-build.mjs",
     "apk:release": "node scripts/apk-release.mjs",
+    "apk:ship": "node scripts/apk-ship.mjs",
     "apk:check": "node scripts/apk-check.mjs"
   },
   "devDependencies": {

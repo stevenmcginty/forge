@@ -161,36 +161,107 @@ export async function check(): Promise<void> {
  */
 const RECHECK_AFTER_MS = 30 * 60_000
 
+/**
+ * How long to leave the installer alone after offering it once.
+ *
+ * Android's install confirmation is the system's, not ours, and declining it
+ * leaves the verified file exactly where it was — `ready`. Without this, every
+ * return to the app would raise that dialog again, which is how an app that
+ * updates itself becomes an app you uninstall.
+ */
+const REOFFER_INSTALL_AFTER_MS = 60 * 60_000
+
 let lastCheckedAt = 0
+let lastInstallOfferedAt = 0
+let autoRunning = false
 
 /**
- * Ask about updates without being asked to.
+ * Check, download and install without being asked to.
  *
  * The version chip was reachable from the moment updating existed, and Steve
  * still could not find it — he assumed he had to *unpair* to get at it. The
- * lesson is not that the button needed to be bigger. It is that a self-updating
- * app which waits to be interrogated will never be interrogated: nobody opens a
- * terminal client wondering what version it is. So the app checks on its own
- * and *says* when there is something, and the chip stops being the discovery
- * mechanism and becomes merely the way in.
+ * first answer to that was for the app to check on its own and *say* when there
+ * was something. That was still two taps of homework for a phone whose whole
+ * job is to be picked up and used, so now the app does the work: a revision
+ * lands, the phone finds it, fetches it, verifies the hash, and offers it to
+ * the installer.
  *
- * Deliberately quiet. A failed check leaves `unreachable`, which no screen
- * shouts about — being offline is a normal Tuesday, not a problem to report.
- * It never runs while a download is in flight or a verified file is waiting to
- * install, because re-checking would discard the path that was just hashed.
+ * What it cannot do is install silently. Android hands a sideloaded package to
+ * its own confirmation dialog and there is no way around that short of being
+ * device owner, so "automatic" honestly means: nothing to find, nothing to
+ * download by hand, one confirm. Two things stop that confirm being a nuisance:
+ * it is only raised while the app is actually in front, and only once an hour
+ * (see REOFFER_INSTALL_AFTER_MS) — declining leaves the verified file ready and
+ * the version chip saying so.
+ *
+ * If Android has not been told Forge may install packages, the flow stops at
+ * `ready` rather than dragging the user into a settings screen unasked. The
+ * chip says "Update", the sheet's Install button asks for the grant, and the
+ * automatic path takes over from the next check onwards.
+ *
+ * Deliberately quiet everywhere else. A failed check leaves `unreachable`,
+ * which no screen shouts about — being offline is a normal Tuesday.
  */
-export function startAutoCheck(): () => void {
+export function startAutoUpdate(): () => void {
   const run = (): void => {
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
-    if (state.phase === 'downloading' || state.phase === 'ready') return
-    if (lastCheckedAt && Date.now() - lastCheckedAt < RECHECK_AFTER_MS) return
-    lastCheckedAt = Date.now()
-    void check()
+    void advance()
   }
   run()
   if (typeof document === 'undefined') return () => {}
   document.addEventListener('visibilitychange', run)
   return () => document.removeEventListener('visibilitychange', run)
+}
+
+/**
+ * One pass of the automatic flow, from wherever it currently is.
+ *
+ * Written as a sequence rather than as reactions to state changes so that a
+ * hand-driven download from the sheet cannot be joined halfway by this and end
+ * up installing something the user was still reading the notes for.
+ */
+async function advance(): Promise<void> {
+  if (autoRunning) return
+  autoRunning = true
+  // Read through a function, never as `state.phase` directly: the steps below
+  // change the phase by calling `check`/`download`, and a narrowed literal type
+  // held across those awaits would be the compiler asserting something this
+  // function exists to disprove.
+  const phase = (): UpdatePhase => state.phase
+  try {
+    if (phase() !== 'available' && phase() !== 'ready') {
+      if (phase() === 'downloading') return
+      if (lastCheckedAt && Date.now() - lastCheckedAt < RECHECK_AFTER_MS) return
+      lastCheckedAt = Date.now()
+      await check()
+    }
+
+    // The browser debug route has no installer; `download` there opens a tab,
+    // which is not something to do to someone who did not ask.
+    if (!isNativeApp()) return
+
+    if (phase() === 'available') await download()
+    if (phase() !== 'ready') return
+
+    if (lastInstallOfferedAt && Date.now() - lastInstallOfferedAt < REOFFER_INSTALL_AFTER_MS) return
+    // Asked before offering, because `install` answers a missing grant by
+    // sending the user to a settings screen — the right response to a tap, and
+    // the wrong one to a background check nobody asked for.
+    let allowed = false
+    try {
+      allowed = (await native.canInstall()).allowed === true
+    } catch {
+      allowed = false
+    }
+    if (!allowed) {
+      set({ detail: 'Downloaded and verified. Allow installs from Forge to finish — tap Update.' })
+      return
+    }
+    lastInstallOfferedAt = Date.now()
+    await install()
+  } finally {
+    autoRunning = false
+  }
 }
 
 export async function download(): Promise<void> {

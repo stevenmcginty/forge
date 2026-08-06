@@ -126,12 +126,29 @@ Either way, that is the last time the phone is told an address. It stores a
 
 ### Updating it afterwards
 
-There is a version chip in the app's status strip, and a link on the connect
-screen for when the desktop is unreachable. Tapping it checks the release
-manifest, and if there is something newer it shows the version and notes,
-downloads it with a progress bar, **verifies the download's SHA-256 against the
-manifest**, and hands it to Android to install. A hash mismatch deletes the file
-and refuses — that check is not decorative, this app holds a key to a shell.
+**From build 10 onwards the app updates itself.** On being brought to the front
+(at most every 30 minutes) it checks the release manifest; if a newer build
+exists it downloads it in the background, **verifies the download's SHA-256
+against the manifest**, and raises Android's install confirmation. A hash
+mismatch deletes the file and refuses — that check is not decorative, this app
+holds a key to a shell.
+
+The one tap that cannot be removed is Android's own. A sideloaded package always
+goes through the system installer's confirm dialog; there is no way past it
+short of being device owner, so "automatic" here means nothing to find and
+nothing to fetch by hand. That dialog is only raised while the app is actually
+in front, and at most once an hour, so declining it is not a decision you are
+asked to make repeatedly.
+
+Two cases still need the version chip in the status strip (or its twin on the
+connect screen, for when the desktop is unreachable):
+
+- **Android has not been told Forge may install packages.** The flow stops at
+  "downloaded and verified" rather than dragging you into a settings screen
+  unasked; the chip says *Update*, and Install asks for the grant. After that
+  it is automatic forever.
+- **Builds 9 and earlier**, which have no automatic path at all — one tap of the
+  chip, once, and the copy it installs takes over.
 
 ---
 
@@ -156,15 +173,26 @@ you would still have after this disk died.
 ## 5. Shipping a new version
 
 ```
+npm run apk:ship                # bump, build, sign, hash, publish — one command
+npm run apk:ship -- --bump minor --notes "What changed"
+```
+
+That is the whole of it: every installed copy finds the release by itself. The
+two steps underneath are still there for the times one of them is all you want:
+
+```
 npm run apk:build -- --bump     # stamps mobile/version.json, gradle and the
                                 # Vite defines from one source, signs, hashes
 npm run apk:release             # creates the GitHub release, uploads the APK
                                 # and latest.json
 ```
 
+`apk:ship` bumps by default, which is the difference between it and `apk:build`.
 Versions are immutable: `apk:release` refuses a tag that already exists, because
 a reused tag means two different binaries claiming one version and phones with
-no way to tell which they have.
+no way to tell which they have. A build that is never published is the quieter
+version of the same problem — the phone polls a release that does not exist and
+truthfully reports itself up to date — and one command is how neither happens.
 
 Releases are cut **from this machine, never from CI** — signing in GitHub
 Actions would mean putting that keystore into repository secrets, and it is the
