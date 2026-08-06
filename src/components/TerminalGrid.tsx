@@ -6,6 +6,7 @@ import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { ACCENT_PALETTE, TAB_TEXT_PALETTE, isShellProfile, resolveProfile } from '@/lib/agents'
 import { TAB_DRAG_TYPE } from '@/lib/mosaicLayout'
 import { terminalHost } from '@/lib/terminals'
+import { useAnyBusy } from '@/hooks/usePaneRuntime'
 import {
   useActiveProject,
   useActiveTab,
@@ -391,6 +392,8 @@ function Tab({
   const ref = useRef<HTMLDivElement | null>(null)
 
   const leaves = collectLeaves(tab.root)
+  const paneIds = leaves.map((l) => l.id)
+  const working = useAnyBusy(paneIds)
   const badges = leaves.slice(0, 3).map((leaf) => resolveProfile(state.settings.agentProfiles, leaf.profileId))
   // Agent tabs inherit the profile accent; an explicit tab colour still wins.
   const primaryProfile = leaves[0] ? resolveProfile(state.settings.agentProfiles, leaves[0].profileId) : null
@@ -420,7 +423,8 @@ function Tab({
       aria-selected={active}
       data-active={active}
       data-tint={tabTint ? 'true' : undefined}
-      title={`${agentName} · ${tab.title} · Double-click to rename · Right-click for colours`}
+      data-working={working ? 'true' : undefined}
+      title={`${agentName} · ${tab.title} · Double-click to rename · Right-click for colours${working ? ' · Working…' : ''}`}
       style={
         {
           ...(tabTint ? { '--tab-tint': tabTint } : {}),
@@ -494,7 +498,8 @@ function Tab({
           terminal text colouring is enabled. */}
       <span
         className="tab__textdot"
-        title={`Session colour for ${tab.title}: ${sessionColor}`}
+        data-working={working ? 'true' : undefined}
+        title={`Session colour for ${tab.title}: ${sessionColor}${working ? ' (working…)' : ''}`}
         aria-label="Terminal session colour"
       />
 
