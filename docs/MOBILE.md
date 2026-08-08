@@ -320,6 +320,111 @@ goes back to being ephemeral.
 
 ---
 
+## The iPhone route: install it as a PWA
+
+There is no Forge iOS app and there is not going to be one — an Apple developer
+account, a signing identity and TestFlight are a lot of scaffolding for a client
+that already exists. An iPhone gets the **same bundle** the APK wraps, installed
+to the home screen as a web app.
+
+Almost none of this needed new app code. `secure.ts`, `scan.ts` and `update.ts`
+have branched on `Capacitor.isNativePlatform()` since the APK landed, and the
+browser fallback on each branch is the PWA. What was added is the packaging:
+`mobile/public/manifest.webmanifest`, the `apple-*` tags in `mobile/index.html`,
+a service worker, and `mobile/src/lib/pwa.ts` to tie them together.
+
+### It has to be HTTPS
+
+This is the whole setup, and there is no way around it. On a plain
+`http://192.168.x.x:8420` origin an iPhone is not in a *secure context*, and
+that removes three things at once:
+
+- **Service workers are unavailable**, so the app shows Safari's offline page
+  the instant the link blinks rather than its own "reconnecting".
+- **`crypto.randomUUID` is `undefined`** — the failure `mobile/src/lib/link.ts`
+  documents at length, which appears only on the phone and only at runtime.
+- **`getUserMedia` will not start**, so nothing camera-shaped can ever work.
+
+An installed-but-insecure PWA is worse than a browser tab, because it looks
+finished. So the LAN route stays what it always was — phone Chrome, typed
+address — and the home-screen route runs over one of these:
+
+| Carrier | Verdict |
+| --- | --- |
+| **Tailscale Serve** | The recommendation. `tailscale serve --bg 8420` puts a real Let's Encrypt certificate on `https://<machine>.<tailnet>.ts.net`. Free, no bandwidth cap, no interstitial, and `100.64.0.0/10` is already on `isAllowedSource`. |
+| **ngrok** (Settings › Forge Mobile) | Works, and it is already built. But the free tier's interstitial page fronts HTML served to a browser — which is every cold launch of the PWA, not just the first. And 1 GB/month, with terminal output as the payload. |
+| **Cloudflare named tunnel** | Free and clean, but wants a domain on Cloudflare. The *quick* tunnel's URL changes every run, which re-installs the app every time. |
+
+The desktop needs no change for any of them: the tunnel dials the socket from
+loopback, so the allowlist sees `127.0.0.1`.
+
+### Installing, and the one trap
+
+On the phone, open the HTTPS address in Safari → Share → **Add to Home Screen**
+→ open Forge from the icon → pair *there*.
+
+That order matters and the pairing screen says so out loud. **iOS gives a
+home-screen web app its own storage container, separate from Safari's.** A phone
+paired in the tab and then installed opens the installed app unpaired, with no
+explanation — which reads as the pairing having failed rather than as two
+different stores. Installing first costs one tap and makes it impossible.
+
+### What an iPhone gives up against the APK
+
+Stated rather than hidden, because all four are permanent:
+
+- **No QR scan.** `canScan()` is native-only and Safari has no `BarcodeDetector`,
+  so an iPhone pairs by typing or by a `forge://pair?…` link. The pairing screen
+  already renders the typed flow for exactly this reason — and `servedFromOrigin()`
+  prefills the address field from `window.location`, since the desktop that
+  served the bundle *is* the desktop being paired with. What is left to enter is
+  the code.
+- **No self-update sheet.** It does not need one — the bundle comes from the
+  desktop, so a `mobile:build` *is* the update. `registerServiceWorker()` refuses
+  to run on a native platform for the opposite reason: a worker inside the
+  Capacitor WebView would go on serving cached assets after ForgeUpdaterPlugin
+  replaced them, and an update that installs and changes nothing is worse than
+  no update.
+- **The token lives in `localStorage`**, not app-private storage. Better than a
+  browser tab (the container is the app's own), worse than the APK. iOS may
+  evict it after a long idle period, which costs a re-pair. The desktop's
+  one-tap revoke is still the real kill switch either way.
+- **iOS suspends a backgrounded web app hard**, so the socket dies sooner than
+  on Android. Nothing new was needed for this: `Link.nudge()` already treats
+  `visibilitychange`, `online`, `focus` and `pageshow` as reasons to re-check,
+  and already assumes a link that has been asleep is broken until it proves
+  otherwise.
+
+### The service worker
+
+`mobile/public/sw.js` — served verbatim, no build step, no generated precache
+list. The bundle's own content-hashed filenames are the cache keys.
+
+Network-first for the navigation, cache-first for `/assets/*`,
+stale-while-revalidate for icons and the manifest, and *nothing else touched* —
+the WebSocket never reaches a worker at all. The cache is named from the `?v=`
+on the registration URL, stamped from `mobile/version.json`, which is both what
+makes the browser re-fetch the worker and what drops the previous release's
+cache on activate.
+
+The one rule worth naming: **`MobileServer.serveStatic` answers any unknown path
+with `index.html` and a 200.** So a request for an asset the desktop no longer
+has does not 404 — it returns HTML. A worker that trusted `res.ok` would store
+that HTML under a `.js` URL and white-screen the installed app on every launch
+from then on, with nothing on screen to say why. `cacheable()` refuses to store
+an HTML body against a non-navigation request, and `pwa:check` drives the real
+worker to prove it still does.
+
+### Building it
+
+```
+npm run mobile:icons    # regenerate mobile/public/icons/* (committed; rare)
+npm run mobile:build    # bundle + public/ into mobile/dist
+npm run pwa:check       # 44 checks — see below
+```
+
+---
+
 ## Limits
 
 - **The desktop must be awake and running.** A power-save blocker is held while
@@ -358,6 +463,14 @@ npm run apk:check       # 48 checks on the APK half: version comparison, the
                         # native templates have not drifted from the copies
                         # in the android tree, and that no key material is
                         # anywhere in the repo
+npm run pwa:check       # 44 checks on the iPhone half: the manifest against
+                        # the icons it declares, that apple-touch-icon.png is
+                        # the full-bleed opaque draw (iOS composites alpha
+                        # over white), the apple-* tags in index.html, and the
+                        # real service worker driven over a fake CacheStorage
+                        # — including that it refuses to cache the SPA
+                        # fallback as an asset, which is the one bug that
+                        # would white-screen an installed app for good
 npm run pty:smoke       # the sink refactor must not have touched the renderer
 npm run build           # includes tsconfig.mobile.json — the phone app is
                         # typechecked against the same shared/ the desktop is

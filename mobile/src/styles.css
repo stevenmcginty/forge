@@ -456,6 +456,35 @@ body {
   font-size: 13px;
 }
 
+/* The iPhone install note. A panel rather than another dim paragraph, because
+   it is an instruction to act on before touching the fields below it, and the
+   one thing on this screen that is easy to skip and expensive to skip.
+
+   The emphasis is carried by the opening sentence, not by a rule down the side:
+   volt is this app's *active* colour — the live bars, the progress fill, the
+   primary button — and spending it on a decorative edge would be the first time
+   it meant nothing. The panel is the same frame every other card here uses. */
+.connect-install {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/* The instruction itself. Later <strong>s in this paragraph name iOS's own
+   buttons, so they read as labels rather than as more emphasis. */
+.connect-install strong:first-child {
+  color: var(--volt);
+}
+
+.connect-install strong {
+  color: var(--ink);
+}
+
 /* The seam between the scan path and the typed fallback: a labelled rule, so
    the fields read as "still here if you need them" rather than a second step. */
 .connect-or {

@@ -16,6 +16,29 @@
     />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0b0c0e" />
+
+    <!--
+      The home-screen route (see mobile/src/lib/pwa.ts). The manifest is what
+      Android and Safari 16.4+ read; the four `apple-` tags below are what older
+      iOS reads, and Safari still honours them in preference to the manifest for
+      an icon and a title, so they are not legacy clutter.
+
+      `black-translucent` is chosen for the status bar because the app already
+      pads itself with env(safe-area-inset-top) — with any other value iOS
+      reserves the strip itself and the top bar gets padded twice.
+
+      `apple-touch-icon` is a full-bleed opaque PNG on purpose: iOS applies its
+      own corner mask and composites transparency over white, so a rounded icon
+      with alpha corners lands as a dark squircle inside a white one.
+    -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Forge" />
+
     <title>Forge Mobile</title>
   </head>
   <body>

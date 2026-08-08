@@ -55,6 +55,8 @@
     "companion:icons": "node scripts/companion-icons.mjs",
     "companion:serve": "node scripts/companion-serve.mjs",
     "mobile:smoke": "node scripts/mobile-smoke.mjs",
+    "mobile:icons": "node scripts/mobile-icons.mjs",
+    "pwa:check": "node scripts/pwa-check.mjs",
     "mobile:dev": "vite --config mobile/vite.config.ts",
     "mobile:build": "vite build --config mobile/vite.config.ts",
     "mobile:serve": "node scripts/mobile-serve.mjs",

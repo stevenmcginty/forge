@@ -3,6 +3,7 @@ import { MOBILE_PORT, type MobileSession } from '@shared/mobile'
 import { Link, deviceId, type LinkPicture, type LinkState } from './lib/link'
 import { forgetToken, pairTokenOf, readOrigin, readToken, toOrigin, writeOrigin, writeToken } from './lib/secure'
 import { canScan, scanPairingCode } from './lib/scan'
+import { servedFromOrigin, shouldOfferInstall } from './lib/pwa'
 import { Browser, leavesOf } from './components/Browser'
 import { PaneView, paneListeners } from './components/PaneView'
 import { UpdateSheet } from './components/Update'
@@ -39,7 +40,10 @@ export function App(): React.JSX.Element {
   const [picture, setPicture] = useState<LinkPicture | null>(null)
   const [notice, setNotice] = useState('')
   const [screen, setScreen] = useState<Screen>({ at: 'browse', projectId: null })
-  const [address, setAddress] = useState(() => readOrigin())
+  // The last desktop reached, or — first run on the browser/PWA routes — the
+  // address this very page was served from, which is that desktop by
+  // definition. See servedFromOrigin in lib/pwa.ts.
+  const [address, setAddress] = useState(() => readOrigin() || servedFromOrigin())
   const [code, setCode] = useState('')
   // Scan guidance is state of its own, not a `notice`: notices self-dismiss
   // after 4s, and "go to Android Settings and re-allow the camera" must stay
@@ -470,9 +474,29 @@ function Connect({
   // The camera is the primary path where there is one (the APK); the browser
   // route cannot scan (see canScan in lib/scan.ts) and keeps its typed flow.
   const scannable = canScan()
+  // An iPhone in a Safari tab, on an origin where installing would actually
+  // work. See shouldOfferInstall in lib/pwa.ts.
+  const offerInstall = shouldOfferInstall()
   return (
     <div className="connect">
       <h1>Forge</h1>
+
+      {/*
+        Above the pairing fields rather than below them, because the order is
+        load-bearing: iOS gives a home-screen web app its own storage container,
+        separate from Safari's. A phone paired in the tab and *then* installed
+        arrives at this same screen again with nothing carried over, which reads
+        as the pairing having failed. Installing first costs one extra tap and
+        makes that impossible.
+      */}
+      {offerInstall && (
+        <p className="connect-install">
+          <strong>On iPhone, install this first.</strong> Tap Share, then <strong>Add to Home Screen</strong>, and open
+          Forge from the icon. Pair inside that app — iOS keeps its storage separate from Safari's, so a phone paired in
+          this tab would arrive unpaired in the installed one.
+        </p>
+      )}
+
       <p className="connect-lead">
         On the desktop, open <strong>Settings → Forge Mobile</strong>, turn the link on and tap
         <strong> Pair a phone</strong>.{' '}

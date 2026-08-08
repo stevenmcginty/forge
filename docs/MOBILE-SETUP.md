@@ -152,6 +152,77 @@ connect screen, for when the desktop is unreachable):
 
 ---
 
+## 3b. An iPhone, instead of the APK
+
+There is no Forge iOS app. An iPhone runs the *same* app as a web app installed
+to the home screen — its own icon, its own window, no browser chrome. Sections 4
+and 5 below are about the APK and do not apply.
+
+**It only works over HTTPS.** Not a preference: on a plain
+`http://192.168.x.x:8420` address Safari withholds APIs the app needs, and it
+installs looking finished and then misbehaves. So the LAN address is for phone
+Chrome; an iPhone needs a real certificate in front of Forge.
+
+### Get an HTTPS address
+
+**Tailscale is the one to use** — free, no data cap, no extra click on every
+launch, and Forge already treats Tailscale addresses as local:
+
+1. Install Tailscale on this desktop and on the iPhone; sign both into the same
+   account.
+2. On the desktop, run once:
+
+   ```
+   tailscale serve --bg 8420
+   ```
+
+3. `tailscale serve status` prints the address. It looks like
+   `https://<machine>.<tailnet>.ts.net` and never changes.
+
+The **ngrok tunnel from section 1 also works** — use `https://<your-domain>`.
+The catch is the free tier's interstitial page: it fronts every page load in a
+browser, so the app shows a click-through screen on each cold launch. Fine to
+try it with; Tailscale is what to keep.
+
+### Install it
+
+On the iPhone, in **Safari** (not Chrome — only Safari can install):
+
+1. Open the HTTPS address.
+2. Tap **Share** → **Add to Home Screen** → **Add**.
+3. **Open Forge from the new icon.** Not from the Safari tab.
+4. On the desktop, **Settings › Forge Mobile › Pair a phone**. Copy the
+   **pairing code** it shows.
+5. In the app, **Desktop address is already filled in** — the app was served by
+   that desktop, so it knows. Paste the code underneath and tap **Pair**. (If
+   you ever do need to type it, it is the HTTPS address you installed from, not
+   the LAN IP printed on the Settings card.)
+6. Compare the two words on both screens, then **Allow** on the desktop.
+
+**Do step 3 before step 4.** iOS gives a home-screen app its own storage,
+separate from Safari's, so a phone paired in the tab opens the installed icon
+*unpaired* — which looks exactly like the pairing having failed. The app says so
+on the pairing screen, but the order is easy to get wrong once.
+
+There is no QR button on iPhone: Safari has no barcode reader to offer. Type the
+address and code, once. After that it stores a device token and reconnects on
+its own, the same as the APK.
+
+### What is different afterwards
+
+- **Updates need nothing.** The app is served by this desktop, so a
+  `npm run mobile:build` here *is* the update on the phone.
+- **The link drops sooner when the app is backgrounded.** iOS suspends web apps
+  harder than Android does. Bring it back to the front and it reconnects on its
+  own — that is what the terminal repainting itself is.
+- **It may ask to be paired again after a long idle spell.** iOS can evict an
+  unused app's storage. Re-pair from Settings › Forge Mobile; nothing else is
+  lost.
+- **Revoking works identically.** Settings › Forge Mobile lists the phone with a
+  one-tap revoke, and that is still the real kill switch.
+
+---
+
 ## 4. Back up the signing key. Now, not later.
 
 ```
