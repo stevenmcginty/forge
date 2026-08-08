@@ -190,9 +190,8 @@ export function initStaleWatcher(): void {
  * pointing at a URL that no longer answers — a blank screen you have to close
  * and start again by hand.
  *
- * So in a dev run the whole toolchain is restarted rather than the app —
- * through the checkout's silent launcher when it has one, a detached
- * `npm run dev` otherwise. Detached because it has to outlive the process
+ * So in a dev run the whole toolchain is restarted rather than the app — with
+ * a detached `npm run dev`. Detached because it has to outlive the process
  * starting it, and delayed a couple of seconds because the outgoing dev server
  * still holds its port for a moment and a fight over it is a slower recovery
  * than a short wait.
@@ -223,29 +222,21 @@ export function relaunchDevToolchain(): void {
     ...cleanEnv
   } = process.env
 
-  // Prefer the silent launcher when the checkout has it: it logs to the
-  // profile's dev.log, retries once if the new run collides with this dying
-  // one, and pops the log only when a start genuinely failed — the exact
-  // safety net a bare detached `npm run dev` does not have.
-  const vbs = join(root, 'Start Forge (silent).vbs')
+  // Do not launch the VBS shortcut from here. That creates a second Windows
+  // Script Host inside the first shutdown/restart race; on some Windows builds
+  // it fails with the misleading "not enough memory resources" dialog before
+  // npm ever gets a chance to start. The normal shortcut may still use VBS,
+  // but an in-app restart has no reason to involve it.
   try {
     const child =
       process.platform === 'win32'
-        ? existsSync(vbs)
-          ? spawn('cmd.exe', ['/c', `timeout /t 2 /nobreak >nul & wscript.exe "${vbs}"`], {
-              cwd: root,
-              env: cleanEnv,
-              detached: true,
-              stdio: 'ignore',
-              windowsHide: true
-            })
-          : spawn('cmd.exe', ['/c', 'timeout /t 2 /nobreak >nul & npm run dev'], {
-              cwd: root,
-              env: cleanEnv,
-              detached: true,
-              stdio: 'ignore',
-              windowsHide: false
-            })
+        ? spawn('cmd.exe', ['/d', '/s', '/c', 'timeout /t 2 /nobreak >nul & npm run dev'], {
+            cwd: root,
+            env: cleanEnv,
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true
+          })
         : spawn('sh', ['-c', 'sleep 2; npm run dev'], {
             cwd: root,
             env: cleanEnv,

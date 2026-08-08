@@ -5,7 +5,9 @@ import { Icon } from './Icon'
 import './WhatsNew.css'
 
 /**
- * What changed in the version you are now running.
+ * What changed in the version you are now running. On startup this is a
+ * top-right notification rather than a blocking modal, so it reads like an
+ * update receipt that drops into the workspace.
  *
  * Forge updates itself, which means it changes under people without asking. The
  * banner says "Update & restart" and the next thing you see is an app that is
@@ -22,9 +24,10 @@ import './WhatsNew.css'
  * else's HTML to say something Forge already knows.
  *
  * **It opens once per release, by itself.** `lastNotesVersion` in settings is the
- * whole mechanism. There is no banner, no dot, and no second chance to be
- * reminded — dismissing it is final, and the button in Settings → Updates is how
- * you get it back.
+ * whole mechanism. The version is recorded when the user dismisses the card,
+ * not when it first opens: if Windows fails to relaunch Forge, the next manual
+ * launch must still show the change log. The button in Settings → Updates is
+ * always how you get it back.
  *
  * **It does not open for a release with nothing in it.** CI cuts a release on
  * every push to master, so plenty of versions are housekeeping. A card that
@@ -43,20 +46,24 @@ export function WhatsNew(): ReactNode {
 
   const notes = whatsNew()
   const version = state.info?.version ?? ''
+  // A dev checkout's package.json deliberately remains on its last released
+  // version while the generated notes describe the next release. The notes'
+  // identity is therefore the correct startup key; falling back keeps this
+  // safe for an empty/unversioned generated file.
+  const notesVersion = notes?.version || version
 
   /*
    * Opened by an effect rather than by a derived boolean, because it is also
    * openable from Settings — one flag with two ways in beats a boolean that has to
-   * agree with a button. Marking it seen happens at open time, not on dismiss: a
-   * card closed by quitting the app has still been shown, and showing it again on
-   * the next launch would make it feel like nagging.
+   * agree with a button. Marking it seen happens on dismiss. This is intentionally
+   * a user acknowledgement rather than an effect marker: the update installer
+   * can fail after this window opens, and the next launch must not lose the prompt.
    */
-  const auto = state.ready && shouldOpenWhatsNew(version, state.settings.lastNotesVersion)
+  const auto = state.ready && shouldOpenWhatsNew(notesVersion, state.settings.lastNotesVersion)
   useEffect(() => {
     if (!auto) return
     actions.setWhatsNewOpen(true)
-    actions.patchSettings({ lastNotesVersion: version })
-  }, [auto, version])
+  }, [auto, notesVersion])
 
   const open = state.whatsNewOpen && notes !== null
 
@@ -69,8 +76,10 @@ export function WhatsNew(): ReactNode {
     setShowAll(false)
     // Also mark it seen when it was opened by hand on a version that had not been
     // seen yet — otherwise the automatic one would still be waiting to fire.
-    if (version && state.settings.lastNotesVersion !== version) actions.patchSettings({ lastNotesVersion: version })
-  }, [actions, version, state.settings.lastNotesVersion])
+    if (notesVersion && state.settings.lastNotesVersion !== notesVersion) {
+      actions.patchSettings({ lastNotesVersion: notesVersion })
+    }
+  }, [actions, notesVersion, state.settings.lastNotesVersion])
 
   if (!open || !notes) return null
 
@@ -79,7 +88,7 @@ export function WhatsNew(): ReactNode {
   const hidden = notes.changes.length - changes.length
 
   return (
-    <div className="wnew" role="dialog" aria-modal="true" aria-label={`What's new in Forge ${shown}`}>
+    <div className="wnew" role="dialog" aria-label={`What's new in Forge ${shown}`}>
       <div
         className="wnew__card"
         ref={cardRef}

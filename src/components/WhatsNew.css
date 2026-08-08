@@ -1,7 +1,7 @@
 /*
- * The "what's new" card. Same obsidian-capsule family as the first-run welcome —
- * on purpose, because it is the same kind of thing: the app, with something to
- * say, once.
+ * The "what's new" notification. It arrives from the upper-right so the first
+ * thing after an update is a readable change log, without hiding the workspace
+ * behind a modal.
  *
  * Narrower than the welcome (520px against 620px), because this is a list of
  * sentences rather than three forms, and a 620px measure makes a one-line bullet
@@ -10,19 +10,21 @@
 
 .wnew {
   position: fixed;
-  inset: 0;
+  top: var(--s-6);
+  right: var(--s-6);
+  width: min(520px, calc(100vw - (var(--s-6) * 2)));
   z-index: var(--z-toast);
-  display: grid;
-  place-items: center;
-  padding: var(--s-8);
-  background: var(--bg-scrim);
-  backdrop-filter: blur(3px);
-  animation: wnew-in var(--dur-med) var(--ease-out);
+  pointer-events: none;
 }
 
 @keyframes wnew-in {
   from {
     opacity: 0;
+    transform: translateY(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -31,8 +33,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--s-5);
-  width: min(520px, 100%);
-  max-height: 100%;
+  width: 100%;
+  max-height: calc(100vh - (var(--s-6) * 2));
   padding: var(--s-8);
   overflow-y: auto;
   background: var(--bg-panel-raised);
@@ -40,6 +42,8 @@
   border-radius: var(--r-xl);
   box-shadow: var(--shadow-card);
   outline: none;
+  pointer-events: auto;
+  animation: wnew-in var(--dur-med) var(--ease-out);
 }
 
 .wnew__dismiss {
@@ -158,4 +162,16 @@
 
 .wnew__link:hover {
   color: var(--accent);
+}
+
+@media (max-width: 600px) {
+  .wnew {
+    top: var(--s-4);
+    right: var(--s-4);
+    width: calc(100vw - (var(--s-4) * 2));
+  }
+
+  .wnew__card {
+    padding: var(--s-6);
+  }
 }

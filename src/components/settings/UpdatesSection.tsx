@@ -767,9 +767,9 @@ function ForgeUpdateCard({
             changes and the automatic trigger therefore never fires.
           */}
           {onNotes ? (
-            <button type="button" className="ghost-btn sbtn" title="What changed in this build" onClick={onNotes}>
+            <button type="button" className="ghost-btn sbtn" title="Open the Forge change log" onClick={onNotes}>
               <Icon name="note" size={12} />
-              What&apos;s new
+              Change log
             </button>
           ) : null}
           {dev ? null : (
