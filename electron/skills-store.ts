@@ -15,6 +15,8 @@ import {
   writeFileSync
 } from 'node:fs'
 import { basename, join, resolve, sep } from 'node:path'
+import { packFileName } from '@shared/skillpack'
+import { buildPack, installPack, readPackFile, readPluginRecipes } from './skill-pack'
 import {
   FORGE_MANAGED_MARKER,
   SKILL_FILE,
@@ -852,6 +854,11 @@ export interface SkillsChannels {
   openFolder: string
   /** Copy one of Steve's ~/.claude/skills into the library. Never a move. */
   copyToLibrary: string
+  /** The four pack channels. See electron/skill-pack.ts. */
+  packPlugins: string
+  packExport: string
+  packOpen: string
+  packInstall: string
 }
 
 /**
@@ -874,6 +881,12 @@ export function registerSkillsHandlers(
     openPath(path: string): void
     /** The native folder picker, for "Import…". */
     pickFolder(): Promise<string | null>
+    /** Where to write a pack. Returns null when the dialog was cancelled. */
+    savePackAs?(suggestedName: string): Promise<string | null>
+    /** Which pack to open. Returns null when the dialog was cancelled. */
+    pickPack?(): Promise<string | null>
+    /** Stamped into the pack's `from`, so a recipient can see what wrote it. */
+    appVersion?(): string
   }
 ): void {
   const listNow = (): SkillsList =>
@@ -935,6 +948,74 @@ export function registerSkillsHandlers(
       ok: false,
       error: 'Skills are not available'
     }
+    return { ...result, ...listNow() }
+  })
+
+  /* ------------------------------------------------------------------ packs */
+
+  ipc.handle(channels.packPlugins, () => (store ? readPluginRecipes(store) : []))
+
+  /**
+   * Build a pack and write it. The dialog comes first — a pack built and then
+   * cancelled is work thrown away, but a dialog raised before the build could
+   * offer to save something that turns out to be empty, and "saved a file with
+   * nothing in it" is the worse of the two.
+   */
+  ipc.handle(channels.packExport, async (_e, names?: unknown, includePlugins?: unknown, note?: unknown) => {
+    if (!store) return { ok: false, error: 'Skills are not available', skipped: [] }
+    const built = buildPack(store, {
+      skills: Array.isArray(names) ? names.map((n) => String(n ?? '')) : [],
+      includePlugins: includePlugins === true,
+      note: typeof note === 'string' ? note : '',
+      from: `Forge ${deps.appVersion?.() ?? ''}`.trim()
+    })
+    if (!built.ok || !built.json || !built.pack) return { ok: false, error: built.error, skipped: built.skipped }
+
+    const target = await deps.savePackAs?.(packFileName(built.pack))
+    if (!target) return { ok: false, cancelled: true, skipped: built.skipped }
+
+    try {
+      writeFileSync(target, built.json, 'utf8')
+    } catch (err) {
+      return { ok: false, error: `Could not write that file: ${(err as Error).message}`, skipped: built.skipped }
+    }
+    return {
+      ok: true,
+      path: target,
+      bytes: Buffer.byteLength(built.json, 'utf8'),
+      skills: built.pack.skills.length,
+      plugins: built.pack.plugins.length,
+      skipped: built.skipped
+    }
+  })
+
+  /** Read a pack for preview. Deliberately writes nothing — see skill-pack.ts. */
+  ipc.handle(channels.packOpen, async (_e, path?: unknown) => {
+    const chosen = typeof path === 'string' && path.trim() ? path : await deps.pickPack?.()
+    if (!chosen) return { ok: false, cancelled: true, dropped: [] }
+    const read = readPackFile(chosen)
+    if (!read.ok) return { ok: false, error: read.error, dropped: read.dropped }
+    return { ok: true, path: chosen, pack: read.pack, dropped: read.dropped }
+  })
+
+  /**
+   * Install from the file, not from a pack object handed back by the renderer.
+   *
+   * The renderer is Forge's own code, but a pack that made a round trip through
+   * it would be validated once and installed from a different object than the
+   * one that was checked. Re-reading means the bytes on disk are what get
+   * installed, and `parsePack` runs again on the way.
+   */
+  ipc.handle(channels.packInstall, (_e, path?: unknown, names?: unknown) => {
+    if (!store) return { ok: false, error: 'Skills are not available', installed: [], skipped: [], ...listNow() }
+    const chosen = typeof path === 'string' ? path : ''
+    const read = readPackFile(chosen)
+    if (!read.ok || !read.pack) {
+      return { ok: false, error: read.error ?? 'That pack could not be read', installed: [], skipped: [], ...listNow() }
+    }
+    const result = installPack(store, read.pack, {
+      skills: Array.isArray(names) ? names.map((n) => String(n ?? '')) : undefined
+    })
     return { ...result, ...listNow() }
   })
 

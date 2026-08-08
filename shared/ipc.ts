@@ -223,6 +223,18 @@ export const IPC = {
   /** Copy one of Steve's own ~/.claude/skills into the library. Never a move. */
   skillsCopyToLibrary: 'skills:copy-to-library',
 
+  // skill packs — the .forgepack file you hand somebody else. Library skills
+  // travel as content; installed plugins travel as a `/plugin` recipe, never as
+  // copied files. See shared/skillpack.ts.
+  /** The plugin recipes this machine could contribute, for the export sheet. */
+  skillsPackPlugins: 'skills:pack-plugins',
+  /** Build a pack and write it wherever the save dialog says. */
+  skillsPackExport: 'skills:pack-export',
+  /** Read and validate a pack for preview. Writes nothing. */
+  skillsPackOpen: 'skills:pack-open',
+  /** Install chosen skills from a pack already on disk, by path. */
+  skillsPackInstall: 'skills:pack-install',
+
   // system probes (M6 settings page)
   systemUserName: 'system:user-name',
   systemClaudeVersion: 'system:claude-version',

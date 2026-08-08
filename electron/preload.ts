@@ -109,7 +109,14 @@ const api: ForgeApi = {
     remove: (name) => ipcRenderer.invoke(IPC.skillsRemove, name),
     setEnabled: (name, on) => ipcRenderer.invoke(IPC.skillsSetEnabled, name, on === true),
     copyToLibrary: (name) => ipcRenderer.invoke(IPC.skillsCopyToLibrary, name),
-    openFolder: (name, source) => ipcRenderer.invoke(IPC.skillsOpenFolder, name ?? '', source ?? 'library')
+    openFolder: (name, source) => ipcRenderer.invoke(IPC.skillsOpenFolder, name ?? '', source ?? 'library'),
+    pack: {
+      plugins: () => ipcRenderer.invoke(IPC.skillsPackPlugins),
+      exportPack: (skills, includePlugins, note) =>
+        ipcRenderer.invoke(IPC.skillsPackExport, skills, includePlugins === true, note ?? ''),
+      open: (path) => ipcRenderer.invoke(IPC.skillsPackOpen, path ?? ''),
+      install: (path, skills) => ipcRenderer.invoke(IPC.skillsPackInstall, path, skills)
+    }
   },
 
   companion: {

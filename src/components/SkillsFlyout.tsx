@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import type { SkillPackOpenResult } from '@shared/api'
 import type { ExternalSkillInfo, MachineSkillInfo, SkillInfo } from '@shared/skills'
 import { resolveProfile } from '@/lib/agents'
 import { paneLabel } from '@/lib/appactions'
@@ -10,6 +11,7 @@ import { useActiveTab, useApp } from '@/state/AppState'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
+import { PackPreview, SharePackSheet } from './SkillPack'
 import './SkillsFlyout.css'
 
 /**
@@ -141,7 +143,9 @@ function SkillsPanel({
   const { skills, machineSkills, externalSkills } = useSkills()
   const [nested, setNested] = useState(0)
   const [adding, setAdding] = useState(false)
+  const [sharing, setSharing] = useState(false)
   const addRef = useRef<HTMLButtonElement | null>(null)
+  const shareRef = useRef<HTMLButtonElement | null>(null)
 
   const enabled = skills.filter((s) => s.enabled).length
   const machine = dedupeSkills(skills, machineSkills)
@@ -175,6 +179,22 @@ function SkillsPanel({
               only useful once it is in a terminal, and neither way of getting
               it there is visible until you know it. */}
           <span className="sfly__hint">Drag one onto a terminal — or double-click</span>
+          <button
+            ref={shareRef}
+            type="button"
+            className="ghost-btn sfly__add"
+            title="Share skills as a pack"
+            // Plugins alone are worth sharing: an empty library and a machine
+            // full of `/plugin install`s is a perfectly good pack — the recipe
+            // list is the whole content.
+            disabled={skills.length === 0 && plugins.length === 0}
+            onClick={() => {
+              track(true)
+              setSharing(true)
+            }}
+          >
+            <Icon name="send" size={14} />
+          </button>
           <button
             ref={addRef}
             type="button"
@@ -272,6 +292,16 @@ function SkillsPanel({
         open={adding}
         onClose={() => {
           setAdding(false)
+          track(false)
+        }}
+      />
+
+      <SharePackSheet
+        anchor={shareRef.current}
+        open={sharing}
+        skills={skills}
+        onClose={() => {
+          setSharing(false)
           track(false)
         }}
       />
@@ -841,17 +871,36 @@ function AddSkillMenu({
   onClose: () => void
 }): ReactNode {
   const { actions } = useApp()
-  const [mode, setMode] = useState<'pick' | 'new'>('pick')
+  const [mode, setMode] = useState<'pick' | 'new' | 'pack'>('pick')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [opened, setOpened] = useState<SkillPackOpenResult | null>(null)
 
   const close = (): void => {
     setMode('pick')
     setName('')
     setDescription('')
     setError(null)
+    setOpened(null)
     onClose()
+  }
+
+  /**
+   * Open a pack, and stop. Nothing is written by this call — the preview is the
+   * whole point, because a pack is instructions from someone else and the
+   * decision to install belongs to the person reading them, not to the picker.
+   */
+  const openPack = async (): Promise<void> => {
+    const result = await window.forge.skills.pack.open()
+    if (result.cancelled) return
+    if (!result.ok) {
+      setError(result.error ?? 'That pack could not be read')
+      return
+    }
+    setError(null)
+    setOpened(result)
+    setMode('pack')
   }
 
   const create = async (): Promise<void> => {
@@ -877,6 +926,23 @@ function AddSkillMenu({
     actions.setNotice(`Imported ${result.name} — turn it on to use it everywhere`)
   }
 
+  if (mode === 'pack' && opened?.pack) {
+    return (
+      <Popover anchor={anchor} open={open} onClose={close} align="end" width={360} label="Install from a pack">
+        <PackPreview
+          pack={opened.pack}
+          path={opened.path ?? ''}
+          dropped={opened.dropped}
+          onBack={() => {
+            setOpened(null)
+            setMode('pick')
+          }}
+          onDone={close}
+        />
+      </Popover>
+    )
+  }
+
   return (
     <Popover anchor={anchor} open={open} onClose={close} align="end" width={300} label="Add a skill">
       {mode === 'pick' ? (
@@ -889,6 +955,10 @@ function AddSkillMenu({
           <PopoverRow onClick={() => void importFolder()}>
             <Icon name="folder" size={14} />
             <span className="srow__menu-name">Import a folder…</span>
+          </PopoverRow>
+          <PopoverRow onClick={() => void openPack()}>
+            <Icon name="file" size={14} />
+            <span className="srow__menu-name">Install from a pack…</span>
           </PopoverRow>
           <PopoverRow onClick={() => setMode('new')}>
             <Icon name="plus" size={14} />

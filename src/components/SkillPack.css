@@ -1,0 +1,136 @@
+/*
+ * Skill packs — the share sheet and the import preview.
+ *
+ * Both are lists of things to tick inside a Popover, so they share one row
+ * shape (`.pack__pick`) and differ only in what the second line says. The
+ * scroll cap matches `.sfly__scroll`: a library of forty skills must not push
+ * the Save button off the bottom of the screen, which is the one failure that
+ * makes a sheet feel broken rather than long.
+ */
+
+.pack__list {
+  max-height: min(38vh, 300px);
+  overflow-y: auto;
+  padding: var(--s-2) var(--s-2) var(--s-3);
+}
+
+/* A whole-row label so the text is part of the target, not just the box —
+   these rows are read carefully and ticked once, and a 13px hitbox for a
+   decision about what leaves your machine is the wrong size for the job. */
+.pack__pick {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.pack__pick:hover {
+  background: var(--bg-sunken);
+}
+
+.pack__pick input {
+  flex: none;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}
+
+/* A name already in the library. Dimmed and inert rather than absent: the row
+   is the explanation for why the count is lower than the pack claimed. */
+.pack__pick[data-off='true'] {
+  cursor: default;
+}
+
+.pack__pick[data-off='true']:hover {
+  background: none;
+}
+
+.pack__pick[data-off='true'] .pack__pick-name {
+  color: var(--text-muted);
+}
+
+.pack__pick-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pack__pick-name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  color: var(--text-primary);
+  font-size: var(--t-md);
+}
+
+/* Two lines, then clipped. A description is written for an agent about to read
+   the whole skill and runs to a paragraph; what it is doing here is telling one
+   row apart from the next. */
+.pack__pick-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--t-sm);
+  line-height: 1.4;
+}
+
+.pack__count {
+  color: var(--text-muted);
+  font-size: var(--t-xs);
+}
+
+/* The sender's note — their words, so it is set apart from Forge's own copy
+   rather than blending into the hints around it. */
+.pack__note {
+  margin: 0 var(--s-4);
+  padding: var(--s-3);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--t-sm);
+  line-height: 1.45;
+}
+
+/* ------------------------------------------------------- plugin recipes */
+
+.pack__recipe {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: 0 var(--s-4) var(--s-3);
+  padding: var(--s-3);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+}
+
+.pack__recipe-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+}
+
+.pack__copy {
+  margin-left: auto;
+  height: 20px;
+  padding: 0 var(--s-3);
+  font-size: var(--t-xs);
+}
+
+/* The commands themselves. Selectable and wrapping rather than scrolling —
+   a marketplace URL that runs off the right edge of a popover is a command
+   nobody can read, and reading it is the point of showing it. */
+.pack__cmd {
+  display: block;
+  color: var(--text-secondary);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: text;
+}

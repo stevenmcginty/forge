@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
+import { PACK_EXTENSION } from '@shared/skillpack'
 import { planProjectFolder } from './projectfolder'
 import { gitRemoteOrigin } from './git-remote'
 import type {
@@ -486,6 +487,46 @@ async function pickFolder(title: string, buttonLabel: string): Promise<string | 
 }
 
 /**
+ * The two dialogs a skill pack needs.
+ *
+ * Both filter on `.forgepack` and both offer "All files" underneath, because a
+ * pack that arrived over chat is as likely as not to have been renamed to
+ * `.txt` on the way — refusing to *show* it would look like the file was
+ * corrupt. What the file actually is gets decided by `parsePack`, not by its
+ * name.
+ */
+async function savePackAs(suggestedName: string): Promise<string | null> {
+  const options: Electron.SaveDialogOptions = {
+    title: 'Save skill pack',
+    buttonLabel: 'Save pack',
+    defaultPath: join(app.getPath('documents'), suggestedName),
+    filters: [
+      { name: 'Forge skill pack', extensions: [PACK_EXTENSION] },
+      { name: 'All files', extensions: ['*'] }
+    ]
+  }
+  const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options)
+  return result.canceled || !result.filePath ? null : result.filePath
+}
+
+async function pickPack(): Promise<string | null> {
+  const options: Electron.OpenDialogOptions = {
+    title: 'Open a skill pack',
+    buttonLabel: 'Open pack',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Forge skill pack', extensions: [PACK_EXTENSION] },
+      { name: 'All files', extensions: ['*'] }
+    ]
+  }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options)
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]!
+}
+
+/**
  * Settings keys the main process owns outright, stripped from anything the
  * renderer sends.
  *
@@ -624,13 +665,20 @@ function registerAppHandlers(): void {
       remove: IPC.skillsRemove,
       setEnabled: IPC.skillsSetEnabled,
       openFolder: IPC.skillsOpenFolder,
-      copyToLibrary: IPC.skillsCopyToLibrary
+      copyToLibrary: IPC.skillsCopyToLibrary,
+      packPlugins: IPC.skillsPackPlugins,
+      packExport: IPC.skillsPackExport,
+      packOpen: IPC.skillsPackOpen,
+      packInstall: IPC.skillsPackInstall
     },
     {
       enabled: () => getSettings().skillsEnabled,
       setEnabled: (names) => void setSettings({ skillsEnabled: names }),
       openPath: (path) => void shell.openPath(path),
-      pickFolder: () => pickFolder('Import a skill folder', 'Import skill')
+      pickFolder: () => pickFolder('Import a skill folder', 'Import skill'),
+      savePackAs,
+      pickPack,
+      appVersion: () => app.getVersion()
     }
   )
 

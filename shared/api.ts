@@ -69,6 +69,7 @@ import type {
   Workspace
 } from './types'
 import type { SkillSource, SkillsList } from './skills'
+import type { PackPlugin, SkillPack } from './skillpack'
 import type { CommandsFeed } from './commands'
 
 /** What every skills mutation hands back: the outcome, and the fresh list. */
@@ -79,6 +80,48 @@ export interface SkillMutation extends SkillsList {
   error?: string
   /** True when the folder picker was dismissed — not a failure worth showing. */
   cancelled?: boolean
+}
+
+/* ------------------------------------------------------------ skill packs */
+
+/**
+ * What a pack export reports back.
+ *
+ * `skipped` is never empty for form's sake and never silent: a skill that could
+ * not be packed, a file too big, a symlink not followed. A pack that quietly
+ * contained less than was asked for would be discovered by the recipient, not
+ * the sender.
+ */
+export interface SkillPackExportResult {
+  ok: boolean
+  error?: string
+  cancelled?: boolean
+  /** Where it was written. */
+  path?: string
+  bytes?: number
+  skills?: number
+  plugins?: number
+  skipped: string[]
+}
+
+export interface SkillPackOpenResult {
+  ok: boolean
+  error?: string
+  cancelled?: boolean
+  /** The file this pack was read from — pass it back to `install`. */
+  path?: string
+  pack?: SkillPack
+  /** Entries the validator refused, each with a reason. Shown, never hidden. */
+  dropped: string[]
+}
+
+export interface SkillPackInstallResult extends SkillsList {
+  ok: boolean
+  error?: string
+  /** Names now in the library, disabled. */
+  installed: string[]
+  /** Names refused, each with a reason. */
+  skipped: string[]
 }
 
 /**
@@ -302,6 +345,40 @@ export interface ForgeApi {
     copyToLibrary(name: string): Promise<SkillMutation>
     /** Reveal a skill's folder, or the library itself. Resolves with the path. */
     openFolder(name?: string, source?: SkillSource): Promise<string>
+
+    /**
+     * Skill packs — the `.forgepack` file you hand somebody else.
+     *
+     * Library skills travel as content; installed plugins travel as the
+     * `/plugin` commands that reproduce them, never as copied files. See
+     * shared/skillpack.ts for why those are two different problems.
+     */
+    pack: {
+      /**
+       * The plugin recipes this machine could contribute. Ones from a local
+       * directory come back with `source.kind: 'local'` and no usable
+       * commands — listed so the sender can see them, not hidden.
+       */
+      plugins(): Promise<PackPlugin[]>
+      /** Build and save. Opens the save dialog; resolves `cancelled` if dismissed. */
+      exportPack(skills: string[], includePlugins: boolean, note?: string): Promise<SkillPackExportResult>
+      /**
+       * Read and validate a pack for preview. **Writes nothing** — this is the
+       * call that lets somebody see what is in a pack before installing it.
+       * Omit `path` to open the file picker.
+       */
+      open(path?: string): Promise<SkillPackOpenResult>
+      /**
+       * Install chosen skills from a pack on disk. Takes the *path*, not a pack
+       * object: the file is re-read and re-validated, so what installs is the
+       * bytes on disk rather than something that made a round trip through the
+       * renderer.
+       *
+       * Never enables anything. An imported skill is inert until it is switched
+       * on by hand.
+       */
+      install(path: string, skills?: string[]): Promise<SkillPackInstallResult>
+    }
   }
 
   /**
