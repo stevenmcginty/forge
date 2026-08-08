@@ -630,15 +630,12 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // never needs to be longer than "10.20.30-rc.1", so it is capped.
     updateDismissedVersion: str(s.updateDismissedVersion).slice(0, 40),
     /*
-     * Absent means "a settings.json written before the card existed", i.e.
-     * somebody who has been using Forge for months. Seeding it to the running
-     * version means the update that *introduces* the card does not open one — the
-     * first they see is the next release, which is a release they chose to take.
-     *
-     * Same reasoning as `onboarded` above, and the same shape: `raw === null` is
-     * the only signal there is, so it is the one that decides.
+     * A genuinely fresh install gets the running version so its own bundled
+     * notes do not announce themselves as an update. An existing settings file
+     * without this key is an upgrade from before the card existed, though: leave
+     * it empty so the first launch after that upgrade actually opens the card.
      */
-    lastNotesVersion: s.lastNotesVersion === undefined ? appVersion() : str(s.lastNotesVersion).slice(0, 40),
+    lastNotesVersion: raw === null ? appVersion() : s.lastNotesVersion === undefined ? '' : str(s.lastNotesVersion).slice(0, 40),
     // Validated in shared/tools.ts rather than here, because the settings page
     // has to apply exactly the same rules to what it is about to save as this
     // does to what it just loaded — a form that accepts a row the store then
@@ -652,7 +649,7 @@ function str(v: unknown): string {
 }
 
 /**
- * The running version, for seeding `lastNotesVersion`.
+ * The running version, for seeding `lastNotesVersion` on a fresh install.
  *
  * Wrapped because the settings normaliser is exercised head-less by check
  * scripts with `app` stubbed, and `app.getVersion` is not part of the shape they
