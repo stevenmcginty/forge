@@ -83,3 +83,13 @@
   background: var(--bg-hover);
   color: var(--text-secondary);
 }
+
+/*
+ * The collapsed rail's hidden mount for an expanded section. It exists so the
+ * section's hooks keep running — its watch, its snapshot — while the rail is
+ * 56px wide; the only thing you actually see is its body, which is portalled
+ * into the panel and so is not touched by this.
+ */
+.rstack__ghost {
+  display: none;
+}

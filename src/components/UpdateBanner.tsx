@@ -78,6 +78,24 @@ export function UpdateBanner(): ReactNode {
       {status.simulated ? <span className="ubanner__sim mono">simulated</span> : null}
 
       <div className="ubanner__actions">
+        {/*
+          What you would be getting, before you agree to get it. A link to the
+          release page rather than the notes themselves: electron-updater does
+          hand over GitHub's rendered release body, but it is HTML, and rendering
+          somebody else's HTML inside a 30px strip is not worth a sanitiser. The
+          card that appears *after* the update carries the notes properly — see
+          src/components/WhatsNew.tsx.
+        */}
+        {version ? (
+          <button
+            type="button"
+            className="ubanner__what"
+            title={`See what changed in ${version}, on GitHub`}
+            onClick={() => void window.forge.openExternal(releaseUrl(version))}
+          >
+            What&apos;s new
+          </button>
+        ) : null}
         {phase === 'available' ? (
           <button
             type="button"
@@ -116,4 +134,15 @@ export function UpdateBanner(): ReactNode {
       </div>
     </div>
   )
+}
+
+/**
+ * The release page for a version.
+ *
+ * Built here rather than read from the update payload, because the payload does
+ * not carry one and the URL is entirely predictable — the tag is `v<version>` and
+ * the repository is where this app updates itself from.
+ */
+function releaseUrl(version: string): string {
+  return `https://github.com/stevenmcginty/forge/releases/tag/v${version}`
 }

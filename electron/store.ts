@@ -123,12 +123,16 @@ function defaultSettings(): Settings {
     // On out of the box: the rail already tells you how many shells a project
     // has, and "are any of them still thinking" is the other half of that.
     railBusyRing: true,
-    // The dock is how work gets handed out, so it stays on. Git and activity are
-    // additions the user turns on rather than panels that arrive uninvited — see
-    // the comments on those fields in shared/types.ts.
+    // The dock is how work gets handed out, so it stays on. Git, activity and
+    // share are additions the user turns on rather than panels that arrive
+    // uninvited — see the comments on those fields in shared/types.ts.
     railTasks: true,
     railGit: false,
     railActivity: false,
+    railShare: false,
+    // Off, like the section it belongs to — and separately, because it is the
+    // half that touches other vendors' config files.
+    shareTools: false,
     railOpen: [...DEFAULT_RAIL_OPEN],
     railHeights: {},
     shell: 'pwsh.exe',
@@ -252,6 +256,10 @@ function defaultSettings(): Settings {
     // in to a settings page that can start an installer with one click.
     updatesAutoRun: false,
     updateDismissedVersion: '',
+    // Empty is "never seen one", which is right for a fresh install: the
+    // normaliser seeds it to the running version, so a first launch is not
+    // followed by a changelog for a release the user did not upgrade to.
+    lastNotesVersion: '',
     // Empty on purpose: the built-in catalogue covers what Forge itself runs,
     // and everything else is Steve's to add.
     customTools: []
@@ -444,11 +452,13 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     tabTextColours: s.tabTextColours ?? DEFAULT_SETTINGS.tabTextColours,
     railBusyRing: s.railBusyRing ?? DEFAULT_SETTINGS.railBusyRing,
     // Undefined means a settings.json written before the rail had sections. The
-    // dock was always there, so its absence means "on"; git and activity were
-    // never there, so theirs means "off". Hence the two different spellings.
+    // dock was always there, so its absence means "on"; git, activity and share
+    // were never there, so theirs means "off". Hence the two different spellings.
     railTasks: s.railTasks ?? DEFAULT_SETTINGS.railTasks,
     railGit: Boolean(s.railGit),
     railActivity: Boolean(s.railActivity),
+    railShare: Boolean(s.railShare),
+    shareTools: Boolean(s.shareTools),
     railOpen: Array.isArray(s.railOpen) ? s.railOpen.filter(isRailSectionId) : [...DEFAULT_RAIL_OPEN],
     railHeights: normaliseRailHeights(s.railHeights),
     shell: s.shell || DEFAULT_SETTINGS.shell,
@@ -619,6 +629,16 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // A version string goes into a comparison, never into markup — but it also
     // never needs to be longer than "10.20.30-rc.1", so it is capped.
     updateDismissedVersion: str(s.updateDismissedVersion).slice(0, 40),
+    /*
+     * Absent means "a settings.json written before the card existed", i.e.
+     * somebody who has been using Forge for months. Seeding it to the running
+     * version means the update that *introduces* the card does not open one — the
+     * first they see is the next release, which is a release they chose to take.
+     *
+     * Same reasoning as `onboarded` above, and the same shape: `raw === null` is
+     * the only signal there is, so it is the one that decides.
+     */
+    lastNotesVersion: s.lastNotesVersion === undefined ? appVersion() : str(s.lastNotesVersion).slice(0, 40),
     // Validated in shared/tools.ts rather than here, because the settings page
     // has to apply exactly the same rules to what it is about to save as this
     // does to what it just loaded — a form that accepts a row the store then
@@ -629,6 +649,22 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
+}
+
+/**
+ * The running version, for seeding `lastNotesVersion`.
+ *
+ * Wrapped because the settings normaliser is exercised head-less by check
+ * scripts with `app` stubbed, and `app.getVersion` is not part of the shape they
+ * stub. An empty string there is harmless: it means the card opens once in a test
+ * process that has no window to open it in.
+ */
+function appVersion(): string {
+  try {
+    return typeof app?.getVersion === 'function' ? app.getVersion() : ''
+  } catch {
+    return ''
+  }
 }
 
 /**

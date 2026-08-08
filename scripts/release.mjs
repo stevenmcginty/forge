@@ -208,8 +208,28 @@ run('git', ['push', 'origin', tag], { cwd: ROOT })
 
 step(`Publishing ${tag} to github.com/${REPO}`)
 
-// No --target. The tag was just pushed, and GitHub rejects target_commitish on
-// a tag that already exists with a 422 that mentions neither.
+/*
+ * The notes come from src/generated/release-notes.md, written by
+ * scripts/whats-new.mjs during the build above — the same file, in the same run,
+ * that produced the JSON the app carries for its "what's new" popup. That is the
+ * whole point: a person who reads the release page and a person who reads the
+ * popup are reading one text rather than two that can disagree.
+ *
+ * A missing file is not fatal. It means the build did not run the generator (a
+ * hand-driven `--skip-build`, an older checkout), and a release with a plain
+ * heading is better than no release. The download and SmartScreen paragraphs are
+ * appended here rather than generated, because they name the artifact and its
+ * name is not known until after the build.
+ */
+const notesPath = join(ROOT, 'src', 'generated', 'release-notes.md')
+let notesBody = `Forge ${version}.`
+if (existsSync(notesPath)) {
+  const generated = readFileSync(notesPath, 'utf8').trim()
+  if (generated) notesBody = generated
+} else {
+  console.log(`  --   ${notesPath} is missing; publishing with a bare heading`)
+}
+
 run(
   'gh',
   [
@@ -217,7 +237,7 @@ run(
     '-R', REPO,
     '--title', `Forge ${version}`,
     '--notes',
-    `Forge ${version}.\n\n` +
+    `${notesBody}\n\n` +
       `Download **${feedPathName}** and run it. Forge updates itself from here: ` +
       'it checks shortly after launch and every six hours, and offers the new ' +
       'version in a banner.\n\n' +

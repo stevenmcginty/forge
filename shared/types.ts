@@ -1290,6 +1290,25 @@ export interface Settings {
    */
   railShare: boolean
   /**
+   * Give agents MCP tools for the shared scratchpad, as well as the files.
+   *
+   * Off out of the box, and independent of `railShare` — the rail without the
+   * tools is a perfectly good manual scratchpad, and the tools without the rail is
+   * a perfectly good agent-only one.
+   *
+   * On, four CLIs get a `forge_share` server: Claude Code through the mcp.json
+   * Forge already writes, Codex through a `-c` flag on its launch, OpenCode
+   * through an environment variable, and Qwen through a line added to
+   * `~/.qwen/settings.json` — the one config file Forge owns for this, because
+   * Qwen is the one vendor with no launch flag. Turning it off removes that line
+   * again. Every other agent reads and writes the same five files with the tools
+   * it already has, which is the mechanism; this is the convenience.
+   *
+   * See electron/bridge/share-mcp.ts, where every one of those strings was
+   * checked against the installed CLI rather than inferred.
+   */
+  shareTools: boolean
+  /**
    * Which sections are open. A set, not an order — the order is fixed in
    * shared/rail.ts, and an id in here that is not in RAIL_SECTION_ORDER is
    * dropped by the normaliser rather than trusted.
@@ -1694,6 +1713,17 @@ export interface Settings {
    * purpose: saying "not now" to 0.2.0 must not silence 0.3.0 as well.
    */
   updateDismissedVersion: string
+  /**
+   * The version whose "what's new" card has been seen.
+   *
+   * The card opens by itself exactly when this does not match the running
+   * version, which is what makes it a one-time thing per release rather than a
+   * banner. It is seeded to the current version on the update that introduces it,
+   * for the `onboarded` reason: a card describing a release somebody did not
+   * choose to read about is the feature announcing itself rather than working.
+   * From the next update onward it fires properly.
+   */
+  lastNotesVersion: string
   /**
    * Tools added by hand, alongside the built-in catalogue.
    *

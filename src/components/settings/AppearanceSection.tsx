@@ -134,6 +134,22 @@ export function AppearanceSection(): ReactNode {
             label="Activity"
           />
         </Row>
+        {/*
+          The hint has to say what this one does to the disk. Every other section
+          only draws; this is the only part of Forge that writes into the project
+          folder, and finding a directory you did not create in your own
+          repository is not a thing anybody should discover by noticing it.
+        */}
+        <Row
+          label="Share"
+          hint="Five markdown notes in .forge/share, inside the project, that every agent working in it can read and write — push a plan from one pane and have another review it. Forge adds .forge/ to this clone's .git/info/exclude, never to your .gitignore."
+        >
+          <Toggle
+            checked={s.railShare}
+            onChange={(on) => actions.patchSettings({ railShare: on })}
+            label="Share"
+          />
+        </Row>
       </Card>
     </Section>
   )

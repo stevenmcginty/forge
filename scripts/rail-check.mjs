@@ -3,7 +3,7 @@
  *
  *   node scripts/rail-check.mjs
  *
- * Four sections, three of which can be switched off and all four of which can be
+ * Five sections, four of which can be switched off and all five of which can be
  * open, closed or dragged to a height, is enough combinations that the rules
  * deserve to be somewhere other than a component. They live in shared/rail.ts
  * and src/lib/railstack.ts with no DOM in either, and this file holds them to it.
@@ -55,6 +55,7 @@ const settings = (patch = {}) => ({
   railTasks: true,
   railGit: false,
   railActivity: false,
+  railShare: false,
   railOpen: [...R.DEFAULT_RAIL_OPEN],
   railHeights: {},
   ...patch
@@ -64,8 +65,8 @@ const settings = (patch = {}) => ({
 
 console.log('\norder')
 ok(
-  JSON.stringify(R.RAIL_SECTION_ORDER) === JSON.stringify(['projects', 'tasks', 'git', 'activity']),
-  'the four sections, in rail order',
+  JSON.stringify(R.RAIL_SECTION_ORDER) === JSON.stringify(['projects', 'tasks', 'git', 'activity', 'share']),
+  'the five sections, in rail order',
   JSON.stringify(R.RAIL_SECTION_ORDER)
 )
 ok(R.RAIL_SECTION_ORDER[0] === R.RAIL_ALWAYS_ON, 'the always-on section is the first one')
@@ -84,24 +85,53 @@ ok(
   JSON.stringify(S.visibleSections(settings()))
 )
 ok(
-  JSON.stringify(S.visibleSections(settings({ railGit: true, railActivity: true }))) ===
-    JSON.stringify(['projects', 'tasks', 'git', 'activity']),
-  'everything on gives all four, still in rail order'
+  JSON.stringify(S.visibleSections(settings({ railGit: true, railActivity: true, railShare: true }))) ===
+    JSON.stringify(['projects', 'tasks', 'git', 'activity', 'share']),
+  'everything on gives all five, still in rail order'
 )
 ok(
-  S.visibleSections(settings({ railTasks: false, railGit: false, railActivity: false })).includes('projects'),
+  S.visibleSections(settings({ railTasks: false, railGit: false, railActivity: false, railShare: false })).includes(
+    'projects'
+  ),
   'projects survives every section being switched off'
 )
 ok(
-  S.isEnabled(settings({ railTasks: false, railGit: false, railActivity: false }), 'projects'),
+  S.isEnabled(settings({ railTasks: false, railGit: false, railActivity: false, railShare: false }), 'projects'),
   'projects has no switch and is always enabled'
 )
 ok(!S.isEnabled(settings(), 'git'), 'git is off until asked for')
 ok(!S.isEnabled(settings(), 'activity'), 'activity is off until asked for')
+ok(!S.isEnabled(settings(), 'share'), 'share is off until asked for')
+ok(S.isEnabled(settings({ railShare: true }), 'share'), 'and on once it is')
+/*
+ * The trap `isEnabled`'s `default: return false` sets for the sixth section: an
+ * id in RAIL_SECTION_ORDER that nobody added a case for is invisible, with no
+ * type error and nothing at runtime to complain. Asserted against the order
+ * array rather than a list written here, so it closes for good rather than once.
+ */
+ok(
+  R.RAIL_SECTION_ORDER.every((id) =>
+    S.isEnabled(
+      settings({ railTasks: true, railGit: true, railActivity: true, railShare: true }),
+      id
+    )
+  ),
+  'every section in the order array can actually be switched on',
+  JSON.stringify(
+    R.RAIL_SECTION_ORDER.filter(
+      (id) => !S.isEnabled(settings({ railTasks: true, railGit: true, railActivity: true, railShare: true }), id)
+    )
+  )
+)
 ok(
   JSON.stringify(S.visibleSections(settings({ railActivity: true }))) ===
     JSON.stringify(['projects', 'tasks', 'activity']),
   'a gap in the middle does not reorder what is left'
+)
+ok(
+  JSON.stringify(S.visibleSections(settings({ railShare: true }))) ===
+    JSON.stringify(['projects', 'tasks', 'share']),
+  'the last section does not need the ones above it'
 )
 
 /* ------------------------------------------------------------------- open */
@@ -178,6 +208,11 @@ ok(
 
 console.log('\nid guarding')
 ok(R.isRailSectionId('git'), 'a real id is accepted')
+ok(R.isRailSectionId('share'), 'so is the newest one, with no change to the guard')
+ok(
+  R.clampSectionHeight(300, 1000) === S.sectionHeight(settings({ railHeights: { share: 300 } }), 'share', 1000),
+  'a share height goes through the same normaliser as every other section'
+)
 ok(!R.isRailSectionId('shots'), 'an id from another part of the rail is refused')
 ok(!R.isRailSectionId(''), 'the empty string is refused')
 ok(!R.isRailSectionId(null) && !R.isRailSectionId(7) && !R.isRailSectionId({}), 'non-strings are refused')
@@ -185,9 +220,10 @@ ok(!R.isRailSectionId(null) && !R.isRailSectionId(7) && !R.isRailSectionId({}), 
 /* -------------------------------------------------------------- discovery */
 
 console.log('\ndiscovery hint')
-ok(S.showsDiscoveryHint(settings()), 'offered while both new sections are off')
+ok(S.showsDiscoveryHint(settings()), 'offered while every optional section is off')
 ok(!S.showsDiscoveryHint(settings({ railGit: true })), 'gone once git is on')
 ok(!S.showsDiscoveryHint(settings({ railActivity: true })), 'gone once activity is on')
+ok(!S.showsDiscoveryHint(settings({ railShare: true })), 'gone once share is on')
 
 /* ------------------------------------------------- main and renderer agree */
 
@@ -213,8 +249,10 @@ ok(
   'railTasks defaults on for a settings.json written before sections existed'
 )
 ok(
-  /railGit:\s*Boolean\(/.test(storeSrc) && /railActivity:\s*Boolean\(/.test(storeSrc),
-  'railGit and railActivity default off for the same file'
+  /railGit:\s*Boolean\(/.test(storeSrc) &&
+    /railActivity:\s*Boolean\(/.test(storeSrc) &&
+    /railShare:\s*Boolean\(/.test(storeSrc),
+  'railGit, railActivity and railShare default off for the same file'
 )
 ok(
   /railHeights:\s*normaliseRailHeights\(/.test(storeSrc),

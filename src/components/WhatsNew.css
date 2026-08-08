@@ -1,0 +1,161 @@
+/*
+ * The "what's new" card. Same obsidian-capsule family as the first-run welcome —
+ * on purpose, because it is the same kind of thing: the app, with something to
+ * say, once.
+ *
+ * Narrower than the welcome (520px against 620px), because this is a list of
+ * sentences rather than three forms, and a 620px measure makes a one-line bullet
+ * look lost.
+ */
+
+.wnew {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-toast);
+  display: grid;
+  place-items: center;
+  padding: var(--s-8);
+  background: var(--bg-scrim);
+  backdrop-filter: blur(3px);
+  animation: wnew-in var(--dur-med) var(--ease-out);
+}
+
+@keyframes wnew-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.wnew__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  width: min(520px, 100%);
+  max-height: 100%;
+  padding: var(--s-8);
+  overflow-y: auto;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-card);
+  outline: none;
+}
+
+.wnew__dismiss {
+  position: absolute;
+  top: var(--s-5);
+  right: var(--s-5);
+}
+
+.wnew__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+}
+
+.wnew__mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-lg);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.wnew__eyebrow {
+  color: var(--text-muted);
+}
+
+.wnew__title {
+  margin: 0;
+  font-size: var(--t-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.wnew__lede {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+
+/*
+ * The highlights carry the weight: full-size text, generous leading, and a
+ * marker rather than a bullet, because these are the sentences somebody wrote by
+ * hand for this release and they should not read like a log.
+ */
+.wnew__highlights {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wnew__highlights li {
+  position: relative;
+  padding-left: var(--s-5);
+  color: var(--text-primary);
+  font-size: var(--t-md);
+  line-height: 1.6;
+}
+
+.wnew__highlights li::before {
+  content: '';
+  position: absolute;
+  top: 0.55em;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+.wnew__also {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.wnew__changes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  margin: 0;
+  padding-left: var(--s-5);
+  color: var(--text-secondary);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+}
+
+.wnew__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line-hairline);
+}
+
+/* A verb in a sentence, not a button pretending to be one. */
+.wnew__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+  text-decoration: underline 1px;
+  text-underline-offset: 2px;
+}
+
+.wnew__link:hover {
+  color: var(--accent);
+}

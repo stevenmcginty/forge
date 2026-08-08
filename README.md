@@ -27,10 +27,50 @@ the top of the window: click it to download, then click **Restart to finish**.
 Nothing is downloaded or installed behind your back — the check is automatic,
 the megabytes are not. Saying no to one version does not mute the next one.
 
+After each update, Forge shows a card saying what changed. It appears once per
+version and never again; **Settings → Updates & tools → What's new** brings it
+back.
+
+Its text comes from the commits in the release, so nothing has to be written
+twice. A commit body line beginning `Highlight:` becomes a headline bullet — the
+customer-facing sentence, written when the change is fresh and the version number
+does not exist yet:
+
+```
+The rail learns to share: five notes every agent can read
+
+Highlight: Push a plan from one agent and have another review it — the new
+Share section in the left rail keeps five markdown notes inside the project
+that Claude, Codex, Antigravity and the rest can all read and write.
+```
+
+Every other commit subject is listed under "Also changed". The same text becomes
+the GitHub release body, so the page and the card can never disagree.
+
 Releases up to and including v0.2.0 also carried a `Forge-<version>-win.zip`,
 a portable copy that ran without installing anything. It could never update
 itself, so it is no longer built. If you are running one, install the `.exe`
 over it — the zip will sit at its own version indefinitely.
+
+## Sharing work between agents
+
+A project can have five panes open — three Claude Code, one Codex, one
+Antigravity — and none of them can see the others. No vendor offers a way for one
+agent to read another's session, so Forge does it with files.
+
+Switch on **Settings → Appearance → Left rail → Share** and the rail grows a
+fifth section: five markdown notes, kept in `.forge/share` inside the project,
+that every agent working there can read and write. Draft a plan in one pane, hand
+it to another for review, capture a failing build off a third. `.forge/` is added
+to that clone's `.git/info/exclude`, never to your `.gitignore`, so nothing is
+committed.
+
+Any agent can use it with the tools it already has — "read
+`.forge/share/slot-2.md`" is a relative path in its own workspace.
+**Settings → Agents → Shared scratchpad tools** additionally gives Claude Code,
+Codex, OpenCode and Qwen a `forge_share` tool set, which refuses to overwrite a
+note somebody else changed while they were thinking. It carries no API key and
+opens no network connection.
 
 ## Forge Mobile
 

@@ -9,7 +9,7 @@ import type { RailSectionId, Settings } from '@shared/types'
 /**
  * The rail stack's arithmetic, with no React in it.
  *
- * Four sections, three of which can be switched off and all four of which can be
+ * Five sections, four of which can be switched off and all five of which can be
  * open or closed, is enough combinations that the rules deserve to be somewhere
  * a check script can reach them. Everything here is a pure function of settings;
  * RailStack does the drawing and nothing else.
@@ -26,6 +26,11 @@ export function visibleSections(settings: Settings): RailSectionId[] {
  * Projects has no setting and never gets one. Every other section is scoped to
  * whichever project is active, so a rail you cannot change project from is a
  * rail where none of the others can be pointed at anything.
+ *
+ * ⚠ The `default` arm is a trap for whoever adds the sixth section: an id added
+ * to RAIL_SECTION_ORDER but not here is invisible, with no type error and nothing
+ * at runtime to complain. scripts/share-check.mjs asserts every id in the order
+ * array answers this function, which closes it for good rather than once.
  */
 export function isEnabled(settings: Settings, id: RailSectionId): boolean {
   switch (id) {
@@ -37,6 +42,8 @@ export function isEnabled(settings: Settings, id: RailSectionId): boolean {
       return settings.railGit
     case 'activity':
       return settings.railActivity
+    case 'share':
+      return settings.railShare
     default:
       return false
   }
@@ -76,13 +83,14 @@ export function sectionHeight(settings: Settings, id: RailSectionId, viewportH: 
 }
 
 /**
- * True while the rail should offer the "＋ Git · Activity" line at its foot.
+ * True while the rail should offer the "＋ Git · Activity · Share" line at its
+ * foot.
  *
- * Both new sections default off, which would otherwise make the whole feature
- * invisible to anyone who never opens Appearance. One row, and it goes away for
- * good the moment either section is on — a hint that keeps hinting after it has
- * been taken is just nagging.
+ * All three optional sections default off, which would otherwise make the whole
+ * feature invisible to anyone who never opens Appearance. One row, and it goes
+ * away for good the moment any of them is on — a hint that keeps hinting after it
+ * has been taken is just nagging.
  */
 export function showsDiscoveryHint(settings: Settings): boolean {
-  return !settings.railGit && !settings.railActivity
+  return !settings.railGit && !settings.railActivity && !settings.railShare
 }

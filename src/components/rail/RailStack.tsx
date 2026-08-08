@@ -3,12 +3,13 @@ import { RAIL_SECTION_MIN_H } from '@shared/rail'
 import type { RailSectionId } from '@shared/types'
 import { isOpen, showsDiscoveryHint, toggleOpen, visibleSections } from '@/lib/railstack'
 import { useApp } from '@/state/AppState'
-import { Icon } from '../Icon'
+import { Icon, type IconName } from '../Icon'
 import { ProjectRail } from '../ProjectRail'
 import { TasksPanel } from '../tasks/TasksPanel'
 import { RailSection } from './RailSection'
 import { GitSection } from './GitSection'
 import { ActivitySection } from './ActivitySection'
+import { ShareSection } from './ShareSection'
 import './RailStack.css'
 
 /** The tasks dock's old localStorage height, folded into settings once. */
@@ -54,6 +55,18 @@ export function RailStack(): ReactNode {
     actions.setRailHeight('tasks', raw)
   }, [state.ready])
 
+  /*
+   * A section that has just been switched off in Appearance cannot go on being
+   * the expanded one. The panel is drawn by the section itself, so it vanishes
+   * with it either way — this is about the flag, which would otherwise re-open
+   * the panel the moment the section came back.
+   */
+  useEffect(() => {
+    if (!state.railExpanded) return
+    if (sections.includes(state.railExpanded)) return
+    actions.setRailExpanded(null)
+  }, [state.railExpanded, sections])
+
   /* ------------------------------------------------------------- collapsed */
 
   if (collapsed) {
@@ -62,6 +75,20 @@ export function RailStack(): ReactNode {
         {sections.map((id) => (
           <CollapsedSection key={id} id={id} />
         ))}
+
+        {/*
+          A panel that is open stays open when the rail is collapsed — collapsing
+          the rail is how you make room for the terminals, and taking the thing
+          you were reading away as a side effect would be a strange way to
+          answer that. The section is mounted hidden purely so it still exists;
+          what you see is its body, portalled into the panel, which is in
+          document.body and so is not hidden by this.
+        */}
+        {state.railExpanded ? (
+          <div className="rstack__ghost" aria-hidden="true">
+            <StackedSection id={state.railExpanded} />
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -75,20 +102,20 @@ export function RailStack(): ReactNode {
       ))}
 
       {/*
-        Both new sections are off out of the box, which would otherwise make the
-        whole feature invisible to anyone who never opens Appearance. One 24px
-        row, and it goes for good the moment either is on — a hint that keeps
+        The optional sections are off out of the box, which would otherwise make
+        the whole feature invisible to anyone who never opens Appearance. One 24px
+        row, and it goes for good the moment any of them is on — a hint that keeps
         hinting after it has been taken is just nagging.
       */}
       {showsDiscoveryHint(state.settings) ? (
         <button
           type="button"
           className="ghost-btn rstack__more"
-          title="Add the Git and Activity sections to the rail"
+          title="Add the Git, Activity and Share sections to the rail"
           onClick={() => actions.openSettings('appearance')}
         >
           <Icon name="plus" size={11} />
-          <span>Git · Activity</span>
+          <span>Git · Activity · Share</span>
         </button>
       ) : null}
     </div>
@@ -107,6 +134,8 @@ function StackedSection({ id }: { id: RailSectionId }): ReactNode {
       return <GitSection />
     case 'activity':
       return <ActivitySection />
+    case 'share':
+      return <ShareSection />
     default:
       return null
   }
@@ -118,8 +147,20 @@ function StackedSection({ id }: { id: RailSectionId }): ReactNode {
  * two original sections keep the marks they have always had — the project dots
  * with their working rings, the tasks pip with its count — because those are
  * already learned, and swapping them for a uniform icon strip would be tidier
- * and worse. The two new ones get a glyph each and follow the same vocabulary.
+ * and worse. The later ones get a glyph each and follow the same vocabulary.
  */
+
+/**
+ * A lookup rather than a pair of ternaries on `id === 'git'`, which is what this
+ * was and which quietly drew every section that was not git as "Activity" with a
+ * history glyph. An id with no entry here draws no pip at all, which is the right
+ * answer for a section that has not chosen one yet.
+ */
+const COLLAPSED: Partial<Record<RailSectionId, { label: string; icon: IconName }>> = {
+  git: { label: 'Git', icon: 'branch' },
+  activity: { label: 'Activity', icon: 'history' },
+  share: { label: 'Share', icon: 'note' }
+}
 
 function CollapsedSection({ id }: { id: RailSectionId }): ReactNode {
   const { state, actions } = useApp()
@@ -132,6 +173,9 @@ function CollapsedSection({ id }: { id: RailSectionId }): ReactNode {
   if (id === 'projects') return <ProjectRail />
   if (id === 'tasks') return <TasksPanel />
 
+  const pip = COLLAPSED[id]
+  if (!pip) return null
+
   const open = (): void => {
     actions.patchSettings({
       railCollapsed: false,
@@ -139,18 +183,16 @@ function CollapsedSection({ id }: { id: RailSectionId }): ReactNode {
     })
   }
 
-  const label = id === 'git' ? 'Git' : 'Activity'
-
   return (
     <button
       type="button"
       className="rstack__pip"
       data-id={id}
-      title={`${label} — open the rail to see it`}
-      aria-label={`Open ${label}`}
+      title={`${pip.label} — open the rail to see it`}
+      aria-label={`Open ${pip.label}`}
       onClick={open}
     >
-      <Icon name={id === 'git' ? 'branch' : 'history'} size={15} />
+      <Icon name={pip.icon} size={15} />
     </button>
   )
 }

@@ -268,6 +268,39 @@ export const IPC = {
   activityClear: 'activity:clear',
   activityUpdate: 'activity:update',
 
+  /*
+   * share — the rail's SHARE section: five markdown slots in
+   * <project>\.forge\share that every agent in the project can read and write.
+   *
+   * Write-capable, unlike git's read-mostly surface. What makes that safe is the
+   * shape of the arguments rather than a check inside the handlers: every channel
+   * here takes a project id and, where it names a slot, an *integer*. No path
+   * ever crosses this boundary, so the set of files the renderer can reach is
+   * five per project and cannot be widened by getting a string wrong.
+   *
+   * `shareRoster` and `shareReveal` are sends: the roster rides a debounced
+   * effect that fires on every pane open, close and rename, and revealing a file
+   * in Explorer has nothing to answer with.
+   */
+  shareWatch: 'share:watch',
+  shareUnwatch: 'share:unwatch',
+  shareRefresh: 'share:refresh',
+  shareSnapshot: 'share:snapshot',
+  /** The full body of one slot, fetched only when a row is opened to be read. */
+  shareRead: 'share:read',
+  shareWrite: 'share:write',
+  shareClear: 'share:clear',
+  /**
+   * Capture a pane's output into a slot from the *main* side, for a pane whose
+   * terminal this renderer has never had. The normal route reads xterm's own
+   * parsed grid instead — see src/lib/paneText.ts for why that is better.
+   */
+  shareCapture: 'share:capture',
+  /** send — the pane roster, on a debounced effect. */
+  shareRoster: 'share:roster',
+  /** send — show a slot, or the folder, in Explorer. */
+  shareReveal: 'share:reveal',
+
   // updates & tools (M10) — what is installed, what is available
   toolsProbe: 'tools:probe',
   toolsLatest: 'tools:latest',

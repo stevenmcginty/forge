@@ -3,7 +3,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import type { PtyDataEvent, PtyExitEvent } from '@shared/types'
 import { findRemoteSessionUrl } from '@shared/remote'
 import { commandExe } from '@shared/agents'
+import { SHARE_CAPTURE_DEFAULT_LINES } from '@shared/share'
 import { advanceDraft, clampDraft } from './draft'
+import { joinBufferRows, tidyCapture, type BufferRow } from './paneText'
 import { earconTaskAttention, earconTaskDone } from './earcon'
 import { getLiveSettings } from './livesettings'
 
@@ -590,6 +592,45 @@ class TerminalHost {
   /** True while a full-screen TUI (vim, htop, an agent) owns the screen. */
   isAltBuffer(paneId: string): boolean {
     return this.entries.get(paneId)?.term.buffer.active.type === 'alternate'
+  }
+
+  /**
+   * The last `lines` lines of a pane, as text. Null for a pane this window has no
+   * terminal for.
+   *
+   * This is what "Capture pane" reads, and reading it *here* rather than from
+   * main's replay buffer is the whole point. The replay buffer is a byte stream of
+   * cursor-addressed redraws; every agent CLI is a full-screen TUI, so stripping
+   * the escapes out of it yields half-overwritten rows in the order they were
+   * painted. This object already parsed those exact bytes into a grid.
+   *
+   * Works for a pane in another tab or in the mosaic: `detach()` keeps the Entry
+   * and its Terminal alive, and only `dispose()` removes them. For an agent the
+   * active buffer *is* the alternate buffer, so what comes back is what is on
+   * screen — which is what capture means. For a shell it is the tail of a
+   * 20,000-line scrollback.
+   *
+   * `isWrapped` is the detail that matters: a soft-wrapped 300-character line is
+   * three rows, and joining those with newlines would turn one sentence into
+   * three. See src/lib/paneText.ts.
+   */
+  snapshotText(paneId: string, lines: number): string | null {
+    const entry = this.entries.get(paneId)
+    if (!entry) return null
+
+    const buffer = entry.term.buffer.active
+    const want = Number.isFinite(lines) && lines > 0 ? Math.floor(lines) : SHARE_CAPTURE_DEFAULT_LINES
+    // Rows, not lines: a wrapped line is several rows, so over-reading here is
+    // what makes `want` lines actually arrive after joinBufferRows has folded
+    // them back together. tidyCapture applies the real limit.
+    const rows: BufferRow[] = []
+    const start = Math.max(0, buffer.length - want * 2)
+    for (let y = start; y < buffer.length; y++) {
+      const line = buffer.getLine(y)
+      if (!line) continue
+      rows.push({ text: line.translateToString(true), wrapped: line.isWrapped })
+    }
+    return tidyCapture(joinBufferRows(rows), want)
   }
 
   detach(paneId: string): void {

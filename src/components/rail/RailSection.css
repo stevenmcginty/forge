@@ -163,3 +163,26 @@
   height: 1px;
   background: var(--accent-line);
 }
+
+/* ------------------------------------------------------- expand into a panel
+ *
+ * The one action every section that has it draws the same way, in the same
+ * place. It stays on while the panel is open — the button and the panel are the
+ * same switch, so a section that is showing elsewhere says so in the rail too.
+ */
+
+.rsec__expand[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+/*
+ * What the rail says while the body is in the panel. Deliberately a sentence
+ * rather than a spinner or an empty box: nothing is loading, the section is
+ * simply somewhere else for a moment.
+ */
+.rsec__elsewhere {
+  margin: 0;
+  padding: var(--s-3) var(--s-4);
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}

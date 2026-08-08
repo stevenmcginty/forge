@@ -1,0 +1,215 @@
+/*
+ * The expanded rail panel.
+ *
+ * Same scrim-and-capsule family as Onboarding and the pairing prompt, one notch
+ * *below* them: this is a way of looking at something, not a question the app is
+ * waiting on, so an authorisation decision or an update still lands over it.
+ *
+ * The panel is deliberately not full-bleed. A section blown up to the edges of
+ * the window reads as a different screen you have navigated to, and this is not
+ * that — the terminals are still running an inch behind it and you are going
+ * back to them in a moment. Leaving the app visible around the edges is what
+ * keeps it a panel rather than a page.
+ */
+
+.rexp {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-popover) - 1);
+  display: grid;
+  place-items: center;
+  padding: var(--s-8);
+  background: var(--bg-scrim);
+  backdrop-filter: blur(3px);
+  animation: rexp-in var(--dur-med) var(--ease-out);
+}
+
+@keyframes rexp-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.rexp__panel {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 100%);
+  max-height: min(760px, 100%);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-card), var(--shadow-inset-top);
+  overflow: hidden;
+  animation: rexp-rise var(--dur-med) var(--ease-out);
+}
+
+@keyframes rexp-rise {
+  from {
+    transform: translateY(6px) scale(0.995);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rexp,
+  .rexp__panel {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .rexp,
+:root[data-reduced-motion='true'] .rexp__panel {
+  animation: none;
+}
+
+/* ------------------------------------------------------------------ header */
+
+.rexp__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-5) var(--s-5) var(--s-4);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.rexp__what {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-4);
+  min-width: 0;
+}
+
+.rexp__title {
+  margin: 0;
+  flex: none;
+  font-size: var(--t-lg);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+}
+
+/*
+ * Whose files these are. The panel floats over a window that may have ten
+ * projects in it, so this is the line that stops the answer being ambiguous —
+ * and it is quiet, because it is a label rather than a headline.
+ */
+.rexp__project {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  min-width: 0;
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+}
+
+.rexp__path {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.rexp__status {
+  margin-left: auto;
+  min-width: 0;
+}
+
+.rexp__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+  margin-left: auto;
+}
+
+/* The status line already took the slack; the buttons sit next to it. */
+.rexp__status + .rexp__actions {
+  margin-left: var(--s-3);
+}
+
+.rexp__hint {
+  margin: 0;
+  padding: var(--s-3) var(--s-5) 0;
+  font-size: var(--t-sm);
+  color: var(--text-dim);
+}
+
+/* -------------------------------------------------------------------- body */
+
+.rexp__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-3) var(--s-2) var(--s-5);
+}
+
+/*
+ * The section's own body, given room. Both sections draw themselves at 240px of
+ * rail by default, so the widening is done here rather than in either of them —
+ * one place that knows what "expanded" looks like, and no `data-wide` branching
+ * inside the components that would have to be kept in step.
+ */
+
+.rexp__body .gsec,
+.rexp__body .asec {
+  gap: var(--s-4);
+  padding: var(--s-2) var(--s-5) var(--s-3);
+}
+
+/*
+ * Git, wide: the lists sit side by side rather than stacked, because at this
+ * width a single 900px column of 22px rows is mostly empty space, and because
+ * "which branch" and "what has changed" are the two things you are comparing.
+ * The full-width rows are the ones you have to have read before you press
+ * anything — strips, notes, errors — so they stay across the top and bottom.
+ */
+.rexp__body .gsec {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(280px, 1.3fr);
+  align-items: start;
+  column-gap: var(--s-6);
+  row-gap: var(--s-4);
+}
+
+.rexp__body .gsec > .gsec__strip,
+.rexp__body .gsec > .gsec__note,
+.rexp__body .gsec > .gsec__remote,
+.rexp__body .gsec > .gsec__error,
+.rexp__body .gsec > .gsec__foot,
+.rexp__body .gsec > .empty {
+  grid-column: 1 / -1;
+}
+
+/* Rail width is where names have to be cut. Here there is room to read them. */
+.rexp__body .gbrow__name,
+.rexp__body .gfrow__name,
+.rexp__body .gchg__dir {
+  font-size: var(--t-sm);
+}
+
+.rexp__body .gbrow {
+  height: 26px;
+}
+
+.rexp__body .gfrow {
+  height: 24px;
+}
+
+.rexp__body .atree__name {
+  font-size: var(--t-sm);
+}
+
+.rexp__body .atree__row {
+  height: 24px;
+}
+
+/*
+ * One column below the width where two would each be too narrow to read. The
+ * panel is capped at 920px and the window can be smaller than that.
+ */
+@media (max-width: 720px) {
+  .rexp {
+    padding: var(--s-4);
+  }
+
+  .rexp__body .gsec {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import type { GitActionKind, GitSnapshot } from '@shared/types'
 import { useGitSnapshot } from '@/hooks/useGitSnapshot'
-import { isShellProfile, resolveProfile } from '@/lib/agents'
+import { useHandOff } from '@/hooks/useHandOff'
 import {
   branchLabel,
   handoffKinds,
@@ -13,15 +13,14 @@ import {
   type HandoffKind
 } from '@/lib/gitview'
 import { shortPath } from '@/lib/paths'
-import { collectLeaves } from '@/lib/splitTree'
-import { terminalHost } from '@/lib/terminals'
-import { useActiveProject, useActiveWorkspace, useApp } from '@/state/AppState'
+import { useActiveProject, useApp } from '@/state/AppState'
 import { EmptyState } from '../EmptyState'
 import { Icon } from '../Icon'
 import { Popover, PopoverRow, PopoverSection } from '../Popover'
 import { GitActionsRow } from './GitActionsRow'
 import { GitBranchList } from './GitBranchList'
 import { GitChangesList } from './GitChangesList'
+import { RailExpand } from './RailExpand'
 import { RailSection } from './RailSection'
 import './GitSection.css'
 
@@ -40,9 +39,10 @@ import './GitSection.css'
  * Nothing here needs GitHub." is a full stop, not a prompt.
  */
 export function GitSection(): ReactNode {
+  const { state, actions } = useApp()
   const project = useActiveProject()
   const { snap, running, error, refresh, run, dismissError } = useGitSnapshot()
-  const handOff = useHandOff()
+  const handOff = useHandOff('Git')
 
   const menuRef = useRef<HTMLButtonElement | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -50,11 +50,71 @@ export function GitSection(): ReactNode {
   const kinds = handoffKinds(snap)
   const label = branchLabel(snap)
   const tone = snap ? upstreamTone(snap.state) : 'none'
+  const expanded = state.railExpanded === 'git'
 
   const send = (kind: HandoffKind): void => {
     setMenuOpen(false)
     handOff(handoffPrompt(kind, snap))
   }
+
+  /*
+   * The header's three pieces, built once and rendered in whichever header is on
+   * screen — the rail's or the panel's. Once, because the menu button carries the
+   * popover's anchor ref: two live copies of it and the popover would open under
+   * whichever of them rendered last.
+   */
+  const status = label ? (
+    <span className="gsec__head" data-tone={tone} title={upstreamTitle(snap)}>
+      <span className="gsec__branch mono truncate">{label}</span>
+      <span className="gsec__dot" />
+    </span>
+  ) : null
+
+  const headerActions = (
+    <>
+      {kinds.length > 0 ? (
+        <button
+          ref={menuRef}
+          type="button"
+          className="ghost-btn"
+          title="Hand a git job to an agent"
+          onClick={() => setMenuOpen(true)}
+        >
+          <Icon name="dots" size={14} />
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="ghost-btn"
+        data-running={running ? 'true' : undefined}
+        title={running ? 'A git command is running' : 'Ask git again now'}
+        onClick={refresh}
+      >
+        <Icon name="refresh" size={14} className="gsec__spin" />
+      </button>
+    </>
+  )
+
+  const body = (
+    <div className="gsec">
+      {project ? (
+        <Body snap={snap} running={running} run={run} handOff={send} />
+      ) : (
+        <EmptyState icon="branch" size="sm" title="No project" body="Select a project to see where it stands." />
+      )}
+
+      {/*
+        A refusal from main, shown where the button that caused it is.
+        Dismissed by the next action rather than by a timer: a sentence that
+        vanishes before it has been read is worse than no sentence.
+      */}
+      {error ? (
+        <button type="button" className="gsec__error" title="Dismiss" onClick={dismissError}>
+          {error}
+        </button>
+      ) : null}
+    </div>
+  )
 
   return (
     <>
@@ -63,58 +123,31 @@ export function GitSection(): ReactNode {
         title="Git"
         count={snap?.changed ?? null}
         hint="Branch, changes, and whether this project is pushed"
-        status={
-          label ? (
-            <span className="gsec__head" data-tone={tone} title={upstreamTitle(snap)}>
-              <span className="gsec__branch mono truncate">{label}</span>
-              <span className="gsec__dot" />
-            </span>
-          ) : null
-        }
-        actions={
-          <>
-            {kinds.length > 0 ? (
-              <button
-                ref={menuRef}
-                type="button"
-                className="ghost-btn"
-                title="Hand a git job to an agent"
-                onClick={() => setMenuOpen(true)}
-              >
-                <Icon name="dots" size={14} />
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="ghost-btn"
-              data-running={running ? 'true' : undefined}
-              title={running ? 'A git command is running' : 'Ask git again now'}
-              onClick={refresh}
-            >
-              <Icon name="refresh" size={14} className="gsec__spin" />
-            </button>
-          </>
-        }
+        status={expanded ? null : status}
+        actions={expanded ? null : headerActions}
+        expanded={expanded}
+        onExpand={() => actions.setRailExpanded(expanded ? null : 'git')}
       >
-        <div className="gsec">
-          {project ? (
-            <Body snap={snap} running={running} run={run} handOff={send} />
-          ) : (
-            <EmptyState icon="branch" size="sm" title="No project" body="Select a project to see where it stands." />
-          )}
-
-          {/*
-            A refusal from main, shown where the button that caused it is.
-            Dismissed by the next action rather than by a timer: a sentence that
-            vanishes before it has been read is worse than no sentence.
-          */}
-          {error ? (
-            <button type="button" className="gsec__error" title="Dismiss" onClick={dismissError}>
-              {error}
-            </button>
-          ) : null}
-        </div>
+        {body}
       </RailSection>
+
+      {/*
+        The same body, in a panel over the app. It is the same element rendered
+        in one place or the other — never both — so expanding costs no second
+        git watch and no refetch, and closing puts the section back exactly as
+        it was rather than reloading it.
+      */}
+      {expanded ? (
+        <RailExpand
+          id="git"
+          title="Git"
+          hint="Where this project stands: its branch, what has changed, and whether it is pushed."
+          status={status}
+          actions={headerActions}
+        >
+          {body}
+        </RailExpand>
+      ) : null}
 
       {/*
         Outside the section rather than inside it, because a closed section does
@@ -327,50 +360,8 @@ function upstreamTitle(snap: GitSnapshot | null): string {
   return `${snap.branch ?? 'HEAD'} — ${where}${symbol ? ` ${symbol}` : ''}`
 }
 
-/**
- * Hand a written brief to a live agent, typed and never submitted.
- *
- * The pane is looked for in the order a person would expect it to be found: the
- * one you are in, then the tab you are looking at, then anywhere in the project.
- * Only live panes, and never a shell — a multi-sentence brief typed at a
- * PowerShell prompt is a very long command that does not exist.
- *
- * `paste`, not `type`: `type()` flattens newlines to spaces and charges the whole
- * thing to the take-back draft, which is right for a one-line command and wrong
- * for a brief. The frame in between is the DECSET 1004 race documented on
- * TerminalPane's file drop — an agent that has just been told the terminal lost
- * focus will drop the paste that follows it.
+/*
+ * `useHandOff` used to live here. It moved to src/hooks/useHandOff.ts when the
+ * SHARE section needed the same gesture — the pane-preference order, the
+ * live-only rule and the DECSET 1004 frame are all documented there.
  */
-function useHandOff(): (prompt: string) => void {
-  const { state, actions } = useApp()
-  const workspace = useActiveWorkspace()
-
-  return useCallback(
-    (prompt: string): void => {
-      if (!prompt) return
-      const profiles = state.settings.agentProfiles
-      const usable = (paneId: string, profileId: string): boolean =>
-        terminalHost.runtime(paneId).status === 'live' && !isShellProfile(resolveProfile(profiles, profileId))
-
-      const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? null
-      const inActive = activeTab ? collectLeaves(activeTab.root) : []
-      const everywhere = workspace.tabs.flatMap((t) => collectLeaves(t.root))
-
-      const current = inActive.find((l) => l.id === activeTab?.activePaneId)
-      const target =
-        (current && usable(current.id, current.profileId) ? current : null) ??
-        inActive.find((l) => usable(l.id, l.profileId)) ??
-        everywhere.find((l) => usable(l.id, l.profileId)) ??
-        null
-
-      if (target) {
-        actions.revealPane(target.id)
-        requestAnimationFrame(() => terminalHost.paste(target.id, prompt))
-        return
-      }
-
-      actions.openAgentPane('Git', prompt)
-    },
-    [actions, state.settings.agentProfiles, workspace]
-  )
-}

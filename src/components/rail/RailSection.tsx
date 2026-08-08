@@ -38,6 +38,8 @@ export function RailSection({
   actions,
   status,
   growable = true,
+  expanded = false,
+  onExpand,
   children
 }: {
   id: RailSectionId
@@ -55,6 +57,17 @@ export function RailSection({
    * takes the rail's slack, so there is no height for a handle to drag.
    */
   growable?: boolean
+  /**
+   * True while this section's body is being drawn in the expanded panel instead
+   * of here. The header stays exactly where it was — the rail must not reflow
+   * because a panel opened over it.
+   */
+  expanded?: boolean
+  /**
+   * Given by a section that can be blown up into a panel. Sections that cannot
+   * pass nothing and get no button, rather than a disabled one.
+   */
+  onExpand?: () => void
   children: ReactNode
 }): ReactNode {
   const { state, actions: appActions } = useApp()
@@ -142,10 +155,39 @@ export function RailSection({
           <button> is invalid HTML and, more to the point, clicking "add project"
           should not also collapse the list you are adding to.
         */}
-        {actions ? <div className="rsec__actions">{actions}</div> : null}
+        {actions || onExpand ? (
+          <div className="rsec__actions">
+            {actions}
+            {/*
+              Last in the row, nearest the edge, and present whether the section
+              is open or closed: expanding is how you look at a section you have
+              no rail height for, so hiding the button on a closed one would
+              take it away exactly when it is most useful.
+            */}
+            {onExpand ? (
+              <button
+                type="button"
+                className="ghost-btn rsec__expand"
+                title={expanded ? `Put ${title} back in the rail` : `Open ${title} in a panel`}
+                aria-pressed={expanded}
+                onClick={onExpand}
+              >
+                <Icon name="expand" size={12} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
-      {open ? <div className="rsec__body">{children}</div> : null}
+      {/*
+        An expanded section's body is drawn in the panel, not here. One line in
+        its place rather than an empty box, so the rail says where it went.
+      */}
+      {open ? (
+        <div className="rsec__body">
+          {expanded ? <p className="rsec__elsewhere">Showing in the panel.</p> : children}
+        </div>
+      ) : null}
     </section>
   )
 }

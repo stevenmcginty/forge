@@ -1,0 +1,333 @@
+/*
+ * The share section's body.
+ *
+ * Five rows and a foot, inside 240px of rail. The design constraint is the same
+ * one the git section is built around — one line per row, so everything on that
+ * line has to be earning its width — and the answer here is that only two things
+ * are ever drawn: the slot's number and its title. Size, age, author and
+ * provenance are a tooltip and a panel away, because "how big is slot 3" is not a
+ * question anybody asks about all five at once.
+ *
+ * The number is the load-bearing mark. It is how a slot is addressed out loud —
+ * "put the review in slot 2" — so it is mono, fixed-width and never truncated,
+ * and it is the one part of a row that looks the same whether the slot is full or
+ * empty.
+ */
+
+.shsec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3) var(--s-4);
+}
+
+.shsec__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.shsec__slot {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------- a row */
+
+.shrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  min-width: 0;
+  height: 24px;
+}
+
+.shrow__open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--s-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.shrow__open:hover {
+  background: var(--bg-hover);
+}
+
+.shrow[data-selected='true'] .shrow__open {
+  background: var(--accent-soft);
+}
+
+/*
+ * Fixed width so five numbers line up as a column rather than shuffling with the
+ * titles beside them — the column is what makes "slot 2" findable at a glance.
+ */
+.shrow__idx {
+  flex: none;
+  width: 12px;
+  color: var(--text-muted);
+  font-size: var(--t-xs);
+  text-align: center;
+}
+
+.shrow__title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+}
+
+/*
+ * An empty slot is quiet, not broken. It is italic and muted rather than dimmed
+ * to the edge of legibility, because an empty slot is an invitation and four of
+ * them is the normal state of a project nobody has shared anything in yet.
+ */
+.shrow:not([data-filled='true']) .shrow__title {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.shrow[data-filled='true'] .shrow__title {
+  color: var(--text-primary);
+}
+
+.shrow[data-problem='true'] .shrow__open {
+  color: var(--text-muted);
+  text-decoration: line-through 1px;
+}
+
+.shrow__meta {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--t-eyebrow);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Three letters saying the body lost its tail. Warn-toned, not danger — the
+ * note is still there, and the top of it is the half that mattered. */
+.shrow__chip {
+  flex: none;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* The dots only appear on hover or focus: five permanently visible menu buttons
+ * in a 240px rail is five things competing with the titles. */
+.shrow__more {
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.shrow:hover .shrow__more,
+.shrow__more:focus-visible,
+.shrow[data-selected='true'] .shrow__more {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------- the foot */
+
+.shsec__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+  padding: 0 var(--s-2);
+  color: var(--text-muted);
+  font-size: var(--t-eyebrow);
+}
+
+.shsec__warn {
+  color: var(--warn);
+}
+
+.shsec__status {
+  color: var(--text-muted);
+  font-size: var(--t-eyebrow);
+  font-variant-numeric: tabular-nums;
+}
+
+.shsec__error {
+  padding: var(--s-2);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--text-primary);
+  font-size: var(--t-eyebrow);
+  text-align: left;
+  cursor: pointer;
+}
+
+.shsec__menu-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.shsec__menu-agent {
+  color: var(--text-muted);
+  font-size: var(--t-eyebrow);
+}
+
+.shsec__spin {
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+[data-running='true'] .shsec__spin {
+  color: var(--accent);
+  animation: shsec-turn 900ms linear infinite;
+}
+
+@keyframes shsec-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-running='true'] .shsec__spin {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+/* ------------------------------------------------------------ a slot, open */
+
+/*
+ * Only ever drawn in the expanded panel, so this is the one part of the section
+ * that can spend vertical space. It still opens *read-only*: another pane may be
+ * part-way through writing this file, and a textarea that arrived focused would
+ * make the reader the loser of a race nobody told them about.
+ */
+.shdet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: var(--s-1) 0 var(--s-3);
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-panel-raised);
+}
+
+.shdet__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.shdet__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.shdet__title {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.shdet__path {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--t-eyebrow);
+}
+
+.shdet__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+.shdet__body,
+.shdet__area {
+  max-height: 46vh;
+  margin: 0;
+  padding: var(--s-2);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.shdet__area {
+  min-height: 34vh;
+  resize: vertical;
+  color: var(--text-primary);
+}
+
+.shdet__quiet {
+  margin: 0;
+  padding: 0 var(--s-1);
+  color: var(--text-muted);
+  font-size: var(--t-eyebrow);
+  line-height: 1.6;
+}
+
+.shdet__foot {
+  padding-top: 0;
+}
+
+/* An inline verb in a sentence, not a button pretending to be one. */
+.shdet__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline 1px;
+  text-underline-offset: 2px;
+}
+
+/*
+ * The refusal. Warn-toned rather than danger: nothing has been lost — that is the
+ * entire point of it — and both ways out are offered rather than one, because
+ * sometimes the other pane wrote nonsense and you know it.
+ */
+.shdet__conflict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--text-primary);
+  font-size: var(--t-eyebrow);
+}
+
+.shdet__force {
+  color: var(--danger);
+}

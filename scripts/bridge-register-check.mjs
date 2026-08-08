@@ -256,13 +256,78 @@ async function main() {
       check('key-injection probe ran', false, String(err))
     }
 
-    console.log('\n[2] applyMcpBridge() gating')
-    check('claude gets the flag', /^claude --mcp-config "/.test(res.claude), res.claude)
-    check('flag goes last, after existing args', /^claude --resume --mcp-config "/.test(res.claudeWithArgs), res.claudeWithArgs)
-    check('kimi is untouched', res.kimi === 'kimi', res.kimi)
-    check('gemini is untouched', res.gemini === 'gemini', res.gemini)
-    check('plain shell is untouched', res.plain === '', JSON.stringify(res.plain))
-    check('idempotent — never doubles the flag', res.idempotent === res.claude, res.idempotent)
+    /*
+     * The share scratchpad's server rides in the same file, as a second entry.
+     * One file rather than a repeated `--mcp-config`, because whether a repeated
+     * variadic flag appends or replaces is a commander detail nobody should bet a
+     * pane's launch on — so the thing to prove is that Claude still accepts the
+     * file once there are two servers in it, which [3] below does.
+     *
+     * It must carry no `env`. That is the whole reason it is a separate server
+     * rather than five more tools on forge-bridge: this one is registered with
+     * Codex, Qwen and OpenCode as well, and the key must not follow it there.
+     */
+    console.log('\n[1c] The share server, on and off')
+    const shareBox = join(tmpdir(), `forge-register-share-${Date.now()}`)
+    cleanup.push(shareBox)
+    /** The two-server config, kept for [3] to hand to the real claude. */
+    let twoServerConfig = null
+    try {
+      mkdirSync(shareBox, { recursive: true })
+      const serversOf = (probe) =>
+        probe?.configPath && existsSync(probe.configPath)
+          ? JSON.parse(readFileSync(probe.configPath, 'utf8'))?.mcpServers ?? {}
+          : null
+
+      writeFileSync(join(shareBox, 'settings.json'), JSON.stringify({ shareTools: false }, null, 2), 'utf8')
+      const off = serversOf(await probeInsideElectron({ FORGE_DATA_DIR: shareBox }))
+      check('tools off → only forge-bridge is registered', !!off && !('forge_share' in off), JSON.stringify(Object.keys(off ?? {})))
+
+      writeFileSync(join(shareBox, 'settings.json'), JSON.stringify({ shareTools: true }, null, 2), 'utf8')
+      const onProbe = await probeInsideElectron({ FORGE_DATA_DIR: shareBox })
+      twoServerConfig = onProbe?.configPath ?? null
+      const on = serversOf(onProbe)
+      check('tools on → both servers are registered', !!on?.['forge-bridge'] && !!on?.['forge_share'], JSON.stringify(Object.keys(on ?? {})))
+      check('the share server is named with an underscore, as every vendor spells it', 'forge_share' in (on ?? {}), JSON.stringify(Object.keys(on ?? {})))
+      check('run by node', on?.['forge_share']?.command === 'node', on?.['forge_share']?.command)
+      check(
+        'from an absolute path that exists',
+        Array.isArray(on?.['forge_share']?.args) &&
+          on['forge_share'].args.length === 1 &&
+          /^[A-Za-z]:[\\/]/.test(on['forge_share'].args[0]) &&
+          existsSync(on['forge_share'].args[0]),
+        JSON.stringify(on?.['forge_share']?.args)
+      )
+      check(
+        'and carries no env at all — no key follows it to the other vendors',
+        !!on?.['forge_share'] && !('env' in on['forge_share']),
+        JSON.stringify(on?.['forge_share'])
+      )
+    } catch (err) {
+      check('share-server probe ran', false, String(err))
+    }
+
+    /*
+     * Against a data dir with no settings.json, so the profiles are the seeded
+     * built-ins — where Claude Code carries `mcpBridge: true`.
+     *
+     * Probe [1]'s real data dir cannot answer this: the flag is gated on a
+     * per-profile switch the user owns, so a machine whose owner has turned the
+     * Gemini bridge *off* would fail these four checks while the code was
+     * perfectly correct. What is being tested here is the gating, not somebody's
+     * preferences.
+     */
+    console.log('\n[2] applyMcpBridge() gating, against seeded defaults')
+    const gateBox = join(tmpdir(), `forge-register-gate-${Date.now()}`)
+    cleanup.push(gateBox)
+    mkdirSync(gateBox, { recursive: true })
+    const gate = (await probeInsideElectron({ FORGE_DATA_DIR: gateBox })) ?? res
+    check('claude gets the flag', /^claude --mcp-config "/.test(gate.claude), gate.claude)
+    check('flag goes last, after existing args', /^claude --resume --mcp-config "/.test(gate.claudeWithArgs), gate.claudeWithArgs)
+    check('kimi is untouched', gate.kimi === 'kimi', gate.kimi)
+    check('gemini is untouched', gate.gemini === 'gemini', gate.gemini)
+    check('plain shell is untouched', gate.plain === '', JSON.stringify(gate.plain))
+    check('idempotent — never doubles the flag', gate.idempotent === gate.claude, gate.idempotent)
 
     console.log('\n[3] claude accepts the generated config')
     const claude = claudeLauncher()
@@ -280,6 +345,24 @@ async function main() {
         combined.slice(0, 800)
       )
       check('claude documents --mcp-config (flag is current)', /--mcp-config/.test(combined), combined.slice(0, 400))
+
+      /*
+       * And again with the two-server file. This is the assertion that stands
+       * behind the decision to put the share server in the same mcp.json rather
+       * than to repeat the flag: if Claude were ever to reject a config with two
+       * servers in it, every Claude pane would die at launch.
+       */
+      if (twoServerConfig && existsSync(twoServerConfig)) {
+        const both = await run(claude.file, [...claude.prefixArgs, '--mcp-config', twoServerConfig, '--help'])
+        const bothOut = `${both.stdout}\n${both.stderr}`
+        check(
+          'claude accepts a config carrying forge-bridge AND forge_share',
+          both.code === 0 && !/unknown option|unrecognized|failed to (load|parse)|invalid .*config/i.test(bothOut),
+          `exit ${both.code}\n${bothOut.slice(0, 800)}`
+        )
+      } else {
+        check('the two-server config was available to test', false, String(twoServerConfig))
+      }
     }
 
     // Opt-in: the only way to prove Claude really *loads* the server (its

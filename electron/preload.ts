@@ -179,6 +179,20 @@ const api: ForgeApi = {
     onUpdate: (cb) => subscribe(IPC.activityUpdate, cb)
   },
 
+  share: {
+    watch: (req) => ipcRenderer.invoke(IPC.shareWatch, req),
+    unwatch: (projectId) => ipcRenderer.send(IPC.shareUnwatch, projectId),
+    refresh: (projectId) => ipcRenderer.invoke(IPC.shareRefresh, projectId),
+    read: (projectId, index) => ipcRenderer.invoke(IPC.shareRead, { projectId, index }),
+    write: (req) => ipcRenderer.invoke(IPC.shareWrite, req),
+    clear: (projectId, index) => ipcRenderer.invoke(IPC.shareClear, { projectId, index }),
+    capture: (req) => ipcRenderer.invoke(IPC.shareCapture, req),
+    // send, and deliberately: this fires on every pane open, close and rename.
+    roster: (projectId, panes) => ipcRenderer.send(IPC.shareRoster, projectId, panes),
+    reveal: (projectId, index) => ipcRenderer.send(IPC.shareReveal, projectId, index),
+    onSnapshot: (cb) => subscribe(IPC.shareSnapshot, cb)
+  },
+
   tools: {
     probe: (refresh) => ipcRenderer.invoke(IPC.toolsProbe, refresh === true),
     latest: (ids, refresh) => ipcRenderer.invoke(IPC.toolsLatest, ids ?? null, refresh === true)

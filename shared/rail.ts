@@ -9,7 +9,8 @@ import type { RailSectionId } from './types'
  * the dock's case, its own height in localStorage. Adding git and activity as
  * two more of those would have meant four components each inventing the same
  * chrome slightly differently. So the chrome moved out into RailSection and the
- * facts about it moved here.
+ * facts about it moved here — which is why share, the fifth, cost one line in
+ * this file rather than a fifth reinvention of a header.
  *
  * This file is imported by electron/store.ts (for the settings normaliser) and
  * by src/lib/railstack.ts (for the renderer). One file rather than two literals
@@ -20,27 +21,30 @@ import type { RailSectionId } from './types'
 
 /**
  * Fixed order, top to bottom. Not user-reorderable, and deliberately so: the
- * rail is furniture you learn the shape of once, and a draggable stack of four
+ * rail is furniture you learn the shape of once, and a draggable stack of five
  * panels is a thing you have to re-learn every time you move one.
  *
  * Projects is first because it is the only section that answers "which project
- * am I even looking at" — everything below it is scoped to that answer.
+ * am I even looking at" — everything below it is scoped to that answer. Share is
+ * last because it is the only one that is about the *other panes* rather than
+ * about the project, so it reads as the bottom of the stack rather than a peer of
+ * Git and Activity.
  */
-export const RAIL_SECTION_ORDER: readonly RailSectionId[] = ['projects', 'tasks', 'git', 'activity']
+export const RAIL_SECTION_ORDER: readonly RailSectionId[] = ['projects', 'tasks', 'git', 'activity', 'share']
 
 /**
  * Open on a fresh install, and the fallback for a settings.json whose railOpen
  * is missing or corrupt.
  *
- * Git and activity are absent rather than merely closed, because on the update
- * that introduces them they are switched off entirely — a rail that grows two
- * new panels on a version bump has changed without being asked to.
+ * Git, activity and share are absent rather than merely closed, because on the
+ * update that introduces each of them it is switched off entirely — a rail that
+ * grows a new panel on a version bump has changed without being asked to.
  */
 export const DEFAULT_RAIL_OPEN: readonly RailSectionId[] = ['projects', 'tasks']
 
 /**
  * A section header's height. A closed section is exactly this and nothing else,
- * which is the invariant that makes four sections usable at once: however the
+ * which is the invariant that makes five sections usable at once: however the
  * heights below are dragged, every header stays reachable without scrolling.
  *
  * Must match `.rsec__head` in src/components/rail/RailSection.css.

@@ -137,6 +137,26 @@ export interface AppState {
    */
   tasksMaximized: boolean
   /**
+   * The rail section currently blown up into a panel over the app — Git or
+   * Activity, one at a time, never both. Transient for the same reason as
+   * `mosaicZoom` and `tasksMaximized`: it is a way of looking at the project
+   * you are in, not a mode to boot back into a day later.
+   *
+   * The panel is *the same component* as the rail section, with its body
+   * portalled out — so what it shows is whatever the active project's section
+   * would have shown, and switching project switches the panel with it.
+   */
+  railExpanded: RailSectionId | null
+  /**
+   * True while the "what's new" card is open.
+   *
+   * Transient, and separate from the settings key that decides whether it opens
+   * *by itself*: the card also has a button in Settings → Updates, which is the
+   * only way to see it again once it has been dismissed — and the only way Steve
+   * sees it at all, since a checkout's version never changes.
+   */
+  whatsNewOpen: boolean
+  /**
    * True when the voice hub's mic is armed, i.e. dictated phrases are the
    * agent's rather than the focused pane's. Transient on purpose: booting with
    * the mic already pointed at the agent is not something anyone asked for.
@@ -162,6 +182,8 @@ const FALLBACK_SETTINGS: Settings = {
   railTasks: true,
   railGit: false,
   railActivity: false,
+  railShare: false,
+  shareTools: false,
   railOpen: [...DEFAULT_RAIL_OPEN],
   railHeights: {},
   shell: 'pwsh.exe',
@@ -246,6 +268,9 @@ const FALLBACK_SETTINGS: Settings = {
   mobileNgrokDomain: '',
   customTools: [],
   updatesAutoRun: false,
+  // Blank until the real settings arrive. The card checks `state.ready`, so it
+  // cannot flash up against a fallback version.
+  lastNotesVersion: '',
   updateDismissedVersion: ''
 }
 
@@ -260,6 +285,8 @@ const INITIAL: AppState = {
   pendingTypes: [],
   mosaicZoom: null,
   tasksMaximized: false,
+  railExpanded: null,
+  whatsNewOpen: false,
   agentListening: false,
   notice: null,
   view: 'terminals',
@@ -313,6 +340,8 @@ type Action =
   | { type: 'taskAdd'; text: string }
   | { type: 'taskRemove'; id: string }
   | { type: 'tasksMaximized'; on: boolean }
+  | { type: 'railExpanded'; id: RailSectionId | null }
+  | { type: 'whatsNewOpen'; on: boolean }
   /** Remember the planner terminal's Claude session id on the workspace. */
   | { type: 'plannerSession'; sessionId: string }
   | { type: 'setAgentListening'; on: boolean }
@@ -988,6 +1017,12 @@ function reducer(state: AppState, action: Action): AppState {
     case 'tasksMaximized':
       return state.tasksMaximized === action.on ? state : { ...state, tasksMaximized: action.on }
 
+    case 'railExpanded':
+      return state.railExpanded === action.id ? state : { ...state, railExpanded: action.id }
+
+    case 'whatsNewOpen':
+      return state.whatsNewOpen === action.on ? state : { ...state, whatsNewOpen: action.on }
+
     case 'plannerSession': {
       if (!isSessionId(action.sessionId)) return state
       return mapActiveWorkspace(state, (ws) =>
@@ -1154,6 +1189,13 @@ export interface AppActions {
   removeTask(id: string): void
   /** Blow the Tasks panel up into the delegation desk, or dock it back. */
   setTasksMaximized(on: boolean): void
+  /**
+   * Blow one rail section — Git or Activity — up into a panel over the app,
+   * or `null` to put it back in the rail. Only one at a time.
+   */
+  setRailExpanded(id: RailSectionId | null): void
+  /** Open or close the "what's new" card. See src/components/WhatsNew.tsx. */
+  setWhatsNewOpen(on: boolean): void
   /**
    * Remember the planner terminal's Claude session id on the active project's
    * workspace, so the same conversation resumes across restarts. Minted by the
@@ -1601,6 +1643,8 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       addTask: (text) => dispatch({ type: 'taskAdd', text }),
       removeTask: (id) => dispatch({ type: 'taskRemove', id }),
       setTasksMaximized: (on) => dispatch({ type: 'tasksMaximized', on }),
+      setRailExpanded: (id) => dispatch({ type: 'railExpanded', id }),
+      setWhatsNewOpen: (on) => dispatch({ type: 'whatsNewOpen', on }),
       setPlannerSessionId: (sessionId) => dispatch({ type: 'plannerSession', sessionId }),
       resetMosaicLayout: () => dispatch({ type: 'mosaicReset' }),
       setNotice: (message) => dispatch({ type: 'notice', message }),

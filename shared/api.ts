@@ -30,6 +30,11 @@ import type {
   GroqCallResult,
   ActivityPane,
   ActivitySnapshot,
+  SharePane,
+  ShareSlotBody,
+  ShareSnapshot,
+  ShareWriteRequest,
+  ShareWriteResult,
   GhState,
   GitActionRequest,
   GitActionResult,
@@ -474,6 +479,47 @@ export interface ForgeApi {
     /** Forget everything recorded for this project. */
     clear(projectId: string): void
     onUpdate(cb: (s: ActivitySnapshot) => void): () => void
+  }
+
+  /**
+   * The shared scratchpad: five markdown slots in `<project>\.forge\share`.
+   *
+   * The only write-capable surface in the rail, and the only part of Forge that
+   * writes inside the user's project folder. Every method that names a slot names
+   * it with an integer — there is deliberately no way to ask this API about a
+   * path, which is what bounds it to five files per project.
+   *
+   * `watch` also creates the folder, the README and the `.git/info/exclude` line
+   * on first call, so nothing exists on disk until the section is switched on.
+   */
+  share: {
+    watch(req: { projectId: string; cwd: string }): Promise<{ ok: boolean; error?: string }>
+    /** send — teardown has nothing to await, same reason as git.unwatch. */
+    unwatch(projectId: string): void
+    /** Re-read now, ignoring the throttle. Null when nothing is being watched. */
+    refresh(projectId: string): Promise<ShareSnapshot | null>
+    /** One slot's full body. Null for an empty slot or one that cannot be read. */
+    read(projectId: string, index: number): Promise<ShareSlotBody | null>
+    write(req: ShareWriteRequest & { projectId: string }): Promise<ShareWriteResult>
+    clear(projectId: string, index: number): Promise<ShareWriteResult>
+    /**
+     * Capture a pane's tail into a slot from main's own replay buffer. Only for a
+     * pane this renderer has no terminal for — everything else captures xterm's
+     * parsed grid, which is the same output without the redraw artefacts.
+     */
+    capture(req: {
+      projectId: string
+      index: number
+      paneId: string
+      lines: number
+      title: string
+      author: string
+    }): Promise<ShareWriteResult>
+    /** send — on a debounced effect; nothing to await. */
+    roster(projectId: string, panes: SharePane[]): void
+    /** send — `null` reveals the folder itself. */
+    reveal(projectId: string, index: number | null): void
+    onSnapshot(cb: (s: ShareSnapshot) => void): () => void
   }
 
   /**

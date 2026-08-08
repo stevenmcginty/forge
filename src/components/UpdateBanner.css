@@ -121,6 +121,27 @@
 }
 
 /*
+ * "What's new" — a quiet link, deliberately not a second button. The strip has
+ * one action on it and that action is the update; this is a thing to read first,
+ * and it has to look like reading rather than like a choice between two verbs.
+ */
+.ubanner__what {
+  padding: 0 var(--s-1);
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+  text-decoration: underline 1px;
+  text-underline-offset: 2px;
+}
+
+.ubanner__what:hover {
+  color: var(--text-primary);
+}
+
+/*
  * The dev-run variant — src/components/StaleBanner.tsx. Same strip, same
  * geometry, warn tones instead of accent: "you are looking at old code" is a
  * different kind of news from "a new version exists", and colour says which one

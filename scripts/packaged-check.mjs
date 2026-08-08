@@ -182,7 +182,7 @@ function send(method, params) {
  * cwd somewhere unrelated — and see whether it completes an MCP handshake.
  * This is the check that catches the bridge shipping without its SDK.
  */
-function bridgeAnswers(script) {
+function bridgeAnswers(script, name = 'forge-bridge') {
   return new Promise((done) => {
     const proc = spawn(process.execPath, [script], {
       cwd: tmpdir(),
@@ -203,10 +203,10 @@ function bridgeAnswers(script) {
     proc.stdout.setEncoding('utf8')
     proc.stdout.on('data', (chunk) => {
       out += chunk
-      if (out.includes('"serverInfo"') && out.includes('forge-bridge')) finish(true)
+      if (out.includes('"serverInfo"') && out.includes(name)) finish(true)
     })
     proc.on('error', () => finish(false))
-    proc.on('exit', () => finish(out.includes('forge-bridge')))
+    proc.on('exit', () => finish(out.includes(name)))
     proc.stdin.write(
       `${JSON.stringify({
         jsonrpc: '2.0',
@@ -363,6 +363,21 @@ try {
     // can run it from somewhere with no node_modules above it — which is
     // exactly the situation a Claude pane spawns it in.
     ok(await bridgeAnswers(script), 'and `node` can run it standalone from an unrelated directory')
+  }
+
+  /*
+   * The share server ships alongside it, and has to be here whether or not the
+   * setting that registers it is on: `mcp.json` only names it when the user has
+   * asked for the tools, so the file's absence would go unnoticed until the day
+   * somebody switched them on.
+   */
+  const shareScript = join(RESOURCES, 'bridge', 'share-bridge.mjs')
+  ok(existsSync(shareScript), 'the shared-scratchpad MCP server is in the package', shareScript)
+  if (existsSync(shareScript)) {
+    ok(
+      await bridgeAnswers(shareScript, 'forge-share'),
+      'and `node` can run it standalone too — bundled with its SDK, like the other one'
+    )
   }
 
   /* ----------------------------------------------------------------- stt */

@@ -51,7 +51,17 @@ export function useGitSnapshot(): GitView {
 
   const projectId = project?.id ?? ''
   const projectPath = project?.path ?? ''
-  const watching = Boolean(projectId && state.settings.railGit && isOpen(state.settings, 'git'))
+  /*
+   * Open in the rail *or* blown up into the panel. The panel draws the section's
+   * body with the rail section closed underneath it perfectly often — expanding
+   * a section you had no rail height for is the main reason the button exists —
+   * so watching on `isOpen` alone would leave the panel showing a snapshot that
+   * never updates.
+   */
+  const expanded = state.railExpanded === 'git'
+  const watching = Boolean(
+    projectId && state.settings.railGit && (isOpen(state.settings, 'git') || expanded)
+  )
 
   const [snap, setSnap] = useState<GitSnapshot | null>(null)
   const [running, setRunning] = useState(false)

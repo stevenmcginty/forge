@@ -29,6 +29,12 @@ scripts/fixtures/*.wav
 # Temp probe files written into the root by scripts/bridge-register-check.mjs
 .bridge-check-*.cjs
 
+# The release notes, worked out from the commit range by scripts/whats-new.mjs
+# and imported by the renderer so the app carries its own. Generated in `predev`
+# and at the start of `build`, so it always exists and never needs committing —
+# and must not be, because its version is decided by CI at release time.
+src/generated/
+
 # Steve's own Firebase project id for the companion — created by
 # `firebase use --alias default forge-sync`. The shape is in
 # companion/.firebaserc.example; the id itself is his, not the repo's.

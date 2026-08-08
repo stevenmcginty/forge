@@ -7,6 +7,7 @@ import { withoutQuestions } from './pty/replay'
 import { checkableExe, whichCommand } from './which'
 import { getSettings } from './store'
 import { applyMcpBridge } from './bridge/mcp-config'
+import { applyShareBridge, shareEnvFor } from './bridge/share-mcp'
 import { applyRemoteControl } from './bridge/remote-control'
 import { applyClaudeSession } from './bridge/claude-session'
 import { presenceFile } from './presence'
@@ -286,7 +287,9 @@ export function registerPtyHandlers(): void {
         cwd
       }
     )
-    const bootstrapCommand = applyMcpBridge(plan.command)
+    // Two transforms, in this order: `--mcp-config` is variadic and has to stay
+    // last on Claude's command line, and only Codex ever matches the second one.
+    const bootstrapCommand = applyShareBridge(applyMcpBridge(plan.command))
     const settings = getSettings()
 
     // The pane is about to type a command into a shell. If the program behind
@@ -317,9 +320,22 @@ export function registerPtyHandlers(): void {
     // to asking git in the pane's own cwd, so a remote created five minutes ago
     // still shows up. Nothing is set when there is no repo at all.
     const repoUrl = String(req?.repoUrl ?? '').trim() || gitRemoteOrigin(cwd) || ''
+
+    /*
+     * The shared scratchpad's two variables. `FORGE_SHARE_AGENT` is the pane's
+     * name, and it goes to every pane rather than only the four that get the MCP
+     * tools: an agent that writes `.forge/share/slot-2.md` with its own Write
+     * tool can read this and sign its work, and writing the file is the path
+     * every vendor has. `OPENCODE_CONFIG_CONTENT` is how OpenCode is told about
+     * the share server at all — verified to merge with the user's own config
+     * rather than replace it. See electron/bridge/share-mcp.ts.
+     */
+    const shareEnv = shareEnvFor(bootstrapCommand, paneTitle || projectName)
+
     const env = {
       ...(geminiEnv ?? {}),
-      ...(repoUrl ? { FORGE_REPO_URL: repoUrl } : {})
+      ...(repoUrl ? { FORGE_REPO_URL: repoUrl } : {}),
+      ...shareEnv
     }
 
     const spec = {

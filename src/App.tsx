@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { AccountChip } from '@/components/AccountChip'
 import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { Onboarding } from '@/components/Onboarding'
+import { WhatsNew } from '@/components/WhatsNew'
 import { RailStack } from '@/components/rail/RailStack'
 import { ScreenshotTray } from '@/components/ScreenshotTray'
 import { TasksWorkspace } from '@/components/tasks/TasksWorkspace'
@@ -100,6 +101,12 @@ export function App(): ReactNode {
       */}
       <OverlayHost />
       <Onboarding />
+      {/*
+        What changed in the version that just installed itself. After the welcome,
+        because a fresh install has nothing to catch up on and its settings are
+        seeded so that this stays quiet on a first run.
+      */}
+      <WhatsNew />
       {/*
         The Forge Mobile pairing prompt — "a phone calling itself X wants to
         connect". Mounted at the root and last, so an authorisation question is

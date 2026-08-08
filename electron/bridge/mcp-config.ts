@@ -31,36 +31,58 @@ import { getDataDir, getSettings } from '../store'
 const SERVER_KEY = 'forge-bridge'
 const SCRIPT = 'gemini-bridge.mjs'
 
-let configPath: string | null = null
-let bridgeScript: string | null = null
+/**
+ * The share scratchpad's server, written into the same file.
+ *
+ * One mcp.json with two servers rather than two files and a repeated
+ * `--mcp-config`: the flag's value is variadic, and whether a *repeated* flag
+ * appends or replaces is a commander detail nobody should be betting a pane's
+ * launch on. This way `applyMcpBridge` is unchanged and
+ * scripts/bridge-register-check.mjs — which hands the real generated file to the
+ * real `claude --help` — stays the proof that Claude accepts it.
+ *
+ * It gets no `env` block. That is the whole reason it is a separate *server*
+ * rather than five more tools on the one above: the Gemini bridge's environment
+ * carries GEMINI_API_KEY, and electron/bridge/share-mcp.ts registers the share
+ * server with three more vendors.
+ */
+const SHARE_KEY = 'forge_share'
 
-/** Candidate locations for the bridge script, dev and packaged. */
-function scriptCandidates(): string[] {
+let configPath: string | null = null
+const scripts = new Map<string, string | null>()
+
+/** Candidate locations for a bridge script, dev and packaged. */
+function scriptCandidates(name: string): string[] {
   const appPath = app.getAppPath()
   const list = [
-    // Dev / unpacked: <root>/bridge/gemini-bridge.mjs
-    join(appPath, 'bridge', SCRIPT),
+    // Dev / unpacked: <root>/bridge/<name>
+    join(appPath, 'bridge', name),
     // Packaged with the bridge as an extraResource.
-    join(process.resourcesPath ?? '', 'bridge', SCRIPT),
+    join(process.resourcesPath ?? '', 'bridge', name),
     // Packaged inside app.asar.unpacked.
-    join(`${appPath}.unpacked`, 'bridge', SCRIPT),
+    join(`${appPath}.unpacked`, 'bridge', name),
     // Built output sits in out/main, so the repo root is two levels up.
-    join(__dirname, '..', '..', 'bridge', SCRIPT)
+    join(__dirname, '..', '..', 'bridge', name)
   ]
   return list.filter(Boolean)
 }
 
-/** Absolute path to the bridge server, or null when it cannot be found. */
-export function resolveBridgeScript(): string | null {
-  if (bridgeScript !== null) return bridgeScript
-  for (const candidate of scriptCandidates()) {
-    if (existsSync(candidate)) {
-      bridgeScript = candidate
-      return bridgeScript
-    }
+/**
+ * Absolute path to a bridge server, or null when it cannot be found.
+ *
+ * Cached per name rather than in one variable, because there are two servers now
+ * and a single slot would have made the second lookup answer with the first
+ * one's path.
+ */
+export function resolveBridgeScript(name: string = SCRIPT): string | null {
+  const cached = scripts.get(name)
+  if (cached !== undefined) return cached
+  const found = scriptCandidates(name).find((candidate) => existsSync(candidate)) ?? null
+  if (!found) {
+    console.error(`[bridge] ${name} not found; tried:\n  ` + scriptCandidates(name).join('\n  '))
   }
-  console.error('[bridge] gemini-bridge.mjs not found; tried:\n  ' + scriptCandidates().join('\n  '))
-  return null
+  scripts.set(name, found)
+  return found
 }
 
 /**
@@ -105,13 +127,19 @@ export function writeBridgeConfig(): string | null {
   const askModel = (process.env['FORGE_GEMINI_ASK_MODEL'] ?? '').trim()
   if (askModel) env['FORGE_GEMINI_ASK_MODEL'] = askModel
 
+  // Only when the user has asked for the share tools, and only when the server
+  // is actually on disk. An mcp.json naming a script that is not there is a
+  // Claude pane that spends its first seconds failing to start a server.
+  const shareScript = settings.shareTools ? resolveBridgeScript('share-bridge.mjs') : null
+
   const config = {
     mcpServers: {
       [SERVER_KEY]: {
         command: 'node',
         args: [script],
         env
-      }
+      },
+      ...(shareScript ? { [SHARE_KEY]: { command: 'node', args: [shareScript] } } : {})
     }
   }
 

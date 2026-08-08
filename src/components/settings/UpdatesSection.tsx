@@ -13,6 +13,7 @@ import {
   updateCommandFor
 } from '@shared/tools'
 import type { ToolId, ToolLatest, ToolProbe, ToolSpec, UpdateStatus } from '@shared/types'
+import { whatsNew } from '@/lib/whatsnew'
 import { useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
 import { Card, Row, Section, StateChip, TextField, Toggle, type ChipTone } from './parts'
@@ -352,7 +353,11 @@ export function UpdatesSection(): ReactNode {
         </Row>
       </Card>
 
-      <ForgeUpdateCard status={update} version={state.info?.version ?? ''} />
+      <ForgeUpdateCard
+        status={update}
+        version={state.info?.version ?? ''}
+        onNotes={whatsNew() ? () => actions.setWhatsNewOpen(true) : null}
+      />
     </Section>
   )
 }
@@ -737,7 +742,16 @@ function ToolForm({
  * app replacing its own executable is a shape Windows is entitled to be
  * suspicious of.
  */
-function ForgeUpdateCard({ status, version }: { status: UpdateStatus | null; version: string }): ReactNode {
+function ForgeUpdateCard({
+  status,
+  version,
+  onNotes
+}: {
+  status: UpdateStatus | null
+  version: string
+  /** Open the "what's new" card. Null when this build carries no notes. */
+  onNotes: (() => void) | null
+}): ReactNode {
   const phase = status?.phase ?? 'unsupported'
   const dev = phase === 'unsupported'
 
@@ -746,12 +760,25 @@ function ForgeUpdateCard({ status, version }: { status: UpdateStatus | null; ver
       title="Forge itself"
       tone={dev ? 'quiet' : 'plain'}
       actions={
-        dev ? null : (
-          <button type="button" className="ghost-btn sbtn" onClick={() => void window.forge.updates.check()}>
-            <Icon name="restart" size={12} />
-            Check now
-          </button>
-        )
+        <>
+          {/*
+            The permanent way back to the card that appears after an update — and
+            the only way to see it at all in a checkout, where the version never
+            changes and the automatic trigger therefore never fires.
+          */}
+          {onNotes ? (
+            <button type="button" className="ghost-btn sbtn" title="What changed in this build" onClick={onNotes}>
+              <Icon name="note" size={12} />
+              What&apos;s new
+            </button>
+          ) : null}
+          {dev ? null : (
+            <button type="button" className="ghost-btn sbtn" onClick={() => void window.forge.updates.check()}>
+              <Icon name="restart" size={12} />
+              Check now
+            </button>
+          )}
+        </>
       }
       hint={
         <>

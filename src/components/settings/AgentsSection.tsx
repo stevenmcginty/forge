@@ -128,6 +128,35 @@ export function AgentsSection(): ReactNode {
           ))}
         </ul>
       </Card>
+
+      {/*
+        Here rather than in Appearance, because this is about what agents can do
+        rather than about what the rail looks like — and because the hint has to
+        name the one file Forge writes outside its own data directory. Somebody
+        who reads only this card should still learn that.
+      */}
+      <Card
+        title="Shared scratchpad tools"
+        hint={
+          <>
+            The five notes in <span className="mono">.forge/share</span> are files, so every agent can already read and
+            write them. This adds a <span className="mono">forge_share</span> tool set on top for the four CLIs that can
+            be told about one: Claude Code, Codex, OpenCode and Qwen. It carries no API key and opens no network
+            connection.
+          </>
+        }
+      >
+        <Row
+          label="forge_share tools"
+          hint="Claude, Codex and OpenCode are told at launch, so they pick it up on the next pane you open. Qwen has no launch flag, so Forge adds one entry to ~/.qwen/settings.json — and removes it again when you turn this off. It never touches an entry it did not write."
+        >
+          <Toggle
+            checked={state.settings.shareTools}
+            onChange={(on) => actions.patchSettings({ shareTools: on })}
+            label="forge_share tools"
+          />
+        </Row>
+      </Card>
     </Section>
   )
 }
