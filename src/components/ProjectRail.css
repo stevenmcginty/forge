@@ -304,18 +304,25 @@
 
 /*
  * Motion off: the row still has to say the same two things. The pulse settles
- * on the flat warn tint declared above, and the running head becomes a steady
- * line of lit dots — present means working, exactly as before.
+ * on the flat warn tint declared above, and the running head goes away entirely
+ * — what is left is the dot row on its own, at a weight that reads as a line of
+ * dots rather than a rule. Lighting every dot at full tint was the wrong
+ * fallback: with nothing travelling along it, a full-strength dot row closes up
+ * into one solid stroke at this size, which is the one thing this indicator
+ * must never look like. Dim and clearly dotted says "working" without pretending
+ * to move.
  */
 @media (prefers-reduced-motion: reduce) {
   .prow[data-attention='true'] {
     animation: none;
   }
 
+  .prow__activity {
+    background: color-mix(in srgb, var(--prow-tint, var(--accent)) 55%, transparent);
+  }
+
   .prow__activity::after {
-    width: 100%;
-    animation: none;
-    background: var(--prow-tint, var(--accent));
+    display: none;
   }
 }
 
@@ -323,10 +330,12 @@
   animation: none;
 }
 
+:root[data-reduced-motion='true'] .prow__activity {
+  background: color-mix(in srgb, var(--prow-tint, var(--accent)) 55%, transparent);
+}
+
 :root[data-reduced-motion='true'] .prow__activity::after {
-  width: 100%;
-  animation: none;
-  background: var(--prow-tint, var(--accent));
+  display: none;
 }
 
 /*
