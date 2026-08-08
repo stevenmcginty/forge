@@ -32,6 +32,13 @@ import './ProjectRail.css'
  * here is the list. The collapsed rail is the exception and still renders bare:
  * at 56px there is no header to speak of, and the dot column *is* the rail.
  *
+ * **Pinned projects sit outside the scroller.** Because this section takes the
+ * stack's slack rather than owning a height, a long list is a scrolling list,
+ * and `Project.pinned` lifts a project out of it into a fixed block above. The
+ * block is a sibling of `.rail__list`, not its first child — a sticky row inside
+ * the scroller would still be a row *in* the list, and would slide under itself
+ * on the way past.
+ *
  * This is also the only section that cannot be switched off, and the only one
  * with no height of its own — it takes the stack's slack. Both facts live in
  * src/lib/railstack.ts rather than here.
@@ -48,36 +55,50 @@ export function ProjectRail(): ReactNode {
   const openAddMenu = (e: MouseEvent<HTMLElement>): void =>
     setAddMenu({ open: true, anchor: e.currentTarget })
 
+  /*
+   * Every project, carrying the index it holds in `state.projects` — which is
+   * the index the drag handlers move by. Splitting the rows for display must not
+   * renumber them, or a drop would move the wrong project.
+   */
+  const rows = state.projects.map((project, index) => ({ project, index }))
+  const pinned = rows.filter((r) => r.project.pinned)
+  const rest = rows.filter((r) => !r.project.pinned)
+
+  const row = ({ project, index }: { project: Project; index: number }): ReactNode => (
+    <ProjectRow
+      key={project.id}
+      project={project}
+      index={index}
+      collapsed={collapsed}
+      active={project.id === state.activeProjectId}
+      dragFrom={dragFrom}
+      setDragFrom={setDragFrom}
+    />
+  )
+
   const list = (
-    <div className="rail__list">
-      {state.projects.length === 0 ? (
-        collapsed ? null : (
-          <EmptyState
-            icon="folder"
-            size="sm"
-            title="No projects"
-            body="Create a new project, or open a folder you already have."
-            action={
-              <button type="button" className="cta-btn" onClick={openAddMenu}>
-                Create project
-              </button>
-            }
-          />
-        )
-      ) : (
-        state.projects.map((project, index) => (
-          <ProjectRow
-            key={project.id}
-            project={project}
-            index={index}
-            collapsed={collapsed}
-            active={project.id === state.activeProjectId}
-            dragFrom={dragFrom}
-            setDragFrom={setDragFrom}
-          />
-        ))
-      )}
-    </div>
+    <>
+      {pinned.length > 0 ? <div className="rail__pinned">{pinned.map(row)}</div> : null}
+      <div className="rail__list">
+        {state.projects.length === 0 ? (
+          collapsed ? null : (
+            <EmptyState
+              icon="folder"
+              size="sm"
+              title="No projects"
+              body="Create a new project, or open a folder you already have."
+              action={
+                <button type="button" className="cta-btn" onClick={openAddMenu}>
+                  Create project
+                </button>
+              }
+            />
+          )
+        ) : (
+          rest.map(row)
+        )}
+      </div>
+    </>
   )
 
   const menu = (
@@ -181,6 +202,7 @@ function ProjectRow({
       ref={rowRef}
       className="prow"
       data-active={active}
+      data-pinned={project.pinned ? 'true' : undefined}
       data-working={working ? 'true' : undefined}
       data-dragover={dragFrom !== null && dragFrom !== index ? 'true' : undefined}
       /*
@@ -202,10 +224,26 @@ function ProjectRow({
         e.preventDefault()
         e.dataTransfer.dropEffect = 'move'
       }}
+      /*
+       * A drop is always the same ordinary reorder — plus, when the row came
+       * from the other side of the seam, the pin flag that puts it in the block
+       * it was dropped into. That is what makes pinning something you can do by
+       * dragging a project up into the pinned block, and unpinning something you
+       * can do by dragging it back down, without either gesture needing its own
+       * notion of order: `moveProject` moves canonical indices exactly as it
+       * always did, and the flag decides which block draws the result.
+       */
       onDrop={(e) => {
         e.preventDefault()
-        if (dragFrom !== null && dragFrom !== index) actions.moveProject(dragFrom, index)
+        const from = dragFrom
         setDragFrom(null)
+        if (from === null || from === index) return
+        const moved = state.projects[from]
+        if (!moved) return
+        if (Boolean(moved.pinned) !== Boolean(project.pinned)) {
+          actions.updateProject(moved.id, { pinned: Boolean(project.pinned) })
+        }
+        actions.moveProject(from, index)
       }}
       onClick={() => actions.selectProject(project.id)}
       onContextMenu={(e) => {
@@ -213,8 +251,8 @@ function ProjectRow({
         setMenuOpen(true)
       }}
       title={`${collapsed ? `${project.name} — ${project.path}` : project.path}${
-        working ? ' · working' : ''
-      }`}
+        project.pinned ? ' · pinned' : ''
+      }${working ? ' · working' : ''}`}
     >
       <span className="prow__dot" style={{ background: project.color }} />
 
@@ -226,6 +264,13 @@ function ProjectRow({
             <span className="prow__name truncate">{project.name}</span>
             <span className="prow__path mono truncate">{shortPath(project.path)}</span>
           </span>
+
+          {/*
+            Only pinned rows draw it, so it costs the list nothing — and the two
+            or three rows that do are the ones that need to say why they are not
+            where the alphabet left them.
+          */}
+          {project.pinned ? <Icon name="pin" size={12} className="prow__pin" /> : null}
 
           <AgentBadge profile={profile} size="sm" />
 
@@ -409,6 +454,22 @@ function ProjectMenu({
       </PopoverSection>
 
       <PopoverDivider />
+
+      {/*
+        The discoverable half of pinning — dragging a row across the seam does
+        the same thing, but only once you know the seam is there, and a project
+        cannot be dragged into a pinned block that does not exist yet.
+      */}
+      <PopoverRow
+        onClick={() => {
+          actions.updateProject(project.id, { pinned: !project.pinned })
+          onClose()
+        }}
+      >
+        <Icon name="pin" size={14} />
+        <span className="prow__menu-name">{project.pinned ? 'Unpin from top' : 'Pin to top'}</span>
+        {project.pinned ? <Icon name="check" size={13} /> : null}
+      </PopoverRow>
 
       <PopoverRow
         onClick={() => {

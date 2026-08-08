@@ -104,6 +104,25 @@ export interface Project {
    * because a folder with no remote yet is a perfectly normal project.
    */
   repoUrl?: string
+  /**
+   * Held at the top of the rail, above the scroller, however far the list below
+   * is scrolled.
+   *
+   * The project list is the one rail section with no height of its own — it
+   * takes the stack's slack — so a long list is a scrolling list, and the two or
+   * three folders that are open every day are exactly the ones that scroll away.
+   * Pinning is what fixes them.
+   *
+   * It changes where a project is *drawn*, never the order of this array:
+   * `moveProject` still works in canonical indices, and the pinned block simply
+   * renders the pinned entries in the order they already sit in. Which is what
+   * lets dragging a row across the seam mean "pin it" — the drop sets this flag
+   * and performs the ordinary move, rather than needing a second notion of order
+   * that could disagree with the first.
+   *
+   * Optional, and absent on every project saved before it existed.
+   */
+  pinned?: boolean
 }
 
 /* ------------------------------------------------------------ pane layouts */
@@ -257,13 +276,14 @@ export type PlannerUpdate = {
 /* ---------------------------------------------------------------- the rail */
 
 /**
- * The left rail's four sections.
+ * The left rail's five sections.
  *
- * `projects` and `tasks` are the rail as it has always been, rehoused; `git` and
- * `activity` are the new ones and are off until asked for. The order is fixed
- * and lives in shared/rail.ts, not here — this type is only the vocabulary.
+ * `projects` and `tasks` are the rail as it has always been, rehoused; `git`,
+ * `activity` and `share` came later and are off until asked for. The order is
+ * fixed and lives in shared/rail.ts, not here — this type is only the
+ * vocabulary.
  */
-export type RailSectionId = 'projects' | 'tasks' | 'git' | 'activity'
+export type RailSectionId = 'projects' | 'tasks' | 'git' | 'activity' | 'share'
 
 /* ----------------------------------------------------------------- git (M12) */
 
@@ -497,6 +517,125 @@ export interface ActivityPane {
   profileId: string
   /** Set only for Claude panes with a session — the key to the exact half. */
   sessionId?: string
+}
+
+/* --------------------------------------------------------------- share (M13) */
+
+/**
+ * How a slot came to be written. Cosmetic, and one value is load-bearing:
+ * `agent` is what a slot with no Forge front matter reads back as, i.e. a file
+ * an agent wrote with its own tools rather than through Forge. That is a
+ * supported way to fill a slot, not a corruption to be repaired.
+ */
+export type ShareVia = 'rail' | 'mcp' | 'capture' | 'agent'
+
+/**
+ * One of the five pigeonholes, as the rail sees it.
+ *
+ * `preview` rather than the body, deliberately: five 64 KiB bodies is 320 KiB
+ * structured-cloned across the preload boundary on every write, to draw five
+ * one-line rows. The body is fetched by `share.read()` when a row is opened.
+ */
+export interface ShareSlot {
+  /** 1..SHARE_SLOTS. The slot's identity — no caller ever passes a path. */
+  index: number
+  filled: boolean
+  title: string
+  /** First SHARE_PREVIEW_CHARS characters, newlines collapsed. Never the body. */
+  preview: string
+  bytes: number
+  lines: number
+  /** Epoch ms. The file's mtime when the front matter does not say. */
+  updatedAt: number
+  /** '' when nobody claimed it. */
+  author: string
+  via: ShareVia
+  /** The body hit SHARE_MAX_BYTES and lost its tail. */
+  truncated: boolean
+  /** Set when the file could not be read. The row goes dim; nothing throws. */
+  problem?: string
+}
+
+/**
+ * A pane in this project, as written to `.forge/share/panes.json`.
+ *
+ * Composed in the renderer, because it is the only side that knows which
+ * profile a pane runs and what `paneDisplayTitle` makes of its nickname.
+ * Deliberately carries no busy flag: busy changes every few seconds, and a file
+ * that churns wakes every watcher anyone has pointed at their repo.
+ */
+export interface SharePane {
+  paneId: string
+  /** paneDisplayTitle(profile, leaf.title) — the name a person would say. */
+  title: string
+  /** The profile's name: 'Claude Code', 'Codex', … */
+  agent: string
+  profileId: string
+  openedAt: number
+}
+
+export interface ShareSnapshot {
+  projectId: string
+  /** Monotonic per-watch, so the renderer can ignore a stale push. */
+  seq: number
+  at: number
+  presence: 'ok' | 'no-folder' | 'error'
+  error?: string
+  /** Absolute path to `<project>/.forge/share`. */
+  root: string
+  /**
+   * Is `.forge/` in `.git/info/exclude`? False also means "not a plain repo" —
+   * a worktree or submodule is skipped rather than guessed at.
+   */
+  excluded: boolean
+  filled: number
+  /** Always SHARE_SLOTS long, in index order, filled or not. */
+  slots: ShareSlot[]
+  panes: SharePane[]
+}
+
+/** One slot's full text, fetched only when a row is opened for reading. */
+export interface ShareSlotBody {
+  index: number
+  title: string
+  body: string
+  bytes: number
+  updatedAt: number
+  author: string
+  via: ShareVia
+  truncated: boolean
+}
+
+export interface ShareWriteRequest {
+  index: number
+  title: string
+  body: string
+  author: string
+  via: ShareVia
+  /** Add to what is there rather than replace it. */
+  append?: boolean
+  /**
+   * The `updatedAt` the caller last read.
+   *
+   * Three agents can hold the same slot open, so a write that does not say what
+   * it was editing is a write that can silently lose somebody's work. A mismatch
+   * is refused with a sentence naming who got there first; the caller decides
+   * whether to reload or overwrite. Omitted means "I know I am clobbering".
+   */
+  expectUpdatedAt?: number
+}
+
+export interface ShareWriteResult {
+  ok: boolean
+  error?: string
+  /** The slot moved under the caller. `error` says who moved it. */
+  conflict?: boolean
+  truncated?: boolean
+  /** Bytes lost to truncation, so the caller can say so out loud. */
+  dropped?: number
+  slot?: ShareSlot
+  /** Freshly re-read, like GitActionResult — no UI ever shows a pre-write answer. */
+  snapshot?: ShareSnapshot
 }
 
 export interface Workspace {
@@ -1135,6 +1274,21 @@ export interface Settings {
    * watches a directory you did not ask it to watch should be a choice.
    */
   railActivity: boolean
+  /**
+   * Show the Share section — five markdown slots every agent in the project can
+   * read and write.
+   *
+   * Off, and the one with the most to say for itself being off: it is the only
+   * part of Forge that writes *into* the project folder rather than into
+   * %APPDATA%\Forge. It puts `.forge/share` there and adds `.forge/` to this
+   * clone's `.git/info/exclude` so nothing is committed, but a feature that
+   * creates a directory in somebody's repository has to be asked for.
+   *
+   * Independent of `shareTools`: the rail without the MCP tools is a perfectly
+   * good manual scratchpad, and the tools without the rail is a perfectly good
+   * agent-only one.
+   */
+  railShare: boolean
   /**
    * Which sections are open. A set, not an order — the order is fixed in
    * shared/rail.ts, and an id in here that is not in RAIL_SECTION_ORDER is

@@ -52,6 +52,33 @@
   padding: var(--s-2) 0 var(--s-4);
 }
 
+/*
+ * ------------------------------------------------------------ pinned block
+ *
+ * A sibling of the scroller rather than a sticky row inside it: `flex: none`
+ * gives it exactly the height of the rows it holds, and the list below takes
+ * what is left, so pinned rows are not merely painted over the list — they are
+ * outside it, and nothing can scroll under them.
+ *
+ * The hairline is the seam a drag crosses to pin or unpin, so it is drawn even
+ * when the list below is short enough that nothing would scroll: it is telling
+ * you the block is a different place, not that there is more to see.
+ */
+.rail__pinned {
+  flex: none;
+  padding: var(--s-2) var(--s-3) var(--s-3);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.rail[data-collapsed='true'] .rail__pinned {
+  padding: var(--s-2) 0 var(--s-3);
+}
+
+/* The block already ends in a gap; the list must not open with a second one. */
+.rail__pinned + .rail__list {
+  padding-top: var(--s-3);
+}
+
 /* ------------------------------------------------------------ project row */
 
 .prow {
@@ -283,6 +310,20 @@
   background: color-mix(in srgb, var(--prow-tint, var(--accent)) 11%, var(--bg-sunken));
   border: 1px solid color-mix(in srgb, var(--prow-tint, var(--accent)) 26%, transparent);
   border-radius: var(--r-full);
+}
+
+/*
+ * The pin glyph on a pinned row. Dim by default and in the project's own colour
+ * once the row is the live one — it is a label on the row, not a control, and
+ * the row already has a control at that end.
+ */
+.prow__pin {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.prow[data-active='true'] .prow__pin {
+  color: color-mix(in srgb, var(--prow-tint, var(--accent)) 62%, var(--text-secondary));
 }
 
 .prow__menu {

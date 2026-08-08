@@ -40,6 +40,8 @@ export type IconName =
   | 'file'
   | 'history'
   | 'refresh'
+  | 'note'
+  | 'pin'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -237,6 +239,25 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M13 8a5 5 0 0 1-8.7 3.4" />
       <path d="M11.8 1.9v2.8H9" />
       <path d="M4.2 14.1v-2.8H7" />
+    </>
+  ),
+  // A pinned note: the Share section. Deliberately not `file`, which the git
+  // changes list already owns — at pip size a shape is the whole of how a
+  // section is told apart, and two sections drawn as a page is one too many.
+  note: (
+    <>
+      <rect x="3" y="2.6" width="10" height="10.8" rx="1.5" />
+      <path d="M5.6 6h4.8M5.6 8.6h4.8M5.6 11.2h2.6" />
+    </>
+  ),
+  // A drawing pin, upright: a project held at the top of the rail. Drawn head-on
+  // rather than at the usual 45° so it still reads as a pin at 13px, where the
+  // tilted version collapses into a smudge.
+  pin: (
+    <>
+      <path d="M6 2.4h4" />
+      <path d="M6.7 2.4v4.1L4.7 9.4h6.6L9.3 6.5V2.4" />
+      <path d="M8 9.4v4.2" />
     </>
   )
 }
