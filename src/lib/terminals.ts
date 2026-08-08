@@ -127,6 +127,18 @@ const BUSY_ONSET_MS = 600
 const BUSY_GAP_MS = 400
 const BUSY_QUIET_MS = 1200
 
+/** "1. Yes", "❯ 2. No", "(3) Skip" — one option in a prompt's list of them. */
+const CHOICE_LINE = /^[❯>▶●•*\s]*\(?\d+[.)]\s+\S/
+
+/**
+ * Drop the border a TUI draws around a prompt, so the text inside reads as
+ * ordinary lines. A row that was nothing but border comes back empty and is
+ * skipped by the caller.
+ */
+function stripBoxDrawing(line: string): string {
+  return line.replace(/[─-╿▀-▟]/g, ' ').trim()
+}
+
 /**
  * How long the geometry must hold still before ConPTY is told about it.
  *
@@ -456,7 +468,7 @@ class TerminalHost {
     if (entry.busyTimer !== null) clearTimeout(entry.busyTimer)
     entry.busyTimer = window.setTimeout(() => {
       entry.busyTimer = null
-      this.setBusy(entry, false)
+      this.settle(entry)
     }, BUSY_QUIET_MS)
 
     if (!entry.busy && now - entry.busyRunStart >= BUSY_ONSET_MS) this.setBusy(entry, true)
@@ -465,23 +477,54 @@ class TerminalHost {
   private setBusy(entry: Entry, busy: boolean): void {
     if (entry.busy === busy) return
     entry.busy = busy
+    // Output means the agent is talking, not waiting; whatever it asked is stale.
     if (busy) this.setAttention(entry, false)
-    else this.setAttention(entry, entry.runtime.status !== 'exited' && this.looksLikeWaiting(entry))
     for (const cb of this.busyListeners) cb()
   }
 
-  /** Conservative fallback for CLIs that do not expose a waiting-state event. */
+  /**
+   * The pane has gone quiet: stop calling it busy, and decide whether the last
+   * thing on screen is a question aimed at the user.
+   *
+   * This runs on *every* quiet timeout rather than only on a busy-to-idle edge.
+   * A permission prompt is often printed in one short burst that never lasts
+   * BUSY_ONSET_MS, so the pane was never marked busy — and an attention check
+   * hung off the busy edge would never look at exactly the prompts that matter
+   * most.
+   */
+  private settle(entry: Entry): void {
+    this.setBusy(entry, false)
+    this.setAttention(entry, entry.runtime.status !== 'exited' && this.looksLikeWaiting(entry))
+  }
+
+  /**
+   * Conservative fallback for CLIs that do not expose a waiting-state event.
+   *
+   * Three shapes cover what agents actually leave on screen when they stop for
+   * an answer: a line that ends in a question mark, a menu of numbered choices
+   * (Claude Code's permission box, which draws its question inside a border and
+   * then lists options, so the *last* line is never the question), and the
+   * classic y/n prompt. Box-drawing characters are stripped first so a bordered
+   * prompt reads the same as an unbordered one.
+   */
   private looksLikeWaiting(entry: Entry): boolean {
     const buffer = entry.term.buffer.active
     const lines: string[] = []
-    const start = Math.max(0, buffer.length - 10)
+    const start = Math.max(0, buffer.length - 30)
     for (let y = start; y < buffer.length; y++) {
-      const text = buffer.getLine(y)?.translateToString(true).trim()
+      const text = stripBoxDrawing(buffer.getLine(y)?.translateToString(true) ?? '')
       if (text) lines.push(text)
     }
-    const tail = lines.slice(-4).join(' ')
-    return /(?:\?|？)\s*$/.test(tail) ||
-      /\b(?:yes\/no|y\/n|allow|deny|approve|confirm|continue)\b\s*[:?]?\s*$/i.test(tail)
+    const tail = lines.slice(-10)
+    if (tail.length === 0) return false
+
+    if (tail.some((line) => /[?？]\s*$/.test(line))) return true
+    if (tail.filter((line) => CHOICE_LINE.test(line)).length >= 2) return true
+    return tail.some((line) =>
+      /\b(?:yes\/no|y\/n|allow|deny|approve|confirm|continue|proceed|overwrite)\b\s*[:?]?\s*$/i.test(
+        line
+      )
+    )
   }
 
   private setAttention(entry: Entry, attention: boolean): void {
@@ -496,6 +539,7 @@ class TerminalHost {
       entry.busyTimer = null
     }
     this.setBusy(entry, false)
+    this.setAttention(entry, false)
   }
 
   /** True while this pane is sustainedly printing — an agent mid-thought. */

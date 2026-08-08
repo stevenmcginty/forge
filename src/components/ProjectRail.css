@@ -127,14 +127,20 @@
   border-color: color-mix(in srgb, var(--prow-tint, var(--accent)) 30%, transparent);
 }
 
-/* A settled question needs more weight than the moving work indicator. */
+/*
+ * A settled question needs more weight than the moving work indicator: the row
+ * takes the warn colour and pulses it (keyframes below). The flat values here
+ * are what a reduced-motion row is left holding, so they have to read as
+ * "answer me" on their own.
+ */
 .prow[data-attention='true'] {
-  background: color-mix(in srgb, var(--warning, #f0b84b) 13%, var(--bg-active));
-  border-color: color-mix(in srgb, var(--warning, #f0b84b) 38%, transparent);
+  background: color-mix(in srgb, var(--warn) 18%, var(--bg-active));
+  border-color: color-mix(in srgb, var(--warn) 44%, transparent);
+  animation: prow-attention 1800ms ease-in-out infinite;
 }
 
 .prow[data-attention='true']:hover {
-  background: color-mix(in srgb, var(--warning, #f0b84b) 18%, var(--bg-hover));
+  background: color-mix(in srgb, var(--warn) 24%, var(--bg-hover));
 }
 
 /* Seam on the live project, in that project's colour rather than the app's. */
@@ -219,36 +225,108 @@
   color: var(--text-dim);
 }
 
-/* A quiet, unmistakable activity signal that belongs to the path it describes. */
+/*
+ * A quiet, unmistakable activity signal that belongs to the path it describes:
+ * a row of dots with a pulse running left to right along it, over and over,
+ * for exactly as long as one of this project's terminals is working.
+ *
+ * The dots never move. Sliding a row of identical dots sideways fails the only
+ * test that matters — every frame looks like the one before, so the eye reads
+ * the whole thing as a static dashed line. Here the geometry is a *mask* on
+ * this element, which does not move, and the thing that travels is a soft head
+ * painted underneath it: the dots stay put and light up in turn as the pulse
+ * passes through them. That reads as motion, and it reads as direction.
+ *
+ * The head is 40% of the row, so travelling from −100% to 250% of its own width
+ * carries it from just off the left edge to just off the right one. `linear`
+ * and one-directional: a bounce would say "scanning", and this says "running".
+ */
 .prow__activity {
+  position: relative;
   display: block;
   width: 100%;
-  height: 1px;
+  height: 3px;
   margin-top: 3px;
-  background: repeating-linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--prow-tint, var(--accent)) 78%, transparent) 0 2px,
-    transparent 2px 6px
-  );
-  background-size: 12px 1px;
-  animation: prow-dots 700ms linear infinite;
-  opacity: 0.9;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--prow-tint, var(--accent)) 26%, transparent);
+  -webkit-mask-image: radial-gradient(circle at 1.5px 50%, #000 0 1.5px, transparent 1.75px);
+  mask-image: radial-gradient(circle at 1.5px 50%, #000 0 1.5px, transparent 1.75px);
+  -webkit-mask-size: 7px 100%;
+  mask-size: 7px 100%;
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
 }
 
-@keyframes prow-dots {
+.prow__activity::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--prow-tint, var(--accent)) 50%,
+    transparent 100%
+  );
+  animation: prow-scan 1400ms linear infinite;
+}
+
+@keyframes prow-scan {
+  from {
+    transform: translateX(-100%);
+  }
   to {
-    background-position: 6px 0;
+    transform: translateX(250%);
   }
 }
 
+/*
+ * A settled question is the one thing on this rail worth interrupting for, so
+ * the whole row breathes rather than wearing a static tint. Slow and shallow:
+ * it has to be visible from across the room in peripheral vision without
+ * becoming the thing you are looking at.
+ */
+@keyframes prow-attention {
+  0%,
+  100% {
+    background-color: color-mix(in srgb, var(--warn) 10%, var(--bg-active));
+    border-color: color-mix(in srgb, var(--warn) 24%, transparent);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    background-color: color-mix(in srgb, var(--warn) 26%, var(--bg-active));
+    border-color: color-mix(in srgb, var(--warn) 62%, transparent);
+    box-shadow: 0 0 12px -2px color-mix(in srgb, var(--warn) 40%, transparent);
+  }
+}
+
+/*
+ * Motion off: the row still has to say the same two things. The pulse settles
+ * on the flat warn tint declared above, and the running head becomes a steady
+ * line of lit dots — present means working, exactly as before.
+ */
 @media (prefers-reduced-motion: reduce) {
-  .prow__activity {
+  .prow[data-attention='true'] {
     animation: none;
   }
+
+  .prow__activity::after {
+    width: 100%;
+    animation: none;
+    background: var(--prow-tint, var(--accent));
+  }
 }
 
-:root[data-reduced-motion='true'] .prow__activity {
+:root[data-reduced-motion='true'] .prow[data-attention='true'] {
   animation: none;
+}
+
+:root[data-reduced-motion='true'] .prow__activity::after {
+  width: 100%;
+  animation: none;
+  background: var(--prow-tint, var(--accent));
 }
 
 /*
