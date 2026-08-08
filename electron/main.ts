@@ -485,6 +485,32 @@ async function pickFolder(title: string, buttonLabel: string): Promise<string | 
   return result.filePaths[0]!
 }
 
+/**
+ * Settings keys the main process owns outright, stripped from anything the
+ * renderer sends.
+ *
+ * The renderer persists its *whole* settings object on a debounce (see
+ * AppState's persistence effect), and that object is only ever as fresh as the
+ * last hydrate. `mobileDevices` is minted and revoked here, in the main
+ * process, and nothing pushes the new list back into renderer state — so a
+ * phone that paired after launch lived in a key the renderer still believed was
+ * empty, and the next unrelated settings change (a theme, a rail drag, the
+ * accept-window mirror in MobileSection) wrote the stale list back over it. The
+ * phone stayed paired for exactly as long as nobody touched a setting, then
+ * came back as `auth refused ... This device is not paired`.
+ *
+ * A merge cannot fix this: the renderer's value is not a partial, it is a
+ * confident and wrong whole. The only stable answer is one writer per key, so
+ * these never travel inward.
+ */
+const MAIN_OWNED_SETTINGS = ['mobileDevices', 'mobileAcceptUntil'] as const
+
+function rendererOwned(patch: Partial<Settings>): Partial<Settings> {
+  const out = { ...patch }
+  for (const key of MAIN_OWNED_SETTINGS) delete out[key]
+  return out
+}
+
 function registerAppHandlers(): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => {
     const settings = getSettings()
@@ -505,7 +531,7 @@ function registerAppHandlers(): void {
   ipcMain.handle(IPC.storeSnapshot, () => snapshot())
   ipcMain.handle(IPC.storeSetSettings, (_e, patch: Partial<Settings>) => {
     const before = getSettings()
-    const next = setSettings(patch ?? {})
+    const next = setSettings(rendererOwned(patch ?? {}))
     applyShotSettings(next)
     // The bridge's mcp.json carries the Gemini key and image model, so it has to
     // be rewritten when either changes — otherwise a key pasted today would not

@@ -465,6 +465,33 @@ async function start(): Promise<void> {
   syncAcceptTimer()
   // The tunnel wants the server listening before it advertises a way in.
   void startTunnel()
+  offerPairingOnStart()
+}
+
+/**
+ * Mint a pairing offer at startup and print the code to the log.
+ *
+ * Off unless `FORGE_MOBILE_PAIR_ON_START=1`, and deliberately so: a pairing
+ * code is a credential, and this writes one in clear to a log file that is not
+ * treated as a secret anywhere else. The ordinary door — Settings → Forge
+ * Mobile → Pair a phone — keeps the code on screen and nowhere else, and it
+ * remains the right door whenever there is a human at the desktop.
+ *
+ * This one exists for the case that door cannot answer: the phone has lost its
+ * device token, the desktop is a hundred miles away, and pairing offers live in
+ * memory only, so the very restart that would let you re-pair is also what
+ * destroys any offer already open. Without an offer mintable from outside the
+ * renderer, a remote phone that forgets its token cannot be let back in at all.
+ *
+ * The offer is single-use and expires with PAIR_TTL_MS like any other, so the
+ * exposure is one code for one window, not a standing key.
+ */
+function offerPairingOnStart(): void {
+  if (process.env.FORGE_MOBILE_PAIR_ON_START !== '1') return
+  const offer = getAuth().offerPairing()
+  const minutes = Math.round(PAIR_TTL_MS / 60_000)
+  console.log(`[mobile] pairing open by FORGE_MOBILE_PAIR_ON_START — code ${offer.token} (${minutes} min)`)
+  report('Pairing open — scan the code on your phone.')
 }
 
 async function stop(): Promise<void> {
