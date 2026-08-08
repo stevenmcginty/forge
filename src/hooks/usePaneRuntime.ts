@@ -33,6 +33,13 @@ export function useAnyBusy(paneIds: string[]): boolean {
   return terminalHost.anyBusy(paneIds)
 }
 
+/** True when any pane has settled on a likely question or approval prompt. */
+export function useAnyAttention(paneIds: string[]): boolean {
+  const [, bump] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => terminalHost.subscribeAttention(bump), [])
+  return terminalHost.anyAttention(paneIds)
+}
+
 /** True once the shell is gone and the pane is showing a corpse. */
 export function isPaneDead(runtime: PaneRuntime): boolean {
   return runtime.status === 'exited' || runtime.status === 'error'

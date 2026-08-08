@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import type { Project } from '@shared/types'
-import { useAnyBusy } from '@/hooks/usePaneRuntime'
-import { ACCENT_PALETTE, resolveProfile } from '@/lib/agents'
+import { useAnyAttention, useAnyBusy } from '@/hooks/usePaneRuntime'
+import { ACCENT_PALETTE } from '@/lib/agents'
 import { shortPath } from '@/lib/paths'
 import { collectLeaves } from '@/lib/splitTree'
 import { useApp } from '@/state/AppState'
@@ -187,7 +187,6 @@ function ProjectRow({
   const workspace = state.workspaces[project.id]
   const paneIds = workspace ? workspace.tabs.flatMap((t) => collectLeaves(t.root).map((l) => l.id)) : []
   const panes = paneIds.length
-  const profile = resolveProfile(state.settings.agentProfiles, project.defaultProfileId)
 
   /*
    * "One or more of this project's terminals is still working." Every pane in
@@ -196,6 +195,7 @@ function ProjectRow({
    * setting only decides whether the answer is allowed to show.
    */
   const working = useAnyBusy(paneIds) && state.settings.railBusyRing
+  const attention = useAnyAttention(paneIds)
 
   return (
     <div
@@ -204,6 +204,7 @@ function ProjectRow({
       data-active={active}
       data-pinned={project.pinned ? 'true' : undefined}
       data-working={working ? 'true' : undefined}
+      data-attention={attention ? 'true' : undefined}
       data-dragover={dragFrom !== null && dragFrom !== index ? 'true' : undefined}
       /*
        * The project's colour, handed to CSS once and spent in several places:
@@ -252,7 +253,7 @@ function ProjectRow({
       }}
       title={`${collapsed ? `${project.name} — ${project.path}` : project.path}${
         project.pinned ? ' · pinned' : ''
-      }${working ? ' · working' : ''}`}
+      }${working ? ' · working' : ''}${attention ? ' · needs your attention' : ''}`}
     >
       <span className="prow__dot" style={{ background: project.color }} />
 
@@ -263,6 +264,7 @@ function ProjectRow({
           <span className="prow__text">
             <span className="prow__name truncate">{project.name}</span>
             <span className="prow__path mono truncate">{shortPath(project.path)}</span>
+            {working ? <span className="prow__activity" aria-label="Working" /> : null}
           </span>
 
           {/*
@@ -271,8 +273,6 @@ function ProjectRow({
             where the alphabet left them.
           */}
           {project.pinned ? <Icon name="pin" size={12} className="prow__pin" /> : null}
-
-          <AgentBadge profile={profile} size="sm" />
 
           <span className="prow__panes mono">{panes}</span>
 

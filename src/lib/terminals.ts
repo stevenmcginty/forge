@@ -213,6 +213,8 @@ interface Entry {
   activityTimer: number | null
   /** True while this pane counts as working — see the BUSY_* constants. */
   busy: boolean
+  /** True when settled output looks like a question or approval prompt. */
+  attention: boolean
   /** When the current unbroken run of output began. */
   busyRunStart: number
   /** When the last chunk arrived, so a gap can be measured. */
@@ -330,6 +332,7 @@ class TerminalHost {
    * is split.
    */
   private busyListeners = new Set<() => void>()
+  private attentionListeners = new Set<() => void>()
   /**
    * Panes a phone is reading, and the size it is reading them at. Kept even
    * for panes with no entry yet, because the phone can ask for a tab that this
@@ -462,7 +465,29 @@ class TerminalHost {
   private setBusy(entry: Entry, busy: boolean): void {
     if (entry.busy === busy) return
     entry.busy = busy
+    if (busy) this.setAttention(entry, false)
+    else this.setAttention(entry, entry.runtime.status !== 'exited' && this.looksLikeWaiting(entry))
     for (const cb of this.busyListeners) cb()
+  }
+
+  /** Conservative fallback for CLIs that do not expose a waiting-state event. */
+  private looksLikeWaiting(entry: Entry): boolean {
+    const buffer = entry.term.buffer.active
+    const lines: string[] = []
+    const start = Math.max(0, buffer.length - 10)
+    for (let y = start; y < buffer.length; y++) {
+      const text = buffer.getLine(y)?.translateToString(true).trim()
+      if (text) lines.push(text)
+    }
+    const tail = lines.slice(-4).join(' ')
+    return /(?:\?|？)\s*$/.test(tail) ||
+      /\b(?:yes\/no|y\/n|allow|deny|approve|confirm|continue)\b\s*[:?]?\s*$/i.test(tail)
+  }
+
+  private setAttention(entry: Entry, attention: boolean): void {
+    if (entry.attention === attention) return
+    entry.attention = attention
+    for (const cb of this.attentionListeners) cb()
   }
 
   private clearBusy(entry: Entry): void {
@@ -488,6 +513,20 @@ class TerminalHost {
     return () => {
       this.busyListeners.delete(cb)
     }
+  }
+
+  subscribeAttention(cb: () => void): () => void {
+    this.attentionListeners.add(cb)
+    return () => this.attentionListeners.delete(cb)
+  }
+
+  isAttention(paneId: string): boolean {
+    return this.entries.get(paneId)?.attention ?? false
+  }
+
+  anyAttention(paneIds: Iterable<string>): boolean {
+    for (const id of paneIds) if (this.isAttention(id)) return true
+    return false
   }
 
   /* ---------------------------------------------------------- lifecycle */
@@ -699,6 +738,7 @@ class TerminalHost {
       lastActivityNotify: 0,
       activityTimer: null,
       busy: false,
+      attention: false,
       busyRunStart: 0,
       busyLastOutput: 0,
       busyTimer: null,
@@ -714,6 +754,7 @@ class TerminalHost {
         if (data === '\r' || data === '\n') void this.restart(paneId)
         return
       }
+      this.setAttention(entry, false)
       // A reply xterm composed itself is still sent — the program asked for it —
       // but it is not part of what was typed. See REPORT_RESPONSE.
       if (!REPORT_RESPONSE.test(data)) entry.typed = advanceDraft(entry.typed, data)

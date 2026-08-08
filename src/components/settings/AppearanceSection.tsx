@@ -88,7 +88,7 @@ export function AppearanceSection(): ReactNode {
         </Row>
         <Row
           label="Show working projects in the rail"
-          hint="A thin arc sweeps the project’s dot while any of its terminals is still producing output — an agent mid-thought, a build running. It ignores your own typing, and settles about a second after the work stops."
+          hint="A thin dotted line appears beneath a project’s folder while any of its terminals is still producing output. It ignores your own typing, and settles about a second after the work stops."
         >
           <Toggle
             checked={s.railBusyRing}
