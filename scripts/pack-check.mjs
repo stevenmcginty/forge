@@ -21,6 +21,7 @@
  * library rather than reading `homedir()`, and the last check confirms the run
  * created nothing in the real ~/.claude.
  */
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -94,7 +95,8 @@ async function main() {
   const skills = await bundle(join(ROOT, 'shared', 'skills.ts'), join(scratch, 'skills.mjs'))
 
   const { isSafePackPath, parsePack, pluginRecipe, pluginIsShareable, FORGEPACK_VERSION, packSize } = pack
-  const { buildPack, installPack, readPackFile, readPluginRecipes } = packFs
+  const { buildPack, buildZip, installPack, readPackFile, readPluginRecipes } = packFs
+  const { writeZip } = await bundle(join(ROOT, 'electron', 'zip.ts'), join(scratch, 'zip.mjs'))
   const { SkillsStore } = store
   const { isValidSkillName } = skills
 
@@ -433,6 +435,112 @@ async function main() {
     const localOnly = readPluginRecipes(new SkillsStore({ libraryDir: libA, claudeSkillsDir: claude, pluginsDir }))
     log(localOnly[0].source.kind === 'local', 'a directory marketplace is marked local')
     log(pluginRecipe(localOnly[0]).length === 0, 'and yields no command, rather than one that would fail')
+  }
+
+  /* ---------------------------------------------------------------- zip */
+
+  console.log('\nthe zip route — for a recipient with no Forge')
+  {
+    const zip = buildZip(sender, { skills: ['release-checklist', 'other'], includePlugins: false, note: 'have these', now: () => 0 })
+    log(zip.ok === true, 'a zip builds')
+    log(zip.bytes[0] === 0x50 && zip.bytes[1] === 0x4b, 'and starts with the PK signature')
+    log(zip.skills === 2, 'carrying both skills')
+
+    const zipPath = join(home, 'skills.zip')
+    writeFileSync(zipPath, zip.bytes)
+
+    // The oracle. Windows' own extractor, not this repo's encoder checking its
+    // own homework — an archive only ever read back by the thing that wrote it
+    // is an archive nobody has proved is a zip.
+    const out = join(home, 'unzipped')
+    let expanded = true
+    try {
+      execFileSync(
+        'powershell',
+        ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${out}' -Force`],
+        { stdio: 'pipe' }
+      )
+    } catch (err) {
+      expanded = false
+      console.log(`      ${String(err.stderr ?? err).slice(0, 300)}`)
+    }
+    log(expanded, "Windows' own Expand-Archive opens it without complaint")
+
+    if (expanded) {
+      log(existsSync(join(out, 'release-checklist', 'SKILL.md')), 'a skill came out as a folder')
+      log(
+        readFileSync(join(out, 'release-checklist', 'SKILL.md'), 'utf8') ===
+          readFileSync(join(libA, 'release-checklist', 'SKILL.md'), 'utf8'),
+        'with SKILL.md byte-identical to the library copy'
+      )
+      log(
+        readFileSync(join(out, 'release-checklist', 'assets', 'diagram.png')).equals(binary),
+        'and the binary file intact through deflate'
+      )
+      log(existsSync(join(out, 'other', 'SKILL.md')), 'the second skill is there too')
+      const readme = readFileSync(join(out, 'README.md'), 'utf8')
+      log(readme.includes('.claude\\skills'), 'the README names the Windows destination')
+      log(readme.includes('~/.claude/skills'), 'and the macOS/Linux one')
+      log(readme.includes('have these'), 'and carries the sender’s note')
+      log(readme.includes('read it before you copy it in'), 'and says to read a skill before trusting it')
+      log(!existsSync(join(out, 'PLUGINS.md')), 'no PLUGINS.md when plugins were not asked for')
+    }
+  }
+
+  {
+    // Plugins in a zip are a document, not files — the same rule the pack has,
+    // and the one that is easiest to break here because a zip *could* carry them.
+    const pluginsDir = join(home, 'plugins2')
+    const cache = join(pluginsDir, 'cache', 'acme', 'widgets', '2.1.0', 'skills', 'widget')
+    mkdirSync(cache, { recursive: true })
+    writeFileSync(join(cache, 'SKILL.md'), '---\nname: widget\ndescription: SECRET-PLUGIN-BODY\n---\n', 'utf8')
+    writeFileSync(
+      join(pluginsDir, 'known_marketplaces.json'),
+      JSON.stringify({ acme: { source: { source: 'github', repo: 'acme/plugins' } } }),
+      'utf8'
+    )
+    const withPlugins = new SkillsStore({ libraryDir: libA, claudeSkillsDir: claude, pluginsDir })
+    const zip = buildZip(withPlugins, { skills: ['other'], includePlugins: true, now: () => 0 })
+    log(zip.ok === true, 'a zip with plugin recipes builds')
+    log(
+      !zip.bytes.includes(Buffer.from('SECRET-PLUGIN-BODY')),
+      'and carries no plugin file content — recipes only, same rule as the pack'
+    )
+
+    const zipPath = join(home, 'withplugins.zip')
+    const out = join(home, 'unzipped2')
+    writeFileSync(zipPath, zip.bytes)
+    try {
+      execFileSync(
+        'powershell',
+        ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${out}' -Force`],
+        { stdio: 'pipe' }
+      )
+      const doc = readFileSync(join(out, 'PLUGINS.md'), 'utf8')
+      log(doc.includes('/plugin marketplace add acme/plugins'), 'PLUGINS.md carries the marketplace command')
+      log(doc.includes('/plugin install widgets@acme'), 'and the install command')
+    } catch (err) {
+      log(false, `the plugins zip expands (${String(err).slice(0, 120)})`)
+    }
+  }
+
+  console.log('\nthe zip writer itself')
+  {
+    log(writeZip([]).ok === true, 'an empty archive is still a valid archive')
+    log(
+      writeZip([
+        { path: 'a.md', bytes: Buffer.from('x') },
+        { path: 'A.md', bytes: Buffer.from('y') }
+      ]).ok === false,
+      'two entries differing only in case are refused rather than silently merged'
+    )
+    log(writeZip([{ path: '', bytes: Buffer.from('x') }]).ok === false, 'an entry with no name is refused')
+    // Incompressible bytes must not come out bigger than they went in.
+    const noise = Buffer.from(Array.from({ length: 4096 }, (_, i) => (i * 2654435761) % 256))
+    const stored = writeZip([{ path: 'n.bin', bytes: noise }])
+    log(stored.ok && stored.bytes.length < noise.length + 512, 'incompressible data is stored, not inflated by deflate')
+    const backslash = writeZip([{ path: 'a\\b.md', bytes: Buffer.from('x') }])
+    log(backslash.ok && backslash.bytes.includes(Buffer.from('a/b.md')), 'a backslash in a path is normalised to forward')
   }
 
   /* ------------------------------------------------------------- sundry */

@@ -380,6 +380,7 @@ async function main() {
       // channels above, and that every one of them is still wired.
       packPlugins: 'skills:pack-plugins',
       packExport: 'skills:pack-export',
+      packExportZip: 'skills:pack-export-zip',
       packOpen: 'skills:pack-open',
       packInstall: 'skills:pack-install'
     },
@@ -392,7 +393,7 @@ async function main() {
       pickFolder: async () => join(outside, 'imported-skill')
     }
   )
-  log(handlers.size === 12, `all twelve channels are registered (${handlers.size})`)
+  log(handlers.size === 13, `all thirteen channels are registered (${handlers.size})`)
 
   const listedOverIpc = await handlers.get('skills:list')()
   log(

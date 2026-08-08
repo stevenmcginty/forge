@@ -1,9 +1,22 @@
 # Skill packs — giving your skills to somebody else
 
-A `.forgepack` is one file you hand over. Open the Skills flyout, hit the
-**send** button, tick what goes in, save. The other person opens their Skills
-flyout, **+** → **Install from a pack…**, and reads what is in it before
-anything is written.
+Open the Skills flyout, hit the **send** button, tick what goes in, save. Two
+formats come out of the same sheet, and which one you want depends entirely on
+what the other person runs.
+
+| | Send it when | They do |
+| --- | --- | --- |
+| **Zip** | Always, unless you know they run Forge | Unzip into `~/.claude/skills`. No Forge, no software, no steps. |
+| **Pack** (`.forgepack`) | Forge to Forge | **+** → *Install from a pack…*, read the preview, one click. |
+
+The zip is the primary button because it is the one that works for the larger
+audience. A `.forgepack` is the richer file — it previews, it validates, it
+installs in a click — and it is completely useless to somebody without Forge,
+which is most people a skill gets sent to.
+
+A zip carries a **README.md** naming the destination folder on each platform
+(somebody who was sent a zip has no interface telling them what to do with it)
+and, when asked for, a **PLUGINS.md** with the recipes.
 
 ---
 
@@ -134,13 +147,14 @@ for "these are mine and I keep them current".
 | --- | --- |
 | `shared/skillpack.ts` | The format, the caps, `isSafePackPath`, `parsePack`, `pluginRecipe`. Pure — no `node:`, no DOM. |
 | `electron/skill-pack.ts` | `buildPack`, `installPack`, `readPackFile`, `readPluginRecipes`. The half that touches disk. |
+| `electron/zip.ts` | A ZIP writer in ~100 lines. No dependency — same call the repo made writing its own PNG encoder. |
 | `src/components/SkillPack.tsx` | The share sheet and the import preview. |
 | `scripts/pack-check.mjs` | 99 checks. |
 
 ## Checking it
 
 ```
-npm run pack:check      # 99 checks: the traversal matrix (24 refusals, each a
+npm run pack:check      # 121 checks: the traversal matrix (24 refusals, each a
                         # shape that beats a naive implementation), the parser
                         # against malformed and hostile packs, a real
                         # build/install round trip through a temp library
@@ -150,6 +164,13 @@ npm run pack:check      # 99 checks: the traversal matrix (24 refusals, each a
                         # prefix trap, plugin recipes off a real plugins tree,
                         # that a plugins-only pack carries no plugin file
                         # content, and that the real ~/.claude/skills was
-                        # never touched
+                        # never touched. Then the zip half — built archives are
+                        # opened by **Windows' own Expand-Archive**, not by this
+                        # repo's decoder, because an archive only ever read back
+                        # by the thing that wrote it is one nobody has proved is
+                        # a zip. Contents are compared byte-for-byte against the
+                        # library, and a zip built with plugin recipes is
+                        # searched for plugin file content that must not be in
+                        # it
 npm run skills:smoke    # the library itself, and that all twelve channels wire
 ```

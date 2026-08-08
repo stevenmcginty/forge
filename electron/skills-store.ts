@@ -16,7 +16,7 @@ import {
 } from 'node:fs'
 import { basename, join, resolve, sep } from 'node:path'
 import { packFileName } from '@shared/skillpack'
-import { buildPack, installPack, readPackFile, readPluginRecipes } from './skill-pack'
+import { buildPack, buildZip, installPack, readPackFile, readPluginRecipes } from './skill-pack'
 import {
   FORGE_MANAGED_MARKER,
   SKILL_FILE,
@@ -857,6 +857,7 @@ export interface SkillsChannels {
   /** The four pack channels. See electron/skill-pack.ts. */
   packPlugins: string
   packExport: string
+  packExportZip: string
   packOpen: string
   packInstall: string
 }
@@ -883,6 +884,8 @@ export function registerSkillsHandlers(
     pickFolder(): Promise<string | null>
     /** Where to write a pack. Returns null when the dialog was cancelled. */
     savePackAs?(suggestedName: string): Promise<string | null>
+    /** Where to write a zip. Returns null when the dialog was cancelled. */
+    saveZipAs?(suggestedName: string): Promise<string | null>
     /** Which pack to open. Returns null when the dialog was cancelled. */
     pickPack?(): Promise<string | null>
     /** Stamped into the pack's `from`, so a recipient can see what wrote it. */
@@ -987,6 +990,34 @@ export function registerSkillsHandlers(
       plugins: built.pack.plugins.length,
       skipped: built.skipped
     }
+  })
+
+  /**
+   * The same skills as a plain zip of folders — the route that works for a
+   * recipient who does not run Forge, which is most of them.
+   */
+  ipc.handle(channels.packExportZip, async (_e, names?: unknown, includePlugins?: unknown, note?: unknown) => {
+    if (!store) return { ok: false, error: 'Skills are not available', skipped: [] }
+    const wanted = Array.isArray(names) ? names.map((n) => String(n ?? '')) : []
+    const built = buildZip(store, {
+      skills: wanted,
+      includePlugins: includePlugins === true,
+      note: typeof note === 'string' ? note : '',
+      from: `Forge ${deps.appVersion?.() ?? ''}`.trim()
+    })
+    if (!built.ok || !built.bytes) return { ok: false, error: built.error, skipped: built.skipped }
+
+    // One skill gets its own name on the file; anything else is a bundle.
+    const suggested = built.skills === 1 && wanted[0] ? `${wanted[0]}.zip` : 'forge-skills.zip'
+    const target = await deps.saveZipAs?.(suggested)
+    if (!target) return { ok: false, cancelled: true, skipped: built.skipped }
+
+    try {
+      writeFileSync(target, built.bytes)
+    } catch (err) {
+      return { ok: false, error: `Could not write that file: ${(err as Error).message}`, skipped: built.skipped }
+    }
+    return { ok: true, path: target, bytes: built.bytes.length, skills: built.skills, skipped: built.skipped }
   })
 
   /** Read a pack for preview. Deliberately writes nothing — see skill-pack.ts. */

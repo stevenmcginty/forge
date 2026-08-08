@@ -11,12 +11,14 @@ import {
   packPathProblem,
   parsePack,
   pluginIsShareable,
+  pluginRecipe,
   type PackFile,
   type PackPlugin,
   type PackPluginSource,
   type PackSkill,
   type SkillPack
 } from '@shared/skillpack'
+import { writeZip, type ZipEntry } from './zip'
 import type { SkillsStore } from './skills-store'
 
 /**
@@ -263,6 +265,169 @@ export function buildPack(
   }
 
   return { ok: true, pack, json, skipped }
+}
+
+/* -------------------------------------------------------------------- zip */
+
+/**
+ * The same skills, as a plain zip of folders.
+ *
+ * The `.forgepack` is the Forge-to-Forge route: it previews, it validates, it
+ * installs with one button. It is also **useless to somebody who does not run
+ * Forge**, and most people a skill gets sent to do not. A zip of folders is the
+ * lowest common denominator and needs no software at all: unzip into
+ * `~/.claude/skills` and every `claude` session on that machine has them.
+ *
+ * So this is not a second export format for its own sake — it is the one that
+ * works for the larger audience, and the pack is the richer one for the smaller.
+ *
+ * Two things ride along that the pack carries structurally and a folder tree
+ * cannot:
+ *
+ *  - **README.md** — where to put these, on all three platforms. Somebody who
+ *    was sent a zip has no interface telling them what to do with it.
+ *  - **PLUGINS.md** — the `/plugin` recipes, when asked for. Same rule as the
+ *    pack: recipes, never copied plugin files.
+ */
+export function buildZip(
+  store: SkillsStore,
+  options: { skills: string[]; includePlugins: boolean; note?: string; from?: string; now?: () => number }
+): { ok: boolean; error?: string; bytes?: Buffer; skills: number; skipped: string[] } {
+  const skipped: string[] = []
+  const names = [...new Set((options.skills ?? []).map((n) => String(n ?? '').trim()))].slice(0, PACK_MAX_SKILLS)
+  const entries: ZipEntry[] = []
+  const included: string[] = []
+
+  for (const name of names) {
+    const dir = store.pathFor(name)
+    if (!dir || !safe(() => statSync(dir).isDirectory(), false)) {
+      skipped.push(`${name} — not in your library`)
+      continue
+    }
+    const files: PackFile[] = []
+    collectFiles(dir, dir, files, skipped)
+    if (!files.some((f) => f.path === SKILL_FILE)) {
+      skipped.push(`${name} — no ${SKILL_FILE}, so there is nothing to send`)
+      continue
+    }
+    for (const file of files) {
+      entries.push({
+        path: `${name}/${file.path}`,
+        bytes: file.text !== undefined ? Buffer.from(file.text, 'utf8') : Buffer.from(file.base64 ?? '', 'base64'),
+        // The file's own mtime, so an unzipped skill does not claim to have
+        // been written the moment it was sent.
+        mtime: safe(() => statSync(join(dir, file.path)).mtime, undefined)
+      })
+    }
+    included.push(name)
+  }
+
+  const plugins = options.includePlugins ? readPluginRecipes(store) : []
+  if (included.length === 0 && plugins.length === 0) return { ok: false, error: 'Nothing to zip', skills: 0, skipped }
+
+  const stamp = new Date(options.now ? options.now() : Date.now())
+  entries.unshift({
+    path: 'README.md',
+    bytes: Buffer.from(zipReadme(included, plugins, options.note ?? '', options.from ?? 'Forge', stamp), 'utf8'),
+    mtime: stamp
+  })
+  if (plugins.length > 0) {
+    entries.push({ path: 'PLUGINS.md', bytes: Buffer.from(pluginsDoc(plugins), 'utf8'), mtime: stamp })
+  }
+
+  const zip = writeZip(entries, options.now)
+  if (!zip.ok || !zip.bytes) return { ok: false, error: zip.error, skills: included.length, skipped }
+  return { ok: true, bytes: zip.bytes, skills: included.length, skipped }
+}
+
+/**
+ * The note the recipient reads first.
+ *
+ * Written for somebody who has never heard of Forge — the whole point of the
+ * zip route — so it names the destination folder on each platform rather than
+ * assuming `~` means anything to them, and it says the skills do nothing until
+ * they are in that folder.
+ */
+function zipReadme(skills: string[], plugins: PackPlugin[], note: string, from: string, stamp: Date): string {
+  const lines = [
+    '# Skills',
+    '',
+    `${skills.length} skill${skills.length === 1 ? '' : 's'}, sent from ${from} on ${stamp.toISOString().slice(0, 10)}.`,
+    ''
+  ]
+  if (note.trim()) lines.push('> ' + note.trim().replace(/\n/g, '\n> '), '')
+
+  lines.push(
+    '## What these are',
+    '',
+    'A skill is a folder with a `SKILL.md` in it. Claude Code reads them from one',
+    'folder on your machine and offers each one as a `/name` command.',
+    '',
+    '## Where to put them',
+    '',
+    'Copy the folders in this zip — not this README — into:',
+    '',
+    '| | |',
+    '| --- | --- |',
+    '| Windows | `%USERPROFILE%\\.claude\\skills\\` |',
+    '| macOS / Linux | `~/.claude/skills/` |',
+    '',
+    'Create the folder if it is not there. Restart any running `claude` session',
+    'and `/<skill-name>` will be available.',
+    '',
+    '## Read them first',
+    '',
+    'A skill is instructions an agent will follow on your machine, and these came',
+    'from someone else.',
+    '',
+    'Open each `SKILL.md` and read it before you copy it in.',
+    '',
+    'That is the only check there is — nothing scans a skill, and nothing could,',
+    'because being instructions is the whole point of the file.',
+    ''
+  )
+
+  if (skills.length > 0) lines.push('## In this zip', '', ...skills.map((name) => `- \`${name}/\``), '')
+  if (plugins.length > 0) {
+    lines.push(
+      '## Plugins',
+      '',
+      'The sender also had the plugins listed in `PLUGINS.md`. Those are not in',
+      'this zip — they install from their own marketplaces, which is how their',
+      'authors keep shipping updates to you.',
+      ''
+    )
+  }
+  return lines.join('\n')
+}
+
+/** The recipes, as something a person can paste. */
+function pluginsDoc(plugins: PackPlugin[]): string {
+  const lines = [
+    '# Plugins',
+    '',
+    'Not included as files — on purpose. A plugin belongs to whoever wrote it,',
+    'and installing it from its own marketplace is what keeps you on their',
+    'updates instead of a frozen copy.',
+    '',
+    'Run these in a Claude Code session:',
+    ''
+  ]
+  for (const plugin of plugins) {
+    const recipe = pluginRecipe(plugin)
+    lines.push(`## ${plugin.plugin}`, '')
+    if (plugin.skills.length > 0) lines.push(`Skills: ${plugin.skills.map((s) => `\`${s}\``).join(', ')}`, '')
+    if (recipe.length === 0) {
+      lines.push(
+        `The sender installed this from a folder on their own machine, so there is`,
+        `no command that would work here. Ask them where they got it.`,
+        ''
+      )
+      continue
+    }
+    lines.push('```', ...recipe, '```', '', `The sender had version ${plugin.version}; this installs the current one.`, '')
+  }
+  return lines.join('\n')
 }
 
 /* ---------------------------------------------------------------- install */

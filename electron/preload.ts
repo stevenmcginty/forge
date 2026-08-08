@@ -114,6 +114,8 @@ const api: ForgeApi = {
       plugins: () => ipcRenderer.invoke(IPC.skillsPackPlugins),
       exportPack: (skills, includePlugins, note) =>
         ipcRenderer.invoke(IPC.skillsPackExport, skills, includePlugins === true, note ?? ''),
+      exportZip: (skills, includePlugins, note) =>
+        ipcRenderer.invoke(IPC.skillsPackExportZip, skills, includePlugins === true, note ?? ''),
       open: (path) => ipcRenderer.invoke(IPC.skillsPackOpen, path ?? ''),
       install: (path, skills) => ipcRenderer.invoke(IPC.skillsPackInstall, path, skills)
     }

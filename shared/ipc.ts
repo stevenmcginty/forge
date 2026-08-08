@@ -230,6 +230,8 @@ export const IPC = {
   skillsPackPlugins: 'skills:pack-plugins',
   /** Build a pack and write it wherever the save dialog says. */
   skillsPackExport: 'skills:pack-export',
+  /** The same skills as a plain zip of folders, for people without Forge. */
+  skillsPackExportZip: 'skills:pack-export-zip',
   /** Read and validate a pack for preview. Writes nothing. */
   skillsPackOpen: 'skills:pack-open',
   /** Install chosen skills from a pack already on disk, by path. */

@@ -363,6 +363,16 @@ export interface ForgeApi {
       /** Build and save. Opens the save dialog; resolves `cancelled` if dismissed. */
       exportPack(skills: string[], includePlugins: boolean, note?: string): Promise<SkillPackExportResult>
       /**
+       * The same skills as a plain zip of folders, plus a README saying where
+       * to put them and a PLUGINS.md carrying the recipes.
+       *
+       * The route for a recipient who does not run Forge — they unzip into
+       * `~/.claude/skills` and every `claude` session on that machine has
+       * them. No preview, no install step, and nothing to validate on the way
+       * in, because nothing on the far end is reading it.
+       */
+      exportZip(skills: string[], includePlugins: boolean, note?: string): Promise<SkillPackExportResult>
+      /**
        * Read and validate a pack for preview. **Writes nothing** — this is the
        * call that lets somebody see what is in a pack before installing it.
        * Omit `path` to open the file picker.

@@ -8,6 +8,21 @@
  * makes a sheet feel broken rather than long.
  */
 
+/* Select-all, above the list rather than beside the heading: it acts on the
+   rows below it, and a control that reads as part of the title would look like
+   it acted on the sheet. */
+.pack__all {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 var(--s-4);
+}
+
+.pack__all button {
+  height: 22px;
+  padding: 0 var(--s-3);
+  font-size: var(--t-xs);
+}
+
 .pack__list {
   max-height: min(38vh, 300px);
   overflow-y: auto;

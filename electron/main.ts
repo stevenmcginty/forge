@@ -509,6 +509,17 @@ async function savePackAs(suggestedName: string): Promise<string | null> {
   return result.canceled || !result.filePath ? null : result.filePath
 }
 
+async function saveZipAs(suggestedName: string): Promise<string | null> {
+  const options: Electron.SaveDialogOptions = {
+    title: 'Save skills as a zip',
+    buttonLabel: 'Save zip',
+    defaultPath: join(app.getPath('documents'), suggestedName),
+    filters: [{ name: 'Zip archive', extensions: ['zip'] }]
+  }
+  const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options)
+  return result.canceled || !result.filePath ? null : result.filePath
+}
+
 async function pickPack(): Promise<string | null> {
   const options: Electron.OpenDialogOptions = {
     title: 'Open a skill pack',
@@ -668,6 +679,7 @@ function registerAppHandlers(): void {
       copyToLibrary: IPC.skillsCopyToLibrary,
       packPlugins: IPC.skillsPackPlugins,
       packExport: IPC.skillsPackExport,
+      packExportZip: IPC.skillsPackExportZip,
       packOpen: IPC.skillsPackOpen,
       packInstall: IPC.skillsPackInstall
     },
@@ -677,6 +689,7 @@ function registerAppHandlers(): void {
       openPath: (path) => void shell.openPath(path),
       pickFolder: () => pickFolder('Import a skill folder', 'Import skill'),
       savePackAs,
+      saveZipAs,
       pickPack,
       appVersion: () => app.getVersion()
     }

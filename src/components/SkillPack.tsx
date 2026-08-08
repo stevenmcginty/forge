@@ -73,13 +73,24 @@ export function SharePackSheet({
   const toggle = (name: string): void =>
     setChosen((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]))
 
-  const save = async (): Promise<void> => {
+  /**
+   * Both save buttons, which differ only in which call they make.
+   *
+   * The zip is the primary action because it is the one that works for the
+   * larger audience: a `.forgepack` is richer — it previews and installs with
+   * one button — and completely useless to somebody who does not run Forge,
+   * which is most people a skill gets sent to.
+   */
+  const save = async (as: 'zip' | 'pack'): Promise<void> => {
     setBusy(true)
-    const result = await window.forge.skills.pack.exportPack(chosen, withPlugins, note)
+    const result =
+      as === 'zip'
+        ? await window.forge.skills.pack.exportZip(chosen, withPlugins, note)
+        : await window.forge.skills.pack.exportPack(chosen, withPlugins, note)
     setBusy(false)
     if (result.cancelled) return
     if (!result.ok) {
-      setError(result.error ?? 'Could not save that pack')
+      setError(result.error ?? 'Could not save that')
       return
     }
     const parts = [
@@ -89,13 +100,14 @@ export function SharePackSheet({
     close()
     // Anything left out is folded into the same sentence rather than raised as
     // a second notice: the save worked, and a skipped file is not a failure —
-    // but a pack that quietly contained less than was asked for would be
+    // but an archive that quietly contained less than was asked for would be
     // discovered by the recipient instead of the sender.
     const left = result.skipped.length > 0 ? ` · left out ${result.skipped.length}` : ''
     actions.setNotice(`Saved ${parts.join(' and ')} — ${packSize(result.bytes ?? 0)}${left}`)
   }
 
   const nothing = chosen.length === 0 && !withPlugins
+  const all = skills.length > 0 && chosen.length === skills.length
 
   return (
     <Popover anchor={anchor} open={open} onClose={close} align="end" width={340} label="Share skills">
@@ -105,6 +117,14 @@ export function SharePackSheet({
           copies, so the author keeps the update path.
         </div>
       </PopoverSection>
+
+      {skills.length > 1 ? (
+        <div className="pack__all">
+          <button type="button" className="ghost-btn" onClick={() => setChosen(all ? [] : skills.map((s) => s.name))}>
+            {all ? 'Clear' : `Select all ${skills.length}`}
+          </button>
+        </div>
+      ) : null}
 
       <div className="pack__list">
         {skills.map((skill) => (
@@ -160,12 +180,20 @@ export function SharePackSheet({
           </div>
         ) : null}
 
+        {/* Which file to send, said in one line rather than left to the button
+            labels — "zip" and "pack" mean nothing until you know that only one
+            of them works for someone without Forge. */}
+        <div className="popover__hint">
+          A <strong>zip</strong> works for anyone: they unzip it into their skills folder, Forge or no Forge. A{' '}
+          <strong>pack</strong> is one file another Forge previews and installs in a click.
+        </div>
+
         <div className="popover__actions">
-          <button type="button" className="ghost-btn" onClick={close}>
-            Cancel
+          <button type="button" className="ghost-btn" disabled={nothing || busy} onClick={() => void save('pack')}>
+            Save pack…
           </button>
-          <button type="button" className="cta-btn" disabled={nothing || busy} onClick={() => void save()}>
-            {busy ? 'Saving…' : 'Save pack…'}
+          <button type="button" className="cta-btn" disabled={nothing || busy} onClick={() => void save('zip')}>
+            {busy ? 'Saving…' : 'Save zip…'}
           </button>
         </div>
       </PopoverSection>
