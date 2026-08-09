@@ -94,6 +94,54 @@ function clamp01(n) {
 }
 
 /**
+ * The same mark on a wide, opaque plate — Android TV's `android:banner`.
+ *
+ * A TV launcher shows one 320x180 tile per app and no icon and no label beside
+ * it, so this is the whole of Forge's presence on a Fire TV home row. Written
+ * into the android tree by scripts/apk-init.mjs rather than committed as an
+ * asset next to the PWA icons, because it is a property of the *package*, not
+ * of the web app: nothing outside the APK ever loads it.
+ */
+export function drawBanner(width, height) {
+  const rgba = Buffer.alloc(width * height * 4)
+
+  // The mark at the same proportions drawIcon uses, sized off the short edge
+  // and centred. Full-bleed ground, no rounded corners: Android TV draws the
+  // banner inside its own card and rounds it there, so alpha corners here would
+  // come back as a dark rectangle inside a lighter one — the same trap the
+  // apple-touch-icon's `bleed` exists for.
+  const u = height
+  const cx = width / 2
+  const cy = height / 2
+  const barW = u * 0.108
+  const gap = u * 0.072
+  const heights = [0.3, 0.46, 0.62].map((h) => h * u)
+  const totalW = barW * 3 + gap * 2
+  const barBottom = cy + u * 0.31
+  const barR = barW / 2
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const px = x + 0.5
+      const py = y + 0.5
+      let barA = 0
+      for (let i = 0; i < 3; i++) {
+        const bx = cx - totalW / 2 + i * (barW + gap) + barW / 2
+        const h = heights[i]
+        const by = barBottom - h / 2
+        barA = Math.max(barA, clamp01(0.5 - sdRoundRect(px, py, bx, by, barW / 2, h / 2, barR)))
+      }
+      const o = (y * width + x) * 4
+      rgba[o] = Math.round(VOLT[0] * barA + BG[0] * (1 - barA))
+      rgba[o + 1] = Math.round(VOLT[1] * barA + BG[1] * (1 - barA))
+      rgba[o + 2] = Math.round(VOLT[2] * barA + BG[2] * (1 - barA))
+      rgba[o + 3] = 255
+    }
+  }
+  return encodePng(width, height, rgba)
+}
+
+/**
  * Three bars of rising height, centred, on a rounded-square ground.
  *
  * `inset` is the maskable safe zone: Android crops a maskable icon to whatever

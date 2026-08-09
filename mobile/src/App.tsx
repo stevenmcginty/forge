@@ -6,6 +6,10 @@ import { canScan, scanPairingCode } from './lib/scan'
 import { servedFromOrigin, shouldOfferInstall } from './lib/pwa'
 import { Browser, leavesOf } from './components/Browser'
 import { PaneView, paneListeners } from './components/PaneView'
+import { TvDashboard } from './components/TvDashboard'
+import { isTv } from './lib/tv'
+import { tvBridge } from './lib/tv-bridge'
+import { mirrorListeners } from './lib/mirror'
 import { UpdateSheet } from './components/Update'
 import { CURRENT_VERSION_NAME, startAutoUpdate, updateStore } from './lib/update'
 
@@ -73,6 +77,10 @@ export function App(): React.JSX.Element {
   // and the desktop's close code alone does not distinguish them.
   const [sawWords, setSawWords] = useState(false)
 
+  // The latest picture, readable from the once-built Link callbacks below —
+  // state is what renders, the ref is for handlers that outlive any render.
+  const pictureRef = useRef<LinkPicture | null>(null)
+
   // Built once. The callbacks below close over setState only, which React
   // guarantees is stable, so the Link never needs rebuilding.
   const link = useMemo(
@@ -83,10 +91,16 @@ export function App(): React.JSX.Element {
           setDetail(why)
           if (next === 'awaiting') setSawWords(true)
         },
-        onPicture: setPicture,
+        onPicture: (next) => {
+          pictureRef.current = next
+          setPicture(next)
+        },
         onData: (id, data, replay) => paneListeners.get(id)?.(data, replay),
-        onExit: (id) => {
+        onExit: (id, exitCode) => {
           paneListeners.get(id)?.('\r\n\x1b[2m— the shell exited —\x1b[0m\r\n', false)
+          // Crosses the TV bridge already named: the native layer has no
+          // picture to resolve an id against. Inert where nothing listens.
+          tvBridge.emit({ kind: 'session-exit', session: sessionNameOf(pictureRef.current, id), exitCode })
           // Leaving a dead terminal on screen is worse than going back to a
           // list that tells the truth.
           setScreen((current) => (current.at === 'pane' && current.session.id === id ? { at: 'browse', projectId: null } : current))
@@ -95,7 +109,16 @@ export function App(): React.JSX.Element {
           writeToken(token)
           setHasToken(true)
         },
-        onNotice: setNotice
+        onNotice: setNotice,
+        // Straight across the bridge: the Link already validated the id, and
+        // the native YouTube layer is the only consumer there will ever be.
+        onTvPlay: (video) => tvBridge.emit({ kind: 'tv-play', video }),
+        // Same shape as onData above, and for the same reason: these callbacks
+        // are built once, before any screen exists, so they route through a
+        // module-level seam rather than through props. At most one screen on
+        // this device is ever mirroring, so it is a slot rather than a map.
+        onMirrorSignal: (data) => mirrorListeners.signal?.(data),
+        onMirrorStop: (reason) => mirrorListeners.stop?.(reason)
       }),
     []
   )
@@ -251,6 +274,14 @@ export function App(): React.JSX.Element {
     )
   }
 
+  // A TV is a monitor with a remote, not a phone: one wall instead of
+  // screens, walked with a D-pad and watched, never typed into. Connecting
+  // still uses the phone screens above — pairing is the one interaction a TV
+  // cannot do without.
+  if (isTv()) {
+    return <TvDashboard link={link} picture={picture} state={state} detail={detail} notice={notice} />
+  }
+
   return (
     <div className="app">
       <StatusStrip
@@ -279,6 +310,14 @@ export function App(): React.JSX.Element {
           onNewTab={(projectId, profileId, permissionMode) => {
             link.op({ op: 'create-tab', projectId, profileId, ...(permissionMode ? { permissionMode } : {}) })
             setNotice('Asked the desktop for a new tab…')
+          }}
+          onSendToTv={(video) => {
+            link.tvPlay(video)
+            // Optimistic, and honestly so: the desktop relays without
+            // answering, so the only thing this phone can truthfully claim is
+            // that it asked. If nothing is listening the desktop says so, and
+            // that arrives as a notice through the same strip.
+            setNotice('Sent to the TV.')
           }}
           onBack={() => setScreen({ at: 'browse', projectId: null })}
         />
@@ -583,6 +622,27 @@ function projectOfSession(picture: LinkPicture, sessionId: string): string | nul
     }
   }
   return null
+}
+
+/**
+ * "Project · pane" for the TV bridge, resolved while the leaf still exists —
+ * an exited session leaves its pane behind in the layout, which is what makes
+ * this lookup work at exactly the moment it is needed.
+ */
+function sessionNameOf(picture: LinkPicture | null, sessionId: string): string {
+  if (!picture) return 'A pane'
+  for (const [projectId, workspace] of Object.entries(picture.workspaces)) {
+    for (const tab of workspace.tabs) {
+      for (const leaf of leavesOf(tab.root)) {
+        if (leaf.id !== sessionId) continue
+        const project = picture.projects.find((p) => p.id === projectId)
+        const profile = picture.profiles.find((p) => p.id === leaf.profileId)
+        const pane = leaf.title || profile?.name || 'pane'
+        return project ? `${project.name} · ${pane}` : pane
+      }
+    }
+  }
+  return 'A pane'
 }
 
 /**

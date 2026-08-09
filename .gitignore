@@ -61,6 +61,10 @@ isolated/
 # is the only key that can ever ship an update to an installed Forge Mobile,
 # so the ignore covers the whole class of key material, not one filename.
 dist-apk/
+# The Fire TV build's web bundle. A directory of its own so a TV build never
+# overwrites mobile/dist, which the desktop serves to phone browsers — the
+# generic `dist/` rule at the top does not cover a name with a suffix.
+mobile/dist-tv/
 mobile/android/local.properties
 mobile/android/.gradle/
 mobile/android/build/

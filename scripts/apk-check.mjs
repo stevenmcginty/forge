@@ -17,7 +17,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { build } from 'esbuild'
-import { bakedOriginOf, readVersion, sha256File, ANDROID, DIST_APK, APK_ASSET, MOBILE } from './apk-lib.mjs'
+import { bakedOriginOf, readVersion, sha256File, tvOriginOf, ANDROID, DIST_APK, APK_ASSET, MOBILE } from './apk-lib.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const scratch = join(ROOT, 'node_modules', '.forge-apk-check')
@@ -118,8 +118,50 @@ if (!existsSync(manifestXml)) {
     'cap sync wired the barcode-scanner native project into the gradle build'
   )
   log(
-    /minSdkVersion = 26/.test(readFileSync(join(ANDROID, 'variables.gradle'), 'utf8')),
-    'minSdkVersion is 26 — the scanner library refuses to merge below it'
+    /minSdkVersion = project\.hasProperty\('forgeTv'\) \? 25 : 26/.test(
+      readFileSync(join(ANDROID, 'variables.gradle'), 'utf8')
+    ),
+    'minSdkVersion is 26 for phones and 25 for the TV build — the scanner library refuses to merge below 26, and a Fire TV Stick is API 25'
+  )
+
+  /* ------------------------------------------------------ the television
+   *
+   * Every one of these ships in the *phone* APK too, which is the point: a TV
+   * APK that is only a TV APK after a build step is one no check can see. What
+   * they guard is a class of failure that only shows up at the far end of a
+   * living room — an app that installs and cannot be found on the home screen,
+   * an installer that refuses the package outright, a blank tile.
+   */
+  log(xml.includes('android.intent.category.LEANBACK_LAUNCHER'), 'the launch activity is a LEANBACK_LAUNCHER — a TV lists nothing else')
+  log(xml.includes('android.intent.category.LAUNCHER'), 'and still a plain LAUNCHER, so one APK opens on a phone too')
+  log(
+    /uses-feature[^>]*android\.hardware\.touchscreen[^>]*android:required="false"/.test(xml),
+    'touchscreen is optional — a TV refuses to install anything that requires one'
+  )
+  log(
+    /uses-feature[^>]*android\.software\.leanback[^>]*android:required="false"/.test(xml),
+    'leanback is declared but optional, so the same APK still installs on a phone'
+  )
+  log(xml.includes('android:banner="@drawable/tv_banner"'), 'the application declares a banner — the TV home row shows nothing else')
+  log(
+    existsSync(join(ANDROID, 'app', 'src', 'main', 'res', 'drawable-xhdpi', 'tv_banner.png')),
+    'the banner drawable exists at xhdpi, where a 320x180 TV banner belongs'
+  )
+  log(
+    xml.includes('tools:overrideLibrary="com.outsystems.plugins.barcode"') && xml.includes('xmlns:tools'),
+    'the scanner library’s minSdk 26 is overridden, which is what lets the API 25 TV build merge'
+  )
+  log(
+    readFileSync(join(MOBILE, 'src', 'lib', 'scan.ts'), 'utf8').includes('!__FORGE_TV__ && Capacitor.isNativePlatform()'),
+    'and canScan() is false on a TV build — overriding the floor is only safe while the library is never entered'
+  )
+  // Read here rather than reusing the `gradle` const below: that one is
+  // declared further down, and reaching it from up here would be a temporal
+  // dead zone, i.e. a check script that crashes instead of checking.
+  const tvGradle = readFileSync(join(ANDROID, 'app', 'build.gradle'), 'utf8')
+  log(
+    tvGradle.includes("if (project.hasProperty('forgeTv'))") && tvGradle.includes('applicationId "com.forge.mobile.tv"'),
+    'the TV build takes a .tv applicationId, so a phone release can never install over a television'
   )
   log(xml.includes('androidx.core.content.FileProvider'), 'AndroidManifest declares the FileProvider')
   log(xml.includes('android:grantUriPermissions="true"'), 'the FileProvider grants URI permissions')
@@ -237,6 +279,24 @@ log(
 )
 log(toOrigin('', 8420) === '', 'an unstamped build yields no origin, so the QR/typed connect screen still renders')
 
+/* --------------------------------------- the TV's baked origin, the opposite
+ *
+ * Everything above is about a tunnel: a domain, no port, wss. A television gets
+ * the exact reverse — a LAN IP, an explicit port, plain http — because it is in
+ * the same room as the desktop and there is no certificate on that port. The
+ * check that matters here is the round trip: whatever gets stamped must come
+ * back out of the phone's own `toOrigin` as a socket the TV can open, or the
+ * one-tap Connect screen dials nothing.
+ */
+log((await tvOriginOf('192.168.4.45')) === 'http://192.168.4.45:8420', 'a bare LAN address bakes as http://<ip> with the default port added')
+log((await tvOriginOf('http://192.168.4.45:8420')) === 'http://192.168.4.45:8420', 'a full http address survives verbatim')
+log((await tvOriginOf('https://192.168.4.45:8420')) === '', 'https is refused — nothing on this machine serves the mobile port over TLS')
+log((await tvOriginOf('')) === '' && (await tvOriginOf('not an address!')) === '', 'nothing and nonsense both bake nothing, so the build refuses rather than stamping a dud')
+log(
+  toOrigin(await tvOriginOf('192.168.4.45'), 8420) === 'ws://192.168.4.45:8420',
+  'the TV reads its baked origin back as a ws:// LAN socket — the one-tap Connect screen dials what was stamped'
+)
+
 const viteBaked = readFileSync(join(MOBILE, 'vite.config.ts'), 'utf8')
 log(
   viteBaked.includes('__BAKED_ORIGIN__') && viteBaked.includes("FORGE_BAKED_ORIGIN ?? ''"),
@@ -255,7 +315,30 @@ log(
   'the Vite define is driven by version.json — web and native cannot drift'
 )
 const envDts = readFileSync(join(MOBILE, 'src', 'env.d.ts'), 'utf8')
-log(envDts.includes('__APK_MANIFEST_URL__') && envDts.includes('__BAKED_ORIGIN__'), 'the defines are declared for TypeScript')
+log(
+  envDts.includes('__APK_MANIFEST_URL__') && envDts.includes('__BAKED_ORIGIN__') && envDts.includes('__FORGE_TV__'),
+  'the defines are declared for TypeScript'
+)
+log(
+  viteConfig.includes("__FORGE_TV__: JSON.stringify(process.env.FORGE_TV === '1')"),
+  'vite defines __FORGE_TV__ from FORGE_TV, so nothing but the TV build can set it'
+)
+const capTv = readFileSync(join(MOBILE, 'capacitor.config.js'), 'utf8')
+log(
+  viteConfig.includes("process.env.FORGE_TV === '1' ? 'dist-tv' : 'dist'") &&
+    capTv.includes("process.env.FORGE_TV === '1' ? 'dist-tv' : 'dist'"),
+  'a TV build writes to mobile/dist-tv, so it cannot leave the browser route serving a television'
+)
+// A television has no browser route and no cable; without this there is no
+// devtools socket on the device and a page-level bug can only be guessed at.
+log(
+  /FORGE_TV === '1' \? \{ webContentsDebuggingEnabled: true \}/.test(capTv),
+  'the TV build enables WebView remote debugging — the only way to inspect the page on a Fire TV'
+)
+log(
+  readFileSync(join(MOBILE, 'src', 'lib', 'tv.ts'), 'utf8').includes('__FORGE_TV__ ||'),
+  'isTv() answers from the define first — the APK has no query string to carry ?tv'
+)
 
 /* ------------------------------------------- the manifest fetch dodges CORS */
 
@@ -282,6 +365,10 @@ log(
   /if \(isNativeApp\(\)\) \{\s*const \{ body \} = await native\.fetchManifest/.test(updateTs),
   'fetch() is the browser-debug fallback only — the APK never takes that path'
 )
+// And the television never takes any of it: a different application id, built
+// for one LAN, whose only update path is being rebuilt and downloaded again.
+// Android's install confirmation is not a dialog a remote control can answer.
+log(updateTs.includes('if (__FORGE_TV__) {'), 'update.ts refuses to check an update feed on a TV build')
 
 const androidKt = readFileSync(
   join(MOBILE, 'android', 'app', 'src', 'main', 'java', 'com', 'forge', 'mobile', 'ForgeUpdaterPlugin.kt'),

@@ -57,6 +57,7 @@ import {
   splitLeaf,
   updateLeaf
 } from '@/lib/splitTree'
+import { handleSignal, startMirror, stopMirror } from '@/lib/mirror'
 import { terminalHost } from '@/lib/terminals'
 import { setLiveSettings } from '@/lib/livesettings'
 
@@ -1757,6 +1758,29 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       }
     })
   }, [actions, state])
+
+  /**
+   * The television asking to watch this desktop's screen.
+   *
+   * Thin on purpose, and depends on nothing in the reducer: the capture, the
+   * peer connection and every way one of them can end live in src/lib/mirror.ts,
+   * so this is only the wire between that module and the socket. There is no
+   * control for it anywhere on the desktop — the sole trigger is the TV asking.
+   */
+  useEffect(() => {
+    return window.forge.mobile.onMirror((event) => {
+      if (event.kind === 'signal') return handleSignal(event.data)
+      if (event.kind === 'stop') return stopMirror()
+      void startMirror(
+        (data) => window.forge.mobile.mirrorSignal(data),
+        (reason) => window.forge.mobile.mirrorStop(reason)
+      ).then((error) => {
+        // Refused before it began — the television is told why rather than
+        // left watching a black screen for a stream that is never coming.
+        if (error) window.forge.mobile.mirrorStop(error)
+      })
+    })
+  }, [])
 
   const value = useMemo<Ctx>(() => ({ state, actions }), [state, actions])
 

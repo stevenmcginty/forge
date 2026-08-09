@@ -110,7 +110,7 @@ function Body({ state }: { state: UpdateState }): React.JSX.Element {
             {state.total > 0 ? ` of ${formatBytes(state.total)}` : ''}
           </p>
           <div className="progress">
-            <div className="progress-fill" style={{ width: `${Math.round(fraction * 100)}%` }} />
+            <div className="progress-fill" style={{ transform: `scaleX(${fraction})` }} />
           </div>
         </>
       )

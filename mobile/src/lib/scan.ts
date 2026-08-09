@@ -40,9 +40,16 @@ export type ScanOutcome =
  * secure-context API — the button would open a scanner whose camera the
  * browser refuses to start. Hiding it there is honest; that route pairs by
  * paste or `?pair=` link, as it always has.
+ *
+ * And never on a television, for a harder reason than "no camera". The Fire TV
+ * build installs on API 25 (Fire OS 7 on a Stick 4K), which is below the
+ * scanner library's declared floor of 26 — the TV build overrides that at merge
+ * time because it has to, and this is the other half of that bargain: the
+ * library ships but is never entered, so its floor is never tested. Both halves
+ * are load-bearing. See the minSdk patch in scripts/apk-init.mjs.
  */
 export function canScan(): boolean {
-  return Capacitor.isNativePlatform()
+  return !__FORGE_TV__ && Capacitor.isNativePlatform()
 }
 
 /** Cancelled (6) and denied (7) per the plugin's published error table. */

@@ -116,6 +116,22 @@ async function readManifest(): Promise<string> {
 }
 
 export async function check(): Promise<void> {
+  // A TV build has no feed, and must not acquire one.
+  //
+  // `__APK_MANIFEST_URL__` describes the *phone* package on GitHub, and the
+  // Fire TV APK is a different application id built against one desktop on one
+  // LAN — so the feed could only ever offer it the wrong app, and Android's
+  // install confirmation is a dialog nobody can dismiss with a TV remote.
+  // Updates get there the way they got there the first time: rebuild from
+  // Settings › Forge Mobile, re-download in the TV's Downloader app.
+  //
+  // The build also stamps `__APK_MANIFEST_URL__` empty, so there is no URL in
+  // the bundle to consult; this guard is what makes that a deliberate state
+  // rather than a fetch that fails forever and reports being offline.
+  if (__FORGE_TV__) {
+    set({ phase: 'current', manifest: null, detail: '' })
+    return
+  }
   if (state.phase === 'checking' || state.phase === 'downloading') return
   set({ phase: 'checking', detail: '' })
 

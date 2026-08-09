@@ -1,5 +1,6 @@
 import {
   APPROVAL_TIMEOUT_MS,
+  MAX_SIGNAL_CHARS,
   MOBILE_PROTO,
   MOBILE_WS_PATH,
   type ClientFrame,
@@ -66,11 +67,39 @@ export interface LinkHandlers {
   onPicture: (picture: LinkPicture) => void
   /** Terminal bytes. `replay` marks the catch-up buffer, which must clear first. */
   onData: (id: string, data: string, replay: boolean) => void
-  onExit: (id: string) => void
+  /** A session's shell exited. The code rides along for the TV bridge. */
+  onExit: (id: string, exitCode: number) => void
   /** Pairing succeeded and this token must be stored. Fires at most once. */
   onPaired: (token: string) => void
   /** Something the user should see — a refused op, a session that vanished. */
   onNotice: (message: string) => void
+  /**
+   * The desktop relayed a video for the TV (see TvPlayFrame). Already held to
+   * the 11-character id shape by `receive` — what arrives here is playable,
+   * not merely parseable. Only the TV route does anything with it.
+   */
+  onTvPlay: (video: string) => void
+  /**
+   * One WebRTC signaling payload for the screen mirror — an SDP or an ICE
+   * candidate, as an opaque JSON string. Held to `MAX_SIGNAL_CHARS` and to
+   * being a string by `receive`; its *meaning* is lib/mirror.ts's business,
+   * and nothing between the two peers reads it.
+   */
+  onMirrorSignal: (data: string) => void
+  /**
+   * The mirror is over, and here is why — the desktop's sentence when it has
+   * one ("no Forge window is open", "another screen is already watching"), and
+   * '' when it does not.
+   *
+   * Also fired by this class when the socket dies under a live mirror. That is
+   * not a reconnect concern this side can paper over: the peer connection was
+   * negotiated *through* this link, so a link that drops takes the video with
+   * it, and there is no arrangement in which frames keep arriving. Terminal
+   * subscriptions are re-armed after a reconnect; a mirror is deliberately not,
+   * because silently restarting a watch is not repair — it is a television
+   * turning itself back on.
+   */
+  onMirrorStop: (reason: string) => void
 }
 
 export interface LinkCredentials {
@@ -142,6 +171,13 @@ export class Link {
    */
   private awaiting = false
   private approvalTimer: number | null = null
+  /**
+   * A screen mirror is believed to be running. Kept here rather than in the UI
+   * because the socket's death is this class's news to break: every route out
+   * of a socket funnels through `endMirror`, so the watching screen is told
+   * exactly once however the link ended.
+   */
+  private mirroring = false
 
   constructor(handlers: LinkHandlers) {
     this.handlers = handlers
@@ -264,6 +300,39 @@ export class Link {
     this.send({ t: 'op', ...op })
   }
 
+  /**
+   * "Play this on the TV." The desktop relays it to every other paired device,
+   * so what happens next is the television's business, not this phone's — there
+   * is no acknowledgement to wait for and nothing here to render.
+   */
+  tvPlay(video: string): void {
+    this.send({ t: 'tv-play', video })
+  }
+
+  /* --------------------------------------------------------- screen mirror */
+
+  /**
+   * "Show me the desktop's screen." The answer arrives as `mirror-signal`
+   * frames, or as a `mirror-stop` carrying the reason it cannot.
+   *
+   * Not remembered across reconnects, unlike `subscribe` — see onMirrorStop.
+   */
+  startMirror(): void {
+    this.mirroring = true
+    this.send({ t: 'mirror-start' })
+  }
+
+  /** One SDP or candidate on its way up. Opaque to everything in between. */
+  sendMirrorSignal(data: string): void {
+    this.send({ t: 'mirror-signal', data })
+  }
+
+  /** This side has finished watching. Silent: the caller already knows. */
+  stopMirror(): void {
+    this.mirroring = false
+    this.send({ t: 'mirror-stop' })
+  }
+
   /* -------------------------------------------------------------- internals */
 
   private open(): void {
@@ -309,6 +378,7 @@ export class Link {
       this.socket = null
       this.stopBeating()
       this.stopWaitingForApproval()
+      this.endMirror('The link to the desktop dropped, so the picture stopped.')
       if (this.closedByUs) return
       // 4001/4002/4003 are the desktop saying no — retrying would be a loop
       // against a door that is not going to open, and would burn the phone's
@@ -383,6 +453,21 @@ export class Link {
   }
 
   /**
+   * The mirror is over. Told once, whichever way it ended.
+   *
+   * A peer connection cannot outlive the channel it was negotiated over, so
+   * the socket going away *is* the end of the video — and a reconnect must not
+   * quietly start a new one. Re-arming subscriptions repaints a terminal
+   * nobody has to notice; re-arming a mirror would put a live picture of the
+   * desk back on a television long after whoever pressed OK had walked away.
+   */
+  private endMirror(reason: string): void {
+    if (!this.mirroring) return
+    this.mirroring = false
+    this.handlers.onMirrorStop(reason)
+  }
+
+  /**
    * Finish with the current socket, without letting it act on the way out.
    *
    * The handlers are detached before `close()` so a half-open socket cannot
@@ -395,6 +480,7 @@ export class Link {
     this.socket = null
     this.stopBeating()
     this.stopWaitingForApproval()
+    this.endMirror('The link to the desktop dropped, so the picture stopped.')
     if (this.verdictTimer !== null) {
       clearTimeout(this.verdictTimer)
       this.verdictTimer = null
@@ -511,7 +597,8 @@ export class Link {
 
       case 'exit':
         this.subscriptions.delete(frame.id)
-        this.handlers.onExit(frame.id)
+        // Coerced, not trusted: the frame is typed but the wire is not.
+        this.handlers.onExit(frame.id, typeof frame.exitCode === 'number' ? frame.exitCode : 0)
         return
 
       case 'state': {
@@ -542,6 +629,34 @@ export class Link {
           return
         }
         this.handlers.onNotice(frame.msg)
+        return
+
+      case 'tv-play':
+        // The id came off the wire via a phone and a relay; only the exact
+        // YouTube id shape is let through, and anything else is dropped here
+        // rather than handed to an iframe src.
+        if (typeof frame.video === 'string' && /^[A-Za-z0-9_-]{11}$/.test(frame.video)) {
+          this.handlers.onTvPlay(frame.video)
+        }
+        return
+
+      case 'mirror-signal':
+        // Opaque the whole way: the desktop wrote it, the relay never read it,
+        // and this side checks only that it is a string of a plausible size
+        // before handing it to a parser (lib/mirror.ts) built to be total
+        // against anything it cannot understand.
+        if (typeof frame.data === 'string' && frame.data.length <= MAX_SIGNAL_CHARS) {
+          this.handlers.onMirrorSignal(frame.data)
+        }
+        return
+
+      case 'mirror-stop':
+        // The desktop's own ending, so its sentence goes through untouched —
+        // "no Forge window is open" is the whole answer, and this side has no
+        // better one. `endMirror` would swallow it as a duplicate, hence the
+        // flag is cleared here rather than by it.
+        this.mirroring = false
+        this.handlers.onMirrorStop(typeof frame.reason === 'string' ? frame.reason : '')
         return
 
       case 'pong':

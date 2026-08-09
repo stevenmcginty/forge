@@ -6,6 +6,9 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.forge.mobile"
+        if (project.hasProperty('forgeTv')) {
+            applicationId "com.forge.mobile.tv"
+        }
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 10

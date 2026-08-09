@@ -222,6 +222,103 @@ export interface PingFrame {
   t: 'ping'
 }
 
+/**
+ * "Play this on the TV."
+ *
+ * One frame, same shape both directions: a phone sends it up, the desktop
+ * relays it down to the TV build of this same app, whose web layer hands it
+ * across the native bridge (mobile/src/lib/tv-bridge.ts) to the YouTube
+ * WebView beside it. `video` is a YouTube video id — never a URL — and each
+ * end holds it to the exact 11-character id shape rather than trusting the
+ * other side to have checked.
+ */
+export interface TvPlayFrame {
+  t: 'tv-play'
+  video: string
+}
+
+/**
+ * Is this exactly a YouTube video id, and nothing else?
+ *
+ * The rule the *wire* is held to, at both ends — see TvPlayFrame above: what
+ * travels is an id, never a URL, and each side checks rather than trusting the
+ * other to have. Deliberately strict: a URL that happens to contain an id is
+ * refused as a frame, because "the field usually contains an id" is how a field
+ * ends up containing something else on the day it matters, and what is on the
+ * far end of this one is a string being put into an address a television opens.
+ */
+export function isVideoId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{11}$/.test(value)
+}
+
+/**
+ * A YouTube video id out of whatever a human had on the clipboard, or '' when
+ * there is not one in there.
+ *
+ * The counterpart to `isVideoId`, and the division between them is the point:
+ * this one is for the *input* on a phone, where a paste is a share link and
+ * being fussy about it would be a form that rejects the only thing anyone
+ * actually has. `isVideoId` is for the wire, where leniency would be a hole.
+ * A phone extracts here, sends an id, and the desktop checks with the strict
+ * one — so a tampered client cannot widen what the television will open.
+ *
+ * Accepted: a bare id, a `v=` query parameter, a `youtu.be/<id>` link, and the
+ * `/shorts/`, `/embed/` and `/live/` path forms — which is every shape the
+ * share sheet on a phone actually produces. The negative lookahead matters:
+ * without it a 12-character id would match its own first 11 characters and be
+ * silently truncated into a different video.
+ */
+export function videoIdOf(raw: unknown): string {
+  if (typeof raw !== 'string') return ''
+  const text = raw.trim()
+  if (isVideoId(text)) return text
+  const query = /[?&]v=([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/.exec(text)
+  if (query) return query[1]!
+  const path = /(?:youtu\.be|\/(?:shorts|embed|live))\/([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/.exec(text)
+  if (path) return path[1]!
+  return ''
+}
+
+/* ---------------------------------------------------------- screen mirror
+ *
+ * The TV watching the desktop's actual screen — a WebRTC stream from the
+ * Forge window's renderer to a <video> on the Fire Stick. Three frames carry
+ * the whole feature, and the server stays a relay: `data` is an opaque JSON
+ * string (an SDP or an ICE candidate) that it forwards without reading,
+ * because the server has no WebRTC stack and must not grow one.
+ *
+ * One viewer at a time, enforced by the server. The Fire Stick is the only
+ * intended client; relaying one peer connection is a seam, fanning out N of
+ * them is a media server.
+ */
+
+/** The TV asks to watch. The desktop answers with `mirror-signal` frames. */
+export interface MirrorStartFrame {
+  t: 'mirror-start'
+}
+
+/** WebRTC signaling, both directions. Opaque to the relay by design. */
+export interface MirrorSignalFrame {
+  t: 'mirror-signal'
+  data: string
+}
+
+/**
+ * Either side ends the watch. The server also synthesises one downward when
+ * the desktop cannot mirror, and upward when the viewer disconnects.
+ */
+export interface MirrorStopFrame {
+  t: 'mirror-stop'
+  /** Why it ended, when the desktop knows — a sentence the TV can show. */
+  reason?: string
+}
+
+/**
+ * Longest accepted `mirror-signal` payload. An SDP is a few kilobytes;
+ * anything approaching this bound is not signaling.
+ */
+export const MAX_SIGNAL_CHARS = 65536
+
 export type ClientFrame =
   | HelloFrame
   | SubFrame
@@ -230,6 +327,10 @@ export type ClientFrame =
   | ResizeFrame
   | OpFrame
   | PingFrame
+  | TvPlayFrame
+  | MirrorStartFrame
+  | MirrorSignalFrame
+  | MirrorStopFrame
 
 /* ------------------------------------------------------------ server frames */
 
@@ -336,6 +437,9 @@ export type ServerFrame =
   | StateFrame
   | PongFrame
   | ErrFrame
+  | TvPlayFrame
+  | MirrorSignalFrame
+  | MirrorStopFrame
 
 /* ----------------------------------------------------------------- decoding */
 
@@ -366,6 +470,12 @@ export function parseFrame(raw: string): ClientFrame | null {
     case 'resize':
     case 'op':
     case 'ping':
+    // Admitted, not trusted: the id is held to its shape by `isVideoId` in the
+    // server's handler, the same way `write` is held to MAX_WRITE_CHARS there.
+    case 'tv-play':
+    case 'mirror-start':
+    case 'mirror-signal':
+    case 'mirror-stop':
       return value as ClientFrame
     default:
       return null

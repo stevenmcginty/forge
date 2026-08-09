@@ -151,7 +151,14 @@ const api: ForgeApi = {
     // `=== true` so nothing short of an explicit allow crosses as one — a
     // truthy accident on this boundary would be a paired stranger.
     approvalResult: (requestId, allow) =>
-      ipcRenderer.send(IPC.mobileApprovalResult, { requestId, allow: allow === true })
+      ipcRenderer.send(IPC.mobileApprovalResult, { requestId, allow: allow === true }),
+    tvStatus: () => ipcRenderer.invoke(IPC.mobileTvStatus),
+    tvBuild: () => ipcRenderer.invoke(IPC.mobileTvBuild),
+    onTvStatus: (cb) => subscribe(IPC.mobileTvStatusEvent, cb),
+    onMirror: (cb) => subscribe(IPC.mobileMirror, cb),
+    mirrorSource: () => ipcRenderer.invoke(IPC.mobileMirrorSource),
+    mirrorSignal: (data) => ipcRenderer.send(IPC.mobileMirrorSignal, { data }),
+    mirrorStop: (reason) => ipcRenderer.send(IPC.mobileMirrorStop, { reason: reason ?? '' })
   },
 
   system: {

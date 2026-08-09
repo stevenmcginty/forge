@@ -9,6 +9,7 @@ import type {
   CreateSessionRequest,
   CreateSessionResult,
   EditImageRequest,
+  ForgeTvStatus,
   GeminiCallRequest,
   GeminiCallResult,
   ImportedKeyResult,
@@ -21,6 +22,7 @@ import type {
   MemorySection,
   MobileApprovalEvent,
   MobileCommandEvent,
+  MobileMirrorEvent,
   MobilePairOffer,
   MobileStatus,
   MobileWatchEvent,
@@ -480,6 +482,49 @@ export interface ForgeApi {
     onApproval(cb: (e: MobileApprovalEvent) => void): () => void
     /** The human's verdict on an `onApproval`. */
     approvalResult(requestId: string, allow: boolean): void
+
+    /* --------------------------------------------------------- Forge TV */
+
+    /** What Settings shows about the Fire TV APK: is there one, and where. */
+    tvStatus(): Promise<ForgeTvStatus>
+    /**
+     * Build the Fire TV APK against this machine's current LAN address.
+     *
+     * Returns as soon as the build has *started* — Vite and Gradle together
+     * take minutes, and an IPC call that blocked for them would freeze the
+     * settings page. Watch `onTvStatus` for the steps and the ending. Calling
+     * it while a build is running is a no-op that returns the running status.
+     */
+    tvBuild(): Promise<ForgeTvStatus>
+    onTvStatus(cb: (s: ForgeTvStatus) => void): () => void
+
+    /* ------------------------------------------------- the screen mirror
+     *
+     * The television watching this desktop's screen, over WebRTC. The peer
+     * connection lives here in the renderer because the main process has no
+     * WebRTC stack to make an offer with; everything below is the wire between
+     * it and the socket. There is no control for this on the desktop — the
+     * only thing that ever starts one is the television asking. The
+     * implementation is src/lib/mirror.ts.
+     */
+
+    /**
+     * The television asked to start, sent a signalling payload, or stopped.
+     * Answer `start` by capturing and offering; answer nothing else.
+     */
+    onMirror(cb: (e: MobileMirrorEvent) => void): () => void
+    /**
+     * The primary screen's `desktopCapturer` source id, for `getUserMedia`.
+     * '' when there is no screen to name.
+     */
+    mirrorSource(): Promise<string>
+    /** An SDP or ICE candidate for the television. Relayed unread. */
+    mirrorSignal(data: string): void
+    /**
+     * End the mirror, with a sentence the television shows instead of black —
+     * the capture was refused, Steve stopped sharing, the peer died.
+     */
+    mirrorStop(reason?: string): void
   }
 
   /**

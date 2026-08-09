@@ -82,6 +82,16 @@ function connect() {
   })
 }
 
+/** Pair a fresh phone against `auth` and drive it through hello-ok — for
+ * phases where the handshake itself is not what is under test. */
+async function authenticatedClient(auth, deviceId, deviceName) {
+  const offer = auth.offerPairing()
+  const client = await connect()
+  client.send({ t: 'hello', proto: 1, deviceId, deviceName, token: offer.token })
+  await waitFor(() => client.first('hello-ok'), 5000, `${deviceId} hello-ok`)
+  return client
+}
+
 const PROJECTS = [
   { id: 'p1', name: 'forge', path: ROOT, color: '#7C5CFF', defaultProfileId: 'shell', createdAt: 0 }
 ]
@@ -101,8 +111,15 @@ async function main() {
     absWorkingDir: ROOT
   })
 
-  const { MobileServer, MobileAuth, PtySessionManager, isAllowedSource, resolveWithin, ACCEPT_WINDOW_MS } =
-    await import(pathToFileURL(join(scratch, 'mobile.mjs')).href)
+  const {
+    MobileServer,
+    MobileAuth,
+    PtySessionManager,
+    isAllowedSource,
+    resolveWithin,
+    ACCEPT_WINDOW_MS,
+    MAX_SIGNAL_CHARS
+  } = await import(pathToFileURL(join(scratch, 'mobile.mjs')).href)
 
   /* ------------------------------------------------- the desktop, once */
 
@@ -549,10 +566,163 @@ async function main() {
     'no raw approval-minted token was ever handed to persistence'
   )
 
+  await serverC.stop()
+
+  /* ====================================== PHASE D — screen mirror relay */
+
+  // The server never parses a signalling payload — it only relays and
+  // counts — so nothing here speaks WebRTC. `mirrorStart` is a function
+  // rather than a fixed answer so the refusing-host check can flip it
+  // without tearing the server down.
+  const mirrorStarts = []
+  const mirrorSignals = []
+  const mirrorStops = []
+  let mirrorStartReturn = null
+  const authD = new MobileAuth(store)
+  const serverD = new MobileServer({
+    auth: authD,
+    appVersion: '0.0.0-smoke',
+    sessions: () => manager.list(),
+    replay: () => '',
+    write: () => true,
+    resize: () => true,
+    snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: {} }),
+    dispatchOp: async () => null,
+    mirrorStart: () => {
+      mirrorStarts.push(true)
+      return mirrorStartReturn
+    },
+    mirrorSignal: (data) => mirrorSignals.push(data),
+    mirrorStop: () => mirrorStops.push(true)
+  })
+  active = serverD
+  await serverD.start({ host: '127.0.0.1', port: PORT })
+
+  /* ---------------------------------------------------- 20. a viewer starts */
+
+  const viewer = await authenticatedClient(authD, 'tv-1', 'Fire TV')
+  viewer.send({ t: 'mirror-start' })
+  await waitFor(() => mirrorStarts.length > 0, 5000, 'mirrorStart hook call')
+  log(mirrorStarts.length === 1, 'an authenticated viewer starting a mirror calls the mirrorStart hook')
+  log(serverD.mirroring === true, 'and the server now considers itself mirroring')
+
+  /* ------------------------------------------------ 21. signalling, verbatim */
+
+  const toHost = 'offer:' + 'A'.repeat(48)
+  viewer.send({ t: 'mirror-signal', data: toHost })
+  await waitFor(() => mirrorSignals.length > 0, 5000, 'mirrorSignal hook call')
+  log(mirrorSignals[0] === toHost, 'a signal from the viewer reaches the mirrorSignal hook byte for byte')
+
+  const toViewer = 'answer:' + 'B'.repeat(48)
+  serverD.pushMirrorSignal(toViewer)
+  await waitFor(() => viewer.of('mirror-signal').length > 0, 5000, 'mirror-signal frame down to the viewer')
+  log(viewer.first('mirror-signal').data === toViewer, 'and pushMirrorSignal reaches the viewer verbatim')
+
+  /* -------------------------------------------------- 22. only the viewer */
+
+  const bystander = await authenticatedClient(authD, 'phone-b', 'Bystander')
+  const viewerSignalsBefore = viewer.of('mirror-signal').length
+  serverD.pushMirrorSignal('should-not-leak')
+  await waitFor(
+    () => viewer.of('mirror-signal').length > viewerSignalsBefore,
+    5000,
+    'the viewer to receive the next pushed signal'
+  )
+  log(bystander.of('mirror-signal').length === 0, 'a second authenticated client never receives a mirror signal')
+  log(viewer.of('mirror-signal').length === viewerSignalsBefore + 1, 'while the viewer alone gets it')
+
+  /* ----------------------------------------------- 23. one viewer at a time */
+
+  const mirrorStartsBeforeSecond = mirrorStarts.length
+  bystander.send({ t: 'mirror-start' })
+  await waitFor(() => bystander.first('mirror-stop'), 5000, 'second mirror-start refusal')
+  log(
+    typeof bystander.first('mirror-stop').reason === 'string' && bystander.first('mirror-stop').reason.length > 0,
+    'a second client asking to view while one is watching gets a mirror-stop with a reason'
+  )
+  log(mirrorStarts.length === mirrorStartsBeforeSecond, 'and the mirrorStart hook is not called a second time')
+  log(serverD.mirroring === true, 'the original viewer is still the viewer')
+
+  /* --------------------------------------------------- 24. a hang-up ends it */
+
+  viewer.socket.close()
+  await waitFor(() => mirrorStops.length > 0, 5000, 'mirrorStop hook call')
+  log(mirrorStops.length === 1, "the viewer's own hang-up fires the mirrorStop hook")
+  log(serverD.mirroring === false, 'and the server is no longer mirroring')
+
+  /* ----------------------------------------------- 25. a refusing host */
+
+  mirrorStartReturn = 'Screen capture failed: no display.'
+  const stopsBeforeRefusal = bystander.of('mirror-stop').length
+  bystander.send({ t: 'mirror-start' })
+  await waitFor(() => bystander.of('mirror-stop').length > stopsBeforeRefusal, 5000, 'refused mirror-start reply')
+  log(
+    bystander.of('mirror-stop').at(-1).reason === mirrorStartReturn,
+    "a refusing host's sentence reaches the would-be viewer verbatim"
+  )
+  log(serverD.mirroring === false, 'and no viewer was created, so it can ask again')
+
+  /* --------------------------------------------- 26. oversized signalling */
+
+  mirrorStartReturn = null
+  const mirrorStartsBeforeRetry = mirrorStarts.length
+  bystander.send({ t: 'mirror-start' })
+  await waitFor(() => mirrorStarts.length > mirrorStartsBeforeRetry, 5000, 'retry mirror-start call')
+  log(serverD.mirroring === true, 'asking again after a refusal succeeds')
+
+  const oversized = 'x'.repeat(MAX_SIGNAL_CHARS + 1)
+  const mirrorSignalsBeforeOversized = mirrorSignals.length
+  const errsBefore = bystander.of('err').length
+  bystander.send({ t: 'mirror-signal', data: oversized })
+  await waitFor(() => bystander.of('err').length > errsBefore, 5000, 'oversized signal rejection')
+  log(bystander.of('err').at(-1).code === 'bad-frame', 'a signal over MAX_SIGNAL_CHARS is rejected as bad-frame')
+  log(mirrorSignals.length === mirrorSignalsBeforeOversized, 'and the mirrorSignal hook never sees it')
+
+  /* ------------------------------------------ 27. no hello, no mirror-start */
+
+  const mirrorStartsBeforeStranger = mirrorStarts.length
+  const stranger = await connect()
+  stranger.send({ t: 'mirror-start' })
+  await waitFor(() => stranger.closed !== null, 5000, 'unauthenticated mirror-start to be refused')
+  log(stranger.closed === 4001, 'a socket that never said hello is dropped for sending mirror-start')
+  log(mirrorStarts.length === mirrorStartsBeforeStranger, 'and the mirrorStart hook is never reached')
+
+  /* ------------------------------------------------ 28. "play this on the TV"
+   *
+   * The one frame the server relays rather than acts on: a phone sends it up,
+   * every *other* authenticated socket gets it down. What is worth proving is
+   * not that a message moved — it is the three rules around it. The sender does
+   * not get its own frame back (or a phone would fling to itself). A stranger
+   * cannot send one at all. And the id is re-derived on this side, so a phone
+   * that has been tampered with cannot put arbitrary text into the URL a
+   * television opens.
+   */
+
+  const flinger = await authenticatedClient(authD, 'phone-fling', 'Phone')
+  const television = await authenticatedClient(authD, 'tv-fling', 'Fire TV')
+
+  flinger.send({ t: 'tv-play', video: 'aqz-KE-bpKQ' })
+  await waitFor(() => television.first('tv-play'), 5000, 'the relayed tv-play')
+  log(television.first('tv-play').video === 'aqz-KE-bpKQ', 'a tv-play from one phone reaches another device verbatim')
+  log(flinger.of('tv-play').length === 0, 'and never comes back to the phone that sent it')
+
+  const flingerErrsBefore = flinger.of('err').length
+  flinger.send({ t: 'tv-play', video: 'https://youtu.be/aqz-KE-bpKQ' })
+  await waitFor(() => flinger.of('err').length > flingerErrsBefore, 5000, 'the refusal of a URL')
+  log(flinger.of('err').at(-1).code === 'bad-frame', 'a URL where an id belongs is refused rather than relayed')
+  log(television.of('tv-play').length === 1, 'and nothing reached the television')
+
+  const flingStranger = await connect()
+  flingStranger.send({ t: 'tv-play', video: 'aqz-KE-bpKQ' })
+  await waitFor(() => flingStranger.closed !== null, 5000, 'unauthenticated tv-play to be refused')
+  log(flingStranger.closed === 4001, 'a socket that never said hello is dropped for sending tv-play')
+  log(television.of('tv-play').length === 1, 'and still nothing reached the television')
+
+  await serverD.stop()
+
   /* ---------------------------------------------------------------- done */
 
   manager.killAll()
-  await serverC.stop()
 }
 
 main()

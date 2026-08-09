@@ -147,6 +147,39 @@ export async function bakedOriginOf(raw) {
   return host ? `wss://${host}` : ''
 }
 
+/**
+ * The desktop origin stamped into a **Fire TV** APK: `http://<host>:<port>`,
+ * or '' when the argument is not an address.
+ *
+ * The opposite rule to `bakedOriginOf` above, and deliberately so. A television
+ * sits on the same wifi as the desktop and dials it directly — there is no
+ * tunnel, no certificate and no implicit 443, so the port is not optional here,
+ * it is the whole address. `MOBILE_PORT` comes out of shared/mobile.ts rather
+ * than being written down again, for the same reason the domain rule is not
+ * restated: the desktop and the APK must not be able to disagree about which
+ * port this is.
+ *
+ * https is refused rather than normalised. Nothing on this machine serves the
+ * mobile port over TLS, so an `https://` stamp is an address that cannot
+ * answer — and it would come back through the phone's `toOrigin` as `wss://`,
+ * failing on the TV weeks later in a way that looks like the desktop being off.
+ */
+export async function tvOriginOf(raw) {
+  const { MOBILE_PORT } = await sharedMobile()
+  const value = String(raw ?? '').trim()
+  if (!value) return ''
+  if (/^(https|wss):\/\//i.test(value)) return ''
+  const withScheme = /^(http|ws):\/\//i.test(value) ? value.replace(/^ws:\/\//i, 'http://') : `http://${value}`
+  let url
+  try {
+    url = new URL(withScheme)
+  } catch {
+    return ''
+  }
+  if (!url.hostname) return ''
+  return `http://${url.hostname}:${url.port || MOBILE_PORT}`
+}
+
 /** shared/mobile.ts as importable ESM, bundled once per process on first use. */
 let sharedMobilePromise = null
 function sharedMobile() {
@@ -186,9 +219,13 @@ export function sha256File(path) {
  * was a release published with `--title Forge Mobile v0.1.0`, where gh read the
  * last two words as asset filenames.
  *
- * Nothing here has a space today. The Android SDK sitting under a path that
- * does — `C:\Program Files\…` is the obvious one — is all it would take, and
- * the failure would surface as a missing-file error naming half a path.
+ * The **command** needs the same treatment as its arguments, and for a while it
+ * did not get it. `gradlew.bat` is addressed by absolute path, so a checkout at
+ * `C:\Users\steve\Desktop\Forge Dev` — a space in it — reached cmd.exe as two
+ * words and failed with `'C:\Users\steve\Desktop\Forge' is not recognized`,
+ * naming exactly the half-path this comment predicted. Everything else spawned
+ * here (npx, keytool, zipalign, apksigner) has no space in its path, so
+ * quoting is conditional and nothing else changes shape.
  */
 function quoteForShell(args) {
   return args.map((arg) => {
@@ -205,8 +242,9 @@ function quoteForShell(args) {
  */
 export function run(cmd, args, options = {}) {
   const settings = { stdio: 'inherit', shell: false, ...options }
+  const [program] = settings.shell ? quoteForShell([cmd]) : [cmd]
   const safe = settings.shell ? quoteForShell(args) : args
-  const result = spawnSync(cmd, safe, settings)
+  const result = spawnSync(program, safe, settings)
   if (result.error) throw result.error
   if (result.status !== 0) {
     throw new Error(`${cmd} ${args.join(' ')} exited with ${result.status}`)
@@ -215,8 +253,9 @@ export function run(cmd, args, options = {}) {
 
 /** Run and capture stdout, for the few places the output is the answer. */
 export function capture(cmd, args, options = {}) {
+  const [program] = options.shell ? quoteForShell([cmd]) : [cmd]
   const safe = options.shell ? quoteForShell(args) : args
-  return execFileSync(cmd, safe, { encoding: 'utf8', ...options }).trim()
+  return execFileSync(program, safe, { encoding: 'utf8', ...options }).trim()
 }
 
 export function ensureDir(dir) {

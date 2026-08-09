@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { toDataURL } from 'qrcode'
 import { normaliseNgrokDomain } from '@shared/mobile'
-import type { MobileDeviceRecord, MobilePairOffer, MobileStatus } from '@shared/types'
+import type { ForgeTvStatus, MobileDeviceRecord, MobilePairOffer, MobileStatus } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTone } from './parts'
 
@@ -21,6 +21,10 @@ import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTon
  *      authorisation. The QR card stays below it as the fallback for a phone
  *      that has no stamped address (a browser, an old build).
  *   4. Which phones?       the device list, and the button that removes one
+ *   5. And the telly?      Forge TV, at the bottom, because it is a different
+ *      device with a different answer: no pairing QR a remote could scan, no
+ *      tunnel, just an APK built on demand against this machine's LAN address
+ *      and a URL to type into the television's Downloader app.
  *
  * One naming rule, learned the hard way: the phone's field is called
  * **Desktop address**, so every card here that shows a value destined for that
@@ -51,17 +55,27 @@ function countdown(seconds: number): string {
 export function MobileSection(): ReactNode {
   const { state, actions } = useApp()
   const [status, setStatus] = useState<MobileStatus | null>(null)
+  const [tv, setTv] = useState<ForgeTvStatus | null>(null)
   const [offer, setOffer] = useState<Extract<MobilePairOffer, { ok: true }> | null>(null)
   const [qr, setQr] = useState('')
   const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [domainError, setDomainError] = useState('')
-  const [copied, setCopied] = useState(false)
+  // Which URL was copied, not merely that one was: two cards on this page have
+  // a Copy button now, and a boolean would flash "Copied" on both.
+  const [copied, setCopied] = useState('')
 
   useEffect(() => {
     void window.forge.mobile.status().then(setStatus)
     return window.forge.mobile.onStatus(setStatus)
+  }, [])
+
+  // A separate stream from the one above, because a running build changes this
+  // line by line for minutes and nothing else on this page does.
+  useEffect(() => {
+    void window.forge.mobile.tvStatus().then(setTv)
+    return window.forge.mobile.onTvStatus(setTv)
   }, [])
 
   // Two countdowns share this clock: the pairing code's TTL and the accept
@@ -194,10 +208,14 @@ export function MobileSection(): ReactNode {
     [actions]
   )
 
-  const copyTunnelUrl = useCallback(async (url: string) => {
+  const buildTv = useCallback(async () => {
+    setTv(await window.forge.mobile.tvBuild())
+  }, [])
+
+  const copyUrl = useCallback(async (url: string) => {
     await window.forge.clipboard.writeText(url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    setCopied(url)
+    setTimeout(() => setCopied(''), 1500)
   }, [])
 
   if (!status) {
@@ -325,8 +343,8 @@ export function MobileSection(): ReactNode {
           >
             <div className="mobile-tunnel-url">
               <code className="mobile-address">{tunnel.url}</code>
-              <button type="button" className="sbtn" onClick={() => void copyTunnelUrl(tunnel.url)}>
-                {copied ? 'Copied' : 'Copy'}
+              <button type="button" className="sbtn" onClick={() => void copyUrl(tunnel.url)}>
+                {copied === tunnel.url ? 'Copied' : 'Copy'}
               </button>
             </div>
           </Row>
@@ -456,7 +474,97 @@ export function MobileSection(): ReactNode {
           </p>
         )}
       </Card>
+
+      <ForgeTvCard tv={tv} copied={copied} onBuild={buildTv} onCopy={copyUrl} />
     </Section>
+  )
+}
+
+/**
+ * Forge TV — the same app, on the television, installed without a cable.
+ *
+ * A Fire TV Stick has no file manager and no browser: the only way an APK gets
+ * onto one is a URL typed into its Downloader app with a remote control, one
+ * character at a time. So this card is two facts and a button — build it, then
+ * type this — and the URL never changes, because retyping it on a D-pad is the
+ * expensive part.
+ *
+ * The build takes minutes and reports its current line while it runs, which is
+ * the honest thing to show for work that long: a spinner with no words looks
+ * identical to a hang.
+ */
+function ForgeTvCard({
+  tv,
+  copied,
+  onBuild,
+  onCopy
+}: {
+  tv: ForgeTvStatus | null
+  copied: string
+  onBuild: () => Promise<void>
+  onCopy: (url: string) => Promise<void>
+}): ReactNode {
+  if (!tv) return null
+
+  const building = tv.phase === 'building'
+  const built = tv.sizeBytes > 0
+  const tone: ChipTone = building ? 'warn' : tv.phase === 'error' ? 'danger' : built ? 'ok' : 'off'
+
+  return (
+    <Card
+      title="Forge TV"
+      actions={
+        tv.supported ? (
+          <button type="button" className="sbtn sbtn--go" disabled={building} onClick={() => void onBuild()}>
+            {building ? 'Building…' : built ? 'Rebuild' : 'Build the TV app'}
+          </button>
+        ) : undefined
+      }
+      hint={
+        tv.supported
+          ? 'The app has this machine’s address baked into it, so the television connects with one press and no typing. If your router hands this machine a different address, rebuild and install it again — that is the whole update mechanism.'
+          : 'Only from a Forge checkout: building the TV app needs the Android SDK and a JDK, neither of which ships inside Forge.'
+      }
+    >
+      {tv.supported && (
+        <Row
+          label="The television app"
+          hint={
+            built
+              ? `Built ${lastSeen(tv.builtAt)} · ${(tv.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+              : 'Not built yet on this machine.'
+          }
+        >
+          <StateChip tone={tone}>
+            {building ? 'Building' : tv.phase === 'error' ? 'Failed' : built ? 'Ready' : 'None'}
+          </StateChip>
+        </Row>
+      )}
+
+      {/* The address box on a TV is the one thing that has to be right, so it
+          gets the same treatment as the phone's: shown as a whole URL, copyable
+          in one press, and never abbreviated. */}
+      {tv.supported && built && tv.url && (
+        <Row
+          label="Type this on the TV"
+          hint="Open Downloader on the Fire TV and enter this. Installing again over the top is how it updates."
+        >
+          <div className="mobile-tunnel-url">
+            <code className="mobile-address">{tv.url}</code>
+            <button type="button" className="sbtn" onClick={() => void onCopy(tv.url)}>
+              {copied === tv.url ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </Row>
+      )}
+
+      {tv.detail && <p className={tv.phase === 'error' ? 'mobile-error' : 'scard__hint'}>{tv.detail}</p>}
+      {built && !tv.url && (
+        <p className="scard__hint">
+          Switch the link on above to get the address — the television downloads the app from this same server.
+        </p>
+      )}
+    </Card>
   )
 }
 

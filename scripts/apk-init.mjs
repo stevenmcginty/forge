@@ -24,10 +24,21 @@
  *    matching WebView-side flags.
  *  - local.properties: ANDROID_HOME is not set on this machine; Gradle finds
  *    the SDK through this gitignored file instead.
+ *  - The television bits — a leanback launcher category, optional touchscreen,
+ *    a banner — live in the shared manifest rather than being patched in by
+ *    scripts/apk-tv-build.mjs at build time. They cost a phone nothing (an
+ *    extra intent-filter category, two `required="false"` features and one
+ *    drawable), and keeping them here means they are visible in the tree
+ *    apk-check reads and diffable in review, the same argument the CAMERA
+ *    permission below is declared under. A TV APK that is only a TV APK
+ *    *after* a build step is one no check script can see.
+ *  - The `-PforgeTv` hook in app/build.gradle: the one thing that genuinely
+ *    cannot be shared, because it is the application id.
  */
-import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ANDROID, MOBILE, ROOT, run, writeLocalProperties, readVersion, stampGradleVersion } from './apk-lib.mjs'
+import { drawBanner } from './icon-lib.mjs'
 
 const KOTLIN_VERSION = '1.9.25'
 const MANIFEST = join(ANDROID, 'app', 'src', 'main', 'AndroidManifest.xml')
@@ -37,6 +48,9 @@ const APP_GRADLE = join(ANDROID, 'app', 'build.gradle')
 const JAVA_DIR = join(ANDROID, 'app', 'src', 'main', 'java', 'com', 'forge', 'mobile')
 const XML_DIR = join(ANDROID, 'app', 'src', 'main', 'res', 'xml')
 const NATIVE = join(MOBILE, 'native')
+/** xhdpi, not `drawable/`: 320x180 is the banner size at that density, so a TV
+ *  draws the pixels as authored instead of upscaling an mdpi copy. */
+const BANNER_DIR = join(ANDROID, 'app', 'src', 'main', 'res', 'drawable-xhdpi')
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 
@@ -106,8 +120,21 @@ patch(MANIFEST, 'REQUEST_INSTALL_PACKAGES permission', (text) => {
 // first scan. 26 is Android 8.0 (2017); Capacitor 8 raises the floor there
 // anyway, so this is early rather than exotic. The stock template writes 23,
 // which is why this is a patch and not a hand edit that `cap add` would undo.
-patch(VARIABLES_GRADLE, 'minSdkVersion 26 (QR scanner library floor)', (text) => {
-  return text.replace(/minSdkVersion = 2[0-5]\b/, 'minSdkVersion = 26')
+//
+// **Except on the television.** A Fire TV Stick 4K (AFTMM) runs Fire OS on
+// Android 7.1.2 — API 25 — and an APK claiming 26 is refused by the installer
+// before anything of ours runs. So the TV build declares 25 and overrides the
+// scanner library's floor in the manifest below. That is only defensible
+// because the TV never enters the scanner: it has no camera, and `canScan()`
+// in mobile/src/lib/scan.ts returns false on a TV build for exactly this
+// reason. Lower the floor and keep the door shut, or neither.
+//
+// Read out of `ext` rather than set per-module, because the Capacitor plugin
+// modules take their own minSdk from this same property — an app at 25 with a
+// library module at 26 fails the merge just as loudly.
+patch(VARIABLES_GRADLE, 'minSdkVersion (26 for phones, 25 for the Fire TV build)', (text) => {
+  if (text.includes('forgeTv')) return text
+  return text.replace(/minSdkVersion = \d+\b/, "minSdkVersion = project.hasProperty('forgeTv') ? 25 : 26")
 })
 
 // Ship phone architectures only.
@@ -150,6 +177,109 @@ patch(MANIFEST, 'camera <uses-feature> marked optional', (text) => {
   return text.replace(
     /(\s*)(<uses-permission android:name="android\.permission\.CAMERA")/,
     `$1<uses-feature android:name="android.hardware.camera" android:required="false" />$1$2`
+  )
+})
+
+/* --------------------------------------------------- 4b. the television
+ *
+ * Four additions, all of them inert on a phone, that together make the same
+ * package installable and launchable on a Fire TV. Only the application id
+ * differs between the two builds (see the -PforgeTv patch below); everything
+ * here ships in both.
+ */
+
+// Fire TV's launcher lists apps by LEANBACK_LAUNCHER and ignores plain
+// LAUNCHER entirely — without this the APK installs and then cannot be found
+// on the home screen at all. Alongside LAUNCHER rather than instead of it, so
+// the one manifest still describes an app a phone can open.
+patch(MANIFEST, 'LEANBACK_LAUNCHER category on the launch activity', (text) => {
+  if (text.includes('LEANBACK_LAUNCHER')) return text
+  return text.replace(
+    /(\s*)(<category android:name="android\.intent\.category\.LAUNCHER" \/>)/,
+    `$1$2$1<category android:name="android.intent.category.LEANBACK_LAUNCHER" />`
+  )
+})
+
+// A television has no touchscreen. Android assumes every app requires one
+// unless told otherwise, and a TV filters out anything that does — this is the
+// difference between an APK that sideloads and one that is refused.
+patch(MANIFEST, 'touchscreen marked optional (a TV has none)', (text) => {
+  if (text.includes('android.hardware.touchscreen')) return text
+  return text.replace(
+    /(\s*)(<uses-feature android:name="android\.hardware\.camera")/,
+    `$1<uses-feature android:name="android.hardware.touchscreen" android:required="false" />$1$2`
+  )
+})
+
+// Declared optional rather than required: this is one app, and a phone must
+// keep being able to install it.
+patch(MANIFEST, 'leanback <uses-feature> marked optional', (text) => {
+  if (text.includes('android.software.leanback')) return text
+  return text.replace(
+    /(\s*)(<uses-feature android:name="android\.hardware\.touchscreen")/,
+    `$1<uses-feature android:name="android.software.leanback" android:required="false" />$1$2`
+  )
+})
+
+// The TV home row shows a 320x180 banner and nothing else — no icon, no label
+// — so an app without one is a blank tile. On the <application> so both the
+// activity and anything added later inherit it; a phone launcher never reads it.
+patch(MANIFEST, 'android:banner on <application>', (text) => {
+  if (text.includes('android:banner')) return text
+  return text.replace(/<application(\s)/, '<application\n        android:banner="@drawable/tv_banner"$1')
+})
+
+// The other half of the API-25 bargain above. `ionbarcode-android` declares
+// minSdk 26 in its own AAR manifest (package com.outsystems.plugins.barcode),
+// so a 25 build is refused by the merger unless it says, in writing, that it
+// knows. Inert in the phone build, which is at 26 and has nothing to override.
+//
+// `tools:` attributes never reach the packaged manifest, so this costs the
+// phone APK nothing but the namespace declaration.
+patch(MANIFEST, 'tools namespace on <manifest>', (text) => {
+  if (text.includes('xmlns:tools')) return text
+  return text.replace(
+    /<manifest xmlns:android="([^"]+)">/,
+    '<manifest xmlns:android="$1"\n    xmlns:tools="http://schemas.android.com/tools">'
+  )
+})
+
+patch(MANIFEST, 'uses-sdk override for the scanner library (the API 25 TV)', (text) => {
+  if (text.includes('tools:overrideLibrary')) return text
+  return text.replace(
+    /(\s*)(<application)/,
+    `$1<uses-sdk tools:overrideLibrary="com.outsystems.plugins.barcode" />$1$2`
+  )
+})
+
+const banner = join(BANNER_DIR, 'tv_banner.png')
+mkdirSync(BANNER_DIR, { recursive: true })
+const bannerBytes = drawBanner(320, 180)
+if (!existsSync(banner) || !readFileSync(banner).equals(bannerBytes)) {
+  writeFileSync(banner, bannerBytes)
+  console.log(`  wrote   res/drawable-xhdpi/tv_banner.png  (${bannerBytes.length} bytes)`)
+} else {
+  console.log('  ok      res/drawable-xhdpi/tv_banner.png (current)')
+}
+
+// The one thing the TV build cannot share: its identity.
+//
+// A distinct application id is what keeps the two builds from ever being
+// mistaken for one another. They are signed with the same key and carry the
+// same versionCode, so a shared id would let the phone's GitHub release —
+// which is a *phone* build, stamped with a tunnel address — install straight
+// over the television, and would make the TV's own rebuilds compete with an
+// OTA feed it is not supposed to have. Different ids, and neither can touch
+// the other, whatever any feed says.
+//
+// A gradle property rather than a product flavour: a flavour renames every
+// task in the project (assembleTvRelease), which is a rewrite of the phone
+// pipeline to buy nothing it needs.
+patch(APP_GRADLE, 'applicationId hook for -PforgeTv (the TV build)', (text) => {
+  if (text.includes('forgeTv')) return text
+  return text.replace(
+    /(applicationId "com\.forge\.mobile")/,
+    `$1\n        if (project.hasProperty('forgeTv')) {\n            applicationId "com.forge.mobile.tv"\n        }`
   )
 })
 

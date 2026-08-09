@@ -7,9 +7,11 @@ import {
   APPROVAL_TIMEOUT_MS,
   HEARTBEAT_GRACE_MS,
   HEARTBEAT_MS,
+  MAX_SIGNAL_CHARS,
   MAX_WRITE_CHARS,
   MOBILE_PROTO,
   MOBILE_WS_PATH,
+  isVideoId,
   parseFrame,
   wireDim,
   wireString,
@@ -129,8 +131,42 @@ export interface MobileServerHost {
   approvalTimeoutMs?: number
   promptCooldownMs?: number
 
+  /* --------------------------------------------------------- screen mirror
+   *
+   * The television watching the desktop's own screen. All three hooks are
+   * optional, and a host that supplies none of them simply cannot be watched:
+   * the server refuses a `mirror-start` outright rather than half-starting
+   * something and leaving a television on a black screen.
+   *
+   * This server relays and counts; it never looks inside a payload. WebRTC
+   * belongs in a renderer — the main process has no peer connection to offer —
+   * so mobile-host forwards these to the window. See src/lib/mirror.ts.
+   */
+
+  /**
+   * Begin a mirror. Returns an error sentence when it cannot start at all, or
+   * null; the picture itself arrives later, as `pushMirrorSignal` calls. The
+   * sentence is shown on the television, so it is written for one.
+   */
+  mirrorStart?: () => string | null
+  /** One signaling payload from the viewer, verbatim. Opaque to this server. */
+  mirrorSignal?: (data: string) => void
+  /** The viewer stopped watching, or went away. Tear the capture down. */
+  mirrorStop?: () => void
+
   /** Where the phone bundle lives on disk. Static hosting is off when absent. */
   webRoot?: string
+  /**
+   * The built Fire TV APK's path on disk, or '' when there is none.
+   *
+   * Read per request, never cached: the file appears the moment a build
+   * finishes, and a path resolved at start-up would 404 until the next restart.
+   * A television has no cable and no file manager — the only way onto one is a
+   * URL typed into its Downloader app with a remote — so this is how the APK
+   * gets from `dist-apk` to the TV. It rides the same `isAllowedSource` gate as
+   * everything else on this port, which is what keeps it a LAN answer.
+   */
+  tvApk?: () => string
   log?: (line: string) => void
 }
 
@@ -183,6 +219,18 @@ interface ApprovalWait {
  */
 const PROMPT_COOLDOWN_MS = 60_000
 
+/**
+ * The Fire TV APK's name and its one URL on this server.
+ *
+ * Stable on purpose, and the reason is a remote control: installing onto a
+ * television means typing this into the Downloader app's address box, one
+ * character at a time, with a D-pad. A name that carried a version would have
+ * to be retyped after every rebuild. `scripts/apk-tv-build.mjs` writes the same
+ * name into `dist-apk/`.
+ */
+export const TV_APK_NAME = 'forge-tv.apk'
+export const TV_APK_PATH = `/${TV_APK_NAME}`
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -209,6 +257,15 @@ export class MobileServer {
   private pendingApproval: Client | null = null
   /** When the last prompt was raised, for PROMPT_COOLDOWN_MS. */
   private lastPromptAt = 0
+  /**
+   * The one socket watching this desktop's screen, if any.
+   *
+   * At most one, ever. Relaying a single peer connection is a seam; fanning
+   * one capture out to N of them is a media server, which is a different piece
+   * of software with a different set of problems. A second `mirror-start` is
+   * refused with a sentence rather than queued.
+   */
+  private mirrorViewer: Client | null = null
   /** The last set handed to `onWatch`, so an unchanged set says nothing. */
   private announcedWatch = ''
 
@@ -267,6 +324,13 @@ export class MobileServer {
     }
     for (const client of [...this.clients]) this.drop(client, 1001, 'Server stopping')
     this.clients.clear()
+    // Whoever was watching is not watching any more. Said explicitly rather
+    // than left to the close handlers above, because a screen capture that
+    // outlives the server relaying it is a desktop being encoded for nobody.
+    if (this.mirrorViewer) {
+      this.mirrorViewer = null
+      this.host.mirrorStop?.()
+    }
     this.wss?.close()
     this.wss = null
     const http = this.http
@@ -327,6 +391,48 @@ export class MobileServer {
     }
   }
 
+  /**
+   * One signaling payload for the television, verbatim.
+   *
+   * To the viewer and nobody else: this string describes how to reach a stream
+   * of Steve's screen, and broadcasting it the way `pushData` broadcasts
+   * terminal bytes would hand that to every connected phone. A no-op when
+   * nobody is watching, which is the ordinary shape of a viewer that hung up
+   * mid-negotiation while the desktop was still answering.
+   */
+  pushMirrorSignal(data: string): void {
+    if (!this.mirrorViewer) return
+    this.send(this.mirrorViewer, { t: 'mirror-signal', data })
+  }
+
+  /**
+   * End the watch from this side, with a sentence the television can show.
+   *
+   * The viewer is cleared whether or not the frame lands, so a socket that
+   * died between the capture failing and this call cannot leave the server
+   * believing it still has a viewer — and refusing the next `mirror-start`.
+   */
+  pushMirrorStop(reason: string): void {
+    const viewer = this.mirrorViewer
+    this.mirrorViewer = null
+    if (viewer) this.send(viewer, { t: 'mirror-stop', reason })
+  }
+
+  /** Is a television watching this screen right now? */
+  get mirroring(): boolean {
+    return this.mirrorViewer !== null
+  }
+
+  /**
+   * This socket is no longer the viewer, if it ever was — and the host is told,
+   * so the capture stops with it.
+   */
+  private dropViewer(client: Client): void {
+    if (this.mirrorViewer !== client) return
+    this.mirrorViewer = null
+    this.host.mirrorStop?.()
+  }
+
   /* --------------------------------------------------------------- inbound */
 
   private accept(socket: WebSocket, source: string): void {
@@ -359,6 +465,10 @@ export class MobileServer {
       // desktop prompt is withdrawn, or Steve would be left approving a socket
       // that no longer exists (and priming an Allow for the next asker).
       this.abandonApproval(client)
+      // A television that hangs up stops the capture behind it. A mirror
+      // outliving its viewer is a screen being encoded and sent to a socket
+      // that closed — which nothing else in this file would ever notice.
+      this.dropViewer(client)
       if (client.device) {
         this.log(`${client.device.name} disconnected`)
         this.host.onPresence?.(this.connectedCount)
@@ -440,6 +550,92 @@ export class MobileServer {
         if (error) this.send(client, { t: 'err', code: 'no-window', msg: error })
         return
       }
+
+      /**
+       * "Play this on the TV" — the one frame this server relays rather than
+       * acts on. A phone sends it up, every *other* authenticated client gets
+       * it down, and in practice that is the television (see TvPlayFrame).
+       *
+       * Broadcast rather than addressed, because nothing on this wire names a
+       * device: the desktop would have to know which socket is a TV, and the
+       * only devices here are Steve's own paired ones. A phone that ignores
+       * the frame it did not ask for costs nothing; a routing table the user
+       * has to maintain costs a screen.
+       *
+       * The id is re-checked here rather than passed through, and against the
+       * strict rule rather than the phone's forgiving one: what travels on this
+       * wire is an id and never a URL (see TvPlayFrame), because "the sender
+       * checked" is not something this side can observe, and what leaves this
+       * method ends up in an address a television opens.
+       */
+      case 'tv-play': {
+        const video = frame.video
+        if (!isVideoId(video)) {
+          this.send(client, { t: 'err', code: 'bad-frame', msg: 'That is not a YouTube video id' })
+          return
+        }
+        let sent = 0
+        for (const other of this.clients) {
+          if (other === client || !other.device) continue
+          this.send(other, { t: 'tv-play', video })
+          sent += 1
+        }
+        this.log(`${client.device.name} sent ${video} to ${sent} other device${sent === 1 ? '' : 's'}`)
+        if (sent === 0) this.send(client, { t: 'err', code: 'no-window', msg: 'Nothing else is connected to play it.' })
+        return
+      }
+
+      /* --------------------------------------------------- screen mirror
+       *
+       * Below the authentication gate above, like everything else in this
+       * switch: a stranger must not be able to make this desktop start
+       * capturing its own screen, and the one line that guarantees that is
+       * the blanket `!client.device` drop, not anything written here.
+       */
+
+      case 'mirror-start': {
+        if (!this.host.mirrorStart) {
+          this.send(client, { t: 'mirror-stop', reason: 'This Forge cannot share its screen.' })
+          return
+        }
+        if (this.mirrorViewer) {
+          this.send(client, {
+            t: 'mirror-stop',
+            reason: 'Another screen is already watching this desktop.'
+          })
+          return
+        }
+        const error = this.host.mirrorStart()
+        if (error) {
+          // Refused before it began, so this socket does not become the
+          // viewer — it must be able to ask again once the reason is fixed.
+          this.send(client, { t: 'mirror-stop', reason: error })
+          return
+        }
+        this.mirrorViewer = client
+        this.log(`${client.device.name} is watching the screen`)
+        return
+      }
+
+      case 'mirror-signal': {
+        // Only the viewer's signaling counts, and a stranger's is dropped in
+        // silence: a frame arriving from a socket that has just stopped being
+        // the viewer is ordinary timing, not something worth an error.
+        if (this.mirrorViewer !== client) return
+        const data = frame.data
+        if (typeof data !== 'string' || data.length > MAX_SIGNAL_CHARS) {
+          this.send(client, { t: 'err', code: 'bad-frame', msg: 'Signalling payload rejected' })
+          return
+        }
+        // Verbatim, and unread. This server has no WebRTC stack and must not
+        // grow one — see the screen-mirror block in shared/mobile.ts.
+        this.host.mirrorSignal?.(data)
+        return
+      }
+
+      case 'mirror-stop':
+        this.dropViewer(client)
+        return
     }
   }
 
@@ -658,13 +854,25 @@ export class MobileServer {
       res.writeHead(403).end('Forbidden')
       return
     }
+
+    const requested = decodeURIComponent((req.url ?? '/').split('?')[0])
+
+    // Before the web root, and before the single-page fallback: this path must
+    // answer with an APK or with a 404, never with index.html. A Downloader app
+    // handed 200 OK and a page of HTML saves it as `forge-tv.apk` and then
+    // fails to install it, which reads as a broken build rather than a missing
+    // one.
+    if (requested === TV_APK_PATH) {
+      this.serveTvApk(res)
+      return
+    }
+
     const root = this.host.webRoot
     if (!root || !existsSync(root)) {
       res.writeHead(404).end('Forge Mobile bundle is not built')
       return
     }
 
-    const requested = decodeURIComponent((req.url ?? '/').split('?')[0])
     const file = resolveWithin(root, requested === '/' ? '/index.html' : requested)
     // A single-page app: unknown paths fall back to index.html rather than 404.
     const target = file && existsSync(file) && statSync(file).isFile() ? file : join(root, 'index.html')
@@ -680,6 +888,32 @@ export class MobileServer {
       'cache-control': 'no-store'
     })
     createReadStream(target).pipe(res)
+  }
+
+  /**
+   * The Fire TV APK, or a 404 that says why.
+   *
+   * The 404 body is a sentence rather than "Not found": what is on the other
+   * end of this request is a television showing whatever text it was given, and
+   * "build it in Settings first" is the entire content of the fix.
+   */
+  private serveTvApk(res: ServerResponse): void {
+    const apk = this.host.tvApk?.() ?? ''
+    if (!apk || !existsSync(apk)) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+        .end('No Forge TV app has been built yet — build it on the desktop under Settings, Forge Mobile.')
+      return
+    }
+    res.writeHead(200, {
+      'content-type': 'application/vnd.android.package-archive',
+      'content-length': statSync(apk).size,
+      // Named, so the Downloader app's own file list says what it downloaded.
+      'content-disposition': `attachment; filename="${TV_APK_NAME}"`,
+      // A rebuilt APK at the same URL must not be answered from a cache — that
+      // is the whole update mechanism for the television.
+      'cache-control': 'no-store'
+    })
+    createReadStream(apk).pipe(res)
   }
 }
 

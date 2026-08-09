@@ -1,0 +1,984 @@
+/*
+ * The TV wall. Loaded only by TvDashboard, so nothing here can lean on — or
+ * lean against — the phone stylesheet beyond the shared :root tokens.
+ *
+ * Two rules drive everything:
+ *
+ *  1. **Three metres.** Nothing informational below 22px, most of it well
+ *     above, and generous padding all round because a 1080p TV overscans and
+ *     the edge of the framebuffer is not the edge of the glass.
+ *  2. **Volt = alive.** The one accent is spent only on liveness — the Live
+ *     badge, working dots, working counts, and the remote's focus ring, which
+ *     is "alive" in the other sense: where the D-pad is. Everything else is
+ *     ink and dim on near-black, so the eye lands on what is moving before
+ *     reading a word.
+ *
+ * The remote's focus ring is deliberately loud (3px volt + glow): it is being
+ * found from three metres on a wall with no cursor, so a subtle border shift
+ * would simply be lost. There are still no hover states — nothing points.
+ *
+ * Motion is ambient and minimal: the clock ticks, working dots breathe.
+ * Reduced motion stills the dots; the words carry the state regardless — as
+ * everywhere else in this app, colour and motion are never the only signal.
+ *
+ * **Every size here is in screen-heights, not pixels.** The Fire Stick drives
+ * a 1080p panel but reports a 960×540 CSS viewport (device pixel ratio 2), so
+ * a stylesheet written in pixels for a 1920×1080 canvas draws everything at
+ * twice its intended size and lays three columns of wall out as one endless
+ * strip below the fold. The rule above says 22 *screen* pixels, so that is
+ * what `--u` measures: one 1080th of the screen's height, whatever the device
+ * calls it. `calc(var(--u) * 22)` is the same physical size on the television,
+ * in a 1920-wide browser preview, and on a 4K panel. Hairline borders stay a
+ * literal 1px — a rule thinner than a device pixel is a rule that flickers.
+ */
+
+.tv {
+  /* One 1080th of the screen height. Both surfaces this wall runs on are 16:9,
+     so scaling by height scales the columns with it. */
+  --u: calc(100dvh / 1080);
+
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 30);
+  padding: calc(var(--u) * 44) calc(var(--u) * 60) calc(var(--u) * 48);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: calc(var(--u) * 24);
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ header */
+
+.tv-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 22);
+}
+
+.tv-mark {
+  font-size: calc(var(--u) * 32);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.tv-head-meta {
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+}
+
+.tv-head-spring {
+  flex: 1 1 auto;
+}
+
+.tv-link {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 12);
+  font-size: calc(var(--u) * 25);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.tv-link-dot {
+  width: calc(var(--u) * 14);
+  height: calc(var(--u) * 14);
+  border-radius: 50%;
+  background: var(--dim);
+}
+
+.tv-link-live {
+  color: var(--volt);
+}
+.tv-link-live .tv-link-dot {
+  background: var(--volt);
+}
+
+.tv-link-connecting,
+.tv-link-retrying {
+  color: var(--warn);
+}
+.tv-link-connecting .tv-link-dot,
+.tv-link-retrying .tv-link-dot {
+  background: var(--warn);
+}
+
+.tv-link-refused {
+  color: var(--bad);
+}
+.tv-link-refused .tv-link-dot {
+  background: var(--bad);
+}
+
+/* Seconds on purpose: on a wall with no cursor, a ticking clock is the one
+   honest sign the render loop is alive — and a frozen one is the tell. */
+.tv-clock {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--u) * 30);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+}
+
+/* -------------------------------------------------------------------- wall */
+
+/* Taller than the screen is the normal case, not the exception: fourteen
+   projects at three-metre type is several screens of wall however it is
+   columned. It carries no scrollbar — there is no cursor here to drag one —
+   and it never scrolls on its own; the focus ring scrolls it, exactly as far
+   as the ring needs (see TvDashboard). */
+.tv-wall {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--u) * 540), 1fr));
+  gap: calc(var(--u) * 26);
+  align-content: start;
+  /* Cards hug their content rather than stretching to the tallest in the
+     row — a busy project earns its height, an idle one stays a low slab. */
+  align-items: start;
+  overflow: hidden;
+  transition: opacity 0.5s ease, filter 0.5s ease;
+}
+
+/* The link is down, so this picture is a photograph, not a window. It dims
+   behind the banner rather than vanishing — stale truth beats a black hole —
+   and the banner says exactly when it stopped being live. */
+.tv-wall.is-stale {
+  opacity: 0.35;
+  filter: saturate(0.5);
+}
+
+.tv-empty {
+  grid-column: 1 / -1;
+  padding-top: 18vh;
+  text-align: center;
+  font-size: calc(var(--u) * 30);
+  color: var(--dim);
+}
+
+/* ------------------------------------------------------------ screen tile */
+
+/* The wall's one destination that is not a terminal. Full width across the top
+   rather than a card among the projects: it is one thing, not one of many, and
+   a project-sized tile with no project in it reads from the sofa as a card
+   that has lost its name. Slimmer than a card for the same reason — it holds a
+   line, not a list.
+
+   Ink and dim at rest. Volt is spent on liveness and on the ring, and a
+   permanent invitation is neither. */
+.tv-screen {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 22);
+  padding: calc(var(--u) * 20) calc(var(--u) * 28);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 18);
+  min-width: 0;
+}
+
+/* The ring is drawn by the roving-focus class, never by UA defaults — one
+   look, whichever way the element came to be focused. Same treatment as a
+   session row, because it is the same ring doing the same job. */
+.tv-screen:focus {
+  outline: none;
+}
+
+.tv-screen.is-focus {
+  outline: calc(var(--u) * 3) solid var(--volt);
+  outline-offset: calc(var(--u) * -3);
+  background: #1b1e24;
+  box-shadow: 0 0 calc(var(--u) * 34) rgb(198 255 74 / 0.16);
+}
+
+/* A monitor, drawn rather than shipped: a bordered box on a stand is enough to
+   read as a screen at three metres, and is one fewer asset in the APK. */
+.tv-screen-glyph {
+  position: relative;
+  flex: 0 0 auto;
+  width: calc(var(--u) * 48);
+  height: calc(var(--u) * 32);
+  border: calc(var(--u) * 3) solid var(--dim);
+  border-radius: calc(var(--u) * 5);
+}
+
+.tv-screen-glyph::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--u) * -9);
+  transform: translateX(-50%);
+  width: calc(var(--u) * 20);
+  height: calc(var(--u) * 3);
+  background: var(--dim);
+}
+
+.tv-screen-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(var(--u) * 30);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-screen-hint {
+  flex: 0 0 auto;
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/* The tile's own honesty: a watch that got no answer changes the invitation
+   into the reason, in amber words — colour underlines, the sentence carries.
+   The sentence outranks the label for space, but it wraps rather than eating
+   the tile's name: on the half-width split screen both must stay readable. */
+.tv-screen.is-down .tv-screen-name {
+  flex: 0 0 auto;
+}
+
+.tv-screen-hint.is-silent {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  text-align: right;
+  color: var(--warn);
+}
+
+/* ------------------------------------------------------------------- cards */
+
+.tv-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 18);
+  padding: calc(var(--u) * 22) calc(var(--u) * 28) calc(var(--u) * 24);
+  min-width: 0;
+}
+
+.tv-card-head {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 16);
+  padding-bottom: calc(var(--u) * 14);
+}
+
+.tv-card-dot {
+  width: calc(var(--u) * 16);
+  height: calc(var(--u) * 16);
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.tv-card-name {
+  margin: 0;
+  font-size: calc(var(--u) * 33);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-card-meta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: calc(var(--u) * 16);
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.tv-card-working {
+  font-style: normal;
+  font-weight: 650;
+  color: var(--volt);
+}
+
+/* ---------------------------------------------------------------- sessions */
+
+/* Horizontal padding + the matching negative margin exist for the focus
+   ring: the ring needs air around the text without the text moving when the
+   ring arrives, so every row pays the space up front. */
+.tv-session {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 8);
+  padding: calc(var(--u) * 14) calc(var(--u) * 16) calc(var(--u) * 16);
+  margin: 0 calc(var(--u) * -16);
+  border-top: 1px solid var(--line);
+  border-radius: calc(var(--u) * 14);
+}
+
+/* The ring is drawn by the roving-focus class below, never by UA defaults —
+   one look, whichever way the element came to be focused. */
+.tv-session:focus {
+  outline: none;
+}
+
+.tv-session.is-focus {
+  outline: calc(var(--u) * 3) solid var(--volt);
+  outline-offset: calc(var(--u) * -3);
+  background: #1b1e24;
+  box-shadow: 0 0 calc(var(--u) * 34) rgb(198 255 74 / 0.16);
+}
+
+.tv-session-top {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 14);
+  min-width: 0;
+}
+
+.tv-badge {
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 36);
+  height: calc(var(--u) * 36);
+  border-radius: calc(var(--u) * 9);
+  font-size: calc(var(--u) * 16);
+  font-weight: 700;
+  color: #0b0c0e;
+  flex: 0 0 auto;
+}
+
+.tv-session-tab {
+  flex: 0 0 auto;
+  font-size: calc(var(--u) * 22);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.tv-session-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(var(--u) * 27);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The word is the state; the dot only underlines it. Volt-vs-grey must never
+   be the only difference — this desk reads red and green as one colour. */
+.tv-state {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 12);
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.tv-state::before {
+  content: '';
+  width: calc(var(--u) * 13);
+  height: calc(var(--u) * 13);
+  border-radius: 50%;
+}
+
+.tv-state.is-working {
+  color: var(--volt);
+  font-weight: 650;
+}
+.tv-state.is-working::before {
+  background: var(--volt);
+  animation: tv-sonar 1.8s ease-out infinite;
+}
+
+.tv-state.is-quiet::before {
+  border: calc(var(--u) * 2) solid var(--dim);
+}
+
+.tv-state.is-off {
+  opacity: 0.55;
+}
+.tv-state.is-off::before {
+  background: var(--line);
+}
+
+/* A slow sonar ring, not a blink: calm is the register, and a Fire Stick is
+   happier compositing one box-shadow than eight opacity flickers. */
+@keyframes tv-sonar {
+  0% {
+    box-shadow: 0 0 0 0 rgb(198 255 74 / 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 calc(var(--u) * 11) rgb(198 255 74 / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-state.is-working::before {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------- tails */
+
+/* Two lines, bottom-anchored like a terminal, at a *fixed* height — a tail
+   that grows and shrinks as output arrives would make the whole wall twitch,
+   and this screen is watched, not operated. */
+.tv-tail {
+  height: calc(var(--u) * 68);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+  padding-left: calc(var(--u) * 50);
+}
+
+.tv-tail div {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--u) * 24);
+  line-height: calc(var(--u) * 34);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-tail-empty {
+  opacity: 0.5;
+}
+
+.tv-more {
+  padding-top: calc(var(--u) * 12);
+  border-top: 1px solid var(--line);
+  font-size: calc(var(--u) * 22);
+  color: var(--dim);
+}
+
+/* ------------------------------------------------------------- zoomed pane */
+
+/* One terminal, watched full screen. The xterm block keeps the desktop's own
+   cols×rows and centres in a framed well — the TV shows the pane as it is,
+   it does not reshape it. */
+.tv-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 16);
+}
+
+.tv-pane-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 18);
+  min-width: 0;
+}
+
+.tv-pane-context {
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.tv-pane-title {
+  font-size: calc(var(--u) * 30);
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-pane-geom {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--u) * 24);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--dim);
+}
+
+.tv-pane-term {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: calc(var(--u) * 16);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 18);
+  transition: opacity 0.5s ease, filter 0.5s ease;
+}
+
+.tv-pane-term.is-stale {
+  opacity: 0.35;
+  filter: saturate(0.5);
+}
+
+/* The remote's one exit, said in words at the bottom where a TV puts its
+   hints — not a button, because nothing here is pressed by a pointer. */
+.tv-pane-foot {
+  flex: 0 0 auto;
+  text-align: center;
+  font-size: calc(var(--u) * 22);
+  color: var(--dim);
+}
+
+/* ----------------------------------------------------------- screen mirror */
+
+/* The desktop's own screen, as video. Same shell as the zoomed pane above —
+   head, well, one line naming the exit — because two full-screen things that
+   framed themselves differently would read as two apps. */
+.tv-mirror {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 16);
+}
+
+/* Black, not --bg: everything outside the picture is letterboxing, and
+   letterboxing that is a shade off black is a grey band a television will
+   happily show you for an hour. */
+.tv-mirror-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 18);
+}
+
+/* `contain`, never `cover`. A desktop is not 16:9 and a television is; cropping
+   to fill would quietly cut off exactly the corner the terminal is in. */
+.tv-mirror-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+/* The peer is dead, so this frame is a photograph. Dimmed to the same 0.35 the
+   stale wall uses, under the sentence that says so. */
+.tv-mirror-video.is-dead {
+  opacity: 0.35;
+  filter: saturate(0.5);
+  transition: opacity 0.5s ease, filter 0.5s ease;
+}
+
+/* Said *over* the picture rather than beside it, and built like the stale
+   banner because it is the same promise: whatever is behind this is not live,
+   and here is the reason in words. */
+.tv-mirror-say {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 12);
+  max-width: 72%;
+  padding: calc(var(--u) * 30) calc(var(--u) * 48);
+  background: #16181d;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 20);
+  box-shadow: 0 calc(var(--u) * 30) calc(var(--u) * 80) rgb(0 0 0 / 0.6);
+  text-align: center;
+}
+
+.tv-mirror-say.is-ended {
+  border-color: var(--warn);
+}
+
+.tv-mirror-say strong {
+  font-size: calc(var(--u) * 34);
+  letter-spacing: -0.01em;
+}
+
+.tv-mirror-say span {
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+}
+
+/* ------------------------------------------------------------------ banner */
+
+/* The one thing allowed to sit on top of the wall, because it is the one
+   thing that must not be missed from the sofa: the picture behind it is old,
+   and here is exactly how old. Words over colour, as ever. */
+.tv-banner {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 12);
+  max-width: 72vw;
+  padding: calc(var(--u) * 30) calc(var(--u) * 48);
+  background: #16181d;
+  border: 1px solid var(--warn);
+  border-radius: calc(var(--u) * 20);
+  box-shadow: 0 calc(var(--u) * 30) calc(var(--u) * 80) rgb(0 0 0 / 0.6);
+  text-align: center;
+}
+
+.tv-banner.is-bad {
+  border-color: var(--bad);
+}
+
+.tv-banner strong {
+  font-size: calc(var(--u) * 34);
+  letter-spacing: -0.01em;
+}
+
+.tv-banner span {
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+}
+
+/* ------------------------------------------------------------------ burger */
+
+/* The management menu's handle, up in the header where chrome lives. Dim at
+   rest — volt stays spent on liveness and the ring — and it takes the same
+   ring as every other stop on the walk, because it is one. */
+.tv-burger {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 12);
+  padding: calc(var(--u) * 8) calc(var(--u) * 18);
+  margin: 0;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 10);
+  font: inherit;
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tv-burger:focus {
+  outline: none;
+}
+
+.tv-burger.is-focus {
+  outline: calc(var(--u) * 3) solid var(--volt);
+  outline-offset: calc(var(--u) * -3);
+  background: #1b1e24;
+  box-shadow: 0 0 calc(var(--u) * 34) rgb(198 255 74 / 0.16);
+  color: var(--ink);
+}
+
+/* Three lines, drawn: the burger glyph at TV size without shipping a font
+   that has one. */
+.tv-burger-glyph {
+  width: calc(var(--u) * 26);
+  height: calc(var(--u) * 18);
+  border-top: calc(var(--u) * 3) solid currentColor;
+  border-bottom: calc(var(--u) * 3) solid currentColor;
+  position: relative;
+}
+
+.tv-burger-glyph::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: calc(var(--u) * 3);
+  background: currentColor;
+}
+
+/* ---------------------------------------------------------------- the menu */
+
+/* Management is a visitor: it arrives over the wall on a scrim, borrows the
+   banner's surface, and leaves nothing behind. One list at a time, walked by
+   the same D-pad, ringed by the same volt. */
+.tv-menu-scrim {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.55);
+  animation: tv-menu-in 0.16s ease-out;
+}
+
+@keyframes tv-menu-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-menu-scrim {
+    animation: none;
+  }
+}
+
+.tv-menu {
+  display: flex;
+  flex-direction: column;
+  width: calc(var(--u) * 760);
+  max-height: calc(var(--u) * 860);
+  padding: calc(var(--u) * 30) calc(var(--u) * 36) calc(var(--u) * 24);
+  background: #16181d;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 20);
+  box-shadow: 0 calc(var(--u) * 30) calc(var(--u) * 80) rgb(0 0 0 / 0.6);
+}
+
+/* The confirm step is the one place red is spent, and the frame says so too —
+   the same escalation the stale banner makes when the news is bad. */
+.tv-menu.is-confirm {
+  border-color: var(--bad);
+}
+
+.tv-menu-head {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 6);
+  padding-bottom: calc(var(--u) * 18);
+}
+
+.tv-menu-crumbs {
+  font-size: calc(var(--u) * 22);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-menu-title {
+  font-size: calc(var(--u) * 34);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.tv-menu-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.tv-menu-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 16);
+  padding: calc(var(--u) * 16) calc(var(--u) * 18);
+  border-top: 1px solid var(--line);
+  border-radius: calc(var(--u) * 12);
+  min-width: 0;
+}
+
+.tv-menu-row.is-focus {
+  outline: calc(var(--u) * 3) solid var(--volt);
+  outline-offset: calc(var(--u) * -3);
+  background: #1b1e24;
+}
+
+/* Bypass, wherever it appears: red where it sits, red when ringed. The word
+   still carries it — the row's label and note name the danger outright. */
+.tv-menu-row.is-danger {
+  color: var(--bad);
+}
+
+.tv-menu-row.is-danger.is-focus {
+  outline-color: var(--bad);
+  box-shadow: 0 0 calc(var(--u) * 34) rgb(255 92 92 / 0.16);
+}
+
+.tv-menu-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(var(--u) * 27);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-menu-sub {
+  flex: 0 0 auto;
+  font-size: calc(var(--u) * 23);
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55%;
+}
+
+.tv-menu-empty {
+  padding: calc(var(--u) * 24) calc(var(--u) * 18);
+  font-size: calc(var(--u) * 25);
+  color: var(--dim);
+}
+
+.tv-menu-foot {
+  padding-top: calc(var(--u) * 18);
+  text-align: center;
+  font-size: calc(var(--u) * 22);
+  color: var(--dim);
+}
+
+/* ----------------------------------------------------------- confirm step */
+
+.tv-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 10);
+}
+
+.tv-confirm-name {
+  font-size: calc(var(--u) * 27);
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-confirm-line {
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+}
+
+.tv-confirm-row {
+  display: flex;
+  gap: calc(var(--u) * 18);
+  padding-top: calc(var(--u) * 22);
+}
+
+.tv-menu-btn {
+  flex: 1 1 0;
+  padding: calc(var(--u) * 16) calc(var(--u) * 20);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 12);
+  font: inherit;
+  font-size: calc(var(--u) * 26);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.tv-menu-btn:focus {
+  outline: none;
+}
+
+.tv-menu-btn.is-focus {
+  outline: calc(var(--u) * 3) solid var(--volt);
+  outline-offset: calc(var(--u) * -3);
+  background: #1b1e24;
+  box-shadow: 0 0 calc(var(--u) * 34) rgb(198 255 74 / 0.16);
+}
+
+/* "Close it": red always, so the two choices never read as equals — and the
+   ring over it stays red, because a volt ring is the colour of safe. */
+.tv-menu-btn.is-danger {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.tv-menu-btn.is-danger.is-focus {
+  outline-color: var(--bad);
+  background: #241214;
+  box-shadow: 0 0 calc(var(--u) * 34) rgb(255 92 92 / 0.22);
+}
+
+/* --------------------------------------------------------------- type row */
+
+/* The zoomed pane's typing mode: a real input (the only thing that summons
+   Fire OS's keyboard) and the few keys a TV prompt needs. The terminal well
+   above stays the hero; this row is chrome, in chrome's sizes. */
+.tv-type {
+  flex: 0 0 auto;
+  display: flex;
+  gap: calc(var(--u) * 14);
+}
+
+.tv-type-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: calc(var(--u) * 14) calc(var(--u) * 20);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 12);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--u) * 26);
+  color: var(--ink);
+  caret-color: var(--volt);
+}
+
+.tv-type-input::placeholder {
+  color: var(--dim);
+}
+
+.tv-type-input:focus {
+  outline: calc(var(--u) * 3) solid var(--volt);
+  outline-offset: calc(var(--u) * -3);
+}
+
+.tv-type-key {
+  flex: 0 0 auto;
+  padding: calc(var(--u) * 14) calc(var(--u) * 22);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 12);
+  font: inherit;
+  font-size: calc(var(--u) * 24);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.tv-type-key:focus {
+  outline: calc(var(--u) * 3) solid var(--volt);
+  outline-offset: calc(var(--u) * -3);
+  background: #1b1e24;
+}
+
+.tv-type-keys {
+  display: flex;
+  gap: calc(var(--u) * 14);
+}
+
+/* ------------------------------------------------------------------- toast */
+
+/* One sentence at the bottom: what the wall just asked the desktop to do, or
+   the desktop's own refusal. Words, briefly, then gone. */
+.tv-toast {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--u) * 44);
+  transform: translateX(-50%);
+  max-width: 80vw;
+  padding: calc(var(--u) * 16) calc(var(--u) * 32);
+  background: #16181d;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 14);
+  box-shadow: 0 calc(var(--u) * 16) calc(var(--u) * 50) rgb(0 0 0 / 0.55);
+  font-size: calc(var(--u) * 24);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -3,6 +3,7 @@ import type { ClaudePermissionMode, LayoutNode, PaneLeaf, Project, Workspace } f
 import type { MobileSession } from '@shared/mobile'
 import type { LinkPicture } from '../lib/link'
 import { NewTabSheet } from './NewTab'
+import { SendToTvSheet } from './SendToTv'
 
 /**
  * Projects → tabs → panes: the phone's way into the desktop.
@@ -28,6 +29,8 @@ export interface BrowserProps {
   onOpenPane: (session: MobileSession, title: string) => void
   /** The chooser has already decided both of these; the caller only sends them. */
   onNewTab: (projectId: string, profileId: string, permissionMode?: ClaudePermissionMode) => void
+  /** A YouTube id, already extracted, bound for whatever television is paired. */
+  onSendToTv: (video: string) => void
   onBack: () => void
 }
 
@@ -37,11 +40,13 @@ export function Browser({
   onOpenProject,
   onOpenPane,
   onNewTab,
+  onSendToTv,
   onBack
 }: BrowserProps): React.JSX.Element {
   // Declared above the project-list branch below, because a hook cannot live
   // after an early return.
   const [choosing, setChoosing] = useState(false)
+  const [flinging, setFlinging] = useState(false)
   const project = picture.projects.find((p) => p.id === projectId) ?? null
 
   if (!project) {
@@ -52,6 +57,12 @@ export function Browser({
             <strong>Forge</strong>
             <span className="bar-sub">{picture.projects.length} projects</span>
           </div>
+          {/* The top of the app, where the phone is not yet inside anything.
+              Sending a video has nothing to do with which project is open, and
+              hanging it off a project's bar would imply that it did. */}
+          <button type="button" className="bar-tv" onClick={() => setFlinging(true)}>
+            Send to TV
+          </button>
         </header>
         <ul className="list">
           {picture.projects.map((p) => (
@@ -59,6 +70,15 @@ export function Browser({
           ))}
           {picture.projects.length === 0 && <li className="empty">No projects open on the desktop.</li>}
         </ul>
+        {flinging && (
+          <SendToTvSheet
+            onCancel={() => setFlinging(false)}
+            onSend={(video) => {
+              setFlinging(false)
+              onSendToTv(video)
+            }}
+          />
+        )}
       </div>
     )
   }

@@ -210,6 +210,50 @@ export const IPC = {
   mobileTunnelConfig: 'mobile:tunnel-config',
   mobileTunnelStart: 'mobile:tunnel-start',
   mobileTunnelStop: 'mobile:tunnel-stop',
+  /**
+   * Forge TV — the same mobile app as a Fire TV APK, built on demand.
+   *
+   * `mobileTvBuild` starts a build that takes minutes (Vite, then Gradle) and
+   * returns immediately; progress and the ending arrive on
+   * `mobileTvStatusEvent`, which is a stream of its own rather than a field on
+   * mobileStatusEvent because it changes line by line while a build runs and
+   * nothing else on that panel does.
+   */
+  mobileTvStatus: 'mobile:tv-status',
+  mobileTvStatusEvent: 'mobile:tv-status-event',
+  mobileTvBuild: 'mobile:tv-build',
+
+  /* ------------------------------------------------------ forge tv mirror
+   *
+   * The television watching this desktop's actual screen, over WebRTC. The
+   * peer connection lives in the *renderer*, because that is the only half of
+   * Electron with a WebRTC stack — the main process can relay an SDP but
+   * cannot make one — so every channel here is a pass-through:
+   *
+   *   TV --ws--> main --mobileMirror-------> renderer   (capture, then offer)
+   *   renderer --mobileMirrorSignal--> main --ws--> TV  (offer, candidates)
+   *
+   * The signal payloads are opaque JSON strings on both sides of main; nothing
+   * outside the renderer reads one. See the screen-mirror block in
+   * shared/mobile.ts, and src/lib/mirror.ts for the half that decodes them.
+   */
+  /** Main → renderer: start, a signaling payload, or stop. MobileMirrorEvent. */
+  mobileMirror: 'mobile:mirror',
+  /** Renderer → main: an SDP or an ICE candidate, for the watching television. */
+  mobileMirrorSignal: 'mobile:mirror-signal',
+  /**
+   * Renderer → main: the mirror is over, and why. Sent when the capture cannot
+   * start, when Steve stops sharing at the OS level, and when the peer dies —
+   * the reason is a sentence the television puts on screen instead of black.
+   */
+  mobileMirrorStop: 'mobile:mirror-stop',
+  /**
+   * The primary screen's `desktopCapturer` source id. Renderer → main invoke,
+   * because `desktopCapturer` has been main-only since Electron 17 and that id
+   * is the entire thing the renderer needs from it to open a stream onto the
+   * desktop.
+   */
+  mobileMirrorSource: 'mobile:mirror-source',
 
   // skills library (M8) — %APPDATA%\Forge\skills, junctioned into
   // ~/.claude/skills so every claude and kimi session on the machine sees them.

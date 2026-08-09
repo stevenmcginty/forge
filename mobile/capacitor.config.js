@@ -35,13 +35,28 @@
 const config = {
   appId: 'com.forge.mobile',
   appName: 'Forge',
-  webDir: 'dist',
+  // `dist-tv` during a Fire TV build (scripts/apk-tv-build.mjs sets FORGE_TV),
+  // because that build must not overwrite `mobile/dist` — the desktop serves
+  // that directory to phone browsers. See the matching `outDir` in
+  // mobile/vite.config.ts; the two have to agree or `cap sync` copies the
+  // wrong bundle into the APK.
+  webDir: process.env.FORGE_TV === '1' ? 'dist-tv' : 'dist',
   server: {
     androidScheme: 'https',
     cleartext: true
   },
   android: {
-    allowMixedContent: true
+    allowMixedContent: true,
+    // Remote debugging, on the television only.
+    //
+    // The TV build is a release build, so Capacitor's default (follow
+    // FLAG_DEBUGGABLE) leaves this off and there is no devtools socket on the
+    // device — which means the only way to find out why a page misbehaves on a
+    // Fire TV is to guess. The phone has a browser route and a cable; the
+    // television has neither, so it is the one surface that cannot afford to be
+    // opaque. It costs nothing at rest: the socket is only reachable over adb,
+    // which the Stick only accepts after Steve enables it by hand.
+    ...(process.env.FORGE_TV === '1' ? { webContentsDebuggingEnabled: true } : {})
   }
 }
 

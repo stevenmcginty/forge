@@ -1869,6 +1869,37 @@ export interface MobileStatus {
 }
 
 /**
+ * Forge TV — the mobile app as a Fire TV APK, built on demand.
+ *
+ * `idle` and `done` are both resting states; they differ only in whether the
+ * last build in this session was ours. Whether an APK exists at all is
+ * `sizeBytes > 0`, which survives a restart, because the file does.
+ */
+export type ForgeTvPhase = 'idle' | 'building' | 'done' | 'error'
+
+export interface ForgeTvStatus {
+  /**
+   * False in a packaged Forge. The build needs the checkout, the Android SDK
+   * and a JDK — none of which ship in Forge-setup.exe — so the panel says so
+   * instead of offering a button that could only fail.
+   */
+  supported: boolean
+  phase: ForgeTvPhase
+  /** The step being run, or the line the build failed on. Never empty noise. */
+  detail: string
+  /**
+   * `http://<lan-ip>:8420/forge-tv.apk` — what gets typed into the TV's
+   * Downloader app. Empty while the link is off, because the address is the
+   * server's, not the file's.
+   */
+  url: string
+  /** Size of the built APK, or 0 when none has been built on this machine. */
+  sizeBytes: number
+  /** When it was built (ms epoch), 0 when there is none. */
+  builtAt: number
+}
+
+/**
  * "A phone is asking to pair — put the question on screen."  Main → renderer.
  *
  * `open: true` raises the prompt; `open: false` withdraws it (the phone gave
@@ -1886,6 +1917,21 @@ export interface MobileApprovalEvent {
   words: string
   open: boolean
 }
+
+/**
+ * "The television wants to watch this screen." Main → renderer.
+ *
+ * The whole mirror in three messages, because the renderer owns the WebRTC
+ * half and the main process owns the socket: `start` asks for a capture and an
+ * offer, `signal` hands over one payload the television sent (an answer or an
+ * ICE candidate, still a JSON string — main never reads inside it), and `stop`
+ * says the viewer is gone. The renderer replies over `mobileMirrorSignal` and
+ * `mobileMirrorStop`. See src/lib/mirror.ts.
+ */
+export type MobileMirrorEvent =
+  | { kind: 'start' }
+  | { kind: 'signal'; data: string }
+  | { kind: 'stop' }
 
 /* ---------------------------------------------------- companion ipc (M9) */
 

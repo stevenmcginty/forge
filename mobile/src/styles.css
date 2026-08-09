@@ -173,6 +173,22 @@ body {
   color: var(--volt);
 }
 
+/* Deliberately quiet, and deliberately words. It sits on the project list next
+   to nothing else, so it needs no icon to be found — and "Send to TV" is a
+   sentence, where a cast glyph is a guess. Same outline as `.bar-keys` so the
+   two bars read as one family. */
+.bar-tv {
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 12px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font: 600 13px/1 system-ui, sans-serif;
+}
+
 /* ------------------------------------------------------------------ lists */
 
 .screen {
@@ -722,9 +738,12 @@ body {
 
 .progress-fill {
   height: 100%;
+  width: 100%;
   background: var(--volt);
   border-radius: 999px;
-  transition: width 0.3s ease;
+  /* Scaled, not sized: width transitions relayout on every progress tick. */
+  transform-origin: left;
+  transition: transform 0.3s ease;
 }
 
 /* ------------------------------------------------------- new-tab chooser */

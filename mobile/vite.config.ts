@@ -48,7 +48,13 @@ export default defineConfig({
     // other build on purpose: the browser route is already *at* the desktop,
     // and an unstamped APK still pairs by QR or typing. Nothing outside
     // apk-build sets the env, so nothing else can bake an address by accident.
-    __BAKED_ORIGIN__: JSON.stringify(process.env.FORGE_BAKED_ORIGIN ?? '')
+    __BAKED_ORIGIN__: JSON.stringify(process.env.FORGE_BAKED_ORIGIN ?? ''),
+    // The one seam that turns this bundle into the TV app. Set by
+    // scripts/apk-tv-build.mjs and by nothing else, so the browser route and
+    // the phone APK compile the TV branches away entirely rather than carrying
+    // a dashboard a phone can never usefully show. `=== '1'` rather than a
+    // truthiness test: an env var that happens to exist must not flip it.
+    __FORGE_TV__: JSON.stringify(process.env.FORGE_TV === '1')
   },
   root: resolve(import.meta.dirname),
   base: './',
@@ -64,7 +70,14 @@ export default defineConfig({
     port: 5175
   },
   build: {
-    outDir: resolve(import.meta.dirname, 'dist'),
+    // A TV build writes somewhere else entirely. `mobile/dist` is not only the
+    // APK's payload — electron/mobile/server.ts serves it to any browser
+    // pointed at the desktop — so a TV bundle landing there would hand a phone
+    // an app that draws the television dashboard and dials one hard-coded
+    // address. Two directories is what makes that impossible rather than
+    // something a build script has to remember to undo afterwards.
+    // mobile/capacitor.config.js reads the same env var to match.
+    outDir: resolve(import.meta.dirname, process.env.FORGE_TV === '1' ? 'dist-tv' : 'dist'),
     emptyOutDir: true,
     target: 'es2022',
     // The desktop serves this over a home network to one phone; a sourcemap is

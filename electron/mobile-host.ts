@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, Notification, powerSaveBlocker } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, Notification, powerSaveBlocker, screen } from 'electron'
 import { IPC } from '@shared/ipc'
 import {
   ACCEPT_WINDOW_MS,
@@ -12,10 +12,19 @@ import {
   type HelloOkFrame,
   type OpFrame
 } from '@shared/mobile'
-import type { MobileApprovalEvent, MobileDeviceRecord, MobileStatus, MobileTunnelStatus, Settings } from '@shared/types'
+import type {
+  ForgeTvStatus,
+  MobileApprovalEvent,
+  MobileDeviceRecord,
+  MobileMirrorEvent,
+  MobileStatus,
+  MobileTunnelStatus,
+  Settings
+} from '@shared/types'
 import { MobileAuth, PAIR_TTL_MS } from './mobile/auth'
-import { MobileServer, type MobileApprovalAsk } from './mobile/server'
+import { MobileServer, TV_APK_PATH, type MobileApprovalAsk } from './mobile/server'
 import { NgrokTunnel, ensureNgrokExe, pairEndpoint, resolveNgrokExe } from './mobile-tunnel'
+import { disposeTvBuild, onTvBuildChange, reportTvProblem, startTvBuild, tvApkPath, tvBuildState } from './mobile-tv'
 import { addPtySink, getManager, getReplay } from './pty-host'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
 
@@ -196,8 +205,12 @@ export function reachableAddresses(): string[] {
       found.push(net.address)
     }
   }
-  const tailnet = (ip: string): boolean => /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip)
-  return [...found.filter(tailnet), ...found.filter((ip) => !tailnet(ip))]
+  return [...found.filter(isTailnet), ...found.filter((ip) => !isTailnet(ip))]
+}
+
+/** 100.64.0.0/10 — the CGNAT range Tailscale allocates from. */
+function isTailnet(ip: string): boolean {
+  return /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip)
 }
 
 export function mobileStatus(): MobileStatus {
@@ -220,6 +233,44 @@ export function mobileStatus(): MobileStatus {
 function report(detail?: string): void {
   if (detail !== undefined) lastDetail = detail
   broadcast(IPC.mobileStatusEvent, mobileStatus())
+}
+
+/* ------------------------------------------------------------- forge tv
+ *
+ * The Fire TV APK. electron/mobile-tv.ts runs the build and owns its phase;
+ * everything here is the half that needs the server: which address a
+ * television can dial, and serving the finished file on it.
+ */
+
+/**
+ * The origin baked into the TV APK, and the one it downloads itself from.
+ *
+ * `reachableAddresses()` puts the tailnet first, which is the right answer for
+ * a phone — a 100.x address keeps working from a train. It is the wrong answer
+ * for a television: the TV is on the same router, is not on the tailnet, and an
+ * address it cannot reach would be baked into a signed APK and only fail on the
+ * far side of the room. Ordinary LAN first here; the tailnet only if there is
+ * nothing else at all.
+ *
+ * '' while the link is not listening, because the port in this URL is the one
+ * the server actually bound — an address for a server that is off is a URL that
+ * would be typed into a TV with a remote and then not answer.
+ */
+function tvOrigin(): string {
+  const address = server?.address()
+  if (!address) return ''
+  const found = reachableAddresses()
+  const lan = found.find((ip) => !isTailnet(ip)) ?? found[0]
+  return lan ? `http://${lan}:${address.port}` : ''
+}
+
+function forgeTvStatus(): ForgeTvStatus {
+  const origin = tvOrigin()
+  return { ...tvBuildState(), url: origin ? `${origin}${TV_APK_PATH}` : '' }
+}
+
+function reportTv(): void {
+  broadcast(IPC.mobileTvStatusEvent, forgeTvStatus())
 }
 
 /* ------------------------------------------------------------ op dispatch */
@@ -254,6 +305,45 @@ async function dispatchOp(op: OpFrame, deviceName: string): Promise<string | nul
     pendingOps.set(requestId, { resolve, timer })
     windows[0].webContents.send(IPC.mobileCommand, { requestId, op, deviceName })
   })
+}
+
+/* --------------------------------------------------------- screen mirror
+ *
+ * The television watching this desktop's own screen. Nothing about WebRTC lives
+ * in the main process — it has no peer connection to make an offer with — so
+ * this is a pass-through in both directions: the server's hooks become a
+ * message to the window, and the window's replies become frames on the socket.
+ *
+ * Unlike dispatchOp there is no request/response pair and no pending map. A
+ * mirror is a stream, not a question: the renderer answers by pushing signals
+ * back over `mobileMirrorSignal` for as long as it has any, and says it is over
+ * on `mobileMirrorStop`. The renderer half is src/lib/mirror.ts.
+ */
+
+/** The window the mirror runs in, or null when Forge has none open. */
+function mirrorWindow(): BrowserWindow | null {
+  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+  return windows[0] ?? null
+}
+
+function sendMirror(event: MobileMirrorEvent): void {
+  mirrorWindow()?.webContents.send(IPC.mobileMirror, event)
+}
+
+/**
+ * Begin a mirror, or say why not.
+ *
+ * The one failure worth naming here is dispatchOp's: the capture runs in the
+ * renderer, so a Forge with its window closed cannot share its screen at all.
+ * Minimised is fine — a minimised window still captures. Everything that can
+ * only be discovered once capture is attempted (a refused permission, no screen
+ * to name) comes back later on `mobileMirrorStop` instead.
+ */
+function startMirror(): string | null {
+  const win = mirrorWindow()
+  if (!win) return 'Forge has no window open on the desktop, so it cannot share its screen.'
+  win.webContents.send(IPC.mobileMirror, { kind: 'start' } satisfies MobileMirrorEvent)
+  return null
 }
 
 /* ------------------------------------------------------ accept new phones
@@ -401,7 +491,13 @@ async function start(): Promise<void> {
     acceptUntil: () => armedUntil(),
     requestApproval,
     cancelApproval,
+    mirrorStart: startMirror,
+    mirrorSignal: (data) => sendMirror({ kind: 'signal', data }),
+    mirrorStop: () => sendMirror({ kind: 'stop' }),
     ...(mobileWebRoot() ? { webRoot: mobileWebRoot() } : {}),
+    // A thunk, not a path: the APK appears while the server is running, and a
+    // path resolved here would 404 until the next restart.
+    tvApk: () => tvApkPath(),
     onPresence: (connected) => {
       if (connected > 0) holdBlocker()
       else releaseBlocker()
@@ -670,6 +766,30 @@ export function publishMobileState(projectId?: string): void {
 export function registerMobileHandlers(): void {
   ipcMain.handle(IPC.mobileStatus, () => mobileStatus())
 
+  // Every line the build prints reaches the settings page through here.
+  onTvBuildChange(reportTv)
+
+  ipcMain.handle(IPC.mobileTvStatus, (): ForgeTvStatus => forgeTvStatus())
+
+  /**
+   * Build the Fire TV APK against this machine's LAN address, right now.
+   *
+   * Returns the status as it stands the instant the build starts, not when it
+   * finishes: Vite plus Gradle is minutes, and this call must not hold the
+   * renderer for them. The rest arrives on `mobileTvStatusEvent`.
+   */
+  ipcMain.handle(IPC.mobileTvBuild, (): ForgeTvStatus => {
+    const origin = tvOrigin()
+    if (!origin) {
+      reportTvProblem(
+        'Turn the phone link on first — the television downloads the app from it, so the address it gets baked with is this server’s.'
+      )
+      return forgeTvStatus()
+    }
+    startTvBuild(origin)
+    return forgeTvStatus()
+  })
+
   ipcMain.handle(IPC.mobileStart, async (): Promise<MobileStatus> => {
     setSettings({ mobileEnabled: true })
     await start()
@@ -805,6 +925,48 @@ export function registerMobileHandlers(): void {
     // Whatever just changed, tell the phones.
     publishMobileState()
   })
+
+  /**
+   * The renderer's half of the screen mirror — both sends, because signalling
+   * is a stream of payloads with no answer to wait for.
+   *
+   * Coerced off the boundary like everything else here, and then forwarded
+   * unread: a signalling payload is an SDP or an ICE candidate that only the
+   * two peer connections at the ends of this relay have any business parsing.
+   */
+  ipcMain.on(IPC.mobileMirrorSignal, (_e, payload: { data?: string }) => {
+    server?.pushMirrorSignal(String(payload?.data ?? ''))
+  })
+
+  /** The mirror ended on this side — the capture failed, or the peer died. */
+  ipcMain.on(IPC.mobileMirrorStop, (_e, payload: { reason?: string }) => {
+    server?.pushMirrorStop(String(payload?.reason ?? ''))
+  })
+
+  /**
+   * Which screen to capture, as a `desktopCapturer` source id.
+   *
+   * `desktopCapturer` is main-only, and this id is the whole of what the
+   * renderer needs from it — the thing that turns `getUserMedia` into a stream
+   * of the desktop rather than a webcam. Thumbnails are switched off with a
+   * zero size (see the SourcesOptions docs): they would be a full screen grab
+   * per display, and the answer here is a string.
+   *
+   * '' when this machine somehow reports no screen, so the renderer refuses
+   * with a sentence rather than opening a stream onto nothing.
+   */
+  ipcMain.handle(IPC.mobileMirrorSource, async (): Promise<string> => {
+    const primary = screen.getPrimaryDisplay()
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 0, height: 0 }
+    })
+    // One entry per display; the primary is the one whose id matches, and the
+    // first entry is the sane fallback when none does — the same rule
+    // electron/voice-agent/ipc.ts uses for its screenshots.
+    const source = sources.find((s) => s.display_id === String(primary.id)) ?? sources[0] ?? null
+    return source?.id ?? ''
+  })
 }
 
 /** Called on boot and whenever settings change, exactly like the Companion. */
@@ -820,6 +982,9 @@ export function applyMobileSettings(): void {
 }
 
 export async function disposeMobile(): Promise<void> {
+  // A Gradle assemble outliving the app that asked for it would hold the build
+  // lock against the next launch.
+  disposeTvBuild()
   for (const [, pending] of pendingOps) {
     clearTimeout(pending.timer)
     pending.resolve('Forge is shutting down.')
