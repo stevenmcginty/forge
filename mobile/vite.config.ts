@@ -37,9 +37,18 @@ export default defineConfig({
   define: {
     __APK_VERSION_CODE__: JSON.stringify(Number(process.env.FORGE_APK_VERSION_CODE ?? version.versionCode)),
     __APK_VERSION_NAME__: JSON.stringify(process.env.FORGE_APK_VERSION_NAME ?? version.versionName),
+    // Which feed this bundle watches — and the two apps must never watch each
+    // other's. The phone package is com.forge.mobile and the television's is
+    // com.forge.mobile.tv, so a bundle pointed at the wrong manifest would
+    // offer a build Android refuses to install over the one running it.
+    // Keyed off FORGE_TV rather than left to the build script to remember,
+    // because "forgot to override the default" is the one mistake here that
+    // ships a plausible-looking app that can never update itself.
     __APK_MANIFEST_URL__: JSON.stringify(
       process.env.FORGE_APK_MANIFEST_URL ??
-        'https://github.com/stevenmcginty/forge-mobile-releases/releases/latest/download/latest.json'
+        (process.env.FORGE_TV === '1'
+          ? 'https://github.com/stevenmcginty/forge-tv-releases/releases/latest/download/tv-latest.json'
+          : 'https://github.com/stevenmcginty/forge-mobile-releases/releases/latest/download/latest.json')
     ),
     // The desktop this APK belongs to, stamped by scripts/apk-build.mjs as a
     // `wss://<domain>` origin with **no port** — the tunnel answers on the

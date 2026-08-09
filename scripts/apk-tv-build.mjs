@@ -29,14 +29,16 @@
  *                                 mobile/src/lib/tv.ts decides to draw the
  *                                 dashboard instead of the phone screens.
  *   FORGE_BAKED_ORIGIN=<lan>   -> the one-tap Connect address.
- *   FORGE_APK_MANIFEST_URL=''  -> no OTA feed in the bundle at all. The GitHub
- *                                 feed describes the *phone* package; offering
- *                                 it to a television would download the wrong
- *                                 app and then raise an install dialog nobody
- *                                 can answer with a remote. mobile/src/lib/
- *                                 update.ts refuses to check as well, so this
- *                                 reads as a decision rather than as a URL
- *                                 somebody forgot to set.
+ *                                 FORGE_TV=1 also selects the television's own
+ *                                 update feed in mobile/vite.config.ts —
+ *                                 tv-latest.json, which describes
+ *                                 com.forge.mobile.tv and nothing else. Both
+ *                                 builds get it, including this one: an
+ *                                 update replaces a baked address with the
+ *                                 shared build's network discovery, which
+ *                                 finds the same desktop and survives the
+ *                                 lease changing, and the alternative is a
+ *                                 television that can never update itself.
  *   -PforgeTv                  -> applicationId com.forge.mobile.tv, so the
  *                                 television and the phone are two apps that
  *                                 can never install over one another.
@@ -167,11 +169,12 @@ const tvEnv = {
   FORGE_APK_VERSION_CODE: String(version.versionCode),
   FORGE_APK_VERSION_NAME: version.versionName,
   FORGE_BAKED_ORIGIN: origin,
-  FORGE_TV: '1',
-  // Empty, not absent: mobile/vite.config.ts falls back to the GitHub feed on
-  // `??`, which only fires for undefined. An empty string is a value, and it
-  // is the value that means "this build has no feed".
-  FORGE_APK_MANIFEST_URL: ''
+  FORGE_TV: '1'
+  // No FORGE_APK_MANIFEST_URL here on purpose. mobile/vite.config.ts picks the
+  // television's own feed when FORGE_TV is 1, so the URL is decided by the
+  // thing that also decides the applicationId rather than by this script
+  // remembering to pass one. Setting it to '' is still how a build is given no
+  // feed at all, and update.ts reads an empty URL as "nothing to check".
 }
 run(npx, ['vite', 'build', '--config', 'mobile/vite.config.ts'], { cwd: ROOT, env: tvEnv, shell: true })
 run(npx, ['cap', 'sync', 'android'], { cwd: MOBILE, env: tvEnv, shell: true })

@@ -85,10 +85,20 @@ const sha256 = sha256File(shared)
 // describes must move together, or a desktop could verify one release's hash
 // against another release's bytes and refuse a perfectly good download.
 const url = `https://github.com/${TV_RELEASE_REPO}/releases/download/${tag}/${TV_APK_ASSET}`
+// `url` and `apkUrl` are the same string under two names, and both are load
+// bearing. The desktop's fetcher reads `url` (parseTvManifest in
+// electron/mobile-tv-fetch.ts); the television's own updater reads `apkUrl`,
+// because it shares its parser with the phone feed (parseManifest in
+// mobile/src/lib/manifest.ts) and that parser is strict on purpose — it decides
+// whether an executable gets downloaded, so a missing field must read as "no
+// update" rather than as undefined flowing into a URL. Publishing both is
+// cheaper than loosening either, and they cannot drift while they are written
+// from one constant.
 const manifest = {
   versionName: version.versionName,
   versionCode: version.versionCode,
   url,
+  apkUrl: url,
   sizeBytes,
   sha256,
   notes: notes || `Forge TV ${version.versionName}.`

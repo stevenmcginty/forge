@@ -116,19 +116,22 @@ async function readManifest(): Promise<string> {
 }
 
 export async function check(): Promise<void> {
-  // A TV build has no feed, and must not acquire one.
+  // A build with no feed stamped in it does not acquire one. That is the
+  // honest answer for the this-house TV build (scripts/apk-tv-build.mjs
+  // without --shared bakes one desktop's LAN address in, and no published
+  // release describes *that* binary), and it must read as "nothing to do"
+  // rather than as a fetch that fails forever and reports being offline.
   //
-  // `__APK_MANIFEST_URL__` describes the *phone* package on GitHub, and the
-  // Fire TV APK is a different application id built against one desktop on one
-  // LAN — so the feed could only ever offer it the wrong app, and Android's
-  // install confirmation is a dialog nobody can dismiss with a TV remote.
-  // Updates get there the way they got there the first time: rebuild from
-  // Settings › Forge Mobile, re-download in the TV's Downloader app.
-  //
-  // The build also stamps `__APK_MANIFEST_URL__` empty, so there is no URL in
-  // the bundle to consult; this guard is what makes that a deliberate state
-  // rather than a fetch that fails forever and reports being offline.
-  if (__FORGE_TV__) {
+  // The television used to be in this state always, on the grounds that the
+  // only feed was the phone's and Android's install confirmation could not be
+  // dismissed with a remote. Both have stopped being true: `tv-latest.json` on
+  // the TV releases repo describes com.forge.mobile.tv specifically, and the
+  // Fire TV package installer is walked with the D-pad like anything else on
+  // that device. What is left of the old objection is real but small — the
+  // install grant and the confirm are Android's and cannot be automated — and
+  // it is handled where it belongs, on the wall (see UpdateTile in
+  // components/TvDashboard.tsx).
+  if (!__APK_MANIFEST_URL__) {
     set({ phase: 'current', manifest: null, detail: '' })
     return
   }
@@ -337,8 +340,21 @@ export async function install(): Promise<void> {
  * Chrome downloads it and the user taps the notification. Android verifies
  * the signature at install time either way — the sha check is what this path
  * gives up, and the message says so by naming the fallback.
+ *
+ * Not on a television. A Fire TV ships no browser, so "opening the download in
+ * your browser" is an instruction to look for something that is not there —
+ * and the television has a better answer anyway, which is the one it used
+ * before it could update itself at all.
  */
 async function fallbackToBrowser(manifest: UpdateManifest, why: string): Promise<void> {
+  if (__FORGE_TV__) {
+    set({
+      phase: 'available',
+      path: '',
+      detail: `${why} Install it from the desktop instead — Settings, Forge Mobile, Forge TV.`
+    })
+    return
+  }
   set({ phase: 'available', path: '', detail: `${why} Opening the download in your browser instead.` })
   try {
     await native.openExternal({ url: manifest.apkUrl })

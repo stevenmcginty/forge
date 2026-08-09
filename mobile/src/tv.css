@@ -255,6 +255,84 @@
   color: var(--warn);
 }
 
+/* ------------------------------------------------------------ the update
+
+   A revision of the television app itself, waiting for the one press Android
+   will not let any app skip. Built like the screen tile — full width, same
+   ring, same shape — because it is the same kind of thing: a destination on
+   the wall that is not a terminal.
+
+   Volt on the border rather than only on the ring, which is the one place
+   this file spends the accent on something that is not focus or liveness. It
+   earns it by being temporary: the row exists only while there is genuinely
+   something to press, and using it is what makes it go away. */
+.tv-newver {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 22);
+  padding: calc(var(--u) * 20) calc(var(--u) * 28);
+  background: #1b1e24;
+  border: 1px solid var(--volt);
+  border-radius: calc(var(--u) * 18);
+  min-width: 0;
+}
+
+.tv-newver:focus {
+  outline: none;
+}
+
+.tv-newver.is-focus {
+  outline: calc(var(--u) * 3) solid var(--volt);
+  outline-offset: calc(var(--u) * -3);
+  box-shadow: 0 0 calc(var(--u) * 34) rgb(198 255 74 / 0.16);
+}
+
+/* An arrow into a tray: down-into-something is the one shape that reads as
+   "install" at three metres without a word beside it. Drawn, like the
+   monitor above, rather than shipped as an asset. */
+.tv-newver-glyph {
+  position: relative;
+  flex: 0 0 auto;
+  width: calc(var(--u) * 36);
+  height: calc(var(--u) * 36);
+  border-bottom: calc(var(--u) * 4) solid var(--volt);
+}
+
+.tv-newver-glyph::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: calc(var(--u) * 4);
+  width: calc(var(--u) * 14);
+  height: calc(var(--u) * 14);
+  margin-left: calc(var(--u) * -7);
+  border-right: calc(var(--u) * 4) solid var(--volt);
+  border-bottom: calc(var(--u) * 4) solid var(--volt);
+  transform: rotate(45deg);
+}
+
+.tv-newver-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: calc(var(--u) * 30);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Wraps rather than truncating: this is where "allow installs from Forge on
+   the next screen" lands, and half of that sentence is no instruction at all. */
+.tv-newver-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+  text-align: right;
+}
+
 /* ------------------------------------------------------------------- cards */
 
 .tv-card {

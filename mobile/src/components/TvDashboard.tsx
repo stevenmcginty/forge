@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import { Terminal } from '@xterm/xterm'
 import type { ClaudePermissionMode, PaneLeaf, TerminalTab, Workspace } from '@shared/types'
 import type { MobileSession } from '@shared/mobile'
@@ -8,6 +8,9 @@ import type { DesktopStats, MirrorViewer, ScreenStats } from '../lib/mirror'
 import { startPointer } from '../lib/pointer'
 import type { PointerHandle, PointerMode } from '../lib/pointer'
 import { tvBridge } from '../lib/tv-bridge'
+import { formatBytes } from '../lib/manifest'
+import { download as downloadUpdate, install as installUpdate, updateStore } from '../lib/update'
+import type { UpdateState } from '../lib/update'
 import { leavesOf } from './Browser'
 import { paneListeners } from './PaneView'
 import { TvMenu } from './TvMenu'
@@ -124,6 +127,16 @@ const MIRROR_ID = '\u0000mirror'
 const MENU_ID = String.fromCharCode(0) + 'menu'
 
 /**
+ * The third reserved id: a revision of this app is waiting to be installed.
+ *
+ * Only ever in the walk while there is genuinely something to press — see
+ * `updateActs`. A television that grew a permanent extra row at the top would
+ * be a television whose wall starts one press further away forever, in
+ * exchange for a sentence that is true about twice a month.
+ */
+const UPDATE_ID = String.fromCharCode(0) + 'update'
+
+/**
  * How long a mirror attempt may sit at "connecting" before the screen says, in
  * words, that nobody answered. The desktop's half of the mirror only exists
  * after a Forge restart, and until then `mirror-start` gets no reply at all —
@@ -232,6 +245,20 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
   const order = useRef<string[]>([])
   /** The scrolling wall itself, for the pan at the end of the walk. */
   const wallEl = useRef<HTMLElement | null>(null)
+  /**
+   * This app updating itself, watched rather than driven.
+   *
+   * lib/update.ts is already checking, downloading and verifying on its own
+   * (startAutoUpdate, called once in App.tsx) whether or not anybody is
+   * looking at this wall. What is left for a television to show is the part
+   * Android will not let any app do by itself: the "install unknown apps"
+   * grant, and the confirmation dialog. So this is a reader, and the tile it
+   * feeds appears only when one of those is actually waiting.
+   */
+  const update = useSyncExternalStore(updateStore.subscribe, updateStore.getState)
+  const updateRef = useRef(update)
+  updateRef.current = update
+  const updateAct = updateActs(update)
   /** Has the remote been used yet? Until it has, the ring belongs at the top. */
   const walked = useRef(false)
   // Mirrors for the window keydown listener, which is bound once.
@@ -359,6 +386,17 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
     // that must answer them does not exist until that component mounts.
     if (id === MIRROR_ID) {
       setZoom({ at: 'mirror' })
+      return
+    }
+    // The update tile. Nothing opens: the press *is* the action, and which
+    // action it is depends on how far the automatic flow has already got —
+    // see `updateActs`. install() handles a missing "install unknown apps"
+    // grant by opening that settings screen itself, so this press is the only
+    // one this app can offer for either half of the job.
+    if (id === UPDATE_ID) {
+      const act = updateActs(updateRef.current)
+      if (act === 'download') void downloadUpdate()
+      else if (act === 'install') void installUpdate()
       return
     }
     for (const project of picture.projects) {
@@ -579,6 +617,10 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
   // With no live session at all, the burger is the most useful place to rest —
   // it is how a first tab gets made — and the silent mirror tile is last.
   order.current.push(MENU_ID, MIRROR_ID)
+  // Last in the resting order however loud it looks: an app update is never
+  // the reason somebody turned the television on, and a ring that opened on it
+  // would be a ring in front of the work.
+  if (updateAct !== 'none') order.current.push(UPDATE_ID)
 
   const zoomSession = zoom?.at === 'pane' ? picture.sessions.find((s) => s.id === zoom.id) : undefined
 
@@ -695,6 +737,15 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
         />
       ) : (
         <main className={`tv-wall${stale ? ' is-stale' : ''}`} ref={wallEl}>
+          {updateAct !== 'none' && (
+            <UpdateTile
+              state={update}
+              act={updateAct}
+              focused={focusId === UPDATE_ID}
+              onRowEl={onRowEl}
+              onOpen={openZoom}
+            />
+          )}
           <ScreenTile
             focused={focusId === MIRROR_ID}
             silent={mirrorSilent}
@@ -743,6 +794,106 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
       )}
 
       {stale && <StaleBanner state={state} detail={detail} since={lastLiveAt.current} />}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------- the update */
+
+/** What one press of OK on the update tile would do, if anything. */
+type UpdateAct = 'none' | 'download' | 'install' | 'watch'
+
+/**
+ * The phase, as the one question this wall asks of it: is there anything a
+ * person on a sofa can usefully press?
+ *
+ * Pure and separate from the tile so the walk can ask it too — a row that is
+ * drawn and a row that is in `order` have to agree, and the cheapest way to
+ * guarantee that is for both to call this.
+ *
+ * `checking`, `current` and `unreachable` are all 'none'. An app that told a
+ * television it had looked for an update and found nothing would be an app
+ * interrupting a wall of terminals to say that nothing happened.
+ */
+function updateActs(state: UpdateState): UpdateAct {
+  switch (state.phase) {
+    case 'available':
+      // Normally the automatic flow is already on this and the tile is a
+      // progress report a beat later. It is still a press, because the flow
+      // stops for an hour after a declined install and for a whole session
+      // after a failed download, and "wait an hour" is not an instruction.
+      return 'download'
+    case 'downloading':
+      return 'watch'
+    case 'ready':
+      return 'install'
+    case 'failed':
+      // Something concrete broke and `detail` says what. Offered as a retry
+      // rather than hidden: a television that quietly gave up is the state
+      // this whole feature exists to end.
+      return 'download'
+    default:
+      return 'none'
+  }
+}
+
+/**
+ * The one thing on this wall that is about the television itself.
+ *
+ * It exists because of a hard limit rather than a design preference: Android
+ * hands a sideloaded package to its own confirmation dialog, and it will not
+ * raise that dialog at all until this app has been granted "install unknown
+ * apps". Neither can be automated by any app that is not the device owner. So
+ * everything up to that point happens without anybody being told — check,
+ * download, verify the SHA-256 — and this tile is only what is left: one press,
+ * for the step Android reserves for a human.
+ *
+ * Volt, and above the screen tile, for the length of time it is there. It is
+ * the one row on this wall that stops being true once it has been used.
+ */
+function UpdateTile({
+  state,
+  act,
+  focused,
+  onRowEl,
+  onOpen
+}: {
+  state: UpdateState
+  act: UpdateAct
+  focused: boolean
+  onRowEl: (id: string, el: HTMLElement | null) => void
+  onOpen: (id: string) => void
+}): React.JSX.Element {
+  const version = state.manifest?.versionName ?? ''
+  const size = formatBytes(state.manifest?.sizeBytes ?? 0)
+  const percent =
+    state.total > 0 ? Math.min(100, Math.round((state.received / state.total) * 100)) : 0
+  const hint =
+    act === 'watch'
+      ? `Downloading — ${percent}%`
+      : act === 'install'
+        ? 'OK installs it · the television asks once more'
+        : state.phase === 'failed'
+          ? 'OK tries again'
+          : 'OK downloads it'
+
+  return (
+    <div
+      className={`tv-newver${focused ? ' is-focus' : ''}`}
+      role="button"
+      tabIndex={-1}
+      ref={(el) => onRowEl(UPDATE_ID, el)}
+      onClick={() => onOpen(UPDATE_ID)}
+    >
+      <span className="tv-newver-glyph" aria-hidden="true" />
+      <span className="tv-newver-name">
+        Forge TV {version || 'update'} is waiting{size ? ` · ${size}` : ''}
+      </span>
+      {/* The detail is the sentence lib/update.ts wrote about whatever went
+          wrong or is still needed — the install grant, a refused download. It
+          outranks the hint whenever there is one, because a generic invitation
+          over a specific problem is how a television stops being believed. */}
+      <span className="tv-newver-hint">{state.detail || hint}</span>
     </div>
   )
 }

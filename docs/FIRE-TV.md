@@ -90,16 +90,29 @@ signs the build with the same release key as the phone app and writes it to
 `dist-apk/forge-tv.apk`, overwriting whatever was there — that stable name
 and path is what lets the desktop serve one fixed URL forever.
 
-**Updating is the same two steps, deliberately, every time:** rebuild on the
-desktop (button or command), then open Downloader on the television and
-enter the URL again. **The TV build does not check for updates on its own —
-that is on purpose.** The phone app's OTA feed describes the phone package;
-offering it to a television would hand it the wrong app and raise an Android
-install dialog nobody could answer with a remote, so the TV build ships with
-no manifest URL at all and its own update-checking code is told not to ask.
-A fresh install over the old one, signed with the same key, is the entire
-update mechanism — and it is also how a router's new DHCP lease gets
-corrected, since the address is baked in at build time, not read at runtime.
+**From 0.3.9 the television updates itself.** It watches its own feed —
+`tv-latest.json` on the TV releases repo, which describes
+`com.forge.mobile.tv` and nothing else — checks when the app comes to the
+front, downloads in the background and verifies the published SHA-256 before
+anything is offered to Android. What it cannot do is finish the job silently:
+Android hands a sideloaded package to its own confirmation dialog and will
+not raise that dialog at all until this app has been granted **install
+unknown apps**. Neither is automatable by anything short of a device owner
+app. So the wall grows one volt row at the top saying a revision is waiting,
+and **OK** is the whole of what is left to do — once to allow installs the
+first time, once to confirm. The row is only there while there is something
+to press.
+
+Two consequences worth knowing. An update always installs the **shared**
+build, which carries no baked address and finds the desktop by asking the
+network — so a television updated from a this-house build stops depending on
+the DHCP lease that built it, which is the better state to be in. And the
+television is still paired afterwards: the token lives in the app's own
+storage and an update over the same package with the same key does not touch
+it.
+
+Downloader is still the way in for the *first* install, and still the answer
+if the app is ever too broken to update itself.
 
 ---
 
@@ -329,7 +342,9 @@ find nothing while everything else works.
 | --- | --- |
 | Television shows the **Connect** screen and nothing happens | The desktop app is not running, or **Allow phones to connect** is off in Settings → Forge Mobile. Both must be true for the television to have anything to dial. |
 | "Cannot connect" right after restarting the desktop | Give Forge a moment to bind the port and come back to **Listening** in Settings → Forge Mobile, then press Connect again on the television. |
-| Downloader gives a 404, or the address just does not answer | Your laptop's LAN IP changed. Confirm the DHCP reservation from step 1 is still applied, then **rebuild** the TV app (button or CLI) and **re-download** it in Downloader on the television — the address is baked in, so nothing short of a rebuild fixes it. |
+| The wall says a revision is **waiting** and OK does nothing visible | The first press opens Fire TV's *install unknown apps* screen for Forge rather than the installer — allow it there, press Back, and press OK on the row again. Android will not raise an install dialog for an app that has not been granted this, and it gives no dialog of its own for the grant. |
+| The television never offers an update | It has no feed if it was built before 0.3.9, or was built with `FORGE_APK_MANIFEST_URL=''`. One more install from Downloader and it updates itself from then on. If it is on 0.3.9 or later and still silent, it is offline — the feed lives on GitHub, and a check that cannot reach it is reported as nothing at all rather than as a failure. |
+| Downloader gives a 404, or the address just does not answer | Your laptop's LAN IP changed. Confirm the DHCP reservation from step 1 is still applied, then **rebuild** the TV app (button or CLI) and **re-download** it in Downloader on the television — that URL is the desktop's own address, and a this-house build has one baked in as well. A television already running 0.3.9 or later does not need any of this: it updates itself to the shared build, which asks the network where the desktop went instead of being told at build time. |
 | `adb` reports **unauthorized** | The Fire Stick's own "Allow USB debugging" dialog was never accepted (or was dismissed). Re-trigger it and accept the prompt on the television's screen. Only relevant if you turned ADB debugging on for development. |
 | The app is not on the home screen after installing | Fire TV files apps that declare themselves TV-ready under **Your Apps & Channels**, not the main row automatically — the Forge TV build is leanback-enabled, so check there before assuming the install failed. |
 | Install fails with a signature error | A copy signed with a different key is already on the device — uninstall it first. Both the phone and TV builds share one release keystore, so a rebuilt TV app should always install over the previous one cleanly. |

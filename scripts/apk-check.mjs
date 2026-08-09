@@ -340,6 +340,28 @@ log(
   'isTv() answers from the define first — the APK has no query string to carry ?tv'
 )
 
+/* ------------------------------------------ the two apps watch two feeds
+ *
+ * The phone is com.forge.mobile and the television is com.forge.mobile.tv, so
+ * a bundle pointed at the other one's manifest would download a package
+ * Android then refuses to install over the app that fetched it — an update
+ * that appears to work and never lands. The three assertions below are the
+ * whole of what keeps those apart, and none of them is visible at runtime
+ * until somebody with a television waits a fortnight for a release.
+ */
+log(
+  viteConfig.includes("process.env.FORGE_TV === '1'") && viteConfig.includes('tv-latest.json'),
+  'a TV bundle takes the television feed (tv-latest.json), decided by the same flag as its applicationId'
+)
+log(
+  !readFileSync(join(ROOT, 'scripts', 'apk-tv-build.mjs'), 'utf8').includes("FORGE_APK_MANIFEST_URL: ''"),
+  'the TV build no longer blanks its feed — a television that cannot update itself is sideloaded forever'
+)
+log(
+  readFileSync(join(ROOT, 'scripts', 'apk-tv-release.mjs'), 'utf8').includes('apkUrl: url'),
+  'the published TV manifest carries apkUrl as well as url — the app’s parser reads one, the desktop’s reads the other'
+)
+
 /* ------------------------------------------- the manifest fetch dodges CORS */
 
 /*
@@ -433,6 +455,26 @@ if (!existsSync(latestPath)) {
     )
   } else {
     log(false, `dist-apk/${APK_ASSET} is missing next to latest.json`)
+  }
+}
+
+/* The television's manifest, through the same parser the television uses.
+ *
+ * The source-level check above proves apk-tv-release *writes* apkUrl; this
+ * proves the file it wrote is one the app would actually act on. They fail for
+ * different reasons — a renamed field, a hash that stopped being hex — and the
+ * cost of finding out at the television is a fortnight and a sideload. */
+const tvLatestPath = join(DIST_APK, 'tv-latest.json')
+if (!existsSync(tvLatestPath)) {
+  skip('dist-apk/tv-latest.json absent — run `npm run apk:tv:release` to check the real TV manifest')
+} else {
+  const tv = parseManifest(JSON.parse(readFileSync(tvLatestPath, 'utf8')))
+  log(tv !== null, 'the published tv-latest.json passes the app’s own parser — the television can read its own feed')
+  if (tv) {
+    log(
+      tv.apkUrl.includes('/forge-tv-releases/'),
+      'the TV manifest points at the TV releases repo, not the phone’s'
+    )
   }
 }
 
