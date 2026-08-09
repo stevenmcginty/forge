@@ -58,6 +58,20 @@ export type TvBridgeEvent =
    * the native side holding a grammar this page has forgotten.
    */
   | { kind: 'control'; on: boolean }
+  /**
+   * Raise the television's keyboard over the picture, or take it away.
+   *
+   * Sent after every plain click while driving, because a click is the only
+   * signal there is. Windows will not say whether the thing just focused
+   * accepts text — Chrome keeps its accessibility tree off unless it is
+   * started with a flag or a screen reader announces itself, and measured on a
+   * real desk it reports the same "document" node with an input focused and
+   * with nothing focused. So this does not ask; it offers, and Back declines.
+   *
+   * The native side ignores it when the keyboard is already up, so a second
+   * click while typing cannot restart the field somebody is halfway through.
+   */
+  | { kind: 'keyboard'; on: boolean }
 
 /**
  * The other direction: the native layer answering a question this one asked.

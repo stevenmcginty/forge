@@ -70,6 +70,15 @@ class MainActivity : BridgeActivity() {
   /** The split, or null on the phone build. Everything TV-shaped hangs off it. */
   private var panels: TvPanels? = null
 
+  /**
+   * Has this press of Play/Pause already been spent on a hold?
+   *
+   * The release after a hold is not a second press, it is the end of the first
+   * — the same rule the pointer applies to OK. See the Play/Pause branch in
+   * dispatchKeyEvent.
+   */
+  private var playSpent = false
+
   override fun onCreate(savedInstanceState: Bundle?) {
     registerPlugin(ForgeUpdaterPlugin::class.java)
     super.onCreate(savedInstanceState)
@@ -181,7 +190,21 @@ class MainActivity : BridgeActivity() {
         // key left that can open a keyboard, and a keyboard is the only thing
         // missing from a remote that can otherwise drive a whole desk.
         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-          if (tap) split.startTyping()
+          // Tapped it opens the keyboard now; held, it stops the keyboard
+          // coming up on its own.
+          //
+          // Decided on the *release*, not on the press, because a hold begins
+          // with a press indistinguishable from a tap — acting on the way down
+          // would open a keyboard and then toggle the setting underneath it,
+          // and one press has to mean one thing. `playSpent` is what the hold
+          // leaves behind so the release that follows it does nothing.
+          if (held) {
+            split.toggleAutoType()
+            playSpent = true
+          } else if (event.action == KeyEvent.ACTION_UP) {
+            if (!playSpent) split.startTyping()
+            playSpent = false
+          }
           return true
         }
         KeyEvent.KEYCODE_MEDIA_REWIND -> {
@@ -617,6 +640,34 @@ class TvPanels(private val activity: MainActivity, private val forge: WebView) {
   /** Is the keyboard up? While it is, the remote belongs to Android. */
   var typing = false
     private set
+
+  /**
+   * Does a click on the desktop raise the keyboard by itself?
+   *
+   * On, because that is the thing worth having: click into a box on the desk
+   * and start talking, with nothing else to press. Off is here because the
+   * offer cannot be made accurately — see the `keyboard` event in
+   * mobile/src/lib/tv-bridge.ts for why nothing can tell a text box from a
+   * button through a video — so somebody doing an hour of clicking rather than
+   * an hour of typing needs a way to stop being offered. Holding ▶❚❚ swaps it,
+   * and a tap of ▶❚❚ still opens the keyboard by hand either way.
+   *
+   * Deliberately not a saved setting. It is one hold to change and the useful
+   * default is the one this starts at; a preference that outlives the evening
+   * would mean a television that has quietly stopped doing the thing it was
+   * installed for, with nothing on screen saying so.
+   */
+  private var autoType = true
+
+  /** Stop clicks raising the keyboard, or start again. Says which it now is. */
+  fun toggleAutoType() {
+    autoType = !autoType
+    if (!autoType && typing) stopTyping(send = false)
+    flashLabelWith(
+      if (autoType) "Clicking a text box opens the keyboard  ·  hold ▶❚❚ to stop"
+      else "Keyboard only when you press ▶❚❚  ·  hold it again for automatic"
+    )
+  }
 
   /** Raise the keyboard over the wall, with an empty field. */
   fun startTyping() {
@@ -1265,6 +1316,15 @@ class TvPanels(private val activity: MainActivity, private val forge: WebView) {
           }
 
           "control" -> setControlling(event.optBoolean("on", false))
+
+          // A click landed on the desktop, so the keyboard is offered. Guarded
+          // by `autoType` rather than obeyed blindly: this arrives after every
+          // click, and somebody clicking their way around a desk rather than
+          // filling a form wants to be able to turn it off. Holding ▶❚❚ is how.
+          "keyboard" -> {
+            val on = event.optBoolean("on", false)
+            if (!on) stopTyping(send = false) else if (autoType) startTyping()
+          }
         }
       }
     }

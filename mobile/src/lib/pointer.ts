@@ -154,6 +154,20 @@ export interface PointerOptions {
    * React `setState` here is fine.
    */
   onChange?: (mode: PointerMode, holding: boolean) => void
+  /**
+   * A plain click just happened — a tap of OK, not a drag and not a hold.
+   *
+   * This exists because a click is the only honest signal that somebody may be
+   * about to type. Windows will not say whether the thing now focused is a text
+   * box: Chrome keeps its accessibility tree switched off unless it is started
+   * with a flag or a screen reader announces itself, and measured on this desk
+   * it reports the same "document" node whether an input has focus or nothing
+   * does. So the desktop cannot be asked, and the click is what is left.
+   *
+   * Not fired for a drag or a right-click, which are the two presses that are
+   * definitely not somebody landing a caret.
+   */
+  onClick?: () => void
 }
 
 /**
@@ -163,7 +177,7 @@ export interface PointerOptions {
  * click somewhere nobody chose.
  */
 export function startPointer(options: PointerOptions): PointerHandle {
-  const { cursor, stage, picture, send, onChange } = options
+  const { cursor, stage, picture, send, onChange, onClick } = options
 
   /** Where the pointer is, in fractions of the picture. */
   let x = 0.5
@@ -428,6 +442,10 @@ export function startPointer(options: PointerOptions): PointerHandle {
     // start of a drag or a right-click without guessing which.
     send({ t: 'mirror-input', a: 'down', button: 'left', x, y })
     send({ t: 'mirror-input', a: 'up', button: 'left', x, y })
+    // After the click, never before it: whatever is about to be typed belongs
+    // in the thing this press just focused, and the desk has to have been told
+    // where to put the caret before anybody starts filling it.
+    onClick?.()
   }
 
   const handle: PointerHandle = {

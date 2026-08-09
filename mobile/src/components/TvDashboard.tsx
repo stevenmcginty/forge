@@ -1480,7 +1480,14 @@ function TvMirrorView({
       picture: videoEl,
       cursor: cursorEl,
       send: (frame) => link.sendMirrorInput(frame),
-      onChange: (mode, holding) => setPointerSays({ mode, holding })
+      onChange: (mode, holding) => setPointerSays({ mode, holding }),
+      // Every click offers the keyboard. It has to be every click, because
+      // nothing on this side or the desktop's can tell a text box from a
+      // button: Chrome answers the accessibility question with the same
+      // "document" whether an input has focus or nothing does. Offering after
+      // a click that did not land in a field costs one press of Back;
+      // offering after none of them would be the feature not existing.
+      onClick: () => tvBridge.emit({ kind: 'keyboard', on: true })
     })
     pointer.current = handle
     // The native layer has to stop competing for the same keys: a held Left or
@@ -1661,7 +1668,7 @@ function TvMirrorView({
           <div className="tv-drive-hint" role="status">
             {pointerSays.mode === 'scroll'
               ? 'Up and Down scroll · Menu returns to the pointer · Back stops driving'
-              : 'D-pad points · OK clicks, hold to drag, hold still to right-click · Menu scrolls · ▶❚❚ types · Back stops driving'}
+              : 'D-pad points · OK clicks and opens the keyboard · hold OK to drag · Menu scrolls · Back closes the keyboard, then stops driving'}
           </div>
         )}
       </div>
