@@ -1466,13 +1466,18 @@ function TvMirrorView({
     if (!driving) return
     const stageEl = stage.current
     const cursorEl = cursor.current
-    if (!stageEl || !cursorEl) return
+    // The video too, and not for playing it: it is the only thing that knows
+    // the desktop's own shape, which is what decides where inside the stage the
+    // picture actually is. See `frameBox` in lib/pointer.ts.
+    const videoEl = video.current
+    if (!stageEl || !cursorEl || !videoEl) return
     // A pointer always starts in the middle, pointing rather than scrolling —
     // so the words on screen have to start there too, or a mode picked up
     // again after a scroll would open under last time's sentence.
     setPointerSays({ mode: 'move', holding: false })
     const handle = startPointer({
       stage: stageEl,
+      picture: videoEl,
       cursor: cursorEl,
       send: (frame) => link.sendMirrorInput(frame),
       onChange: (mode, holding) => setPointerSays({ mode, holding })

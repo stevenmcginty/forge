@@ -192,15 +192,31 @@ const tick = (ms) => {
   if (next) next()
 }
 
-function pointerHarness() {
+/**
+ * One pointer, with a fake television around it.
+ *
+ * The stage and the picture are separate arguments because they are separate
+ * things: the video is drawn `object-fit: contain`, so a desktop that is not
+ * the stage's shape is painted inside it with bars either side. The defaults
+ * make the two agree, which is the case the grammar tests below want — the
+ * letterboxing has its own section.
+ */
+function pointerHarness(box = { width: 1920, height: 1080 }, source = { width: 1920, height: 1080 }) {
   const sent = []
+  const cursor = { style: {} }
   const handle = startPointer({
-    cursor: { style: {} },
-    stage: { getBoundingClientRect: () => ({ width: 1920, height: 1080 }) },
+    cursor,
+    stage: { getBoundingClientRect: () => box },
+    picture: { videoWidth: source.width, videoHeight: source.height },
     send: (frame) => sent.push(frame),
     onChange: () => {}
   })
-  return { handle, sent, of: (a) => sent.filter((f) => f.a === a) }
+  /** Where the ring has actually been drawn, in the stage's pixels. */
+  const at = () => {
+    const found = /translate3d\((-?[\d.]+)px, (-?[\d.]+)px/.exec(cursor.style.transform ?? '')
+    return found ? { x: Number(found[1]), y: Number(found[2]) } : null
+  }
+  return { handle, sent, cursor, at, of: (a) => sent.filter((f) => f.a === a) }
 }
 
 const tapped = pointerHarness()
@@ -304,6 +320,63 @@ log(
   `a second of smooth movement is coalesced into ${coalescing.of('move').length} frames, not sixty`
 )
 coalescing.handle.stop()
+
+/* ------------------------------------------ 3b. the ring is on the picture
+
+   The one thing a pointer can get wrong without anybody being able to name it:
+   pointing accurately at the wrong place. The video is drawn `object-fit:
+   contain`, so a 16:9 desktop inside a stage that is wider than 16:9 is painted
+   with a bar down each side, and those bars are nobody's screen. Measuring a
+   fraction against the stage puts the ring on the right pixel in the exact
+   middle and progressively further out towards the edges — which reads as "it
+   is nearly right", and is the hardest kind of wrong to see from a sofa.
+
+   A stage of 1920x900 showing a 1920x1080 desk: contain scales it to 1600x900,
+   leaving 160px of black either side. */
+const letterboxed = pointerHarness({ width: 1920, height: 900 }, { width: 1920, height: 1080 })
+log(
+  letterboxed.at()?.x === 960 && letterboxed.at()?.y === 450,
+  'a pointer starting in the middle is in the middle of the stage too — the one place bars cannot show'
+)
+letterboxed.handle.key('ArrowLeft', true)
+// Long enough at full speed to be pinned against the left edge of the desk.
+for (let i = 0; i < 200; i++) {
+  letterboxed.handle.key('ArrowLeft', true)
+  tick(16)
+}
+const home = letterboxed.of('move').at(-1)
+log(home?.x === 0, 'holding Left reaches the left edge of the desktop')
+log(
+  letterboxed.at()?.x === 160,
+  `and the ring stops on the picture's own edge (${letterboxed.at()?.x}px), not on the stage's — the black bar is not part of anybody's screen`
+)
+letterboxed.handle.stop()
+
+/* And the same picture decides how fast the cursor climbs. `y` is a fraction of
+   a shorter side, so vertical travel is scaled by the aspect it is a fraction
+   *of* — the desk's, 16:9, not the stage's 1920x900. Held for the same time in
+   both directions, the cursor must cross the same number of desktop pixels. */
+const square = pointerHarness({ width: 1920, height: 900 }, { width: 1920, height: 1080 })
+square.handle.key('ArrowRight', true)
+for (let i = 0; i < 12; i++) {
+  square.handle.key('ArrowRight', true)
+  tick(16)
+}
+const across = (square.of('move').at(-1)?.x ?? 0) - 0.5
+square.handle.key('ArrowRight', false)
+const down = pointerHarness({ width: 1920, height: 900 }, { width: 1920, height: 1080 })
+down.handle.key('ArrowDown', true)
+for (let i = 0; i < 12; i++) {
+  down.handle.key('ArrowDown', true)
+  tick(16)
+}
+const downwards = (down.of('move').at(-1)?.y ?? 0) - 0.5
+log(
+  Math.abs(across * 1920 - downwards * 1080) < 1,
+  `the same hold moves the same distance in desktop pixels either way (${Math.round(across * 1920)} across, ${Math.round(downwards * 1080)} down)`
+)
+square.handle.stop()
+down.handle.stop()
 
 const everything = [
   ...tapped.sent,

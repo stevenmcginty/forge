@@ -28,6 +28,12 @@
  *  - **Positions are fractions, never pixels.** This screen has no idea what
  *    resolution the desk is running, and the encoder rescales the picture on
  *    the way over regardless.
+ *  - **A fraction is a fraction of the picture, not of the box it sits in.**
+ *    The video is drawn `object-fit: contain`, so a desktop that is not the
+ *    television's shape leaves bars down the sides or along the top, and those
+ *    bars are not part of anybody's screen. Measuring against the box would put
+ *    the ring on the right pixel only in the exact middle and further out the
+ *    nearer the edge — see `frame` below.
  *  - **Movement is coalesced.** Sixty frames a second are painted here; at most
  *    thirty go out, each one saying where the pointer *is* rather than where it
  *    went. That is what keeps a smooth cursor comfortably under the desktop's
@@ -127,8 +133,19 @@ export interface PointerOptions {
    * alone — nothing else on the screen moves, and no layout is invalidated.
    */
   cursor: HTMLElement
-  /** The box the picture fills. What a fraction is a fraction of. */
+  /** The box the video element fills — bars and all. */
   stage: HTMLElement
+  /**
+   * The video itself, for its intrinsic size.
+   *
+   * What a fraction is a fraction of is the *picture*, and only this element
+   * knows how big that is: `videoWidth`/`videoHeight` are the desktop's own
+   * resolution, and with `object-fit: contain` they are what decides how much
+   * of the stage is screen and how much is letterboxing. Read on a timer rather
+   * than subscribed to, because it changes when the desk changes resolution and
+   * at no other time.
+   */
+  picture: HTMLVideoElement
   /** One input, on its way to the desktop. */
   send: (frame: MirrorInputFrame) => void
   /**
@@ -146,7 +163,7 @@ export interface PointerOptions {
  * click somewhere nobody chose.
  */
 export function startPointer(options: PointerOptions): PointerHandle {
-  const { cursor, stage, send, onChange } = options
+  const { cursor, stage, picture, send, onChange } = options
 
   /** Where the pointer is, in fractions of the picture. */
   let x = 0.5
@@ -181,20 +198,69 @@ export function startPointer(options: PointerOptions): PointerHandle {
   /** When the loop last ran, for a frame-rate-independent step. */
   let steppedAt = 0
   let frame = 0
-  /** The picture's box, re-measured on the second — see `measure`. */
-  let box = stage.getBoundingClientRect()
+
+  /**
+   * Where the desktop's screen actually is, inside the stage.
+   *
+   * Offsets from the stage's top-left, in this screen's pixels, and never the
+   * stage itself unless the two happen to be the same shape. Everything that
+   * turns a fraction into a place on the television goes through this.
+   */
+  let shot = { left: 0, top: 0, width: 0, height: 0 }
+  /** The intrinsic size the box above was worked out from. See `measure`. */
+  let sourceW = -1
+  let sourceH = -1
   let measuredAt = 0
 
   const now = (): number => performance.now()
 
-  const paint = (): void => {
-    cursor.style.transform = `translate3d(${x * box.width}px, ${y * box.height}px, 0)`
+  /**
+   * Work out the picture's box from the stage's, the way `object-fit: contain`
+   * does: the largest rectangle of the video's own shape that fits, centred,
+   * with the remainder left as bars.
+   *
+   * Before the first frame decodes there is no intrinsic size to scale by, and
+   * the honest fallback is the whole stage — the pointer starts in the middle,
+   * where the two agree, and `measure` corrects the rest within a frame of the
+   * video knowing its own size.
+   */
+  const frameBox = (): void => {
+    const box = stage.getBoundingClientRect()
+    const vw = picture.videoWidth
+    const vh = picture.videoHeight
+    if (vw <= 0 || vh <= 0 || box.width <= 0 || box.height <= 0) {
+      shot = { left: 0, top: 0, width: box.width, height: box.height }
+      return
+    }
+    const scale = Math.min(box.width / vw, box.height / vh)
+    const width = vw * scale
+    const height = vh * scale
+    shot = { left: (box.width - width) / 2, top: (box.height - height) / 2, width, height }
   }
 
+  const paint = (): void => {
+    const px = shot.left + x * shot.width
+    const py = shot.top + y * shot.height
+    cursor.style.transform = `translate3d(${px}px, ${py}px, 0)`
+  }
+
+  /**
+   * Re-measure, on the second — or immediately when the desk changes shape.
+   *
+   * The timer is for the television's own layout, which barely moves. The
+   * intrinsic-size check is for the desktop's, which can change the instant
+   * somebody plugs in a monitor, and where waiting up to a second would leave
+   * the ring pointing at bars. Reading `videoWidth` costs nothing; taking a
+   * rect is the part worth throttling.
+   */
   const measure = (at: number): void => {
-    if (at - measuredAt < 1000) return
+    const changed = picture.videoWidth !== sourceW || picture.videoHeight !== sourceH
+    if (!changed && at - measuredAt < 1000) return
     measuredAt = at
-    box = stage.getBoundingClientRect()
+    sourceW = picture.videoWidth
+    sourceH = picture.videoHeight
+    frameBox()
+    if (changed) paint()
   }
 
   const tell = (): void => {
@@ -285,8 +351,10 @@ export function startPointer(options: PointerOptions): PointerHandle {
     x += (dx / length) * travel
     // The same distance in pixels, vertically. `y` is a fraction of a shorter
     // side, so without the aspect correction the cursor would climb a 16:9
-    // screen almost twice as fast as it crosses it.
-    y += (dy / length) * travel * (box.height > 0 ? box.width / box.height : 1)
+    // screen almost twice as fast as it crosses it. The picture's aspect, not
+    // the stage's: the desk is the thing being crossed, and a diagonal is only
+    // a diagonal at the far end if it is measured against the far end's shape.
+    y += (dy / length) * travel * (shot.height > 0 ? shot.width / shot.height : 1)
     x = Math.min(1, Math.max(0, x))
     y = Math.min(1, Math.max(0, y))
     paint()
@@ -410,6 +478,7 @@ export function startPointer(options: PointerOptions): PointerHandle {
     }
   }
 
+  measure(now())
   paint()
   tell()
   frame = requestAnimationFrame(step)

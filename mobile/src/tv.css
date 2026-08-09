@@ -738,9 +738,24 @@
    A ring, not an arrow. Three metres from a 1080p panel, a 12px arrow over a
    screenshot of a desktop full of 12px arrows is invisible; a hollow volt
    circle with a dark halo is findable over anything, and being hollow it does
-   not hide the thing it is pointing at. The dot in the middle is the hotspot —
-   the ring is a finder, the dot is the pixel that gets clicked, and without it
-   people aim with the edge.
+   not hide the thing it is pointing at.
+
+   Three parts, and each answers a different question:
+
+     the ring    where is my cursor      — found from across a room
+     the marks   which point is it       — four ticks outside the ring, aimed in
+     the dot     which pixel gets clicked — the hotspot, at the exact centre
+
+   The dot is the one that had to grow. A 6px disc is a correct hotspot and an
+   invisible one: from a sofa it is below what the eye resolves against a busy
+   desktop, so people aim with the ring's edge and click a dozen pixels off.
+   Twelve across with a dark rim reads at distance and still covers less than a
+   line of terminal text. The marks do the rest of the work without covering
+   anything at all — they sit *outside* the ring, so the convergence they point
+   at is the one place the cursor never obscures.
+
+   Everything volt here is `currentColor`, so the scrolling state recolours the
+   whole reticle by changing one property rather than restating four gradients.
 
    Positioned entirely by `transform`, written by lib/pointer.ts on an
    animation frame. `left`/`top` would invalidate layout sixty times a second
@@ -752,9 +767,13 @@
   width: calc(var(--u) * 34);
   height: calc(var(--u) * 34);
   /* Centred on its own coordinates: the position from the pointer is where the
-     click lands, not where the box's corner goes. */
+     click lands, not where the box's corner goes. Exact only because
+     `box-sizing: border-box` makes the border part of the 34, not extra to it —
+     a content-box here would hang the whole reticle 3px down and right of the
+     pixel it claims, which is precisely the aim it exists to make honest. */
   margin: calc(var(--u) * -17) 0 0 calc(var(--u) * -17);
-  border: calc(var(--u) * 3) solid var(--volt);
+  color: var(--volt);
+  border: calc(var(--u) * 3) solid currentColor;
   border-radius: 50%;
   /* Dark ring outside the bright one, so the cursor survives landing on a
      white document — the one background a volt circle would otherwise vanish
@@ -764,17 +783,43 @@
   will-change: transform;
 }
 
+/* The four marks. A 60px box centred on the hotspot, with a 9px bar laid at
+   each edge — so they run from 30px out to 21px out, clear of both the ring
+   (17px) and its dark rim (19px). Absolutely positioned children measure from
+   the padding box, which is inset by the border on every side, so the -30
+   margin lands on the same centre the dot does. */
+.tv-cursor::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--u) * 60);
+  height: calc(var(--u) * 60);
+  margin: calc(var(--u) * -30) 0 0 calc(var(--u) * -30);
+  background:
+    linear-gradient(currentColor, currentColor) 50% 0 / calc(var(--u) * 3) calc(var(--u) * 9) no-repeat,
+    linear-gradient(currentColor, currentColor) 50% 100% / calc(var(--u) * 3) calc(var(--u) * 9) no-repeat,
+    linear-gradient(currentColor, currentColor) 0 50% / calc(var(--u) * 9) calc(var(--u) * 3) no-repeat,
+    linear-gradient(currentColor, currentColor) 100% 50% / calc(var(--u) * 9) calc(var(--u) * 3) no-repeat;
+  /* One shadow around all four, rather than a rim on each: same job as the
+     ring's dark halo, which is surviving a white document. */
+  filter: drop-shadow(0 0 calc(var(--u) * 2) rgb(0 0 0 / 0.9));
+}
+
+/* The hotspot. This is the pixel the desktop is told about, and the only thing
+   on screen that is allowed to claim it, so it is dead centre by construction:
+   half the parent's inner box, less half its own width. */
 .tv-cursor::after {
   content: '';
   position: absolute;
   left: 50%;
   top: 50%;
-  width: calc(var(--u) * 6);
-  height: calc(var(--u) * 6);
-  margin: calc(var(--u) * -3) 0 0 calc(var(--u) * -3);
-  background: var(--volt);
+  width: calc(var(--u) * 12);
+  height: calc(var(--u) * 12);
+  margin: calc(var(--u) * -6) 0 0 calc(var(--u) * -6);
+  background: currentColor;
   border-radius: 50%;
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.8);
+  box-shadow: 0 0 0 calc(var(--u) * 2) rgb(0 0 0 / 0.8);
 }
 
 /* A button is down. Filled rather than merely recoloured, because "am I
@@ -786,14 +831,11 @@
 
 /* The arrows are the wheel now. Warn rather than volt: it is the one pointer
    state where pressing Up does not move the pointer, and a colour that says
-   "this is not the mode you think" is worth more than a prettier one. */
+   "this is not the mode you think" is worth more than a prettier one. One
+   `color` recolours the ring, the marks and the dot together. */
 .tv-cursor.is-scrolling {
-  border-color: var(--warn);
+  color: var(--warn);
   box-shadow: 0 0 0 calc(var(--u) * 2) rgb(0 0 0 / 0.75), 0 0 calc(var(--u) * 18) rgb(255 176 32 / 0.45);
-}
-
-.tv-cursor.is-scrolling::after {
-  background: var(--warn);
 }
 
 /* The grammar, flashed over the picture when the pointer is picked up and
