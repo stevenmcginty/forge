@@ -29,6 +29,28 @@ const MAX_HEIGHT = 1080
 const MAX_FPS = 30
 
 /**
+ * The ceiling on the encoder, in bits per second, and the reason the text on
+ * the television is readable at all.
+ *
+ * WebRTC was built to carry faces over the open internet, so left alone it
+ * budgets like it: a couple of megabits, spent on keeping motion smooth. A
+ * desktop is the opposite problem. It barely moves, and when it does — a
+ * scrolling browser, a repainting terminal — every pixel on the screen changes
+ * at once, and a codec holding a small budget answers that by throwing away
+ * resolution. The picture stays at 30fps and the letters turn to soup, which is
+ * exactly what a 1080p wall of ten-pixel type looks like at 960 wide.
+ *
+ * Eight megabits is generous and is meant to be: both ends are on one LAN with
+ * nothing between them, and the number is a ceiling rather than a target. A
+ * still desktop spends almost none of it. See `widenTheChannel`, which also
+ * tells the encoder which way to fail when the ceiling is not reachable.
+ */
+const MAX_BITRATE = 8_000_000
+
+/** How often the desktop tells the television how the stream is really going. */
+const STATS_MS = 1000
+
+/**
  * Electron's desktop-capture constraints, which `getUserMedia` accepts and
  * `MediaTrackConstraints` has never described.
  *
@@ -54,6 +76,11 @@ interface Mirror {
   stream: MediaStream
   send: (data: string) => void
   onClosed: (reason: string) => void
+  /** The repeating stats sample, or 0 when none is running. See `reportStats`. */
+  statsTimer: number
+  /** The previous sample's totals, so a rate can be a rate and not a total. */
+  lastBytes: number
+  lastAt: number
   /**
    * A mirror ends exactly once, whichever of a failed connection, a closed
    * peer, Steve ending the share or an explicit stop gets there first. Every
@@ -138,6 +165,185 @@ function preferH264(transceiver: RTCRtpTransceiver): void {
 }
 
 /**
+ * Tell the encoder it is looking at a screen, not at a room.
+ *
+ * `contentHint` is the one-word version of the whole problem. Left unset, a
+ * track off `getUserMedia` is assumed to be a camera, and every trade the
+ * encoder makes is the trade a camera wants: blur a frame rather than stutter,
+ * because a soft face at 30fps beats a sharp one at 12. `'text'` reverses it —
+ * hold the edges, drop frames if something has to give. On a desktop, where the
+ * picture is words and the words are why the television is on, that is the only
+ * honest answer.
+ *
+ * Assigned rather than checked because it is a hint in the strict sense: an
+ * engine that has never heard of it ignores the string and mirrors as before.
+ */
+function preferSharpness(track: MediaStreamTrack): void {
+  track.contentHint = 'text'
+}
+
+/**
+ * Raise the ceiling, and choose which way the picture fails under it.
+ *
+ * Two settings, and the second matters more than the first.
+ * `maxBitrate` lifts the budget to something a LAN can obviously carry. But a
+ * budget is only permission to spend; `degradationPreference` decides what
+ * happens when the encoder still cannot fit — and its default for a screen
+ * share is to keep the frame rate and shrink the frame. That is the blur.
+ * `'maintain-resolution'` says the opposite: stay at 1920 and let the frames
+ * per second fall instead. A desktop that redraws at 12fps while you scroll and
+ * is legible throughout is worth more than a smooth one you cannot read, which
+ * is the same reason `MAX_FPS` can stay at 30 — under pressure this now spends
+ * the frame rate rather than the pixels, without anybody choosing a number.
+ *
+ * Applied after `setLocalDescription`, which is where Chromium has finally
+ * populated the encodings array; before it, some builds hand back an empty one
+ * and quietly drop what is written into it. Failure here is never worth ending
+ * a mirror over — a build that will not take these parameters gives the picture
+ * it would have given anyway.
+ */
+async function widenTheChannel(sender: RTCRtpSender): Promise<void> {
+  try {
+    const parameters = sender.getParameters()
+    // One entry, because this sender is not simulcast: a mirror has exactly one
+    // viewer on one television, and there is no second quality to publish.
+    if (!parameters.encodings || parameters.encodings.length === 0) {
+      parameters.encodings = [{}]
+    }
+    parameters.encodings[0].maxBitrate = MAX_BITRATE
+    // Explicit, because a sender that has already scaled itself down once will
+    // otherwise keep the factor it chose while it was starved.
+    parameters.encodings[0].scaleResolutionDownBy = 1
+    parameters.degradationPreference = 'maintain-resolution'
+    await sender.setParameters(parameters)
+  } catch {
+    /* a build that will not take them keeps its own defaults */
+  }
+}
+
+/**
+ * What the desktop knows about its own outbound stream, once a second.
+ *
+ * The point of this is arbitration. "The television looks blurry" has at least
+ * four causes that feel identical from the sofa — a starved encoder, a busy
+ * CPU, a lossy wifi hop, or a picture that is genuinely 1920 wide and simply
+ * being watched from too far away — and only the sender can tell them apart.
+ * `qualityLimitationReason` in particular is the whole argument settled in one
+ * word, and it exists nowhere else.
+ *
+ * Shaped as a JSON payload down the existing signalling channel, because that
+ * channel is already a relay for opaque strings and the alternative is a second
+ * one. The viewer's own half of the picture — what actually decoded, and on
+ * what — is measured on the television; see `readStats` in mobile/src/lib.
+ */
+interface StatsFrame {
+  kind: 'stats'
+  /** What the capture is handing the encoder, before any scaling. */
+  srcWidth: number
+  srcHeight: number
+  /** What actually left, which is the number the blur argument is about. */
+  width: number
+  height: number
+  fps: number
+  kbps: number
+  /** 'none' | 'bandwidth' | 'cpu' | 'other' — Chromium's own verdict. */
+  limit: string
+  /** Seconds spent limited by each cause since the mirror started. */
+  limitedBy: { bandwidth: number; cpu: number; other: number }
+  /** The codec that won the negotiation, e.g. 'video/H264'. */
+  codec: string
+  /** Round trip to the television, in milliseconds, or -1 when not yet known. */
+  rttMs: number
+  /** Fraction of packets the television reported missing, 0–100. */
+  lossPct: number
+  /** Keyframes the television has had to ask for. Rising means it is struggling. */
+  pli: number
+}
+
+/** The handful of stats fields this file reads, named rather than left as any. */
+interface OutboundVideoStats {
+  bytesSent?: number
+  frameWidth?: number
+  frameHeight?: number
+  framesPerSecond?: number
+  qualityLimitationReason?: string
+  qualityLimitationDurations?: Record<string, number>
+  pliCount?: number
+  codecId?: string
+}
+
+/**
+ * Take one sample and send it. Silent on every failure: a stats frame is a
+ * courtesy to a debug overlay, and nothing about the picture depends on one
+ * arriving. A mirror that ends between the await and the send simply stops.
+ */
+async function reportStats(mirror: Mirror): Promise<void> {
+  let report: RTCStatsReport
+  try {
+    report = await mirror.peer.getStats()
+  } catch {
+    return
+  }
+  if (mirror.closed || live !== mirror) return
+
+  // Gathered onto one object rather than into three locals: the compiler cannot
+  // see that a callback it did not call has assigned anything, and narrows a
+  // `let` set only inside `forEach` to the null it was declared with.
+  const found: {
+    outbound?: OutboundVideoStats
+    pair?: { currentRoundTripTime?: number }
+    remote?: { fractionLost?: number }
+  } = {}
+  report.forEach((entry: { type?: string; kind?: string; state?: string }) => {
+    if (entry.type === 'outbound-rtp' && entry.kind === 'video') found.outbound = entry as OutboundVideoStats
+    else if (entry.type === 'candidate-pair' && entry.state === 'succeeded')
+      found.pair = entry as { currentRoundTripTime?: number }
+    else if (entry.type === 'remote-inbound-rtp' && entry.kind === 'video')
+      found.remote = entry as { fractionLost?: number }
+  })
+  const out = found.outbound
+  // Nothing has been sent yet — the first sample of a mirror still negotiating.
+  if (!out) return
+
+  const now = performance.now()
+  const bytes = out.bytesSent ?? 0
+  // The first sample has no predecessor to subtract, and a rate off a single
+  // total would read as every byte since the mirror began arriving at once.
+  const elapsed = mirror.lastAt > 0 ? (now - mirror.lastAt) / 1000 : 0
+  const kbps = elapsed > 0 ? Math.max(0, Math.round(((bytes - mirror.lastBytes) * 8) / 1000 / elapsed)) : 0
+  mirror.lastBytes = bytes
+  mirror.lastAt = now
+
+  const codecEntry = out.codecId ? (report.get(out.codecId) as { mimeType?: string } | undefined) : undefined
+  const track = mirror.stream.getVideoTracks()[0]
+  const settings = track?.getSettings() ?? {}
+  const durations = out.qualityLimitationDurations ?? {}
+  const seconds = (value: number | undefined): number => Math.round(value ?? 0)
+
+  const frame: StatsFrame = {
+    kind: 'stats',
+    srcWidth: settings.width ?? 0,
+    srcHeight: settings.height ?? 0,
+    width: out.frameWidth ?? 0,
+    height: out.frameHeight ?? 0,
+    fps: Math.round(out.framesPerSecond ?? 0),
+    kbps,
+    limit: out.qualityLimitationReason ?? 'unknown',
+    limitedBy: {
+      bandwidth: seconds(durations.bandwidth),
+      cpu: seconds(durations.cpu),
+      other: seconds(durations.other)
+    },
+    codec: codecEntry?.mimeType ?? 'unknown',
+    rttMs:
+      found.pair?.currentRoundTripTime === undefined ? -1 : Math.round(found.pair.currentRoundTripTime * 1000),
+    lossPct: Math.round((found.remote?.fractionLost ?? 0) * 1000) / 10,
+    pli: out.pliCount ?? 0
+  }
+  mirror.send(JSON.stringify(frame))
+}
+
+/**
  * The one exit from a live mirror: tear it down, then say why it ended.
  *
  * Order matters. The teardown happens first so that `onClosed` — which pushes a
@@ -206,9 +412,10 @@ export async function startMirror(
   // would add a round trip to the internet before the first frame and make a
   // feature that works with the router's uplink unplugged depend on it.
   const peer = new RTCPeerConnection({ iceServers: [] })
-  const mirror: Mirror = { peer, stream, send, onClosed, closed: false }
+  const mirror: Mirror = { peer, stream, send, onClosed, closed: false, statsTimer: 0, lastBytes: 0, lastAt: 0 }
   live = mirror
 
+  preferSharpness(track)
   const transceiver = peer.addTransceiver(track, { direction: 'sendonly', streams: [stream] })
   preferH264(transceiver)
 
@@ -232,7 +439,15 @@ export async function startMirror(
     // capture that no longer exists. Silently, like every other exit a
     // superseded attempt takes: see `generation`.
     if (live !== mirror) return null
+    // After the local description and before the offer goes out, which is the
+    // first moment the sender's encodings exist to be written to. Awaited so a
+    // mirror is never negotiated at the old ceiling and widened a tick later.
+    await widenTheChannel(transceiver.sender)
+    if (live !== mirror) return null
     send(JSON.stringify({ kind: 'offer', sdp: peer.localDescription?.sdp ?? offer.sdp ?? '' }))
+    // Only once there is something to describe. The timer is the mirror's, and
+    // `stopMirror` is the only thing that clears it.
+    mirror.statsTimer = window.setInterval(() => void reportStats(mirror), STATS_MS)
   } catch {
     // Guarded, like the check above it: a failure here is this mirror's to
     // clean up, and an unguarded stop would take down whichever mirror had
@@ -301,6 +516,10 @@ export function stopMirror(): void {
   generation += 1
   if (!mirror) return
   mirror.closed = true
+  // Before anything else can send: a sample landing after the teardown is a
+  // stats frame for a mirror the television has already been told is over.
+  if (mirror.statsTimer) clearInterval(mirror.statsTimer)
+  mirror.statsTimer = 0
   // Unhooked before the close, or `peer.close()` would come straight back
   // through the state-change handler as an ending to announce.
   mirror.peer.onicecandidate = null

@@ -53,6 +53,11 @@ class FakeTrack {
   constructor() {
     this.onended = null
     this.stopped = false
+    /** Written by `preferSharpness`; read by case 6. */
+    this.contentHint = ''
+  }
+  getSettings() {
+    return { width: 2560, height: 1440 }
   }
   stop() {
     this.stopped = true
@@ -83,10 +88,49 @@ class FakePeer {
     this.onconnectionstatechange = null
     /** Held open until the test lets the offer through. */
     this.offerGate = null
+    /** The last parameters written by `widenTheChannel`, or null. */
+    this.parameters = null
     peers.push(this)
   }
   addTransceiver() {
-    return { setCodecPreferences: () => {} }
+    return {
+      setCodecPreferences: () => {},
+      // The encoder knobs. `encodings: []` on purpose — it is what Chromium
+      // hands back before a first negotiation on some builds, and the file
+      // under test has to cope with filling it in rather than indexing into
+      // nothing.
+      sender: {
+        getParameters: () => ({ encodings: [] }),
+        setParameters: async (parameters) => {
+          this.parameters = parameters
+        }
+      }
+    }
+  }
+  /**
+   * One plausible sample. A Map, because `RTCStatsReport` is one — the file
+   * under test both iterates it and looks a codec up by id.
+   */
+  async getStats() {
+    return new Map([
+      [
+        'out',
+        {
+          type: 'outbound-rtp',
+          kind: 'video',
+          bytesSent: 500_000,
+          frameWidth: 1920,
+          frameHeight: 1080,
+          framesPerSecond: 27,
+          qualityLimitationReason: 'none',
+          qualityLimitationDurations: { bandwidth: 0, cpu: 0, other: 0 },
+          pliCount: 0,
+          codecId: 'codec'
+        }
+      ],
+      ['codec', { type: 'codec', mimeType: 'video/H264' }],
+      ['pair', { type: 'candidate-pair', state: 'succeeded', currentRoundTripTime: 0.004 }]
+    ])
   }
   async createOffer() {
     if (this.offerGate) await this.offerGate
@@ -208,6 +252,50 @@ stopMirror()
 handleSignal(JSON.stringify({ kind: 'answer', sdp: 'v=0 answer' }))
 handleSignal('not json at all')
 log(true, 'a signal arriving with no mirror running is dropped without throwing')
+
+/* ------------------------------ 6. the picture is tuned, and it says so */
+
+/*
+ * The quality half of the file. A mirror that negotiates perfectly and then
+ * hands the television a soft 960-wide picture is the bug this guards: the
+ * three settings below are the difference between readable text on a wall and
+ * a blur, and none of them is visible in an SDP, a log line or a screenshot.
+ * The stats frame is the other half — the only way anybody on a sofa can tell
+ * a starved encoder from a busy desk from a lossy hop.
+ */
+stopMirror()
+/** Kept, so the hint written onto its track can be read back. */
+let tunedStream = null
+capture = async () => {
+  tunedStream = new FakeStream()
+  return tunedStream
+}
+const tuned = attempt()
+await tuned.done
+const tunedPeer = peers[peers.length - 1]
+
+log(tunedStream?.track.contentHint === 'text', 'the captured track is hinted as text, not as a camera')
+const parameters = tunedPeer.parameters
+log(parameters !== null, 'the sender is given explicit encoding parameters')
+log(parameters?.degradationPreference === 'maintain-resolution', 'and told to spend frame rate rather than pixels')
+log((parameters?.encodings?.[0]?.maxBitrate ?? 0) >= 4_000_000, 'and given a ceiling a LAN can actually fill')
+log(parameters?.encodings?.[0]?.scaleResolutionDownBy === 1, 'and told not to scale the frame down')
+
+// A second of real time, because the sample is on a real interval and the
+// point of the assertion is that it fires by itself rather than on demand.
+await new Promise((res) => setTimeout(res, 1200))
+const statsOf = (record) => record.sent.filter((s) => s.kind === 'stats')
+const sample = statsOf(tuned)[0]
+log(sample !== undefined, 'a live mirror reports its own stats without being asked')
+log(sample?.width === 1920 && sample?.height === 1080, 'and says what resolution actually left the desk')
+log(sample?.srcWidth === 2560, 'and what the capture handed the encoder, so scaling is visible')
+log(sample?.limit === 'none', "and Chromium's own verdict on what is limiting it")
+log(sample?.codec === 'video/H264', 'and which codec won')
+
+const before = statsOf(tuned).length
+stopMirror()
+await new Promise((res) => setTimeout(res, 1200))
+log(statsOf(tuned).length === before, 'and stops reporting the moment the mirror is torn down')
 
 console.log(failures === 0 ? '\nmirror-check: all good' : `\nmirror-check: ${failures} failed`)
 process.exit(failures === 0 ? 0 : 1)

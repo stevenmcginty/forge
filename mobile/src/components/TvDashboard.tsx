@@ -4,6 +4,7 @@ import type { ClaudePermissionMode, PaneLeaf, TerminalTab, Workspace } from '@sh
 import type { MobileSession } from '@shared/mobile'
 import type { Link, LinkPicture, LinkState } from '../lib/link'
 import { mirrorListeners, startMirrorViewer } from '../lib/mirror'
+import type { DesktopStats, MirrorViewer, ScreenStats } from '../lib/mirror'
 import { leavesOf } from './Browser'
 import { paneListeners } from './PaneView'
 import { TvMenu } from './TvMenu'
@@ -1078,6 +1079,27 @@ function TvMirrorView({
   const video = useRef<HTMLVideoElement | null>(null)
   const [phase, setPhase] = useState<Phase>({ at: 'connecting' })
   /**
+   * The measurement overlay, on Down and off again.
+   *
+   * It exists because "the television looks blurry" is not a fact anybody can
+   * act on. A soft picture has four different causes that look identical from a
+   * sofa — a starved encoder, a busy desk, a lossy wifi hop, or a stream that is
+   * genuinely 1920 wide and simply large — and each wants a different fix. The
+   * numbers here name which one it is, on the screen where the problem is,
+   * rather than in a devtools window on a machine in another room.
+   *
+   * Down rather than a menu, because it is the one arrow this surface has never
+   * used and the wall ignores every key while a pane is zoomed (see the bound-
+   * once listener above).
+   */
+  const [hud, setHud] = useState(false)
+  /** What the desktop last said about its sending. See lib/mirror.ts. */
+  const desk = useRef<DesktopStats | null>(null)
+  /** The same pair, snapshotted for rendering — see the polling effect below. */
+  const [shown, setShown] = useState<{ desk: DesktopStats | null; screen: ScreenStats | null } | null>(null)
+  /** The live viewer, so the overlay can ask it what it decoded. */
+  const viewerRef = useRef<MirrorViewer | null>(null)
+  /**
    * Which attempt this is. Bumping it is the retry: the watch lives in an
    * effect keyed on this number, so one press of OK on a dead screen tears the
    * old peer down, tells the desktop to stop, and asks again from scratch —
@@ -1136,8 +1158,16 @@ function TvMirrorView({
           setPhase({ at: 'ended', reason: 'This screen would not start the video.' })
         })
       },
-      (reason) => setPhase({ at: 'ended', reason: reason || 'The mirror ended.' })
+      (reason) => setPhase({ at: 'ended', reason: reason || 'The mirror ended.' }),
+      // Into a ref, not into state. These land once a second for the whole life
+      // of the watch, and a set-state here would re-render a full-screen video
+      // every second of an evening for numbers nobody has asked to see. The
+      // polling effect below reads the ref, and only while the overlay is up.
+      (stats) => {
+        desk.current = stats
+      }
     )
+    viewerRef.current = viewer
     mirrorListeners.signal = (data) => {
       setHeard(true)
       viewer.handleSignal(data)
@@ -1150,10 +1180,32 @@ function TvMirrorView({
     return () => {
       mirrorListeners.signal = null
       mirrorListeners.stop = null
+      viewerRef.current = null
+      desk.current = null
       viewer.close()
       link.stopMirror()
     }
   }, [link, attempt])
+
+  // The overlay's own clock, and the only thing that re-renders for it. Off
+  // when the overlay is down, so a watched desktop is a video element and
+  // nothing else. Cleared and re-armed by the effect, so a retry starts its
+  // numbers again rather than showing the dead attempt's last reading.
+  useEffect(() => {
+    if (!hud) return
+    let alive = true
+    const sample = async (): Promise<void> => {
+      const screen = (await viewerRef.current?.readStats()) ?? null
+      if (!alive) return
+      setShown({ desk: desk.current, screen })
+    }
+    void sample()
+    const timer = window.setInterval(() => void sample(), 1000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [hud, attempt])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -1164,6 +1216,14 @@ function TvMirrorView({
       if (event.key === 'Escape') {
         event.preventDefault()
         onClose()
+        return
+      }
+      // Down opens the measurement overlay and Down closes it. Available in
+      // every phase on purpose: a mirror that died of bandwidth is exactly the
+      // one whose last numbers are worth reading.
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setHud((on) => !on)
         return
       }
       if (event.key !== 'Enter') return
@@ -1212,12 +1272,137 @@ function TvMirrorView({
             <span>{dead ? phase.reason : 'Asking the desktop to share what is on it.'}</span>
           </div>
         )}
+        {hud && <TvMirrorStats desk={shown?.desk ?? null} screen={shown?.screen ?? null} />}
       </div>
 
       {/* The same shell as the zoomed pane, on purpose: one head, one well,
           one line at the bottom naming the exits. Two full-screen things that
           framed themselves differently would read as two apps. */}
-      <div className="tv-pane-foot">{dead ? 'OK tries again · Back returns to the wall' : 'Back returns to the wall'}</div>
+      <div className="tv-pane-foot">
+        {dead ? 'OK tries again · ' : ''}
+        {hud ? 'Down hides the numbers' : 'Down shows the numbers'} · Back returns to the wall
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One sentence naming what is actually holding the picture back.
+ *
+ * The table below it is the evidence; this is the finding. Ordered by how
+ * actionable each cause is rather than how likely: a desktop that is not
+ * reporting makes every other number half a story, a hardware decoder that
+ * turned out to be a software one cannot be fixed with bitrate, and only after
+ * those is it worth reading Chromium's own verdict on the encoder.
+ */
+function verdictOf(desk: DesktopStats | null, screen: ScreenStats | null): string {
+  if (!desk) {
+    return 'The desktop is sending no numbers. Forge there is older than this overlay — update it and mirror again.'
+  }
+  if (screen && screen.decoder !== 'unknown' && !/omx|mediacodec|hardware|c2\./i.test(screen.decoder)) {
+    return `This screen is decoding in software (${screen.decoder}). That is the whole problem: no bitrate fixes a dongle doing the work on its CPU.`
+  }
+  if (desk.limit === 'bandwidth') {
+    return 'The network is the ceiling. The encoder wants more room than this wifi is giving it — check the Fire Stick is on 5GHz.'
+  }
+  if (desk.limit === 'cpu') {
+    return 'The desk is the ceiling. That machine cannot encode this screen any faster than it already is.'
+  }
+  if (desk.width > 0 && desk.srcWidth > 0 && desk.width < desk.srcWidth) {
+    return `The desk is sending ${desk.width} wide from a ${desk.srcWidth}-wide screen. Something is still scaling it down.`
+  }
+  if (screen && screen.frozenSecs > 2) {
+    return `Full size, but the picture has been frozen for ${screen.frozenSecs}s in total. That is loss, not resolution.`
+  }
+  return 'Nothing is limiting the encoder. What is on the wall is the full picture the desk can send.'
+}
+
+/**
+ * The measurement overlay: what left the desk, and what arrived here.
+ *
+ * Two columns because the interesting failures live in the gap between them. A
+ * desk sending 1920 and a screen decoding 960 is a different fault from both
+ * ends agreeing on 960, and a single merged column would hide exactly that.
+ *
+ * Sized in the wall's own screen-height units like everything else here, and
+ * placed over the video rather than beside it: the picture underneath is the
+ * thing being judged, and a panel that pushed it out of the way would be
+ * measuring a different picture from the one that looked wrong.
+ */
+function TvMirrorStats({ desk, screen }: { desk: DesktopStats | null; screen: ScreenStats | null }): React.JSX.Element {
+  const size = (w: number, h: number): string => (w > 0 && h > 0 ? `${w}×${h}` : '—')
+  const limited = desk
+    ? [
+        desk.limitedBy.bandwidth > 0 ? `${desk.limitedBy.bandwidth}s network` : '',
+        desk.limitedBy.cpu > 0 ? `${desk.limitedBy.cpu}s cpu` : '',
+        desk.limitedBy.other > 0 ? `${desk.limitedBy.other}s other` : ''
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : ''
+  return (
+    <div className="tv-mirror-stats" role="status">
+      <div className="tv-stats-verdict">{verdictOf(desk, screen)}</div>
+      <div className="tv-stats-cols">
+        <div className="tv-stats-col">
+          <strong>The desk sends</strong>
+          {desk ? (
+            <dl>
+              <dt>Captured</dt>
+              <dd>{size(desk.srcWidth, desk.srcHeight)}</dd>
+              <dt>Encoded</dt>
+              <dd>{size(desk.width, desk.height)}</dd>
+              <dt>Rate</dt>
+              <dd>
+                {desk.fps} fps · {desk.kbps} kbps
+              </dd>
+              <dt>Codec</dt>
+              <dd>{desk.codec.replace(/^video\//i, '')}</dd>
+              <dt>Limited by</dt>
+              <dd>{desk.limit}</dd>
+              {limited !== '' && (
+                <>
+                  <dt>Spent limited</dt>
+                  <dd>{limited}</dd>
+                </>
+              )}
+              <dt>Round trip</dt>
+              <dd>{desk.rttMs < 0 ? '—' : `${desk.rttMs} ms`}</dd>
+              <dt>Reported lost</dt>
+              <dd>
+                {desk.lossPct}% · {desk.pli} keyframes asked for
+              </dd>
+            </dl>
+          ) : (
+            <p>Nothing yet.</p>
+          )}
+        </div>
+        <div className="tv-stats-col">
+          <strong>This screen decodes</strong>
+          {screen ? (
+            <dl>
+              <dt>Decoded</dt>
+              <dd>{size(screen.width, screen.height)}</dd>
+              <dt>Rate</dt>
+              <dd>
+                {screen.fps} fps · {screen.kbps} kbps
+              </dd>
+              <dt>Decoder</dt>
+              <dd>{screen.decoder}</dd>
+              <dt>Frozen</dt>
+              <dd>
+                {screen.freezes} times · {screen.frozenSecs}s
+              </dd>
+              <dt>Lost</dt>
+              <dd>{screen.packetsLost} packets</dd>
+              <dt>Jitter</dt>
+              <dd>{screen.jitterMs} ms</dd>
+            </dl>
+          ) : (
+            <p>Nothing yet.</p>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
