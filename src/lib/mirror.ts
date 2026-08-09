@@ -20,12 +20,37 @@
  * The cap on what leaves this machine.
  *
  * A Fire Stick asked to decode 4K60 over house wifi does not produce a better
- * picture, it produces a slideshow and a hot dongle — and the television is
- * 1080p regardless. 30fps is plenty for watching a desktop, which is mostly a
- * still image with a cursor on it.
+ * picture, it produces a slideshow and a hot dongle. 30fps is plenty for
+ * watching a desktop, which is mostly a still image with a cursor on it.
+ *
+ * **1200 rather than 1080, on a television that is 1080p.** The height looks
+ * wrong and is deliberate, for two reasons that both come from the same fact:
+ * a great many desktops are 16:10, and capping such a screen at 1080 tall makes
+ * the capture rescale itself on the way out.
+ *
+ * The first is sharpness. A 1920x1200 screen squeezed to 1728x1080 is resampled
+ * by 0.9 — a non-integer factor, which softens exactly the small text this
+ * feature exists to carry — and the encoder then spends its bits compressing
+ * that softened result. Sent at its own size, the codec sees crisp native
+ * pixels and the television's own scaler does the fitting, after decoding, on
+ * a clean image. The picture on the wall is the same size either way; the
+ * difference is which end resamples and whether compression happens before or
+ * after it.
+ *
+ * The second is why this changed. Neither 1080 nor 1200 is a strange number to
+ * a scaler, but H.264 codes in 16x16 macroblocks, and 1080 is not a multiple of
+ * 16: an encoder must pad the frame to 1088 and mark the last eight rows to be
+ * cropped away. Hardware encoders are not reliably careful about what they
+ * leave in the padding, and a band of uninitialised video memory decodes to a
+ * vivid green stripe across the picture — which is what a desktop here did,
+ * mid-stream, on an Intel Arc encoder. 1920 and 1200 are both multiples of 16,
+ * so there is no padding to get wrong.
+ *
+ * Still a ceiling, not a target: a 4K screen is capped to this and rescaled,
+ * because a Fire Stick decoding 4K is the slideshow above.
  */
 const MAX_WIDTH = 1920
-const MAX_HEIGHT = 1080
+const MAX_HEIGHT = 1200
 const MAX_FPS = 30
 
 /**
