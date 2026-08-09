@@ -1321,6 +1321,27 @@ function TvMirrorView({
    * once listener above).
    */
   const [hud, setHud] = useState(false)
+  /**
+   * The keyboard, over the picture.
+   *
+   * A `<input>` in this page and not a native field, which is the correction
+   * this replaced: Fire OS raises its own on-screen keyboard for a focused web
+   * input perfectly well — it is what the pairing screen's address box and the
+   * terminal pane's type row have always used on this hardware — and a native
+   * EditText fighting the WebView for focus produced a green row that appeared
+   * and vanished in the same frame.
+   *
+   * Opened by a click on the desktop, because nothing can tell whether the
+   * click landed in a text box: Chrome answers the accessibility question with
+   * the same "document" node whether an input has focus or nothing does. So
+   * every click offers, and Back declines.
+   */
+  const [typing, setTyping] = useState(false)
+  const [draft, setDraft] = useState('')
+  const typeEl = useRef<HTMLInputElement | null>(null)
+  /** The window listener is bound once; this is how it reads the live value. */
+  const typingRef = useRef(typing)
+  typingRef.current = typing
   /** What the desktop last said about its sending. See lib/mirror.ts. */
   const desk = useRef<DesktopStats | null>(null)
   /** The same pair, snapshotted for rendering — see the polling effect below. */
@@ -1487,7 +1508,7 @@ function TvMirrorView({
       // "document" whether an input has focus or nothing does. Offering after
       // a click that did not land in a field costs one press of Back;
       // offering after none of them would be the feature not existing.
-      onClick: () => tvBridge.emit({ kind: 'keyboard', on: true })
+      onClick: () => setTyping(true)
     })
     pointer.current = handle
     // The native layer has to stop competing for the same keys: a held Left or
@@ -1496,25 +1517,24 @@ function TvMirrorView({
     // running the arrows belong to it, and Menu — normally the panel cycle —
     // is handed to this page as the scroll toggle. See MainActivity.
     tvBridge.emit({ kind: 'control', on: true })
-
-    // The keyboard's half. The field itself is native — Fire OS only offers its
-    // own on-screen keyboard, and any microphone in it, to a real Android text
-    // field — so all that arrives here is the finished phrase, and all this does
-    // is put it on the wire. See the typing block in mobile/native/MainActivity.kt.
-    //
-    // Subscribed for exactly as long as the pointer exists, because a phrase
-    // typed at a desktop nobody is driving has nowhere to land.
-    const stopTyped = tvBridge.onTyped((text) => {
-      link.sendMirrorInput({ t: 'mirror-input', a: 'text', text })
-    })
-
     return () => {
-      stopTyped()
+      // A keyboard over a picture nobody is driving has nowhere to send what is
+      // typed into it, so putting the pointer down puts this away too.
+      setTyping(false)
+      setDraft('')
       tvBridge.emit({ kind: 'control', on: false })
       pointer.current = null
       handle.stop()
     }
   }, [driving, link])
+
+  // Entering typing mode is what summons the keyboard: focus has to land on the
+  // input, and the input does not exist until this render has committed. The
+  // same two lines the terminal pane uses, for the same reason — this is the
+  // mechanism that is known to raise the on-screen keyboard on a Fire Stick.
+  useEffect(() => {
+    if (typing) typeEl.current?.focus()
+  }, [typing])
 
   // A picture that is no longer live cannot be pointed at. Ending the mode
   // rather than leaving a cursor over a dead frame: the pointer would still be
@@ -1551,6 +1571,22 @@ function TvMirrorView({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
+      // The keyboard is up, so every key belongs to the input that has real DOM
+      // focus — which is what puts the television's own keyboard on screen and
+      // what its microphone dictates into. Only Back is this window's business,
+      // and it closes the keyboard rather than the mirror: one press, one level.
+      //
+      // Read before everything, including the pointer, because the pointer
+      // claims the arrows and OK and would otherwise eat the presses that are
+      // walking a key grid.
+      if (typingRef.current) {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          setTyping(false)
+        }
+        return
+      }
+
       // Back is the one key that means the same thing in both modes and is
       // read first in both: it steps out. Out of the pointer if it is running,
       // out of the mirror if it is not — one press, one level, never two at
@@ -1664,7 +1700,36 @@ function TvMirrorView({
             explained. A flash rather than a permanent strip, for the reason the
             native layer's mode label gives: by the fourth reading it has
             stopped being help and started being a bar across the desktop. */}
-        {driving && hint && (
+        {/* The keyboard, over the picture. Rendered inside the stage so it sits
+            on the desktop it is typing into rather than beside it, and built
+            from the same `tv-type` parts as the terminal pane's row because it
+            is the same thing doing the same job on the same hardware. */}
+        {driving && typing && (
+          <div className="tv-type is-over-mirror">
+            <input
+              ref={typeEl}
+              className="tv-type-input"
+              value={draft}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="Talk or type — OK sends it to the desktop"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                // OK sends what is there and leaves the keyboard up, because
+                // the next box on a form is one click away and closing it after
+                // every field would be a keyboard you re-open all afternoon.
+                // An empty draft is not an instruction; Back is how it closes.
+                event.preventDefault()
+                const text = draft
+                setDraft('')
+                if (text) link.sendMirrorInput({ t: 'mirror-input', a: 'text', text })
+              }}
+            />
+          </div>
+        )}
+        {driving && hint && !typing && (
           <div className="tv-drive-hint" role="status">
             {pointerSays.mode === 'scroll'
               ? 'Up and Down scroll · Menu returns to the pointer · Back stops driving'

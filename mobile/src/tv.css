@@ -1261,6 +1261,19 @@
   gap: calc(var(--u) * 14);
 }
 
+/* The same row, floated over the mirrored desktop instead of sitting under a
+   terminal. Along the bottom, because Fire OS draws its own keyboard up from
+   the bottom edge and a field underneath that keyboard is a field nobody can
+   read — and because the bottom of somebody's desktop is the taskbar, which is
+   the least costly strip of their screen to cover while typing into it. */
+.tv-type.is-over-mirror {
+  position: absolute;
+  left: calc(var(--u) * 40);
+  right: calc(var(--u) * 40);
+  bottom: calc(var(--u) * 40);
+  z-index: 2;
+}
+
 .tv-type-input {
   flex: 1 1 auto;
   min-width: 0;

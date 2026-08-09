@@ -1,26 +1,20 @@
 package com.forge.mobile
 
 import android.annotation.SuppressLint
-import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.speech.RecognizerIntent
-import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -69,15 +63,6 @@ import org.json.JSONObject
 class MainActivity : BridgeActivity() {
   /** The split, or null on the phone build. Everything TV-shaped hangs off it. */
   private var panels: TvPanels? = null
-
-  /**
-   * Has this press of Play/Pause already been spent on a hold?
-   *
-   * The release after a hold is not a second press, it is the end of the first
-   * — the same rule the pointer applies to OK. See the Play/Pause branch in
-   * dispatchKeyEvent.
-   */
-  private var playSpent = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     registerPlugin(ForgeUpdaterPlugin::class.java)
@@ -166,17 +151,6 @@ class MainActivity : BridgeActivity() {
     // long it is held for.
     val held = down && event.repeatCount == HOLD_REPEATS
 
-    // The keyboard is up, so the remote belongs to it and to Android's input
-    // method — every arrow is walking a key grid, OK is choosing a letter, and
-    // the mic button is Fire OS's to answer. Nothing below may take any of
-    // that: routing a D-pad press into the wall's page while somebody is typing
-    // is the cursor running off across the desktop under an open keyboard.
-    //
-    // Back is the exception, and it is Android's own: it closes the input
-    // method first and then arrives at onBackPressed, which is where the field
-    // is dismissed. See TvPanels.typing.
-    if (split.typing) return super.dispatchKeyEvent(event)
-
     // The wall is driving the desktop's mouse, so the D-pad is a mouse and not
     // a navigation ring. Every key goes to the page untouched except the
     // transport buttons below, which are the way out of a mode whose own keys
@@ -189,24 +163,6 @@ class MainActivity : BridgeActivity() {
         // four arrows and OK are the pointer itself — so Play/Pause is the only
         // key left that can open a keyboard, and a keyboard is the only thing
         // missing from a remote that can otherwise drive a whole desk.
-        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-          // Tapped it opens the keyboard now; held, it stops the keyboard
-          // coming up on its own.
-          //
-          // Decided on the *release*, not on the press, because a hold begins
-          // with a press indistinguishable from a tap — acting on the way down
-          // would open a keyboard and then toggle the setting underneath it,
-          // and one press has to mean one thing. `playSpent` is what the hold
-          // leaves behind so the release that follows it does nothing.
-          if (held) {
-            split.toggleAutoType()
-            playSpent = true
-          } else if (event.action == KeyEvent.ACTION_UP) {
-            if (!playSpent) split.startTyping()
-            playSpent = false
-          }
-          return true
-        }
         KeyEvent.KEYCODE_MEDIA_REWIND -> {
           if (tap) split.step(towardYouTube = false)
           return true
@@ -263,14 +219,6 @@ class MainActivity : BridgeActivity() {
 
   override fun onBackPressed() {
     val split = panels
-    // Typing, and Android has already closed the input method on its way here.
-    // Back abandons the phrase: nothing is sent to the desk, because the one
-    // thing worse than a television that cannot type is a television that types
-    // something nobody finished saying.
-    if (split != null && split.typing) {
-      split.stopTyping(send = false)
-      return
-    }
     if (split != null && split.youtubeIsLit) {
       // Back belongs to YouTube while YouTube is lit. It is the only way out of
       // a video and back up through its menus, so it is offered to the page
@@ -294,20 +242,6 @@ class MainActivity : BridgeActivity() {
     webView.evaluateJavascript(BACK_AS_ESCAPE) { result ->
       if (result?.trim() != "false") defaultBack()
     }
-  }
-
-  /**
-   * The speech recogniser answered, if this device had one to ask.
-   *
-   * Forwarded whole rather than filtered here: which request code is the
-   * recogniser's is TvPanels' business, and this activity's job is only to make
-   * sure the answer reaches it.
-   */
-  @Deprecated("Capacitor's BridgeActivity is still on the result API this overrides")
-  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-    @Suppress("DEPRECATION")
-    super.onActivityResult(requestCode, resultCode, data)
-    panels?.onSpeechResult(requestCode, resultCode, data)
   }
 
   /**
@@ -596,279 +530,6 @@ class TvPanels(private val activity: MainActivity, private val forge: WebView) {
   /** The page picked the pointer up, or put it down. See `controlling`. */
   fun setControlling(on: Boolean) {
     controlling = on
-    // A pointer put down while the keyboard is open leaves a field over a
-    // picture nothing is driving. The phrase is abandoned rather than sent:
-    // it was aimed at a desktop this remote no longer has hold of.
-    if (!on && typing) stopTyping(send = false)
-  }
-
-  /* -------------------------------------------------------- the keyboard
-   *
-   * A desktop being pointed at is a desktop with text boxes in it, and until
-   * this existed the remote could click into one and then do nothing. Six
-   * buttons and no letters.
-   *
-   * ## Why a native field and not an <input> in the page
-   *
-   * Because of the microphone. Fire OS raises its own on-screen keyboard for
-   * whatever has focus, and what that keyboard offers depends on what it is
-   * editing — a plain `EditText` declaring `inputType="text"` is the shape its
-   * voice input was built for, and a WebView's internal editing surface is the
-   * shape it was not. The keyboard is the certain half of this feature and the
-   * microphone is the hopeful half, so the hopeful half decides the design.
-   *
-   * There is no way to ask the remote's mic button directly: it belongs to Fire
-   * OS, which answers it with Alexa or with dictation depending on the device
-   * and what has focus. Nothing in this app can claim it, so nothing here tries.
-   * `RECOGNIZE_SPEECH` below is the second route, offered only where the device
-   * actually has a recogniser to offer.
-   *
-   * ## Committed, not streamed
-   *
-   * The phrase goes to the desk when Done is pressed, in one frame — not a
-   * keystroke at a time as it is typed. Dictation arrives as a whole sentence
-   * anyway, the picture from the desk is a fifth of a second behind so live
-   * echo would read as lag, and a committed phrase is the only version where
-   * Back can mean "no, forget it".
-   */
-
-  /** The field, built on first use — most sessions never type anything. */
-  private var field: EditText? = null
-  private var fieldRow: LinearLayout? = null
-  private var voiceButton: TextView? = null
-
-  /** Is the keyboard up? While it is, the remote belongs to Android. */
-  var typing = false
-    private set
-
-  /**
-   * Does a click on the desktop raise the keyboard by itself?
-   *
-   * On, because that is the thing worth having: click into a box on the desk
-   * and start talking, with nothing else to press. Off is here because the
-   * offer cannot be made accurately — see the `keyboard` event in
-   * mobile/src/lib/tv-bridge.ts for why nothing can tell a text box from a
-   * button through a video — so somebody doing an hour of clicking rather than
-   * an hour of typing needs a way to stop being offered. Holding ▶❚❚ swaps it,
-   * and a tap of ▶❚❚ still opens the keyboard by hand either way.
-   *
-   * Deliberately not a saved setting. It is one hold to change and the useful
-   * default is the one this starts at; a preference that outlives the evening
-   * would mean a television that has quietly stopped doing the thing it was
-   * installed for, with nothing on screen saying so.
-   */
-  private var autoType = true
-
-  /** Stop clicks raising the keyboard, or start again. Says which it now is. */
-  fun toggleAutoType() {
-    autoType = !autoType
-    if (!autoType && typing) stopTyping(send = false)
-    flashLabelWith(
-      if (autoType) "Clicking a text box opens the keyboard  ·  hold ▶❚❚ to stop"
-      else "Keyboard only when you press ▶❚❚  ·  hold it again for automatic"
-    )
-  }
-
-  /** Raise the keyboard over the wall, with an empty field. */
-  fun startTyping() {
-    if (typing) return
-    val row = fieldRow ?: buildField().also { fieldRow = it }
-    typing = true
-    row.visibility = View.VISIBLE
-    val edit = field ?: return
-    edit.setText("")
-    edit.isFocusable = true
-    edit.isFocusableInTouchMode = true
-    edit.requestFocus()
-    // Asked for three ways, because a keyboard that does not come up is the
-    // whole feature failing silently and none of the three is reliable alone.
-    //
-    // The window flag first: it is the declarative one, and it survives the
-    // activity being resumed with the field already open. Then the explicit
-    // ask, forced rather than implicit — there is no touch on a television and
-    // SHOW_IMPLICIT is free to decide a hardware keyboard is present, which on
-    // a Fire Stick with a remote paired is exactly what it decides. Then the
-    // same ask again on the next layout pass, because `requestFocus` on a view
-    // made visible in this same frame has not necessarily taken yet, and an
-    // input method asked about an unfocused view does nothing at all.
-    activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
-    @Suppress("DEPRECATION")
-    inputMethods()?.showSoftInput(edit, InputMethodManager.SHOW_FORCED)
-    edit.post {
-      if (typing) {
-        edit.requestFocus()
-        @Suppress("DEPRECATION")
-        inputMethods()?.showSoftInput(edit, InputMethodManager.SHOW_FORCED)
-      }
-    }
-    tellPage(true)
-    flashLabelWith("Type or hold 🎤  ·  OK sends it to the desktop  ·  Back cancels")
-  }
-
-  /**
-   * Take the keyboard away — and, if the phrase was finished rather than
-   * abandoned, hand it to the page for the desktop.
-   */
-  fun stopTyping(send: Boolean) {
-    if (!typing) return
-    typing = false
-    val edit = field
-    val text = edit?.text?.toString() ?: ""
-    activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
-    inputMethods()?.hideSoftInputFromWindow(edit?.windowToken, 0)
-    edit?.setText("")
-    edit?.clearFocus()
-    fieldRow?.visibility = View.GONE
-    // The wall gets the focus back, or the next arrow goes nowhere at all.
-    forge.requestFocus()
-    tellPage(false)
-    if (send && text.isNotEmpty()) typeOnDesktop(text)
-  }
-
-  private fun inputMethods(): InputMethodManager? =
-    activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-
-  /**
-   * Hand the phrase to the page, which sends it to the desktop.
-   *
-   * `JSONObject.quote` and not interpolation, and this is the call site that
-   * makes the rule in `pressInPage` real: this string was typed or dictated by
-   * a person, so it is the one thing reaching `evaluateJavascript` that could
-   * otherwise end a literal and keep going.
-   */
-  private fun typeOnDesktop(text: String) {
-    val trimmed = if (text.length > MAX_TEXT_CHARS) text.substring(0, MAX_TEXT_CHARS) else text
-    forge.evaluateJavascript(
-      "window.dispatchEvent(new CustomEvent('$TV_TYPED_EVENT'," +
-        "{detail:${JSONObject.quote(trimmed)}}))",
-      null
-    )
-  }
-
-  /** Tell the page the keyboard opened or closed, so its hint line is true. */
-  private fun tellPage(on: Boolean) {
-    forge.evaluateJavascript(
-      "window.dispatchEvent(new CustomEvent('$TV_TYPING_EVENT',{detail:$on}))",
-      null
-    )
-  }
-
-  /**
-   * The field and, where the device has a recogniser, a microphone beside it.
-   *
-   * Built once and kept. Sized and coloured like the wall rather than like an
-   * Android form: this appears over a picture of somebody's desktop, and the
-   * only thing on screen that should look like the desktop is the desktop.
-   */
-  private fun buildField(): LinearLayout {
-    val row = LinearLayout(activity)
-    row.orientation = LinearLayout.HORIZONTAL
-    row.gravity = Gravity.CENTER_VERTICAL
-    val back = GradientDrawable()
-    back.cornerRadius = dp(12).toFloat()
-    back.setColor(TOAST_BACK)
-    back.setStroke(dp(2), LIT)
-    row.background = back
-    row.setPadding(dp(14), dp(10), dp(14), dp(10))
-
-    val edit = EditText(activity)
-    edit.setSingleLine(true)
-    edit.inputType = InputType.TYPE_CLASS_TEXT
-    edit.imeOptions = EditorInfo.IME_ACTION_DONE
-    edit.hint = "Type for the desktop"
-    edit.setHintTextColor(UNLIT_TEXT)
-    edit.setTextColor(LIT)
-    edit.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
-    edit.background = null
-    edit.setPadding(dp(4), dp(4), dp(4), dp(4))
-    // Done on the keyboard, and OK on the remote, are the same press: both are
-    // "I have finished saying it". The remote's OK arrives as an Enter on a
-    // single-line field, which Android reports as the IME action.
-    edit.setOnEditorActionListener { _, actionId, keyEvent ->
-      val done = actionId == EditorInfo.IME_ACTION_DONE ||
-        actionId == EditorInfo.IME_ACTION_GO ||
-        actionId == EditorInfo.IME_ACTION_SEND ||
-        (keyEvent != null && keyEvent.action == KeyEvent.ACTION_DOWN &&
-          (keyEvent.keyCode == KeyEvent.KEYCODE_ENTER || keyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER))
-      if (done) stopTyping(send = true)
-      done
-    }
-    field = edit
-    row.addView(edit, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-
-    if (canRecogniseSpeech()) {
-      val mic = TextView(activity)
-      mic.text = "🎤"
-      mic.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
-      mic.setPadding(dp(14), dp(4), dp(4), dp(4))
-      mic.setTextColor(LIT)
-      mic.isFocusable = true
-      mic.setOnClickListener { listen() }
-      voiceButton = mic
-      row.addView(mic)
-    }
-
-    root.addView(row, fieldLayout())
-    row.visibility = View.GONE
-    return row
-  }
-
-  private fun fieldLayout(): FrameLayout.LayoutParams {
-    val params = FrameLayout.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT,
-      ViewGroup.LayoutParams.WRAP_CONTENT,
-      Gravity.TOP
-    )
-    // Along the top, because Fire OS puts its keyboard along the bottom and a
-    // field underneath its own keyboard is a field nobody can read.
-    params.topMargin = dp(24)
-    params.leftMargin = dp(24)
-    params.rightMargin = dp(24)
-    return params
-  }
-
-  /**
-   * Does this device have anything that turns speech into text?
-   *
-   * Asked rather than assumed, and it is the reason the microphone is
-   * conditional. A Fire Stick may have no `RecognitionService` at all — Amazon's
-   * voice belongs to Alexa and is not offered through Android's recogniser
-   * intent — and a button that opens nothing is worse than no button, because
-   * it is the button somebody presses when the remote's own mic did not work.
-   */
-  private fun canRecogniseSpeech(): Boolean = try {
-    activity.packageManager
-      .queryIntentActivities(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH), 0)
-      .isNotEmpty()
-  } catch (err: Exception) {
-    false
-  }
-
-  /** Ask Android to listen, and put whatever it heard into the field. */
-  private fun listen() {
-    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-    intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-    intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Say it for the desktop")
-    try {
-      activity.startActivityForResult(intent, SPEECH_REQUEST)
-    } catch (err: Exception) {
-      flashLabelWith("This television has no dictation to offer")
-    }
-  }
-
-  /**
-   * The recogniser answered. Put its best guess in the field rather than
-   * sending it: dictation mishears, and the one press between "what it heard"
-   * and "what lands on the desk" is the whole of the correction anybody gets.
-   */
-  fun onSpeechResult(requestCode: Int, resultCode: Int, data: Intent?) {
-    if (requestCode != SPEECH_REQUEST) return
-    if (resultCode != android.app.Activity.RESULT_OK || data == null) return
-    val heard = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return
-    val edit = field ?: return
-    edit.setText(heard)
-    edit.setSelection(heard.length)
-    edit.requestFocus()
   }
 
   /**
@@ -1316,15 +977,6 @@ class TvPanels(private val activity: MainActivity, private val forge: WebView) {
           }
 
           "control" -> setControlling(event.optBoolean("on", false))
-
-          // A click landed on the desktop, so the keyboard is offered. Guarded
-          // by `autoType` rather than obeyed blindly: this arrives after every
-          // click, and somebody clicking their way around a desk rather than
-          // filling a form wants to be able to turn it off. Holding ▶❚❚ is how.
-          "keyboard" -> {
-            val on = event.optBoolean("on", false)
-            if (!on) stopTyping(send = false) else if (autoType) startTyping()
-          }
         }
       }
     }
@@ -1412,21 +1064,6 @@ class TvPanels(private val activity: MainActivity, private val forge: WebView) {
 
     /** The event the web layer listens for. mobile/src/lib/tv-bridge.ts. */
     const val TV_FOUND_EVENT = "forge:tv-found"
-
-    /** A finished phrase, on its way to the desktop. Same file, same seam. */
-    const val TV_TYPED_EVENT = "forge:tv-typed"
-
-    /** The keyboard opened or closed, so the wall's hint line can say so. */
-    const val TV_TYPING_EVENT = "forge:tv-typing"
-
-    /** MAX_TEXT_CHARS in shared/mobile.ts, which trims to the same length. */
-    const val MAX_TEXT_CHARS = 240
-
-    /** Which `startActivityForResult` is the recogniser's. Nothing else uses one. */
-    const val SPEECH_REQUEST = 4021
-
-    /** Dimmer than LIT, for a hint inside a field nobody has typed in yet. */
-    const val UNLIT_TEXT = 0xFF6B7280.toInt()
 
     /** See the user-agent note in this class's own doc comment. */
     const val YOUTUBE_UA =
