@@ -34,7 +34,7 @@
  * itself.
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   DIST_APK,
@@ -112,6 +112,42 @@ try {
   process.exit(1)
 }
 
+/* A brand-new repo has no commits, and GitHub will not hang a release tag on
+ * nothing — it answers "Repository is empty" after the upload has been
+ * attempted, which reads like a broken script rather than a first run. Seeding
+ * one README is the whole fix, and it is also the page anybody who follows the
+ * download URL back to its source will land on. */
+let empty = false
+try {
+  capture('gh', ['api', `repos/${TV_RELEASE_REPO}/commits`, '--jq', 'length'], {
+    stdio: ['ignore', 'pipe', 'ignore']
+  })
+} catch {
+  empty = true
+}
+if (empty) {
+  console.log(`${TV_RELEASE_REPO} has no commits yet — writing a README so releases have something to tag.`)
+  const readme = [
+    '# Forge TV releases',
+    '',
+    'Signed builds of the Forge Fire TV app, and nothing else. The source lives in',
+    '[stevenmcginty/forge](https://github.com/stevenmcginty/forge).',
+    '',
+    'This app has **no desktop address inside it**: on first run it asks the local',
+    'network which Forge is there and lists what answers. Nothing here is meant to',
+    'be downloaded by hand — Forge on the desktop fetches it, checks it against the',
+    'SHA-256 published beside it, and serves it to the television.',
+    ''
+  ].join('\n')
+  run('gh', [
+    'api',
+    `repos/${TV_RELEASE_REPO}/contents/README.md`,
+    '-X', 'PUT',
+    '-f', 'message=Forge TV releases',
+    '-f', `content=${Buffer.from(readme, 'utf8').toString('base64')}`
+  ])
+}
+
 let tagExists = false
 try {
   capture('gh', ['release', 'view', tag, '-R', TV_RELEASE_REPO, '--json', 'tagName'], {
@@ -132,9 +168,20 @@ if (tagExists) {
 
 /* -------------------------------------------------------------- 4. publish
  *
- * The APK is uploaded under the name the desktop serves it as, which is not
- * the name it was built under — `gh` takes `path#name` for exactly this.
+ * The asset has to *be* called forge-tv.apk, because that is the name the
+ * manifest's pinned URL asks for. GitHub takes the uploaded file's own name and
+ * `gh`'s `path#label` sets only the display label — verified the hard way, with
+ * a release whose one asset was called forge-tv-shared.apk and a manifest
+ * pointing at a 404. So the file is copied under the published name first,
+ * into a directory of its own: dist-apk/forge-tv.apk is this machine's *local*
+ * TV app, addressed to this desktop, and must not be overwritten by the shared
+ * one on its way out of the door.
  */
+
+const outbox = join(DIST_APK, 'publish')
+mkdirSync(outbox, { recursive: true })
+const asset = join(outbox, TV_APK_ASSET)
+copyFileSync(shared, asset)
 
 console.log(`Publishing ${tag} to github.com/${TV_RELEASE_REPO} …`)
 run('gh', [
@@ -142,7 +189,7 @@ run('gh', [
   '-R', TV_RELEASE_REPO,
   '--title', `Forge TV ${version.versionName}`,
   '--notes', manifest.notes,
-  `${shared}#${TV_APK_ASSET}`,
+  asset,
   manifestPath
 ])
 
