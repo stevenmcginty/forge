@@ -9,7 +9,7 @@ import { startPointer } from '../lib/pointer'
 import type { PointerHandle, PointerMode } from '../lib/pointer'
 import { tvBridge } from '../lib/tv-bridge'
 import { formatBytes } from '../lib/manifest'
-import { download as downloadUpdate, install as installUpdate, updateStore } from '../lib/update'
+import { CURRENT_VERSION_NAME, download as downloadUpdate, install as installUpdate, updateStore } from '../lib/update'
 import type { UpdateState } from '../lib/update'
 import { leavesOf } from './Browser'
 import { paneListeners } from './PaneView'
@@ -691,8 +691,16 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
     <div className="tv">
       <header className="tv-head">
         <strong className="tv-mark">Forge</strong>
+        {/* Two versions, each labelled, because an unlabelled one is the
+            desktop's and the question people actually have is about this
+            television. "Is the app on the Fire Stick the one that updates
+            itself?" had no answer on this screen at all — the header showed
+            the desktop's number, which reads exactly like the TV's until it
+            matters. Nothing else on the wall can settle it: an app too old to
+            update itself and an app already up to date both show no update
+            row, for opposite reasons. */}
         <span className="tv-head-meta">
-          v{picture.appVersion} · {picture.projects.length}{' '}
+          Desktop v{picture.appVersion} · TV {CURRENT_VERSION_NAME} · {picture.projects.length}{' '}
           {picture.projects.length === 1 ? 'project' : 'projects'} · {live.size} live
         </span>
         <span className="tv-head-spring" />
