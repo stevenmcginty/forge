@@ -11,6 +11,7 @@ import {
   MOBILE_PORT,
   pairLink,
   type HelloOkFrame,
+  type MirrorInput,
   type OpFrame
 } from '@shared/mobile'
 import type {
@@ -24,6 +25,7 @@ import type {
 } from '@shared/types'
 import { MobileAuth, PAIR_TTL_MS } from './mobile/auth'
 import { DiscoveryResponder } from './mobile/discovery'
+import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
 import { MobileServer, TV_APK_PATH, type MobileApprovalAsk } from './mobile/server'
 import { NgrokTunnel, ensureNgrokExe, pairEndpoint, resolveNgrokExe } from './mobile-tunnel'
 import {
@@ -363,6 +365,62 @@ function startMirror(): string | null {
   return null
 }
 
+/* ------------------------------------------------- driving from the sofa
+ *
+ * The mirror pointing back the other way: the remote's D-pad as this desktop's
+ * mouse. Everything above this comment ends inside Forge; this ends at the
+ * operating system, so it is gated twice — once by a setting that is off until
+ * somebody switches it on, and once by the server, which only accepts these
+ * frames from the socket that is currently watching the screen.
+ *
+ * Both gates are read per event, never captured. Switching control off while
+ * somebody is holding the remote stops the next click, not the next session.
+ */
+
+/** Is the television allowed to touch this machine, right now? */
+function canControl(): boolean {
+  return canDriveDesktop() && getSettings().mobileControlEnabled
+}
+
+/**
+ * A fraction of the mirrored screen, as a physical pixel on it.
+ *
+ * Three coordinate systems meet here and none of them is the television's.
+ * `mirrorSource` captures the *primary* display, so that display's bounds are
+ * what a 0..1 pair is a fraction of; Electron reports those bounds in
+ * device-independent pixels, and `SetCursorPos` wants real ones, which on a
+ * screen at 150% is a different number. `dipToScreenPoint` is the conversion,
+ * and it is Windows-only — which is fine, because so is the whole feature.
+ *
+ * Clamped one pixel inside the far edges: a fraction of exactly 1 lands on the
+ * first pixel of the next monitor on a multi-display desk.
+ */
+function pointFor(x: number, y: number): { x: number; y: number } {
+  const bounds = screen.getPrimaryDisplay().bounds
+  const dip = {
+    x: Math.round(bounds.x + x * Math.max(0, bounds.width - 1)),
+    y: Math.round(bounds.y + y * Math.max(0, bounds.height - 1))
+  }
+  return screen.dipToScreenPoint(dip)
+}
+
+/**
+ * Perform one input, or refuse it.
+ *
+ * `false` is the answer the television is told about — see the `mirror-input`
+ * case in electron/mobile/server.ts, which turns it into one refusal rather
+ * than a silence the sofa has to interpret. A pointer that moves on the
+ * television and nowhere else is the failure this exists to prevent.
+ */
+function applyInput(input: MirrorInput): boolean {
+  if (!canControl()) return false
+  // A key stroke has no position; `pointFor` is asked anyway so the helper's
+  // grammar stays one shape, and the coordinates are ignored for a `k` line.
+  const at = input.a === 'key' ? { x: 0, y: 0 } : pointFor(input.x, input.y)
+  driveDesktop(input, at)
+  return true
+}
+
 /* ------------------------------------------------------ accept new phones
  *
  * The tap-to-pair window. Armed = `mobileAcceptUntil` holds a deadline in the
@@ -510,7 +568,16 @@ async function start(): Promise<void> {
     cancelApproval,
     mirrorStart: startMirror,
     mirrorSignal: (data) => sendMirror({ kind: 'signal', data }),
-    mirrorStop: () => sendMirror({ kind: 'stop' }),
+    mirrorStop: () => {
+      // The helper is torn down with the picture. It costs half a second to
+      // start and nothing to keep, but a PowerShell process outliving the
+      // television that needed it is the kind of thing people find in a task
+      // manager and reasonably worry about.
+      stopDesktopInput()
+      sendMirror({ kind: 'stop' })
+    },
+    mirrorControl: canControl,
+    mirrorInput: applyInput,
     ...(mobileWebRoot() ? { webRoot: mobileWebRoot() } : {}),
     // A thunk, not a path: the APK appears while the server is running, and a
     // path resolved here would 404 until the next restart.
@@ -1019,6 +1086,10 @@ export function registerMobileHandlers(): void {
 /** Called on boot and whenever settings change, exactly like the Companion. */
 export function applyMobileSettings(): void {
   const enabled = getSettings().mobileEnabled
+  // Turning the remote's cursor off closes the helper that performs it, rather
+  // than leaving a process alive that every subsequent event is refused by.
+  // `applyInput` is what actually enforces the setting; this is hygiene.
+  if (!enabled || !getSettings().mobileControlEnabled) stopDesktopInput()
   if (enabled && !server) {
     void start().then(() => report())
     return
@@ -1030,8 +1101,10 @@ export function applyMobileSettings(): void {
 
 export async function disposeMobile(): Promise<void> {
   // A Gradle assemble outliving the app that asked for it would hold the build
-  // lock against the next launch.
+  // lock against the next launch, and the input helper is a child process with
+  // the same rule.
   disposeTvBuild()
+  stopDesktopInput()
   for (const [, pending] of pendingOps) {
     clearTimeout(pending.timer)
     pending.resolve('Forge is shutting down.')

@@ -5,6 +5,9 @@ import type { MobileSession } from '@shared/mobile'
 import type { Link, LinkPicture, LinkState } from '../lib/link'
 import { mirrorListeners, startMirrorViewer } from '../lib/mirror'
 import type { DesktopStats, MirrorViewer, ScreenStats } from '../lib/mirror'
+import { startPointer } from '../lib/pointer'
+import type { PointerHandle, PointerMode } from '../lib/pointer'
+import { tvBridge } from '../lib/tv-bridge'
 import { leavesOf } from './Browser'
 import { paneListeners } from './PaneView'
 import { TvMenu } from './TvMenu'
@@ -127,6 +130,16 @@ const MENU_ID = String.fromCharCode(0) + 'menu'
  * before saying so is cheaper than declaring a live desktop dead.
  */
 const MIRROR_WAIT_MS = 10_000
+
+/**
+ * How long the line explaining the pointer's buttons stays up.
+ *
+ * The same bargain the native layer's mode label makes (see `LABEL_MS` in
+ * MainActivity.kt), and a little longer because there is more of it to read:
+ * long enough to learn a grammar nobody has been told, short enough that it is
+ * gone before it becomes a bar across somebody's desktop.
+ */
+const HINT_MS = 6_000
 
 /**
  * PTY bytes → words. CSI, OSC, the DCS family and lone escapes go first, then
@@ -627,6 +640,7 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
       ) : zoom?.at === 'mirror' ? (
         <TvMirrorView
           link={link}
+          canControl={picture.canControl}
           onClose={() => setZoom(null)}
           onSilent={mirrorWentSilent}
           onAlive={mirrorCameAlive}
@@ -1065,11 +1079,18 @@ type Phase = { at: 'connecting' } | { at: 'live' } | { at: 'ended'; reason: stri
  */
 function TvMirrorView({
   link,
+  canControl,
   onClose,
   onSilent,
   onAlive
 }: {
   link: Link
+  /**
+   * Whether the desktop will act on a pointer at all — its own switch, read at
+   * hello (see LinkPicture). False hides every trace of the cursor rather than
+   * offering one that would move here and nowhere else.
+   */
+  canControl: boolean
   onClose: () => void
   /** Nobody answered the watch request — the wall's tile should say so too. */
   onSilent: () => void
@@ -1113,6 +1134,29 @@ function TvMirrorView({
    * deserves the deadline below.
    */
   const [heard, setHeard] = useState(false)
+
+  /* ----------------------------------------------------- driving the desk
+   *
+   * Watching and driving are two modes of one screen, and OK is the door
+   * between them. Not a permanent state: a remote whose arrows always moved a
+   * pointer would have no way left to open the numbers overlay or leave, and a
+   * television that is *usually* watched should not silently be a mouse.
+   *
+   * The cursor itself is drawn by lib/pointer.ts straight into the node below,
+   * on an animation frame, without going near React — see the note there about
+   * re-rendering a full-screen video sixty times a second.
+   */
+  const [driving, setDriving] = useState(false)
+  /** What the arrows are doing and whether a button is down, for the foot. */
+  const [pointerSays, setPointerSays] = useState<{ mode: PointerMode; holding: boolean }>({
+    mode: 'move',
+    holding: false
+  })
+  /** Whether the line explaining the remote is up. See its effect below. */
+  const [hint, setHint] = useState(false)
+  const stage = useRef<HTMLDivElement | null>(null)
+  const cursor = useRef<HTMLDivElement | null>(null)
+  const pointer = useRef<PointerHandle | null>(null)
 
   // The honest deadline. `mirror-start` is answered within milliseconds by a
   // desktop that can mirror, and by *nothing at all* when Forge there predates
@@ -1207,17 +1251,92 @@ function TvMirrorView({
     }
   }, [hud, attempt])
 
+  // The pointer's whole lifetime. Built when driving starts, torn down when it
+  // stops — and the teardown is what releases a button left held by a
+  // television that was switched off mid-drag, so it must not be conditional
+  // on anything but this effect running.
+  useEffect(() => {
+    if (!driving) return
+    const stageEl = stage.current
+    const cursorEl = cursor.current
+    if (!stageEl || !cursorEl) return
+    // A pointer always starts in the middle, pointing rather than scrolling —
+    // so the words on screen have to start there too, or a mode picked up
+    // again after a scroll would open under last time's sentence.
+    setPointerSays({ mode: 'move', holding: false })
+    const handle = startPointer({
+      stage: stageEl,
+      cursor: cursorEl,
+      send: (frame) => link.sendMirrorInput(frame),
+      onChange: (mode, holding) => setPointerSays({ mode, holding })
+    })
+    pointer.current = handle
+    // The native layer has to stop competing for the same keys: a held Left or
+    // Right is how the remote crosses to the YouTube panel, which is exactly
+    // the press this mode needs for "keep moving left". While the pointer is
+    // running the arrows belong to it, and Menu — normally the panel cycle —
+    // is handed to this page as the scroll toggle. See MainActivity.
+    tvBridge.emit({ kind: 'control', on: true })
+    return () => {
+      tvBridge.emit({ kind: 'control', on: false })
+      pointer.current = null
+      handle.stop()
+    }
+  }, [driving, link])
+
+  // A picture that is no longer live cannot be pointed at. Ending the mode
+  // rather than leaving a cursor over a dead frame: the pointer would still be
+  // sending, and the desktop would still be moving, against a screen showing a
+  // photograph of where things used to be.
+  useEffect(() => {
+    if (phase.at !== 'live' && driving) setDriving(false)
+  }, [phase, driving])
+
+  // The hint's own clock. Re-armed whenever what it says would change — the
+  // mode was picked up, or the arrows swapped between pointing and scrolling —
+  // so the sentence on screen is always the one that is true right now.
+  useEffect(() => {
+    if (!driving) {
+      setHint(false)
+      return
+    }
+    setHint(true)
+    const timer = window.setTimeout(() => setHint(false), HINT_MS)
+    return () => clearTimeout(timer)
+  }, [driving, pointerSays.mode])
+
+  // Losing the keyboard is losing the remote. On the television that happens
+  // when the light crosses to the YouTube panel, which takes the arrows with it
+  // — and it can happen mid-press, so the release of whatever was held never
+  // arrives here. Ending the mode runs the pointer's teardown, and the teardown
+  // is what lifts a mouse button left down on somebody's desk.
+  useEffect(() => {
+    if (!driving) return
+    const stop = (): void => setDriving(false)
+    window.addEventListener('blur', stop)
+    return () => window.removeEventListener('blur', stop)
+  }, [driving])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      // Back returns to the wall, and OK asks again once there is nothing left
-      // to watch — the only two verbs this surface has. While the picture is
-      // live or still connecting, OK does nothing: a press that restarted a
-      // working mirror would be a screen that flickers for no reason.
+      // Back is the one key that means the same thing in both modes and is
+      // read first in both: it steps out. Out of the pointer if it is running,
+      // out of the mirror if it is not — one press, one level, never two at
+      // once, because a remote with no undo should not skip a floor.
       if (event.key === 'Escape') {
         event.preventDefault()
-        onClose()
+        if (driving) setDriving(false)
+        else onClose()
         return
       }
+
+      // While driving, the arrows, OK and Menu belong to the cursor. Anything
+      // it does not claim falls through to the verbs below.
+      if (driving && pointer.current?.key(event.key, true)) {
+        event.preventDefault()
+        return
+      }
+
       // Down opens the measurement overlay and Down closes it. Available in
       // every phase on purpose: a mirror that died of bandwidth is exactly the
       // one whose last numbers are worth reading.
@@ -1227,13 +1346,30 @@ function TvMirrorView({
         return
       }
       if (event.key !== 'Enter') return
-      if (phase.at !== 'ended') return
       event.preventDefault()
-      setAttempt((n) => n + 1)
+      // OK on a dead screen asks again; OK on a live one picks up the pointer,
+      // when the desktop has said it will accept one. A live mirror on a
+      // desktop that has not is the case where OK does nothing at all, and the
+      // line along the bottom is where that is explained rather than here.
+      if (phase.at === 'ended') {
+        setAttempt((n) => n + 1)
+        return
+      }
+      if (phase.at === 'live' && canControl) setDriving(true)
+    }
+    // Releases matter now: a held arrow is a moving cursor, and the keyup is
+    // what stops it. Registered together so neither can outlive the other.
+    const onKeyUp = (event: KeyboardEvent): void => {
+      if (!driving) return
+      if (pointer.current?.key(event.key, false)) event.preventDefault()
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, phase])
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [onClose, phase, driving, canControl])
 
   const dead = phase.at === 'ended'
   // Frames are moving, so the picture takes the whole television. Everything
@@ -1243,7 +1379,7 @@ function TvMirrorView({
   // 55-inch wall is a postcard of a screen rather than the screen.
   const live = phase.at === 'live'
   return (
-    <div className={`tv-mirror${live ? ' is-live' : ''}`}>
+    <div className={`tv-mirror${live ? ' is-live' : ''}${driving ? ' is-driving' : ''}`}>
       <div className="tv-pane-head">
         <span className="tv-pane-context">Desktop</span>
         <strong className="tv-pane-title">The screen</strong>
@@ -1251,7 +1387,7 @@ function TvMirrorView({
         <span className="tv-pane-geom">{phase.at === 'live' ? 'live' : phase.at}</span>
       </div>
 
-      <div className="tv-mirror-stage">
+      <div className="tv-mirror-stage" ref={stage}>
         <video
           className={`tv-mirror-video${dead ? ' is-dead' : ''}`}
           ref={video}
@@ -1273,13 +1409,43 @@ function TvMirrorView({
           </div>
         )}
         {hud && <TvMirrorStats desk={shown?.desk ?? null} screen={shown?.screen ?? null} />}
+        {/* Always mounted while driving, and moved only by transform: the
+            pointer writes to this node on an animation frame, and a node React
+            might replace under it is a cursor that stops when the picture
+            re-renders. The ring is drawn rather than an arrow bitmap so it
+            reads at sofa distance over a busy desktop, and it says which
+            button is down by changing colour, because there is no second
+            cursor to look at. */}
+        {driving && (
+          <div
+            className={`tv-cursor${pointerSays.holding ? ' is-holding' : ''}${
+              pointerSays.mode === 'scroll' ? ' is-scrolling' : ''
+            }`}
+            ref={cursor}
+            aria-hidden="true"
+          />
+        )}
+        {/* The grammar, said over the picture and then taken away.
+            A television has no place to put a manual and the wall's own footer
+            is hidden while the picture is live (it is the picture's screen, not
+            ours) — so this is the only place the six buttons are ever
+            explained. A flash rather than a permanent strip, for the reason the
+            native layer's mode label gives: by the fourth reading it has
+            stopped being help and started being a bar across the desktop. */}
+        {driving && hint && (
+          <div className="tv-drive-hint" role="status">
+            {pointerSays.mode === 'scroll'
+              ? 'Up and Down scroll · Menu returns to the pointer · Back stops driving'
+              : 'D-pad points · OK clicks, hold to drag, hold still to right-click · Menu scrolls · Back stops driving'}
+          </div>
+        )}
       </div>
 
       {/* The same shell as the zoomed pane, on purpose: one head, one well,
           one line at the bottom naming the exits. Two full-screen things that
           framed themselves differently would read as two apps. */}
       <div className="tv-pane-foot">
-        {dead ? 'OK tries again · ' : ''}
+        {dead ? 'OK tries again · ' : live && canControl ? 'OK drives the desktop · ' : ''}
         {hud ? 'Down hides the numbers' : 'Down shows the numbers'} · Back returns to the wall
       </div>
     </div>

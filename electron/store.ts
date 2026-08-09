@@ -252,6 +252,10 @@ function defaultSettings(): Settings {
     mobileTunnel: 'off',
     mobileNgrokAuthtoken: '',
     mobileNgrokDomain: '',
+    // The television watches and cannot touch. Turning this on is the one
+    // switch here that gives something outside Forge a real cursor on this
+    // machine — see the note in shared/types.ts.
+    mobileControlEnabled: false,
     // The Update button types the command and stops. Turning this on is opting
     // in to a settings page that can start an installer with one click.
     updatesAutoRun: false,
@@ -623,6 +627,11 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     mobileTunnel: s.mobileTunnel === 'ngrok' ? 'ngrok' : 'off',
     mobileNgrokAuthtoken: str(s.mobileNgrokAuthtoken),
     mobileNgrokDomain: normaliseNgrokDomain(s.mobileNgrokDomain),
+    // `Boolean` and nothing cleverer, deliberately: the only value that turns
+    // the television's cursor on is a literal `true` written by the switch in
+    // Settings. Every older settings.json, every hand-edit that fat-fingers a
+    // string, and every absent key all mean the same thing here — no.
+    mobileControlEnabled: s.mobileControlEnabled === true,
     // Coerced rather than defaulted, like companionEnabled above: a settings.json
     // written before M10 has no key, and the answer for that file is "no".
     updatesAutoRun: Boolean(s.updatesAutoRun),

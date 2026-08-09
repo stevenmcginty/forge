@@ -43,6 +43,21 @@ export type TvBridgeEvent =
    * because the native layer has no picture to resolve an id against.
    */
   | { kind: 'session-exit'; session: string; exitCode: number }
+  /**
+   * The mirror has picked up a pointer, or put it down.
+   *
+   * The one event that changes what the *remote* means rather than what the
+   * screen shows. While a pointer is running the arrows belong to it, and the
+   * native layer must stop claiming a held Left or Right for its own panel
+   * crossing — that press is "keep moving left" now. Menu goes the other way:
+   * useless to a page in every other state, it becomes the scroll toggle and is
+   * forwarded here instead of cycling the layout.
+   *
+   * Sent on every change rather than assumed, because the two layers can
+   * disagree — a WebView that reloads with the pointer up would otherwise leave
+   * the native side holding a grammar this page has forgotten.
+   */
+  | { kind: 'control'; on: boolean }
 
 /**
  * The other direction: the native layer answering a question this one asked.

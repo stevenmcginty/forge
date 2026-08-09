@@ -2,10 +2,13 @@
 
 Forge TV is the same Forge, on the television: a glanceable wall of every
 project's running sessions, sitting beside YouTube in a native split so the
-TV can play something while the wall keeps working. It is not driven from the
-couch — the phone (or the desktop) still does the typing and the tab-opening;
-the television just shows what is happening and lets a remote zoom into a
-pane or reach for the video next to it.
+TV can play something while the wall keeps working. The phone (or the desktop)
+still does the typing and the tab-opening; the television shows what is
+happening and lets a remote zoom into a pane or reach for the video next to it.
+
+It can also, if you switch it on, drive the desktop's own mouse — the D-pad as
+a pointer over the mirrored screen. That is off by default and section 6 is the
+whole of it.
 
 This file is the whole of getting it onto a Fire TV Stick and keeping it
 there. `docs/MOBILE-SETUP.md` is the phone-side equivalent and worth reading
@@ -118,8 +121,8 @@ Mobile lists it with the phones, and revoking it there is the kill switch.
 
 ## 5. Remote controls
 
-**Current as of tonight's build** — a further control pass is still landing,
-so treat this table as a snapshot rather than a promise.
+What the remote does on the wall and around it. Driving the desktop's own
+pointer is a separate mode with its own grammar — section 6.
 
 | Press | Does |
 | --- | --- |
@@ -131,6 +134,7 @@ so treat this table as a snapshot rather than a promise.
 | Fast Forward | Jump to the YouTube panel |
 | Play / Pause | Controls the YouTube video |
 | Down, while watching **The screen** | Show or hide the mirror's own measurements — see below |
+| OK, while watching **The screen** | Pick up a pointer and drive the desktop — see section 6 |
 
 **Signing in to YouTube** never opens a Google login page on the television —
 the leanback interface offers an **activation code** instead. It shows the
@@ -140,7 +144,65 @@ television with only a D-pad cannot type a password.
 
 ---
 
-## 6. Proving the mirror's picture
+## 6. Driving the desktop from the sofa
+
+The mirror shows the desktop's screen. With one switch it also lets the remote
+*point* at it: the D-pad becomes a mouse, OK becomes the button.
+
+**It is off until you turn it on.** Settings → **Forge Mobile** → the **Forge TV**
+card → **Let the remote drive this desktop**. Everything else the television can
+do ends inside Forge — open a pane, watch a screen, play a video. This one ends
+at Windows: a real cursor, real clicks, on whatever window is under them. While
+it is on, any paired device that can watch the screen can also drive it. Off is
+the right setting for most evenings; it is one switch either way.
+
+With it on, the mirror's footer says **OK drives the desktop**. Press OK on a
+live picture and a volt ring appears — that is the pointer, and it is drawn on
+the television rather than sent from the desk, so it answers the D-pad instantly
+instead of a fifth of a second later.
+
+| Press | Does |
+| --- | --- |
+| D-pad | Moves the pointer. Held, it accelerates — a nudge for a scrollbar, a swipe for the far corner |
+| OK, tapped | Left click. Two quick taps are a double-click |
+| OK, held while moving | Drag: the button goes down when you start moving and up when you let go |
+| OK, held still (0.7s) | Right click |
+| Menu | Swaps the arrows between the pointer and the scroll wheel. The ring turns amber while they are the wheel |
+| Back | Puts the pointer down and goes back to just watching. A second Back returns to the wall |
+| Rewind / Fast-Forward | Still step between the Forge and YouTube panels, which is the way out if anything gets stuck |
+
+The line explaining all of that flashes over the picture whenever you pick the
+pointer up or change what the arrows do, then gets out of the way.
+
+**There is no typing.** The wire carries a closed list of keys — the arrows,
+Enter, Escape, Tab, Backspace, Delete, the page keys, Home, End, Space and the
+Windows key — and no way at all to express arbitrary text. Reaching an app is
+the Windows key and the pointer, not a keyboard nobody has.
+
+**Windows will not let it answer a UAC prompt**, and that is deliberate on
+Windows' part rather than ours: synthetic input from a normal process cannot
+reach an administrator window. The one dialog that exists to prove a human is
+at the desk stays un-clickable from the sofa.
+
+**How it works, in one paragraph.** The television sends fractions, not pixels —
+"the pointer is 25% across and 75% down" — because the desk's resolution is
+unknown here and the encoder rescales the picture anyway. Every click carries
+its own coordinates, so a dropped packet cannot make the next one land in the
+wrong place. On the desktop, `electron/mobile/input.ts` keeps one PowerShell
+process alive with a fifteen-line loop in it and writes it a line per event;
+that loop can move the pointer, press three buttons, turn the wheel and press
+the listed keys, and nothing else. There is no native module, no compiler and no
+build step — see the header of that file for why that is the trade being made.
+
+```
+npm run input:check   # what may be expressed at all, what each input becomes,
+                      # and whether this machine will let a normal process
+                      # reach user32 — without moving your cursor
+```
+
+---
+
+## 7. Proving the mirror's picture
 
 A soft picture on the television has four causes that look identical from the
 sofa, and each wants a different fix. Press **Down** while watching **The
@@ -165,7 +227,7 @@ rather than showing zeroes.
 
 ---
 
-## 7. Giving it to somebody else
+## 8. Giving it to somebody else
 
 Everything above builds a television app for *this* house: the desktop's LAN
 address is baked into the APK, which is exactly what makes it useless to
@@ -227,7 +289,10 @@ find nothing while everything else works.
 | Install fails with a signature error | A copy signed with a different key is already on the device — uninstall it first. Both the phone and TV builds share one release keystore, so a rebuilt TV app should always install over the previous one cleanly. |
 | **The screen** says *the mirror ended* as soon as it opens | Press **OK** on that screen to ask again — it retries in place. Opening a desktop capture can take longer than the television's six-second patience, and the retry is the supported answer. If every attempt ends instantly with the same sentence, the desktop half is what to look at: it is the only end that can refuse, and `npm run mirror:check` is the script that covers it. |
 | The mirror says the desktop *didn't answer* | Forge on the desktop is older than the mirror feature, or its window is closed — a minimised Forge can share its screen, a Forge with no window open cannot. Restart it and try again. |
-| The shared app searches and finds **nothing** | Three things must all be true: Forge is running, its phone link is on (Settings → Forge Mobile), and the television is on the same wifi — not a guest network, which usually blocks devices from seeing each other. If all three hold, the firewall is the next suspect (UDP 8421, see section 7). The **Type the address instead** row works regardless. |
+| The shared app searches and finds **nothing** | Three things must all be true: Forge is running, its phone link is on (Settings → Forge Mobile), and the television is on the same wifi — not a guest network, which usually blocks devices from seeing each other. If all three hold, the firewall is the next suspect (UDP 8421, see section 8). The **Type the address instead** row works regardless. |
+| Pressing **OK** on a live mirror does nothing | The desktop is not offering a pointer. Either **Let the remote drive this desktop** is off (Settings → Forge Mobile → Forge TV), or the desktop is older than the feature. The television reads both the same way and hides the cursor entirely rather than offering one that would move on the wall and nowhere else. It asks again on its next connection, so switch it on at the desk and the television needs a moment — or a Back and another go at the screen — to notice. |
+| The pointer says **not accepting a remote control** | Control was switched off at the desk *while* the television was driving. That is the switch working: it is read on every event, not captured when the mirror started. |
+| The pointer moves but nothing on the desktop responds | Whatever is under it is running as administrator. Windows refuses synthetic input from a normal process to an elevated window, and Forge is not elevated — deliberately, because that is also what keeps a UAC prompt un-clickable from the sofa. |
 | The search lists a desktop as **different Forge version** | The two ends speak different protocol numbers, so pairing would fail at hello. Update the older one — usually the desktop. |
 
 Checks that prove the parts a script can (run from the desktop checkout):
@@ -244,4 +309,7 @@ npm run discovery:check # the "is there a Forge here?" responder against real
 npm run tv-fetch:check  # the downloaded TV app: that nothing failing its size
                         # or SHA-256 is ever put where a television could
                         # install it
+npm run input:check     # the remote-as-a-mouse: what a frame off the wire is
+                        # allowed to express, what each input becomes at
+                        # user32, and whether this machine will perform one
 ```

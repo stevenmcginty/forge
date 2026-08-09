@@ -6,6 +6,7 @@ import {
   type ClientFrame,
   type HelloFrame,
   type HelloOkFrame,
+  type MirrorInputFrame,
   type MobileSession,
   type ServerFrame
 } from '@shared/mobile'
@@ -53,6 +54,16 @@ export interface LinkPicture {
   profiles: AgentProfile[]
   workspaces: Record<string, Workspace>
   sessions: MobileSession[]
+  /**
+   * Whether that desktop will act on `mirror-input` — the remote as a mouse.
+   *
+   * False for every desktop older than the feature and every desktop whose
+   * owner has not switched it on, which are the same thing from here. The TV's
+   * mirror hides the cursor entirely when this is false; offering one and
+   * having it move on the television alone is the failure mode worth designing
+   * out, because from a sofa it is indistinguishable from a broken desktop.
+   */
+  canControl: boolean
 }
 
 export interface LinkHandlers {
@@ -331,6 +342,23 @@ export class Link {
   stopMirror(): void {
     this.mirroring = false
     this.send({ t: 'mirror-stop' })
+  }
+
+  /**
+   * One press, move or turn of the wheel, for the desktop being watched.
+   *
+   * Fire and forget, like `tvPlay`: there is no acknowledgement worth waiting
+   * for at sixty frames a second, and the answer to "did it work" is the
+   * picture on the television a moment later. A refusal — control switched off
+   * at the desk — comes back as an ordinary `err`, on `onNotice`.
+   *
+   * Dropped on the floor when no mirror is running. A pointer event for a
+   * picture that has ended is not something the desktop should be asked to
+   * perform, and this class is the one place that knows the difference.
+   */
+  sendMirrorInput(input: MirrorInputFrame): void {
+    if (!this.mirroring) return
+    this.send(input)
   }
 
   /* -------------------------------------------------------------- internals */
@@ -677,7 +705,11 @@ function pictureOf(frame: HelloOkFrame): LinkPicture {
     projects: frame.projects,
     profiles: frame.profiles,
     workspaces: frame.workspaces,
-    sessions: frame.sessions
+    sessions: frame.sessions,
+    // `=== true` and nothing looser. This decides whether a screen offers to
+    // drive somebody's desktop, and the only value that should reach it is a
+    // desktop that said so in as many words.
+    canControl: frame.canControl === true
   }
 }
 

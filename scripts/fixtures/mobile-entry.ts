@@ -12,4 +12,4 @@ export { PtySessionManager } from '../../electron/pty/session-manager'
 // Re-exported so the checks use exactly the shipped values rather than a
 // number that could drift from them: the approval window, and the screen
 // mirror's signalling payload cap.
-export { ACCEPT_WINDOW_MS, MAX_SIGNAL_CHARS } from '../../shared/mobile'
+export { ACCEPT_WINDOW_MS, MAX_INPUT_PER_SECOND, MAX_SIGNAL_CHARS } from '../../shared/mobile'

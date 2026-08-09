@@ -151,6 +151,34 @@ class MainActivity : BridgeActivity() {
     // long it is held for.
     val held = down && event.repeatCount == HOLD_REPEATS
 
+    // The wall is driving the desktop's mouse, so the D-pad is a mouse and not
+    // a navigation ring. Every key goes to the page untouched except the two
+    // transport buttons below, which are the way out of a mode whose own keys
+    // are all spoken for. See `controlling` and the 'control' event in
+    // mobile/src/lib/tv-bridge.ts.
+    if (split.controlling && !split.youtubeIsLit) {
+      when (event.keyCode) {
+        KeyEvent.KEYCODE_MEDIA_REWIND -> {
+          if (tap) split.step(towardYouTube = false)
+          return true
+        }
+        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+          if (tap) split.step(towardYouTube = true)
+          return true
+        }
+        // Menu is the one button the pointer wants and cannot otherwise have:
+        // six keys reach the page and all six are already spoken for, so the
+        // scroll toggle has to come from somewhere the page never sees. Handed
+        // over as ContextMenu, which is what a WebView calls this key.
+        KeyEvent.KEYCODE_MENU -> {
+          if (event.action == KeyEvent.ACTION_UP) split.pressInPage("ContextMenu")
+          return true
+        }
+      }
+      if (isRemoteKey(event.keyCode)) return split.route(event)
+      return super.dispatchKeyEvent(event)
+    }
+
     when (event.keyCode) {
       KeyEvent.KEYCODE_MENU -> {
         // On the up stroke, so holding the button does not run the whole cycle.
@@ -373,6 +401,24 @@ class TvPanels(private val activity: MainActivity, private val forge: WebView) {
   private var mode = TvMode.FORGE_SPLIT
   /** Whether the YouTube WebView is currently stopped. See `quieten`. */
   private var youtubeQuiet = false
+
+  /**
+   * Is the wall driving the desktop's pointer right now?
+   *
+   * Told by the page, on both edges (see the 'control' event in
+   * mobile/src/lib/tv-bridge.ts). It changes what the remote means: a held Left
+   * or Right stops crossing between the panels — that press is the cursor
+   * moving — and Menu stops cycling the layout so the pointer can use it to
+   * toggle scrolling.
+   *
+   * Deliberately *not* cleared when YouTube takes the light — it is ignored
+   * instead (see the guard in dispatchKeyEvent). Clearing it would leave the
+   * two layers disagreeing the moment the wall was lit again: this side back to
+   * cycling panels, the page still holding a cursor. The page owns this fact
+   * and says when it changes; this side only ever repeats it.
+   */
+  var controlling = false
+    private set
   /** Whether YouTube's sound is off. Survives navigation; see `applyMute`. */
   private var muted = false
 
@@ -458,6 +504,28 @@ class TvPanels(private val activity: MainActivity, private val forge: WebView) {
    * same fact rather than two hopes.
    */
   fun route(event: KeyEvent): Boolean = (if (youtubeIsLit) youtube else forge).dispatchKeyEvent(event)
+
+  /**
+   * Press a key inside the wall's page that no remote can send it.
+   *
+   * One `keydown`, dispatched on `window` where the dashboard's own listeners
+   * are. Quoted rather than interpolated at the call site would be safer still,
+   * but the only caller passes a constant from this file — the day that stops
+   * being true, this needs `JSONObject.quote` around it, exactly like
+   * `searchForDesktops` does with what it collects off the network.
+   */
+  fun pressInPage(key: String) {
+    forge.evaluateJavascript(
+      "window.dispatchEvent(new KeyboardEvent('keydown'," +
+        "{key:'$key',code:'$key',bubbles:true,cancelable:true}))",
+      null
+    )
+  }
+
+  /** The page picked the pointer up, or put it down. See `controlling`. */
+  fun setControlling(on: Boolean) {
+    controlling = on
+  }
 
   /**
    * Back, while YouTube is lit: the page first, its history second, and only
@@ -902,6 +970,8 @@ class TvPanels(private val activity: MainActivity, private val forge: WebView) {
             val code = event.optInt("exitCode", 0)
             announce(if (code == 0) "$session finished" else "$session exited · code $code")
           }
+
+          "control" -> setControlling(event.optBoolean("on", false))
         }
       }
     }

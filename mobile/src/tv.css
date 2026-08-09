@@ -637,6 +637,126 @@
   color: var(--dim);
 }
 
+/* The picture is being driven, not merely watched.
+
+   A hairline inside the stage rather than a badge, because the header and
+   footer are both hidden while the picture is live — the screen belongs to the
+   desktop then, and a bar across it to say so would be taking back what the
+   full-bleed rule above just gave. An inset stroke costs no pixels of picture
+   and is unmistakable from a sofa: this state moves somebody's real cursor, so
+   it should never be a state you are in without knowing. */
+.tv-mirror.is-driving .tv-mirror-stage {
+  box-shadow: inset 0 0 0 calc(var(--u) * 3) var(--volt);
+}
+
+/* --------------------------------------------------------------- the pointer
+
+   The D-pad as a mouse, drawn on this end. It has to be *this* end: the
+   desktop's own cursor arrives inside the video about 150ms late, and a
+   pointer that lags the button pressing it is one you hunt with rather than
+   aim with. So the ring below is the honest cursor and the desk's arrow is its
+   echo, usually a frame or two behind it.
+
+   A ring, not an arrow. Three metres from a 1080p panel, a 12px arrow over a
+   screenshot of a desktop full of 12px arrows is invisible; a hollow volt
+   circle with a dark halo is findable over anything, and being hollow it does
+   not hide the thing it is pointing at. The dot in the middle is the hotspot —
+   the ring is a finder, the dot is the pixel that gets clicked, and without it
+   people aim with the edge.
+
+   Positioned entirely by `transform`, written by lib/pointer.ts on an
+   animation frame. `left`/`top` would invalidate layout sixty times a second
+   over a playing video, on a device with one small processor. */
+.tv-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(var(--u) * 34);
+  height: calc(var(--u) * 34);
+  /* Centred on its own coordinates: the position from the pointer is where the
+     click lands, not where the box's corner goes. */
+  margin: calc(var(--u) * -17) 0 0 calc(var(--u) * -17);
+  border: calc(var(--u) * 3) solid var(--volt);
+  border-radius: 50%;
+  /* Dark ring outside the bright one, so the cursor survives landing on a
+     white document — the one background a volt circle would otherwise vanish
+     into at this distance. */
+  box-shadow: 0 0 0 calc(var(--u) * 2) rgb(0 0 0 / 0.75), 0 0 calc(var(--u) * 18) rgb(198 255 74 / 0.45);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.tv-cursor::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--u) * 6);
+  height: calc(var(--u) * 6);
+  margin: calc(var(--u) * -3) 0 0 calc(var(--u) * -3);
+  background: var(--volt);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.8);
+}
+
+/* A button is down. Filled rather than merely recoloured, because "am I
+   dragging" is a question asked while looking at what is being dragged, in the
+   corner of the eye. */
+.tv-cursor.is-holding {
+  background: rgb(198 255 74 / 0.28);
+}
+
+/* The arrows are the wheel now. Warn rather than volt: it is the one pointer
+   state where pressing Up does not move the pointer, and a colour that says
+   "this is not the mode you think" is worth more than a prettier one. */
+.tv-cursor.is-scrolling {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 calc(var(--u) * 2) rgb(0 0 0 / 0.75), 0 0 calc(var(--u) * 18) rgb(255 176 32 / 0.45);
+}
+
+.tv-cursor.is-scrolling::after {
+  background: var(--warn);
+}
+
+/* The grammar, flashed over the picture when the pointer is picked up and
+   whenever the arrows change meaning. Bottom-centre and narrow: the wall's own
+   footer is hidden while the picture is live, and the bottom of a desktop is
+   the taskbar, which is the least costly strip of somebody else's screen to
+   cover for six seconds. */
+.tv-drive-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--u) * 36);
+  transform: translateX(-50%);
+  max-width: 86%;
+  padding: calc(var(--u) * 14) calc(var(--u) * 28);
+  font-size: calc(var(--u) * 24);
+  color: var(--ink);
+  background: rgb(12 14 18 / 0.92);
+  border: 1px solid var(--volt);
+  border-radius: calc(var(--u) * 999);
+  box-shadow: 0 calc(var(--u) * 20) calc(var(--u) * 56) rgb(0 0 0 / 0.7);
+  text-align: center;
+  animation: tv-hint-in 0.25s ease both;
+}
+
+@keyframes tv-hint-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(var(--u) * 10));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-drive-hint {
+    animation: none;
+  }
+}
+
 /* ------------------------------------------------------- the mirror's numbers
 
    The measurement overlay, on Down. Bottom-left rather than centred, because

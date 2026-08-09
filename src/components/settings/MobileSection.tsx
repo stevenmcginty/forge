@@ -479,7 +479,15 @@ export function MobileSection(): ReactNode {
         )}
       </Card>
 
-      <ForgeTvCard tv={tv} copied={copied} onBuild={buildTv} onFetch={fetchTv} onCopy={copyUrl} />
+      <ForgeTvCard
+        tv={tv}
+        copied={copied}
+        control={state.settings.mobileControlEnabled}
+        onControl={(on) => actions.patchSettings({ mobileControlEnabled: on })}
+        onBuild={buildTv}
+        onFetch={fetchTv}
+        onCopy={copyUrl}
+      />
     </Section>
   )
 }
@@ -510,12 +518,16 @@ export function MobileSection(): ReactNode {
 function ForgeTvCard({
   tv,
   copied,
+  control,
+  onControl,
   onBuild,
   onFetch,
   onCopy
 }: {
   tv: ForgeTvStatus | null
   copied: string
+  control: boolean
+  onControl: (on: boolean) => void
   onBuild: () => Promise<void>
   onFetch: () => Promise<void>
   onCopy: (url: string) => Promise<void>
@@ -581,6 +593,24 @@ function ForgeTvCard({
           </div>
         </Row>
       )}
+
+      {/* The one switch on this page that reaches past Forge.
+          Everything else the television can do ends inside this app — open a
+          pane, watch a screen, play a video — and is bounded by what Forge
+          itself can do. This hands a device in another room a real mouse on
+          this machine, so it is worded as what it *is* rather than as a
+          feature, and it sits below the install rows because nobody should
+          meet it before they have a television at all. */}
+      <Row
+        label="Let the remote drive this desktop"
+        hint={
+          control
+            ? 'On. While the television is watching the screen, OK picks up a pointer — the D-pad moves it, OK clicks. Windows still refuses anything asking for administrator rights, so a UAC prompt cannot be answered from the sofa.'
+            : 'Off. The television can watch this screen but not touch it. Turning this on lets any paired device drive the mouse and keyboard while it is mirroring.'
+        }
+      >
+        <Toggle checked={control} onChange={onControl} label="Let the remote drive this desktop" />
+      </Row>
 
       {tv.detail && <p className={tv.phase === 'error' ? 'mobile-error' : 'scard__hint'}>{tv.detail}</p>}
       {have && !tv.url && (

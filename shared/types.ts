@@ -1694,6 +1694,24 @@ export interface Settings {
    * up on a command line.
    */
   mobileNgrokDomain: string
+  /**
+   * May a paired television drive this desktop's mouse and keyboard?
+   *
+   * Off by default, and the default is the important part. Everything else on
+   * the mobile link ends inside Forge — a pane, a tab, a project, a video — and
+   * is bounded by what Forge itself can do. This one ends at the operating
+   * system: a real cursor, real clicks, on whatever window happens to be under
+   * them. Switched on, anything holding a paired device token on this network
+   * can operate the machine.
+   *
+   * So it is a deliberate act with a narrow purpose — the Fire TV remote's
+   * D-pad as a pointer on the screen it is already mirroring — and it is read
+   * on every single input frame rather than captured when a mirror starts.
+   * Turning it off while somebody is watching stops the next event, not the
+   * next session. See the input block in shared/mobile.ts for what can be
+   * expressed at all, and electron/mobile/input.ts for what performs it.
+   */
+  mobileControlEnabled: boolean
 
   /* ------------------------------------------------ updates & tools (M10) */
   /**

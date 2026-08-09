@@ -118,6 +118,7 @@ async function main() {
     isAllowedSource,
     resolveWithin,
     ACCEPT_WINDOW_MS,
+    MAX_INPUT_PER_SECOND,
     MAX_SIGNAL_CHARS
   } = await import(pathToFileURL(join(scratch, 'mobile.mjs')).href)
 
@@ -577,7 +578,10 @@ async function main() {
   const mirrorStarts = []
   const mirrorSignals = []
   const mirrorStops = []
+  const inputs = []
   let mirrorStartReturn = null
+  /** Stands in for `mobileControlEnabled`, flipped by the checks in phase E. */
+  let controlAllowed = false
   const authD = new MobileAuth(store)
   const serverD = new MobileServer({
     auth: authD,
@@ -593,7 +597,17 @@ async function main() {
       return mirrorStartReturn
     },
     mirrorSignal: (data) => mirrorSignals.push(data),
-    mirrorStop: () => mirrorStops.push(true)
+    mirrorStop: () => mirrorStops.push(true),
+    // The desktop's own two answers, exactly as electron/mobile-host.ts gives
+    // them: may anybody drive at all, and here is one input to perform. Both
+    // read the flag per call, because that is what makes switching control off
+    // stop the *next* event rather than the next session.
+    mirrorControl: () => controlAllowed,
+    mirrorInput: (input) => {
+      if (!controlAllowed) return false
+      inputs.push(input)
+      return true
+    }
   })
   active = serverD
   await serverD.start({ host: '127.0.0.1', port: PORT })
@@ -734,6 +748,124 @@ async function main() {
   await waitFor(() => flingStranger.closed !== null, 5000, 'unauthenticated tv-play to be refused')
   log(flingStranger.closed === 4001, 'a socket that never said hello is dropped for sending tv-play')
   log(television.of('tv-play').length === 1, 'and still nothing reached the television')
+
+  /* ================================ PHASE E — the remote driving the desk
+   *
+   * The one frame on this wire that ends in a synthetic event at the operating
+   * system, so it is the one worth being hard about. Four gates stand between
+   * a socket and somebody's mouse — it must be the screen currently watching,
+   * it must fit a rate limit, it must parse into an exact shape, and the
+   * desktop must still be saying yes — and each is checked here against the
+   * real server over a real socket rather than reasoned about.
+   */
+
+  /* --------------------------------- 29. the desktop's answer, at hello */
+
+  const denied = await authenticatedClient(authD, 'tv-denied', 'Fire TV')
+  log(
+    denied.first('hello-ok').canControl === undefined,
+    'a desktop with control switched off never claims it in hello-ok'
+  )
+
+  controlAllowed = true
+  const remote = await authenticatedClient(authD, 'tv-remote', 'Fire TV')
+  log(remote.first('hello-ok').canControl === true, 'and says so plainly once it is switched on')
+
+  /* ------------------------------------ 30. only the screen that is watching */
+
+  const strayInputs = inputs.length
+  remote.send({ t: 'mirror-input', a: 'move', x: 0.5, y: 0.5 })
+  // Nothing to wait *for* — the assertion is that nothing happens — so the
+  // proof is a frame that does travel, sent afterwards on the same socket.
+  bystander.send({ t: 'mirror-signal', data: 'still-the-viewer' })
+  await waitFor(() => mirrorSignals.at(-1) === 'still-the-viewer', 5000, 'the viewer’s own signal')
+  log(inputs.length === strayInputs, 'an input from a device that is not watching the screen is dropped')
+  log(remote.of('err').length === 0, 'and silently: a frame from a screen that just stopped watching is timing, not an attack')
+
+  /* ------------------------------------------- 31. the watching screen drives */
+
+  bystander.send({ t: 'mirror-stop' })
+  await waitFor(() => serverD.mirroring === false, 5000, 'the previous viewer to let go')
+  remote.send({ t: 'mirror-start' })
+  await waitFor(() => serverD.mirroring === true, 5000, 'the remote to become the viewer')
+
+  remote.send({ t: 'mirror-input', a: 'move', x: 0.25, y: 0.75 })
+  await waitFor(() => inputs.length > strayInputs, 5000, 'the first input to reach the host')
+  log(
+    inputs.at(-1).a === 'move' && inputs.at(-1).x === 0.25 && inputs.at(-1).y === 0.75,
+    'a move from the watching screen reaches the desktop with its coordinates intact'
+  )
+
+  remote.send({ t: 'mirror-input', a: 'down', button: 'left', x: 0.5, y: 0.5 })
+  await waitFor(() => inputs.at(-1).a === 'down', 5000, 'a button press')
+  log(inputs.at(-1).button === 'left', 'and a button press names its button')
+
+  remote.send({ t: 'mirror-input', a: 'key', key: 'win', down: true })
+  await waitFor(() => inputs.at(-1).a === 'key', 5000, 'a key press')
+  log(inputs.at(-1).key === 'win' && inputs.at(-1).down === true, 'a key from the closed list is performed')
+
+  /* ------------------------------------------------------ 32. out of bounds */
+
+  remote.send({ t: 'mirror-input', a: 'move', x: 4, y: -3 })
+  await waitFor(() => inputs.at(-1).a === 'move', 5000, 'the clamped move')
+  log(
+    inputs.at(-1).x === 1 && inputs.at(-1).y === 0,
+    'a coordinate outside the screen is clamped to its edge rather than refused'
+  )
+
+  const badBefore = inputs.length
+  const errsBeforeBad = remote.of('err').length
+  remote.send({ t: 'mirror-input', a: 'key', key: 'f13', down: true })
+  await waitFor(() => remote.of('err').length > errsBeforeBad, 5000, 'the refusal of a key nobody listed')
+  log(remote.of('err').at(-1).code === 'bad-frame', 'a key outside the closed list is refused as bad-frame')
+  log(inputs.length === badBefore, 'and never reaches the desktop')
+
+  const errsBeforeShapeless = remote.of('err').length
+  remote.send({ t: 'mirror-input', a: 'move' })
+  await waitFor(() => remote.of('err').length > errsBeforeShapeless, 5000, 'the refusal of a move with no coordinates')
+  log(inputs.length === badBefore, 'a move with no coordinates is refused too — every pointer event carries its own')
+
+  /* ----------------------------------------------------- 33. the rate limit */
+
+  const burstBefore = inputs.length
+  for (let i = 0; i < MAX_INPUT_PER_SECOND * 3; i++) {
+    remote.send({ t: 'mirror-input', a: 'move', x: 0.5, y: 0.5 })
+  }
+  // Everything sent on one socket arrives in order, so a frame sent last and
+  // known to be dropped cannot be waited for — this waits for the burst to be
+  // over by asking for something that answers.
+  remote.send({ t: 'mirror-signal', data: 'after-the-burst' })
+  await waitFor(() => mirrorSignals.at(-1) === 'after-the-burst', 5000, 'the frame behind the burst')
+  const performed = inputs.length - burstBefore
+  log(
+    performed <= MAX_INPUT_PER_SECOND * 2,
+    `a burst of ${MAX_INPUT_PER_SECOND * 3} inputs is capped by the rate limit (${performed} performed)`
+  )
+
+  /* ------------------------------------------------- 34. switched off mid-watch */
+
+  // Past the burst's own second, because the rate limit is checked before the
+  // permission is: an input dropped by the counter is dropped in silence, and
+  // waiting for a refusal inside the exhausted second would be waiting for a
+  // frame the server is right not to send.
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 1100))
+
+  controlAllowed = false
+  const refusedBefore = inputs.length
+  const errsBeforeRefusal = remote.of('err').length
+  remote.send({ t: 'mirror-input', a: 'move', x: 0.1, y: 0.1 })
+  await waitFor(() => remote.of('err').length > errsBeforeRefusal, 5000, 'the refusal')
+  log(remote.of('err').at(-1).code === 'locked', 'switching control off refuses the very next input, not the next session')
+  log(inputs.length === refusedBefore, 'and nothing is performed')
+
+  const errsAfterFirstRefusal = remote.of('err').length
+  for (let i = 0; i < 5; i++) remote.send({ t: 'mirror-input', a: 'move', x: 0.2, y: 0.2 })
+  remote.send({ t: 'mirror-signal', data: 'after-the-refusals' })
+  await waitFor(() => mirrorSignals.at(-1) === 'after-the-refusals', 5000, 'the frame behind the refusals')
+  log(
+    remote.of('err').length === errsAfterFirstRefusal,
+    'and the refusal is said once per watch — a held button must not fill the screen with it'
+  )
 
   await serverD.stop()
 

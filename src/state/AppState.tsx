@@ -267,6 +267,7 @@ const FALLBACK_SETTINGS: Settings = {
   mobileTunnel: 'off',
   mobileNgrokAuthtoken: '',
   mobileNgrokDomain: '',
+  mobileControlEnabled: false,
   customTools: [],
   updatesAutoRun: false,
   // Blank until the real settings arrive. The card checks `state.ready`, so it

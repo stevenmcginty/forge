@@ -428,6 +428,167 @@ export interface MirrorStopFrame {
  */
 export const MAX_SIGNAL_CHARS = 65536
 
+/* ------------------------------------------------- driving the desktop
+ *
+ * The mirror pointing the other way: the television's D-pad as a mouse on the
+ * desktop it is watching. One frame carries the whole feature, and it is the
+ * only frame in this file that ends in a synthetic event at the operating
+ * system — everything else on this wire ends in a pane, a project or a video.
+ *
+ * That is why it is shaped the way it is:
+ *
+ *  - **A closed vocabulary, never a keycode.** Four pointer actions and a short
+ *    list of named keys. Nothing here can express "press this scancode", so
+ *    nothing that arrives here can ask for one. Typing on the desktop is
+ *    deliberately absent: a channel that can send arbitrary text into whatever
+ *    window happens to be focused is a different feature with a different
+ *    argument to make.
+ *  - **Every pointer event carries its own position.** A dropped `move` cannot
+ *    make the click after it land somewhere else, because the click says where
+ *    it is too. The cost is two numbers per frame; the alternative is a remote
+ *    that occasionally clicks the wrong thing, which is unfixable from a sofa.
+ *  - **Positions are fractions of the mirrored screen, not pixels.** The
+ *    television has no idea what resolution the desk is, the encoder scales the
+ *    picture on the way over, and the desk can change its own display while
+ *    somebody is watching. 0..1 survives all three; a pixel does not.
+ *
+ * The desktop is the end that decides whether any of it happens at all — see
+ * `mobileControlEnabled` in shared/types.ts. This frame being sendable is not
+ * permission to send it, and an app that sends one to a desktop with control
+ * switched off is answered with a refusal, not with a cursor.
+ */
+
+/** What one input frame does. */
+export type MirrorInputAction = 'move' | 'down' | 'up' | 'wheel' | 'key'
+
+export type MirrorButton = 'left' | 'right' | 'middle'
+
+/**
+ * Every key the television is allowed to press, and the whole of it.
+ *
+ * A list rather than a code, so that adding one is a decision somebody makes in
+ * this file rather than an accident of what a remote happened to send. These are
+ * the keys a D-pad and an OK button can plausibly mean on a desktop that is
+ * being pointed at: the ones a page scrolls with, the ones a dialog is answered
+ * with, and the Windows key, which is how you reach anything at all from a sofa
+ * when the thing you want is not on screen.
+ */
+export const MIRROR_KEYS = [
+  'enter',
+  'escape',
+  'tab',
+  'backspace',
+  'delete',
+  'up',
+  'down',
+  'left',
+  'right',
+  'pageup',
+  'pagedown',
+  'home',
+  'end',
+  'space',
+  'win'
+] as const
+
+export type MirrorKey = (typeof MIRROR_KEYS)[number]
+
+/** The television drives the desktop's pointer. Only ever sent upward. */
+export interface MirrorInputFrame {
+  t: 'mirror-input'
+  a: MirrorInputAction
+  /** Where the pointer is, as a fraction of the mirrored screen. 0..1. */
+  x?: number
+  y?: number
+  button?: MirrorButton
+  /** Wheel notches; positive scrolls away from the reader, like a real wheel. */
+  wheel?: number
+  key?: MirrorKey
+  /** For `key`: the stroke's direction. Both are sent, always in pairs. */
+  down?: boolean
+}
+
+/**
+ * One input, after validation — the shape the desktop acts on.
+ *
+ * Distinct from the frame on purpose. The frame is what arrives, with every
+ * field optional because the wire is not a compiler; this is what has survived
+ * `readMirrorInput`, and its fields are present because the checking is done.
+ */
+export type MirrorInput =
+  | { a: 'move'; x: number; y: number }
+  | { a: 'down'; button: MirrorButton; x: number; y: number }
+  | { a: 'up'; button: MirrorButton; x: number; y: number }
+  | { a: 'wheel'; wheel: number; x: number; y: number }
+  | { a: 'key'; key: MirrorKey; down: boolean }
+
+/** Most notches one frame may carry. A television cannot flick a wheel. */
+export const MAX_WHEEL_NOTCHES = 10
+
+/**
+ * How many input frames a second the desktop will act on.
+ *
+ * A cursor moving smoothly at 60fps sends well under this — the television
+ * coalesces its own movement and only reports where the pointer *is* — so the
+ * ceiling is not a budget anybody is meant to notice. It is there because this
+ * is the one frame that ends in a synthetic OS event, and a paired device gone
+ * wrong should exhaust a counter rather than a desktop.
+ */
+export const MAX_INPUT_PER_SECOND = 120
+
+/**
+ * Read one input frame, or nothing at all.
+ *
+ * Total against its input, like every other parser here: it is handed
+ * attacker-controlled JSON and returns null rather than throwing, and every
+ * number that survives is finite and inside its bounds. A coordinate is clamped
+ * rather than refused — a fraction slightly outside the screen is a rounding
+ * error at the television's end, not an attack, and the honest answer to it is
+ * the edge of the screen.
+ */
+export function readMirrorInput(value: unknown): MirrorInput | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const frame = value as MirrorInputFrame
+  const point = (): { x: number; y: number } | null => {
+    const { x, y } = frame
+    if (typeof x !== 'number' || typeof y !== 'number') return null
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+    return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) }
+  }
+  const button = (): MirrorButton | null =>
+    frame.button === 'left' || frame.button === 'right' || frame.button === 'middle' ? frame.button : null
+
+  switch (frame.a) {
+    case 'move': {
+      const at = point()
+      return at ? { a: 'move', ...at } : null
+    }
+    case 'down':
+    case 'up': {
+      const at = point()
+      const which = button()
+      return at && which ? { a: frame.a, button: which, ...at } : null
+    }
+    case 'wheel': {
+      const at = point()
+      const notches = frame.wheel
+      if (!at || typeof notches !== 'number' || !Number.isFinite(notches)) return null
+      const clamped = Math.max(-MAX_WHEEL_NOTCHES, Math.min(MAX_WHEEL_NOTCHES, Math.round(notches)))
+      // A wheel frame that rounds to nothing is not an event, it is noise.
+      return clamped === 0 ? null : { a: 'wheel', wheel: clamped, ...at }
+    }
+    case 'key': {
+      const key = frame.key
+      if (typeof key !== 'string') return null
+      if (!(MIRROR_KEYS as readonly string[]).includes(key)) return null
+      if (typeof frame.down !== 'boolean') return null
+      return { a: 'key', key: key as MirrorKey, down: frame.down }
+    }
+    default:
+      return null
+  }
+}
+
 export type ClientFrame =
   | HelloFrame
   | SubFrame
@@ -440,6 +601,7 @@ export type ClientFrame =
   | MirrorStartFrame
   | MirrorSignalFrame
   | MirrorStopFrame
+  | MirrorInputFrame
 
 /* ------------------------------------------------------------ server frames */
 
@@ -459,6 +621,21 @@ export interface HelloOkFrame {
   sessions: MobileSession[]
   /** Issued only when this connection paired. Stored once, never re-sent. */
   deviceToken?: string
+  /**
+   * Whether this desktop will act on `mirror-input` — its answer to "may the
+   * remote drive the mouse", read at hello time.
+   *
+   * Optional, so an older desktop is simply a desktop that never says yes, and
+   * MOBILE_PROTO does not move. A television must not offer a cursor it cannot
+   * deliver: the affordance is hidden entirely when this is absent or false,
+   * because a pointer that moves on the screen and nowhere else is worse than
+   * no pointer at all.
+   *
+   * A snapshot, not a subscription. Switching control on at the desk reaches a
+   * television on its next connection; switching it *off* is felt immediately,
+   * because the desktop refuses the frames whatever it said earlier.
+   */
+  canControl?: boolean
 }
 
 /**
@@ -585,6 +762,11 @@ export function parseFrame(raw: string): ClientFrame | null {
     case 'mirror-start':
     case 'mirror-signal':
     case 'mirror-stop':
+    // Admitted here and understood nowhere else until `readMirrorInput` has
+    // had it: this is the one frame that ends in a synthetic OS event, so it
+    // crosses this boundary as a shape and becomes an action later, in one
+    // place, under a switch that has no default case worth taking.
+    case 'mirror-input':
       return value as ClientFrame
     default:
       return null

@@ -7,16 +7,19 @@ import {
   APPROVAL_TIMEOUT_MS,
   HEARTBEAT_GRACE_MS,
   HEARTBEAT_MS,
+  MAX_INPUT_PER_SECOND,
   MAX_SIGNAL_CHARS,
   MAX_WRITE_CHARS,
   MOBILE_PROTO,
   MOBILE_WS_PATH,
   isVideoId,
   parseFrame,
+  readMirrorInput,
   wireDim,
   wireString,
   wordPair,
   type ClientFrame,
+  type MirrorInput,
   type MobileSession,
   type OpFrame,
   type ServerFrame
@@ -154,6 +157,22 @@ export interface MobileServerHost {
   /** The viewer stopped watching, or went away. Tear the capture down. */
   mirrorStop?: () => void
 
+  /**
+   * May the screen being watched also be *driven* right now?
+   *
+   * Asked at every hello, and answered by a setting the desktop's owner
+   * switched on deliberately — see `mobileControlEnabled` in shared/types.ts.
+   * A host that does not supply this hook can never be controlled, which is
+   * what makes the smoke test's server, and any future host, safe by default.
+   */
+  mirrorControl?: () => boolean
+  /**
+   * Perform one input on the desktop. `false` means it was refused — control is
+   * off, or this platform has no way to do it — and the server turns that into
+   * one sentence for the television rather than a silence.
+   */
+  mirrorInput?: (input: MirrorInput) => boolean
+
   /** Where the phone bundle lives on disk. Static hosting is off when absent. */
   webRoot?: string
   /**
@@ -266,6 +285,15 @@ export class MobileServer {
    * refused with a sentence rather than queued.
    */
   private mirrorViewer: Client | null = null
+  /**
+   * Whether this watch has already been told its input is not wanted. Reset
+   * with the viewer, so switching control on at the desk and watching again
+   * gets an honest answer rather than the last watch's silence.
+   */
+  private refusedInput = false
+  /** The second the input counter belongs to, and its tally. See `allowInput`. */
+  private inputSecond = 0
+  private inputCount = 0
   /** The last set handed to `onWatch`, so an unchanged set says nothing. */
   private announcedWatch = ''
 
@@ -621,6 +649,10 @@ export class MobileServer {
           return
         }
         this.mirrorViewer = client
+        // A fresh watch, so a refusal from the last one is not carried into it.
+        // Reset here rather than at every ending because this is the single
+        // place a watch begins, and the endings are many.
+        this.refusedInput = false
         this.log(`${client.device.name} is watching the screen`)
         return
       }
@@ -644,7 +676,69 @@ export class MobileServer {
       case 'mirror-stop':
         this.dropViewer(client)
         return
+
+      /**
+       * The remote driving the desktop's pointer.
+       *
+       * Three gates, in the order that costs the least to fail: it must come
+       * from the socket that is currently watching the screen, it must survive
+       * a rate limit, and it must parse into one of five exact shapes. Only
+       * then is the host asked — and the host's own answer is the fourth gate,
+       * because the setting behind it can change between one frame and the
+       * next.
+       *
+       * "Watching" as the first test is deliberate. A device that cannot see
+       * the screen has no business pointing at it: every legitimate input frame
+       * is a response to a picture, and a socket with no picture is asking to
+       * click on something it cannot see.
+       */
+      case 'mirror-input': {
+        if (this.mirrorViewer !== client) return
+        if (!this.allowInput()) return
+        const input = readMirrorInput(frame)
+        if (!input) {
+          this.send(client, { t: 'err', code: 'bad-frame', msg: 'That is not an input this desktop understands' })
+          return
+        }
+        if (this.host.mirrorInput?.(input)) return
+        // Refused. Said once per watch, not once per press: a remote that has
+        // just been told no will send a dozen more frames from the same held
+        // button, and a screen full of the same sentence is not more honest
+        // than one copy of it.
+        if (this.refusedInput) return
+        this.refusedInput = true
+        this.send(client, {
+          t: 'err',
+          code: 'locked',
+          msg: 'This desktop is not accepting a remote control. Turn it on in Settings › Forge Mobile.'
+        })
+        return
+      }
     }
+  }
+
+  /**
+   * The input rate limit: a whole second's worth, then silence until the next.
+   *
+   * A pointer moving smoothly sends well under this, because the television
+   * coalesces its own movement and reports where the cursor *is* rather than
+   * every step it took. The ceiling exists because this is the one frame on
+   * this wire that ends in a synthetic event at the operating system, and a
+   * paired device gone wrong should run out of budget rather than run the
+   * desktop.
+   *
+   * Whole-second buckets rather than a sliding window: the failure it guards
+   * against is a flood, not a burst, and a counter and a timestamp are
+   * something anybody reading this can verify at a glance.
+   */
+  private allowInput(): boolean {
+    const second = Math.floor(this.now() / 1000)
+    if (second !== this.inputSecond) {
+      this.inputSecond = second
+      this.inputCount = 0
+    }
+    this.inputCount += 1
+    return this.inputCount <= MAX_INPUT_PER_SECOND
   }
 
   private onHello(client: Client, frame: Extract<ClientFrame, { t: 'hello' }>): void {
@@ -712,6 +806,10 @@ export class MobileServer {
       deviceName: device.name,
       sessions: this.host.sessions(),
       ...snapshot,
+      // What this desktop will let a remote control do, as it stands right now.
+      // Sent only when it is true: absent is what an older desktop says, and a
+      // television reads both the same way — no cursor. See `mirrorInput`.
+      ...(this.host.mirrorControl?.() ? { canControl: true } : {}),
       // Present exactly once, on the connection that paired.
       ...(issuedToken ? { deviceToken: issuedToken } : {})
     })
