@@ -71,6 +71,23 @@ export type TvBridgeEvent =
  */
 export const TV_FOUND_EVENT = 'forge:tv-found'
 
+/**
+ * A phrase, typed or dictated on the television, on its way to the desktop.
+ *
+ * The keyboard is native for a reason the web layer cannot supply: Fire OS
+ * raises its own on-screen keyboard for whatever has focus, and what that
+ * keyboard offers — a microphone in particular — depends on it editing a real
+ * `EditText` rather than something inside a WebView. So the field lives over
+ * there and only the finished sentence crosses.
+ *
+ * One event per commit, never per keystroke. See the note on `MirrorInputFrame`
+ * in shared/mobile.ts for why a phrase is one instruction.
+ */
+export const TV_TYPED_EVENT = 'forge:tv-typed'
+
+/** The native keyboard opened or closed. Only the hint line cares. */
+export const TV_TYPING_EVENT = 'forge:tv-typing'
+
 /** What the native side exposes. Absent in a browser, and that is a normal
  *  state — the address field is the fallback and always has been. */
 interface TvNative {
@@ -113,6 +130,31 @@ export const tvBridge = {
     }
     window.addEventListener(TV_FOUND_EVENT, listen)
     return () => window.removeEventListener(TV_FOUND_EVENT, listen)
+  },
+
+  /**
+   * A finished phrase from the television's own keyboard.
+   *
+   * Trusted no further than any other string off a seam: it is checked again by
+   * `readMirrorInput` on the desktop, which is the side that turns it into key
+   * strokes and therefore the side that has to be sure.
+   */
+  onTyped(handler: (text: string) => void): () => void {
+    const listen = (event: Event): void => {
+      const detail = (event as CustomEvent<unknown>).detail
+      if (typeof detail === 'string' && detail) handler(detail)
+    }
+    window.addEventListener(TV_TYPED_EVENT, listen)
+    return () => window.removeEventListener(TV_TYPED_EVENT, listen)
+  },
+
+  /** The native keyboard came up, or went away. */
+  onTyping(handler: (on: boolean) => void): () => void {
+    const listen = (event: Event): void => {
+      handler((event as CustomEvent<unknown>).detail === true)
+    }
+    window.addEventListener(TV_TYPING_EVENT, listen)
+    return () => window.removeEventListener(TV_TYPING_EVENT, listen)
   },
 
   /**

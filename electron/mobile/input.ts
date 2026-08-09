@@ -27,9 +27,31 @@
  *
  * Move the pointer. Press and release one of three buttons. Turn the wheel.
  * Press and release one of a short list of named keys (`MIRROR_KEYS` in
- * shared/mobile.ts). There is no route here for arbitrary text, no way to name
- * a scancode, and nothing that runs a command — the child is a loop over four
- * verbs, and an unrecognised line is discarded by it.
+ * shared/mobile.ts). Type one character. There is no way to name a scancode and
+ * nothing that runs a command — the child is a loop over five verbs, and an
+ * unrecognised line is discarded by it.
+ *
+ * ## Typing, and what it costs
+ *
+ * The fifth verb is newer than the other four and it is the one that widens
+ * what a paired television can do, so it is worth stating rather than
+ * discovering: a remote can now put arbitrary text into whatever window has
+ * focus on this desk. That is a real widening. It is not a new *category* —
+ * the remote could already click anything, press Enter and open the Start menu,
+ * which is enough to drive a machine — but "it cannot type" was true before
+ * this and is not true now.
+ *
+ * Everything that gated the other four gates this one identically: the setting,
+ * the pairing, the screen-watching socket, the rate limit, and the fact that
+ * Windows' UIPI refuses all of it to an elevated window. What is new is only
+ * the verb.
+ *
+ * It sends a *character*, not a key. `VkKeyScanW` asks the keyboard layout that
+ * is actually loaded which key produces it and with which modifiers held, which
+ * is the only way this can be right on a UK desk and a US one and a French one
+ * without a table in here that is wrong for two of them. A character the layout
+ * cannot produce answers -1 and is skipped, so an emoji dictated into a remote
+ * is dropped rather than turned into something else.
  *
  * ## What it deliberately cannot do
  *
@@ -99,6 +121,18 @@ const KEY_EXTENDED = 0x0001
 const KEY_UP = 0x0002
 
 /**
+ * The modifiers a character can need, as the bits `VkKeyScanW` reports them in.
+ *
+ * Shift for a capital, Ctrl+Alt together for anything on the AltGr level of a
+ * European layout — which is where a UK keyboard keeps its euro sign and a
+ * German one keeps its @. Named here rather than open-coded in the helper so
+ * that the mapping between a bit and a virtual key is readable in one place.
+ */
+const VK_SHIFT = 0x10
+const VK_CONTROL = 0x11
+const VK_MENU = 0x12
+
+/**
  * The child's entire program.
  *
  * Three imported functions and a loop over stdin. Deliberately written as one
@@ -149,6 +183,7 @@ Add-Type -Namespace Forge -Name Input -MemberDefinition @'
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, int flags, System.UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(System.IntPtr value);
 [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern short VkKeyScanW(char ch);
 '@
 try {
   if (-not [Forge.Input]::SetProcessDpiAwarenessContext([System.IntPtr](-4))) { [void][Forge.Input]::SetProcessDPIAware() }
@@ -170,6 +205,27 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         [Forge.Input]::mouse_event(${MOUSE_WHEEL}, 0, 0, [int]$p[1], [System.UIntPtr]::Zero)
       }
       'k' { [Forge.Input]::keybd_event([byte][int]$p[1], 0, [int]$p[2], [System.UIntPtr]::Zero) }
+      't' {
+        $code = [int]$p[1]
+        if ($code -gt 0 -and $code -lt 65536) {
+          $scan = [Forge.Input]::VkKeyScanW([char]$code)
+          if ($scan -ne -1) {
+            $vk = $scan -band 0xFF
+            $mods = ($scan -shr 8) -band 0x07
+            $wanted = @()
+            if ($mods -band 1) { $wanted += ${VK_SHIFT} }
+            if ($mods -band 2) { $wanted += ${VK_CONTROL} }
+            if ($mods -band 4) { $wanted += ${VK_MENU} }
+            foreach ($m in $wanted) { [Forge.Input]::keybd_event([byte]$m, 0, 0, [System.UIntPtr]::Zero) }
+            [Forge.Input]::keybd_event([byte]$vk, 0, 0, [System.UIntPtr]::Zero)
+            [Forge.Input]::keybd_event([byte]$vk, 0, ${KEY_UP}, [System.UIntPtr]::Zero)
+            # Released in the reverse order they were pressed, so a character
+            # needing Ctrl+Alt does not leave Ctrl down over the next one.
+            [array]::Reverse($wanted)
+            foreach ($m in $wanted) { [Forge.Input]::keybd_event([byte]$m, 0, ${KEY_UP}, [System.UIntPtr]::Zero) }
+          }
+        }
+      }
     }
   } catch {
   }
@@ -204,8 +260,38 @@ export function lineFor(input: MirrorInput, at: ScreenPoint): string {
       return `k ${key.vk} ${flags}`
     }
     default:
+      // Typing is many strokes and this returns one line. See `linesFor`.
       return ''
   }
+}
+
+/**
+ * One input, as every line the child needs for it.
+ *
+ * The shape `lineFor` cannot have: a phrase is one instruction on the wire and
+ * a stroke per character at the operating system, so the only honest return
+ * type for the general case is a list. Everything except `text` is the single
+ * line `lineFor` already produced, and an empty list means there was nothing to
+ * perform.
+ *
+ * Surrogate pairs are dropped, not split. `VkKeyScanW` takes a UTF-16 code
+ * unit, so half of an emoji would either answer -1 or — worse — answer with
+ * whatever key happens to match a lone surrogate. Dropping the whole character
+ * is the only reading that cannot type something nobody said.
+ */
+export function linesFor(input: MirrorInput, at: ScreenPoint): string[] {
+  if (input.a !== 'text') {
+    const line = lineFor(input, at)
+    return line ? [line] : []
+  }
+  const lines: string[] = []
+  for (const character of input.text) {
+    if (character.length !== 1) continue
+    const code = character.charCodeAt(0)
+    if (code < 0x20 || code === 0x7f) continue
+    lines.push(`t ${code}`)
+  }
+  return lines
 }
 
 /** Only Windows has a `user32` and a PowerShell to reach it with. */
@@ -321,19 +407,29 @@ function writeLine(line: string): void {
  */
 export function driveDesktop(input: MirrorInput, at: ScreenPoint): void {
   if (!canDriveDesktop()) return
-  const line = lineFor(input, at)
-  if (!line) return
+  const lines = linesFor(input, at)
+  if (lines.length === 0) return
   spawnHelper()
   if (!child) return
   armIdle()
-  if (!ready) {
-    // The newest instruction matters more than the oldest: what is being
-    // dropped is where the pointer was half a second ago.
-    if (pending.length >= MAX_PENDING) pending.shift()
-    pending.push(line)
+  if (ready) {
+    for (const line of lines) writeLine(line)
     return
   }
-  writeLine(line)
+  // A phrase is all of it or none of it. The queue below drops its oldest when
+  // it overflows, which for a pointer is right — the discarded line is where
+  // the cursor was half a second ago — and for typing would be a sentence
+  // arriving on somebody's desk with its beginning missing. So a phrase that
+  // will not fit is not typed at all, and the person who spoke it sees nothing
+  // happen rather than seeing half of it happen.
+  if (lines.length > 1) {
+    if (pending.length + lines.length <= MAX_PENDING) pending.push(...lines)
+    return
+  }
+  // The newest instruction matters more than the oldest: what is being
+  // dropped is where the pointer was half a second ago.
+  if (pending.length >= MAX_PENDING) pending.shift()
+  pending.push(lines[0])
 }
 
 /**

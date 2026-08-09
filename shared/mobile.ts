@@ -459,7 +459,7 @@ export const MAX_SIGNAL_CHARS = 65536
  */
 
 /** What one input frame does. */
-export type MirrorInputAction = 'move' | 'down' | 'up' | 'wheel' | 'key'
+export type MirrorInputAction = 'move' | 'down' | 'up' | 'wheel' | 'key' | 'text'
 
 export type MirrorButton = 'left' | 'right' | 'middle'
 
@@ -493,6 +493,18 @@ export const MIRROR_KEYS = [
 
 export type MirrorKey = (typeof MIRROR_KEYS)[number]
 
+/**
+ * The longest run of text one frame may carry.
+ *
+ * A phrase, not a document. What this exists for is a sentence spoken into a
+ * remote or tapped out on a television's keyboard, and both of those end when
+ * somebody presses Done — so the ceiling only has to be above the longest thing
+ * anybody would say in one breath. It is low on purpose: every character
+ * becomes a real key stroke on somebody's desk, and one frame should not be
+ * able to hold the desktop's keyboard for a minute.
+ */
+export const MAX_TEXT_CHARS = 240
+
 /** The television drives the desktop's pointer. Only ever sent upward. */
 export interface MirrorInputFrame {
   t: 'mirror-input'
@@ -506,6 +518,16 @@ export interface MirrorInputFrame {
   key?: MirrorKey
   /** For `key`: the stroke's direction. Both are sent, always in pairs. */
   down?: boolean
+  /**
+   * For `text`: a phrase to type, as one instruction.
+   *
+   * One frame rather than a stroke each, because the thing being sent is a
+   * finished phrase — dictated into a remote, or tapped out on a television's
+   * on-screen keyboard and committed with Done. Sending it a character at a
+   * time would spend the whole input budget on one sentence and would let a
+   * dropped packet leave half a word on somebody's desk.
+   */
+  text?: string
 }
 
 /**
@@ -521,6 +543,7 @@ export type MirrorInput =
   | { a: 'up'; button: MirrorButton; x: number; y: number }
   | { a: 'wheel'; wheel: number; x: number; y: number }
   | { a: 'key'; key: MirrorKey; down: boolean }
+  | { a: 'text'; text: string }
 
 /** Most notches one frame may carry. A television cannot flick a wheel. */
 export const MAX_WHEEL_NOTCHES = 10
@@ -583,6 +606,18 @@ export function readMirrorInput(value: unknown): MirrorInput | null {
       if (!(MIRROR_KEYS as readonly string[]).includes(key)) return null
       if (typeof frame.down !== 'boolean') return null
       return { a: 'key', key: key as MirrorKey, down: frame.down }
+    }
+    case 'text': {
+      const text = frame.text
+      if (typeof text !== 'string') return null
+      // Control characters are stripped rather than refused. A television's
+      // keyboard and a speech recogniser both hand back the odd stray one, and
+      // the honest reading of a dictated sentence with a tab in it is the
+      // sentence. The keys that *are* control — Enter, Tab, Backspace — have
+      // their own action, where pressing them is something somebody chose.
+      // eslint-disable-next-line no-control-regex
+      const clean = text.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, MAX_TEXT_CHARS)
+      return clean ? { a: 'text', text: clean } : null
     }
     default:
       return null

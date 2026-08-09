@@ -60,7 +60,17 @@ await build({
   logLevel: 'silent',
   absWorkingDir: ROOT
 })
-const { readMirrorInput, lineFor, canDriveDesktop, probeDesktopInput, startPointer, MIRROR_KEYS, MAX_WHEEL_NOTCHES } = await import(
+const {
+  readMirrorInput,
+  lineFor,
+  linesFor,
+  canDriveDesktop,
+  probeDesktopInput,
+  startPointer,
+  MIRROR_KEYS,
+  MAX_WHEEL_NOTCHES,
+  MAX_TEXT_CHARS
+} = await import(
   pathToFileURL(bundle).href
 )
 
@@ -148,6 +158,53 @@ log(lineFor({ a: 'key', key: 'enter', down: false }, at) === 'k 13 2', 'and come
 log(lineFor({ a: 'key', key: 'left', down: true }, at) === 'k 37 1', 'Left carries the extended bit')
 log(lineFor({ a: 'key', key: 'left', down: false }, at) === 'k 37 3', 'and carries it on the way up as well')
 log(lineFor({ a: 'key', key: 'win', down: true }, at) === 'k 91 1', 'the Windows key is 0x5B, extended')
+
+/* -------------------------------------------------------- typing a phrase
+
+   The fifth verb, and the one that widened what a paired television can do:
+   before it, a remote could click anything and press Enter but could not put a
+   letter anywhere. So the door is worth leaning on. What must hold is that a
+   phrase becomes one `t` line per character and nothing else — no route to a
+   scancode, no way to hold a modifier down across the end of a phrase, and no
+   length a television can choose. */
+
+const typed = readMirrorInput({ a: 'text', text: 'Hello, desk.' })
+log(typed?.a === 'text' && typed.text === 'Hello, desk.', 'a phrase survives the door intact')
+
+const controlled = readMirrorInput({ a: 'text', text: 'rm -rf\r\nnow ' })
+log(
+  controlled?.text === 'rm -rfnow',
+  'control characters are stripped out of it — a newline is Enter, and Enter is a key somebody presses on purpose'
+)
+
+log(readMirrorInput({ a: 'text', text: '' }) === null, 'an empty phrase is not an instruction')
+log(readMirrorInput({ a: 'text' }) === null, 'and neither is one with no text at all')
+log(readMirrorInput({ a: 'text', text: 42 }) === null, 'nor one whose text is not a string')
+log(readMirrorInput({ a: 'text', text: ' ' }) === null, 'nor one that is only control characters')
+
+const long = readMirrorInput({ a: 'text', text: 'a'.repeat(MAX_TEXT_CHARS * 4) })
+log(
+  long?.text.length === MAX_TEXT_CHARS,
+  `a phrase longer than any sentence is cut to ${MAX_TEXT_CHARS} — one frame cannot hold the desk's keyboard`
+)
+
+const hi = linesFor({ a: 'text', text: 'Hi!' }, at)
+log(
+  hi.length === 3 && hi[0] === 't 72' && hi[1] === 't 105' && hi[2] === 't 33',
+  'a phrase becomes one line per character, each carrying the code point and nothing else'
+)
+log(
+  linesFor({ a: 'text', text: '\u{1F600}ok' }, at).join(' ') === 't 111 t 107',
+  'a character outside the basic plane is dropped whole rather than sent as half a surrogate'
+)
+log(
+  linesFor({ a: 'move', x: 0.5, y: 0.5 }, at).length === 1,
+  'and every other input is still exactly one line — typing is the only verb that is many'
+)
+log(
+  linesFor({ a: 'text', text: 'Ünïcodé — £' }, at).every((line) => /^t \d+$/.test(line)),
+  'every typed line is the letter t and one integer; which key that is belongs to the layout on the desk'
+)
 
 // Every line is four fields or fewer of digits and one letter — nothing a
 // PowerShell `switch` could read as anything but an instruction.

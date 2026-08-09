@@ -421,9 +421,11 @@ function pointFor(x: number, y: number): { x: number; y: number } {
  */
 function applyInput(input: MirrorInput): boolean {
   if (!canControl()) return false
-  // A key stroke has no position; `pointFor` is asked anyway so the helper's
-  // grammar stays one shape, and the coordinates are ignored for a `k` line.
-  const at = input.a === 'key' ? { x: 0, y: 0 } : pointFor(input.x, input.y)
+  // A key stroke and a typed phrase both have no position — they land wherever
+  // the focus already is, which is the whole point of them. The coordinates are
+  // ignored for a `k` or `t` line, and asked for anyway everywhere else so the
+  // helper's grammar stays one shape.
+  const at = input.a === 'key' || input.a === 'text' ? { x: 0, y: 0 } : pointFor(input.x, input.y)
   driveDesktop(input, at)
   return true
 }

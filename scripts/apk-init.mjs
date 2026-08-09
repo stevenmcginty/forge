@@ -106,6 +106,24 @@ patch(APP_GRADLE, 'kotlin-android plugin (app build.gradle)', (text) => {
 
 /* ----------------------------------------------------- 4. the manifest */
 
+// The television's keyboard offers a microphone only where there is something
+// behind it, and this is what lets the app find out. From Android 11 an app
+// cannot see another app's activities unless it declares that it wants to look:
+// `queryIntentActivities` for a recogniser answers "none" on a device that has
+// one, and the button is then hidden on exactly the televisions where it would
+// have worked. Fire OS 8 is Android 11, so this is not hypothetical.
+//
+// A declaration to *look*, not a permission to use — nothing here can start a
+// recogniser that the person does not choose to start. See canRecogniseSpeech
+// in mobile/native/MainActivity.kt, which is the only caller.
+patch(MANIFEST, '<queries> for the speech recogniser', (text) => {
+  if (text.includes('android.speech.action.RECOGNIZE_SPEECH')) return text
+  return text.replace(
+    /(\s*)(<uses-permission android:name="android\.permission\.INTERNET")/,
+    `$1<queries>$1  <intent>$1    <action android:name="android.speech.action.RECOGNIZE_SPEECH" />$1  </intent>$1</queries>$1$2`
+  )
+})
+
 patch(MANIFEST, 'REQUEST_INSTALL_PACKAGES permission', (text) => {
   if (text.includes('android.permission.REQUEST_INSTALL_PACKAGES')) return text
   return text.replace(

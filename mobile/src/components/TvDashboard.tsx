@@ -1489,7 +1489,20 @@ function TvMirrorView({
     // running the arrows belong to it, and Menu — normally the panel cycle —
     // is handed to this page as the scroll toggle. See MainActivity.
     tvBridge.emit({ kind: 'control', on: true })
+
+    // The keyboard's half. The field itself is native — Fire OS only offers its
+    // own on-screen keyboard, and any microphone in it, to a real Android text
+    // field — so all that arrives here is the finished phrase, and all this does
+    // is put it on the wire. See the typing block in mobile/native/MainActivity.kt.
+    //
+    // Subscribed for exactly as long as the pointer exists, because a phrase
+    // typed at a desktop nobody is driving has nowhere to land.
+    const stopTyped = tvBridge.onTyped((text) => {
+      link.sendMirrorInput({ t: 'mirror-input', a: 'text', text })
+    })
+
     return () => {
+      stopTyped()
       tvBridge.emit({ kind: 'control', on: false })
       pointer.current = null
       handle.stop()
@@ -1648,7 +1661,7 @@ function TvMirrorView({
           <div className="tv-drive-hint" role="status">
             {pointerSays.mode === 'scroll'
               ? 'Up and Down scroll · Menu returns to the pointer · Back stops driving'
-              : 'D-pad points · OK clicks, hold to drag, hold still to right-click · Menu scrolls · Back stops driving'}
+              : 'D-pad points · OK clicks, hold to drag, hold still to right-click · Menu scrolls · ▶❚❚ types · Back stops driving'}
           </div>
         )}
       </div>
