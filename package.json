@@ -70,7 +70,10 @@
     "apk:release": "node scripts/apk-release.mjs",
     "apk:ship": "node scripts/apk-ship.mjs",
     "apk:check": "node scripts/apk-check.mjs",
-    "apk:tv": "node scripts/apk-tv-build.mjs"
+    "apk:tv": "node scripts/apk-tv-build.mjs",
+    "apk:tv:release": "node scripts/apk-tv-release.mjs",
+    "discovery:check": "node scripts/discovery-check.mjs",
+    "tv-fetch:check": "node scripts/tv-fetch-check.mjs"
   },
   "devDependencies": {
     "@capacitor/android": "^7.6.8",

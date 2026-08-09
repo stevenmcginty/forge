@@ -82,12 +82,36 @@ import {
 /** The stable name the desktop serves. Also in electron/mobile/server.ts. */
 const TV_APK = 'forge-tv.apk'
 
+/**
+ * The shared build's own file name.
+ *
+ * Kept apart from `forge-tv.apk` on purpose: that name is what this machine's
+ * own Forge serves to this house's television, and a shared build written over
+ * it would silently swap an app addressed to this desktop for one that has to
+ * go looking. Two files, two jobs. `scripts/apk-tv-release.mjs` publishes this
+ * one; nothing serves it locally.
+ */
+const TV_SHARED_APK = 'forge-tv-shared.apk'
+
 /* -------------------------------------------------------- 1. the address */
 
-const origin = await tvOriginOf(process.argv[2])
-if (!origin) {
+/**
+ * `--shared` builds the APK that goes on GitHub: **no address inside it at
+ * all.**
+ *
+ * A baked address is what makes the ordinary build unshareable — it is correct
+ * for exactly one house, and wrong in a way nobody on a sofa can diagnose. The
+ * shared build finds its desktop instead, by asking the network (see the
+ * discovery block in shared/mobile.ts, mobile/src/components/TvConnect.tsx and
+ * electron/mobile/discovery.ts). One binary, anybody's wifi, and the only thing
+ * anyone has to do is press OK on the desktop that answers.
+ */
+const shared = process.argv.includes('--shared')
+const origin = shared ? '' : await tvOriginOf(process.argv[2])
+if (!shared && !origin) {
   console.error(
     `Usage: node scripts/apk-tv-build.mjs <desktop address>\n` +
+      `       node scripts/apk-tv-build.mjs --shared    # no address baked in; finds it on the network\n` +
       `  e.g. node scripts/apk-tv-build.mjs http://192.168.4.45:8420\n\n` +
       `"${process.argv[2] ?? ''}" is not an address this TV could dial. It must be plain http on the\n` +
       `LAN — nothing on this machine serves the mobile port over TLS, so an https address would be\n` +
@@ -134,7 +158,7 @@ if (missing.length > 0) {
 
 const version = readVersion()
 console.log(`Building Forge TV v${version.versionName} (versionCode ${version.versionCode})`)
-console.log(`Baked-in desktop: ${origin}`)
+console.log(shared ? 'Baked-in desktop: none — this build finds one on the network' : `Baked-in desktop: ${origin}`)
 stampGradleVersion(version)
 
 const npx = 'npx'
@@ -175,7 +199,7 @@ const props = Object.fromEntries(
 ensureDir(DIST_APK)
 const tools = buildToolsDir()
 const aligned = join(DIST_APK, 'forge-tv-aligned.tmp.apk')
-const signed = join(DIST_APK, TV_APK)
+const signed = join(DIST_APK, shared ? TV_SHARED_APK : TV_APK)
 
 // zipalign before signing, as in apk-build: the v2/v3 signature covers the
 // whole file, so aligning afterwards would invalidate it.
@@ -197,10 +221,20 @@ const certs = capture(join(tools, 'apksigner.bat'), ['verify', '--print-certs', 
   .split(/\r?\n/)
   .find((line) => line.includes('SHA-256'))
 
-console.log(`
+console.log(
+  shared
+    ? `
+Signed APK:  ${signed}  (${(sizeBytes / (1024 * 1024)).toFixed(1)} MB)
+Desktop:     none — it asks the network which Forge is there
+Signer:      ${certs ?? '(see apksigner verify --print-certs)'}
+
+Publish it with:  npm run apk:tv:release
+`
+    : `
 Signed APK:  ${signed}  (${(sizeBytes / (1024 * 1024)).toFixed(1)} MB)
 Desktop:     ${origin}
 Signer:      ${certs ?? '(see apksigner verify --print-certs)'}
 
 On the Fire TV, open Downloader and type:  ${origin}/${TV_APK}
-`)
+`
+)

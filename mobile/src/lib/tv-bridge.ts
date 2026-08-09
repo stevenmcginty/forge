@@ -44,10 +44,60 @@ export type TvBridgeEvent =
    */
   | { kind: 'session-exit'; session: string; exitCode: number }
 
+/**
+ * The other direction: the native layer answering a question this one asked.
+ *
+ * Only one question exists — "which Forge is on this wifi?" — and it has to be
+ * asked natively, because a WebView cannot send a UDP broadcast and a broadcast
+ * is the only way to find an address nobody has typed. The reply arrives as the
+ * raw strings the desktops sent, parsed here rather than there: shared/mobile.ts
+ * already knows that shape and a second implementation in Kotlin would be one
+ * that could drift.
+ */
+export const TV_FOUND_EVENT = 'forge:tv-found'
+
+/** What the native side exposes. Absent in a browser, and that is a normal
+ *  state — the address field is the fallback and always has been. */
+interface TvNative {
+  discover?: () => void
+}
+
+function native(): TvNative | null {
+  const found = (window as unknown as { ForgeTvNative?: TvNative }).ForgeTvNative
+  return found && typeof found.discover === 'function' ? found : null
+}
+
 export const tvBridge = {
   /** Hand an event to whoever is listening — natively or in a test. */
   emit(event: TvBridgeEvent): void {
     window.dispatchEvent(new CustomEvent(TV_BRIDGE_EVENT, { detail: event }))
+  },
+
+  /** Is there a native layer able to search the network at all? */
+  canFindDesktops(): boolean {
+    return native() !== null
+  },
+
+  /**
+   * Ask the network who is out there. Returns false when nothing can ask —
+   * a browser preview, or an APK older than this seam — so the caller can say
+   * "type the address" instead of spinning over a question nobody heard.
+   */
+  findDesktops(): boolean {
+    const layer = native()
+    if (!layer?.discover) return false
+    layer.discover()
+    return true
+  },
+
+  /** The replies to `findDesktops`, verbatim. Parsing is the caller's. */
+  onDesktopsFound(handler: (replies: string[]) => void): () => void {
+    const listen = (event: Event): void => {
+      const detail = (event as CustomEvent<unknown>).detail
+      handler(Array.isArray(detail) ? detail.filter((item): item is string => typeof item === 'string') : [])
+    }
+    window.addEventListener(TV_FOUND_EVENT, listen)
+    return () => window.removeEventListener(TV_FOUND_EVENT, listen)
   },
 
   /**

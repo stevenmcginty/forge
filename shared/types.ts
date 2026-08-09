@@ -1869,19 +1869,31 @@ export interface MobileStatus {
 }
 
 /**
- * Forge TV — the mobile app as a Fire TV APK, built on demand.
+ * Forge TV — the mobile app as a Fire TV APK, built on demand or downloaded.
  *
  * `idle` and `done` are both resting states; they differ only in whether the
  * last build in this session was ours. Whether an APK exists at all is
  * `sizeBytes > 0`, which survives a restart, because the file does.
  */
-export type ForgeTvPhase = 'idle' | 'building' | 'done' | 'error'
+export type ForgeTvPhase = 'idle' | 'building' | 'fetching' | 'done' | 'error'
+
+/**
+ * Where the APK this Forge is serving came from.
+ *
+ * The difference matters to the person reading the panel, because the two are
+ * not the same app. A *built* one has this desktop's LAN address baked into it
+ * and stops working when the router hands out a new lease. A *downloaded* one
+ * is the shared release: no address inside it at all, so it finds whichever
+ * Forge answers on the network it is switched on in (see the discovery block in
+ * shared/mobile.ts). That is the one worth sending to somebody else.
+ */
+export type ForgeTvSource = 'none' | 'built' | 'downloaded'
 
 export interface ForgeTvStatus {
   /**
-   * False in a packaged Forge. The build needs the checkout, the Android SDK
-   * and a JDK — none of which ship in Forge-setup.exe — so the panel says so
-   * instead of offering a button that could only fail.
+   * False in a packaged Forge. Building needs the checkout, the Android SDK
+   * and a JDK — none of which ship in Forge-setup.exe — so the panel offers the
+   * download instead of a button that could only fail.
    */
   supported: boolean
   phase: ForgeTvPhase
@@ -1893,10 +1905,14 @@ export interface ForgeTvStatus {
    * server's, not the file's.
    */
   url: string
-  /** Size of the built APK, or 0 when none has been built on this machine. */
+  /** Size of the APK this Forge would serve, or 0 when there is none. */
   sizeBytes: number
-  /** When it was built (ms epoch), 0 when there is none. */
+  /** When it was built or downloaded (ms epoch), 0 when there is none. */
   builtAt: number
+  /** Which of the two it is. See ForgeTvSource. */
+  source: ForgeTvSource
+  /** The published version, when the APK is a downloaded one. '' otherwise. */
+  version: string
 }
 
 /**

@@ -771,7 +771,116 @@ class TvPanels(private val activity: MainActivity, private val forge: WebView) {
    * refused, which is the additive rule tv-bridge.ts asks for: this activity
    * and that bundle do not update in lockstep.
    */
+  /** One search at a time. A dashboard that re-renders must not stack probes. */
+  private val searching = java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /**
+   * "Which Forge is on this wifi?" — the television's half of discovery.
+   *
+   * Native because it has to be: a WebView speaks HTTP and WebSockets and has
+   * no way to send a UDP datagram, and a broadcast is the only question that
+   * can be asked before the answer is known. The alternative is the sentence
+   * this whole feature exists to delete — *type your desktop's IP address* —
+   * with a D-pad, one character at a time.
+   *
+   * Deliberately incurious about what it collects. Each reply is handed to the
+   * web layer as the string it arrived as; shared/mobile.ts parses and
+   * sanitises it there, in the same file the desktop wrote it with, rather than
+   * being re-implemented here where it would drift. This layer knows the
+   * question, the port and the timeout, and nothing else.
+   *
+   * Runs off the UI thread and answers on it. Failures are silent by design:
+   * the screen already has a manual address field, and a toast about a socket
+   * is not something anybody on a sofa can act on.
+   */
+  private fun searchForDesktops() {
+    if (!searching.compareAndSet(false, true)) return
+    Thread {
+      val found = LinkedHashSet<String>()
+      try {
+        java.net.DatagramSocket().use { socket ->
+          socket.broadcast = true
+          socket.soTimeout = POLL_MS
+          val probe = DISCOVERY_PROBE.padEnd(DISCOVERY_PROBE_BYTES, ' ').toByteArray()
+          // Every broadcast address this device has, and the global one.
+          // Routers differ on which they will carry, and the cost of asking
+          // twice is one datagram.
+          val targets = broadcastAddresses()
+          val deadline = System.currentTimeMillis() + SEARCH_MS
+          var nextProbe = 0L
+          val buffer = ByteArray(DISCOVERY_REPLY_BYTES)
+          while (System.currentTimeMillis() < deadline) {
+            if (System.currentTimeMillis() >= nextProbe) {
+              // Asked more than once on purpose: UDP drops, and a television
+              // that searched once and found nothing looks broken.
+              for (target in targets) {
+                try {
+                  socket.send(java.net.DatagramPacket(probe, probe.size, target, DISCOVERY_PORT))
+                } catch (err: Exception) {
+                  /* one address refused; the others are still worth asking */
+                }
+              }
+              nextProbe = System.currentTimeMillis() + REPROBE_MS
+            }
+            val packet = java.net.DatagramPacket(buffer, buffer.size)
+            try {
+              socket.receive(packet)
+              found.add(String(packet.data, packet.offset, packet.length))
+            } catch (timeout: java.net.SocketTimeoutException) {
+              /* nothing this poll; the loop decides whether to ask again */
+            }
+          }
+        }
+      } catch (err: Exception) {
+        /* no socket, no answers — the manual address field is still there */
+      }
+      val payload = org.json.JSONObject().put("found", org.json.JSONArray(found.toList())).toString()
+      activity.runOnUiThread {
+        // Quoted rather than interpolated: these strings came off the network,
+        // and the one place they must not end up is inside a script as code.
+        forge.evaluateJavascript(
+          "window.dispatchEvent(new CustomEvent('$TV_FOUND_EVENT'," +
+            "{detail:JSON.parse(${org.json.JSONObject.quote(payload)}).found}))",
+          null
+        )
+        searching.set(false)
+      }
+    }.start()
+  }
+
+  /** Every IPv4 broadcast address this device has, plus the global one. */
+  private fun broadcastAddresses(): List<java.net.InetAddress> {
+    val addresses = mutableListOf<java.net.InetAddress>()
+    try {
+      for (network in java.net.NetworkInterface.getNetworkInterfaces()) {
+        if (!network.isUp || network.isLoopback) continue
+        for (entry in network.interfaceAddresses) {
+          val broadcast = entry.broadcast ?: continue
+          addresses.add(broadcast)
+        }
+      }
+    } catch (err: Exception) {
+      /* fall through to the global address, which is usually enough */
+    }
+    try {
+      addresses.add(java.net.InetAddress.getByName("255.255.255.255"))
+    } catch (err: Exception) {
+      /* nothing to add */
+    }
+    return addresses
+  }
+
   val jsBridge = object {
+    /**
+     * Start a search. Returns immediately; the answers arrive as a
+     * `forge:tv-found` event carrying the raw replies. See
+     * mobile/src/lib/tv-bridge.ts for the web side of this seam.
+     */
+    @JavascriptInterface
+    fun discover() {
+      searchForDesktops()
+    }
+
     @JavascriptInterface
     fun notify(json: String) {
       val event = try {
@@ -847,6 +956,39 @@ class TvPanels(private val activity: MainActivity, private val forge: WebView) {
 
   private companion object {
     const val YOUTUBE_TV = "https://www.youtube.com/tv"
+
+    /* ------------------------------------------------ finding a desktop
+     *
+     * These five must agree with the discovery block in shared/mobile.ts,
+     * which is the file the desktop answers from. They are duplicated here
+     * because Kotlin cannot import TypeScript, and they are duplicated *with
+     * this comment* because the failure mode of a silent drift is a television
+     * that searches a network full of Forges and finds nothing.
+     */
+
+    /** MOBILE_DISCOVERY_PORT. */
+    const val DISCOVERY_PORT = 8421
+
+    /** DISCOVERY_PROBE. */
+    const val DISCOVERY_PROBE = "forge-discover/1"
+
+    /** DISCOVERY_MIN_PROBE_BYTES — the padding that earns an answer. */
+    const val DISCOVERY_PROBE_BYTES = 512
+
+    /** Comfortably larger than any reply; anything bigger is not one. */
+    const val DISCOVERY_REPLY_BYTES = 2048
+
+    /** How long a search listens before giving its answer to the screen. */
+    const val SEARCH_MS = 1_500L
+
+    /** How often the question is repeated inside that window. UDP drops. */
+    const val REPROBE_MS = 400L
+
+    /** How long one receive blocks — short, so the loop can re-ask on time. */
+    const val POLL_MS = 200
+
+    /** The event the web layer listens for. mobile/src/lib/tv-bridge.ts. */
+    const val TV_FOUND_EVENT = "forge:tv-found"
 
     /** See the user-agent note in this class's own doc comment. */
     const val YOUTUBE_UA =

@@ -66,6 +66,109 @@ export const MOBILE_PROTO = 1
 /** Default listen port. Nothing else on Steve's machine wants 8420. */
 export const MOBILE_PORT = 8420
 
+/* ------------------------------------------------------ finding a desktop
+ *
+ * A television has a remote control and no keyboard, so "type your desktop's
+ * IP address" is a sentence that ends the setup for anybody who is not already
+ * committed. It is also the only thing a shareable build cannot bake in: the
+ * TV app published on GitHub has to work on somebody else's network, and there
+ * is nothing in an APK that could know their address in advance.
+ *
+ * So the app asks. One UDP datagram to the local broadcast address, and every
+ * Forge on that wifi with its phone link on answers with its own name and the
+ * URL to dial. The television lists what answered; OK connects; the desktop
+ * still has to approve the pairing on its own screen, exactly as it does for a
+ * phone. Discovery finds a door — it never opens one.
+ */
+
+/** Where the probe goes and the answer comes from. One past the link's port. */
+export const MOBILE_DISCOVERY_PORT = 8421
+
+/**
+ * The probe's opening bytes. Anything that does not start with this is not
+ * ours and is dropped without a reply — a discovery responder that answers
+ * arbitrary datagrams is a service that tells the whole network what it is.
+ */
+export const DISCOVERY_PROBE = 'forge-discover/1'
+
+/**
+ * How large a probe has to be before it earns an answer.
+ *
+ * Padding, and the padding is the point. A short question with a long answer
+ * is an amplifier: a datagram's source address can be forged, so anybody on
+ * the network could ask in somebody else's name and have this desktop shout at
+ * them. Requiring the question to be bigger than the answer removes the reason
+ * to try — the attacker sends more than they get back. The TV app pads to
+ * exactly this, and the responder measures rather than trusts.
+ */
+export const DISCOVERY_MIN_PROBE_BYTES = 512
+
+/** Longest datagram the responder will even read. */
+export const DISCOVERY_MAX_PROBE_BYTES = 2048
+
+/**
+ * What a desktop says back.
+ *
+ * Deliberately thin: a name to tell two desktops apart on one wall, an address
+ * to dial, and the protocol number so a television can say "these two do not
+ * speak the same Forge" instead of failing at `hello`. No device list, no
+ * project names, no versions of anything private — everything here is what a
+ * port scan of that machine would show anyway.
+ */
+export interface DiscoveryReply {
+  t: 'forge-desktop'
+  /** The computer's own name, as shown in the television's list. */
+  name: string
+  /** `http://<lan-ip>:<port>` — what the app connects to. */
+  origin: string
+  /** Forge's version on that desktop, for the line under the name. */
+  app: string
+  proto: number
+}
+
+/**
+ * Printable characters only, by code point rather than by regex.
+ *
+ * The string it guards is drawn on a television from a datagram anybody on the
+ * wifi could have sent, and a control character in a name is at best a broken
+ * line and at worst something the renderer has to have an opinion about.
+ */
+function printable(text: string): string {
+  return [...text]
+    .filter((ch) => {
+      const code = ch.codePointAt(0) ?? 0
+      return code > 31 && code !== 127
+    })
+    .join('')
+}
+
+/** Parse a reply datagram, or null. Total: this arrives off the network. */
+export function parseDiscoveryReply(text: string): DiscoveryReply | null {
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const reply = value as Partial<DiscoveryReply>
+  if (reply.t !== 'forge-desktop') return null
+  if (typeof reply.origin !== 'string' || !/^https?:\/\/[\w.:-]+$/.test(reply.origin)) return null
+  if (typeof reply.name !== 'string' || !reply.name) return null
+  if (typeof reply.app !== 'string') return null
+  if (!Number.isInteger(reply.proto)) return null
+  return {
+    t: 'forge-desktop',
+    // Trimmed to a line a television can draw, and stripped of control
+    // characters: this string is painted on a screen from a datagram anybody on
+    // the wifi could have sent.
+    name: printable(reply.name).slice(0, 64),
+    origin: reply.origin,
+    app: reply.app.replace(/[^\w.\-+]/g, '').slice(0, 24),
+    proto: reply.proto as number
+  }
+}
+
 /** Longest single `write` payload accepted from a phone, in characters. */
 export const MAX_WRITE_CHARS = 8192
 
@@ -290,6 +393,12 @@ export function videoIdOf(raw: unknown): string {
  * One viewer at a time, enforced by the server. The Fire Stick is the only
  * intended client; relaying one peer connection is a seam, fanning out N of
  * them is a media server.
+ *
+ * The desktop also pushes a once-a-second measurement down the same channel —
+ * resolution, bitrate, and Chromium's own verdict on what is limiting the
+ * encoder — which the television shows on Down. Same opaqueness rule: it is a
+ * JSON string the relay never reads, and the only two things that understand it
+ * are src/lib/mirror.ts and mobile/src/lib/mirror.ts.
  */
 
 /** The TV asks to watch. The desktop answers with `mirror-signal` frames. */

@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { networkInterfaces } from 'node:os'
+import { hostname, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { app, BrowserWindow, desktopCapturer, ipcMain, Notification, powerSaveBlocker, screen } from 'electron'
 import { IPC } from '@shared/ipc'
 import {
   ACCEPT_WINDOW_MS,
   APPROVAL_TIMEOUT_MS,
+  MOBILE_DISCOVERY_PORT,
   MOBILE_PORT,
   pairLink,
   type HelloOkFrame,
@@ -22,9 +23,18 @@ import type {
   Settings
 } from '@shared/types'
 import { MobileAuth, PAIR_TTL_MS } from './mobile/auth'
+import { DiscoveryResponder } from './mobile/discovery'
 import { MobileServer, TV_APK_PATH, type MobileApprovalAsk } from './mobile/server'
 import { NgrokTunnel, ensureNgrokExe, pairEndpoint, resolveNgrokExe } from './mobile-tunnel'
-import { disposeTvBuild, onTvBuildChange, reportTvProblem, startTvBuild, tvApkPath, tvBuildState } from './mobile-tv'
+import {
+  disposeTvBuild,
+  fetchTv,
+  onTvBuildChange,
+  reportTvProblem,
+  startTvBuild,
+  tvApkPath,
+  tvBuildState
+} from './mobile-tv'
 import { addPtySink, getManager, getReplay } from './pty-host'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
 
@@ -53,6 +63,13 @@ import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from 
 
 let server: MobileServer | null = null
 let auth: MobileAuth | null = null
+/**
+ * The "is there a Forge here?" responder, up for exactly as long as the server
+ * is. It exists so a television — which has a remote and no keyboard, and in a
+ * shared build has no address baked into it — can find this desktop by asking
+ * the network instead of being typed at. See electron/mobile/discovery.ts.
+ */
+let discovery: DiscoveryResponder | null = null
 let unsubscribePty: (() => void) | null = null
 let lastDetail = ''
 let starting = false
@@ -555,6 +572,17 @@ async function start(): Promise<void> {
     }
   })
 
+  // After the server, because the address it advertises is the server's. A
+  // responder that fails to bind is reported and dropped — discovery is a
+  // convenience, and the link must not fail to start over a busy UDP port.
+  discovery = new DiscoveryResponder({
+    origin: () => tvOrigin(),
+    name: () => hostname(),
+    appVersion: () => app.getVersion(),
+    log: (line) => console.log(`[mobile] ${line}`)
+  })
+  void discovery.start(MOBILE_DISCOVERY_PORT)
+
   report('')
   // A restart mid-window stays armed for the remainder — re-hang the disarm
   // timer so the remainder still ends itself.
@@ -592,6 +620,11 @@ function offerPairingOnStart(): void {
 
 async function stop(): Promise<void> {
   stopTunnel()
+  // Before everything else: a desktop that still answers "I am here" after the
+  // link is off is advertising a door that has been bricked up.
+  const responder = discovery
+  discovery = null
+  await responder?.stop()
   // Switching the link off disarms it too: "off" must mean off, not "off but
   // primed to accept strangers the moment it is switched back on".
   disarmAccept()
@@ -787,6 +820,20 @@ export function registerMobileHandlers(): void {
       return forgeTvStatus()
     }
     startTvBuild(origin)
+    return forgeTvStatus()
+  })
+
+  /**
+   * Download the published TV app.
+   *
+   * No origin check, unlike the build above: this APK has no address baked into
+   * it, so it can be fetched while the link is off and be perfectly correct.
+   * The address only matters at the *other* end of the job — the URL a
+   * television types — and that one is reported honestly as '' until the link
+   * is listening.
+   */
+  ipcMain.handle(IPC.mobileTvFetch, (): ForgeTvStatus => {
+    fetchTv()
     return forgeTvStatus()
   })
 

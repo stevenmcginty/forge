@@ -130,12 +130,88 @@ so treat this table as a snapshot rather than a promise.
 | Rewind | Jump to the Forge panel |
 | Fast Forward | Jump to the YouTube panel |
 | Play / Pause | Controls the YouTube video |
+| Down, while watching **The screen** | Show or hide the mirror's own measurements — see below |
 
 **Signing in to YouTube** never opens a Google login page on the television —
 the leanback interface offers an **activation code** instead. It shows the
 code on screen; type it into `youtube.com/activate` on your phone or a
 computer to finish signing in. There is no other way in, because a
 television with only a D-pad cannot type a password.
+
+---
+
+## 6. Proving the mirror's picture
+
+A soft picture on the television has four causes that look identical from the
+sofa, and each wants a different fix. Press **Down** while watching **The
+screen** and the mirror says which one it is: a sentence naming the finding,
+and two columns of evidence under it — what left the desk, and what this
+television actually decoded. Press **Down** again to put it away.
+
+| Reading | What it means |
+| --- | --- |
+| **Captured** 2560×1440, **Encoded** 1920×1080 | Normal. The desktop caps what it sends at 1080p, because the television is 1080p. |
+| **Encoded** noticeably smaller than 1920 wide | The encoder is scaling the picture down to fit a budget. **Limited by** names which budget. |
+| **Limited by** `bandwidth` | The wifi is the ceiling. The single biggest cause is a Fire Stick on the 2.4GHz band — check the router, because no setting in Forge beats a slow hop. |
+| **Limited by** `cpu` | The desktop cannot encode its own screen any faster. Close what is busy on it. |
+| **Limited by** `none` | Nothing is holding the encoder back. If the picture still looks soft, the remaining suspects are the television's own sharpness settings and the distance to the sofa. |
+| **Decoder** reading like a software library rather than `OMX…` / `c2…` | The stream negotiated a codec this dongle has no silicon for. Bitrate cannot rescue that; the desktop asks for H.264 first precisely to avoid it. |
+| **Frozen** climbing while **Encoded** stays 1920 | Packet loss, not resolution. Look at **Lost** and **Jitter** in the same column. |
+
+The desktop sends these numbers once a second down the same channel that
+carries the WebRTC signalling, so the two halves are always describing the same
+moment. A desktop older than this feature sends none, and the overlay says so
+rather than showing zeroes.
+
+---
+
+## 7. Giving it to somebody else
+
+Everything above builds a television app for *this* house: the desktop's LAN
+address is baked into the APK, which is exactly what makes it useless to
+anybody else. Their network hands out different addresses, and a friend has no
+Android SDK, no JDK and no signing key to build their own with.
+
+So there is a second app, and it is the one to share.
+
+**The shared build has no address inside it.** On first run it asks the local
+network — one UDP broadcast on port 8421 — and every Forge on that wifi with
+its phone link switched on answers with its name and where to dial it. The
+television lists what answered, you press OK on the right one, and the desktop
+raises the same two-word pairing prompt it raises for a phone. Nothing is
+typed. If the search finds nothing (a guest VLAN, broadcast disabled, a desktop
+on ethernet behind a switch that will not carry it), the last row on that
+screen is still **Type the address instead**.
+
+**For your friend, from a plain install of Forge:**
+
+1. Settings → **Forge Mobile**, switch the phone link on.
+2. Same page, **Forge TV** card → **Download the TV app**. About twenty
+   megabytes, no build tools involved. The desktop verifies the download's
+   SHA-256 against the published release before it will serve it to anything.
+3. Type the address that appears into **Downloader** on their Fire Stick, the
+   same as step 2 above.
+4. On the television, Forge finds their desktop and asks to pair. They press
+   **Allow** at the desk.
+
+**Publishing a new shared build** (only from this checkout, and only by whoever
+holds the signing key):
+
+```
+npm run apk:tv:release            # builds --shared, then publishes it
+npm run apk:tv:release -- --no-build
+```
+
+It goes to `stevenmcginty/forge-tv-releases` — its own repo, because
+`releases/latest/download/…` resolves to whichever release in a repo is newest,
+and sharing one with the phone feed would make each app's release hide the
+other's manifest.
+
+**A note on the firewall.** Discovery answers on **UDP 8421**, beside the
+link's TCP 8420. Windows' "allow this app" prompt covers the program rather
+than a single port, so a Forge that has already been allowed through will
+answer; a rule written by hand for TCP only will not, and the television will
+find nothing while everything else works.
 
 ---
 
@@ -151,6 +227,8 @@ television with only a D-pad cannot type a password.
 | Install fails with a signature error | A copy signed with a different key is already on the device — uninstall it first. Both the phone and TV builds share one release keystore, so a rebuilt TV app should always install over the previous one cleanly. |
 | **The screen** says *the mirror ended* as soon as it opens | Press **OK** on that screen to ask again — it retries in place. Opening a desktop capture can take longer than the television's six-second patience, and the retry is the supported answer. If every attempt ends instantly with the same sentence, the desktop half is what to look at: it is the only end that can refuse, and `npm run mirror:check` is the script that covers it. |
 | The mirror says the desktop *didn't answer* | Forge on the desktop is older than the mirror feature, or its window is closed — a minimised Forge can share its screen, a Forge with no window open cannot. Restart it and try again. |
+| The shared app searches and finds **nothing** | Three things must all be true: Forge is running, its phone link is on (Settings → Forge Mobile), and the television is on the same wifi — not a guest network, which usually blocks devices from seeing each other. If all three hold, the firewall is the next suspect (UDP 8421, see section 7). The **Type the address instead** row works regardless. |
+| The search lists a desktop as **different Forge version** | The two ends speak different protocol numbers, so pairing would fail at hello. Update the older one — usually the desktop. |
 
 Checks that prove the parts a script can (run from the desktop checkout):
 
@@ -160,4 +238,10 @@ npm run mobile:smoke    # the server, auth, protocol and a real PTY
 npm run mirror:check    # the desktop half of the screen mirror against a held-
                         # open capture: which attempt is allowed to speak when
                         # a retry overtakes a slow one
+npm run discovery:check # the "is there a Forge here?" responder against real
+                        # datagrams: what earns an answer, what is ignored, and
+                        # that a stopped link answers nothing
+npm run tv-fetch:check  # the downloaded TV app: that nothing failing its size
+                        # or SHA-256 is ever put where a television could
+                        # install it
 ```

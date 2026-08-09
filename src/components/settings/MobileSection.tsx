@@ -212,6 +212,10 @@ export function MobileSection(): ReactNode {
     setTv(await window.forge.mobile.tvBuild())
   }, [])
 
+  const fetchTv = useCallback(async () => {
+    setTv(await window.forge.mobile.tvFetch())
+  }, [])
+
   const copyUrl = useCallback(async (url: string) => {
     await window.forge.clipboard.writeText(url)
     setCopied(url)
@@ -475,7 +479,7 @@ export function MobileSection(): ReactNode {
         )}
       </Card>
 
-      <ForgeTvCard tv={tv} copied={copied} onBuild={buildTv} onCopy={copyUrl} />
+      <ForgeTvCard tv={tv} copied={copied} onBuild={buildTv} onFetch={fetchTv} onCopy={copyUrl} />
     </Section>
   )
 }
@@ -485,66 +489,86 @@ export function MobileSection(): ReactNode {
  *
  * A Fire TV Stick has no file manager and no browser: the only way an APK gets
  * onto one is a URL typed into its Downloader app with a remote control, one
- * character at a time. So this card is two facts and a button — build it, then
- * type this — and the URL never changes, because retyping it on a D-pad is the
- * expensive part.
+ * character at a time. So this card is two facts and a button — get the app,
+ * then type this — and the URL never changes, because retyping it on a D-pad is
+ * the expensive part.
  *
- * The build takes minutes and reports its current line while it runs, which is
- * the honest thing to show for work that long: a spinner with no words looks
- * identical to a hang.
+ * There are two ways to have an app, and the card says which one this is,
+ * because they are not the same binary:
+ *
+ *  - **Downloaded.** The published build, signed once and fetched from the
+ *    release feed. No address inside it: it asks the network which Forge is
+ *    there (see the discovery block in shared/mobile.ts). Works on any machine
+ *    — no Android SDK, no JDK, no keystore — and is the one worth sending to
+ *    somebody else, because it is not addressed to this house.
+ *  - **Built.** Assembled from a checkout with this desktop's LAN address baked
+ *    in. Minutes of Vite and Gradle, and correct for exactly one network.
+ *
+ * The build reports its current line while it runs, which is the honest thing
+ * to show for work that long: a spinner with no words looks identical to a hang.
  */
 function ForgeTvCard({
   tv,
   copied,
   onBuild,
+  onFetch,
   onCopy
 }: {
   tv: ForgeTvStatus | null
   copied: string
   onBuild: () => Promise<void>
+  onFetch: () => Promise<void>
   onCopy: (url: string) => Promise<void>
 }): ReactNode {
   if (!tv) return null
 
   const building = tv.phase === 'building'
-  const built = tv.sizeBytes > 0
-  const tone: ChipTone = building ? 'warn' : tv.phase === 'error' ? 'danger' : built ? 'ok' : 'off'
+  const fetching = tv.phase === 'fetching'
+  const busy = building || fetching
+  const have = tv.sizeBytes > 0
+  const tone: ChipTone = busy ? 'warn' : tv.phase === 'error' ? 'danger' : have ? 'ok' : 'off'
+  const megabytes = (tv.sizeBytes / (1024 * 1024)).toFixed(1)
 
   return (
     <Card
       title="Forge TV"
       actions={
-        tv.supported ? (
-          <button type="button" className="sbtn sbtn--go" disabled={building} onClick={() => void onBuild()}>
-            {building ? 'Building…' : built ? 'Rebuild' : 'Build the TV app'}
+        <>
+          <button type="button" className="sbtn sbtn--go" disabled={busy} onClick={() => void onFetch()}>
+            {fetching ? 'Downloading…' : tv.source === 'downloaded' ? 'Check for a newer one' : 'Download the TV app'}
           </button>
-        ) : undefined
+          {/* Second, and only in a checkout: the built app is the specialist
+              answer — this desktop's address, this network. Offering it first
+              on a machine that can do both would put the slower, narrower
+              route in front of the one that works everywhere. */}
+          {tv.supported && (
+            <button type="button" className="sbtn" disabled={busy} onClick={() => void onBuild()}>
+              {building ? 'Building…' : 'Build one instead'}
+            </button>
+          )}
+        </>
       }
-      hint={
-        tv.supported
-          ? 'The app has this machine’s address baked into it, so the television connects with one press and no typing. If your router hands this machine a different address, rebuild and install it again — that is the whole update mechanism.'
-          : 'Only from a Forge checkout: building the TV app needs the Android SDK and a JDK, neither of which ships inside Forge.'
-      }
+      hint="The television downloads the app from this desktop over your wifi, so the link above has to be on. Installing it again over the top is the whole update mechanism — there is no store."
     >
-      {tv.supported && (
-        <Row
-          label="The television app"
-          hint={
-            built
-              ? `Built ${lastSeen(tv.builtAt)} · ${(tv.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
-              : 'Not built yet on this machine.'
-          }
-        >
-          <StateChip tone={tone}>
-            {building ? 'Building' : tv.phase === 'error' ? 'Failed' : built ? 'Ready' : 'None'}
-          </StateChip>
-        </Row>
-      )}
+      <Row
+        label="The television app"
+        hint={
+          !have
+            ? 'Nothing here yet. The download needs no Android tools and takes about twenty megabytes.'
+            : tv.source === 'downloaded'
+              ? `Downloaded ${lastSeen(tv.builtAt)} · ${megabytes} MB${tv.version ? ` · version ${tv.version}` : ''} · finds this desktop by itself, so it works on anybody’s network`
+              : `Built here ${lastSeen(tv.builtAt)} · ${megabytes} MB · this desktop’s address is baked in, so rebuild if the router changes it`
+        }
+      >
+        <StateChip tone={tone}>
+          {fetching ? 'Downloading' : building ? 'Building' : tv.phase === 'error' ? 'Failed' : have ? 'Ready' : 'None'}
+        </StateChip>
+      </Row>
 
       {/* The address box on a TV is the one thing that has to be right, so it
           gets the same treatment as the phone's: shown as a whole URL, copyable
           in one press, and never abbreviated. */}
-      {tv.supported && built && tv.url && (
+      {have && tv.url && (
         <Row
           label="Type this on the TV"
           hint="Open Downloader on the Fire TV and enter this. Installing again over the top is how it updates."
@@ -559,7 +583,7 @@ function ForgeTvCard({
       )}
 
       {tv.detail && <p className={tv.phase === 'error' ? 'mobile-error' : 'scard__hint'}>{tv.detail}</p>}
-      {built && !tv.url && (
+      {have && !tv.url && (
         <p className="scard__hint">
           Switch the link on above to get the address — the television downloads the app from this same server.
         </p>

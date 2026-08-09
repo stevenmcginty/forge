@@ -154,6 +154,7 @@ const api: ForgeApi = {
       ipcRenderer.send(IPC.mobileApprovalResult, { requestId, allow: allow === true }),
     tvStatus: () => ipcRenderer.invoke(IPC.mobileTvStatus),
     tvBuild: () => ipcRenderer.invoke(IPC.mobileTvBuild),
+    tvFetch: () => ipcRenderer.invoke(IPC.mobileTvFetch),
     onTvStatus: (cb) => subscribe(IPC.mobileTvStatusEvent, cb),
     onMirror: (cb) => subscribe(IPC.mobileMirror, cb),
     mirrorSource: () => ipcRenderer.invoke(IPC.mobileMirrorSource),

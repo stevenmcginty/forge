@@ -637,6 +637,87 @@
   color: var(--dim);
 }
 
+/* ------------------------------------------------------- the mirror's numbers
+
+   The measurement overlay, on Down. Bottom-left rather than centred, because
+   the picture it is judging has to stay judgeable while it is up — a panel over
+   the middle of the screen would hide the text whose sharpness is the whole
+   question. Everything is tabular and monospaced: these are figures read across
+   a room and compared with the last time they were read, and proportional
+   digits jumping about between samples make that harder than it needs to be. */
+.tv-mirror-stats {
+  position: absolute;
+  left: calc(var(--u) * 32);
+  bottom: calc(var(--u) * 32);
+  max-width: calc(var(--u) * 900);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 18);
+  padding: calc(var(--u) * 24) calc(var(--u) * 30);
+  background: rgb(12 14 18 / 0.92);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 18);
+  box-shadow: 0 calc(var(--u) * 24) calc(var(--u) * 64) rgb(0 0 0 / 0.7);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The finding, not the evidence — so it gets the size, and the table under it
+   gets the detail. One line from a sofa is worth ten a nobody stands up for. */
+.tv-stats-verdict {
+  font-size: calc(var(--u) * 26);
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.tv-stats-cols {
+  display: flex;
+  gap: calc(var(--u) * 40);
+}
+
+.tv-stats-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.tv-stats-col > strong {
+  display: block;
+  margin-bottom: calc(var(--u) * 10);
+  font-size: calc(var(--u) * 20);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* Label left, figure right, on one row each: the two columns are meant to be
+   read across, and a definition list that wrapped would break the comparison
+   the whole panel exists for. */
+.tv-stats-col dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: calc(var(--u) * 4) calc(var(--u) * 16);
+  margin: 0;
+  font-size: calc(var(--u) * 21);
+}
+
+.tv-stats-col dt {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.tv-stats-col dd {
+  margin: 0;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-stats-col p {
+  margin: 0;
+  font-size: calc(var(--u) * 21);
+  color: var(--dim);
+}
+
 /* ------------------------------------------------------------------ banner */
 
 /* The one thing allowed to sit on top of the wall, because it is the one
@@ -1005,4 +1086,134 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* --------------------------------------------------------------- connect */
+
+/* The television's first screen in a shared build: it has no address baked in,
+   so it asks the network and lists what answered (TvConnect).
+
+   One column, walked with Up and Down, because a remote has four directions
+   and one OK — a grid of choices on a wall is a thing somebody has to aim at.
+   The same --u screen-height unit as the wall, so the type is readable from
+   the same sofa. */
+.tv-connect {
+  --u: calc(100dvh / 1080);
+
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 22);
+  padding: calc(var(--u) * 60);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: calc(var(--u) * 24);
+  line-height: 1.4;
+  overflow: hidden;
+}
+
+.tv-connect-mark {
+  margin: 0;
+  font-size: calc(var(--u) * 54);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.tv-connect-lead {
+  margin: 0;
+  max-width: calc(var(--u) * 1100);
+  text-align: center;
+  font-size: calc(var(--u) * 28);
+  color: var(--dim);
+}
+
+.tv-connect-trouble {
+  margin: 0;
+  max-width: calc(var(--u) * 1100);
+  padding: calc(var(--u) * 14) calc(var(--u) * 26);
+  border: 1px solid var(--warn);
+  border-radius: calc(var(--u) * 14);
+  text-align: center;
+  font-size: calc(var(--u) * 26);
+  color: var(--ink);
+}
+
+.tv-connect-list {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 14);
+  width: min(calc(var(--u) * 1100), 92vw);
+  margin-top: calc(var(--u) * 10);
+}
+
+/* A row is a whole target: name on top, address under it. Same panel, same
+   line and the same loud volt ring as the wall's rows — one focus look in the
+   whole app, so the eye learns it once. */
+.tv-connect-row {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 6);
+  padding: calc(var(--u) * 20) calc(var(--u) * 28);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 16);
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: default;
+}
+
+.tv-connect-row:focus {
+  outline: none;
+}
+
+.tv-connect-row.is-focus {
+  outline: calc(var(--u) * 3) solid var(--volt);
+  outline-offset: calc(var(--u) * -3);
+  background: #1b1e24;
+  box-shadow: 0 0 calc(var(--u) * 34) rgb(198 255 74 / 0.16);
+}
+
+/* The two ways out sit in the same column as the desktops but read quieter:
+   they are what to do when the list is wrong, not what to do first. */
+.tv-connect-row.is-quiet .tv-connect-name {
+  color: var(--dim);
+}
+
+.tv-connect-name {
+  font-size: calc(var(--u) * 30);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.tv-connect-where {
+  font-size: calc(var(--u) * 24);
+  color: var(--dim);
+}
+
+/* The pairing words, shown while the desktop is asking. Big enough to compare
+   across a room without standing up. */
+.tv-connect-words {
+  display: flex;
+  gap: calc(var(--u) * 24);
+}
+
+.tv-connect-word {
+  padding: calc(var(--u) * 14) calc(var(--u) * 30);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 14);
+  font-size: calc(var(--u) * 44);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.tv-connect-foot {
+  margin: 0;
+  font-size: calc(var(--u) * 22);
+  color: var(--dim);
 }

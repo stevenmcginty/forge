@@ -27,6 +27,22 @@ export const RELEASE_REPO = 'stevenmcginty/forge-mobile-releases'
 export const APK_ASSET = 'forge-mobile.apk'
 
 /**
+ * The television's own releases repo, and why it is not the phone's.
+ *
+ * Both feeds are read through `releases/latest/download/<asset>`, which
+ * resolves to whichever release is newest in that repo — so two apps sharing
+ * one repo means every phone release hides the TV manifest until a TV release
+ * follows it, and vice versa. The failure is silent and remote: a friend
+ * presses "Download the TV app" and gets a 404 from a feed that was correct
+ * last week. One repo per feed, and the question never arises.
+ */
+export const TV_RELEASE_REPO = 'stevenmcginty/forge-tv-releases'
+/** What the desktop downloads, and what electron/mobile/server.ts serves on. */
+export const TV_APK_ASSET = 'forge-tv.apk'
+/** The manifest beside it. electron/mobile-tv-fetch.ts reads exactly this. */
+export const TV_MANIFEST_ASSET = 'tv-latest.json'
+
+/**
  * The release keystore, outside the repo on purpose. Android will only ever
  * install an update signed with the same key as the app it replaces — so
  * this file is not a build input, it is the identity of every Forge Mobile

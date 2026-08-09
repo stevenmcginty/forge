@@ -218,10 +218,17 @@ export const IPC = {
    * `mobileTvStatusEvent`, which is a stream of its own rather than a field on
    * mobileStatusEvent because it changes line by line while a build runs and
    * nothing else on that panel does.
+   *
+   * `mobileTvFetch` is the same feature for every machine that cannot build:
+   * it downloads the published, address-less TV app instead of assembling one.
+   * Same status stream, same ending — the difference is minutes of Gradle
+   * against twenty megabytes of download, and an APK that works in one house
+   * against one that works in anybody's.
    */
   mobileTvStatus: 'mobile:tv-status',
   mobileTvStatusEvent: 'mobile:tv-status-event',
   mobileTvBuild: 'mobile:tv-build',
+  mobileTvFetch: 'mobile:tv-fetch',
 
   /* ------------------------------------------------------ forge tv mirror
    *

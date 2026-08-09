@@ -3,8 +3,10 @@ import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { stripAnsi } from '@shared/ansi'
-import type { ForgeTvPhase, ForgeTvStatus } from '@shared/types'
+import type { ForgeTvPhase, ForgeTvSource, ForgeTvStatus } from '@shared/types'
+import { downloadedTv, fetchTvApk } from './mobile-tv-fetch'
 import { TV_APK_NAME } from './mobile/server'
+import { getDataDir } from './store'
 
 /**
  * Forge TV — building the Fire TV APK from the settings page.
@@ -84,31 +86,75 @@ function repoRoot(): string {
   return cachedRoot
 }
 
+/** Where a downloaded TV app is kept — this Forge's own data, not the repo's. */
+function fetchedDir(): string {
+  return join(getDataDir(), 'tv')
+}
+
 /**
- * Where the built APK is, whether or not it exists yet.
- *
- * Handed to the mobile server as a thunk rather than a string: a build finishes
- * while the server is running, and a path resolved once at start-up would go on
- * 404ing until the next restart.
+ * Where a *built* APK is, whether or not it exists yet. '' outside a checkout.
  */
-export function tvApkPath(): string {
+function builtApkPath(): string {
   const root = repoRoot()
   return root ? join(root, 'dist-apk', TV_APK_NAME) : ''
 }
 
-/** Everything about the build except the address, which is mobile-host's. */
+/**
+ * The APK this Forge would hand to a television, whether or not it exists yet.
+ *
+ * Handed to the mobile server as a thunk rather than a string: a build finishes
+ * while the server is running, and a path resolved once at start-up would go on
+ * 404ing until the next restart.
+ *
+ * A build on this machine wins over a download, and deliberately: somebody who
+ * has just pressed Build wants the thing they built, addressed to this desktop.
+ * The download is what a machine with no toolchain gets, and what anybody hands
+ * to somebody else.
+ */
+export function tvApkPath(): string {
+  const built = builtApkPath()
+  if (built && existsSync(built)) return built
+  const fetched = downloadedTv(fetchedDir())
+  return fetched ? fetched.path : built
+}
+
+/** Everything about the TV app except the address, which is mobile-host's. */
 export function tvBuildState(): Omit<ForgeTvStatus, 'url'> {
-  const apk = tvApkPath()
   // Read from disk rather than remembered, so an APK built in a previous run —
   // or deleted by hand — is reported honestly after a restart.
-  const stats = apk && existsSync(apk) ? statSync(apk) : null
+  const built = builtApkPath()
+  const builtStats = built && existsSync(built) ? statSync(built) : null
+  const fetched = builtStats ? null : downloadedTv(fetchedDir())
+  const source: ForgeTvSource = builtStats ? 'built' : fetched ? 'downloaded' : 'none'
   return {
     supported: repoRoot() !== '',
     phase,
     detail,
-    sizeBytes: stats ? stats.size : 0,
-    builtAt: stats ? Math.round(stats.mtimeMs) : 0
+    sizeBytes: builtStats?.size ?? fetched?.sizeBytes ?? 0,
+    builtAt: builtStats ? Math.round(builtStats.mtimeMs) : (fetched?.at ?? 0),
+    source,
+    version: fetched?.versionName ?? ''
   }
+}
+
+/**
+ * Fetch the published, address-less TV app.
+ *
+ * The other half of this feature, and the half that makes it shareable: this
+ * one runs anywhere — a packaged Forge on a machine that has never seen an
+ * Android SDK — because all it does is download a signed file and check it
+ * against the hash the release published. See electron/mobile-tv-fetch.ts.
+ *
+ * Not awaited by its caller, exactly like `startTvBuild`: the settings page
+ * hears the steps and the ending on `onTvBuildChange`.
+ */
+export function fetchTv(): void {
+  if (child || phase === 'fetching') return
+  report('fetching', 'Looking for the published TV app…')
+  void fetchTvApk({ dir: fetchedDir() }, (line) => report('fetching', line)).then((outcome) => {
+    if (outcome.ok) report('done', `Forge TV ${outcome.versionName} is ready — type the address below into the TV.`)
+    else report('error', outcome.error)
+  })
 }
 
 /** The one subscriber is mobile-host, which decorates and broadcasts. */

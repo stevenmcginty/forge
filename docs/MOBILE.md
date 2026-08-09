@@ -475,7 +475,19 @@ npm run mirror:check    # the desktop half of the TV screen mirror, driven with
                         # a capture held open on purpose: an attempt that was
                         # stopped or overtaken must end in silence, because the
                         # sentence it used to return was delivered to whichever
-                        # screen was watching next and killed it
+                        # screen was watching next and killed it. Also the
+                        # quality settings, which nothing else can see: the
+                        # text content hint, the bitrate ceiling, and the
+                        # instruction to spend frame rate rather than pixels
+                        # when the encoder runs short
+npm run discovery:check # the UDP responder that lets a television find this
+                        # desktop with no address typed: what earns an answer,
+                        # what is ignored (short probes, strangers, floods),
+                        # and that a stopped link answers nothing at all
+npm run tv-fetch:check  # the downloaded, shareable TV app: that a download
+                        # failing its size or SHA-256 never reaches the path a
+                        # television installs from, and never disturbs the APK
+                        # already there
 npm run pty:smoke       # the sink refactor must not have touched the renderer
 npm run build           # includes tsconfig.mobile.json — the phone app is
                         # typechecked against the same shared/ the desktop is

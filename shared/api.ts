@@ -496,6 +496,19 @@ export interface ForgeApi {
      * it while a build is running is a no-op that returns the running status.
      */
     tvBuild(): Promise<ForgeTvStatus>
+    /**
+     * Download the published Fire TV app instead of building one.
+     *
+     * The route for every machine that is not this project's development box:
+     * it needs no Android SDK, no JDK and no signing key, because the file is
+     * built and signed once and published. The APK it fetches has no desktop
+     * address inside it — it finds whichever Forge answers on the network it is
+     * switched on in — which is what makes it the one to hand to somebody else.
+     *
+     * Returns immediately, like `tvBuild`; the steps and the ending arrive on
+     * `onTvStatus`.
+     */
+    tvFetch(): Promise<ForgeTvStatus>
     onTvStatus(cb: (s: ForgeTvStatus) => void): () => void
 
     /* ------------------------------------------------- the screen mirror

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { MOBILE_PORT, type MobileSession } from '@shared/mobile'
+import { MOBILE_PORT, MOBILE_PROTO, type MobileSession } from '@shared/mobile'
 import { Link, deviceId, type LinkPicture, type LinkState } from './lib/link'
 import { forgetToken, pairTokenOf, readOrigin, readToken, toOrigin, writeOrigin, writeToken } from './lib/secure'
 import { canScan, scanPairingCode } from './lib/scan'
 import { servedFromOrigin, shouldOfferInstall } from './lib/pwa'
 import { Browser, leavesOf } from './components/Browser'
 import { PaneView, paneListeners } from './components/PaneView'
+import { TvConnect } from './components/TvConnect'
 import { TvDashboard } from './components/TvDashboard'
 import { isTv } from './lib/tv'
 import { tvBridge } from './lib/tv-bridge'
@@ -226,6 +227,32 @@ export function App(): React.JSX.Element {
   /* ------------------------------------------------------------- rendering */
 
   if (!picture) {
+    // A television with no address baked into it — the shared build, installed
+    // by somebody this desktop has never met — asks the network instead of
+    // asking a person to type an IP with a D-pad. Only when there is genuinely
+    // nothing else to go on: a stamped TV build keeps its one-button screen,
+    // and a paired television is reconnecting to an address it already knows.
+    if (isTv() && BAKED === '' && !hasToken && !manual) {
+      return (
+        <TvConnect
+          state={state}
+          detail={detail}
+          proto={MOBILE_PROTO}
+          onPick={(origin) => {
+            setSawWords(false)
+            writeOrigin(origin)
+            setAddress(origin)
+            link.connect({ origin, token: '', deviceId: deviceId(), deviceName: deviceName() })
+          }}
+          onCancel={abandon}
+          onType={() => {
+            abandon()
+            setManual(true)
+          }}
+        />
+      )
+    }
+
     // A stamped, unpaired APK opens on one button. A paired phone that is
     // merely reconnecting, an unstamped build, and anyone who chose "Other
     // ways to connect" all get the form instead — a paired phone must never
