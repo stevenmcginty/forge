@@ -498,6 +498,7 @@ function settleApproval(requestId: string, allow: boolean): void {
     requestId,
     deviceName: '',
     words: '',
+    known: false,
     open: false
   } satisfies MobileApprovalEvent)
   pending.resolve(allow)
@@ -511,6 +512,7 @@ function requestApproval(ask: MobileApprovalAsk): Promise<boolean> {
       requestId: ask.requestId,
       deviceName: ask.deviceName,
       words: ask.words,
+      known: ask.known,
       open: true
     } satisfies MobileApprovalEvent)
     notifyApproval(ask)
@@ -535,8 +537,8 @@ function notifyApproval(ask: MobileApprovalAsk): void {
   if (windows.some((w) => w.isFocused())) return
   if (!Notification.isSupported()) return
   const note = new Notification({
-    title: 'A phone wants to connect to Forge',
-    body: `"${ask.deviceName}" is asking to pair. Its screen should be showing ${ask.words}. Open Forge to allow or deny.`
+    title: ask.known ? 'A device you have paired is asking to reconnect' : 'A phone wants to connect to Forge',
+    body: `"${ask.deviceName}" is asking to ${ask.known ? 'reconnect' : 'pair'}. Its screen should be showing ${ask.words}. Open Forge to allow or deny.`
   })
   note.on('click', () => {
     const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
@@ -564,6 +566,7 @@ async function start(): Promise<void> {
   const instance = new MobileServer({
     auth: getAuth(),
     appVersion: app.getVersion(),
+    desktopName: () => hostname(),
     sessions: () => getManager().list(),
     replay: (id) => getReplay(id),
     write: (id, data) => getManager().write(id, data),

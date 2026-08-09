@@ -29,10 +29,22 @@ import { Preferences } from '@capacitor/preferences'
 
 const TOKEN_KEY = 'forge.deviceToken'
 const ORIGIN_KEY = 'forge.origin'
+/**
+ * The paired desktop's own name, as it said it in `hello-ok`.
+ *
+ * Not a credential and not stored like one — it is here rather than in
+ * localStorage only so that it is forgotten by the same "forget this desktop"
+ * that clears the token, and never survives it. Its one job is on the
+ * television: after the laptop comes home on a different DHCP address, this is
+ * what tells "some Forge answered the broadcast" apart from "the desktop this
+ * television belongs to has moved".
+ */
+const DESKTOP_KEY = 'forge.desktopName'
 
 const native = Capacitor.isNativePlatform()
 let token = ''
 let origin = ''
+let desktop = ''
 
 /**
  * Load both values into memory. Must complete before the first render;
@@ -42,10 +54,12 @@ export async function hydrate(): Promise<void> {
   if (!native) {
     token = localStorage.getItem(TOKEN_KEY) ?? ''
     origin = localStorage.getItem(ORIGIN_KEY) ?? ''
+    desktop = localStorage.getItem(DESKTOP_KEY) ?? ''
     return
   }
   token = (await Preferences.get({ key: TOKEN_KEY })).value ?? ''
   origin = (await Preferences.get({ key: ORIGIN_KEY })).value ?? ''
+  desktop = (await Preferences.get({ key: DESKTOP_KEY })).value ?? ''
 }
 
 /** Fire-and-forget persistence: the in-memory value is already the truth for
@@ -70,9 +84,28 @@ export function writeToken(next: string): void {
   persist(TOKEN_KEY, next)
 }
 
+/**
+ * Drop the credential, and the desktop it belonged to.
+ *
+ * The name goes with it deliberately: a remembered "this belongs to STEVE-PC"
+ * outliving the token it was learned on would have a television homing in on a
+ * desktop it can no longer open, and saying so on screen.
+ */
 export function forgetToken(): void {
   token = ''
   persist(TOKEN_KEY, '')
+  desktop = ''
+  persist(DESKTOP_KEY, '')
+}
+
+/** The paired desktop's own name, or '' if it never said. */
+export function readDesktopName(): string {
+  return desktop
+}
+
+export function writeDesktopName(next: string): void {
+  desktop = next
+  persist(DESKTOP_KEY, next)
 }
 
 /** The last desktop we reached, so the app reconnects without being asked. */

@@ -117,6 +117,41 @@ Nothing is typed on either end. Once paired, the television stores its own
 device token and reconnects on its own from then on — Settings → Forge
 Mobile lists it with the phones, and revoking it there is the kill switch.
 
+### When the desktop is not there
+
+A laptop leaves the house. The television is still paired, and there is
+nothing to reconnect to — so it says so, by name, and keeps looking:
+
+> *Waiting for STEVE-PC to come back on this network…*
+
+It never asks for an address or a pairing code again. Both rows are still
+there to be chosen, but a television that is already paired is never
+*presented* with a form — it holds a working credential, and asking for one
+would be asking for something it already has.
+
+What happens when the laptop comes home depends on one thing:
+
+- **Same address as before** — it reconnects on its own, silently. Nothing
+  to press at either end. This is the usual case.
+- **A new address** (the router handed the old one to something else while
+  the laptop was out) — the television hears it answering the network search
+  from somewhere new and dials it, and the desktop raises the same two-word
+  prompt as on the first day. Check the words, press **Allow**, done. One
+  press, at the desk.
+
+The prompt is deliberate. The television will not send its saved credential
+to an address it has not reached before — a device token is a shell on that
+machine, and something answering "I am Forge" on the wifi is not evidence of
+anything. So the address is proven by a human at the desk rather than by the
+network, once, and only when the address actually changes.
+
+That second case does **not** need *Accept new phones* armed first: a desktop
+lets a device already in its paired list ask, because making somebody arm a
+window for a television it already knows turns one press into a chore. The
+prompt still goes up and Allow is still a human's, which is where the
+authority was all along. Revoking the television removes it from the list and
+closes that door with it.
+
 ---
 
 ## 5. Remote controls
@@ -306,6 +341,9 @@ find nothing while everything else works.
 | The desktop's cursor lands below and right of the volt ring, further out the further it travels | The input helper is not DPI-aware, which was true of every Forge before 0.3.6 on any screen running Windows display scaling above 100%. Update the desktop. The distance is exactly the scale factor — a ring a third of the way across a 125% screen put the cursor at 41% — so a cursor that tracks the ring perfectly in the top-left corner and drifts from there is this and not a mis-aimed remote. |
 | The pointer moves but nothing on the desktop responds | Whatever is under it is running as administrator. Windows refuses synthetic input from a normal process to an elevated window, and Forge is not elevated — deliberately, because that is also what keeps a UAC prompt un-clickable from the sofa. |
 | The search lists a desktop as **different Forge version** | The two ends speak different protocol numbers, so pairing would fail at hello. Update the older one — usually the desktop. |
+| The television waits for a desktop that **is** running | It is waiting on the name the desktop gave it. Check Forge's phone link is on and that both are on the same wifi; the television re-asks the network every fifteen seconds and reconnects itself the moment it hears an answer. If the desktop has been renamed since pairing, the automatic move to a new address cannot match it any more — choose it from the list once and the new name is learned. |
+| The desktop prompt says **a device you paired is asking again** | That is a paired television whose desktop moved to a new address, doing exactly what it should. Compare the two words as usual, then Allow. If no television of yours is on, deny it — nothing is granted without that press. |
+| The television says it is **no longer paired** | Its token was refused, so it threw the token away rather than retrying a dead credential — normally because it was revoked at the desk, or because Forge is running on a different data profile than the one it paired against. Arm **Accept new phones** and let it ask again. |
 
 Checks that prove the parts a script can (run from the desktop checkout):
 

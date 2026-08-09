@@ -65,10 +65,20 @@ export function ApprovalPrompt(): ReactNode {
         }}
       >
         <div className="eyebrow approval__eyebrow">Forge Mobile</div>
-        <h1 className="approval__title">A phone wants to connect</h1>
+        <h1 className="approval__title">{ask.known ? 'A device you paired is asking again' : 'A phone wants to connect'}</h1>
         <p className="approval__body">
-          A phone calling itself <strong className="approval__name">“{ask.deviceName}”</strong> is asking to pair.
-          Its screen should be showing:
+          {ask.known ? (
+            <>
+              <strong className="approval__name">“{ask.deviceName}”</strong> is already in your paired list and is
+              asking to reconnect — usually because this computer’s address on the network changed while it was away.
+              Its screen should be showing:
+            </>
+          ) : (
+            <>
+              A phone calling itself <strong className="approval__name">“{ask.deviceName}”</strong> is asking to pair.
+              Its screen should be showing:
+            </>
+          )}
         </p>
         <div className="approval__words mono" aria-label={`The words ${ask.words}`}>
           {ask.words}

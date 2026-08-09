@@ -1949,6 +1949,13 @@ export interface MobileApprovalEvent {
   deviceName: string
   /** The word pair both screens show, e.g. "OTTER RIVER". Empty on withdraw. */
   words: string
+  /**
+   * This device is already in the paired list, asking again — the usual reason
+   * being a television whose desktop moved to a new address. It changes the
+   * prompt's wording only; Allow grants exactly what it always granted, and
+   * Deny is still where the focus lands.
+   */
+  known: boolean
   open: boolean
 }
 

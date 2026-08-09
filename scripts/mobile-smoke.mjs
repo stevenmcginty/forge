@@ -293,6 +293,7 @@ async function main() {
   log(ok.projects?.[0]?.name === 'forge', 'hello-ok carries the project list')
   log(ok.profiles?.[0]?.id === 'shell', 'hello-ok carries the launchable profiles')
   log(ok.appVersion === '0.0.0-smoke', 'hello-ok carries the desktop version')
+  log(ok.desktopName === undefined, 'a host that does not name itself omits desktopName rather than sending an empty one')
 
   /* --------------------------------------------- a real shell to drive */
 
@@ -427,6 +428,7 @@ async function main() {
   const hostC = {
     auth: authC,
     appVersion: '0.0.0-smoke',
+    desktopName: () => 'SMOKE-PC',
     sessions: () => manager.list(),
     replay: () => '',
     write: () => true,
@@ -474,6 +476,11 @@ async function main() {
   log(
     prompts.length === 1 && prompts[0].words === showing.words && prompts[0].deviceName === 'Pixel 8',
     'exactly one prompt was raised, carrying the same words and the device name'
+  )
+  log(prompts[0].known === false, 'and it says this is a device the desktop has never seen')
+  log(
+    pixel.first('hello-ok').desktopName === 'SMOKE-PC',
+    'hello-ok names the desktop, so a television can recognise it at a new address later'
   )
   const granted = pixel.first('hello-ok').deviceToken
   log(
@@ -565,6 +572,51 @@ async function main() {
   log(
     persisted.length > 0 && persisted.every((json) => !json.includes(granted)),
     'no raw approval-minted token was ever handed to persistence'
+  )
+
+  /* ------------------------- 20. a device already paired may still ask */
+
+  // The television's homecoming. Its token is no good against an address it has
+  // not confirmed, so it asks instead — and a desktop that made somebody walk
+  // over and arm a window first would have turned "press Allow" into a chore
+  // for a device already sitting in its own list. What is *not* loosened: the
+  // prompt still goes up, and a human still answers it.
+  clockC += 61_000
+  verdict = async () => true
+  const returning = await connect()
+  returning.send({ t: 'hello', proto: 1, deviceId: 'pixel-8', deviceName: 'TV (Fire TV)', requestPair: true })
+  await waitFor(() => returning.first('hello-ok'), 5000, 'known-device approval hello-ok')
+  log(
+    prompts.length === 4 && prompts[3].known === true,
+    'a device already in the paired list may ask again with the window shut, and the prompt says it is a returning one'
+  )
+  const regranted = returning.first('hello-ok').deviceToken
+  log(
+    typeof regranted === 'string' && regranted !== granted,
+    'Allow issues it a fresh token rather than resurrecting the old one'
+  )
+
+  // The same hello with an id nobody has paired is still refused, which is the
+  // whole difference between a door for a known device and no door at all.
+  clockC += 61_000
+  const impostor = await connect()
+  impostor.send({ t: 'hello', proto: 1, deviceId: 'not-a-device', deviceName: 'TV (Fire TV)', requestPair: true })
+  await waitFor(() => impostor.closed !== null, 5000, 'unknown-device refusal')
+  log(
+    impostor.closed === 4001 && impostor.first('err')?.code === 'auth' && prompts.length === 4,
+    'and an unpaired device asking the same way with the window shut is refused with no prompt at all'
+  )
+
+  // Revoke is still the kill switch: the relaxation lives entirely inside the
+  // paired list, so leaving the list closes the door behind you.
+  clockC += 61_000
+  authC.revoke('pixel-8')
+  const revoked = await connect()
+  revoked.send({ t: 'hello', proto: 1, deviceId: 'pixel-8', deviceName: 'TV (Fire TV)', requestPair: true })
+  await waitFor(() => revoked.closed !== null, 5000, 'revoked-device refusal')
+  log(
+    revoked.closed === 4001 && prompts.length === 4,
+    'and a revoked device loses that door with its pairing — no prompt, no way back in'
   )
 
   await serverC.stop()

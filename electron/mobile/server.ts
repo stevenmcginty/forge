@@ -58,6 +58,12 @@ import type { MobileAuth, MobileDevice } from './auth'
 export interface MobileServerHost {
   auth: MobileAuth
   appVersion: string
+  /**
+   * This computer's name, echoed in `hello-ok` so a paired television can
+   * recognise this desktop again at a different address. Absent hosts simply
+   * do not say, and the field is omitted. See `desktopName` in shared/mobile.ts.
+   */
+  desktopName?: () => string
 
   /** Live sessions, as the wire sees them. */
   sessions: () => MobileSession[]
@@ -197,6 +203,12 @@ export interface MobileApprovalAsk {
   deviceName: string
   /** The pair both screens show, e.g. "OTTER RIVER". */
   words: string
+  /**
+   * This device id is already in the paired list — a returning device asking
+   * again, not a stranger. Changes what the prompt *says*, never what Allow
+   * does: the answer is still a human's, and Deny is still the default.
+   */
+  known: boolean
 }
 
 export interface MobileServerOptions {
@@ -757,13 +769,14 @@ export class MobileServer {
     const token = wireString(frame.token, 512)
 
     // Pairing by approval — only for a hello with no credential at all, and
-    // only while "Accept new phones" is armed. When it is not armed (the
-    // default state, and the common one), the flag is *ignored* rather than
+    // only while the door is open for this particular caller (see
+    // `acceptingPairs`). When it is not, the flag is *ignored* rather than
     // answered: the hello falls through to the ordinary no-credential refusal
     // below, indistinguishable from one that never carried the flag. Anyone
     // probing the tunnel hostname learns nothing about whether this door
     // exists, and — the point — cannot make prompts appear on Steve's screen.
-    if (frame.requestPair === true && !token && this.acceptingPairs()) {
+    const helloDeviceId = wireString(frame.deviceId, 128)
+    if (frame.requestPair === true && !token && this.acceptingPairs(helloDeviceId)) {
       this.beginApproval(client, frame)
       return
     }
@@ -804,6 +817,9 @@ export class MobileServer {
       proto: MOBILE_PROTO,
       appVersion: this.host.appVersion,
       deviceName: device.name,
+      // Sent only when the host knows it, so an older Forge and a host that
+      // declines to say are the same thing on the wire.
+      ...(this.host.desktopName?.() ? { desktopName: this.host.desktopName() } : {}),
       sessions: this.host.sessions(),
       ...snapshot,
       // What this desktop will let a remote control do, as it stands right now.
@@ -818,10 +834,41 @@ export class MobileServer {
 
   /* ------------------------------------------------- pairing by approval */
 
-  /** Is the tap-to-pair door open right now? Read per-hello, never cached. */
-  private acceptingPairs(): boolean {
+  /**
+   * Is the tap-to-pair door open for this caller right now? Read per-hello,
+   * never cached.
+   *
+   * Two ways in, and the second one is a deliberate loosening.
+   *
+   *  - **Armed.** "Accept new phones" is on, and anybody may ask. This is the
+   *    door for a device the desktop has never met.
+   *  - **Already known.** The hello names a `deviceId` that is in the paired
+   *    list, and the desktop lets it ask without being armed first.
+   *
+   * The second exists because of one real situation: a television is paired,
+   * the laptop leaves the house and comes back on a different DHCP address, and
+   * its token — which the television will not send to an address it has not
+   * confirmed — is useless until somebody walks to the desk and arms a window.
+   * Requiring that turns "press Allow" into "find the setting, arm it, then
+   * press Allow", for a device already sitting in the list.
+   *
+   * What it does *not* loosen: nothing is issued without a human pressing Allow
+   * on this machine, the one-pending and one-prompt-a-minute rules still bound
+   * how often a prompt can appear at all, and a device id is 128 bits of the
+   * phone's own randomness — it is not guessable, so this is not a door a
+   * stranger on the network can knock on. A revoked device is gone from the
+   * list and gets the ordinary refusal, which is the property revoke exists for.
+   */
+  private acceptingPairs(deviceId: string): boolean {
     if (!this.host.requestApproval) return false
-    return (this.host.acceptUntil?.() ?? 0) > this.now()
+    if ((this.host.acceptUntil?.() ?? 0) > this.now()) return true
+    return this.knows(deviceId)
+  }
+
+  /** Is this device id already in the paired list? '' is never known. */
+  private knows(deviceId: string): boolean {
+    if (!deviceId) return false
+    return this.host.auth.devices().some((device) => device.id === deviceId)
   }
 
   /**
@@ -869,7 +916,7 @@ export class MobileServer {
     this.send(client, { t: 'awaiting-approval', words })
     this.log(`"${deviceName}" is asking to pair from ${client.source}`)
 
-    this.host.requestApproval!({ requestId, deviceId, deviceName, words })
+    this.host.requestApproval!({ requestId, deviceId, deviceName, words, known: this.knows(deviceId) })
       .then((allowed) => this.settleApproval(client, allowed === true, 'The desktop said no.'))
       .catch(() => this.settleApproval(client, false, 'The desktop could not ask.'))
   }

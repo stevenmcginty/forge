@@ -258,6 +258,22 @@ network posture defends the fact that the port exists at all.
    Both routes mint through the same `mintDevice`, so an approved phone is
    indistinguishable from a coded one afterwards, and the only-hashes-persist
    invariant lives in one routine rather than two that might drift.
+
+3b. **A device already in the list may ask without the window being armed.**
+   One relaxation of 3a, for one situation: a paired television whose desktop
+   came home on a different DHCP address. The television will not send its
+   token to an address it has not reached before — a credential is a shell, and
+   a discovery reply proves nothing — so it asks instead, and requiring an armed
+   window first would turn "press Allow" into "find the setting, arm it, then
+   press Allow" for a device sitting in the desktop's own paired list.
+
+   What that relaxation does *not* touch: the prompt still goes up, the word
+   pair still has to match, Allow is still a human's, the one-pending and
+   one-per-60-seconds limits still bound how often a prompt can appear, and a
+   `deviceId` is 128 bits of the device's own randomness — not a value a
+   stranger can present. Revoking removes the device from the list, and the
+   door goes with it. `acceptingPairs` in electron/mobile/server.ts is the whole
+   of it; `npm run mobile:smoke` covers all four of those properties.
 4. **Only hashes on disk.** `settings.json` holds SHA-256 of each device token
    and never the token. The smoke test records everything ever handed to
    persistence and fails if the raw token appears in any of it.

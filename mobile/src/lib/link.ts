@@ -50,6 +50,12 @@ export type LinkState = 'idle' | 'connecting' | 'live' | 'retrying' | 'refused' 
 export interface LinkPicture {
   appVersion: string
   deviceName: string
+  /**
+   * The desktop's own name, or '' from a desktop too old to say. Remembered on
+   * the television so a rediscovered address can be recognised as this same
+   * desktop later — see `desktopName` in shared/mobile.ts.
+   */
+  desktopName: string
   projects: Project[]
   profiles: AgentProfile[]
   workspaces: Record<string, Workspace>
@@ -82,6 +88,22 @@ export interface LinkHandlers {
   onExit: (id: string, exitCode: number) => void
   /** Pairing succeeded and this token must be stored. Fires at most once. */
   onPaired: (token: string) => void
+  /**
+   * The stored device token is no longer any good — revoked at the desk, or
+   * pointed at a Forge whose settings no longer hold this device.
+   *
+   * Separate from `onState('refused')` because the two want different answers.
+   * A refusal can be a lockout, a protocol mismatch, or a desktop that is not
+   * accepting anyone: none of those are a reason to throw a credential away,
+   * and a screen that re-pairs on any of them would be one that un-pairs itself
+   * every time somebody fat-fingers a code. This fires only for the desktop
+   * saying, in as many words, that the *credential* is not one it knows.
+   *
+   * Only ever for a device token, never for a pairing code — the two travel in
+   * the same field and are told apart by length, exactly as the desktop tells
+   * them apart (see onHello in electron/mobile/server.ts).
+   */
+  onTokenRejected: () => void
   /** Something the user should see — a refused op, a session that vanished. */
   onNotice: (message: string) => void
   /**
@@ -145,6 +167,13 @@ const SILENCE_MS = 30_000
 
 /** After a resume ping, how long the socket has to say anything at all. */
 const VERDICT_MS = 4_000
+
+/**
+ * Longer than this and the credential in `token` is a device token rather than
+ * a pairing code. The same rule the desktop applies to the same field: a device
+ * token is 32 bytes base64url (43 chars), a pairing code is 16 (22).
+ */
+const DEVICE_TOKEN_MIN_CHARS = 30
 
 /** A connect still unresolved this long after a resume was frozen mid-dial. */
 const STUCK_MS = 10_000
@@ -649,6 +678,13 @@ export class Link {
       }
 
       case 'err':
+        // The credential itself was rejected. Said here rather than left to the
+        // close that follows, because only the `err` frame distinguishes "this
+        // token is not one I know" from the lockout and cooldown refusals that
+        // close with the same 4001.
+        if (frame.code === 'auth' && (this.credentials?.token.length ?? 0) > DEVICE_TOKEN_MIN_CHARS) {
+          this.handlers.onTokenRejected()
+        }
         // `unknown-session` is normal churn — a pane closed at the desk while
         // the phone still had it on screen — so it drops the subscription
         // rather than shouting about it.
@@ -702,6 +738,7 @@ function pictureOf(frame: HelloOkFrame): LinkPicture {
   return {
     appVersion: frame.appVersion,
     deviceName: frame.deviceName,
+    desktopName: typeof frame.desktopName === 'string' ? frame.desktopName : '',
     projects: frame.projects,
     profiles: frame.profiles,
     workspaces: frame.workspaces,

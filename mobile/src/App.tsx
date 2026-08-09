@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { MOBILE_PORT, MOBILE_PROTO, type MobileSession } from '@shared/mobile'
 import { Link, deviceId, type LinkPicture, type LinkState } from './lib/link'
-import { forgetToken, pairTokenOf, readOrigin, readToken, toOrigin, writeOrigin, writeToken } from './lib/secure'
+import {
+  forgetToken,
+  pairTokenOf,
+  readDesktopName,
+  readOrigin,
+  readToken,
+  toOrigin,
+  writeDesktopName,
+  writeOrigin,
+  writeToken
+} from './lib/secure'
 import { canScan, scanPairingCode } from './lib/scan'
 import { servedFromOrigin, shouldOfferInstall } from './lib/pwa'
 import { Browser, leavesOf } from './components/Browser'
 import { PaneView, paneListeners } from './components/PaneView'
-import { TvConnect } from './components/TvConnect'
+import { TvConnect, type KnownDesktop } from './components/TvConnect'
 import { TvDashboard } from './components/TvDashboard'
 import { isTv } from './lib/tv'
 import { tvBridge } from './lib/tv-bridge'
@@ -81,6 +91,24 @@ export function App(): React.JSX.Element {
   // The latest picture, readable from the once-built Link callbacks below —
   // state is what renders, the ref is for handlers that outlive any render.
   const pictureRef = useRef<LinkPicture | null>(null)
+  /**
+   * The paired desktop's own name, mirrored out of the secure store the same
+   * way `hasToken` is, because that store is module state React cannot watch.
+   * A television uses it to recognise the desktop it belongs to at an address
+   * it has never seen — see the homing block in components/TvConnect.tsx.
+   */
+  const [knownName, setKnownName] = useState(() => readDesktopName())
+  /**
+   * The address currently being dialled, saved only once it answers.
+   *
+   * Writing it at dial time — which is what every other route here does, and
+   * what this one used to do — is fine when a human just typed the address, and
+   * wrong when the television picked it off a broadcast: a machine on the wifi
+   * answering "I am Forge" would overwrite the remembered address of the real
+   * desktop merely by being asked. So the discovered address earns its place in
+   * the store by completing a hello, not by being dialled.
+   */
+  const dialling = useRef('')
 
   // Built once. The callbacks below close over setState only, which React
   // guarantees is stable, so the Link never needs rebuilding.
@@ -91,10 +119,25 @@ export function App(): React.JSX.Element {
           setState(next)
           setDetail(why)
           if (next === 'awaiting') setSawWords(true)
+          // An address that has answered a hello is an address worth keeping.
+          // One that was refused is not, and must not be left lying around to
+          // be written by whatever connects next.
+          if (next === 'live' && dialling.current) {
+            writeOrigin(dialling.current)
+            setAddress(dialling.current)
+            dialling.current = ''
+          }
+          if (next === 'refused' || next === 'expired' || next === 'idle') dialling.current = ''
         },
         onPicture: (next) => {
           pictureRef.current = next
           setPicture(next)
+          // Learned rather than configured, and re-learned on every connection
+          // so a renamed computer is a renamed computer here too.
+          if (next.desktopName && next.desktopName !== readDesktopName()) {
+            writeDesktopName(next.desktopName)
+            setKnownName(next.desktopName)
+          }
         },
         onData: (id, data, replay) => paneListeners.get(id)?.(data, replay),
         onExit: (id, exitCode) => {
@@ -109,6 +152,22 @@ export function App(): React.JSX.Element {
         onPaired: (token) => {
           writeToken(token)
           setHasToken(true)
+        },
+        /**
+         * The saved credential is dead — revoked at the desk, or this desktop's
+         * settings no longer hold this device. Throwing it away is the honest
+         * move and the useful one: what is left is an unpaired device, which is
+         * a state both routes already know how to get out of. A television
+         * drops back to its search-and-ask screen, and a stamped phone gets its
+         * one-tap button back.
+         *
+         * Only ever fired for a device token, never for a mistyped pairing
+         * code — see onTokenRejected in lib/link.ts.
+         */
+        onTokenRejected: () => {
+          forgetToken()
+          setHasToken(false)
+          setKnownName('')
         },
         onNotice: setNotice,
         // Straight across the bridge: the Link already validated the id, and
@@ -219,36 +278,81 @@ export function App(): React.JSX.Element {
     link.disconnect()
     forgetToken()
     setHasToken(false)
+    // The remembered name goes with the credential it was learned on. A
+    // television still homing in on a desktop it can no longer open would be
+    // announcing a reunion it cannot deliver.
+    setKnownName('')
     setPicture(null)
     setScreen({ at: 'browse', projectId: null })
-    setNotice('This phone is no longer paired.')
+    setSawWords(false)
+    setNotice(isTv() ? 'This television is no longer paired.' : 'This phone is no longer paired.')
   }, [link])
+
+  /**
+   * The desktop this television is paired to, if it is paired at all.
+   *
+   * Held here rather than built during render so the screen below is handed the
+   * same object each time: it feeds an effect that searches the network and
+   * dials on its own, and an identity that changed every render would restart
+   * that effect every render.
+   */
+  const known = useMemo<KnownDesktop | null>(() => {
+    if (!isTv() || !hasToken) return null
+    return { name: knownName, origin: toOrigin(address, MOBILE_PORT) }
+  }, [address, hasToken, knownName])
+
+  /**
+   * Dial a desktop the television chose — from the list, or by finding the one
+   * it is paired to at a new address.
+   *
+   * The one rule: the saved token rides along only to the address it was issued
+   * at. Anywhere else — a desktop found on the network, however convincing its
+   * name — is dialled with nothing, so the far end has to raise its own prompt
+   * and a human has to press Allow. A credential here is a shell, and an answer
+   * to a broadcast is not evidence of anything.
+   */
+  const pickDesktop = useCallback(
+    (picked: string): void => {
+      const origin = toOrigin(picked, MOBILE_PORT)
+      if (!origin) return
+      setSawWords(false)
+      dialling.current = origin
+      const token = known && origin === known.origin ? readToken() : ''
+      link.connect({ origin, token, deviceId: deviceId(), deviceName: deviceName() })
+    },
+    [known, link]
+  )
 
   /* ------------------------------------------------------------- rendering */
 
   if (!picture) {
     // A television with no address baked into it — the shared build, installed
     // by somebody this desktop has never met — asks the network instead of
-    // asking a person to type an IP with a D-pad. Only when there is genuinely
-    // nothing else to go on: a stamped TV build keeps its one-button screen,
-    // and a paired television is reconnecting to an address it already knows.
-    if (isTv() && BAKED === '' && !hasToken && !manual) {
+    // asking a person to type an IP with a D-pad. A stamped TV build keeps its
+    // one-button screen, and anyone who chose "Type the address instead" is
+    // taken at their word; everything else on a television lands here.
+    //
+    // Including a television that is already paired, which is the case this
+    // used to get wrong. Being paired and being connected are different facts,
+    // and a paired television whose desktop is simply not home was shown the
+    // phone's pairing form — an address and a code, to be entered with a
+    // D-pad, for a pairing it already had. It read as "Forge has forgotten
+    // me", so that is what everyone concluded. What it should say is who it is
+    // waiting for, and then go and find them.
+    if (isTv() && BAKED === '' && !manual) {
       return (
         <TvConnect
           state={state}
           detail={detail}
           proto={MOBILE_PROTO}
-          onPick={(origin) => {
-            setSawWords(false)
-            writeOrigin(origin)
-            setAddress(origin)
-            link.connect({ origin, token: '', deviceId: deviceId(), deviceName: deviceName() })
-          }}
+          known={known}
+          onPick={pickDesktop}
           onCancel={abandon}
           onType={() => {
             abandon()
             setManual(true)
           }}
+          onForget={forget}
         />
       )
     }
@@ -676,8 +780,17 @@ function sessionNameOf(picture: LinkPicture | null, sessionId: string): string {
  * A name for the desktop's device list. `navigator.userAgentData` is the modern
  * source and Android Chrome has it; the UA string is the fallback, and "Phone"
  * is the answer when neither says anything useful.
+ *
+ * A television says so. The name is what the approval prompt puts in front of
+ * whoever is deciding whether to press Allow, and on a Fire TV every automatic
+ * source answers with a build string ("AFTKA") that identifies the device to
+ * nobody. "TV" is the word the person at the desk is thinking.
  */
 function deviceName(): string {
+  return isTv() ? `TV (${hardwareName()})` : hardwareName()
+}
+
+function hardwareName(): string {
   const brands = (navigator as { userAgentData?: { platform?: string } }).userAgentData
   if (brands?.platform) return brands.platform
   const match = /\(([^)]+)\)/.exec(navigator.userAgent)

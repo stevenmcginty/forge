@@ -615,6 +615,23 @@ export interface HelloOkFrame {
   proto: number
   appVersion: string
   deviceName: string
+  /**
+   * The desktop's own name — the same string discovery puts in its reply.
+   *
+   * Optional, so an older desktop simply does not say, and MOBILE_PROTO does
+   * not move. It exists for one job: a television that has been paired needs to
+   * recognise this desktop again after its LAN address changes, and the address
+   * is the one fact that does not survive a DHCP lease. Matching a discovery
+   * reply against a remembered name is what turns "some Forge answered" into
+   * "the desktop this television is paired to has moved" — see the homing block
+   * in mobile/src/App.tsx.
+   *
+   * It is a label, never a credential: a name that matches proves nothing, and
+   * nothing is unlocked by it. All it decides is which address is worth dialling
+   * — and that dial still carries no token, because a rediscovered address is an
+   * unproven one until a human at the desk says otherwise.
+   */
+  desktopName?: string
   projects: Project[]
   profiles: AgentProfile[]
   workspaces: Record<string, Workspace>
