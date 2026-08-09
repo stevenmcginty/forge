@@ -149,10 +149,15 @@ television with only a D-pad cannot type a password.
 | `adb` reports **unauthorized** | The Fire Stick's own "Allow USB debugging" dialog was never accepted (or was dismissed). Re-trigger it and accept the prompt on the television's screen. Only relevant if you turned ADB debugging on for development. |
 | The app is not on the home screen after installing | Fire TV files apps that declare themselves TV-ready under **Your Apps & Channels**, not the main row automatically — the Forge TV build is leanback-enabled, so check there before assuming the install failed. |
 | Install fails with a signature error | A copy signed with a different key is already on the device — uninstall it first. Both the phone and TV builds share one release keystore, so a rebuilt TV app should always install over the previous one cleanly. |
+| **The screen** says *the mirror ended* as soon as it opens | Press **OK** on that screen to ask again — it retries in place. Opening a desktop capture can take longer than the television's six-second patience, and the retry is the supported answer. If every attempt ends instantly with the same sentence, the desktop half is what to look at: it is the only end that can refuse, and `npm run mirror:check` is the script that covers it. |
+| The mirror says the desktop *didn't answer* | Forge on the desktop is older than the mirror feature, or its window is closed — a minimised Forge can share its screen, a Forge with no window open cannot. Restart it and try again. |
 
 Checks that prove the parts a script can (run from the desktop checkout):
 
 ```
 npm run apk:check       # the APK half: versions, manifest, hashing, key hygiene
 npm run mobile:smoke    # the server, auth, protocol and a real PTY
+npm run mirror:check    # the desktop half of the screen mirror against a held-
+                        # open capture: which attempt is allowed to speak when
+                        # a retry overtakes a slow one
 ```

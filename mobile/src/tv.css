@@ -547,6 +547,30 @@
   gap: calc(var(--u) * 16);
 }
 
+/* Edge to edge the moment frames are actually moving.
+   `.tv` is itself a fixed, padded box, so a mirror that only grew inside it
+   would still be a picture in a frame with the wall's header above it. Fixed
+   and inset:0 is the one way to mean the whole television. Nothing here sets a
+   z-index, and none is needed: this paints after the header it covers.
+   The chrome comes back the instant the picture stops being live, because
+   *that* is when there is something to say. */
+.tv-mirror.is-live {
+  position: fixed;
+  inset: 0;
+  gap: 0;
+  background: #000;
+}
+
+.tv-mirror.is-live .tv-pane-head,
+.tv-mirror.is-live .tv-pane-foot {
+  display: none;
+}
+
+.tv-mirror.is-live .tv-mirror-stage {
+  border: 0;
+  border-radius: 0;
+}
+
 /* Black, not --bg: everything outside the picture is letterboxing, and
    letterboxing that is a shade off black is a grey band a television will
    happily show you for an hour. */

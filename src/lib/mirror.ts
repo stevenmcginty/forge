@@ -67,6 +67,29 @@ interface Mirror {
 let live: Mirror | null = null
 
 /**
+ * Which attempt is allowed to speak.
+ *
+ * A capture is slow — `desktopCapturer` plus `getUserMedia` plus an offer is
+ * comfortably a second, and can be several — and the television gives up
+ * waiting after six. So the ordinary shape of a slow start is: the TV declares
+ * silence, the sofa presses Back and then OK again, and a *second* attempt is
+ * under way while the first is still inside an await.
+ *
+ * The failure that made this counter necessary is what happened next. The first
+ * attempt would surface its cancellation as an error sentence, the renderer
+ * would push it as a `mirror-stop`, and the server would deliver it to whoever
+ * is watching *now* — the healthy second attempt — and forget it had a viewer.
+ * Every retry was killed by the ghost of the one before it, which is why the
+ * television read "the mirror was stopped before it started" no matter how many
+ * times anybody pressed OK.
+ *
+ * Every start takes a number, and only the holder of the current one reports.
+ * Anything a superseded attempt has to say is news about a mirror nobody is
+ * waiting on, and whoever superseded it already knows.
+ */
+let generation = 0
+
+/**
  * Open a stream onto the primary screen, or null when there is no screen to
  * open one onto.
  *
@@ -145,6 +168,15 @@ export async function startMirror(
   // one viewer, so two peer connections here could only ever be one live one
   // and one quietly holding a screen capture open for nobody.
   stopMirror()
+  const token = ++generation
+  /**
+   * Is this attempt still the one the television is waiting on? Checked before
+   * every sentence that leaves this function, because an attempt that has been
+   * superseded or stopped must end in silence — see `generation`.
+   */
+  const mine = (): boolean => token === generation
+  /** A sentence, or nothing at all if this attempt no longer speaks for anyone. */
+  const say = (reason: string): string | null => (mine() ? reason : null)
 
   let stream: MediaStream | null
   try {
@@ -152,14 +184,21 @@ export async function startMirror(
   } catch {
     // A refused permission and a cancelled picker land here as the same thing,
     // and the television can do nothing about either beyond being told.
-    return 'The desktop would not share its screen.'
+    return say('The desktop would not share its screen.')
   }
-  if (!stream) return 'The desktop could not find a screen to share.'
+  if (!stream) return say('The desktop could not find a screen to share.')
+
+  // A stream that arrived after this attempt was superseded is a capture of
+  // Steve's screen running for nobody, and Windows saying so in the tray.
+  if (!mine()) {
+    stopStream(stream)
+    return null
+  }
 
   const track = stream.getVideoTracks()[0]
   if (!track) {
     stopStream(stream)
-    return 'The desktop captured no video.'
+    return say('The desktop captured no video.')
   }
 
   // No ICE servers, on purpose. Both ends are on this LAN, so host candidates
@@ -190,14 +229,16 @@ export async function startMirror(
     await peer.setLocalDescription(offer)
     // The world may have moved on across those two awaits — a viewer that hung
     // up is a stopped mirror, and an offer for it would be describing a screen
-    // capture that no longer exists.
-    if (live !== mirror) return 'The mirror was stopped before it started.'
+    // capture that no longer exists. Silently, like every other exit a
+    // superseded attempt takes: see `generation`.
+    if (live !== mirror) return null
     send(JSON.stringify({ kind: 'offer', sdp: peer.localDescription?.sdp ?? offer.sdp ?? '' }))
   } catch {
     // Guarded, like the check above it: a failure here is this mirror's to
     // clean up, and an unguarded stop would take down whichever mirror had
     // replaced it while these awaits were in flight.
-    if (live === mirror) stopMirror()
+    if (live !== mirror) return null
+    stopMirror()
     return 'The desktop could not start the stream.'
   }
   return null
@@ -253,6 +294,11 @@ export function handleSignal(data: string): void {
 export function stopMirror(): void {
   const mirror = live
   live = null
+  // Before the early return, not after: a stop that lands while a capture is
+  // still being opened has no `live` mirror to tear down, and that is exactly
+  // the case this counter exists for — the attempt in flight must come back to
+  // find itself superseded and say nothing.
+  generation += 1
   if (!mirror) return
   mirror.closed = true
   // Unhooked before the close, or `peer.close()` would come straight back

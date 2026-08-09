@@ -117,8 +117,15 @@ const MENU_ID = String.fromCharCode(0) + 'menu'
  * words, that nobody answered. The desktop's half of the mirror only exists
  * after a Forge restart, and until then `mirror-start` gets no reply at all —
  * a spinner with no deadline would spin over that forever.
+ *
+ * Generous, because the thing it must not cut short is a *working* desktop:
+ * `desktopCapturer` plus `getUserMedia` plus an offer is comfortably a second
+ * and on a busy machine several, and the deadline is dropped the moment the
+ * desktop says anything at all (see `heard` in TvMirrorView). What is left is
+ * the honest case — a Forge that will never reply — and ten seconds of waiting
+ * before saying so is cheaper than declaring a live desktop dead.
  */
-const MIRROR_WAIT_MS = 6_000
+const MIRROR_WAIT_MS = 10_000
 
 /**
  * PTY bytes → words. CSI, OSC, the DCS family and lone escapes go first, then
@@ -1070,14 +1077,33 @@ function TvMirrorView({
 }): React.JSX.Element {
   const video = useRef<HTMLVideoElement | null>(null)
   const [phase, setPhase] = useState<Phase>({ at: 'connecting' })
+  /**
+   * Which attempt this is. Bumping it is the retry: the watch lives in an
+   * effect keyed on this number, so one press of OK on a dead screen tears the
+   * old peer down, tells the desktop to stop, and asks again from scratch —
+   * without a trip back to the wall and back in again.
+   */
+  const [attempt, setAttempt] = useState(0)
+  /**
+   * The desktop has said *something* about this attempt — an offer, a
+   * candidate, anything. It is the difference between a Forge that cannot
+   * mirror and one that is merely slow to open a capture, and only the first
+   * deserves the deadline below.
+   */
+  const [heard, setHeard] = useState(false)
 
   // The honest deadline. `mirror-start` is answered within milliseconds by a
   // desktop that can mirror, and by *nothing at all* when Forge there predates
   // the mirror — the case this wall lives in until Steve restarts it. So a
   // connect that has heard nothing after MIRROR_WAIT_MS is declared dead in
   // words, rather than left spinning over a promise nobody is keeping.
+  //
+  // Dropped the moment the desktop speaks: negotiation has its own endings
+  // (a peer that fails, an answer neither side can read) and they say something
+  // truer than a stopwatch. Declaring silence over a desktop that is talking is
+  // how a slow capture used to become a dead screen.
   useEffect(() => {
-    if (phase.at !== 'connecting') return
+    if (phase.at !== 'connecting' || heard) return
     const timer = window.setTimeout(() => {
       setPhase({
         at: 'ended',
@@ -1086,9 +1112,13 @@ function TvMirrorView({
       onSilent()
     }, MIRROR_WAIT_MS)
     return () => clearTimeout(timer)
-  }, [phase, onSilent])
+  }, [phase, heard, onSilent])
 
   useEffect(() => {
+    // A retry starts where the first attempt did, or the words on screen would
+    // still be the last attempt's obituary while this one is connecting.
+    setPhase({ at: 'connecting' })
+    setHeard(false)
     const viewer = startMirrorViewer(
       (data) => link.sendMirrorSignal(data),
       (stream) => {
@@ -1108,7 +1138,10 @@ function TvMirrorView({
       },
       (reason) => setPhase({ at: 'ended', reason: reason || 'The mirror ended.' })
     )
-    mirrorListeners.signal = (data) => viewer.handleSignal(data)
+    mirrorListeners.signal = (data) => {
+      setHeard(true)
+      viewer.handleSignal(data)
+    }
     mirrorListeners.stop = (reason) => {
       viewer.close()
       setPhase({ at: 'ended', reason: reason || 'The desktop stopped mirroring.' })
@@ -1120,22 +1153,37 @@ function TvMirrorView({
       viewer.close()
       link.stopMirror()
     }
-  }, [link])
+  }, [link, attempt])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      // Back, and nothing else. This surface watches.
-      if (event.key !== 'Escape') return
+      // Back returns to the wall, and OK asks again once there is nothing left
+      // to watch — the only two verbs this surface has. While the picture is
+      // live or still connecting, OK does nothing: a press that restarted a
+      // working mirror would be a screen that flickers for no reason.
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Enter') return
+      if (phase.at !== 'ended') return
       event.preventDefault()
-      onClose()
+      setAttempt((n) => n + 1)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, phase])
 
   const dead = phase.at === 'ended'
+  // Frames are moving, so the picture takes the whole television. Everything
+  // this surface has to say — which desktop, how to leave — is said while it is
+  // connecting and again if it dies; saying it *over* a live desktop costs the
+  // screen a header, a footer and a border, and a mirror inside a box on a
+  // 55-inch wall is a postcard of a screen rather than the screen.
+  const live = phase.at === 'live'
   return (
-    <div className="tv-mirror">
+    <div className={`tv-mirror${live ? ' is-live' : ''}`}>
       <div className="tv-pane-head">
         <span className="tv-pane-context">Desktop</span>
         <strong className="tv-pane-title">The screen</strong>
@@ -1167,9 +1215,9 @@ function TvMirrorView({
       </div>
 
       {/* The same shell as the zoomed pane, on purpose: one head, one well,
-          one line at the bottom naming the only exit. Two full-screen things
-          that framed themselves differently would read as two apps. */}
-      <div className="tv-pane-foot">Back returns to the wall</div>
+          one line at the bottom naming the exits. Two full-screen things that
+          framed themselves differently would read as two apps. */}
+      <div className="tv-pane-foot">{dead ? 'OK tries again · Back returns to the wall' : 'Back returns to the wall'}</div>
     </div>
   )
 }

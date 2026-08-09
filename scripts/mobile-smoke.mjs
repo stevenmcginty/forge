@@ -643,6 +643,23 @@ async function main() {
   log(mirrorStarts.length === mirrorStartsBeforeSecond, 'and the mirrorStart hook is not called a second time')
   log(serverD.mirroring === true, 'the original viewer is still the viewer')
 
+  /* ------------------------------------- 23b. the same screen asking again
+   *
+   * The television's own attempt can die where this side cannot see it — its
+   * no-answer deadline, a peer that never connected — leaving the server still
+   * believing it has a watcher. Refusing that screen's retry told the one
+   * television in the room that another television was watching, and left the
+   * sofa with nothing to press. A repeat from the *viewer* is a restart.
+   */
+
+  const startsBeforeRestart = mirrorStarts.length
+  const viewerStopsBeforeRestart = viewer.of('mirror-stop').length
+  viewer.send({ t: 'mirror-start' })
+  await waitFor(() => mirrorStarts.length > startsBeforeRestart, 5000, 'restart from the screen already watching')
+  log(mirrorStarts.length === startsBeforeRestart + 1, 'the screen already watching can ask again, and the host starts over')
+  log(viewer.of('mirror-stop').length === viewerStopsBeforeRestart, 'it is never told another screen is watching')
+  log(serverD.mirroring === true, 'and it is still the viewer afterwards')
+
   /* --------------------------------------------------- 24. a hang-up ends it */
 
   viewer.socket.close()

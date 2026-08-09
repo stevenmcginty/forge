@@ -598,7 +598,14 @@ export class MobileServer {
           this.send(client, { t: 'mirror-stop', reason: 'This Forge cannot share its screen.' })
           return
         }
-        if (this.mirrorViewer) {
+        // One screen at a time still — but the *same* screen asking again is a
+        // restart, not a second viewer. A television whose first attempt died
+        // on its own end (its no-answer deadline, a peer that never connected)
+        // leaves this side still believing it has a watcher, and refusing the
+        // retry told the one screen in the room that it was busy watching
+        // itself. The renderer replaces its capture on every start, so a repeat
+        // is safe here; two different sockets is the case worth refusing.
+        if (this.mirrorViewer && this.mirrorViewer !== client) {
           this.send(client, {
             t: 'mirror-stop',
             reason: 'Another screen is already watching this desktop.'
@@ -609,6 +616,7 @@ export class MobileServer {
         if (error) {
           // Refused before it began, so this socket does not become the
           // viewer — it must be able to ask again once the reason is fixed.
+          this.mirrorViewer = null
           this.send(client, { t: 'mirror-stop', reason: error })
           return
         }

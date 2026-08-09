@@ -471,6 +471,11 @@ npm run pwa:check       # 44 checks on the iPhone half: the manifest against
                         # — including that it refuses to cache the SPA
                         # fallback as an asset, which is the one bug that
                         # would white-screen an installed app for good
+npm run mirror:check    # the desktop half of the TV screen mirror, driven with
+                        # a capture held open on purpose: an attempt that was
+                        # stopped or overtaken must end in silence, because the
+                        # sentence it used to return was delivered to whichever
+                        # screen was watching next and killed it
 npm run pty:smoke       # the sink refactor must not have touched the renderer
 npm run build           # includes tsconfig.mobile.json — the phone app is
                         # typechecked against the same shared/ the desktop is
