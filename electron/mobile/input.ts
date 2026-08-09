@@ -50,6 +50,10 @@ import type { MirrorButton, MirrorInput, MirrorKey } from '@shared/mobile'
  * call and wants the pixels Windows actually has. The conversion is the
  * caller's — see `pointFor` in electron/mobile-host.ts, which owns the display
  * and its scale factor.
+ *
+ * That is only true because the helper below makes itself DPI-aware first; see
+ * the awareness block in `LOOP`. The two are one decision and neither survives
+ * the other being changed.
  */
 export interface ScreenPoint {
   x: number
@@ -112,6 +116,30 @@ const KEY_UP = 0x0002
  *
  * Every line is parsed by position and coerced to `int` before it reaches a
  * P/Invoke; a line that does not fit falls through the `switch` and is ignored.
+ *
+ * ## Why it declares itself DPI-aware before doing anything
+ *
+ * `powershell.exe` ships with no DPI awareness, and Windows is generous to
+ * processes in that state: it lies to them. A helper left unaware on a screen
+ * running at 125% sees a 1920x1200 panel as 1536x960, and — the half that
+ * actually bites — has every coordinate it passes to `SetCursorPos` multiplied
+ * by 1.25 on the way through. The pointer then lands a quarter of the way
+ * further right and further down than the sofa aimed, an error that is zero in
+ * the top-left corner and grows across the screen, so it reads as a cursor that
+ * drifts rather than one that is simply offset.
+ *
+ * `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2` (the -4 below) turns that off:
+ * the process sees real pixels and its coordinates are taken literally, which
+ * is what `pointFor` in electron/mobile-host.ts has always been computing.
+ * Per-monitor rather than merely system-aware because a desk can mix a 4K panel
+ * with a 1080p one at different scales, and only the per-monitor context gets
+ * the second screen right.
+ *
+ * The call needs Windows 10 1703, so it is attempted and then fallen back on:
+ * an older Windows throws `EntryPointNotFoundException` at the P/Invoke, and
+ * `SetProcessDPIAware` is the 2007 spelling of the same intent. If both fail
+ * the helper still works — the pointer is simply as wrong as it was before,
+ * which is a better outcome than a remote that does nothing at all.
  */
 const LOOP = `
 $ErrorActionPreference = 'Stop'
@@ -119,7 +147,14 @@ Add-Type -Namespace Forge -Name Input -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
 [DllImport("user32.dll")] public static extern void mouse_event(int flags, int dx, int dy, int data, System.UIntPtr extra);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, int flags, System.UIntPtr extra);
+[DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(System.IntPtr value);
+[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 '@
+try {
+  if (-not [Forge.Input]::SetProcessDpiAwarenessContext([System.IntPtr](-4))) { [void][Forge.Input]::SetProcessDPIAware() }
+} catch {
+  try { [void][Forge.Input]::SetProcessDPIAware() } catch { }
+}
 [Console]::Out.WriteLine('ready')
 while ($null -ne ($line = [Console]::In.ReadLine())) {
   try {

@@ -127,6 +127,7 @@ pointer is a separate mode with its own grammar — section 6.
 | Press | Does |
 | --- | --- |
 | D-pad (any direction) | Move focus around the dashboard |
+| Up / Down, with no row that way | Scroll the wall instead. Only a running terminal is a place the focus ring can go, so the bottom of a tall wall is often a stopped terminal, a *+2 more panes* line or the rest of a card — all of it readable, none of it a destination |
 | Enter / D-pad centre | Open the focused pane |
 | Back | Close the zoomed pane and return to the wall (sent to the page as Escape) |
 | Menu | Cycle panel modes — Forge split → YouTube split → YouTube full → Forge alone |
@@ -193,6 +194,16 @@ process alive with a fifteen-line loop in it and writes it a line per event;
 that loop can move the pointer, press three buttons, turn the wheel and press
 the listed keys, and nothing else. There is no native module, no compiler and no
 build step — see the header of that file for why that is the trade being made.
+
+**Where the ring is, is where the click lands.** Two conversions stand between a
+fraction and a pixel, and both live on the desktop: the primary display's
+bounds, which Electron reports in device-independent pixels, and Windows' own
+display scaling, which is 125% or 150% on most laptop panels. The helper
+declares itself per-monitor DPI-aware before its first call so that the second
+conversion happens once rather than twice — left in PowerShell's default unaware
+state it would have every coordinate silently multiplied by the scale factor
+again, putting the cursor a quarter of the way further down and right than the
+ring, and further out the further it travelled from the top-left corner.
 
 ```
 npm run input:check   # what may be expressed at all, what each input becomes,
@@ -292,6 +303,7 @@ find nothing while everything else works.
 | The shared app searches and finds **nothing** | Three things must all be true: Forge is running, its phone link is on (Settings → Forge Mobile), and the television is on the same wifi — not a guest network, which usually blocks devices from seeing each other. If all three hold, the firewall is the next suspect (UDP 8421, see section 8). The **Type the address instead** row works regardless. |
 | Pressing **OK** on a live mirror does nothing | The desktop is not offering a pointer. Either **Let the remote drive this desktop** is off (Settings → Forge Mobile → Forge TV), or the desktop is older than the feature. The television reads both the same way and hides the cursor entirely rather than offering one that would move on the wall and nowhere else. It asks again on its next connection, so switch it on at the desk and the television needs a moment — or a Back and another go at the screen — to notice. |
 | The pointer says **not accepting a remote control** | Control was switched off at the desk *while* the television was driving. That is the switch working: it is read on every event, not captured when the mirror started. |
+| The desktop's cursor lands below and right of the volt ring, further out the further it travels | The input helper is not DPI-aware, which was true of every Forge before 0.3.6 on any screen running Windows display scaling above 100%. Update the desktop. The distance is exactly the scale factor — a ring a third of the way across a 125% screen put the cursor at 41% — so a cursor that tracks the ring perfectly in the top-left corner and drifts from there is this and not a mis-aimed remote. |
 | The pointer moves but nothing on the desktop responds | Whatever is under it is running as administrator. Windows refuses synthetic input from a normal process to an elevated window, and Forge is not elevated — deliberately, because that is also what keeps a UAC prompt un-clickable from the sofa. |
 | The search lists a desktop as **different Forge version** | The two ends speak different protocol numbers, so pairing would fail at hello. Update the older one — usually the desktop. |
 

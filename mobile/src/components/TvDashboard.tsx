@@ -64,6 +64,13 @@ const MAX_ROWS = 5
  *  the wall's height — a fraction rather than pixels, because the wall is
  *  sized in screen-heights too (see tv.css). */
 const FOCUS_MARGIN = 0.06
+/**
+ * How much of the wall one pan moves, when the ring has run out of rows but
+ * the wall has not run out of picture. A little over half a screen, so the
+ * band that was at the bottom is still on it afterwards to read the new
+ * position against.
+ */
+const PAN = 0.6
 /** How often tails and working-flags are re-read. */
 const TICK_MS = 500
 
@@ -223,6 +230,8 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
   const rowEls = useRef(new Map<string, HTMLElement>())
   /** Focusable ids in visual order, rebuilt every render. */
   const order = useRef<string[]>([])
+  /** The scrolling wall itself, for the pan at the end of the walk. */
+  const wallEl = useRef<HTMLElement | null>(null)
   /** Has the remote been used yet? Until it has, the ring belongs at the top. */
   const walked = useRef(false)
   // Mirrors for the window keydown listener, which is bound once.
@@ -409,6 +418,39 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
   const stepFocusRef = useRef(stepFocus)
   stepFocusRef.current = stepFocus
 
+  /**
+   * The end of the walk is not the end of the wall.
+   *
+   * Only a live pane is a place the ring can go, and the rows that are not —
+   * a terminal that has exited, the "+2 more panes" line, the tail of a card
+   * that ran past the bottom of the television — are still picture. When the
+   * ring is on the last walkable row and there is unread wall below it, Down
+   * used to do nothing at all: a press that looks from the sofa exactly like
+   * a remote that has stopped working, on the one screen where nothing else
+   * moves to prove otherwise.
+   *
+   * So the walk falls through to a pan. Not a jump to the end: a screenful at
+   * a time is how somebody reads a wall they cannot see all of, and it keeps
+   * the press meaning roughly the same thing whether or not there happened to
+   * be a row to land on.
+   *
+   * True when the wall actually moved, which is what makes the key handler's
+   * choice between "moved the ring", "moved the picture" and "did neither" a
+   * decision this function can be asked rather than one it has to predict.
+   */
+  const panWall = (down: boolean): boolean => {
+    const wall = wallEl.current
+    if (!wall) return false
+    const room = down ? wall.scrollHeight - wall.clientHeight - wall.scrollTop : wall.scrollTop
+    // A pixel of slack: a scroll container that has arrived is routinely a
+    // fraction of a pixel short of its own arithmetic.
+    if (room <= 1) return false
+    wall.scrollTop += (down ? 1 : -1) * Math.min(room, wall.clientHeight * PAN)
+    return true
+  }
+  const panWallRef = useRef(panWall)
+  panWallRef.current = panWall
+
   // The remote, bound once. While a pane is zoomed its own listener owns the
   // keys; the wall ignores everything rather than moving a ring nobody sees.
   useEffect(() => {
@@ -430,7 +472,13 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
       // The remote has been used: the ring is now the viewer's, not the wall's.
       walked.current = true
       const next = stepFocusRef.current(focusRef.current, key)
-      if (next) setFocusId(next)
+      if (next) {
+        setFocusId(next)
+        return
+      }
+      // Nowhere left to put the ring. Vertically that is not necessarily the
+      // end of the wall — see panWall.
+      if (key === 'ArrowUp' || key === 'ArrowDown') panWallRef.current(key === 'ArrowDown')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -646,7 +694,7 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
           onAlive={mirrorCameAlive}
         />
       ) : (
-        <main className={`tv-wall${stale ? ' is-stale' : ''}`}>
+        <main className={`tv-wall${stale ? ' is-stale' : ''}`} ref={wallEl}>
           <ScreenTile
             focused={focusId === MIRROR_ID}
             silent={mirrorSilent}

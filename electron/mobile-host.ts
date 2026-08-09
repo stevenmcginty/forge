@@ -392,6 +392,13 @@ function canControl(): boolean {
  * screen at 150% is a different number. `dipToScreenPoint` is the conversion,
  * and it is Windows-only — which is fine, because so is the whole feature.
  *
+ * Real pixels are only what `SetCursorPos` receives because the input helper
+ * declares itself DPI-aware before its first call; a helper left in Windows'
+ * default unaware state has these numbers scaled a second time on the way in,
+ * and the pointer lands short of the target by exactly the scale factor. See
+ * the awareness block in electron/mobile/input.ts — changing either of these
+ * two places alone puts the cursor back where the sofa did not aim it.
+ *
  * Clamped one pixel inside the far edges: a fraction of exactly 1 lands on the
  * first pixel of the next monitor on a multi-display desk.
  */
