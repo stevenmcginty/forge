@@ -66,9 +66,15 @@ computer to run one. Offline mode is Forge's *shell* — projects, files, git �
 not Forge's *powers*.
 
 The mitigation is that closing the Forge **window** must not end the session.
-`forge-server` runs as a background/tray process, so lids, shutdowns of the UI
-and walking away all keep the terminals alive. Only a genuine power-off or
-reboot drops the browser to GitHub-only mode.
+`electron/tray.ts` is what makes that true rather than aspirational: with
+Forge Web switched on, an icon appears in the notification area and closing
+the window hides it there instead of closing the app — sessions stay alive,
+the rendezvous record stays published, sockets stay open. The tray's menu
+shows what the link is doing and offers "Quit Forge", which is the one visible
+act that actually tears everything down. Nobody who has not switched Forge Web
+on acquires an icon; for them closing the window quits exactly as it always
+did. Only a genuine power-off, a reboot, or Quit from the tray drops the
+browser to GitHub-only mode.
 
 ---
 
@@ -224,8 +230,8 @@ scripts (`pty:smoke`, `git:check`, `session:check`, `mobile:smoke`,
 
 - Settings: `webEnabled`, Firebase sign-in, the public URL, the device list
   with revoke, the device-approval toggle and the TOTP enrolment.
-- `forge-server` survives the window closing — tray process or equivalent — so
-  that GitHub-only mode is rare rather than nightly.
+- `forge-server` survives the window closing — a tray process, `electron/tray.ts`
+  — so that GitHub-only mode is rare rather than nightly.
 
 ---
 
@@ -335,16 +341,17 @@ and none of them blocks the others.
    the `host` block Forge Web needs, and it is proved against the emulator by
    `npm run web:rendezvous` — but the emulator is not the project. Until this
    runs, the live database refuses the rendezvous write and the browser can
-   never find the desktop:
+   never find the desktop. Run this from the **repo root** — see item 5 below
+   for why it is no longer `companion/`:
 
    ```
-   cd companion && firebase deploy --only database
+   firebase deploy --only database --project <your-project-id>
    ```
 
-3. **An ngrok account with a second domain.** The decision this once left open
-   has been taken: Forge Web supervises an **ngrok** agent of its own, through
-   the same `electron/mobile-tunnel.ts` Forge Mobile already drives. That was
-   the cheaper of the two honest options — the file already handles download,
+3. **An ngrok account.** The decision this once left open has been taken:
+   Forge Web supervises an **ngrok** agent of its own, through the same
+   `electron/mobile-tunnel.ts` Forge Mobile already drives. That was the
+   cheaper of the two honest options — the file already handles download,
    spawn, restart and permanent-refusal detection — and the alternative, a
    second `cloudflared` supervisor written from scratch, bought nothing that
    code did not already do. (The only `cloudflared` in the repository remains
@@ -352,11 +359,34 @@ and none of them blocks the others.
    scripts that spawn a quick tunnel and exit. Neither is importable and neither
    is supervised.)
 
-   What Steve has to do is one-time and on the ngrok dashboard: reserve a second
-   domain — Forge Mobile's cannot be reused, because one domain forwards to one
-   port — and paste it, with the authtoken, into Settings › Forge Web. A free
-   plan allows three concurrent agent sessions, and two links running at once
-   take two of them.
+   What Steve has to do is one-time and on the ngrok dashboard: paste the
+   **authtoken** into Settings › Forge Web. That is the only thing this door
+   requires — `ngrokArgs` no longer templates a URL that made a reserved domain
+   compulsory, and `startTunnel` no longer refuses to start without one. A
+   **domain is optional** in the sense that Forge no longer refuses to start
+   without one — but on a free ngrok account it does not get you a second link.
+
+   This was observed, not reasoned. With Forge Web's domain left blank and
+   Forge Mobile's tunnel already up, ngrok refused:
+
+   ```
+   The endpoint 'https://cure-task-legroom.ngrok-free.dev' is already online.
+   … ERR_NGROK_334
+   ```
+
+   That endpoint is Forge Mobile's own reserved domain. A free account is
+   granted **one** static domain, and leaving `--url` off does not produce a
+   throwaway address — it uses that same account default. So the two links
+   collide over one domain, and blank does not help.
+
+   The consequence: on free ngrok you can have Forge Mobile *or* Forge Web
+   reachable, not both. **Use cloudflared for Forge Web instead** — it needs no
+   account, no token and no domain, and nothing stops it running alongside
+   ngrok. A reserved ngrok domain, on a paid plan, remains the right choice if
+   you specifically want an address that never changes; a changing one costs
+   nothing here, because the browser reads the desktop's current address out of
+   the rendezvous record before it dials, which is the entire reason that
+   record exists.
 
    `FORGE_WEB_HOSTNAME` still works and now means one thing only: a tunnel run
    by hand, outside Forge. On that path the status reads `configured` rather
@@ -381,21 +411,38 @@ and none of them blocks the others.
    `companion/web`. Deploying Forge Web through it would have replaced the
    Companion PWA with the Forge Web bundle — same project, same URL, one site.
 
-   So it now declares two, and they are kept apart by target names. In the
-   Firebase console, under Hosting, add a second site (the name is globally
-   unique and becomes the URL). Then, once, from `companion/`:
+   The fix moved the deploy config, not just the site list. Firebase refuses a
+   `public` path outside the directory holding `firebase.json`, and `web/dist`
+   (Forge Web) and `companion/web` (the Companion PWA) are siblings — no
+   `firebase.json` inside either one can see both. So the **deploy** config
+   — the one with two hosting sites, kept apart by target names — now lives at
+   the **repo root** (`firebase.json`, committed) and is the one every deploy
+   command below runs against. `companion/firebase.json` stays where it is and
+   keeps a narrower job: it is the **emulator** config `npm run web:rendezvous`
+   passes with `--config`, and what `companion/GO-LIVE.md` documents.
+
+   Every project already has one default hosting site, named after the project
+   id — that one is Companion's. Add a second, for Forge Web:
 
    ```
-   firebase target:apply hosting companion <your-companion-site>
-   firebase target:apply hosting web       <your-forge-web-site>
+   firebase hosting:sites:create <your-forge-web-site> --project <your-project-id>
    ```
 
-   That writes the `targets` block shown in `.firebaserc.example`. After it,
-   each site deploys on its own and neither can clobber the other:
+   Site ids are globally unique and become the URL. Then, once, **from the repo
+   root**:
 
    ```
-   npm run web:deploy                 # Forge Web only — builds, then ships web/dist
-   cd companion && firebase deploy --only hosting:companion
+   firebase target:apply hosting companion <your-companion-site> --project <your-project-id>
+   firebase target:apply hosting web       <your-forge-web-site> --project <your-project-id>
+   ```
+
+   That writes a root `.firebaserc` (gitignored — see `.gitignore`'s note on
+   it) in the shape `companion/.firebaserc.example` shows. After it, each site
+   deploys on its own and neither can clobber the other:
+
+   ```
+   npm run web:deploy                                              # Forge Web only — builds, then ships web/dist
+   firebase deploy --only hosting:companion --project <your-project-id>   # the phone PWA
    ```
 
    Also copy `web/config.example.json` to `web/public/config.json` and fill in
