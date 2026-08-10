@@ -566,8 +566,25 @@ async function pickPack(): Promise<string | null> {
  * electron/web/auth.ts exactly as the mobile pair are, so a browser approved
  * after launch lives in a key the renderer still believes is empty. Any new
  * device list belongs on this line the day it is added.
+ *
+ * `webUid`/`webRefreshToken`/`webEmail` are here for the same reason and with
+ * sharper consequences: they are written by Forge Web's sign-in, in main, and
+ * the refresh token is the credential this desktop publishes its address with.
+ * A renderer that saved its pre-sign-in snapshot back over them would sign
+ * Forge Web out roughly 200ms after the next theme change, and the symptom
+ * would be a browser that simply stops finding the desktop. Values a human
+ * types — the API key, the database URL, the ngrok pair — stay renderer-owned:
+ * a form is exactly where those belong.
  */
-const MAIN_OWNED_SETTINGS = ['mobileDevices', 'mobileAcceptUntil', 'webDevices', 'webAcceptUntil'] as const
+const MAIN_OWNED_SETTINGS = [
+  'mobileDevices',
+  'mobileAcceptUntil',
+  'webDevices',
+  'webAcceptUntil',
+  'webUid',
+  'webRefreshToken',
+  'webEmail'
+] as const
 
 function rendererOwned(patch: Partial<Settings>): Partial<Settings> {
   const out = { ...patch }
@@ -628,13 +645,24 @@ function registerAppHandlers(): void {
       applyCompanionSettings()
     }
     // The same rule for Forge Web, and the same one-line reason: flipping the
-    // switch, or repointing the door at another Firebase project or account,
-    // should take effect now rather than at the next launch. `applyWebSettings`
-    // is idempotent, so only the fields it actually reads are compared.
+    // switch, repointing the door at another Firebase project, or changing the
+    // way in from outside should take effect now rather than at the next
+    // launch. `applyWebSettings` is idempotent, so only the fields it actually
+    // reads are compared — its own session (which it publishes the rendezvous
+    // record with) and its own tunnel (which the record advertises).
     if (
       before.webEnabled !== next.webEnabled ||
       before.webProjectId !== next.webProjectId ||
-      before.webUid !== next.webUid
+      before.webUid !== next.webUid ||
+      before.webApiKey !== next.webApiKey ||
+      before.webDatabaseURL !== next.webDatabaseURL ||
+      before.webAuthBase !== next.webAuthBase ||
+      before.webTokenBase !== next.webTokenBase ||
+      before.webRefreshToken !== next.webRefreshToken ||
+      before.webPort !== next.webPort ||
+      before.webTunnel !== next.webTunnel ||
+      before.webNgrokDomain !== next.webNgrokDomain ||
+      before.webNgrokAuthtoken !== next.webNgrokAuthtoken
     ) {
       applyWebSettings()
     }

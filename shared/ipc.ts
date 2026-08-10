@@ -280,6 +280,27 @@ export const IPC = {
   /** Stop listening, retract the rendezvous record. Persists `webEnabled: false`. */
   webStop: 'web:stop',
   /**
+   * Forge Web's *own* Firebase sign-in — its own account, its own refresh
+   * token, nothing to do with `companionSignIn` beyond sharing a provider.
+   *
+   * It exists because the alternative was discovered rather than designed: with
+   * no session of its own, Forge Web published under the Companion's, which
+   * made this door depend on another feature being signed in as the same
+   * account and stop working silently when it was not. See the header of
+   * electron/web-host.ts.
+   *
+   * The password is used for one HTTPS POST and dropped; what is persisted is a
+   * refresh token. Signing in does **not** switch the link on — that is
+   * `webStart`, deliberately separate, because this one puts a shell behind a
+   * public address.
+   */
+  webSignIn: 'web:sign-in',
+  /**
+   * Sign out: the rendezvous record is retracted first, then the credential and
+   * the uid are cleared. The email is kept so the form pre-fills.
+   */
+  webSignOut: 'web:sign-out',
+  /**
    * Arm or disarm "Accept new browsers". Arming writes `webAcceptUntil` and the
    * window closes itself; the deadline rides `webStatusEvent` like everything
    * else here. Unlike Forge Mobile there is no pairing code to mint: the

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
+import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, Notification, powerSaveBlocker } from 'electron'
 import { IPC } from '@shared/ipc'
 import { ACCEPT_WINDOW_MS } from '@shared/mobile'
@@ -8,9 +9,12 @@ import type {
   AgentPresence,
   CommandPresence,
   GitSnapshot,
+  TunnelStatus,
   WebApprovalEvent,
   WebCommandEvent,
   WebRendezvousStatus,
+  WebSessionStatus,
+  WebSignInResult,
   WebStatus,
   WebTunnelStatus,
   Workspace
@@ -18,10 +22,11 @@ import type {
 import { WebAuth, googleJwksFetcher, type WebApprovalAsk } from './web/auth'
 import { WebServer, type WebServerHost } from './web/server'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
-import { FirebaseRest } from './companion/rest'
+import { describe, FirebaseRest } from './companion/rest'
+import { NgrokTunnel, ensureNgrokExe, resolveNgrokExe } from './mobile-tunnel'
 import { addPtySink, getManager, getReplay } from './pty-host'
 import { addGitSink, gitRefresh, runAction } from './git-watcher'
-import { getProjects, getSettings, getWorkspace, setSettings } from './store'
+import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
 import { getSkillsStore } from './skills-store'
 import { commandsFeed } from './commands'
 import { probeAgents } from './agent-probe'
@@ -38,14 +43,18 @@ import { probeCommands } from './which'
  * `PtySessionManager` with no Electron in the process. **This is the only file
  * in the feature that imports Electron.**
  *
- * Five jobs:
+ * Six jobs:
  *
+ *  0. Hold Forge Web's *own* Firebase session, and supervise Forge Web's *own*
+ *     tunnel. Both used to be borrowed, and both borrowings were wrong in the
+ *     same way — see "What this file used to get wrong" below.
  *  1. Own the server's lifecycle against `webEnabled`, and the rendezvous
- *     record's alongside it. Off by default and *silent* when off: no port
- *     bound, no credential read, no hostname published, no timer started. That
- *     is not tidiness — docs/forge-web.md's security posture promises it in
- *     those words, and `scripts/web-check.mjs` asserts it by inspecting the
- *     listener and the rendezvous rather than by trusting the setting.
+ *     record's and the tunnel's alongside it. Off by default and *silent* when
+ *     off: no port bound, no credential read, no hostname published, no process
+ *     spawned, no timer started. That is not tidiness — docs/forge-web.md's
+ *     security posture promises it in those words, and `scripts/web-check.mjs`
+ *     asserts it by inspecting the listener, the rendezvous and the fetch log
+ *     rather than by trusting the setting.
  *  2. Feed the server PTY output, by registering a sink on `pty-host` rather
  *     than opening a second route to node-pty. A browser therefore sees exactly
  *     the bytes the window sees, coalesced by the same 12ms flush, and cannot
@@ -63,19 +72,36 @@ import { probeCommands } from './which'
  *  5. Ask the human. A browser this desktop has never approved raises a prompt
  *     here, and every outcome that is not an explicit Allow is a deny.
  *
- * ## What this file deliberately does not do
+ * ## What this file used to get wrong
  *
- * **It does not run the tunnel.** `electron/mobile-tunnel.ts` supervises an
- * *ngrok* agent for Forge Mobile; there is no `cloudflared` supervisor anywhere
- * in the app, and `npm run mobile:tunnel` is a standalone dev script rather than
- * a module. docs/forge-web.md ("What only Steve can do", item 3) asks for a
- * *named* Cloudflare tunnel, which is a thing set up once on the machine and run
- * as a service — it has a stable hostname and nothing about it changes when
- * Forge restarts. So the honest wiring is that Forge is *told* the hostname
- * (`FORGE_WEB_HOSTNAME`) and publishes it, and reports `state: 'off'` rather
- * than inventing a liveness it cannot observe. Starting a second tunnel
- * supervisor here would be a process Forge owns, kills and reports on, for a
- * tunnel it did not create.
+ * Both of these worked, and both arrangements were wrong. They are recorded
+ * because the shape they were corrected *into* is the load-bearing part.
+ *
+ * **It borrowed the Companion's Firebase session.** The rendezvous record is
+ * written under a signed-in uid, and the only session this desktop held belonged
+ * to Forge Companion — so this file refused to publish unless `companionUid`
+ * equalled `webUid`. Switching Forge Web on therefore depended on a *different
+ * feature* being signed in as the same account, and signing the Companion out
+ * stopped Forge Web publishing without saying so. That is exactly what the note
+ * on `webUid` in shared/types.ts says must never happen: the Companion's uid
+ * moves whenever somebody signs it in or out, and letting that decide who gets a
+ * shell on this machine is not acceptable. Forge Web now holds its own session —
+ * its own credentials, its own refresh token, its own uid — through the same
+ * `electron/companion/rest.ts` client, because the *provider* is shared and
+ * nothing else is. Signed out, it publishes nothing and says so: see
+ * `sessionStatus()`, and the `session` block on `WebStatus`.
+ *
+ * **It took its hostname from `FORGE_WEB_HOSTNAME` and called that a tunnel.**
+ * An environment variable is a development seam, not a feature, and the status
+ * it produced could only ever say "somebody told us a string". Forge Web now
+ * supervises its own ngrok agent through `electron/mobile-tunnel.ts` — the same
+ * class Forge Mobile drives, a second instance, on Forge Web's own port and
+ * domain — so `starting`, `live` and `error` are observations. The variable
+ * survives as an explicitly-documented override for a tunnel run by hand; see
+ * `tunnelHostname()`, which is careful to say `configured` rather than `live`
+ * on that path.
+ *
+ * ## What this file deliberately does not do
  *
  * **It does not implement `onWatch`, and it does not push `attention`.** Both
  * are optional on `WebServerHost`, and both are half of a pair whose other half
@@ -98,21 +124,28 @@ import { probeCommands } from './which'
 
 /* ----------------------------------------------------------------- the port
  *
- * Loopback, always, and not a setting. `cloudflared` runs on this machine and
- * dials the socket from here, so the public side never touches this port
- * directly and `isAllowedSource` in electron/web/server.ts still sees
+ * The *host* is loopback, always, and not a setting. The tunnel agent runs on
+ * this machine and dials the socket from here, so the public side never touches
+ * this port directly and `isAllowedSource` in electron/web/server.ts still sees
  * 127.0.0.1. Binding this listener to 0.0.0.0 would put the internet-facing
  * half of Forge on the LAN as well, for no gain — Forge Mobile is the LAN
  * answer and it has its own port.
  */
 const WEB_BIND_HOST = '127.0.0.1'
 
-/** Next door to Forge Mobile's 8420. Overridable for a second Forge on one box. */
-const DEFAULT_WEB_PORT = 8421
-
+/**
+ * The port, which *is* a setting (`webPort`, defaulted and clamped by
+ * electron/store.ts), because the tunnel has to be told which port to forward
+ * to and both halves must read the same number.
+ *
+ * `FORGE_WEB_PORT` still wins. It predates the setting, `scripts/web-check.mjs`
+ * drives the real host through it, and it is how a second Forge on one box gets
+ * out of the first one's way without editing anybody's settings.json.
+ */
 function webPort(): number {
   const raw = Number(process.env['FORGE_WEB_PORT'] ?? '')
-  return Number.isInteger(raw) && raw > 0 && raw < 65536 ? raw : DEFAULT_WEB_PORT
+  if (Number.isInteger(raw) && raw > 0 && raw < 65536) return raw
+  return getSettings().webPort
 }
 
 /**
@@ -136,6 +169,25 @@ let unsubscribePty: (() => void) | null = null
 let unsubscribeGit: (() => void) | null = null
 let lastDetail = ''
 let starting = false
+
+/** Forge Web's own ngrok agent, and the last thing it said. See the tunnel block. */
+const TUNNEL_OFF: TunnelStatus = { state: 'off', url: '', detail: '' }
+let tunnel: NgrokTunnel | null = null
+let tunnelState: TunnelStatus = TUNNEL_OFF
+let tunnelStarting = false
+/**
+ * What the running agent was started with. An ngrok agent takes its port,
+ * domain and account on its command line and cannot be re-pointed afterwards,
+ * so this is how `applyWebSettings` tells "the settings changed" from "the
+ * settings were saved" and restarts only in the first case. In memory only, and
+ * never logged or reported — it contains the authtoken.
+ */
+let tunnelSpec = ''
+
+function tunnelSpecNow(): string {
+  const s = getSettings()
+  return `${webPort()}|${s.webNgrokDomain}|${s.webNgrokAuthtoken}`
+}
 
 /**
  * Held while at least one browser is connected, so Windows does not suspend the
@@ -219,33 +271,62 @@ function broadcast(channel: string, payload: unknown): void {
 /**
  * The tunnel, as far as this desktop can honestly tell.
  *
- * `configured` means "somebody told us a hostname"; it is not a claim that
- * anything is listening on the far end of it, because Forge does not run the
- * tunnel and has no way to know. See the header.
+ * Three answers, and the difference between them matters to the person reading
+ * the panel:
+ *
+ *  - **the supervised agent.** Forge started it, so `starting`, `live` and
+ *    `error` are things it watched happen. The supervisor's `retrying` is
+ *    reported as `starting`, because from the panel's side a tunnel coming back
+ *    up is a tunnel coming up, and *why* it is having to is already in `detail`.
+ *  - **the override.** `FORGE_WEB_HOSTNAME` names a tunnel somebody else runs.
+ *    `configured` says "we were told an address" and refuses to imply more:
+ *    Forge never met that process and cannot report on it.
+ *  - **nothing at all.** A sentence naming both doors, because a browser with
+ *    no address to dial is the single most likely thing to be wrong here.
  */
 function tunnelStatus(): WebTunnelStatus {
-  const host = tunnelHostname()
-  if (!host) {
-    return {
-      state: 'off',
-      host: '',
-      detail:
-        'No tunnel hostname. Set FORGE_WEB_HOSTNAME to the hostname of your Cloudflare tunnel — until then a browser has no address to dial.'
-    }
+  const override = normaliseHost(process.env['FORGE_WEB_HOSTNAME'] ?? '')
+  if (override) return { state: 'configured', host: override, detail: '' }
+
+  if (tunnelState.state === 'live') {
+    const host = normaliseHost(tunnelState.url)
+    // A live agent whose URL will not normalise is not a live tunnel: the
+    // hostname is what a browser dials, and half of one fails at dial time
+    // where it reads as a network fault rather than as this.
+    if (host) return { state: 'live', host, detail: '' }
+    return { state: 'error', host: '', detail: `ngrok reported an address Forge cannot use (${tunnelState.url}).` }
   }
-  return { state: 'configured', host, detail: '' }
+
+  if (tunnelState.state === 'starting' || tunnelState.state === 'retrying') {
+    return { state: 'starting', host: '', detail: tunnelState.detail }
+  }
+  if (tunnelState.state === 'error') return { state: 'error', host: '', detail: tunnelState.detail }
+
+  return {
+    state: 'off',
+    host: '',
+    detail:
+      getSettings().webTunnel === 'ngrok'
+        ? tunnelState.detail
+        : 'No way in from outside yet. Switch the tunnel on in Settings › Forge Web, or set FORGE_WEB_HOSTNAME to a tunnel you run yourself.'
+  }
 }
 
 /**
  * The tunnel's public hostname, normalised, or '' when there is none.
  *
- * Through `normaliseHost` even though it came from this machine's own
- * environment: what leaves here becomes the address a browser opens a socket
- * to, and publishing a half-hostname only moves the failure to dial time, where
- * it reads as a network fault instead of as a typo in an environment variable.
+ * This is the string that becomes the address a browser opens a socket to, so
+ * it goes through `normaliseHost` however it arrived — "it came off our own
+ * agent" is not a reason to trust it, and publishing a half-hostname only moves
+ * the failure to dial time.
+ *
+ * Deliberately '' whenever the tunnel is anything but live: `WebRendezvous`
+ * reads this on every tick and retracts the record when it goes empty, which is
+ * what stops a dead tunnel leaving a live-looking address in the database for
+ * the three minutes `HOST_STALE_MS` would otherwise take.
  */
 function tunnelHostname(): string {
-  return normaliseHost(process.env['FORGE_WEB_HOSTNAME'] ?? '')
+  return tunnelStatus().host
 }
 
 function rendezvousStatus(): WebRendezvousStatus {
@@ -253,14 +334,41 @@ function rendezvousStatus(): WebRendezvousStatus {
   return { published: state?.published ?? '', at: state?.at ?? 0, detail: state?.detail ?? '' }
 }
 
+/**
+ * Forge Web's own Firebase session, and — when there is not one — the sentence
+ * that says which door to go and open.
+ *
+ * The sentence is the whole point of this function. A Forge Web that is
+ * switched on but signed out cannot publish its address, so no browser can find
+ * it; before this file held its own session that state was *silent*, and worse,
+ * it could be caused by somebody signing a completely different feature out.
+ * Every path below therefore ends in either "signed in" or a sentence naming
+ * what is missing.
+ */
+function sessionStatus(): WebSessionStatus {
+  const s = getSettings()
+  const signedIn = Boolean(s.webRefreshToken && s.webUid && s.webApiKey && s.webDatabaseURL)
+  if (signedIn) return { signedIn: true, email: s.webEmail, uid: s.webUid, detail: '' }
+  const detail =
+    !s.webApiKey || !s.webDatabaseURL
+      ? 'Forge Web has no Firebase project yet — paste the API key and database URL from the Firebase console into Settings › Forge Web.'
+      : 'Forge Web is signed out, so no browser can find this desktop. Sign in with the account that should reach these terminals — Forge Companion signing in does not count for this door, and never did.'
+  return { signedIn: false, email: s.webEmail, uid: '', detail }
+}
+
 export function webStatus(): WebStatus {
   const settings = getSettings()
   const address = server?.address() ?? null
   const tunnel = tunnelStatus()
+  const session = sessionStatus()
   return {
     enabled: settings.webEnabled,
     state: !settings.webEnabled ? 'off' : starting ? 'starting' : address ? 'listening' : 'error',
-    configured: Boolean(settings.webProjectId && settings.webUid),
+    // The door *and* the session: knowing whose tokens to accept is no use
+    // without the credential this desktop publishes its address with, and a
+    // panel that called that "configured" would be describing a Forge Web
+    // nobody can reach. `session.detail` says which half is missing.
+    configured: Boolean(settings.webProjectId && settings.webUid && session.signedIn),
     host: address?.host ?? WEB_BIND_HOST,
     port: address?.port ?? webPort(),
     // The address only means anything while something is listening on it — a
@@ -271,6 +379,7 @@ export function webStatus(): WebStatus {
     connected: server?.connectedCount ?? 0,
     acceptUntil: armedUntil(),
     detail: lastDetail,
+    session,
     tunnel,
     rendezvous: rendezvousStatus()
   }
@@ -455,6 +564,36 @@ function notifyApproval(ask: WebApprovalAsk): void {
  */
 
 /**
+ * Build a Firebase client on Forge Web's own settings.
+ *
+ * `electron/companion/rest.ts` and not a second Firebase client: it already
+ * does email/password sign-in and refresh-token rotation over plain REST with
+ * no SDK, against the same identity provider, and the emulator suite it is
+ * pointed at by `web-rendezvous:check` is the same one. Sharing the *client*
+ * is not sharing the *session* — that is the whole distinction this file was
+ * corrected to make.
+ */
+function makeRest(): FirebaseRest {
+  const s = getSettings()
+  const client = new FirebaseRest({
+    apiKey: s.webApiKey,
+    databaseURL: s.webDatabaseURL,
+    ...(s.webAuthBase ? { authBase: s.webAuthBase } : {}),
+    ...(s.webTokenBase ? { tokenBase: s.webTokenBase } : {})
+  })
+  // Rotated refresh tokens have to reach disk immediately: the rotation
+  // invalidates the old one, so a crash before saving locks this feature out
+  // until somebody signs in again. companion-sync.ts persists its own for
+  // exactly this reason — and now that Forge Web owns a token rather than
+  // borrowing one, it owns the saving of it too. The two never write the same
+  // field, which is what makes that safe.
+  client.onRefreshToken = (refreshToken) => {
+    setSettings({ webRefreshToken: refreshToken })
+  }
+  return client
+}
+
+/**
  * The Firebase client the rendezvous writes with, or null when there is none.
  *
  * Note what is *not* guarded here: `webEnabled`. It looks like it belongs, and
@@ -468,42 +607,31 @@ function notifyApproval(ask: WebApprovalAsk): void {
  * `HOST_STALE_MS` takes to expire it. Retracting what we published is not
  * "reading a credential while off"; it is finishing what being on started.
  *
- * Two guards, and neither is decoration:
+ * The guard that *is* here is the session, and it is one thing rather than the
+ * two it used to be. There is no longer any comparison with `companionUid`,
+ * because there is nothing to compare: the uid this publishes under is the uid
+ * Forge Web signed in as. Signed out — no refresh token, or no project to
+ * refresh it against — the answer is null, the rendezvous waits, and
+ * `sessionStatus()` puts the reason on screen.
  *
- *  - **`companionUid === webUid`.** The record's *path* is built from the
- *    signed-in uid, and the credential this desktop holds belongs to the
- *    Companion. `companionUid` moves whenever somebody signs the Companion in
- *    or out; publishing under whatever it happens to be would put this
- *    machine's address in a stranger's subtree, and would advertise a shell to
- *    an account `webUid` does not admit. If the two disagree, the honest
- *    answer is to publish nothing.
- *  - **The credential itself.** No API key, no database URL or no refresh
- *    token means there is no session to write with.
- *
- * Built fresh on each `start()` rather than kept forever, and the refresh token
- * it rotates onto is deliberately *not* persisted from here: the Companion owns
- * that credential and writes it, and two clients racing to save the same field
- * is how one of them ends up holding a token the other has replaced.
+ * Built fresh on each `start()` and on each sign-in rather than kept forever,
+ * so a corrected project, a new account or a token rotated on disk is picked up
+ * then rather than at the next launch.
  */
 function webRest(): RendezvousRest | null {
   const s = getSettings()
-  if (!s.webUid || !s.webProjectId) return null
-  if (!s.companionUid || s.companionUid !== s.webUid) return null
-  if (!s.companionApiKey || !s.companionDatabaseURL || !s.companionRefreshToken) return null
+  if (!s.webUid || !s.webApiKey || !s.webDatabaseURL || !s.webRefreshToken) return null
   if (!rest) {
-    rest = new FirebaseRest({
-      apiKey: s.companionApiKey,
-      databaseURL: s.companionDatabaseURL,
-      ...(s.companionAuthBase ? { authBase: s.companionAuthBase } : {}),
-      ...(s.companionTokenBase ? { tokenBase: s.companionTokenBase } : {})
-    })
+    rest = makeRest()
     // `expiresAt: 0` forces a refresh on the first write, which is what turns a
-    // stored refresh token back into a usable session.
+    // stored refresh token back into a usable session — and is also how a
+    // credential revoked in the Firebase console is discovered without a round
+    // trip to the database.
     rest.adopt({
       uid: s.webUid,
-      email: s.companionEmail,
+      email: s.webEmail,
       idToken: '',
-      refreshToken: s.companionRefreshToken,
+      refreshToken: s.webRefreshToken,
       expiresAt: 0
     })
   }
@@ -522,6 +650,75 @@ function getRendezvous(): WebRendezvous {
     })
   }
   return rendezvous
+}
+
+/* --------------------------------------------------------------- sign in
+ *
+ * Forge Web's own front door to Firebase, and the same flow the Companion's
+ * is: one HTTPS POST with the password, which is then dropped on the floor.
+ * What reaches settings.json is the refresh token — revocable from the Firebase
+ * console without touching a password Steve uses anywhere else — the uid, and
+ * the email so the form pre-fills next time. Never the password, and never the
+ * ID token, which lives for an hour and is minted again from the refresh token
+ * whenever it is needed. `scripts/web-check.mjs` reads settings.json back off
+ * disk to prove exactly that.
+ */
+
+/**
+ * Sign Forge Web in, and start publishing if the link is already up.
+ *
+ * Deliberately does **not** set `webEnabled`. The Companion's sign-in switches
+ * itself on because the thing it switches on is a message channel; this one
+ * would be switching on a shell behind a public address, and that stays a
+ * separate, explicit act (`web:start`). Signing in says who may reach this
+ * desktop. It does not say "and let them, now".
+ */
+async function signIn(email: string, password: string): Promise<WebSignInResult> {
+  const s = getSettings()
+  if (!s.webApiKey || !s.webDatabaseURL) {
+    return {
+      ok: false,
+      error: 'Set the Firebase API key and database URL for Forge Web first (see companion/GO-LIVE.md for where to find them).'
+    }
+  }
+  try {
+    const result = await makeRest().signIn(String(email ?? '').trim(), String(password ?? ''))
+    setSettings({ webEmail: result.email, webUid: result.uid, webRefreshToken: result.refreshToken })
+    // The old client, if any, holds the old session. Drop it so the next write
+    // adopts the credential that was just saved.
+    rest = null
+    // Idempotent, and a no-op unless the server is already listening — see
+    // `WebRendezvous.start`. With the link up this is what turns "signed in"
+    // into a published address without waiting for the next heartbeat.
+    getRendezvous().start()
+    report('')
+    return { ok: true, uid: result.uid, created: result.created }
+  } catch (err) {
+    const error = describe(err)
+    report(error)
+    return { ok: false, error }
+  }
+}
+
+/**
+ * Sign Forge Web out: retract the address, then forget the credential.
+ *
+ * The order is the point. Clearing `webUid` first would leave the rendezvous
+ * unable to work out the path of the record it published, and the address of
+ * this desktop would sit in the database until it went stale — up to three
+ * minutes of browsers dialling a door that no longer admits anybody. So the
+ * record goes first, with the session that wrote it still intact.
+ *
+ * `webEmail` survives, like the Companion's, so the form pre-fills. It is not a
+ * credential; the credential is the refresh token, and that is gone.
+ */
+async function signOut(): Promise<void> {
+  const service = rendezvous
+  rendezvous = null
+  await service?.shutdown()
+  rest = null
+  setSettings({ webUid: '', webRefreshToken: '' })
+  report('Forge Web signed out. No browser can find this desktop until you sign in again.')
 }
 
 /* -------------------------------------------------------------- the picture */
@@ -580,9 +777,9 @@ async function start(): Promise<void> {
 
   starting = true
   report('Starting…')
-  // A fresh Firebase client each time round, so a corrected uid, a Companion
-  // signed in since the last start, or a refresh token the Companion has
-  // rotated is picked up here rather than at the next launch. See `webRest`.
+  // A fresh Firebase client each time round, so a corrected uid, a sign-in
+  // since the last start, or a refresh token rotated on disk is picked up here
+  // rather than at the next launch. See `webRest`.
   rest = null
 
   const host: WebServerHost = {
@@ -666,11 +863,106 @@ async function start(): Promise<void> {
   // A restart mid-window stays armed for the remainder — re-hang the disarm
   // timer so the remainder still ends itself.
   syncAcceptTimer()
-  // After the server, never before: the record says "dial this address and a
-  // Forge will answer", and publishing it while nothing is listening is an
-  // invitation to a socket that refuses. `isEnabled()` checks `server !== null`
-  // for the same reason.
+  // After the server, never before: a tunnel pointed at a port nothing listens
+  // on is a public address that refuses, and the record that would advertise it
+  // says "dial this and a Forge will answer". `isEnabled()` checks
+  // `server !== null` for the same reason.
+  void startTunnel()
   getRendezvous().start()
+}
+
+/* -------------------------------------------------------------- the tunnel
+ *
+ * Forge Web's own supervised ngrok agent, through the class Forge Mobile
+ * already drives (electron/mobile-tunnel.ts). A second instance, a second
+ * domain, a second port — and, on the free plan, a second of the account's
+ * three agent sessions, which is why stopping kills the process tree.
+ *
+ * The lifecycle is the server's: up after it listens, down before it stops.
+ * Every early return leaves a sentence behind, because a tunnel that silently
+ * is not there is the failure this half of the job exists to remove.
+ */
+
+/**
+ * Bring the agent up, fetching the binary first if this machine has never had
+ * one. Modelled on `startTunnel` in electron/mobile-host.ts, including the
+ * re-check after the download: fetching 12 MB takes long enough that the world
+ * can move under it.
+ */
+async function startTunnel(): Promise<void> {
+  if (tunnel || tunnelStarting) return
+  const settings = getSettings()
+  if (settings.webTunnel !== 'ngrok') return
+  if (!server) {
+    setTunnelState({ state: 'error', url: '', detail: 'Turn Forge Web on first — the tunnel has nothing to carry.' })
+    return
+  }
+  if (!settings.webNgrokAuthtoken || !settings.webNgrokDomain) {
+    setTunnelState({
+      state: 'error',
+      url: '',
+      detail: 'Paste your ngrok authtoken and the domain for Forge Web below first — both are on the ngrok dashboard.'
+    })
+    return
+  }
+
+  tunnelStarting = true
+  try {
+    const binDir = join(getDataDir(), 'bin')
+    let exe = resolveNgrokExe({ env: process.env, binDir })
+    if (!exe) {
+      setTunnelState({ state: 'starting', url: '', detail: 'Fetching ngrok (one time, about 12 MB)…' })
+      const fetched = await ensureNgrokExe({ binDir })
+      if (!fetched.ok) {
+        setTunnelState({ state: 'error', url: '', detail: fetched.error })
+        return
+      }
+      exe = fetched.path
+    }
+    if (getSettings().webTunnel !== 'ngrok' || !server) return
+
+    tunnel = new NgrokTunnel({
+      exe,
+      port: webPort(),
+      domain: getSettings().webNgrokDomain,
+      authtoken: getSettings().webNgrokAuthtoken,
+      // Whose card to send somebody to when ngrok refuses permanently. Forge
+      // Mobile's is the default in that module; this door is a different one
+      // with a different authtoken and a different domain in it.
+      settingsCard: 'Settings › Forge Web',
+      onStatus: setTunnelState,
+      log: (line) => console.log(`[web] ${line}`)
+    })
+    tunnelSpec = tunnelSpecNow()
+    tunnel.start()
+  } finally {
+    tunnelStarting = false
+  }
+}
+
+/**
+ * Fold the supervisor's verdict into this desktop's picture.
+ *
+ * Two things follow from a tunnel changing state, and neither can be skipped:
+ * the panel is told, and the *rendezvous* is told. The second is the one that
+ * matters — the record carries the hostname a browser dials, so an agent that
+ * has just come up on a new address must republish now rather than at the next
+ * heartbeat, and an agent that has just died must have its address retracted
+ * rather than left to go stale for three minutes. `refresh()` does both: it
+ * re-reads `hostname()`, which is '' unless the tunnel is live.
+ */
+function setTunnelState(status: TunnelStatus): void {
+  tunnelState = status
+  rendezvous?.refresh()
+  report()
+}
+
+/** Take the agent down — the whole process tree, or it holds a session slot. */
+function stopTunnel(): void {
+  tunnel?.stop()
+  tunnel = null
+  tunnelSpec = ''
+  tunnelState = TUNNEL_OFF
 }
 
 /**
@@ -692,6 +984,11 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   rendezvous = null
   await service?.shutdown()
   rest = null
+  // After the record and not before: retracting the address needs the network
+  // the tunnel does not carry (Firebase is reached directly, not through it),
+  // but the order still reads correctly — the advertisement goes, then the way
+  // in goes, then the door.
+  stopTunnel()
 
   // Switching the link off disarms it too: "off" must mean off, not "off but
   // primed to accept strangers the moment it is switched back on". Guarded on
@@ -752,6 +1049,19 @@ export function registerWebHandlers(): void {
     setSettings({ webEnabled: false })
     await stop('disabled')
     report('')
+    return webStatus()
+  })
+
+  /**
+   * Forge Web's own sign-in. The password reaches Firebase and nothing else —
+   * see `signIn`, and note that this does not switch the link on.
+   */
+  ipcMain.handle(IPC.webSignIn, async (_e, email: string, password: string): Promise<WebSignInResult> => {
+    return signIn(String(email ?? ''), String(password ?? ''))
+  })
+
+  ipcMain.handle(IPC.webSignOut, async (): Promise<WebStatus> => {
+    await signOut()
     return webStatus()
   })
 
@@ -830,8 +1140,14 @@ export function registerWebHandlers(): void {
  *
  * The rendezvous is re-started on every call rather than only on a transition:
  * `start()` there is documented as cheap and idempotent, and it is the one path
- * that picks up a Companion sign-in, a corrected uid, or a refresh token the
- * Companion has since rotated.
+ * that picks up a sign-in, a corrected uid, or a refresh token rotated on disk.
+ *
+ * The tunnel gets the same treatment, and needs it more: switching
+ * `webTunnel` to `'ngrok'` or pasting a domain while the link is already up
+ * must start an agent now. A tunnel already running is left alone —
+ * `startTunnel()` returns immediately when one exists — so this stays cheap;
+ * changing the *credentials* of a running tunnel is a stop and a start, which
+ * is what main.ts's change-detection asks for by calling this after the write.
  */
 export function applyWebSettings(): void {
   const enabled = getSettings().webEnabled
@@ -843,7 +1159,22 @@ export function applyWebSettings(): void {
     void stop('disabled').then(() => report(''))
     return
   }
-  if (enabled && server) getRendezvous().start()
+  if (!enabled) return
+  // Enabled and already listening. Bring the tunnel in line with what the
+  // settings now say — including "switched off", which has to take the agent
+  // down rather than leave a public address open onto a link Steve believes he
+  // has closed, and "same switch, different domain", which an already-running
+  // agent cannot honour without being restarted.
+  if (getSettings().webTunnel !== 'ngrok') {
+    if (tunnel) {
+      stopTunnel()
+      rendezvous?.refresh()
+    }
+  } else {
+    if (tunnel && tunnelSpec !== tunnelSpecNow()) stopTunnel()
+    void startTunnel()
+  }
+  getRendezvous().start()
 }
 
 export async function disposeWeb(): Promise<void> {

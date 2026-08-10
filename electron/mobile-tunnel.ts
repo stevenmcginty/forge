@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
-import type { MobileTunnelStatus } from '@shared/types'
+import type { MobileTunnelStatus, TunnelStatus } from '@shared/types'
 
 /**
  * The permanent way in from outside the house: a supervised ngrok agent.
@@ -40,6 +40,25 @@ import type { MobileTunnelStatus } from '@shared/types'
  * drives this exact class with a scripted fake process, because a supervisor
  * whose backoff and refusal rules have only ever run against the real ngrok is
  * a supervisor nobody has tested. `electron/mobile-host.ts` owns the wiring.
+ *
+ * ## Two consumers, not one
+ *
+ * The file is named for the feature that paid for it, and it is no longer that
+ * feature's alone: `electron/web-host.ts` supervises a second agent through
+ * this same class, on Forge Web's own port and Forge Web's own domain. Nothing
+ * about the supervision differs — download, spawn, backoff, refusal detection
+ * and the kill-the-whole-tree stop are the same problems whatever is on the
+ * other end of the port — so the only things a consumer has to say for itself
+ * are the four it already passes (`exe`, `port`, `domain`, `authtoken`) and one
+ * that used to be hard-coded: which Settings card a refusal tells the reader to
+ * go and fix. That is `settingsCard`, and its default is Forge Mobile's, so the
+ * sentences this file has always produced are byte-for-byte what it still
+ * produces for the caller that has always read them.
+ *
+ * The one genuinely shared resource is the ngrok account: a free plan allows
+ * three concurrent agent sessions, and two links running at once take two of
+ * them. That is the reason `stop()` kills the process *tree* — see
+ * `killTreeWindows` — and it is now twice as load-bearing as it was.
  */
 
 /** The official Windows amd64 agent, from ngrok's own distribution host. */
@@ -123,6 +142,9 @@ export function parseNgrokLine(line: string): NgrokLogEvent | null {
   return { lvl: field('lvl'), msg: field('msg'), url: field('url'), err: field('err') }
 }
 
+/** The Settings card a refusal points at when the caller does not say. */
+export const DEFAULT_SETTINGS_CARD = 'Settings › Forge Mobile'
+
 /**
  * The doors that will not open, matched by ngrok's error codes and the phrases
  * around them. Restarting into any of these buys nothing but a spent request
@@ -134,16 +156,23 @@ export function parseNgrokLine(line: string): NgrokLogEvent | null {
  * Codes 105/107/108 are stable and documented; the domain-ownership failures
  * are matched on phrasing because their codes have shifted between agent
  * versions and a missed match merely retries where it should stop.
+ *
+ * `settingsCard` is the one thing here a second consumer has to change: the
+ * sentences send somebody to a specific card to paste a specific value, and
+ * sending Forge Web's reader to Forge Mobile's card would be worse than saying
+ * nothing. It defaults to Forge Mobile's so the sentences the phone link has
+ * always shown are the sentences it still shows.
  */
-export function permanentRefusal(text: string): string | null {
+export function permanentRefusal(text: string, settingsCard: string = DEFAULT_SETTINGS_CARD): string | null {
+  const card = settingsCard || DEFAULT_SETTINGS_CARD
   if (/ERR_NGROK_10[57]/.test(text) || /authtoken.+(is invalid|not look like)/i.test(text)) {
-    return 'ngrok rejected the authtoken. Paste a fresh one from the ngrok dashboard into Settings › Forge Mobile.'
+    return `ngrok rejected the authtoken. Paste a fresh one from the ngrok dashboard into ${card}.`
   }
   if (/ERR_NGROK_108/.test(text) || /limited to \d+ simultaneous ngrok agent session/i.test(text)) {
     return 'This ngrok account already has its full allowance of agent sessions running somewhere. Close the other ngrok agents (or stranded ngrok.exe processes) and switch the tunnel on again.'
   }
   if (/not reserved for your account/i.test(text) || /reserved for another account/i.test(text)) {
-    return 'That domain does not belong to this ngrok account. Copy the domain assigned to you from the ngrok dashboard into Settings › Forge Mobile.'
+    return `That domain does not belong to this ngrok account. Copy the domain assigned to you from the ngrok dashboard into ${card}.`
   }
   return null
 }
@@ -319,8 +348,18 @@ export interface NgrokTunnelHost {
   port: number
   domain: string
   authtoken: string
-  /** Every state change, already redacted. mobile-host folds it into mobileStatus(). */
-  onStatus: (status: MobileTunnelStatus) => void
+  /**
+   * Every state change, already redacted. `mobile-host.ts` folds it into
+   * `mobileStatus()`; `web-host.ts` folds it into `webStatus().tunnel` and
+   * nudges the rendezvous, because for Forge Web this status *is* the address
+   * a browser is about to be told to dial.
+   */
+  onStatus: (status: TunnelStatus) => void
+  /**
+   * Which Settings card a permanent refusal tells the reader to go and fix.
+   * Defaults to Forge Mobile's — see `permanentRefusal`.
+   */
+  settingsCard?: string
   log?: (line: string) => void
   /* Seams for scripts/tunnel-check.mjs. Real implementations are the defaults. */
   spawn?: SpawnTunnel
@@ -364,7 +403,7 @@ export class NgrokTunnel {
   private refusal = ''
   private lastError = ''
   private stopped = false
-  private current: MobileTunnelStatus = { state: 'off', url: '', detail: '' }
+  private current: TunnelStatus = { state: 'off', url: '', detail: '' }
 
   constructor(host: NgrokTunnelHost) {
     this.host = host
@@ -375,7 +414,7 @@ export class NgrokTunnel {
     return this.attempt
   }
 
-  status(): MobileTunnelStatus {
+  status(): TunnelStatus {
     return this.current
   }
 
@@ -408,6 +447,11 @@ export class NgrokTunnel {
 
     let child: TunnelChild
     try {
+      // Every consumer-specific part of the command line — which port to
+      // forward, which domain to bind, whose account to bind it with — arrives
+      // from the host, so a second link needs no second argument builder. What
+      // is fixed is ngrok's own shape: `http`, JSON logs on stdout, and the
+      // token as an argument rather than a config file. See `ngrokArgs`.
       child = (this.host.spawn ?? ((exe, args) => spawn(exe, args, { stdio: ['ignore', 'pipe', 'pipe'] })))(
         this.host.exe,
         ngrokArgs(this.host.port, this.host.domain, this.host.authtoken)
@@ -451,7 +495,7 @@ export class NgrokTunnel {
     // ngrok spells it 'eror' and 'crit'. Everything else is routine chatter.
     if (event.lvl !== 'eror' && event.lvl !== 'crit' && !event.err) return
     const text = `${event.msg} ${event.err}`.trim()
-    const refusal = permanentRefusal(text)
+    const refusal = permanentRefusal(text, this.host.settingsCard)
     if (refusal) this.refusal = refusal
     this.lastError = this.redact(text)
     this.host.log?.(`ngrok: ${this.lastError}`)
@@ -490,7 +534,7 @@ export class NgrokTunnel {
     return redactAuthtoken(text, this.host.authtoken)
   }
 
-  private report(status: MobileTunnelStatus): void {
+  private report(status: TunnelStatus): void {
     this.current = { ...status, detail: this.redact(status.detail) }
     this.host.onStatus(this.current)
   }
