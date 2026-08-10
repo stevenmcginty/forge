@@ -95,10 +95,28 @@ export const HEALTHY_RESET_MS = 30_000
  * then leak into a diff or a backup.
  */
 export function ngrokArgs(port: number, domain: string, authtoken: string): string[] {
+  const clean = domain.trim()
   return [
     'http',
     String(port),
-    `--url=https://${domain}`,
+    /*
+     * A reserved domain when there is one, and whatever ngrok hands out when
+     * there is not.
+     *
+     * `--url` used to be unconditional, which quietly made a reserved domain a
+     * requirement — and ngrok's free tier grants exactly one per account. Forge
+     * Mobile takes it, and a domain forwards to a single port, so Forge Web
+     * could not have one at all without paying. That is a hard stop imposed by
+     * a string template rather than by anything the feature needs.
+     *
+     * An ephemeral URL is genuinely fine here, and only here: the address
+     * changes on every restart, which is precisely the problem the rendezvous
+     * record in shared/web.ts exists to solve — the desktop publishes wherever
+     * it landed and the browser reads it before dialling. Forge Mobile is a
+     * different case, because a phone that scanned a QR keeps the address it
+     * was given; it should keep passing a reserved domain, and does.
+     */
+    ...(clean ? [`--url=https://${clean}`] : []),
     '--authtoken',
     authtoken,
     '--log=stdout',
