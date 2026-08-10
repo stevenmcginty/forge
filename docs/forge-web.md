@@ -343,8 +343,40 @@ and none of them blocks the others.
    it never reaches the desktop, never enters the offline cache, and "forget
    this token" genuinely removes it.
 
-5. **Deploy the web client to Hosting** once Phase 3 exists. One command, and
-   the URL never changes afterwards.
+5. **Two Hosting sites, then deploy.** This one has a trap in it, which is why
+   it is spelled out.
+
+   `companion/firebase.json` used to declare a *single* hosting site pointing at
+   `companion/web`. Deploying Forge Web through it would have replaced the
+   Companion PWA with the Forge Web bundle — same project, same URL, one site.
+
+   So it now declares two, and they are kept apart by target names. In the
+   Firebase console, under Hosting, add a second site (the name is globally
+   unique and becomes the URL). Then, once, from `companion/`:
+
+   ```
+   firebase target:apply hosting companion <your-companion-site>
+   firebase target:apply hosting web       <your-forge-web-site>
+   ```
+
+   That writes the `targets` block shown in `.firebaserc.example`. After it,
+   each site deploys on its own and neither can clobber the other:
+
+   ```
+   npm run web:deploy                 # Forge Web only — builds, then ships web/dist
+   cd companion && firebase deploy --only hosting:companion
+   ```
+
+   Also copy `web/config.example.json` to `web/public/config.json` and fill in
+   your project's `apiKey` and `databaseUrl` **before** building. Neither is
+   secret — a Firebase web API key is a public identifier — which is why it is
+   served beside the bundle rather than baked into it.
+
+   The Forge Web site is served with a Content-Security-Policy that allows only
+   `self` for scripts, the Firebase auth and database hosts, `api.github.com`
+   for offline mode, and `wss:` for the tunnel. `wss:` is deliberately not
+   pinned to one host: the tunnel hostname changes, which is the entire reason
+   the rendezvous record exists.
 
 ## Two things that were wired but not right
 

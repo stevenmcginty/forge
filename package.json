@@ -65,6 +65,7 @@
     "web:offline": "node scripts/web-offline.mjs",
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
+    "web:deploy": "npm run web:build && firebase deploy --only hosting:web --config companion/firebase.json",
     "mirror:check": "node scripts/mirror-check.mjs",
     "input:check": "node scripts/input-check.mjs",
     "mobile:icons": "node scripts/mobile-icons.mjs",

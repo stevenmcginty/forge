@@ -1,5 +1,25 @@
 {
   "projects": {
     "default": "forge-sync"
+  },
+
+  "//": [
+    "One Firebase project serves two sites, so a deploy of one cannot overwrite the other.",
+    "Before this works, both sites must exist in the console (Hosting > Add another site).",
+    "The names on the right are the *site* names — globally unique, and they decide the URLs:",
+    "  companion -> https://<site>.web.app  (the phone PWA, companion/web)",
+    "  web       -> https://<site>.web.app  (Forge Web, built from web/dist)",
+    "Then, once, from companion/:",
+    "  firebase target:apply hosting companion forge-sync",
+    "  firebase target:apply hosting web forge-web",
+    "which writes exactly the block below. See docs/forge-web.md."
+  ],
+  "targets": {
+    "forge-sync": {
+      "hosting": {
+        "companion": ["forge-sync"],
+        "web": ["forge-web"]
+      }
+    }
   }
 }
