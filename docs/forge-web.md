@@ -207,8 +207,8 @@ Every test below is written to that bar.
 
 | Phase | Gate | Command |
 | ----- | ---- | ------- |
-| 1 | Desktop behaviour unchanged after the extraction, and `store.ts` imports no Electron. | `npm run typecheck && npm run pty:smoke && npm run session:check && npm run git:check && npm run skills:smoke && npm run commands:check && npm run mobile:smoke` |
-| 2 | The web host serves a real PTY over a real socket with no Electron in the process, and every auth refusal path actually refuses. | `npm run web:smoke` |
+| 1 | Desktop behaviour unchanged after the extraction, and `store.ts` imports no Electron. | `npm run typecheck && npm run pty:smoke && npm run session:check && npm run git:check && npm run gitwatch:smoke && npm run skills:smoke && npm run commands:check && npm run mobile:smoke` |
+| 2 | The web host serves a real PTY over a real socket with no Electron in the process, and every auth refusal path actually refuses. | `npm run web:auth && npm run web:rendezvous && npm run web:smoke` |
 | 3 | The client renders the desktop's UI against a live host, and a typed command's output comes back. | `npm run web:e2e` |
 | 4 | With the host down, the client reaches GitHub, lists a tree, and a commit lands on a `forge-web/*` branch. | `npm run web:offline` |
 | 5 | The settings toggle starts and stops the host; closing the window does not kill the session. | `npm run web:check` |
@@ -268,6 +268,42 @@ The refusal assertions in Phase 2 are the most important tests in this
 document. This feature puts a shell behind a public address, and every one of
 those paths is the difference between a locked door and an open one. A refusal
 path that is not tested is a refusal path that does not work.
+
+## What only Steve can do
+
+Everything else is code and can be built and proved without leaving the
+repository. These cannot: they need credentials, a console, or a decision only
+the account holder can make. Each is written so it can be done in one sitting,
+and none of them blocks the others.
+
+1. **A Firebase project with Hosting and Realtime Database enabled.** The
+   Companion already needs one (`companion/GO-LIVE.md` has the exact commands).
+   If Forge Web shares it, there is nothing to do beyond enabling Hosting.
+   Note that `webProjectId` is a *new* settings field rather than a read of the
+   Companion's: `companionUid` changes whenever the Companion is signed in or
+   out, and letting that re-point who gets a shell is not acceptable for this
+   door.
+
+2. **Deploy the database rules.** `companion/database.rules.json` now carries
+   the `host` block Forge Web needs, and it is proved against the emulator by
+   `npm run web:rendezvous` — but the emulator is not the project. Until this
+   runs, the live database refuses the rendezvous write and the browser can
+   never find the desktop:
+
+   ```
+   cd companion && firebase deploy --only database
+   ```
+
+3. **A tunnel.** Cloudflare Tunnel is the intended one; `electron/mobile-tunnel.ts`
+   already knows how to run `cloudflared`, and Forge Mobile uses it today. A
+   named tunnel gives a stable hostname, which makes the rendezvous record
+   change rarely instead of on every restart.
+
+4. **A GitHub OAuth app** — Phase 4 only, for the offline mode. Scoped to repo
+   contents, device-flow enabled. Nothing before Phase 4 touches it.
+
+5. **Deploy the web client to Hosting** once Phase 3 exists. One command, and
+   the URL never changes afterwards.
 
 ## What is deliberately not here
 
