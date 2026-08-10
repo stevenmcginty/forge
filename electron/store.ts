@@ -309,6 +309,10 @@ function defaultSettings(): Settings {
     // docs/forge-web.md and electron/web/auth.ts.
     webEnabled: false,
     webProjectId: '',
+    // Blank, meaning "the site is named after the project" — Firebase's own
+    // default for a project that has never had a second site added. See
+    // `webSiteId` in shared/types.ts and `webAllowedOrigins`.
+    webSiteId: '',
     webUid: '',
     webDevices: [],
     // "Accept new browsers" is disarmed, for the same reason mobileAcceptUntil
@@ -736,6 +740,11 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // the correct failure; junk degrading to a string is a comparison that
     // quietly passes something.
     webProjectId: /^[a-z0-9][a-z0-9-]{2,62}$/.test(str(s.webProjectId)) ? str(s.webProjectId) : '',
+    // The same shape as the project id, and shaped rather than trimmed for the
+    // same reason: it is concatenated into an origin that browsers are compared
+    // against, so junk must degrade to '' — which falls back to the project id —
+    // rather than to a string that matches nothing and explains nothing.
+    webSiteId: /^[a-z0-9][a-z0-9-]{2,62}$/.test(str(s.webSiteId)) ? str(s.webSiteId) : '',
     // Firebase uids are 28 URL-safe characters today, but that is Google's to
     // change, so this is bounded rather than shaped. '' admits nobody.
     webUid: str(s.webUid).slice(0, 128),

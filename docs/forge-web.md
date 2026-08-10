@@ -115,6 +115,20 @@ whole risk in one sentence, and every decision below exists because of it.
   credential until `webEnabled` is switched on in the desktop's settings.
 - **The source allowlist stays.** The tunnel dials the listener from loopback,
   so `isAllowedSource` still bites on anything that reaches the port directly.
+- **The `Origin` check names a *site*, not a project.** It is the one control
+  that stops any page on the internet opening a socket to a tunnel hostname it
+  guessed, so it fails closed and an unconfigured desktop admits no browser at
+  all. What that costs is a name somebody has to get right, and Forge Web
+  shipped getting it wrong: `webAllowedOrigins` derived every origin from the
+  Firebase *project* id, which is a site's name only until a project has two
+  sites — and this project has two, the Companion's PWA and Forge Web's bundle.
+  The real page was refused by the real desktop from the first minute. Hence
+  `webSiteId`, and hence the rule this refusal now follows: **a refusal that
+  cannot reach the browser must reach the desk.** It fires during the upgrade,
+  where there is no socket to carry a `refused` frame, so the browser sees only
+  a failed handshake and does what any page does with one — retries, forever,
+  saying "Reconnecting to the desktop". `WebStatus.refusal` carries the origin
+  to the Settings card and a notification instead.
 - **Defence in depth, not the defence.** The allowlist and the device list are
   the second and third locks. The token is the first, and it is the one that
   matters.

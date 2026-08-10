@@ -86,6 +86,37 @@ const PORT = 8479
 const HOSTNAME = 'forge-web-check.trycloudflare.invalid'
 const PROJECT = 'forge-web-check'
 const OTHER_PROJECT = 'somebody-elses-project'
+/**
+ * A Hosting site whose name has nothing in common with the project's, because
+ * that is the case this feature was wrong about: `webAllowedOrigins` derived
+ * every origin from the project id, which is only the site's name when nobody
+ * has added a second site. A site called `<project>-web` would have let the old
+ * code pass a substring check and prove nothing.
+ */
+const SITE = 'a-site-of-its-own'
+
+/**
+ * What this repo actually deploys Forge Web to, read out of `.firebaserc`.
+ *
+ * The one fact in this file that is not invented, and the reason for that is
+ * the bug: every assertion here can pass against made-up names while the real
+ * page is served from an address the real desktop refuses. `firebase.json`'s
+ * `target: "web"` names the target; `.firebaserc` maps it to a site.
+ * '' when either cannot be read, which fails below rather than skipping.
+ */
+const { DEPLOY_PROJECT, DEPLOY_SITE } = readDeployTarget()
+
+function readDeployTarget() {
+  try {
+    const rc = JSON.parse(readFileSync(new URL('../.firebaserc', import.meta.url), 'utf8'))
+    const project = String(rc?.projects?.default ?? '')
+    const sites = rc?.targets?.[project]?.hosting?.web
+    const site = Array.isArray(sites) ? String(sites[0] ?? '') : ''
+    return { DEPLOY_PROJECT: project, DEPLOY_SITE: site }
+  } catch {
+    return { DEPLOY_PROJECT: '', DEPLOY_SITE: '' }
+  }
+}
 const UID = 'ULFo0dLmQ1bXQ8mJ2v7hZ4pTgS93'
 /** The Companion's account — deliberately *not* the one Forge Web signs into. */
 const COMPANION_UID = 'zZ9tGhK2wR4nB7cV1xM6qL0sD85e'
@@ -860,6 +891,55 @@ const forOther = host.webAllowedOrigins()
 log(
   forOther.includes(`https://${OTHER_PROJECT}.web.app`) && !forOther.some((o) => o.includes(PROJECT)),
   'renaming the project renames every origin — none of them is fixed in the source'
+)
+
+/*
+ * The site, which is not the project — and this is the assertion that was
+ * missing when Forge Web shipped.
+ *
+ * Everything above proves the origins move with the *project id*, and every one
+ * of them passed while no browser could connect at all, because a Firebase
+ * project may host any number of sites and only the first is named after it.
+ * `.firebaserc` below is read rather than restated so this cannot agree with a
+ * deployment that has moved: it names the site `npm run web:deploy` actually
+ * publishes to, and the claim is that a desktop configured for this repo's
+ * deployment admits the page that deployment serves.
+ */
+store.setSettings({ webProjectId: PROJECT, webSiteId: SITE })
+const forSite = host.webAllowedOrigins()
+log(
+  forSite.includes(`https://${SITE}.web.app`) && forSite.includes(`https://${SITE}.firebaseapp.com`),
+  `a named Hosting site is served, not only the project (${SITE})`
+)
+log(
+  forSite.includes(`https://${PROJECT}.web.app`),
+  'and naming one does not stop serving the project’s own site, which the Companion is'
+)
+
+if (DEPLOY_SITE) {
+  store.setSettings({ webProjectId: DEPLOY_PROJECT, webSiteId: DEPLOY_SITE })
+  const forDeploy = host.webAllowedOrigins()
+  log(
+    forDeploy.includes(`https://${DEPLOY_SITE}.web.app`),
+    `the site this repo deploys to is one this desktop would admit (https://${DEPLOY_SITE}.web.app)`
+  )
+  log(
+    DEPLOY_SITE === DEPLOY_PROJECT || !host.webAllowedOrigins.toString().includes(DEPLOY_SITE),
+    'and it is admitted because .firebaserc says so, not because the name is written into the source'
+  )
+} else {
+  // Not a failure. `.firebaserc` is gitignored — it names somebody's own
+  // project and sites — so a fresh clone and CI both have every right to be
+  // without one. Said out loud rather than skipped silently, because "this
+  // check did not run" and "this check passed" must not look the same.
+  console.log('--    no .firebaserc here, so the real deployment’s site was not checked (nothing has been deployed yet)')
+}
+
+store.setSettings({ webProjectId: PROJECT, webSiteId: '' })
+const siteless = host.webAllowedOrigins()
+log(
+  siteless.includes(`https://${PROJECT}.web.app`) && !siteless.some((o) => o.includes(SITE)),
+  'a blank site falls back to the project, which is what a single-site project has'
 )
 
 store.setSettings({ webProjectId: '' })

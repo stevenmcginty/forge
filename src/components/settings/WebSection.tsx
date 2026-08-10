@@ -84,6 +84,22 @@ const TUNNELS: Array<{ id: WebTunnelMode; label: string; hint: string }> = [
   { id: 'off', label: 'None', hint: 'No way in from outside, unless you run a tunnel yourself.' }
 ]
 
+/**
+ * The Hosting site name inside a refused origin, or '' when there is not one.
+ *
+ * Only `*.web.app` and `*.firebaseapp.com` are read, because those are the two
+ * addresses Firebase serves a site at and the only ones where the fix really is
+ * "put this word in the Hosting site box". A refusal from anywhere else — a
+ * custom domain, or a page with no business here at all — gets the sentence
+ * without the instruction, because the instruction would be wrong.
+ */
+function refusedSite(origin: string): string {
+  const match = /^https:\/\/([a-z0-9][a-z0-9-]{2,62})\.(?:web\.app|firebaseapp\.com)\/?$/.exec(
+    origin.trim().toLowerCase()
+  )
+  return match?.[1] ?? ''
+}
+
 /** Seconds remaining until a ms-epoch deadline, floored at zero. */
 function secondsLeft(deadline: number, now: number): number {
   return Math.max(0, Math.ceil((deadline - now) / 1000))
@@ -403,6 +419,36 @@ export function WebSection(): ReactNode {
           )}
         </p>
 
+        {/*
+          The one refusal a browser can never be shown. It happens during the
+          WebSocket upgrade, so there is no socket to send it on: the page sees
+          a handshake that failed, cannot tell that from a machine that is off,
+          and reconnects for as long as anybody watches it. Said here, on the
+          desktop, or said nowhere. See `WebStatus.refusal`.
+        */}
+        {status.refusal && (
+          <p className="web-refusal">
+            <strong>A browser was turned away.</strong> It was on{' '}
+            <code className="mono">{status.refusal.origin || 'a page that sent no address'}</code>, which is not an
+            address this desktop serves
+            {status.refusal.allowed.length > 0 ? (
+              <>
+                {' '}
+                — it serves <code className="mono">{status.refusal.allowed.join(', ')}</code>
+              </>
+            ) : (
+              ' — it serves none at all yet'
+            )}
+            . That page is retrying and will keep saying <em>Reconnecting to the desktop</em> until the two agree.
+            {refusedSite(status.refusal.origin) ? (
+              <>
+                {' '}
+                Set <strong>Hosting site</strong> below to <code className="mono">{refusedSite(status.refusal.origin)}</code>.
+              </>
+            ) : null}
+          </p>
+        )}
+
         <Row
           label="Let browsers reach this desktop"
           hint={busy ? 'Working…' : `Port ${status.port}, bound to loopback — the tunnel below is the only way in from outside.`}
@@ -444,6 +490,17 @@ export function WebSection(): ReactNode {
             mono
             placeholder="forge-sync"
             onCommit={(next) => actions.patchSettings({ webProjectId: next.trim() })}
+          />
+        </Row>
+        <Row
+          label="Hosting site"
+          hint="The Firebase Hosting site the browser page is served from — the name in https://<site>.web.app. Leave it blank when it matches the project, which is Firebase's default; fill it in when the bundle went to a site of its own, as `firebase deploy --only hosting:web` does here. Nothing else uses it, and getting it wrong refuses every browser at the door."
+        >
+          <TextField
+            value={settings.webSiteId}
+            mono
+            placeholder={settings.webProjectId || 'same as the project'}
+            onCommit={(next) => actions.patchSettings({ webSiteId: next.trim() })}
           />
         </Row>
         <Row

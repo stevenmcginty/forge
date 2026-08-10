@@ -169,13 +169,30 @@ panel; nothing needs DevTools the way Companion's early sign-in did.
 
 ### 6a. The account card
 
-Paste the three values you just used to build the client:
+Paste the four values you just used to build the client:
 
 | Field | Value |
 | ----- | ----- |
 | Firebase project | `forge-sync-aadafc` |
+| Hosting site | `forge-web-aadafc` |
 | Web API key | the `apiKey` from step 4 |
 | Database URL | the `databaseURL` from step 4 |
+
+**The project and the site are different names, and step 3 is where they came
+apart.** The project is `forge-sync-aadafc`; the site you created there for
+Forge Web is `forge-web-aadafc`, and that is the one in the address bar. The
+project id is what tokens are checked against; the Hosting site is the only
+thing that decides which *page* may open a socket to this desktop. Leave the
+site blank only if you skipped step 3 and deployed to the project's own default
+site.
+
+Get it wrong and there is exactly one symptom, which is not the one you would
+guess from it: sign-in works, the tunnel is live, the desktop publishes its
+address, the browser finds it — and every connection is refused during the
+WebSocket handshake, where there is no socket to explain it on. The page says
+*"Reconnecting to the desktop (attempt 6)…"* forever. The desktop says which
+address it turned away, in red, at the top of "The link" card; that sentence
+names the value this field wants.
 
 Then sign in — email and password, in the card itself. **Typing an email that
 does not exist yet creates the account**, exactly as it does on Companion's
@@ -280,13 +297,14 @@ once it wakes up.
 
 | What you see | What it is |
 | --- | --- |
+| **"Reconnecting to the desktop (attempt N)…" forever, with the tunnel live and the desktop signed in** | The **Hosting site** field does not match the address the page is served from, so every browser is refused during the WebSocket upgrade — where there is no socket to say so on, which is why the page can only sit there retrying. Look at "The link" card on the desktop: it names the address it turned away, and the site name inside it is what the field wants. Observed on the first live run: the site is `forge-web-aadafc` and the project is `forge-sync-aadafc`, and only the project had ever been asked for. |
 | The browser can never find the desktop, even though everything looks on | The database rules were never deployed against the *live* project — step 2 above proves them against the emulator, not against `forge-sync-aadafc`. Run `firebase deploy --only database --project forge-sync-aadafc` from the repo root. |
 | A deploy command says it cannot find `firebase.json` / deploys the wrong thing | You ran it from `companion/`. The deploy config moved to the repo root — run `firebase deploy …` and `firebase target:apply …` from there. `companion/firebase.json` is the *emulator* config now (`--config companion/firebase.json`, used by the check scripts), not the deploy one. |
 | Tunnel error mentioning **the authtoken** | Paste a fresh one from the ngrok dashboard. Forge stops rather than retrying — a rejected token is not a network blip. |
 | **`ERR_NGROK_334` — "the endpoint … is already online"** | The endpoint it names is almost certainly Forge Mobile's reserved domain. A free ngrok account gets **one** static domain, and leaving Forge Web's domain blank does *not* mint a throwaway address — it uses that same account default, so the two links fight over one domain. Observed on the first live run. Either stop Forge Mobile's tunnel, or — better — set Forge Web's tunnel to **cloudflared**, which needs no account, no token and no domain, and runs happily beside ngrok. |
 | Tunnel error mentioning **agent sessions** (`ERR_NGROK_108`) | All of the account's concurrent agent sessions are spent — usually a stranded `ngrok.exe` from a previous run. End it in Task Manager and switch the tunnel off and on again. |
 | Tunnel card says **"Paste your ngrok authtoken below first"** or **"Turn Forge Web on first"** | The tunnel toggle is on with nothing for it to carry — the authtoken field is empty, or "Let browsers reach this desktop" itself is still off. Fill in the missing half; the tunnel starts on its own once it can. |
-| Sign-in in Settings refuses immediately | The account card's three fields are blank — "Set the Firebase API key and database URL for Forge Web first" is the exact refusal. Fill in the project id, API key and database URL from step 4 before trying again. |
+| Sign-in in Settings refuses immediately | The account card's project, API key and database URL are blank — "Set the Firebase API key and database URL for Forge Web first" is the exact refusal. Fill them in from step 4 before trying again. (The Hosting site is not part of sign-in and never blocks it — see the first row.) |
 | The browser says **"That desktop is asleep"** and you know the PC is on | This is a tunnel or publishing problem, not a sign-in one — the browser only reads what the desktop last published. On the desktop's Settings card, check the tunnel state (`live`, not `error` or `off`) and the line under "Reach it from anywhere" that says what was published and when. A live tunnel with nothing published usually means Forge Web is signed out — see `session.detail` on the same card. |
 | The client loads to a blank page saying **"This deployment is not configured yet"** | `web/public/config.json` never made it into the deployed bundle — it has to exist *before* `npm run web:build` runs, not be added to `web/dist` afterwards. Redo step 4, then step 5. |
 

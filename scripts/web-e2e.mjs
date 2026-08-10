@@ -327,6 +327,22 @@ async function main() {
       auth,
       appVersion: '0.0.0-e2e',
       desktopName: () => 'E2E-PC',
+      /*
+       * A blind spot, stated rather than hidden: this hands the server the
+       * origin the harness serves the page from, so it exercises
+       * `originAllowed` and never `webAllowedOrigins`. The real desktop's list
+       * is *derived* — and it derived the wrong thing for the whole of Forge
+       * Web's first release, refusing the real page from the real Hosting site
+       * while this check passed end to end every time.
+       *
+       * It cannot be fixed here. The page under test is served from
+       * `http://localhost:<vite>`, so a list built the production way would
+       * refuse it, and pointing the derivation at "localhost" would prove
+       * nothing about `https://<site>.web.app`. The assertion that covers it
+       * lives in scripts/web-check.mjs instead: it reads `.firebaserc` and
+       * demands that the site this repo actually deploys to is one
+       * `webAllowedOrigins()` produces.
+       */
       allowedOrigins: () => [ORIGIN],
       sessions: () => manager.list(),
       replay: (id) => replay.get(id) ?? '',

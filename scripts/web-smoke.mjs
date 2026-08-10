@@ -322,6 +322,16 @@ async function main() {
   }
 
   let allowedOrigins = [ORIGIN]
+  /**
+   * Every origin the server turned away, in order.
+   *
+   * The refusal this records is the only one in the file that cannot reach the
+   * browser it concerns — it happens during the upgrade, where there is no
+   * socket to carry a `refused` frame — so a desktop that does not hear about
+   * it has no way to tell anybody, and the page retries forever looking like a
+   * network fault. See `onOriginRefused` in electron/web/server.ts.
+   */
+  const refusedOrigins = []
   const ops = []
   let layoutAnswer = null
   const watches = []
@@ -366,6 +376,7 @@ async function main() {
       appVersion: '0.0.0-smoke',
       desktopName: () => 'SMOKE-PC',
       allowedOrigins: () => allowedOrigins,
+      onOriginRefused: (origin, allowed) => refusedOrigins.push({ origin, allowed }),
       sessions: () => manager.list(),
       replay: (id) => replay.get(id) ?? '',
       write: (id, data) => manager.write(id, data),
@@ -523,6 +534,24 @@ async function main() {
   log(
     wrongOrigin.opened === false && wrongOrigin.refusal.includes('403'),
     'an unexpected Origin is refused at the upgrade — the one control that stops a page on the internet dialling a guessed hostname'
+  )
+  /*
+   * And the desktop is told which page it just refused.
+   *
+   * Forge Web shipped with this refusal firing only into a console log, so a
+   * Hosting site that did not match the project id refused every browser in
+   * the world in silence: the page said "Reconnecting to the desktop" for as
+   * long as anybody watched it, and nothing at either end said why. The
+   * *sentence* is the fix, so the sentence is what is asserted.
+   */
+  const lastRefused = refusedOrigins.at(-1)
+  log(
+    lastRefused?.origin === 'https://not-forge.example',
+    `the desktop is told which page was turned away (${lastRefused?.origin ?? 'nothing was reported'})`
+  )
+  log(
+    Array.isArray(lastRefused?.allowed) && lastRefused.allowed.includes(ORIGIN),
+    'and what it would have accepted instead, so the two can be compared without reading the source'
   )
 
   allowedOrigins = []

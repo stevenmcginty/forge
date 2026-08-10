@@ -1775,6 +1775,26 @@ export interface Settings {
    */
   webProjectId: string
   /**
+   * The Firebase **Hosting site** the browser bundle is served from, e.g.
+   * `forge-web` in `https://forge-web.web.app` — and blank means "the same name
+   * as the project", which is Firebase's own default site.
+   *
+   * A separate field from `webProjectId` because the two are separate names and
+   * only one of them is the page's address. A project may host any number of
+   * sites, each with a name of its own: this repo's `.firebaserc` puts Forge
+   * Web on the `forge-web-aadafc` site inside the `forge-sync-aadafc` project,
+   * so the page's origin shares no substring with the project at all.
+   *
+   * Only `webAllowedOrigins` reads it, and getting it wrong has exactly one
+   * symptom, which is the one it was written for: every browser is refused at
+   * the WebSocket upgrade with `Origin not allowed`, the page cannot tell a
+   * refusal from a network fault, and it reconnects forever saying
+   * "Reconnecting to the desktop". The token check is not involved and never
+   * was — that is `webProjectId`'s job, and it kept doing it perfectly while
+   * nothing could connect.
+   */
+  webSiteId: string
+  /**
    * The one Firebase uid this desktop admits. Blank admits nobody.
    *
    * Deliberately its own field rather than a read of `companionUid`, even
@@ -2332,6 +2352,36 @@ export interface WebStatus {
   session: WebSessionStatus
   tunnel: WebTunnelStatus
   rendezvous: WebRendezvousStatus
+  /**
+   * The last browser this desktop turned away at the door, or null.
+   *
+   * Every other refusal in Forge Web reaches the person it concerns: a bad
+   * token, an unapproved device and a revoked browser all travel back down the
+   * socket as a `refused` frame the page renders. The origin check cannot —
+   * it fires *during* the upgrade, so there is no WebSocket to say it on, and
+   * the browser is handed a bare failed handshake that is indistinguishable
+   * from an unreachable machine. The page therefore does the only sensible
+   * thing with a network fault, which is retry, and a misconfiguration looks
+   * exactly like a tunnel that is down.
+   *
+   * So the sentence surfaces here instead, on the desktop, where somebody can
+   * act on it. It carries the origin verbatim because the fix is to compare it
+   * with the Hosting site in Settings — see `webSiteId`.
+   */
+  refusal: WebRefusal | null
+}
+
+/**
+ * A browser refused before it had a socket to be told on. See
+ * `WebStatus.refusal`, which is the only thing that carries it.
+ */
+export interface WebRefusal {
+  /** The `Origin` header as the browser sent it, e.g. `https://forge-web.web.app`. */
+  origin: string
+  /** What this desktop would have accepted instead, for the panel to show beside it. */
+  allowed: string[]
+  /** ms epoch. */
+  at: number
 }
 
 /**

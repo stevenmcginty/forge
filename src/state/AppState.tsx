@@ -276,6 +276,7 @@ const FALLBACK_SETTINGS: Settings = {
   // before the real settings landed.
   webEnabled: false,
   webProjectId: '',
+  webSiteId: '',
   webUid: '',
   webDevices: [],
   webAcceptUntil: 0,

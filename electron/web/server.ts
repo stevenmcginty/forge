@@ -149,6 +149,18 @@ export interface WebServerHost {
    */
   allowedOrigins: () => string[]
 
+  /**
+   * A browser was turned away by `originAllowed`, with the `Origin` it sent.
+   *
+   * Optional, and the only refusal in this file that needs a channel of its
+   * own. Every other one happens on an open socket and travels back as a
+   * `refused` frame the page renders; this one happens mid-handshake, so the
+   * browser is handed a bare failed upgrade it cannot tell from an unreachable
+   * machine, and it retries forever. A host that implements this can say on the
+   * *desktop* what the browser will never learn — see `WebStatus.refusal`.
+   */
+  onOriginRefused?: (origin: string, allowed: string[]) => void
+
   /** Live panes, as the wire sees them. */
   sessions: () => WebSession[]
   /** The catch-up buffer from pty-host, or '' when there is none. */
@@ -327,7 +339,11 @@ export class WebServer {
         return
       }
       if (!this.originAllowed(req)) {
-        this.log(`refusing an upgrade from ${source} with origin ${String(req.headers.origin)}`)
+        const origin = typeof req.headers.origin === 'string' ? req.headers.origin : ''
+        this.log(`refusing an upgrade from ${source} with origin ${origin || '(none)'}`)
+        // Told to the desktop as well as the log, because this refusal is the
+        // one the browser cannot be told about. See `onOriginRefused`.
+        this.host.onOriginRefused?.(origin, this.host.allowedOrigins())
         refuseUpgrade(socket, 403, 'Origin not allowed')
         return
       }

@@ -12,6 +12,7 @@ import type {
   TunnelStatus,
   WebApprovalEvent,
   WebCommandEvent,
+  WebRefusal,
   WebRendezvousStatus,
   WebSessionStatus,
   WebSignInResult,
@@ -174,6 +175,17 @@ let unsubscribeGit: (() => void) | null = null
 let lastDetail = ''
 let starting = false
 
+/**
+ * The last browser refused at the door for the page it was on, or null.
+ *
+ * Kept here rather than in the server because it outlives a restart of the
+ * listener and because the panel reads its picture from `webStatus()`. Only
+ * ever the *last* one: a page that is on the wrong address retries every few
+ * seconds, so a list would be the same sentence a hundred times, and the
+ * hundredth is worth no more than the first.
+ */
+let lastRefusal: WebRefusal | null = null
+
 /** Forge Web's own tunnel agent, and the last thing it said. See the tunnel block. */
 const TUNNEL_OFF: TunnelStatus = { state: 'off', url: '', detail: '' }
 let tunnel: CloudflareTunnel | NgrokTunnel | null = null
@@ -312,14 +324,37 @@ function getAuth(): WebAuth {
 /**
  * The pages a browser may open this socket from.
  *
- * Derived from `webProjectId` rather than written down, and that is the whole
- * point: a production origin hard-coded in this file would be a second place
- * the deployment is named, and the first thing to go stale when the project is
- * renamed. Firebase Hosting gives every project two default domains —
- * `<project>.web.app` and `<project>.firebaseapp.com` — and both are served the
- * same bundle, so a page loaded from either has to be able to connect. The id
- * is safe to interpolate because `electron/store.ts` only admits
- * `/^[a-z0-9][a-z0-9-]{2,62}$/` into that field.
+ * Derived rather than written down, and that is the whole point: a production
+ * origin hard-coded in this file would be a second place the deployment is
+ * named, and the first thing to go stale when it moves. Firebase Hosting gives
+ * every *site* two domains — `<site>.web.app` and `<site>.firebaseapp.com` —
+ * and both are served the same bundle, so a page loaded from either has to be
+ * able to connect. Both ids are safe to interpolate because
+ * `electron/store.ts` only admits `/^[a-z0-9][a-z0-9-]{2,62}$/` into them.
+ *
+ * ## The site, and the bug that named it
+ *
+ * This function used to derive its origins from `webProjectId` alone, on the
+ * assumption that a project's Hosting site carries the project's name. That is
+ * only Firebase's *default*, for a project that has never had a second site
+ * added — and this repo has two, because the Companion's PWA and Forge Web's
+ * bundle are different sites in one project. `.firebaserc` says so:
+ *
+ *     "hosting": { "companion": ["forge-sync-aadafc"], "web": ["forge-web-aadafc"] }
+ *
+ * So the page really served at `https://forge-web-aadafc.web.app` presented an
+ * origin this desktop had never heard of, every upgrade was refused with
+ * `Origin not allowed`, and — because that refusal happens *during* the
+ * handshake, where there is no socket to explain it on — the browser saw a
+ * failed connection and did the only reasonable thing with one, which is retry.
+ * "Reconnecting to the desktop (attempt 6)…" for as long as anybody watched.
+ * Nothing in the token path was wrong and nothing in the tunnel was down.
+ *
+ * Hence `webSiteId`, and hence the fallback: blank means "named after the
+ * project", which is what every single-site project has and what this code
+ * assumed of all of them. The project's own pair is still included even when a
+ * site is named, because the Companion's site *is* the project and a browser
+ * arriving from either address is the same browser.
  *
  * `FORGE_WEB_ORIGINS` (comma-separated) is for a custom domain and for the
  * Phase 3 dev loop on an unusual port. The dev origins are appended only in an
@@ -329,7 +364,8 @@ function getAuth(): WebAuth {
  * unconfigured desktop — see `originAllowed` in electron/web/server.ts.
  *
  * Exported for `scripts/web-check.mjs`, which asserts that nothing in here is a
- * fixed production address.
+ * fixed production address *and* that the site this repo actually deploys to is
+ * among the addresses it produces.
  */
 export function webAllowedOrigins(): string[] {
   const origins: string[] = []
@@ -337,10 +373,53 @@ export function webAllowedOrigins(): string[] {
     const clean = raw.trim()
     if (clean) origins.push(clean)
   }
-  const project = getSettings().webProjectId
-  if (project) origins.push(`https://${project}.web.app`, `https://${project}.firebaseapp.com`)
+  const settings = getSettings()
+  for (const name of new Set([settings.webSiteId, settings.webProjectId])) {
+    if (name) origins.push(`https://${name}.web.app`, `https://${name}.firebaseapp.com`)
+  }
   if (!app.isPackaged) origins.push(...DEV_ORIGINS)
   return origins
+}
+
+/**
+ * Record the browser this desktop just turned away, and say so out loud.
+ *
+ * The notification is the point. A refused origin is invisible from the browser
+ * by construction — it retries a handshake that never completes — so unless the
+ * desktop speaks, the only evidence anywhere is a line in a log nobody is
+ * reading. It fires once per *origin* rather than once per attempt: the page
+ * behind it reconnects every couple of seconds, and a notification per attempt
+ * would be a machine shouting the same sentence until it was muted.
+ */
+function noteOriginRefused(origin: string, allowed: string[]): void {
+  const clean = origin.trim()
+  const first = lastRefusal?.origin !== clean
+  lastRefusal = { origin: clean, allowed, at: Date.now() }
+  report()
+  if (!first) return
+  console.log(`[web] a browser at ${clean || '(no origin)'} is not one this desktop serves`)
+  if (!Notification.isSupported()) return
+  new Notification({
+    title: 'Forge Web turned a browser away',
+    body: clean
+      ? `${clean} is not an address this desktop serves. Check "Hosting site" in Settings › Forge Web.`
+      : 'A browser was refused because this desktop serves no origins yet. Fill in Settings › Forge Web.'
+  }).show()
+}
+
+/**
+ * Forget the refusal once the address that caused it would now be admitted.
+ *
+ * Called after settings are applied, so the panel's warning disappears when the
+ * thing it asked for has been done rather than lingering until a restart — a
+ * warning that survives its own fix teaches people to ignore warnings.
+ */
+function clearRefusalIfFixed(): void {
+  if (!lastRefusal) return
+  const origin = lastRefusal.origin.toLowerCase().replace(/\/$/, '')
+  if (webAllowedOrigins().some((allowed) => allowed.trim().toLowerCase().replace(/\/$/, '') === origin)) {
+    lastRefusal = null
+  }
 }
 
 /* ---------------------------------------------------------------- reporting */
@@ -474,7 +553,8 @@ export function webStatus(): WebStatus {
     detail: lastDetail,
     session,
     tunnel,
-    rendezvous: rendezvousStatus()
+    rendezvous: rendezvousStatus(),
+    refusal: lastRefusal
   }
 }
 
@@ -907,6 +987,7 @@ async function start(): Promise<void> {
     appVersion: app.getVersion(),
     desktopName: () => hostname(),
     allowedOrigins: webAllowedOrigins,
+    onOriginRefused: noteOriginRefused,
     sessions: () => getManager().list(),
     replay: (id) => getReplay(id),
     write: (id, data) => getManager().write(id, data),
@@ -1378,6 +1459,10 @@ export function registerWebHandlers(): void {
  * for by calling this after the write.
  */
 export function applyWebSettings(): void {
+  // Before anything else, and on every path including the ones that return
+  // early: naming the Hosting site is precisely the fix the refusal asks for,
+  // and the warning must not outlive it.
+  clearRefusalIfFixed()
   const enabled = getSettings().webEnabled
   if (enabled && !server) {
     void start().then(() => report())

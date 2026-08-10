@@ -1603,6 +1603,28 @@
   color: var(--danger);
 }
 
+/* A browser refused at the door. `.web-note`'s shape, in the danger tint,
+   because this one is not advice: something is misconfigured right now and a
+   page somewhere is spinning because of it. The addresses inside it are long,
+   so it wraps on any character rather than pushing the card wide. */
+.web-refusal {
+  margin: 0;
+  max-width: 66ch;
+  padding: var(--s-3) var(--s-4);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-sm);
+  overflow-wrap: anywhere;
+}
+
+.web-refusal code {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
 /* An address beside the button that copies it. Wraps rather than overflows:
    a tunnel hostname is forty-odd characters and the column is not. */
 .web-url {
