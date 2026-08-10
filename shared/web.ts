@@ -206,16 +206,53 @@ export function normaliseHost(raw: unknown): string {
 }
 
 /**
+ * `localhost` or `127.0.0.1`, each optionally with a port. Nothing else counts
+ * as loopback, and in particular no name that merely resolves to it.
+ */
+const LOOPBACK = /^(?:localhost|127\.0\.0\.1)(?::(\d{1,5}))?$/
+
+/**
  * The address to dial, built in one place so the two ends cannot disagree about
  * it. Returns '' rather than a half-URL when the host is not a hostname — a
  * client that dials '' fails immediately and visibly, where one that dials
  * `wss://undefined/web` fails in a way that reads like a network fault.
  *
- * Always `wss:`. The tunnel terminates TLS, the page is served over https from
- * Firebase Hosting, and a browser refuses a plaintext socket from a secure page
- * anyway — so a scheme parameter here could only ever be a way to get it wrong.
+ * `wss:` always, with exactly one exception. The tunnel terminates TLS, the
+ * page is served over https from Firebase Hosting, and a browser refuses a
+ * plaintext socket from a secure page anyway — so a free scheme parameter here
+ * could only ever be a way to get it wrong.
+ *
+ * ## The exception, and why it cannot be reached by accident
+ *
+ * The exception is development. `npm run dev` in `web/` serves the client from
+ * Vite on http://localhost, and the Forge it talks to is on this machine — so
+ * there is no tunnel, no certificate, and `wss://localhost` cannot be honoured
+ * by anything. Without a way to say so, the dev loop for the whole of Phase 3
+ * would have to hand-build its own URL beside this function, which is precisely
+ * the drift this file exists to prevent.
+ *
+ * It is opt-in rather than inferred, and that is the load-bearing part.
+ * `normaliseHost` rejects `localhost` outright (it demands a dot), but it
+ * *accepts* `127.0.0.1`, so a `host` sniffed out of the published record could
+ * otherwise steer a real session onto a plaintext socket. Requiring the caller
+ * to pass `allowLoopback` means the production path — which reads its host from
+ * `parseHostRecord` and never sets the flag — cannot take this branch whatever
+ * the database says. A hostile record can at worst name a loopback address that
+ * is then dialled over TLS and fails.
  */
-export function webSocketUrl(host: unknown): string {
+export function webSocketUrl(host: unknown, allowLoopback = false): string {
+  if (allowLoopback && typeof host === 'string') {
+    const bare = host
+      .trim()
+      .toLowerCase()
+      .replace(/^wss?:\/\//, '')
+      .replace(/^https?:\/\//, '')
+      .replace(/[/?#].*$/, '')
+    const loop = LOOPBACK.exec(bare)
+    // The port is the only part worth re-checking: everything else the regex
+    // already spelled out in full.
+    if (loop) return Number(loop[1] ?? 0) > 65535 ? '' : `ws://${bare}${WEB_WS_PATH}`
+  }
   const clean = normaliseHost(host)
   return clean ? `wss://${clean}${WEB_WS_PATH}` : ''
 }
