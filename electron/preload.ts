@@ -162,6 +162,24 @@ const api: ForgeApi = {
     mirrorStop: (reason) => ipcRenderer.send(IPC.mobileMirrorStop, { reason: reason ?? '' })
   },
 
+  web: {
+    status: () => ipcRenderer.invoke(IPC.webStatus),
+    start: () => ipcRenderer.invoke(IPC.webStart),
+    stop: () => ipcRenderer.invoke(IPC.webStop),
+    setAccept: (on) => ipcRenderer.invoke(IPC.webAccept, on === true),
+    revoke: (deviceId) => ipcRenderer.invoke(IPC.webRevoke, deviceId ?? ''),
+    forget: (deviceId) => ipcRenderer.invoke(IPC.webForget, deviceId ?? ''),
+    onStatus: (cb) => subscribe(IPC.webStatusEvent, cb),
+    onApproval: (cb) => subscribe(IPC.webApproval, cb),
+    // `=== true` so nothing short of an explicit allow crosses as one. The same
+    // rule as the mobile pair above, and it matters more here: this door faces
+    // the internet, and a truthy accident on this boundary is a shell.
+    approvalResult: (requestId, allow) =>
+      ipcRenderer.send(IPC.webApprovalResult, { requestId, allow: allow === true }),
+    onCommand: (cb) => subscribe(IPC.webCommand, cb),
+    commandResult: (requestId, error) => ipcRenderer.send(IPC.webCommandResult, { requestId, error: error ?? '' })
+  },
+
   system: {
     userName: () => ipcRenderer.invoke(IPC.systemUserName),
     claudeVersion: () => ipcRenderer.invoke(IPC.systemClaudeVersion),

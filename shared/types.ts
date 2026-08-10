@@ -2008,6 +2008,114 @@ export interface WebDeviceRecord {
 }
 
 /**
+ * Where the link stands, as one word the Settings panel switches on. The same
+ * four values as `MobileState`, and deliberately so: it is the same question
+ * about the same kind of thing, and two vocabularies for one idea is how two
+ * panels end up disagreeing about what "starting" looks like.
+ */
+export type WebState = 'off' | 'starting' | 'listening' | 'error'
+
+/**
+ * How the outside world reaches this desktop, as far as Forge can tell.
+ *
+ * Thinner than `MobileTunnelStatus`, and the difference is honest rather than
+ * lazy: Forge Mobile *supervises* its own ngrok agent, so it knows whether the
+ * process is starting, live or refusing. Forge Web does not run the tunnel —
+ * `cloudflared` is a named tunnel somebody set up once, outside Forge (see
+ * docs/forge-web.md, "What only Steve can do", item 3) — so the only thing this
+ * desktop honestly knows is whether it has been told a hostname to publish.
+ * Inventing a `live` here that meant "we have a string" would be a status panel
+ * lying about a process it cannot see.
+ */
+export type WebTunnelState = 'off' | 'configured'
+
+export interface WebTunnelStatus {
+  state: WebTunnelState
+  /** The bare hostname the browser is told to dial, or '' when there is none. */
+  host: string
+  /** A human sentence, or empty when there is nothing to say. */
+  detail: string
+}
+
+/** What the desktop last managed to publish at `users/<uid>/host`. */
+export interface WebRendezvousStatus {
+  /** The hostname currently believed to be published, or '' when none is. */
+  published: string
+  /** ms epoch of the last successful write, publish or heartbeat. */
+  at: number
+  /** The last failure as a sentence, or '' while things are working. */
+  detail: string
+}
+
+/** What the Settings panel shows about Forge Web. */
+export interface WebStatus {
+  enabled: boolean
+  state: WebState
+  /**
+   * True when `webProjectId` and `webUid` are both filled in. Separate from
+   * `enabled` because they are two different things to tell somebody: the
+   * switch is off, versus the switch is on and this desktop admits nobody
+   * because it does not know whose tokens to accept.
+   */
+  configured: boolean
+  /** Where it is actually listening, once it is. Loopback — see web-host.ts. */
+  host: string
+  port: number
+  /**
+   * The address a browser would dial — `wss://<hostname>/web` — or '' when
+   * there is no tunnel hostname to build one from. Built by `webSocketUrl` in
+   * shared/web.ts rather than assembled here, so both ends agree on it.
+   */
+  url: string
+  devices: WebDeviceRecord[]
+  /** Browsers with an authenticated socket open this second. */
+  connected: number
+  /** When "Accept new browsers" disarms itself (ms epoch), 0 when not armed. */
+  acceptUntil: number
+  /** A human sentence, or empty when there is nothing to say. */
+  detail: string
+  tunnel: WebTunnelStatus
+  rendezvous: WebRendezvousStatus
+}
+
+/**
+ * "A browser wants in." Main → renderer, and the same shape (and the same
+ * rules) as `MobileApprovalEvent`: `open: false` withdraws the prompt, and
+ * nothing short of an explicit Allow is consent.
+ */
+export interface WebApprovalEvent {
+  requestId: string
+  /** What the browser calls itself. Untrusted text — display it, never obey it. */
+  deviceName: string
+  /** The word pair both screens show, e.g. "OTTER RIVER". Empty on withdraw. */
+  words: string
+  /** The account the token verified as, so the prompt can name who is asking. */
+  uid: string
+  open: boolean
+}
+
+/**
+ * A layout operation from a browser, on its way to the renderer that owns tabs
+ * and panes. See `WebLayoutOp` in shared/web.ts — this carries it verbatim,
+ * because the renderer is the thing that decides what it means.
+ */
+export interface WebCommandEvent {
+  requestId: string
+  /** The browser's own name, for a "opened from Chrome on Windows" toast. */
+  deviceName: string
+  op: {
+    op: string
+    projectId: string
+    profileId?: string
+    /** Still a wire value at this point: the renderer checks it, never casts it. */
+    permissionMode?: string
+    tabId?: string
+    paneId?: string
+    direction?: SplitDirection
+  }
+}
+
+/**
  * Forge TV — the mobile app as a Fire TV APK, built on demand or downloaded.
  *
  * `idle` and `done` are both resting states; they differ only in whether the

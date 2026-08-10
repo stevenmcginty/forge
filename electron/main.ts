@@ -47,6 +47,7 @@ import {
 } from './voice-agent/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import { applyMobileSettings, disposeMobile, publishMobileState, registerMobileHandlers } from './mobile-host'
+import { applyWebSettings, disposeWeb, publishWebState, registerWebHandlers } from './web-host'
 import { registerSystemHandlers } from './system'
 import { disposePlannerWatchers, registerPlannerWatcherHandlers } from './planner-watcher'
 import { disposeGitWatchers, registerGitWatcherHandlers } from './git-watcher'
@@ -626,9 +627,27 @@ function registerAppHandlers(): void {
     ) {
       applyCompanionSettings()
     }
+    // The same rule for Forge Web, and the same one-line reason: flipping the
+    // switch, or repointing the door at another Firebase project or account,
+    // should take effect now rather than at the next launch. `applyWebSettings`
+    // is idempotent, so only the fields it actually reads are compared.
+    if (
+      before.webEnabled !== next.webEnabled ||
+      before.webProjectId !== next.webProjectId ||
+      before.webUid !== next.webUid
+    ) {
+      applyWebSettings()
+    }
     return next
   })
-  ipcMain.handle(IPC.storeSetProjects, (_e, projects: Project[]) => setProjects(Array.isArray(projects) ? projects : []))
+  ipcMain.handle(IPC.storeSetProjects, (_e, projects: Project[]) => {
+    const saved = setProjects(Array.isArray(projects) ? projects : [])
+    // A browser draws the project rail from this list, and unlike the phone it
+    // has no second route to it — so the one place the list is written is the
+    // place that says so.
+    publishWebState()
+    return saved
+  })
   ipcMain.handle(IPC.storeGetWorkspace, (_e, projectId: string) => getWorkspace(String(projectId)))
   ipcMain.handle(IPC.storeSetWorkspace, (_e, projectId: string, workspace: Workspace) => {
     const id = String(projectId)
@@ -639,6 +658,11 @@ function registerAppHandlers(): void {
     // the phones. Publishing from here rather than from each action also means
     // the phone is only ever told about a layout that is already on disk.
     publishMobileState(id)
+    // And the browsers, from the same place and for the same reason. Two calls
+    // rather than one broadcast because the two links have different wire
+    // protocols; what they share is this being the only moment either of them
+    // is told, so neither can be shown a layout that is not yet on disk.
+    publishWebState(id)
   })
   ipcMain.handle(IPC.storeDeleteWorkspace, (_e, projectId: string) => deleteWorkspace(String(projectId)))
   ipcMain.handle(IPC.storeReveal, () => shell.openPath(getDataDir()))
@@ -927,6 +951,12 @@ void app
       // port or minting a credential. See docs/MOBILE.md.
       registerMobileHandlers()
       applyMobileSettings()
+      // And the third time, for the door that faces the internet rather than
+      // the LAN: this reads settings, sees `webEnabled: false`, and returns
+      // without binding a port, reading a credential or publishing a hostname.
+      // See docs/forge-web.md's security posture, which promises exactly that.
+      registerWebHandlers()
+      applyWebSettings()
       registerSystemHandlers()
       // Handlers only: nothing is tailed until the tasks panel opens a planning
       // session and asks for it. See electron/planner-watcher.ts.
@@ -1012,6 +1042,10 @@ app.on('before-quit', () => {
   safely('disposeVoiceAgent', disposeVoiceAgent)
   safely('disposeCompanion', disposeCompanion)
   safely('disposeMobile', disposeMobile)
+  // Retracts the rendezvous record and tells every browser why before the
+  // sockets close — without it, a quit reads as a network fault and the page
+  // spends the next minute retrying a machine that is off.
+  safely('disposeWeb', disposeWeb)
   safely('disposeUpdater', disposeUpdater)
   safely('disposeStaleWatcher', disposeStaleWatcher)
   safely('disposeSourceUpdater', disposeSourceUpdater)

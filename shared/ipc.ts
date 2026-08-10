@@ -262,6 +262,57 @@ export const IPC = {
    */
   mobileMirrorSource: 'mobile:mirror-source',
 
+  /* ------------------------------------------------------------- forge web
+   *
+   * Forge in a browser tab: the same terminals, mirrored, behind a public
+   * address. See docs/forge-web.md and electron/web-host.ts.
+   *
+   * The naming follows the `mobile*` block above, and so does the shape of it:
+   * one status invoke, one status *event* everything else rides, and a
+   * request/response pair for each of the two questions main has to put to the
+   * renderer. There is deliberately no second event stream — a panel that has
+   * to subscribe to four things is a panel that forgets one.
+   */
+  webStatus: 'web:status',
+  webStatusEvent: 'web:status-event',
+  /** Bind the port and start listening. Persists `webEnabled: true`. */
+  webStart: 'web:start',
+  /** Stop listening, retract the rendezvous record. Persists `webEnabled: false`. */
+  webStop: 'web:stop',
+  /**
+   * Arm or disarm "Accept new browsers". Arming writes `webAcceptUntil` and the
+   * window closes itself; the deadline rides `webStatusEvent` like everything
+   * else here. Unlike Forge Mobile there is no pairing code to mint: the
+   * credential is a Firebase ID token the browser already holds, so the only
+   * thing this desktop grants is an approval.
+   */
+  webAccept: 'web:accept',
+  /**
+   * Revoke a browser. The row stays as a tombstone so a revoked browser is
+   * refused with `revoked` rather than re-prompted as a stranger, and its live
+   * socket is closed immediately — "revoked" must not mean "revoked next time".
+   */
+  webRevoke: 'web:revoke',
+  /** Drop a row entirely, tombstone and all — the only way back for a revoked browser. */
+  webForget: 'web:forget',
+  /**
+   * A browser is asking to connect. Main → renderer, carrying the word pair the
+   * browser is showing; the renderer raises the prompt and answers with
+   * `webApprovalResult`. Every outcome that is not an explicit Allow is a deny.
+   */
+  webApproval: 'web:approval',
+  /** The renderer's verdict on a `webApproval`. Absence of an answer is a deny. */
+  webApprovalResult: 'web:approval-result',
+  /**
+   * A layout operation arriving from a browser. Main → renderer, because the
+   * renderer owns the split tree and persists it — the browser must take the
+   * same code path a local click takes, not a second one that can disagree
+   * (docs/forge-web.md, decision 5).
+   */
+  webCommand: 'web:command',
+  /** The renderer's answer to a `webCommand`. */
+  webCommandResult: 'web:command-result',
+
   // skills library (M8) — %APPDATA%\Forge\skills, junctioned into
   // ~/.claude/skills so every claude and kimi session on the machine sees them.
   skillsList: 'skills:list',

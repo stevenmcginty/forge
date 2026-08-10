@@ -60,6 +60,7 @@
     "mobile:smoke": "node scripts/mobile-smoke.mjs",
     "web:auth": "node scripts/web-auth-check.mjs",
     "web:smoke": "node scripts/web-smoke.mjs",
+    "web:check": "node scripts/web-check.mjs",
     "mirror:check": "node scripts/mirror-check.mjs",
     "input:check": "node scripts/input-check.mjs",
     "mobile:icons": "node scripts/mobile-icons.mjs",
