@@ -57,6 +57,7 @@
     "companion:icons": "node scripts/companion-icons.mjs",
     "companion:serve": "node scripts/companion-serve.mjs",
     "mobile:smoke": "node scripts/mobile-smoke.mjs",
+    "web:auth": "node scripts/web-auth-check.mjs",
     "mirror:check": "node scripts/mirror-check.mjs",
     "input:check": "node scripts/input-check.mjs",
     "mobile:icons": "node scripts/mobile-icons.mjs",

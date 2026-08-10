@@ -1737,6 +1737,63 @@ export interface Settings {
    */
   mobileMirrorAudio: boolean
 
+  /* -------------------------------------------------------------- forge web
+   *
+   * Forge in a browser tab: the same terminals, mirrored, behind a public
+   * address. See docs/forge-web.md, whose security posture these five fields
+   * implement between them.
+   *
+   * The same posture as the Companion and Forge Mobile above, and here it is
+   * load-bearing rather than tidy: this feature puts a shell on a home PC
+   * behind a URL anybody can reach, so nothing here binds a socket, publishes
+   * a hostname or reads a credential until `webEnabled` is true *and* the
+   * project and uid below are both filled in.
+   */
+
+  /** Master switch. False = nothing listens, nothing publishes, nothing verifies. */
+  webEnabled: boolean
+  /**
+   * The Firebase project whose ID tokens this desktop will accept, e.g.
+   * `forge-sync` — the same project the Companion signs into (docs/forge-web.md,
+   * decision 2), but a separate field because `CompanionConfig` has never held a
+   * project id: it holds an API key, a database URL and a refresh token, and the
+   * project id cannot be derived from any of them without string-scraping a
+   * hostname.
+   *
+   * This is not a secret. It is half of what makes a token *ours*: every token
+   * is checked for `aud === webProjectId` and
+   * `iss === https://securetoken.google.com/<webProjectId>`, so a perfectly
+   * valid, perfectly signed token minted by somebody else's Firebase project is
+   * refused. Blank means unconfigured, and unconfigured admits nobody.
+   */
+  webProjectId: string
+  /**
+   * The one Firebase uid this desktop admits. Blank admits nobody.
+   *
+   * Deliberately its own field rather than a read of `companionUid`, even
+   * though in practice they hold the same account. `companionUid` moves
+   * whenever somebody signs the Companion in or out; if the web door read it,
+   * signing the Companion in as a different account would silently re-point
+   * who gets a shell on this machine. Which account may reach the terminals is
+   * a decision somebody makes once, on purpose, here.
+   */
+  webUid: string
+  /**
+   * Browsers a human has approved at this desk. Nothing here is a credential —
+   * see `WebDeviceRecord`, and the note there on why this list is not hashed
+   * the way `mobileDevices` is.
+   */
+  webDevices: WebDeviceRecord[]
+  /**
+   * When "Accept new browsers" disarms itself — a ms-epoch timestamp, 0 when it
+   * is not armed. A deadline rather than a boolean for exactly the reason given
+   * on `mobileAcceptUntil`, and more sharply here: a boolean left on would leave
+   * this desktop raising approval prompts for anybody on the internet who found
+   * the address, forever. Written as now + ACCEPT_WINDOW_MS when Steve arms it,
+   * and clamped by the store so a hand-edited file cannot arm it for a week.
+   */
+  webAcceptUntil: number
+
   /* ------------------------------------------------ updates & tools (M10) */
   /**
    * What the Update button does with the command it puts in a pane.
@@ -1908,6 +1965,46 @@ export interface MobileStatus {
   detail: string
   /** The ngrok tunnel, when one is configured. `state: 'off'` otherwise. */
   tunnel: MobileTunnelStatus
+}
+
+/* --------------------------------------------------------------- forge web */
+
+/**
+ * A browser this desktop has approved, as persisted in settings.json.
+ *
+ * Note what is absent, because it is the whole difference from
+ * `MobileDeviceRecord` above: there is no `tokenHash`, and there is nothing to
+ * hash. Forge Mobile mints a device token because it has no identity provider,
+ * so its record has to hold a one-way image of a secret. Forge Web's credential
+ * is a Firebase ID token the browser already holds and the desktop re-verifies
+ * against Google's published keys on every connection — minting a second
+ * credential beside it would add a thing to steal and prove nothing the first
+ * does not (see `WebHelloFrame` in shared/web.ts).
+ *
+ * So this record remembers that a human pressed Allow. It is an approval, not a
+ * key: a copy of this whole list gets an attacker a set of browser names and no
+ * way in. The instinct behind Mobile's hashing rule still holds — nothing in
+ * settings.json may be usable as a credential — it is simply satisfied here by
+ * there being no credential to write down.
+ */
+export interface WebDeviceRecord {
+  /** The browser's own per-profile id, from `WebHelloFrame.deviceId`. */
+  id: string
+  /** What the browser called itself. Untrusted display text — show, never obey. */
+  name: string
+  createdAt: number
+  lastSeenAt: number
+  /**
+   * When this browser was revoked in Settings (ms epoch), 0 while it is live.
+   *
+   * A tombstone rather than a deletion, and that is deliberate: a revoked
+   * browser must be refused with `revoked` rather than treated as a stranger
+   * and re-prompted, because a revoked device that keeps knocking is a prompt
+   * storm on somebody's desk. Deleting the row would lose the only fact that
+   * tells those two apart. Settings can still remove a row outright — see
+   * `WebAuth.forget` — which is how a revoked browser is given a fresh start.
+   */
+  revokedAt: number
 }
 
 /**

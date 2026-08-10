@@ -27,6 +27,7 @@ import type {
   ThemeCore,
   VoiceHubMode,
   VoiceHubPlacement,
+  WebDeviceRecord,
   Workspace
 } from '@shared/types'
 import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
@@ -289,6 +290,18 @@ function defaultSettings(): Settings {
     // The mirror is a picture and nothing else until somebody asks otherwise:
     // what Windows shares is the whole system mix, so this is opt-in.
     mobileMirrorAudio: false,
+    // Forge Web — off, unconfigured, and admitting nobody out of the box. Every
+    // one of these five has to be set by hand before a browser can reach a
+    // terminal: the switch, the Firebase project whose tokens count, the one
+    // uid that counts, and then a human pressing Allow at the desk. See
+    // docs/forge-web.md and electron/web/auth.ts.
+    webEnabled: false,
+    webProjectId: '',
+    webUid: '',
+    webDevices: [],
+    // "Accept new browsers" is disarmed, for the same reason mobileAcceptUntil
+    // is: the armed state is a deadline, not a switch.
+    webAcceptUntil: 0,
     // The Update button types the command and stops. Turning this on is opting
     // in to a settings page that can start an installer with one click.
     updatesAutoRun: false,
@@ -668,6 +681,24 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // Same rule, same reason: a missing key, an older settings.json and a
     // hand-typed "true" all mean no. Only the switch turns the sound on.
     mobileMirrorAudio: s.mobileMirrorAudio === true,
+    // Forge Web. `=== true` rather than `Boolean`, the strictest form used in
+    // this file, and used here for the reason it is used on the television's
+    // cursor: this switch is what puts a shell behind a public address, so an
+    // absent key, an older settings.json and a hand-edited "true" all mean no.
+    webEnabled: s.webEnabled === true,
+    // A Firebase project id is `[a-z0-9-]`, and it is checked rather than
+    // trimmed because it is concatenated into the `iss` a token is compared
+    // against. Junk degrading to '' is a desktop that admits nobody, which is
+    // the correct failure; junk degrading to a string is a comparison that
+    // quietly passes something.
+    webProjectId: /^[a-z0-9][a-z0-9-]{2,62}$/.test(str(s.webProjectId)) ? str(s.webProjectId) : '',
+    // Firebase uids are 28 URL-safe characters today, but that is Google's to
+    // change, so this is bounded rather than shaped. '' admits nobody.
+    webUid: str(s.webUid).slice(0, 128),
+    webDevices: webDevices(s.webDevices),
+    // The same clamp as the phone link's, because it is the same window: see
+    // ACCEPT_WINDOW_MS in shared/mobile.ts, and the note on `webAcceptUntil`.
+    webAcceptUntil: acceptUntil(s.webAcceptUntil),
     // Coerced rather than defaulted, like companionEnabled above: a settings.json
     // written before M10 has no key, and the answer for that file is "no".
     updatesAutoRun: Boolean(s.updatesAutoRun),
@@ -731,6 +762,34 @@ function mobileDevices(raw: unknown): MobileDeviceRecord[] {
       lastSeenAt: Number(d.lastSeenAt) || 0
     }))
     .filter((d) => d.id && /^[0-9a-f]{64}$/.test(d.tokenHash))
+    .slice(0, 20)
+}
+
+/**
+ * Approved browsers, made safe off disk.
+ *
+ * The counterpart to `mobileDevices` above, and shorter for the reason
+ * `WebDeviceRecord` gives: there is no token hash here to be strict about,
+ * because Forge Web mints no token. What is left is an id — which is only ever
+ * compared, never trusted — a display name, and three timestamps. A row with no
+ * id is dropped, since an approval that names nothing can never match a browser.
+ *
+ * `revokedAt` survives normalisation deliberately: it is the difference between
+ * a browser that is refused with `revoked` and one that gets a fresh prompt, so
+ * losing it here would turn every revocation back into a knock at the door.
+ */
+function webDevices(raw: unknown): WebDeviceRecord[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((d) => (d && typeof d === 'object' ? (d as Record<string, unknown>) : {}))
+    .map((d) => ({
+      id: str(d.id).slice(0, 128),
+      name: str(d.name).slice(0, 64) || 'Browser',
+      createdAt: Number(d.createdAt) || 0,
+      lastSeenAt: Number(d.lastSeenAt) || 0,
+      revokedAt: Number(d.revokedAt) || 0
+    }))
+    .filter((d) => d.id)
     .slice(0, 20)
 }
 

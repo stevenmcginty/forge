@@ -559,8 +559,14 @@ async function pickPack(): Promise<string | null> {
  * A merge cannot fix this: the renderer's value is not a partial, it is a
  * confident and wrong whole. The only stable answer is one writer per key, so
  * these never travel inward.
+ *
+ * `webDevices`/`webAcceptUntil` are here on the same ticket, before they can
+ * repeat the bug rather than after: they are minted and revoked in main by
+ * electron/web/auth.ts exactly as the mobile pair are, so a browser approved
+ * after launch lives in a key the renderer still believes is empty. Any new
+ * device list belongs on this line the day it is added.
  */
-const MAIN_OWNED_SETTINGS = ['mobileDevices', 'mobileAcceptUntil'] as const
+const MAIN_OWNED_SETTINGS = ['mobileDevices', 'mobileAcceptUntil', 'webDevices', 'webAcceptUntil'] as const
 
 function rendererOwned(patch: Partial<Settings>): Partial<Settings> {
   const out = { ...patch }
