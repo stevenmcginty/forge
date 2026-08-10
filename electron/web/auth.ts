@@ -1,8 +1,9 @@
 import { X509Certificate, createVerify, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
 import { AUTH_LOCKOUT_MS, AUTH_MAX_FAILURES, wordPair } from '@shared/mobile'
-import { APPROVAL_TIMEOUT_MS, type WebRefusal } from '@shared/web'
+import { APPROVAL_TIMEOUT_MS, TOTP_DIGITS, TRUST_WINDOW_MS, type WebRefusal } from '@shared/web'
 import type { WebDeviceRecord } from '@shared/types'
+import { checkTotp, hashRecoveryCode, newRecoveryCodes, newTotpSecret, totpUri } from './totp'
 
 /**
  * Forge Web authentication — the lock on the door.
@@ -33,6 +34,31 @@ import type { WebDeviceRecord } from '@shared/types'
  * and a copy of the whole device list is a list of browser names. It records
  * that a human pressed Allow. It is an approval, not a key.
  *
+ * ## Two modes, and the default is the permissive one
+ *
+ * The account is the credential. A verified token for the configured uid is
+ * admitted, the browser it came from is recorded in the device list, and no
+ * prompt goes up on the desktop. That is what `webRequireApproval: false` — the
+ * shipped default — means, and it is deliberate: the word-pair prompt below can
+ * only be answered by somebody standing at this machine, so a door that always
+ * demanded one was a door that locked Steve out of his own desktop from a hotel
+ * a hundred miles away. shared/types.ts states the trade beside the setting,
+ * once, and this file does not restate it.
+ *
+ * What survives being away from the desk is what defends that mode, and none of
+ * it is weakened by it:
+ *
+ *  - the token is verified against Google's keys on every connection;
+ *  - the uid must match, and a token for another account is still refused;
+ *  - **a revoked browser is still refused, in both modes**, and revoking still
+ *    drops its live socket (electron/web-host.ts);
+ *  - every browser is still recorded, listed and revocable — visibility without
+ *    friction, which is the actual trade being made;
+ *  - a TOTP second factor, when one is enrolled, is asked for in both modes.
+ *
+ * `webRequireApproval: true` restores the word-pair prompt exactly as it was,
+ * for a desktop somebody is willing to be standing at.
+ *
  * ## What is kept from the neighbour
  *
  *  1. **Constant-time comparison.** See `sameString`, and the honest note there
@@ -41,14 +67,13 @@ import type { WebDeviceRecord } from '@shared/types'
  *     from shared/mobile.ts rather than numbers invented here.
  *  3. **Approval by a human at the desk**, with the word pair from
  *     `wordPair` — the same list both screens draw from, because two lists is
- *     how the two screens end up showing different words.
+ *     how the two screens end up showing different words. Optional now, and
+ *     unchanged when it is switched on.
  *  4. **Everything injected**, including the clock and the JWKS fetcher, so a
  *     check script drives this exact class with no network and no Electron.
  *
  * ## What this does *not* protect against
  *
- *  - Somebody who has Steve's Firebase password and second factor. This is a
- *    door with one key and no second opinion; a stolen account is a shell.
  *  - A browser profile that is already approved and already signed in. Approval
  *    is per browser profile, and a person at that machine is that browser.
  *  - Anything after the socket is authenticated. Rate limits, frame caps and
@@ -140,6 +165,32 @@ const PROMPT_COOLDOWN_MS = 60_000
  */
 export type WebDevice = WebDeviceRecord
 
+/**
+ * The second factor, as this class needs it: the secret in the clear, the
+ * hashes of the recovery codes nobody has spent, and the last counter that was.
+ *
+ * The secret is plaintext *here* and sealed on disk, and the seam is the point:
+ * this class is arithmetic and has no business knowing about files or keys, and
+ * a check script can drive every branch of it by handing over a secret it made
+ * up. See `webTotpSecret` in shared/types.ts for what actually gets written.
+ */
+export interface WebTotpState {
+  /** base32, or '' when nothing is enrolled — which means nothing is asked for. */
+  secret: string
+  /** SHA-256 of each unused recovery code. Spending one removes it. */
+  recovery: string[]
+  /** The highest counter already accepted. A code at or below it is a replay. */
+  lastCounter: number
+}
+
+/** What the settings panel is handed when it starts an enrolment. */
+export interface WebTotpEnrolment {
+  /** base32, for somebody whose phone cannot scan. */
+  secret: string
+  /** The `otpauth://` URI the panel turns into a QR. */
+  uri: string
+}
+
 /** One JWKS response, as the injected fetcher hands it over. */
 export interface JwksResponse {
   /** The body verbatim — Google's `{ "<kid>": "<PEM certificate>" }` JSON. */
@@ -226,6 +277,29 @@ export interface WebAuthHost {
    */
   acceptUntil?: () => number
   /**
+   * Is the hardening toggle on? Read per connection, like everything else here,
+   * so switching it at the desk bites on the next hello.
+   *
+   * A host that omits it gets `false`, which is the shipped default and the
+   * account-only path: a browser holding a verified token for the configured
+   * uid is admitted and recorded without a prompt. See the header.
+   */
+  requireApproval?: () => boolean
+  /**
+   * The second factor as it stands on disk, or undefined on a host that has
+   * none. `secret` is the *unsealed* base32 — this class does arithmetic, and
+   * the host is what knows about `electron/web/secret-box.ts`.
+   */
+  totp?: () => WebTotpState
+  /**
+   * Persist a changed second factor: a spent counter, a spent recovery code, an
+   * enrolment, a removal. Called on every accepted code, because "single use"
+   * that only holds until the next restart is not single use.
+   */
+  saveTotp?: (state: WebTotpState) => void
+  /** How long "trust this browser" lasts. Defaults to TRUST_WINDOW_MS. */
+  trustWindowMs?: number
+  /**
    * Put the question to the human, and resolve with the verdict. A rejected
    * promise is treated exactly like a `false` — every path that is not an
    * explicit allow is a deny. A host that omits this hook has no approval door
@@ -300,6 +374,16 @@ export interface WebAuthInput {
   deviceId: string
   /** Untrusted display text. */
   deviceName: string
+  /**
+   * The second factor off the `hello` frame: six digits, or a recovery code.
+   * Absent on the first attempt of every sign-in — see `WebHelloFrame.totp`.
+   */
+  totp?: string
+  /**
+   * "Trust this browser for 30 days". Honoured only alongside a code that was
+   * actually accepted; on its own it grants nothing.
+   */
+  trust?: boolean
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -404,6 +488,12 @@ export class WebAuth {
   private pending: ApprovalWait | null = null
   private lastPromptAt = 0
 
+  /**
+   * A second factor somebody has been offered and not yet proved. In memory
+   * only, deliberately: see `beginEnrolment`.
+   */
+  private enrolment: { secret: string; recovery: string[] } | null = null
+
   constructor(host: WebAuthHost) {
     this.host = host
     this.now = host.now ?? (() => Date.now())
@@ -457,7 +547,7 @@ export class WebAuth {
   /**
    * Authenticate a `hello`.
    *
-   * Four gates, in this order, and the order is load-bearing:
+   * Five gates, in this order, and the order is load-bearing:
    *
    *  1. **Lockout**, so a source that has been failing does not get to keep
    *     trying while the rest of this runs.
@@ -470,7 +560,16 @@ export class WebAuth {
    *  3. **The account**, which is `wrong-account` and a genuinely different
    *     outcome: a different sentence, a different recovery, and never a retry
    *     loop on a correct credential.
-   *  4. **The device**, which is an approval and may need a human.
+   *  4. **Revocation**, which is the one answer that is identical in both
+   *     modes. A browser somebody ended at this desk stays ended, and the
+   *     permissive mode does not soften it by so much as a prompt.
+   *  5. **The second factor** when one is enrolled, and then **the device** —
+   *     recorded and admitted on the default path, or put to a human when
+   *     `requireApproval` is on.
+   *
+   * The second factor is checked before the device is admitted and *after*
+   * revocation, so a revoked browser is turned away without being invited to
+   * type a code — there is nothing a correct code could have bought it.
    *
    * `onPending` fires exactly once, before any waiting, when a prompt has gone
    * up on the desktop — it is how the server knows to send `WebPendingFrame`
@@ -512,15 +611,38 @@ export class WebAuth {
       })
     }
 
+    // Spends the code, if there was one to spend, before anything is written.
+    const second = this.secondFactor(known ?? null, input)
+    if (!second.ok) {
+      // `totp-required` is the first half of every ordinary sign-in on a
+      // desktop with 2FA — not a failure, and struck for as such would lock
+      // somebody out on their fifth login. Every other refusal here counts.
+      if (second.reason === 'totp-required') {
+        this.host.log?.(`web auth: asking "${deviceName}" at ${input.source} for a code`)
+        return second
+      }
+      return this.fail(input.source, second)
+    }
+
     if (known) {
       known.name = deviceName
       known.lastSeenAt = this.now()
+      if (second.trustedUntil) known.trustedUntil = second.trustedUntil
       this.host.save(devices)
       this.clearStrikes(input.source)
       return { ok: true, device: known, claims: verified.claims }
     }
 
-    return this.beginApproval(input.source, deviceId, deviceName, verified.claims, onPending)
+    // A browser this desktop has never seen. Which of the two doors it goes
+    // through is the whole of `webRequireApproval`, and the default is the one
+    // that needs nobody at the desk.
+    if (this.host.requireApproval?.() === true) {
+      return this.beginApproval(input.source, deviceId, deviceName, verified.claims, onPending, second.trustedUntil)
+    }
+
+    this.host.log?.(`"${deviceName}" admitted from ${input.source} on the account alone, and recorded`)
+    this.clearStrikes(input.source)
+    return { ok: true, device: this.approve(deviceId, deviceName, second.trustedUntil), claims: verified.claims }
   }
 
   /**
@@ -554,6 +676,137 @@ export class WebAuth {
       reason: 'declined',
       message: 'The browser stopped waiting for an answer.'
     })
+  }
+
+  /* -------------------------------------------------------- the second factor */
+
+  /**
+   * Is the second factor satisfied for this connection?
+   *
+   * Four ways to be satisfied and two ways not, and the ordering is what makes
+   * it usable rather than merely correct:
+   *
+   *  1. **Nothing enrolled** — no secret, nothing asked, and this is the state
+   *     the desktop ships in.
+   *  2. **This browser is trusted** and the window has not closed. See
+   *     TRUST_WINDOW_MS; the whole point is that a code is a monthly event.
+   *  3. **A correct TOTP code**, inside TOTP_DRIFT_STEPS, *and* on a counter
+   *     that has not been spent. The replay guard is not decoration: without it
+   *     the drift window is three chances at the same six digits, and somebody
+   *     who reads a code over a shoulder has thirty seconds to use it.
+   *  4. **An unspent recovery code**, which is burned as it is accepted.
+   *
+   * Every accepted code is written back through `saveTotp` *before* this
+   * returns, so a code cannot be spent twice by two sockets racing, and a
+   * restart between the two attempts does not hand it back.
+   *
+   * The two refusals are one sentence between them on purpose: telling "wrong
+   * code" apart from "already used" out loud tells somebody holding a stolen
+   * code which half of the guess was right.
+   */
+  private secondFactor(
+    known: WebDevice | null,
+    input: WebAuthInput
+  ): { ok: true; trustedUntil: number } | { ok: false; reason: 'totp-required' | 'totp-invalid'; message: string } {
+    const state = this.host.totp?.()
+    if (!state?.secret) return { ok: true, trustedUntil: 0 }
+
+    const now = this.now()
+    if (known && known.trustedUntil > now) return { ok: true, trustedUntil: known.trustedUntil }
+
+    const presented = String(input.totp ?? '').trim()
+    if (!presented) {
+      return {
+        ok: false,
+        reason: 'totp-required',
+        message: `Enter the ${TOTP_DIGITS}-digit code from your authenticator app, or one of your recovery codes.`
+      }
+    }
+
+    const wrong = {
+      ok: false as const,
+      reason: 'totp-invalid' as const,
+      message: 'That code was not accepted. Codes last 30 seconds and each one works once.'
+    }
+    // The trust window is only granted alongside a code that was accepted; the
+    // flag on its own is a browser asking to skip the factor.
+    const granted = input.trust === true ? now + (this.host.trustWindowMs ?? TRUST_WINDOW_MS) : 0
+
+    if (new RegExp(`^\\d{${TOTP_DIGITS}}$`).test(presented)) {
+      const counter = checkTotp(state.secret, presented, now)
+      if (counter === null) return wrong
+      // `<=`, not `<`: the counter that was spent is the one that is dead, and
+      // this is the assertion the whole feature stands on.
+      if (counter <= state.lastCounter) return wrong
+      this.host.saveTotp?.({ ...state, lastCounter: counter })
+      return { ok: true, trustedUntil: granted }
+    }
+
+    const hash = hashRecoveryCode(presented)
+    const index = state.recovery.findIndex((held) => sameString(held, hash))
+    if (index < 0) return wrong
+    this.host.saveTotp?.({ ...state, recovery: state.recovery.filter((_, i) => i !== index) })
+    this.host.log?.(`web auth: a recovery code was spent — ${state.recovery.length - 1} left`)
+    return { ok: true, trustedUntil: granted }
+  }
+
+  /* ------------------------------------------------------------- enrolment */
+
+  /**
+   * Start enrolling a second factor: a fresh secret, and the URI a QR is made
+   * of.
+   *
+   * Held in this object's memory and written nowhere. An unverified secret is
+   * never persisted, and that is the rule the whole enrolment is shaped around:
+   * a secret saved before somebody proved their app has it is a lockout with a
+   * green tick on it. Starting again replaces any offer already outstanding —
+   * two live secrets would mean two ways in and only one on screen.
+   */
+  beginEnrolment(account: string): WebTotpEnrolment {
+    const secret = newTotpSecret()
+    this.enrolment = { secret, recovery: newRecoveryCodes() }
+    return { secret, uri: totpUri(secret, account) }
+  }
+
+  /** Abandon an outstanding offer — the panel was closed, or somebody said no. */
+  cancelEnrolment(): void {
+    this.enrolment = null
+  }
+
+  /**
+   * Finish enrolling: prove the app holds the secret, and only then write it.
+   *
+   * The recovery codes come back here and nowhere else, ever. They are hashed
+   * on the way to the host and there is no call that returns them a second
+   * time, which is the same rule the ngrok authtoken field follows and the same
+   * reason: a panel that can render spare keys on demand is a panel a
+   * screen-share renders them on.
+   *
+   * `lastCounter` is seeded with the counter that verified, so the code somebody
+   * just typed into the settings panel cannot immediately be typed into a
+   * browser as well.
+   */
+  completeEnrolment(code: string): { ok: true; recovery: string[] } | { ok: false; error: string } {
+    const pending = this.enrolment
+    if (!pending) return { ok: false, error: 'Start the setup again — there is no code waiting to be confirmed.' }
+    const counter = checkTotp(pending.secret, String(code ?? '').trim(), this.now())
+    if (counter === null) {
+      return { ok: false, error: 'That code did not match. Check the app has finished adding Forge, then try the next one.' }
+    }
+    if (!this.host.saveTotp) return { ok: false, error: 'This desktop cannot store a second factor.' }
+    this.host.saveTotp({
+      secret: pending.secret,
+      recovery: pending.recovery.map(hashRecoveryCode),
+      lastCounter: counter
+    })
+    this.enrolment = null
+    return { ok: true, recovery: pending.recovery }
+  }
+
+  /** Remove the second factor entirely, along with every unspent recovery code. */
+  disableTotp(): void {
+    this.enrolment = null
+    this.host.saveTotp?.({ secret: '', recovery: [], lastCounter: 0 })
   }
 
   /* ---------------------------------------------------------- token verification */
@@ -740,7 +993,8 @@ export class WebAuth {
     deviceId: string,
     deviceName: string,
     claims: WebTokenClaims,
-    onPending?: (pending: WebAuthPending) => void
+    onPending?: (pending: WebAuthPending) => void,
+    trustedUntil = 0
   ): Promise<WebAuthOutcome> {
     const shut = {
       ok: false as const,
@@ -795,7 +1049,7 @@ export class WebAuth {
           // write an approval row for a connection that was already refused.
           if (wait.settled) return
           if (allowed === true) {
-            this.settle(wait, { ok: true, device: this.approve(deviceId, deviceName), claims })
+            this.settle(wait, { ok: true, device: this.approve(deviceId, deviceName, trustedUntil), claims })
             return
           }
           this.settle(wait, { ok: false, reason: 'declined', message: 'The desktop said no.' })
@@ -835,13 +1089,14 @@ export class WebAuth {
    * reaches `save` is an id, a name and three timestamps, and never anything a
    * browser could present later as a credential.
    */
-  private approve(deviceId: string, deviceName: string): WebDevice {
+  private approve(deviceId: string, deviceName: string, trustedUntil = 0): WebDevice {
     const device: WebDevice = {
       id: deviceId,
       name: deviceName,
       createdAt: this.now(),
       lastSeenAt: this.now(),
-      revokedAt: 0
+      revokedAt: 0,
+      trustedUntil
     }
     // Approving a browser this desktop already has a row for replaces it, rather
     // than leaving a second row with the same id and a stale name.

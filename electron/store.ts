@@ -11,6 +11,7 @@ import {
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
+import { TRUST_WINDOW_MS } from '@shared/web'
 import {
   DEFAULT_RAIL_OPEN,
   isRailSectionId,
@@ -313,6 +314,17 @@ function defaultSettings(): Settings {
     // "Accept new browsers" is disarmed, for the same reason mobileAcceptUntil
     // is: the armed state is a deadline, not a switch.
     webAcceptUntil: 0,
+    // Off, and the only default in this block that is off in order to let
+    // somebody *in*: with it off the account is the credential and a browser
+    // signed in as `webUid` needs nobody at the desk. See the note on
+    // `webRequireApproval` in shared/types.ts for what that costs.
+    webRequireApproval: false,
+    // No second factor until somebody enrols one, and nothing to enrol it with:
+    // the secret is sealed when it is written and there is no unsealed form of
+    // it anywhere in this file.
+    webTotpSecret: '',
+    webTotpRecovery: [],
+    webTotpCounter: 0,
     // Forge Web's own Firebase session: unconfigured and signed out. Not a read
     // of the companion* fields above — see the block comment on `webApiKey` in
     // shared/types.ts for why the two features share a provider and nothing
@@ -726,6 +738,23 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // The same clamp as the phone link's, because it is the same window: see
     // ACCEPT_WINDOW_MS in shared/mobile.ts, and the note on `webAcceptUntil`.
     webAcceptUntil: acceptUntil(s.webAcceptUntil),
+    // `=== true` like the switches above, and here it is the *permissive*
+    // direction that is the default: an absent key means off, which means the
+    // account alone gets in. That is the decision, not an oversight — see the
+    // note on the field in shared/types.ts.
+    webRequireApproval: s.webRequireApproval === true,
+    // Sealed ciphertext or ''. Bounded rather than shaped: what a valid sealed
+    // blob looks like is `electron/web/secret-box.ts`'s business, and a value
+    // this file mangled into a plausible shape would be a lockout that reads
+    // like a bug. Junk degrading to a string that will not open is a desktop
+    // that asks for a code nobody can give, which is why the panel offers
+    // "turn it off" as well as "set it up".
+    webTotpSecret: str(s.webTotpSecret).slice(0, 512),
+    webTotpRecovery: recoveryHashes(s.webTotpRecovery),
+    // A counter, never negative and never fractional: it is compared with `<=`
+    // to decide whether a code has already been spent, and a NaN in that
+    // comparison is a replay guard that silently stops guarding.
+    webTotpCounter: Math.max(0, Math.floor(Number(s.webTotpCounter) || 0)),
     // Forge Web's own Firebase session. Trimmed exactly like the companion*
     // fields above and for the same reason: every one of these is pasted by
     // hand out of the Firebase console, and a trailing space in a URL is a
@@ -824,19 +853,57 @@ function mobileDevices(raw: unknown): MobileDeviceRecord[] {
  * `revokedAt` survives normalisation deliberately: it is the difference between
  * a browser that is refused with `revoked` and one that gets a fresh prompt, so
  * losing it here would turn every revocation back into a knock at the door.
+ *
+ * The cap is applied to the *live* rows only, and that is not tidiness. With
+ * `webRequireApproval` off — the shipped default — a browser with no row is
+ * admitted on its account rather than turned away, so a tombstone that fell off
+ * the end of a twenty-row list would be an un-revocation performed by a
+ * `slice`. Keeping every tombstone and dropping a live row instead trades the
+ * harmless failure (a browser is recorded afresh next time) for the dangerous
+ * one. The list order is untouched either way: the panel draws these in the
+ * order they are in, and a list that reordered itself on every read would be a
+ * list nobody could find anything in.
  */
 function webDevices(raw: unknown): WebDeviceRecord[] {
   if (!Array.isArray(raw)) return []
-  return raw
+  const rows = raw
     .map((d) => (d && typeof d === 'object' ? (d as Record<string, unknown>) : {}))
     .map((d) => ({
       id: str(d.id).slice(0, 128),
       name: str(d.name).slice(0, 64) || 'Browser',
       createdAt: Number(d.createdAt) || 0,
       lastSeenAt: Number(d.lastSeenAt) || 0,
-      revokedAt: Number(d.revokedAt) || 0
+      revokedAt: Number(d.revokedAt) || 0,
+      // Clamped to the window it is allowed to be, so a hand-edited file cannot
+      // grant a browser a decade off the second factor. Same instinct as
+      // `acceptUntil` above, and the same reason: a deadline read off disk is a
+      // deadline somebody could have typed.
+      trustedUntil: Math.min(Number(d.trustedUntil) || 0, Date.now() + TRUST_WINDOW_MS)
     }))
     .filter((d) => d.id)
+
+  const keep = new Set(rows.filter((d) => d.revokedAt).map((d) => d.id))
+  for (const row of rows) {
+    if (keep.size >= 20) break
+    keep.add(row.id)
+  }
+  return rows.filter((d) => keep.has(d.id))
+}
+
+/**
+ * Recovery-code hashes off disk: 64-character lowercase hex, and nothing else.
+ *
+ * Shape-checked rather than trimmed for the reason `webProjectId` is: these are
+ * compared against `sha256(what the person typed)`, and a value that is not a
+ * digest can never match one, so anything else is dead weight in a file that is
+ * meant to hold nothing usable. Ten is the number minted; twenty is room for a
+ * re-enrolment that has not tidied up after itself.
+ */
+function recoveryHashes(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((h) => str(h).toLowerCase())
+    .filter((h) => /^[0-9a-f]{64}$/.test(h))
     .slice(0, 20)
 }
 

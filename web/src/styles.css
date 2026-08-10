@@ -119,6 +119,35 @@
 }
 
 /*
+ * "Trust this browser for 30 days", under the code box.
+ *
+ * Left-aligned with the field above it rather than centred with the card,
+ * because a checkbox and its sentence are one line of reading and a centred one
+ * puts the box somewhere different on every screen width. The whole row is the
+ * label, so the sentence is the hit target — this is a thing people tick on a
+ * phone.
+ */
+.gate__check {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  font-size: var(--t-sm);
+  line-height: 1.4;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.gate__check input {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/*
  * The word pair, and the only place in this client that shouts.
  *
  * shared/web.ts asks for it in large type because comparing it against the

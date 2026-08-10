@@ -1807,6 +1807,66 @@ export interface Settings {
    */
   webAcceptUntil: number
 
+  /**
+   * Require a human at the desk to approve every browser this desktop has not
+   * seen before. **Off by default, and that default is the decision.**
+   *
+   * With it off, the account is the credential: a Firebase ID token that
+   * verifies against Google's keys, for `webUid`, admits the browser it came
+   * from, records it in `webDevices`, and raises no prompt. That is how
+   * Anthropic, Google and everybody else who has solved this actually do it,
+   * and it is the only shape that works from a hotel a hundred miles from the
+   * machine — the word-pair prompt can only be answered by somebody standing at
+   * this desk, so with it on, being away from the desk means being locked out.
+   *
+   * The price, stated once and not repeated anywhere else in the codebase: with
+   * this off, a stolen Firebase password is a shell on this machine. The
+   * mitigations are the ones that survive being away — `webTotpSecret` below,
+   * and the fact that every browser is still recorded, listed and revocable,
+   * with revocation dropping the live socket.
+   *
+   * With it on, behaviour is exactly what it was before this field existed:
+   * "Accept new browsers" has to be armed, a prompt goes up carrying the word
+   * pair from `wordPair`, and nothing short of an explicit Allow is consent.
+   * `=== true` in the store, like every other switch in this block.
+   */
+  webRequireApproval: boolean
+  /**
+   * The TOTP shared secret, **sealed**, or '' when no second factor is enrolled.
+   *
+   * Never the base32 secret an authenticator app was given. What is written
+   * here is AES-256-GCM ciphertext whose key lives in a file of its own beside
+   * settings.json (`electron/web/secret-box.ts`), so a copy of settings.json —
+   * the file that gets backed up, screenshotted, pasted into an issue and read
+   * back by check scripts — is not a copy of the second factor. Somebody who
+   * can read the whole data directory has both halves; they also have the
+   * shell, so that was never the boundary this defends.
+   *
+   * Written only by `web:totp-confirm`, and only after a code minted from the
+   * secret has been verified — an unverified secret is never persisted, because
+   * a secret nobody has proved they hold is a lockout waiting to happen.
+   */
+  webTotpSecret: string
+  /**
+   * SHA-256 of each *unused* recovery code, hashed exactly as
+   * `electron/mobile/auth.ts` hashes device tokens.
+   *
+   * Hashes rather than ciphertext because these never need reading back: a code
+   * is checked by hashing what was typed and looking for it here, and spending
+   * one removes its row. Shown to a human once, at enrolment, and never again —
+   * the same rule the ngrok authtoken field follows.
+   */
+  webTotpRecovery: string[]
+  /**
+   * The highest TOTP counter already spent, so a code cannot be used twice.
+   *
+   * Without this the drift window is three chances at the same six digits, and
+   * anybody who reads a code over a shoulder has thirty seconds to use it.
+   * Persisted rather than kept in memory because a restart would otherwise
+   * hand back every code the last thirty seconds minted.
+   */
+  webTotpCounter: number
+
   /* --------------------------------------------- forge web's own session
    *
    * The Firebase session Forge Web publishes its rendezvous record with. Its
@@ -2128,6 +2188,16 @@ export interface WebDeviceRecord {
    * `WebAuth.forget` — which is how a revoked browser is given a fresh start.
    */
   revokedAt: number
+  /**
+   * When "trust this browser" stops covering it (ms epoch), 0 when it was never
+   * asked for. Inside the window this browser is not asked for a TOTP code; see
+   * TRUST_WINDOW_MS in shared/web.ts.
+   *
+   * A field on the device row rather than a list of its own, and that is the
+   * whole reason trust is revocable: revoking a browser revokes its trust in
+   * the same act, because there is only one row to end.
+   */
+  trustedUntil: number
 }
 
 /**
@@ -2224,6 +2294,17 @@ export interface WebStatus {
   connected: number
   /** When "Accept new browsers" disarms itself (ms epoch), 0 when not armed. */
   acceptUntil: number
+  /**
+   * True when every unknown browser has to be allowed by hand at this desk —
+   * the hardening toggle, off by default. See `webRequireApproval` in
+   * `Settings`; the panel mirrors it rather than reading the setting so the
+   * card and the door cannot disagree.
+   */
+  requireApproval: boolean
+  /** True when a TOTP second factor is enrolled. Never the secret itself. */
+  totpEnabled: boolean
+  /** How many unused recovery codes are left. Never the codes, used or not. */
+  recoveryLeft: number
   /** A human sentence, or empty when there is nothing to say. */
   detail: string
   /** Forge Web's own Firebase session — see `WebSessionStatus`. */
@@ -2242,6 +2323,31 @@ export interface WebStatus {
  * is about to serve a shell is worth a second look.
  */
 export type WebSignInResult = { ok: true; uid: string; created: boolean } | { ok: false; error: string }
+
+/**
+ * The half-finished second factor: what an authenticator app has to be given,
+ * before anybody has proved they gave it.
+ *
+ * Held in main's memory and nowhere else until a code minted from it verifies —
+ * see `webTotpSecret`. The panel renders `uri` as a QR and `secret` as text for
+ * a phone that cannot scan, and both are gone from the screen the moment
+ * enrolment finishes or is abandoned.
+ */
+export type WebTotpOffer =
+  | { ok: true; secret: string; uri: string }
+  | { ok: false; error: string }
+
+/**
+ * The answer to "here is a code from the app you just set up".
+ *
+ * `recovery` is the one and only time these codes exist as text: they are
+ * hashed on the way to settings.json and this call is the only thing that ever
+ * returns them. A panel that could ask for them again would be a panel that
+ * renders ten spare keys on demand.
+ */
+export type WebTotpResult =
+  | { ok: true; recovery: string[] }
+  | { ok: false; error: string }
 
 /**
  * "A browser wants in." Main → renderer, and the same shape (and the same

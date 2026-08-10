@@ -349,6 +349,13 @@ async function main() {
       fetchJwks: async () => ({ body: JSON.stringify(served), cacheControl: 'public, max-age=21600' }),
       projectId: () => PROJECT,
       uid: () => UID,
+      // The hardening mode, on for every phase here. This file is about the
+      // *protocol* — what a refusal frame looks like, when a prompt goes up,
+      // what the socket does afterwards — and the word-pair path is the one
+      // with all of those moving parts in it. The account-only default (see
+      // `webRequireApproval` in shared/types.ts) is exercised where the
+      // admission decision itself is, in scripts/web-auth-check.mjs.
+      requireApproval: () => true,
       ...extra
     })
   }

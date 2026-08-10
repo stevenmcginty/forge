@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { APPROVAL_TIMEOUT_MS, type WebRefusal } from '@shared/web'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { APPROVAL_TIMEOUT_MS, TOTP_DIGITS, TRUST_WINDOW_MS, type WebRefusal } from '@shared/web'
 import { Icon, type IconName } from '@/components/Icon'
 import { useForge } from '../state'
 
@@ -94,6 +94,18 @@ function recovery(reason: WebRefusal, email: string): Recovery {
         title: 'The desktop cannot take this connection yet',
         icon: 'restart',
         hint: 'It is up, but not ready — still starting, or holding too many sockets. This page will try again on its own.',
+        action: 'retry'
+      }
+    // Both are drawn by `TotpPrompt` rather than by `Refused`, because a
+    // question is not a failure. They are still in this table: leaving them out
+    // would mean a desktop that somehow sent one on a path this page did not
+    // expect fell through to nothing at all.
+    case 'totp-required':
+    case 'totp-invalid':
+      return {
+        title: 'This desktop wants a code',
+        icon: 'gear',
+        hint: 'Open your authenticator app and try again with the code it is showing.',
         action: 'retry'
       }
   }
@@ -218,6 +230,79 @@ export function Refused({
         </button>
       ) : null}
     </Screen>
+  )
+}
+
+/**
+ * "This desktop wants a code."
+ *
+ * A text box rather than an apology, because nothing has gone wrong: the
+ * desktop has a second factor enrolled and this browser has not shown one yet.
+ * The same screen serves the second visit, with the desktop's sentence about
+ * the code that did not work above it — deliberately not two screens, because
+ * the thing to do next is identical and a person who mistyped six digits should
+ * not have to navigate back to where they were.
+ *
+ * "Trust this browser" is what stops this being a daily event: inside the
+ * window (TRUST_WINDOW_MS) the desktop stops asking, and revoking the browser
+ * in Settings ends that in the same act, because it is a field on the same row.
+ */
+export function TotpPrompt({ message, invalid }: { message: string; invalid: boolean }): ReactNode {
+  const { actions } = useForge()
+  const [code, setCode] = useState('')
+  const [trust, setTrust] = useState(true)
+
+  const submit = (event: FormEvent): void => {
+    event.preventDefault()
+    if (!code.trim()) return
+    actions.submitTotp(code.trim(), trust)
+    setCode('')
+  }
+
+  return (
+    <div className="gate">
+      <form className="gate__card" data-reason="totp" onSubmit={submit}>
+        <div className="gate__mark">
+          <Icon name="gear" size={22} />
+        </div>
+        <h1 className="gate__title">Enter your code</h1>
+        {/* The desktop's own sentence, verbatim, exactly as `Refused` shows it:
+            it is the half that knows whether this is the first ask or a wrong
+            answer, and this page only knows what the box is for. */}
+        <p className={invalid ? 'gate__error' : 'gate__body'}>
+          {message || `The ${TOTP_DIGITS}-digit code from your authenticator app.`}
+        </p>
+
+        <label className="gate__field">
+          <span className="eyebrow">Code</span>
+          <input
+            className="gate__input mono"
+            type="text"
+            /* `one-time-code` is what makes a phone offer the code from its own
+               notification, and `numeric` is what gives it a number pad. Neither
+               is decoration on a screen somebody is using one-handed. */
+            autoComplete="one-time-code"
+            inputMode="numeric"
+            autoFocus
+            data-testid="totp-input"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+          />
+        </label>
+
+        <label className="gate__check">
+          <input type="checkbox" checked={trust} onChange={(e) => setTrust(e.target.checked)} />
+          <span>Trust this browser for {TRUST_WINDOW_MS / (24 * 60 * 60_000)} days</span>
+        </label>
+
+        <button type="submit" className="cta-btn gate__go" disabled={!code.trim()}>
+          Continue
+        </button>
+        <p className="gate__hint">
+          Lost the app? A recovery code works here instead — each one works once.
+        </p>
+      </form>
+    </div>
   )
 }
 

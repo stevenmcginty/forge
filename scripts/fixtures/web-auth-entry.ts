@@ -12,7 +12,14 @@ export { WebAuth, GOOGLE_JWKS_URL, CLOCK_SKEW_MS } from '../../electron/web/auth
 // The real settings writer, so the "no credential in settings.json" check can
 // read the file back off disk rather than trusting an in-memory array.
 export { setSettings } from '../../electron/store'
+// The real TOTP arithmetic, so the check mints codes exactly as an
+// authenticator app would rather than asserting against a second
+// implementation written to agree with the first.
+export { totpCode, hashRecoveryCode } from '../../electron/web/totp'
+// The real seal, so "settings.json holds no plaintext secret" is asserted
+// against the bytes the app would actually write.
+export { seal, open, sealingKey } from '../../electron/web/secret-box'
 // Re-exported so the checks use exactly the shipped values rather than numbers
 // that could drift from them.
-export { APPROVAL_TIMEOUT_MS } from '../../shared/web'
+export { APPROVAL_TIMEOUT_MS, TOTP_STEP_MS, TRUST_WINDOW_MS } from '../../shared/web'
 export { AUTH_LOCKOUT_MS, AUTH_MAX_FAILURES } from '../../shared/mobile'

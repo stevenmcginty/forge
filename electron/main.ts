@@ -583,7 +583,15 @@ const MAIN_OWNED_SETTINGS = [
   'webAcceptUntil',
   'webUid',
   'webRefreshToken',
-  'webEmail'
+  'webEmail',
+  // The second factor is written by main alone (`web:totp-confirm`), and the
+  // secret is sealed on the way in. Without these three here the renderer's
+  // debounced whole-object save would post its pre-enrolment copy back and
+  // silently un-enrol 2FA — and, worse, replay the pre-enrolment
+  // `webTotpCounter`, which is the value that stops a code being used twice.
+  'webTotpSecret',
+  'webTotpRecovery',
+  'webTotpCounter'
 ] as const
 
 function rendererOwned(patch: Partial<Settings>): Partial<Settings> {

@@ -279,6 +279,15 @@ const FALLBACK_SETTINGS: Settings = {
   webUid: '',
   webDevices: [],
   webAcceptUntil: 0,
+  // The hardening toggle and the second factor, matching defaultSettings() in
+  // electron/store.ts. The toggle is the one fallback here that is *not* the
+  // locked-down guess, and it matches the store on purpose: a panel that drew
+  // "device approval required" for a second and then switched itself off would
+  // be a panel that lies about the door twice a launch.
+  webRequireApproval: false,
+  webTotpSecret: '',
+  webTotpRecovery: [],
+  webTotpCounter: 0,
   // Forge Web's own Firebase session and its own tunnel — signed out, and no
   // way in from outside. Same rule as every other fallback here: the safe
   // answer before the real settings land.

@@ -53,7 +53,7 @@
  * out.
  */
 import { createSign, generateKeyPairSync } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -456,7 +456,7 @@ const invoke = (channel, ...args) => {
  * arrived in — which is the whole of the shutdown assertion: a `shutdown` frame
  * sent *after* the close is a frame nobody receives.
  */
-function browser(deviceId, { origin } = {}) {
+function browser(deviceId, { origin, totp } = {}) {
   const socket = new WebSocket(`ws://127.0.0.1:${PORT}${WEB_WS_PATH}`, [WEB_SUBPROTOCOL], {
     ...(origin ? { origin } : {})
   })
@@ -478,7 +478,10 @@ function browser(deviceId, { origin } = {}) {
           idToken: mint(),
           client: 'web-check',
           deviceId,
-          deviceName: 'Check'
+          deviceName: 'Check',
+          // Omitted unless a phase is exercising the second factor, so every
+          // other phase sends the hello it always sent.
+          ...(totp ? { totp } : {})
         })
       )
       resolvePromise(tab)
@@ -671,6 +674,71 @@ log(first.closed === 4003, `and hung up on, not left open (close ${first.closed}
 log(afterRevoke.devices.find((d) => d.id === 'browser-1')?.revokedAt > 0, 'the row is a tombstone, not a deletion')
 await waitFor(() => host.webStatus().connected === 0, 2000, 'the connection count to fall')
 log(host.webStatus().connected === 0, 'nobody is connected any more')
+
+/* ================================================================== phase 5b
+ *
+ * The second factor, through the real host and over a real socket.
+ *
+ * `scripts/web-auth-check.mjs` proves the arithmetic and every refusal; what
+ * only this file can prove is the *lifecycle* — that the three IPC calls the
+ * settings panel makes write what they claim, that the secret is sealed by the
+ * time it reaches the file, and that a browser holding no code is turned away
+ * by the server rather than merely by the class.
+ */
+
+console.log('\nthe second factor')
+
+const { totpCode } = await import('../electron/web/totp.ts')
+
+log(store.getSettings().webRequireApproval === false, 'the desktop ships with device approval off — the account is the key')
+log(host.webStatus().requireApproval === false, 'and the panel is told so')
+log(host.webStatus().totpEnabled === false, 'with no second factor enrolled either')
+
+const totpOffer = await invoke('web:totp-begin')
+log(totpOffer.ok === true && totpOffer.uri.startsWith('otpauth://totp/'), 'starting the setup hands back an otpauth:// URI')
+log(store.getSettings().webTotpSecret === '', 'and writes nothing — an unproved secret is never persisted')
+
+const badConfirm = await invoke('web:totp-confirm', '000000')
+log(badConfirm.ok === false, 'a wrong code does not complete the setup')
+log(store.getSettings().webTotpSecret === '', 'and still writes nothing')
+
+const confirmed = await invoke('web:totp-confirm', totpCode(totpOffer.secret, Math.floor(Date.now() / 30_000)))
+log(confirmed.ok === true, 'a correct code completes it')
+log(confirmed.ok && confirmed.recovery.length === 10, 'and hands back ten recovery codes, this once')
+log(host.webStatus().totpEnabled === true && host.webStatus().recoveryLeft === 10, 'the panel now reads code required')
+
+const totpOnDisk = readFileSync(join(dataDir, 'settings.json'), 'utf8')
+log(!totpOnDisk.includes(totpOffer.secret), 'the secret is not in settings.json — what is written there is sealed')
+log(
+  confirmed.ok && confirmed.recovery.every((code) => !totpOnDisk.includes(code)),
+  'and no recovery code is either, only their digests'
+)
+log(existsSync(join(dataDir, 'web-totp.key')), 'the key that opens it is a file of its own beside settings.json')
+
+const noCode = await browser('browser-2', { origin: `https://${PROJECT}.web.app` })
+await waitFor(() => noCode.closed !== null, 4000, 'the browser with no code to be turned away')
+log(frameOf(noCode, 'refused')?.reason === 'totp-required', 'a browser with no code is refused over the wire, not let in')
+log(!frameOf(noCode, 'hello-ok'), 'and never sees the opening picture')
+
+// A recovery code rather than a TOTP one, deliberately: the code that completed
+// the enrolment is spent by having completed it, and inside the same 30 seconds
+// there is no *other* TOTP code to present.
+const withCode = await browser('browser-2', {
+  origin: `https://${PROJECT}.web.app`,
+  totp: confirmed.ok ? confirmed.recovery[0] : ''
+})
+await waitFor(() => frameOf(withCode, 'hello-ok') || withCode.closed !== null, 4000, 'the browser with a code')
+log(Boolean(frameOf(withCode, 'hello-ok')), 'a browser presenting a valid code is let in')
+log(host.webStatus().recoveryLeft === 9, 'and the code it used is struck off, so it will not work twice')
+withCode.socket.close()
+await waitFor(() => host.webStatus().connected === 0, 4000, 'that browser to go')
+
+const afterDisable = await invoke('web:totp-disable')
+log(afterDisable.totpEnabled === false && afterDisable.recoveryLeft === 0, 'turning it off takes the spare codes with it')
+log(
+  store.getSettings().webTotpSecret === '' && store.getSettings().webTotpCounter === 0,
+  'and leaves nothing behind in settings.json'
+)
 
 /* ================================================================== phase 6
  *

@@ -30,6 +30,8 @@ import type {
   WebCommandEvent,
   WebSignInResult,
   WebStatus,
+  WebTotpOffer,
+  WebTotpResult,
   OpenRouterCallRequest,
   OpenRouterCallResult,
   GroqCallRequest,
@@ -603,6 +605,21 @@ export interface ForgeApi {
      * human to press Allow.
      */
     forget(deviceId: string): Promise<WebStatus>
+    /**
+     * Start setting up a second factor: a fresh secret and the `otpauth://` URI
+     * the panel draws as a QR. Nothing is written until `totpConfirm` succeeds,
+     * because a secret persisted before an app has proved it holds it is a
+     * lockout with a green tick on it.
+     */
+    totpBegin(): Promise<WebTotpOffer>
+    /**
+     * Confirm the setup with a code from the app. The only call that writes the
+     * secret, and the only one that ever returns the recovery codes — they are
+     * hashed on the way to disk and shown exactly once.
+     */
+    totpConfirm(code: string): Promise<WebTotpResult>
+    /** Remove the second factor, and every unspent recovery code with it. */
+    totpDisable(): Promise<WebStatus>
     onStatus(cb: (s: WebStatus) => void): () => void
     /**
      * A browser is asking to connect. `open: true` raises the prompt (its name

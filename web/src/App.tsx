@@ -1,5 +1,14 @@
 import { type ReactNode } from 'react'
-import { Connecting, Declined, Pending, Refused, TimedOut, Unconfigured, Unreachable } from './components/Connection'
+import {
+  Connecting,
+  Declined,
+  Pending,
+  Refused,
+  TimedOut,
+  TotpPrompt,
+  Unconfigured,
+  Unreachable
+} from './components/Connection'
 import { SignIn } from './components/SignIn'
 import { Workspace } from './components/Workspace'
 import { useForge } from './state'
@@ -54,6 +63,8 @@ export function App(): ReactNode {
       return <Connecting attempt={state.connection.attempt} />
     case 'pending':
       return <Pending words={state.connection.words} expiresAt={state.connection.expiresAt} />
+    case 'totp':
+      return <TotpPrompt message={state.connection.message} invalid={state.connection.invalid} />
     case 'declined':
       return <Declined message={state.connection.message} />
     case 'timed-out':

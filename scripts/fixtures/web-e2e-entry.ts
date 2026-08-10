@@ -16,4 +16,8 @@
 export { WebServer } from '../../electron/web/server'
 export { WebAuth } from '../../electron/web/auth'
 export { PtySessionManager } from '../../electron/pty/session-manager'
-export { HOST_HEARTBEAT_MS, WEB_PROTO, webHostPath } from '../../shared/web'
+export { HOST_HEARTBEAT_MS, TOTP_STEP_MS, WEB_PROTO, webHostPath } from '../../shared/web'
+// The real second-factor arithmetic, so the browser is driven with the codes an
+// authenticator app would actually show rather than with a second
+// implementation written to agree with the first.
+export { totpCode, hashRecoveryCode } from '../../electron/web/totp'
