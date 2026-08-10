@@ -26,6 +26,9 @@ import type {
   MobilePairOffer,
   MobileStatus,
   MobileWatchEvent,
+  WebApprovalEvent,
+  WebCommandEvent,
+  WebStatus,
   OpenRouterCallRequest,
   OpenRouterCallResult,
   GroqCallRequest,
@@ -538,6 +541,62 @@ export interface ForgeApi {
      * the capture was refused, Steve stopped sharing, the peer died.
      */
     mirrorStop(reason?: string): void
+  }
+
+  /**
+   * Forge Web — the same terminals in a browser tab, behind a public address.
+   *
+   * Deliberately smaller than `mobile` above, and the missing members are the
+   * point: there is no `pair`, because the credential is a Firebase ID token
+   * the browser already holds and this desktop verifies against Google's keys
+   * on every connection, so there is nothing for the desk to mint. And there is
+   * no tunnel control, because Forge does not run the tunnel — see
+   * `WebTunnelStatus` in shared/types.ts.
+   *
+   * See docs/forge-web.md and electron/web-host.ts.
+   */
+  web: {
+    status(): Promise<WebStatus>
+    /** Bind the port and start listening. Persists `webEnabled: true`. */
+    start(): Promise<WebStatus>
+    /**
+     * Stop listening and close every socket, telling the browsers why first.
+     * Retracts the rendezvous record. Persists `webEnabled: false`.
+     */
+    stop(): Promise<WebStatus>
+    /**
+     * Arm or disarm "Accept new browsers". While armed, a browser this desktop
+     * has never approved may *ask*, which raises the prompt here; nothing is
+     * written until Allow is pressed. Arms for ACCEPT_WINDOW_MS and then
+     * disarms itself — the countdown is `acceptUntil` on WebStatus.
+     */
+    setAccept(on: boolean): Promise<WebStatus>
+    /** Revoke a browser. Its live socket is closed immediately, not next time. */
+    revoke(deviceId: string): Promise<WebStatus>
+    /**
+     * Forget a browser outright, tombstone and all. The only way back for a
+     * revoked one: forgotten, it is a stranger again, and a stranger needs a
+     * human to press Allow.
+     */
+    forget(deviceId: string): Promise<WebStatus>
+    onStatus(cb: (s: WebStatus) => void): () => void
+    /**
+     * A browser is asking to connect. `open: true` raises the prompt (its name
+     * and the word pair its screen is showing); `open: false` withdraws it.
+     * Answer with `approvalResult` — an unanswered prompt times out on the main
+     * side as a deny, never an allow.
+     */
+    onApproval(cb: (e: WebApprovalEvent) => void): () => void
+    /** The human's verdict on an `onApproval`. */
+    approvalResult(requestId: string, allow: boolean): void
+    /**
+     * A layout operation arrived from a browser. The renderer owns tabs and
+     * panes, so it performs the op and answers with `commandResult` — the
+     * browser takes the same code path a local click takes.
+     */
+    onCommand(cb: (e: WebCommandEvent) => void): () => void
+    /** Answer an `onCommand`. `error` empty means it worked. */
+    commandResult(requestId: string, error?: string): void
   }
 
   /**
