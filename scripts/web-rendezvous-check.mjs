@@ -30,19 +30,16 @@
  *   8.  an OfflineError is retried with backoff — not abandoned, not hammered
  *   9.  a hostname change that lands mid-write is deferred, not swallowed
  *
- * ## About check 1, and why this file installs a second ruleset
+ * ## The rules are the real ones
  *
- * companion/database.rules.json ends every user subtree with
- * `"$other": { ".validate": false }`, and it has no `host` entry — so as
- * committed, the rules *refuse* the one write this whole feature depends on.
- * That is a real gap in the deploy, not a quirk of the test, which is why check
- * 1 asserts the refusal against the committed rules rather than papering over
- * it. Checks 2 onwards then install the committed rules *plus* the `host` block
- * the feature needs (`PROPOSED_HOST_RULES` below, via the Database emulator's
- * runtime `/.settings/rules.json` endpoint) so the service's behaviour can be
- * exercised at all. That block still has to be added to
- * companion/database.rules.json and deployed before Forge Web can work against
- * the real project; this file prints a NOTE saying so at the end.
+ * `companion/database.rules.json` is read off disk and deployed to the emulator
+ * unmodified, exactly as `firebase deploy` would send it. Nothing here installs
+ * a permissive ruleset to get the service moving, which matters because every
+ * user subtree ends with `"$other": { ".validate": false }` — when this file was
+ * first written there was no `host` entry at all, so the rules refused the one
+ * write the whole feature depends on, and the test said so instead of working
+ * around it. The block exists now, and check 1 is what proves it is really
+ * deployed rather than only intended.
  */
 
 import assert from 'node:assert/strict'
@@ -74,28 +71,6 @@ const API_KEY = 'demo-forge-sync-key'
  * line is still in its temporal dead zone when `main()` reaches for it.
  */
 const MIN_REPUBLISH_WAIT = 5_000
-
-/**
- * The block companion/database.rules.json is missing.
- *
- * Shaped like the neighbouring `presence` block: `hasChildren` on the fields the
- * browser cannot do without, a type and a length on each field, and `$other`
- * closed so a future field cannot be smuggled in past review. The lengths match
- * what `parseHostRecord` clamps to on the way back in, so a record that survives
- * the rules is a record the browser will render whole.
- *
- * `hasChildren` holds on the heartbeat too: RTDB validates the *post-write*
- * state, so a PATCH of `{ at }` alone is judged against the merged record.
- */
-const PROPOSED_HOST_RULES = {
-  '.validate': "newData.hasChildren(['host', 'proto', 'at'])",
-  host: { '.validate': 'newData.isString() && newData.val().length <= 255' },
-  proto: { '.validate': 'newData.isNumber()' },
-  app: { '.validate': 'newData.isString() && newData.val().length <= 24' },
-  name: { '.validate': 'newData.isString() && newData.val().length <= 64' },
-  at: { '.validate': 'newData.isNumber()' },
-  $other: { '.validate': false }
-}
 
 /* --------------------------------------------------------------- reporting */
 
@@ -294,23 +269,42 @@ async function main() {
     assert.equal(spy.rest, 0, 'shutdown must not read a credential it never used')
   })
 
-  /* ------------------------------- 1. the committed rules refuse the write */
+  /* -------------------------- 1. the committed rules admit the record, and
+   *                               admit nothing else
+   *
+   * This check used to assert the opposite. When this file was written
+   * companion/database.rules.json had no `host` block, and `users/$uid` closes
+   * with `"$other": { ".validate": false }` — so the rendezvous write was
+   * refused outright and Forge Web could not have worked against the real
+   * project at all. The block has since been added, and this is what proves it
+   * is really there rather than only intended: the rules are read off disk and
+   * deployed to the emulator unmodified, exactly as `firebase deploy` would.
+   *
+   * The second half matters as much as the first. The browser reads this node
+   * before it has authenticated to the desktop, so it is the record an attacker
+   * who reached the account would shape first, and `$other: false` is what
+   * stops it becoming a place to put anything else.
+   */
+
+  await installRules(readCommittedRules())
 
   settings.enabled = true
   settings.hostname = 'forge-alpha.trycloudflare.com'
-  const refused = new WebRendezvous(host)
-  refused.start()
+  const admitted = new WebRendezvous(host)
+  admitted.start()
   await settle()
-  const afterRefusal = await readHost()
-  check('the committed database.rules.json refuses users/<uid>/host', () => {
-    assert.equal(afterRefusal, null, 'the rules as committed should not have admitted this record')
-    assert.match(refused.getState().detail, /revoked|denied|401|403/i, `got detail: ${refused.getState().detail}`)
+  const afterCommitted = await readHost()
+  check('the committed database.rules.json admits users/<uid>/host', () => {
+    assert.ok(afterCommitted, `the committed rules refused the record: ${admitted.getState().detail}`)
+    assert.equal(afterCommitted.host, 'forge-alpha.trycloudflare.com')
   })
-  await refused.shutdown()
+  await admitted.shutdown()
 
-  // Install the committed rules *plus* the block this feature needs, so the
-  // remaining checks can exercise behaviour rather than re-proving the gap.
-  await installRules(withHostRules(readCommittedRules()))
+  const strayed = await rawPut(PATH, await rest.token(), { ...afterCommitted, sessions: 4 })
+  check('and refuse a sixth key, so this node cannot become somewhere to put things', () => {
+    assert.equal(strayed.ok, false, 'an unknown key should have been rejected by $other')
+  })
+
   clock.created = 0
   clock.delays.length = 0
 
@@ -545,12 +539,10 @@ async function main() {
   console.log(
     [
       '',
-      'NOTE  companion/database.rules.json has no `host` block, and its',
-      '      "$other": { ".validate": false } refuses the rendezvous write — which is',
-      '      what check 1 asserts. Every check after it ran against the committed rules',
-      '      PLUS this file\'s PROPOSED_HOST_RULES. That block has to be added to',
-      '      companion/database.rules.json and deployed before Forge Web can publish',
-      '      against the real project.',
+      'NOTE  Every check above ran against companion/database.rules.json exactly as',
+      '      committed, deployed to the emulator the way `firebase deploy` would.',
+      '      Passing here does not mean the live project has them: the rules have to',
+      '      be deployed once, from companion/, with `firebase deploy --only database`.',
       "NOTE  RTDB's onDisconnect is not reachable over REST, so a power cut is covered",
       '      by HOST_STALE_MS alone (check 7) rather than by a server-side clear. The',
       '      header of electron/web/rendezvous.ts explains why.'
@@ -574,13 +566,6 @@ function readCommittedRules() {
     .filter((line) => !line.trim().startsWith('//'))
     .join('\n')
   return JSON.parse(stripped)
-}
-
-/** The committed rules, plus the block `users/<uid>/host` still needs. */
-function withHostRules(rules) {
-  const next = structuredClone(rules)
-  next.rules.users.$uid.host = PROPOSED_HOST_RULES
-  return next
 }
 
 /**
@@ -613,6 +598,21 @@ function dbUrl(path, params = {}) {
 async function rawGet(path, token) {
   const res = await fetch(dbUrl(path, { auth: token }))
   return { ok: res.ok, status: res.status, json: res.ok ? await res.json() : null }
+}
+
+/**
+ * A write that goes around the service, for asserting what the *rules* allow
+ * rather than what the service happens to send. The service can only ever
+ * produce a well-formed record, so it cannot be used to prove that a badly
+ * formed one is refused.
+ */
+async function rawPut(path, token, value) {
+  const res = await fetch(dbUrl(path, { auth: token }), {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(value)
+  })
+  return { ok: res.ok, status: res.status }
 }
 
 /** Let pending promises and their HTTP round trips finish. */

@@ -113,11 +113,11 @@ export const WEB_SUBPROTOCOL = 'forge-web.v1'
  *
  * How the browser finds the PC, and how it learns the PC is not there.
  *
- * The desktop publishes one small record to Firebase RTDB and refreshes it on a
- * heartbeat; RTDB's own `onDisconnect` clears it when the desktop's socket
- * dies. The browser reads it before it dials anything. No record, a stale
- * record, or a protocol number it cannot speak all mean the same thing to the
- * client: this desktop is not available, go to GitHub mode.
+ * The desktop publishes one small record to Firebase RTDB, refreshes it on a
+ * heartbeat, and clears it on the way out. The browser reads it before it dials
+ * anything. No record, a stale record, or a protocol number it cannot speak all
+ * mean the same thing to the client: this desktop is not available, go to
+ * GitHub mode.
  *
  * Nothing secret is in it. It is a hostname that resolves publicly anyway, and
  * everything behind that hostname is gated by a Firebase ID token the server
@@ -148,15 +148,30 @@ export const HOST_HEARTBEAT_MS = 60_000
 /**
  * How old a record may be before the browser treats the desktop as absent.
  *
- * Three heartbeats. RTDB's `onDisconnect` is the primary mechanism and clears
- * the record within about a minute of a power cut, so this is only the backstop
- * for the case where it does not fire — and a backstop wants to be short enough
+ * Three heartbeats — and for an ungraceful death this is the *only* mechanism,
+ * not a backstop.
+ *
+ * An earlier draft of this comment said RTDB's `onDisconnect` was the primary
+ * mechanism and that three minutes merely covered the case where it did not
+ * fire. That is not true and could not be made true here. `onDisconnect` is a
+ * feature of RTDB's realtime wire protocol: the server arms it against a live
+ * socket and runs it when that socket dies. `electron/companion/rest.ts` is
+ * REST plus SSE by design — no SDK, no dependency — so there is no socket for
+ * the server to hang a handler on, and the `.json` endpoints expose no
+ * equivalent. `electron/web/rendezvous.ts` clears the record on a clean
+ * shutdown; a power cut is covered by this number and nothing else.
+ *
+ * So it is chosen as a sole mechanism rather than a safety net: short enough
  * that a browser opened after a shutdown does not sit dialling a machine that
  * is off, and long enough that a laptop's wifi blinking does not throw a live
- * session into GitHub mode. The Companion's equivalent (`STALE_MS` in
- * electron/companion/protocol.ts) is ten minutes because it is judging a
- * *message queue*, where being early is worse than being late; here it is the
- * other way round.
+ * session into GitHub mode. The cost of the missing `onDisconnect` is a couple
+ * of minutes in which the page offers to connect to a desktop that is already
+ * gone; the lever, if that ever matters, is a shorter HOST_HEARTBEAT_MS rather
+ * than a different database client.
+ *
+ * The Companion's equivalent (`STALE_MS` in electron/companion/protocol.ts) is
+ * ten minutes because it is judging a *message queue*, where being early is
+ * worse than being late; here it is the other way round.
  */
 export const HOST_STALE_MS = 3 * HOST_HEARTBEAT_MS
 

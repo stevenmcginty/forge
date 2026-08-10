@@ -35,6 +35,42 @@
           "$other": { ".validate": false }
         },
 
+        // Forge Web's rendezvous record: where a browser should dial this
+        // desktop, and how to tell that it has stopped saying so. Written by
+        // electron/web/rendezvous.ts, read by the browser before it opens a
+        // socket. See shared/web.ts's WebHostRecord and docs/forge-web.md.
+        //
+        // Nothing secret is in it. It is a tunnel hostname that resolves
+        // publicly anyway, and everything behind that hostname is gated by a
+        // Firebase ID token the desktop verifies against Google's keys on
+        // every connection. What keeps this node private is the same
+        // per-uid rule as everything else here, not the contents.
+        //
+        // `$other: false` matters more than usual: the browser reads this node
+        // before it has authenticated to the desktop, so it is the one record
+        // an attacker who reached the account would shape first. It may hold
+        // these five keys and nothing else.
+        //
+        // The lengths match what parseHostRecord clamps to on the way back in,
+        // so a record that survives these rules is a record the browser will
+        // render whole rather than truncate.
+        //
+        // `hasChildren` bites on the heartbeat as well as the first write, and
+        // that is deliberate rather than incidental: RTDB validates the
+        // *post-write* state, so a PATCH of `at` alone is judged against the
+        // merged record. A heartbeat against a node somebody had emptied is
+        // therefore refused instead of quietly recreating a record with a
+        // timestamp and no hostname in it.
+        "host": {
+          ".validate": "newData.hasChildren(['host', 'proto', 'at'])",
+          "host": { ".validate": "newData.isString() && newData.val().length <= 255" },
+          "proto": { ".validate": "newData.isNumber()" },
+          "app": { ".validate": "newData.isString() && newData.val().length <= 24" },
+          "name": { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "at": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        },
+
         // Forge writes, the phone reads. Never contains a local file path.
         "projects": {
           "$projectId": {
