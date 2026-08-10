@@ -193,9 +193,8 @@ async function main() {
     absWorkingDir: ROOT
   })
 
-  const { WebServer, WebAuth, PtySessionManager, WEB_PROTO, webHostPath } = await import(
-    pathToFileURL(join(scratch, 'web.mjs')).href
-  )
+  const { WebServer, WebAuth, PtySessionManager, WEB_PROTO, webHostPath, TOTP_STEP_MS, totpCode, hashRecoveryCode } =
+    await import(pathToFileURL(join(scratch, 'web.mjs')).href)
 
   const google = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const served = { [KID]: certificateFor(google, 'securetoken.google.com') }
@@ -225,6 +224,8 @@ async function main() {
   /** What `users/<uid>/host` currently holds, or null for "nobody is home". */
   let hostRecord = null
   const rtdbReads = []
+  /** How many times the stored refresh token has been spent for a fresh ID token. */
+  let tokenRefreshes = 0
 
   const stub = createServer((req, res) => {
     const url = new URL(req.url, `http://127.0.0.1:${STUB_PORT}`)
@@ -252,6 +253,7 @@ async function main() {
       return
     }
     if (url.pathname === '/securetoken/v1/token') {
+      tokenRefreshes++
       json({ id_token: mint({ sub: tokenSub }), refresh_token: 'refresh-e2e', expires_in: '3600', user_id: UID })
       return
     }
@@ -392,12 +394,6 @@ async function main() {
   /* ------------------------------------------------------------- the browser */
 
   const browser = await chromium.launch({ channel: 'chrome' })
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-  // The device id is the one thing a phase needs to be able to name — a revoked
-  // browser has to be *this* browser. Seeded rather than read back so no phase
-  // depends on a previous one having run.
-  await context.addInitScript(`localStorage.setItem('forge-web-device', ${JSON.stringify(DEVICE_ID)})`)
-  const page = await context.newPage()
   const consoleErrors = []
   const noteError = (text) => {
     // The one thing filtered, and it is not the client's doing: a socket the
@@ -408,13 +404,43 @@ async function main() {
     if (/WebSocket connection to/i.test(text)) return
     consoleErrors.push(text)
   }
-  page.on('console', (message) => {
-    // The URL, not only the text: a failed subresource logs "Failed to load
-    // resource: … 404" and names the file nowhere in its message, so filtering
-    // on the text alone would either swallow every 404 or none of them.
-    if (message.type() === 'error') noteError(`${message.text()} (${message.location()?.url ?? '?'})`)
-  })
-  page.on('pageerror', (err) => noteError(String(err)))
+
+  /**
+   * A browser profile, optionally carrying one over from a previous life.
+   *
+   * `storageState` is the whole of the restart assertion: quitting Chrome and
+   * opening it again keeps `localStorage` on disk, and a `newContext` with no
+   * state would be a *fresh install* rather than a restart — which would prove
+   * the opposite of what it looked like it proved.
+   */
+  const newContext = async (storageState) => {
+    const made = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      ...(storageState ? { storageState } : {})
+    })
+    // The device id is the one thing a phase needs to be able to name — a
+    // revoked browser has to be *this* browser. Seeded rather than read back so
+    // no phase depends on a previous one having run.
+    await made.addInitScript(`localStorage.setItem('forge-web-device', ${JSON.stringify(DEVICE_ID)})`)
+    return made
+  }
+
+  const newPage = async (ctx) => {
+    const made = await ctx.newPage()
+    made.on('console', (message) => {
+      // The URL, not only the text: a failed subresource logs "Failed to load
+      // resource: … 404" and names the file nowhere in its message, so filtering
+      // on the text alone would either swallow every 404 or none of them.
+      if (message.type() === 'error') noteError(`${message.text()} (${message.location()?.url ?? '?'})`)
+    })
+    made.on('pageerror', (err) => noteError(String(err)))
+    return made
+  }
+
+  // `let`, because the restart phase below genuinely replaces both — a browser
+  // that was quit and reopened is a different context and a different tab.
+  let context = await newContext()
+  let page = await newPage(context)
 
   /** Everything the terminal is currently rendering, as text. */
   const screenText = () => page.locator('.xterm-rows').first().innerText().catch(() => '')
@@ -429,12 +455,22 @@ async function main() {
    * quietly assert nothing. Clearing the session is what makes each phase's
    * credential its own.
    */
+  /**
+   * How many times a credential has been typed into this browser, ever.
+   *
+   * The counter *is* the seamlessness assertion. "The workspace appeared" is
+   * easy to satisfy by accident; "the workspace appeared and this number did
+   * not move" is the claim — nothing was typed, so nothing was asked for.
+   */
+  let credentialsTyped = 0
+
   const signInFresh = async () => {
     await page.evaluate(() => localStorage.removeItem('forge-web-auth'))
     await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' })
     await page.waitForSelector('input[type="email"]', { timeout: 20_000 })
     await page.fill('input[type="email"]', EMAIL)
     await page.fill('input[type="password"]', 'not-checked-by-the-stub')
+    credentialsTyped++
     await page.click('button[type="submit"]')
   }
 
@@ -451,8 +487,17 @@ async function main() {
   })
   log((await gateReason()) !== 'unconfigured', 'the page read /config.json and offered a sign-in rather than a setup error')
 
+  // The sign-in screen, before anything is typed into it, at both widths.
+  await page.screenshot({ path: join(shots, 'signin-1440.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await sleep(400)
+  await page.screenshot({ path: join(shots, 'signin-390.png') })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await sleep(300)
+
   await page.fill('input[type="email"]', EMAIL)
   await page.fill('input[type="password"]', 'not-checked-by-the-stub')
+  credentialsTyped++
   await page.click('button[type="submit"]')
 
   await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace to appear')
@@ -553,12 +598,112 @@ async function main() {
   await sleep(400)
   log(true, 'screenshots taken at 1440px and 390px')
 
+  /* ================================== PHASE 1b — coming back, and typing nothing
+   *
+   * The thing this whole feature is for: most visits should involve no login at
+   * all. Two of them, and they are genuinely different failures — a reload
+   * exercises the session surviving in `localStorage` and being restored on
+   * load, and a restart exercises it surviving the tab that wrote it.
+   *
+   * `credentialsTyped` is the assertion. Landing in the workspace is easy to
+   * satisfy by accident; landing in the workspace without that number moving is
+   * the claim.
+   */
+
+  const typedBeforeReload = credentialsTyped
+  const stored = await page.evaluate(() => localStorage.getItem('forge-web-auth'))
+  log(
+    typeof stored === 'string' && JSON.parse(stored).refreshToken === 'refresh-e2e',
+    'signing in left a refresh token in browser storage — the credential a return visit restores from'
+  )
+
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace after a reload')
+  log(credentialsTyped === typedBeforeReload, 'reloading lands straight back in the workspace with nothing typed')
+  log((await page.locator('input[type="email"]').count()) === 0, 'and the sign-in form is never drawn on the way')
+
+  // The stored ID token, aged past its own margin. `Auth.idToken` has to notice
+  // and spend the refresh token rather than presenting a dead one — the case
+  // that decides whether this works tomorrow morning as well as this minute.
+  const refreshesBefore = tokenRefreshes
+  await page.evaluate(() => {
+    const raw = localStorage.getItem('forge-web-auth')
+    if (!raw) return
+    const session = JSON.parse(raw)
+    session.expiresAt = Date.now() - 60_000
+    localStorage.setItem('forge-web-auth', JSON.stringify(session))
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace after a refresh')
+  log(tokenRefreshes > refreshesBefore, 'an ID token past its margin is refreshed rather than presented dead')
+  log(credentialsTyped === typedBeforeReload, 'and that still costs nobody a password')
+
+  // A browser that was quit and reopened. `storageState` carried over is what
+  // makes this a restart rather than a fresh install — without it this would
+  // assert the opposite of what it looks like it asserts.
+  const carriedOver = await context.storageState()
+  await context.close()
+  context = await newContext(carriedOver)
+  page = await newPage(context)
+  await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' })
+  await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace after a restart')
+  log(credentialsTyped === typedBeforeReload, 'and a browser that was quit and reopened is still signed in')
+  log(
+    (await page.locator('.linkbadge[data-state="live"]').count()) === 1,
+    'with a live link rather than a cached picture — it reconnected on its own'
+  )
+
+  /* ===================================== PHASE 1c — the second factor, on screen
+   *
+   * A desktop with 2FA enrolled, driven with the codes the real arithmetic
+   * mints. The claim `scripts/web-auth-check.mjs` cannot make is this one: that
+   * a person in a browser is asked, can answer, and gets in.
+   */
+
+  const TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
+  let totpState = { secret: TOTP_SECRET, recovery: [hashRecoveryCode('abcd-efgh')], lastCounter: 0 }
+  const totpPort = await startPhase(approved, {
+    totp: () => totpState,
+    saveTotp: (next) => {
+      totpState = next
+    }
+  })
+  setConfig({ devHost: `127.0.0.1:${totpPort}` })
+  await signInFresh()
+  await waitFor(async () => (await gateReason()) === 'totp', 30_000, 'the code prompt')
+  log(true, 'a desktop with a second factor enrolled asks the browser for a code rather than refusing it')
+
+  await page.screenshot({ path: join(shots, 'totp-1440.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await sleep(400)
+  await page.screenshot({ path: join(shots, 'totp-390.png') })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await sleep(300)
+
+  await page.fill('[data-testid="totp-input"]', '000000')
+  await page.click('.gate__card[data-reason="totp"] button[type="submit"]')
+  await waitFor(async () => (await page.locator('.gate__error').count()) > 0, 20_000, 'the refusal for a wrong code')
+  log((await gateReason()) === 'totp', 'a wrong code is answered on the same screen rather than by a dead end')
+
+  await page.fill('[data-testid="totp-input"]', totpCode(TOTP_SECRET, Math.floor(Date.now() / TOTP_STEP_MS)))
+  await page.click('.gate__card[data-reason="totp"] button[type="submit"]')
+  await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace after the code')
+  log(true, 'and the code the app is showing gets the browser in')
+  log(
+    totpState.lastCounter > 0,
+    'with the counter it used written back, so those same six digits will not work a second time'
+  )
+
   /* ============================================ PHASE 2 — pending, with words */
 
   // No approved devices, the desk armed, and a prompt nobody answers — which is
   // exactly the screen somebody stands in front of comparing two word pairs.
   const prompts = []
   const pendingPort = await startPhase([], {
+    // The hardening toggle, which is what the word-pair prompt now *is*: with it
+    // off — the shipped default, exercised by phase 1 above — this browser
+    // would simply have been admitted and recorded.
+    requireApproval: () => true,
     acceptUntil: () => Date.now() + 600_000,
     requestApproval: (ask) => {
       prompts.push(ask)

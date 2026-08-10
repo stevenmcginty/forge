@@ -173,6 +173,9 @@ const api: ForgeApi = {
     setAccept: (on) => ipcRenderer.invoke(IPC.webAccept, on === true),
     revoke: (deviceId) => ipcRenderer.invoke(IPC.webRevoke, deviceId ?? ''),
     forget: (deviceId) => ipcRenderer.invoke(IPC.webForget, deviceId ?? ''),
+    totpBegin: () => ipcRenderer.invoke(IPC.webTotpBegin),
+    totpConfirm: (code) => ipcRenderer.invoke(IPC.webTotpConfirm, code ?? ''),
+    totpDisable: () => ipcRenderer.invoke(IPC.webTotpDisable),
     onStatus: (cb) => subscribe(IPC.webStatusEvent, cb),
     onApproval: (cb) => subscribe(IPC.webApproval, cb),
     // `=== true` so nothing short of an explicit allow crosses as one. The same

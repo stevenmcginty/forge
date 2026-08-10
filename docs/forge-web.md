@@ -82,9 +82,29 @@ whole risk in one sentence, and every decision below exists because of it.
   never reaches a PTY.
 - **The uid must match.** A valid token for a *different* account is refused;
   the desktop's configured uid is the only one admitted.
-- **Device approval on first sight.** A new browser triggers a prompt on the
-  desktop, exactly as Forge Mobile does today. Devices are listed and
-  revocable in settings.
+- **The account is the credential, by default.** A verified token for the
+  configured uid is admitted with no prompt on the desktop. That default was
+  chosen deliberately and it is the thing that makes the feature usable: the
+  word-pair prompt can only be answered by somebody standing at this machine,
+  so a door that always demanded one locked Steve out of his own desktop from
+  anywhere he actually wanted to use a browser. The trade — a stolen Firebase
+  password is a shell — is stated once beside the setting in shared/types.ts
+  (`webRequireApproval`) and repeated nowhere.
+- **Every browser is still recorded, listed and revocable.** Revoking one drops
+  its live socket immediately, and a revoked browser stays refused in *both*
+  modes. That is the one thing the permissive mode does not soften, and the
+  device-list cap in `electron/store.ts` spends its budget on live rows so a
+  tombstone can never be squeezed off the end of it.
+- **Device approval is an optional hardening toggle**, off by default. Switched
+  on, behaviour is exactly what it was: "Accept new browsers" must be armed and
+  a human at the desk presses Allow on a prompt carrying the word pair.
+- **A TOTP second factor**, also optional, RFC 6238 over `node:crypto` with no
+  new dependency. Codes are single-use — the accepted counter is remembered, so
+  the ±1 drift window is not three chances at the same six digits — recovery
+  codes are hashed at rest exactly as `electron/mobile/auth.ts` hashes device
+  tokens, and the secret is sealed with a key in a file of its own rather than
+  written into settings.json. "Trust this browser for 30 days" lives on the
+  device row, so revoking the browser revokes the trust in the same act.
 - **Off by default.** Nothing binds a socket, publishes a hostname or reads a
   credential until `webEnabled` is switched on in the desktop's settings.
 - **The source allowlist stays.** The tunnel dials the listener from loopback,
@@ -203,7 +223,7 @@ scripts (`pty:smoke`, `git:check`, `session:check`, `mobile:smoke`,
 ### Phase 5 — desktop settings and the background service
 
 - Settings: `webEnabled`, Firebase sign-in, the public URL, the device list
-  with revoke.
+  with revoke, the device-approval toggle and the TOTP enrolment.
 - `forge-server` survives the window closing — tray process or equivalent — so
   that GitHub-only mode is rare rather than nightly.
 
@@ -240,7 +260,12 @@ be torn down before the success phase starts).
   replay buffer, writes a command and reads its output back.
 - Each refusal is asserted *separately*, because each is a different sentence on
   screen: malformed token, expired token, valid token for the wrong uid,
-  unapproved device, revoked device, stale protocol version.
+  unapproved device (with the hardening toggle on), revoked device, stale
+  protocol version. `scripts/web-auth-check.mjs` carries the ones that are about
+  the admission decision rather than the wire — the account-only path with no
+  prompt raised, revocation and the uid match holding in *both* modes, and the
+  second factor, including the assertion the feature stands on: a replayed TOTP
+  code is refused.
 - Rate limits and the max-write cap bite.
 - Heartbeat loss closes the session inside the grace window.
 - Token verification runs against injected JWKS, so the test needs no network
@@ -252,6 +277,12 @@ seeded scratch directory, driven with `playwright-core`) so it never touches
 Steve's own data root.
 
 - Sign in, land on the project list, attach to a session.
+- Reload the page, and then restart the browser context carrying its stored
+  state over, and land back in the workspace **with no credential typed** —
+  which is the whole promise of the account-only default and the only assertion
+  that catches a session that survives a reload but not a restart.
+- With a second factor enrolled: the browser is asked for a code, a wrong one is
+  answered on the same screen, and the code the app is showing gets it in.
 - Type `echo forge-web-<nonce>` and assert the nonce appears in the browser's
   terminal.
 - Assert the same nonce appears in the desktop window's terminal — that is the

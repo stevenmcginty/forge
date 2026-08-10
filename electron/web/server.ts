@@ -731,7 +731,15 @@ export class WebServer {
         // 256 would truncate every real JWT into a broken one.
         idToken: wireString(frame.idToken, 8192),
         deviceId: wireString(frame.deviceId, 128),
-        deviceName: wireString(frame.deviceName, 64) || 'Browser'
+        deviceName: wireString(frame.deviceName, 64) || 'Browser',
+        // A six-digit code or a recovery code, so 32 is generous and a cap is
+        // still the right thing: this string is hashed and pattern-matched, and
+        // a megabyte of it would be a megabyte of hashing per hello.
+        totp: wireString(frame.totp, 32),
+        // `=== true`, the strictest form, because this is the field that skips
+        // the second factor for a month — the same rule `webApprovalResult`
+        // holds an Allow to.
+        trust: frame.trust === true
       },
       (pending) => {
         // Fired once, before any waiting. Recorded first so a hang-up during the

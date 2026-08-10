@@ -16,10 +16,13 @@ import type {
   WebSessionStatus,
   WebSignInResult,
   WebStatus,
+  WebTotpOffer,
+  WebTotpResult,
   WebTunnelStatus,
   Workspace
 } from '@shared/types'
-import { WebAuth, googleJwksFetcher, type WebApprovalAsk } from './web/auth'
+import { WebAuth, googleJwksFetcher, type WebApprovalAsk, type WebTotpState } from './web/auth'
+import { open as openSecret, seal as sealSecret, sealingKey } from './web/secret-box'
 import { WebServer, type WebServerHost } from './web/server'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
 import { describe, FirebaseRest } from './companion/rest'
@@ -198,6 +201,70 @@ let blockerId = 0
 
 /* ------------------------------------------------------------------- auth */
 
+/**
+ * The key that seals the TOTP secret, read once and kept for the process.
+ *
+ * Lazy, because a desktop that never enrols a second factor should never make
+ * the file: `getDataDir()` is where it lands, beside settings.json rather than
+ * inside it. A failure here is not fatal — it means "no second factor", which
+ * `totpState()` reports as an empty secret and the panel reports as a sentence.
+ * See electron/web/secret-box.ts for what this does and does not buy.
+ */
+let totpKey: Buffer | null = null
+
+function getTotpKey(): Buffer | null {
+  if (totpKey) return totpKey
+  try {
+    totpKey = sealingKey(getDataDir())
+  } catch (err) {
+    console.log(`[web] could not read the second-factor key (${String(err)})`)
+    totpKey = null
+  }
+  return totpKey
+}
+
+/**
+ * The second factor as `WebAuth` needs it: unsealed here, so that class stays
+ * arithmetic and the check script can drive it with a secret it invented.
+ *
+ * A secret that will not open reports as absent rather than throwing, which is
+ * the honest answer — a settings.json restored from a backup taken before the
+ * key file existed has no usable second factor, and the recovery is to set one
+ * up again, not to be locked out by an exception mid-`hello`.
+ */
+function totpState(): WebTotpState {
+  const s = getSettings()
+  if (!s.webTotpSecret) return { secret: '', recovery: s.webTotpRecovery, lastCounter: s.webTotpCounter }
+  const key = getTotpKey()
+  const secret = key ? openSecret(s.webTotpSecret, key) : ''
+  if (!secret) console.log('[web] the stored second factor could not be opened — set it up again in Settings')
+  return { secret, recovery: s.webTotpRecovery, lastCounter: s.webTotpCounter }
+}
+
+/**
+ * Persist a changed second factor. The secret is sealed on the way in and is
+ * the only field that is: recovery codes are already one-way images, and the
+ * counter is a number.
+ *
+ * A secret that cannot be sealed is not written in the clear as a fallback —
+ * the enrolment fails instead, which is the whole reason this returns a
+ * boolean.
+ */
+function saveTotpState(next: WebTotpState): boolean {
+  if (!next.secret) {
+    setSettings({ webTotpSecret: '', webTotpRecovery: [], webTotpCounter: 0 })
+    return true
+  }
+  const key = getTotpKey()
+  if (!key) return false
+  setSettings({
+    webTotpSecret: sealSecret(next.secret, key),
+    webTotpRecovery: next.recovery,
+    webTotpCounter: next.lastCounter
+  })
+  return true
+}
+
 function getAuth(): WebAuth {
   if (!auth) {
     auth = new WebAuth({
@@ -216,6 +283,14 @@ function getAuth(): WebAuth {
       projectId: () => getSettings().webProjectId,
       uid: () => getSettings().webUid,
       acceptUntil: () => armedUntil(),
+      // The hardening toggle, read per connection like everything else here.
+      // Off is the shipped default and the account-only path — see the header
+      // of electron/web/auth.ts.
+      requireApproval: () => getSettings().webRequireApproval,
+      totp: totpState,
+      saveTotp: (next) => {
+        saveTotpState(next)
+      },
       requestApproval,
       cancelApproval,
       log: (line) => console.log(`[web] ${line}`)
@@ -378,6 +453,12 @@ export function webStatus(): WebStatus {
     devices: settings.webDevices,
     connected: server?.connectedCount ?? 0,
     acceptUntil: armedUntil(),
+    requireApproval: settings.webRequireApproval,
+    // Whether one is enrolled, never what it is. `webTotpSecret` is sealed and
+    // this status crosses an IPC boundary into a renderer — the panel needs the
+    // fact, and the fact is all it gets.
+    totpEnabled: Boolean(settings.webTotpSecret),
+    recoveryLeft: settings.webTotpRecovery.length,
     detail: lastDetail,
     session,
     tunnel,
@@ -1106,6 +1187,34 @@ export function registerWebHandlers(): void {
       server?.disconnectDevice(id)
       report('Browser forgotten.')
     }
+    return webStatus()
+  })
+
+  /**
+   * Start enrolling a second factor. The secret lives in `WebAuth`'s memory
+   * until a code proves an app holds it; nothing reaches settings.json here.
+   */
+  ipcMain.handle(IPC.webTotpBegin, (): WebTotpOffer => {
+    if (!getTotpKey()) {
+      return { ok: false, error: 'Forge could not create the key that protects a second factor on this machine.' }
+    }
+    const offer = getAuth().beginEnrolment(getSettings().webEmail)
+    return { ok: true, secret: offer.secret, uri: offer.uri }
+  })
+
+  /**
+   * Confirm it. The one call that writes a secret, and it writes it sealed —
+   * see `saveTotpState`, which refuses rather than falling back to plaintext.
+   */
+  ipcMain.handle(IPC.webTotpConfirm, (_e, code: string): WebTotpResult => {
+    const result = getAuth().completeEnrolment(String(code ?? ''))
+    if (result.ok) report('Two-factor is on. Keep the recovery codes somewhere that is not this machine.')
+    return result
+  })
+
+  ipcMain.handle(IPC.webTotpDisable, (): WebStatus => {
+    getAuth().disableTotp()
+    report('Two-factor is off.')
     return webStatus()
   })
 

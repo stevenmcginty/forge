@@ -117,6 +117,11 @@ export interface ForgeActions {
   signOut: () => void
   /** A human pressed "Try again" on a screen the client had stopped at. */
   retry: () => void
+  /**
+   * A human typed the second factor. Reconnects carrying it; the code is spent
+   * on that one attempt whatever the desktop makes of it.
+   */
+  submitTotp: (code: string, trust: boolean) => void
   /** Look for the desktop again — the offline screen's button, and its poll. */
   refind: () => void
   /** Forget this browser's device id, so the next connection asks to be let in again. */
@@ -498,6 +503,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         setStage({ kind: 'signed-out', error: '' })
       },
       retry: () => client.retry(),
+      submitTotp: (code, trust) => client.submitTotp(code, trust),
       refind: () => void find(),
       forgetThisBrowser: () => {
         forgetDevice()

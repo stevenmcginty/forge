@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { toDataURL } from 'qrcode'
 import { normaliseNgrokDomain } from '@shared/mobile'
+import { TOTP_DIGITS, TRUST_WINDOW_MS } from '@shared/web'
 import type { WebDeviceRecord, WebStatus } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTone } from './parts'
@@ -18,9 +20,12 @@ import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTon
  *                                publish because nobody is signed in
  *   3. Who is allowed in?        the account card: the Firebase project, and
  *                                Forge Web's *own* sign-in
- *   4. How does anyone reach me? the tunnel card, and what got published
- *   5. Let a new browser ask     the accept window, armed for ten minutes
- *   6. Which browsers?           the list, and the two different ways to end one
+ *   4. How careful do I want     the "Getting in" card: the device-approval
+ *      to be?                    toggle, and the second factor
+ *   5. How does anyone reach me? the tunnel card, and what got published
+ *   6. Let a new browser ask     the accept window, armed for ten minutes —
+ *                                only shown while approval is the door
+ *   7. Which browsers?           the list, and the two different ways to end one
  *
  * Three states, told apart deliberately, because they fail in different ways
  * and only one of them is a problem:
@@ -86,6 +91,17 @@ export function WebSection(): ReactNode {
   const [created, setCreated] = useState(false)
   const [domainError, setDomainError] = useState('')
   const [copied, setCopied] = useState('')
+  /*
+   * The half-finished second factor. All four of these are React state and
+   * nothing else: the secret arrives from main for as long as this card is
+   * open, the recovery codes are rendered once and dropped, and closing the
+   * setup drops both. Nothing here is written to any store on this side.
+   */
+  const [totpOffer, setTotpOffer] = useState<{ secret: string; uri: string } | null>(null)
+  const [totpQr, setTotpQr] = useState('')
+  const [totpCode, setTotpCode] = useState('')
+  const [totpError, setTotpError] = useState('')
+  const [recovery, setRecovery] = useState<string[] | null>(null)
 
   // Live rather than polled: main pushes a whole `WebStatus` on every change it
   // makes — a socket opening, a tunnel dying, an approval landing — and this
@@ -177,6 +193,88 @@ export function WebSection(): ReactNode {
     setStatus(await window.forge.web.signOut())
   }, [])
 
+  /* ------------------------------------------------------ the second factor */
+
+  /*
+   * The QR, drawn on this machine. `otpauth://` carries the shared secret in
+   * plain sight — that is what it is for — so it must never reach a
+   * QR-rendering service, which is the same rule the pairing QR in
+   * MobileSection follows and the same reason. Dark on light with a real quiet
+   * zone whatever theme the panel is in: inverted codes fail on many scanner
+   * libraries and a margin-less one fails on most.
+   */
+  useEffect(() => {
+    if (!totpOffer?.uri) {
+      setTotpQr('')
+      return
+    }
+    let stale = false
+    toDataURL(totpOffer.uri, {
+      errorCorrectionLevel: 'M',
+      margin: 3,
+      width: 220,
+      color: { dark: '#000000', light: '#ffffff' }
+    })
+      .then((url) => {
+        if (!stale) setTotpQr(url)
+      })
+      .catch(() => {
+        if (!stale) setTotpQr('')
+      })
+    return () => {
+      stale = true
+    }
+  }, [totpOffer?.uri])
+
+  const beginTotp = useCallback(async () => {
+    setTotpError('')
+    setTotpCode('')
+    setRecovery(null)
+    const offer = await window.forge.web.totpBegin()
+    if (!offer.ok) {
+      setTotpError(offer.error)
+      return
+    }
+    setTotpOffer({ secret: offer.secret, uri: offer.uri })
+  }, [])
+
+  const cancelTotp = useCallback(() => {
+    setTotpOffer(null)
+    setTotpCode('')
+    setTotpError('')
+  }, [])
+
+  /**
+   * Confirm the setup. Nothing was written until this succeeded — see
+   * `IPC.webTotpConfirm` — so a person who never types a code is a person who
+   * never enrolled, rather than one who is locked out by a secret their phone
+   * did not keep.
+   */
+  const confirmTotp = useCallback(async () => {
+    setTotpError('')
+    setBusy(true)
+    try {
+      const result = await window.forge.web.totpConfirm(totpCode.trim())
+      if (!result.ok) {
+        setTotpError(result.error)
+        return
+      }
+      setTotpOffer(null)
+      setTotpCode('')
+      // The one and only time these exist as text on this side.
+      setRecovery(result.recovery)
+      setStatus(await window.forge.web.status())
+    } finally {
+      setBusy(false)
+    }
+  }, [totpCode])
+
+  const disableTotp = useCallback(async () => {
+    setTotpError('')
+    setRecovery(null)
+    setStatus(await window.forge.web.totpDisable())
+  }, [])
+
   /* ---------------------------------------------------------- the tunnel */
 
   const saveAuthtoken = useCallback(
@@ -238,10 +336,11 @@ export function WebSection(): ReactNode {
         <>
           Your real terminals, in a browser tab — the same projects, the same panes, from any machine you can sign in
           on. Read this bit once, because it is the whole of it: switching Forge Web on puts a shell on this PC behind
-          an address anybody on the internet can reach. Three things stand in the way, and all three have to hold —
-          a Firebase account you own, a browser this desktop has never seen being allowed by hand at this desk, and
-          the switch below, which is off until you turn it on. Until then nothing binds a port, publishes an address
-          or reads a credential. The full picture is in <code>docs/forge-web.md</code>.
+          an address anybody on the internet can reach. Two things stand in the way, and both have to hold — a
+          Firebase account you own, and the switch below, which is off until you turn it on. Until then nothing binds
+          a port, publishes an address or reads a credential. Two further locks are yours to add under
+          <em> Getting in</em>, and every browser that gets in is listed at the bottom and can be thrown out from
+          there. The full picture is in <code>docs/forge-web.md</code>.
         </>
       }
     >
@@ -250,7 +349,7 @@ export function WebSection(): ReactNode {
         actions={<StateChip tone={tone}>{listening ? 'Listening' : status.state}</StateChip>}
         hint={
           status.detail ||
-          'A browser that gets in can type into your shells as you. Approve one you are holding, and revoke it below the moment you stop trusting it.'
+          'A browser that gets in can type into your shells as you. Every one of them is listed below, and revoking one drops its connection there and then.'
         }
       >
         {/*
@@ -407,6 +506,121 @@ export function WebSection(): ReactNode {
         )}
       </Card>
 
+      {/*
+        The two locks that are *choices*, together, because they trade against
+        each other: one of them cannot be opened from anywhere but this chair,
+        and the other travels with you.
+      */}
+      <Card
+        title="Getting in"
+        actions={
+          <StateChip tone={status.totpEnabled ? 'ok' : 'off'}>{status.totpEnabled ? 'Code required' : 'Account only'}</StateChip>
+        }
+        hint="Switch the approval prompt on and a browser this desktop has never seen has to be allowed by hand at this desk, holding the word pair — the safest door there is, and the one nobody can open while you are three hundred miles away. A code from an authenticator app is the lock that travels with you."
+      >
+        <Row
+          label="Approve new browsers at this desk"
+          /* The one sentence about what off means. It is said here and nowhere
+             else in this panel — a warning repeated is a warning skipped. */
+          hint="Off — the default — means your Firebase account is the whole key: a browser signed in to it reaches these terminals from anywhere with nobody at this desk, so a stolen password is a shell on this PC."
+        >
+          <Toggle
+            checked={settings.webRequireApproval}
+            onChange={(on) => actions.patchSettings({ webRequireApproval: on })}
+            label="Require approval at this desk"
+          />
+        </Row>
+
+        {status.totpEnabled ? (
+          <Row
+            label="Two-factor code"
+            hint={`On. ${status.recoveryLeft} recovery ${status.recoveryLeft === 1 ? 'code' : 'codes'} left, and a browser you trusted is not asked again for ${TRUST_WINDOW_MS / (24 * 60 * 60_000)} days.`}
+          >
+            <button type="button" className="sbtn sbtn--danger" onClick={() => void disableTotp()}>
+              Turn off
+            </button>
+          </Row>
+        ) : totpOffer ? (
+          <div className="web-2fa">
+            <p className="web-lede">
+              <strong>Scan this</strong> with an authenticator app, then type the {TOTP_DIGITS} digits it shows to prove
+              it took. Nothing is saved until you do.
+            </p>
+            <div className="web-2fa__scan">
+              {totpQr ? <img className="web-2fa__qr" src={totpQr} alt="Two-factor setup code" /> : null}
+              <div className="web-2fa__manual">
+                <span className="field__label">Or type this in by hand</span>
+                <code className="web-address">{totpOffer.secret}</code>
+                <button type="button" className="sbtn" onClick={() => void copyUrl(totpOffer.secret)}>
+                  {copied === totpOffer.secret ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
+            <div className="web-signin">
+              <SignInField
+                id="web-totp-code"
+                label="Code from the app"
+                type="text"
+                value={totpCode}
+                placeholder={'0'.repeat(TOTP_DIGITS)}
+                onChange={setTotpCode}
+                onSubmit={() => void confirmTotp()}
+              />
+              <button
+                type="button"
+                className="sbtn sbtn--go web-signin__go"
+                disabled={busy || !totpCode.trim()}
+                onClick={() => void confirmTotp()}
+              >
+                {busy ? 'Checking…' : 'Confirm'}
+              </button>
+              <button type="button" className="sbtn web-signin__go" onClick={cancelTotp}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <Row
+            label="Two-factor code"
+            hint="Off. With it on, a browser signing in has to show a six-digit code as well as the account — which is the part a stolen password does not come with."
+          >
+            <button type="button" className="sbtn sbtn--go" onClick={() => void beginTotp()}>
+              Set up
+            </button>
+          </Row>
+        )}
+
+        {totpError && <p className="web-error">{totpError}</p>}
+
+        {/* Shown once, here, and never again. There is no call that returns
+            them a second time — see IPC.webTotpConfirm — because a panel that
+            could render ten spare keys on demand is a panel a screen-share
+            renders them on. */}
+        {recovery && (
+          <div className="web-2fa">
+            <p className="web-note">
+              <strong>Write these down now.</strong> Each one gets you in once if you lose the app, and this is the only
+              time they will ever be shown. Keep them somewhere that is not this machine.
+            </p>
+            <ul className="web-2fa__codes">
+              {recovery.map((code) => (
+                <li key={code}>
+                  <code>{code}</code>
+                </li>
+              ))}
+            </ul>
+            <div className="web-2fa__done">
+              <button type="button" className="sbtn" onClick={() => void copyUrl(recovery.join('\n'))}>
+                {copied === recovery.join('\n') ? 'Copied' : 'Copy all'}
+              </button>
+              <button type="button" className="sbtn sbtn--go" onClick={() => setRecovery(null)}>
+                I have saved them
+              </button>
+            </div>
+          </div>
+        )}
+      </Card>
+
       <Card
         title="Reach it from anywhere"
         actions={<StateChip tone={tunnelTone}>{tunnel.state === 'live' ? 'Live' : tunnel.state}</StateChip>}
@@ -509,7 +723,10 @@ export function WebSection(): ReactNode {
         </p>
       </Card>
 
-      {listening && (
+      {/* Only while the prompt is the door. With approval off there is nothing
+          to arm — an unknown browser is admitted on the account — and a switch
+          that changed nothing would be the panel lying about the lock. */}
+      {listening && settings.webRequireApproval && (
         <Card
           title="Accept new browsers"
           actions={
@@ -542,7 +759,7 @@ export function WebSection(): ReactNode {
         title="Approved browsers"
         hint={
           status.devices.length > 0
-            ? 'Two different endings, and the difference matters. Revoke means not any more: the socket is dropped now, and that browser is turned away by name if it comes back — no prompt, nothing to press by mistake. Forget means start over: the row goes, and the browser becomes a stranger that may ask again the next time you are accepting.'
+            ? 'Two different endings, and the difference matters. Revoke means not any more: the socket is dropped now, and that browser is turned away by name if it comes back — in either mode, with no prompt and nothing to press by mistake. Forget means start over: the row goes, and the browser is a stranger again, which is only a fresh start rather than a lock-out.'
             : undefined
         }
       >
@@ -608,7 +825,7 @@ function SignInField({
 }: {
   id: string
   label: string
-  type: 'email' | 'password'
+  type: 'email' | 'password' | 'text'
   value: string
   placeholder?: string
   onChange: (next: string) => void

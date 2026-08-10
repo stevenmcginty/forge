@@ -317,6 +317,25 @@ export const IPC = {
   /** Drop a row entirely, tombstone and all — the only way back for a revoked browser. */
   webForget: 'web:forget',
   /**
+   * Start enrolling a TOTP second factor: mint a secret, hand back the
+   * `otpauth://` URI the panel draws as a QR, and hold the secret in main's
+   * memory.
+   *
+   * Nothing is persisted by this call, deliberately. A secret written before
+   * somebody has proved their authenticator holds it is a lockout with a green
+   * tick on it — see `webTotpConfirm`, which is the only thing that writes one.
+   */
+  webTotpBegin: 'web:totp-begin',
+  /**
+   * Finish enrolling by presenting a code minted from the offered secret. The
+   * only call that ever writes `webTotpSecret`, and the only one that ever
+   * returns the recovery codes as text — they are hashed on the way to disk and
+   * there is no call that shows them a second time.
+   */
+  webTotpConfirm: 'web:totp-confirm',
+  /** Remove the second factor and every unspent recovery code with it. */
+  webTotpDisable: 'web:totp-disable',
+  /**
    * A browser is asking to connect. Main → renderer, carrying the word pair the
    * browser is showing; the renderer raises the prompt and answers with
    * `webApprovalResult`. Every outcome that is not an explicit Allow is a deny.

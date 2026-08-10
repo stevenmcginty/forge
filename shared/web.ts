@@ -432,6 +432,47 @@ export const APPROVAL_TIMEOUT_MS = 2 * 60_000
 export const TOKEN_LIFETIME_MS = 60 * 60_000
 export const TOKEN_REFRESH_MS = 50 * 60_000
 
+/* ------------------------------------------------------- the second factor
+ *
+ * RFC 6238, and every number below is that document's rather than one invented
+ * here. They live in this file because both ends read them: the desktop
+ * computes codes against them and the browser tells the person what it is
+ * asking for ("a six-digit code", "it changes every thirty seconds").
+ *
+ * The second factor is optional and off until somebody enrols one. What it
+ * guards is the case account-only admission deliberately allows: a browser
+ * nobody at the desk has ever seen. See `webRequireApproval` in
+ * shared/types.ts for the other half of that trade.
+ */
+
+/** RFC 6238's default time step. Every authenticator app assumes it. */
+export const TOTP_STEP_MS = 30_000
+
+/** Six digits, which is what every authenticator app shows. */
+export const TOTP_DIGITS = 6
+
+/**
+ * How many steps either side of now are accepted.
+ *
+ * One, which is RFC 6238's own recommendation and the smallest window that is
+ * usable: a person reading six digits off a phone and typing them takes a few
+ * seconds, and a code that turned over mid-typing would otherwise be refused.
+ * Two steps would be a minute and a half of life for a code that is supposed to
+ * live thirty seconds, and the replay guard below is what stops even this
+ * window being three chances at the same code.
+ */
+export const TOTP_DRIFT_STEPS = 1
+
+/**
+ * How long "trust this browser" lasts.
+ *
+ * Thirty days, so a code is a monthly event rather than a daily one — the
+ * difference between a second factor somebody keeps and one they turn off. The
+ * trust is per device and dies with the device: revoking a browser in Settings
+ * revokes its trust in the same act, because it is a field on the same row.
+ */
+export const TRUST_WINDOW_MS = 30 * 24 * 60 * 60_000
+
 /* ------------------------------------------------------------------ records */
 
 /**
@@ -470,15 +511,22 @@ export interface WebSession {
  *
  *   connecting  the socket is opening, or `hello` is in flight
  *   pending     a prompt is up on the desktop; `WebPendingFrame` has the words
+ *   totp        the desktop wants a six-digit code before it will say more
  *   live        authenticated and mirroring — `WebHelloOkFrame` has arrived
  *   declined    a human said no. Asking again is a new prompt, not a retry
  *   timed-out   nobody answered within APPROVAL_TIMEOUT_MS
  *   refused     any other refusal; `WebRefusedFrame.reason` says which
  *   offline     no desktop to talk to. This is the GitHub-mode state
+ *
+ * `totp` is its own state rather than a shade of `refused` for the same reason
+ * `pending` is: nothing has gone wrong and there is nothing to recover from —
+ * the page is being asked a question, and the screen it draws is a text box
+ * rather than an apology.
  */
 export type WebApprovalState =
   | 'connecting'
   | 'pending'
+  | 'totp'
   | 'live'
   | 'declined'
   | 'timed-out'
@@ -518,6 +566,26 @@ export interface WebHelloFrame {
    * Windows", typically. Untrusted display text: show it, never obey it.
    */
   deviceName?: string
+  /**
+   * The second factor, when the desktop has asked for one: six digits from an
+   * authenticator app, or one of the recovery codes minted at enrolment.
+   *
+   * Optional, so adding it is not a protocol bump — an older desktop ignores
+   * the field, and a desktop with no second factor enrolled never asks for one.
+   * The browser does not send this unprompted: the first `hello` carries no
+   * code, the desktop answers `totp-required`, and the second carries what the
+   * person typed. That costs a round trip and buys the property that a page
+   * only ever holds a code it was just asked for.
+   */
+  totp?: string
+  /**
+   * "Trust this browser for 30 days" — see TRUST_WINDOW_MS.
+   *
+   * Only honoured alongside a `totp` the desktop actually accepted, because a
+   * flag that granted trust on its own would be a second factor a browser could
+   * skip by asking nicely.
+   */
+  trust?: boolean
 }
 
 /**
@@ -816,7 +884,24 @@ export const WEB_REFUSALS = [
    * The desktop is up but cannot take this connection: too many sockets, or it
    * is still starting. `retryAfterMs` says when to try again.
    */
-  'busy'
+  'busy',
+  /**
+   * A second factor is enrolled and this browser has not presented one. Nothing
+   * has gone wrong: the recovery is to show a text box and send the `hello`
+   * again with `totp` filled in.
+   *
+   * Deliberately not counted as a failed attempt by the desktop's lockout — it
+   * is the first half of every ordinary sign-in on a machine with 2FA, and a
+   * door that struck for it would lock somebody out on their fifth login.
+   */
+  'totp-required',
+  /**
+   * A code was presented and did not open the door: wrong, expired, already
+   * spent, or a recovery code that has been used. One value rather than four,
+   * because telling them apart out loud tells an attacker which half of the
+   * guess was right. This one *does* count against the lockout.
+   */
+  'totp-invalid'
 ] as const
 
 export type WebRefusal = (typeof WEB_REFUSALS)[number]

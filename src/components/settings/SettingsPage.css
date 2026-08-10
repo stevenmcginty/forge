@@ -1727,3 +1727,63 @@
   border: 1px solid var(--line-hairline);
   border-radius: var(--r-sm);
 }
+
+/* Setting up the second factor: a QR, the same secret as text, and a box to
+   prove the app took it. Full width rather than a right-hand control, like the
+   sign-in form above and for the same reason — this is a short errand, not a
+   setting with a value. */
+.web-2fa {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.web-2fa__scan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-5);
+}
+
+/* The white ground is the code's, not the theme's: an inverted QR fails on many
+   scanner libraries, so the light square is drawn deliberately in both themes. */
+.web-2fa__qr {
+  flex: none;
+  width: 160px;
+  height: 160px;
+  background: #fff;
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+}
+
+.web-2fa__manual {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+
+/* Two columns of five, tabular, because these get copied by hand and a ragged
+   list is where a transcription error hides. */
+.web-2fa__codes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--s-2) var(--s-4);
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  user-select: text;
+}
+
+.web-2fa__done {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}

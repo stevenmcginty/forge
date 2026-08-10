@@ -24,7 +24,7 @@
  * Every check gets its own `source` address, because the failure lockout is per
  * source and a shared one would mean check 3's strikes silently failing check 9.
  */
-import { mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { createSign, generateKeyPairSync } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -122,8 +122,22 @@ async function main() {
     absWorkingDir: ROOT
   })
 
-  const { WebAuth, GOOGLE_JWKS_URL, CLOCK_SKEW_MS, setSettings, APPROVAL_TIMEOUT_MS, AUTH_LOCKOUT_MS, AUTH_MAX_FAILURES } =
-    await import(pathToFileURL(join(scratch, 'web-auth.mjs')).href)
+  const {
+    WebAuth,
+    GOOGLE_JWKS_URL,
+    CLOCK_SKEW_MS,
+    setSettings,
+    APPROVAL_TIMEOUT_MS,
+    AUTH_LOCKOUT_MS,
+    AUTH_MAX_FAILURES,
+    TOTP_STEP_MS,
+    TRUST_WINDOW_MS,
+    totpCode,
+    hashRecoveryCode,
+    seal,
+    open,
+    sealingKey
+  } = await import(pathToFileURL(join(scratch, 'web-auth.mjs')).href)
 
   const google = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const impostor = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -145,6 +159,21 @@ async function main() {
   let uid = UID
   let jwksFetches = 0
   const jwksUrls = []
+  /**
+   * The hardening toggle. Checks 1–16 run with it **on**, because they are the
+   * word-pair path and that path is exactly what "on" means; checks 17 onwards
+   * switch it off and assert the shipped default. Mutable rather than two
+   * `WebAuth`s so the same object is proved to behave both ways — a second
+   * instance would prove two constructions agree, which is not the claim.
+   */
+  let requireApproval = true
+  /**
+   * The second factor, as the Electron host would hold it: unsealed here,
+   * sealed on disk. Nothing is enrolled until check 20 enrols it, which is also
+   * the state the desktop ships in.
+   */
+  let totp = { secret: '', recovery: [], lastCounter: 0 }
+  const totpWrites = []
 
   const auth = new WebAuth({
     load: () => saved,
@@ -160,6 +189,12 @@ async function main() {
     projectId: () => projectId,
     uid: () => uid,
     acceptUntil: () => acceptUntil,
+    requireApproval: () => requireApproval,
+    totp: () => totp,
+    saveTotp: (next) => {
+      totp = next
+      totpWrites.push(JSON.stringify(next))
+    },
     requestApproval: (ask) => {
       prompts.push(ask)
       return verdict(ask)
@@ -192,16 +227,17 @@ async function main() {
     return `${header}.${payload}.${signature.toString('base64url')}`
   }
 
-  const hello = (source, idToken, deviceId, deviceName = 'Chrome on Windows') => ({
+  const hello = (source, idToken, deviceId, deviceName = 'Chrome on Windows', extra = {}) => ({
     source,
     idToken,
     deviceId,
-    deviceName
+    deviceName,
+    ...extra
   })
 
   /* ------------------------------------------ 1. the credential that works */
 
-  saved = [{ id: 'browser-1', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }]
+  saved = [{ id: 'browser-1', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0, trustedUntil: 0 }]
   const promptsBeforeGood = prompts.length
   const admitted = await auth.authenticate(hello('10.0.0.1', mint(), 'browser-1'))
   log(admitted.ok === true, 'a correctly signed, correctly claimed token for the configured uid and an approved device is admitted')
@@ -361,8 +397,8 @@ async function main() {
     'and nothing shaped like a JWT reached it either'
   )
   log(
-    saved.every((d) => Object.keys(d).sort().join(',') === 'createdAt,id,lastSeenAt,name,revokedAt'),
-    'an approval record is an id, a name and three timestamps — there is no credential field to leak'
+    saved.every((d) => Object.keys(d).sort().join(',') === 'createdAt,id,lastSeenAt,name,revokedAt,trustedUntil'),
+    'an approval record is an id, a name and four timestamps — there is no credential field to leak'
   )
 
   // The same guarantee, asserted against the file rather than the array: the
@@ -432,6 +468,291 @@ async function main() {
   log(
     unconfigured.reason === 'busy' && unconfigured.retryAfterMs > 0,
     'and says so with a back-off rather than bad-token, which would loop the page on a correct credential'
+  )
+  projectId = PROJECT
+  uid = UID
+
+  /* ============================== 17. the shipped default: the account is the key
+   *
+   * Everything above ran with `requireApproval` on, which is what this desktop
+   * used to do and always. From here it is off, which is what it ships as — and
+   * the claim is a browser nobody has ever seen, from an address nobody has
+   * armed anything for, getting in with nobody at the machine.
+   */
+
+  requireApproval = false
+  acceptUntil = 0
+  const promptsBeforeSeamless = prompts.length
+  const seamless = await auth.authenticate(hello('10.1.0.1', mint(), 'hotel-laptop', 'Chrome on macOS'))
+  log(seamless.ok === true, 'with device approval off, a verified token for the configured uid is admitted on its own')
+  log(prompts.length === promptsBeforeSeamless, 'and no prompt is raised — there is nobody at the desk to answer one')
+  log(
+    acceptUntil === 0,
+    'without "Accept new browsers" having been armed, which is the setting that used to have to be armed in advance'
+  )
+  const recorded = saved.find((d) => d.id === 'hotel-laptop')
+  log(
+    !!recorded && recorded.name === 'Chrome on macOS' && recorded.createdAt === clock && recorded.revokedAt === 0,
+    'the browser is still recorded, named and stamped — visibility is what this mode trades friction for, not audit'
+  )
+  log(auth.devices().some((d) => d.id === 'hotel-laptop'), 'and it is in the list Settings draws, so it can be revoked')
+
+  /* ------------------------- 18. revocation holds in the permissive mode */
+
+  log(auth.revoke('hotel-laptop') === true, 'that browser can be revoked exactly like an approved one')
+  const revokedOpen = await auth.authenticate(hello('10.1.0.2', mint(), 'hotel-laptop'))
+  log(
+    revokedOpen.ok === false && revokedOpen.reason === 'revoked',
+    'and a revoked browser is refused with revoked in the permissive mode too — the one thing this mode must not soften'
+  )
+  requireApproval = true
+  const revokedShut = await auth.authenticate(hello('10.1.0.3', mint(), 'hotel-laptop'))
+  log(
+    revokedShut.ok === false && revokedShut.reason === 'revoked',
+    'and refused identically with device approval on, so revocation is one answer in both modes'
+  )
+
+  /* ------------------------ 19. the wrong account, in both modes */
+
+  const wrongShut = await auth.authenticate(hello('10.1.0.4', mint({ sub: OTHER_UID }), 'browser-1'))
+  log(
+    wrongShut.ok === false && wrongShut.reason === 'wrong-account',
+    'a token for another account is wrong-account with device approval on'
+  )
+  requireApproval = false
+  const wrongOpen = await auth.authenticate(hello('10.1.0.5', mint({ sub: OTHER_UID }), 'browser-1'))
+  log(
+    wrongOpen.ok === false && wrongOpen.reason === 'wrong-account',
+    'and wrong-account with it off — the uid match is not what the permissive mode relaxes'
+  )
+
+  /* ============================================ 20. the second factor
+   *
+   * Enrolled through the real class, with codes minted by the real arithmetic —
+   * the same function the desktop verifies with, driven as an authenticator app
+   * drives it, which is the only way "a correct code" means anything.
+   */
+
+  const badEnrolment = auth.completeEnrolment('000000')
+  log(
+    badEnrolment.ok === false,
+    'confirming an enrolment nobody started is refused rather than writing an unproved secret'
+  )
+
+  const offer = auth.beginEnrolment('steve@example.com')
+  log(/^[A-Z2-7]{32}$/.test(offer.secret), 'starting enrolment mints a base32 secret')
+  log(
+    offer.uri.startsWith('otpauth://totp/') && offer.uri.includes(`secret=${offer.secret}`) && offer.uri.includes('digits=6'),
+    'and an otpauth:// URI that spells out its own parameters, so no app has to guess them'
+  )
+  log(totp.secret === '', 'and nothing is persisted yet — an unproved secret is a lockout with a green tick on it')
+
+  const wrongEnrolment = auth.completeEnrolment('000000')
+  log(wrongEnrolment.ok === false, 'a wrong code does not complete the enrolment')
+  log(totp.secret === '', 'and still nothing is written')
+
+  const enrolmentCode = totpCode(offer.secret, Math.floor(clock / TOTP_STEP_MS))
+  const enrolled = auth.completeEnrolment(enrolmentCode)
+  log(enrolled.ok === true, 'a correct code completes it')
+  log(enrolled.ok && enrolled.recovery.length === 10, 'and hands back ten recovery codes, once')
+  log(totp.secret === offer.secret, 'only now is the secret held by the desktop')
+  log(
+    totp.recovery.length === 10 && enrolled.recovery.every((code) => totp.recovery.includes(hashRecoveryCode(code))),
+    'and the recovery codes reach storage as SHA-256 digests, exactly as mobile/auth.ts hashes a device token'
+  )
+  log(
+    enrolled.ok && enrolled.recovery.every((code) => !totp.recovery.includes(code)),
+    'with no raw code among them'
+  )
+
+  /* -------------------------------- 20a. a code is asked for, and checked */
+
+  saved = [{ id: 'browser-2', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0, trustedUntil: 0 }]
+  const step = () => Math.floor(clock / TOTP_STEP_MS)
+
+  // `completeEnrolment` seeds the spent counter with the code that proved the
+  // secret, so the six digits typed into the settings panel cannot be walked
+  // straight over to a browser. Asserted before the clock moves on, because
+  // that is the thirty seconds in which it would be possible.
+  const enrolmentReplay = await auth.authenticate(
+    hello('10.2.0.0', mint(), 'browser-2', 'Chrome', { totp: enrolmentCode })
+  )
+  log(
+    enrolmentReplay.ok === false && enrolmentReplay.reason === 'totp-invalid',
+    'the code that completed the enrolment is spent by having completed it, and will not open the door as well'
+  )
+  clock += TOTP_STEP_MS
+
+  const noCode = await auth.authenticate(hello('10.2.0.1', mint(), 'browser-2'))
+  log(
+    noCode.ok === false && noCode.reason === 'totp-required',
+    'with a second factor enrolled, a hello carrying no code is totp-required'
+  )
+
+  const wrongCode = await auth.authenticate(hello('10.2.0.2', mint(), 'browser-2', 'Chrome', { totp: '000000' }))
+  log(wrongCode.ok === false && wrongCode.reason === 'totp-invalid', 'a wrong code is totp-invalid')
+
+  const rightCode = totpCode(totp.secret, step())
+  const accepted = await auth.authenticate(hello('10.2.0.3', mint(), 'browser-2', 'Chrome', { totp: rightCode }))
+  log(accepted.ok === true, 'the code the app is showing right now is accepted')
+
+  /* ------------------- 20b. the assertion the whole feature stands on */
+
+  const replayed = await auth.authenticate(hello('10.2.0.4', mint(), 'browser-2', 'Chrome', { totp: rightCode }))
+  log(
+    replayed.ok === false && replayed.reason === 'totp-invalid',
+    'and the *same* code presented again is refused — a shoulder-surfed code is dead the moment it is spent'
+  )
+
+  /* -------------------------------------------------- 20c. clock drift */
+
+  clock += 4 * TOTP_STEP_MS
+  const early = await auth.authenticate(
+    hello('10.2.0.5', mint(), 'browser-2', 'Chrome', { totp: totpCode(totp.secret, step() - 1) })
+  )
+  log(early.ok === true, 'a code one step early is accepted, because a person reads six digits and then types them')
+
+  clock += 4 * TOTP_STEP_MS
+  const late = await auth.authenticate(
+    hello('10.2.0.6', mint(), 'browser-2', 'Chrome', { totp: totpCode(totp.secret, step() + 1) })
+  )
+  log(late.ok === true, 'and one step late, for a phone whose clock runs fast')
+
+  clock += 4 * TOTP_STEP_MS
+  const tooEarly = await auth.authenticate(
+    hello('10.2.0.7', mint(), 'browser-2', 'Chrome', { totp: totpCode(totp.secret, step() - 2) })
+  )
+  log(tooEarly.ok === false && tooEarly.reason === 'totp-invalid', 'two steps out is refused — the window is one, not "roughly"')
+
+  clock += 4 * TOTP_STEP_MS
+  const tooLate = await auth.authenticate(
+    hello('10.2.0.8', mint(), 'browser-2', 'Chrome', { totp: totpCode(totp.secret, step() + 2) })
+  )
+  log(tooLate.ok === false && tooLate.reason === 'totp-invalid', 'in both directions')
+
+  /* ------------------------------------------------ 20d. recovery codes */
+
+  clock += 4 * TOTP_STEP_MS
+  const spare = enrolled.recovery[0]
+  const usedOnce = await auth.authenticate(hello('10.2.0.9', mint(), 'browser-2', 'Chrome', { totp: spare }))
+  log(usedOnce.ok === true, 'a recovery code gets a browser in when the phone is gone')
+  log(totp.recovery.length === 9, 'and is struck off as it is spent')
+  const usedTwice = await auth.authenticate(hello('10.2.0.10', mint(), 'browser-2', 'Chrome', { totp: spare }))
+  log(
+    usedTwice.ok === false && usedTwice.reason === 'totp-invalid',
+    'and the second use of the same one is refused — single-use means single-use'
+  )
+  log(
+    (await auth.authenticate(hello('10.2.0.11', mint(), 'browser-2', 'Chrome', { totp: 'zzzz-zzzz' }))).reason ===
+      'totp-invalid',
+    'a recovery code that was never minted is refused too'
+  )
+
+  /* -------------------------------------- 20e. trust this browser */
+
+  clock += 4 * TOTP_STEP_MS
+  saved = [{ id: 'browser-3', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0, trustedUntil: 0 }]
+  const trusted = await auth.authenticate(
+    hello('10.3.0.1', mint(), 'browser-3', 'Chrome', { totp: totpCode(totp.secret, step()), trust: true })
+  )
+  log(trusted.ok === true, 'a code presented with "trust this browser" is accepted')
+  log(
+    saved.find((d) => d.id === 'browser-3')?.trustedUntil === clock + TRUST_WINDOW_MS,
+    'and the window is written on the device row, so revoking the browser ends the trust in the same act'
+  )
+
+  clock += 5 * TOTP_STEP_MS
+  const inside = await auth.authenticate(hello('10.3.0.2', mint(), 'browser-3'))
+  log(inside.ok === true, 'inside the window that browser is not asked for a code at all')
+
+  clock += TRUST_WINDOW_MS
+  const trustLapsed = await auth.authenticate(hello('10.3.0.3', mint(), 'browser-3'))
+  log(
+    trustLapsed.ok === false && trustLapsed.reason === 'totp-required',
+    'and once it has passed it is asked again — a month, not forever'
+  )
+
+  /* -------------------------- 20f. the second factor is not the account */
+
+  const trustedWrongAccount = await auth.authenticate(hello('10.3.0.4', mint({ sub: OTHER_UID }), 'browser-3'))
+  log(
+    trustedWrongAccount.ok === false && trustedWrongAccount.reason === 'wrong-account',
+    'a trusted browser holding a token for another account is still wrong-account, before any code is looked at'
+  )
+
+  /* ------------------- 20g. a tombstone cannot be squeezed off the list
+   *
+   * The store caps the device list at twenty. With approval off a browser with
+   * no row is *admitted*, so a revocation that fell off the end of that list
+   * would be an un-revocation performed by a `slice` — which is why the cap now
+   * spends its budget on live rows and keeps every tombstone.
+   */
+
+  const crowd = []
+  for (let i = 0; i < 40; i++) {
+    crowd.push({ id: `filler-${i}`, name: 'Filler', createdAt: 1, lastSeenAt: 1, revokedAt: 0, trustedUntil: 0 })
+  }
+  // Last, which is exactly where a plain `slice(0, 20)` would have lost it.
+  crowd.push({ id: 'revoked-long-ago', name: 'Old', createdAt: 1, lastSeenAt: 1, revokedAt: 2, trustedUntil: 0 })
+
+  const capped = setSettings({ webDevices: crowd }).webDevices
+  log(capped.length === 20, 'a device list far over the cap is trimmed to twenty rows')
+  log(
+    capped.some((d) => d.id === 'revoked-long-ago'),
+    'and the revoked row survives from the far end of it — a tombstone is never what the cap throws away'
+  )
+  const order = capped.map((d) => crowd.findIndex((c) => c.id === d.id))
+  log(
+    order.every((position, i) => i === 0 || position > order[i - 1]),
+    'and the rows that are kept stay in the order the panel drew them'
+  )
+
+  /* ================================ 21. nothing readable on disk, again
+   *
+   * The same instinct as check 13 and as scripts/mobile-auth-check.mjs, pointed
+   * at the second factor: the real seal, the real settings writer, the real
+   * normaliser, and the file read back off the disk it was written to.
+   */
+
+  log(
+    totpWrites.length > 0 &&
+      totpWrites.every((json) => enrolled.ok && enrolled.recovery.every((code) => !json.includes(code))),
+    'no raw recovery code was ever handed to persistence, on any of the writes an enrolment and four spent codes made'
+  )
+
+  const key = sealingKey(join(scratch, 'data'))
+  const sealed = seal(totp.secret, key)
+  log(open(sealed, key) === totp.secret, 'the seal round-trips, so what is written is what the desktop can read back')
+  log(!sealed.includes(totp.secret), 'and the sealed form contains none of the secret')
+  const password = 'hunter2-not-in-any-file'
+  const afterTotp = setSettings({
+    webTotpSecret: sealed,
+    webTotpRecovery: totp.recovery,
+    webTotpCounter: totp.lastCounter,
+    webDevices: saved
+  })
+  const diskWithTotp = readFileSync(settingsPath, 'utf8')
+  log(!diskWithTotp.includes(totp.secret), 'the TOTP secret does not appear anywhere in settings.json')
+  log(
+    enrolled.ok && enrolled.recovery.every((code) => !diskWithTotp.includes(code)),
+    'and neither does any recovery code, spent or unspent'
+  )
+  log(!diskWithTotp.includes(password), 'and no password, which never reaches this file by any path')
+  log(
+    diskWithTotp.includes(afterTotp.webTotpRecovery[0]),
+    "but the codes' digests do — proof the record was written, not proof of nothing being saved"
+  )
+  log(
+    afterTotp.webTotpSecret === sealed && afterTotp.webTotpCounter === totp.lastCounter,
+    'the store round-trips the sealed secret and the spent counter'
+  )
+  log(
+    afterTotp.webRequireApproval === false,
+    'and `webRequireApproval` normalises to false, which is the mode this desktop ships in'
+  )
+  log(
+    existsSync(join(scratch, 'data', 'web-totp.key')),
+    'the key that opens it is a file of its own beside settings.json, never a field inside it'
   )
 }
 

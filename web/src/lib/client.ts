@@ -88,6 +88,12 @@ const WARM_MS = HEARTBEAT_MS * 2
 export type Connection =
   | { state: Extract<WebApprovalState, 'connecting'>; attempt: number }
   | { state: Extract<WebApprovalState, 'pending'>; words: string; expiresAt: number }
+  /**
+   * The desktop wants a six-digit code. `invalid` distinguishes "you have not
+   * been asked yet" from "that one did not work" — the same screen either way,
+   * but only one of them owes the person a red line.
+   */
+  | { state: Extract<WebApprovalState, 'totp'>; message: string; invalid: boolean }
   | { state: Extract<WebApprovalState, 'live'>; desktopName: string; appVersion: string }
   | { state: Extract<WebApprovalState, 'declined'>; message: string }
   | { state: Extract<WebApprovalState, 'timed-out'>; message: string }
@@ -174,6 +180,12 @@ function retryPolicy(reason: WebRefusal): Retry {
       return { kind: 'stop' }
     case 'busy':
       return { kind: 'after' }
+    // Both are answered by a human typing something, so neither is a reconnect
+    // this loop can decide on its own. `submitTotp` is what starts the next
+    // attempt, and it carries the thing that was missing.
+    case 'totp-required':
+    case 'totp-invalid':
+      return { kind: 'stop' }
   }
 }
 
@@ -197,6 +209,9 @@ export class ForgeClient {
   private waiting = new Map<string, { settle: (result: WebResult) => void; timer: number }>()
   /** sessionId → the geometry this browser is reading it at, re-sent on reconnect. */
   private subs = new Map<string, { cols: number; rows: number } | null>()
+  /** The second factor for the *next* hello only. See `submitTotp`. */
+  private totp = ''
+  private trust = false
 
   constructor(handlers: ForgeHandlers) {
     this.handlers = handlers
@@ -225,6 +240,21 @@ export class ForgeClient {
     this.attempt = 0
     this.clearRetry()
     void this.open()
+  }
+
+  /**
+   * A human typed the second factor. Reconnect, carrying it.
+   *
+   * The code is held for exactly one `hello` and dropped in `open()`, whatever
+   * the desktop makes of it. A client that kept it would retry a spent code on
+   * every reconnect for the rest of the session, and every one of those retries
+   * would be a strike against this address at the far end.
+   */
+  submitTotp(code: string, trust: boolean): void {
+    if (!this.credentials) return
+    this.totp = code.trim()
+    this.trust = trust
+    this.retry()
   }
 
   disconnect(): void {
@@ -354,6 +384,14 @@ export class ForgeClient {
     this.socket = socket
     this.lastFrameAt = Date.now()
 
+    // Spent on this attempt and this attempt only, whatever comes of it — read
+    // before `onopen` so a socket that never opens still burns it rather than
+    // leaving a stale code to be replayed by the reconnect loop.
+    const totp = this.totp
+    const trust = this.trust
+    this.totp = ''
+    this.trust = false
+
     socket.onopen = () => {
       this.lastFrameAt = Date.now()
       this.startBeating()
@@ -363,7 +401,11 @@ export class ForgeClient {
         idToken,
         client: __WEB_CLIENT_VERSION__,
         deviceId: credentials.deviceId,
-        deviceName: credentials.deviceName
+        deviceName: credentials.deviceName,
+        // Omitted entirely rather than sent empty: the field is optional in the
+        // protocol and a desktop with no second factor should see a `hello`
+        // that looks exactly like it always did.
+        ...(totp ? { totp, trust } : {})
       })
     }
 
@@ -519,6 +561,17 @@ export class ForgeClient {
       return
     }
     const reason = rawReason
+
+    // Not a failure and not a shade of one: the desktop is asking a question,
+    // and the screen it earns is a text box rather than an apology. Handled
+    // ahead of the retry table because the answer comes from a person, so there
+    // is nothing for the loop to schedule until `submitTotp` is called.
+    if (reason === 'totp-required' || reason === 'totp-invalid') {
+      this.stopped = true
+      this.handlers.onConnection({ state: 'totp', message, invalid: reason === 'totp-invalid' })
+      return
+    }
+
     const policy = retryPolicy(reason)
 
     if (policy.kind === 'reauth' && !this.reauthed) {
