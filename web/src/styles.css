@@ -1,0 +1,323 @@
+/*
+ * Web-only chrome.
+ *
+ * Everything Forge already has is imported from src/theme and src/components
+ * (see main.tsx). What is left here is the handful of surfaces the desktop has
+ * no equivalent for, because it has no link to be honest about and nobody to
+ * sign in as: the gate (sign-in and every connection screen), the link badge,
+ * the offline strip, and the transient notice.
+ *
+ * Every value is a token. A literal colour, radius or duration in this file
+ * would be the first place the browser and the desktop started to look
+ * different, and the difference would be invisible until somebody changed a
+ * theme.
+ */
+
+/* -------------------------------------------------------------- the gate
+ *
+ * One centred card, used by sign-in and by all seven connection states. They
+ * share a shell on purpose: "waiting to be let in" and "the desktop said no"
+ * should feel like the same doorway with different words on it, not like two
+ * different applications.
+ */
+
+.gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--s-6);
+  background: radial-gradient(120% 90% at 50% 0%, var(--panel-grad-a), var(--bg-base) 70%);
+}
+
+.gate__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-4);
+  width: 100%;
+  max-width: 380px;
+  padding: var(--s-9) var(--s-8);
+  text-align: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-card);
+}
+
+.gate__mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  color: var(--accent);
+  background: var(--accent-softer);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-lg);
+}
+
+.gate__title {
+  margin: 0;
+  font-size: var(--t-xl);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+}
+
+.gate__body {
+  margin: 0;
+  font-size: var(--t-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.gate__hint {
+  margin: 0;
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.gate__error {
+  margin: 0;
+  width: 100%;
+  padding: var(--s-4) var(--s-5);
+  font-size: var(--t-sm);
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-md);
+}
+
+.gate__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: 100%;
+  text-align: left;
+}
+
+.gate__input {
+  height: 34px;
+  padding: 0 var(--s-5);
+  color: var(--text-primary);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-md);
+  user-select: text;
+}
+
+.gate__input:focus {
+  border-color: var(--accent-line);
+}
+
+.gate__go {
+  margin-top: var(--s-3);
+  justify-content: center;
+  width: 100%;
+}
+
+/*
+ * The word pair, and the only place in this client that shouts.
+ *
+ * shared/web.ts asks for it in large type because comparing it against the
+ * desktop's prompt is the whole anti-confusion device — a pair somebody has to
+ * squint at is a pair somebody stops comparing. Selectable, unlike the rest of
+ * the app, so it can be read out or pasted into a message.
+ */
+.gate__words {
+  margin: var(--s-3) 0;
+  padding: var(--s-5) var(--s-6);
+  font-size: var(--t-display);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: var(--accent-softer);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-lg);
+  user-select: text;
+}
+
+/* A slow breath under "Connecting", so a wait reads as a wait rather than a stall. */
+.gate__pulse {
+  width: 44px;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: var(--accent-line);
+  animation: gate-pulse 1.4s var(--ease-in-out) infinite;
+}
+
+@keyframes gate-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scaleX(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gate__pulse {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------- the link badge
+ *
+ * Where the desktop reserves space for Windows' window controls, the browser
+ * puts the one fact the desktop never has to state: whether this is a live
+ * mirror or a picture of one.
+ */
+
+.linkbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  max-width: 190px;
+  height: 22px;
+  padding: 0 var(--s-4);
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+}
+
+.linkbadge__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--text-dim);
+}
+
+.linkbadge[data-state='live'] .linkbadge__dot {
+  background: var(--warn);
+}
+
+/* Live *and* answering. The app-level ping exists for this one pixel. */
+.linkbadge[data-state='live'][data-warm='true'] .linkbadge__dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+.linkbadge[data-state='offline'] .linkbadge__dot {
+  background: var(--text-muted);
+}
+
+.linkbadge[data-state='connecting'] .linkbadge__dot {
+  background: var(--info);
+}
+
+/* ------------------------------------------------------- the offline strip
+ *
+ * The same 30px band, in the same place, as UpdateBanner and StaleBanner on the
+ * desktop — it pushes the app down rather than covering any of it.
+ */
+
+.offline {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  flex: none;
+  height: 30px;
+  padding: 0 var(--s-6);
+  font-size: var(--t-sm);
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-bottom: 1px solid var(--warn-line);
+}
+
+.offline__text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.offline__text strong {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.offline__look {
+  flex: none;
+  height: 20px;
+  color: var(--warn);
+}
+
+/* A frozen pane wears the same chip its live twin wears for a permission mode. */
+.pane__perm[data-frozen='true'] {
+  color: var(--warn);
+  border-color: var(--warn-line);
+}
+
+/* ---------------------------------------------------------------- notices */
+
+.notice {
+  position: fixed;
+  left: 50%;
+  bottom: var(--s-7);
+  z-index: var(--z-toast);
+  max-width: min(560px, calc(100vw - var(--s-9)));
+  padding: var(--s-4) var(--s-6);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-card);
+  transform: translateX(-50%);
+}
+
+/* ------------------------------------------------------------ rail extras */
+
+.rail__empty {
+  margin: 0;
+  padding: var(--s-5) var(--s-6);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/*
+ * The divider a browser cannot drag. It keeps the hairline — the *shape* of the
+ * split is what is being mirrored — and drops the grab cursor, because offering
+ * one for a gesture that cannot be performed is worse than not offering it.
+ */
+.split__divider[data-fixed='true'] {
+  cursor: default;
+}
+
+.split__divider[data-fixed='true'] .split__grip {
+  opacity: 0;
+}
+
+/* -------------------------------------------------------------- narrow
+ *
+ * A phone-width window is not Forge Mobile — that is a separate app and
+ * decision 7 keeps it out of here. This is the same desktop layout, folded: the
+ * rail becomes a strip of dots rather than disappearing, so switching project
+ * is still one tap, and the terminal keeps the full width because it is the
+ * whole reason the page is open.
+ */
+
+@media (max-width: 640px) {
+  /*
+   * The rail's *width* is not set here. `useNarrow` sets the same `collapsed`
+   * flag a click sets, so `.app__left[data-collapsed='true']` — the desktop's
+   * own rule — does it, and the rail renders its collapsed markup to match.
+   * Narrowing the box from CSS alone would leave the full row inside it.
+   */
+  .titlebar__path,
+  .linkbadge__text {
+    display: none;
+  }
+
+  .gate__card {
+    padding: var(--s-8) var(--s-6);
+  }
+}
