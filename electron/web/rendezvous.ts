@@ -359,12 +359,37 @@ export class WebRendezvous {
    * anything; this is not that case.
    */
   private async hostWentAway(rest: RendezvousRest, path: string): Promise<void> {
-    if (this.published) {
-      const gone = this.published
-      await this.clear(rest, path)
-      if (!this.published) this.log(`tunnel hostname went away (${gone}) — rendezvous record cleared`)
+    /*
+     * The retraction takes the same `writing` window a publish does, and that
+     * is the whole point of this function's shape.
+     *
+     * `clear()` does not go through `write()`, so `this.writing` used to stay
+     * false for the entire await. A `refresh()` landing in that window took
+     * `refresh()`'s fast path and armed a timer at MIN_REPUBLISH_MS — which the
+     * unconditional `schedule(HOST_HEARTBEAT_MS)` at the end of this function
+     * then cancelled, turning five seconds into sixty.
+     *
+     * That is precisely the sequence a tunnel restart produces: the hostname
+     * goes away, the agent comes back with a *different* one, and the new
+     * address arrives while the retraction is still in flight. It converged on
+     * the next heartbeat, so it read as a slow reconnect rather than a fault —
+     * a full minute of a browser being told this desktop is unreachable when it
+     * is not. Cheap to miss when the address was stable; a cloudflared quick
+     * tunnel gets a new hostname on every start, so it stopped being rare.
+     */
+    this.writing = true
+    try {
+      if (this.published) {
+        const gone = this.published
+        await this.clear(rest, path)
+        if (!this.published) this.log(`tunnel hostname went away (${gone}) — rendezvous record cleared`)
+      }
+    } finally {
+      this.writing = false
     }
-    this.schedule(HOST_HEARTBEAT_MS)
+    const wanted = this.refreshWanted
+    this.refreshWanted = false
+    this.schedule(wanted ? MIN_REPUBLISH_MS : HOST_HEARTBEAT_MS)
   }
 
   /** Write the whole record. A PUT, because this node is authored in one go. */

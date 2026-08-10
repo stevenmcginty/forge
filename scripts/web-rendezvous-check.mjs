@@ -544,6 +544,74 @@ async function main() {
   })
   midwrite.stop()
 
+  /* ------------------- a refresh arriving during a *retraction*
+   *
+   * The same window as above, on the other write path, and it was open until
+   * the day a cloudflared quick tunnel made it matter.
+   *
+   * `hostWentAway()` retracts through `clear()`, which does not go through
+   * `write()`. So `writing` stayed false for the whole await, a refresh landing
+   * there armed a timer at the republish floor, and the unconditional
+   * `schedule(HOST_HEARTBEAT_MS)` at the end of the retraction cancelled it —
+   * five seconds became sixty. That is exactly a tunnel restart: the hostname
+   * goes away, the agent returns with a different one, and the new address
+   * arrives while the retraction is in flight.
+   */
+
+  let releaseRemove = () => {}
+  const retract = {
+    uid,
+    writes: [],
+    removes: 0,
+    put: async (_path, value) => {
+      retract.writes.push(value.host)
+      return value
+    },
+    patch: async () => ({}),
+    remove: async () => {
+      retract.removes += 1
+      if (retract.removes === 1) await new Promise((r) => (releaseRemove = r))
+    }
+  }
+
+  settings.client = retract
+  settings.hostname = 'forge-live.trycloudflare.com'
+  clock.delays.length = 0
+
+  const flap = new WebRendezvous(host)
+  flap.start()
+  await settle()
+  const publishedFirst = flap.getState().published
+
+  // The tunnel drops: no usable hostname, so the next tick retracts.
+  settings.hostname = ''
+  flap.refresh()
+  await advance(MIN_REPUBLISH_WAIT)
+  const retracting = retract.removes
+
+  // The agent comes back on a *different* address, mid-retraction.
+  settings.hostname = 'forge-moved.trycloudflare.com'
+  flap.refresh()
+  releaseRemove()
+  await settle()
+  const afterRetraction = [...clock.delays]
+  await advance(MIN_REPUBLISH_WAIT)
+
+  check('a refresh arriving while the record is being retracted is not lost', () => {
+    assert.equal(publishedFirst, 'forge-live.trycloudflare.com', 'the first address should have been published')
+    assert.equal(retracting, 1, 'the retraction should have been in flight')
+    assert.equal(
+      afterRetraction[afterRetraction.length - 1],
+      MIN_REPUBLISH_WAIT,
+      'the new address must come back at the republish floor, not a minute later'
+    )
+  })
+  check('and the address the tunnel came back on is what gets published', () => {
+    assert.equal(flap.getState().published, 'forge-moved.trycloudflare.com')
+    assert.deepEqual(retract.writes, ['forge-live.trycloudflare.com', 'forge-moved.trycloudflare.com'])
+  })
+  flap.stop()
+
   /* ------------------------------------------------------------ teardown */
 
   settings.client = rest
