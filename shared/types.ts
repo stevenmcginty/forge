@@ -1923,11 +1923,15 @@ export interface Settings {
 
   /* ------------------------------------------------ forge web's own tunnel
    *
-   * How the outside world reaches this desktop's web listener. Forge Mobile's
-   * ngrok supervisor (electron/mobile-tunnel.ts) drives it — the same code,
-   * a second instance, its own port and its own domain. Off by default like
-   * everything else here, and inert until `webEnabled` as well: the supervisor
-   * is only started once the server is actually listening.
+   * How the outside world reaches this desktop's web listener, and the one
+   * setting here that is *not* off by default — because the transport it
+   * defaults to needs no account, no domain and nothing pasted. It is still
+   * inert until `webEnabled`: the supervisor is only started once the server is
+   * actually listening, so a Forge Web that is switched off spawns nothing.
+   *
+   * Two supervisors, chosen by `webTunnel`: `electron/cloudflare-tunnel.ts` and
+   * the ngrok one Forge Mobile drives (`electron/mobile-tunnel.ts`). See
+   * `WebTunnelMode` for what each one costs.
    */
 
   /**
@@ -1938,15 +1942,11 @@ export interface Settings {
    * how a second Forge on one box gets out of the first one's way.
    */
   webPort: number
+  /** Which supervisor, if any, puts this desktop on the internet. */
+  webTunnel: WebTunnelMode
   /**
-   * `'ngrok'` runs a supervised ngrok agent against the domain below whenever
-   * Forge Web is listening, so a browser keeps one address forever. `'off'`
-   * means Forge runs no tunnel: either there is no way in from outside, or one
-   * is run by hand and named with `FORGE_WEB_HOSTNAME`.
-   */
-  webTunnel: TunnelMode
-  /**
-   * The ngrok authtoken for Forge Web's agent, from the dashboard. Stored like
+   * The ngrok authtoken for Forge Web's agent, from the dashboard. Read only on
+   * the `'ngrok'` path — the default transport has no credential at all. Stored like
    * every other key in this file: plain, local, and revocable at the far end.
    * Handed to ngrok as an argument — never written into an ngrok config file —
    * and redacted from every log line and status detail this app emits.
@@ -2100,6 +2100,27 @@ export type MobileState = 'off' | 'starting' | 'listening' | 'error'
 /** Which transport carries a link past the front door. See mobile-tunnel.ts. */
 export type TunnelMode = 'off' | 'ngrok'
 
+/**
+ * Forge Web's, which has one more answer than the phone link's — and
+ * deliberately is not the same type, because two of the three are wrong for a
+ * phone and a shared union would let one be set there by mistake.
+ *
+ *  - **`'cloudflared'`** — the default, and the only one that needs nothing
+ *    pasted. A quick tunnel (`electron/cloudflare-tunnel.ts`) with no account,
+ *    no domain and no per-account limit, so it runs happily beside Forge
+ *    Mobile's. The address is new on every start, which costs nothing here: the
+ *    browser reads this desktop's current address out of the rendezvous record
+ *    before it dials. See `WebHostRecord` in shared/web.ts.
+ *  - **`'ngrok'`** — a supervised ngrok agent (`electron/mobile-tunnel.ts`,
+ *    a second instance) against `webNgrokAuthtoken` and, optionally,
+ *    `webNgrokDomain`. One steady address forever, at the price of the free
+ *    plan's one-online-endpoint-per-account rule: with this chosen, the phone
+ *    link and the browser link cannot both be up.
+ *  - **`'off'`** — Forge runs no tunnel. Either there is no way in from
+ *    outside, or one is run by hand and named with `FORGE_WEB_HOSTNAME`.
+ */
+export type WebTunnelMode = 'off' | 'cloudflared' | 'ngrok'
+
 export type TunnelState = 'off' | 'starting' | 'live' | 'retrying' | 'error'
 
 /**
@@ -2110,7 +2131,7 @@ export type TunnelState = 'off' | 'starting' | 'live' | 'retrying' | 'error'
  */
 export interface TunnelStatus {
   state: TunnelState
-  /** The public https URL ngrok reported, while live. */
+  /** The public https URL the agent reported, while live. */
   url: string
   /** A human sentence, or empty when there is nothing to say. Never a token. */
   detail: string

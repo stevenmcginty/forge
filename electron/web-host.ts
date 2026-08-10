@@ -27,6 +27,7 @@ import { WebServer, type WebServerHost } from './web/server'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
 import { describe, FirebaseRest } from './companion/rest'
 import { NgrokTunnel, ensureNgrokExe, resolveNgrokExe } from './mobile-tunnel'
+import { CloudflareTunnel, ensureCloudflaredExe, resolveCloudflaredExe } from './cloudflare-tunnel'
 import { addPtySink, getManager, getReplay } from './pty-host'
 import { addGitSink, gitRefresh, runAction } from './git-watcher'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
@@ -97,9 +98,9 @@ import { probeCommands } from './which'
  * **It took its hostname from `FORGE_WEB_HOSTNAME` and called that a tunnel.**
  * An environment variable is a development seam, not a feature, and the status
  * it produced could only ever say "somebody told us a string". Forge Web now
- * supervises its own ngrok agent through `electron/mobile-tunnel.ts` — the same
- * class Forge Mobile drives, a second instance, on Forge Web's own port and
- * domain — so `starting`, `live` and `error` are observations. The variable
+ * supervises an agent of its own — a cloudflared quick tunnel by default, or
+ * ngrok when somebody wants one steady address; see "the tunnel" below — so
+ * `starting`, `live` and `error` are observations. The variable
  * survives as an explicitly-documented override for a tunnel run by hand; see
  * `tunnelHostname()`, which is careful to say `configured` rather than `live`
  * on that path.
@@ -173,23 +174,30 @@ let unsubscribeGit: (() => void) | null = null
 let lastDetail = ''
 let starting = false
 
-/** Forge Web's own ngrok agent, and the last thing it said. See the tunnel block. */
+/** Forge Web's own tunnel agent, and the last thing it said. See the tunnel block. */
 const TUNNEL_OFF: TunnelStatus = { state: 'off', url: '', detail: '' }
-let tunnel: NgrokTunnel | null = null
+let tunnel: CloudflareTunnel | NgrokTunnel | null = null
 let tunnelState: TunnelStatus = TUNNEL_OFF
 let tunnelStarting = false
 /**
- * What the running agent was started with. An ngrok agent takes its port,
- * domain and account on its command line and cannot be re-pointed afterwards,
- * so this is how `applyWebSettings` tells "the settings changed" from "the
- * settings were saved" and restarts only in the first case. In memory only, and
- * never logged or reported — it contains the authtoken.
+ * What the running agent was started with. Either agent takes its port — and
+ * ngrok's also its domain and its account — on its command line and cannot be
+ * re-pointed afterwards, so this is how `applyWebSettings` tells "the settings
+ * changed" from "the settings were saved" and restarts only in the first case.
+ * The transport itself is part of it, because switching between the two is the
+ * change most obviously requiring a different process. In memory only, and never
+ * logged or reported — it contains the authtoken.
  */
 let tunnelSpec = ''
 
 function tunnelSpecNow(): string {
   const s = getSettings()
-  return `${webPort()}|${s.webNgrokDomain}|${s.webNgrokAuthtoken}`
+  return `${s.webTunnel}|${webPort()}|${s.webNgrokDomain}|${s.webNgrokAuthtoken}`
+}
+
+/** What to call the agent in a sentence, so a status never names the wrong one. */
+function tunnelAgentName(): string {
+  return getSettings().webTunnel === 'ngrok' ? 'ngrok' : 'cloudflared'
 }
 
 /**
@@ -369,7 +377,11 @@ function tunnelStatus(): WebTunnelStatus {
     // hostname is what a browser dials, and half of one fails at dial time
     // where it reads as a network fault rather than as this.
     if (host) return { state: 'live', host, detail: '' }
-    return { state: 'error', host: '', detail: `ngrok reported an address Forge cannot use (${tunnelState.url}).` }
+    return {
+      state: 'error',
+      host: '',
+      detail: `${tunnelAgentName()} reported an address Forge cannot use (${tunnelState.url}).`
+    }
   }
 
   if (tunnelState.state === 'starting' || tunnelState.state === 'retrying') {
@@ -381,9 +393,9 @@ function tunnelStatus(): WebTunnelStatus {
     state: 'off',
     host: '',
     detail:
-      getSettings().webTunnel === 'ngrok'
-        ? tunnelState.detail
-        : 'No way in from outside yet. Switch the tunnel on in Settings › Forge Web, or set FORGE_WEB_HOSTNAME to a tunnel you run yourself.'
+      getSettings().webTunnel === 'off'
+        ? 'No way in from outside yet. Switch the tunnel on in Settings › Forge Web, or set FORGE_WEB_HOSTNAME to a tunnel you run yourself.'
+        : tunnelState.detail
   }
 }
 
@@ -981,30 +993,89 @@ async function start(): Promise<void> {
 
 /* -------------------------------------------------------------- the tunnel
  *
- * Forge Web's own supervised ngrok agent, through the class Forge Mobile
- * already drives (electron/mobile-tunnel.ts). A second instance, a second
- * domain, a second port — and, on the free plan, a second of the account's
- * three agent sessions, which is why stopping kills the process tree.
+ * Forge Web's own supervised agent, and there are two of them to choose from
+ * because the first choice was wrong in a way nobody could see from the code.
  *
- * The lifecycle is the server's: up after it listens, down before it stops.
- * Every early return leaves a sentence behind, because a tunnel that silently
- * is not there is the failure this half of the job exists to remove.
+ * This file used to drive only `NgrokTunnel` — Forge Mobile's supervisor, a
+ * second instance on Forge Web's own port — on the reasoning that reusing a
+ * class which already downloads, spawns, restarts and gives up beat writing a
+ * second one. What that reasoning never checked is that **ngrok's free plan
+ * allows one online endpoint per account**: with the phone link up, Forge Web's
+ * agent was refused (ERR_NGROK_334) and the only way to read a browser link was
+ * to switch the phone link off. Two links that cannot both be up is one link.
+ *
+ * So `webTunnel` now names a transport rather than a boolean:
+ *
+ *  - **cloudflared** (electron/cloudflare-tunnel.ts) — the default. A quick
+ *    tunnel with no account, no domain, no token and no per-account limit, so
+ *    it runs happily beside Forge Mobile's ngrok agent. Its hostname changes on
+ *    every start, which costs nothing here and is the case the rendezvous
+ *    record was built for.
+ *  - **ngrok** — kept, and still the right answer for anybody who wants one
+ *    steady address and is content to stop the phone link to get it.
+ *
+ * The lifecycle is the server's either way: up after it listens, down before it
+ * stops. Every early return leaves a sentence behind, because a tunnel that
+ * silently is not there is the failure this half of the job exists to remove.
  */
 
 /**
- * Bring the agent up, fetching the binary first if this machine has never had
- * one. Modelled on `startTunnel` in electron/mobile-host.ts, including the
- * re-check after the download: fetching 12 MB takes long enough that the world
- * can move under it.
+ * Bring the chosen agent up, fetching its binary first if this machine has
+ * never had one. Modelled on `startTunnel` in electron/mobile-host.ts, including
+ * the re-check after the download: fetching tens of megabytes takes long enough
+ * that the world can move under it — the switch can be flipped off, or the
+ * transport changed, while the bytes are still arriving.
  */
 async function startTunnel(): Promise<void> {
   if (tunnel || tunnelStarting) return
-  const settings = getSettings()
-  if (settings.webTunnel !== 'ngrok') return
+  const mode = getSettings().webTunnel
+  if (mode === 'off') return
   if (!server) {
     setTunnelState({ state: 'error', url: '', detail: 'Turn Forge Web on first — the tunnel has nothing to carry.' })
     return
   }
+
+  tunnelStarting = true
+  try {
+    if (mode === 'cloudflared') await startCloudflared()
+    else await startNgrok()
+  } finally {
+    tunnelStarting = false
+  }
+}
+
+/**
+ * The default path, and the shortest function in this block — which is the
+ * whole argument for it. There is no credential to check, no domain to
+ * validate, and nothing for somebody to have forgotten to paste.
+ */
+async function startCloudflared(): Promise<void> {
+  const binDir = join(getDataDir(), 'bin')
+  let exe = resolveCloudflaredExe({ env: process.env, binDir })
+  if (!exe) {
+    setTunnelState({ state: 'starting', url: '', detail: 'Fetching cloudflared (one time, about 50 MB)…' })
+    const fetched = await ensureCloudflaredExe({ binDir })
+    if (!fetched.ok) {
+      setTunnelState({ state: 'error', url: '', detail: fetched.error })
+      return
+    }
+    exe = fetched.path
+  }
+  // The world may have moved during a 50 MB download; see `startTunnel`.
+  if (getSettings().webTunnel !== 'cloudflared' || !server) return
+
+  tunnel = new CloudflareTunnel({
+    exe,
+    port: webPort(),
+    onStatus: setTunnelState,
+    log: (line) => console.log(`[web] ${line}`)
+  })
+  tunnelSpec = tunnelSpecNow()
+  tunnel.start()
+}
+
+/** The steady-address path, unchanged from when it was the only one. */
+async function startNgrok(): Promise<void> {
   /*
    * The authtoken is required. The domain is not.
    *
@@ -1019,7 +1090,7 @@ async function startTunnel(): Promise<void> {
    * QR keeps the address it was given, which is why Forge Mobile still asks
    * for a reserved one.
    */
-  if (!settings.webNgrokAuthtoken) {
+  if (!getSettings().webNgrokAuthtoken) {
     setTunnelState({
       state: 'error',
       url: '',
@@ -1028,38 +1099,33 @@ async function startTunnel(): Promise<void> {
     return
   }
 
-  tunnelStarting = true
-  try {
-    const binDir = join(getDataDir(), 'bin')
-    let exe = resolveNgrokExe({ env: process.env, binDir })
-    if (!exe) {
-      setTunnelState({ state: 'starting', url: '', detail: 'Fetching ngrok (one time, about 12 MB)…' })
-      const fetched = await ensureNgrokExe({ binDir })
-      if (!fetched.ok) {
-        setTunnelState({ state: 'error', url: '', detail: fetched.error })
-        return
-      }
-      exe = fetched.path
+  const binDir = join(getDataDir(), 'bin')
+  let exe = resolveNgrokExe({ env: process.env, binDir })
+  if (!exe) {
+    setTunnelState({ state: 'starting', url: '', detail: 'Fetching ngrok (one time, about 12 MB)…' })
+    const fetched = await ensureNgrokExe({ binDir })
+    if (!fetched.ok) {
+      setTunnelState({ state: 'error', url: '', detail: fetched.error })
+      return
     }
-    if (getSettings().webTunnel !== 'ngrok' || !server) return
-
-    tunnel = new NgrokTunnel({
-      exe,
-      port: webPort(),
-      domain: getSettings().webNgrokDomain,
-      authtoken: getSettings().webNgrokAuthtoken,
-      // Whose card to send somebody to when ngrok refuses permanently. Forge
-      // Mobile's is the default in that module; this door is a different one
-      // with a different authtoken and a different domain in it.
-      settingsCard: 'Settings › Forge Web',
-      onStatus: setTunnelState,
-      log: (line) => console.log(`[web] ${line}`)
-    })
-    tunnelSpec = tunnelSpecNow()
-    tunnel.start()
-  } finally {
-    tunnelStarting = false
+    exe = fetched.path
   }
+  if (getSettings().webTunnel !== 'ngrok' || !server) return
+
+  tunnel = new NgrokTunnel({
+    exe,
+    port: webPort(),
+    domain: getSettings().webNgrokDomain,
+    authtoken: getSettings().webNgrokAuthtoken,
+    // Whose card to send somebody to when ngrok refuses permanently. Forge
+    // Mobile's is the default in that module; this door is a different one
+    // with a different authtoken and a different domain in it.
+    settingsCard: 'Settings › Forge Web',
+    onStatus: setTunnelState,
+    log: (line) => console.log(`[web] ${line}`)
+  })
+  tunnelSpec = tunnelSpecNow()
+  tunnel.start()
 }
 
 /**
@@ -1072,6 +1138,12 @@ async function startTunnel(): Promise<void> {
  * heartbeat, and an agent that has just died must have its address retracted
  * rather than left to go stale for three minutes. `refresh()` does both: it
  * re-reads `hostname()`, which is '' unless the tunnel is live.
+ *
+ * On the cloudflared path "a new address" is not an edge case but the norm — a
+ * quick tunnel is handed a different `*.trycloudflare.com` name every time the
+ * process starts — so this is the line that makes the default transport usable
+ * at all, and scripts/web-check.mjs asserts a restart-on-a-different-hostname
+ * reaches the record.
  */
 function setTunnelState(status: TunnelStatus): void {
   tunnelState = status
@@ -1079,7 +1151,11 @@ function setTunnelState(status: TunnelStatus): void {
   report()
 }
 
-/** Take the agent down — the whole process tree, or it holds a session slot. */
+/**
+ * Take the agent down — the whole process tree, whichever agent it is. A
+ * stranded ngrok holds one of the account's session slots; a stranded
+ * cloudflared holds a public address open onto a link Steve believes he closed.
+ */
 function stopTunnel(): void {
   tunnel?.stop()
   tunnel = null
@@ -1293,11 +1369,13 @@ export function registerWebHandlers(): void {
  * that picks up a sign-in, a corrected uid, or a refresh token rotated on disk.
  *
  * The tunnel gets the same treatment, and needs it more: switching
- * `webTunnel` to `'ngrok'` or pasting a domain while the link is already up
- * must start an agent now. A tunnel already running is left alone —
- * `startTunnel()` returns immediately when one exists — so this stays cheap;
- * changing the *credentials* of a running tunnel is a stop and a start, which
- * is what main.ts's change-detection asks for by calling this after the write.
+ * `webTunnel` on, or from one transport to the other, or pasting a domain while
+ * the link is already up, must start the right agent now. A tunnel already
+ * running on the settings it was started with is left alone — `startTunnel()`
+ * returns immediately when one exists — so this stays cheap; changing the
+ * transport or the credentials under a running agent is a stop and a start,
+ * which `tunnelSpec` is what detects and which main.ts's change-detection asks
+ * for by calling this after the write.
  */
 export function applyWebSettings(): void {
   const enabled = getSettings().webEnabled
@@ -1315,7 +1393,7 @@ export function applyWebSettings(): void {
   // down rather than leave a public address open onto a link Steve believes he
   // has closed, and "same switch, different domain", which an already-running
   // agent cannot honour without being restarted.
-  if (getSettings().webTunnel !== 'ngrok') {
+  if (getSettings().webTunnel === 'off') {
     if (tunnel) {
       stopTunnel()
       rendezvous?.refresh()

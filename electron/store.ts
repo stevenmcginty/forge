@@ -335,10 +335,15 @@ function defaultSettings(): Settings {
     webTokenBase: '',
     webEmail: '',
     webRefreshToken: '',
-    // Forge Web's own tunnel: the port it listens on, and no way in from
-    // outside until Steve does the one-time ngrok setup in Settings › Forge Web.
+    // Forge Web's own tunnel: the port it listens on, and the one default in
+    // this block that is not "off". A cloudflared quick tunnel needs no account,
+    // no domain and no authtoken, so switching Forge Web on is the only step
+    // there is — and it runs beside Forge Mobile's ngrok agent, which the ngrok
+    // option cannot (one online endpoint per free account). Nothing is spawned
+    // until `webEnabled` is on and the server is listening; see
+    // electron/cloudflare-tunnel.ts.
     webPort: WEB_PORT,
-    webTunnel: 'off',
+    webTunnel: 'cloudflared',
     webNgrokAuthtoken: '',
     webNgrokDomain: '',
     // The Update button types the command and stops. Turning this on is opting
@@ -772,7 +777,15 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // degrading to '' is a tunnel that refuses to start with a sentence, which
     // beats junk degrading to an argument.
     webPort: clamp(Number(s.webPort ?? WEB_PORT), 1024, 65535),
-    webTunnel: s.webTunnel === 'ngrok' ? 'ngrok' : 'off',
+    /*
+     * Three answers, and only two of them can arrive from an older file: the
+     * two spellings that existed before cloudflared did are honoured exactly,
+     * so a desktop that chose ngrok keeps ngrok and one that chose "no tunnel"
+     * keeps no tunnel. Everything else — a missing key, a typo, a settings.json
+     * written before this field existed at all — lands on the default, which is
+     * the transport that needs nothing pasted to work.
+     */
+    webTunnel: s.webTunnel === 'ngrok' ? 'ngrok' : s.webTunnel === 'off' ? 'off' : 'cloudflared',
     webNgrokAuthtoken: str(s.webNgrokAuthtoken),
     webNgrokDomain: normaliseNgrokDomain(s.webNgrokDomain),
     // Coerced rather than defaulted, like companionEnabled above: a settings.json

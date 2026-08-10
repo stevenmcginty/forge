@@ -76,6 +76,7 @@
     "mobile:tunnel": "node scripts/mobile-tunnel.mjs",
     "mobile:go": "node scripts/mobile-go.mjs",
     "tunnel:check": "node scripts/tunnel-check.mjs",
+    "cf:tunnel": "node scripts/cf-tunnel-check.mjs",
     "apk:init": "node scripts/apk-init.mjs",
     "apk:build": "node scripts/apk-build.mjs",
     "apk:release": "node scripts/apk-release.mjs",

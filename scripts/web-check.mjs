@@ -25,10 +25,11 @@
  *    revoked browser hung up on, or merely refused next time";
  *  - **settings.json, read back off disk** answers "what did signing in
  *    actually write down", the way scripts/mobile-auth-check.mjs does;
- *  - a **scripted ngrok process** answers "does the tunnel's own hostname reach
- *    the rendezvous record, and does a tunnel that dies take it away again".
- *    The supervisor is the shipped one; only the OS process is a stand-in, the
- *    same bargain scripts/tunnel-check.mjs strikes.
+ *  - a **scripted tunnel process** answers "does the tunnel's own hostname reach
+ *    the rendezvous record, does a tunnel that dies take it away again, and does
+ *    one that comes back on a *different* address replace it". Both supervisors
+ *    are the shipped ones — cloudflared's and ngrok's — and only the OS process
+ *    is a stand-in, the same bargain scripts/tunnel-check.mjs strikes.
  *
  * Two of the phases below exist because of arrangements this feature was
  * *corrected out of*, and they are the ones to keep if anything here is ever
@@ -37,8 +38,12 @@
  * in as somebody else — phase 2 sets up exactly that (Companion signed in, as
  * another account, Forge Web signed out) and demands a refusal that says why.
  * And it used to take its hostname from an environment variable, which no
- * status could ever describe honestly — phase 9 drives a real supervisor
- * instead.
+ * status could ever describe honestly — phases 9 and 9b drive real supervisors
+ * instead. Phase 9's middle is a third correction: Forge Web shipped on ngrok,
+ * whose free plan allows one online endpoint per account, so the browser link
+ * and the phone link could not both be up. The default is now a cloudflared
+ * quick tunnel, and the price of that — a new address on every start — is what
+ * the kill-and-return assertions there exist to prove has already been paid.
  *
  * Everything Google and Firebase would supply is generated or served here: an
  * RSA keypair, a self-signed X.509 certificate in the shape the securetoken
@@ -102,17 +107,30 @@ const WEB_REFRESH = 'web-refresh-token-issued-by-the-fake-identity-toolkit'
 const NGROK_DOMAIN = 'forge-web-check.ngrok-free.app'
 const NGROK_TOKEN = '2FakeNgrokAuthtoken_ForTheWebCheckOnly99'
 /**
- * Something for `resolveNgrokExe` to find, so the host never tries to download
- * an agent. It is never executed: the spawn that would run it is intercepted
- * below.
+ * The two addresses a cloudflared quick tunnel hands out — two, because they
+ * are never the same twice and that is the whole reason this transport is the
+ * default. Phase 9 kills a tunnel that is live on the first and asserts the
+ * second reaches the browser.
+ */
+const CF_HOST_ONE = 'forge-check-first-address.trycloudflare.com'
+const CF_HOST_TWO = 'forge-check-second-address.trycloudflare.com'
+/** The banner a quick tunnel prints, in the shape cloudflared really prints it. */
+const cfBanner = (host) => `2026-08-10T16:42:54Z INF |  https://${host}                      |`
+/**
+ * Something for `resolveNgrokExe` and `resolveCloudflaredExe` to find, so the
+ * host never tries to download an agent. Neither is ever executed: the spawn
+ * that would run them is intercepted below.
  */
 const FAKE_NGROK = join(dataDir, 'fake-ngrok.exe')
 writeFileSync(FAKE_NGROK, 'not a real ngrok')
+const FAKE_CLOUDFLARED = join(dataDir, 'fake-cloudflared.exe')
+writeFileSync(FAKE_CLOUDFLARED, 'not a real cloudflared')
 
 process.env['FORGE_DATA_DIR'] = dataDir
 process.env['FORGE_WEB_PORT'] = String(PORT)
 process.env['FORGE_WEB_HOSTNAME'] = HOSTNAME
 process.env['FORGE_NGROK_EXE'] = FAKE_NGROK
+process.env['FORGE_CLOUDFLARED_EXE'] = FAKE_CLOUDFLARED
 // Read by `webAllowedOrigins`, and deliberately left unset until the origins
 // phase: an override in place from the start would mask the derivation this
 // check exists to prove.
@@ -184,14 +202,15 @@ globalThis.__forgeBalloons = []
 
 const ELECTRON_STUB = 'forge-web-check:electron'
 
-/* ------------------------------------------------------- a scripted ngrok
+/* --------------------------------------------- a scripted tunnel agent
  *
- * The supervisor under test is the shipped one — `NgrokTunnel`, reached the way
- * the app reaches it, through `electron/web-host.ts`'s own `startTunnel()`. What
- * is faked is the operating-system process, and *only* for the one module that
- * spawns it: the `node:child_process` swap below is keyed on the importer, so
- * everything else in this graph (git, taskkill, whatever else main reaches for)
- * still gets the real one.
+ * The supervisors under test are the shipped ones — `CloudflareTunnel` and
+ * `NgrokTunnel`, reached the way the app reaches them, through
+ * `electron/web-host.ts`'s own `startTunnel()`. What is faked is the
+ * operating-system process, and *only* for the two modules that spawn one: the
+ * `node:child_process` swap below is keyed on the importer, so everything else
+ * in this graph (git, taskkill, whatever else main reaches for) still gets the
+ * real one.
  *
  * The stand-in carries no pid on purpose. `NgrokTunnel.stop()` kills by process
  * *tree* when it has one — `taskkill /pid <n> /T /F` — and inventing a number
@@ -226,14 +245,18 @@ function fakeAgent(args) {
 }
 
 globalThis.__forgeSpawn = (exe, args, options, realSpawn) => {
-  if (exe === FAKE_NGROK) return fakeAgent(args)
+  if (exe === FAKE_NGROK || exe === FAKE_CLOUDFLARED) return fakeAgent(args)
   return realSpawn(exe, args, options)
 }
 
 registerHooks({
   resolve(spec, context, next) {
     if (spec === 'electron') return { url: ELECTRON_STUB, shortCircuit: true }
-    if (spec === 'node:child_process' && String(context.parentURL ?? '').endsWith('mobile-tunnel.ts')) {
+    const importer = String(context.parentURL ?? '')
+    if (
+      spec === 'node:child_process' &&
+      (importer.endsWith('mobile-tunnel.ts') || importer.endsWith('cloudflare-tunnel.ts'))
+    ) {
       return { url: CHILD_PROCESS_STUB, shortCircuit: true }
     }
     if (spec.startsWith('@shared/')) {
@@ -244,7 +267,7 @@ registerHooks({
     // has extensionless CommonJS requires of its own, and rewriting one of
     // those to `./utils.ts` is how the whole check dies before its first
     // assertion, in a stack trace about a missing platform binary.
-    const fromDependency = String(context.parentURL ?? '').includes('/node_modules/')
+    const fromDependency = importer.includes('/node_modules/')
     if (!fromDependency && spec.startsWith('.') && !/\.[a-z]+$/i.test(spec)) return next(`${spec}.ts`, context)
     return next(spec, context)
   },
@@ -526,8 +549,29 @@ const frameOf = (tab, type) => tab.frames.find((f) => f.type === type)
 
 console.log('\nwebEnabled: false')
 
+/*
+ * What a desktop that has never chosen gets, read before this file writes a
+ * single setting. The tunnel is the one field in the Forge Web block that does
+ * *not* default to off, because the transport it defaults to needs no account,
+ * no domain and no token — so "switch Forge Web on" is genuinely the whole
+ * setup. The two assertions beside it are the reason that is safe to default:
+ * the link is still off, and there is still no credential anywhere.
+ */
+const fresh = store.getSettings()
+log(fresh.webTunnel === 'cloudflared', `a fresh profile picks the tunnel that needs nothing pasted (${fresh.webTunnel})`)
+log(fresh.webEnabled === false, 'while the link itself is off, so the default costs nothing until somebody switches it on')
+log(
+  fresh.webNgrokAuthtoken === '' && fresh.webNgrokDomain === '',
+  'and there is no credential stored for it to need, because it has none'
+)
+
 store.setSettings({
   webEnabled: false,
+  // Pinned rather than left at the default for the eight phases below: they are
+  // about the switch, the session and the socket, and `FORGE_WEB_HOSTNAME` is
+  // answering the address question for all of them. The tunnel gets phase 9 to
+  // itself, where the environment override is deleted first.
+  webTunnel: 'off',
   webProjectId: PROJECT,
   // Signed out: Forge Web knows *which* Firebase project to trust, and holds no
   // session of its own yet. The uid arrives when somebody signs in, in phase 3.
@@ -567,6 +611,7 @@ log(calls.length === 0, `no request left this desktop (${calls.length} made)`)
 log(host.webStatus().state === 'off', `status reads off (${host.webStatus().state})`)
 log(host.webStatus().rendezvous.published === '', 'no hostname is published')
 log(host.webStatus().url === '', 'and there is no address to hand anybody')
+log(agents.length === 0, `and no tunnel agent was spawned (${agents.length})`)
 log((await invoke('web:status')).enabled === false, 'the settings panel is told the same thing')
 
 /* ================================================================== phase 2
@@ -870,17 +915,186 @@ log(
 
 /* ================================================================== phase 9
  *
- * The tunnel: Forge Web's own supervised agent.
+ * The tunnel Forge Web reaches for by itself: a cloudflared quick tunnel.
  *
  * `FORGE_WEB_HOSTNAME` goes first, because with it set nothing below would
  * prove anything — an environment variable would be answering every question
  * the supervisor is supposed to answer. What is exercised from here is the real
- * `NgrokTunnel`, started by the real `web-host.ts`, against a scripted process.
+ * `CloudflareTunnel`, started by the real `web-host.ts`, against a scripted
+ * process.
+ *
+ * This transport is the default because ngrok's free plan allows one online
+ * endpoint per account, so Forge Web's agent and Forge Mobile's could not both
+ * be up — a live bug, not a preference. What it costs is a different hostname
+ * on every start, and the middle of this phase is the assertion that the cost
+ * is already paid for: a tunnel is killed while live on one address, comes back
+ * on another, and the browser is told the new one.
  */
 
-console.log('\nthe tunnel')
+console.log('\nthe tunnel: cloudflared, the default')
 
 delete process.env['FORGE_WEB_HOSTNAME']
+store.setSettings({ webProjectId: PROJECT, webTunnel: 'cloudflared' })
+
+const putsBeforeCf = dbCalls('PUT', `/users/${UID}/host.json`).length
+
+await invoke('web:start')
+await waitFor(() => agents.length > 0, 4000, 'the cloudflared agent to be spawned')
+const cfAgent = agents.at(-1)
+
+log(
+  JSON.stringify(cfAgent.args) === JSON.stringify(['tunnel', '--url', `http://127.0.0.1:${PORT}`, '--no-autoupdate']),
+  `the agent forwards to Forge Web's own loopback port and nothing else (${cfAgent.args.join(' ')})`
+)
+log(
+  !cfAgent.args.some((a) => /token|auth|domain/i.test(String(a))),
+  'with no credential on the command line, because this transport has none'
+)
+log(host.webStatus().tunnel.state === 'starting', `the panel reads starting (${host.webStatus().tunnel.state})`)
+log(host.webStatus().tunnel.host === '', 'and hands out no hostname yet, because there is not one yet')
+await sleep(300)
+log(
+  dbCalls('PUT', `/users/${UID}/host.json`).length === putsBeforeCf,
+  'nothing is published while the tunnel is still coming up'
+)
+
+/* ------------------------------------------- the door that stays shut */
+
+// Taken first, while nothing has been published, because a flag parser speaks
+// at startup and that is the only permanent refusal this transport has: there
+// is no credential to reject. Retrying it buys nothing but the same sentence at
+// sixty-second intervals, so the supervisor must stop and repeat what it was
+// told rather than translate it into an instruction nobody can act on.
+cfAgent.say('Incorrect Usage. flag provided but not defined: -nope')
+cfAgent.die(1)
+await waitFor(() => host.webStatus().tunnel.state === 'error', 8000, 'the refusal to be reported')
+
+const cfDead = host.webStatus()
+log(cfDead.tunnel.state === 'error', `a refused agent reads error, not live (${cfDead.tunnel.state})`)
+log(
+  /flag provided but not defined/.test(cfDead.tunnel.detail),
+  `with cloudflared's own complaint in it ("${cfDead.tunnel.detail}")`
+)
+log(cfDead.tunnel.host === '' && cfDead.url === '', 'and no stale address is handed to anybody')
+log(
+  dbCalls('PUT', `/users/${UID}/host.json`).length === putsBeforeCf,
+  'and a tunnel that never came up advertised nothing on the way down'
+)
+
+/* --------------------------------------- and now one that actually works */
+
+// Switching off and on is the deliberate retry a permanent refusal asks for.
+const cfAgentsBeforeRetry = agents.length
+await invoke('web:stop')
+await invoke('web:start')
+await waitFor(() => agents.length > cfAgentsBeforeRetry, 4000, 'a second cloudflared agent')
+const cfLive = agents.at(-1)
+
+cfLive.say(cfBanner(CF_HOST_ONE))
+await waitFor(() => host.webStatus().tunnel.state === 'live', 4000, 'the quick tunnel to go live')
+
+log(host.webStatus().tunnel.host === CF_HOST_ONE, `the address in the banner is the one the panel shows (${host.webStatus().tunnel.host})`)
+log(host.webStatus().url === `wss://${CF_HOST_ONE}${WEB_WS_PATH}`, `and the address it hands out is the tunnel's (${host.webStatus().url})`)
+
+await waitFor(
+  () => dbCalls('PUT', `/users/${UID}/host.json`).at(-1)?.body?.host === CF_HOST_ONE,
+  20_000,
+  'the quick tunnel hostname to be published'
+)
+log(
+  dbCalls('PUT', `/users/${UID}/host.json`).at(-1)?.body?.host === CF_HOST_ONE,
+  `the tunnel's own hostname reaches the rendezvous record (${dbCalls('PUT', `/users/${UID}/host.json`).at(-1)?.body?.host})`
+)
+
+/* ------------------------------ the case this transport is chosen despite */
+
+// A quick tunnel is anonymous: the address is handed back when the process ends
+// and a different one is issued to the next. So the agent is killed while live,
+// and what has to happen — without anybody touching Settings — is that the
+// record stops naming the dead address and starts naming the new one. This is
+// the whole reason the rendezvous record exists, and it is the one assertion in
+// this file that could not be made against a reserved domain.
+const cfAgentsBeforeFlap = agents.length
+cfLive.die(1)
+await waitFor(() => agents.length > cfAgentsBeforeFlap, 8000, 'the supervisor to bring it back')
+const cfLive2 = agents.at(-1)
+log(cfLive2 !== cfLive, 'a tunnel that dies is restarted rather than mourned')
+log(host.webStatus().tunnel.host === '', 'and hands out nothing in the meantime — the old address answers for nobody now')
+
+cfLive2.say(cfBanner(CF_HOST_TWO))
+await waitFor(() => host.webStatus().tunnel.host === CF_HOST_TWO, 8000, 'the second address')
+log(host.webStatus().tunnel.host === CF_HOST_TWO, `it comes back on a different address, and the panel says so (${host.webStatus().tunnel.host})`)
+
+await waitFor(
+  () => dbCalls('PUT', `/users/${UID}/host.json`).at(-1)?.body?.host === CF_HOST_TWO,
+  20_000,
+  'the new address to be republished'
+)
+const afterFlap = dbCalls('PUT', `/users/${UID}/host.json`).at(-1)
+log(afterFlap.body?.host === CF_HOST_TWO, `the record follows it, so a browser dials the address that is live (${afterFlap.body?.host})`)
+log(host.webStatus().rendezvous.published === CF_HOST_TWO, 'and the desktop knows which one it is advertising')
+
+/* ------------------------------------------- switching the tunnel off */
+
+// Off has to mean off: the agent goes, and so does the advertisement. A record
+// left behind is up to three minutes of browsers dialling a public address that
+// Steve believes he has just closed. Done here, from a record that was just
+// confirmed published, so what is observed is the retraction and not a leftover.
+const deletesBeforeOff = dbCalls('DELETE', `/users/${UID}/host.json`).length
+store.setSettings({ webTunnel: 'off' })
+host.applyWebSettings()
+
+log(cfLive2.killed === true, 'switching the tunnel off takes the running agent down')
+log(host.webStatus().tunnel.state === 'off', `and the panel reads off (${host.webStatus().tunnel.state})`)
+await waitFor(
+  () => dbCalls('DELETE', `/users/${UID}/host.json`).length > deletesBeforeOff,
+  20_000,
+  'the record to be retracted'
+)
+log(
+  dbCalls('DELETE', `/users/${UID}/host.json`).length > deletesBeforeOff,
+  'the published record is retracted rather than left for browsers to dial'
+)
+log(host.webStatus().rendezvous.published === '', 'and the desktop knows it is advertising nothing')
+
+/* ------------------------------- the other transport is still reachable */
+
+// The whole point of keeping ngrok: somebody who wants one steady address, and
+// is content to stop the phone link to get it, changes one setting. What must
+// happen is a *different agent*, on ngrok's command line, without Forge Web
+// being restarted around it.
+const agentsBeforeSwitch = agents.length
+store.setSettings({ webTunnel: 'ngrok', webNgrokDomain: NGROK_DOMAIN, webNgrokAuthtoken: NGROK_TOKEN })
+host.applyWebSettings()
+await waitFor(() => agents.length > agentsBeforeSwitch, 4000, 'the ngrok agent to take over')
+
+const switched = agents.at(-1)
+log(switched.args.includes(`--url=https://${NGROK_DOMAIN}`), `switching to ngrok really runs ngrok (${switched.args.join(' ')})`)
+log(switched.args.includes('--authtoken'), 'with the account this desktop was told to use')
+
+switched.say(`{"lvl":"info","msg":"started tunnel","url":"https://${NGROK_DOMAIN}"}`)
+await waitFor(() => host.webStatus().tunnel.host === NGROK_DOMAIN, 8000, 'the ngrok tunnel to go live')
+await waitFor(
+  () => dbCalls('PUT', `/users/${UID}/host.json`).at(-1)?.body?.host === NGROK_DOMAIN,
+  20_000,
+  'the steady address to be published'
+)
+log(
+  dbCalls('PUT', `/users/${UID}/host.json`).at(-1)?.body?.host === NGROK_DOMAIN,
+  'and the record names it, exactly as it named the quick tunnel'
+)
+
+await invoke('web:stop')
+
+/* ================================================================= phase 9b
+ *
+ * The same questions asked of the ngrok supervisor, from a cold start — the
+ * transport this feature shipped on, and still the right answer for anybody who
+ * wants one address forever.
+ */
+
+console.log('\nthe tunnel: ngrok, for a steady address')
+
 store.setSettings({
   webProjectId: PROJECT,
   webTunnel: 'ngrok',
@@ -890,9 +1104,10 @@ store.setSettings({
 
 const putsBeforeTunnel = dbCalls('PUT', `/users/${UID}/host.json`).length
 const deletesBeforeTunnel = dbCalls('DELETE', `/users/${UID}/host.json`).length
+const agentsBeforeNgrok = agents.length
 
 await invoke('web:start')
-await waitFor(() => agents.length > 0, 4000, 'the ngrok agent to be spawned')
+await waitFor(() => agents.length > agentsBeforeNgrok, 4000, 'the ngrok agent to be spawned')
 const agent = agents[agents.length - 1]
 
 log(agent.args.includes(`--url=https://${NGROK_DOMAIN}`), `the agent binds Forge Web's own domain (${NGROK_DOMAIN})`)
