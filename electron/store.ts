@@ -33,6 +33,17 @@ import type {
 import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
 
 /**
+ * Forge Web's listen port — next door to Forge Mobile's 8420, so one machine
+ * can run both links at once.
+ *
+ * Spelled here rather than in shared/web.ts because that file is the *wire
+ * protocol* both ends agree on, and a browser never dials this number: the
+ * listener is loopback-only and a tunnel forwards to it. See the note on
+ * `webPort` in shared/types.ts, and `webPort()` in electron/web-host.ts.
+ */
+const WEB_PORT = 8421
+
+/**
  * Dead-simple JSON persistence in %APPDATA%\Forge.
  *
  *   settings.json          app settings + agent profiles + window bounds
@@ -302,6 +313,22 @@ function defaultSettings(): Settings {
     // "Accept new browsers" is disarmed, for the same reason mobileAcceptUntil
     // is: the armed state is a deadline, not a switch.
     webAcceptUntil: 0,
+    // Forge Web's own Firebase session: unconfigured and signed out. Not a read
+    // of the companion* fields above — see the block comment on `webApiKey` in
+    // shared/types.ts for why the two features share a provider and nothing
+    // else. Signed out means no rendezvous record is published at all.
+    webApiKey: '',
+    webDatabaseURL: '',
+    webAuthBase: '',
+    webTokenBase: '',
+    webEmail: '',
+    webRefreshToken: '',
+    // Forge Web's own tunnel: the port it listens on, and no way in from
+    // outside until Steve does the one-time ngrok setup in Settings › Forge Web.
+    webPort: WEB_PORT,
+    webTunnel: 'off',
+    webNgrokAuthtoken: '',
+    webNgrokDomain: '',
     // The Update button types the command and stops. Turning this on is opting
     // in to a settings page that can start an installer with one click.
     updatesAutoRun: false,
@@ -699,6 +726,26 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // The same clamp as the phone link's, because it is the same window: see
     // ACCEPT_WINDOW_MS in shared/mobile.ts, and the note on `webAcceptUntil`.
     webAcceptUntil: acceptUntil(s.webAcceptUntil),
+    // Forge Web's own Firebase session. Trimmed exactly like the companion*
+    // fields above and for the same reason: every one of these is pasted by
+    // hand out of the Firebase console, and a trailing space in a URL is a
+    // mystery bug. The refresh token is the only credential here; a password
+    // never reaches this file, and neither does an ID token.
+    webApiKey: str(s.webApiKey),
+    webDatabaseURL: str(s.webDatabaseURL).replace(/\/+$/, ''),
+    webAuthBase: str(s.webAuthBase).replace(/\/+$/, ''),
+    webTokenBase: str(s.webTokenBase).replace(/\/+$/, ''),
+    webEmail: str(s.webEmail),
+    webRefreshToken: str(s.webRefreshToken),
+    // Forge Web's own tunnel, with the same rules the phone link's gets: the
+    // port is clamped to a legal one, and the domain is shape-checked rather
+    // than merely trimmed because it ends up on ngrok's command line. Junk
+    // degrading to '' is a tunnel that refuses to start with a sentence, which
+    // beats junk degrading to an argument.
+    webPort: clamp(Number(s.webPort ?? WEB_PORT), 1024, 65535),
+    webTunnel: s.webTunnel === 'ngrok' ? 'ngrok' : 'off',
+    webNgrokAuthtoken: str(s.webNgrokAuthtoken),
+    webNgrokDomain: normaliseNgrokDomain(s.webNgrokDomain),
     // Coerced rather than defaulted, like companionEnabled above: a settings.json
     // written before M10 has no key, and the answer for that file is "no".
     updatesAutoRun: Boolean(s.updatesAutoRun),

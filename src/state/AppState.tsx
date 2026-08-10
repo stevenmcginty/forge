@@ -278,6 +278,22 @@ const FALLBACK_SETTINGS: Settings = {
   webUid: '',
   webDevices: [],
   webAcceptUntil: 0,
+  // Forge Web's own Firebase session and its own tunnel — signed out, and no
+  // way in from outside. Same rule as every other fallback here: the safe
+  // answer before the real settings land.
+  webApiKey: '',
+  webDatabaseURL: '',
+  webAuthBase: '',
+  webTokenBase: '',
+  webEmail: '',
+  webRefreshToken: '',
+  // 8421, as electron/store.ts spells it. Not imported, because that module is
+  // main's and this fallback is only ever used for the instant before main's
+  // real settings arrive.
+  webPort: 8421,
+  webTunnel: 'off',
+  webNgrokAuthtoken: '',
+  webNgrokDomain: '',
   customTools: [],
   updatesAutoRun: false,
   // Blank until the real settings arrive. The card checks `state.ready`, so it

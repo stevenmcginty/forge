@@ -1740,7 +1740,7 @@ export interface Settings {
   /* -------------------------------------------------------------- forge web
    *
    * Forge in a browser tab: the same terminals, mirrored, behind a public
-   * address. See docs/forge-web.md, whose security posture these five fields
+   * address. See docs/forge-web.md, whose security posture these fields
    * implement between them.
    *
    * The same posture as the Companion and Forge Mobile above, and here it is
@@ -1748,6 +1748,13 @@ export interface Settings {
    * behind a URL anybody can reach, so nothing here binds a socket, publishes
    * a hostname or reads a credential until `webEnabled` is true *and* the
    * project and uid below are both filled in.
+   *
+   * Note the shape of the block: the door (`webEnabled`, `webProjectId`,
+   * `webUid`, `webDevices`, `webAcceptUntil`), then Forge Web's *own* Firebase
+   * session, then its *own* tunnel. The session fields are a deliberate mirror
+   * of the `companion*` ones rather than a read of them — the two features
+   * share an identity provider and nothing else, for the reason spelled out on
+   * `webUid` below.
    */
 
   /** Master switch. False = nothing listens, nothing publishes, nothing verifies. */
@@ -1776,6 +1783,12 @@ export interface Settings {
    * signing the Companion in as a different account would silently re-point
    * who gets a shell on this machine. Which account may reach the terminals is
    * a decision somebody makes once, on purpose, here.
+   *
+   * Written by Forge Web's own sign-in and by nothing else — see
+   * `webRefreshToken`. That *is* the deliberate decision: a human typed this
+   * account's password into the Forge Web card. Signing Forge Web out clears
+   * it, which is what makes a signed-out desktop admit nobody rather than
+   * quietly keep admitting the last account it saw.
    */
   webUid: string
   /**
@@ -1793,6 +1806,103 @@ export interface Settings {
    * and clamped by the store so a hand-edited file cannot arm it for a week.
    */
   webAcceptUntil: number
+
+  /* --------------------------------------------- forge web's own session
+   *
+   * The Firebase session Forge Web publishes its rendezvous record with. Its
+   * own — not the Companion's.
+   *
+   * This block exists because the first cut of the feature did read the
+   * Companion's: `web-host.ts` would only publish while `companionUid` equalled
+   * `webUid`, which made switching Forge Web on depend on a *different feature*
+   * being signed in as the same account, and made signing the Companion out
+   * stop Forge Web publishing without saying so. That is precisely what the
+   * note on `webUid` above says must never happen, arrived at from the other
+   * direction.
+   *
+   * So the two features share an identity *provider* — the same Firebase
+   * project, the same accounts, the same `electron/companion/rest.ts` client —
+   * and nothing else. Same field names, same rules, same storage decision as
+   * the `companion*` block: the credential that reaches disk is a refresh
+   * token, never a password and never an ID token.
+   */
+
+  /**
+   * Firebase Web API key of the project Forge Web signs into. Public by
+   * design, exactly as `companionApiKey` is: it names the project, it
+   * authorises nothing — database.rules.json is what authorises.
+   */
+  webApiKey: string
+  /**
+   * RTDB root, e.g. `https://forge-sync-default-rtdb.europe-west1.firebasedatabase.app`.
+   * Against the emulator suite: `http://127.0.0.1:9000?ns=forge-sync-default-rtdb`
+   * — any query string here is carried onto every request.
+   */
+  webDatabaseURL: string
+  /**
+   * Identity Toolkit base. Blank = Google's real one. Set only to point Forge
+   * Web's sign-in at the emulator, which serves the same REST API under a path
+   * prefix: `http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1`.
+   */
+  webAuthBase: string
+  /** Secure Token base. Blank = Google's. Emulator: same host, `/securetoken.googleapis.com/v1`. */
+  webTokenBase: string
+  /** The account Forge Web is signed in as. Kept after sign-out so the form pre-fills. */
+  webEmail: string
+  /**
+   * The only credential Forge Web stores, and never the password: a Firebase
+   * refresh token, revocable from the Firebase console without touching any
+   * password Steve uses elsewhere.
+   *
+   * Blank means signed out, and a signed-out Forge Web publishes no rendezvous
+   * record at all — it says so in `WebStatus.session.detail` rather than
+   * quietly doing nothing, because "quietly doing nothing" is the failure this
+   * whole block was written to end.
+   */
+  webRefreshToken: string
+
+  /* ------------------------------------------------ forge web's own tunnel
+   *
+   * How the outside world reaches this desktop's web listener. Forge Mobile's
+   * ngrok supervisor (electron/mobile-tunnel.ts) drives it — the same code,
+   * a second instance, its own port and its own domain. Off by default like
+   * everything else here, and inert until `webEnabled` as well: the supervisor
+   * is only started once the server is actually listening.
+   */
+
+  /**
+   * The loopback port the web listener binds, and the port the tunnel forwards
+   * to. Next door to Forge Mobile's 8420, so a machine can run both.
+   *
+   * `FORGE_WEB_PORT` still overrides it — that seam predates this field and is
+   * how a second Forge on one box gets out of the first one's way.
+   */
+  webPort: number
+  /**
+   * `'ngrok'` runs a supervised ngrok agent against the domain below whenever
+   * Forge Web is listening, so a browser keeps one address forever. `'off'`
+   * means Forge runs no tunnel: either there is no way in from outside, or one
+   * is run by hand and named with `FORGE_WEB_HOSTNAME`.
+   */
+  webTunnel: TunnelMode
+  /**
+   * The ngrok authtoken for Forge Web's agent, from the dashboard. Stored like
+   * every other key in this file: plain, local, and revocable at the far end.
+   * Handed to ngrok as an argument — never written into an ngrok config file —
+   * and redacted from every log line and status detail this app emits.
+   *
+   * Its own field rather than a read of `mobileNgrokAuthtoken` for the reason
+   * the whole session block above exists: one feature's credentials must not
+   * decide whether another feature works.
+   */
+  webNgrokAuthtoken: string
+  /**
+   * The domain Forge Web's tunnel binds, copied off the ngrok dashboard.
+   * Normalised and shape-checked by the store, because it ends up on a command
+   * line. Must not be the same domain as `mobileNgrokDomain`: one domain
+   * forwards to one port, and both links want their own.
+   */
+  webNgrokDomain: string
 
   /* ------------------------------------------------ updates & tools (M10) */
   /**
@@ -1917,26 +2027,39 @@ export interface MobileWatchEvent {
 
 export type MobileState = 'off' | 'starting' | 'listening' | 'error'
 
-/* ------------------------------------------------------- the ngrok tunnel */
+/* ------------------------------------------------------- the ngrok tunnel
+ *
+ * Written for Forge Mobile and now shared with Forge Web, which supervises its
+ * own agent on its own port through the same class. The names below are
+ * therefore feature-neutral, with the original `Mobile*` spellings kept as
+ * aliases: they appear in `MobileStatus`, in electron/mobile-host.ts and in
+ * scripts/tunnel-check.mjs, and renaming a type across three files to say the
+ * same thing is churn rather than clarity.
+ */
 
-/** Which transport carries the link past the front door. See mobile-tunnel.ts. */
-export type MobileTunnelMode = 'off' | 'ngrok'
+/** Which transport carries a link past the front door. See mobile-tunnel.ts. */
+export type TunnelMode = 'off' | 'ngrok'
 
-export type MobileTunnelState = 'off' | 'starting' | 'live' | 'retrying' | 'error'
+export type TunnelState = 'off' | 'starting' | 'live' | 'retrying' | 'error'
 
 /**
- * The tunnel's slice of MobileStatus. `error` is terminal on purpose: it means
+ * What a supervised tunnel is doing. `error` is terminal on purpose: it means
  * a door that will not open (bad authtoken, someone else's domain, no session
  * allowance left), where retrying buys nothing — `detail` says which key to go
  * and fix. Transient trouble shows as `retrying` and never needs Steve.
  */
-export interface MobileTunnelStatus {
-  state: MobileTunnelState
+export interface TunnelStatus {
+  state: TunnelState
   /** The public https URL ngrok reported, while live. */
   url: string
   /** A human sentence, or empty when there is nothing to say. Never a token. */
   detail: string
 }
+
+/** Forge Mobile's spellings. Identical types — see the block comment above. */
+export type MobileTunnelMode = TunnelMode
+export type MobileTunnelState = TunnelState
+export type MobileTunnelStatus = TunnelStatus
 
 /** What the Settings panel shows about the link. */
 export interface MobileStatus {
@@ -2018,22 +2141,50 @@ export type WebState = 'off' | 'starting' | 'listening' | 'error'
 /**
  * How the outside world reaches this desktop, as far as Forge can tell.
  *
- * Thinner than `MobileTunnelStatus`, and the difference is honest rather than
- * lazy: Forge Mobile *supervises* its own ngrok agent, so it knows whether the
- * process is starting, live or refusing. Forge Web does not run the tunnel —
- * `cloudflared` is a named tunnel somebody set up once, outside Forge (see
- * docs/forge-web.md, "What only Steve can do", item 3) — so the only thing this
- * desktop honestly knows is whether it has been told a hostname to publish.
- * Inventing a `live` here that meant "we have a string" would be a status panel
- * lying about a process it cannot see.
+ * Four of these five words mean the same as they do on `TunnelStatus`, because
+ * they describe the same supervised ngrok agent: Forge Web now runs one of its
+ * own (electron/mobile-tunnel.ts, a second instance on its own port), so
+ * `starting`, `live` and `error` are observations rather than guesses. The
+ * supervisor's `retrying` is folded into `starting` — from the settings panel's
+ * point of view a tunnel that is coming back up is a tunnel that is coming up,
+ * and the reason it is having to is already in `detail`.
+ *
+ * `configured` is the odd one out and is kept deliberately: it means "somebody
+ * gave us a hostname we do not supervise", which is what `FORGE_WEB_HOSTNAME`
+ * does. It is not a claim that anything is listening at the far end, because on
+ * that path Forge did not start the tunnel and cannot see it — and a panel that
+ * said `live` about a process it has never met would be lying.
  */
-export type WebTunnelState = 'off' | 'configured'
+export type WebTunnelState = 'off' | 'starting' | 'live' | 'configured' | 'error'
 
 export interface WebTunnelStatus {
   state: WebTunnelState
   /** The bare hostname the browser is told to dial, or '' when there is none. */
   host: string
-  /** A human sentence, or empty when there is nothing to say. */
+  /** A human sentence, or empty when there is nothing to say. Never a token. */
+  detail: string
+}
+
+/**
+ * Forge Web's own Firebase session, as the settings panel should show it.
+ *
+ * Its own — the Companion's sign-in is a different feature and cannot stand in
+ * for it (see the `webApiKey` block in `Settings`). This rides `WebStatus`
+ * rather than a stream of its own for the reason everything else here does: a
+ * panel that has to subscribe to two things is a panel that forgets one.
+ *
+ * `detail` is the load-bearing field. A signed-out Forge Web is not an error
+ * and not a silence; it is a sentence saying which door to go and open, and the
+ * whole point of this status is that the panel can show it.
+ */
+export interface WebSessionStatus {
+  /** True when there is a refresh token and a uid to publish under. */
+  signedIn: boolean
+  /** The account, kept after sign-out so the form pre-fills. */
+  email: string
+  /** The uid the rendezvous record is published under. '' when signed out. */
+  uid: string
+  /** Why publishing cannot happen yet, or '' when nothing is in the way. */
   detail: string
 }
 
@@ -2052,10 +2203,11 @@ export interface WebStatus {
   enabled: boolean
   state: WebState
   /**
-   * True when `webProjectId` and `webUid` are both filled in. Separate from
-   * `enabled` because they are two different things to tell somebody: the
-   * switch is off, versus the switch is on and this desktop admits nobody
-   * because it does not know whose tokens to accept.
+   * True when this desktop knows whose tokens to accept *and* holds the session
+   * it would publish its address with: a project id, a uid, and Forge Web's own
+   * Firebase credentials. Separate from `enabled` because they are two
+   * different things to tell somebody: the switch is off, versus the switch is
+   * on and nothing can come of it yet. `session.detail` says which.
    */
   configured: boolean
   /** Where it is actually listening, once it is. Loopback — see web-host.ts. */
@@ -2074,9 +2226,22 @@ export interface WebStatus {
   acceptUntil: number
   /** A human sentence, or empty when there is nothing to say. */
   detail: string
+  /** Forge Web's own Firebase session — see `WebSessionStatus`. */
+  session: WebSessionStatus
   tunnel: WebTunnelStatus
   rendezvous: WebRendezvousStatus
 }
+
+/**
+ * The answer to `window.forge.web.signIn()`. The same shape as
+ * `CompanionSignInResult` and for the same reason: the two failures a person
+ * can act on (wrong password, unconfigured project) are sentences, not codes.
+ *
+ * `created` is true when the account did not exist and this call made it, which
+ * the panel says out loud — signing in to a *new* account on the machine that
+ * is about to serve a shell is worth a second look.
+ */
+export type WebSignInResult = { ok: true; uid: string; created: boolean } | { ok: false; error: string }
 
 /**
  * "A browser wants in." Main → renderer, and the same shape (and the same

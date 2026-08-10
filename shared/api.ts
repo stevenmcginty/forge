@@ -28,6 +28,7 @@ import type {
   MobileWatchEvent,
   WebApprovalEvent,
   WebCommandEvent,
+  WebSignInResult,
   WebStatus,
   OpenRouterCallRequest,
   OpenRouterCallResult,
@@ -546,12 +547,15 @@ export interface ForgeApi {
   /**
    * Forge Web — the same terminals in a browser tab, behind a public address.
    *
-   * Deliberately smaller than `mobile` above, and the missing members are the
+   * Deliberately smaller than `mobile` above, and the missing member is the
    * point: there is no `pair`, because the credential is a Firebase ID token
    * the browser already holds and this desktop verifies against Google's keys
-   * on every connection, so there is nothing for the desk to mint. And there is
-   * no tunnel control, because Forge does not run the tunnel — see
-   * `WebTunnelStatus` in shared/types.ts.
+   * on every connection, so there is nothing for the desk to mint.
+   *
+   * There *is* a sign-in, and it is Forge Web's own — see `signIn` below and
+   * the note on `webUid` in shared/types.ts. The tunnel has no control of its
+   * own: it is settings (`webTunnel`, `webNgrokDomain`, `webNgrokAuthtoken`)
+   * plus the link's own switch, and its state rides `WebStatus.tunnel`.
    *
    * See docs/forge-web.md and electron/web-host.ts.
    */
@@ -561,9 +565,29 @@ export interface ForgeApi {
     start(): Promise<WebStatus>
     /**
      * Stop listening and close every socket, telling the browsers why first.
-     * Retracts the rendezvous record. Persists `webEnabled: false`.
+     * Retracts the rendezvous record and stops the tunnel. Persists
+     * `webEnabled: false`.
      */
     stop(): Promise<WebStatus>
+    /**
+     * Sign Forge Web in to Firebase, creating the account if it is new.
+     *
+     * Its own session, sharing only a provider with `companion.signIn` — the
+     * uid this returns is the one uid this desktop will admit and the one it
+     * publishes its address under. The password is used for a single HTTPS POST
+     * and then dropped; a refresh token is what reaches settings.json.
+     *
+     * Does **not** switch the link on. Signing in says who may reach this
+     * desktop; `start()` is the separate, deliberate act that lets them.
+     */
+    signIn(email: string, password: string): Promise<WebSignInResult>
+    /**
+     * Sign out: the published address is retracted first, then the credential
+     * and the uid are dropped. The email is kept so the form pre-fills. A
+     * signed-out Forge Web admits nobody and publishes nothing, and says so in
+     * `WebStatus.session.detail`.
+     */
+    signOut(): Promise<WebStatus>
     /**
      * Arm or disarm "Accept new browsers". While armed, a browser this desktop
      * has never approved may *ask*, which raises the prompt here; nothing is
