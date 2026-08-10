@@ -670,7 +670,21 @@ async function main() {
   )
 
   await page.click('.ghrow[data-kind="file"]')
-  await waitFor(() => count('[data-testid="github-editor"]').then((n) => n > 0), 15_000, 'the editor')
+  /*
+   * Wait for the editor to have *contents*, not merely to exist.
+   *
+   * The textarea is rendered as soon as a file is selected and filled when the
+   * fetch settles, so waiting on the element alone races the network — and it
+   * is a race that only ever fails one way, reading an empty string and
+   * reporting it as "GitHub sent the wrong bytes". It went from occasional to
+   * reliable without anything in web/ changing, which is what a timing-shaped
+   * check does when the machine around it gets busier.
+   */
+  await waitFor(
+    () => page.inputValue('[data-testid="github-editor"]').then((v) => v.length > 0).catch(() => false),
+    15_000,
+    'the editor to be filled'
+  )
   const opened = await page.inputValue('[data-testid="github-editor"]')
   log(
     opened.includes('A repository that lives only inside npm run web:offline'),
