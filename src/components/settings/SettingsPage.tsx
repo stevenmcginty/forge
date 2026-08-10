@@ -8,6 +8,7 @@ import { AppearanceSection } from './AppearanceSection'
 import { ModelsSection } from './ModelsSection'
 import { ShotsSection } from './ShotsSection'
 import { MobileSection } from './MobileSection'
+import { WebSection } from './WebSection'
 import { TerminalSection } from './TerminalSection'
 import { UpdatesSection } from './UpdatesSection'
 import { VoiceSection } from './VoiceSection'
@@ -34,6 +35,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName; blur
   { id: 'appearance', label: 'Appearance', icon: 'palette', blurb: 'themes and type' },
   { id: 'screenshots', label: 'Screenshots', icon: 'camera', blurb: 'the shelf' },
   { id: 'mobile', label: 'Forge Mobile', icon: 'phone', blurb: 'your terminals, on your phone' },
+  { id: 'web', label: 'Forge Web', icon: 'globe', blurb: 'your terminals, in a browser' },
   { id: 'updates', label: 'Updates & tools', icon: 'restart', blurb: 'CLIs, and Forge itself' },
   { id: 'advanced', label: 'Advanced', icon: 'gear', blurb: 'paths and versions' }
 ]
@@ -121,6 +123,7 @@ export function SettingsPage(): ReactNode {
             {section === 'appearance' ? <AppearanceSection /> : null}
             {section === 'screenshots' ? <ShotsSection /> : null}
             {section === 'mobile' ? <MobileSection /> : null}
+            {section === 'web' ? <WebSection /> : null}
             {section === 'updates' ? <UpdatesSection /> : null}
             {section === 'advanced' ? <AdvancedSection /> : null}
           </div>
