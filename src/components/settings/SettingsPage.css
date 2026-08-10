@@ -1542,27 +1542,6 @@
   container-name: webset;
 }
 
-/*
- * `height: auto`, and it is not decoration.
- *
- * `src/components/SkillsFlyout.css` declares its own global `.srow` — a
- * different row, in a different component, that happens to have picked the same
- * class name — and that one sets `height: 38px`. Both files land in one
- * stylesheet, the flyout's comes later, and equal specificity means it wins
- * everywhere: every row on this settings page is clamped to 38px, whatever it
- * contains. The settings row above declares `min-height: 30px` and no height at
- * all, so growing with its content is what it was written to do.
- *
- * The rows here carry two-line hints and, when the column is narrow, a control
- * on its own line — so this section is where a 38px clamp stops being invisible
- * and starts drawing labels through each other. Undone for this section only:
- * the real repair is to scope the flyout's `.srow`, and that is a different
- * component's file and a different job.
- */
-.sset[aria-label='Forge Web'] .srow {
-  height: auto;
-}
-
 @container webset (max-width: 460px) {
   .srow {
     flex-wrap: wrap;

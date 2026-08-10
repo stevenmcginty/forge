@@ -117,7 +117,7 @@
 
 /* ------------------------------------------------------------- skill row */
 
-.srow {
+.sfly .srow {
   position: relative;
   display: flex;
   align-items: center;
@@ -132,16 +132,16 @@
     border-color var(--dur-fast) var(--ease-out);
 }
 
-.srow:active {
+.sfly .srow:active {
   cursor: grabbing;
 }
 
-.srow:hover {
+.sfly .srow:hover {
   background: var(--bg-hover);
 }
 
 /* An enabled skill is live in every session on the machine — worth a seam. */
-.srow[data-enabled='true']::before {
+.sfly .srow[data-enabled='true']::before {
   content: '';
   position: absolute;
   left: -1px;
@@ -152,7 +152,7 @@
   background: var(--accent);
 }
 
-.srow__grip {
+.sfly .srow__grip {
   flex: none;
   display: grid;
   place-items: center;
@@ -165,12 +165,12 @@
   pointer-events: none;
 }
 
-.srow:hover .srow__grip {
+.sfly .srow:hover .srow__grip {
   opacity: 1;
 }
 
 
-.srow__text {
+.sfly .srow__text {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -178,27 +178,27 @@
   min-width: 0;
 }
 
-.srow__name {
+.sfly .srow__name {
   font-size: var(--t-md);
   color: var(--text-secondary);
 }
 
-.srow[data-enabled='true'] .srow__name {
+.sfly .srow[data-enabled='true'] .srow__name {
   color: var(--text-primary);
 }
 
-.srow__desc {
+.sfly .srow__desc {
   font-size: var(--t-eyebrow);
   color: var(--text-dim);
 }
 
-.srow[data-problem='true'] .srow__desc {
+.sfly .srow[data-problem='true'] .srow__desc {
   color: var(--warn);
 }
 
 /* A machine skill is live by definition — a seam in the muted colour, so it
    reads as "already true" rather than "switched on by you". */
-.srow[data-machine='true']::before {
+.sfly .srow[data-machine='true']::before {
   content: '';
   position: absolute;
   left: -1px;
@@ -209,11 +209,11 @@
   background: var(--text-dim);
 }
 
-.srow[data-machine='true'] .srow__name {
+.sfly .srow[data-machine='true'] .srow__name {
   color: var(--text-primary);
 }
 
-.srow__live {
+.sfly .srow__live {
   flex: none;
   height: 15px;
   padding: 0 var(--s-2);
@@ -227,7 +227,7 @@
 }
 
 /* "this name exists in another agent's folder too" — a hint, never a blocker */
-.srow__dupe {
+.sfly .srow__dupe {
   flex: none;
   height: 15px;
   padding: 0 var(--s-2);
@@ -242,7 +242,7 @@
 
 /* ---------------------------------------------------------------- switch */
 
-.srow__switch {
+.sfly .srow__switch {
   flex: none;
   position: relative;
   width: 26px;
@@ -255,26 +255,26 @@
     border-color var(--dur-fast) var(--ease-out);
 }
 
-.srow__switch:hover {
+.sfly .srow__switch:hover {
   border-color: var(--accent-line);
 }
 
-.srow__switch[aria-checked='true'] {
+.sfly .srow__switch[aria-checked='true'] {
   background: var(--accent-wash);
   border-color: var(--accent-line);
 }
 
-.srow__switch[data-conflict='true'],
-.srow__switch[data-conflict='true']:hover {
+.sfly .srow__switch[data-conflict='true'],
+.sfly .srow__switch[data-conflict='true']:hover {
   background: var(--danger-soft);
   border-color: var(--danger-line);
 }
 
-.srow__switch[disabled] {
+.sfly .srow__switch[disabled] {
   opacity: 0.5;
 }
 
-.srow__knob {
+.sfly .srow__knob {
   position: absolute;
   top: 2px;
   left: 2px;
@@ -287,23 +287,23 @@
     background var(--dur-fast) var(--ease-out);
 }
 
-.srow__switch[aria-checked='true'] .srow__knob {
+.sfly .srow__switch[aria-checked='true'] .srow__knob {
   transform: translateX(11px);
   background: var(--accent);
 }
 
-.srow__menu {
+.sfly .srow__menu {
   flex: none;
   width: 22px;
   height: 22px;
   opacity: 0;
 }
 
-.srow:hover .srow__menu {
+.sfly .srow:hover .srow__menu {
   opacity: 1;
 }
 
-.srow__menu-name {
+.sfly .srow__menu-name {
   flex: 1;
   min-width: 0;
   font-size: var(--t-md);
