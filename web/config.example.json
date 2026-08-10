@@ -1,0 +1,12 @@
+{
+  "_comment": [
+    "Copy to web/public/config.json before `npm run web:build`, or deploy it beside the bundle on Firebase Hosting.",
+    "web/src/config.ts is the reader and documents every field; this is the shape, with Steve's own project id left out.",
+    "Nothing here is secret. A Firebase web API key is a public identifier — the database rules and the desktop's uid",
+    "check are what gate anything — which is why it is safe to serve beside the bundle rather than baked into it.",
+    "See docs/forge-web.md, 'What only Steve can do', items 1, 2 and 5."
+  ],
+  "apiKey": "AIza...",
+  "databaseUrl": "https://<project>-default-rtdb.<region>.firebasedatabase.app",
+  "_devHost": "127.0.0.1:8420 — npm run web:dev only. Ignored by anything vite build emits; see __DEV_SERVER__."
+}

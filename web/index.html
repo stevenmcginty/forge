@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0c0e" />
+    <!--
+      The struck anvil from src/components/Icon.tsx, as a data URI: the same two
+      paths on the same 16×16 grid at the same 1.4px stroke, in the volt accent
+      from tokens.css. Inline rather than a file so there is no second copy of
+      the mark to keep in step and no `/favicon.ico` 404 in the console of a page
+      whose whole job is to look like a finished application.
+    -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23c6ff4a' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.5h7l2.5 2 1.5-1.2v3.2H4.8z'/%3E%3Cpath d='M6.2 10.5v2.2M4 13.2h5'/%3E%3C/svg%3E"
+    />
+    <!--
+      Deliberately no Content-Security-Policy meta tag.
+
+      The desktop's index.html carries one because an Electron renderer has no
+      server in front of it to send a header. This bundle is served by Firebase
+      Hosting, which does, and `firebase.json`'s `headers` block is where the
+      policy for a hosted page belongs — a meta tag would be a second copy of it
+      that only one of the two deployments reads. What the policy has to allow is
+      recorded here so whoever writes it knows: `connect-src` needs the Identity
+      Toolkit and securetoken endpoints, the Realtime Database host, and `wss:`
+      for the tunnel the terminals arrive over.
+    -->
+    <title>Forge</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

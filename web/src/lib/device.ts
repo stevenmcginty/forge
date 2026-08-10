@@ -1,0 +1,104 @@
+/**
+ * What this browser calls itself when it asks to be let in.
+ *
+ * The id is per browser *profile*, not per machine, and shared/web.ts says why
+ * that is correct: two profiles on one machine are two devices, because the
+ * thing being approved is a place a token can be used from.
+ *
+ * It is not a credential. `WebHelloFrame` is explicit that Forge Web mints no
+ * device token — the Firebase ID token is the credential, and a second one
+ * beside it would be a second thing to steal. So this lives in `localStorage`
+ * beside the session, and losing it costs one press of Allow.
+ */
+
+const DEVICE_KEY = 'forge-web-device'
+
+export function deviceId(): string {
+  let existing: string | null = null
+  try {
+    existing = localStorage.getItem(DEVICE_KEY)
+  } catch {
+    // Private mode. A fresh id per tab means a prompt per tab, which is
+    // annoying and correct — there is nowhere to remember an approval.
+    return randomId()
+  }
+  if (existing) return existing
+  const minted = randomId()
+  try {
+    localStorage.setItem(DEVICE_KEY, minted)
+  } catch {
+    /* see above */
+  }
+  return minted
+}
+
+/**
+ * Forget this browser's identity, so the next connection is a stranger asking
+ * again.
+ *
+ * The recovery for `revoked`: shared/web.ts says a revoked page "should forget
+ * its device id and stop reconnecting", because a revoked device that keeps
+ * knocking is a prompt storm. Forgetting is not automatic — it is what the
+ * button on the refusal screen does, so the storm needs a human each time.
+ */
+export function forgetDevice(): void {
+  try {
+    localStorage.removeItem(DEVICE_KEY)
+  } catch {
+    /* nothing to forget */
+  }
+}
+
+/**
+ * "Chrome on Windows" — untrusted display text the desktop shows in its
+ * approval prompt and device list.
+ *
+ * Derived from the user agent rather than asked for, because a text box on the
+ * sign-in screen is a text box nobody fills in honestly, and this string's only
+ * job is to let a human at the desk recognise which of their own browsers is
+ * knocking.
+ */
+export function deviceName(): string {
+  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /OPR\//.test(ua)
+      ? 'Opera'
+      : /Firefox\//.test(ua)
+        ? 'Firefox'
+        : /Chrome\//.test(ua)
+          ? 'Chrome'
+          : /Safari\//.test(ua)
+            ? 'Safari'
+            : 'Browser'
+  const platform = /Windows/.test(ua)
+    ? 'Windows'
+    : /Android/.test(ua)
+      ? 'Android'
+      : /iPhone|iPad/.test(ua)
+        ? 'iOS'
+        : /Mac OS X/.test(ua)
+          ? 'macOS'
+          : /Linux/.test(ua)
+            ? 'Linux'
+            : ''
+  return platform ? `${browser} on ${platform}` : browser
+}
+
+/**
+ * Not `crypto.randomUUID()`: it is a secure-context API, and while this bundle
+ * is served over https in production, `npm run web:dev` serves it over plain
+ * http on a LAN address where the call is simply `undefined`. Same reasoning,
+ * and the same fallback, as `randomId` in mobile/src/lib/link.ts — and it is
+ * acceptable here for the same reason, which is that this value is a label
+ * rather than a secret.
+ */
+function randomId(): string {
+  const bytes = new Uint8Array(16)
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+  }
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
