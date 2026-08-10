@@ -53,6 +53,7 @@
     "draft:check": "node scripts/draft-check.mjs",
     "hub:check": "node scripts/hub-check.mjs",
     "companion:smoke": "node scripts/companion-smoke.mjs",
+    "web:rendezvous": "node scripts/web-rendezvous-check.mjs",
     "companion:icons": "node scripts/companion-icons.mjs",
     "companion:serve": "node scripts/companion-serve.mjs",
     "mobile:smoke": "node scripts/mobile-smoke.mjs",
