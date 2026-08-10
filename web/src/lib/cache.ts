@@ -1,5 +1,5 @@
 import { MAX_REPLAY_BYTES, type WebHelloOkFrame, type WebSession } from '@shared/web'
-import type { AgentProfile, Project, Workspace } from '@shared/types'
+import type { AgentProfile, GitSnapshot, Project, Workspace } from '@shared/types'
 
 /**
  * The offline snapshot: the last picture this browser was handed, kept so a
@@ -12,17 +12,21 @@ import type { AgentProfile, Project, Workspace } from '@shared/types'
  * client already received." So nothing is asked for. What arrives is written
  * down.
  *
- * ## The Phase 4 seam
+ * ## The Phase 4 seam, now filled
  *
- * This is the *frozen* half of offline mode, and it is all of Phase 3's share of
- * it. The other half — GitHub auth, a file tree and editor over the REST API,
- * and commits landing on a `forge-web/*` branch — is Phase 4 and is **not built
- * here**, deliberately (docs/forge-web.md, work plan). The seam is this module's
- * boundary: an offline screen reads `loadSnapshot()` and draws it read-only.
- * Phase 4 adds a second source beside it and a way to switch between "what the
- * desktop last looked like" and "what GitHub says the files are"; it does not
- * change what is written down here, because a transcript and a repo are
- * different things and the frozen transcript is the one the desktop owns.
+ * This is the *frozen* half of offline mode. The other half — GitHub mode: a
+ * token, a file tree and an editor over the REST API, and commits landing on a
+ * `forge-web/*` branch — is Phase 4 and lives in lib/github.ts and lib/repo.tsx.
+ * The seam turned out to be exactly one field wide. Nothing about a transcript
+ * changed, because a transcript and a repository are different things and the
+ * frozen transcript is the one the desktop owns; what GitHub mode needed from
+ * here was the one fact it cannot derive and cannot ask for with the desktop
+ * off, which is *which repository a project is*. That is `slugs` below.
+ *
+ * Everything else GitHub mode caches — trees, file bodies, unsent edits — is its
+ * own, under its own keys, in lib/repo.tsx. It is deliberately not folded in
+ * here: this snapshot is a picture the desktop sent and can send again, and a
+ * draft nobody has committed is neither.
  *
  * ## Why localStorage
  *
@@ -46,8 +50,14 @@ const SNAPSHOT_KEY = 'forge-web-snapshot'
  * puts the profiles in the opening picture precisely because "a client without
  * them cannot render the workspace it was just handed", and that is no less
  * true of a workspace it is rendering from disk.
+ *
+ * 3 added `slugs`. GitHub mode has to name a repository with the desktop off,
+ * and `GitSnapshot.slug` — the same `owner/repo` that gates every `gh` call in
+ * electron/git/gh.ts — only ever arrives in a `git` push while the desktop is
+ * awake. Without it the offline client can tell nobody which repository the
+ * project it is drawing belongs to.
  */
-const SNAPSHOT_VERSION = 2
+const SNAPSHOT_VERSION = 3
 
 /**
  * Total bytes of replay this cache will hold across every session.
@@ -71,6 +81,17 @@ export interface Snapshot {
   sessions: WebSession[]
   /** sessionId → the last replay this browser was sent, newest last. */
   transcripts: Array<{ sessionId: string; data: string }>
+  /**
+   * projectId → `owner/repo`, or null for a project git has been read for whose
+   * remote is not a github.com one.
+   *
+   * A *missing* key and a null value are different answers and GitHub mode says
+   * different sentences for them: null is "that project has no GitHub remote",
+   * missing is "this browser has never been told what git thinks of it". Merging
+   * them would have a project with a perfectly good remote reading as broken
+   * whenever the desktop went off before the first `git` push arrived.
+   */
+  slugs: Record<string, string | null>
 }
 
 export function loadSnapshot(): Snapshot | null {
@@ -100,8 +121,20 @@ export function loadSnapshot(): Snapshot | null {
     profiles: Array.isArray(snapshot.profiles) ? snapshot.profiles : [],
     workspaces: (snapshot.workspaces ?? {}) as Record<string, Workspace>,
     sessions: snapshot.sessions,
-    transcripts: Array.isArray(snapshot.transcripts) ? snapshot.transcripts : []
+    transcripts: Array.isArray(snapshot.transcripts) ? snapshot.transcripts : [],
+    slugs: (snapshot.slugs ?? {}) as Record<string, string | null>
   }
+}
+
+/**
+ * Which GitHub repository a project is, as of the last `git` push.
+ *
+ * `undefined` when this browser has never been told — see the field's comment
+ * for why that is not the same as `null`.
+ */
+export function slugFor(snapshot: Snapshot | null, projectId: string | null): string | null | undefined {
+  if (!snapshot || !projectId) return undefined
+  return Object.hasOwn(snapshot.slugs, projectId) ? snapshot.slugs[projectId] : undefined
 }
 
 export function clearSnapshot(): void {
@@ -129,15 +162,35 @@ export function rememberPicture(frame: WebHelloOkFrame): void {
     sessions: frame.sessions,
     // Only the transcripts of sessions that still exist: a pane that closed on
     // the desktop is not one the frozen view should still be offering.
-    transcripts: (previous?.transcripts ?? []).filter((t) => frame.sessions.some((s) => s.id === t.sessionId))
+    transcripts: (previous?.transcripts ?? []).filter((t) => frame.sessions.some((s) => s.id === t.sessionId)),
+    // Kept across a fresh picture, and only for projects that still exist. A
+    // remote is a property of the repository rather than of this connection, so
+    // re-connecting must not cost GitHub mode the one fact it needs.
+    slugs: pruneSlugs(previous?.slugs ?? {}, frame.projects)
   })
+}
+
+/**
+ * The one field GitHub mode needs out of a `git` push.
+ *
+ * Not the whole `GitSnapshot`: it carries `repoRoot`, every changed file's
+ * absolute path on Steve's disk, and a per-project seq, none of which mean
+ * anything with the desktop off — and writing desktop paths into localStorage to
+ * keep them company would be a cost with no reader.
+ */
+export function rememberGit(snapshot: GitSnapshot): void {
+  const cached = loadSnapshot()
+  if (!cached) return
+  const slug = typeof snapshot.slug === 'string' && snapshot.slug ? snapshot.slug : null
+  if (Object.hasOwn(cached.slugs, snapshot.projectId) && cached.slugs[snapshot.projectId] === slug) return
+  write({ ...cached, at: Date.now(), slugs: { ...cached.slugs, [snapshot.projectId]: slug } })
 }
 
 /** Project list, workspace and session-list pushes, folded into the snapshot. */
 export function rememberProjects(projects: Project[]): void {
   const snapshot = loadSnapshot()
   if (!snapshot) return
-  write({ ...snapshot, at: Date.now(), projects })
+  write({ ...snapshot, at: Date.now(), projects, slugs: pruneSlugs(snapshot.slugs, projects) })
 }
 
 export function rememberWorkspace(projectId: string, workspace: Workspace): void {
@@ -176,6 +229,15 @@ export function rememberTranscript(sessionId: string, data: string): void {
 
 export function transcriptFor(snapshot: Snapshot | null, sessionId: string): string {
   return snapshot?.transcripts.find((t) => t.sessionId === sessionId)?.data ?? ''
+}
+
+/** Drop remotes for projects the desktop no longer has. */
+function pruneSlugs(slugs: Record<string, string | null>, projects: Project[]): Record<string, string | null> {
+  const kept: Record<string, string | null> = {}
+  for (const project of projects) {
+    if (Object.hasOwn(slugs, project.id)) kept[project.id] = slugs[project.id]
+  }
+  return kept
 }
 
 /**

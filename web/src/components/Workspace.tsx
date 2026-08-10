@@ -5,6 +5,7 @@ import { Icon } from '@/components/Icon'
 import { useNarrow } from '../lib/narrow'
 import { useActiveProject, useForge, useWorkspace } from '../state'
 import { AgentChooser } from './AgentChooser'
+import { GitHubMode } from './GitHubMode'
 import { OfflineBanner } from './OfflineBanner'
 import { Rail } from './Rail'
 import { SplitView } from './Panes'
@@ -51,6 +52,16 @@ export function Workspace(): ReactNode {
           <Rail collapsed={collapsed} />
         </aside>
         <main className="app__main">
+          {/*
+            The one swap in the whole shell. GitHub mode replaces the terminal
+            grid and nothing else: the titlebar, the offline strip, the rail and
+            the theme are the same objects either way, because decision 9 and
+            decision 10 are two halves of "the desktop is off" rather than two
+            applications. See OfflineBanner, which holds the switch.
+          */}
+          {offline && state.offlineMode === 'github' ? (
+            <GitHubMode />
+          ) : (
           <div className="grid">
             <TabStrip />
             <div className="grid__body">
@@ -90,6 +101,7 @@ export function Workspace(): ReactNode {
               )}
             </div>
           </div>
+          )}
         </main>
       </div>
 

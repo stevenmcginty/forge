@@ -15,16 +15,19 @@ import { useForge } from '../state'
  * where `UpdateBanner` and `StaleBanner` sit on the desktop, so the layout below
  * it is unchanged rather than overlapped.
  *
- * ## Phase 4 goes here
+ * ## Phase 4 lives here now
  *
- * This is the seam. When GitHub mode is built (docs/forge-web.md, Phase 4) the
- * offline screen gains a second half — the repository read straight from the
- * GitHub REST API, with edits committed to a `forge-web/*` branch — and this
- * banner is where the switch between "the desktop's last picture" and "the
- * files, live from GitHub" belongs. Nothing in Phase 3 builds any of it: there
- * is no GitHub auth, no tree, no editor and no commit path anywhere in `web/`,
- * deliberately, because a half-built one would be a second source of truth for
- * files the desktop still owns whenever it is awake.
+ * This was the seam, and this is what came through it. Offline mode has two
+ * halves — the desktop's last picture (decision 10) and the repository read
+ * straight from GitHub, with edits committed to a `forge-web/*` branch
+ * (decision 9) — and the switch between them is on this strip because this
+ * strip is already the sentence that says the picture is frozen. It is the
+ * place somebody is standing at the moment they decide they would rather have
+ * the files.
+ *
+ * The switch is a switch and not a link away: the rail, the titlebar and the
+ * theme do not change, the terminals stay exactly as frozen as they were, and
+ * `Workspace` swaps what is inside the grid. GitHub mode is a mode.
  */
 export function OfflineBanner(): ReactNode {
   const { state, actions } = useForge()
@@ -32,14 +35,32 @@ export function OfflineBanner(): ReactNode {
 
   const when = state.cached?.at ?? 0
   const name = state.stage.record?.name || state.cached?.desktopName || 'That desktop'
+  const github = state.offlineMode === 'github'
 
   return (
     <div className="offline" role="status" data-testid="offline-banner">
-      <Icon name="restart" size={13} />
+      <Icon name={github ? 'branch' : 'restart'} size={13} />
       <span className="offline__text truncate">
-        <strong>{name} is asleep.</strong> {state.stage.message}
-        {when ? ` This is the picture it last sent, ${ago(when)}.` : ''}
+        {github ? (
+          <>
+            <strong>{name} is asleep.</strong> There is no terminal and no agent — there is no computer to run one. The
+            repository is still here.
+          </>
+        ) : (
+          <>
+            <strong>{name} is asleep.</strong> {state.stage.message}
+            {when ? ` This is the picture it last sent, ${ago(when)}.` : ''}
+          </>
+        )}
       </span>
+      <button
+        type="button"
+        className="ghost-btn offline__look"
+        data-testid="offline-mode-switch"
+        onClick={() => actions.setOfflineMode(github ? 'frozen' : 'github')}
+      >
+        {github ? 'Show the frozen terminals' : 'Open the repo from GitHub'}
+      </button>
       <button type="button" className="ghost-btn offline__look" onClick={() => actions.refind()}>
         Look again
       </button>

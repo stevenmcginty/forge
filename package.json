@@ -62,6 +62,7 @@
     "web:smoke": "node scripts/web-smoke.mjs",
     "web:check": "node scripts/web-check.mjs",
     "web:e2e": "node scripts/web-e2e.mjs",
+    "web:offline": "node scripts/web-offline.mjs",
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
     "mirror:check": "node scripts/mirror-check.mjs",

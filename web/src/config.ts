@@ -29,6 +29,15 @@ export interface WebClientConfig {
   authBase?: string
   tokenBase?: string
   /**
+   * Where GitHub mode's REST calls go. Defaults to `https://api.github.com`.
+   *
+   * Overridable for the same reason as the two above and no other: there is no
+   * CORS-free way to reach real GitHub from a check, and a check that needed
+   * somebody's personal access token is a check nobody would ever run. See
+   * scripts/web-offline.mjs.
+   */
+  githubApiBase?: string
+  /**
    * A desktop on this very machine, for `npm run web:dev` — `localhost:8420`
    * or `127.0.0.1:8420`, with the port, because a published `WebHostRecord`
    * cannot carry one (`normaliseHost` strips it).
@@ -107,6 +116,9 @@ export async function loadConfig(): Promise<{ ok: true; config: WebClientConfig 
       databaseUrl,
       ...(typeof raw.authBase === 'string' && raw.authBase ? { authBase: raw.authBase.replace(/\/+$/, '') } : {}),
       ...(typeof raw.tokenBase === 'string' && raw.tokenBase ? { tokenBase: raw.tokenBase.replace(/\/+$/, '') } : {}),
+      ...(typeof raw.githubApiBase === 'string' && raw.githubApiBase
+        ? { githubApiBase: raw.githubApiBase.replace(/\/+$/, '') }
+        : {}),
       ...(typeof raw.devHost === 'string' && raw.devHost ? { devHost: raw.devHost } : {})
     }
   }

@@ -296,6 +296,526 @@
   opacity: 0;
 }
 
+/* ---------------------------------------------------------- GitHub mode
+ *
+ * The other half of "the desktop is off": decision 9's repository, where the
+ * terminal grid would be. It is deliberately built out of the surfaces the rest
+ * of Forge already uses — the rail's row, the pane's header, the gate's card,
+ * the git panel's chip — because it is a mode of this application rather than a
+ * second one, and the moment it grew a look of its own the two halves of the
+ * offline screen would stop being the same screen.
+ */
+
+.ghmode {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+.ghmode__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  flex: none;
+  min-width: 0;
+  height: var(--pane-header-h);
+  padding: 0 var(--s-5);
+  overflow: hidden;
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.ghmode__slug {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Shrinks and truncates rather than pushing the token control off a phone. */
+.ghmode__ref {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0 var(--s-3);
+  overflow: hidden;
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--accent);
+  background: var(--accent-softer);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-full);
+}
+
+.ghmode__lede {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--t-xs);
+}
+
+.ghmode__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.ghmode__tree {
+  flex: none;
+  width: 260px;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--line-hairline);
+}
+
+.ghmode__file {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ------------------------------------------------------------- the tree */
+
+.ghtree {
+  padding: var(--s-3) 0;
+}
+
+.ghtree__empty,
+.ghtree__cut {
+  margin: 0;
+  padding: var(--s-4) var(--s-5);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.ghtree__cut {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-bottom: 1px solid var(--warn-line);
+}
+
+/* The rail's row, at the rail's height, because that is what it is. */
+.ghrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  height: 24px;
+  padding-right: var(--s-4);
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.ghrow:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.ghrow[data-active='true'] {
+  color: var(--text-primary);
+  background: var(--bg-active);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ghrow__chev {
+  display: flex;
+  flex: none;
+  width: 13px;
+  color: var(--text-dim);
+}
+
+.ghrow__name {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The same dot the desktop's git panel puts beside a changed file. */
+.ghrow__dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+/* ------------------------------------------------------- the file itself */
+
+.ghfile {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.ghfile__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  height: var(--pane-header-h);
+  padding: 0 var(--s-5);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.ghfile__path {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.ghfile__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+}
+
+.ghfile__note {
+  margin: 0;
+  padding: var(--s-5) var(--s-6);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/*
+ * A textarea, and the whole editor. See the header of FileView.tsx for why this
+ * is a decision rather than a shortcut. The terminal's own background and
+ * foreground, so a file reads as being in the same room as the panes it
+ * replaced.
+ */
+.ghfile__editor {
+  flex: 1;
+  min-height: 0;
+  padding: var(--s-5) var(--s-6);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--term-fg);
+  background: var(--bg-terminal);
+  border: 0;
+  border-radius: 0;
+  resize: none;
+  tab-size: 2;
+  user-select: text;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.ghfile__editor:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* An edit that is only in this browser wears its own chip, next to FROZEN's. */
+.pane__perm[data-dirty='true'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+
+/* -------------------------------------------------------- committing it */
+
+.ghcommit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  flex: none;
+  padding: var(--s-5) var(--s-6);
+  background: var(--bg-panel);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.ghcommit__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+}
+
+.ghcommit__branch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+}
+
+.ghcommit__to {
+  color: var(--text-dim);
+}
+
+.ghcommit__name {
+  height: 20px;
+  color: var(--accent);
+}
+
+.ghcommit__prefix {
+  color: var(--text-dim);
+}
+
+.ghcommit__suffix {
+  height: 24px;
+  flex: 1;
+  max-width: 240px;
+}
+
+/* The rule, on screen, beside the name it is a rule about. */
+.ghcommit__never {
+  padding: 0 var(--s-3);
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-full);
+}
+
+.ghcommit__message {
+  flex: 1;
+  min-width: 0;
+}
+
+.ghcommit__landed {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  margin: 0;
+  padding: var(--s-3) var(--s-5);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--ok);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-md);
+}
+
+/*
+ * The sentence is one flex item rather than five. Left as bare text nodes each
+ * one becomes an anonymous flex item and the line breaks into columns, which on
+ * a phone reads as a stack of fragments rather than a sentence.
+ */
+.ghcommit__landed-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ghcommit__conflict {
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+  gap: var(--s-4);
+  padding: var(--s-5);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-md);
+}
+
+.ghcommit__conflict p {
+  margin: 0;
+}
+
+.ghcommit__drafts ul,
+.ghtoken__reach {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ghcommit__drafts li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+}
+
+.ghcommit__draft-when {
+  flex: 1;
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------ a refusal
+ *
+ * The offline strip's shape, in the danger palette: a band that pushes the
+ * thing it is about down rather than covering it, because a failure that hid
+ * the tree would take away the cached copy that is still perfectly readable.
+ */
+
+.ghfail {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-4);
+  flex: none;
+  padding: var(--s-4) var(--s-6);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-bottom: 1px solid var(--danger-line);
+}
+
+.ghfail[data-reason='rate-limited'],
+.ghfail[data-reason='conflict'],
+.ghfail[data-reason='offline'] {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-bottom-color: var(--warn-line);
+}
+
+.ghfail__text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+}
+
+.ghfail__text strong {
+  color: inherit;
+  font-weight: 600;
+}
+
+.ghfail[data-reason] .ghfail__text strong {
+  color: var(--text-primary);
+}
+
+/* ----------------------------------------------------------- the token
+ *
+ * The one screen in this client that asks for a credential it cannot mint, and
+ * the one that has to be read rather than clicked past. It borrows the gate's
+ * card, so it is the same doorway as every other door here.
+ */
+
+.ghgate__ask {
+  width: 100%;
+  padding: var(--s-5);
+  text-align: left;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-md);
+}
+
+.ghgate__ask-title {
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ghgate__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: 0;
+  padding-left: var(--s-6);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.ghgate__list strong {
+  color: var(--text-primary);
+}
+
+/* The consequence, in the warning palette, because it is a warning. */
+.ghgate__warning {
+  display: flex;
+  gap: var(--s-3);
+  width: 100%;
+  padding: var(--s-4) var(--s-5);
+  text-align: left;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-md);
+}
+
+.ghgate__link {
+  color: var(--accent);
+}
+
+.ghtoken {
+  position: relative;
+  flex: none;
+}
+
+.ghtoken__toggle {
+  height: 20px;
+  color: var(--text-muted);
+}
+
+.ghtoken__sheet {
+  position: absolute;
+  top: calc(100% + var(--s-3));
+  right: 0;
+  z-index: var(--z-popover);
+  width: min(420px, calc(100vw - var(--s-8)));
+  padding: var(--s-5);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.ghtoken__lede {
+  margin: 0;
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.ghtoken__reach li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s-3) var(--s-4);
+  font-size: var(--t-xs);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+}
+
+.ghtoken__reach li[data-state='refused'] {
+  border-color: var(--danger-line);
+}
+
+.ghtoken__slug {
+  color: var(--text-primary);
+}
+
+.ghtoken__detail {
+  color: var(--text-secondary);
+}
+
+.ghtoken__for {
+  color: var(--text-dim);
+}
+
+.ghtoken__forget {
+  justify-content: center;
+  width: 100%;
+  margin-top: var(--s-4);
+}
+
 /* -------------------------------------------------------------- narrow
  *
  * A phone-width window is not Forge Mobile — that is a separate app and
@@ -319,5 +839,39 @@
 
   .gate__card {
     padding: var(--s-8) var(--s-6);
+  }
+
+  /*
+   * The tree stacks above the file rather than beside it. 260px of sidebar on a
+   * 390px screen leaves 130px for the thing somebody opened, and a two-column
+   * layout that narrow is one column with a stripe down the side of it.
+   */
+  .ghmode__body {
+    flex-direction: column;
+  }
+
+  .ghmode__tree {
+    width: 100%;
+    max-height: 38%;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-hairline);
+  }
+
+  .ghmode__lede {
+    display: none;
+  }
+
+  /*
+   * Lines wrap at a phone's width. Losing the column alignment of code is a real
+   * cost, and it is smaller than the one it replaces: at 330px of usable width,
+   * an unwrapped file is read four words at a time through a horizontal scroll.
+   */
+  .ghfile__editor {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .ghcommit__row {
+    flex-wrap: wrap;
   }
 }
