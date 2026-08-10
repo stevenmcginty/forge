@@ -12,6 +12,12 @@ import { useState } from 'react'
  * while pressing another. They clear after one keypress — like a shift key,
  * because that is the behaviour everyone already has in their fingers — and
  * double-tapping locks them, for the rare case of several in a row.
+ *
+ * The encodings below are exported because the television grew the same row
+ * (see TvPaneView in TvDashboard.tsx) and two spellings of Ctrl-C in one app is
+ * one spelling too many. What differs between the two surfaces is the *shape* —
+ * a phone taps caps with a thumb, a television walks them with a D-pad — and
+ * that is all either of them should be deciding for itself.
  */
 
 export interface KeyBarProps {
@@ -21,10 +27,10 @@ export interface KeyBarProps {
   onCompose: () => void
 }
 
-type Sticky = 'off' | 'once' | 'locked'
+export type Sticky = 'off' | 'once' | 'locked'
 
 /** Ctrl+letter is the letter's position in the alphabet as a control code. */
-function ctrlOf(key: string): string | null {
+export function ctrlOf(key: string): string | null {
   const upper = key.toUpperCase()
   if (upper.length === 1 && upper >= 'A' && upper <= 'Z') {
     return String.fromCharCode(upper.charCodeAt(0) - 64)
@@ -35,7 +41,7 @@ function ctrlOf(key: string): string | null {
   return null
 }
 
-const ARROWS: Array<[string, string]> = [
+export const ARROWS: Array<[string, string]> = [
   ['←', '\x1b[D'],
   ['↓', '\x1b[B'],
   ['↑', '\x1b[A'],
@@ -43,31 +49,76 @@ const ARROWS: Array<[string, string]> = [
 ]
 
 /** The punctuation a shell needs constantly and a phone buries two taps deep. */
-const SYMBOLS = ['|', '/', '-', '~', '$', '*', '.', ':']
+export const SYMBOLS = ['|', '/', '-', '~', '$', '*', '.', ':']
 
-export function KeyBar({ onSend, onCompose }: KeyBarProps): React.JSX.Element {
+/**
+ * Shift+Tab, as a terminal hears it.
+ *
+ * CSI Z — "back tab" — which is what every terminal emulator sends for the
+ * press and what a TUI reading the sequence expects. Here rather than at the
+ * one surface that offers it, because it belongs with the other encodings: the
+ * next surface that needs the press should find it spelled once.
+ *
+ * Claude Code is why it exists at all. Shift+Tab is how its permission mode is
+ * cycled, and a keyboard that cannot produce it is a keyboard that cannot
+ * answer the question that session is asking.
+ */
+export const BACK_TAB = '\x1b[Z'
+
+/** Off, armed for one keypress, or locked down until pressed again. */
+export function cycleSticky(current: Sticky): Sticky {
+  return current === 'off' ? 'once' : current === 'once' ? 'locked' : 'off'
+}
+
+/**
+ * The sticky modifiers themselves, as state and the two send functions that
+ * consume them.
+ *
+ * A hook rather than a copied block, because "does Alt survive this keypress"
+ * is behaviour, not encoding, and the two rows that ask it must not be able to
+ * answer differently. The caps and their arrangement stay with each surface.
+ */
+export interface StickyKeys {
+  ctrl: Sticky
+  alt: Sticky
+  cycleCtrl: () => void
+  cycleAlt: () => void
+  /** A literal character, with whichever modifiers are armed applied. */
+  sendChar: (char: string) => void
+  /** Something that is already an escape sequence — modifiers don't apply. */
+  sendRaw: (data: string) => void
+}
+
+export function useStickyKeys(onSend: (data: string) => void): StickyKeys {
   const [ctrl, setCtrl] = useState<Sticky>('off')
   const [alt, setAlt] = useState<Sticky>('off')
 
-  /** Send a literal character, applying whichever modifiers are armed. */
-  const sendChar = (char: string): void => {
-    let out = char
-    if (ctrl !== 'off') out = ctrlOf(char) ?? char
-    if (alt !== 'off') out = `\x1b${out}`
-    onSend(out)
+  const spend = (): void => {
     if (ctrl === 'once') setCtrl('off')
     if (alt === 'once') setAlt('off')
   }
 
-  /** Send something that is already an escape sequence — modifiers don't apply. */
-  const sendRaw = (data: string): void => {
-    onSend(data)
-    if (ctrl === 'once') setCtrl('off')
-    if (alt === 'once') setAlt('off')
+  return {
+    ctrl,
+    alt,
+    cycleCtrl: () => setCtrl(cycleSticky(ctrl)),
+    cycleAlt: () => setAlt(cycleSticky(alt)),
+    sendChar: (char: string): void => {
+      let out = char
+      if (ctrl !== 'off') out = ctrlOf(char) ?? char
+      if (alt !== 'off') out = `\x1b${out}`
+      onSend(out)
+      spend()
+    },
+    sendRaw: (data: string): void => {
+      onSend(data)
+      spend()
+    }
   }
+}
 
-  const cycle = (current: Sticky): Sticky =>
-    current === 'off' ? 'once' : current === 'once' ? 'locked' : 'off'
+export function KeyBar({ onSend, onCompose }: KeyBarProps): React.JSX.Element {
+  const { ctrl, alt, cycleCtrl, cycleAlt, sendChar, sendRaw } = useStickyKeys(onSend)
 
   return (
     <div className="keybar" role="toolbar" aria-label="Terminal keys">
@@ -76,7 +127,7 @@ export function KeyBar({ onSend, onCompose }: KeyBarProps): React.JSX.Element {
           type="button"
           className={`key mod mod-${ctrl}`}
           aria-pressed={ctrl !== 'off'}
-          onClick={() => setCtrl(cycle(ctrl))}
+          onClick={cycleCtrl}
         >
           Ctrl
         </button>
@@ -84,7 +135,7 @@ export function KeyBar({ onSend, onCompose }: KeyBarProps): React.JSX.Element {
           type="button"
           className={`key mod mod-${alt}`}
           aria-pressed={alt !== 'off'}
-          onClick={() => setAlt(cycle(alt))}
+          onClick={cycleAlt}
         >
           Alt
         </button>

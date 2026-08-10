@@ -178,6 +178,14 @@ export function startMirrorViewer(
   // desktop's offer is the first thing this peer ever sees — an m-line the
   // answer has no transceiver for is a stream that negotiates and never plays.
   peer.addTransceiver('video', { direction: 'recvonly' })
+  // Audio unconditionally, in the same order the desktop adds it: video first,
+  // then sound. The television cannot know in advance whether this desktop has
+  // `mobileMirrorAudio` on, and declaring a receiver for a track that never
+  // comes costs nothing — the m-line is answered with a port of zero and no
+  // audio flows. Not declaring it, on a desktop that *did* send sound, is an
+  // m-line the answer has no transceiver for: exactly the failure the comment
+  // above describes, negotiated and silent.
+  peer.addTransceiver('audio', { direction: 'recvonly' })
 
   peer.ontrack = (event) => {
     if (torn) return

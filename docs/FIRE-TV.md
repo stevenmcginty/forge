@@ -216,17 +216,26 @@ instead of a fifth of a second later.
 | OK, tapped | Left click. Two quick taps are a double-click |
 | OK, held while moving | Drag: the button goes down when you start moving and up when you let go |
 | OK, held still (0.7s) | Right click |
-| Menu | Swaps the arrows between the pointer and the scroll wheel. The ring turns amber while they are the wheel |
+| Menu | Moves the arrows on: pointer → scroll wheel → the desktop's keys → pointer. The ring turns amber while they are the wheel and fades while they are keys |
 | Back | Puts the pointer down and goes back to just watching. A second Back returns to the wall |
 | Rewind / Fast-Forward | Still step between the Forge and YouTube panels, which is the way out if anything gets stuck |
 
 The line explaining all of that flashes over the picture whenever you pick the
 pointer up or change what the arrows do, then gets out of the way.
 
-**There is no typing.** The wire carries a closed list of keys — the arrows,
-Enter, Escape, Tab, Backspace, Delete, the page keys, Home, End, Space and the
-Windows key — and no way at all to express arbitrary text. Reaching an app is
-the Windows key and the pointer, not a keyboard nobody has.
+**It can type, and it can press keys.** Two verbs, and they are separate on
+purpose. A tap of OK opens a text box over the picture: talk into the remote's
+microphone or tap the on-screen keyboard, and OK sends the phrase to whatever
+window has focus on the desk *and presses Enter* — which is what a prompt
+dictated into a Claude Code pane needs. The cap beside it, **Send only**, sends
+the words without submitting them, for the second field of a form.
+
+The keys themselves are a closed list — Enter, Escape, Tab, Backspace, Delete,
+the arrows, the page keys, Home, End, Space and the Windows key — with nothing
+on the wire that can express a scancode. Press Menu twice while driving and the
+remote becomes that list: a row of caps along the bottom, walked with Left and
+Right and pressed with OK, while Up and Down are the desktop's own arrow keys
+for scrolling a page or moving a caret. Menu again returns to the pointer.
 
 **Windows will not let it answer a UAC prompt**, and that is deliberate on
 Windows' part rather than ours: synthetic input from a normal process cannot

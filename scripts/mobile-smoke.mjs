@@ -119,7 +119,8 @@ async function main() {
     resolveWithin,
     ACCEPT_WINDOW_MS,
     MAX_INPUT_PER_SECOND,
-    MAX_SIGNAL_CHARS
+    MAX_SIGNAL_CHARS,
+    MAX_TEXT_CHARS
   } = await import(pathToFileURL(join(scratch, 'mobile.mjs')).href)
 
   /* ------------------------------------------------- the desktop, once */
@@ -364,6 +365,88 @@ async function main() {
   phone.send({ t: 'sub', id: 'm1' })
   await waitFor(() => watches[watches.length - 1] === 'm1', 5000, 'the pane to be taken again')
   log(true, 'and opening it again takes it back')
+
+  /* ----------------------------------- 9c. typing into a pane that has gone
+   *
+   * The one silence on this wire a user cannot recover from. A phone clears
+   * its composer the instant it sends, so a write that lands nowhere costs
+   * whatever was in it, and a server that answers a dead pane exactly as it
+   * answers a live one is doing the worst thing a remote can do: looking like
+   * it worked. Two ways a pane can be gone, and both are checked: an id that
+   * never existed, and a real shell that has exited while the phone was in a
+   * pocket.
+   */
+
+  const errsBeforeStrayWrite = phone.of('err').length
+  phone.send({ t: 'write', id: 'never-existed', data: 'echo into-the-void\r' })
+  await waitFor(() => phone.of('err').length > errsBeforeStrayWrite, 5000, 'the refusal of a write to an unknown id')
+  log(
+    phone.of('err').at(-1).code === 'unknown-session',
+    'a write to a session id that never existed is refused rather than swallowed'
+  )
+
+  const secondPane = manager.create({ id: 'm2', cwd: ROOT, cols: 80, rows: 24 })
+  log(secondPane.ok === true, 'spawned a second real shell, so a pane can be made to die under the phone')
+  if (!secondPane.ok) throw new Error(secondPane.error)
+  await waitFor(() => (replay.get('m2') ?? '').length > 0, 25000, "the second shell's first prompt")
+
+  phone.send({ t: 'sub', id: 'm2' })
+  await waitFor(() => phone.frames.some((f) => f.t === 'replay' && f.id === 'm2'), 6000, 'the replay for the second pane')
+  manager.kill('m2')
+  // The exit frame rather than the manager's own map: it is what clears the
+  // phone's subscription, and waiting for it keeps the watch bookkeeping below
+  // from moving underneath its own baseline.
+  await waitFor(() => phone.frames.some((f) => f.t === 'exit' && f.id === 'm2'), 15000, 'the second pane to exit')
+
+  const errsBeforeDeadWrite = phone.of('err').length
+  phone.send({ t: 'write', id: 'm2', data: 'echo too-late\r' })
+  await waitFor(() => phone.of('err').length > errsBeforeDeadWrite, 5000, 'the refusal of a write to an exited pane')
+  log(
+    phone.of('err').at(-1).code === 'unknown-session',
+    'and a write to a pane whose shell has exited is refused too, rather than looking like it worked'
+  )
+  log(
+    phone.of('err').at(-1).msg === 'That pane is gone — nothing was typed',
+    'and says in a sentence that nothing was typed, because the phone has already thrown the draft away'
+  )
+
+  /* --------------------------- 9d. two frames that answer nothing, on purpose
+   *
+   * Not every silence is a bug, but every silence ought to be a decision. These
+   * two frames are dropped on the floor by the server today, and what follows
+   * records that rather than endorses it: if either silence ever stops being
+   * the right answer, the change should break a check here rather than surface
+   * as a puzzled user.
+   */
+
+  // A resize for a pane that has gone. Nothing at all comes back, so the phone
+  // cannot tell "resized" from "there was nothing to resize". Deliberate, per
+  // the comment on the `resize` case in electron/mobile/server.ts: the frame
+  // carries nothing the user composed, and a subscribed client is told the
+  // session ended by its own `exit` frame anyway. KNOWN GAP, documented: a
+  // phone that resizes a pane it never subscribed to learns nothing.
+  const pongsBeforeDeadResize = phone.of('pong').length
+  const errsBeforeDeadResize = phone.of('err').length
+  phone.send({ t: 'resize', id: 'm2', cols: 100, rows: 40 })
+  // Nothing to wait *for*, so the wait is a frame that does answer, sent behind
+  // it on the same socket — the technique the mirror checks below use.
+  phone.send({ t: 'ping' })
+  await waitFor(() => phone.of('pong').length > pongsBeforeDeadResize, 5000, 'the frame behind the dead resize')
+  log(phone.of('err').length === errsBeforeDeadResize, 'a resize for a pane that has gone is dropped in silence')
+
+  // An unsub for a pane this phone never opened. The id is simply not in the
+  // set, and the watch announcement dedupes by value, so neither the phone nor
+  // the desktop hears anything. KNOWN GAP, documented: an unsub is never
+  // acknowledged, so a phone cannot distinguish "handed back" from "you never
+  // held it" — harmless today because nothing on the phone waits on it.
+  const watchesBeforeStrayUnsub = watches.length
+  const errsBeforeStrayUnsub = phone.of('err').length
+  const pongsBeforeStrayUnsub = phone.of('pong').length
+  phone.send({ t: 'unsub', id: 'never-opened' })
+  phone.send({ t: 'ping' })
+  await waitFor(() => phone.of('pong').length > pongsBeforeStrayUnsub, 5000, 'the frame behind the stray unsub')
+  log(phone.of('err').length === errsBeforeStrayUnsub, 'an unsub for a pane that was never opened is accepted in silence')
+  log(watches.length === watchesBeforeStrayUnsub, 'and the desktop is not told the watch changed, because it did not')
 
   /* ---------------------------------------------------------------- 10. op */
 
@@ -876,6 +959,95 @@ async function main() {
   remote.send({ t: 'mirror-input', a: 'move' })
   await waitFor(() => remote.of('err').length > errsBeforeShapeless, 5000, 'the refusal of a move with no coordinates')
   log(inputs.length === badBefore, 'a move with no coordinates is refused too — every pointer event carries its own')
+
+  /* ------------------------------------------------- 32b. the remote types
+   *
+   * Everything above this line is a pointer or one key at a time. This is the
+   * frame that carries a *phrase* — dictated into the remote, or tapped out on
+   * the television's own keyboard and committed with Done — and it is the frame
+   * that reached a living room and was answered with "That is not an input this
+   * desktop understands". The parser is already exercised as a pure function by
+   * scripts/input-check.mjs; what was never exercised, and what shipped broken,
+   * is the same frame arriving over this socket through the same four gates as
+   * a click. So it is driven here end to end rather than reasoned about.
+   */
+
+  const typedBefore = inputs.length
+  const errsBeforeTyping = remote.of('err').length
+  const phrase = 'git status'
+  remote.send({ t: 'mirror-input', a: 'text', a_unused: undefined, text: phrase })
+  await waitFor(() => inputs.length > typedBefore, 5000, 'the typed phrase to reach the desktop')
+  log(
+    inputs.at(-1).a === 'text' && inputs.at(-1).text === phrase,
+    'a phrase typed on the television reaches the desktop verbatim'
+  )
+  // Silence is half the assertion: the regression was an error frame, not a
+  // missing keystroke, so a phrase that arrives *and* draws a refusal would
+  // still put that sentence on the screen. A frame that does answer, sent
+  // behind it, is the proof the refusal is not merely in flight.
+  remote.send({ t: 'mirror-signal', data: 'after-the-phrase' })
+  await waitFor(() => mirrorSignals.at(-1) === 'after-the-phrase', 5000, 'the frame behind the phrase')
+  log(remote.of('err').length === errsBeforeTyping, 'and draws no error frame at all — this is the regression, asserted directly')
+
+  const typedBeforeControlOnly = inputs.length
+  const errsBeforeControlOnly = remote.of('err').length
+  remote.send({ t: 'mirror-input', a: 'text', text: ' ' })
+  await waitFor(
+    () => remote.of('err').length > errsBeforeControlOnly,
+    5000,
+    'the refusal of a phrase that is only control characters'
+  )
+  log(
+    remote.of('err').at(-1).code === 'bad-frame',
+    'a phrase that is nothing but control characters survives stripping as nothing, and is refused as bad-frame'
+  )
+  // The string itself, not just the code. This exact sentence on a television
+  // is what the regression looked like from the sofa, so the check that guards
+  // it has to be the check that reads it.
+  log(
+    remote.of('err').at(-1).msg === 'That is not an input this desktop understands',
+    'and the sentence a television would put on the screen is exactly the one this desktop sends'
+  )
+  log(inputs.length === typedBeforeControlOnly, 'and nothing was typed on the desk')
+
+  const exact = 'q'.repeat(MAX_TEXT_CHARS)
+  const typedBeforeExact = inputs.length
+  remote.send({ t: 'mirror-input', a: 'text', text: exact })
+  await waitFor(() => inputs.length > typedBeforeExact, 5000, 'a phrase of exactly MAX_TEXT_CHARS')
+  log(
+    inputs.at(-1).text === exact && inputs.at(-1).text.length === MAX_TEXT_CHARS,
+    `a phrase of exactly MAX_TEXT_CHARS (${MAX_TEXT_CHARS}) survives the wire intact`
+  )
+
+  // Over the ceiling the phrase is cut, and *silently*: nothing goes back to
+  // say so, so a dictated sentence can arrive on the desk with its tail
+  // missing and the television none the wiser. This asserts today's behaviour
+  // deliberately. If the truncation is ever made loud — a refusal, or a frame
+  // that says how much was dropped — this assertion is meant to break, and
+  // breaking is the point: it is how the change gets noticed here rather than
+  // in somebody's living room.
+  const overlong = 'z'.repeat(MAX_TEXT_CHARS + 60)
+  const typedBeforeOverlong = inputs.length
+  const errsBeforeOverlong = remote.of('err').length
+  remote.send({ t: 'mirror-input', a: 'text', text: overlong })
+  await waitFor(() => inputs.length > typedBeforeOverlong, 5000, 'an over-long phrase')
+  log(
+    inputs.at(-1).text === overlong.slice(0, MAX_TEXT_CHARS),
+    'a phrase past MAX_TEXT_CHARS is cut to the ceiling rather than refused'
+  )
+  log(remote.of('err').length === errsBeforeOverlong, 'and the cut is silent today — the television is told nothing about it')
+
+  // The same first gate a pointer meets. `denied` is authenticated and has
+  // never asked to watch anything, so its keyboard must reach nothing at all,
+  // and must do so without an error: a frame from a screen that has just
+  // stopped watching is timing, not an attack.
+  const typedBeforeStranger = inputs.length
+  const deniedErrsBefore = denied.of('err').length
+  denied.send({ t: 'mirror-input', a: 'text', text: 'typed from the wrong sofa' })
+  remote.send({ t: 'mirror-signal', data: 'after-the-wrong-sofa' })
+  await waitFor(() => mirrorSignals.at(-1) === 'after-the-wrong-sofa', 5000, 'the frame behind the stranger')
+  log(inputs.length === typedBeforeStranger, 'a phrase from a device that is not watching the screen is dropped')
+  log(denied.of('err').length === deniedErrsBefore, 'and silently, exactly as a stray pointer event is')
 
   /* ----------------------------------------------------- 33. the rate limit */
 

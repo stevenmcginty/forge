@@ -112,8 +112,19 @@ const DIRECTIONS: Record<string, { dx: number; dy: number }> = {
   ArrowRight: { dx: 1, dy: 0 }
 }
 
-/** What the pointer is doing with the arrows. */
-export type PointerMode = 'move' | 'scroll'
+/**
+ * What the remote's six buttons are doing.
+ *
+ * Three meanings for one D-pad, cycled by Menu in this order — pointer, wheel,
+ * keyboard — so that the third is always exactly one press from being the
+ * first again. 'keys' is the odd one out and does not belong to this module at
+ * all: in that mode the pointer claims nothing but Menu, the arrows and OK go
+ * back to the page, and the page turns them into `key` frames against a row of
+ * caps it draws itself. The mode still lives here because there is only one
+ * D-pad and one thing may own it at a time; splitting that decision across two
+ * files is how a remote ends up doing two things at once.
+ */
+export type PointerMode = 'move' | 'scroll' | 'keys'
 
 export interface PointerHandle {
   /**
@@ -123,6 +134,16 @@ export interface PointerHandle {
   key(name: string, down: boolean): boolean
   /** Which mode the arrows are in, for the line of hint text. */
   mode(): PointerMode
+  /**
+   * Put the remote into a mode without a press of Menu.
+   *
+   * One caller: the keyboard overlay, which closes itself into 'keys' the
+   * moment it has sent a dictated phrase, so that the press after "the words
+   * are on the desk" is the press that submits them. Everything a press of
+   * Menu would settle — a held direction, a button left down — is settled here
+   * too, because a mode change is a mode change however it was asked for.
+   */
+  setMode(mode: PointerMode): void
   /** Finish: stop the loop, release anything held, and forget the cursor. */
   stop(): void
 }
@@ -331,6 +352,11 @@ export function startPointer(options: PointerOptions): PointerHandle {
     const stale = repeats ? STALE_MS : NO_REPEAT_STALE_MS
     for (const [name, heard] of held) if (at - heard > stale) held.delete(name)
 
+    // The arrows are the desktop's own keys and this loop has nothing to do
+    // with them. The frame keeps turning rather than being cancelled, so that
+    // a press of Menu resumes a cursor that is still where it was left.
+    if (mode === 'keys') return
+
     if (mode === 'scroll') {
       turnWheel(at)
       return
@@ -448,8 +474,39 @@ export function startPointer(options: PointerOptions): PointerHandle {
     onClick?.()
   }
 
+  /**
+   * Leave the mode this is in without leaving anything behind.
+   *
+   * A mode change is the one moment when a key that is down can stop being
+   * heard from: the arrows and OK mean something different a millisecond
+   * later, and their releases are read by whoever owns them then. So the held
+   * set is emptied and a drag in progress is ended here — an abandoned left
+   * button is the worst thing this file can leave on somebody's desk, and it
+   * costs one frame to make impossible.
+   */
+  const settle = (): void => {
+    held.clear()
+    wheelSince = -1
+    clearHold()
+    if (dragging) send({ t: 'mirror-input', a: 'up', button: 'left', x, y })
+    dragging = false
+    okDown = false
+    spent = false
+  }
+
+  const goTo = (next: PointerMode): void => {
+    if (next === mode) return
+    settle()
+    mode = next
+    onChange?.(mode, false)
+  }
+
   const handle: PointerHandle = {
     key(name: string, down: boolean): boolean {
+      // In keyboard mode the only button this module still owns is Menu, which
+      // is how anybody gets out of it. Everything else falls through to the
+      // page, which is drawing the row of caps the arrows are walking.
+      if (mode === 'keys' && name !== 'ContextMenu') return false
       if (name in DIRECTIONS) {
         if (down) {
           if (held.has(name)) repeats = true
@@ -465,14 +522,16 @@ export function startPointer(options: PointerOptions): PointerHandle {
         return true
       }
       // Menu, which the native layer hands to this page only while the pointer
-      // is running (see MainActivity). One press swaps the arrows between the
-      // cursor and the wheel — the only way to scroll a desktop with a remote
-      // that has no wheel and no spare buttons.
+      // is running (see MainActivity). One press moves the arrows on round the
+      // ring: the cursor, then the wheel — the only way to scroll a desktop
+      // with a remote that has no wheel and no spare buttons — then the
+      // desktop's own keyboard, and back to the cursor. Round rather than a
+      // pair because a third meaning had to go somewhere and a remote with no
+      // spare buttons has only this one; the order is what keeps the way home
+      // to a single press from the far side of it.
       if (name === 'ContextMenu') {
         if (!down) return true
-        mode = mode === 'move' ? 'scroll' : 'move'
-        wheelSince = -1
-        onChange?.(mode, dragging)
+        goTo(mode === 'move' ? 'scroll' : mode === 'scroll' ? 'keys' : 'move')
         return true
       }
       return false
@@ -480,6 +539,10 @@ export function startPointer(options: PointerOptions): PointerHandle {
 
     mode(): PointerMode {
       return mode
+    },
+
+    setMode(next: PointerMode): void {
+      goTo(next)
     },
 
     stop(): void {

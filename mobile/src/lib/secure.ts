@@ -34,10 +34,10 @@ const ORIGIN_KEY = 'forge.origin'
  *
  * Not a credential and not stored like one — it is here rather than in
  * localStorage only so that it is forgotten by the same "forget this desktop"
- * that clears the token, and never survives it. Its one job is on the
- * television: after the laptop comes home on a different DHCP address, this is
- * what tells "some Forge answered the broadcast" apart from "the desktop this
- * television belongs to has moved".
+ * that clears the token, and never survives it. Its one job is re-homing, on a
+ * television and now on a phone: after the laptop comes home on a different
+ * DHCP address, this is what tells "some Forge answered the broadcast" apart
+ * from "the desktop this device belongs to has moved". See lib/homing.ts.
  */
 const DESKTOP_KEY = 'forge.desktopName'
 

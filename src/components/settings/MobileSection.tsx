@@ -484,6 +484,8 @@ export function MobileSection(): ReactNode {
         copied={copied}
         control={state.settings.mobileControlEnabled}
         onControl={(on) => actions.patchSettings({ mobileControlEnabled: on })}
+        audio={state.settings.mobileMirrorAudio}
+        onAudio={(on) => actions.patchSettings({ mobileMirrorAudio: on })}
         onBuild={buildTv}
         onFetch={fetchTv}
         onCopy={copyUrl}
@@ -520,6 +522,8 @@ function ForgeTvCard({
   copied,
   control,
   onControl,
+  audio,
+  onAudio,
   onBuild,
   onFetch,
   onCopy
@@ -528,6 +532,8 @@ function ForgeTvCard({
   copied: string
   control: boolean
   onControl: (on: boolean) => void
+  audio: boolean
+  onAudio: (on: boolean) => void
   onBuild: () => Promise<void>
   onFetch: () => Promise<void>
   onCopy: (url: string) => Promise<void>
@@ -610,6 +616,24 @@ function ForgeTvCard({
         }
       >
         <Toggle checked={control} onChange={onControl} label="Let the remote drive this desktop" />
+      </Row>
+
+      {/* Sound, and the reason it is a switch rather than part of the mirror.
+          What Windows shares is the system mix — there is no way to send one
+          app's voice and nothing else — so turning this on sends every chime,
+          call and video on this machine to a room this desktop cannot see. It
+          exists because Forge's own voice agent speaks out of the desk's
+          speakers, which is no use from a sofa. Worded as what leaves the
+          machine, not as "enable audio". */}
+      <Row
+        label="Send this desktop's sound too"
+        hint={
+          audio
+            ? 'On. The mirror carries the whole system mix, so the voice agent can be heard from the sofa — and so can every notification, call and video playing on this desktop.'
+            : 'Off. The mirror is a picture and nothing else. Turn this on to hear the voice agent from the sofa, knowing it sends everything else this machine plays as well.'
+        }
+      >
+        <Toggle checked={audio} onChange={onAudio} label="Send this desktop's sound too" />
       </Row>
 
       {tv.detail && <p className={tv.phase === 'error' ? 'mobile-error' : 'scard__hint'}>{tv.detail}</p>}

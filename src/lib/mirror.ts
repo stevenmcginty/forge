@@ -145,11 +145,23 @@ let generation = 0
  * Open a stream onto the primary screen, or null when there is no screen to
  * open one onto.
  *
- * Video only, and not by omission: system audio would carry every notification
- * sound, every call and every video on this desktop to a television in another
- * room, which is a different feature and one nobody asked for.
+ * Video always; sound only when `withAudio`, which is main's answer to the
+ * `mobileMirrorAudio` setting and arrives with the request rather than being
+ * read here (see MobileMirrorEvent in shared/types.ts). Off by default for the
+ * reason this comment used to give for refusing outright: what Windows hands
+ * back is the *system* mix, so every notification chime, every call and every
+ * video on this desktop goes to a television that may be in a room with other
+ * people in it. The reason it can be switched on at all is Forge's own voice
+ * agent, which speaks out of the desk's speakers and so cannot be heard from
+ * the sofa the mirror is watched from.
+ *
+ * The audio attempt is separate from the video one on purpose. Windows loopback
+ * capture is the part of this that fails — a device that has gone, an exclusive
+ * mode owner, a driver that will not share — and it must not be able to take the
+ * picture down with it. A mirror with no sound is the feature working slightly
+ * less well; a mirror with no picture is the feature not working.
  */
-async function captureScreen(): Promise<MediaStream | null> {
+async function captureScreen(withAudio: boolean): Promise<MediaStream | null> {
   const sourceId = await window.forge.mobile.mirrorSource()
   if (!sourceId) return null
   const video: DesktopCaptureConstraints = {
@@ -159,6 +171,21 @@ async function captureScreen(): Promise<MediaStream | null> {
       maxWidth: MAX_WIDTH,
       maxHeight: MAX_HEIGHT,
       maxFrameRate: MAX_FPS
+    }
+  }
+  if (withAudio) {
+    // `chromeMediaSourceId` is deliberately absent from the audio half. Windows
+    // loopback is a property of the machine, not of the window or screen being
+    // captured, and naming a source here is how the whole call comes back with
+    // NotFoundError instead of a stream.
+    const audio = { mandatory: { chromeMediaSource: 'desktop' } }
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: audio as unknown as MediaTrackConstraints,
+        video: video as unknown as MediaTrackConstraints
+      })
+    } catch {
+      /* falls through to the silent capture below — see the note above */
     }
   }
   return await navigator.mediaDevices.getUserMedia({
@@ -385,13 +412,15 @@ function finish(mirror: Mirror, reason: string): void {
 /**
  * Start mirroring this desktop's primary screen to a television.
  *
- * `send` carries one signalling payload to the viewer; `onClosed` fires once,
- * with a sentence for the television, if the mirror ends by itself. Returns an
- * error sentence when it could not start at all, or null once the offer is
- * away — a mirror that has started can still fail later, and that arrives on
- * `onClosed` rather than here.
+ * `withAudio` is main's answer to `mobileMirrorAudio`, decided when the
+ * television asked and passed in rather than read here; `send` carries one
+ * signalling payload to the viewer; `onClosed` fires once, with a sentence for
+ * the television, if the mirror ends by itself. Returns an error sentence when
+ * it could not start at all, or null once the offer is away — a mirror that has
+ * started can still fail later, and that arrives on `onClosed` rather than here.
  */
 export async function startMirror(
+  withAudio: boolean,
   send: (data: string) => void,
   onClosed: (reason: string) => void
 ): Promise<string | null> {
@@ -411,7 +440,7 @@ export async function startMirror(
 
   let stream: MediaStream | null
   try {
-    stream = await captureScreen()
+    stream = await captureScreen(withAudio)
   } catch {
     // A refused permission and a cancelled picker land here as the same thing,
     // and the television can do nothing about either beyond being told.
@@ -443,6 +472,14 @@ export async function startMirror(
   preferSharpness(track)
   const transceiver = peer.addTransceiver(track, { direction: 'sendonly', streams: [stream] })
   preferH264(transceiver)
+
+  // Sound, when the capture came back with any. Send-only for the same reason
+  // the video is: the television has no microphone this desktop wants, and a
+  // recvonly half would have Chromium negotiating a return channel that nothing
+  // on either end ever fills. Added after the video so the m-line order is
+  // stable — video first, audio second — across every renegotiation.
+  const audioTrack = stream.getAudioTracks()[0]
+  if (audioTrack) peer.addTransceiver(audioTrack, { direction: 'sendonly', streams: [stream] })
 
   peer.onicecandidate = (event): void => {
     if (!event.candidate) return

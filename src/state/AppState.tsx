@@ -268,6 +268,7 @@ const FALLBACK_SETTINGS: Settings = {
   mobileNgrokAuthtoken: '',
   mobileNgrokDomain: '',
   mobileControlEnabled: false,
+  mobileMirrorAudio: false,
   customTools: [],
   updatesAutoRun: false,
   // Blank until the real settings arrive. The card checks `state.ready`, so it
@@ -1773,6 +1774,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       if (event.kind === 'signal') return handleSignal(event.data)
       if (event.kind === 'stop') return stopMirror()
       void startMirror(
+        event.audio,
         (data) => window.forge.mobile.mirrorSignal(data),
         (reason) => window.forge.mobile.mirrorStop(reason)
       ).then((error) => {

@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MOBILE_PORT, parseDiscoveryReply, type DiscoveryReply } from '@shared/mobile'
-import { tvBridge } from '../lib/tv-bridge'
-import { toOrigin } from '../lib/secure'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { sameAddress, type Homing, type KnownDesktop } from '../lib/homing'
 import type { LinkState } from '../lib/link'
 import '../tv.css'
 
@@ -42,48 +40,13 @@ import '../tv.css'
  * credential to an address nothing has confirmed yet), so what happens at the
  * far end is a prompt on the laptop and one press of Allow. From the sofa the
  * whole repair is: the television says the desktop moved, and then it is back.
- */
-
-/** How long the native side listens before answering. Mirrors SEARCH_MS. */
-const SEARCH_MS = 1_800
-
-/**
- * How often a paired television re-asks the network while it is waiting.
  *
- * Slow on purpose. This runs for as long as the laptop is out of the house —
- * hours — so it is a patient background question, not a spinner: one small
- * broadcast every fifteen seconds costs nothing and finds a moved desktop
- * within a few seconds of it appearing. The desktop's own rate limit (one reply
- * per source per second) is nowhere near this.
+ * None of that searching happens *here* any more. It happens in lib/homing.ts
+ * and arrives as the `homing` prop, because a phone loses its desktop to the
+ * same DHCP lease and deserves the same repair, and a phone cannot be handed a
+ * screen built for a D-pad. This file is the television's way of showing the
+ * search; it is no longer the only place that can run one.
  */
-const SEARCH_EVERY_MS = 15_000
-
-/** A desktop that answered, plus the address it answered from. */
-type Found = DiscoveryReply
-
-/**
- * Are these two the same address?
- *
- * They arrive written differently and always have: discovery answers with
- * `http://host:port` because that is what a browser would fetch, and the store
- * holds whatever last worked, which is `ws://host:port` for anything that has
- * been through `toOrigin`. Compared raw, the remembered desktop would never
- * match the one answering the search — every reply would look like a move, and
- * a television sitting happily beside its desktop would announce every fifteen
- * seconds that it had found it somewhere new.
- */
-function sameAddress(a: string, b: string): boolean {
-  if (!a || !b) return false
-  return toOrigin(a, MOBILE_PORT) === toOrigin(b, MOBILE_PORT)
-}
-
-/** The desktop this television is already paired to, if there is one. */
-export interface KnownDesktop {
-  /** Its own name, as it said in `hello-ok`. '' if it never said. */
-  name: string
-  /** The address that worked last time. May now be somebody else's. */
-  origin: string
-}
 
 /** One row in the column, in the order the D-pad walks them. */
 interface Choice {
@@ -99,6 +62,7 @@ export function TvConnect({
   detail,
   proto,
   known,
+  homing,
   onPick,
   onCancel,
   onType,
@@ -111,6 +75,12 @@ export function TvConnect({
   proto: number
   /** The desktop already paired with, or null on a television's first day. */
   known: KnownDesktop | null
+  /**
+   * The search, run by App.tsx so that exactly one of them exists on this
+   * device. This screen reads it and draws it; the automatic dial that follows
+   * from it has already happened by the time anything here re-renders.
+   */
+  homing: Homing
   /** Connect to this desktop. Whether a token rides along is App.tsx's call. */
   onPick: (origin: string) => void
   /** Give up on a pairing request that is waiting on the desk. */
@@ -120,93 +90,9 @@ export function TvConnect({
   /** Throw the pairing away and start over as an unpaired television. */
   onForget: () => void
 }): React.JSX.Element {
-  const [found, setFound] = useState<Found[]>([])
-  const [searching, setSearching] = useState(false)
-  /** No native layer at all — a browser preview, or an older APK. */
-  const [canSearch] = useState(() => tvBridge.canFindDesktops())
-  /** Has a search finished at least once? It is the difference between
-   *  "looking" and "nothing answered", which are different sentences. */
-  const [searched, setSearched] = useState(false)
+  const { found, searching, searched, canSearch, search } = homing
   const [at, setAt] = useState(0)
   const rows = useRef(new Map<number, HTMLElement>())
-  /**
-   * Addresses this screen has dialled on its own initiative.
-   *
-   * A ref, not state: it must not repaint anything, and it must be read by the
-   * effect that writes it without that effect depending on its own output. Its
-   * job is to make the automatic dial happen once per address — the desktop
-   * answers every probe, so without this a moved laptop would be re-dialled
-   * every fifteen seconds and a prompt would reappear over the top of the one
-   * already on its screen.
-   */
-  const homed = useRef(new Set<string>())
-
-  const search = useCallback((): void => {
-    if (!tvBridge.findDesktops()) {
-      setSearched(true)
-      return
-    }
-    setSearching(true)
-    window.setTimeout(() => {
-      setSearching(false)
-      setSearched(true)
-    }, SEARCH_MS)
-  }, [])
-
-  // Answers can arrive from several desktops and from repeated probes, so they
-  // are merged by address rather than replacing the list — a second reply from
-  // the same machine must not make it appear twice, and must not make the ring
-  // jump because the row under it moved.
-  useEffect(() => {
-    return tvBridge.onDesktopsFound((replies) => {
-      const parsed = replies.map(parseDiscoveryReply).filter((reply): reply is Found => reply !== null)
-      setFound((current) => {
-        const byOrigin = new Map(current.map((desktop) => [desktop.origin, desktop]))
-        for (const desktop of parsed) byOrigin.set(desktop.origin, desktop)
-        return [...byOrigin.values()]
-      })
-    })
-  }, [])
-
-  /**
-   * Searching starts by itself and keeps going: the screen exists because the
-   * desktop is not reachable, so waiting for a press to begin looking would be
-   * asking the question the screen is here to answer.
-   *
-   * It pauses while a connection is being made or a human is being asked —
-   * those are the two moments when the answer is already on its way, and one
-   * more broadcast could only produce a second dial across the top of the first.
-   */
-  const idle = state !== 'connecting' && state !== 'awaiting'
-  useEffect(() => {
-    if (!idle) return
-    search()
-    const timer = window.setInterval(search, SEARCH_EVERY_MS)
-    return () => window.clearInterval(timer)
-  }, [idle, search])
-
-  /**
-   * The known desktop, answering from somewhere new: dial it without being told.
-   *
-   * Matched on the name it gave at pairing time, which is a label and not a
-   * credential — it decides which address is worth a connection attempt, and
-   * nothing more. The attempt itself proves the address, because App.tsx sends
-   * no token to one this television has not reached before; a machine that lied
-   * about its name gets a connection request and no secret.
-   *
-   * Only when nothing has been found at the remembered address, so a desktop
-   * that is simply slow to answer is never abandoned mid-reconnect.
-   */
-  useEffect(() => {
-    if (!known?.name || !idle) return
-    if (found.some((desktop) => sameAddress(desktop.origin, known.origin))) return
-    const moved = found.find(
-      (desktop) => desktop.name === known.name && !sameAddress(desktop.origin, known.origin) && desktop.proto === proto
-    )
-    if (!moved || homed.current.has(moved.origin)) return
-    homed.current.add(moved.origin)
-    onPick(moved.origin)
-  }, [found, idle, known, onPick, proto])
 
   const choices = useMemo((): Choice[] => {
     const list: Choice[] = found.map((desktop) => ({

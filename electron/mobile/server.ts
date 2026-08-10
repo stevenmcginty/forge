@@ -573,13 +573,25 @@ export class MobileServer {
           this.send(client, { t: 'err', code: 'bad-frame', msg: 'Write too large' })
           return
         }
-        this.host.write(id, data)
+        // The boolean matters. `write` is the one frame that carries something
+        // the sender composed — a dictated prompt, a typed command — and the
+        // client throws its draft away the moment it hands it over. A pane that
+        // exited while the phone was in a pocket would otherwise swallow the
+        // words and answer exactly as a successful write does, which is the
+        // worst thing a remote can do: look like it worked.
+        if (!this.host.write(id, data)) {
+          this.send(client, { t: 'err', code: 'unknown-session', msg: 'That pane is gone — nothing was typed' })
+        }
         return
       }
 
       case 'resize': {
         const id = wireString(frame.id, 128)
         const current = this.host.sessions().find((s) => s.id === id)
+        // Unlike `write`, a resize for a pane that has gone is not worth a
+        // sentence: it carries nothing the user composed, and the client is
+        // about to be told the session ended anyway. Silence here is the same
+        // silence `sub` would break, one frame later.
         if (!current) return
         this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows))
         return

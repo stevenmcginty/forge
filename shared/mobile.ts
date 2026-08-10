@@ -437,12 +437,17 @@ export const MAX_SIGNAL_CHARS = 65536
  *
  * That is why it is shaped the way it is:
  *
- *  - **A closed vocabulary, never a keycode.** Four pointer actions and a short
- *    list of named keys. Nothing here can express "press this scancode", so
- *    nothing that arrives here can ask for one. Typing on the desktop is
- *    deliberately absent: a channel that can send arbitrary text into whatever
- *    window happens to be focused is a different feature with a different
- *    argument to make.
+ *  - **A closed vocabulary, never a keycode.** Four pointer actions, a short
+ *    list of named keys, and one instruction that types a run of text. Nothing
+ *    here can express "press this scancode", so nothing that arrives here can
+ *    ask for one. Typing is the newest of the three and the one worth stating
+ *    rather than discovering: a paired television can put arbitrary characters
+ *    into whatever window has focus on that desk. That is a real widening, and
+ *    it is not a new *category* — a remote that can click anything and press
+ *    Enter already drives the machine — but "it cannot type" was true before
+ *    this frame grew a `text` action and is not true now. Everything that gates
+ *    the other verbs gates this one identically; see the same argument, made at
+ *    the end that performs it, in electron/mobile/input.ts.
  *  - **Every pointer event carries its own position.** A dropped `move` cannot
  *    make the click after it land somewhere else, because the click says where
  *    it is too. The cost is two numbers per frame; the alternative is a remote

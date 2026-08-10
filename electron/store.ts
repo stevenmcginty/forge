@@ -256,6 +256,9 @@ function defaultSettings(): Settings {
     // switch here that gives something outside Forge a real cursor on this
     // machine — see the note in shared/types.ts.
     mobileControlEnabled: false,
+    // The mirror is a picture and nothing else until somebody asks otherwise:
+    // what Windows shares is the whole system mix, so this is opt-in.
+    mobileMirrorAudio: false,
     // The Update button types the command and stops. Turning this on is opting
     // in to a settings page that can start an installer with one click.
     updatesAutoRun: false,
@@ -632,6 +635,9 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // Settings. Every older settings.json, every hand-edit that fat-fingers a
     // string, and every absent key all mean the same thing here — no.
     mobileControlEnabled: s.mobileControlEnabled === true,
+    // Same rule, same reason: a missing key, an older settings.json and a
+    // hand-typed "true" all mean no. Only the switch turns the sound on.
+    mobileMirrorAudio: s.mobileMirrorAudio === true,
     // Coerced rather than defaulted, like companionEnabled above: a settings.json
     // written before M10 has no key, and the answer for that file is "no".
     updatesAutoRun: Boolean(s.updatesAutoRun),

@@ -1712,6 +1712,30 @@ export interface Settings {
    * expressed at all, and electron/mobile/input.ts for what performs it.
    */
   mobileControlEnabled: boolean
+  /**
+   * May the mirror carry this desktop's sound as well as its picture?
+   *
+   * Off by default, and for the reason the capture used to give for refusing
+   * outright (see `captureScreen` in src/lib/mirror.ts): what Windows hands
+   * over is the *system* mix, so switching this on sends every notification
+   * chime, every call and every video playing on this machine to a television
+   * that may be in a room with other people in it. That is a surprise nobody
+   * should get by default, and the reason this is a switch rather than a
+   * silent improvement to the mirror.
+   *
+   * It exists because the mirror's most useful passenger is Forge's own voice
+   * agent, which speaks out of the desk's speakers and therefore cannot be
+   * heard from the sofa the mirror is watched from. There is no way to send
+   * that one voice and nothing else — Windows offers the mix or nothing — so
+   * the honest shape is the mix, opt-in, clearly labelled.
+   *
+   * Read in main when a television asks to watch, and sent to the renderer on
+   * the `start` event rather than looked up there: the desk's own copy of the
+   * settings is a cache, and this decides what leaves the machine. Unlike
+   * `mobileControlEnabled` it cannot be read per event, because a capture is
+   * negotiated once — turning it off stops the *next* watch, not this one.
+   */
+  mobileMirrorAudio: boolean
 
   /* ------------------------------------------------ updates & tools (M10) */
   /**
@@ -1970,7 +1994,15 @@ export interface MobileApprovalEvent {
  * `mobileMirrorStop`. See src/lib/mirror.ts.
  */
 export type MobileMirrorEvent =
-  | { kind: 'start' }
+  /**
+   * `audio` is the answer main gives to "may this one carry sound?", read off
+   * `mobileMirrorAudio` at the moment the television asks. It travels with the
+   * request rather than being looked up in the renderer because main holds the
+   * settings that decide what may leave this machine, and because a capture is
+   * negotiated once: the answer has to be fixed before the offer, not sampled
+   * from a copy that may be a debounced save behind.
+   */
+  | { kind: 'start'; audio: boolean }
   | { kind: 'signal'; data: string }
   | { kind: 'stop' }
 

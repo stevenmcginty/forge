@@ -321,18 +321,41 @@ const IDLE_MS = 120_000
 const RESPAWN_MS = 5_000
 
 /**
+ * One line waiting for the child, and whether it is worth less than the line
+ * behind it.
+ *
+ * The flag is the whole of the difference between the two things this queue
+ * holds. A pointer line describes *where the cursor is now*, so a backlog of
+ * them is stale by definition and the newest is the only one that matters. A
+ * character is not like that: it is part of a sentence somebody spoke, it does
+ * not go out of date while PowerShell compiles, and the one thing that must
+ * never happen to it is arriving with its beginning missing.
+ */
+interface Pending {
+  line: string
+  /** Droppable: a pointer or a key, superseded by whatever comes next. */
+  stale: boolean
+}
+
+/**
  * Lines written while the child is still compiling its P/Invoke block.
  *
- * Small on purpose. This is a queue for half a second of start-up, not a
- * buffer: everything the television sends describes *where the pointer is now*,
- * so a backlog is stale by definition. When it overflows, the oldest goes —
- * see `write`.
+ * Two ceilings, because the two kinds of line above want opposite things.
+ * Pointer lines get a small one and lose their oldest when it is reached —
+ * half a second of cursor history is worth nothing. Text gets a large one,
+ * because the helper is *cold at the start of every watch* (it is torn down
+ * with the mirror), which made the small ceiling apply to the very first thing
+ * anybody dictated: a phrase over about thirty characters was thrown away
+ * silently, which is every phrase. The larger number is still a ceiling rather
+ * than a licence — a paired device typing faster than a desktop can accept is
+ * bounded here as everywhere else.
  */
-const MAX_PENDING = 32
+const MAX_PENDING_STALE = 32
+const MAX_PENDING_TEXT = 4_096
 
 let child: ChildProcess | null = null
 let ready = false
-let pending: string[] = []
+let pending: Pending[] = []
 let idleTimer: NodeJS.Timeout | null = null
 let lastFailedAt = 0
 
@@ -375,7 +398,7 @@ function spawnHelper(): void {
     ready = true
     const queued = pending
     pending = []
-    for (const line of queued) writeLine(line)
+    for (const held of queued) writeLine(held.line)
   })
 
   const gone = (): void => {
@@ -416,20 +439,27 @@ export function driveDesktop(input: MirrorInput, at: ScreenPoint): void {
     for (const line of lines) writeLine(line)
     return
   }
-  // A phrase is all of it or none of it. The queue below drops its oldest when
-  // it overflows, which for a pointer is right — the discarded line is where
-  // the cursor was half a second ago — and for typing would be a sentence
-  // arriving on somebody's desk with its beginning missing. So a phrase that
-  // will not fit is not typed at all, and the person who spoke it sees nothing
-  // happen rather than seeing half of it happen.
-  if (lines.length > 1) {
-    if (pending.length + lines.length <= MAX_PENDING) pending.push(...lines)
+  // A phrase is all of it or none of it, and it waits in the roomy half of the
+  // queue: the helper is cold at the start of every watch, so this is the
+  // ordinary path for the first thing anybody says, not an edge of it. Only a
+  // phrase that would not fit even there is refused, and then whole — half a
+  // sentence appearing on somebody's desk is worse than none of it.
+  if (input.a === 'text') {
+    const held = pending.reduce((count, line) => (line.stale ? count : count + 1), 0)
+    if (held + lines.length > MAX_PENDING_TEXT) return
+    for (const line of lines) pending.push({ line, stale: false })
     return
   }
   // The newest instruction matters more than the oldest: what is being
-  // dropped is where the pointer was half a second ago.
-  if (pending.length >= MAX_PENDING) pending.shift()
-  pending.push(lines[0])
+  // dropped is where the pointer was half a second ago. Text queued alongside
+  // it keeps its place — the search is for the oldest *stale* line, so a
+  // waggled D-pad cannot evict the sentence in front of it.
+  const stale = pending.reduce((count, line) => (line.stale ? count + 1 : count), 0)
+  if (stale >= MAX_PENDING_STALE) {
+    const oldest = pending.findIndex((line) => line.stale)
+    if (oldest >= 0) pending.splice(oldest, 1)
+  }
+  for (const line of lines) pending.push({ line, stale: true })
 }
 
 /**

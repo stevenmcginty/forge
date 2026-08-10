@@ -838,6 +838,15 @@
   box-shadow: 0 0 0 calc(var(--u) * 2) rgb(0 0 0 / 0.75), 0 0 calc(var(--u) * 18) rgb(255 176 32 / 0.45);
 }
 
+/* The remote is the desktop's keyboard, and the arrows are not driving this
+   ring at all. Faded rather than hidden: where the pointer was left is where
+   the next click will land, which is worth knowing while the row along the
+   bottom is being walked — but a bright cursor beside a lit row of caps reads
+   as the thing the D-pad is moving, which it is not. */
+.tv-cursor.is-keys {
+  opacity: 0.35;
+}
+
 /* The grammar, flashed over the picture when the pointer is picked up and
    whenever the arrows change meaning. Bottom-centre and narrow: the wall's own
    footer is hidden while the picture is live, and the bottom of a desktop is
@@ -1253,11 +1262,15 @@
 /* --------------------------------------------------------------- type row */
 
 /* The zoomed pane's typing mode: a real input (the only thing that summons
-   Fire OS's keyboard) and the few keys a TV prompt needs. The terminal well
-   above stays the hero; this row is chrome, in chrome's sizes. */
+   Fire OS's keyboard) and the keys a terminal needs that a remote has not got.
+   The terminal well above stays the hero; this row is chrome, in chrome's
+   sizes. It wraps because the key set is the phone's whole set now — Esc, Tab,
+   Shift+Tab, the arrows, the modifiers and the shell's punctuation — and a row
+   that refused to wrap would put half of them off the side of the screen. */
 .tv-type {
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   gap: calc(var(--u) * 14);
 }
 
@@ -1316,7 +1329,162 @@
 
 .tv-type-keys {
   display: flex;
+  flex-wrap: wrap;
   gap: calc(var(--u) * 14);
+}
+
+/* A modifier that is armed, and a modifier that is locked down until it is
+   pressed again. Both have to be readable from the sofa in the corner of the
+   eye — Ctrl silently on is a key row that sends the wrong thing once an
+   evening — so the state is a filled cap rather than a tint, and locked wears
+   the same fill with the ring around it that focus uses. */
+.tv-type-key.is-mod-once,
+.tv-type-key.is-mod-locked {
+  background: var(--volt);
+  border-color: var(--volt);
+  color: #0b0c0e;
+}
+
+.tv-type-key.is-mod-locked {
+  box-shadow: 0 0 0 calc(var(--u) * 3) rgb(198 255 74 / 0.35);
+}
+
+/* The desktop's own keys, floated over the mirror in the same place the
+   keyboard row uses — one strip along the bottom, one grammar. Centred and
+   wrapping because this row is caps and nothing else: there is no field to give
+   the width to, and thirteen of them at sofa size is more than one line of a
+   1080p screen. The scrim is what makes a label readable over whatever happens
+   to be on the desktop underneath it. */
+.tv-keys {
+  justify-content: center;
+  padding: calc(var(--u) * 16);
+  background: rgb(12 14 18 / 0.92);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 18);
+  box-shadow: 0 calc(var(--u) * 20) calc(var(--u) * 56) rgb(0 0 0 / 0.7);
+}
+
+/* ------------------------------------------------------------ split screen
+
+   YouTube owns the other half of the television (TvPanels in MainActivity.kt),
+   and the native layer tells this page nothing — the WebView is simply half as
+   wide. Whether that is so is judged in one place, `useSplit` in
+   TvDashboard.tsx (window width against the display's — a shape the soft
+   keyboard cannot disturb), and worn here as `.tv.is-split`. Every rule in
+   this block hangs off that class rather than a media query of its own, so the
+   chrome can never compact while the terminal still draws the desktop's grid.
+
+   The rule of the whole block: half the pixels means the chrome pays, not the
+   content. One header line survives — the mark, which pane, the live badge and
+   the clock, which is everything a glance from the sofa actually asks — and
+   the version line, the pane's own title row and the permanent footer all give
+   their pixels to the terminal. `--u` stays a *screen* height unit, so type
+   stays at its full-screen physical size rather than shrinking with the panel. */
+
+.tv.is-split {
+  /* Left edge heavier than right on purpose: the left is the television's
+     own edge, where overscan lives; the right border is the middle of the
+     screen, which no set crops. Top and bottom stay near the full-screen
+     values because they are still real screen edges. */
+  padding: calc(var(--u) * 34) calc(var(--u) * 26) calc(var(--u) * 36) calc(var(--u) * 44);
+  gap: calc(var(--u) * 16);
+}
+
+/* Version arithmetic is desk reading, not sofa reading, and at half width it
+   would push the live badge and the clock off the line that exists for them. */
+.tv.is-split .tv-head-meta {
+  display: none;
+}
+
+/* The zoomed pane's identity, folded up into the surviving header line.
+   Rendered only while split and zoomed (TvDashboard.tsx), so full screen
+   never sees it. Context dim and title ink, exactly as the two-row version
+   weighted them. */
+.tv-head-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(var(--u) * 26);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-head-pane-context {
+  color: var(--dim);
+  font-weight: 400;
+}
+
+/* The rows the header line just absorbed. */
+.tv.is-split .tv-pane-head {
+  display: none;
+}
+
+.tv.is-split .tv-pane {
+  gap: calc(var(--u) * 10);
+}
+
+/* Top-left anchored rather than centred: the split terminal fits itself to
+   this box, but for the beat before the desktop's reflow lands — and on the
+   day a fit fails — the edge that gets clipped must be the far one, because
+   terminal lines begin on the left. Thin padding; the frame is enough. */
+.tv.is-split .tv-pane-term {
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: calc(var(--u) * 10);
+  border-radius: calc(var(--u) * 12);
+}
+
+/* The exit line becomes a visitor: a pill over the bottom of the well that
+   says its sentence and gets out of the way, because a permanent strip of
+   instructions is a row of terminal nobody gets back. Six seconds, like
+   every other flashed grammar on this television (HINT_MS). Scoped to the
+   zoomed pane — the mirror's foot has its own arrangements. Hidden outright
+   while the type row is up, since both live at the bottom edge and the row
+   explains itself. */
+.tv.is-split .tv-pane .tv-pane-foot {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--u) * 24);
+  transform: translateX(-50%);
+  max-width: 88%;
+  padding: calc(var(--u) * 10) calc(var(--u) * 26);
+  background: rgb(12 14 18 / 0.92);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--u) * 999);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  animation: tv-foot-fade 6s ease forwards;
+}
+
+.tv.is-split .tv-pane .tv-type + .tv-pane-foot {
+  display: none;
+}
+
+@keyframes tv-foot-fade {
+  0%,
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* No motion: the pill stays put in the layout instead, exactly the strip the
+   full-screen view keeps — words persist, nothing covers the terminal. */
+@media (prefers-reduced-motion: reduce) {
+  .tv.is-split .tv-pane .tv-pane-foot {
+    position: static;
+    transform: none;
+    animation: none;
+    background: none;
+    border: 0;
+    max-width: none;
+  }
 }
 
 /* ------------------------------------------------------------------- toast */

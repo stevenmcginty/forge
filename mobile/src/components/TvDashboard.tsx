@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import type { ClaudePermissionMode, PaneLeaf, TerminalTab, Workspace } from '@shared/types'
-import type { MobileSession } from '@shared/mobile'
+import { MAX_TEXT_CHARS } from '@shared/mobile'
+import type { MirrorKey, MobileSession } from '@shared/mobile'
 import type { Link, LinkPicture, LinkState } from '../lib/link'
 import { mirrorListeners, startMirrorViewer } from '../lib/mirror'
 import type { DesktopStats, MirrorViewer, ScreenStats } from '../lib/mirror'
@@ -12,6 +14,7 @@ import { formatBytes } from '../lib/manifest'
 import { CURRENT_VERSION_NAME, download as downloadUpdate, install as installUpdate, updateStore } from '../lib/update'
 import type { UpdateState } from '../lib/update'
 import { leavesOf } from './Browser'
+import { ARROWS, BACK_TAB, SYMBOLS, useStickyKeys } from './KeyBar'
 import { paneListeners } from './PaneView'
 import { TvMenu } from './TvMenu'
 import '../tv.css'
@@ -90,10 +93,50 @@ type Tap = (data: string, replay: boolean) => void
 
 /**
  * The control bytes the type row sends — KeyBar.tsx's encodings, spelled as
- * code rather than string escapes so they stay visible in a diff.
+ * code rather than string escapes so they stay visible in a diff. Everything
+ * with more than one byte to it (the arrows, the symbols, Shift+Tab, the
+ * Ctrl+letter rule) is imported from KeyBar rather than written again here.
  */
 const ESC = String.fromCharCode(27)
 const CTRL_C = String.fromCharCode(3)
+const TAB = String.fromCharCode(9)
+const BACKSPACE = String.fromCharCode(127)
+
+/** Every cap in a key row, in the order the D-pad walks them. */
+function capsOf(row: HTMLElement | null): HTMLButtonElement[] {
+  return Array.from(row?.querySelectorAll('button') ?? [])
+}
+
+/**
+ * The D-pad's walk along a row of caps, and the way back off it.
+ *
+ * Left and Right move the ring; Up — and Left from the first cap, which is the
+ * same gesture as running out of row — hands focus back to whatever the row
+ * hangs under, when there is one. Shared by the zoomed terminal's row and the
+ * mirror's, because two rows that walked differently on the same remote would
+ * be two grammars to learn for one gesture.
+ *
+ * Nothing here moves focus vertically *into* the row: the caps are the leaves
+ * of this walk and every surface that has one puts it at the bottom.
+ */
+function walkCaps(event: React.KeyboardEvent, row: HTMLElement | null, back: HTMLElement | null): void {
+  if (event.key === 'ArrowUp') {
+    if (!back) return
+    event.preventDefault()
+    back.focus()
+    return
+  }
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  const caps = capsOf(row)
+  const at = caps.indexOf(event.target as HTMLButtonElement)
+  if (at < 0) return
+  event.preventDefault()
+  if (event.key === 'ArrowLeft' && at === 0) {
+    back?.focus()
+    return
+  }
+  caps[event.key === 'ArrowLeft' ? at - 1 : Math.min(caps.length - 1, at + 1)]?.focus()
+}
 
 /**
  * What is open full screen.
@@ -162,6 +205,60 @@ const MIRROR_WAIT_MS = 10_000
 const HINT_MS = 6_000
 
 /**
+ * The gap between the frames of one dictated paragraph.
+ *
+ * A sentence spoken into a remote can run past MAX_TEXT_CHARS, and one frame
+ * cannot carry it — so it goes as several, and this is how far apart. Long
+ * enough that a burst of them cannot walk into the desktop's own input ceiling
+ * (MAX_INPUT_PER_SECOND) or outrun the helper typing the last lot, short enough
+ * that the whole paragraph is on the desk before anybody has finished reading
+ * the confirmation of it.
+ */
+const TEXT_CHUNK_MS = 150
+
+/**
+ * Is this WebView half a television?
+ *
+ * The native layer (TvPanels in MainActivity.kt) puts YouTube beside this page
+ * in a horizontal split, and tells the web layer nothing — the WebView simply
+ * *is* half as wide. So the fact is read from shape: the window's width
+ * against the *display's*, which `screen` reports whatever slice of it this
+ * WebView occupies. Full screen the two are equal; split, the window is half.
+ *
+ * Width against the screen rather than an aspect ratio on purpose: the soft
+ * keyboard resizes this window's *height* (there is no windowSoftInputMode in
+ * the manifest to say otherwise), and an aspect test would flip the whole
+ * layout to full-screen rules at the exact moment somebody starts typing.
+ * Width is the one dimension only the panel arrangement moves.
+ *
+ * The verdict is worn as a class (`tv is-split`) that every split rule in
+ * tv.css hangs off — one judge, so the chrome can never compact while the
+ * terminal still renders the desktop's grid.
+ */
+function useSplit(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      window.addEventListener('resize', onChange)
+      return () => window.removeEventListener('resize', onChange)
+    },
+    () => window.innerWidth <= window.screen.width * 0.75
+  )
+}
+
+/**
+ * The zoomed terminal's type size while this app owns half the television.
+ *
+ * Fixed rather than fitted, because in split view the fitting runs the other
+ * way: the font is chosen for the sofa and the *grid* is asked to fit around it
+ * (see the split branch in TvPaneView). 14 CSS px is 28 real pixels on the Fire
+ * Stick's 1080p output — two steps above the wall's own 22px floor, because
+ * terminal output is read, not glanced at. The slight extra leading is for the
+ * same distance; xterm's own glyphs keep box-drawing joined across it.
+ */
+const SPLIT_FONT = 14
+const SPLIT_LEADING = 1.1
+
+/**
  * PTY bytes → words. CSI, OSC, the DCS family and lone escapes go first, then
  * every control character except `\n` and `\r`, which the line logic needs.
  * Applied to the whole kept tail on read rather than chunk-by-chunk, so an
@@ -223,6 +320,8 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
 
   const [zoom, setZoom] = useState<Zoom | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
+  /** Half the television (YouTube beside us), read from the viewport's shape. */
+  const split = useSplit()
   /** The management menu (TvMenu) is up; the wall's remote listener stands down. */
   const [menuOpen, setMenuOpen] = useState(false)
   /**
@@ -365,12 +464,37 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
     return () => clearTimeout(timer)
   }, [toast])
 
+  /**
+   * The zoomed pane's geometry requests, on their way to the desktop.
+   *
+   * Stable (useCallback on the link alone) because TvPaneView's restore fires
+   * from an effect teardown, and a callback that changed identity every paint
+   * would run that teardown twice a second. The guard exists for the restore
+   * too: a pane that died while zoomed still owes nothing, and a resize for it
+   * would come back as an 'unknown-session' toast over a wall that already
+   * moved on.
+   */
+  const resizePane = useCallback(
+    (id: string, cols: number, rows: number): void => {
+      if (!link.sessions.some((s) => s.id === id)) return
+      link.resize(id, cols, rows)
+    },
+    [link]
+  )
+
   // Stable on purpose: TvMirrorView arms its no-answer deadline in an effect
   // that depends on these, and this wall re-renders twice a second — a fresh
   // closure each paint would reset that clock forever and the honest timeout
   // would never come.
   const mirrorWentSilent = useCallback((): void => setMirrorSilent(true), [])
   const mirrorCameAlive = useCallback((): void => setMirrorSilent(false), [])
+  /**
+   * The mirror's own sentences, on the wall's toast — what the keyboard over
+   * the picture just sent to the desk. Stable for the same reason as the two
+   * above: every prop that screen builds an effect out of has to survive this
+   * wall repainting twice a second.
+   */
+  const mirrorSaid = useCallback((line: string): void => setToast(line), [])
 
   const openZoom = (id: string): void => {
     // The burger is a destination like any other; it just opens a menu rather
@@ -688,7 +812,7 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
   }
 
   return (
-    <div className="tv">
+    <div className={`tv${split ? ' is-split' : ''}`}>
       <header className="tv-head">
         <strong className="tv-mark">Forge</strong>
         {/* Two versions, each labelled, because an unlabelled one is the
@@ -703,6 +827,16 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
           Desktop v{picture.appVersion} · TV {CURRENT_VERSION_NAME} · {picture.projects.length}{' '}
           {picture.projects.length === 1 ? 'project' : 'projects'} · {live.size} live
         </span>
+        {/* In split view the zoomed pane's own header row is given up to the
+            terminal (see tv.css), so the one header line left has to say which
+            pane this is. Only rendered when both facts are true — full screen
+            keeps its two-row arrangement untouched. */}
+        {split && zoom?.at === 'pane' && (
+          <span className="tv-head-pane">
+            <span className="tv-head-pane-context">{zoom.context} · </span>
+            {zoom.title}
+          </span>
+        )}
         <span className="tv-head-spring" />
         {/* The burger. In the walk like any row — up past the screen tile
             lands here — and absent while something is zoomed, because a verb
@@ -730,10 +864,12 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
           title={zoom.title}
           context={zoom.context}
           stale={stale}
+          split={split}
           onClose={() => setZoom(null)}
           attach={attachTap}
           detach={detachTap}
           onWrite={(data) => link.write(zoom.id, data)}
+          onResize={resizePane}
         />
       ) : zoom?.at === 'mirror' ? (
         <TvMirrorView
@@ -742,6 +878,7 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
           onClose={() => setZoom(null)}
           onSilent={mirrorWentSilent}
           onAlive={mirrorCameAlive}
+          onSaid={mirrorSaid}
         />
       ) : (
         <main className={`tv-wall${stale ? ' is-stale' : ''}`} ref={wallEl}>
@@ -1046,33 +1183,54 @@ function ProjectCard({
 /**
  * One pane, full screen, watched.
  *
- * A real xterm, but held at the *desktop's* geometry: the desktop owns this
- * PTY's cols×rows and the phone may be driving it right now, so the TV never
- * sends a resize — it picks the font size that fits that grid on this screen
- * and centres the result. stdin is disabled for the same reason the wall has
- * no buttons: this surface watches. Up/Down walk the scrollback in a plain
- * shell (a full-screen TUI owns its own screen and ignores them, which is
- * right); Escape — the remote's Back — returns to the wall.
+ * A real xterm, and *whose* geometry it draws depends on how much television
+ * there is. Full screen, it is held at the desktop's: the desktop owns this
+ * PTY's cols×rows and the phone may be driving it right now, so the TV picks
+ * the font size that fits that grid on this screen and centres the result.
+ *
+ * In split view that bargain collapses. Half a 1080p panel cannot show a
+ * 130-column grid at any size a sofa can read — fitting it means a 6px font,
+ * and holding the font means clipping, which is how this screen once showed
+ * only the right-hand ends of every line. So while the window is both zoomed
+ * *and* split, the TV does what the phone has always done: it fits the grid to
+ * its own box at a readable size and asks the desktop for that shape over the
+ * existing `resize` frame. The desktop's side of that contract already exists
+ * — while a remote device has a pane open, the remote owns the geometry and
+ * the desktop letterboxes its own terminal to match (see the mobileWatched
+ * plumbing in electron/mobile-host.ts) — and closing the window hands the
+ * shape straight back (the restore effect below), so the desk finds its pane
+ * as it left it.
+ *
+ * stdin is disabled for the same reason the wall has no buttons: this surface
+ * watches. Up/Down walk the scrollback in a plain shell (a full-screen TUI
+ * owns its own screen and ignores them, which is right); Escape — the
+ * remote's Back — returns to the wall.
  */
 function TvPaneView({
   session,
   title,
   context,
   stale,
+  split,
   onClose,
   attach,
   detach,
-  onWrite
+  onWrite,
+  onResize
 }: {
   session: MobileSession
   title: string
   context: string
   stale: boolean
+  /** Half the television. Decides who owns the PTY's shape — see above. */
+  split: boolean
   onClose: () => void
   attach: (id: string, fn: Tap) => void
   detach: () => void
   /** Raw bytes for this pane's PTY, down the Link's existing write path. */
   onWrite: (data: string) => void
+  /** A geometry request for the desktop, guarded there against dead panes. */
+  onResize: (id: string, cols: number, rows: number) => void
 }): React.JSX.Element {
   const holder = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -1090,24 +1248,29 @@ function TvPaneView({
   const keysEl = useRef<HTMLDivElement | null>(null)
   const typingRef = useRef(typing)
   typingRef.current = typing
+  /**
+   * The same sticky Ctrl and Alt the phone's key bar has, from the same hook.
+   *
+   * A television needs them for the same reason a phone does and one more: the
+   * remote has no modifier at all, so "hold Ctrl" is not a gesture that exists
+   * here. Armed by a press, spent by the next key — see `onDraft` for what
+   * being armed does to the field.
+   */
+  const { ctrl, alt, cycleCtrl, cycleAlt, sendChar, sendRaw } = useStickyKeys(onWrite)
+  /**
+   * The desktop's shape when this window opened, held for the hand-back.
+   * Captured once — by the time the window closes, `session.cols` is whatever
+   * this television last asked for, which is exactly the wrong thing to
+   * restore to.
+   */
+  const original = useRef({ cols: session.cols, rows: session.rows })
+  /** Whether this window ever reshaped the PTY, so only a debt is repaid. */
+  const reshaped = useRef(false)
 
   useEffect(() => {
     const container = holder.current
     if (!container) return
-    // 0.62 and 1.35 are conservative cell-metric estimates for the mono
-    // stack; erring small costs a few px of margin, erring big clips rows.
-    const font = Math.max(
-      10,
-      Math.min(
-        26,
-        Math.floor(container.clientWidth / (session.cols * 0.62)),
-        Math.floor(container.clientHeight / (session.rows * 1.35))
-      )
-    )
-    const term = new Terminal({
-      cols: session.cols,
-      rows: session.rows,
-      fontSize: font,
+    const shared = {
       fontFamily: "'Cascadia Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
       disableStdin: true,
       cursorBlink: false,
@@ -1118,8 +1281,46 @@ function TvPaneView({
         cursor: '#C6FF4A',
         selectionBackground: '#2A3A12'
       }
-    })
-    term.open(container)
+    } as const
+    let term: Terminal
+    if (split) {
+      // Half a television: the font is fixed at sofa size and the grid fits
+      // around it, then the desktop is asked for that shape — the reflow that
+      // turns "the right-hand ends of long lines" back into sentences. The
+      // under-8px guard is term.ts's: a box mid-layout makes FitAddon compute
+      // a nonsense geometry, and a nonsense geometry must never reach a PTY.
+      term = new Terminal({ ...shared, fontSize: SPLIT_FONT, lineHeight: SPLIT_LEADING })
+      const fit = new FitAddon()
+      term.loadAddon(fit)
+      term.open(container)
+      if (container.clientWidth >= 8 && container.clientHeight >= 8) {
+        try {
+          fit.fit()
+        } catch {
+          /* the desktop's shape stands until the box is real */
+        }
+      }
+      if (term.cols >= 2 && term.rows >= 2 && (term.cols !== session.cols || term.rows !== session.rows)) {
+        reshaped.current = true
+        onResize(session.id, term.cols, term.rows)
+      }
+    } else {
+      // The whole television: the desktop owns this PTY's cols×rows and the
+      // phone may be driving it right now, so no resize is ever sent — the
+      // font that fits that grid is picked instead. 0.62 and 1.35 are
+      // conservative cell-metric estimates for the mono stack; erring small
+      // costs a few px of margin, erring big clips rows.
+      const font = Math.max(
+        10,
+        Math.min(
+          26,
+          Math.floor(container.clientWidth / (session.cols * 0.62)),
+          Math.floor(container.clientHeight / (session.rows * 1.35))
+        )
+      )
+      term = new Terminal({ ...shared, cols: session.cols, rows: session.rows, fontSize: font })
+      term.open(container)
+    }
     termRef.current = term
     attach(session.id, (data, replay) => {
       // The replay is the whole screen; without the reset a reconnect stacks
@@ -1135,8 +1336,26 @@ function TvPaneView({
     // `typing` is a real dependency: the type row shortens the well, so the
     // terminal is remounted at the size that is actually there. The attach()
     // inside re-subscribes, and the desktop's replay repaints the screen —
-    // the same bargain opening the zoom makes.
-  }, [session.id, session.cols, session.rows, attach, detach, typing])
+    // the same bargain opening the zoom makes. `split` is one for the same
+    // reason with the panels: crossing between half and whole television
+    // rebuilds the terminal under the geometry rule that now applies.
+  }, [session.id, session.cols, session.rows, attach, detach, typing, split, onResize])
+
+  // The hand-back. Leaving the split window — Back to the wall, the pane
+  // dying, or the panels folding to full screen — returns the PTY to the shape
+  // the desktop had before this television reshaped it. An effect of its own,
+  // keyed on `split` rather than riding the mount effect above, because that
+  // one also tears down for a typing toggle and the desk must not watch its
+  // pane snap wide and narrow again every time the keyboard comes up.
+  useEffect(() => {
+    if (!split) return
+    const id = session.id
+    return () => {
+      if (!reshaped.current) return
+      reshaped.current = false
+      onResize(id, original.current.cols, original.current.rows)
+    }
+  }, [split, session.id, onResize])
 
   // Entering typing mode is what summons the keyboard: focus must land on the
   // input, and it does not exist until this render has committed.
@@ -1175,10 +1394,6 @@ function TvPaneView({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  /** The D-pad's route around the type row: input first, then the keys. */
-  const keyButtons = (): HTMLButtonElement[] =>
-    Array.from(keysEl.current?.querySelectorAll('button') ?? [])
-
   const onInputKey = (event: React.KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === 'Enter') {
       // The whole line, with its Enter. An empty draft still sends '\r',
@@ -1192,21 +1407,31 @@ function TvPaneView({
     const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length
     if (event.key === 'ArrowDown' || (event.key === 'ArrowRight' && atEnd)) {
       event.preventDefault()
-      keyButtons()[0]?.focus()
+      capsOf(keysEl.current)[0]?.focus()
     }
   }
 
-  const onKeysNav = (event: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'ArrowUp') return
-    const buttons = keyButtons()
-    const at = buttons.indexOf(event.target as HTMLButtonElement)
-    if (at < 0) return
-    event.preventDefault()
-    if (event.key === 'ArrowUp' || (event.key === 'ArrowLeft' && at === 0)) {
-      inputEl.current?.focus()
+  /**
+   * A letter, while a modifier is armed.
+   *
+   * The phone's Ctrl works because every keystroke on that screen is its own
+   * event; here the field is a *line* that leaves on Enter, so Ctrl+C typed
+   * into it would arrive as the two characters "^C" long after the moment it
+   * meant anything. So while Ctrl or Alt is armed this field stops being a line
+   * and becomes one key at a time: the character that was just added is sent
+   * modified and taken straight back out of the box.
+   *
+   * Only while something is armed, which is a press somebody made a moment ago
+   * and can see on the cap. With nothing armed this is an ordinary text field
+   * and dictation into it behaves exactly as it always has.
+   */
+  const onDraft = (value: string): void => {
+    if ((ctrl === 'off' && alt === 'off') || value.length !== draft.length + 1 || !value.startsWith(draft)) {
+      setDraft(value)
       return
     }
-    buttons[event.key === 'ArrowLeft' ? at - 1 : Math.min(buttons.length - 1, at + 1)]?.focus()
+    sendChar(value.slice(draft.length))
+    setDraft(draft)
   }
 
   return (
@@ -1229,30 +1454,94 @@ function TvPaneView({
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            placeholder="Type a line — OK sends it"
-            onChange={(e) => setDraft(e.target.value)}
+            placeholder={
+              ctrl !== 'off' || alt !== 'off'
+                ? 'One letter at a time while a modifier is held'
+                : 'Type a line — OK sends it'
+            }
+            onChange={(e) => onDraft(e.target.value)}
             onKeyDown={onInputKey}
           />
-          {/* The keys a TV prompt actually needs, KeyBar's encodings exactly.
-              Words on the caps, as everywhere: a sofa reads labels, not glyphs. */}
-          <div className="tv-type-keys" ref={keysEl} onKeyDown={onKeysNav}>
-            <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => onWrite(ESC + '[A')}>
-              ↑
-            </button>
-            <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => onWrite(ESC + '[B')}>
-              ↓
-            </button>
-            <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => onWrite(ESC)}>
+          {/* The keys a terminal needs and a remote does not have, in KeyBar's
+              encodings — imported from it rather than spelled again, so the
+              television and the phone cannot drift apart on what Ctrl-C is.
+
+              The set is the phone's, reordered for a walk instead of a thumb:
+              what a Claude Code session is answered with (Escape, Tab and
+              Shift+Tab, which is how its permission mode cycles) comes first,
+              because every cap after the first costs a press of Right to
+              reach. Words on the caps where a word exists, as everywhere on
+              this wall: a sofa reads labels, not glyphs. */}
+          <div className="tv-type-keys" ref={keysEl} onKeyDown={(e) => walkCaps(e, keysEl.current, inputEl.current)}>
+            <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => sendRaw(ESC)}>
               Esc
             </button>
-            <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => onWrite(CTRL_C)}>
+            <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => sendRaw(TAB)}>
+              Tab
+            </button>
+            <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => sendRaw(BACK_TAB)}>
+              ⇧Tab
+            </button>
+            <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => sendRaw(CTRL_C)}>
               Ctrl-C
             </button>
+            <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => sendRaw(BACKSPACE)}>
+              ⌫
+            </button>
+            {ARROWS.map(([label, code]) => (
+              <button
+                type="button"
+                key={label}
+                className="tv-type-key"
+                tabIndex={-1}
+                onClick={() => sendRaw(code)}
+              >
+                {label}
+              </button>
+            ))}
+            {/* Sticky, exactly as on the phone: one press arms them for the
+                next key, a second locks them, a third puts them away. The state
+                is on the cap because a modifier nobody can see the state of is
+                a modifier that sends the wrong thing once an evening. */}
+            <button
+              type="button"
+              className={`tv-type-key is-mod is-mod-${ctrl}`}
+              tabIndex={-1}
+              aria-pressed={ctrl !== 'off'}
+              onClick={cycleCtrl}
+            >
+              Ctrl
+            </button>
+            <button
+              type="button"
+              className={`tv-type-key is-mod is-mod-${alt}`}
+              tabIndex={-1}
+              aria-pressed={alt !== 'off'}
+              onClick={cycleAlt}
+            >
+              Alt
+            </button>
+            {SYMBOLS.map((symbol) => (
+              <button
+                type="button"
+                key={symbol}
+                className="tv-type-key is-sym"
+                tabIndex={-1}
+                onClick={() => sendChar(symbol)}
+              >
+                {symbol}
+              </button>
+            ))}
           </div>
         </div>
       )}
-      <div className="tv-pane-foot">
-        {typing ? 'OK sends the line · Back puts the keyboard away' : 'OK to type into this terminal · Back returns to the wall'}
+      {/* Keyed on what it says: in split view this line is a pill that fades
+          out (tv.css), and a changed sentence should get its six seconds too —
+          remounting is what restarts a one-shot CSS animation. */}
+      <div className="tv-pane-foot" key={typing ? 'typing' : 'watching'}>
+        {typing
+          ? 'OK sends the line · Down for Esc, Tab and the rest · Back puts the keyboard away'
+          : 'OK to type into this terminal · Back returns to the wall'}
       </div>
     </div>
   )
@@ -1262,6 +1551,62 @@ function TvPaneView({
 
 /** Where the watch has got to. 'ended' always carries its sentence. */
 type Phase = { at: 'connecting' } | { at: 'live' } | { at: 'ended'; reason: string }
+
+/**
+ * The caps on the mirror's key row, and the whole of it.
+ *
+ * A subset of `MIRROR_KEYS` (shared/mobile.ts) with a word on each — the two
+ * arrows this row does not carry are Up and Down, which the D-pad sends
+ * directly. Order is frequency, not the vocabulary's: every cap after the first
+ * costs a press of Right to reach, and the first one is Enter because
+ * submitting the thing just dictated is what the whole row is for.
+ */
+const MIRROR_CAPS: Array<[string, MirrorKey]> = [
+  ['Enter', 'enter'],
+  ['Esc', 'escape'],
+  ['Tab', 'tab'],
+  ['⌫', 'backspace'],
+  ['Space', 'space'],
+  ['←', 'left'],
+  ['→', 'right'],
+  ['Del', 'delete'],
+  ['Home', 'home'],
+  ['End', 'end'],
+  ['PgUp', 'pageup'],
+  ['PgDn', 'pagedown'],
+  ['⊞ Win', 'win']
+]
+
+/**
+ * One phrase, cut into the frames the wire will actually carry.
+ *
+ * `readMirrorInput` on the desktop takes the first MAX_TEXT_CHARS of a `text`
+ * frame and silently drops the rest, which is the right answer to a single
+ * over-long frame and the wrong answer to a dictated paragraph — and a
+ * paragraph is exactly what a remote's microphone produces when somebody keeps
+ * talking. So the cut happens here, where the whole of it is still known, and
+ * the pieces go as successive frames.
+ *
+ * Cut anywhere, including mid-word: the desktop types the pieces one after
+ * another into the same field with nothing between them, so the characters that
+ * land are the characters that were said whatever the boundaries were. Code
+ * points rather than UTF-16 units only so that a surrogate pair is never split
+ * in half — half an emoji is a character the desktop's layout cannot type and
+ * would drop, which would be the one way this could change what was said.
+ */
+function phraseChunks(text: string): string[] {
+  const chunks: string[] = []
+  let chunk = ''
+  for (const character of text) {
+    if (chunk.length + character.length > MAX_TEXT_CHARS) {
+      chunks.push(chunk)
+      chunk = ''
+    }
+    chunk += character
+  }
+  if (chunk) chunks.push(chunk)
+  return chunks
+}
 
 /**
  * The desktop's own screen, full bleed, watched.
@@ -1289,7 +1634,8 @@ function TvMirrorView({
   canControl,
   onClose,
   onSilent,
-  onAlive
+  onAlive,
+  onSaid
 }: {
   link: Link
   /**
@@ -1303,6 +1649,14 @@ function TvMirrorView({
   onSilent: () => void
   /** Frames actually arrived; any remembered silence is stale. */
   onAlive: () => void
+  /**
+   * Something happened that the person on the sofa cannot see: a phrase left
+   * for the desktop to type. It goes on the wall's toast, which is drawn over
+   * this screen too — a dictated sentence disappears into a field that empties
+   * itself, and without a line saying where it went there is nothing at all to
+   * tell "sent" from "swallowed".
+   */
+  onSaid: (line: string) => void
 }): React.JSX.Element {
   const video = useRef<HTMLVideoElement | null>(null)
   const [phase, setPhase] = useState<Phase>({ at: 'connecting' })
@@ -1334,7 +1688,9 @@ function TvMirrorView({
    * Opened by a click on the desktop, because nothing can tell whether the
    * click landed in a text box: Chrome answers the accessibility question with
    * the same "document" node whether an input has focus or nothing does. So
-   * every click offers, and Back declines.
+   * every click offers, and Back puts it away again — sending whatever was in
+   * it on the way out, which is `commit` below and the reason a phrase cannot
+   * be lost by leaving rather than by pressing OK.
    */
   const [typing, setTyping] = useState(false)
   const [draft, setDraft] = useState('')
@@ -1342,6 +1698,99 @@ function TvMirrorView({
   /** The window listener is bound once; this is how it reads the live value. */
   const typingRef = useRef(typing)
   typingRef.current = typing
+  /**
+   * The draft, where the fallbacks below can reach it.
+   *
+   * `commit` is called from an effect's teardown as well as from the field's
+   * own handlers, and a teardown runs after the render that caused it — by
+   * which point the `draft` captured in that closure is whatever the last paint
+   * held. This ref is the live value, and emptying it is what makes one commit
+   * unrepeatable by the next.
+   */
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+
+  /**
+   * One key on the desktop's own keyboard, pressed and released.
+   *
+   * Both halves always, in that order and in the same instant: the desktop
+   * performs each one as a real `keybd_event`, so a down without its up is a
+   * key held on somebody's desk until the mirror ends. Nothing here can name a
+   * scancode — `MirrorKey` is a closed list (shared/mobile.ts) and this is a
+   * lookup into it, not an encoding.
+   */
+  const tapKey = (key: MirrorKey): void => {
+    link.sendMirrorInput({ t: 'mirror-input', a: 'key', key, down: true })
+    link.sendMirrorInput({ t: 'mirror-input', a: 'key', key, down: false })
+  }
+
+  /**
+   * Send what is in the box to the desktop, once, whatever asked — and press
+   * Enter after it, or not.
+   *
+   * One function because there are now six ways in and they must not be able to
+   * disagree: Enter from the remote, the form's implicit submit, the keyboard's
+   * own action button, either cap under the field, the field losing focus, and
+   * the keyboard closing. The last two exist because of what Fire OS actually
+   * does with the voice dialog — it labels its button "Next", and Chromium
+   * answers a Next by *moving focus*, not by synthesising an Enter
+   * (`ImeAdapterImpl`). A remote that dictated a sentence and pressed the only
+   * button on screen would otherwise watch the words vanish, which is exactly
+   * what it did.
+   *
+   * So the field is emptied first and sent second. Anything that arrives after
+   * the first route has fired finds an empty box and does nothing, which is the
+   * whole of the protection against sending a phrase twice.
+   *
+   * `submit` is the difference between filling a box and answering a question,
+   * and it is never guessed: a dictated prompt for a Claude pane wants its
+   * Enter and the second field of a login form very much does not. The presses
+   * that mean "I have finished saying it" carry it; the ones that mean "the
+   * keyboard is going away" do not. An empty box with `submit` set is still a
+   * press of Enter — answering a prompt with a bare Enter is a real need, and
+   * the zoomed terminal's row has always read it that way.
+   *
+   * Answers whether there was anything to send, which is what tells a blur that
+   * moved focus off this overlay from one that did not.
+   */
+  const commit = (submit: boolean): boolean => {
+    const text = draftRef.current
+    draftRef.current = ''
+    setDraft('')
+    // Whitespace is not an instruction, but what is sent is the draft itself:
+    // a trailing space between two dictated phrases is part of the sentence.
+    const words = text.trim() ? text : ''
+    if (!words && !submit) return false
+    if (phase.at !== 'live') {
+      onSaid('The desktop’s picture has ended — nothing was typed.')
+      return false
+    }
+    // Spread out rather than fired together: each frame is a couple of hundred
+    // real key strokes at the other end, and the desktop counts frames per
+    // second (MAX_INPUT_PER_SECOND) before it performs any of them. The Enter
+    // takes the slot after the last of them, because a submit that overtook the
+    // sentence it is submitting would send half a prompt.
+    const chunks = words ? phraseChunks(words) : []
+    chunks.forEach((chunk, index) => {
+      const send = (): void => link.sendMirrorInput({ t: 'mirror-input', a: 'text', text: chunk })
+      if (index === 0) send()
+      else window.setTimeout(send, index * TEXT_CHUNK_MS)
+    })
+    if (submit) {
+      if (chunks.length > 1) window.setTimeout(() => tapKey('enter'), chunks.length * TEXT_CHUNK_MS)
+      else tapKey('enter')
+    }
+    if (!words) {
+      onSaid('Pressed Enter on the desktop.')
+      return false
+    }
+    const shown = words.length > 40 ? `${words.slice(0, 40)}…` : words
+    onSaid(submit ? `Sent “${shown}” and pressed Enter.` : `Sent “${shown}” — not submitted.`)
+    return true
+  }
+  /** The teardown below calls this, and must call the current one. */
+  const commitRef = useRef(commit)
+  commitRef.current = commit
   /** What the desktop last said about its sending. See lib/mirror.ts. */
   const desk = useRef<DesktopStats | null>(null)
   /** The same pair, snapshotted for rendering — see the polling effect below. */
@@ -1380,6 +1829,8 @@ function TvMirrorView({
     mode: 'move',
     holding: false
   })
+  /** The row of desktop keys, while the remote is a keyboard. See `walkCaps`. */
+  const keysEl = useRef<HTMLDivElement | null>(null)
   /** Whether the line explaining the remote is up. See its effect below. */
   const [hint, setHint] = useState(false)
   const stage = useRef<HTMLDivElement | null>(null)
@@ -1427,7 +1878,16 @@ function TvMirrorView({
         // lands, so the rejection is caught and *reported* rather than left as
         // an unhandled promise and a black screen with no explanation.
         void el.play().catch(() => {
-          setPhase({ at: 'ended', reason: 'This screen would not start the video.' })
+          // Sound is the one thing that can be refused on its own. Every engine
+          // that blocks autoplay blocks *audible* autoplay, so a rejection here
+          // is far more likely to be "not without a gesture" than "cannot play
+          // this at all". Muting and trying once more turns that into a silent
+          // mirror rather than a black screen — and only a second refusal, which
+          // no longer has anything to do with the sound, is worth a sentence.
+          el.muted = true
+          void el.play().catch(() => {
+            setPhase({ at: 'ended', reason: 'This screen would not start the video.' })
+          })
         })
       },
       (reason) => setPhase({ at: 'ended', reason: reason || 'The mirror ended.' }),
@@ -1519,9 +1979,11 @@ function TvMirrorView({
     tvBridge.emit({ kind: 'control', on: true })
     return () => {
       // A keyboard over a picture nobody is driving has nowhere to send what is
-      // typed into it, so putting the pointer down puts this away too.
+      // typed into it, so putting the pointer down puts this away too. What was
+      // in it is not cleared here: closing the keyboard sends it (see the focus
+      // effect below), and clearing it in this teardown would empty the draft
+      // one render before that teardown could read it.
       setTyping(false)
-      setDraft('')
       tvBridge.emit({ kind: 'control', on: false })
       pointer.current = null
       handle.stop()
@@ -1532,9 +1994,30 @@ function TvMirrorView({
   // input, and the input does not exist until this render has committed. The
   // same two lines the terminal pane uses, for the same reason — this is the
   // mechanism that is known to raise the on-screen keyboard on a Fire Stick.
+  //
+  // Closing it is what sends: whatever put the keyboard away — Back, the
+  // pointer being put down, the mirror ending — the sentence in it goes to the
+  // desk rather than into the bin. A television has no drafts folder, and the
+  // press that closes this is far more often "I have said it" than "forget it".
   useEffect(() => {
-    if (typing) typeEl.current?.focus()
+    if (!typing) return
+    typeEl.current?.focus()
+    // Closing is not a submit. Whatever the phrase was for, the press that put
+    // the keyboard away said nothing about whether it was finished, so the
+    // words go to the desk and the Enter does not.
+    return () => {
+      commitRef.current(false)
+    }
   }, [typing])
+
+  // The key row's ring has to start somewhere, and it starts on Enter — the cap
+  // this mode exists for. Re-run when the mode is entered rather than once,
+  // because the row is unmounted the rest of the time and a focus call into a
+  // node that is not there focuses nothing.
+  useEffect(() => {
+    if (!driving || typing || pointerSays.mode !== 'keys') return
+    capsOf(keysEl.current)[0]?.focus()
+  }, [driving, typing, pointerSays.mode])
 
   // A picture that is no longer live cannot be pointed at. Ending the mode
   // rather than leaving a cursor over a dead frame: the pointer would still be
@@ -1575,6 +2058,7 @@ function TvMirrorView({
       // focus — which is what puts the television's own keyboard on screen and
       // what its microphone dictates into. Only Back is this window's business,
       // and it closes the keyboard rather than the mirror: one press, one level.
+      // Closing sends what was typed — see the focus effect above.
       //
       // Read before everything, including the pointer, because the pointer
       // claims the arrows and OK and would otherwise eat the presses that are
@@ -1599,9 +2083,24 @@ function TvMirrorView({
       }
 
       // While driving, the arrows, OK and Menu belong to the cursor. Anything
-      // it does not claim falls through to the verbs below.
+      // it does not claim falls through to the verbs below — and in keyboard
+      // mode it claims only Menu, which is the press that gets back out.
       if (driving && pointer.current?.key(event.key, true)) {
         event.preventDefault()
+        return
+      }
+
+      // The remote *is* a keyboard now. Up and Down are the desktop's own
+      // arrow keys — the press that scrolls a page or walks a caret, and the
+      // reason this mode is worth a third of the D-pad — while Left and Right
+      // walk the row of caps below and OK presses whichever one the ring is on.
+      // Both of those have real DOM focus, so they are simply not this
+      // listener's business and it gets out of their way.
+      if (driving && pointerSays.mode === 'keys') {
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          event.preventDefault()
+          tapKey(event.key === 'ArrowUp' ? 'up' : 'down')
+        }
         return
       }
 
@@ -1637,7 +2136,7 @@ function TvMirrorView({
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [onClose, phase, driving, canControl])
+  }, [onClose, phase, driving, canControl, pointerSays.mode])
 
   const dead = phase.at === 'ended'
   // Frames are moving, so the picture takes the whole television. Everything
@@ -1660,7 +2159,12 @@ function TvMirrorView({
           className={`tv-mirror-video${dead ? ' is-dead' : ''}`}
           ref={video}
           autoPlay
-          muted
+          // Not muted. The desktop decides whether the mirror carries sound at
+          // all — `mobileMirrorAudio`, read there when this television asks — so
+          // muting here would silence a stream the desk deliberately sent. When
+          // the setting is off the stream simply has no audio track and this
+          // behaves exactly as it did before. The autoplay policy is handled
+          // where `play()` is called, not with a permanent mute.
           playsInline
           // 'live' is claimed when frames are actually moving, not when a track
           // arrives: a negotiated stream that never paints is the one thing
@@ -1688,7 +2192,7 @@ function TvMirrorView({
           <div
             className={`tv-cursor${pointerSays.holding ? ' is-holding' : ''}${
               pointerSays.mode === 'scroll' ? ' is-scrolling' : ''
-            }`}
+            }${pointerSays.mode === 'keys' ? ' is-keys' : ''}`}
             ref={cursor}
             aria-hidden="true"
           />
@@ -1703,37 +2207,119 @@ function TvMirrorView({
         {/* The keyboard, over the picture. Rendered inside the stage so it sits
             on the desktop it is typing into rather than beside it, and built
             from the same `tv-type` parts as the terminal pane's row because it
-            is the same thing doing the same job on the same hardware. */}
+            is the same thing doing the same job on the same hardware.
+
+            A form around one field, which is not decoration: a single-input
+            form is what gives Chromium something to implicitly submit to, and
+            it is half of what decides which button Fire OS puts on its voice
+            dialog. `enterKeyHint` is the other half — without both, that dialog
+            offers "Next", and a Next is answered by moving focus rather than by
+            an Enter anybody here could hear. */}
         {driving && typing && (
-          <div className="tv-type is-over-mirror">
+          <form
+            className="tv-type is-over-mirror"
+            onSubmit={(event) => {
+              event.preventDefault()
+              commit(true)
+            }}
+            // Focus leaving the *overlay* sends. That is the Next case exactly:
+            // the IME moves focus out of the field, no key ever arrives, and
+            // the phrase would otherwise sit in a box nobody can press OK in.
+            // Leaving the field for one of the caps below is not that — the cap
+            // it landed on is the thing about to send it — so the whole form is
+            // asked, not the input, and a move inside it is left alone.
+            //
+            // Having sent, the keyboard goes away and the remote becomes the
+            // desktop's keys with the ring on Enter: the words are on the desk
+            // and the next press is the one that submits them.
+            onBlur={(event) => {
+              if (event.currentTarget.contains(event.relatedTarget)) return
+              if (!commit(false)) return
+              setTyping(false)
+              pointer.current?.setMode('keys')
+            }}
+          >
             <input
               ref={typeEl}
               className="tv-type-input"
+              type="text"
+              name="phrase"
               value={draft}
-              autoCapitalize="off"
+              enterKeyHint="send"
+              inputMode="text"
+              autoCapitalize="sentences"
               autoCorrect="off"
               spellCheck={false}
-              placeholder="Talk or type — OK sends it to the desktop"
+              placeholder="Talk or type — OK sends it and presses Enter"
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(event) => {
-                if (event.key !== 'Enter') return
-                // OK sends what is there and leaves the keyboard up, because
-                // the next box on a form is one click away and closing it after
-                // every field would be a keyboard you re-open all afternoon.
-                // An empty draft is not an instruction; Back is how it closes.
+                // Every spelling of the same press. A remote's OK is a plain
+                // Enter, an IME's Go/Done/Send is a synthesised one, and the
+                // keyCode is there for whatever a Fire OS build sends that
+                // matches neither name.
+                if (event.key !== 'Enter' && event.key !== 'NumpadEnter' && event.keyCode !== 13) return
+                // OK sends what is there *and presses Enter on the desktop*,
+                // then leaves the keyboard up: what this screen is for is
+                // dictating a prompt into a Claude pane, and a prompt that is
+                // not submitted is a walk to the desk. The cap beside it is how
+                // to fill a form field instead. An empty box still presses
+                // Enter — see `commit`.
                 event.preventDefault()
-                const text = draft
-                setDraft('')
-                if (text) link.sendMirrorInput({ t: 'mirror-input', a: 'text', text })
+                commit(true)
               }}
             />
+            {/* Which one submits, said on the cap rather than in a hint that
+                has already faded: these are read from a sofa by somebody who
+                has just dictated a sentence and wants to know what happens
+                next. Down or Right from the field reaches them. */}
+            <div
+              className="tv-type-keys"
+              ref={keysEl}
+              onKeyDown={(event) => walkCaps(event, keysEl.current, typeEl.current)}
+            >
+              <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => commit(true)}>
+                Send + Enter
+              </button>
+              <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => commit(false)}>
+                Send only
+              </button>
+            </div>
+          </form>
+        )}
+        {/* The desktop's own keys, while the remote is being one.
+            Every key `MirrorKey` allows and nothing else — this row is the only
+            place in the app that presses one, and until it existed a dictated
+            prompt could reach a Claude pane and never be submitted from the
+            sofa. Ordered by what a session actually needs: Enter, then the two
+            that answer and cycle it, then the rest. Left and Right walk it, OK
+            presses, and Up and Down are the desktop's arrows rather than caps
+            here, because moving a caret or a page is a hold, not a walk. */}
+        {driving && !typing && pointerSays.mode === 'keys' && (
+          <div
+            className="tv-type tv-keys is-over-mirror"
+            ref={keysEl}
+            onKeyDown={(event) => walkCaps(event, keysEl.current, null)}
+          >
+            {MIRROR_CAPS.map(([label, key]) => (
+              <button
+                type="button"
+                key={key}
+                className="tv-type-key"
+                tabIndex={-1}
+                onClick={() => tapKey(key)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         )}
         {driving && hint && !typing && (
           <div className="tv-drive-hint" role="status">
-            {pointerSays.mode === 'scroll'
-              ? 'Up and Down scroll · Menu returns to the pointer · Back stops driving'
-              : 'D-pad points · OK clicks and opens the keyboard · hold OK to drag · Menu scrolls · Back closes the keyboard, then stops driving'}
+            {pointerSays.mode === 'keys'
+              ? 'Up and Down are the desktop’s arrows · Left and Right choose a key · OK presses it · Menu returns to the pointer'
+              : pointerSays.mode === 'scroll'
+                ? 'Up and Down scroll · Menu again for the desktop’s keys · Back stops driving'
+                : 'D-pad points · OK clicks and opens the keyboard · hold OK to drag · Menu scrolls, again for the keys · Back closes the keyboard, then stops driving'}
           </div>
         )}
       </div>

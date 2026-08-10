@@ -16,8 +16,9 @@ import { canScan, scanPairingCode } from './lib/scan'
 import { servedFromOrigin, shouldOfferInstall } from './lib/pwa'
 import { Browser, leavesOf } from './components/Browser'
 import { PaneView, paneListeners } from './components/PaneView'
-import { TvConnect, type KnownDesktop } from './components/TvConnect'
+import { TvConnect } from './components/TvConnect'
 import { TvDashboard } from './components/TvDashboard'
+import { homingLine, useDesktopHoming, type KnownDesktop } from './lib/homing'
 import { isTv } from './lib/tv'
 import { tvBridge } from './lib/tv-bridge'
 import { mirrorListeners } from './lib/mirror'
@@ -94,8 +95,8 @@ export function App(): React.JSX.Element {
   /**
    * The paired desktop's own name, mirrored out of the secure store the same
    * way `hasToken` is, because that store is module state React cannot watch.
-   * A television uses it to recognise the desktop it belongs to at an address
-   * it has never seen — see the homing block in components/TvConnect.tsx.
+   * It is how a device recognises the desktop it belongs to at an address it
+   * has never seen before — see lib/homing.ts.
    */
   const [knownName, setKnownName] = useState(() => readDesktopName())
   /**
@@ -289,21 +290,27 @@ export function App(): React.JSX.Element {
   }, [link])
 
   /**
-   * The desktop this television is paired to, if it is paired at all.
+   * The desktop this device is paired to, if it is paired at all.
    *
-   * Held here rather than built during render so the screen below is handed the
-   * same object each time: it feeds an effect that searches the network and
-   * dials on its own, and an identity that changed every render would restart
-   * that effect every render.
+   * Held here rather than built during render so the search below is handed the
+   * same object each time: it feeds an effect that asks the network and dials on
+   * its own, and an identity that changed every render would restart that effect
+   * every render.
+   *
+   * No longer a television's privilege. A phone loses its desktop to exactly the
+   * same expired DHCP lease, and used to have exactly one way out of it: walk to
+   * the desk and scan the QR code again. The rule that keeps this safe is not
+   * "only a TV may do it" — it is `pickDesktop` below, which is the same rule
+   * either way.
    */
   const known = useMemo<KnownDesktop | null>(() => {
-    if (!isTv() || !hasToken) return null
+    if (!hasToken) return null
     return { name: knownName, origin: toOrigin(address, MOBILE_PORT) }
   }, [address, hasToken, knownName])
 
   /**
-   * Dial a desktop the television chose — from the list, or by finding the one
-   * it is paired to at a new address.
+   * Dial a desktop this device chose — from the television's list, or by finding
+   * the one it is paired to at a new address.
    *
    * The one rule: the saved token rides along only to the address it was issued
    * at. Anywhere else — a desktop found on the network, however convincing its
@@ -323,6 +330,51 @@ export function App(): React.JSX.Element {
     [known, link]
   )
 
+  /**
+   * The television's search-and-choose screen is showing.
+   *
+   * Two things need to agree about this, so it is worked out once: what gets
+   * rendered further down, and whether the network is worth asking. A shared
+   * build with no address stamped into it has nowhere else to get one, and
+   * anybody who chose "Type the address instead" is taken at their word.
+   */
+  const tvSearchScreen = isTv() && BAKED === '' && !manual
+
+  /**
+   * One search for the whole app, wherever it happens to be.
+   *
+   * At this level rather than inside a screen because the moment that matters
+   * most is the one where no connect screen exists: a phone that was happily
+   * live when the desktop's address changed keeps its picture, keeps showing the
+   * project list, and quietly retries a dead address behind it. A search that
+   * only ran on a connect screen would never run then — which is precisely why
+   * the television healed itself and the phone did not.
+   *
+   * Worth asking when this device is not currently watching a desktop *and*
+   * there is an answer it could use: a paired device of any shape needs to know
+   * whether the desktop it belongs to has moved, and an unpaired television
+   * needs the list to choose from. An unpaired phone has a QR code and a text
+   * field and nowhere to put a discovered desktop, so it stays off the air
+   * rather than broadcasting on somebody's wifi for no reason.
+   */
+  const homing = useDesktopHoming({
+    state,
+    known,
+    proto: MOBILE_PROTO,
+    active: state !== 'live' && (known !== null || tvSearchScreen),
+    onPick: pickDesktop
+  })
+
+  /**
+   * What the phone says about a link that is not up.
+   *
+   * '' whenever the Link's own words are the better ones on their own — a
+   * refusal, an expiry, an approval nobody's search asked for — and a sentence
+   * about the search whenever they are not. See homingLine in lib/homing.ts for
+   * why "Reconnecting in 15s…" by itself is not good enough.
+   */
+  const searchLine = homingLine({ state, detail, known, homing })
+
   /* ------------------------------------------------------------- rendering */
 
   if (!picture) {
@@ -339,13 +391,14 @@ export function App(): React.JSX.Element {
     // D-pad, for a pairing it already had. It read as "Forge has forgotten
     // me", so that is what everyone concluded. What it should say is who it is
     // waiting for, and then go and find them.
-    if (isTv() && BAKED === '' && !manual) {
+    if (tvSearchScreen) {
       return (
         <TvConnect
           state={state}
           detail={detail}
           proto={MOBILE_PROTO}
           known={known}
+          homing={homing}
           onPick={pickDesktop}
           onCancel={abandon}
           onType={() => {
@@ -387,6 +440,7 @@ export function App(): React.JSX.Element {
           <Connect
             state={state}
             detail={detail}
+            searchLine={searchLine}
             address={address}
             code={code}
             notice={notice}
@@ -418,6 +472,7 @@ export function App(): React.JSX.Element {
       <StatusStrip
         state={state}
         detail={detail}
+        searchLine={searchLine}
         version={picture.appVersion}
         updateReady={updateReady}
         onForget={forget}
@@ -465,6 +520,7 @@ export function App(): React.JSX.Element {
 function StatusStrip({
   state,
   detail,
+  searchLine,
   version,
   updateReady,
   onForget,
@@ -472,6 +528,13 @@ function StatusStrip({
 }: {
   state: LinkState
   detail: string
+  /**
+   * What the search has to say, and '' when it has nothing. It wins over the
+   * Link's own `detail` because the two are answers to different questions:
+   * `detail` says when the next attempt is, and this says whether the address
+   * being attempted is one the desktop still lives at.
+   */
+  searchLine: string
   version: string
   updateReady: boolean
   onForget: () => void
@@ -481,7 +544,7 @@ function StatusStrip({
     <div className={`status status-${state}`}>
       <span className="status-dot" />
       <span className="status-text">
-        {state === 'live' ? `Forge ${version}` : detail || state}
+        {state === 'live' ? `Forge ${version}` : searchLine || detail || state}
       </span>
       {/* The app's own version, not the desktop's — tapping it is how the APK
           checks for and installs a newer self.
@@ -613,6 +676,7 @@ function FirstRun({
 function Connect({
   state,
   detail,
+  searchLine,
   address,
   code,
   notice,
@@ -627,6 +691,17 @@ function Connect({
 }: {
   state: LinkState
   detail: string
+  /**
+   * The search's sentence, or '' when it has nothing to say.
+   *
+   * A phone that is already paired reaches this screen too — the picture only
+   * exists once a hello has been answered, so a phone whose desktop moved
+   * overnight opens on a pairing form it does not need. Saying which desktop is
+   * missing, and that this phone is out looking for it, is the difference
+   * between that form reading as "Forge has forgotten you" and reading as "your
+   * desktop is not on this wifi yet".
+   */
+  searchLine: string
   address: string
   code: string
   notice: string
@@ -716,7 +791,10 @@ function Connect({
         {busy ? 'Connecting…' : 'Pair'}
       </button>
 
-      {(detail || notice) && <p className="connect-detail">{notice || detail}</p>}
+      {/* A notice is something that just happened and self-dismisses, so it
+          goes first; after that the search's sentence beats the Link's, for the
+          reason given on `searchLine` above. */}
+      {(notice || searchLine || detail) && <p className="connect-detail">{notice || searchLine || detail}</p>}
 
       {onOneTap && (
         <button type="button" className="connect-version" onClick={onOneTap}>

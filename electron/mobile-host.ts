@@ -357,11 +357,18 @@ function sendMirror(event: MobileMirrorEvent): void {
  * Minimised is fine — a minimised window still captures. Everything that can
  * only be discovered once capture is attempted (a refused permission, no screen
  * to name) comes back later on `mobileMirrorStop` instead.
+ *
+ * Whether this one carries sound is decided here, now, and travels with the
+ * request. `mobileMirrorAudio` is read at the moment the television asks rather
+ * than captured at boot — the same rule the control gate below follows — but
+ * unlike an input frame a capture happens once, so switching the sound off
+ * silences the next watch and not this one.
  */
 function startMirror(): string | null {
   const win = mirrorWindow()
   if (!win) return 'Forge has no window open on the desktop, so it cannot share its screen.'
-  win.webContents.send(IPC.mobileMirror, { kind: 'start' } satisfies MobileMirrorEvent)
+  const audio = getSettings().mobileMirrorAudio
+  win.webContents.send(IPC.mobileMirror, { kind: 'start', audio } satisfies MobileMirrorEvent)
   return null
 }
 

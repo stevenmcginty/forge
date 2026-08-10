@@ -10,6 +10,6 @@ export { MobileServer, isAllowedSource, resolveWithin } from '../../electron/mob
 export { MobileAuth, PAIR_TTL_MS, hashToken } from '../../electron/mobile/auth'
 export { PtySessionManager } from '../../electron/pty/session-manager'
 // Re-exported so the checks use exactly the shipped values rather than a
-// number that could drift from them: the approval window, and the screen
-// mirror's signalling payload cap.
-export { ACCEPT_WINDOW_MS, MAX_INPUT_PER_SECOND, MAX_SIGNAL_CHARS } from '../../shared/mobile'
+// number that could drift from them: the approval window, the screen mirror's
+// signalling payload cap, and the longest phrase one text frame may carry.
+export { ACCEPT_WINDOW_MS, MAX_INPUT_PER_SECOND, MAX_SIGNAL_CHARS, MAX_TEXT_CHARS } from '../../shared/mobile'
