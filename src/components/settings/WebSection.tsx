@@ -627,8 +627,10 @@ export function WebSection(): ReactNode {
         hint={
           <>
             The listener binds loopback, so on its own it is reachable from nothing. An ngrok tunnel is what gives it
-            a permanent public address — set it up once and the browser keeps the same one forever. Forge Mobile’s
-            domain cannot be reused: one domain forwards to one port, and both links want their own.
+            a public address. The authtoken is all it needs; a domain is optional and only buys you the same address
+            every time. Leave it blank and ngrok picks one on each start — which costs nothing here, because the
+            browser reads this desktop’s current address out of your Firebase account before it dials. Forge Mobile’s
+            domain cannot be borrowed either way: one domain forwards to one port.
           </>
         }
       >
@@ -660,7 +662,7 @@ export function WebSection(): ReactNode {
         </Row>
         <Row
           label="Forge Web’s ngrok domain"
-          hint="A second reserved domain, not the one Forge Mobile uses. Copy it from the dashboard, don’t invent one."
+          hint="Optional. Blank means ngrok picks an address each start, which the browser finds anyway. A reserved one keeps it steady — it must be a second domain, not the one Forge Mobile uses."
         >
           <TextField
             value={settings.webNgrokDomain}

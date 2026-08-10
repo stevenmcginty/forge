@@ -1005,11 +1005,25 @@ async function startTunnel(): Promise<void> {
     setTunnelState({ state: 'error', url: '', detail: 'Turn Forge Web on first — the tunnel has nothing to carry.' })
     return
   }
-  if (!settings.webNgrokAuthtoken || !settings.webNgrokDomain) {
+  /*
+   * The authtoken is required. The domain is not.
+   *
+   * Demanding both made a reserved domain compulsory, and ngrok's free tier
+   * grants one per account — Forge Mobile holds it, and a domain forwards to a
+   * single port, so Forge Web could not have one without paying. Blank means
+   * ngrok assigns an address, which `ngrokArgs` now allows.
+   *
+   * That is safe *here* and would not be on the phone: the address changes
+   * every restart, and the rendezvous record exists precisely so the browser
+   * reads wherever this desktop landed before it dials. A phone that scanned a
+   * QR keeps the address it was given, which is why Forge Mobile still asks
+   * for a reserved one.
+   */
+  if (!settings.webNgrokAuthtoken) {
     setTunnelState({
       state: 'error',
       url: '',
-      detail: 'Paste your ngrok authtoken and the domain for Forge Web below first — both are on the ngrok dashboard.'
+      detail: 'Paste your ngrok authtoken below first — it is on the ngrok dashboard, under Your Authtoken.'
     })
     return
   }
