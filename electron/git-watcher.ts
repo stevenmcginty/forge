@@ -153,6 +153,37 @@ function nextSeq(): number {
   return seq
 }
 
+/* --------------------------------------------------------------------- sinks */
+
+/**
+ * A second consumer of git snapshots — the browser client, when it arrives.
+ *
+ * Deliberately the same shape pty-host.ts gives terminal output, and for the
+ * same reason: the phone sees the bytes the window sees because it rides the
+ * window's own flush rather than opening a second route to the data. A sink
+ * here sees the snapshots the panel sees, after the same suppression, stamped
+ * with the same sequence number — so a second host cannot disagree with the
+ * window about what the repository is doing, because it is being told by the
+ * same sentence.
+ *
+ * Narrow on purpose: a sink is shown snapshots and nothing else. Watching,
+ * refreshing and acting are ordinary exported functions below, which is what a
+ * second host calls; it does not get to pretend to be a window.
+ */
+export interface GitSink {
+  onSnapshot: (snapshot: GitSnapshot) => void
+}
+
+const sinks = new Set<GitSink>()
+
+/** Register a sink. Returns the unsubscribe, in the repo's usual shape. */
+export function addGitSink(sink: GitSink): () => void {
+  sinks.add(sink)
+  return () => {
+    sinks.delete(sink)
+  }
+}
+
 /* ------------------------------------------------------------------- reading */
 
 /**
@@ -201,6 +232,23 @@ function pushSnapshot(w: GitWatch, snap: GitSnapshot): void {
   if (hash === w.hash) return
   w.hash = hash
   if (!w.target.isDestroyed()) w.target.send(IPC.gitSnapshot, snap)
+  /*
+   * The sinks ride this push. They get no timer, no watch and no route to git
+   * of their own — everything above this line decided *whether* there is
+   * anything to say, and a second consumer that asked git itself would be a
+   * second answer able to disagree with the panel.
+   *
+   * Each is isolated, the same way pty-host isolates its own: the window has
+   * already been sent the snapshot by the time we are here, and one consumer
+   * throwing must not stop the next one being told either.
+   */
+  for (const sink of sinks) {
+    try {
+      sink.onSnapshot(snap)
+    } catch (err) {
+      console.error('[git] sink failed:', err)
+    }
+  }
 }
 
 /** May this trigger spend a network round trip on gh? */
@@ -539,139 +587,186 @@ async function readOnDemand(projectId: string, trigger: Trigger): Promise<GitSna
   return readStatus(projectId, cwd, null, nextSeq())
 }
 
+/* --------------------------------------------------------------- operations */
+
+/*
+ * Everything the GIT section can ask for, as ordinary functions.
+ *
+ * They take arguments that have already been made safe and hand back exactly
+ * what the IPC handlers below hand back, because the handlers are now nothing
+ * but coercion and a call. That is the whole point of the split: a second host
+ * — the browser client — reaches the same code by calling it, rather than by
+ * duplicating it and drifting.
+ *
+ * The `String(x ?? '')` at each boundary stays in the handler on purpose. The
+ * renderer is untrusted input and that is where input is made safe; a second
+ * host is a second untrusted boundary and does its own, at its own edge.
+ */
+
+/**
+ * Watch one project, pushing to the given target.
+ *
+ * The target stays a `WebContents` rather than being made generic: a second
+ * consumer arrives through `addGitSink` above, which is a narrower and more
+ * honest thing to be than a pretend window.
+ */
+export function startWatch(projectId: string, cwd: string, target: WebContents): { ok: boolean; error?: string } {
+  if (!projectId || !cwd) return { ok: false, error: 'a project and a folder are both required' }
+  start(projectId, cwd, target)
+  return { ok: true }
+}
+
+/** Stop watching, if this is the project being watched. */
+export function unwatch(projectId: string): void {
+  if (watch?.projectId === projectId) stop()
+}
+
+export async function gitRefresh(projectId: string): Promise<GitSnapshot | null> {
+  if (!projectId) return null
+  /*
+   * The refresh button is the one gesture that means "something changed that
+   * you could not have noticed" — git being installed since Forge started, or
+   * `gh auth login` having just run in the pane next door. So it is the only
+   * caller that throws away the cached answers to both.
+   */
+  invalidateGitAvailable()
+  invalidateGhCaches()
+  if (watch?.projectId === projectId) watch.ghAt = 0
+  return readOnDemand(projectId, 'refresh')
+}
+
+export async function runAction(req: GitActionRequest): Promise<GitActionResult> {
+  const result = await runGitAction(req)
+  if (!result.snapshot) return result
+
+  /*
+   * The action module reads the repository but does not own the sequence
+   * counter, so the snapshot is stamped here — one source of seq, no chance of
+   * the panel appearing to go backwards after a button press. The gh half is
+   * carried across from the watch **only when it is the same project**: git
+   * actions know nothing about GitHub, and grafting another project's pull
+   * request onto this one would be a confident lie.
+   */
+  const w = watch
+  const carried = w && w.projectId === result.snapshot.projectId ? w.snap?.gh : undefined
+  const snapshot: GitSnapshot = { ...result.snapshot, seq: nextSeq(), gh: carried ?? result.snapshot.gh }
+  if (w && w.projectId === snapshot.projectId) {
+    w.lastBranch = snapshot.branch
+    pushSnapshot(w, snapshot)
+  }
+  return { ...result, snapshot }
+}
+
+export async function remoteBranches(projectId: string): Promise<GitBranch[]> {
+  const cwd = watch?.projectId === projectId ? watch.cwd : pathFor(projectId)
+  if (!cwd) return []
+  const refs = await runGit(cwd, [
+    'for-each-ref',
+    '--sort=-committerdate',
+    `--count=${GIT_MAX_BRANCHES}`,
+    `--format=${FOR_EACH_REF_FORMAT}`,
+    'refs/remotes'
+  ])
+  if (!refs.ok) return []
+  // origin/HEAD is a symbolic ref to whichever branch is the default; it is
+  // not a branch anybody wants to see listed beside the branch it points at.
+  return parseForEachRef(refs.out, true).filter((b) => !/\/HEAD$/.test(b.name))
+}
+
+/*
+ * What a switch would do, asked before it is done rather than discovered
+ * afterwards.
+ *
+ * `rev-list --left-right --count HEAD...refs/heads/<name>` is one process and
+ * answers both halves at once: the left number is what HEAD has and the target
+ * does not - the commits that would leave the working tree - and the right is
+ * what the target has and HEAD does not. Two dots would answer a different and
+ * much less useful question; the three are load-bearing.
+ *
+ * The ref is spelled out in full rather than passed as a bare name. A full
+ * `refs/heads/` ref cannot quietly resolve to a tag or a remote-tracking
+ * branch that happens to share the name, and it cannot begin with a hyphen and
+ * be read as an option. This is a read rather than a write, but the argv
+ * discipline in git-actions.ts is not worth keeping in one file and dropping
+ * in the one beside it.
+ */
+export async function branchCompare(projectId: string, branch: string): Promise<GitBranchCompare | null> {
+  const cwd = watch?.projectId === projectId ? watch.cwd : pathFor(projectId)
+  if (!cwd || !branch) return null
+
+  const unknown = (error: string): GitBranchCompare => ({ branch, leaving: 0, gaining: 0, error })
+
+  /*
+   * The live branch list, not the one the row was drawn from - the same rule
+   * the switch itself follows. A row armed against a branch an agent deleted
+   * in the pane next door says so, rather than measuring against nothing and
+   * offering to move you there.
+   */
+  const known = watch?.projectId === projectId ? watch.snap?.branches : undefined
+  if (known && !known.some((b) => b.name === branch && !b.remote)) {
+    return unknown(`There is no local branch called ${branch}`)
+  }
+
+  const res = await runGit(cwd, ['rev-list', '--left-right', '--count', `HEAD...refs/heads/${branch}`])
+  if (!res.ok) return unknown('git could not work out how far that is from here')
+
+  const [left, right] = res.out.trim().split(/\s+/)
+  const leaving = Number.parseInt(left ?? '', 10)
+  const gaining = Number.parseInt(right ?? '', 10)
+  if (!Number.isFinite(leaving) || !Number.isFinite(gaining)) {
+    return unknown('git could not work out how far that is from here')
+  }
+  return { branch, leaving, gaining }
+}
+
+export async function ghRefresh(projectId: string): Promise<GhState> {
+  const w = watch
+  invalidateGhCaches()
+  if (!w || w.projectId !== projectId || !w.snap || w.snap.presence !== 'ok' || !w.snap.slug) return GH_UNKNOWN
+  const next = await withGh(w, w.snap)
+  if (watch !== w) return next.gh
+  pushSnapshot(w, { ...next, seq: nextSeq() })
+  return next.gh
+}
+
 /* ----------------------------------------------------------------- handlers */
 
 export function registerGitWatcherHandlers(): void {
   ipcMain.handle(IPC.gitWatch, (e, req: { projectId?: unknown; cwd?: unknown }) => {
-    const projectId = String(req?.projectId ?? '')
-    const cwd = String(req?.cwd ?? '')
-    if (!projectId || !cwd) return { ok: false, error: 'a project and a folder are both required' }
-    start(projectId, cwd, e.sender)
+    const result = startWatch(String(req?.projectId ?? ''), String(req?.cwd ?? ''), e.sender)
+    if (!result.ok) return result
     // The window going away must not leave a watcher pushing into a dead pipe.
     e.sender.once('destroyed', () => {
       if (watch?.target === e.sender) stop()
     })
-    return { ok: true }
+    return result
   })
 
   ipcMain.on(IPC.gitUnwatch, (_e, projectId: string) => {
-    if (watch?.projectId === String(projectId ?? '')) stop()
+    unwatch(String(projectId ?? ''))
   })
 
-  ipcMain.handle(IPC.gitRefresh, async (_e, projectId: string): Promise<GitSnapshot | null> => {
-    const id = String(projectId ?? '')
-    if (!id) return null
-    /*
-     * The refresh button is the one gesture that means "something changed that
-     * you could not have noticed" — git being installed since Forge started, or
-     * `gh auth login` having just run in the pane next door. So it is the only
-     * caller that throws away the cached answers to both.
-     */
-    invalidateGitAvailable()
-    invalidateGhCaches()
-    if (watch?.projectId === id) watch.ghAt = 0
-    return readOnDemand(id, 'refresh')
+  ipcMain.handle(IPC.gitRefresh, (_e, projectId: string): Promise<GitSnapshot | null> => {
+    return gitRefresh(String(projectId ?? ''))
   })
 
-  ipcMain.handle(IPC.gitAction, async (_e, req: GitActionRequest): Promise<GitActionResult> => {
-    const result = await runGitAction(req)
-    if (!result.snapshot) return result
-
-    /*
-     * The action module reads the repository but does not own the sequence
-     * counter, so the snapshot is stamped here — one source of seq, no chance of
-     * the panel appearing to go backwards after a button press. The gh half is
-     * carried across from the watch **only when it is the same project**: git
-     * actions know nothing about GitHub, and grafting another project's pull
-     * request onto this one would be a confident lie.
-     */
-    const w = watch
-    const carried = w && w.projectId === result.snapshot.projectId ? w.snap?.gh : undefined
-    const snapshot: GitSnapshot = { ...result.snapshot, seq: nextSeq(), gh: carried ?? result.snapshot.gh }
-    if (w && w.projectId === snapshot.projectId) {
-      w.lastBranch = snapshot.branch
-      pushSnapshot(w, snapshot)
-    }
-    return { ...result, snapshot }
+  ipcMain.handle(IPC.gitAction, (_e, req: GitActionRequest): Promise<GitActionResult> => {
+    return runAction(req)
   })
 
-  ipcMain.handle(IPC.gitRemoteBranches, async (_e, projectId: string): Promise<GitBranch[]> => {
-    const id = String(projectId ?? '')
-    const cwd = watch?.projectId === id ? watch.cwd : pathFor(id)
-    if (!cwd) return []
-    const refs = await runGit(cwd, [
-      'for-each-ref',
-      '--sort=-committerdate',
-      `--count=${GIT_MAX_BRANCHES}`,
-      `--format=${FOR_EACH_REF_FORMAT}`,
-      'refs/remotes'
-    ])
-    if (!refs.ok) return []
-    // origin/HEAD is a symbolic ref to whichever branch is the default; it is
-    // not a branch anybody wants to see listed beside the branch it points at.
-    return parseForEachRef(refs.out, true).filter((b) => !/\/HEAD$/.test(b.name))
+  ipcMain.handle(IPC.gitRemoteBranches, (_e, projectId: string): Promise<GitBranch[]> => {
+    return remoteBranches(String(projectId ?? ''))
   })
 
-  /*
-   * What a switch would do, asked before it is done rather than discovered
-   * afterwards.
-   *
-   * `rev-list --left-right --count HEAD...refs/heads/<name>` is one process and
-   * answers both halves at once: the left number is what HEAD has and the target
-   * does not - the commits that would leave the working tree - and the right is
-   * what the target has and HEAD does not. Two dots would answer a different and
-   * much less useful question; the three are load-bearing.
-   *
-   * The ref is spelled out in full rather than passed as a bare name. A full
-   * `refs/heads/` ref cannot quietly resolve to a tag or a remote-tracking
-   * branch that happens to share the name, and it cannot begin with a hyphen and
-   * be read as an option. This is a read rather than a write, but the argv
-   * discipline in git-actions.ts is not worth keeping in one file and dropping
-   * in the one beside it.
-   */
   ipcMain.handle(
     IPC.gitBranchCompare,
-    async (_e, req: { projectId?: unknown; branch?: unknown }): Promise<GitBranchCompare | null> => {
-      const id = String(req?.projectId ?? '')
-      const branch = String(req?.branch ?? '').trim()
-      const cwd = watch?.projectId === id ? watch.cwd : pathFor(id)
-      if (!cwd || !branch) return null
-
-      const unknown = (error: string): GitBranchCompare => ({ branch, leaving: 0, gaining: 0, error })
-
-      /*
-       * The live branch list, not the one the row was drawn from - the same rule
-       * the switch itself follows. A row armed against a branch an agent deleted
-       * in the pane next door says so, rather than measuring against nothing and
-       * offering to move you there.
-       */
-      const known = watch?.projectId === id ? watch.snap?.branches : undefined
-      if (known && !known.some((b) => b.name === branch && !b.remote)) {
-        return unknown(`There is no local branch called ${branch}`)
-      }
-
-      const res = await runGit(cwd, ['rev-list', '--left-right', '--count', `HEAD...refs/heads/${branch}`])
-      if (!res.ok) return unknown('git could not work out how far that is from here')
-
-      const [left, right] = res.out.trim().split(/\s+/)
-      const leaving = Number.parseInt(left ?? '', 10)
-      const gaining = Number.parseInt(right ?? '', 10)
-      if (!Number.isFinite(leaving) || !Number.isFinite(gaining)) {
-        return unknown('git could not work out how far that is from here')
-      }
-      return { branch, leaving, gaining }
+    (_e, req: { projectId?: unknown; branch?: unknown }): Promise<GitBranchCompare | null> => {
+      return branchCompare(String(req?.projectId ?? ''), String(req?.branch ?? '').trim())
     }
   )
 
-  ipcMain.handle(IPC.gitGhRefresh, async (_e, projectId: string): Promise<GhState> => {
-    const id = String(projectId ?? '')
-    const w = watch
-    invalidateGhCaches()
-    if (!w || w.projectId !== id || !w.snap || w.snap.presence !== 'ok' || !w.snap.slug) return GH_UNKNOWN
-    const next = await withGh(w, w.snap)
-    if (watch !== w) return next.gh
-    pushSnapshot(w, { ...next, seq: nextSeq() })
-    return next.gh
+  ipcMain.handle(IPC.gitGhRefresh, (_e, projectId: string): Promise<GhState> => {
+    return ghRefresh(String(projectId ?? ''))
   })
 }
 
