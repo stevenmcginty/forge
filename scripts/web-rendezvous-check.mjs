@@ -305,6 +305,25 @@ async function main() {
     assert.equal(strayed.ok, false, 'an unknown key should have been rejected by $other')
   })
 
+  /*
+   * Hand the next phase an empty node.
+   *
+   * This phase is the only one that deliberately leaves a *published* record
+   * behind — it exists to prove the rules admit one. Everything after it asks
+   * some form of "and nothing was written", which a leftover from here answers
+   * wrongly and loudly: check 2 read this record and reported that `localhost`
+   * had been published, which was never true.
+   *
+   * `shutdown()` retracts, and check 12 proves it does. It is not depended on
+   * here, because a phase that proves the next phase's precondition as a side
+   * effect is a phase whose failure lands somewhere else.
+   */
+  await rest.remove(PATH).catch(() => {})
+  const emptied = await readHost()
+  check('and the node is empty again before anything else is asked of it', () => {
+    assert.equal(emptied, null, 'a record left here would be read as the next phase publishing one')
+  })
+
   clock.created = 0
   clock.delays.length = 0
 
