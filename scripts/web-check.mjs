@@ -52,7 +52,7 @@
  * root: `FORGE_DATA_DIR` points at a temporary folder that is removed on the way
  * out.
  */
-import { createSign, generateKeyPairSync } from 'node:crypto'
+import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { connect } from 'node:net'
@@ -171,6 +171,17 @@ function portOpen(port) {
  */
 globalThis.__forgeIpc = { handlers: new Map(), listeners: new Map() }
 
+/**
+ * The notification area, as far as a head-less run can see it.
+ *
+ * `new Tray(...)` is the whole observable fact — an icon exists or it does not —
+ * so the stand-in registers itself here and remembers what it was last told to
+ * show. That is enough for phase 11 to assert the rule electron/tray.ts is built
+ * around: Forge never hides itself behind an icon that is not there.
+ */
+globalThis.__forgeTray = null
+globalThis.__forgeBalloons = []
+
 const ELECTRON_STUB = 'forge-web-check:electron'
 
 /* ------------------------------------------------------- a scripted ngrok
@@ -273,6 +284,21 @@ registerHooks({
           // it is also the state `dispatchLayout` has to refuse cleanly in.
           'export const BrowserWindow = { getAllWindows: () => [], fromWebContents: () => null }',
           'export const Notification = { isSupported: () => false }',
+          'export class Tray {',
+          '  constructor(image) { this.image = image; globalThis.__forgeTray = this }',
+          '  on() {}',
+          '  setToolTip(text) { this.tooltip = text }',
+          '  setContextMenu(menu) { this.menu = menu }',
+          '  displayBalloon(options) { globalThis.__forgeBalloons.push(options) }',
+          '  destroy() { if (globalThis.__forgeTray === this) globalThis.__forgeTray = null }',
+          '}',
+          // The template goes through untouched, so the check can click the
+          // items a person would click rather than the functions behind them.
+          'export const Menu = { buildFromTemplate: (template) => template }',
+          'export const nativeImage = {',
+          '  createFromPath: (path) => ({ isEmpty: () => false, path }),',
+          '  createFromBitmap: () => ({ isEmpty: () => false, path: "" })',
+          '}',
           'export const powerSaveBlocker = { start: () => 1, stop: () => {}, isStarted: () => true }',
           'export const shell = { openPath: () => {} }',
           'export const clipboard = { readText: () => "", writeText: () => {} }',
@@ -987,10 +1013,268 @@ await invoke('web:stop')
 log(liveAgent.killed === true, 'switching Forge Web off takes a live agent down with it')
 log(host.webStatus().tunnel.state === 'off', `and the panel reads off (${host.webStatus().tunnel.state})`)
 
+/* ================================================================= phase 11
+ *
+ * Closing the window.
+ *
+ * This is the assertion docs/forge-web.md's "honest limitation" rests on, and
+ * until electron/tray.ts existed the document was simply wrong about it:
+ * "closing the Forge **window** must not end the session … Only a genuine
+ * power-off or reboot drops the browser to GitHub-only mode." Closing the window
+ * closed the last window, `window-all-closed` quit the app, and the before-quit
+ * chain retracted the record, killed the tunnel, hung up on every browser and
+ * took every PTY with it.
+ *
+ * Everything below drives the *shipped* decision — `handleWindowClose` in
+ * electron/tray.ts, given the same narrow slice of a window electron/main.ts
+ * hands it — and then watches from outside, exactly as the earlier phases do:
+ * a TCP connect for the listener, the fake RTDB for the record, the live socket
+ * for the browser, and a real pwsh answering a string that only ever existed in
+ * its own output for the pane. "The port is still open" is not the claim being
+ * tested; "the session survived" is.
+ */
+
+console.log('\nclosing the window with Forge Web on')
+
+const tray = await import('../electron/tray.ts')
+const ptyHost = await import('../electron/pty-host.ts')
+
+/**
+ * Forge's window, as far as this file needs one.
+ *
+ * `TrayWindow` is three methods wide on purpose — that is the whole of what the
+ * close decision touches — so the code being exercised here is the code that
+ * ships rather than a copy of it.
+ */
+function fakeWindow() {
+  const win = {
+    visible: true,
+    destroyed: false,
+    isDestroyed: () => win.destroyed,
+    isVisible: () => win.visible,
+    hide: () => {
+      win.visible = false
+    }
+  }
+  return win
+}
+
+let copied = ''
+let quitRan = false
+let quitPromise = Promise.resolve()
+let opened = 0
+let window = fakeWindow()
+
+tray.setTrayHost({
+  open: () => {
+    opened++
+    window.visible = true
+  },
+  quit: () => {
+    quitRan = true
+    // What electron/main.ts does on this click, minus the window it does not
+    // have here: raise the flag that stops the next close being absorbed, then
+    // run the disposer this feature owns in the before-quit chain.
+    tray.noteQuitting()
+    quitPromise = host.disposeWeb()
+  },
+  status: () => host.webStatus(),
+  copy: (text) => {
+    copied = text
+  },
+  iconFile: 'icon.ico'
+})
+// The seam main.ts hangs the tray on, wired here for the same reason it is
+// wired there: `web:start` and `web:stop` never reach a settings handler, and
+// an icon that disagrees with the link is worse than no icon.
+host.setWebStatusListener(tray.syncTray)
+
+/* --------------------------------------- back on its feet, and publishing */
+
+await invoke('web:sign-in', WEB_EMAIL, WEB_PASSWORD)
+const agentsBeforeClose = agents.length
+const putsBeforeClose = dbCalls('PUT', `/users/${UID}/host.json`).length
+await invoke('web:start')
+await waitFor(() => agents.length > agentsBeforeClose, 4000, 'an ngrok agent for the close phase')
+const closeAgent = agents.at(-1)
+closeAgent.say(`{"lvl":"info","msg":"started tunnel","url":"https://${NGROK_DOMAIN}"}`)
+await waitFor(() => host.webStatus().tunnel.state === 'live', 4000, 'the tunnel for the close phase')
+await waitFor(
+  () => dbCalls('PUT', `/users/${UID}/host.json`).length > putsBeforeClose,
+  10_000,
+  'the address to be published for the close phase'
+)
+
+/* ------------------------------------- a real pane, and a real browser on it */
+
+const pane = ptyHost.getManager().create({ id: 'tray-1', cwd: process.cwd(), cols: 90, rows: 30 })
+log(pane.ok === true, `a real shell is running before the window closes (${pane.ok ? pane.id : pane.error})`)
+// The *prompt*, not the first byte: a shell that has printed something is not a
+// shell that is ready to be typed at, which is the whole flaky-test story.
+await waitFor(() => ptyHost.getReplay('tray-1').includes('> '), 25_000, 'the first prompt')
+
+const held = await browser('browser-2', { origin: `https://${PROJECT}.web.app` })
+await waitFor(() => frameOf(held, 'hello-ok') || held.closed !== null, 4000, 'the browser that will hold the socket')
+log(Boolean(frameOf(held, 'hello-ok')), 'and a browser is attached to this desktop')
+
+const sendFrame = (tab, frame) => tab.socket.send(JSON.stringify(frame))
+const textFor = (tab, id) =>
+  tab.frames
+    .filter((f) => (f.type === 'data' || f.type === 'replay') && f.sessionId === id)
+    .map((f) => f.data)
+    .join('')
+
+sendFrame(held, { type: 'attach', sessionId: 'tray-1', cols: 90, rows: 30 })
+await waitFor(() => frameOf(held, 'replay'), 5000, 'the replay frame')
+
+// A string that only ever exists in pwsh's *output* — what was typed is a
+// concatenation of two halves of it — so a client-side echo cannot fake this.
+const beforeNonce = randomBytes(4).toString('hex')
+sendFrame(held, { type: 'write', sessionId: 'tray-1', data: `Write-Output ("forge-tray-" + "${beforeNonce}")\r` })
+await waitFor(() => textFor(held, 'tray-1').includes(`forge-tray-${beforeNonce}`), 25_000, 'the shell before the close')
+log(true, `the pane is alive and writable before the window closes (forge-tray-${beforeNonce})`)
+
+/* -------------------------------------------------------- and now, closing */
+
+const icon = globalThis.__forgeTray
+log(Boolean(icon), 'with Forge Web on, there is an icon in the notification area')
+log(
+  String(icon?.tooltip ?? '').includes(NGROK_DOMAIN),
+  `and it says what the link is doing without opening a window ("${icon?.tooltip}")`
+)
+
+const balloonsBefore = globalThis.__forgeBalloons.length
+const absorbed = tray.handleWindowClose(window)
+
+log(absorbed === true, 'closing the window is absorbed rather than closing Forge')
+log(window.visible === false, 'the window is hidden')
+log(
+  window.destroyed === false,
+  'and hidden rather than destroyed, so the renderer that holds the split tree a browser dispatches layout into is still there'
+)
+log(globalThis.__forgeBalloons.length === balloonsBefore + 1, 'the first hide explains itself, once')
+log(
+  /still/i.test(String(globalThis.__forgeBalloons.at(-1)?.content ?? '')) &&
+    String(globalThis.__forgeBalloons.at(-1)?.content ?? '').includes(NGROK_DOMAIN),
+  `and what it says is that the link is still up ("${globalThis.__forgeBalloons.at(-1)?.content}")`
+)
+
+await sleep(250)
+
+log((await portOpen(PORT)) === true, `the server is still listening on ${PORT}`)
+log(
+  host.webStatus().rendezvous.published === NGROK_DOMAIN,
+  `the rendezvous record still names this desktop (${host.webStatus().rendezvous.published || 'nothing'})`
+)
+log(held.closed === null, "the connected browser's socket was never broken — not reconnected, never broken")
+log(!frameOf(held, 'shutdown'), 'and nothing told it the desk was going, because the desk did not go')
+log(host.webStatus().connected === 1, `it is still counted as connected (${host.webStatus().connected})`)
+
+const afterNonce = randomBytes(4).toString('hex')
+sendFrame(held, { type: 'write', sessionId: 'tray-1', data: `Write-Output ("forge-tray-" + "${afterNonce}")\r` })
+await waitFor(() => textFor(held, 'tray-1').includes(`forge-tray-${afterNonce}`), 25_000, 'the shell after the close')
+log(
+  ptyHost.getManager().list().some((s) => s.id === 'tray-1'),
+  'the pane started before the close is still alive after it'
+)
+log(true, `and still writable from the browser (forge-tray-${afterNonce})`)
+
+/* ------------------------------------------------------------- the menu */
+
+const menu = tray.trayMenuTemplate()
+const labels = menu.map((item) => item.label ?? '—')
+
+log(
+  menu.some((item) => item.label === 'Open Forge'),
+  'the menu offers the way back'
+)
+log(
+  labels.some((label) => label.includes(NGROK_DOMAIN)),
+  `and says where the link is, so a closed window is not a silent one (${labels.join(' | ')})`
+)
+menu.find((item) => item.label === 'Copy the link')?.click()
+log(copied === `wss://${NGROK_DOMAIN}${WEB_WS_PATH}`, `with the address itself a click away (${copied})`)
+
+const quitItem = menu.find((item) => /^Quit Forge/.test(String(item.label)))
+log(Boolean(quitItem), `and one way out, named for what it costs ("${quitItem?.label}")`)
+
+menu.find((item) => item.label === 'Open Forge')?.click()
+log(opened === 1 && window.visible === true, 'clicking the way back gives the window back')
+window.visible = false
+
+/* ================================================================ phase 11b
+ *
+ * Quitting from the tray, which must be the full shutdown the app has always
+ * done on `before-quit` — not a lesser one because the window went first.
+ */
+
+console.log('\nquitting from the tray')
+
+const deletesBeforeQuit = dbCalls('DELETE', `/users/${UID}/host.json`).length
+quitItem.click()
+log(quitRan === true, 'the tray’s Quit reaches the shutdown the before-quit chain runs')
+await quitPromise
+await waitFor(() => held.closed !== null, 4000, 'the held socket to close')
+
+const bye = frameOf(held, 'shutdown')
+log(bye?.reason === 'quit', `every connected browser is told the desk is going, and why (${bye?.reason})`)
+log(held.frames.indexOf(bye) < held.framesAtClose, 'and told before the socket closed, not after')
+log(
+  dbCalls('DELETE', `/users/${UID}/host.json`).length > deletesBeforeQuit,
+  'the rendezvous record is retracted rather than left for browsers to dial'
+)
+log((await portOpen(PORT)) === false, 'the listener is gone')
+log(closeAgent.killed === true, 'and the tunnel agent goes with it')
+log(
+  tray.handleWindowClose(fakeWindow()) === false,
+  'a close arriving during a quit is never absorbed — the window really goes'
+)
+
+/* ================================================================ phase 11c
+ *
+ * The desktop that never switched this on.
+ *
+ * The rule is that nobody acquires a notification-area icon for a feature they
+ * have not asked for, and that closing the window on such a desktop behaves
+ * exactly as it did before any of this existed. The second half of it — what
+ * happens when Forge Web is switched off while Forge is already hidden — is the
+ * one that could strand a process with no window and no icon, so it is asserted
+ * rather than reasoned about.
+ */
+
+console.log('\nswitching Forge Web off, and closing the window without it')
+
+tray.cancelQuitting()
+await invoke('web:start')
+await sleep(200)
+log(Boolean(globalThis.__forgeTray), 'switching Forge Web on puts the icon back without anybody asking it to')
+
+const hiddenAgain = fakeWindow()
+log(tray.handleWindowClose(hiddenAgain) === true, 'and the window can be closed to it again')
+log(hiddenAgain.visible === false, 'so Forge is hidden')
+
+const openedBeforeOff = opened
+window = hiddenAgain
+await invoke('web:stop')
+await sleep(200)
+
+log(globalThis.__forgeTray === null, 'switching Forge Web off takes the icon away')
+log(
+  opened > openedBeforeOff && hiddenAgain.visible === true,
+  'and hands the window back with it — a live Forge with no window and no icon is the one state this must never reach'
+)
+
+const off = fakeWindow()
+log(tray.handleWindowClose(off) === false, 'with Forge Web off, closing the window is not absorbed')
+log(off.visible === true, 'the window is not hidden, and Forge quits exactly as it always did')
+
 /* ------------------------------------------------------------------- done */
 
+host.setWebStatusListener(null)
+tray.disposeTray()
+ptyHost.disposePtyHost()
 await host.disposeWeb()
-for (const tab of [first, second]) {
+for (const tab of [first, second, held]) {
   try {
     tab.socket.terminate()
   } catch {

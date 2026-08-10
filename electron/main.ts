@@ -47,7 +47,22 @@ import {
 } from './voice-agent/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import { applyMobileSettings, disposeMobile, publishMobileState, registerMobileHandlers } from './mobile-host'
-import { applyWebSettings, disposeWeb, publishWebState, registerWebHandlers } from './web-host'
+import {
+  applyWebSettings,
+  disposeWeb,
+  publishWebState,
+  registerWebHandlers,
+  setWebStatusListener,
+  webStatus
+} from './web-host'
+import {
+  cancelQuitting,
+  disposeTray,
+  handleWindowClose,
+  noteQuitting,
+  setTrayHost,
+  syncTray
+} from './tray'
 import { registerSystemHandlers } from './system'
 import { disposePlannerWatchers, registerPlannerWatcherHandlers } from './planner-watcher'
 import { disposeGitWatchers, registerGitWatcherHandlers } from './git-watcher'
@@ -163,12 +178,12 @@ if (!gotSingleInstanceLock) {
   )
   app.exit(0)
 } else {
-  app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
-    }
-  })
+  // `openMainWindow` rather than a bare focus: with Forge Web on, the running
+  // copy may be hidden in the tray, and focusing a hidden window leaves it
+  // hidden — so launching Forge from the Start menu would appear to do nothing
+  // at all, which is precisely the "Forge won't open" morning this lock exists
+  // to avoid.
+  app.on('second-instance', () => openMainWindow())
 }
 
 /* ----------------------------------------------------------------- window */
@@ -360,11 +375,37 @@ function createWindow(): void {
   mainWindow.on('close', (event) => {
     if (boundsTimer) clearTimeout(boundsTimer)
     persistBounds()
-    if (!mainWindow || !shouldConfirmClose()) return
+    if (!mainWindow) return
+    /*
+     * With Forge Web on, the window goes and the desk stays.
+     *
+     * `handleWindowClose` hides rather than destroys, and answers true only
+     * when there is a tray icon to get Forge back from — so a desktop with
+     * Forge Web switched off, or one whose icon could not be created, falls
+     * straight through to the behaviour below and quits exactly as it always
+     * did. Hidden rather than destroyed matters twice over: the terminals keep
+     * their renderer, and the split tree that `dispatchLayout` in
+     * electron/web-host.ts sends a browser's tab and pane requests into is in
+     * that renderer.
+     *
+     * No close confirmation here on purpose. quit-guard.ts's dialog is a list
+     * of what is about to be killed, and hiding kills nothing.
+     */
+    if (handleWindowClose(mainWindow)) {
+      event.preventDefault()
+      return
+    }
+    if (!shouldConfirmClose()) return
     // Nothing is closed yet: the dialog is asynchronous, so the window has to
     // be kept alive until it comes back with an answer. See quit-guard.ts.
     event.preventDefault()
-    void askBeforeClose(mainWindow)
+    void askBeforeClose(mainWindow).then((closing) => {
+      // Cancel is also a *cancelled quit*: this close may have been the tray's
+      // Quit, which sets the flag before closing the window. Left set, the next
+      // ordinary close would take the terminals down without hiding and without
+      // asking again.
+      if (!closing) cancelQuitting()
+    })
   })
 
   mainWindow.on('closed', () => {
@@ -471,6 +512,51 @@ async function loadDevUrl(win: BrowserWindow, url: string, attempt = 0): Promise
     }
     setTimeout(() => void loadDevUrl(win, url, attempt + 1), 1000)
   }
+}
+
+/**
+ * Give Forge back — from the tray, from a second launch, or from macOS's dock.
+ *
+ * Restore before show before focus: focusing a minimised window on Windows
+ * flashes the taskbar button and leaves it minimised, and showing a hidden one
+ * without focusing it puts it behind whatever the person was looking at.
+ *
+ * The window is only ever *hidden* by the tray, never destroyed, so the branch
+ * that builds a new one is for the case where something else took it — a
+ * renderer that died twice, most of all. See the render-process-gone handler.
+ */
+function openMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+/**
+ * The tray's Quit, and — once Forge Web is holding the terminals open — the
+ * only way out.
+ *
+ * It closes the *window* rather than calling `app.quit()`, so the route is
+ * exactly the one the X button has always taken. Two things depend on that:
+ * quit-guard.ts's list of what is about to be killed still appears, and the
+ * `before-quit` disposers still run *after* that answer rather than before it —
+ * `app.quit()` here would dispose the PTY host and the web link first and then
+ * ask, which is a dialog whose Cancel cannot work.
+ *
+ * The window is shown first because a modal attached to a hidden window is a
+ * dialog nobody can answer.
+ */
+function quitForReal(): void {
+  noteQuitting()
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    app.quit()
+    return
+  }
+  if (!mainWindow.isVisible()) mainWindow.show()
+  mainWindow.close()
 }
 
 /* -------------------------------------------------------------------- ipc */
@@ -987,12 +1073,41 @@ void app
       // port or minting a credential. See docs/MOBILE.md.
       registerMobileHandlers()
       applyMobileSettings()
+      /*
+       * The tray, and with it the rule that closing the window is not the same
+       * act as quitting — the thing docs/forge-web.md's "honest limitation"
+       * promises, and that this app did not do until electron/tray.ts existed.
+       *
+       * Wired before the link starts, so the very first status lands on it, and
+       * hung off `report()` in web-host rather than off the settings write
+       * below: `web:start` and `web:stop` are how this feature is actually
+       * switched, and neither of them comes through the settings handler.
+       *
+       * Nothing appears for anybody who has not switched Forge Web on. That is
+       * not a nicety — an icon for a feature nobody enabled is a change to
+       * every desktop user's notification area for nothing.
+       */
+      setTrayHost({
+        open: openMainWindow,
+        quit: quitForReal,
+        status: webStatus,
+        copy: (text) => clipboard.writeText(text),
+        // The same two committed files windowIcon() picks between, and for the
+        // same reason: two identical lime plates in the notification area is
+        // how you quit the wrong Forge.
+        iconFile: isDevChannel ? 'icon-dev.ico' : 'icon.ico'
+      })
+      setWebStatusListener(syncTray)
       // And the third time, for the door that faces the internet rather than
       // the LAN: this reads settings, sees `webEnabled: false`, and returns
       // without binding a port, reading a credential or publishing a hostname.
       // See docs/forge-web.md's security posture, which promises exactly that.
       registerWebHandlers()
       applyWebSettings()
+      // `applyWebSettings` reports asynchronously; this is the synchronous read
+      // of the setting, so a Forge that starts with the link already on has its
+      // icon before the first window can be closed.
+      syncTray()
       registerSystemHandlers()
       // Handlers only: nothing is tailed until the tasks panel opens a planning
       // session and asks for it. See electron/planner-watcher.ts.
@@ -1053,6 +1168,11 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  // First, and outside the catches below: every quit route in this app emits
+  // this event — the tray's Quit, the updater, the stale-build Restart, an OS
+  // shutdown — and from here on the window's close handler must stop hiding to
+  // the tray and let the window actually go. See electron/tray.ts.
+  noteQuitting()
   // Each disposer behind its own catch: a throw from any of them propagates
   // out of the 'before-quit' emit and aborts app.quit() itself — skipping the
   // remaining disposers and leaving the app alive with no window. That is how
@@ -1085,6 +1205,11 @@ app.on('before-quit', () => {
   safely('disposeUpdater', disposeUpdater)
   safely('disposeStaleWatcher', disposeStaleWatcher)
   safely('disposeSourceUpdater', disposeSourceUpdater)
+  // The icon goes with the process in the ordinary case; this is for the other
+  // one. `window-all-closed` arms a 2.5s hard exit, and a notification-area
+  // entry orphaned by a hard exit sits there as a ghost until somebody happens
+  // to move the mouse across it.
+  safely('disposeTray', disposeTray)
   // Last, and unconditional: an always-on-top window that outlived the app
   // would sit over everything with nothing behind it to close it.
   safely('disposeOverlay', disposeOverlay)
