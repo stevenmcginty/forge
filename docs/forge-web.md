@@ -294,16 +294,57 @@ and none of them blocks the others.
    cd companion && firebase deploy --only database
    ```
 
-3. **A tunnel.** Cloudflare Tunnel is the intended one; `electron/mobile-tunnel.ts`
-   already knows how to run `cloudflared`, and Forge Mobile uses it today. A
-   named tunnel gives a stable hostname, which makes the rendezvous record
-   change rarely instead of on every restart.
+3. **A tunnel** — and this needs a decision first, because an earlier draft of
+   this document was wrong about what exists.
+
+   It claimed `electron/mobile-tunnel.ts` already runs `cloudflared`. It does
+   not: that file is an **ngrok** supervisor end to end — it downloads the
+   binary, spawns it with ngrok's arguments, and recognises ngrok's refusal
+   codes. The only `cloudflared` in the repository is in
+   `scripts/mobile-tunnel.mjs` and `scripts/mobile-go.mjs`, which are standalone
+   development scripts that spawn a quick tunnel and exit. Neither is importable
+   and neither is supervised.
+
+   So Forge Web has no in-app tunnel today. `electron/web-host.ts` takes the
+   hostname from `FORGE_WEB_HOSTNAME`, normalises it, publishes it, and reports
+   `tunnel.state: 'configured'` — it deliberately does not claim a liveness it
+   cannot observe. That is enough to run the feature with a tunnel started by
+   hand, and not enough to ship.
+
+   The two honest options are: generalise the existing ngrok supervisor so both
+   Mobile and Web share it (least new code, and it already handles download,
+   spawn, restart and permanent-refusal detection), or write a `cloudflared`
+   supervisor beside it. A named tunnel of either kind gives a stable hostname,
+   which makes the rendezvous record change rarely rather than on every restart.
 
 4. **A GitHub OAuth app** — Phase 4 only, for the offline mode. Scoped to repo
    contents, device-flow enabled. Nothing before Phase 4 touches it.
 
 5. **Deploy the web client to Hosting** once Phase 3 exists. One command, and
    the URL never changes afterwards.
+
+## Two things that are wired but not yet right
+
+Both were found by building the thing rather than by planning it, and both are
+recorded here because the code works and the arrangement is still wrong.
+
+**Forge Web currently borrows the Companion's Firebase session.** The
+rendezvous record is written under the signed-in uid, and the only Firebase
+session this desktop holds belongs to Forge Companion. So `web-host.ts` refuses
+to publish unless `companionUid` equals `webUid` — which means switching Forge
+Web on quietly depends on a *different feature* being signed in as the same
+account, and silently stops working if the Companion is signed out.
+
+That contradicts the reason `webUid` is a separate field in the first place:
+the Companion's uid changes whenever it is signed in or out, and letting that
+re-point who gets a shell on this machine is not acceptable. The fix is for
+Forge Web to hold its own Firebase session — its own sign-in in settings, its
+own refresh token — so the two features share an identity provider and nothing
+else. Until then the coupling has to be visible in the settings panel rather
+than discovered.
+
+**No tunnel is supervised in-app.** See item 3 above. `FORGE_WEB_HOSTNAME` is a
+development seam, not a feature.
 
 ## What is deliberately not here
 
