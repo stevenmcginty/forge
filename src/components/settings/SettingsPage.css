@@ -1509,3 +1509,242 @@
   color: var(--danger, #ff5c5c);
   border-color: color-mix(in srgb, var(--danger, #ff5c5c) 40%, transparent);
 }
+
+/* --------------------------------------------------------------- forge web
+ *
+ * Its own block rather than a reuse of the mobile one above, because the two
+ * panels answer different questions with similar-looking furniture and sharing
+ * a class name is how a tweak for a QR fallback ends up moving a device list.
+ *
+ * Everything here has to survive a narrow settings column: the panel has no
+ * breakpoints and the rows are flex, so every value that can be long — a
+ * tunnel hostname, an email, a browser's self-chosen name — either wraps or
+ * ellipses rather than pushing the control off the edge.
+ */
+
+/*
+ * Narrow columns, scoped to this section alone.
+ *
+ * `.srow` is label-left/control-right with a 260px input and no wrap, which is
+ * right at the 720px the settings column normally gets and falls apart well
+ * below it — the label runs under the control and the input hangs off the card.
+ * Every section on this page does that; Forge Mobile does it too, and fixing
+ * `.srow` itself would silently redraw all ten.
+ *
+ * So the rule is bound to this section's own container. `Section` stamps the
+ * title into `aria-label`, which gives the block a selector of its own without
+ * a wrapper element, and a container query measures the column rather than the
+ * window — the rail collapsing changes how much room this has, and a viewport
+ * media query would be measuring the wrong box.
+ */
+.sset[aria-label='Forge Web'] {
+  container-type: inline-size;
+  container-name: webset;
+}
+
+/*
+ * `height: auto`, and it is not decoration.
+ *
+ * `src/components/SkillsFlyout.css` declares its own global `.srow` — a
+ * different row, in a different component, that happens to have picked the same
+ * class name — and that one sets `height: 38px`. Both files land in one
+ * stylesheet, the flyout's comes later, and equal specificity means it wins
+ * everywhere: every row on this settings page is clamped to 38px, whatever it
+ * contains. The settings row above declares `min-height: 30px` and no height at
+ * all, so growing with its content is what it was written to do.
+ *
+ * The rows here carry two-line hints and, when the column is narrow, a control
+ * on its own line — so this section is where a 38px clamp stops being invisible
+ * and starts drawing labels through each other. Undone for this section only:
+ * the real repair is to scope the flyout's `.srow`, and that is a different
+ * component's file and a different job.
+ */
+.sset[aria-label='Forge Web'] .srow {
+  height: auto;
+}
+
+@container webset (max-width: 460px) {
+  .srow {
+    flex-wrap: wrap;
+    gap: var(--s-2);
+  }
+
+  /* `flex: 1` plus `min-width: 0` lets the label block shrink to nothing rather
+     than push the control onto a line of its own, so the wrap above does not
+     fire on its own. Claiming the whole line is what actually makes it fire. */
+  .srow__text {
+    flex: 1 1 100%;
+  }
+
+  .srow__control {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .srow__control .field__input {
+    width: 100%;
+  }
+}
+
+/* The sentence above the switch. Slightly larger than a hint, because it is
+   the one line on the card that says which of the three states this is. */
+.web-lede {
+  margin: 0;
+  max-width: 66ch;
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.web-lede strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Something true and in the way, but not a failure: a listening link with no
+   public address, an account that was just created, a hostname Forge cannot
+   vouch for. */
+.web-note {
+  margin: 0;
+  max-width: 66ch;
+  padding: var(--s-3) var(--s-4);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-sm);
+}
+
+.web-error {
+  margin: 0;
+  max-width: 66ch;
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  color: var(--danger);
+}
+
+/* An address beside the button that copies it. Wraps rather than overflows:
+   a tunnel hostname is forty-odd characters and the column is not. */
+.web-url {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.web-address {
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  padding: 2px var(--s-2);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-all;
+}
+
+/* The sign-in form. Full width rather than a right-hand control, because it is
+   two fields and a verb rather than a setting with a value. */
+.web-signin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s-4);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.web-field {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.web-field .field__input {
+  width: 100%;
+}
+
+.web-signin__go {
+  flex: none;
+  height: 30px;
+}
+
+/* Tabular digits, or the accept chip shifts a pixel every second as 9:59
+   becomes 9:58. */
+.web-accept__left {
+  font-variant-numeric: tabular-nums;
+}
+
+.web-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.web-device {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.web-device:first-child {
+  border-top: 0;
+}
+
+/* A revoked row stays in the list on purpose — the tombstone is what tells a
+   refused browser apart from a stranger — so it is dimmed rather than removed,
+   and carries the word as well as the dimming. */
+.web-device[data-revoked] .web-device__name {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.web-device__text {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.web-device__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.web-device__meta {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.web-device__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.web-device__badge {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--s-4);
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+}

@@ -73,6 +73,7 @@ export type SettingsSection =
   | 'appearance'
   | 'screenshots'
   | 'mobile'
+  | 'web'
   | 'updates'
   | 'advanced'
 

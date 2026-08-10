@@ -73,11 +73,30 @@
   border-radius: var(--r-lg);
 }
 
+/* Which account asked, under the words. Quieter than the pair on purpose: the
+   words are the check, and this is the label on the door it opens. */
+.approval__account {
+  margin: 0 0 var(--s-6);
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
 .approval__grant {
   margin: 0;
   font-size: var(--t-sm);
   line-height: 1.5;
   color: var(--text-muted);
+}
+
+/* The deadline. Tabular digits so a card counting down does not jitter, and it
+   sits under the grant sentence because it is a fact about the question rather
+   than part of the decision. */
+.approval__ttl {
+  margin: var(--s-4) 0 0;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
 }
 
 .approval__actions {

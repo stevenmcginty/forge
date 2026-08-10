@@ -35,6 +35,7 @@ export type IconName =
   | 'mic'
   | 'panelRight'
   | 'phone'
+  | 'globe'
   | 'chevronRight'
   | 'branch'
   | 'file'
@@ -170,6 +171,16 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <circle cx="8" cy="5.8" r="2.6" />
       <path d="M3 13.4a5 5 0 0 1 10 0" />
+    </>
+  ),
+  // A globe: the same terminals, from anywhere. The meridian is an ellipse
+  // rather than a straight line because at 16px a straight one reads as a clock
+  // hand, and this glyph sits directly under the handset in the sidebar.
+  globe: (
+    <>
+      <circle cx="8" cy="8" r="5.8" />
+      <path d="M2.2 8h11.6" />
+      <ellipse cx="8" cy="8" rx="2.6" ry="5.8" />
     </>
   ),
   // A key: the section where credentials live.
