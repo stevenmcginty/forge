@@ -76,3 +76,14 @@ mobile/android/app/src/main/assets/capacitor.plugins.json
 *.keystore
 keystore.properties
 __pycache__/
+
+# Firebase deploy artefacts and the local project wiring.
+# .firebaserc names Steve's own project and hosting sites; firebase.json (the
+# deploy config) is committed, its .example sibling documents the target names.
+.firebase/
+.firebaserc
+# The web client's runtime config carries Steve's project's API key and database
+# URL. Neither is a secret — a Firebase web API key is a public identifier and
+# the rules are what gate anything — but they are his project's, not the repo's.
+# web/config.example.json is the shape; this is the filled-in copy.
+web/public/config.json

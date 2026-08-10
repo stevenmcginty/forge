@@ -1,0 +1,62 @@
+{
+  "//": [
+    "The DEPLOY config, at the repo root because Firebase refuses a `public`",
+    "path outside the directory holding firebase.json — and Forge Web's bundle",
+    "(web/dist) and the Companion's PWA (companion/web) are siblings, so no",
+    "config inside either one can see both.",
+    "",
+    "companion/firebase.json stays where it is and keeps its own job: it is the",
+    "EMULATOR config that scripts/companion-smoke.mjs and",
+    "scripts/web-rendezvous-check.mjs pass with --config, and it is what the",
+    "Companion's GO-LIVE.md documents. The database rules are named from both,",
+    "which is a duplicated path and not duplicated content.",
+    "",
+    "Deploy:  npm run web:deploy                                  (Forge Web only)",
+    "         firebase deploy --only hosting:companion            (the phone PWA)",
+    "         firebase deploy --only database                     (rules for both)"
+  ],
+  "hosting": [
+    {
+      "target": "companion",
+      "public": "companion/web",
+      "ignore": ["firebase.json", "**/.*", "README.md", "GO-LIVE.md"],
+      "headers": [
+        {
+          "source": "**",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        },
+        {
+          "source": "/sw.js",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+        }
+      ]
+    },
+    {
+      "target": "web",
+      "public": "web/dist",
+      "ignore": ["firebase.json", "**/.*"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "headers": [
+        {
+          "source": "**",
+          "headers": [
+            { "key": "Cache-Control", "value": "no-cache" },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' wss: https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.firebasedatabase.app https://*.firebaseio.com https://api.github.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+            },
+            { "key": "X-Content-Type-Options", "value": "nosniff" },
+            { "key": "Referrer-Policy", "value": "no-referrer" }
+          ]
+        },
+        {
+          "source": "/assets/**",
+          "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+        }
+      ]
+    }
+  ],
+  "database": {
+    "rules": "companion/database.rules.json"
+  }
+}
