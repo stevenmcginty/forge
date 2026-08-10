@@ -276,7 +276,21 @@ try {
   ok(onboarding?.hasCta === true, 'and a way out of it')
 
   const agents = await evaluate('return await window.forge.probeAgents()')
-  ok(Array.isArray(agents) && agents.length === 3, 'agent detection answers', JSON.stringify(agents?.map?.((a) => a.id)))
+  /*
+   * A count, not a number.
+   *
+   * This asserted `=== 3` and went stale the moment the catalogue grew — by the
+   * time anyone ran it against a packaged build it was five agents behind and
+   * failing for no reason anybody had introduced. What this check is actually
+   * for is that the probe *answers over IPC in a packaged app*, where a
+   * `which`-style lookup resolves differently from a checkout; the exact size of
+   * the built-in list is `shared/agents.ts`'s business and `agents:check`'s.
+   */
+  ok(
+    Array.isArray(agents) && agents.length > 0,
+    'agent detection answers',
+    JSON.stringify(agents?.map?.((a) => a.id))
+  )
   for (const agent of agents ?? []) {
     console.log(`  ..   ${agent.name}: ${agent.found ? agent.path : 'not on PATH'}`)
   }
