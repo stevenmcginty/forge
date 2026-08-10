@@ -269,6 +269,15 @@ const FALLBACK_SETTINGS: Settings = {
   mobileNgrokDomain: '',
   mobileControlEnabled: false,
   mobileMirrorAudio: false,
+  // Forge Web — off, unconfigured, admitting nobody. Same rule as the block
+  // above: this mirrors defaultSettings() in electron/store.ts, and a fallback
+  // that guessed "on" would be a fallback that opened a door for the second
+  // before the real settings landed.
+  webEnabled: false,
+  webProjectId: '',
+  webUid: '',
+  webDevices: [],
+  webAcceptUntil: 0,
   customTools: [],
   updatesAutoRun: false,
   // Blank until the real settings arrive. The card checks `state.ready`, so it
