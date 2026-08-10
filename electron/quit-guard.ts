@@ -59,9 +59,15 @@ function nameList(items: LiveSession[], max = 4): string {
  * The caller has already called `event.preventDefault()`: nothing is closed
  * until this comes back, and if it never does — a dialog that will not open —
  * the app closes anyway rather than trapping the user inside it.
+ *
+ * Resolves true when Forge is closing and false when the answer was Cancel.
+ * Nothing here behaves differently for it; the answer is reported because
+ * electron/tray.ts's quit flag has to be *un*set when a quit is declined —
+ * otherwise a tray Quit that was cancelled would leave the next close taking
+ * the terminals down without hiding and without asking again.
  */
-export async function askBeforeClose(win: BrowserWindow): Promise<void> {
-  if (win.isDestroyed()) return
+export async function askBeforeClose(win: BrowserWindow): Promise<boolean> {
+  if (win.isDestroyed()) return true
   asking = true
   try {
     const live = liveSessions()
@@ -94,13 +100,15 @@ export async function askBeforeClose(win: BrowserWindow): Promise<void> {
     })
 
     if (checkboxChecked) setSettings({ confirmOnQuit: false })
-    if (response !== 0) return
+    if (response !== 0) return false
     allowed = true
     if (!win.isDestroyed()) win.close()
+    return true
   } catch (err) {
     console.error('[quit] close confirmation failed, closing anyway:', err)
     allowed = true
     if (!win.isDestroyed()) win.close()
+    return true
   } finally {
     asking = false
   }

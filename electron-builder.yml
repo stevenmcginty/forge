@@ -21,6 +21,8 @@
 #                                           see scripts/build-bridge.mjs)
 #   resources/stt-bin/forge-stt.exe     ← electron/stt-sidecar.ts resolveFrozen()
 #   resources/stt/stt_service.py        ← electron/stt-sidecar.ts resolveScript()
+#   resources/icon.ico                  ← electron/tray.ts iconCandidates()
+#   resources/icon-dev.ico              ← ditto, for the dev channel
 
 appId: dev.forge.app
 productName: Forge
@@ -52,7 +54,17 @@ files:
 #    its own DLLs relative to the exe
 #  - stt_service.py is the fallback for anyone running the sidecar under their
 #    own interpreter
+#  - the tray icon is read off disk by `nativeImage.createFromPath`. It is the
+#    same .ico electron-builder stamps onto Forge.exe, but the stamp lives in
+#    the binary's resource table where nothing can read it back — and the file
+#    itself is in build/, which is `buildResources` and is not shipped. Without
+#    a copy out here a packaged Forge has no image for the notification area,
+#    and an icon with no image is a hidden Forge with no visible way back.
 extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+  - from: build/icon-dev.ico
+    to: icon-dev.ico
   - from: bridge-dist
     to: bridge
     filter:

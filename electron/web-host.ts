@@ -466,9 +466,36 @@ export function webStatus(): WebStatus {
   }
 }
 
+/**
+ * Told whenever this desktop's picture of Forge Web changes.
+ *
+ * One listener, set by electron/main.ts, because there is exactly one thing
+ * outside a renderer that has to *react* to this switch rather than merely
+ * display it: the tray, which is the whole of "closing the window does not end
+ * the session" and must never disagree with the link it describes. `report()`
+ * is the single place every state change already passes through — including
+ * `web:start` and `web:stop`, which never reach the settings handler in main.ts
+ * that `applyWebSettings()` is called from, and which are exactly how somebody
+ * turns this feature on and off.
+ */
+let statusListener: ((status: WebStatus) => void) | null = null
+
+export function setWebStatusListener(listener: ((status: WebStatus) => void) | null): void {
+  statusListener = listener
+}
+
 function report(detail?: string): void {
   if (detail !== undefined) lastDetail = detail
-  broadcast(IPC.webStatusEvent, webStatus())
+  const status = webStatus()
+  broadcast(IPC.webStatusEvent, status)
+  try {
+    statusListener?.(status)
+  } catch (err) {
+    // `report()` is called from the middle of start, stop and shutdown. A
+    // listener that throws must not be the reason the link fails to come up or
+    // the reason Forge will not close.
+    console.error('[web] the status listener failed:', err)
+  }
 }
 
 /* --------------------------------------------------- accept new browsers
