@@ -23,6 +23,7 @@ import {
   resolveDataRoot,
   setProjects,
   setSettings,
+  setStoreHost,
   setWorkspace,
   snapshot
 } from './store'
@@ -90,6 +91,10 @@ const TITLEBAR_HEIGHT = 38
  * quitting on startup or fighting over the session directory.
  */
 
+// store.ts is Electron-free and takes Electron by injection — see the
+// StoreHost comment there. This has to run before resolveDataRoot() below,
+// which is what the single-instance lock is keyed on.
+setStoreHost({ appDataDir: () => app.getPath('appData'), appVersion: () => app.getVersion() })
 const DATA_ROOT = resolveDataRoot()
 // setPath throws on a directory that is not there yet.
 mkdirSync(DATA_ROOT, { recursive: true })

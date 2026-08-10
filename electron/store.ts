@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -59,6 +58,37 @@ import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
  * if it is there, use it. Both are editable in settings.json and from Settings.
  */
 const PARAKEET_NAME = 'parakeet-tdt-0.6b-v2'
+
+/**
+ * The two things this module needs from Electron, injected rather than
+ * imported — the same shape as `electron/companion-sync.ts`'s `CompanionHost`,
+ * and for the same reason: this file is exercised head-less by check scripts
+ * and (eventually) Forge Web's server, none of which load Electron.
+ */
+export interface StoreHost {
+  /** The platform's roaming app-data directory. Forge's default root is <appData>/Forge. */
+  appDataDir: () => string
+  /** The running app's version, or '' when there isn't one (headless runs). */
+  appVersion: () => string
+}
+
+/**
+ * Set by electron/main.ts, before `resolveDataRoot()` is first called — see
+ * the comment on that function. A headless caller that never sets a host
+ * still gets safe answers: `appDataRoot()` falls back to APPDATA, and
+ * `appVersion()` falls back to ''.
+ */
+let storeHost: StoreHost | null = null
+
+export function setStoreHost(host: StoreHost): void {
+  storeHost = host
+}
+
+/** `storeHost`'s app-data dir, or the same answer Windows would give it. */
+function appDataRoot(): string {
+  if (storeHost) return storeHost.appDataDir()
+  return process.env['APPDATA'] || join(homedir(), 'AppData', 'Roaming')
+}
 
 /** The Windows account name, for the account chip's first run. */
 function defaultAccountName(): string {
@@ -303,7 +333,7 @@ export function resolveDataRoot(): string {
   // Forge is launched from source too, so an unpackaged run is not the same
   // thing as a development run, and keying on it sent the real app to an empty
   // profile the moment this file was pulled into the stable checkout.
-  return join(app.getPath('appData'), 'Forge')
+  return join(appDataRoot(), 'Forge')
 }
 
 /** `--data-dir <path>` or `--data-dir=<path>`, whichever the caller used. */
@@ -667,13 +697,13 @@ function str(v: unknown): string {
  * The running version, for seeding `lastNotesVersion` on a fresh install.
  *
  * Wrapped because the settings normaliser is exercised head-less by check
- * scripts with `app` stubbed, and `app.getVersion` is not part of the shape they
- * stub. An empty string there is harmless: it means the card opens once in a test
+ * scripts and Forge Web's server, neither of which calls `setStoreHost`. An
+ * empty string there is harmless: it means the card opens once in a test
  * process that has no window to open it in.
  */
 function appVersion(): string {
   try {
-    return typeof app?.getVersion === 'function' ? app.getVersion() : ''
+    return storeHost ? storeHost.appVersion() : ''
   } catch {
     return ''
   }
