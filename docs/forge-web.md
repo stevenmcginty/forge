@@ -177,7 +177,23 @@ scripts (`pty:smoke`, `git:check`, `session:check`, `mobile:smoke`,
 
 ### Phase 4 — GitHub mode
 
-- GitHub auth in the browser (OAuth device flow), scoped to repo contents.
+- GitHub auth in the browser: a **fine-grained personal access token**, pasted
+  by the user, scoped to the chosen repositories with Contents read/write.
+
+  Not OAuth, and not by preference. Every GitHub token endpoint — the web flow,
+  the device flow and a GitHub App's user-to-server flow alike — terminates at
+  `https://github.com/login/oauth/access_token`, which sends no
+  `Access-Control-Allow-Origin`. A browser cannot complete the exchange, and
+  Forge Web deliberately has no server to exchange through. Device flow was
+  planned here until it was tried.
+
+  The cost is a long-lived credential in browser storage, so the UI treats that
+  as the fact it is: it names the exact permission to grant, shows what the
+  token can actually reach by asking GitHub rather than assuming, and offers to
+  forget it. If a small Cloud Function ever becomes acceptable — Firebase
+  Hosting is already in play — a GitHub App user-to-server flow would replace
+  this with a short-lived token and a refresh token. That is a deliberate
+  trade, not an oversight.
 - File tree, viewer and editor over the GitHub REST API.
 - Commits land on a `forge-web/*` branch, never on `master` directly.
 - Frozen terminal transcripts from the last cached replay, clearly badged.
@@ -316,8 +332,16 @@ and none of them blocks the others.
    than `live`, because Forge never started that process and cannot report on
    it.
 
-4. **A GitHub OAuth app** — Phase 4 only, for the offline mode. Scoped to repo
-   contents, device-flow enabled. Nothing before Phase 4 touches it.
+4. **A fine-grained GitHub personal access token** — offline mode only, and
+   only when you want it. Create it under Settings → Developer settings →
+   Fine-grained tokens: pick the specific repositories, grant **Contents:
+   Read and write** and nothing else, and give it the shortest expiry you can
+   live with. Paste it into the browser when it asks.
+
+   No OAuth app, because a browser cannot complete GitHub's token exchange —
+   see Phase 4 above for why. The token lives in that browser and nowhere else:
+   it never reaches the desktop, never enters the offline cache, and "forget
+   this token" genuinely removes it.
 
 5. **Deploy the web client to Hosting** once Phase 3 exists. One command, and
    the URL never changes afterwards.
