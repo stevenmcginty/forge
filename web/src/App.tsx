@@ -18,6 +18,12 @@ import { useForge } from './state'
  * The one crossing between them is deliberate: an `offline` stage still draws
  * the whole workspace, from the cache, because Forge asleep must not look like
  * Forge broken.
+ *
+ * There is no third axis for GitHub mode, and that is the point of it being a
+ * *mode*: `Workspace` swaps what is inside the grid when `offlineMode` says so,
+ * and everything around it — the titlebar, the offline strip, the rail, the
+ * theme — is the same furniture either way. A screen of its own here would have
+ * made decision 9 and decision 10 two applications instead of two halves of one.
  */
 export function App(): ReactNode {
   const { state } = useForge()

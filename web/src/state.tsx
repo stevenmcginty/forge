@@ -23,6 +23,7 @@ import { Auth, isSignedOutError, type Session } from './lib/auth'
 import { ForgeClient, type Connection } from './lib/client'
 import {
   loadSnapshot,
+  rememberGit,
   rememberPicture,
   rememberProjects,
   rememberSessions,
@@ -76,10 +77,24 @@ export type Stage =
    */
   | { kind: 'offline'; message: string; record: WebHostRecord | null }
 
+/**
+ * Which half of offline mode this browser is looking at.
+ *
+ * Decision 10 is the frozen picture and decision 9 is GitHub; they are two
+ * halves of the same "the desktop is off" screen rather than two apps, so this
+ * is one flag on the offline stage rather than a second stage. `OfflineBanner`
+ * owns the switch, because the banner is already the sentence that says the
+ * picture is frozen — the place somebody is standing when they decide they want
+ * the files instead.
+ */
+export type OfflineMode = 'frozen' | 'github'
+
 export interface ForgeState {
   stage: Stage
   connection: Connection
   session: Session | null
+  /** The deployment facts, once `/config.json` has been read. */
+  config: WebClientConfig | null
   picture: Picture | null
   /** The last picture this browser was handed, for the offline view. */
   cached: Snapshot | null
@@ -93,6 +108,8 @@ export interface ForgeState {
   notice: string
   /** Is the link answering right now? Only the badge reads this. */
   warm: boolean
+  /** Frozen terminals, or the repository from GitHub. Only read while offline. */
+  offlineMode: OfflineMode
 }
 
 export interface ForgeActions {
@@ -115,6 +132,8 @@ export interface ForgeActions {
   /** Subscribe to a pane's bytes. Returns the unsubscribe. */
   onData: (sessionId: string, listener: (data: string, replay: boolean, truncated: boolean) => void) => () => void
   setNotice: (message: string) => void
+  /** Switch between the frozen picture and GitHub mode. Offline only. */
+  setOfflineMode: (mode: OfflineMode) => void
 }
 
 interface ForgeContextValue {
@@ -171,6 +190,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   const [asking, setAsking] = useState<Set<string>>(() => new Set())
   const [notice, setNotice] = useState('')
   const [warm, setWarm] = useState(false)
+  const [config, setConfig] = useState<WebClientConfig | null>(null)
+  const [offlineMode, setOfflineMode] = useState<OfflineMode>('frozen')
 
   const configRef = useRef<WebClientConfig | null>(null)
   const authRef = useRef<Auth | null>(null)
@@ -262,7 +283,14 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         )
         rememberWorkspace(id, workspace)
       },
-      onGit: (snapshot) => setGit((current) => ({ ...current, [snapshot.projectId]: snapshot })),
+      onGit: (snapshot) => {
+        setGit((current) => ({ ...current, [snapshot.projectId]: snapshot }))
+        // The one field of it that outlives the connection. GitHub mode cannot
+        // ask a desktop that is off which repository a project is, so the answer
+        // is written down while there is somebody to answer.
+        rememberGit(snapshot)
+        setCached(loadSnapshot())
+      },
       onNotice: setNotice,
       onTokenRejected: () => {
         authRef.current?.signOut()
@@ -364,6 +392,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         return
       }
       configRef.current = result.config
+      setConfig(result.config)
       const auth = new Auth(result.config)
       authRef.current = auth
       const current = auth.current()
@@ -399,6 +428,18 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
     if (stage.kind !== 'offline') return
     setProjectId((current) => current ?? cached?.projects[0]?.id ?? null)
   }, [stage.kind, cached])
+
+  /**
+   * A desktop that came back takes the page with it.
+   *
+   * The poll above is what notices, and `client.connect` is what dials — no
+   * reload anywhere. All this does is put the offline switch back where it
+   * started, so the *next* time the machine goes away the browser opens on the
+   * frozen picture rather than on a repository somebody looked at yesterday.
+   */
+  useEffect(() => {
+    if (stage.kind !== 'offline') setOfflineMode('frozen')
+  }, [stage.kind])
 
   /**
    * Write what the panes have said into the offline cache.
@@ -493,14 +534,28 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           if (set.size === 0) map.delete(sessionId)
         }
       },
-      setNotice
+      setNotice,
+      setOfflineMode
     }),
     [client, find, projectId]
   )
 
   const state = useMemo<ForgeState>(
-    () => ({ stage, connection, session, picture, cached, projectId, git, asking, notice, warm }),
-    [stage, connection, session, picture, cached, projectId, git, asking, notice, warm]
+    () => ({
+      stage,
+      connection,
+      session,
+      config,
+      picture,
+      cached,
+      projectId,
+      git,
+      asking,
+      notice,
+      warm,
+      offlineMode
+    }),
+    [stage, connection, session, config, picture, cached, projectId, git, asking, notice, warm, offlineMode]
   )
 
   return <ForgeContext.Provider value={{ state, actions }}>{children}</ForgeContext.Provider>

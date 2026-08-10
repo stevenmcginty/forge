@@ -36,6 +36,7 @@ import '@/components/rail/GitSection.css'
 import './styles.css'
 
 import { App } from './App'
+import { RepoProvider } from './lib/repo'
 import { ForgeProvider } from './state'
 
 const host = document.getElementById('root')
@@ -48,8 +49,18 @@ if (!host) throw new Error('index.html has no #root')
  * would also mean attaching to every pane twice and taking a second replay for
  * each, which is 192KB per pane down a tunnel to prove a point about purity.
  */
+/*
+ * `RepoProvider` inside `ForgeProvider`, and above `App` rather than inside the
+ * offline branch of it: it reads the connection stage to decide whether to do
+ * anything at all (it is inert while the desktop is live — decision 9's "the
+ * browser reads and writes GitHub" is what happens *instead of* a session, never
+ * alongside one), and mounting it per-screen would throw away a repository's
+ * tree every time the socket blinked.
+ */
 createRoot(host).render(
   <ForgeProvider>
-    <App />
+    <RepoProvider>
+      <App />
+    </RepoProvider>
   </ForgeProvider>
 )
