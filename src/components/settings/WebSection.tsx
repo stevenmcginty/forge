@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { toDataURL } from 'qrcode'
 import { normaliseNgrokDomain } from '@shared/mobile'
 import { TOTP_DIGITS, TRUST_WINDOW_MS } from '@shared/web'
-import type { WebDeviceRecord, WebStatus } from '@shared/types'
+import type { WebDeviceRecord, WebStatus, WebTunnelMode } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTone } from './parts'
 
@@ -55,7 +55,34 @@ import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTon
  * main.ts's settings-write handler compares `webTunnel`, `webNgrokDomain` and
  * `webNgrokAuthtoken` and calls `applyWebSettings()` itself, so a pasted domain
  * starts an agent now rather than at the next launch.
+ *
+ * The tunnel card is three choices rather than a switch, and the ngrok fields
+ * only appear under the choice that reads them. That is not tidiness: the
+ * default transport needs nothing pasted, and a card that showed two empty
+ * credential boxes under it would be asking for a credential the feature does
+ * not want. What the card must say out loud is the trade between the two, once,
+ * without nagging — see `TUNNELS` below, where each option carries its own
+ * sentence.
  */
+
+/**
+ * The three answers, with what each one costs written next to it rather than in
+ * a paragraph above them. `cloudflared` is first because it is the default and
+ * the one that works with nothing typed.
+ */
+const TUNNELS: Array<{ id: WebTunnelMode; label: string; hint: string }> = [
+  {
+    id: 'cloudflared',
+    label: 'Cloudflare',
+    hint: 'Needs nothing — no account, no token. A new address each start, which the browser finds anyway.'
+  },
+  {
+    id: 'ngrok',
+    label: 'ngrok',
+    hint: 'One steady address, but the free plan allows a single tunnel per account — so it cannot run beside Forge Mobile.'
+  },
+  { id: 'off', label: 'None', hint: 'No way in from outside, unless you run a tunnel yourself.' }
+]
 
 /** Seconds remaining until a ms-epoch deadline, floored at zero. */
 function secondsLeft(deadline: number, now: number): number {
@@ -309,7 +336,7 @@ export function WebSection(): ReactNode {
   const tunnel = status.tunnel
   const settings = state.settings
   const authtoken = settings.webNgrokAuthtoken
-  const tunnelOn = settings.webTunnel === 'ngrok'
+  const tunnelMode = settings.webTunnel
   const listening = status.state === 'listening'
 
   const tone: ChipTone = listening ? 'ok' : status.state === 'error' ? 'danger' : 'off'
@@ -626,11 +653,12 @@ export function WebSection(): ReactNode {
         actions={<StateChip tone={tunnelTone}>{tunnel.state === 'live' ? 'Live' : tunnel.state}</StateChip>}
         hint={
           <>
-            The listener binds loopback, so on its own it is reachable from nothing. An ngrok tunnel is what gives it
-            a public address. The authtoken is all it needs; a domain is optional and only buys you the same address
-            every time. Leave it blank and ngrok picks one on each start — which costs nothing here, because the
-            browser reads this desktop’s current address out of your Firebase account before it dials. Forge Mobile’s
-            domain cannot be borrowed either way: one domain forwards to one port.
+            The listener binds loopback, so on its own it is reachable from nothing. A tunnel is what gives it a public
+            address, and there are two. <strong>Cloudflare</strong> is the one that needs nothing at all — no account,
+            no token — and hands out a fresh address each time it starts, which costs nothing here because the browser
+            reads this desktop’s current address out of your Firebase account before it dials. <strong>ngrok</strong>
+            keeps the same address, but its free plan allows one tunnel per account, so choosing it means Forge Mobile
+            has to stay switched off.
           </>
         }
       >
@@ -642,45 +670,62 @@ export function WebSection(): ReactNode {
         {tunnel.detail && <p className={tunnel.state === 'error' ? 'web-error' : 'scard__hint'}>{tunnel.detail}</p>}
 
         <Row
-          label="ngrok authtoken"
-          hint={
-            authtoken
-              ? `Saved (${maskKey(authtoken)}) — paste a new one to replace it.`
-              : 'From the ngrok dashboard, under Your Authtoken.'
-          }
+          label="How this desktop is reached"
+          hint={TUNNELS.find((t) => t.id === tunnelMode)?.hint ?? ''}
         >
-          {/* Write-only. The saved token is shown masked in the hint above and
-              never rendered back in full, revealable or otherwise — a settings
-              page is exactly where a screen-share lingers. */}
-          <TextField
-            value=""
-            password
-            mono
-            placeholder={authtoken ? 'paste to replace' : 'paste your authtoken'}
-            onCommit={saveAuthtoken}
-          />
+          <div className="seg" role="group" aria-label="Tunnel">
+            {TUNNELS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="seg__btn"
+                data-on={tunnelMode === t.id ? 'true' : undefined}
+                aria-pressed={tunnelMode === t.id}
+                title={t.hint}
+                onClick={() => actions.patchSettings({ webTunnel: t.id })}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </Row>
-        <Row
-          label="Forge Web’s ngrok domain"
-          hint="Optional. Blank means ngrok picks an address each start, which the browser finds anyway. A reserved one keeps it steady — it must be a second domain, not the one Forge Mobile uses."
-        >
-          <TextField
-            value={settings.webNgrokDomain}
-            mono
-            placeholder="assigned-name.ngrok-free.dev"
-            onCommit={saveDomain}
-          />
-        </Row>
-        <Row
-          label="Keep the tunnel up"
-          hint="Starts with the link and restarts itself if it drops. Off takes the public address down and retracts what was published."
-        >
-          <Toggle
-            checked={tunnelOn}
-            onChange={(on) => actions.patchSettings({ webTunnel: on ? 'ngrok' : 'off' })}
-            label="Enable the ngrok tunnel"
-          />
-        </Row>
+
+        {/* Only under the choice that reads them. An authtoken box sitting under
+            "Cloudflare" would be asking for a credential nothing would use. */}
+        {tunnelMode === 'ngrok' && (
+          <>
+            <Row
+              label="ngrok authtoken"
+              hint={
+                authtoken
+                  ? `Saved (${maskKey(authtoken)}) — paste a new one to replace it.`
+                  : 'From the ngrok dashboard, under Your Authtoken.'
+              }
+            >
+              {/* Write-only. The saved token is shown masked in the hint above and
+                  never rendered back in full, revealable or otherwise — a settings
+                  page is exactly where a screen-share lingers. */}
+              <TextField
+                value=""
+                password
+                mono
+                placeholder={authtoken ? 'paste to replace' : 'paste your authtoken'}
+                onCommit={saveAuthtoken}
+              />
+            </Row>
+            <Row
+              label="Forge Web’s ngrok domain"
+              hint="Optional. Blank means ngrok picks an address each start, which the browser finds anyway. A reserved one keeps it steady — it must be a second domain, not the one Forge Mobile uses."
+            >
+              <TextField
+                value={settings.webNgrokDomain}
+                mono
+                placeholder="assigned-name.ngrok-free.dev"
+                onCommit={saveDomain}
+              />
+            </Row>
+          </>
+        )}
 
         {tunnel.host && (
           <Row
@@ -688,7 +733,9 @@ export function WebSection(): ReactNode {
             hint={
               tunnel.state === 'configured'
                 ? 'From FORGE_WEB_HOSTNAME.'
-                : 'What the browser is told to dial. It changes only if you change the domain.'
+                : tunnelMode === 'ngrok'
+                  ? 'What the browser is told to dial. It changes only if you change the domain.'
+                  : 'What the browser is told to dial. Cloudflare hands out a new one each start, and the browser is told the new one before it dials.'
             }
           >
             <div className="web-url">

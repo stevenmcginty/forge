@@ -22,7 +22,7 @@ browser (Firebase Hosting, one stable URL)
    │                                                  │ tunnel hostname + presence
    │  3. connect straight to the PC                   │
    ▼                                                  │
-ngrok tunnel ──────────▶ forge-server (on Steve's PC) ┘
+tunnel (cloudflared) ──▶ forge-server (on Steve's PC) ┘
                               │
                               ├── PTY sessions  (the real terminals, mirrored)
                               ├── projects / workspace / store
@@ -348,23 +348,15 @@ and none of them blocks the others.
    firebase deploy --only database --project <your-project-id>
    ```
 
-3. **An ngrok account.** The decision this once left open has been taken:
-   Forge Web supervises an **ngrok** agent of its own, through the same
-   `electron/mobile-tunnel.ts` Forge Mobile already drives. That was the
-   cheaper of the two honest options — the file already handles download,
-   spawn, restart and permanent-refusal detection — and the alternative, a
-   second `cloudflared` supervisor written from scratch, bought nothing that
-   code did not already do. (The only `cloudflared` in the repository remains
-   `scripts/mobile-tunnel.mjs` and `scripts/mobile-go.mjs`: standalone dev
-   scripts that spawn a quick tunnel and exit. Neither is importable and neither
-   is supervised.)
+3. **Nothing at all, for the tunnel.** This item used to be "an ngrok account
+   with a second domain", and it is recorded here rather than deleted because
+   the reasoning that put it there was sound and its premise was wrong.
 
-   What Steve has to do is one-time and on the ngrok dashboard: paste the
-   **authtoken** into Settings › Forge Web. That is the only thing this door
-   requires — `ngrokArgs` no longer templates a URL that made a reserved domain
-   compulsory, and `startTunnel` no longer refuses to start without one. A
-   **domain is optional** in the sense that Forge no longer refuses to start
-   without one — but on a free ngrok account it does not get you a second link.
+   Forge Web first supervised an **ngrok** agent of its own, through the same
+   `electron/mobile-tunnel.ts` Forge Mobile already drives — the cheaper of the
+   two honest options, since that file already handled download, spawn, restart
+   and permanent-refusal detection. What it never checked is the limit that
+   matters: **ngrok's free plan allows one online endpoint per account.**
 
    This was observed, not reasoned. With Forge Web's domain left blank and
    Forge Mobile's tunnel already up, ngrok refused:
@@ -374,21 +366,31 @@ and none of them blocks the others.
    … ERR_NGROK_334
    ```
 
-   That endpoint is Forge Mobile's own reserved domain. A free account is
-   granted **one** static domain, and leaving `--url` off does not produce a
-   throwaway address — it uses that same account default. So the two links
-   collide over one domain, and blank does not help.
+   The endpoint it names is Forge Mobile's own reserved domain. Leaving `--url`
+   off does not mint a throwaway address, as was assumed when the requirement
+   was relaxed — it uses the account's single default endpoint, which is the one
+   already in use. So the two links collide, blank does not help, and the only
+   way to read a browser link was to switch the phone link off. Two links that
+   cannot both be up is one link.
 
-   The consequence: on free ngrok you can have Forge Mobile *or* Forge Web
-   reachable, not both. **Use cloudflared for Forge Web instead** — it needs no
-   account, no token and no domain, and nothing stops it running alongside
-   ngrok. A reserved ngrok domain, on a paid plan, remains the right choice if
-   you specifically want an address that never changes; a changing one costs
-   nothing here, because the browser reads the desktop's current address out of
-   the rendezvous record before it dials, which is the entire reason that
-   record exists.
+   So `webTunnel` now defaults to **`cloudflared`**, a quick tunnel supervised by
+   `electron/cloudflare-tunnel.ts`: no account, no domain, no authtoken, no
+   per-account agent limit, and therefore nothing for Steve to do beyond
+   switching Forge Web on. The price is a different `*.trycloudflare.com`
+   hostname on every start, and that price was already paid — the rendezvous
+   record exists precisely so the browser reads whatever address this desktop
+   landed on before it dials. `scripts/cf-tunnel-check.mjs` proves the
+   supervisor, and `npm run web:check` kills a live tunnel and asserts the
+   *new* address reaches the record.
 
-   `FORGE_WEB_HOSTNAME` still works and now means one thing only: a tunnel run
+   **ngrok is still there**, as `webTunnel: 'ngrok'`, for anybody who wants one
+   steady address and is content to stop the phone link to get it. That path is
+   unchanged: paste the authtoken into Settings › Forge Web, and optionally a
+   reserved domain (Forge Mobile's cannot be reused — one domain forwards to one
+   port). Forge Mobile itself is untouched and stays on ngrok, because a phone
+   that scanned a QR keeps the address it was given.
+
+   `FORGE_WEB_HOSTNAME` still works and still means one thing only: a tunnel run
    by hand, outside Forge. On that path the status reads `configured` rather
    than `live`, because Forge never started that process and cannot report on
    it.
@@ -482,13 +484,15 @@ and a signed-out Forge Web publishes nothing while saying why in
 Companion signed in as a *different* account, which is exactly the arrangement
 that used to fail in silence.
 
-**No tunnel was supervised in-app.** Now one is: Forge Web runs its own ngrok
-agent on its own port and domain (see item 3 above), so `tunnel.state` reports
-`starting`, `live` and `error` as things Forge watched happen, and a tunnel that
-dies retracts the published hostname instead of leaving browsers dialling a dead
-address. `FORGE_WEB_HOSTNAME` survives as an explicitly-documented override for
-a tunnel run by hand, and says `configured` rather than `live` because on that
-path Forge cannot see the process.
+**No tunnel was supervised in-app.** Now one is: Forge Web runs its own agent on
+its own port — a cloudflared quick tunnel by default, or ngrok for a steady
+address (see item 3 above) — so `tunnel.state` reports `starting`, `live` and
+`error` as things Forge watched happen, a tunnel that dies retracts the published
+hostname instead of leaving browsers dialling a dead address, and one that comes
+back on a different hostname republishes rather than waiting for a heartbeat.
+`FORGE_WEB_HOSTNAME` survives as an explicitly-documented override for a tunnel
+run by hand, and says `configured` rather than `live` because on that path Forge
+cannot see the process.
 
 ## What is deliberately not here
 
