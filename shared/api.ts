@@ -481,9 +481,10 @@ export interface ForgeApi {
     /** Answer an `onCommand`. `error` empty means it worked. */
     commandResult(requestId: string, error?: string): void
     /**
-     * Which panes a phone has open, and at what size. While a pane is on this
-     * list the renderer must leave its geometry alone and follow the phone's —
-     * one PTY cannot be two widths, and the phone is the one being read.
+     * Which panes a phone has open. Ids and no geometry: one PTY cannot be two
+     * widths, and while this desktop has a window open the desk is the one that
+     * picks — so all the renderer does with this list is label the panes on it.
+     * See `setPhoneWatched` in src/lib/terminals.ts.
      */
     onWatched(cb: (e: MobileWatchEvent) => void): () => void
     /**
@@ -597,14 +598,6 @@ export interface ForgeApi {
      * `WebStatus.session.detail`.
      */
     signOut(): Promise<WebStatus>
-    /** Revoke a browser. Its live socket is closed immediately, not next time. */
-    revoke(deviceId: string): Promise<WebStatus>
-    /**
-     * Forget a browser outright, tombstone and all. The only way back for a
-     * revoked one: forgotten, it is a stranger again, and a stranger needs a
-     * human to press Allow.
-     */
-    forget(deviceId: string): Promise<WebStatus>
     /**
      * Set the unlock PIN every browser has to present — 4 to 12 digits. The
      * digits are hashed in main and only the hash is stored; there is no call
@@ -637,14 +630,12 @@ export interface ForgeApi {
     /** Answer an `onCommand` or an `onProjectAdd`. `error` empty means it worked. */
     commandResult(requestId: string, error?: string): void
     /**
-     * Which panes a browser has open, and at what size. While a pane is on this
-     * list the renderer must leave its geometry alone and follow the browser's —
-     * one PTY cannot be two widths, and the browser is one of the two screens
-     * it is being read on.
+     * Which panes a browser has open, under exactly the rule `mobile.onWatched`
+     * above states: ids, no geometry, a label and nothing more.
      *
-     * The phone's equivalent (`mobile.onWatched`) is a separate list on purpose:
-     * both can be reading the same pane, and the renderer draws it at whichever
-     * of the two sizes is smaller so it fits on both.
+     * A separate list from the phone's on purpose. Both can be reading the same
+     * pane, and the pane header says which — see `setBrowserWatched` in
+     * src/lib/terminals.ts.
      */
     onWatched(cb: (e: WebWatchEvent) => void): () => void
 

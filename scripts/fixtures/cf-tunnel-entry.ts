@@ -17,7 +17,15 @@ export {
   BACKOFF_CAP_MS,
   CLOUDFLARED_EXE_URL,
   HEALTHY_RESET_MS,
-  QUICK_TUNNEL_URL
+  QUICK_TUNNEL_URL,
+  EDGE_FAILURE_LIMIT,
+  EDGE_FAILURE_LINE,
+  EDGE_RECOVERED_LINE,
+  KILL_ESCALATE_MS,
+  PROBE_INTERVAL_MS,
+  PROBE_STRIKES,
+  PROBE_TIMEOUT_MS,
+  CONTROL_PROBE_URL
 } from '../../electron/cloudflare-tunnel'
 /**
  * The hostname normaliser Forge Web actually publishes through. A quick tunnel

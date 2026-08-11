@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { normaliseNgrokDomain } from '@shared/mobile'
 import { PIN_MAX_DIGITS, PIN_MIN_DIGITS } from '@shared/web'
-import type { WebDeviceRecord, WebStatus, WebTunnelMode } from '@shared/types'
+import type { WebStatus, WebTunnelMode } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTone } from './parts'
 
@@ -104,7 +104,7 @@ function refusedSite(origin: string): string {
   return match?.[1] ?? ''
 }
 
-/** "2 minutes ago" is more use in a device list than a timestamp nobody reads. */
+/** "2 minutes ago" is more use on a status line than a timestamp nobody reads. */
 function ago(at: number): string {
   if (!at) return 'never'
   const seconds = Math.max(0, Math.round((Date.now() - at) / 1000))
@@ -140,7 +140,7 @@ export function WebSection(): ReactNode {
   const [pinError, setPinError] = useState('')
 
   // Live rather than polled: main pushes a whole `WebStatus` on every change it
-  // makes — a socket opening, a tunnel dying, an approval landing — and this
+  // makes — a socket opening, a tunnel dying, a sign-in landing — and this
   // page is often left open while exactly those things happen.
   useEffect(() => {
     void window.forge.web.status().then(setStatus)
@@ -149,7 +149,7 @@ export function WebSection(): ReactNode {
 
   /*
    * `webEnabled` is written by main (`web:start` / `web:stop` persist it), but
-   * unlike `webUid` and the device list it is *not* in main.ts's
+   * unlike `webUid` it is *not* in main.ts's
    * MAIN_OWNED_SETTINGS, so the renderer's debounced whole-object save would
    * happily post its pre-toggle copy straight back. The symptom would be a link
    * that switches itself off 200ms after an unrelated settings change — a
@@ -175,14 +175,6 @@ export function WebSection(): ReactNode {
   /** Take the screen back. See `IPC.webMirrorEnd` — the watch ends at the socket. */
   const stopMirror = useCallback(async () => {
     setStatus(await window.forge.web.stopMirror())
-  }, [])
-
-  const revoke = useCallback(async (device: WebDeviceRecord) => {
-    setStatus(await window.forge.web.revoke(device.id))
-  }, [])
-
-  const forget = useCallback(async (device: WebDeviceRecord) => {
-    setStatus(await window.forge.web.forget(device.id))
   }, [])
 
   const copyUrl = useCallback(async (url: string) => {
@@ -801,6 +793,15 @@ export function WebSection(): ReactNode {
             "Cloudflare" would be asking for a credential nothing would use. */}
         {tunnelMode === 'ngrok' && (
           <>
+            <p className="scard__hint">First time with ngrok? Quick setup:</p>
+            <ol className="scard__steps">
+              <li>Create a free account at <span className="mono">ngrok.com</span>.</li>
+              <li>
+                Copy your authtoken from <span className="mono">dashboard.ngrok.com/get-started/your-authtoken</span>{' '}
+                and paste it below.
+              </li>
+            </ol>
+
             <Row
               label="ngrok authtoken"
               hint={
@@ -879,51 +880,20 @@ export function WebSection(): ReactNode {
         </p>
       </Card>
 
-      <Card
-        title="Approved browsers"
-        hint={
-          status.devices.length > 0
-            ? 'Two different endings, and the difference matters. Revoke means not any more: the socket is dropped now, and that browser is turned away by name if it comes back — in either mode, with no prompt and nothing to press by mistake. Forget means start over: the row goes, and the browser is a stranger again, which is only a fresh start rather than a lock-out.'
-            : undefined
-        }
-      >
-        {status.devices.length === 0 ? (
-          <p className="scard__hint">No browsers approved.</p>
-        ) : (
-          <ul className="web-devices">
-            {status.devices.map((device) => (
-              <li key={device.id} className="web-device" data-revoked={device.revokedAt ? 'true' : undefined}>
-                <div className="web-device__text">
-                  {/* The name is whatever the browser called itself. Display
-                      text and nothing more — never obeyed, never parsed. */}
-                  <span className="web-device__name">{device.name}</span>
-                  <span className="web-device__meta">
-                    {device.revokedAt
-                      ? `Revoked ${ago(device.revokedAt)} · approved ${ago(device.createdAt)}`
-                      : `Approved ${ago(device.createdAt)} · last seen ${ago(device.lastSeenAt)}`}
-                  </span>
-                </div>
-                <div className="web-device__actions">
-                  {device.revokedAt ? (
-                    <span className="web-device__badge">Revoked</span>
-                  ) : (
-                    <button type="button" className="sbtn sbtn--danger" onClick={() => void revoke(device)}>
-                      Revoke
-                    </button>
-                  )}
-                  <button type="button" className="sbtn" onClick={() => void forget(device)}>
-                    Forget
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        {status.connected > 0 && (
-          <p className="scard__hint">
-            {status.connected} {status.connected === 1 ? 'browser is' : 'browsers are'} connected right now.
-          </p>
-        )}
+      {/* Live presence, and deliberately nothing more. There used to be a list
+          of approved browsers here with a Revoke button on every row, and it
+          was removed because it was never a gate: any browser holding a
+          verified token for this account and the unlock PIN was admitted
+          whether or not it was on the list, so the rows only implied a lock
+          that was not there. What is left is the fact a person actually cannot
+          get any other way — whether anybody is on this desk right now. The
+          ways to end that are the PIN, and signing Forge Web out. */}
+      <Card title="Connected browsers">
+        <p className="scard__hint">
+          {status.connected === 0
+            ? 'No browser is connected right now.'
+            : `${status.connected} ${status.connected === 1 ? 'browser is' : 'browsers are'} connected right now.`}
+        </p>
       </Card>
     </Section>
   )

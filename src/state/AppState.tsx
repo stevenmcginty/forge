@@ -279,7 +279,6 @@ const FALLBACK_SETTINGS: Settings = {
   webProjectId: '',
   webSiteId: '',
   webUid: '',
-  webDevices: [],
   // The unlock PIN, matching defaultSettings() in electron/store.ts. Blank is
   // the one fallback here that is *not* the locked-down guess, and it matches
   // the store on purpose: a panel that drew "a PIN is set" for a second and
@@ -1742,28 +1741,23 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
    */
 
   /**
-   * Which panes a phone is reading, so the terminal host can hand those panes'
-   * geometry over to it. Kept next to the op handler because it is the same
-   * conversation — the phone's half of a pane the desktop also has open — and
-   * separate from it because it depends on nothing in the reducer.
+   * Which panes a phone is reading, so the terminal host can label them. Ids
+   * and no geometry: the desk keeps its own grid while it has a window and the
+   * phone draws that grid scaled to its screen — see `setPhoneWatched`. Kept
+   * next to the op handler because it is the same conversation — the phone's
+   * half of a pane the desktop also has open — and separate from it because it
+   * depends on nothing in the reducer.
    */
   useEffect(() => {
-    return window.forge.mobile.onWatched(({ panes }) => {
-      terminalHost.setPhoneWatched(Array.isArray(panes) ? panes : [])
+    return window.forge.mobile.onWatched(({ ids }) => {
+      terminalHost.setPhoneWatched(Array.isArray(ids) ? ids : [])
     })
   }, [])
 
-  /**
-   * And the same for a browser on Forge Web, which is the other half of the
-   * same sentence: one PTY, and now potentially three screens on it. The two
-   * lists are kept apart all the way into the terminal host — see
-   * `setBrowserWatched` — because a pane both are reading has to be drawn at
-   * whichever of the two is smaller, and only something holding both can work
-   * that out.
-   */
+  /** And the same message for a browser on Forge Web — see `setBrowserWatched`. */
   useEffect(() => {
-    return window.forge.web.onWatched(({ panes }) => {
-      terminalHost.setBrowserWatched(Array.isArray(panes) ? panes : [])
+    return window.forge.web.onWatched(({ ids }) => {
+      terminalHost.setBrowserWatched(Array.isArray(ids) ? ids : [])
     })
   }, [])
 

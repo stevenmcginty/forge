@@ -51,6 +51,16 @@ export interface ManagerOptions {
   maxSessions?: number
   onData: (id: string, data: string) => void
   onExit: (id: string, exitCode: number, signal?: number) => void
+  /**
+   * A session's grid actually changed — after clamping, and never for a resize
+   * that asked for the size it already had.
+   *
+   * Optional, because most consumers of this class only care about bytes. The
+   * one that needs it is Forge Web: a browser is a second viewer of a grid it
+   * does not own, so it has to be told when the desk moves one. See the
+   * `onResize` sink in electron/web-host.ts.
+   */
+  onResize?: (id: string, cols: number, rows: number) => void
 }
 
 export interface SessionInfo {
@@ -90,6 +100,7 @@ export class PtySessionManager {
   private readonly maxSessions: number
   private readonly onData: ManagerOptions['onData']
   private readonly onExit: ManagerOptions['onExit']
+  private readonly onResize: ManagerOptions['onResize']
 
   constructor(options: ManagerOptions) {
     this.shell = options.shell || 'pwsh.exe'
@@ -98,6 +109,7 @@ export class PtySessionManager {
     this.maxSessions = options.maxSessions ?? 16
     this.onData = options.onData
     this.onExit = options.onExit
+    this.onResize = options.onResize
   }
 
   get count(): number {
@@ -224,6 +236,11 @@ export class PtySessionManager {
       s.proc.resize(c, r)
       s.info.cols = c
       s.info.rows = r
+      // After the ConPTY and after the record, so what a listener reads back
+      // off `list()` is the size that actually took. Announced here rather than
+      // at the call sites because there are four of them — the renderer, a
+      // re-adoption, a phone and a browser — and a fifth would forget.
+      this.onResize?.(id, c, r)
       return true
     } catch (err) {
       console.error(`[pty] resize of ${id} failed:`, describe(err))

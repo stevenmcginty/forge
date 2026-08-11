@@ -14,13 +14,20 @@ import { AgentChooser } from './AgentChooser'
  *
  * ## Geometry, which is the part that is easy to get wrong
  *
- * A PTY has one geometry and this link gives it two viewers. `WebAttachFrame`'s
- * optional `cols`/`rows` mean "and this is the size I am reading it at", and the
- * desktop stands down and follows the browser for as long as the browser is
- * reading — so the *first* thing this component does after mounting a terminal
- * is fit it and attach with the result. Attaching first and resizing afterwards
- * would paint the replay buffer at the wrong width and then reflow it, which is
- * the visible version of the same bug mobile/src/lib/term.ts documents.
+ * A PTY has one geometry and this link gives it two viewers. The desktop owns
+ * it whenever it has a window open, because panes re-flowing on the machine
+ * somebody is sitting at is not a price a tab in another town gets to charge —
+ * see `deskOpen` in electron/web/server.ts. So this component does both halves
+ * of that arrangement:
+ *
+ *  - It still fits its container and still attaches with the result. That is
+ *    the *wish*, and it is granted whole the moment the desk's window closes,
+ *    which is the case Forge Web exists for. It is sent first for the reason it
+ *    always was: attaching first and resizing afterwards paints the replay
+ *    buffer at the wrong width and then reflows it.
+ *  - It follows the session's real `cols`/`rows` out of the picture — the
+ *    desktop's answer, pushed on every change — and hands them to `follow`,
+ *    which draws that grid at a font small enough to fit this box.
  *
  * The fit can legitimately fail on the first pass, because the effect runs
  * before flex has settled and a container under 8px must not be measured. That
@@ -73,7 +80,9 @@ export function PaneView({
   /** Is the socket answering this second? Only input and the badge read this. */
   const live = !cached && state.connection.state === 'live'
   const asking = state.asking.has(leaf.id)
-  const alive = (state.picture?.sessions ?? []).some((s) => s.id === leaf.id)
+  /** The desktop's own row for this pane, which is where its real grid is. */
+  const session = (state.picture?.sessions ?? []).find((s) => s.id === leaf.id)
+  const alive = session !== undefined
 
   /**
    * Whether this pane has a live shell, readable from inside the mount effect
@@ -193,6 +202,28 @@ export function PaneView({
     // above; without them a terminal rebuilt while the link was down would come
     // up taking keys for a socket that is not there.
   }, [live, cached, leaf.id])
+
+  /* --------------------------------------------- and the desktop's own grid */
+
+  /**
+   * Draw what the pane actually is, at whatever type size that takes.
+   *
+   * The two numbers rather than the session object, because this has to run on
+   * a change of *geometry* and the picture hands out a fresh array of sessions
+   * for every push there is — a git status, a pane opening, somebody clicking a
+   * project. `follow` is a no-op when the grid it is given is the one it is
+   * already drawing, but an effect that ran on every push would still be an
+   * effect that ran on every push.
+   *
+   * Declared after both mount effects so it runs after them in the same commit:
+   * a terminal is built and fitted, and then — before anything is painted — put
+   * to the desktop's grid, rather than showing this browser's fit for a frame.
+   */
+  const cols = session?.cols ?? 0
+  const rows = session?.rows ?? 0
+  useLayoutEffect(() => {
+    hostRef.current?.follow(cols > 0 && rows > 0 ? { cols, rows } : null)
+  }, [cols, rows, cached, leaf.id])
 
   /**
    * A pane whose shell started *after* this component mounted has to attach a
@@ -314,7 +345,27 @@ export function PaneView({
         </div>
       </header>
 
-      <div className="pane__terminal" ref={holderRef} onPointerDown={() => hostRef.current?.focus()} />
+      {/*
+        A tap takes the caret; a swipe does not.
+
+        Pressing focuses on a mouse, exactly as it did — but a finger's
+        `pointerdown` arrives at the *start* of every gesture, including the drag
+        that scrolls the scrollback (`enableTouchScroll` in lib/term.ts), so
+        keeping it for touch would pop Android's keyboard on every swipe and
+        resize the pane out from under the gesture that asked for it. `click` is
+        the event a touch drag does not produce — the drag calls preventDefault,
+        and a moved finger raises no click either way — so it is the one that
+        means "tapped". The phone client focuses from `click` for the same
+        reason.
+      */}
+      <div
+        className="pane__terminal"
+        ref={holderRef}
+        onPointerDown={(event) => {
+          if (event.pointerType !== 'touch') hostRef.current?.focus()
+        }}
+        onClick={() => hostRef.current?.focus()}
+      />
 
       <AgentChooser
         anchor={splitRef.current}

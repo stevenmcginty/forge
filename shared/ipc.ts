@@ -193,13 +193,14 @@ export const IPC = {
   /** The renderer's answer to a mobileCommand. */
   mobileCommandResult: 'mobile:command-result',
   /**
-   * Which panes a phone currently has open, and at what geometry. Main →
-   * renderer, on every change.
+   * Which panes a phone currently has open. Main → renderer, on every change.
    *
-   * A PTY has one size and this link gives it two viewers, so one of them has
-   * to stand down: while a pane is on this list the renderer stops refitting
-   * it and letterboxes its own terminal at the phone's size. See the note
-   * above `watched` in electron/mobile-host.ts.
+   * It used to carry a geometry too, and the renderer used to letterbox those
+   * panes at it. It no longer does: plugging a phone in must not change the
+   * resolution at the desk, so the desk keeps its grid and the phone draws that
+   * grid scaled to its own screen. All the renderer does with this list is
+   * label the panes on it — see the note above `watched` in
+   * electron/mobile-host.ts, and `setPhoneWatched` in src/lib/terminals.ts.
    */
   mobileWatched: 'mobile:watched',
   /**
@@ -301,14 +302,6 @@ export const IPC = {
    */
   webSignOut: 'web:sign-out',
   /**
-   * Revoke a browser. The row stays as a tombstone so a revoked browser is
-   * refused with `revoked` rather than re-prompted as a stranger, and its live
-   * socket is closed immediately — "revoked" must not mean "revoked next time".
-   */
-  webRevoke: 'web:revoke',
-  /** Drop a row entirely, tombstone and all — the only way back for a revoked browser. */
-  webForget: 'web:forget',
-  /**
    * Set the unlock PIN every browser has to present. The digits cross this
    * boundary once, are hashed in main by `electron/web/pin.ts`, and only the
    * hash reaches settings.json — the same rule the ngrok authtoken follows, and
@@ -361,16 +354,13 @@ export const IPC = {
    */
   webCommandResult: 'web:command-result',
   /**
-   * Which panes a browser currently has open, and at what geometry. Main →
-   * renderer, on every change.
+   * Which panes a browser currently has open. Main → renderer, on every change.
    *
-   * The same message `mobileWatched` is, for the same reason and with the same
-   * shape: a PTY has one size and a browser is a second viewer of it, so while
-   * a pane is on this list the renderer stops refitting it and letterboxes its
-   * own terminal at the browser's size. Two channels rather than one because a
-   * phone and a browser can be reading the same pane at once and the renderer
-   * has to take the smaller of the two — see `setBrowserWatched` in
-   * src/lib/terminals.ts, which merges them.
+   * The message `mobileWatched` is, on the other link and for the same reason:
+   * re-flowing the panes in front of somebody because a tab opened in another
+   * town is the app rearranging their work. So this carries ids, the renderer
+   * keeps drawing these panes at its own size, and all it does with the list is
+   * label them — see `setBrowserWatched` in src/lib/terminals.ts.
    */
   webWatched: 'web:watched',
 

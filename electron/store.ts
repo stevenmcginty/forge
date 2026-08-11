@@ -27,7 +27,6 @@ import type {
   ThemeCore,
   VoiceHubMode,
   VoiceHubPlacement,
-  WebDeviceRecord,
   Workspace
 } from '@shared/types'
 import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
@@ -42,6 +41,29 @@ import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
  * `webPort` in shared/types.ts, and `webPort()` in electron/web-host.ts.
  */
 const WEB_PORT = 8421
+
+/**
+ * Steve's own Forge Web deployment — a live Firebase project, not a sample.
+ * Shipping these as the defaults is what makes a fresh install (and an
+ * existing one, once it upgrades) work without anybody pasting four values
+ * out of a console: install Forge, sign in, flip two switches, done. See
+ * "Giving Forge to a friend" in docs/WEB-SETUP.md.
+ *
+ * None of this is a secret. A Firebase web API key does not authorise
+ * anything — it names which project a browser is talking to, the same way a
+ * hostname does, and docs/WEB-SETUP.md says so explicitly. What actually
+ * gates access is the database's security rules, which check the signed-in
+ * uid on every read and write; the API key plays no part in that check.
+ *
+ * Anybody running their own deployment overwrites all four in Settings ›
+ * Forge Web, and from that point on their values are what both the defaults
+ * block below and the normaliser's fallback use — this only reaches an
+ * install that has never had its own values pasted in.
+ */
+export const WEB_DEFAULT_PROJECT_ID = 'forge-sync-aadafc'
+export const WEB_DEFAULT_SITE_ID = 'forge-web-aadafc'
+export const WEB_DEFAULT_API_KEY = 'AIzaSyC2CJR7UZMyNrpXYqIMpwIGUVFp-gZpcWM'
+export const WEB_DEFAULT_DATABASE_URL = 'https://forge-sync-aadafc-default-rtdb.europe-west1.firebasedatabase.app'
 
 /**
  * Dead-simple JSON persistence in %APPDATA%\Forge.
@@ -301,18 +323,24 @@ function defaultSettings(): Settings {
     // The mirror is a picture and nothing else until somebody asks otherwise:
     // what Windows shares is the whole system mix, so this is opt-in.
     mobileMirrorAudio: false,
-    // Forge Web — off, unconfigured, and admitting nobody out of the box. Every
-    // one of these has to be set by hand before a browser can reach a terminal:
-    // the switch, the Firebase project whose tokens count, and the one uid that
-    // counts. See docs/forge-web.md and electron/web/auth.ts.
+    // Forge Web — off until somebody flips the switch, but pointed at Steve's
+    // own Firebase deployment out of the box rather than nowhere: the project
+    // id and site id below are WEB_DEFAULT_PROJECT_ID / WEB_DEFAULT_SITE_ID
+    // (see the comment above WEB_PORT for why that is safe to ship), so a
+    // fresh install only needs the switch and a sign-in, not four fields
+    // copied out of a console. The one thing still nobody's by default is the
+    // uid — that names one signed-in person, and only signing in sets it. See
+    // docs/forge-web.md and electron/web/auth.ts.
     webEnabled: false,
-    webProjectId: '',
-    // Blank, meaning "the site is named after the project" — Firebase's own
-    // default for a project that has never had a second site added. See
-    // `webSiteId` in shared/types.ts and `webAllowedOrigins`.
-    webSiteId: '',
+    webProjectId: WEB_DEFAULT_PROJECT_ID,
+    // Steve's site id by default — see the comment above WEB_PORT. Someone
+    // running their own deployment pastes their own site id here; blank is no
+    // longer a value this field settles on (see the normaliser below), since
+    // "the site is named after the project" was only ever a fallback for
+    // whoever had not set one, and now everyone has. See `webSiteId` in
+    // shared/types.ts and `webAllowedOrigins`.
+    webSiteId: WEB_DEFAULT_SITE_ID,
     webUid: '',
-    webDevices: [],
     // No unlock PIN until somebody sets one, and this is the one default in the
     // block that is blank in order to let somebody *in*: with no PIN the
     // account is the credential and a browser signed in as `webUid` needs
@@ -327,12 +355,20 @@ function defaultSettings(): Settings {
     webMirrorEnabled: false,
     webControlEnabled: false,
     webMirrorAudio: false,
-    // Forge Web's own Firebase session: unconfigured and signed out. Not a read
-    // of the companion* fields above — see the block comment on `webApiKey` in
-    // shared/types.ts for why the two features share a provider and nothing
-    // else. Signed out means no rendezvous record is published at all.
-    webApiKey: '',
-    webDatabaseURL: '',
+    // Forge Web's own Firebase session: pointed at Steve's deployment, and
+    // signed out. Not a read of the companion* fields above — see the block
+    // comment on `webApiKey` in shared/types.ts for why the two features
+    // share a provider and nothing else. Signing in is still a step nobody
+    // gets for free: an api key and a database URL only say *which* project,
+    // never *who* — that is `webEmail` / `webRefreshToken` below, both blank
+    // until somebody actually signs in, at which point no rendezvous record
+    // is published until they do.
+    webApiKey: WEB_DEFAULT_API_KEY,
+    webDatabaseURL: WEB_DEFAULT_DATABASE_URL,
+    // Blank, and stays blank: an empty auth/token base means Google's real
+    // endpoints, which is what every deployment — Steve's included — actually
+    // talks to. These exist to let a test point Forge at a fake Identity
+    // Toolkit, not to be filled in by a real install.
     webAuthBase: '',
     webTokenBase: '',
     webEmail: '',
@@ -734,19 +770,24 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     webEnabled: s.webEnabled === true,
     // A Firebase project id is `[a-z0-9-]`, and it is checked rather than
     // trimmed because it is concatenated into the `iss` a token is compared
-    // against. Junk degrading to '' is a desktop that admits nobody, which is
-    // the correct failure; junk degrading to a string is a comparison that
-    // quietly passes something.
-    webProjectId: /^[a-z0-9][a-z0-9-]{2,62}$/.test(str(s.webProjectId)) ? str(s.webProjectId) : '',
+    // against. Junk used to degrade to '', a desktop that admits nobody; now
+    // it degrades to WEB_DEFAULT_PROJECT_ID, Steve's own deployment, which is
+    // what upgrades an existing settings.json (its stored value is '' today)
+    // to the shipped defaults without anybody touching Settings. A comparison
+    // that quietly passed something would be worse than either — the fallback
+    // is always a project that exists, never a string that matches nothing.
+    webProjectId: /^[a-z0-9][a-z0-9-]{2,62}$/.test(str(s.webProjectId))
+      ? str(s.webProjectId)
+      : WEB_DEFAULT_PROJECT_ID,
     // The same shape as the project id, and shaped rather than trimmed for the
-    // same reason: it is concatenated into an origin that browsers are compared
-    // against, so junk must degrade to '' — which falls back to the project id —
-    // rather than to a string that matches nothing and explains nothing.
-    webSiteId: /^[a-z0-9][a-z0-9-]{2,62}$/.test(str(s.webSiteId)) ? str(s.webSiteId) : '',
+    // same reason: it is concatenated into an origin that browsers are
+    // compared against, so junk must degrade to a value that names a real
+    // site rather than a string that matches nothing. That value is
+    // WEB_DEFAULT_SITE_ID for the same upgrade reason as `webProjectId` above.
+    webSiteId: /^[a-z0-9][a-z0-9-]{2,62}$/.test(str(s.webSiteId)) ? str(s.webSiteId) : WEB_DEFAULT_SITE_ID,
     // Firebase uids are 28 URL-safe characters today, but that is Google's to
     // change, so this is bounded rather than shaped. '' admits nobody.
     webUid: str(s.webUid).slice(0, 128),
-    webDevices: webDevices(s.webDevices),
     webPin: webPin(s.webPin),
     // The screen, the mouse and the sound, on the strictest rule in this file
     // and for the reason `mobileControlEnabled` earns it above: the only thing
@@ -754,19 +795,28 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // the switch in Settings. An absent key, an older settings.json and a
     // hand-typed "true" all mean no. Note that `webControlEnabled === true` is
     // still not enough on its own — `canControl` in electron/web-host.ts
-    // refuses control outright unless approval-at-desk or a second factor is on
-    // as well, because a browser holding the mouse could otherwise switch every
-    // remaining lock off itself.
+    // refuses control outright unless an unlock PIN is set as well, because a
+    // browser holding the mouse could otherwise switch every remaining lock off
+    // itself.
     webMirrorEnabled: s.webMirrorEnabled === true,
     webControlEnabled: s.webControlEnabled === true,
     webMirrorAudio: s.webMirrorAudio === true,
     // Forge Web's own Firebase session. Trimmed exactly like the companion*
-    // fields above and for the same reason: every one of these is pasted by
-    // hand out of the Firebase console, and a trailing space in a URL is a
-    // mystery bug. The refresh token is the only credential here; a password
-    // never reaches this file, and neither does an ID token.
-    webApiKey: str(s.webApiKey),
-    webDatabaseURL: str(s.webDatabaseURL).replace(/\/+$/, ''),
+    // fields above and for the same reason: every one of these, when
+    // somebody chooses to paste their own, is pasted by hand out of the
+    // Firebase console, and a trailing space in a URL is a mystery bug. The
+    // refresh token is the only credential here; a password never reaches
+    // this file, and neither does an ID token.
+    //
+    // Empty falls back to the shipped deployment (WEB_DEFAULT_API_KEY /
+    // WEB_DEFAULT_DATABASE_URL) rather than to '': the api key names a
+    // project and authorises nothing on its own — see the comment above
+    // WEB_PORT — so there is no safety lost in a settings.json that has never
+    // set its own falling back to Steve's, and it is exactly this fallback
+    // that upgrades an existing install (stored value '' today) the same way
+    // `webProjectId` above does.
+    webApiKey: str(s.webApiKey) || WEB_DEFAULT_API_KEY,
+    webDatabaseURL: str(s.webDatabaseURL).replace(/\/+$/, '') || WEB_DEFAULT_DATABASE_URL,
     webAuthBase: str(s.webAuthBase).replace(/\/+$/, ''),
     webTokenBase: str(s.webTokenBase).replace(/\/+$/, ''),
     webEmail: str(s.webEmail),
@@ -852,50 +902,6 @@ function mobileDevices(raw: unknown): MobileDeviceRecord[] {
     }))
     .filter((d) => d.id && /^[0-9a-f]{64}$/.test(d.tokenHash))
     .slice(0, 20)
-}
-
-/**
- * Approved browsers, made safe off disk.
- *
- * The counterpart to `mobileDevices` above, and shorter for the reason
- * `WebDeviceRecord` gives: there is no token hash here to be strict about,
- * because Forge Web mints no token. What is left is an id — which is only ever
- * compared, never trusted — a display name, and three timestamps. A row with no
- * id is dropped, since an approval that names nothing can never match a browser.
- *
- * `revokedAt` survives normalisation deliberately: it is the difference between
- * a browser that is refused with `revoked` and one that gets a fresh prompt, so
- * losing it here would turn every revocation back into a knock at the door.
- *
- * The cap is applied to the *live* rows only, and that is not tidiness. A
- * browser with no row is admitted on its account and its PIN rather than turned
- * away, so a tombstone that fell off
- * the end of a twenty-row list would be an un-revocation performed by a
- * `slice`. Keeping every tombstone and dropping a live row instead trades the
- * harmless failure (a browser is recorded afresh next time) for the dangerous
- * one. The list order is untouched either way: the panel draws these in the
- * order they are in, and a list that reordered itself on every read would be a
- * list nobody could find anything in.
- */
-function webDevices(raw: unknown): WebDeviceRecord[] {
-  if (!Array.isArray(raw)) return []
-  const rows = raw
-    .map((d) => (d && typeof d === 'object' ? (d as Record<string, unknown>) : {}))
-    .map((d) => ({
-      id: str(d.id).slice(0, 128),
-      name: str(d.name).slice(0, 64) || 'Browser',
-      createdAt: Number(d.createdAt) || 0,
-      lastSeenAt: Number(d.lastSeenAt) || 0,
-      revokedAt: Number(d.revokedAt) || 0
-    }))
-    .filter((d) => d.id)
-
-  const keep = new Set(rows.filter((d) => d.revokedAt).map((d) => d.id))
-  for (const row of rows) {
-    if (keep.size >= 20) break
-    keep.add(row.id)
-  }
-  return rows.filter((d) => keep.has(d.id))
 }
 
 /**

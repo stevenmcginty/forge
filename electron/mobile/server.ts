@@ -72,6 +72,26 @@ export interface MobileServerHost {
   write: (id: string, data: string) => boolean
   resize: (id: string, cols: number, rows: number) => boolean
 
+  /**
+   * Does this desktop have a window open right now?
+   *
+   * The one question the geometry policy turns on. A PTY has one grid and this
+   * link gives it two viewers, and the answer used to be the phone's — the
+   * phone wins, the desk letterboxes itself. Steve rejected that: whichever
+   * device he plugs in, the resolution at the desk must not move, and watching
+   * every pane in front of him re-flow because a phone came out of a pocket is
+   * exactly that happening. So while there is a window, the desk owns the grid
+   * and a phone's `cols`/`rows` are *dropped* here rather than obeyed — see the
+   * `resize` case. With no window there is nothing to disturb and the phone's
+   * wish is granted exactly as it always was.
+   *
+   * Optional, and a host that omits it is treated as having no window: this
+   * file must stay Electron-free (scripts/mobile-smoke.mjs drives it with a
+   * fake host and a real PTY), and "head-less, so the phone is the only viewer"
+   * is the honest reading of a host that cannot answer.
+   */
+  deskOpen?: () => boolean
+
   /** The opening picture: whatever the phone needs to draw a project list. */
   snapshot: () => Pick<import('@shared/mobile').HelloOkFrame, 'projects' | 'profiles' | 'workspaces'>
 
@@ -91,13 +111,9 @@ export interface MobileServerHost {
   /**
    * Which sessions a phone currently has open, whenever that set changes.
    *
-   * A PTY has exactly one geometry and this link gives it two viewers. Without
-   * this, both fitted it to their own box and the last one to move won: the
-   * desktop pane refits on any layout change, so a phone reading a pane on a
-   * train would have the width yanked back to the desktop's mid-sentence, and
-   * every line after that wrapped for a screen three times wider than the one
-   * showing it. Naming the watched sessions lets the desktop stand down and
-   * adopt the phone's size for as long as the phone is the one reading.
+   * Nothing on the desktop changes shape because of this — `deskOpen` above is
+   * where that was decided — so what it buys is a *label*: a pane on the desk
+   * that says a phone is reading it, which is worth knowing and cheap to say.
    *
    * Fired on subscribe, unsubscribe, exit and hangup, with the full set each
    * time — a diff the receiver has to reassemble is a diff that can be missed.
@@ -551,9 +567,8 @@ export class MobileServer {
           return
         }
         client.subs.add(id)
-        // Before the replay, not after: the buffer about to be sent was written
-        // at the desktop's width, and the sooner the desktop hands the geometry
-        // over the fewer lines the phone paints at a width it is not.
+        // Before the replay, so the desktop can label the pane as read from
+        // elsewhere as early as possible.
         this.announceWatch()
         // Catch-up first, then live data. Same buffer a reloading renderer gets.
         this.send(client, { t: 'replay', id, data: this.host.replay(id) })
@@ -593,6 +608,12 @@ export class MobileServer {
         // about to be told the session ended anyway. Silence here is the same
         // silence `sub` would break, one frame later.
         if (!current) return
+        // And the same silence for a resize that arrives while somebody is
+        // working at the desk — see `deskOpen`. The phone keeps sending these on
+        // every keyboard slide on purpose: the wish is honoured the moment the
+        // desk's window goes, and a client that had to be told the policy would
+        // be a client that could hold a stale copy of it.
+        if (this.host.deskOpen?.()) return
         this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows))
         return
       }

@@ -21,6 +21,7 @@ import type {
   MobileMirrorEvent,
   MobileStatus,
   MobileTunnelStatus,
+  MobileWatchEvent,
   Settings
 } from '@shared/types'
 import { MobileAuth, PAIR_TTL_MS } from './mobile/auth'
@@ -104,25 +105,56 @@ let blockerId = 0
  * width dragged back to the desktop's, and everything after that was wrapped
  * for a screen it was not being read on.
  *
- * The rule now: while a phone has a pane open, the phone owns its geometry.
- * The set of watched panes and their current size is broadcast to the renderer
- * (mobileWatched), which stops refitting those panes and letterboxes its own
- * terminal at the phone's size — so both ends draw the same screen. Handing a
- * pane back is the same message with the pane no longer in it.
+ * That was settled the phone's way for a long time: while a phone had a pane
+ * open the phone owned its geometry, and the desktop letterboxed its own
+ * terminal to match. Steve rejected it, and rightly — plugging a device in must
+ * not change the resolution at the desk, and every pane on the machine
+ * somebody is working at re-flowing because a phone came out of a pocket is
+ * precisely that.
+ *
+ * So the rule is now the other way round, and it has one line: **while this
+ * desktop has a window open, the desk owns the grid.** A phone still says what
+ * size it is reading at — the frames are unchanged — but that wish is only
+ * granted when there is no window to disturb. With a window open the wish is
+ * dropped in electron/mobile/server.ts, and the phone draws the desk's grid at
+ * a font small enough to fit its own box; see `follow` in mobile/src/lib/term.ts.
+ *
+ * What the renderer is still told is *which* panes a phone is reading
+ * (mobileWatched), because "ON PHONE" on a pane header is honest and useful.
+ * It is no longer told a size, because it no longer follows one. This is the
+ * arrangement Forge Web reached first — see the block of the same name in
+ * electron/web-host.ts — and the two links now answer the question the same way.
  */
 
 /** Session ids at least one phone currently has open. */
 let watched = new Set<string>()
 
 /**
- * The last size each phone asked for, kept so it can be re-asserted.
+ * Is there a desktop window to disturb?
  *
- * The case that needs it is a renderer reload (dev HMR, or a crash) while a
- * phone is reading a pane: the renderer re-adopts every session and resizes it
- * to its own idea of the geometry, which would take the width back from the
- * phone without the phone ever knowing. See the `onSpawn` sink.
+ * The same question `broadcast` below asks, in the same terms, because it is
+ * the same fact: a window that is not destroyed has a renderer holding the
+ * split tree, drawing panes, and refitting them. Note that closing Forge's
+ * window with Forge Web on *hides* it rather than destroying it (see the close
+ * handler in electron/main.ts), so a Forge sitting in the tray still counts as
+ * open — which is the answer this policy wants. That window comes back, and it
+ * must come back to the grid it was left at rather than to one a phone chose
+ * while nobody was looking.
  */
-const phoneGeometry = new Map<string, { cols: number; rows: number }>()
+function deskOpen(): boolean {
+  return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed())
+}
+
+/**
+ * How long a PTY resize waits before the session list is pushed again.
+ *
+ * The desk owns the grid, so every pane it refits is news a phone reading that
+ * pane has to hear — and the desk refits in bursts: a window drag, a split, a
+ * tab switch move several panes at once. Long enough to make one message out of
+ * a burst, short enough that a phone is never drawing last second's geometry.
+ */
+const GEOMETRY_PUSH_MS = 80
+let geometryPush: NodeJS.Timeout | null = null
 
 /**
  * Gap between the short size and the true one when a phone resizes — the same
@@ -147,45 +179,36 @@ function clearJiggle(id: string): void {
 }
 
 /**
- * A phone asked for a size. Applied one row short, then true a beat later, and
- * the renderer is told the result so its own terminal follows.
+ * A phone asked for a size, and there was no window here to refuse it. Applied
+ * one row short, then true a beat later.
+ *
+ * Only ever reached with the desk asleep — the server drops the frame outright
+ * while `deskOpen` is true — so nothing on this machine is watching the pane
+ * flinch, and the jiggle is purely for the program inside the PTY.
  */
 function resizeForPhone(id: string, cols: number, rows: number): boolean {
   clearJiggle(id)
-  phoneGeometry.set(id, { cols, rows })
-  if (rows < 3) {
-    const ok = getManager().resize(id, cols, rows)
-    publishWatched()
-    return ok
-  }
+  if (rows < 3) return getManager().resize(id, cols, rows)
   const ok = getManager().resize(id, cols, rows - 1)
   jiggles.set(
     id,
     setTimeout(() => {
       jiggles.delete(id)
       getManager().resize(id, cols, rows)
-      // After the jiggle, never during it: the renderer adopts the geometry it
-      // is handed, and being handed the short size would letterbox the desktop
-      // one row shy of the phone forever.
-      publishWatched()
     }, REDRAW_JIGGLE_MS)
   )
   return ok
 }
 
 /**
- * Tell the renderer which panes a phone is reading and at what size.
+ * Tell the renderer which panes a phone is reading.
  *
- * Sizes come from the session manager rather than from the phone's frame, so
- * this reports what the PTY *is*, clamped and all, not what was asked for.
+ * Ids and nothing else: the renderer draws these panes at its own size like any
+ * other, and the one thing it does differently is label them. A size in this
+ * message would be a size somebody would eventually follow.
  */
 function publishWatched(): void {
-  const sessions = getManager().list()
-  broadcast(IPC.mobileWatched, {
-    panes: sessions
-      .filter((s) => watched.has(s.id))
-      .map((s) => ({ id: s.id, cols: s.cols, rows: s.rows }))
-  })
+  broadcast(IPC.mobileWatched, { ids: [...watched] } satisfies MobileWatchEvent)
 }
 
 function getAuth(): MobileAuth {
@@ -580,6 +603,12 @@ async function start(): Promise<void> {
     replay: (id) => getReplay(id),
     write: (id, data) => getManager().write(id, data),
     resize: (id, cols, rows) => resizeForPhone(id, cols, rows),
+    // The policy point is the server, which drops a phone's cols/rows while
+    // this is true rather than passing them here. It is a thunk, not a value,
+    // for the reason every other thunk on this host is one: the window can go
+    // and come back inside one connection, and a captured answer would be a
+    // stale one for the rest of it.
+    deskOpen,
     snapshot: () => snapshotForPhone(),
     dispatchOp,
     acceptUntil: () => armedUntil(),
@@ -608,9 +637,6 @@ async function start(): Promise<void> {
     },
     onWatch: (ids) => {
       watched = new Set(ids)
-      // A pane nobody is reading has no phone geometry to remember; keeping it
-      // would let a stale size be re-asserted at the next reload.
-      for (const id of [...phoneGeometry.keys()]) if (!watched.has(id)) phoneGeometry.delete(id)
       publishWatched()
     },
     log: (line) => console.log(line)
@@ -640,18 +666,31 @@ async function start(): Promise<void> {
     // one that has just died — and the list is what decides whether a row can
     // be tapped. Without this, a tab opened from the phone could sit there
     // reading "not running" until something unrelated moved. See PtySink.
-    onSpawn: (id) => {
+    onSpawn: () => {
       instance.pushState({ sessions: getManager().list() })
-      // Re-adoption after a renderer reload arrives here too, having just
-      // resized the session to the desktop's geometry. If a phone is reading
-      // it, that is the wrong answer and this puts it back.
-      const geometry = watched.has(id) ? phoneGeometry.get(id) : undefined
-      if (geometry) resizeForPhone(id, geometry.cols, geometry.rows)
-      else publishWatched()
+      // Re-adoption after a renderer reload arrives here too, and a renderer
+      // that has just reloaded has forgotten which of its panes a phone is
+      // reading — the labels on them, and nothing else now, but a label that
+      // survives a dev reload is a label that can be trusted. Re-stating the
+      // list costs one message.
+      publishWatched()
+    },
+    onResize: () => {
+      // The desk moved a pane's grid, and every phone reading it has just been
+      // left drawing the wrong one. `state` already carries the session list
+      // with its cols/rows, so the news needs no new frame — only sending.
+      // Coalesced, because a window drag or a split is several panes resizing
+      // in the same breath and each one would otherwise broadcast the whole
+      // list. A phone's *own* resize lands here too, jiggle and all, and one
+      // push at the end of it is exactly what should reach the phone.
+      if (geometryPush) return
+      geometryPush = setTimeout(() => {
+        geometryPush = null
+        instance.pushState({ sessions: getManager().list() })
+      }, GEOMETRY_PUSH_MS)
     },
     onExit: (id, exitCode) => {
       clearJiggle(id)
-      phoneGeometry.delete(id)
       instance.pushExit(id, exitCode)
       // A dead pane changes the picture, so the phone's list is refreshed too.
       instance.pushState({ sessions: getManager().list() })
@@ -717,11 +756,14 @@ async function stop(): Promise<void> {
   for (const requestId of [...pendingApprovals.keys()]) settleApproval(requestId, false)
   unsubscribePty?.()
   unsubscribePty = null
-  // Switching the link off hands every pane back to the desktop — a pane still
-  // letterboxed at phone width by a server that no longer exists would never
-  // be given its geometry back.
+  // Switching the link off takes every "ON PHONE" chip off the desk with it —
+  // a pane labelled as read by a server that no longer exists is a pane telling
+  // a lie nothing would ever correct.
   for (const id of [...jiggles.keys()]) clearJiggle(id)
-  phoneGeometry.clear()
+  // A pending push would fire into a server that has stopped, which is the
+  // ordinary shape of switching the link off a beat after moving a pane.
+  if (geometryPush) clearTimeout(geometryPush)
+  geometryPush = null
   if (watched.size > 0) {
     watched = new Set()
     publishWatched()

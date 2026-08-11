@@ -647,11 +647,9 @@ async function pickPack(): Promise<string | null> {
  * confident and wrong whole. The only stable answer is one writer per key, so
  * these never travel inward.
  *
- * `webDevices` is here on the same ticket, before it can repeat the bug rather
- * than after: it is written and revoked in main by electron/web/auth.ts exactly
- * as the mobile pair are, so a browser admitted after launch lives in a key the
- * renderer still believes is empty. Any new device list belongs on this line
- * the day it is added.
+ * Any new device list belongs on this list the day it is added. Forge Web used
+ * to have one and no longer does — it admits a browser on its account and its
+ * PIN and writes nothing down — which is why only the mobile pair are here.
  *
  * `webUid`/`webRefreshToken`/`webEmail` are here for the same reason and with
  * sharper consequences: they are written by Forge Web's sign-in, in main, and
@@ -665,7 +663,6 @@ async function pickPack(): Promise<string | null> {
 const MAIN_OWNED_SETTINGS = [
   'mobileDevices',
   'mobileAcceptUntil',
-  'webDevices',
   'webUid',
   'webRefreshToken',
   'webEmail',

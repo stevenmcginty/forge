@@ -304,6 +304,19 @@ export function MobileSection(): ReactNode {
           </>
         }
       >
+        <p className="scard__hint">First time with ngrok? Quick setup:</p>
+        <ol className="scard__steps">
+          <li>Create a free account at <span className="mono">ngrok.com</span>.</li>
+          <li>
+            Copy your authtoken from <span className="mono">dashboard.ngrok.com/get-started/your-authtoken</span>{' '}
+            and paste it below.
+          </li>
+          <li>
+            Claim your free static domain at <span className="mono">dashboard.ngrok.com/domains</span> and paste it
+            below — copy it exactly, don’t invent one.
+          </li>
+        </ol>
+
         <Row
           label="ngrok authtoken"
           hint={

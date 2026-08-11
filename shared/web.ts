@@ -546,8 +546,9 @@ export type WebConnectionState = 'connecting' | 'pin' | 'live' | 'refused' | 'of
  * has no identity provider and needs something to remember a phone by; Forge
  * Web has a verified Firebase ID token in hand, and minting a second credential
  * beside it would add a thing to steal and prove nothing the first does not.
- * The device record on the desktop records where a token has been used; it is
- * not a key.
+ * The desktop keeps no record of the browsers it has admitted either: `deviceId`
+ * and `deviceName` below live for the length of one socket and are written
+ * nowhere.
  */
 export interface WebHelloFrame {
   type: 'hello'
@@ -558,17 +559,21 @@ export interface WebHelloFrame {
    * desktop is configured for. An unverified socket never reaches a PTY.
    */
   idToken: string
-  /** The web client's build, for the desktop's device list and for support. */
+  /** The web client's build, for the desktop's log and for support. */
   client: string
   /**
    * Stable per-browser-profile id, minted once and kept in the browser's own
    * storage. Two profiles on one machine are two devices, which is correct: the
-   * thing being recorded is a place a token has been used from.
+   * thing being named is a place a token is being used from.
+   *
+   * Not a credential and not a gate — the desktop only checks that it is there
+   * at all, because a page that cannot produce one has no storage and should be
+   * told so rather than left guessing. See `not-approved` below.
    */
   deviceId: string
   /**
-   * What the browser calls itself in the desktop's device list — "Chrome on
-   * Windows", typically. Untrusted display text: show it, never obey it.
+   * What the browser calls itself in the desktop's log — "Chrome on Windows",
+   * typically. Untrusted display text: show it, never obey it.
    */
   deviceName?: string
   /**
@@ -581,10 +586,10 @@ export interface WebHelloFrame {
    * was just asked for, and so a desktop with no PIN set never causes one to be
    * typed at all.
    *
-   * Asked on **every** connection. There is no "remember this browser": the
-   * device row on the desktop records where a token has been used, it is not a
-   * key, and letting it excuse the PIN would turn the one thing a stolen
-   * password does not come with back into something it does.
+   * Asked on **every** connection. There is no "remember this browser" and
+   * nothing on the desktop that could remember one: letting anything excuse the
+   * PIN would turn the one thing a stolen password does not come with back into
+   * something it does.
    */
   pin?: string
 }
@@ -609,11 +614,17 @@ export interface WebAuthFrame {
  * Subscribe to a session's output. Answered with `replay`, then live `data`.
  *
  * `cols`/`rows` are optional and mean "and this is the size I am reading it
- * at". A PTY has one geometry and this link gives it two viewers, so the
- * desktop stands down and follows the browser for as long as the browser is
- * the one reading — the same arrangement `onWatch` makes for a phone in
- * electron/mobile/server.ts. Omitting them means "I will take whatever size it
- * is", which is what a read-only or thumbnail view should send.
+ * at". They are a *wish*, not an instruction: a PTY has one grid and this link
+ * gives it two viewers, and while the desktop has a window open the desk owns
+ * that grid and the wish is dropped — see `deskOpen` in
+ * electron/web/server.ts. With no window at the desk there is nothing to
+ * disturb and the wish is granted, which is the arrangement Forge Mobile makes
+ * unconditionally and this one makes only when the desk is asleep.
+ *
+ * So a browser sends these and then draws whatever the `sessions` list says the
+ * grid actually is, at a font small enough to fit its own box (`follow` in
+ * web/src/lib/term.ts). Omitting them means "I will take whatever size it is",
+ * which is what a read-only or thumbnail view should send.
  */
 export interface WebAttachFrame {
   type: 'attach'
@@ -645,7 +656,16 @@ export interface WebWriteFrame {
   data: string
 }
 
-/** The browser's terminal viewport changed — a window resize, or a font change. */
+/**
+ * The browser's terminal viewport changed — a window resize, or a font change.
+ *
+ * The same wish `WebAttachFrame` carries, and under the same rule: granted when
+ * this desktop has no window open, dropped in silence when it has. A client
+ * keeps sending them regardless rather than tracking the policy, because the
+ * desk's window can close between one frame and the next and a client holding a
+ * stale copy of the rule would keep quiet through exactly the moment its size
+ * started to matter.
+ */
 export interface WebResizeFrame {
   type: 'resize'
   sessionId: string
@@ -977,22 +997,21 @@ export const WEB_REFUSALS = [
   'wrong-account',
   /**
    * This browser did not identify itself — `hello` carried a blank `deviceId`,
-   * so there is nothing to record an admission against and nothing a revocation
-   * could later name. Recovery is a reload, which mints one.
+   * which is a page whose storage was unavailable rather than a browser
+   * anybody has judged. Recovery is a reload, which mints one.
    *
-   * It used to mean "no prompt can be raised for you right now", back when an
-   * unknown browser had to be allowed by a human at the desk. There is no such
-   * prompt any more: a browser holding a verified token for the configured uid
-   * and the desktop's PIN is admitted whether or not this desktop has seen it
-   * before.
+   * The name is a fossil and is kept deliberately rather than churned: it is on
+   * the wire, and the deployed bundle at `https://forge-web…web.app` knows this
+   * word. It used to mean "no prompt can be raised for you right now", back
+   * when an unknown browser had to be allowed by a human at the desk, and then
+   * "you are not on the desktop's list". There is no prompt and no list any
+   * more — a browser holding a verified token for the configured uid and the
+   * desktop's PIN is admitted, from anywhere, whether or not this desktop has
+   * ever seen it. All that is left of the old meaning is the one fact the
+   * desktop genuinely cannot check without an id: which browser it is talking
+   * to for the length of the socket.
    */
   'not-approved',
-  /**
-   * This device was approved once and has since been revoked in settings. The
-   * page should forget its device id and stop reconnecting; a revoked device
-   * that keeps knocking is a prompt storm.
-   */
-  'revoked',
   /**
    * Protocol mismatch — the client is too old, or too new. Recovery is a reload
    * (Firebase Hosting will serve the current bundle) or updating the desktop.
@@ -1316,9 +1335,8 @@ export type WebServerFrame =
  * anywhere. That difference is the whole argument.
  *
  * So the picture travels on the socket that is already open. Same tunnel, same
- * origin check, same Firebase token, same device list, same revocation — one
- * transport with one set of locks, and nothing new to reason about at the
- * network layer. There is deliberately no ICE, no STUN, no TURN and no
+ * origin check, same Firebase token, same unlock PIN — one transport with one
+ * set of locks, and nothing new to reason about at the network layer. There is deliberately no ICE, no STUN, no TURN and no
  * signalling frame anywhere in this file.
  *
  * ## How the chunk bytes travel, and what that costs

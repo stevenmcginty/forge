@@ -549,6 +549,39 @@
   cursor: default;
 }
 
+/*
+ * A pane here can be bigger than its box, which one at the desk never is: the
+ * desktop owns the grid while it has a window open, and this client draws that
+ * grid at a font shrunk to fit (see `follow` in lib/term.ts), with the shrinking
+ * stopping at a readable floor. Past the floor the terminal overflows and
+ * `.pane__terminal`'s `overflow: hidden` cuts the right-hand columns off.
+ *
+ * That is deliberately left alone. `overflow: auto` here is the obvious fix and
+ * a bad one: xterm's own viewport sits inside this box, a scrollbar appearing on
+ * the outside of it takes width away from the very measurement FitAddon makes to
+ * decide how many columns fit, and the two chase each other — measured as a real
+ * regression, a pane a dozen columns narrower than its box and a transcript
+ * wrapped out of the visible rows. Whatever answers the floor case has to happen
+ * inside lib/term.ts, where the geometry is already known.
+ */
+
+/*
+ * The finger owns the vertical, and the browser is told so.
+ *
+ * The scrollback is dragged by hand — `enableTouchScroll` in lib/term.ts, ported
+ * from the phone client, which is where the same problem was solved first. This
+ * is the other half of that gesture: without it a downward drag over a terminal
+ * is a page pan or a pull-to-refresh *as well as* a scroll, and the terminal
+ * stutters against a browser it is already fighting for the same movement. The
+ * property is added here rather than in src/components/TerminalPane.css because
+ * nothing under src/ is modified to make this client work (see main.tsx) — and
+ * the desktop's own panes are read with a wheel.
+ */
+.pane__terminal {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
 /* -------------------------------------------------------- the hidden tabs
  *
  * Every tab of the active project that has been looked at stays mounted, so

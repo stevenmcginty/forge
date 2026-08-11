@@ -170,8 +170,6 @@ const api: ForgeApi = {
     // crosses this bridge once and is never stored; see IPC.webSignIn.
     signIn: (email, password) => ipcRenderer.invoke(IPC.webSignIn, email ?? '', password ?? ''),
     signOut: () => ipcRenderer.invoke(IPC.webSignOut),
-    revoke: (deviceId) => ipcRenderer.invoke(IPC.webRevoke, deviceId ?? ''),
-    forget: (deviceId) => ipcRenderer.invoke(IPC.webForget, deviceId ?? ''),
     // The digits cross this bridge once and are hashed on the other side; main
     // decides what counts as a PIN, because this door faces the internet and a
     // renderer is not the thing that should be settling that.

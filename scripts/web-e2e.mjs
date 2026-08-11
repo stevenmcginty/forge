@@ -430,19 +430,13 @@ async function main() {
    * inferred from what the screen looks like afterwards.
    */
   const replayServed = []
-  const makeAuth = (devices, extra = {}) => {
-    let saved = devices
-    return new WebAuth({
-      load: () => saved,
-      save: (next) => {
-        saved = next
-      },
+  const makeAuth = (extra = {}) =>
+    new WebAuth({
       fetchJwks: async () => ({ body: JSON.stringify(served), cacheControl: 'public, max-age=21600' }),
       projectId: () => PROJECT,
       uid: () => UID,
       ...extra
     })
-  }
 
   const makeServer = (auth) =>
     new WebServer({
@@ -538,10 +532,10 @@ async function main() {
   /** Start a phase: a fresh port, a fresh WebAuth, a fresh WebServer. */
   let port = 8500
   let server = null
-  const startPhase = async (devices, extra = {}) => {
+  const startPhase = async (extra = {}) => {
     if (server) await server.stop()
     port += 1
-    server = makeServer(makeAuth(devices, extra))
+    server = makeServer(makeAuth(extra))
     active = server
     await server.start({ host: '127.0.0.1', port })
     return port
@@ -619,9 +613,11 @@ async function main() {
       viewport: { width: 1440, height: 900 },
       ...(storageState ? { storageState } : {})
     })
-    // The device id is the one thing a phase needs to be able to name — a
-    // revoked browser has to be *this* browser. Seeded rather than read back so
-    // no phase depends on a previous one having run.
+    // A fixed device id, so the desktop's log names the same browser across
+    // every phase and a run is readable. It buys this page nothing — the door is
+    // the account and the PIN, and any non-blank id would do — but seeding it
+    // rather than letting each context mint its own keeps no phase depending on
+    // a previous one having run.
     await made.addInitScript(`localStorage.setItem('forge-web-device', ${JSON.stringify(DEVICE_ID)})`)
     // Every write of the offline cache, counted. The snapshot is written whole
     // and synchronously, so "how many times was it written" is the honest cost
@@ -696,11 +692,9 @@ async function main() {
     await page.click('button[type="submit"]')
   }
 
-  const approved = [{ id: DEVICE_ID, name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }]
-
   /* ===================================================== PHASE 1 — sign in */
 
-  const livePort = await startPhase(approved)
+  const livePort = await startPhase()
   setConfig({ devHost: `127.0.0.1:${livePort}` })
   await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' })
 
@@ -771,17 +765,143 @@ async function main() {
     true,
     `session-started re-attached that pane with no reload, and the replay buffer painted into it (forge-replay-${replayNonce})`
   )
-  log(watched === true, 'and the desktop was told a browser is reading that pane, so it can stand down on geometry')
+  log(watched === true, 'and the desktop was told a browser is reading that pane, so it can say so on the pane itself')
   log(
     (await page.locator('.notice').count()) === 0,
     'and a pane that had not started yet raised no "that pane is gone" — a sentence nobody could act on'
   )
 
+  // This server has no `deskOpen` hook, which is a desktop with no window open
+  // by the reading electron/web/server.ts gives a host that cannot answer — so
+  // the browser is the only viewer there is and its geometry is honoured. The
+  // other branch, where a window is open and this frame is dropped, is asserted
+  // in scripts/web-smoke.mjs and scripts/web-check.mjs.
   const geometry = manager.list().find((s) => s.id === SESSION_ID)
   log(
     geometry.cols !== 90 || geometry.rows !== 30,
-    `and attach carried the browser's own geometry, so the PTY is no longer at the size the desk set (now ${geometry.cols}×${geometry.rows})`
+    `and with no window at that desk, attach carried the browser's own geometry, so the PTY is no longer at the size the desk set (now ${geometry.cols}×${geometry.rows})`
   )
+
+  /* ------------------------------- and the other pointer, which is a finger
+   *
+   * A phone reads Forge Web in the same bundle a desktop does, and for a long
+   * time it could read only the last screenful of it: xterm scrolls its viewport
+   * from wheel events and from the keyboard, so the scrollback this client keeps
+   * (5,000 lines) was history that was retained and unreachable. "The scroller
+   * works fine on the PC but on the phone it doesn't" is exactly that asymmetry,
+   * and it is invisible to every other check here because Playwright drives a
+   * mouse.
+   *
+   * So this one drives a finger. Chrome's own touch emulation is switched on
+   * over CDP and the drag is dispatched through `Input.dispatchTouchEvent`,
+   * which is the same input pipeline a handset's digitiser feeds — not a
+   * `TouchEvent` constructed in page script, which would prove the handler is
+   * wired and nothing about whether a real touch ever reaches it.
+   *
+   * Four properties, because three of them can pass while the feature is still
+   * useless: that a drag scrolls at all, that it keeps going to the *top* of the
+   * transcript rather than the last screenful, that it comes back, and that
+   * scrolling does not take the caret — a finger that focused the terminal would
+   * open Android's keyboard on every swipe and resize the pane out from under
+   * the gesture.
+   */
+
+  const touch = await context.newCDPSession(page)
+  await touch.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+
+  /**
+   * One finger dragged down the terminal (`+1`, which reveals older output) or
+   * up it (`-1`), over most of the pane's height and in steps a phone would send.
+   */
+  const swipe = async (direction) => {
+    const box = await page.locator('.pane__terminal').first().boundingBox()
+    const distance = Math.round(box.height * 0.6) * direction
+    const x = Math.round(box.x + box.width / 2)
+    const from = Math.round(box.y + box.height / 2 - distance / 2)
+    const point = (y) => [{ x, y: Math.round(y), id: 1 }]
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(from) })
+    for (let step = 1; step <= 8; step++) {
+      await touch.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: point(from + (distance * step) / 8)
+      })
+    }
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  }
+
+  const tap = async () => {
+    const box = await page.locator('.pane__terminal').first().boundingBox()
+    const point = [{ x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2), id: 1 }]
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point })
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  }
+
+  /** Whether the caret is in this terminal — xterm's own class for it. */
+  const caretHeld = () => page.locator('.pane__terminal .xterm.focus').count()
+
+  // Halved in the command and joined by the shell, as the replay marker above
+  // is: the echo of what was typed is part of the transcript too, and a mark
+  // that appeared in it as well would be found one row early.
+  const topNonce = randomBytes(4).toString('hex')
+  const topMark = `forge-top-${topNonce}`
+  manager.write(SESSION_ID, `Write-Output ("forge-top-" + "${topNonce}"); 1..140 | ForEach-Object { "forge-scroll-line-$_" }\r`)
+  await waitFor(async () => (await screenText()).includes('forge-scroll-line-140'), 60_000, 'a transcript past the bottom')
+  log(
+    !(await screenText()).includes(topMark),
+    'a transcript longer than the pane has a first line that is off the screen and reachable no other way'
+  )
+
+  await swipe(1)
+  await waitFor(
+    async () => !(await screenText()).includes('forge-scroll-line-140'),
+    10_000,
+    'the bottom of the transcript to leave the screen'
+  )
+  log(true, 'one downward drag of a finger scrolls the terminal itself, rather than the page around it')
+
+  let swipes = 1
+  await waitFor(
+    async () => {
+      if ((await screenText()).includes(topMark)) return true
+      swipes++
+      await swipe(1)
+      return false
+    },
+    60_000,
+    'the top of the transcript'
+  )
+  log(true, `and it keeps going to the top of the transcript rather than one screenful (${swipes} drags to reach it)`)
+
+  await waitFor(
+    async () => {
+      if ((await screenText()).includes('forge-scroll-line-140')) return true
+      await swipe(-1)
+      return false
+    },
+    60_000,
+    'the live end of the transcript'
+  )
+  log(true, 'and an upward drag comes back down to where the shell is still printing')
+
+  await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+  await waitFor(async () => (await caretHeld()) === 0, 10_000, 'the caret to leave the terminal')
+  await swipe(1)
+  await sleep(200)
+  log(
+    (await caretHeld()) === 0,
+    'scrolling with a finger does not take the caret, so a phone does not answer every swipe with its keyboard'
+  )
+  await tap()
+  await waitFor(() => caretHeld().then((n) => n === 1), 10_000, 'the caret to come back on a tap')
+  log(true, 'while a tap still does, which is how a phone types into a pane at all')
+
+  // Back to the live end and pinned there, so every later assertion about what
+  // is "on screen" is reading the bottom of the transcript rather than wherever
+  // this drag left the viewport. A keypress is what does it: xterm scrolls to
+  // the bottom on user input, exactly as it does at the desk.
+  await page.keyboard.press('Enter')
+  await touch.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+  await touch.detach()
 
   /* ------------------- THE assertion: a keystroke through a real ConPTY */
 
@@ -1109,7 +1229,7 @@ async function main() {
     'and it says so rather than pretending — the pane is badged and its keyboard is shut'
   )
 
-  server = makeServer(makeAuth(approved))
+  server = makeServer(makeAuth())
   active = server
   await server.start({ host: '127.0.0.1', port: livePort })
   await waitFor(
@@ -1218,7 +1338,7 @@ async function main() {
     }
   }
 
-  const pinPort = await startPhase(approved, pinHost)
+  const pinPort = await startPhase(pinHost)
   setConfig({ devHost: `127.0.0.1:${pinPort}` })
   await signInFresh()
   await waitFor(async () => (await gateReason()) === 'pin', 30_000, 'the PIN prompt')
@@ -1285,7 +1405,15 @@ async function main() {
     `and nothing on this page wrote the PIN down${stashed ? ` — "${stashed}" is holding it` : ', so a page only ever holds one it was just asked for'}`
   )
 
-  /* ================================ PHASE 3 — two refusals, two sentences */
+  /* ================================ PHASE 3 — two refusals, two sentences
+   *
+   * The pair used to be `wrong-account` and `revoked`. There is no `revoked` any
+   * more — the device list it named is gone, because it was never a gate — so
+   * the second half of the contrast moved to `busy` in phase 3b, which is a
+   * sharper pair anyway: those two refusals differ in the one way that matters
+   * most to somebody reading the screen, which is whether the page is going to
+   * come back on its own or is waiting for them.
+   */
 
   const refusalScreens = {}
   const captureRefusal = async (label) => {
@@ -1301,35 +1429,14 @@ async function main() {
   // wrong-account: a perfectly valid token, for a uid this desktop is not
   // configured for. Refused before the device is even looked at.
   tokenSub = OTHER_UID
-  const wrongPort = await startPhase(approved)
+  const wrongPort = await startPhase()
   setConfig({ devHost: `127.0.0.1:${wrongPort}` })
   await signInFresh()
   await waitFor(async () => (await gateReason()) === 'wrong-account', 30_000, 'the wrong-account screen')
   await captureRefusal('wrong-account')
   await page.screenshot({ path: join(shots, 'refused-wrong-account-1440.png') })
 
-  // revoked: approved once, since revoked at the desk. A different row, a
-  // different recovery, and no prompt raised.
   tokenSub = UID
-  const revokedPort = await startPhase([{ id: DEVICE_ID, name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 2 }])
-  setConfig({ devHost: `127.0.0.1:${revokedPort}` })
-  await signInFresh()
-  await waitFor(async () => (await gateReason()) === 'revoked', 30_000, 'the revoked screen')
-  await captureRefusal('revoked')
-  await page.screenshot({ path: join(shots, 'refused-revoked-1440.png') })
-
-  const wrong = refusalScreens['wrong-account']
-  const revoked = refusalScreens['revoked']
-  log(wrong.reason === 'wrong-account' && revoked.reason === 'revoked', 'each refusal names itself on screen')
-  log(
-    wrong.title !== revoked.title,
-    `and wears a different headline (“${wrong.title}” vs “${revoked.title}”), not one generic failure`
-  )
-  log(wrong.body !== revoked.body, 'with different prose underneath it')
-  log(
-    /sign out|sign in as/i.test(wrong.body) && /forget this browser/i.test(revoked.body),
-    'and a different recovery: sign in as somebody else, against forget this browser and ask again'
-  )
 
   /* ============== PHASE 3b — the refusal that is retried, and read anyway
    *
@@ -1347,10 +1454,11 @@ async function main() {
    * because no amount of re-authenticating would fix it.
    */
 
-  const busyPort = await startPhase(approved, { uid: () => '' })
+  const busyPort = await startPhase({ uid: () => '' })
   setConfig({ devHost: `127.0.0.1:${busyPort}` })
   await signInFresh()
   await waitFor(async () => (await gateReason()) === 'busy', 30_000, 'the busy screen')
+  await captureRefusal('busy')
   const busyCard = await page.locator('.gate__card').innerText()
   log(true, 'a desktop that is up but not set up refuses with busy, and that refusal is drawn rather than skipped past')
   log(
@@ -1370,6 +1478,29 @@ async function main() {
   log(
     (await gateReason()) === 'busy',
     'and it is still there a second and a half later, rather than replaced by the retry that is waiting on it'
+  )
+
+  /* --------------------- the contrast phase 3 set this pair up to make
+   *
+   * Two refusals, side by side, taken off the screen rather than off the type:
+   * different words, and — the half that actually decides what somebody does
+   * next — different recoveries. `wrong-account` is a correct credential for the
+   * wrong desktop, so retrying would loop on it forever and the only way out is
+   * a human signing in as somebody else; `busy` is a desktop that will be ready
+   * later, so the page comes back on its own and says when.
+   */
+
+  const wrong = refusalScreens['wrong-account']
+  const busy = refusalScreens['busy']
+  log(wrong.reason === 'wrong-account' && busy.reason === 'busy', 'each refusal names itself on screen')
+  log(
+    wrong.title !== busy.title,
+    `and wears a different headline (“${wrong.title}” vs “${busy.title}”), not one generic failure`
+  )
+  log(wrong.body !== busy.body, 'with different prose underneath it')
+  log(
+    /sign out|sign in as/i.test(wrong.body) && /trying again in about \d+s/i.test(busy.body),
+    'and a different recovery: sign in as somebody else, against a page that is already coming back on its own'
   )
 
   /* ====================================== PHASE 4 — the desktop is asleep */
@@ -1532,7 +1663,7 @@ async function main() {
    */
   PROJECTS.push({ id: 'p2', name: 'scratch', path: scratch, color: '#4AA3FF', defaultProfileId: 'shell', createdAt: 0 })
 
-  const pickPort = await startPhase(approved)
+  const pickPort = await startPhase()
   setConfig({ devHost: `127.0.0.1:${pickPort}` })
   await signInFresh()
   await waitFor(() => page.locator('.rail').count().then((n) => n > 0), 30_000, 'the rail')
@@ -1645,7 +1776,7 @@ async function main() {
   mirrorStarts.length = 0
   mirrorInputs.length = 0
 
-  const screenPort = await startPhase(approved)
+  const screenPort = await startPhase()
   setConfig({ devHost: `127.0.0.1:${screenPort}` })
   await signInFresh()
   await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace')
@@ -1892,7 +2023,7 @@ async function main() {
    * counted at the desktop instead.
    */
 
-  const heldPort = await startPhase(approved, pinHost)
+  const heldPort = await startPhase(pinHost)
   setConfig({ devHost: `127.0.0.1:${heldPort}` })
   pinChecks = 0
   await signInFresh()

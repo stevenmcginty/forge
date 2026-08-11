@@ -87,6 +87,75 @@ export function backoffDelay(attempt: number): number {
  */
 export const HEALTHY_RESET_MS = 30_000
 
+/**
+ * The watchdog, and why a supervisor that only watches for *exit* is not
+ * enough on this transport.
+ *
+ * A quick tunnel can die while cloudflared lives. Cloudflare deletes the
+ * anonymous `*.trycloudflare.com` registration on its side — the hostname
+ * drops out of DNS entirely — and cloudflared does not exit. It sits in a
+ * reconnect loop printing `Serve tunnel error` / `control stream encountered a
+ * failure while serving` forever, the supervisor sees a healthy child, the
+ * rendezvous record keeps a fresh heartbeat on an address that answers for
+ * nobody, and every browser in the world shows "desktop is asleep" while the
+ * desktop is wide awake. That exact incident is in %APPDATA%\Forge\dev.log,
+ * 636 error lines deep, from 2026-08-11.
+ *
+ * Two detectors, because each catches what the other cannot:
+ *
+ *  - **the log.** While live, consecutive `Serve tunnel error` lines are
+ *    counted; `Registered tunnel connection` — cloudflared's own announcement
+ *    that an edge link is re-established — resets the count. A genuine blip
+ *    re-registers within a line or two; a deleted tunnel never does. At
+ *    EDGE_FAILURE_LIMIT the child is killed.
+ *  - **the probe.** Every PROBE_INTERVAL_MS the public URL is fetched over
+ *    HTTPS, end to end through Cloudflare's edge and back into the loopback
+ *    listener. Any HTTP status below 500 proves the path (our own server's
+ *    404 included); Cloudflare answers 530 for a tunnel it no longer carries,
+ *    and a hostname gone from DNS rejects outright. PROBE_STRIKES consecutive
+ *    failures kill the child. This catches the death cloudflared never
+ *    mentions at all.
+ *
+ * Killing the child is the whole cure: the ordinary exit path respawns it,
+ * the quick tunnel comes back on a fresh hostname, `setTunnelState` fires and
+ * `web-host.ts` republishes the rendezvous record, and the browser's next poll
+ * finds the new address. A false positive still costs something, though — a
+ * quick tunnel that reconnects *keeps* its hostname, and a killed one draws a
+ * new address every browser has to re-find — so neither detector kills on its
+ * own say-so:
+ *
+ *  - the log counter's verdict is confirmed by an immediate probe before it
+ *    fires, so an edge that grumbles while the address still answers is left
+ *    alone (cloudflared holds several edge connections, and one datacenter
+ *    event can print a failure line for each of them);
+ *  - a failed probe is confirmed against CONTROL_PROBE_URL, so this desktop's
+ *    own connection being down — which fails *every* fetch — pauses the
+ *    watchdog instead of forfeiting a hostname that would have survived.
+ *
+ * And because the cure is a kill, the kill itself cannot be trusted blindly:
+ * if the child has not exited KILL_ESCALATE_MS after taskkill, the exit is
+ * synthesised — a supervisor stuck at `retrying` with every detector disarmed
+ * would be the original incident back again, minus the self-heal.
+ */
+export const EDGE_FAILURE_LIMIT = 6
+export const PROBE_INTERVAL_MS = 120_000
+export const PROBE_TIMEOUT_MS = 10_000
+export const PROBE_STRIKES = 2
+export const KILL_ESCALATE_MS = 10_000
+
+/** cloudflared's serving-failure line — the signature of a dead quick tunnel. */
+export const EDGE_FAILURE_LINE = /Serve tunnel error/i
+/** cloudflared's edge-link-restored line, which forgives the failures before it. */
+export const EDGE_RECOVERED_LINE = /Registered tunnel connection/i
+
+/**
+ * Cloudflare's own trace endpoint: the one host guaranteed to be reachable
+ * whenever the *edge* is reachable, which is exactly the question the control
+ * probe asks. Any HTTP answer at all counts — a 4xx proves the network path
+ * as well as a 200 does.
+ */
+export const CONTROL_PROBE_URL = 'https://www.cloudflare.com/cdn-cgi/trace'
+
 /* ------------------------------------------------------------ pure helpers */
 
 /**
@@ -303,6 +372,48 @@ export interface CloudflareTunnelHost {
   now?: () => number
   setTimer?: (fn: () => void, ms: number) => unknown
   clearTimer?: (timer: unknown) => void
+  /** The watchdog's end-to-end reachability check. True means the address answers. */
+  probe?: (url: string) => Promise<boolean>
+  /** The watchdog's is-the-internet-up check. True means this desktop is online. */
+  probeControl?: () => Promise<boolean>
+}
+
+/**
+ * The default probe: one HEAD request to the public URL, through the edge and
+ * back into the loopback listener. Below 500 is alive — the desktop server's
+ * own 404 for `/` proves the whole path just as well as a 200 would.
+ * Cloudflare's 530 for a tunnel it no longer carries, and the outright
+ * rejection of a hostname DNS has dropped, are the two shapes of dead.
+ */
+async function probeTunnelUrl(url: string): Promise<boolean> {
+  try {
+    const control = new AbortController()
+    const timer = setTimeout(() => control.abort(), PROBE_TIMEOUT_MS)
+    try {
+      const res = await fetch(url, { method: 'HEAD', redirect: 'manual', signal: control.signal })
+      return res.status < 500
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch {
+    return false
+  }
+}
+
+/** The default control probe — see CONTROL_PROBE_URL for why any answer counts. */
+async function probeControlUrl(): Promise<boolean> {
+  try {
+    const control = new AbortController()
+    const timer = setTimeout(() => control.abort(), PROBE_TIMEOUT_MS)
+    try {
+      await fetch(CONTROL_PROBE_URL, { method: 'HEAD', redirect: 'manual', signal: control.signal })
+      return true
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -333,11 +444,15 @@ export class CloudflareTunnel {
   private readonly host: CloudflareTunnelHost
   private child: TunnelChild | null = null
   private timer: unknown = null
+  private probeTimer: unknown = null
+  private killTimer: unknown = null
   private attempt = 0
   private liveSince = 0
   private refusal = ''
   private lastError = ''
   private stopped = false
+  private edgeFailures = 0
+  private probeStrikes = 0
   private current: TunnelStatus = { state: 'off', url: '', detail: '' }
 
   constructor(host: CloudflareTunnelHost) {
@@ -358,6 +473,8 @@ export class CloudflareTunnel {
     this.stopped = false
     this.attempt = 0
     this.refusal = ''
+    this.edgeFailures = 0
+    this.probeStrikes = 0
     this.spawnOnce()
   }
 
@@ -367,6 +484,8 @@ export class CloudflareTunnel {
       ;(this.host.clearTimer ?? clearTimeout)(this.timer as NodeJS.Timeout)
       this.timer = null
     }
+    this.clearProbe()
+    this.clearKillTimer()
     const child = this.child
     this.child = null
     if (child?.pid) (this.host.killTree ?? killTreeWindows)(child.pid)
@@ -413,7 +532,10 @@ export class CloudflareTunnel {
     }
     child.stdout?.on('data', onChunk)
     child.stderr?.on('data', onChunk)
-    child.on('exit', (code) => this.onExit(code))
+    // The handler names its own child so a late exit — one arriving after the
+    // watchdog synthesised it, or after stop()/start() replaced the process —
+    // cannot clobber a successor's state.
+    child.on('exit', (code) => this.onExit(child, code))
   }
 
   private onLine(line: string): void {
@@ -423,8 +545,18 @@ export class CloudflareTunnel {
     if (event.url) {
       this.liveSince = (this.host.now ?? Date.now)()
       this.lastError = ''
+      this.edgeFailures = 0
+      this.probeStrikes = 0
       this.report({ state: 'live', url: event.url, detail: '' })
       this.host.log?.(`tunnel live at ${event.url}`)
+      this.scheduleProbe()
+      return
+    }
+
+    // An edge link coming back means the failures before it were a blip, not a
+    // dead tunnel — the watchdog's count starts over.
+    if (EDGE_RECOVERED_LINE.test(event.message)) {
+      this.edgeFailures = 0
       return
     }
 
@@ -435,10 +567,153 @@ export class CloudflareTunnel {
     if (!refusal && event.level !== 'ERR' && event.level !== 'FTL') return
     this.lastError = event.message
     this.host.log?.(`cloudflared: ${this.lastError}`)
+
+    // The watchdog's first detector: serving failures while supposedly live,
+    // with no re-registration between them. Failures during startup are the
+    // backoff's business, not the watchdog's. The counter does not convict on
+    // its own — it asks the probe to confirm, because cloudflared can print
+    // one of these per edge connection over a single benign event.
+    if (this.current.state === 'live' && EDGE_FAILURE_LINE.test(event.message)) {
+      this.edgeFailures += 1
+      if (this.edgeFailures >= EDGE_FAILURE_LIMIT) {
+        this.edgeFailures = 0
+        void this.verifyDead()
+      }
+    }
   }
 
-  private onExit(code: number | null): void {
+  /* ------------------------------------------------------------ the watchdog */
+
+  private clearProbe(): void {
+    if (this.probeTimer !== null) {
+      ;(this.host.clearTimer ?? clearTimeout)(this.probeTimer as NodeJS.Timeout)
+      this.probeTimer = null
+    }
+  }
+
+  private clearKillTimer(): void {
+    if (this.killTimer !== null) {
+      ;(this.host.clearTimer ?? clearTimeout)(this.killTimer as NodeJS.Timeout)
+      this.killTimer = null
+    }
+  }
+
+  private scheduleProbe(): void {
+    if (this.stopped || this.probeTimer !== null) return
+    this.probeTimer = (this.host.setTimer ?? setTimeout)(() => {
+      this.probeTimer = null
+      void this.runProbe()
+    }, PROBE_INTERVAL_MS)
+  }
+
+  /**
+   * True when the world moved during an await: a probe answered after the
+   * child changed, the state changed or stop() ran proves nothing about the
+   * current tunnel and must change nothing.
+   */
+  private staleSince(child: TunnelChild): boolean {
+    return this.stopped || this.child !== child || this.current.state !== 'live'
+  }
+
+  /**
+   * The second detector, on its 2-minute clock. A dead answer is confirmed
+   * against the control probe first: when this desktop's own connection is
+   * down, every fetch fails, and killing cloudflared then would trade a
+   * hostname that survives a reconnect for a new one that cannot even be
+   * published yet. A passing probe is ground truth the other way, and clears
+   * the log counter's suspicions too.
+   */
+  private async runProbe(): Promise<void> {
+    if (this.stopped || this.current.state !== 'live' || !this.child) return
+    const child = this.child
+    const alive = await (this.host.probe ?? probeTunnelUrl)(this.current.url)
+    if (this.staleSince(child)) return
+    if (alive) {
+      this.probeStrikes = 0
+      this.edgeFailures = 0
+      this.scheduleProbe()
+      return
+    }
+    const online = await (this.host.probeControl ?? probeControlUrl)()
+    if (this.staleSince(child)) return
+    if (!online) {
+      this.probeStrikes = 0
+      this.scheduleProbe()
+      return
+    }
+    this.probeStrikes += 1
+    if (this.probeStrikes >= PROBE_STRIKES) {
+      this.restartDead(`the public address stopped answering (${this.probeStrikes} probes in a row)`)
+      return
+    }
+    this.scheduleProbe()
+  }
+
+  /**
+   * The log counter's confirmation step: an immediate out-of-schedule probe.
+   * Edge failures with an address that still answers are grumbling, not
+   * death; edge failures with a dead address and a working internet
+   * connection are the incident, and one confirmed sighting is enough.
+   */
+  private async verifyDead(): Promise<void> {
+    if (this.stopped || this.current.state !== 'live' || !this.child) return
+    const child = this.child
+    const alive = await (this.host.probe ?? probeTunnelUrl)(this.current.url)
+    if (this.staleSince(child)) return
+    if (alive) return
+    const online = await (this.host.probeControl ?? probeControlUrl)()
+    if (this.staleSince(child)) return
+    if (!online) return
+    this.restartDead('the edge connection kept failing and the public address stopped answering')
+  }
+
+  /**
+   * The cure for a tunnel that died without its process dying: kill the
+   * process and let the ordinary exit path respawn it. The quick tunnel comes
+   * back on a fresh hostname and `onStatus` hands it on, which is what makes
+   * the rendezvous record true again. The dead address is dropped *now*, not
+   * at exit, so nothing republishes it in the meantime.
+   *
+   * The kill itself is watched: if the child has not exited KILL_ESCALATE_MS
+   * later — taskkill refused, the process is stuck in a syscall — the exit is
+   * synthesised. Without that, a kill that does not land leaves the
+   * supervisor at `retrying` with no timer pending and both detectors
+   * disarmed: wedged for good, which is the incident this watchdog exists to
+   * end. A late real exit is harmless — onExit ignores a child that is no
+   * longer the current one.
+   */
+  private restartDead(reason: string): void {
+    if (this.stopped || !this.child) return
+    this.lastError = reason
+    this.edgeFailures = 0
+    this.probeStrikes = 0
+    this.clearProbe()
+    this.host.log?.(`cloudflared: ${reason} — restarting the tunnel for a fresh address`)
+    this.report({ state: 'retrying', url: '', detail: 'The tunnel went dead — restarting cloudflared.' })
+    const child = this.child
+    if (child.pid) (this.host.killTree ?? killTreeWindows)(child.pid)
+    else child.kill()
+    this.killTimer = (this.host.setTimer ?? setTimeout)(() => {
+      this.killTimer = null
+      if (this.child !== child) return
+      try {
+        child.kill()
+      } catch {
+        /* already gone */
+      }
+      this.onExit(child, null)
+    }, KILL_ESCALATE_MS)
+  }
+
+  private onExit(child: TunnelChild, code: number | null): void {
+    // A stale exit — the real one arriving after the watchdog synthesised it,
+    // or a predecessor's after a restart — must not touch the current child.
+    if (this.child !== child) return
     this.child = null
+    this.clearKillTimer()
+    // A probe armed for a tunnel that no longer exists proves nothing; the
+    // next live banner arms a fresh one.
+    this.clearProbe()
     if (this.stopped) return
 
     // A door that will not open. Stop knocking — switching the tunnel off and on

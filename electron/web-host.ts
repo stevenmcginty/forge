@@ -93,12 +93,10 @@ import { probeCommands } from './which'
  *     tree and persists the workspace — so the browser joins that code path
  *     instead of growing a parallel one in main that could disagree with it
  *     (docs/forge-web.md, decision 5).
- *  5. Ask the human. A browser this desktop has never approved raises a prompt
- *     here, and every outcome that is not an explicit Allow is a deny.
- *  6. Hand a pane's geometry to the browser reading it, and take it back when
- *     the browser leaves. One PTY, two viewers — the block of that name below
- *     is the whole of it, and it is Forge Mobile's arrangement reached through
- *     a channel of its own.
+ *  5. Keep this desktop's terminal geometry out of a browser's hands while
+ *     there is a window here to disturb, and hand it over when there is not.
+ *     One PTY, two viewers — the block of that name below is the whole of it,
+ *     and it is deliberately *not* Forge Mobile's arrangement.
  *
  * ## What this file used to get wrong
  *
@@ -142,8 +140,9 @@ import { probeCommands } from './which'
  * to forward. What must not happen in the meantime is a channel that implies a
  * behaviour nothing performs. `onWatch` stood in this same list for a
  * milestone on exactly that reasoning — naming the watched sessions is only
- * worth anything if the renderer then stands down — and left it the day the
- * renderer half was written, not before.
+ * worth anything if the renderer then does something with the names — and left
+ * it the day the renderer half was written, not before. What it does with them
+ * has since shrunk to a label on the pane header, and that is still something.
  */
 
 /* ----------------------------------------------------------------- the port
@@ -203,6 +202,17 @@ let rendezvous: WebRendezvous | null = null
 let rest: FirebaseRest | null = null
 let unsubscribePty: (() => void) | null = null
 let unsubscribeGit: (() => void) | null = null
+/**
+ * How long a PTY resize waits before the session list is pushed again.
+ *
+ * The desk owns the grid, so every pane it refits is news a browser reading
+ * that pane has to hear — and the desk refits in bursts: a window drag, a
+ * split, a tab switch move several panes at once. Long enough to make one
+ * message out of a burst, short enough that a browser is never drawing last
+ * second's geometry.
+ */
+const GEOMETRY_PUSH_MS = 80
+let geometryPush: NodeJS.Timeout | null = null
 let lastDetail = ''
 let starting = false
 
@@ -260,63 +270,57 @@ let blockerId = 0
  * that was wrapped for a screen it was not being drawn on. Switching tabs in
  * the browser dragged it the other way. The two fought.
  *
- * The rule is Forge Mobile's, because the problem is Forge Mobile's: while a
- * browser has a pane open, the browser owns its geometry. The set of watched
- * panes and their current size is broadcast to the renderer (`webWatched`),
- * which stops refitting those panes and letterboxes its own terminal at the
- * browser's size — so both ends draw the same screen. Handing a pane back is
- * the same message with the pane no longer in it.
+ * This used to be settled Forge Mobile's way — while a browser had a pane open,
+ * the browser owned its geometry and the desktop letterboxed itself at the
+ * browser's size. That is the wrong trade for a *desk*. A phone is a glance at
+ * a pane; the desktop is the machine somebody is working at, and watching every
+ * pane on it re-flow because a tab opened somewhere else is the app rearranging
+ * the work in front of you on a stranger's behalf.
  *
- * A pane a phone *and* a browser are both reading is drawn at the smaller of
- * the two sizes, so it fits on both. That merge happens in the renderer, which
- * is the only place that hears both lists; see `setBrowserWatched` in
- * src/lib/terminals.ts.
+ * So the rule is now the other way round, and it has one line: **while this
+ * desktop has a window open, the desk owns the grid.** A browser still says
+ * what size it is reading at — the frames are unchanged — but that wish is only
+ * granted when there is no window to disturb, which is exactly the case Forge
+ * Web exists for (the desk closed to the tray, the terminals still running).
+ * With a window open the wish is dropped in electron/web/server.ts, and the
+ * browser draws the desk's grid at a font small enough to fit its own box; see
+ * `follow` in web/src/lib/term.ts.
+ *
+ * What the renderer is still told is *which* panes a browser is reading
+ * (`webWatched`), because "IN BROWSER" on a pane header is honest and useful.
+ * It is no longer told a size, because it no longer follows one. Phones live
+ * under the same rule — see `setPhoneWatched` in src/lib/terminals.ts and the
+ * matching `deskOpen` gate in electron/mobile/server.ts.
  */
 
 /** Session ids at least one browser currently has open. */
 let watched = new Set<string>()
 
 /**
- * The last size each browser asked for, kept so it can be re-asserted.
+ * Is there a desktop window to disturb?
  *
- * The case that needs it is a renderer reload (dev HMR, or a crash) while a
- * browser is reading a pane: the renderer re-adopts every session and resizes
- * it to its own idea of the geometry, which would take the width back from the
- * browser without the browser ever knowing. See the `onSpawn` sink.
+ * The same question `askRenderer` and `mirrorWindow` below ask, in the same
+ * terms, because it is the same fact: a window that is not destroyed has a
+ * renderer holding the split tree, drawing panes, and refitting them. Note that
+ * closing Forge's window with the link on *hides* it rather than destroying it
+ * (see the close handler in electron/main.ts), so a Forge sitting in the tray
+ * still counts as open — which is the answer this policy wants. That window
+ * comes back, and it must come back to the grid it was left at rather than to
+ * one a browser chose while nobody was looking.
  */
-const browserGeometry = new Map<string, { cols: number; rows: number }>()
-
-/**
- * Tell the renderer which panes a browser is reading and at what size.
- *
- * Sizes come from the session manager rather than from the browser's frame, so
- * this reports what the PTY *is*, clamped and all, not what was asked for.
- */
-function publishWatched(): void {
-  const sessions = getManager().list()
-  broadcast(IPC.webWatched, {
-    panes: sessions.filter((s) => watched.has(s.id)).map((s) => ({ id: s.id, cols: s.cols, rows: s.rows }))
-  } satisfies WebWatchEvent)
+function deskOpen(): boolean {
+  return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed())
 }
 
 /**
- * A browser asked for a size. The resize itself is the pass-through to the
- * session manager this host has always done; what is added is remembering the
- * size and telling the renderer what the PTY ended up at.
+ * Tell the renderer which panes a browser is reading.
  *
- * The publish is the part that cannot be left out. `onWatch` fires when the
- * *set* changes, and an attach announces itself one line *before* it applies
- * its cols/rows — deliberately, so the desktop hands the width over as early
- * as possible (see the `attach` case in electron/web/server.ts). Without a
- * publish here the renderer would letterbox every freshly attached pane at the
- * size it had a moment before the browser arrived, and never hear the size it
- * actually settled on.
+ * Ids and nothing else: the renderer draws these panes at its own size like any
+ * other, and the one thing it does differently is label them. A size in this
+ * message would be a size somebody would eventually follow.
  */
-function resizeForBrowser(id: string, cols: number, rows: number): boolean {
-  browserGeometry.set(id, { cols, rows })
-  const ok = getManager().resize(id, cols, rows)
-  publishWatched()
-  return ok
+function publishWatched(): void {
+  broadcast(IPC.webWatched, { ids: [...watched] } satisfies WebWatchEvent)
 }
 
 /* ------------------------------------------------------------------- auth */
@@ -324,10 +328,6 @@ function resizeForBrowser(id: string, cols: number, rows: number): boolean {
 function getAuth(): WebAuth {
   if (!auth) {
     auth = new WebAuth({
-      load: () => getSettings().webDevices,
-      save: (devices) => {
-        setSettings({ webDevices: devices })
-      },
       // The real fetcher, injected rather than defaulted — see `JwksFetcher`.
       // Constructing it costs nothing and touches no network; the first request
       // happens when a token is first verified, which is after a browser has
@@ -571,7 +571,6 @@ export function webStatus(): WebStatus {
     // URL for a server that is off is a link that would be sent to somebody and
     // then not answer.
     url: address ? webSocketUrl(tunnel.host) : '',
-    devices: settings.webDevices,
     connected: server?.connectedCount ?? 0,
     // Read off the server rather than tracked here, so the card cannot say
     // "being watched" about a viewer the socket has already lost. The card is
@@ -1119,7 +1118,13 @@ async function start(): Promise<void> {
     sessions: () => getManager().list(),
     replay: (id) => getReplay(id),
     write: (id, data) => getManager().write(id, data),
-    resize: (id, cols, rows) => resizeForBrowser(id, cols, rows),
+    resize: (id, cols, rows) => getManager().resize(id, cols, rows),
+    // The policy point is the server, which drops a browser's cols/rows while
+    // this is true rather than passing them here. It is a thunk, not a value,
+    // for the reason every other thunk on this host is one: the window can go
+    // and come back inside one connection, and a captured answer would be a
+    // stale one for the rest of it.
+    deskOpen,
     snapshot: snapshotForBrowser,
     layout: dispatchLayout,
     // The exported functions, not the IPC handlers: a second host calls what
@@ -1156,9 +1161,6 @@ async function start(): Promise<void> {
     },
     onWatch: (ids) => {
       watched = new Set(ids)
-      // A pane nobody is reading has no browser geometry to remember; keeping
-      // it would let a stale size be re-asserted at the next reload.
-      for (const id of [...browserGeometry.keys()]) if (!watched.has(id)) browserGeometry.delete(id)
       publishWatched()
     },
     log: (line) => console.log(line)
@@ -1196,20 +1198,26 @@ async function start(): Promise<void> {
         .find((s) => s.id === id)
       if (session) instance.pushSessionStarted(session)
       instance.pushSessions()
-      // Re-adoption after a renderer reload arrives here too. pty-host resizes
-      // a re-adopted session to the renderer's own geometry *after* announcing
-      // the spawn (see the `existed` branch of its create), so a browser
-      // reading that pane has just had the width taken off it without being
-      // told. Putting it back therefore has to happen once that resize has
-      // run, which is what the microtask buys — nothing between the two is
-      // asynchronous, so this lands immediately afterwards rather than at some
-      // guessed interval.
-      const geometry = watched.has(id) ? browserGeometry.get(id) : undefined
-      if (geometry) queueMicrotask(() => resizeForBrowser(id, geometry.cols, geometry.rows))
-      else publishWatched()
+      // Re-adoption after a renderer reload arrives here too, and a renderer
+      // that has just reloaded has forgotten which of its panes a browser is
+      // reading — the labels on them, and nothing else now, but a label that
+      // survives a dev reload is a label that can be trusted. Re-stating the
+      // list costs one message.
+      publishWatched()
+    },
+    onResize: () => {
+      // The desk moved a pane's grid, and every browser reading it has just
+      // been left drawing the wrong one. `sessions` already carries cols/rows,
+      // so the news needs no new frame — only sending. Coalesced, because a
+      // window drag or a split is several panes resizing in the same breath and
+      // each one would otherwise broadcast the whole list.
+      if (geometryPush) return
+      geometryPush = setTimeout(() => {
+        geometryPush = null
+        instance.pushSessions()
+      }, GEOMETRY_PUSH_MS)
     },
     onExit: (id, exitCode) => {
-      browserGeometry.delete(id)
       instance.pushExit(id, exitCode)
       // A dead pane changes the picture, so the list is refreshed too.
       instance.pushSessions()
@@ -1431,6 +1439,10 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   unsubscribePty = null
   unsubscribeGit?.()
   unsubscribeGit = null
+  // A pending push would fire into a server that has stopped, which is the
+  // ordinary shape of switching the link off a beat after moving a pane.
+  if (geometryPush) clearTimeout(geometryPush)
+  geometryPush = null
   releaseBlocker()
 
   const instance = server
@@ -1491,29 +1503,6 @@ export function registerWebHandlers(): void {
 
   ipcMain.handle(IPC.webSignOut, async (): Promise<WebStatus> => {
     await signOut()
-    return webStatus()
-  })
-
-  ipcMain.handle(IPC.webRevoke, (_e, deviceId: string): WebStatus => {
-    const id = String(deviceId ?? '')
-    if (getAuth().revoke(id)) {
-      // Revoking a browser that is connected right now has to hang up on it, or
-      // "revoked" would only mean "revoked next time" — and this door has a
-      // live shell behind it.
-      server?.disconnectDevice(id)
-      report('Browser removed.')
-    }
-    return webStatus()
-  })
-
-  ipcMain.handle(IPC.webForget, (_e, deviceId: string): WebStatus => {
-    const id = String(deviceId ?? '')
-    if (getAuth().forget(id)) {
-      // Same reasoning as revoke: whatever the row said, the socket it belongs
-      // to is no longer one this desktop has agreed to.
-      server?.disconnectDevice(id)
-      report('Browser forgotten.')
-    }
     return webStatus()
   })
 

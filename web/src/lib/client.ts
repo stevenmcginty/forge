@@ -158,8 +158,9 @@ export interface ForgeCredentials {
  * What a refusal means for the reconnect loop.
  *
  * One table rather than a chain of ifs, because the whole value of `WebRefusal`
- * being eight words instead of one string is that each has a different recovery,
- * and a recovery that only exists in prose is one the code does not have.
+ * being several words instead of one string is that each has a different
+ * recovery, and a recovery that only exists in prose is one the code does not
+ * have.
  */
 type Retry =
   /** Do not reconnect. A human has to do something. */
@@ -177,13 +178,10 @@ function retryPolicy(reason: WebRefusal): Retry {
     // Retrying a correct credential against the wrong desktop loops forever.
     case 'wrong-account':
       return { kind: 'stop' }
-    // This browser sent a blank `deviceId`, so there is nothing to record an
-    // admission against. Reconnecting would send the same blank one forever;
-    // recovery is a reload, which mints one.
+    // This browser sent a blank `deviceId`, so its storage is unavailable.
+    // Reconnecting would send the same blank one forever; recovery is a reload,
+    // which mints one.
     case 'not-approved':
-      return { kind: 'stop' }
-    // "The page should forget its device id and stop reconnecting."
-    case 'revoked':
       return { kind: 'stop' }
     // Recovery is a reload; this bundle cannot become a different one.
     case 'proto':

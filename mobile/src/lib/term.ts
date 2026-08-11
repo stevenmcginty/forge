@@ -32,12 +32,34 @@ import { FitAddon } from '@xterm/addon-fit'
  *
  * Canvas rendering, not WebGL: the WebGL addon is the desktop's default but
  * loses its context whenever Android backgrounds the app, and comes back blank.
+ *
+ * ## Whose grid this is, which is not this phone's
+ *
+ * A PTY has one grid and a phone is a second viewer of it. While the desktop
+ * has a window open the desktop owns that grid — nothing a phone sends moves
+ * it, by design, because plugging a device in must not change the resolution of
+ * the machine somebody is working at (see `deskOpen` in
+ * electron/mobile/server.ts). So this file does two things at once: it goes on
+ * fitting the container and reporting that geometry through `onResize` — the
+ * wish, which is granted the moment the desk's window closes — and it draws
+ * whatever grid the desktop says the session really has, shrinking the *font*
+ * until that grid fits the screen it has. `follow` is where the second half
+ * happens, and when the two agree it does nothing at all.
  */
 
 export interface TermHost {
   term: Terminal
-  /** Refit to the container and return the new geometry, or null if unchanged. */
+  /**
+   * Refit to the container and return this phone's own geometry, or null if it
+   * is unchanged. Note that this is the size this phone *would like* — what is
+   * on screen afterwards may be the desktop's grid instead. See `follow`.
+   */
   fit: () => { cols: number; rows: number } | null
+  /**
+   * Draw the grid the desktop says this session actually has, or null to go
+   * back to drawing this phone's own fit. See the geometry note in the header.
+   */
+  follow: (size: { cols: number; rows: number } | null) => void
   write: (data: string) => void
   /** Wipe the screen and scrollback — used before painting a replay buffer. */
   reset: () => void
@@ -50,6 +72,17 @@ export interface TermOptions {
   onData: (data: string) => void
   onResize: (cols: number, rows: number) => void
 }
+
+/**
+ * How small the font may go while shrinking a desktop grid onto this screen.
+ *
+ * There is a size below which a terminal stops being readable and starts being
+ * a texture, and a pane rendered at 4px is not "still working" in any sense
+ * that matters. At the floor the shrinking stops and the terminal overflows its
+ * holder, which `.term-holder` clips. A desk pane has to be roughly twice a
+ * handset's width before it is reached.
+ */
+const MIN_FONT_PX = 7
 
 export function mountTerm(container: HTMLElement, options: TermOptions): TermHost {
   const term = new Terminal({
@@ -92,21 +125,87 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
 
   let lastCols = 0
   let lastRows = 0
+  /** The grid this phone's own holder would hold at this phone's own font. */
+  let natural: { cols: number; rows: number } | null = null
+  /** The grid the desktop says this session actually has. Null while unknown. */
+  let desired: { cols: number; rows: number } | null = null
+
+  /**
+   * Put the right grid on screen at the largest font it fits in.
+   *
+   * The desktop's grid whenever this pane has been told one, and this phone's
+   * own until then. When the two agree — which is the whole of the case where
+   * the desk has no window and the wish below was granted — the second branch
+   * finds nothing to change and costs a comparison.
+   *
+   * The scale comes out of the two grids rather than out of any measurement of
+   * a character: `natural` is what this holder holds at `options.fontSize`, so
+   * `natural.cols / desired.cols` is exactly the factor the type has to come
+   * down by for `desired.cols` of them to fit the same width. Never *up*,
+   * because a desk pane narrower than a handset is better letterboxed than
+   * blown up past the size the rest of the app is set in.
+   */
+  const apply = (): void => {
+    // Nobody has told this pane what the desktop's grid is, so this phone's own
+    // is the only one there is — and the addon's own `fit` is what applies it,
+    // rather than a hand-rolled resize that would be the same call minus
+    // whatever else it does on the way.
+    if (!desired) {
+      if (term.options.fontSize !== options.fontSize) term.options.fontSize = options.fontSize
+      try {
+        fitAddon.fit()
+      } catch {
+        /* xterm throws if measured mid-teardown — harmless */
+      }
+      return
+    }
+    if (desired.cols < 1 || desired.rows < 1) return
+    const scale = natural ? Math.min(natural.cols / desired.cols, natural.rows / desired.rows) : 1
+    const size = scale >= 1 ? options.fontSize : Math.max(MIN_FONT_PX, Math.floor(options.fontSize * scale))
+    if (term.options.fontSize !== size) term.options.fontSize = size
+    if (term.cols === desired.cols && term.rows === desired.rows) return
+    try {
+      term.resize(desired.cols, desired.rows)
+      // A resize is not on its own a repaint, and this one is not the addon's:
+      // `FitAddon.fit` wipes the rendered rows before it resizes, and skipping
+      // that step is measurably not free — the same omission on Forge Web left a
+      // freshly mounted terminal blank after its replay was written. The
+      // desktop's own `redraw` reaches for the same public refresh.
+      term.refresh(0, term.rows - 1)
+    } catch {
+      /* xterm throws if measured mid-teardown — harmless */
+    }
+  }
 
   const fit = (): { cols: number; rows: number } | null => {
     // A container with no height — mid-layout, or while the keyboard animates —
-    // makes FitAddon compute a nonsense geometry and resize the real PTY to it.
+    // makes FitAddon compute a nonsense geometry, and a nonsense geometry is
+    // what the desktop would be asked for.
     if (container.clientWidth < 8 || container.clientHeight < 8) return null
+    // Measured at this phone's own type size, whatever the terminal is
+    // currently drawn at: the wish is "the grid I would choose", not "the grid
+    // I would choose if I stayed squinting at the desktop's". xterm remeasures
+    // its cell synchronously when the option is set, so what `proposeDimensions`
+    // reads a line later is already the new one — and `propose` rather than
+    // `fit`, because measuring the box and deciding what goes on screen are two
+    // different questions here. `apply` answers the second one.
+    if (term.options.fontSize !== options.fontSize) term.options.fontSize = options.fontSize
+    let proposed
     try {
-      fitAddon.fit()
+      proposed = fitAddon.proposeDimensions()
     } catch {
+      // Measured mid-teardown, or before the renderer exists. The observer
+      // below is the retry, exactly as it is for a container with no box.
       return null
     }
-    if (term.cols === lastCols && term.rows === lastRows) return null
-    lastCols = term.cols
-    lastRows = term.rows
-    options.onResize(term.cols, term.rows)
-    return { cols: term.cols, rows: term.rows }
+    if (!proposed || !Number.isFinite(proposed.cols) || !Number.isFinite(proposed.rows)) return null
+    natural = { cols: proposed.cols, rows: proposed.rows }
+    apply()
+    if (natural.cols === lastCols && natural.rows === lastRows) return null
+    lastCols = natural.cols
+    lastRows = natural.rows
+    options.onResize(natural.cols, natural.rows)
+    return { cols: natural.cols, rows: natural.rows }
   }
 
   const releaseTouch = enableTouchScroll(container, term, () => options.fontSize)
@@ -134,6 +233,12 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
   return {
     term,
     fit,
+    follow: (size) => {
+      const next = size && size.cols > 0 && size.rows > 0 ? { cols: size.cols, rows: size.rows } : null
+      if (next?.cols === desired?.cols && next?.rows === desired?.rows) return
+      desired = next
+      apply()
+    },
     write: (data) => term.write(data),
     reset: () => term.reset(),
     focus: () => term.focus(),
@@ -160,17 +265,36 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
  * because native scrolling moves the DOM viewport underneath a canvas that
  * xterm paints by row index — they desynchronise and you get a smear.
  *
- * The drag becomes synthetic `WheelEvent`s, not `term.scrollLines` calls.
- * `scrollLines` moves the viewport over the *normal* buffer's scrollback — and
- * an agent's TUI (Claude Code, vim, htop) runs on the alternate screen, which
- * has no scrollback, so there it is a silent no-op: the first version of this
- * gesture shipped calling it, and dragging a Claude pane did nothing at all.
- * xterm's own wheel pipeline is the one route that does the right thing in
- * every state — viewport scroll in the normal buffer, mouse-wheel reports when
- * the TUI tracks the mouse, arrow keys when it does not — and it is exactly
- * what the desktop's physical wheel goes through. So the finger is turned into
- * the event that pipeline already understands, one whole row per event, aimed
- * at the element under the touch so col/row-carrying reports come out true.
+ * ## Where the finger's movement is sent, which depends on what the pane is
+ *
+ * This used to turn the whole drag into synthetic `WheelEvent`s and let
+ * xterm's own wheel pipeline sort out what that means, on the grounds that it
+ * was the one route that did the right thing in every state. That stopped
+ * being true at the xterm 6 upgrade: it replaced the viewport with vscode's
+ * `ScrollableElement`, which reads the *legacy* `wheelDeltaY` in preference to
+ * `deltaY` (see `StandardWheelEvent` in
+ * node_modules/@xterm/xterm/src/vs/base/browser/mouseEvent.ts) — and Chrome
+ * reports `wheelDeltaY` as 0 on any `WheelEvent` built by a constructor, so a
+ * synthetic wheel over the normal buffer computed a delta of zero and
+ * scrolled nothing. A finger drag silently stopped scrolling shell panes.
+ *
+ * Fixed first in web/src/lib/term.ts, this file's sibling: the two files are
+ * not one implementation because this one also owns the touch threshold below
+ * and the keyboard workarounds above the file, which the web client has no
+ * need of, but the routing fix is identical and carried over from there. The
+ * drag is routed rather than translated once:
+ *
+ *  - **A plain scrollback gets `term.scrollLines`** — the public API for the
+ *    thing being asked for, unaffected by the wheelDeltaY regression because
+ *    it never goes through a wheel event at all.
+ *  - **A pane that has asked for the wheel still gets a wheel**, exactly as
+ *    before: on the alternate screen there is no scrollback to move — an
+ *    agent's TUI (Claude Code, vim, htop) lives there, and `scrollLines` is a
+ *    silent no-op, which is the bug this gesture's first version shipped with
+ *    — and a TUI tracking the mouse wants a wheel *report*, not a scrolled
+ *    viewport. xterm turns a wheel into arrow keys for the first and into a
+ *    report for the second, and both read `deltaY` straight off the event
+ *    rather than the legacy field, so this path was never broken.
  *
  * Two details that stop it fighting the rest of the app:
  *
@@ -230,7 +354,8 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
     }
 
     // Dragging down reveals older output, which is scrolling *up* the buffer —
-    // a negative wheel delta, same as a physical wheel.
+    // a negative count, which is what both branches below want: a negative
+    // wheel delta, same as a physical wheel, and a negative `scrollLines`.
     carry += lastY - y
     lastY = y
 
@@ -238,22 +363,30 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
     const lines = Math.trunc(carry / height)
     if (lines !== 0) {
       carry -= lines * height
-      const at = (target instanceof Element ? target : null) ?? container
-      const touch = event.touches[0]
-      // One event per row rather than one carrying the total: the alt-screen
-      // path answers an event with a keypress, not a distance, so a fast flick
-      // batched into one event would scroll a TUI by a single line.
-      for (let i = Math.abs(lines); i > 0; i--) {
-        at.dispatchEvent(
-          new WheelEvent('wheel', {
-            deltaY: Math.sign(lines) * height,
-            deltaMode: WheelEvent.DOM_DELTA_PIXEL,
-            clientX: touch.clientX,
-            clientY: touch.clientY,
-            bubbles: true,
-            cancelable: true
-          })
-        )
+      // Whether this pane's own program is what a wheel would be talking to.
+      // Both of these are xterm's own conditions for treating a wheel as
+      // something other than a scroll, read through its public surface.
+      const appWantsWheel = term.buffer.active.type === 'alternate' || term.modes.mouseTrackingMode !== 'none'
+      if (!appWantsWheel) {
+        term.scrollLines(lines)
+      } else {
+        const at = (target instanceof Element ? target : null) ?? container
+        const touch = event.touches[0]
+        // One event per row rather than one carrying the total: the alt-screen
+        // path answers an event with a keypress, not a distance, so a fast flick
+        // batched into one event would scroll a TUI by a single line.
+        for (let i = Math.abs(lines); i > 0; i--) {
+          at.dispatchEvent(
+            new WheelEvent('wheel', {
+              deltaY: Math.sign(lines) * height,
+              deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+              clientX: touch.clientX,
+              clientY: touch.clientY,
+              bubbles: true,
+              cancelable: true
+            })
+          )
+        }
       }
     }
     event.preventDefault()

@@ -21,8 +21,9 @@
  *  - a **fetch counter** answers "did anything read a credential or publish a
  *    hostname", because every credential this feature has travels over `fetch`
  *    — the JWKS, the sign-in, the token refresh, and the RTDB write itself;
- *  - a **real WebSocket** with a real Firebase-shaped ID token answers "was the
- *    revoked browser hung up on, or merely refused next time";
+ *  - a **real WebSocket** with a real Firebase-shaped ID token answers "does a
+ *    browser this desktop has never seen actually get in, and does the unlock
+ *    PIN actually stop one that has not answered it";
  *  - **settings.json, read back off disk** answers "what did signing in
  *    actually write down", the way scripts/mobile-auth-check.mjs does;
  *  - a **scripted tunnel process** answers "does the tunnel's own hostname reach
@@ -629,10 +630,6 @@ store.setSettings({
   webTokenBase: TOKEN_BASE,
   webEmail: '',
   webRefreshToken: '',
-  webDevices: [
-    { id: 'browser-1', name: 'Check', createdAt: 1, lastSeenAt: 1, revokedAt: 0 },
-    { id: 'browser-2', name: 'Check two', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }
-  ],
   // No unlock PIN, which is what this desktop ships as. Phase 5b sets one.
   webPin: '',
   // The Companion, signed in — as a *different account*. This is the whole
@@ -773,26 +770,33 @@ log(
 
 /* ================================================================== phase 5
  *
- * A live, authenticated browser, revoked while it is holding the socket.
+ * A browser this desktop has never seen, holding a good token, from anywhere.
+ *
+ * This phase used to revoke a connected browser and watch its socket drop. There
+ * is no device list to revoke from any more — it was never a gate, since any
+ * browser with a verified token for `webUid` and the PIN was admitted whether or
+ * not it was on the list — so what is asserted instead is the thing that
+ * replaced it: an unseen browser is let in on the account alone, the desktop
+ * counts it while it is there, and nothing about it is written down. What ends
+ * access now is the unlock PIN below and signing Forge Web out, both of which
+ * later phases drive.
  */
 
-console.log('\nrevoking a browser that is connected right now')
+console.log('\na browser this desktop has never seen')
 
-const first = await browser('browser-1', { origin: `https://${PROJECT}.web.app` })
+const first = await browser('never-seen-before', { origin: `https://${PROJECT}.web.app` })
 await waitFor(() => frameOf(first, 'hello-ok') || first.closed !== null, 4000, 'the first browser to be let in')
 
-log(Boolean(frameOf(first, 'hello-ok')), 'a browser with a valid token and an approved id is let in')
-log(host.webStatus().connected === 1, `and is counted as connected (${host.webStatus().connected})`)
+log(Boolean(frameOf(first, 'hello-ok')), 'a browser with a valid token is let in without ever having been approved')
+log(host.webStatus().connected === 1, `and is counted as connected while it is there (${host.webStatus().connected})`)
+log(
+  !JSON.stringify(store.getSettings()).includes('never-seen-before'),
+  'and settings.json is not given a row for it — there is no list to accumulate one'
+)
 
-const afterRevoke = await invoke('web:revoke', 'browser-1')
-await waitFor(() => first.closed !== null, 4000, 'the revoked socket to close')
-
-const refused = frameOf(first, 'refused')
-log(refused?.reason === 'revoked', `the live socket was told why (${refused?.reason})`)
-log(first.closed === 4003, `and hung up on, not left open (close ${first.closed})`)
-log(afterRevoke.devices.find((d) => d.id === 'browser-1')?.revokedAt > 0, 'the row is a tombstone, not a deletion')
+first.socket.close()
 await waitFor(() => host.webStatus().connected === 0, 2000, 'the connection count to fall')
-log(host.webStatus().connected === 0, 'nobody is connected any more')
+log(host.webStatus().connected === 0, 'and the count falls again when it hangs up')
 
 /* ================================================================== phase 5a
  *
@@ -1124,15 +1128,29 @@ log(
   'a blank site falls back to the project, which is what a single-site project has'
 )
 
-store.setSettings({ webProjectId: '' })
-const unconfigured = host.webAllowedOrigins()
+// There is no unconfigured desktop any more: clearing the project id lands on
+// the deployment Forge ships in its defaults (WEB_DEFAULT_* in
+// electron/store.ts), so a fresh install admits the real Forge Web page with
+// nothing pasted. What must still be true is that the fallback is *the shipped
+// deployment* — a cleared field must never degrade to admitting everywhere or
+// to admitting nothing, both of which this phase used to be able to say when
+// blank meant blank.
+store.setSettings({ webProjectId: '', webSiteId: '' })
+const cleared = host.webAllowedOrigins()
 log(
-  !unconfigured.some((o) => o.startsWith('https://')),
-  `an unconfigured desktop allows no https origin at all (${unconfigured.join(', ') || 'none'})`
+  cleared.includes(`https://${store.WEB_DEFAULT_SITE_ID}.web.app`),
+  `a cleared desktop falls back to the shipped deployment (https://${store.WEB_DEFAULT_SITE_ID}.web.app)`
 )
 log(
-  unconfigured.every((o) => o.startsWith('http://localhost') || o.startsWith('http://127.0.0.1')),
-  'what is left is the dev loop, and only because this is not a packaged run'
+  cleared.every(
+    (o) =>
+      [store.WEB_DEFAULT_SITE_ID, store.WEB_DEFAULT_PROJECT_ID].some(
+        (name) => o === `https://${name}.web.app` || o === `https://${name}.firebaseapp.com`
+      ) ||
+      o.startsWith('http://localhost') ||
+      o.startsWith('http://127.0.0.1')
+  ),
+  'and admits nothing beyond that deployment and the dev loop of this unpackaged run'
 )
 
 process.env['FORGE_WEB_ORIGINS'] = 'https://forge.example.test, https://second.example.test'
@@ -1174,6 +1192,11 @@ log(
   saved.webRefreshToken !== saved.companionRefreshToken && saved.webUid !== saved.companionUid,
   'and holding a different account entirely — two sessions on one desktop, sharing nothing but a provider'
 )
+// The browsers phase 5 and 5b let in wrote nothing, and the key they used to
+// write into is not one this store knows any more — so an upgrading desktop's
+// list is dropped on load rather than carried forward. Asserted against the
+// file, because a stale row nobody can see is exactly the kind that survives.
+log(saved.webDevices === undefined, 'and no list of admitted browsers, however many have been let in by now')
 
 /* ================================================================== phase 9
  *
@@ -1623,18 +1646,17 @@ held.socket.on('message', (raw) => {
 
 /* ----------------------------------------------- one PTY, two viewers
  *
- * The desktop and a browser are two viewers of one ConPTY, which has one width,
- * and until this existed both ends fitted it to their own box — so switching
- * tabs at the desk re-wrapped the browser's pane for a screen it was not on,
- * and switching tabs in the browser did the same back. The fix is that the
- * browser's watch list reaches the renderer, which then stands down; that list
- * is a broadcast, so the window installed here is what makes it observable.
+ * The desktop and a browser are two viewers of one ConPTY, which has one width.
+ * The rule is that while this desktop has a *window*, the desk owns that width:
+ * a browser says what it is reading at, the desktop ignores it, and the browser
+ * scales its own type instead. Nothing in front of the person at the desk moves
+ * because somebody opened a tab in another town.
  *
- * The size in it is the load-bearing part. It is read back off the session
- * manager rather than echoed from the browser's frame, so what the renderer is
- * told is what the PTY *is* — clamped, and after any adjustment on the way in —
- * rather than what was asked for. A renderer letterboxing itself at a size the
- * PTY never took would be the same corruption from the other direction.
+ * Both halves are asserted here because the window is what decides which one
+ * runs, and this file is the only check that can install one and take it away
+ * again. What the renderer is told is now a list of ids and no geometry — it
+ * draws these panes at its own size like any other, and all it does with the
+ * list is label them.
  */
 
 const watched = []
@@ -1649,38 +1671,73 @@ globalThis.__forgeWindows = [
   }
 ]
 
-sendFrame(held, { type: 'attach', sessionId: 'tray-1', cols: 90, rows: 30 })
+const paneNow = () => ptyHost.getManager().list().find((s) => s.id === 'tray-1')
+const deskGeometry = paneNow()
+
+// A size neither the session was created at (90x30) nor a default, so a PTY
+// that moved could only have moved because of this frame.
+sendFrame(held, { type: 'attach', sessionId: 'tray-1', cols: 104, rows: 27 })
 await waitFor(() => frameOf(held, 'replay'), 5000, 'the replay frame')
 
-const namesTray = () => watched.length > 0 && watched.at(-1).panes.some((p) => p.id === 'tray-1')
+const namesTray = () => watched.length > 0 && watched.at(-1).ids.includes('tray-1')
 await waitFor(namesTray, 5000, 'the watch broadcast')
-log(true, 'a browser attaching to a pane is named to the renderer, so the desk can stand down and hand the geometry over')
-
-// A size neither the session was created at (90x30) nor a default, so the
-// number below can only have come from this frame travelling the whole way.
-sendFrame(held, { type: 'resize', sessionId: 'tray-1', cols: 104, rows: 27 })
-await waitFor(
-  () => watched.at(-1).panes.some((p) => p.id === 'tray-1' && p.cols === 104 && p.rows === 27),
-  5000,
-  "the browser's geometry reaching the renderer"
-)
-const reported = watched.at(-1).panes.find((p) => p.id === 'tray-1')
-const livePane = ptyHost.getManager().list().find((s) => s.id === 'tray-1')
+log(true, 'a browser attaching to a pane is named to the renderer, so the pane can say it is being read from away')
 log(
-  reported.cols === livePane.cols && reported.rows === livePane.rows,
-  `and it is reported at the size the PTY actually is (${livePane.cols}x${livePane.rows}), read off the session rather than off the frame`
+  Array.isArray(watched.at(-1).ids) && watched.at(-1).ids.every((id) => typeof id === 'string'),
+  'and named is all it is — the message carries ids and no geometry, because the desk follows nobody'
 )
+
+const afterAttach = paneNow()
+log(
+  afterAttach.cols === deskGeometry.cols && afterAttach.rows === deskGeometry.rows,
+  `with a window open, the browser's attach geometry did not move the real PTY (still ${afterAttach.cols}x${afterAttach.rows})`
+)
+
+sendFrame(held, { type: 'resize', sessionId: 'tray-1', cols: 132, rows: 44 })
+// Long enough that a resize which was going to land would have landed: the
+// frame is answered on the same socket the replay above arrived on, and every
+// other assertion in this phase settles inside a second.
+await new Promise((r) => setTimeout(r, 500))
+const afterResize = paneNow()
+log(
+  afterResize.cols === deskGeometry.cols && afterResize.rows === deskGeometry.rows,
+  'and neither did a resize frame — the desk keeps the grid it had while its window is open'
+)
+
+// The other direction: the desk moves the pane, and a browser reading it has to
+// be told, or it goes on drawing a shape the PTY no longer has. `sessions`
+// already carries cols/rows, so this is a push rather than a new frame.
+const sessionsBefore = held.frames.filter((f) => f.type === 'sessions').length
+ptyHost.getManager().resize('tray-1', 96, 28)
+await waitFor(
+  () =>
+    held.frames
+      .filter((f) => f.type === 'sessions')
+      .slice(sessionsBefore)
+      .some((f) => f.sessions.some((s) => s.id === 'tray-1' && s.cols === 96 && s.rows === 28)),
+  5000,
+  'the desk-driven geometry reaching the browser'
+)
+log(true, 'while a resize made at the desk is pushed to every browser, which is how they follow it')
 
 sendFrame(held, { type: 'detach', sessionId: 'tray-1' })
-await waitFor(() => watched.at(-1).panes.length === 0, 5000, 'the pane being handed back')
-log(true, 'and dropping off the list is the same message with the pane no longer in it — the desk owns its geometry again')
+await waitFor(() => watched.at(-1).ids.length === 0, 5000, 'the pane being handed back')
+log(true, 'and dropping off the list is the same message with the pane no longer in it')
 
-// Re-attached at the browser's own size, because everything below reads this
-// pane's output back down this socket, and only a subscriber is sent it.
+// Re-attached because everything below reads this pane's output back down this
+// socket, and only a subscriber is sent it. Still with the window installed,
+// because the broadcast this waits on is a message to a renderer.
 sendFrame(held, { type: 'attach', sessionId: 'tray-1', cols: 104, rows: 27 })
 await waitFor(namesTray, 5000, 'the re-attach')
-// Away again: no window is the honest state for the rest of this run.
+
+// And away: the window closes, Forge Web keeps the terminals, and with nobody
+// at the desk to disturb, the browser's own geometry is honoured again — which
+// is the whole case this feature exists for. No window is also the honest state
+// for the rest of this run.
 globalThis.__forgeWindows = []
+sendFrame(held, { type: 'resize', sessionId: 'tray-1', cols: 104, rows: 27 })
+await waitFor(() => paneNow().cols === 104 && paneNow().rows === 27, 6000, "the browser's geometry with no window open")
+log(true, 'with the window closed, the very same frame resizes the real PTY — the browser is the only viewer left')
 
 // A string that only ever exists in pwsh's *output* — what was typed is a
 // concatenation of two halves of it — so a client-side echo cannot fake this.

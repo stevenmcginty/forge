@@ -2,7 +2,6 @@ import { X509Certificate, createVerify, timingSafeEqual } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
 import { AUTH_LOCKOUT_MS, AUTH_MAX_FAILURES } from '@shared/mobile'
 import { PIN_MAX_DIGITS, PIN_MIN_DIGITS, type WebRefusal } from '@shared/web'
-import type { WebDeviceRecord } from '@shared/types'
 import { verifyPin } from './pin'
 
 /**
@@ -26,13 +25,12 @@ import { verifyPin } from './pin'
  * shared/web.ts). Minting a second credential beside a verified one would add a
  * thing to steal and prove nothing the first does not.
  *
- * So the hashing rule does not appear on the *device list*, and its absence is
- * not a relaxation. The rule underneath it is the one that carries over:
- * **nothing written to settings.json may be usable as a credential.** Mobile
- * satisfies that by storing a one-way image of its token. Forge Web satisfies
- * it by having no token to store — a `WebDeviceRecord` is an id, a name and
- * three timestamps, and a copy of the whole device list is a list of browser
- * names. It records where a token has been used; it is not a key.
+ * So the hashing rule has nothing here to apply to, and its absence is not a
+ * relaxation. The rule underneath it is the one that carries over: **nothing
+ * written to settings.json may be usable as a credential.** Mobile satisfies
+ * that by storing a one-way image of its token. Forge Web satisfies it by
+ * having nothing to store at all — this module writes no record of any browser,
+ * so there is no list of admissions to steal, to leak, or to go stale.
  *
  * The one secret this feature does write down is the unlock PIN, and it obeys
  * that rule too: electron/web/pin.ts stores a scrypt image of it and never the
@@ -42,25 +40,27 @@ import { verifyPin } from './pin'
  * ## The door is the account plus a PIN, and nothing else
  *
  * There is no prompt at the desk here, and there used to be. The word-pair
- * approval and the TOTP second factor are both gone, replaced by one thing a
- * person sets once in Settings: an unlock PIN, asked of every browser on every
- * connection.
+ * approval, the TOTP second factor and the approved-browser list are all gone,
+ * replaced by one thing a person sets once in Settings: an unlock PIN, asked of
+ * every browser on every connection.
  *
- * The reason is that a prompt at the desk can only be answered by somebody
- * standing at this machine, so a door that demanded one was a door that locked
- * Steve out of his own desktop from a hotel a hundred miles away — and a TOTP
- * enrolment is a phone, an app and ten recovery codes to keep, for a feature
- * used by exactly one person who is already signed into an account. What
- * survives being away from the desk is what actually defends this door:
+ * The reason is that anything answered at the desk can only be answered by
+ * somebody standing at this machine, so a door that demanded one was a door
+ * that locked Steve out of his own desktop from a hotel a hundred miles away —
+ * and a TOTP enrolment is a phone, an app and ten recovery codes to keep, for a
+ * feature used by exactly one person who is already signed into an account. The
+ * device list went the same way and for a related reason: it never was a gate
+ * (an unknown browser holding a good token and the PIN was admitted anyway), so
+ * all it did was accumulate rows whose Revoke button implied a lock that was
+ * not there. What survives being away from the desk is what actually defends
+ * this door:
  *
  *  - the token is verified against Google's keys on every connection;
  *  - the uid must match, and a token for another account is refused;
- *  - **a revoked browser is refused**, before the PIN is even asked for, and
- *    revoking drops its live socket (electron/web-host.ts);
  *  - the PIN, which is the one thing a stolen Firebase password does not come
- *    with, and which is asked afresh every time — a browser on the device list
- *    is excused nothing;
- *  - every browser is recorded, listed and revocable.
+ *    with, and which is asked afresh of every browser on every connection —
+ *    there is no list to be on and nothing that excuses it;
+ *  - the per-source lockout below, which is what makes a short PIN defensible.
  *
  * With no PIN set the account alone gets in, which is the state this desktop
  * ships in and is deliberate rather than an oversight: shared/types.ts states
@@ -157,14 +157,22 @@ const JWKS_MIN_REFETCH_MS = 60_000
 /* ------------------------------------------------------------------- shapes */
 
 /**
- * An admitted browser, as persisted in Settings. Note: no credential anywhere.
+ * The browser on the far end of one admitted connection.
  *
- * An alias of the settings record rather than a second declaration, so the
- * thing this module writes and the thing `Settings.webDevices` holds cannot
- * drift apart. The import is type-only, so this file still carries no runtime
- * dependency beyond `node:crypto` and the check script can bundle it alone.
+ * Nothing here is persisted and nothing here is a credential: it is the two
+ * untrusted strings off the `hello` frame, carried so that electron/web/server.ts
+ * has something to log a connection under and something to name a browser by in
+ * the presence line. It lives and dies with the socket — this desktop keeps no
+ * record of which browsers have been admitted, deliberately, because the list it
+ * used to keep was never a gate and its Revoke button implied a lock that was
+ * not there.
  */
-export type WebDevice = WebDeviceRecord
+export interface WebDevice {
+  /** The browser's own per-profile id, from `WebHelloFrame.deviceId`. */
+  id: string
+  /** What the browser called itself. Untrusted display text — show, never obey. */
+  name: string
+}
 
 /**
  * The one sentence a refused PIN ever gets, wherever it was presented.
@@ -244,10 +252,6 @@ const JWKS_TIMEOUT_MS = 8_000
  * socket, or a file.
  */
 export interface WebAuthHost {
-  /** The admitted browsers as they stand in settings. */
-  load: () => WebDevice[]
-  /** Persist a changed device list. Called on admit, revoke and last-seen bumps. */
-  save: (devices: WebDevice[]) => void
   /** Google's keys. Required, never defaulted — see `JwksFetcher`. */
   fetchJwks: JwksFetcher
   /**
@@ -309,7 +313,7 @@ export interface WebAuthInput {
   source: string
   /** The Firebase ID token off the `hello` frame. */
   idToken: string
-  /** The browser's per-profile id. Compared, never trusted. */
+  /** The browser's per-profile id. Only ever checked for being there at all. */
   deviceId: string
   /** Untrusted display text. */
   deviceName: string
@@ -408,55 +412,12 @@ export class WebAuth {
     this.now = host.now ?? (() => Date.now())
   }
 
-  /* ------------------------------------------------------------- the device list */
-
-  devices(): WebDevice[] {
-    return this.host.load()
-  }
-
-  /**
-   * Revoke a browser: it keeps its row, marked. Its live socket is closed by the
-   * server, separately.
-   *
-   * A tombstone rather than a deletion, because `revoked` and `not-approved` are
-   * different answers with different recoveries — see `WebDeviceRecord.revokedAt`
-   * — and a deleted row would make a revoked browser look like a stranger and
-   * earn it a fresh prompt every time it reconnected.
-   */
-  revoke(deviceId: string): boolean {
-    const devices = this.host.load()
-    const found = devices.find((d) => d.id === deviceId && !d.revokedAt)
-    if (!found) return false
-    found.revokedAt = this.now()
-    this.host.save(devices)
-    return true
-  }
-
-  revokeAll(): void {
-    const now = this.now()
-    this.host.save(this.host.load().map((d) => (d.revokedAt ? d : { ...d, revokedAt: now })))
-  }
-
-  /**
-   * Drop a row entirely, tombstone and all — the only way back for a revoked
-   * browser, and a deliberate act at the desk rather than something the browser
-   * can ask for. Forgotten, it is a stranger again, and a stranger needs a human
-   * to press Allow.
-   */
-  forget(deviceId: string): boolean {
-    const devices = this.host.load()
-    const next = devices.filter((d) => d.id !== deviceId)
-    if (next.length === devices.length) return false
-    this.host.save(next)
-    return true
-  }
-
   /* ----------------------------------------------------------------- the door */
 
   /**
    * Authenticate a `hello`.
    *
-   * Six gates, in this order, and the order is load-bearing:
+   * Five gates, in this order, and the order is load-bearing:
    *
    *  1. **Lockout**, so a source that has been failing does not get to keep
    *     trying while the rest of this runs — and, since the PIN is short, so
@@ -470,18 +431,15 @@ export class WebAuth {
    *  3. **The account**, which is `wrong-account` and a genuinely different
    *     outcome: a different sentence, a different recovery, and never a retry
    *     loop on a correct credential.
-   *  4. **A device id at all**, because an admission is recorded against one
-   *     and a revocation later names one.
-   *  5. **Revocation.** A browser somebody ended at this desk stays ended, and
-   *     it is turned away *before* being invited to type a PIN — there is
-   *     nothing a correct one could have bought it, and a revoked browser being
-   *     asked to guess is a revoked browser being given attempts.
-   *  6. **The PIN**, when one is set. Asked of every browser on every
-   *     connection; being on the device list excuses nothing.
+   *  4. **A device id at all.** Not an admission check — nothing is looked up
+   *     and nothing is recorded — but a page that sent a blank one is a page
+   *     whose storage is unavailable, and telling it so is the only way it ever
+   *     finds out. See `not-approved` in shared/web.ts.
+   *  5. **The PIN**, when one is set. Asked of every browser on every
+   *     connection, with nothing that excuses it.
    *
-   * Then one admission path, not two: a known row is updated and an unknown one
-   * is created. There is no prompt branch any more, so there is no way for the
-   * two to drift.
+   * Then one admission path and no bookkeeping: what comes back is the browser's
+   * own two strings, for the length of this socket and no longer.
    */
   async authenticate(input: WebAuthInput): Promise<WebAuthOutcome> {
     const locked = this.lockout(input.source)
@@ -490,10 +448,10 @@ export class WebAuth {
     const verified = await this.checkToken(input.idToken)
     if (!verified.ok) return this.fail(input.source, verified)
 
-    // Clamped to the same bounds `webDevices` in electron/store.ts enforces on
-    // the way back off disk, because this is the end that writes them: a store
-    // that trims what it reads and a writer that does not is a row that changes
-    // shape on the next restart, and the id is what a device is matched by.
+    // Bounded because both arrive off a public socket and both end up in log
+    // lines and, in the case of the name, on the desktop's own screen. Neither
+    // is stored, so the bound is about what an unbounded string can do on the
+    // way past rather than about what a row on disk should look like.
     const deviceId = input.deviceId.slice(0, 128)
     const deviceName = (input.deviceName || 'Browser').slice(0, 64)
     if (!deviceId) {
@@ -501,17 +459,6 @@ export class WebAuth {
         ok: false,
         reason: 'not-approved',
         message: 'This browser did not identify itself, so it cannot be admitted. Reload the page and try again.'
-      })
-    }
-
-    const devices = this.host.load()
-    const known = devices.find((d) => sameString(d.id, deviceId))
-
-    if (known?.revokedAt) {
-      return this.fail(input.source, {
-        ok: false,
-        reason: 'revoked',
-        message: "This browser was removed from the desktop's device list. Sign in from one it still trusts."
       })
     }
 
@@ -527,17 +474,9 @@ export class WebAuth {
       return this.fail(input.source, pin)
     }
 
-    if (known) {
-      known.name = deviceName
-      known.lastSeenAt = this.now()
-      this.host.save(devices)
-      this.clearStrikes(input.source)
-      return { ok: true, device: known, claims: verified.claims }
-    }
-
-    this.host.log?.(`"${deviceName}" admitted from ${input.source}, and recorded`)
+    this.host.log?.(`"${deviceName}" admitted from ${input.source}`)
     this.clearStrikes(input.source)
-    return { ok: true, device: this.record(deviceId, deviceName), claims: verified.claims }
+    return { ok: true, device: { id: deviceId, name: deviceName }, claims: verified.claims }
   }
 
   /**
@@ -577,7 +516,7 @@ export class WebAuth {
    *     sentence for every cause.
    *
    * Note what is *not* here, and is not an oversight: no trust window, no
-   * exemption for a browser already on the device list, and nothing persisted
+   * browser this desktop has seen before and lets past, and nothing persisted
    * on success. A PIN is not spent by being used, so unlike the TOTP counter
    * this replaces there is nothing to write down — which also means there is no
    * race between two sockets presenting it at once.
@@ -781,32 +720,6 @@ export class WebAuth {
       }
     })()
     return this.fetching
-  }
-
-  /* ------------------------------------------------------------ the device list */
-
-  /**
-   * Record an admission. The one place a device row is created, and the reason
-   * it is one place is the reason `mintDevice` is one place in mobile/auth.ts:
-   * the authorisation happened before this was called, and what this guarantees
-   * is the invariant the rest of the app leans on — what reaches `save` is an
-   * id, a name and three timestamps, and never anything a browser could present
-   * later as a credential.
-   */
-  private record(deviceId: string, deviceName: string): WebDevice {
-    const device: WebDevice = {
-      id: deviceId,
-      name: deviceName,
-      createdAt: this.now(),
-      lastSeenAt: this.now(),
-      revokedAt: 0
-    }
-    // Recording a browser this desktop already has a row for replaces it, rather
-    // than leaving a second row with the same id and a stale name.
-    const devices = this.host.load().filter((d) => d.id !== device.id)
-    devices.push(device)
-    this.host.save(devices)
-    return device
   }
 
   /* -------------------------------------------------------------------- lockout */

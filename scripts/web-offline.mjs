@@ -482,8 +482,6 @@ async function main() {
 
   const layoutOps = []
   const auth = new WebAuth({
-    load: () => [{ id: DEVICE_ID, name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }],
-    save: () => {},
     fetchJwks: async () => ({ body: JSON.stringify(served), cacheControl: 'public, max-age=21600' }),
     projectId: () => PROJECT,
     uid: () => UID

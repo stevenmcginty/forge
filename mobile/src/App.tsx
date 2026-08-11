@@ -482,7 +482,16 @@ export function App(): React.JSX.Element {
       {screen.at === 'pane' ? (
         <PaneView
           link={link}
-          session={screen.session}
+          /*
+           * The live row, not the one captured when the pane was opened. The
+           * desktop owns this PTY's grid and pushes a fresh session list every
+           * time it moves one (see the `onResize` sink in
+           * electron/mobile-host.ts), and the whole point of that push is the
+           * cols/rows on it — which a snapshot taken minutes ago would throw
+           * away. The snapshot stays the fallback for the beat between a pane
+           * dying and `onExit` walking this screen back to the list.
+           */
+          session={picture.sessions.find((s) => s.id === screen.session.id) ?? screen.session}
           title={screen.title}
           fontSize={13}
           onBack={() => setScreen({ at: 'browse', projectId: projectOfSession(picture, screen.session.id) })}

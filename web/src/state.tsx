@@ -33,7 +33,7 @@ import {
   sameProjects,
   type Snapshot
 } from './lib/cache'
-import { deviceId, deviceName, forgetDevice } from './lib/device'
+import { deviceId, deviceName } from './lib/device'
 import { readHost } from './lib/rendezvous'
 
 /**
@@ -126,8 +126,6 @@ export interface ForgeActions {
   submitPin: (pin: string) => void
   /** Look for the desktop again — the offline screen's button, and its poll. */
   refind: () => void
-  /** Forget this browser's device id, so the next connection asks to be let in again. */
-  forgetThisBrowser: () => void
   selectProject: (projectId: string) => void
   /** One layout gesture. Resolves with the desktop's refusal sentence, or null. */
   layout: (op: Omit<WebLayoutOp, 'projectId'> & { projectId?: string }) => Promise<string | null>
@@ -611,10 +609,6 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       retry: () => client.retry(),
       submitPin: (pin) => client.submitPin(pin),
       refind: () => void find(),
-      forgetThisBrowser: () => {
-        forgetDevice()
-        client.retry()
-      },
       selectProject: (id) => {
         // Local *and* mirrored. Which project this browser is looking at is not
         // in `hello-ok` and not in any push — the protocol has no field for it —

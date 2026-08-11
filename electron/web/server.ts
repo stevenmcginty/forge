@@ -143,7 +143,6 @@ const GIT_ACTIONS: readonly GitActionKind[] = ['fetch', 'pull', 'push', 'switch'
  */
 const CLOSE_UNAUTHENTICATED = 4001
 const CLOSE_PROTO = 4002
-const CLOSE_REVOKED = 4003
 const CLOSE_HEARTBEAT = 4008
 const CLOSE_GOING_AWAY = 1001
 
@@ -194,6 +193,26 @@ export interface WebServerHost {
   replay: (id: string) => string
   write: (id: string, data: string) => boolean
   resize: (id: string, cols: number, rows: number) => boolean
+
+  /**
+   * Does this desktop have a window open right now?
+   *
+   * The one question the geometry policy turns on. A PTY has one grid and this
+   * link gives it two viewers, and the answer used to be Forge Mobile's — the
+   * browser wins, the desk letterboxes itself. For a phone that is right; for
+   * the machine somebody is sitting at it is not, because it means every pane
+   * in front of them re-flows the moment a tab opens elsewhere. So: while there
+   * is a window, the desk owns the grid and a browser's `cols`/`rows` are
+   * *dropped* here rather than obeyed — see the `attach` and `resize` cases.
+   * With no window there is nothing to disturb and the browser's wish is
+   * granted exactly as it always was, which is the case Forge Web is for.
+   *
+   * Optional, and a host that omits it is treated as having no window: this
+   * file must stay Electron-free (scripts/web-smoke.mjs drives it with a fake
+   * host and a real PTY), and "head-less, so the browser is the only viewer" is
+   * the honest reading of a host that cannot answer.
+   */
+  deskOpen?: () => boolean
 
   /** The opening picture: whatever the browser needs to draw the workspace. */
   snapshot: () => Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces'>
@@ -267,13 +286,11 @@ export interface WebServerHost {
   /**
    * Which sessions a browser currently has open, whenever that set changes.
    *
-   * A PTY has one geometry and this link gives it two viewers. Without this,
-   * both fit it to their own box and the last one to move wins: the desktop
-   * pane refits on any layout change, so a browser reading a pane on a train
-   * would have the width yanked back mid-sentence and every line after that
-   * wrapped for a screen it is not on. Naming the watched sessions lets the
-   * desktop stand down and follow the browser for as long as the browser is the
-   * one reading — the same arrangement `onWatch` makes for a phone.
+   * Nothing on the desktop changes shape because of this — `deskOpen` above is
+   * where that was decided — so what it buys is a *label*: a pane on the desk
+   * that says a browser is reading it, which is worth knowing and cheap to say.
+   * The phone's identical hook still moves geometry, because a phone is a
+   * glance rather than a second desk.
    *
    * Fired on attach, detach, exit and hangup, with the full set each time; a
    * diff the receiver has to reassemble is a diff that can be missed.
@@ -591,20 +608,6 @@ export class WebServer {
     }
   }
 
-  /** Close any live socket belonging to a revoked browser, immediately. */
-  disconnectDevice(deviceId: string): void {
-    for (const client of [...this.clients]) {
-      if (client.device?.id === deviceId) {
-        this.send(client, {
-          type: 'refused',
-          reason: 'revoked',
-          message: "This browser was removed from the desktop's device list."
-        })
-        this.drop(client, CLOSE_REVOKED, 'Device revoked')
-      }
-    }
-  }
-
   /* -------------------------------------------------------- screen mirror */
 
   /**
@@ -848,15 +851,18 @@ export class WebServer {
           return
         }
         client.subs.add(id)
-        // Before the geometry and before the replay: the buffer about to be sent
-        // was written at whatever width the pane is now, and the sooner the
-        // desktop hands that width over the fewer lines the browser paints at a
-        // size it is not.
+        // Before the replay, so the desktop can label the pane as read from
+        // elsewhere as early as possible.
         this.announceWatch()
         // `cols`/`rows` are optional and mean "and this is the size I am reading
         // it at". Omitting them means "I will take whatever size it is", which
-        // is what a read-only or thumbnail view should send.
-        if (frame.cols !== undefined || frame.rows !== undefined) {
+        // is what a read-only or thumbnail view should send — and with a window
+        // open at the desk, `deskOpen` makes that of *every* attach. Dropped
+        // silently rather than refused: the browser is about to be sent a
+        // `replay` written at the desk's grid and it has the real cols/rows
+        // from `sessions` already, so it has everything it needs to draw this
+        // pane properly. There is nothing for an error frame to say.
+        if ((frame.cols !== undefined || frame.rows !== undefined) && !this.host.deskOpen?.()) {
           this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows))
         }
         const buffer = this.host.replay(id)
@@ -919,6 +925,12 @@ export class WebServer {
         // is about to be told the session ended by its own `exit` frame. The
         // same silence, and the same reasoning, as electron/mobile/server.ts.
         if (!current) return
+        // And the same silence for a resize that arrives while somebody is
+        // working at the desk — see `deskOpen`. The browser keeps sending these
+        // on every box change on purpose: the wish is honoured the moment the
+        // desk's window goes, and a client that had to be told the policy would
+        // be a client that could hold a stale copy of it.
+        if (this.host.deskOpen?.()) return
         this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows))
         return
       }
@@ -1411,9 +1423,10 @@ export class WebServer {
     this.clients.delete(client)
     this.clearTimers(client)
     // Here as well as in the close handler, and not instead of it. `close`
-    // arrives on the next tick, so a revoked browser would otherwise keep its
-    // desktop encoding for it after `disconnectDevice` had supposedly ended
-    // things; `dropViewer` is idempotent, so the second call is free.
+    // arrives on the next tick, so a browser hung up on for a protocol
+    // mismatch or a missed heartbeat would otherwise keep its desktop encoding
+    // for it after the drop had supposedly ended things; `dropViewer` is
+    // idempotent, so the second call is free.
     this.dropViewer(client)
     try {
       client.socket.close(code, reason)

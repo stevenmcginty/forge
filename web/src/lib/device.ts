@@ -3,13 +3,15 @@
  *
  * The id is per browser *profile*, not per machine, and shared/web.ts says why
  * that is correct: two profiles on one machine are two devices, because the
- * thing being approved is a place a token can be used from.
+ * thing being named is a place a token is being used from.
  *
- * It is not a credential. `WebHelloFrame` is explicit that Forge Web mints no
- * device token — the Firebase ID token is the credential, and a second one
- * beside it would be a second thing to steal. So this lives in `localStorage`
- * beside the session, and losing it only costs this browser its row in the
- * desktop's device list — the next connection is recorded as a new one.
+ * It is not a credential and it is not a key to anything. `WebHelloFrame` is
+ * explicit that Forge Web mints no device token — the Firebase ID token is the
+ * credential, and a second one beside it would be a second thing to steal — and
+ * the desktop keeps no list of the browsers it has admitted, so the only thing
+ * this id has to do is be there. It lives in `localStorage` beside the session,
+ * and losing it costs nothing: the next connection mints another and is admitted
+ * on exactly the same terms.
  */
 
 const DEVICE_KEY = 'forge-web-device'
@@ -34,25 +36,8 @@ export function deviceId(): string {
 }
 
 /**
- * Forget this browser's identity, so the next connection is a stranger asking
- * again.
- *
- * The recovery for `revoked`: shared/web.ts says a revoked page "should forget
- * its device id and stop reconnecting", because a revoked device that keeps
- * knocking is a prompt storm. Forgetting is not automatic — it is what the
- * button on the refusal screen does, so the storm needs a human each time.
- */
-export function forgetDevice(): void {
-  try {
-    localStorage.removeItem(DEVICE_KEY)
-  } catch {
-    /* nothing to forget */
-  }
-}
-
-/**
- * "Chrome on Windows" — untrusted display text the desktop shows in its
- * approval prompt and device list.
+ * "Chrome on Windows" — untrusted display text the desktop puts in its log and
+ * beside a live connection.
  *
  * Derived from the user agent rather than asked for, because a text box on the
  * sign-in screen is a text box nobody fills in honestly, and this string's only

@@ -106,6 +106,16 @@ export interface PtySink {
    * much as an exit is.
    */
   onSpawn?: (id: string) => void
+  /**
+   * A session's grid changed, whoever moved it. Optional for the same reason
+   * `onSpawn` is: a sink that only relays bytes has no use for it.
+   *
+   * Forge Web needs it because the desktop owns the grid while it has a window
+   * open (see the "one PTY, two viewers" block in electron/web-host.ts): a
+   * browser reading a pane the desk has just refitted is drawing the wrong
+   * shape until it is told, and nothing else on this link would tell it.
+   */
+  onResize?: (id: string, cols: number, rows: number) => void
 }
 
 const sinks = new Set<PtySink>()
@@ -201,6 +211,7 @@ export function getManager(): PtySessionManager {
       env: { CLAUDE_CLIENT_PRESENCE_FILE: presenceFile() },
       maxSessions: MAX_SESSIONS,
       onData: queue,
+      onResize: (id, cols, rows) => toSinks((sink) => sink.onResize?.(id, cols, rows)),
       onExit: (id, exitCode, signal) => {
         // Flush whatever the process said on its way out before the exit event.
         if (pending.has(id)) {

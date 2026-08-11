@@ -339,27 +339,30 @@ async function main() {
   const ops = []
   let layoutAnswer = null
   const watches = []
+  /**
+   * Whether this pretend desktop has a window open, which is what decides who
+   * owns a PTY's grid — see `deskOpen` in electron/web/server.ts.
+   *
+   * False for every phase but the one that flips it, because a head-less server
+   * driving a real PTY is a desktop with no window by any honest reading, and it
+   * is also the state Forge Web is *for*. A host that omits the hook entirely
+   * has to behave the same way; scripts/web-e2e.mjs's server is the one that
+   * omits it, and it asserts the browser's geometry landing.
+   */
+  let deskHasWindow = false
   let releaseSkills = null
   let releaseCommands = null
 
   /**
-   * A WebAuth over its own private device list.
+   * A WebAuth wired to the same fixed project and uid every phase uses.
    *
-   * The list is held in a closure and replaced wholesale on save, exactly as
-   * scripts/web-auth-check.mjs does it. Mutating a caller's array in place looks
-   * equivalent and is not: `authenticate` bumps `lastSeenAt` on the array it was
-   * handed and then saves *that same array*, so an implementation that empties
-   * its target before refilling it wipes the device list on every successful
-   * connection — and the next hello is answered `not-approved` for a browser
-   * that was approved a second ago.
+   * There is nothing to seed it with: this door admits any browser holding a
+   * verified token for `UID` and, where a phase sets one, the unlock PIN. It
+   * keeps no list of the browsers it has admitted, so a phase says who may get
+   * in by choosing which token to mint rather than by handing over rows.
    */
-  const makeAuth = (initial, extra = {}) => {
-    let saved = initial
-    return new WebAuth({
-      load: () => saved,
-      save: (next) => {
-        saved = next
-      },
+  const makeAuth = (extra = {}) =>
+    new WebAuth({
       fetchJwks: async () => ({ body: JSON.stringify(served), cacheControl: 'public, max-age=21600' }),
       projectId: () => PROJECT,
       uid: () => UID,
@@ -370,7 +373,6 @@ async function main() {
       // itself is judged is scripts/web-auth-check.mjs.
       ...extra
     })
-  }
 
   const makeServer = (auth, extra = {}) =>
     new WebServer({
@@ -394,6 +396,7 @@ async function main() {
       skills: () => new Promise((r) => (releaseSkills = () => r(SKILLS))),
       commands: () => new Promise((r) => (releaseCommands = () => r(FEED))),
       onWatch: (ids) => watches.push(ids.join(' ')),
+      deskOpen: () => deskHasWindow,
       ...extra
     })
 
@@ -439,11 +442,7 @@ async function main() {
    * anything that has to succeed.
    */
 
-  const devicesA = [
-    { id: 'browser-1', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 },
-    { id: 'gone-1', name: 'Old Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 2 }
-  ]
-  const authA = makeAuth(devicesA)
+  const authA = makeAuth()
   const serverA = makeServer(authA)
   active = serverA
   await serverA.start({ host: '127.0.0.1', port: PORT })
@@ -481,9 +480,9 @@ async function main() {
   )
 
   // `not-approved` no longer means "no prompt can be raised for you" — there is
-  // no prompt any more — so what it is asserted on is what it means now: a
-  // browser that sent no device id, which there is nothing to record an
-  // admission against.
+  // no prompt any more — nor "you are not on the desktop's list", because there
+  // is no list either. What it is asserted on is what it means now: a browser
+  // that sent no device id, which is a page whose storage is unavailable.
   const nameless = await refusedBy({ idToken: mint(), deviceId: '' }, 'a browser with no device id')
   log(
     nameless.first('refused')?.reason === 'not-approved',
@@ -500,21 +499,14 @@ async function main() {
 
   await serverA.stop()
 
-  /* ------------------------- the two refusals that never reach a credential */
+  /* --------------------------- the refusal that never reaches a credential */
 
-  // A revoked device on a fresh auth, so the lockout above cannot be what
-  // refuses it. Revoked and not-approved are different rows and different
-  // recoveries, so they are asserted apart.
-  const devicesR = [{ id: 'gone-1', name: 'Old Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 2 }]
-  const serverR = makeServer(makeAuth(devicesR))
+  // On a fresh auth, so the lockout above cannot be what refuses it: a
+  // protocol mismatch is decided before the token is looked at, and asserting
+  // it against a locked-out source would prove nothing about which check fired.
+  const serverR = makeServer(makeAuth())
   active = serverR
   await serverR.start({ host: '127.0.0.1', port: PORT })
-
-  const revoked = await refusedBy({ idToken: mint(), deviceId: 'gone-1' }, 'a revoked device')
-  log(
-    revoked.first('refused')?.reason === 'revoked',
-    'a revoked browser is refused with revoked rather than not-approved, and raises no prompt'
-  )
 
   const staleProto = await refusedBy({ proto: WEB_PROTO + 99, idToken: mint(), deviceId: 'gone-1' }, 'a stale protocol')
   log(
@@ -572,8 +564,7 @@ async function main() {
 
   /* ================================================= PHASE B — the link */
 
-  const devices = [{ id: 'browser-1', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }]
-  const auth = makeAuth(devices)
+  const auth = makeAuth()
   const server = makeServer(auth)
   active = server
   await server.start({ host: '127.0.0.1', port: PORT })
@@ -591,7 +582,7 @@ async function main() {
   })
   await waitFor(() => browser.first('hello-ok'), 8000, 'hello-ok')
   const ok = browser.first('hello-ok')
-  log(!!ok && ok.proto === WEB_PROTO, 'a valid token for the configured uid from an approved device is let in')
+  log(!!ok && ok.proto === WEB_PROTO, 'a valid token for the configured uid is let in')
   log(ok.projects?.[0]?.name === 'forge', 'hello-ok carries the project list')
   log(ok.profiles?.[0]?.id === 'shell', 'hello-ok carries the launchable profiles')
   log(!!ok.workspaces?.p1, 'hello-ok carries the workspaces the desktop is persisting')
@@ -625,9 +616,9 @@ async function main() {
   log(browser.first('replay').truncated === false, `a buffer under MAX_REPLAY_BYTES (${MAX_REPLAY_BYTES}) is not marked truncated`)
 
   await waitFor(() => watches.length > 0, 5000, 'the watch announcement')
-  log(watches.at(-1) === 'w1', 'a browser opening a pane says so, so the desktop can stand down and hand it the geometry')
+  log(watches.at(-1) === 'w1', 'a browser opening a pane says so, so the desktop can label it as read from away')
   await waitFor(() => manager.list().find((s) => s.id === 'w1')?.cols === 100, 6000, "attach's own geometry")
-  log(true, "and attach's optional cols/rows resized the real PTY to what the browser is reading it at")
+  log(true, "and with no window at this desk, attach's optional cols/rows resized the real PTY to what the browser is reading it at")
 
   /* ------------------------------ 2b. a real byte, through a real PTY */
 
@@ -649,7 +640,35 @@ async function main() {
   browser.send({ type: 'resize', sessionId: 'w1', cols: 132, rows: 44 })
   await waitFor(() => manager.list().find((s) => s.id === 'w1')?.cols === 132, 6000, 'resize to land')
   const geometry = manager.list().find((s) => s.id === 'w1')
-  log(geometry.cols === 132 && geometry.rows === 44, 'a resize from the browser resized the real PTY')
+  log(geometry.cols === 132 && geometry.rows === 44, 'a resize from the browser resized the real PTY, because nothing is drawing this pane here')
+
+  /* --------------------------------- 3b. the same frames, with a window open
+   *
+   * A PTY has one grid, and while somebody is at the desk the desk keeps it:
+   * both frames that carry a size are dropped rather than obeyed, in silence,
+   * because the browser is told the real geometry by `sessions` anyway and
+   * scales its own type to it. The `attach` is what sequences this — it is
+   * answered on the same socket the resize was sent down, so its `replay` is
+   * proof that both frames have been handled and not merely posted.
+   */
+
+  deskHasWindow = true
+  const held = manager.list().find((s) => s.id === 'w1')
+  const replaysBefore = browser.of('replay').length
+  browser.send({ type: 'resize', sessionId: 'w1', cols: 80, rows: 24 })
+  browser.send({ type: 'attach', sessionId: 'w1', cols: 81, rows: 25 })
+  await waitFor(() => browser.of('replay').length > replaysBefore, 8000, 'the re-attach to be answered')
+  const unmoved = manager.list().find((s) => s.id === 'w1')
+  log(
+    unmoved.cols === held.cols && unmoved.rows === held.rows,
+    `with a window open at the desk, neither a resize nor an attach moved the real PTY (still ${unmoved.cols}x${unmoved.rows})`
+  )
+  log(browser.of('error').every((e) => e.sessionId !== 'w1'), 'and neither was refused out loud — a dropped wish is not an error')
+
+  deskHasWindow = false
+  browser.send({ type: 'resize', sessionId: 'w1', cols: 120, rows: 40 })
+  await waitFor(() => manager.list().find((s) => s.id === 'w1')?.cols === 120, 6000, 'the resize once the window has gone')
+  log(true, 'and the moment the desk has no window, the same frame is honoured again — the client never changed what it sends')
 
   /* ------------------------------- 11. typing into a pane that has gone */
 
@@ -825,8 +844,7 @@ async function main() {
    */
 
   const PIN = '824159'
-  const devicesC = []
-  const authC = makeAuth(devicesC, { pinHash: () => hashPin(PIN) })
+  const authC = makeAuth({ pinHash: () => hashPin(PIN) })
   const serverC = makeServer(authC)
   active = serverC
   await serverC.start({ host: '127.0.0.1', port: PORT })
@@ -849,7 +867,6 @@ async function main() {
   log(wantsPin.reason === 'pin-required', 'a browser reaching a desktop with a PIN set is refused pin-required')
   log(typeof wantsPin.message === 'string' && wantsPin.message.length > 0, 'with a sentence to put above the PIN box')
   log(!askedForPin.first('hello-ok'), 'and never sees the opening picture')
-  log(authC.devices().length === 0, 'and nothing is recorded for it')
 
   /* --------------------------------------------- 12. a wrong PIN, and the right one */
 
@@ -863,11 +880,19 @@ async function main() {
   helloC(withPin, { pin: PIN })
   await waitFor(() => withPin.first('hello-ok'), 8000, 'the browser that knows the PIN')
   log(Boolean(withPin.first('hello-ok')), 'the right PIN gets the same browser the whole opening picture')
-  log(
-    authC.devices().some((d) => d.id === 'brand-new-browser'),
-    'and it is recorded in the device list, so it can be revoked later'
-  )
   withPin.socket.close()
+
+  // The other half of "there is no list": a browser this desktop has never seen
+  // and will never remember gets in on exactly the same two things. Nothing was
+  // seeded for it, and nothing is left behind by it.
+  const strangerWithPin = await connect()
+  helloC(strangerWithPin, { deviceId: 'never-seen-before', deviceName: 'Safari on iOS', pin: PIN })
+  await waitFor(() => strangerWithPin.first('hello-ok'), 8000, 'the stranger that knows the PIN')
+  log(
+    Boolean(strangerWithPin.first('hello-ok')),
+    'and so does a browser the desktop has never seen — the account and the PIN are the whole door'
+  )
+  strangerWithPin.socket.close()
 
   await serverC.stop()
 
@@ -882,7 +907,7 @@ async function main() {
 
   const beatMs = 200
   const graceMs = 300
-  const authD = makeAuth([{ id: 'browser-1', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }])
+  const authD = makeAuth()
   const serverD = makeServer(authD, { heartbeatMs: beatMs, heartbeatGraceMs: graceMs })
   active = serverD
   await serverD.start({ host: '127.0.0.1', port: PORT })
@@ -921,16 +946,9 @@ async function main() {
   await sleep((beatMs + graceMs) * 4)
   log(alive.closed === null, 'while a browser that answers it survives, however quiet the link goes')
 
-  /* ------------------------------------------------ revoking a live socket */
-
-  log(authD.revoke('browser-1') === true, 'an approved browser can be revoked at the desk')
-  serverD.disconnectDevice('browser-1')
-  await waitFor(() => alive.closed !== null, 5000, 'the revoked socket to close')
-  log(
-    alive.closed === 4003 && alive.first('refused')?.reason === 'revoked',
-    'and revoking hangs up on the live socket with a reason, not just on the next one'
-  )
-
+  // There is no per-browser revocation to assert here any more. The only thing
+  // that ends a live connection from this side is the whole link going down,
+  // and phase B already proves that path announces itself before it hangs up.
   await serverD.stop()
 
   /* ================================== PHASE E — the screen mirror, and the
@@ -955,11 +973,7 @@ async function main() {
   const MIRROR_PIN = '246813'
   /** Set only for the escalation check below; '' for every phase before it. */
   let mirrorPin = ''
-  const devicesE = [
-    { id: 'browser-1', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 },
-    { id: 'browser-2', name: 'Firefox', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }
-  ]
-  const authE = makeAuth(devicesE, { pinHash: () => mirrorPin })
+  const authE = makeAuth({ pinHash: () => mirrorPin })
 
   /** An authenticated tab, the shape every check below starts from. */
   const admitted = async (deviceId) => {

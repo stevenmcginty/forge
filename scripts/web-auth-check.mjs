@@ -22,7 +22,7 @@
  * Every check gets its own `source` address, because the failure lockout is per
  * source and a shared one would mean check 3's strikes silently failing check 9.
  */
-import { mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createSign, generateKeyPairSync } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -36,7 +36,29 @@ mkdirSync(scratch, { recursive: true })
 // The store writes under whatever this names, so the check never goes near
 // Steve's real profile. Set before the bundle is imported: store.ts resolves
 // its root lazily, on the first write.
-process.env['FORGE_DATA_DIR'] = join(scratch, 'data')
+const dataDir = join(scratch, 'data')
+process.env['FORGE_DATA_DIR'] = dataDir
+
+/*
+ * A settings.json as an upgrading desktop's actually is: written by a Forge
+ * that still kept a list of approved browsers, and never touched since. Laid
+ * down here, before the store has read anything, so check 13 exercises the real
+ * load path rather than a patch — the claim is about what happens to a file
+ * somebody already has on disk, and a check that fed the key in through
+ * `setSettings` would be proving something easier.
+ */
+mkdirSync(dataDir, { recursive: true })
+writeFileSync(
+  join(dataDir, 'settings.json'),
+  JSON.stringify({
+    webProjectId: 'forge-web-check',
+    webDevices: [
+      { id: 'browser-1', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 },
+      { id: 'gone-1', name: 'Old Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 2 }
+    ]
+  }),
+  'utf8'
+)
 
 const PROJECT = 'forge-web-check'
 const OTHER_PROJECT = 'somebody-elses-project'
@@ -141,9 +163,6 @@ async function main() {
   /* --------------------------------------------------------- the desktop */
 
   let clock = 1_760_000_000_000
-  let saved = []
-  /** Everything ever handed to persistence, so check 13 can search all of it. */
-  const persisted = []
   let served = { [KID]: certificateFor(google, 'securetoken.google.com') }
   // Mutable so check 16 can put the desktop back into the state it ships in.
   let projectId = PROJECT
@@ -161,11 +180,6 @@ async function main() {
   let pinHash = ''
 
   const auth = new WebAuth({
-    load: () => saved,
-    save: (devices) => {
-      saved = devices
-      persisted.push(JSON.stringify(devices))
-    },
     fetchJwks: async (url) => {
       jwksFetches++
       jwksUrls.push(url)
@@ -207,11 +221,13 @@ async function main() {
 
   /* ------------------------------------------ 1. the credential that works */
 
-  saved = [{ id: 'browser-1', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }]
   const admitted = await auth.authenticate(hello('10.0.0.1', mint(), 'browser-1'))
-  log(admitted.ok === true, 'a correctly signed, correctly claimed token for the configured uid and a known device is admitted')
+  log(admitted.ok === true, 'a correctly signed, correctly claimed token for the configured uid is admitted')
   log(admitted.ok && admitted.claims.uid === UID, 'and the uid it verified as is handed back to the caller')
-  log(saved.find((d) => d.id === 'browser-1')?.lastSeenAt === clock, 'and its last-seen is bumped on the injected clock')
+  log(
+    admitted.ok && admitted.device.id === 'browser-1' && admitted.device.name === 'Chrome on Windows',
+    "and the browser's own two strings come back for the socket to be logged under"
+  )
   log(jwksUrls[0] === GOOGLE_JWKS_URL, "the keys were fetched from Google's published endpoint")
 
   /* ------------------------------------------------- 2. a broken signature */
@@ -292,83 +308,85 @@ async function main() {
 
   const stranger = await auth.authenticate(hello('10.0.0.9', mint(), 'hotel-laptop', 'Chrome on macOS'))
   log(stranger.ok === true, 'with no PIN set, a verified token for the configured uid admits a browser on its own')
-  const record = saved.find((d) => d.id === 'hotel-laptop')
   log(
-    !!record && record.name === 'Chrome on macOS' && record.createdAt === clock && record.revokedAt === 0,
-    'and the browser is recorded, named and stamped — visibility is what this mode trades friction for'
+    stranger.ok && stranger.device.name === 'Chrome on macOS',
+    'and it is named for the length of the socket, which is the only thing that name is for'
   )
-  log(auth.devices().some((d) => d.id === 'hotel-laptop'), 'and it is in the list Settings draws, so it can be revoked')
 
   /* ---------------------------------- 9. a browser that names itself nothing */
 
   const nameless = await auth.authenticate(hello('10.0.0.10', mint(), '', 'Anonymous'))
   log(
     nameless.ok === false && nameless.reason === 'not-approved',
-    'a hello with a blank device id is not-approved — there is nothing to record an admission against'
+    'a hello with a blank device id is not-approved — a page that cannot mint one has no storage, and should be told so'
   )
-  log(!saved.some((d) => d.id === ''), 'and no row is written for it')
 
-  /* ------------------------------------------ 10. revocation, in this mode */
+  /* -------------------------- 10. there is no list, and nothing to revoke on
+   *
+   * The claim Steve asked for, asserted against the class rather than against
+   * prose: access is the account plus the PIN, from any browser in the world,
+   * and there is no second mechanism sitting beside that which could disagree
+   * with it or go stale.
+   */
 
-  log(auth.revoke('hotel-laptop') === true, 'a browser admitted on the account alone can still be revoked')
-  const revokedOpen = await auth.authenticate(hello('10.0.0.11', mint(), 'hotel-laptop'))
   log(
-    revokedOpen.ok === false && revokedOpen.reason === 'revoked',
-    'and is then refused with revoked — the one answer this permissive mode must not soften'
+    typeof auth.devices !== 'function' && typeof auth.revoke !== 'function' && typeof auth.forget !== 'function',
+    'the class has no device list, no revoke and no forget — the machinery is gone rather than merely unused'
   )
-  log(auth.forget('hotel-laptop') === true, 'and it can be forgotten outright from Settings')
 
-  /* ---------------------------- 11. an admitted browser is admitted again */
+  /* ---------------------------- 11. every connection is judged from scratch */
 
   const again = await auth.authenticate(hello('10.0.0.12', mint(), 'laptop-1', 'Firefox on Linux'))
-  log(again.ok === true, 'a second unknown browser is admitted the same way')
-  const rows = saved.filter((d) => d.id === 'laptop-1')
+  log(again.ok === true, 'a second browser nobody has ever seen is admitted the same way')
   const returning = await auth.authenticate(hello('10.0.0.12', mint(), 'laptop-1', 'Firefox on Linux'))
   log(
-    returning.ok === true && saved.filter((d) => d.id === 'laptop-1').length === rows.length,
-    'and coming back updates its row rather than growing a second one with the same id'
+    returning.ok === true && returning.device.id === again.device.id,
+    'and coming back is the same answer on the same terms — nothing was remembered between the two'
   )
 
-  /* ---------------------------------------------------------- 12. revocation */
+  /* ---------------------- 12. a browser the desktop has never seen, from anywhere */
 
-  log(auth.revoke('browser-1') === true, 'an admitted browser can be revoked')
-  const revoked = await auth.authenticate(hello('10.0.0.13', mint(), 'browser-1'))
-  log(revoked.ok === false && revoked.reason === 'revoked', 'a revoked device is refused with revoked, not not-approved')
+  const strangerAgain = await auth.authenticate(hello('203.0.113.7', mint(), 'phone-in-a-hotel', 'Safari on iOS'))
+  log(
+    strangerAgain.ok === true,
+    'a brand-new browser at a brand-new address is admitted on the account alone — which is the whole point of removing the list'
+  )
 
-  /* ------------------------------------------------ 13. nothing to steal on disk */
+  /* ------------------------------------------------ 13. nothing to steal on disk
+   *
+   * There is nothing left for this module to persist, so the assertion moved to
+   * the file: the store is driven exactly as the Electron host drives it, and
+   * the settings.json that lands on disk is read back and searched.
+   */
 
   const everyToken = [good, tampered, mint()]
-  log(
-    persisted.length > 0 && persisted.every((json) => everyToken.every((token) => !json.includes(token))),
-    'no ID token was ever handed to persistence'
-  )
-  log(
-    persisted.every((json) => !json.includes('eyJ')),
-    'and nothing shaped like a JWT reached it either'
-  )
-  log(
-    saved.every((d) => Object.keys(d).sort().join(',') === 'createdAt,id,lastSeenAt,name,revokedAt'),
-    'a device record is an id, a name and three timestamps — there is no credential field to leak'
-  )
-
-  // The same guarantee, asserted against the file rather than the array: the
-  // real settings writer, the real normaliser, read back off disk.
-  const written = setSettings({ webDevices: saved, webUid: UID, webProjectId: PROJECT })
-  const settingsPath = join(scratch, 'data', 'settings.json')
+  const written = setSettings({ webUid: UID, webProjectId: PROJECT })
+  const settingsPath = join(dataDir, 'settings.json')
   const onDisk = readFileSync(settingsPath, 'utf8')
   log(
     everyToken.every((token) => !onDisk.includes(token)) && !onDisk.includes('eyJ'),
-    'and the settings.json actually written to disk holds no token either'
-  )
-  log(
-    written.webDevices.length === saved.length && written.webDevices.every((d) => d.revokedAt !== undefined),
-    'the store round-trips the web device list, tombstones and all'
+    'the settings.json actually written to disk holds no ID token and nothing shaped like one'
   )
   log(
     written.webProjectId === PROJECT && written.webUid === UID && written.webEnabled === false,
-    'and the project and uid survive normalisation while the master switch stays off'
+    'the project and uid survive normalisation while the master switch stays off'
   )
   log(written.webPin === '', 'and this desktop still has no unlock PIN, which is the state it ships in')
+
+  /* ------------------------------- 13b. the upgrade, off a real settings.json
+   *
+   * The file this check laid down before the store had read anything carries a
+   * `webDevices` list, exactly as an upgrading desktop's does. Nothing migrates
+   * it deliberately: `normaliseSettings` builds a fresh object out of the keys
+   * it knows, so a key it no longer knows is dropped on the way in and gone from
+   * the file on the next write. This is the assertion that says so, because
+   * "unknown keys are dropped" is a property of that function that nothing else
+   * would notice losing.
+   */
+
+  log(written.webDevices === undefined, 'a settings.json carrying the old webDevices list loses it on load')
+  log(!onDisk.includes('webDevices'), 'and the next write leaves no trace of it on disk')
+  log(!onDisk.includes('gone-1') && !onDisk.includes('Old Chrome'), 'so no stale browser row survives the upgrade')
 
   /* -------------------------------------------------------------- 14. lockout */
 
@@ -458,12 +476,12 @@ async function main() {
     `${AUTH_MAX_FAILURES + 2} of those in a row do not lock the source — being asked is the first half of every ordinary sign-in`
   )
 
-  /* ------------------------------------- 17b. and the browser is recorded */
+  /* -------------------- 17b. and answering it buys the socket and nothing else */
 
-  const pinRecord = saved.find((d) => d.id === 'pin-browser')
+  const spent = await auth.authenticate(hello('10.4.0.7', mint(), 'pin-browser', 'Chrome'))
   log(
-    !!pinRecord && pinRecord.createdAt === clock && pinRecord.revokedAt === 0,
-    'a browser that answers the PIN is recorded, live and stamped on the injected clock'
+    spent.ok === false && spent.reason === 'pin-required',
+    'a browser that answered the PIN a moment ago is asked again on its next connection — there is no trust window and nothing that remembers it'
   )
 
   /* --------------------------------------------- 17c. a wrong PIN is a failure */
@@ -493,19 +511,15 @@ async function main() {
   const pinForgiven = await auth.authenticate(hello('10.4.0.3', mint(), 'pin-browser', 'Chrome', { pin: PIN }))
   log(pinForgiven.ok === true, 'the lockout expires on the injected clock, and the right PIN then works')
 
-  /* ------------------- 17e. a revoked browser is never invited to guess */
+  /* -------------------- 17e. a browser nobody has ever seen still needs the PIN */
 
-  saved = [...saved, { id: 'ex-browser', name: 'Old Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 2 }]
-  const revokedBeforePin = await auth.authenticate(hello('10.4.0.4', mint(), 'ex-browser', 'Old Chrome'))
+  const newcomerAsked = await auth.authenticate(hello('10.4.0.4', mint(), 'never-seen-before', 'Chrome'))
   log(
-    revokedBeforePin.ok === false && revokedBeforePin.reason === 'revoked',
-    'a revoked browser is refused with revoked before the PIN is asked for — there is nothing a correct one could buy it'
+    newcomerAsked.ok === false && newcomerAsked.reason === 'pin-required',
+    'a browser this desktop has never seen is asked for the PIN like every other one — being new is neither a pass nor a bar'
   )
-  const revokedWithPin = await auth.authenticate(hello('10.4.0.5', mint(), 'ex-browser', 'Old Chrome', { pin: PIN }))
-  log(
-    revokedWithPin.ok === false && revokedWithPin.reason === 'revoked',
-    'and holding the right PIN does not change that answer'
-  )
+  const newcomerIn = await auth.authenticate(hello('10.4.0.5', mint(), 'never-seen-before', 'Chrome', { pin: PIN }))
+  log(newcomerIn.ok === true, 'and the PIN is the whole of what it needs')
 
   /* -------------------- 17f. the account is still the first half of the door */
 
@@ -545,7 +559,7 @@ async function main() {
    * back off the disk it was written to.
    */
 
-  const afterPin = setSettings({ webPin: pinHash, webDevices: saved })
+  const afterPin = setSettings({ webPin: pinHash })
   const diskWithPin = readFileSync(settingsPath, 'utf8')
   log(!diskWithPin.includes(PIN), 'the PIN itself appears nowhere in settings.json')
   log(diskWithPin.includes('scrypt$1$'), 'what is there instead is the versioned scrypt string')
@@ -607,35 +621,22 @@ async function main() {
   log(inputThrew === null, `and neither does junk presented against a real one (${inputThrew ?? 'none did'})`)
   log(verifyPin(PIN, pinHash) === true, 'while the PIN that was hashed still opens it')
 
-  /* ================ 21. a tombstone cannot be squeezed off the device list
+  /* ================ 21. the old key cannot be written back in by anybody
    *
-   * The store caps the device list at twenty. A browser with no row is
-   * *admitted* once it answers the PIN, so a revocation that fell off the end of
-   * that list would be an un-revocation performed by a `slice` — which is why
-   * the cap spends its budget on live rows and keeps every tombstone.
+   * Check 13b proved an existing settings.json loses it. This is the other
+   * direction and the one that would rot quietly: a caller — a stale renderer
+   * posting its whole settings object, a hand-edit — putting the key back. The
+   * store is the only writer, and it drops what it does not know, so the answer
+   * has to be the same however the key arrives.
    */
 
-  const crowd = []
-  for (let i = 0; i < 40; i++) {
-    crowd.push({ id: `filler-${i}`, name: 'Filler', createdAt: 1, lastSeenAt: 1, revokedAt: 0 })
-  }
-  // Last, which is exactly where a plain `slice(0, 20)` would have lost it.
-  crowd.push({ id: 'revoked-long-ago', name: 'Old', createdAt: 1, lastSeenAt: 1, revokedAt: 2 })
-
-  const capped = setSettings({ webDevices: crowd }).webDevices
-  log(capped.length === 20, 'a device list far over the cap is trimmed to twenty rows')
+  const smuggled = setSettings({
+    webDevices: [{ id: 'smuggled-in', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }]
+  })
+  log(smuggled.webDevices === undefined, 'a caller handing the store a webDevices list gets it dropped rather than kept')
   log(
-    capped.some((d) => d.id === 'revoked-long-ago'),
-    'and the revoked row survives from the far end of it — a tombstone is never what the cap throws away'
-  )
-  const order = capped.map((d) => crowd.findIndex((c) => c.id === d.id))
-  log(
-    order.every((position, i) => i === 0 || position > order[i - 1]),
-    'and the rows that are kept stay in the order the panel drew them'
-  )
-  log(
-    capped.every((d) => Object.keys(d).sort().join(',') === 'createdAt,id,lastSeenAt,name,revokedAt'),
-    'and every row that comes back off disk is still an id, a name and three timestamps'
+    !readFileSync(settingsPath, 'utf8').includes('smuggled-in'),
+    'and nothing about it reaches settings.json — there is no way back to a device list'
   )
 }
 

@@ -15,6 +15,20 @@ import { KeyBar } from './KeyBar'
  * with its 192KB catch-up buffer, so the first thing painted is the screen as
  * it actually is, not an empty box waiting for the next keystroke.
  *
+ * ## Geometry, which is the part that is easy to get wrong
+ *
+ * A PTY has one geometry and this link gives it two viewers. The desktop owns
+ * it whenever it has a window open, because plugging a phone in must not change
+ * the resolution of the machine somebody is working at — see `deskOpen` in
+ * electron/mobile/server.ts. So this component does both halves of that
+ * arrangement:
+ *
+ *  - It still fits its holder and still reports the result up the link. That is
+ *    the *wish*, and it is granted whole the moment the desk's window closes.
+ *  - It follows the session's real `cols`/`rows` out of the desktop's `state`
+ *    pushes and hands them to `follow`, which draws that grid at a font small
+ *    enough to fit this screen.
+ *
  * The key bar is raised from the header rather than always present — see
  * KEYBAR_PREF below. The compose row still lives inside it, so opening the keys
  * is also how you reach "type a line and send it".
@@ -91,6 +105,30 @@ export function PaneView({ link, session, title, fontSize, onBack }: PaneViewPro
   useEffect(() => {
     host.current?.fit()
   }, [keys, composing])
+
+  /**
+   * Draw what the pane actually is, at whatever type size that takes.
+   *
+   * The two numbers rather than the session object, because this has to run on
+   * a change of *geometry* and the desktop hands out a fresh session list for
+   * every `state` push there is — a project renamed, a tab opened, a pane
+   * dying. `follow` is a no-op when the grid it is given is the one it is
+   * already drawing, but an effect that ran on every push would still be an
+   * effect that ran on every push.
+   *
+   * An ordinary effect declared after the mount effect, so it runs after it in
+   * the same flush: a terminal is built and fitted, and then put to the
+   * desktop's grid. A `useLayoutEffect` would be *worse* here rather than
+   * better — React runs every layout effect before any passive one, so it would
+   * fire before the terminal above exists and find nothing to follow.
+   */
+  const cols = session.cols
+  const rows = session.rows
+  useEffect(() => {
+    host.current?.follow(cols > 0 && rows > 0 ? { cols, rows } : null)
+    // `session.id` and `fontSize` because they are what rebuilds the terminal
+    // above, and a rebuilt terminal has forgotten the grid it was following.
+  }, [cols, rows, session.id, fontSize])
 
   const toggleKeys = (): void => {
     setKeys((on) => {

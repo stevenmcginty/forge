@@ -1750,7 +1750,7 @@ export interface Settings {
    * project and uid below are both filled in.
    *
    * Note the shape of the block: the door (`webEnabled`, `webProjectId`,
-   * `webUid`, `webDevices`, `webPin`), then Forge Web's *own* Firebase
+   * `webUid`, `webPin`), then Forge Web's *own* Firebase
    * session, then its *own* tunnel. The session fields are a deliberate mirror
    * of the `companion*` ones rather than a read of them — the two features
    * share an identity provider and nothing else, for the reason spelled out on
@@ -1812,12 +1812,6 @@ export interface Settings {
    */
   webUid: string
   /**
-   * Browsers this desktop has admitted. Nothing here is a credential — see
-   * `WebDeviceRecord`, and the note there on why this list is not hashed the
-   * way `mobileDevices` is.
-   */
-  webDevices: WebDeviceRecord[]
-  /**
    * The unlock PIN, **hashed**, or '' when none is set.
    *
    * Never the digits somebody typed. What is written here is
@@ -1828,18 +1822,17 @@ export interface Settings {
    * per-source lockout in electron/web/auth.ts.
    *
    * With one set, every browser answers it on every connection, whether or not
-   * this desktop has seen that browser before. There is no trust window and no
-   * way to be excused it.
+   * this desktop has seen that browser before. There is no trust window, no
+   * list of browsers to be on, and no way to be excused it.
    *
    * With it blank the account is the credential: a Firebase ID token that
    * verifies against Google's keys, for `webUid`, admits the browser it came
-   * from and records it in `webDevices`. That is deliberate rather than an
-   * oversight — it is the only shape that works from a hotel a hundred miles
-   * away — and the price, stated once and not repeated anywhere else in the
-   * codebase, is that a stolen Firebase password is then a shell on this
-   * machine. The mitigations that survive being away from the desk are this PIN
-   * and the fact that every browser is recorded, listed and revocable, with
-   * revocation dropping the live socket.
+   * from. That is deliberate rather than an oversight — it is the only shape
+   * that works from a hotel a hundred miles away — and the price, stated once
+   * and not repeated anywhere else in the codebase, is that a stolen Firebase
+   * password is then a shell on this machine. This PIN is the mitigation that
+   * survives being away from the desk; signing Forge Web out or clearing
+   * `webUid` is the one that ends every browser's access at once.
    *
    * Written only by `web:pin-set` and `web:pin-clear`, in the main process.
    */
@@ -2115,13 +2108,20 @@ export interface MobileCommandEvent {
 }
 
 /**
- * The panes a phone is reading right now, and the geometry it is reading them
- * at — the desktop's cue to stop fitting those PTYs and follow instead.
+ * The panes a phone is reading right now — a label for those pane headers, and
+ * nothing more.
  *
- * An empty list is the normal, and the message that hands everything back.
+ * It used to carry a geometry, because the desktop used to follow a phone. It
+ * no longer does: while there is a window open the desk owns every grid and a
+ * phone draws what the desk chose (see the "one PTY, two viewers" block in
+ * electron/mobile-host.ts). `WebWatchEvent` is now its twin in shape as well as
+ * in purpose, and both are kept as their own type on their own channel because
+ * a shared message would have to be read twice as carefully at both ends.
+ *
+ * An empty list is the normal, and the message that says nobody is reading.
  */
 export interface MobileWatchEvent {
-  panes: Array<{ id: string; cols: number; rows: number }>
+  ids: string[]
 }
 
 export type MobileState = 'off' | 'starting' | 'listening' | 'error'
@@ -2213,45 +2213,6 @@ export interface MobileStatus {
 /* --------------------------------------------------------------- forge web */
 
 /**
- * A browser this desktop has admitted, as persisted in settings.json.
- *
- * Note what is absent, because it is the whole difference from
- * `MobileDeviceRecord` above: there is no `tokenHash`, and there is nothing to
- * hash. Forge Mobile mints a device token because it has no identity provider,
- * so its record has to hold a one-way image of a secret. Forge Web's credential
- * is a Firebase ID token the browser already holds and the desktop re-verifies
- * against Google's published keys on every connection — minting a second
- * credential beside it would add a thing to steal and prove nothing the first
- * does not (see `WebHelloFrame` in shared/web.ts).
- *
- * So this record remembers where a token has been used. It is a visitors' book,
- * not a key: a copy of this whole list gets an attacker a set of browser names
- * and no way in, and being on it excuses a browser nothing — not the token, not
- * the account, and not the PIN. The instinct behind Mobile's hashing rule still
- * holds — nothing in settings.json may be usable as a credential — it is simply
- * satisfied here by there being no credential to write down.
- */
-export interface WebDeviceRecord {
-  /** The browser's own per-profile id, from `WebHelloFrame.deviceId`. */
-  id: string
-  /** What the browser called itself. Untrusted display text — show, never obey. */
-  name: string
-  createdAt: number
-  lastSeenAt: number
-  /**
-   * When this browser was revoked in Settings (ms epoch), 0 while it is live.
-   *
-   * A tombstone rather than a deletion, and that is deliberate: a revoked
-   * browser must be refused with `revoked` rather than treated as a stranger
-   * and re-prompted, because a revoked device that keeps knocking is a prompt
-   * storm on somebody's desk. Deleting the row would lose the only fact that
-   * tells those two apart. Settings can still remove a row outright — see
-   * `WebAuth.forget` — which is how a revoked browser is given a fresh start.
-   */
-  revokedAt: number
-}
-
-/**
  * Where the link stands, as one word the Settings panel switches on. The same
  * four values as `MobileState`, and deliberately so: it is the same question
  * about the same kind of thing, and two vocabularies for one idea is how two
@@ -2340,7 +2301,6 @@ export interface WebStatus {
    * shared/web.ts rather than assembled here, so both ends agree on it.
    */
   url: string
-  devices: WebDeviceRecord[]
   /** Browsers with an authenticated socket open this second. */
   connected: number
   /**
@@ -2370,8 +2330,8 @@ export interface WebStatus {
    * The last browser this desktop turned away at the door, or null.
    *
    * Every other refusal in Forge Web reaches the person it concerns: a bad
-   * token, an unapproved device and a revoked browser all travel back down the
-   * socket as a `refused` frame the page renders. The origin check cannot —
+   * token, a token for the wrong account and a wrong PIN all travel back down
+   * the socket as a `refused` frame the page renders. The origin check cannot —
    * it fires *during* the upgrade, so there is no WebSocket to say it on, and
    * the browser is handed a bare failed handshake that is indistinguishable
    * from an unreachable machine. The page therefore does the only sensible
@@ -2450,19 +2410,20 @@ export interface WebCommandEvent {
 }
 
 /**
- * The panes a browser is reading right now, and the geometry it is reading them
- * at — the desktop's cue to stop fitting those PTYs and follow instead.
+ * The panes a browser is reading right now — a label for those pane headers,
+ * and nothing more.
  *
- * `MobileWatchEvent`'s twin, and deliberately a separate type on a separate
- * channel rather than a shared one with a `source` field: the renderer keeps a
- * map per viewer so that a pane a phone *and* a browser are both reading can be
- * drawn at the smaller of the two sizes, and a merged channel would arrive
- * having already thrown that away.
+ * `MobileWatchEvent`'s twin. Both carry ids and no geometry, because the desktop
+ * follows nobody: while there is a window open, the desk owns every grid and a
+ * remote viewer draws what the desk chose (see the "one PTY, two viewers" block
+ * in electron/web-host.ts). Still its own type on its own channel, because the
+ * two viewers arrive on different links with different lifecycles and a shared
+ * message would have to be read twice as carefully at both ends.
  *
- * An empty list is the normal, and the message that hands everything back.
+ * An empty list is the normal, and the message that says nobody is reading.
  */
 export interface WebWatchEvent {
-  panes: Array<{ id: string; cols: number; rows: number }>
+  ids: string[]
 }
 
 /**

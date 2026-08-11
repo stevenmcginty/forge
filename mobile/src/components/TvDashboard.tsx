@@ -1194,12 +1194,19 @@ function ProjectCard({
  * only the right-hand ends of every line. So while the window is both zoomed
  * *and* split, the TV does what the phone has always done: it fits the grid to
  * its own box at a readable size and asks the desktop for that shape over the
- * existing `resize` frame. The desktop's side of that contract already exists
- * — while a remote device has a pane open, the remote owns the geometry and
- * the desktop letterboxes its own terminal to match (see the mobileWatched
- * plumbing in electron/mobile-host.ts) — and closing the window hands the
- * shape straight back (the restore effect below), so the desk finds its pane
- * as it left it.
+ * existing `resize` frame, handing it back when the window closes (the restore
+ * effect below).
+ *
+ * That ask is now a *wish* rather than a contract, and this screen has not been
+ * reworked for it. The desktop only grants a remote's geometry while it has no
+ * window open (`deskOpen` in electron/mobile/server.ts) — plugging a device in
+ * must not change the resolution of the machine somebody is sitting at — so
+ * against a desktop with a window this split view is back to holding the desk's
+ * grid in half a panel, which is the clipping it was written to end. The phone
+ * answers this by scaling its font to the desk's grid (`follow` in
+ * mobile/src/lib/term.ts); a sofa cannot read the result at half width, which
+ * is exactly why that route was rejected here in the first place. Deciding what
+ * a television should do instead is unfinished work.
  *
  * stdin is disabled for the same reason the wall has no buttons: this surface
  * watches. Up/Down walk the scrollback in a plain shell (a full-screen TUI

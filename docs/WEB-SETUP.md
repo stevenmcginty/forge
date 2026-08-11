@@ -25,6 +25,36 @@ below if a deploy command refuses to find `firebase.json`.
 
 ---
 
+## Giving Forge to a friend
+
+Everything below this point is for standing up your **own** deployment — a new
+Firebase project, a new hosting site, keys you copy in by hand. Most people
+handing Forge to somebody else don't need any of it: Steve's own deployment
+ships baked into the app as the default (`electron/store.ts`,
+`WEB_DEFAULT_PROJECT_ID` and friends), so a friend's install already has the
+four account-card fields in step 6a filled in.
+
+A friend just needs to:
+
+1. Install Forge.
+2. Open **Settings › Forge Web** and sign in with a **new** email — typing an
+   email that doesn't exist yet creates the account in Steve's project, the
+   same as it does for Steve.
+3. Flip **"Let browsers reach this desktop"** and **"Keep the tunnel up"**
+   (step 6b/6c below — cloudflared needs no account, no domain, no authtoken).
+4. Open **https://forge-web-aadafc.web.app** in any browser and sign in with
+   that same email.
+
+No Firebase CLI, no ngrok account, no Cloudflare account, nothing pasted. The
+API key that ships in the defaults is not a secret — see step 4 below for why
+— and the database's security rules gate every read and write by the
+signed-in uid, so a friend on Steve's deployment only ever sees their own
+session. Somebody who wants their *own* Firebase project instead of sharing
+Steve's follows the rest of this document and overwrites the four fields in
+step 6a with their own values.
+
+---
+
 ## 0. Preflight
 
 ```powershell
@@ -169,7 +199,12 @@ panel; nothing needs DevTools the way Companion's early sign-in did.
 
 ### 6a. The account card
 
-Paste the four values you just used to build the client:
+These four fields now ship pre-filled with Steve's own deployment
+(`WEB_DEFAULT_PROJECT_ID` and friends in `electron/store.ts`), so on a fresh
+install — or an existing one that has never had its own values pasted in —
+there is nothing to do here. Touch this card only if you are pointing Forge
+at a **different** deployment: paste the four values you just used to build
+the client:
 
 | Field | Value |
 | ----- | ----- |
@@ -264,9 +299,14 @@ in"**, and it is not required to use any of the above:
   to the desktop and set a new one from this same card, which replaces the old
   one outright. Clear it to fall back to the account alone.
 
-Every browser that has ever signed in is listed at the bottom of the panel,
-with **Revoke** (drops it now, refuses it if it comes back, whether or not a
-PIN is set) and **Forget** (clears the row — a fresh start, not a lock).
+The bottom of the panel says how many browsers are connected right now, and
+that is all it says about them. There used to be a list of every browser that
+had ever signed in, with a Revoke button on each row; it was removed because it
+never actually stopped anybody — a browser holding a valid sign-in and the PIN
+got in whether or not it was on the list, so the buttons implied a lock that
+was not there. To end access, clear or change the PIN, or sign Forge Web out
+from this card. Both end it for every browser at once, which is the truth about
+a door whose key is one account.
 
 ---
 

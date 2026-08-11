@@ -168,31 +168,51 @@ to move wins — and the desktop moves on every layout change, so a pane being r
 on a phone would have its geometry dragged back to the desk's without the phone
 ever knowing.
 
-So there is an owner, and while a phone has a pane open the phone is it:
+That was settled the phone's way for a long time: while a phone had a pane open
+the phone owned its geometry, and the desktop letterboxed its own terminal to
+match. It is not settled that way any more. Plugging a device in must not change
+the resolution of the machine somebody is sitting at, and every pane on the desk
+re-flowing because a phone came out of a pocket is exactly that.
 
-- The server tracks the union of subscribed sessions across every socket and
-  announces it through `onWatch` whenever it changes (subscribe, unsubscribe,
-  exit, hangup). `mobile-host` forwards that to the renderer as `mobile:watched`,
-  carrying each watched pane's *current* geometry, read off the session manager
-  rather than off the phone's frame.
-- `terminalHost.setPhoneWatched` makes `fit()` a no-op for those panes and
-  resizes the desktop's own xterm **to the phone's** cols/rows. The pane is
-  letterboxed inside its box, which is honest: it is the size the pane is
-  actually being drawn at. The header says `ON PHONE` so it does not read as a
-  bug.
-- Dropping off the list refits against the real container, which hands the
-  geometry back with the usual repaint jiggle.
+**The rule: while this desktop has a window open, the desk owns the grid.**
 
-A phone's resize goes down as `rows - 1` and then `rows`, the same jiggle
-`resizePty` does in the renderer and for the same reason: an Ink TUI only
-rewrites the rows it believes changed, and ConPTY's reflow leaves fragments of
-the old frame behind. No program honours a "please repaint" sequence; every one
-of them redraws for a size change.
+- The server asks its host `deskOpen()` on every `resize` frame. While it
+  answers true the frame is **dropped, in silence** — the phone is about to be
+  told the real geometry anyway, so there is nothing for an error frame to say.
+  A host that does not supply the hook is treated as having no window, which is
+  what lets `scripts/mobile-smoke.mjs` drive the server head-less.
+- With no window at the desk the wish is granted exactly as it always was.
+  Phones keep sending `resize` on every keyboard slide regardless rather than
+  tracking the policy: the desk's window can close between one frame and the
+  next, and a client holding a stale copy of the rule would keep quiet through
+  exactly the moment its size started to matter.
+- The phone draws the desk's grid instead, at a font small enough to fit its own
+  screen — `follow` in `mobile/src/lib/term.ts`, floored at `MIN_FONT_PX` so a
+  pane never becomes a texture. The grid arrives on the ordinary `state` push:
+  `mobile-host` subscribes to the session manager's `onResize` and pushes the
+  session list, coalesced by `GEOMETRY_PUSH_MS` because a window drag moves
+  several panes in one breath.
+- The watch list survives, carrying **ids and no geometry**. The server still
+  announces the union of subscribed sessions through `onWatch` (subscribe,
+  unsubscribe, exit, hangup), `mobile-host` forwards it as `mobile:watched`, and
+  `terminalHost.setPhoneWatched` does one thing with it: put `ON PHONE` on the
+  pane header. Nothing on the desk changes shape.
 
-The last size each phone asked for is remembered in `phoneGeometry` so it can be
-re-asserted when a session is re-adopted — a renderer reload (dev HMR, a crash)
-re-creates every pane at the *desktop's* geometry, and a phone reading one of
-them would otherwise lose the width without a word.
+Forge Web reached this arrangement first and the two links now answer the
+question identically — see `docs/forge-web.md`.
+
+A phone's resize, in the case where it is granted, goes down as `rows - 1` and
+then `rows`: the same jiggle `resizePty` does in the renderer and for the same
+reason: an Ink TUI only rewrites the rows it believes changed, and ConPTY's
+reflow leaves fragments of the old frame behind. No program honours a "please
+repaint" sequence; every one of them redraws for a size change.
+
+Known gap: the television's **split view** (`TvDashboard.tsx`) was written on the
+old contract — it fits the grid to half a panel at sofa font and asks the desktop
+for that shape. Against a desktop with a window that ask is now dropped, and the
+split view is back to holding the desk's grid in half a screen. Scaling the font
+the way the phone does gives a 6px terminal, which is why that route was rejected
+there in the first place. Unfinished.
 
 ### Reconnecting
 

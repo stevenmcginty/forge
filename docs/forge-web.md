@@ -96,14 +96,20 @@ whole risk in one sentence, and every decision below exists because of it.
   desktop from anywhere he actually wanted to use a browser. The trade — a
   stolen Firebase password is a shell — is stated once beside the setting in
   shared/types.ts (`webPin`) and repeated nowhere.
-- **Every browser is still recorded, listed and revocable.** Revoking one drops
-  its live socket immediately, and a revoked browser stays refused whether or
-  not a PIN is set — that is the one thing the account-only default does not
-  soften, and the device-list cap in `electron/store.ts` spends its budget on
-  live rows so a tombstone can never be squeezed off the end of it.
+- **No browser is recorded, and there is nothing to revoke.** Forge Web kept a
+  list of admitted browsers with a Revoke button on every row, and it was
+  removed rather than kept for tidiness: it was never a gate. A browser holding
+  a verified token for the configured uid and the desktop's PIN was admitted
+  whether or not it was on the list, so every row implied a lock that was not
+  there, and a stale row implied it about a browser nobody had used for months.
+  What ends access is the PIN and signing Forge Web out — both of which end it
+  for *every* browser, which is the honest granularity for a door whose
+  credential is one account. An upgrading desktop's `webDevices` list is
+  dropped on load by `normaliseSettings` and gone from settings.json on the
+  next write.
 - **An unlock PIN is the one optional lock.** Four to twelve digits, set once
   in Settings › Forge Web, and asked of every browser on every connection —
-  not just the first, and being on the device list excuses nothing
+  not just the first, with no trust window and nothing that excuses it
   (`electron/web/auth.ts`). It is stored as a versioned scrypt hash
   (`scrypt$1$salt$hash` in `electron/web/pin.ts`); the digits themselves are
   never written to settings.json. A wrong PIN gets one sentence for every
@@ -134,9 +140,9 @@ whole risk in one sentence, and every decision below exists because of it.
   a failed handshake and does what any page does with one — retries, forever,
   saying "Reconnecting to the desktop". `WebStatus.refusal` carries the origin
   to the Settings card and a notification instead.
-- **Defence in depth, not the defence.** The allowlist and the device list are
-  the second and third locks. The token is the first, and it is the one that
-  matters.
+- **Defence in depth, not the defence.** The source allowlist and the `Origin`
+  check are the second and third locks. The token is the first, and it is the
+  one that matters.
 - **The screen is off, control is off, and control cannot be switched on
   alone.** Decision 7 used to say the desktop's screen was out of scope
   entirely, on the grounds that "a public URL that moves the real mouse is a
@@ -278,8 +284,8 @@ scripts (`pty:smoke`, `git:check`, `session:check`, `mobile:smoke`,
 
 ### Phase 5 — desktop settings and the background service
 
-- Settings: `webEnabled`, Firebase sign-in, the public URL, the device list
-  with revoke, and the unlock PIN — set, change or clear.
+- Settings: `webEnabled`, Firebase sign-in, the public URL, how many browsers
+  are connected right now, and the unlock PIN — set, change or clear.
 - `forge-server` survives the window closing — a tray process, `electron/tray.ts`
   — so that GitHub-only mode is rare rather than nightly.
 
@@ -316,14 +322,17 @@ be torn down before the success phase starts).
   replay buffer, writes a command and reads its output back.
 - Each refusal is asserted *separately*, because each is a different sentence on
   screen: malformed token, expired token, valid token for the wrong uid, a
-  blank device id, revoked device, stale protocol version. `scripts/web-auth-check.mjs`
+  blank device id, stale protocol version. `scripts/web-auth-check.mjs`
   carries the ones that are about the admission decision rather than the wire —
-  the account-only path with no prompt raised, revocation holding whether or
-  not a PIN is set, and the PIN itself: `pin-required` on the first hello of a
-  sign-in, `pin-invalid` on a wrong one, the per-source lockout that is what
-  makes four digits defensible at all, and the assertion the feature stands
-  on — a set PIN never lands on disk as anything but a versioned
-  `scrypt$1$…` string.
+  the account-only path with no prompt raised, a browser this desktop has never
+  seen being admitted from an address it has never seen, and the PIN itself:
+  `pin-required` on the first hello of a sign-in, `pin-invalid` on a wrong one,
+  the per-source lockout that is what makes four digits defensible at all, and
+  the assertion the feature stands on — a set PIN never lands on disk as
+  anything but a versioned `scrypt$1$…` string. It also asserts what the removal
+  of the device list has to keep true: `WebAuth` has no `revoke` or `forget` to
+  call, and a `webDevices` key cannot get back into settings.json from either
+  direction.
 - Rate limits and the max-write cap bite.
 - Heartbeat loss closes the session inside the grace window.
 - Token verification runs against injected JWKS, so the test needs no network
@@ -510,7 +519,7 @@ and none of them blocks the others.
    pinned to one host: the tunnel hostname changes, which is the entire reason
    the rendezvous record exists.
 
-## Two things that were wired but not right
+## Three things that were wired but not right
 
 Both were found by building the thing rather than by planning it, both are
 fixed, and both are recorded because the shape they were corrected *into* is
@@ -545,6 +554,30 @@ back on a different hostname republishes rather than waiting for a heartbeat.
 `FORGE_WEB_HOSTNAME` survives as an explicitly-documented override for a tunnel
 run by hand, and says `configured` rather than `live` because on that path Forge
 cannot see the process.
+
+**A browser used to resize the desktop.** A PTY has one grid and this link gives
+it two viewers, and the first arrangement was Forge Mobile's: the browser said
+what size it was reading at, the desktop stood down, and the desk letterboxed
+its own pane to match. It works, it is symmetrical, and it is wrong — the first
+time a tab connected, every pane on the desk re-flowed in front of the person
+using it. The desktop is where the work is, and nothing arriving over a tunnel
+should rearrange it.
+
+So the rule is now: **while this desktop has a window open, the desk owns the
+grid**, and a browser draws the desk's grid at a font shrunk to fit its own box
+(`follow` in `web/src/lib/term.ts`, floored at 7px, below which the pane
+overflows and scrolls). Nothing on the wire changed — a browser still sends its
+`cols`/`rows` on `attach` and on every `resize` — because those frames are a
+*wish*, and the wish is granted whole the moment the desk's window closes, which
+is the case Forge Web is for: the desk shut to the tray, the terminals still
+running, the browser the only viewer there is. The gate is one hook,
+`WebServerHost.deskOpen`, so the policy lives in one place and a head-less host
+(the smoke test's, and any future one) is treated as having no window. The desk
+is still told *which* panes a browser is reading, because "IN BROWSER" on a pane
+header is worth knowing; it is no longer told a size, because it no longer
+follows one. Forge Mobile has since been brought to the same rule through the
+same hook, `MobileServerHost.deskOpen` — see "One PTY, two viewers" in
+`docs/MOBILE.md`.
 
 ## What is deliberately not here
 

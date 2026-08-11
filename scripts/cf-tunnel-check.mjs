@@ -99,6 +99,12 @@ async function main() {
     BACKOFF_CAP_MS,
     CLOUDFLARED_EXE_URL,
     HEALTHY_RESET_MS,
+    EDGE_FAILURE_LIMIT,
+    EDGE_FAILURE_LINE,
+    EDGE_RECOVERED_LINE,
+    KILL_ESCALATE_MS,
+    PROBE_INTERVAL_MS,
+    PROBE_STRIKES,
     normaliseHost,
     webSocketUrl
   } = await import(pathToFileURL(join(scratch, 'cf-tunnel.mjs')).href)
@@ -367,7 +373,12 @@ async function main() {
     last().state === 'error' && /flag provided but not defined/.test(last().detail),
     "a permanent refusal surfaces as error, carrying cloudflared's own text"
   )
-  log(timers.length === 0 && spawned.length === 5, 'and is NOT retried — no timer set, nothing respawned')
+  // Only backoff timers count here: the probe timer arms on every live banner
+  // and this harness's clearTimer deliberately forgets nothing.
+  log(
+    timers.filter((t) => t.ms !== PROBE_INTERVAL_MS).length === 0 && spawned.length === 5,
+    'and is NOT retried — no timer set, nothing respawned'
+  )
 
   tunnel.stop()
   log(last().state === 'off', 'stop() reports off')
@@ -377,6 +388,256 @@ async function main() {
   tunnel.stop()
   log(killed.includes(5150), 'stopping a live tunnel kills the process tree by pid')
   log(last().state === 'off' && last().url === '', 'and the status ends off with no URL')
+
+  /* ------------------------------------------ 6d. the watchdog: a tunnel
+     that dies while its process lives.
+
+     The incident this guards against is real and sat in dev.log for hours:
+     Cloudflare deleted the quick tunnel on its side, the hostname fell out of
+     DNS, and cloudflared printed `Serve tunnel error` for the rest of the
+     evening without ever exiting. The supervisor saw a healthy child; every
+     browser saw "desktop is asleep". Two detectors below — the log counter
+     and the probe — and both must end the same way: the child killed, the
+     dead address dropped at once, and a respawn that comes back on a fresh
+     hostname for the rendezvous to republish. */
+
+  // The two lines the detector turns on, exactly as this machine's dev.log
+  // and cloudflared 2026.5.2 print them.
+  const SERVE_ERR =
+    '2026-08-11T18:19:35Z ERR Serve tunnel error error="control stream encountered a failure while serving" connIndex=0 event=0 ip=198.41.200.23'
+  const REGISTERED =
+    '2026-08-11T12:31:05Z INF Registered tunnel connection connIndex=0 connection=5f8d ip=198.41.200.23 location=lhr protocol=quic'
+  log(
+    EDGE_FAILURE_LINE.test(parseCloudflaredLine(SERVE_ERR).message),
+    "the real Serve-tunnel-error line off this machine's dev.log is recognised as an edge failure"
+  )
+  log(
+    EDGE_RECOVERED_LINE.test(parseCloudflaredLine(REGISTERED).message),
+    'and the real Registered-tunnel-connection line is recognised as recovery'
+  )
+  log(
+    !EDGE_FAILURE_LINE.test('failed to run the datagram handler error="context canceled"'),
+    'the datagram-handler chatter that rides along with a failure is not counted twice'
+  )
+
+  const watchdogRig = (impl = {}) => {
+    const rig = { statuses: [], spawned: 0, killed: [], timers: [], child: null }
+    rig.tunnel = new CloudflareTunnel({
+      exe: 'cloudflared.exe',
+      port: 8421,
+      onStatus: (s) => rig.statuses.push(s),
+      spawn: () => {
+        rig.spawned += 1
+        rig.child = fakeChild(6000 + rig.spawned)
+        return rig.child
+      },
+      killTree: (pid) => rig.killed.push(pid),
+      now: () => 2_000_000,
+      setTimer: (fn, ms) => {
+        const handle = { fn, ms }
+        rig.timers.push(handle)
+        return handle
+      },
+      clearTimer: (handle) => {
+        rig.timers = rig.timers.filter((t) => t !== handle)
+      },
+      probe: impl.probe ?? (async () => true),
+      probeControl: impl.probeControl ?? (async () => true)
+    })
+    rig.last = () => rig.statuses[rig.statuses.length - 1]
+    // Fire the queued timer of the given delay — the probe interval, the kill
+    // escalation and the backoff schedule never share a value, so the delay
+    // names the timer. A miss is the harness lying about which path it
+    // exercises, and must be loud.
+    rig.fire = (ms) => {
+      const i = rig.timers.findIndex((t) => t.ms === ms)
+      if (i < 0) throw new Error(`no ${ms}ms timer is armed`)
+      const t = rig.timers.splice(i, 1)[0]
+      t.fn()
+    }
+    rig.hasTimer = (ms) => rig.timers.some((t) => t.ms === ms)
+    return rig
+  }
+  const settle = () => new Promise((r) => setImmediate(r))
+
+  /* --- the log counter, confirmed by the probe --- */
+  {
+    let answer = false
+    const dialled = []
+    const rig = watchdogRig({
+      probe: async (url) => {
+        dialled.push(url)
+        return answer
+      }
+    })
+    rig.tunnel.start()
+    rig.child.say(banner(HOST_ONE))
+    log(rig.hasTimer(PROBE_INTERVAL_MS), 'going live arms the probe timer')
+
+    for (let i = 0; i < EDGE_FAILURE_LIMIT - 1; i++) rig.child.say(SERVE_ERR)
+    await settle()
+    log(rig.killed.length === 0 && rig.last().state === 'live', 'serving failures below the limit change nothing')
+
+    rig.child.say(REGISTERED)
+    for (let i = 0; i < EDGE_FAILURE_LIMIT - 1; i++) rig.child.say(SERVE_ERR)
+    await settle()
+    log(
+      rig.killed.length === 0 && rig.last().state === 'live',
+      'an edge link that re-registers forgives the failures before it — the count starts over'
+    )
+
+    rig.child.say(SERVE_ERR)
+    await settle()
+    log(
+      dialled.length === 1 && dialled[0] === `https://${HOST_ONE}` && rig.killed.includes(6001),
+      `failure number ${EDGE_FAILURE_LIMIT} is confirmed by an immediate probe, then kills the process tree`
+    )
+    log(
+      rig.last().state === 'retrying' && rig.last().url === '',
+      'and the dead address is dropped immediately, not at exit — nothing republishes it meanwhile'
+    )
+    log(!rig.hasTimer(PROBE_INTERVAL_MS), 'the probe timer is disarmed with it')
+    log(rig.hasTimer(KILL_ESCALATE_MS), 'and a watch is set on the kill itself')
+
+    // The ordinary exit path takes over: respawn, fresh hostname, live again.
+    rig.child.die(1)
+    log(!rig.hasTimer(KILL_ESCALATE_MS), 'the exit arriving stands the kill-watch down')
+    rig.fire(1000)
+    log(rig.spawned === 2, 'the kill flows into the normal respawn')
+    answer = true
+    rig.child.say(banner(HOST_TWO))
+    log(
+      rig.last().state === 'live' && rig.last().url === `https://${HOST_TWO}`,
+      'and the tunnel comes back live on the fresh address the rendezvous will publish'
+    )
+  }
+
+  /* --- a grumbling edge whose address still answers is left alone --- */
+  {
+    const rig = watchdogRig({ probe: async () => true })
+    rig.tunnel.start()
+    rig.child.say(banner(HOST_ONE))
+    for (let i = 0; i < EDGE_FAILURE_LIMIT; i++) rig.child.say(SERVE_ERR)
+    await settle()
+    log(
+      rig.killed.length === 0 && rig.last().state === 'live',
+      'edge failures with an address that still answers are grumbling, not death — no restart'
+    )
+  }
+
+  /* --- this desktop's own connection being down pauses the watchdog --- */
+  {
+    const rig = watchdogRig({ probe: async () => false, probeControl: async () => false })
+    rig.tunnel.start()
+    rig.child.say(banner(HOST_ONE))
+    for (let i = 0; i < EDGE_FAILURE_LIMIT; i++) rig.child.say(SERVE_ERR)
+    await settle()
+    rig.fire(PROBE_INTERVAL_MS)
+    await settle()
+    rig.fire(PROBE_INTERVAL_MS)
+    await settle()
+    log(
+      rig.killed.length === 0 && rig.last().state === 'live',
+      'a dead probe with the whole internet unreachable strikes nobody — the hostname survives the outage'
+    )
+  }
+
+  /* --- the scheduled probe --- */
+  {
+    let answer = true
+    const dialled = []
+    const rig = watchdogRig({
+      probe: async (url) => {
+        dialled.push(url)
+        return answer
+      }
+    })
+    rig.tunnel.start()
+    rig.child.say(banner(HOST_ONE))
+
+    rig.fire(PROBE_INTERVAL_MS)
+    await settle()
+    log(
+      dialled.length === 1 && dialled[0] === `https://${HOST_ONE}`,
+      'the probe dials the exact public address the tunnel reported'
+    )
+    log(
+      rig.killed.length === 0 && rig.last().state === 'live' && rig.hasTimer(PROBE_INTERVAL_MS),
+      'an address that answers keeps the tunnel live and re-arms the probe'
+    )
+
+    answer = false
+    rig.fire(PROBE_INTERVAL_MS)
+    await settle()
+    log(
+      rig.killed.length === 0 && rig.hasTimer(PROBE_INTERVAL_MS),
+      `one failed probe is a strike, not a verdict (${PROBE_STRIKES} are needed)`
+    )
+    rig.fire(PROBE_INTERVAL_MS)
+    await settle()
+    log(rig.killed.includes(6001), 'the second consecutive failure kills the process tree')
+    log(rig.last().state === 'retrying' && rig.last().url === '', 'drops the dead address at once')
+
+    rig.child.die(1)
+    rig.fire(1000)
+    answer = true
+    rig.child.say(banner(HOST_TWO))
+    log(
+      rig.last().state === 'live' && rig.last().url === `https://${HOST_TWO}`,
+      'and the respawn comes back on a fresh address here too'
+    )
+
+    // stop() must not leave a probe behind to fire on a dead rig.
+    rig.tunnel.stop()
+    log(!rig.hasTimer(PROBE_INTERVAL_MS), 'stop() disarms the probe along with everything else')
+  }
+
+  /* --- the kill that does not land --- */
+  {
+    const rig = watchdogRig({ probe: async () => false })
+    rig.tunnel.start()
+    rig.child.say(banner(HOST_ONE))
+    const wedged = rig.child
+    rig.fire(PROBE_INTERVAL_MS)
+    await settle()
+    rig.fire(PROBE_INTERVAL_MS)
+    await settle()
+    log(rig.killed.includes(6001) && rig.spawned === 1, 'the watchdog kills a child that will turn out not to die')
+
+    // No exit arrives. The escalation must synthesise one, or the supervisor
+    // is wedged at retrying with every detector disarmed — the incident back
+    // again, minus the self-heal.
+    rig.fire(KILL_ESCALATE_MS)
+    log(rig.hasTimer(1000), 'a child that never exits is declared dead anyway, and the respawn is scheduled')
+    rig.fire(1000)
+    log(rig.spawned === 2, 'the supervisor is not wedged — a fresh cloudflared is spawned')
+    rig.child.say(banner(HOST_TWO))
+    const statusesBefore = rig.statuses.length
+    const spawnedBefore = rig.spawned
+    wedged.die(1)
+    log(
+      rig.statuses.length === statusesBefore && rig.spawned === spawnedBefore && rig.last().url === `https://${HOST_TWO}`,
+      "the wedged child's late real exit is ignored — it cannot clobber its successor"
+    )
+  }
+
+  /* --- stop() during an in-flight probe --- */
+  {
+    let resolveProbe = null
+    const rig = watchdogRig({ probe: () => new Promise((r) => (resolveProbe = r)) })
+    rig.tunnel.start()
+    rig.child.say(banner(HOST_ONE))
+    rig.fire(PROBE_INTERVAL_MS)
+    rig.tunnel.stop()
+    const statusesBefore = rig.statuses.length
+    const killedBefore = rig.killed.length
+    resolveProbe(false)
+    await settle()
+    log(
+      rig.statuses.length === statusesBefore && rig.killed.length === killedBefore && rig.last().state === 'off',
+      'a probe answering after stop() changes nothing — no kill, no report, no timer'
+    )
+  }
 
   /* ------------------------------ 7. the address reaches a browser intact */
 

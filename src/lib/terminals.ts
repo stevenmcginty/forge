@@ -34,17 +34,15 @@ export interface PaneRuntime {
    */
   remoteUrl: string | null
   /**
-   * True while a phone has this pane open and is therefore the one deciding
-   * its size. The pane still works normally at the desk — this is a fact worth
-   * showing (the terminal is letterboxed at phone width, which otherwise reads
-   * as a bug), not a lock.
+   * True while a phone has this pane open. It decides nothing about the pane's
+   * size — the desk keeps its grid and the phone scales to it — so this is news
+   * rather than an explanation of what is on screen, and never a lock.
    */
   phone: boolean
   /**
    * The same fact about a browser on Forge Web. Two flags rather than one
-   * because both can be true at once and the pane says which — a terminal
-   * drawn at somebody else's width is only reassuring if the label names the
-   * screen it is being drawn for.
+   * because both can be true at once and the pane header has to be able to say
+   * which.
    */
   browser: boolean
 }
@@ -213,13 +211,6 @@ interface Entry {
   ptyDims: { cols: number; rows: number } | null
   /** Pending second half of a repaint jiggle — see resizePty. */
   jiggleTimer: number | null
-  /**
-   * A phone or a browser has this pane open, so that viewer owns the geometry —
-   * see setPhoneWatched and setBrowserWatched. While true, nothing here refits
-   * the terminal or resizes the PTY; the pane follows what the viewer asked for
-   * instead, and when both are reading it, the smaller of the two.
-   */
-  viewerOwned: boolean
   /** Tail of the last output chunk, kept only until the RC URL is found. */
   scanTail: string
   /**
@@ -342,26 +333,6 @@ function baseTheme(accent: string, foreground?: string): ITheme {
   }
 }
 
-/**
- * A watch list off the wire, as a map this host can ask questions of.
- *
- * The dimension guard is why this is a function rather than a `new Map`: main
- * reports what the PTY *is*, but a session that has just been created and never
- * resized, or one read by a client that sent nonsense, can still arrive as a
- * zero — and a terminal resized to zero columns is a pane that draws nothing at
- * all. A pane with an unusable size is treated as one nobody is reading, which
- * leaves the desk fitting it as normal.
- */
-function asWatchMap(
-  panes: Array<{ id: string; cols: number; rows: number }>
-): Map<string, { cols: number; rows: number }> {
-  const map = new Map<string, { cols: number; rows: number }>()
-  for (const pane of panes) {
-    if (pane.cols > 0 && pane.rows > 0) map.set(pane.id, { cols: pane.cols, rows: pane.rows })
-  }
-  return map
-}
-
 class TerminalHost {
   private entries = new Map<string, Entry>()
   private listeners = new Map<string, Listeners>()
@@ -375,19 +346,15 @@ class TerminalHost {
   private busyListeners = new Set<() => void>()
   private attentionListeners = new Set<() => void>()
   /**
-   * Panes a phone is reading, and the size it is reading them at. Kept even
-   * for panes with no entry yet, because the phone can ask for a tab that this
-   * host is about to create — see `create`.
+   * Panes a phone is reading. A set, not a map, because no geometry comes with
+   * them: this desk owns the grid of every pane it has a window for, and the
+   * list is here only so a pane can say it is being read.
    */
-  private phoneWatched = new Map<string, { cols: number; rows: number }>()
-  /**
-   * The same, for browsers on Forge Web. A second map rather than a second
-   * source writing into the first: each viewer sends its whole list on every
-   * change (an empty one is how it hands its panes back), so merging them on
-   * arrival would mean a browser's silence looking exactly like a phone
-   * leaving. `watchedSize` is where the two are read together.
-   */
-  private browserWatched = new Map<string, { cols: number; rows: number }>()
+  private phoneWatched = new Set<string>()
+  /** The same, for a browser on Forge Web. Two lists because each is complete
+   * in itself: every viewer sends its whole set on every change, so merging
+   * them on arrival would make a browser's silence look like a phone leaving. */
+  private browserWatched = new Set<string>()
   private wired = false
 
   /* ----------------------------------------------------------- plumbing */
@@ -814,10 +781,6 @@ class TerminalHost {
       resizeTimer: null,
       ptyDims: null,
       jiggleTimer: null,
-      // A pane can be created while a phone or a browser is already reading it —
-      // that viewer asked for the tab, and the desktop is building it. It must
-      // be born owned, or the very first fit takes the geometry straight back.
-      viewerOwned: this.watchedSize(paneId) !== null,
       scanTail: '',
       typed: '',
       lastActivityNotify: 0,
@@ -1227,11 +1190,9 @@ class TerminalHost {
   fit(paneId: string): void {
     const entry = this.entries.get(paneId)
     if (!entry || !entry.container) return
-    // A phone or a browser is reading this pane, so that viewer's geometry is
-    // the pane's geometry until it stops — see setPhoneWatched. The observer
-    // still fires (the box is still moving, and `geometry` below would be worth
-    // having); it simply must not become a resize.
-    if (entry.viewerOwned) return
+    // No viewer gets to stop this any more. A phone or a browser reading this
+    // pane is read at *this desk's* size — see setPhoneWatched — so the desk
+    // goes on fitting exactly as it would with nobody watching.
     const { clientWidth, clientHeight } = entry.container
     if (clientWidth < 8 || clientHeight < 8) return
     // Only a full-size layout is worth remembering — a peek tile's box is
@@ -1249,78 +1210,37 @@ class TerminalHost {
   }
 
   /**
-   * Hand the panes a phone is reading over to it, and take back the ones it
-   * has let go. `mobileWatched`, from electron/mobile-host.ts.
+   * Which panes a phone is reading — `mobileWatched`, from
+   * electron/mobile-host.ts.
    *
-   * The problem this solves is that a PTY has one geometry and a link gives it
-   * a second viewer. Both ends used to fit it to their own box, and since the
-   * desktop refits on any layout change — a window resize, a split, the boot
-   * `fitAll` — the desktop kept winning: a pane being read on a phone would
-   * have its width dragged back to the desk's without anything on the phone
-   * knowing, and every line after that arrived wrapped for a screen three
-   * times wider than the one showing it.
-   *
-   * So there is an owner, and `applyWatched` below is where it is decided.
+   * Note what this does *not* do, because it used to. A phone once owned the
+   * geometry of every pane it had open: it sent the size it was reading at, and
+   * this desk letterboxed its own pane to match. Steve rejected that — plugging
+   * a device in must not change the resolution at the desk, and watching every
+   * pane on the machine you are working at re-flow because a phone came out of
+   * a pocket is the app rearranging your work on a stranger's behalf. So the
+   * desk now keeps its grid, the phone draws the desk's grid at a font that
+   * fits its own screen (`follow` in mobile/src/lib/term.ts), and all this list
+   * does here is put a label on the pane header.
    */
-  setPhoneWatched(panes: Array<{ id: string; cols: number; rows: number }>): void {
-    this.phoneWatched = asWatchMap(panes)
+  setPhoneWatched(ids: string[]): void {
+    this.phoneWatched = new Set(ids)
+    this.applyWatched()
+  }
+
+  /** The same for a browser on Forge Web — `webWatched`, from
+   * electron/web-host.ts, under the same rule and for the same reason. */
+  setBrowserWatched(ids: string[]): void {
+    this.browserWatched = new Set(ids)
     this.applyWatched()
   }
 
   /**
-   * The same, for a browser on Forge Web — `webWatched`, from
-   * electron/web-host.ts.
+   * Say which panes are being read from away.
    *
-   * A second entry point rather than a second caller of `setPhoneWatched`
-   * because each list is complete in itself: a phone that has closed every pane
-   * says so by sending an empty one, and were the two writing into a single map
-   * that message would also hand back the panes a browser is still reading.
-   * Which is the bug that made this necessary — the desktop and a browser tab
-   * open side by side, each repairing its own render by corrupting the other's.
-   */
-  setBrowserWatched(panes: Array<{ id: string; cols: number; rows: number }>): void {
-    this.browserWatched = asWatchMap(panes)
-    this.applyWatched()
-  }
-
-  /**
-   * What size a pane is being read at away from this desk, or null when nobody
-   * is reading it.
-   *
-   * With both viewers on one pane the answer is the smaller of each dimension
-   * *independently*, and independently is the load-bearing word: a phone held
-   * upright is narrow and long, a browser window is wide and shallow, and
-   * taking either viewer's pair wholesale overflows the other in the dimension
-   * it was not chosen for. Neither screen can draw more than it has room for,
-   * so both are given the intersection — which is smaller than one of them
-   * asked for and readable on both, and that is the trade this whole
-   * arrangement exists to make.
-   */
-  private watchedSize(paneId: string): { cols: number; rows: number } | null {
-    const phone = this.phoneWatched.get(paneId)
-    const browser = this.browserWatched.get(paneId)
-    if (!phone) return browser ?? null
-    if (!browser) return phone
-    return { cols: Math.min(phone.cols, browser.cols), rows: Math.min(phone.rows, browser.rows) }
-  }
-
-  /**
-   * Give every pane to whoever is reading it now, and take back the rest.
-   *
-   * While a pane has a viewer:
-   *
-   *  - `fit` is a no-op for it, so nothing here resizes the PTY, and
-   *  - the desktop's own terminal is resized to the *viewer's* cols/rows, which
-   *    letterboxes it inside the pane — the same screen, at the size it is
-   *    actually being drawn at, rather than a lie the width of the window.
-   *
-   * `ptyDims` is set before `term.resize` on purpose: xterm answers a resize
-   * with `onResize`, which queues a PTY resize, and the settle check compares
-   * against `ptyDims`. Recording the size first is what makes adoption
-   * *following* the PTY rather than arguing with it.
-   *
-   * Dropping off both lists refits against the real container, which sends the
-   * desktop's geometry back down with the usual repaint jiggle.
+   * The whole of it, now that neither viewer moves any geometry: a pane on
+   * either list gets `runtime.phone` or `runtime.browser`, which is a chip on
+   * the pane header, and the size is left exactly where the desk put it.
    */
   private applyWatched(): void {
     for (const [paneId, entry] of this.entries) {
@@ -1328,27 +1248,12 @@ class TerminalHost {
       const browser = this.browserWatched.has(paneId)
       // Only when one of them has actually moved. `setRuntime` tells every
       // listener on the pane whatever the patch says, and these lists are
-      // re-sent on every resize a viewer makes — a browser window being dragged
-      // is a stream of them, and a stream of them is a stream of re-renders.
+      // re-sent whenever a viewer opens or closes a pane — a phone walking a
+      // list of them is a stream of messages, and a stream of them would be a
+      // stream of re-renders.
       if (entry.runtime.phone !== phone || entry.runtime.browser !== browser) {
         this.setRuntime(entry, { phone, browser })
       }
-      const watched = this.watchedSize(paneId)
-      if (watched) {
-        entry.viewerOwned = true
-        if (entry.term.cols !== watched.cols || entry.term.rows !== watched.rows) {
-          entry.ptyDims = { cols: watched.cols, rows: watched.rows }
-          try {
-            entry.term.resize(watched.cols, watched.rows)
-          } catch {
-            /* xterm throws if measured mid-teardown — harmless */
-          }
-        }
-        continue
-      }
-      if (!entry.viewerOwned) continue
-      entry.viewerOwned = false
-      this.fit(paneId)
     }
   }
 

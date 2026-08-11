@@ -25,29 +25,29 @@ import './TerminalPane.css'
 /**
  * The chip for a pane somebody else is reading, or null when nobody is.
  *
- * Three sentences rather than one, because the size on screen has three
- * different explanations and only the true one is any use: a pane letterboxed
- * for a phone, one letterboxed for a browser on Forge Web, and one letterboxed
- * for both — which is drawn at the smaller of the two and so is narrower than
- * *either* screen asked for. See `watchedSize` in src/lib/terminals.ts.
+ * Three sentences rather than one because the chip names *which* screen is
+ * reading, and that is the whole of what it says: neither viewer changes what
+ * is on this desk any more — the desk keeps its grid and both of them scale to
+ * it — so this is news rather than an explanation of the size. See
+ * `setPhoneWatched` and `setBrowserWatched` in src/lib/terminals.ts.
  */
 function watcherChip(runtime: { phone: boolean; browser: boolean }): { label: string; title: string } | null {
   if (runtime.phone && runtime.browser) {
     return {
       label: 'PHONE + BROWSER',
-      title: 'A phone and a browser both have this pane open, so it is drawn small enough to fit on both until one of them leaves'
+      title: "A phone and a browser both have this pane open. Both follow this desktop's size; nothing here changes shape for them"
     }
   }
   if (runtime.phone) {
     return {
       label: 'ON PHONE',
-      title: "A phone has this pane open, so it is drawn at the phone's size until the phone leaves"
+      title: "A phone has this pane open. It is drawn at this desktop's size — nothing here changes shape for it"
     }
   }
   if (runtime.browser) {
     return {
       label: 'IN BROWSER',
-      title: "A browser has this pane open, so it is drawn at the browser's size until the browser leaves"
+      title: "A browser has this pane open. It is drawn at this desktop's size — nothing here changes shape for it"
     }
   }
   return null
@@ -389,12 +389,10 @@ export function TerminalPane({
           </span>
         ) : null}
 
-        {/* A pane being read elsewhere is letterboxed at that screen's width —
-            deliberately, so both screens show the same thing (see
-            setPhoneWatched and setBrowserWatched). Unlabelled, that reads as a
-            broken pane, so the chip names which screen it is being drawn for
-            and, when there are two of them, says that the size is neither
-            one's. */}
+        {/* Neither a phone nor a browser changes anything about this pane —
+            both draw this desk's grid scaled to their own screen (see
+            setPhoneWatched). They are named anyway: "somebody is reading this
+            from away" is worth knowing on its own. */}
         {watcher ? (
           <span className="pane__perm mono" title={watcher.title}>
             {watcher.label}

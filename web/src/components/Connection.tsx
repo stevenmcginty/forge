@@ -6,8 +6,8 @@ import { useForge } from '../state'
 /**
  * The connection screens — the part of this client that is not a spinner.
  *
- * shared/web.ts is blunt about why these are eight values rather than one error
- * string: "These are different sentences on screen and different recovery paths
+ * shared/web.ts is blunt about why these are several values rather than one
+ * error string: "These are different sentences on screen and different recovery paths
  * — sign in again, sign in as somebody else, wait for a human, ask a human,
  * update the page, come back later — so they are different values rather than
  * one `error: string`. A client that collapses them into 'connection failed' has
@@ -25,7 +25,7 @@ interface Recovery {
   /** What the person should do, in the browser's own words. */
   hint: string
   /** The one button, when there is one worth offering. */
-  action?: 'retry' | 'sign-out' | 'reload' | 'forget'
+  action?: 'retry' | 'sign-out' | 'reload'
 }
 
 function recovery(reason: WebRefusal, email: string): Recovery {
@@ -62,15 +62,6 @@ function recovery(reason: WebRefusal, email: string): Recovery {
         // browser anybody has judged. Retrying would send the same blank id.
         hint: 'Reloading mints a fresh id for this browser. If it says the same thing afterwards, this browser is refusing the page any storage to keep one in — private browsing, or blocked site data.',
         action: 'reload'
-      }
-    case 'revoked':
-      return {
-        title: 'This browser was removed',
-        icon: 'close',
-        // "The page should forget its device id and stop reconnecting; a revoked
-        // device that keeps knocking is a prompt storm."
-        hint: 'It was admitted once and has since been revoked in the desktop’s settings. Forgetting this browser mints it a fresh id, so the next connection is a new row rather than the revoked one — and it still has to answer the desktop’s PIN.',
-        action: 'forget'
       }
     case 'proto':
       return {
@@ -176,11 +167,6 @@ export function Refused({
       {plan.action === 'reload' ? (
         <button type="button" className="cta-btn gate__go" onClick={() => window.location.reload()}>
           Reload the page
-        </button>
-      ) : null}
-      {plan.action === 'forget' ? (
-        <button type="button" className="cta-btn gate__go" onClick={() => actions.forgetThisBrowser()}>
-          Forget this browser and ask again
         </button>
       ) : null}
     </Screen>

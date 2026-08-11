@@ -241,6 +241,19 @@
   color: var(--text-muted);
 }
 
+.scard__steps {
+  margin: 0;
+  max-width: 66ch;
+  padding-left: var(--s-4);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.scard__steps li + li {
+  margin-top: var(--s-1);
+}
+
 /* --------------------------------------------------------------------- row */
 
 .srow {
@@ -1683,70 +1696,3 @@
   height: 30px;
 }
 
-.web-devices {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.web-device {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--s-3);
-  padding: var(--s-3) 0;
-  border-top: 1px solid var(--line-hairline);
-}
-
-.web-device:first-child {
-  border-top: 0;
-}
-
-/* A revoked row stays in the list on purpose — the tombstone is what tells a
-   refused browser apart from a stranger — so it is dimmed rather than removed,
-   and carries the word as well as the dimming. */
-.web-device[data-revoked] .web-device__name {
-  color: var(--text-muted);
-  text-decoration: line-through;
-}
-
-.web-device__text {
-  flex: 1 1 180px;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.web-device__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.web-device__meta {
-  font-size: var(--t-xs);
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.web-device__actions {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-}
-
-.web-device__badge {
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 var(--s-4);
-  font-family: var(--font-mono);
-  font-size: var(--t-eyebrow);
-  color: var(--text-dim);
-  border: 1px solid var(--line-hairline);
-  border-radius: var(--r-sm);
-}

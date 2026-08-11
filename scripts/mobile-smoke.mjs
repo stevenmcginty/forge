@@ -155,9 +155,19 @@ async function main() {
   const ops = []
   let opAnswer = null
   // Every set of watched panes the server has announced, in order. The desktop
-  // uses these to decide which PTYs it must stop resizing, so "it fired" and
-  // "it fired only when the set actually changed" are both worth proving.
+  // labels those panes as read from away, so "it fired" and "it fired only when
+  // the set actually changed" are both worth proving.
   const watches = []
+  /**
+   * Whether this pretend desktop has a window open, which is what decides who
+   * owns a PTY's grid — see `deskOpen` in electron/mobile/server.ts.
+   *
+   * False for every phase but the one that flips it, because a head-less server
+   * driving a real PTY is a desktop with no window by any honest reading. A host
+   * that omits the hook entirely has to behave the same way, which is what every
+   * other server built below proves by never setting it.
+   */
+  let deskHasWindow = false
   const makeServer = (auth) =>
     new MobileServer({
       auth,
@@ -166,6 +176,7 @@ async function main() {
       replay: (id) => replay.get(id) ?? '',
       write: (id, data) => manager.write(id, data),
       resize: (id, cols, rows) => manager.resize(id, cols, rows),
+      deskOpen: () => deskHasWindow,
       snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: {} }),
       dispatchOp: async (op) => {
         ops.push(op)
@@ -311,7 +322,7 @@ async function main() {
   log(phone.first('replay').data.length > 0, 'and that buffer carries the scrollback')
 
   await waitFor(() => watches.length > 0, 5000, 'the watch announcement')
-  log(watches[watches.length - 1] === 'm1', 'a phone opening a pane says so, so the desktop can hand it the geometry')
+  log(watches[watches.length - 1] === 'm1', 'a phone opening a pane says so, so the desktop can label it as read from away')
 
   phone.send({ t: 'sub', id: 'does-not-exist' })
   await waitFor(() => phone.of('err').length > 0, 5000, 'unknown-session error')
@@ -329,7 +340,39 @@ async function main() {
   phone.send({ t: 'resize', id: 'm1', cols: 132, rows: 44 })
   await waitFor(() => manager.list().find((s) => s.id === 'm1')?.cols === 132, 6000, 'resize to land')
   const geometry = manager.list().find((s) => s.id === 'm1')
-  log(geometry.cols === 132 && geometry.rows === 44, 'a resize from the phone resized the real PTY')
+  log(
+    geometry.cols === 132 && geometry.rows === 44,
+    'a resize from the phone resized the real PTY, because nothing is drawing this pane at a desk'
+  )
+
+  /* ------------------------------------ 7b. the same frame, with a window open
+   *
+   * A PTY has one grid, and while somebody is at the desk the desk keeps it:
+   * the frame is dropped rather than obeyed, in silence, because the phone is
+   * told the real geometry by the `state` push anyway and scales its own type
+   * to it. The ping is what sequences this — it is answered on the same socket
+   * the resize was sent down, so its pong is proof the resize has been handled
+   * and not merely posted.
+   */
+
+  deskHasWindow = true
+  const held = manager.list().find((s) => s.id === 'm1')
+  const errsBeforeHeld = phone.of('err').length
+  const pongsBeforeHeld = phone.of('pong').length
+  phone.send({ t: 'resize', id: 'm1', cols: 40, rows: 12 })
+  phone.send({ t: 'ping' })
+  await waitFor(() => phone.of('pong').length > pongsBeforeHeld, 6000, 'the frame behind the held resize')
+  const unmoved = manager.list().find((s) => s.id === 'm1')
+  log(
+    unmoved.cols === held.cols && unmoved.rows === held.rows,
+    `with a window open at the desk, a resize from the phone did not move the real PTY (still ${unmoved.cols}x${unmoved.rows})`
+  )
+  log(phone.of('err').length === errsBeforeHeld, 'and it was not refused out loud — a dropped wish is not an error')
+
+  deskHasWindow = false
+  phone.send({ t: 'resize', id: 'm1', cols: 120, rows: 40 })
+  await waitFor(() => manager.list().find((s) => s.id === 'm1')?.cols === 120, 6000, 'the resize once the window has gone')
+  log(true, 'and the moment the desk has no window, the same frame is honoured again — the phone never changed what it sends')
 
   /* ------------------------------------------------- 8. a late subscriber */
 
@@ -348,7 +391,7 @@ async function main() {
 
   log(
     watches.length === watchesBeforeLate,
-    'a second phone on the same pane is not a change of ownership, and says nothing'
+    'a second phone on the same pane does not change the set, and says nothing'
   )
 
   late.socket.close()
@@ -356,15 +399,15 @@ async function main() {
   log(manager.list().some((s) => s.id === 'm1'), 'closing the phone does not kill the session')
   log(watches[watches.length - 1] === 'm1', 'and the pane stays watched while the other phone still holds it')
 
-  /* --------------------------------------------- 9b. handing the pane back */
+  /* ------------------------------------------- 9b. letting the pane go again */
 
   phone.send({ t: 'unsub', id: 'm1' })
-  await waitFor(() => watches[watches.length - 1] === '', 5000, 'the pane to be handed back')
-  log(true, 'leaving a pane hands its geometry back to the desktop')
+  await waitFor(() => watches[watches.length - 1] === '', 5000, 'the pane to be let go')
+  log(true, 'leaving a pane says so, so the desktop can take the label off it')
 
   phone.send({ t: 'sub', id: 'm1' })
   await waitFor(() => watches[watches.length - 1] === 'm1', 5000, 'the pane to be taken again')
-  log(true, 'and opening it again takes it back')
+  log(true, 'and opening it again puts the label back')
 
   /* ----------------------------------- 9c. typing into a pane that has gone
    *
