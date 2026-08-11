@@ -65,6 +65,26 @@ const SHAPE_RULES = [
 ]
 
 /**
+ * Values that match a shape rule and are shipped on purpose, each one exact.
+ *
+ * There is exactly one today: `WEB_DEFAULT_API_KEY` in electron/store.ts, the
+ * Firebase *web* API key of the deployment Forge ships as its default. It
+ * shares the `AIza` prefix with a Gemini key and shares nothing else with one:
+ * a Firebase web API key names a project and authorises nothing — the same
+ * value is already served in the clear to every visitor of the hosting site as
+ * `config.json`, so the artifact cannot leak what the deployment already
+ * publishes. See docs/WEB-SETUP.md ("not secrets").
+ *
+ * Exact literals rather than a pattern or an import, on purpose: a pattern
+ * would widen the door, and importing the constant would let a *new* key ride
+ * in on the allowlist without anyone retyping it here and owning the decision.
+ * The one real risk — Steve's personal Gemini key somehow equalling this
+ * string — is impossible (they are different strings), and the LIVE_KEYS
+ * cross-check below still runs on every file regardless of this list.
+ */
+const PUBLIC_VALUES = new Set(['AIzaSyC2CJR7UZMyNrpXYqIMpwIGUVFp-gZpcWM'])
+
+/**
  * Files whose *presence* in a build artifact is the problem, whatever is in
  * them. Matched on the basename, so `resources/app.asar.unpacked/settings.json`
  * counts just as much as one at the root.
@@ -195,8 +215,8 @@ function scanFile(path, label, { allowFixtures = true } = {}) {
   if (!fixtures) {
     for (const rule of SHAPE_RULES) {
       rule.re.lastIndex = 0
-      const hits = text.match(rule.re)
-      if (hits) report(label, rule.label, `${hits.length}× e.g. ${redact(hits[0])}`)
+      const hits = (text.match(rule.re) ?? []).filter((hit) => !PUBLIC_VALUES.has(hit))
+      if (hits.length) report(label, rule.label, `${hits.length}× e.g. ${redact(hits[0])}`)
     }
   }
   for (const key of LIVE_KEYS) {

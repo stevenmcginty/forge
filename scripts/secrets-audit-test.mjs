@@ -71,6 +71,34 @@ console.log('\nsecrets gate — negative controls')
   ok(!r.stderr.includes('B0RtHzQ9vKmNpLwXcVfGh2JdEr'), 'without the audit printing the key itself')
 }
 
+/* ------------------------------------------------- the one deliberate value */
+
+{
+  // The shipped Firebase web API key (WEB_DEFAULT_API_KEY in electron/store.ts)
+  // is AIza-shaped and public by design — the deployment already serves it to
+  // every visitor. It must pass…
+  const dir = fresh('public-value')
+  writeFileSync(
+    join(dir, 'resources', 'defaults.js'),
+    "export const key = 'AIzaSyC2CJR7UZMyNrpXYqIMpwIGUVFp-gZpcWM'\n"
+  )
+  const r = run(dir)
+  ok(r.status === 0, 'the shipped Firebase web API key is allowed through', r.stderr.slice(0, 200))
+}
+
+{
+  // …without the allowlist widening into "AIza keys are fine now": the same
+  // artifact with one *other* AIza-shaped string beside it still fails.
+  const dir = fresh('public-plus-leak')
+  writeFileSync(
+    join(dir, 'resources', 'defaults.js'),
+    "export const key = 'AIzaSyC2CJR7UZMyNrpXYqIMpwIGUVFp-gZpcWM'\nconst oops = 'AIzaSyB0RtHzQ9vKmNpLwXcVfGh2JdErTyUiOp'\n"
+  )
+  const r = run(dir)
+  ok(r.status === 1, 'a different Google key beside the shipped one still fails the build')
+  ok(/1×/.test(r.stderr), 'and only the leak is counted, not the shipped value', r.stderr.slice(0, 200))
+}
+
 {
   const dir = fresh('sk')
   writeFileSync(
