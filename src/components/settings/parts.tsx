@@ -87,14 +87,24 @@ export function Row({
 
 /* ----------------------------------------------------------------- controls */
 
+/**
+ * `disabled` is for a switch whose *on* position would not mean anything — the
+ * one that has it today is Forge Web's "let a browser drive this desk", which
+ * the desktop refuses outright until one of the two escalation locks is on. A
+ * switch somebody can flip to a state the desktop then ignores is worse than no
+ * switch: it reads as a granted permission. The row's hint says why, because a
+ * greyed control with no sentence beside it is a puzzle rather than an answer.
+ */
 export function Toggle({
   checked,
   onChange,
-  label
+  label,
+  disabled
 }: {
   checked: boolean
   onChange: (next: boolean) => void
   label: string
+  disabled?: boolean
 }): ReactNode {
   return (
     <button
@@ -103,6 +113,7 @@ export function Toggle({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       data-on={checked ? 'true' : undefined}
       onClick={() => onChange(!checked)}
     >

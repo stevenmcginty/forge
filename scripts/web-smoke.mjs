@@ -30,10 +30,11 @@
  * check in phase A asserts the lockout is live, which is the same fact stated
  * out loud rather than assumed.
  *
- * Phase C is device approval on a third server, so a hang-up mid-question can be
- * observed withdrawing its own prompt. Phase D is the heartbeat, on a fourth
- * whose ping interval is injected short — a browser that stops answering has to
- * be dropped by a timer actually firing, not by an argument.
+ * Phase C is the unlock PIN on a third server, so the refusals it produces are
+ * observed as frames on a socket rather than as return values. Phase D is the
+ * heartbeat, on a fourth whose ping interval is injected short — a browser that
+ * stops answering has to be dropped by a timer actually firing, not by an
+ * argument.
  */
 import { mkdirSync, rmSync } from 'node:fs'
 import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto'
@@ -183,12 +184,15 @@ async function main() {
     WebServer,
     WebAuth,
     PtySessionManager,
+    hashPin,
     isAllowedSource,
     webSocketUrl,
     HEARTBEAT_GRACE_MS,
     HEARTBEAT_MS,
     MAX_FRAME_BYTES,
     MAX_INPUT_PER_SECOND,
+    MAX_MIRROR_CHUNK_BYTES,
+    MAX_MIRROR_INPUT_PER_SECOND,
     MAX_REPLAY_BYTES,
     MAX_WRITE_CHARS,
     WEB_PROTO,
@@ -359,13 +363,11 @@ async function main() {
       fetchJwks: async () => ({ body: JSON.stringify(served), cacheControl: 'public, max-age=21600' }),
       projectId: () => PROJECT,
       uid: () => UID,
-      // The hardening mode, on for every phase here. This file is about the
-      // *protocol* — what a refusal frame looks like, when a prompt goes up,
-      // what the socket does afterwards — and the word-pair path is the one
-      // with all of those moving parts in it. The account-only default (see
-      // `webRequireApproval` in shared/types.ts) is exercised where the
-      // admission decision itself is, in scripts/web-auth-check.mjs.
-      requireApproval: () => true,
+      // No unlock PIN unless a phase sets one, which is what this desktop ships
+      // as. This file is about the *protocol* — what a refusal frame looks
+      // like, what the socket does afterwards — so the phases that care about
+      // the PIN pass a `pinHash` of their own; where the admission decision
+      // itself is judged is scripts/web-auth-check.mjs.
       ...extra
     })
   }
@@ -478,10 +480,14 @@ async function main() {
     "a valid token minted by another Firebase project is bad-token, so a guessed uid learns nothing"
   )
 
-  const unapproved = await refusedBy({ idToken: mint(), deviceId: 'stranger-1' }, 'an unapproved device')
+  // `not-approved` no longer means "no prompt can be raised for you" — there is
+  // no prompt any more — so what it is asserted on is what it means now: a
+  // browser that sent no device id, which there is nothing to record an
+  // admission against.
+  const nameless = await refusedBy({ idToken: mint(), deviceId: '' }, 'a browser with no device id')
   log(
-    unapproved.first('refused')?.reason === 'not-approved',
-    'a browser this desktop has never approved is not-approved, with no prompt raised on an unarmed desktop'
+    nameless.first('refused')?.reason === 'not-approved',
+    'a browser that did not identify itself is not-approved, whatever its token says'
   )
 
   // Five strikes spent. The lockout is now shut, which is the whole reason this
@@ -810,66 +816,58 @@ async function main() {
   await waitFor(() => browser.closed !== null, 5000, 'the socket to close behind it')
   log(browser.closed === 1001, 'and then the socket closes')
 
-  /* ==================================== PHASE C — approval, and abandoning it */
+  /* ============================================= PHASE C — the unlock PIN
+   *
+   * A third server, with a PIN on it. scripts/web-auth-check.mjs proves the
+   * decision; what only this file can prove is that it reaches the *socket* —
+   * that a browser with no PIN is turned away over the wire with a refusal it
+   * can act on, and never sees the opening picture.
+   */
 
+  const PIN = '824159'
   const devicesC = []
-  const prompts = []
-  const withdrawn = []
-  const authC = makeAuth(devicesC, {
-    acceptUntil: () => Date.now() + 600_000,
-    // Never settles: the browser is going to hang up on it, which is the whole
-    // point of the check.
-    requestApproval: (ask) => {
-      prompts.push(ask)
-      return new Promise(() => {})
-    },
-    cancelApproval: (requestId) => withdrawn.push(requestId),
-    approvalTimeoutMs: 30_000
-  })
-  // Spying on the real method rather than replacing it: what runs underneath is
-  // still WebAuth.abandon, so this observes the call the server makes without
-  // stubbing out what it does.
-  const abandoned = []
-  const realAbandon = authC.abandon.bind(authC)
-  authC.abandon = (requestId) => {
-    abandoned.push(requestId)
-    return realAbandon(requestId)
-  }
+  const authC = makeAuth(devicesC, { pinHash: () => hashPin(PIN) })
   const serverC = makeServer(authC)
   active = serverC
   await serverC.start({ host: '127.0.0.1', port: PORT })
 
-  const waiting = await connect()
-  waiting.send({
-    type: 'hello',
-    proto: WEB_PROTO,
-    idToken: mint(),
-    client: '0.0.0-smoke',
-    deviceId: 'brand-new-browser',
-    deviceName: 'Firefox on Linux'
-  })
-  await waitFor(() => waiting.first('pending'), 8000, 'the pending frame')
-  const pending = waiting.first('pending')
-  log(/^[A-Z]+ [A-Z]+$/.test(pending.words), 'an unknown browser on an armed desktop is shown a word pair while a human is asked')
-  log(
-    prompts.length === 1 && prompts[0].words === pending.words,
-    'and the desktop prompt shows the same pair, which is the whole anti-confusion device'
-  )
-  log(pending.expiresAt > Date.now(), 'the browser is told when the question expires')
-  log(!waiting.first('hello-ok'), 'and nothing is handed over while it waits')
+  const helloC = (tab, extra = {}) =>
+    tab.send({
+      type: 'hello',
+      proto: WEB_PROTO,
+      idToken: mint(),
+      client: '0.0.0-smoke',
+      deviceId: 'brand-new-browser',
+      deviceName: 'Firefox on Linux',
+      ...extra
+    })
 
-  /* ----------------------------------------- 12. hanging up mid-question */
+  const askedForPin = await connect()
+  helloC(askedForPin)
+  await waitFor(() => askedForPin.first('refused'), 8000, 'the pin-required refusal')
+  const wantsPin = askedForPin.first('refused')
+  log(wantsPin.reason === 'pin-required', 'a browser reaching a desktop with a PIN set is refused pin-required')
+  log(typeof wantsPin.message === 'string' && wantsPin.message.length > 0, 'with a sentence to put above the PIN box')
+  log(!askedForPin.first('hello-ok'), 'and never sees the opening picture')
+  log(authC.devices().length === 0, 'and nothing is recorded for it')
 
-  waiting.socket.close()
-  await waitFor(() => abandoned.length > 0, 5000, 'the abandoned approval')
+  /* --------------------------------------------- 12. a wrong PIN, and the right one */
+
+  const wrongPin = await connect()
+  helloC(wrongPin, { pin: '000000' })
+  await waitFor(() => wrongPin.first('refused'), 8000, 'the pin-invalid refusal')
+  log(wrongPin.first('refused').reason === 'pin-invalid', 'a wrong PIN is refused pin-invalid over the same wire')
+  log(!wrongPin.first('hello-ok'), 'and it too is told nothing else')
+
+  const withPin = await connect()
+  helloC(withPin, { pin: PIN })
+  await waitFor(() => withPin.first('hello-ok'), 8000, 'the browser that knows the PIN')
+  log(Boolean(withPin.first('hello-ok')), 'the right PIN gets the same browser the whole opening picture')
   log(
-    abandoned[0] === prompts[0].requestId,
-    'a browser that hangs up mid-approval has its question abandoned by request id, not left pending'
+    authC.devices().some((d) => d.id === 'brand-new-browser'),
+    'and it is recorded in the device list, so it can be revoked later'
   )
-  log(
-    withdrawn.includes(prompts[0].requestId),
-    'and the prompt is withdrawn from the desktop, so an Allow cannot land on a socket that is gone'
-  )
+  withPin.socket.close()
 
   await serverC.stop()
 
@@ -934,6 +932,332 @@ async function main() {
   )
 
   await serverD.stop()
+
+  /* ================================== PHASE E — the screen mirror, and the
+   *                                             one frame that ends at the OS
+   *
+   * Everything else on this link ends inside Forge. A `mirror-frame` ends at a
+   * decoder somewhere on the internet and a `mirror-input` ends at `user32`, so
+   * this phase drives the real relay over a real socket rather than reasoning
+   * about it — including the two things that are only true because the code
+   * says so in one place: that a refused control is *one* sentence per watch,
+   * and that pointer frames spend a budget of their own rather than the one
+   * that answers keystrokes.
+   *
+   * The gates that decide whether any of it may happen at all — the settings
+   * and the escalation guard — are electron/web-host.ts's and are not in this
+   * file, which is the same division phase D observes: this server relays and
+   * counts, and the host says yes or no. What is asserted here is that a "no"
+   * arrives as a sentence and that a "yes" arrives intact — including the one
+   * "no" that is really a question, which is the fresh PIN a watch asks for.
+   */
+
+  const MIRROR_PIN = '246813'
+  /** Set only for the escalation check below; '' for every phase before it. */
+  let mirrorPin = ''
+  const devicesE = [
+    { id: 'browser-1', name: 'Chrome', createdAt: 1, lastSeenAt: 1, revokedAt: 0 },
+    { id: 'browser-2', name: 'Firefox', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }
+  ]
+  const authE = makeAuth(devicesE, { pinHash: () => mirrorPin })
+
+  /** An authenticated tab, the shape every check below starts from. */
+  const admitted = async (deviceId) => {
+    const tab = await connect()
+    tab.send({
+      type: 'hello',
+      proto: WEB_PROTO,
+      idToken: mint(),
+      client: '0.0.0-smoke',
+      deviceId,
+      deviceName: 'Chrome on Windows'
+    })
+    await waitFor(() => tab.first('hello-ok'), 8000, `${deviceId} to be let in`)
+    return tab
+  }
+
+  /* ------------------------------------- 16. a desktop that cannot be watched */
+
+  // The base `makeServer` supplies no mirror hooks at all, which is exactly the
+  // shape of an older Forge and of any future host that has not thought about
+  // this. It must refuse rather than half-start something and leave a tab on a
+  // black rectangle.
+  const serverBare = makeServer(authE)
+  active = serverBare
+  await serverBare.start({ host: '127.0.0.1', port: PORT })
+
+  const bare = await admitted('browser-1')
+  bare.send({ type: 'mirror-start' })
+  await waitFor(() => bare.first('mirror-stop'), 5000, 'the refusal from a host with no mirror hooks')
+  log(
+    typeof bare.first('mirror-stop').reason === 'string' && bare.first('mirror-stop').reason.length > 0,
+    'a host that supplies no mirror hooks refuses to be watched, with a sentence rather than a silence'
+  )
+  log(serverBare.mirroring === false, 'and no viewer was created by the asking')
+
+  await serverBare.stop()
+
+  /* ------------------------------------------------ the desktop that can be */
+
+  const starts = []
+  /** Every edge of `onMirror`, in order — true when a watch begins, false when it ends. */
+  const edges = []
+  const inputs = []
+  let startRefusal = null
+  /** Stands in for the escalation guard and the control toggle behind it. */
+  let controlAllowed = false
+  const serverE = makeServer(authE, {
+    // The desktop's own answer, in the shape electron/web-host.ts's
+    // `startMirror` gives it: the relay hands the PIN straight over, and what
+    // decides is `checkFreshPin` on the real WebAuth rather than a stand-in
+    // written to agree with it.
+    mirrorStart: (pin) => {
+      starts.push(pin)
+      const fresh = authE.checkFreshPin(pin)
+      if (!fresh.ok) return { error: fresh.message, ...(fresh.needed ? { needsPin: true } : {}) }
+      return startRefusal
+    },
+    onMirror: (watching) => edges.push(watching),
+    // The desktop's own two answers, exactly as electron/web-host.ts gives
+    // them: may anybody drive at all, and here is one input to perform. Both
+    // are read per call, because that is what makes switching control off stop
+    // the *next* event rather than the next session.
+    mirrorControl: () => controlAllowed,
+    mirrorInput: (input) => {
+      if (!controlAllowed) return false
+      inputs.push(input)
+      return true
+    }
+  })
+  active = serverE
+  await serverE.start({ host: '127.0.0.1', port: PORT })
+
+  /* -------------------------------------------------- 17. a viewer starts */
+
+  const viewer = await admitted('browser-1')
+  viewer.send({ type: 'mirror-start', pin: '123456' })
+  await waitFor(() => starts.length > 0, 5000, 'the mirrorStart hook call')
+  log(starts[0] === '123456', 'the PIN a browser typed reaches the desktop verbatim — the relay never reads it')
+  log(serverE.mirroring === true, 'and the server now considers itself mirroring')
+  log(edges.at(-1) === true, 'the desk is told a watch has begun, so it can say so and raise a notification')
+
+  /* ---------------------------- 18. what the decoder is configured with */
+
+  serverE.pushMirrorReady({ codec: 'vp8', width: 1920, height: 1080 })
+  await waitFor(() => viewer.first('mirror-ok'), 5000, 'the mirror-ok frame')
+  const mirrorOk = viewer.first('mirror-ok')
+  log(
+    mirrorOk.codec === 'vp8' && mirrorOk.width === 1920 && mirrorOk.height === 1080,
+    'mirror-ok carries what a decoder has to be configured with, from the renderer that chose it'
+  )
+  log(
+    mirrorOk.canControl === false,
+    'and says plainly that this desktop will not be driven, so a tab never offers a cursor it cannot deliver'
+  )
+
+  /* --------------------------------------- 19. the picture, to the viewer only */
+
+  const bystander = await admitted('browser-2')
+  serverE.pushMirrorFrame({ data: 'AAAA', key: true, timestamp: 0 })
+  await waitFor(() => viewer.of('mirror-frame').length > 0, 5000, 'the chunk to reach the viewer')
+  log(viewer.first('mirror-frame').key === true, 'a chunk reaches the viewer with the one bit a decoder needs per frame')
+  log(
+    bystander.of('mirror-frame').length === 0 && bystander.of('mirror-ok').length === 0,
+    'and a second authenticated browser is sent neither the picture nor the means to decode it'
+  )
+
+  /* ------------------------------------------- 20. one screen at a time */
+
+  const startsBeforeSecond = starts.length
+  bystander.send({ type: 'mirror-start' })
+  await waitFor(() => bystander.first('mirror-stop'), 5000, 'the second viewer to be refused')
+  log(
+    typeof bystander.first('mirror-stop').reason === 'string' && bystander.first('mirror-stop').reason.length > 0,
+    'a second browser asking while one is watching gets a mirror-stop with a reason'
+  )
+  log(starts.length === startsBeforeSecond, 'and the desktop is never asked to start a second capture')
+  log(serverE.mirroring === true, 'the original viewer is still the viewer')
+
+  /* ------------------------------- 21. the same browser asking again is a restart
+   *
+   * A tab's own attempt can die where this side cannot see it — a decoder that
+   * would not configure, a reload — leaving the server still believing it has a
+   * watcher. Refusing that tab's retry would tell the only browser in the room
+   * that it was busy watching itself.
+   */
+
+  const startsBeforeRestart = starts.length
+  const edgesBeforeRestart = edges.length
+  const viewerStopsBeforeRestart = viewer.of('mirror-stop').length
+  viewer.send({ type: 'mirror-start' })
+  await waitFor(() => starts.length > startsBeforeRestart, 5000, 'the restart from the browser already watching')
+  log(starts.length === startsBeforeRestart + 1, 'the browser already watching can ask again, and the desktop starts over')
+  log(viewer.of('mirror-stop').length === viewerStopsBeforeRestart, 'it is never told another browser is watching')
+  log(serverE.mirroring === true, 'and it is still the viewer afterwards')
+  log(
+    edges.length === edgesBeforeRestart,
+    'and the desk is not told a second time — a tab retrying in a loop must not be a notification a second'
+  )
+
+  /* --------------------------------- 22. only the screen that is watching drives */
+
+  const straysBefore = inputs.length
+  const bystanderErrsBefore = bystander.of('error').length
+  bystander.send({ type: 'mirror-input', a: 'move', x: 0.5, y: 0.5 })
+  // Nothing to wait *for* — the assertion is that nothing happens — so the
+  // proof is a frame that does travel, sent afterwards on the same socket.
+  bystander.send({ type: 'ping' })
+  await waitFor(() => bystander.of('pong').length > 0, 5000, 'a frame behind the stray input')
+  log(inputs.length === straysBefore, 'an input from a browser that is not watching the screen never reaches the desktop')
+  log(
+    bystander.of('error').length === bystanderErrsBefore,
+    'and is dropped in silence: a frame from a socket that has just stopped watching is timing, not an attack'
+  )
+
+  /* ------------------------ 23. a refused control is one sentence, not a hundred */
+
+  const errsBeforeRefusal = viewer.of('error').length
+  for (let i = 0; i < 20; i++) viewer.send({ type: 'mirror-input', a: 'move', x: 0.5, y: 0.5 })
+  await waitFor(() => viewer.of('error').length > errsBeforeRefusal, 5000, 'the refusal of a control that is switched off')
+  // "Exactly one" is a claim about the whole burst, not about the first refusal
+  // having arrived — so a frame sent behind the twenty and answered is what
+  // settles it. Without this the check would pass on a second error still in
+  // flight.
+  const pongsBeforeSettle = viewer.of('pong').length
+  viewer.send({ type: 'ping' })
+  await waitFor(() => viewer.of('pong').length > pongsBeforeSettle, 5000, 'the frame sent behind the burst')
+  log(
+    viewer.of('error').length === errsBeforeRefusal + 1,
+    'a burst of input at a desktop that refuses control draws exactly one error, not one per press'
+  )
+  log(
+    viewer.of('error').at(-1).code === 'unsupported',
+    'and it is answered rather than dropped, so the tab can stop offering a cursor'
+  )
+  log(inputs.length === straysBefore, 'and not one of the twenty reached the desktop')
+
+  /* ------------------------------ 24. the watching screen drives, once allowed */
+
+  controlAllowed = true
+  viewer.send({ type: 'mirror-input', a: 'move', x: 0.25, y: 0.75 })
+  await waitFor(() => inputs.length > straysBefore, 5000, 'the first input to reach the desktop')
+  log(
+    inputs.at(-1).a === 'move' && inputs.at(-1).x === 0.25 && inputs.at(-1).y === 0.75,
+    'a move from the watching browser reaches the desktop with its coordinates intact'
+  )
+
+  viewer.send({ type: 'mirror-input', a: 'down', button: 'left', x: 0.5, y: 0.5 })
+  await waitFor(() => inputs.at(-1).a === 'down', 5000, 'the button press')
+  log(inputs.at(-1).button === 'left', 'and a button press names its button')
+
+  viewer.send({ type: 'mirror-input', a: 'move', x: 4, y: -3 })
+  await waitFor(() => inputs.at(-1).a === 'move', 5000, 'the clamped move')
+  log(
+    inputs.at(-1).x === 1 && inputs.at(-1).y === 0,
+    'a coordinate outside the screen is clamped to its edge by the same readMirrorInput the phone link uses'
+  )
+
+  const shapelessBefore = inputs.length
+  const errsBeforeShapeless = viewer.of('error').length
+  viewer.send({ type: 'mirror-input', a: 'key', key: 'f13', down: true })
+  await waitFor(() => viewer.of('error').length > errsBeforeShapeless, 5000, 'the refusal of a key nobody listed')
+  log(viewer.of('error').at(-1).code === 'bad-frame', 'a key outside the closed list is refused as bad-frame')
+  log(inputs.length === shapelessBefore, 'and never reaches the desktop')
+
+  /* ------------------- 25. the pointer's budget is not the terminal's budget
+   *
+   * The whole reason `mirror-input` is counted separately. A pointer moving
+   * smoothly is thirty frames a second; if those spent the budget that answers
+   * `write`, the half of this link that stalls would be the terminal.
+   */
+
+  const burst = MAX_MIRROR_INPUT_PER_SECOND * 3
+  const actedBefore = inputs.length
+  const limitsBefore = viewer.of('error').filter((e) => e.code === 'limit').length
+  const pongsBefore = viewer.of('pong').length
+  for (let i = 0; i < burst; i++) viewer.send({ type: 'mirror-input', a: 'move', x: 0.5, y: 0.5 })
+  viewer.send({ type: 'ping' })
+  await waitFor(() => viewer.of('pong').length > pongsBefore, 8000, 'the ping sent behind the burst')
+  log(
+    viewer.of('error').filter((e) => e.code === 'limit').length === limitsBefore,
+    `a burst of ${burst} pointer frames spends none of MAX_INPUT_PER_SECOND (${MAX_INPUT_PER_SECOND}) — the terminal's budget is untouched`
+  )
+  log(
+    inputs.length - actedBefore < burst,
+    `while the pointer's own ceiling of ${MAX_MIRROR_INPUT_PER_SECOND} a second still bites (${inputs.length - actedBefore} of ${burst} were acted on)`
+  )
+  await sleep(1100)
+
+  /* -------------------------------- 26. a chunk too big to send ends the watch */
+
+  const edgesBeforeOversized = edges.length
+  serverE.pushMirrorFrame({ data: 'A'.repeat(MAX_MIRROR_CHUNK_BYTES * 2), key: true, timestamp: 1 })
+  await waitFor(() => viewer.of('mirror-stop').length > viewerStopsBeforeRestart, 5000, 'the oversized chunk to end the watch')
+  log(
+    viewer.of('mirror-stop').at(-1).reason.length > 0,
+    `a chunk over MAX_MIRROR_CHUNK_BYTES (${MAX_MIRROR_CHUNK_BYTES}) ends the watch with a sentence rather than showing a picture that cannot decode`
+  )
+  log(serverE.mirroring === false && edges.length === edgesBeforeOversized + 1, 'and the desktop is told to stop capturing')
+
+  /* ------------------------------------------------- 27. a hang-up ends it */
+
+  viewer.send({ type: 'mirror-start' })
+  await waitFor(() => serverE.mirroring === true, 5000, 'the watch to begin again')
+  const edgesBeforeHangup = edges.length
+  viewer.socket.close()
+  await waitFor(() => edges.length > edgesBeforeHangup, 5000, 'the hang-up to end the watch')
+  log(edges.at(-1) === false, "the viewer's own hang-up tells the desktop to stop capturing")
+  log(serverE.mirroring === false, 'and the server is no longer mirroring')
+
+  /* ------------------------- 27b. the fresh PIN, before the picture starts
+   *
+   * The escalation the whole mirror block rests on: a desktop with a PIN set
+   * asks for it *again* at `mirror-start`, and the refusal carries the one bit
+   * that makes a browser draw a PIN box rather than an apology.
+   */
+
+  mirrorPin = hashPin(MIRROR_PIN)
+  const stopsBeforePin = bystander.of('mirror-stop').length
+  bystander.send({ type: 'mirror-start' })
+  await waitFor(() => bystander.of('mirror-stop').length > stopsBeforePin, 5000, 'the refusal that asks for a PIN')
+  const mirrorWantsPin = bystander.of('mirror-stop').at(-1)
+  log(mirrorWantsPin.needsPin === true, 'a watch asked for on a desktop with a PIN set comes back needing one')
+  log(
+    typeof mirrorWantsPin.reason === 'string' && mirrorWantsPin.reason.length > 0,
+    'with a sentence to put above the box, rather than a bare refusal'
+  )
+  log(serverE.mirroring === false, 'and no watch began, so the browser can ask again once it has the PIN')
+
+  const stopsBeforeWrong = bystander.of('mirror-stop').length
+  bystander.send({ type: 'mirror-start', pin: '999999' })
+  await waitFor(() => bystander.of('mirror-stop').length > stopsBeforeWrong, 5000, 'the refusal of a wrong PIN')
+  log(
+    bystander.of('mirror-stop').at(-1).needsPin === undefined,
+    'a wrong PIN is a failure rather than a question, so the page shows an apology and not another box'
+  )
+
+  bystander.send({ type: 'mirror-start', pin: MIRROR_PIN })
+  await waitFor(() => serverE.mirroring === true, 5000, 'the watch to begin once the PIN is right')
+  log(serverE.mirroring === true, 'and the right PIN starts the capture')
+
+  // Closed by the browser, and the desktop put back to no-PIN: the last check is
+  // about the relay tearing a watch down rather than about the lock in front of
+  // it, and it starts from no viewer.
+  bystander.send({ type: 'mirror-stop' })
+  await waitFor(() => serverE.mirroring === false, 5000, 'the viewer to close its own watch')
+  mirrorPin = ''
+
+  /* ---------------------------------------------- 28. and so does stop() */
+
+  bystander.send({ type: 'mirror-start' })
+  await waitFor(() => serverE.mirroring === true, 5000, 'the second browser to take the screen')
+  const edgesBeforeStop = edges.length
+  await serverE.stop()
+  log(
+    edges.length === edgesBeforeStop + 1 && edges.at(-1) === false,
+    'and a server stopping tears the capture down with it, rather than leaving a desktop encoding for nobody'
+  )
+  log(serverE.mirroring === false, 'with no viewer left behind to refuse the next one')
 
   /* ---------------------------------------------------------------- done */
 

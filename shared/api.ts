@@ -26,12 +26,12 @@ import type {
   MobilePairOffer,
   MobileStatus,
   MobileWatchEvent,
-  WebApprovalEvent,
   WebCommandEvent,
+  WebMirrorEvent,
+  WebProjectAddEvent,
   WebSignInResult,
   WebStatus,
-  WebTotpOffer,
-  WebTotpResult,
+  WebWatchEvent,
   OpenRouterCallRequest,
   OpenRouterCallResult,
   GroqCallRequest,
@@ -76,6 +76,13 @@ import type {
   WindowStateEvent,
   Workspace
 } from './types'
+/*
+ * The two wire shapes the screen mirror hands straight through this bridge.
+ * Declared in shared/web.ts because the browser on the far end is compiled
+ * against that file; named here rather than re-described, so the renderer, main
+ * and the tab cannot end up with three ideas of what configures a decoder.
+ */
+import type { WebMirrorChunk, WebMirrorConfig } from './web'
 import type { SkillSource, SkillsList } from './skills'
 import type { PackPlugin, SkillPack } from './skillpack'
 import type { CommandsFeed } from './commands'
@@ -590,13 +597,6 @@ export interface ForgeApi {
      * `WebStatus.session.detail`.
      */
     signOut(): Promise<WebStatus>
-    /**
-     * Arm or disarm "Accept new browsers". While armed, a browser this desktop
-     * has never approved may *ask*, which raises the prompt here; nothing is
-     * written until Allow is pressed. Arms for ACCEPT_WINDOW_MS and then
-     * disarms itself — the countdown is `acceptUntil` on WebStatus.
-     */
-    setAccept(on: boolean): Promise<WebStatus>
     /** Revoke a browser. Its live socket is closed immediately, not next time. */
     revoke(deviceId: string): Promise<WebStatus>
     /**
@@ -606,38 +606,84 @@ export interface ForgeApi {
      */
     forget(deviceId: string): Promise<WebStatus>
     /**
-     * Start setting up a second factor: a fresh secret and the `otpauth://` URI
-     * the panel draws as a QR. Nothing is written until `totpConfirm` succeeds,
-     * because a secret persisted before an app has proved it holds it is a
-     * lockout with a green tick on it.
+     * Set the unlock PIN every browser has to present — 4 to 12 digits. The
+     * digits are hashed in main and only the hash is stored; there is no call
+     * that reads one back, because a panel that could render the PIN is a panel
+     * a screen-share renders it on.
+     *
+     * Answers with the new status, or with a sentence when what was typed is
+     * not a PIN.
      */
-    totpBegin(): Promise<WebTotpOffer>
+    setPin(pin: string): Promise<WebStatus | { error: string }>
     /**
-     * Confirm the setup with a code from the app. The only call that writes the
-     * secret, and the only one that ever returns the recovery codes — they are
-     * hashed on the way to disk and shown exactly once.
+     * Remove the PIN. Browsers are then admitted on the account alone, and
+     * screen *control* is refused outright — see `webControlEnabled`.
      */
-    totpConfirm(code: string): Promise<WebTotpResult>
-    /** Remove the second factor, and every unspent recovery code with it. */
-    totpDisable(): Promise<WebStatus>
+    clearPin(): Promise<WebStatus>
     onStatus(cb: (s: WebStatus) => void): () => void
-    /**
-     * A browser is asking to connect. `open: true` raises the prompt (its name
-     * and the word pair its screen is showing); `open: false` withdraws it.
-     * Answer with `approvalResult` — an unanswered prompt times out on the main
-     * side as a deny, never an allow.
-     */
-    onApproval(cb: (e: WebApprovalEvent) => void): () => void
-    /** The human's verdict on an `onApproval`. */
-    approvalResult(requestId: string, allow: boolean): void
     /**
      * A layout operation arrived from a browser. The renderer owns tabs and
      * panes, so it performs the op and answers with `commandResult` — the
      * browser takes the same code path a local click takes.
      */
     onCommand(cb: (e: WebCommandEvent) => void): () => void
-    /** Answer an `onCommand`. `error` empty means it worked. */
+    /**
+     * A browser picked a folder on this machine and wants it in the rail. The
+     * main side has already checked the folder is really there; the renderer
+     * adds it with `addProjectPath`, which is the same function the desktop's
+     * own Add project button reaches.
+     */
+    onProjectAdd(cb: (e: WebProjectAddEvent) => void): () => void
+    /** Answer an `onCommand` or an `onProjectAdd`. `error` empty means it worked. */
     commandResult(requestId: string, error?: string): void
+    /**
+     * Which panes a browser has open, and at what size. While a pane is on this
+     * list the renderer must leave its geometry alone and follow the browser's —
+     * one PTY cannot be two widths, and the browser is one of the two screens
+     * it is being read on.
+     *
+     * The phone's equivalent (`mobile.onWatched`) is a separate list on purpose:
+     * both can be reading the same pane, and the renderer draws it at whichever
+     * of the two sizes is smaller so it fits on both.
+     */
+    onWatched(cb: (e: WebWatchEvent) => void): () => void
+
+    /* --------------------------------------------------- the screen mirror
+     *
+     * A browser watching this desktop's screen. The capture and the encoder
+     * live here in the renderer because the main process has no display to
+     * open a stream onto; everything below is the wire between them and the
+     * socket. There is no *start* here — the only thing that ever begins one is
+     * a browser asking, and whether it may is decided in main. The
+     * implementation is src/lib/mirror.ts.
+     *
+     * Unlike `mobile.onMirror` there is no signalling pair, because there is no
+     * peer connection: the encoded chunks travel down the same WebSocket the
+     * terminals do. See the screen-mirror block in shared/web.ts.
+     */
+
+    /** A browser asked to watch, or stopped. Answer `start` by capturing. */
+    onMirror(cb: (e: WebMirrorEvent) => void): () => void
+    /**
+     * The capture is up: what the browser's decoder must be configured with.
+     * Send this once, before the first chunk — a decoder handed a chunk it has
+     * no configuration for cannot do anything with it.
+     */
+    mirrorReady(config: WebMirrorConfig): void
+    /** One encoded chunk, base64. Held to MAX_MIRROR_CHUNK_BYTES by the server. */
+    mirrorChunk(chunk: WebMirrorChunk): void
+    /**
+     * End the mirror, with a sentence the browser shows instead of a frozen
+     * last frame — the capture was refused, Steve stopped sharing, the encoder
+     * died.
+     */
+    mirrorStop(reason?: string): void
+    /**
+     * Take the screen back from the desk. The Settings card's Stop button, and
+     * the reason `WebStatus.mirroring` exists: a capture in progress is
+     * otherwise invisible from this machine.
+     */
+    stopMirror(): Promise<WebStatus>
   }
 
   /**

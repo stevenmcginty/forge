@@ -58,6 +58,7 @@ import {
   updateLeaf
 } from '@/lib/splitTree'
 import { handleSignal, startMirror, stopMirror } from '@/lib/mirror'
+import { startWebMirror, stopWebMirror } from '@/lib/web-mirror'
 import { terminalHost } from '@/lib/terminals'
 import { setLiveSettings } from '@/lib/livesettings'
 
@@ -279,16 +280,19 @@ const FALLBACK_SETTINGS: Settings = {
   webSiteId: '',
   webUid: '',
   webDevices: [],
-  webAcceptUntil: 0,
-  // The hardening toggle and the second factor, matching defaultSettings() in
-  // electron/store.ts. The toggle is the one fallback here that is *not* the
-  // locked-down guess, and it matches the store on purpose: a panel that drew
-  // "device approval required" for a second and then switched itself off would
-  // be a panel that lies about the door twice a launch.
-  webRequireApproval: false,
-  webTotpSecret: '',
-  webTotpRecovery: [],
-  webTotpCounter: 0,
+  // The unlock PIN, matching defaultSettings() in electron/store.ts. Blank is
+  // the one fallback here that is *not* the locked-down guess, and it matches
+  // the store on purpose: a panel that drew "a PIN is set" for a second and
+  // then switched itself off would be a panel that lies about the door twice a
+  // launch. Nothing here is ever the digits — see electron/web/pin.ts.
+  webPin: '',
+  // The screen, the mouse and the sound: off here for the ordinary reason the
+  // rest of this object is conservative, and the real settings decide a moment
+  // later. Nothing in the renderer acts on these anyway — main reads them at
+  // the moment a browser asks, so a stale copy here cannot open a door.
+  webMirrorEnabled: false,
+  webControlEnabled: false,
+  webMirrorAudio: false,
   // Forge Web's own Firebase session and its own tunnel — signed out, and no
   // way in from outside. Same rule as every other fallback here: the safe
   // answer before the real settings land.
@@ -1749,6 +1753,20 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     })
   }, [])
 
+  /**
+   * And the same for a browser on Forge Web, which is the other half of the
+   * same sentence: one PTY, and now potentially three screens on it. The two
+   * lists are kept apart all the way into the terminal host — see
+   * `setBrowserWatched` — because a pane both are reading has to be drawn at
+   * whichever of the two is smaller, and only something holding both can work
+   * that out.
+   */
+  useEffect(() => {
+    return window.forge.web.onWatched(({ panes }) => {
+      terminalHost.setBrowserWatched(Array.isArray(panes) ? panes : [])
+    })
+  }, [])
+
   useEffect(() => {
     return window.forge.mobile.onCommand(({ requestId, op }) => {
       const answer = (error?: string): void => window.forge.mobile.commandResult(requestId, error)
@@ -1798,6 +1816,112 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
   }, [actions, state])
 
   /**
+   * The same conversation with a browser, and it has to exist separately.
+   *
+   * `WebLayoutOp` is not `OpFrame`: it carries `close-tab`, `focus-pane` and
+   * `select-project`, which the phone has no gesture for, and a `direction` on
+   * `create-pane` because a browser window is wide enough for the choice to
+   * matter. Handling both in one effect would mean a union of two wires and a
+   * cast per branch; two handlers over one set of actions is the cheaper honesty.
+   *
+   * Without this, everything below still existed and none of it worked. The
+   * frame shipped, `electron/web-host.ts` forwarded it to this window, `shared/
+   * api.ts` documented the pair, `electron/preload.ts` exposed it — and nothing
+   * in the renderer ever subscribed, so every op a browser sent went unanswered
+   * until `dispatchLayout`'s deadline turned it into "The desktop did not answer
+   * in time". Adding a tab from the browser did nothing at all, and so did
+   * closing one, splitting one, and switching project.
+   */
+  useEffect(() => {
+    return window.forge.web.onCommand(({ requestId, op }) => {
+      const answer = (error?: string): void => window.forge.web.commandResult(requestId, error)
+      const project = state.projects.find((p) => p.id === op.projectId)
+      if (!project) return answer('That project is no longer open on the desktop.')
+      // Every op names its project, and acting on one that is not on screen
+      // would mean opening a tab nobody at the desk can see. Selecting first is
+      // also what makes `select-project` a real operation rather than a no-op.
+      if (state.activeProjectId !== project.id) dispatch({ type: 'selectProject', projectId: project.id })
+      if (op.op === 'select-project') return answer()
+
+      // Checked here as well as in the reducer, because the reducer reports a
+      // full Forge by setting a `notice` on the desktop — which the browser
+      // cannot see. Refusing here is what turns it into an answer.
+      const atLimit = totalPanes(state) >= MAX_SESSIONS
+
+      // Wire data, so it is checked and never cast: anything that is not one of
+      // the four modes becomes undefined, which means "whatever the profile
+      // says" — exactly what a browser that never sent the field gets.
+      const mode = isPermissionMode(op.permissionMode) ? op.permissionMode : undefined
+
+      switch (op.op) {
+        case 'create-tab':
+          if (atLimit) return answer(`Forge is at its ${MAX_SESSIONS}-session limit.`)
+          if (workspaceOf(state, project.id).tabs.length >= MAX_TABS_PER_PROJECT)
+            return answer(`That project already holds its ${MAX_TABS_PER_PROJECT} tabs.`)
+          actions.newTab(op.profileId ?? project.defaultProfileId, mode)
+          return answer()
+        case 'close-tab':
+          if (!op.tabId) return answer('No tab named.')
+          actions.closeTab(op.tabId)
+          return answer()
+        case 'select-tab':
+          if (!op.tabId) return answer('No tab named.')
+          actions.selectTab(op.tabId)
+          return answer()
+        case 'create-pane': {
+          if (atLimit) return answer(`Forge is at its ${MAX_SESSIONS}-session limit.`)
+          const workspace = workspaceOf(state, project.id)
+          const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId)
+          const paneId = op.paneId ?? activeTab?.activePaneId
+          if (!paneId) return answer('There is no pane open to split.')
+          // The browser's own default when it sends nothing, matching the
+          // desktop's split button rather than inventing a third answer.
+          actions.splitPane(paneId, op.direction === 'column' ? 'column' : 'row', op.profileId ?? project.defaultProfileId, mode)
+          return answer()
+        }
+        case 'close-pane':
+          if (!op.paneId) return answer('No pane named.')
+          actions.closePane(op.paneId)
+          return answer()
+        case 'focus-pane':
+          if (!op.paneId) return answer('No pane named.')
+          // `revealPane` rather than `focusPane`: a browser can name a pane in a
+          // tab that is not the one on screen here, and moving the ring to a
+          // pane nobody can see is a focus that is invisible at the desk.
+          actions.revealPane(op.paneId)
+          return answer()
+        default:
+          return answer('Forge does not know that command.')
+      }
+    })
+  }, [actions, state])
+
+  /**
+   * A folder somebody picked in a browser, on its way into the rail.
+   *
+   * The desktop's own Add project opens a native folder picker, which is a
+   * window on a screen nobody three hundred miles away is sitting at — so Forge
+   * Web browses this machine's folders in the page instead and ends here. What
+   * arrives has already been checked on the main side (`dispatchProjectAdd`):
+   * absolute, present, and a directory as of a moment ago.
+   *
+   * `actions.addProjectPath` and nothing else, because that is exactly what
+   * `AddProjectMenu` calls after the native dialog. A browser therefore adds a
+   * project the same way a click at the desk does — including landing on the
+   * project it named if the rail already holds it — rather than through a
+   * second route into the list that could drift from the first.
+   */
+  useEffect(() => {
+    return window.forge.web.onProjectAdd(({ requestId, path }) => {
+      const answer = (error?: string): void => window.forge.web.commandResult(requestId, error)
+      const folder = String(path ?? '').trim()
+      if (!folder) return answer('That request named no folder.')
+      actions.addProjectPath(folder)
+      return answer()
+    })
+  }, [actions])
+
+  /**
    * The television asking to watch this desktop's screen.
    *
    * Thin on purpose, and depends on nothing in the reducer: the capture, the
@@ -1817,6 +1941,37 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         // Refused before it began — the television is told why rather than
         // left watching a black screen for a stream that is never coming.
         if (error) window.forge.mobile.mirrorStop(error)
+      })
+    })
+  }, [])
+
+  /**
+   * A browser asking to watch this desktop's screen.
+   *
+   * The same shape as the television's above and deliberately so, because it is
+   * the same errand with a different pipe: the capture and every way an encoder
+   * can die live in src/lib/web-mirror.ts, and this is only the wire between
+   * that module and the socket. What differs is what comes back — encoded chunks
+   * rather than an SDP, because WebRTC media never enters the tunnel a browser
+   * reaches this desk through (see the screen-mirror block in shared/web.ts) —
+   * and that there is no signalling half to answer.
+   *
+   * There is no control for this at the desk either. Whether a browser may watch
+   * at all, whether it must spend a second factor first, and whether it may also
+   * drive are settled in main before this ever fires; `Settings › Forge Web` is
+   * where a watch in progress is seen and stopped.
+   */
+  useEffect(() => {
+    return window.forge.web.onMirror((event) => {
+      if (event.kind === 'stop') return stopWebMirror()
+      void startWebMirror(event.audio, {
+        ready: (config) => window.forge.web.mirrorReady(config),
+        chunk: (chunk) => window.forge.web.mirrorChunk(chunk),
+        closed: (reason) => window.forge.web.mirrorStop(reason)
+      }).then((error) => {
+        // Refused before it began — the browser is told why rather than left on
+        // a spinner for a picture that is never coming.
+        if (error) window.forge.web.mirrorStop(error)
       })
     })
   }, [])

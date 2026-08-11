@@ -170,21 +170,29 @@ const api: ForgeApi = {
     // crosses this bridge once and is never stored; see IPC.webSignIn.
     signIn: (email, password) => ipcRenderer.invoke(IPC.webSignIn, email ?? '', password ?? ''),
     signOut: () => ipcRenderer.invoke(IPC.webSignOut),
-    setAccept: (on) => ipcRenderer.invoke(IPC.webAccept, on === true),
     revoke: (deviceId) => ipcRenderer.invoke(IPC.webRevoke, deviceId ?? ''),
     forget: (deviceId) => ipcRenderer.invoke(IPC.webForget, deviceId ?? ''),
-    totpBegin: () => ipcRenderer.invoke(IPC.webTotpBegin),
-    totpConfirm: (code) => ipcRenderer.invoke(IPC.webTotpConfirm, code ?? ''),
-    totpDisable: () => ipcRenderer.invoke(IPC.webTotpDisable),
+    // The digits cross this bridge once and are hashed on the other side; main
+    // decides what counts as a PIN, because this door faces the internet and a
+    // renderer is not the thing that should be settling that.
+    setPin: (pin) => ipcRenderer.invoke(IPC.webPinSet, pin ?? ''),
+    clearPin: () => ipcRenderer.invoke(IPC.webPinClear),
     onStatus: (cb) => subscribe(IPC.webStatusEvent, cb),
-    onApproval: (cb) => subscribe(IPC.webApproval, cb),
-    // `=== true` so nothing short of an explicit allow crosses as one. The same
-    // rule as the mobile pair above, and it matters more here: this door faces
-    // the internet, and a truthy accident on this boundary is a shell.
-    approvalResult: (requestId, allow) =>
-      ipcRenderer.send(IPC.webApprovalResult, { requestId, allow: allow === true }),
     onCommand: (cb) => subscribe(IPC.webCommand, cb),
-    commandResult: (requestId, error) => ipcRenderer.send(IPC.webCommandResult, { requestId, error: error ?? '' })
+    onProjectAdd: (cb) => subscribe(IPC.webProjectAdd, cb),
+    // One result channel for both questions — see `IPC.webCommandResult`.
+    commandResult: (requestId, error) => ipcRenderer.send(IPC.webCommandResult, { requestId, error: error ?? '' }),
+    onWatched: (cb) => subscribe(IPC.webWatched, cb),
+    // The screen mirror. Sends rather than invokes, on the same reasoning the
+    // mobile pair above uses: a chunk is a stream, and a stream that waited for
+    // an answer per frame would be a stream with a round trip in it.
+    onMirror: (cb) => subscribe(IPC.webMirror, cb),
+    mirrorReady: (config) => ipcRenderer.send(IPC.webMirrorReady, config),
+    mirrorChunk: (chunk) => ipcRenderer.send(IPC.webMirrorChunk, chunk),
+    mirrorStop: (reason) => ipcRenderer.send(IPC.webMirrorStop, { reason: reason ?? '' }),
+    // The desk taking its screen back — a button, so an invoke that answers
+    // with the status the card redraws from.
+    stopMirror: () => ipcRenderer.invoke(IPC.webMirrorEnd)
   },
 
   system: {

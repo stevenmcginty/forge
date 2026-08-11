@@ -10,6 +10,7 @@ import {
 } from 'react'
 import {
   HOST_HEARTBEAT_MS,
+  MAX_REPLAY_BYTES,
   webSocketUrl,
   type WebHostRecord,
   type WebLayoutOp,
@@ -27,8 +28,9 @@ import {
   rememberPicture,
   rememberProjects,
   rememberSessions,
-  rememberTranscript,
+  rememberTranscripts,
   rememberWorkspace,
+  sameProjects,
   type Snapshot
 } from './lib/cache'
 import { deviceId, deviceName, forgetDevice } from './lib/device'
@@ -118,10 +120,10 @@ export interface ForgeActions {
   /** A human pressed "Try again" on a screen the client had stopped at. */
   retry: () => void
   /**
-   * A human typed the second factor. Reconnects carrying it; the code is spent
-   * on that one attempt whatever the desktop makes of it.
+   * A human typed the desktop's unlock PIN. Reconnects carrying it; the PIN is
+   * spent on that one attempt whatever the desktop makes of it.
    */
-  submitTotp: (code: string, trust: boolean) => void
+  submitPin: (pin: string) => void
   /** Look for the desktop again — the offline screen's button, and its poll. */
   refind: () => void
   /** Forget this browser's device id, so the next connection asks to be let in again. */
@@ -182,6 +184,50 @@ export function useProfiles(): AgentProfile[] {
   return state.picture?.profiles ?? state.cached?.profiles ?? []
 }
 
+/* -------------------------------------------------------------- ceilings */
+
+/**
+ * How far an in-memory transcript may run past MAX_REPLAY_BYTES before it is cut
+ * back to it.
+ *
+ * The ceiling itself is not a number invented here — it is the same
+ * MAX_REPLAY_BYTES the desktop sends on attach and the cache holds each
+ * transcript to, so a live pane and a frozen one describe the same amount of
+ * scrollback. What the slack buys is the *cost* of holding it. Appending is a
+ * cheap join, but slicing the result forces the engine to flatten the whole
+ * string first, so cutting to an exact ceiling on every frame would copy the
+ * best part of 200KB per pane at the eighty frames a second a redrawing TUI
+ * produces — the cure costing more than the disease. Overshooting by one slab
+ * and cutting back in one go makes that copy a rare event and costs nothing on
+ * disk, because `rememberTranscripts` trims to the ceiling exactly on the way
+ * into the cache.
+ */
+const TRANSCRIPT_SLACK_BYTES = 32 * 1024
+
+/**
+ * How many failed dials in a row mean the rendezvous record was not true.
+ *
+ * The record is a *claim* about a desktop rather than a connection to one, and
+ * HOST_STALE_MS gives that claim three minutes of credibility — so for up to
+ * three minutes after a machine sleeps without saying so, the browser is dialling
+ * an address nothing is listening on. That much is unavoidable and by design.
+ * What is not is where it leaves the page: the `Connecting` screen has no button
+ * on it, and the poll that would look at the record again only runs while the
+ * stage is `offline`, so the tab is stranded until somebody reloads it.
+ *
+ * Six, because lib/client.ts's own back-off is six steps from 500ms to its 15s
+ * cap: long enough that a wifi blink or a tunnel restarting mid-dial is ridden
+ * out by the retry loop rather than by the page, and about half a minute in all
+ * — comfortably inside the three minutes the record stays credible for, which is
+ * far too long for a browser to spend on a screen it cannot act on.
+ */
+const STRANDED_ATTEMPTS = 6
+
+/** A transcript, held to the ceiling above. See TRANSCRIPT_SLACK_BYTES. */
+function capTranscript(text: string): string {
+  return text.length > MAX_REPLAY_BYTES + TRANSCRIPT_SLACK_BYTES ? text.slice(text.length - MAX_REPLAY_BYTES) : text
+}
+
 /* -------------------------------------------------------------- provider */
 
 export function ForgeProvider({ children }: { children: ReactNode }): ReactNode {
@@ -214,6 +260,11 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    * output arrives up to eighty frames a second per pane, and `localStorage` is
    * synchronous — a write per frame would block the main thread on disk while a
    * TUI redraws. See `flushTranscripts`.
+   *
+   * Bounded, and it has to be: an agent left working for an afternoon is tens of
+   * megabytes of output, all of which was being carried here for the sake of the
+   * last MAX_REPLAY_BYTES of it — and every flush then handed the whole thing to
+   * the cache to be sliced. See `capTranscript`.
    */
   const transcripts = useRef(new Map<string, string>())
   const dirtyTranscripts = useRef(new Set<string>())
@@ -227,6 +278,28 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // view without another rendezvous read: the desktop said, in as many
         // words, that it is going away.
         if (next.state === 'offline') setStage({ kind: 'offline', message: next.message, record: null })
+        // And this is the route back out of a record that was not true. `find`
+        // moves the stage to `connected` on the strength of a live record, which
+        // is what that stage means — a desktop was found, and `connection` says
+        // the rest — but nothing was ever going to move it back if the socket
+        // then could not be opened: this loop only ever announces another
+        // attempt, and the poll that re-reads the record runs only while the
+        // stage is `offline`. So the loop is given STRANDED_ATTEMPTS to make
+        // good on the record, and then the page goes back to the frozen picture,
+        // where there is both a poll and a button. The link is deliberately left
+        // dialling underneath it: whichever of the two gets through first,
+        // `hello-ok` is what puts the workspace back.
+        if (next.state === 'connecting' && next.attempt >= STRANDED_ATTEMPTS) {
+          setStage((current) =>
+            current.kind === 'connected'
+              ? {
+                  kind: 'offline',
+                  message: 'It published an address a moment ago, but nothing is answering there.',
+                  record: null
+                }
+              : current
+          )
+        }
       },
       onPicture: (frame) => {
         setStage({ kind: 'connected' })
@@ -238,8 +311,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           workspaces: frame.workspaces,
           sessions: frame.sessions
         })
-        rememberPicture(frame)
-        setCached(loadSnapshot())
+        // Written down and held, from the one object rather than by reading back
+        // what was just written: `rememberPicture` hands over what it stored.
+        setCached(rememberPicture(frame))
         setProjectId((current) => current ?? frame.projects[0]?.id ?? null)
       },
       onData: (sessionId, data, replay, truncated) => {
@@ -247,7 +321,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // buffer again, and appending it would double the cached transcript the
         // frozen view later paints.
         const previous = replay ? '' : (transcripts.current.get(sessionId) ?? '')
-        transcripts.current.set(sessionId, previous + data)
+        transcripts.current.set(sessionId, capTranscript(previous + data))
         dirtyTranscripts.current.add(sessionId)
         const listeners = dataListeners.current.get(sessionId)
         if (!listeners) return
@@ -278,7 +352,16 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         })
       },
       onProjects: (projects) => {
-        setPicture((current) => (current ? { ...current, projects } : current))
+        // Only when it is actually a different list. The desktop answers a great
+        // many things with a `projects` push whether or not anything changed —
+        // clicking into a pane is a `focus-pane`, and one of these comes back
+        // from it — and a fresh `Picture` object is a fresh `state` object, which
+        // is every component in the app re-rendering, every pane included, for a
+        // list that reads identically. `rememberProjects` declines the same push
+        // for the same reason, on the same comparison.
+        setPicture((current) =>
+          current && !sameProjects(current.projects, projects) ? { ...current, projects } : current
+        )
         rememberProjects(projects)
         setProjectId((current) => (current && projects.some((p) => p.id === current) ? current : (projects[0]?.id ?? null)))
       },
@@ -293,8 +376,13 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // The one field of it that outlives the connection. GitHub mode cannot
         // ask a desktop that is off which repository a project is, so the answer
         // is written down while there is somebody to answer.
-        rememberGit(snapshot)
-        setCached(loadSnapshot())
+        //
+        // And only re-held when it was actually written: the git watcher fires
+        // on every file save, so an unconditional `setCached` was a new snapshot
+        // object — and with it a re-render of every pane in the workspace —
+        // several times a minute for a remote that changes about once a year.
+        const written = rememberGit(snapshot)
+        if (written) setCached(written)
       },
       onNotice: setNotice,
       onTokenRejected: () => {
@@ -382,7 +470,18 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       url,
       getToken: (force) => (force ? auth.idToken() : Promise.resolve(idToken)),
       deviceId: deviceId(),
-      deviceName: deviceName()
+      deviceName: deviceName(),
+      // Where the desktop is *now*, asked afresh before every re-dial. See
+      // `refindUrl` in lib/client.ts: a tunnel that restarts comes back on a
+      // different hostname, and the record here is refreshed within seconds of
+      // that happening. '' where there is nothing better to say — an absent or
+      // unreadable record is not grounds for the loop to abandon the address it
+      // already has.
+      refindUrl: async () => {
+        const token = await auth.idToken()
+        const again = await readHost(config, auth.current()?.uid ?? '', token)
+        return again.state === 'live' ? webSocketUrl(again.record.host) : ''
+      }
     })
   }, [client])
 
@@ -453,14 +552,21 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    * event that fires for a reload, a navigation and a closed tab alike, and
    * without it everything said since the last tick is lost exactly when the
    * cache is about to be needed.
+   *
+   * Every dirty pane in one write, because the snapshot is read and written
+   * whole: a call per pane was a parse and a synchronous `setItem` of the entire
+   * cache *per pane*, on a three-second timer, which is precisely the rhythm
+   * somebody working in three panes could feel under their typing.
    */
   useEffect(() => {
     const flush = (): void => {
       if (dirtyTranscripts.current.size === 0) return
-      for (const sessionId of dirtyTranscripts.current) {
-        rememberTranscript(sessionId, transcripts.current.get(sessionId) ?? '')
-      }
+      const said = [...dirtyTranscripts.current].map((sessionId) => ({
+        sessionId,
+        data: transcripts.current.get(sessionId) ?? ''
+      }))
       dirtyTranscripts.current.clear()
+      rememberTranscripts(said)
     }
     const timer = window.setInterval(flush, 3000)
     window.addEventListener('pagehide', flush)
@@ -503,7 +609,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         setStage({ kind: 'signed-out', error: '' })
       },
       retry: () => client.retry(),
-      submitTotp: (code, trust) => client.submitTotp(code, trust),
+      submitPin: (pin) => client.submitPin(pin),
       refind: () => void find(),
       forgetThisBrowser: () => {
         forgetDevice()

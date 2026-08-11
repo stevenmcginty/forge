@@ -11,7 +11,6 @@ import {
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
-import { TRUST_WINDOW_MS } from '@shared/web'
 import {
   DEFAULT_RAIL_OPEN,
   isRailSectionId,
@@ -303,10 +302,9 @@ function defaultSettings(): Settings {
     // what Windows shares is the whole system mix, so this is opt-in.
     mobileMirrorAudio: false,
     // Forge Web — off, unconfigured, and admitting nobody out of the box. Every
-    // one of these five has to be set by hand before a browser can reach a
-    // terminal: the switch, the Firebase project whose tokens count, the one
-    // uid that counts, and then a human pressing Allow at the desk. See
-    // docs/forge-web.md and electron/web/auth.ts.
+    // one of these has to be set by hand before a browser can reach a terminal:
+    // the switch, the Firebase project whose tokens count, and the one uid that
+    // counts. See docs/forge-web.md and electron/web/auth.ts.
     webEnabled: false,
     webProjectId: '',
     // Blank, meaning "the site is named after the project" — Firebase's own
@@ -315,20 +313,20 @@ function defaultSettings(): Settings {
     webSiteId: '',
     webUid: '',
     webDevices: [],
-    // "Accept new browsers" is disarmed, for the same reason mobileAcceptUntil
-    // is: the armed state is a deadline, not a switch.
-    webAcceptUntil: 0,
-    // Off, and the only default in this block that is off in order to let
-    // somebody *in*: with it off the account is the credential and a browser
-    // signed in as `webUid` needs nobody at the desk. See the note on
-    // `webRequireApproval` in shared/types.ts for what that costs.
-    webRequireApproval: false,
-    // No second factor until somebody enrols one, and nothing to enrol it with:
-    // the secret is sealed when it is written and there is no unsealed form of
-    // it anywhere in this file.
-    webTotpSecret: '',
-    webTotpRecovery: [],
-    webTotpCounter: 0,
+    // No unlock PIN until somebody sets one, and this is the one default in the
+    // block that is blank in order to let somebody *in*: with no PIN the
+    // account is the credential and a browser signed in as `webUid` needs
+    // nobody at the desk. See the note on `webPin` in shared/types.ts for what
+    // that costs. Nothing here is ever the digits — see electron/web/pin.ts.
+    webPin: '',
+    // The screen, the mouse and the sound: three switches that reach past Forge
+    // to the display and the operating system, and all three off. Switching
+    // Forge Web on says a browser may reach these terminals; it does not say it
+    // may watch the rest of this desk, and it certainly does not say it may
+    // click on it. See the mirror block in shared/types.ts.
+    webMirrorEnabled: false,
+    webControlEnabled: false,
+    webMirrorAudio: false,
     // Forge Web's own Firebase session: unconfigured and signed out. Not a read
     // of the companion* fields above — see the block comment on `webApiKey` in
     // shared/types.ts for why the two features share a provider and nothing
@@ -749,26 +747,19 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // change, so this is bounded rather than shaped. '' admits nobody.
     webUid: str(s.webUid).slice(0, 128),
     webDevices: webDevices(s.webDevices),
-    // The same clamp as the phone link's, because it is the same window: see
-    // ACCEPT_WINDOW_MS in shared/mobile.ts, and the note on `webAcceptUntil`.
-    webAcceptUntil: acceptUntil(s.webAcceptUntil),
-    // `=== true` like the switches above, and here it is the *permissive*
-    // direction that is the default: an absent key means off, which means the
-    // account alone gets in. That is the decision, not an oversight — see the
-    // note on the field in shared/types.ts.
-    webRequireApproval: s.webRequireApproval === true,
-    // Sealed ciphertext or ''. Bounded rather than shaped: what a valid sealed
-    // blob looks like is `electron/web/secret-box.ts`'s business, and a value
-    // this file mangled into a plausible shape would be a lockout that reads
-    // like a bug. Junk degrading to a string that will not open is a desktop
-    // that asks for a code nobody can give, which is why the panel offers
-    // "turn it off" as well as "set it up".
-    webTotpSecret: str(s.webTotpSecret).slice(0, 512),
-    webTotpRecovery: recoveryHashes(s.webTotpRecovery),
-    // A counter, never negative and never fractional: it is compared with `<=`
-    // to decide whether a code has already been spent, and a NaN in that
-    // comparison is a replay guard that silently stops guarding.
-    webTotpCounter: Math.max(0, Math.floor(Number(s.webTotpCounter) || 0)),
+    webPin: webPin(s.webPin),
+    // The screen, the mouse and the sound, on the strictest rule in this file
+    // and for the reason `mobileControlEnabled` earns it above: the only thing
+    // that puts a browser's cursor on this desk is a literal `true` written by
+    // the switch in Settings. An absent key, an older settings.json and a
+    // hand-typed "true" all mean no. Note that `webControlEnabled === true` is
+    // still not enough on its own — `canControl` in electron/web-host.ts
+    // refuses control outright unless approval-at-desk or a second factor is on
+    // as well, because a browser holding the mouse could otherwise switch every
+    // remaining lock off itself.
+    webMirrorEnabled: s.webMirrorEnabled === true,
+    webControlEnabled: s.webControlEnabled === true,
+    webMirrorAudio: s.webMirrorAudio === true,
     // Forge Web's own Firebase session. Trimmed exactly like the companion*
     // fields above and for the same reason: every one of these is pasted by
     // hand out of the Firebase console, and a trailing space in a URL is a
@@ -876,9 +867,9 @@ function mobileDevices(raw: unknown): MobileDeviceRecord[] {
  * a browser that is refused with `revoked` and one that gets a fresh prompt, so
  * losing it here would turn every revocation back into a knock at the door.
  *
- * The cap is applied to the *live* rows only, and that is not tidiness. With
- * `webRequireApproval` off — the shipped default — a browser with no row is
- * admitted on its account rather than turned away, so a tombstone that fell off
+ * The cap is applied to the *live* rows only, and that is not tidiness. A
+ * browser with no row is admitted on its account and its PIN rather than turned
+ * away, so a tombstone that fell off
  * the end of a twenty-row list would be an un-revocation performed by a
  * `slice`. Keeping every tombstone and dropping a live row instead trades the
  * harmless failure (a browser is recorded afresh next time) for the dangerous
@@ -895,12 +886,7 @@ function webDevices(raw: unknown): WebDeviceRecord[] {
       name: str(d.name).slice(0, 64) || 'Browser',
       createdAt: Number(d.createdAt) || 0,
       lastSeenAt: Number(d.lastSeenAt) || 0,
-      revokedAt: Number(d.revokedAt) || 0,
-      // Clamped to the window it is allowed to be, so a hand-edited file cannot
-      // grant a browser a decade off the second factor. Same instinct as
-      // `acceptUntil` above, and the same reason: a deadline read off disk is a
-      // deadline somebody could have typed.
-      trustedUntil: Math.min(Number(d.trustedUntil) || 0, Date.now() + TRUST_WINDOW_MS)
+      revokedAt: Number(d.revokedAt) || 0
     }))
     .filter((d) => d.id)
 
@@ -913,20 +899,23 @@ function webDevices(raw: unknown): WebDeviceRecord[] {
 }
 
 /**
- * Recovery-code hashes off disk: 64-character lowercase hex, and nothing else.
+ * The stored unlock PIN off disk: `scrypt$1$<salt>$<hash>` in base64url, or ''.
  *
- * Shape-checked rather than trimmed for the reason `webProjectId` is: these are
- * compared against `sha256(what the person typed)`, and a value that is not a
- * digest can never match one, so anything else is dead weight in a file that is
- * meant to hold nothing usable. Ten is the number minted; twenty is room for a
- * re-enrolment that has not tidied up after itself.
+ * Shape-checked rather than trimmed, for the reason `webProjectId` is: this is
+ * fed to `verifyPin` in electron/web/pin.ts, and a value that is not a stored
+ * hash can never match anything, so anything else is dead weight in a file that
+ * is meant to hold nothing usable. Junk therefore degrades to "no PIN set" —
+ * which is the account-only door rather than a desktop asking for a PIN nobody
+ * can give — and a hand-typed PIN in the clear degrades to '' rather than
+ * becoming a PIN of `1234`.
+ *
+ * The shape is restated here rather than imported so the store keeps its own
+ * dependency shape; `verifyPin` is the authority and refuses anything this
+ * would let through by mistake.
  */
-function recoveryHashes(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return []
-  return raw
-    .map((h) => str(h).toLowerCase())
-    .filter((h) => /^[0-9a-f]{64}$/.test(h))
-    .slice(0, 20)
+function webPin(raw: unknown): string {
+  const value = str(raw)
+  return /^scrypt\$1\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+$/.test(value) ? value : ''
 }
 
 function clamp(n: number, lo: number, hi: number): number {

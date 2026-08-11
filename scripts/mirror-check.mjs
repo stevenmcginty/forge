@@ -71,6 +71,18 @@ class FakeStream {
   getVideoTracks() {
     return [this.track]
   }
+  /**
+   * Silent, and asked about anyway.
+   *
+   * `startMirror` reads the audio tracks off every capture so it can add a
+   * second transceiver when there are any — see the sound half of
+   * `captureScreen`. A fake that only knows about video is not a mirror without
+   * sound, it is a TypeError one line after the capture returns, which is what
+   * this stub was until the audio option arrived beside it.
+   */
+  getAudioTracks() {
+    return []
+  }
   getTracks() {
     return [this.track]
   }
@@ -178,6 +190,11 @@ const { startMirror, stopMirror, handleSignal } = await import(pathToFileURL(bun
 function attempt() {
   const record = { sent: [], closed: [], error: undefined }
   record.done = startMirror(
+    // Without sound, which is what `mobileMirrorAudio` says unless somebody has
+    // turned it on. The audio half is a capture that is allowed to fail on its
+    // own and fall back to a silent one; it has nothing to do with which
+    // attempt is allowed to speak, which is the whole of what this file drives.
+    false,
     (data) => record.sent.push(JSON.parse(data)),
     (reason) => record.closed.push(reason)
   ).then((error) => {

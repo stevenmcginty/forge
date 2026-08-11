@@ -60,6 +60,24 @@ await build({
   logLevel: 'silent',
   absWorkingDir: ROOT
 })
+// The browser's half of the same feature, bundled separately because it is a
+// separate application: web/ compiles against `@shared` exactly as the desktop
+// does, but nothing in it is reachable from scripts/fixtures/input-entry.ts and
+// it has no business being pulled into the desktop's bundle to be measured.
+const webBundle = join(scratch, 'mirror-input.mjs')
+await build({
+  entryPoints: [join(ROOT, 'web', 'src', 'lib', 'mirror-input.ts')],
+  outfile: webBundle,
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  alias: { '@shared': join(ROOT, 'shared') },
+  logLevel: 'silent',
+  absWorkingDir: ROOT
+})
+const { pictureBox, fractionFor, keyFor, notchesFor } = await import(pathToFileURL(webBundle).href)
+
 const {
   readMirrorInput,
   lineFor,
@@ -342,12 +360,22 @@ tick(120)
 const wheels = scrolling.of('wheel')
 log(wheels.length > 0 && wheels[0].wheel > 0, 'Menu turns the arrows into a wheel, and Up scrolls away from the reader')
 log(scrolling.of('move').length === movesBeforeWheel, 'and the pointer stops moving while they are the wheel')
-scrolling.handle.key('ContextMenu', true)
+// The arrow is released before the mode moves, so nothing is being held across
+// a change in what holding it means — and then Menu is pressed *twice*, because
+// the ring has three stops and not two. This check pressed it once and asserted
+// the pointer was back, which has been wrong since the keyboard mode was added:
+// `pointer.ts` cycles `move → scroll → keys → move` and its own comment says so
+// ("Three meanings for one D-pad… pointer, wheel, keyboard"), so one press from
+// the wheel lands on the keyboard. The check was stale, not the code, and the
+// way home being a single press *from the far side* is the property the ring's
+// order exists to give — which is what the second press below is standing on.
 scrolling.handle.key('ArrowUp', false)
+scrolling.handle.key('ContextMenu', true)
+scrolling.handle.key('ContextMenu', true)
 scrolling.handle.key('ArrowRight', true)
 const movesBeforeBack = scrolling.of('move').length
 tick(16)
-log(scrolling.of('move').length > movesBeforeBack, 'and Menu again gives them back to the pointer')
+log(scrolling.of('move').length > movesBeforeBack, 'and Menu twice more comes round the ring and gives them back to the pointer')
 scrolling.handle.stop()
 
 const runaway = pointerHarness()
@@ -446,6 +474,145 @@ const everything = [
 log(
   everything.length > 0 && everything.every((frame) => frame.t === 'mirror-input' && readMirrorInput(frame) !== null),
   `all ${everything.length} frames the remote produced are ones the desktop's own validator accepts`
+)
+
+/* ------------------------------------- 3c. the browser's half of the mapping
+
+   Forge Web shows the same desktop in a tab, and a tab has a mouse already — so
+   there is no grammar to build out of six buttons here, only arithmetic: where
+   on the desk did that click land, which browser key is a key the desk knows,
+   and how many notches is one turn of somebody's wheel. All of it is pure
+   functions in web/src/lib/mirror-input.ts, and all of it is the kind of thing
+   that is wrong by a little rather than wrong outright.
+
+   The letterboxing is the part worth the most attention, for the reason 3b
+   gives about the television: a fraction measured against the element instead
+   of the picture is exactly right in the middle and further out towards every
+   edge. The case below is a browser window of 1920x900 showing a 1920x1080
+   desk, which `contain` paints as 1600x900 with a 160px bar down each side.
+
+   The box is deliberately not at the origin. `getBoundingClientRect` and
+   `clientX` are both viewport coordinates, and a mapping that forgot where the
+   canvas starts would still pass every assertion made against a rect at 0,0. */
+
+// Node has no DOMRect and `pictureBox` returns one. The four fields it is built
+// from are the four the arithmetic reads; `left` and `top` are the aliases the
+// mapping uses, and a rect whose sides disagreed with its origin would be a
+// stranger thing than this file needs to model.
+globalThis.DOMRect = class {
+  constructor(x, y, width, height) {
+    this.x = x
+    this.y = y
+    this.width = width
+    this.height = height
+    this.left = x
+    this.top = y
+    this.right = x + width
+    this.bottom = y + height
+  }
+}
+
+/** Floating point: 1920 * (900/1080) is 1600.0000000000002, not 1600. */
+const near = (value, want) => typeof value === 'number' && Math.abs(value - want) < 1e-9
+
+const canvas = new DOMRect(40, 20, 1920, 900)
+const picture = pictureBox(canvas, 1920, 1080)
+log(
+  near(picture.width, 1600) && near(picture.height, 900),
+  'a 1920x1080 desk inside a 1920x900 window is painted 1600x900 — the widest that fits, not the box'
+)
+log(
+  near(picture.left, 200) && near(picture.top, 20),
+  "and it sits 160px in from the window's own left edge, which is where the black bar ends"
+)
+
+const middle = fractionFor(canvas, 1920, 1080, 40 + 960, 20 + 450)
+log(near(middle?.x, 0.5) && near(middle?.y, 0.5), 'the centre of the window is the centre of the desk')
+
+const topLeft = fractionFor(canvas, 1920, 1080, 200, 20)
+log(near(topLeft?.x, 0) && near(topLeft?.y, 0), "the picture's top-left corner is the desktop's origin")
+const bottomRight = fractionFor(canvas, 1920, 1080, 1800, 920)
+log(near(bottomRight?.x, 1) && near(bottomRight?.y, 1), 'and its bottom-right corner is the far end of the screen')
+
+// The whole reason for the letterboxing arithmetic, in one number: a quarter of
+// the way across the *window* is a fifth of the way across the *desk*, because
+// the first 160px of the window is not anybody's screen. A mapping measured
+// against the element answers 0.25 here and is wrong by 96 desktop pixels.
+const quarter = fractionFor(canvas, 1920, 1080, 40 + 480, 20 + 450)
+log(
+  near(quarter?.x, 0.2),
+  `a quarter of the way across the window is ${quarter?.x} of the way across the desk, not 0.25`
+)
+
+log(fractionFor(canvas, 1920, 1080, 100, 470) === null, 'a click on the left black bar is not a click on the desktop')
+log(fractionFor(canvas, 1920, 1080, 1900, 470) === null, 'and neither is one on the right')
+log(
+  fractionFor(canvas, 1920, 1080, 1000, 950) === null,
+  'nor one below the window entirely — a pointer that left is not clamped back onto the screen'
+)
+
+// A window the desk's own shape has no bars, and the mapping must not invent
+// any: the picture is the box, and a quarter across is a quarter across.
+const unboxed = new DOMRect(0, 0, 1600, 900)
+const exact = fractionFor(unboxed, 1920, 1080, 400, 225)
+log(near(exact?.x, 0.25) && near(exact?.y, 0.25), 'a window of the desk’s own shape maps straight through, bars and all')
+
+/* The keys. Fifteen names reach the desktop and the rest of a keyboard does
+   not — there is no modifier field in `MirrorInput`, so Ctrl+C, Alt+Tab and the
+   F-keys cannot be said at all. What matters is that the ones that do travel
+   are spelled the way the desktop's own door expects, and that everything else
+   comes back as the empty string rather than as something plausible. */
+
+const browserKeys = [
+  'Enter',
+  'Escape',
+  'Tab',
+  'Backspace',
+  'Delete',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'PageUp',
+  'PageDown',
+  'Home',
+  'End',
+  ' ',
+  'Meta'
+]
+log(
+  browserKeys.every((key) => readMirrorInput({ a: 'key', key: keyFor(key), down: true }) !== null),
+  `all ${browserKeys.length} browser key names map onto keys the desktop's own validator accepts`
+)
+log(
+  keyFor('ArrowUp') === 'up' && keyFor(' ') === 'space' && keyFor('Meta') === 'win',
+  'and they map onto the right ones — the space bar is a key, not a character'
+)
+const unsendable = ['a', 'C', 'Control', 'Alt', 'Shift', 'F5', 'F11', 'CapsLock', 'Insert', 'Dead', '']
+log(
+  unsendable.every((key) => keyFor(key) === ''),
+  'a key with no name on the desk — a letter, a modifier, an F-key — is refused rather than sent as something else'
+)
+
+/* The wheel. A browser reports how far the content should move; the frame
+   carries how far the wheel turned, which is the same gesture described from
+   the other end and therefore the opposite sign. */
+
+log(notchesFor(100, 0) === -1, 'one notch of a wheel rolled towards the reader is 100 pixels of browser delta')
+log(notchesFor(-100, 0) === 1, 'and the same roll away from the reader is positive, like a real wheel')
+log(notchesFor(3, 1) === -1, 'a browser measuring in lines calls the same notch three of them')
+log(notchesFor(-1, 2) === 8, 'and one that measures in pages is worth a screenful of notches')
+log(notchesFor(4, 0) === -1, 'a trackpad nudge is a whole notch — rounding it to nothing is a surface that will not scroll')
+log(notchesFor(0, 0) === 0 && notchesFor(Number.NaN, 0) === 0, 'and no movement at all is no notches, not one')
+log(
+  notchesFor(99999, 0) === -MAX_WHEEL_NOTCHES && notchesFor(-99999, 0) === MAX_WHEEL_NOTCHES,
+  'a flick nobody could make with a hand is capped where the desktop would have capped it anyway'
+)
+log(
+  [100, -100, 3, 4, 99999].every(
+    (delta) => readMirrorInput({ a: 'wheel', wheel: notchesFor(delta, 0), x: 0.5, y: 0.5 }) !== null
+  ),
+  'and every notch count this produces is one the desktop accepts unchanged'
 )
 
 /* -------------------------------------------------- 4. does this machine do it */

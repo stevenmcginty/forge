@@ -51,6 +51,16 @@ export interface TermHost {
   /** Wipe screen and scrollback — used before painting a replay buffer. */
   reset: () => void
   focus: () => void
+  /**
+   * Stop taking input, or start again, without rebuilding the terminal.
+   *
+   * A pane whose socket has dropped keeps the emulator it already has — see
+   * `PaneView`, where tearing one down costs a detach, a re-attach and up to
+   * MAX_REPLAY_BYTES — so "this is not live right now" has to be something a
+   * running instance can be told. No effect on a host built `readOnly`, which
+   * never wired `onData` in the first place.
+   */
+  setReadOnly: (readOnly: boolean) => void
   dispose: () => void
 }
 
@@ -102,6 +112,32 @@ const TERM_TOKENS = [
 
 /** Only reached if tokens.css failed to load at all. */
 const TERM_FALLBACK = '#e8eaed'
+
+/**
+ * How long a container has to hold still before it is worth refitting.
+ *
+ * Read off the design tokens rather than named here, for the reason the palette
+ * above is: the thing this number is *about* is timed by a token. Collapsing the
+ * rail transitions `.app__left`'s width over `--dur-med` (see src/App.css), so
+ * every pane's box moves for the whole of that transition, and a number invented
+ * in this file would drift the moment somebody retimed the rail — and the
+ * reduced-motion override, which sets the token to `0ms`, would never reach it
+ * at all.
+ */
+let settleCache: number | null = null
+
+/** Only reached if tokens.css failed to load. `--dur-med`'s own value. */
+const SETTLE_FALLBACK = 180
+
+function settleMs(): number {
+  if (settleCache !== null) return settleCache
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--dur-med').trim()
+  const value = Number.parseFloat(raw)
+  // Tokens are written in ms today; seconds are honoured anyway rather than
+  // silently read as a thousandth of themselves if that ever changes.
+  settleCache = Number.isFinite(value) ? (raw.endsWith('ms') ? value : value * 1000) : SETTLE_FALLBACK
+  return settleCache
+}
 
 function palette(): Record<string, string> {
   if (paletteCache) return paletteCache
@@ -197,9 +233,40 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     return { cols: term.cols, rows: term.rows }
   }
 
-  // The retry for a fit that arrived before the flex layout had settled. See
-  // the note in the header.
-  const observer = new ResizeObserver(() => fit())
+  /*
+   * The retry for a fit that arrived before the flex layout had settled (see the
+   * note in the header) — and the throttle that keeps it from being a flood.
+   *
+   * A box does not change once when it changes: `.app__left` animates its width
+   * over `--dur-med`, so collapsing the rail moves every pane's container on
+   * every frame of that transition, and each frame that lands on a new cols/rows
+   * is a `resize` frame the desktop counts against MAX_INPUT_PER_SECOND — 120,
+   * shared by every frame this browser sends. Four panes riding one animation,
+   * or a window being dragged, can pass it, and the refusal comes back as "slow
+   * down", which is a nonsense sentence about a window somebody resized.
+   *
+   * So: every observation in one animation frame is coalesced into a single
+   * callback, the first one after a quiet spell is acted on immediately — a pane
+   * that has just mounted must not sit at 80×24 for the length of an animation
+   * it is not part of — and everything after that waits until the box has been
+   * still for `--dur-med`. An animation therefore costs two fits rather than
+   * one per frame, and only the ones that actually changed the geometry send
+   * anything, because `fit` returns null otherwise.
+   */
+  let frame = 0
+  let settling = 0
+  const observer = new ResizeObserver(() => {
+    if (frame) return
+    frame = requestAnimationFrame(() => {
+      frame = 0
+      if (settling) clearTimeout(settling)
+      else fit()
+      settling = window.setTimeout(() => {
+        settling = 0
+        fit()
+      }, settleMs())
+    })
+  })
   observer.observe(container)
 
   return {
@@ -209,7 +276,24 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     write: (data) => term.write(data),
     reset: () => term.reset(),
     focus: () => term.focus(),
+    setReadOnly: (readOnly) => {
+      // A host built read-only never wired `onData`, so letting it take input
+      // again would put keystrokes somewhere there is nothing to receive them.
+      if (options.readOnly) return
+      // `disableStdin` is read live by xterm's core service, and it also marks
+      // the textarea read-only, so the caret stops taking keys rather than
+      // taking them into a socket that is not there. The blink goes with it,
+      // because a blinking cursor is the one part of a terminal that claims to
+      // be waiting for you. Note that it gates xterm's *replies* as well as its
+      // keystrokes — including the `CSI 6 n` answer this file's header is about
+      // — which is why the caller switches it back the moment the link is live
+      // and not a beat later.
+      term.options.disableStdin = readOnly
+      term.options.cursorBlink = !readOnly
+    },
     dispose: () => {
+      if (frame) cancelAnimationFrame(frame)
+      if (settling) clearTimeout(settling)
       observer.disconnect()
       term.dispose()
     }

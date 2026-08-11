@@ -11,8 +11,8 @@ android {
         }
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 17
-        versionName "0.3.14"
+        versionCode 18
+        versionName "0.3.15"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Phones only. The QR scanner pulls in ML Kit's barhopper native library
         // for every architecture Google ships, and x86 + x86_64 alone were

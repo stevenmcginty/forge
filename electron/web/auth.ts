@@ -1,9 +1,9 @@
-import { X509Certificate, createVerify, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { X509Certificate, createVerify, timingSafeEqual } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
-import { AUTH_LOCKOUT_MS, AUTH_MAX_FAILURES, wordPair } from '@shared/mobile'
-import { APPROVAL_TIMEOUT_MS, TOTP_DIGITS, TRUST_WINDOW_MS, type WebRefusal } from '@shared/web'
+import { AUTH_LOCKOUT_MS, AUTH_MAX_FAILURES } from '@shared/mobile'
+import { PIN_MAX_DIGITS, PIN_MIN_DIGITS, type WebRefusal } from '@shared/web'
 import type { WebDeviceRecord } from '@shared/types'
-import { checkTotp, hashRecoveryCode, newRecoveryCodes, newTotpSecret, totpUri } from './totp'
+import { verifyPin } from './pin'
 
 /**
  * Forge Web authentication — the lock on the door.
@@ -26,38 +26,53 @@ import { checkTotp, hashRecoveryCode, newRecoveryCodes, newTotpSecret, totpUri }
  * shared/web.ts). Minting a second credential beside a verified one would add a
  * thing to steal and prove nothing the first does not.
  *
- * So the hashing rule does not appear here, and its absence is not a relaxation.
- * The rule underneath it is the one that carries over: **nothing written to
- * settings.json may be usable as a credential.** Mobile satisfies that by
- * storing a one-way image of its token. Forge Web satisfies it by having no
- * token to store — a `WebDeviceRecord` is an id, a name and three timestamps,
- * and a copy of the whole device list is a list of browser names. It records
- * that a human pressed Allow. It is an approval, not a key.
+ * So the hashing rule does not appear on the *device list*, and its absence is
+ * not a relaxation. The rule underneath it is the one that carries over:
+ * **nothing written to settings.json may be usable as a credential.** Mobile
+ * satisfies that by storing a one-way image of its token. Forge Web satisfies
+ * it by having no token to store — a `WebDeviceRecord` is an id, a name and
+ * three timestamps, and a copy of the whole device list is a list of browser
+ * names. It records where a token has been used; it is not a key.
  *
- * ## Two modes, and the default is the permissive one
+ * The one secret this feature does write down is the unlock PIN, and it obeys
+ * that rule too: electron/web/pin.ts stores a scrypt image of it and never the
+ * digits. What that does and does not buy is set out in full in that file's
+ * header, honestly, because four digits are not entropy.
  *
- * The account is the credential. A verified token for the configured uid is
- * admitted, the browser it came from is recorded in the device list, and no
- * prompt goes up on the desktop. That is what `webRequireApproval: false` — the
- * shipped default — means, and it is deliberate: the word-pair prompt below can
- * only be answered by somebody standing at this machine, so a door that always
- * demanded one was a door that locked Steve out of his own desktop from a hotel
- * a hundred miles away. shared/types.ts states the trade beside the setting,
- * once, and this file does not restate it.
+ * ## The door is the account plus a PIN, and nothing else
  *
- * What survives being away from the desk is what defends that mode, and none of
- * it is weakened by it:
+ * There is no prompt at the desk here, and there used to be. The word-pair
+ * approval and the TOTP second factor are both gone, replaced by one thing a
+ * person sets once in Settings: an unlock PIN, asked of every browser on every
+ * connection.
+ *
+ * The reason is that a prompt at the desk can only be answered by somebody
+ * standing at this machine, so a door that demanded one was a door that locked
+ * Steve out of his own desktop from a hotel a hundred miles away — and a TOTP
+ * enrolment is a phone, an app and ten recovery codes to keep, for a feature
+ * used by exactly one person who is already signed into an account. What
+ * survives being away from the desk is what actually defends this door:
  *
  *  - the token is verified against Google's keys on every connection;
- *  - the uid must match, and a token for another account is still refused;
- *  - **a revoked browser is still refused, in both modes**, and revoking still
- *    drops its live socket (electron/web-host.ts);
- *  - every browser is still recorded, listed and revocable — visibility without
- *    friction, which is the actual trade being made;
- *  - a TOTP second factor, when one is enrolled, is asked for in both modes.
+ *  - the uid must match, and a token for another account is refused;
+ *  - **a revoked browser is refused**, before the PIN is even asked for, and
+ *    revoking drops its live socket (electron/web-host.ts);
+ *  - the PIN, which is the one thing a stolen Firebase password does not come
+ *    with, and which is asked afresh every time — a browser on the device list
+ *    is excused nothing;
+ *  - every browser is recorded, listed and revocable.
  *
- * `webRequireApproval: true` restores the word-pair prompt exactly as it was,
- * for a desktop somebody is willing to be standing at.
+ * With no PIN set the account alone gets in, which is the state this desktop
+ * ships in and is deliberate rather than an oversight: shared/types.ts states
+ * the trade beside `webPin`, once, and this file does not restate it. What that
+ * state does *not* buy is the mouse — see `canControl` in
+ * electron/web-host.ts, which refuses screen control outright without a PIN.
+ *
+ * The PIN is short, and electron/web/pin.ts is honest about what hashing four
+ * digits does and does not buy. The part that belongs here is the other half of
+ * that answer: **the per-source lockout below is what makes a four-digit secret
+ * defensible at all.** Five wrong answers and that address is refused for a
+ * minute, so ten thousand guesses are weeks of them rather than seconds.
  *
  * ## What is kept from the neighbour
  *
@@ -65,17 +80,13 @@ import { checkTotp, hashRecoveryCode, newRecoveryCodes, newTotpSecret, totpUri }
  *     about which of these comparisons is actually secret.
  *  2. **Failure lockout per source**, on `AUTH_MAX_FAILURES`/`AUTH_LOCKOUT_MS`
  *     from shared/mobile.ts rather than numbers invented here.
- *  3. **Approval by a human at the desk**, with the word pair from
- *     `wordPair` — the same list both screens draw from, because two lists is
- *     how the two screens end up showing different words. Optional now, and
- *     unchanged when it is switched on.
- *  4. **Everything injected**, including the clock and the JWKS fetcher, so a
+ *  3. **Everything injected**, including the clock and the JWKS fetcher, so a
  *     check script drives this exact class with no network and no Electron.
  *
  * ## What this does *not* protect against
  *
- *  - A browser profile that is already approved and already signed in. Approval
- *    is per browser profile, and a person at that machine is that browser.
+ *  - A browser profile that is signed in and whose person knows the PIN. A
+ *    person at that machine is that browser.
  *  - Anything after the socket is authenticated. Rate limits, frame caps and
  *    the session vocabulary live in electron/web/server.ts; this file's job
  *    ends the moment it says yes.
@@ -143,20 +154,10 @@ const JWKS_FALLBACK_TTL_MS = 60 * 60_000
  */
 const JWKS_MIN_REFETCH_MS = 60_000
 
-/**
- * Floor between approval prompts, and it shares its rationale with the
- * one-pending rule in `beginApproval`: a script must not be able to queue a
- * thousand prompts so that somebody taps Allow on one by accident. Prompt
- * fatigue is how people get owned, and one prompt a minute is slower than
- * anyone fatigues. Same value and same reason as PROMPT_COOLDOWN_MS in
- * electron/mobile/server.ts.
- */
-const PROMPT_COOLDOWN_MS = 60_000
-
 /* ------------------------------------------------------------------- shapes */
 
 /**
- * An approved browser, as persisted in Settings. Note: no credential anywhere.
+ * An admitted browser, as persisted in Settings. Note: no credential anywhere.
  *
  * An alias of the settings record rather than a second declaration, so the
  * thing this module writes and the thing `Settings.webDevices` holds cannot
@@ -166,30 +167,16 @@ const PROMPT_COOLDOWN_MS = 60_000
 export type WebDevice = WebDeviceRecord
 
 /**
- * The second factor, as this class needs it: the secret in the clear, the
- * hashes of the recovery codes nobody has spent, and the last counter that was.
+ * The one sentence a refused PIN ever gets, wherever it was presented.
  *
- * The secret is plaintext *here* and sealed on disk, and the seam is the point:
- * this class is arithmetic and has no business knowing about files or keys, and
- * a check script can drive every branch of it by handing over a secret it made
- * up. See `webTotpSecret` in shared/types.ts for what actually gets written.
+ * Written once because it must not drift: "wrong", "not digits" and "the wrong
+ * number of them" are three different facts and one answer, since telling them
+ * apart out loud tells somebody guessing which half of their guess was right.
  */
-export interface WebTotpState {
-  /** base32, or '' when nothing is enrolled — which means nothing is asked for. */
-  secret: string
-  /** SHA-256 of each unused recovery code. Spending one removes it. */
-  recovery: string[]
-  /** The highest counter already accepted. A code at or below it is a replay. */
-  lastCounter: number
-}
+const BAD_PIN = 'That PIN was not accepted.'
 
-/** What the settings panel is handed when it starts an enrolment. */
-export interface WebTotpEnrolment {
-  /** base32, for somebody whose phone cannot scan. */
-  secret: string
-  /** The `otpauth://` URI the panel turns into a QR. */
-  uri: string
-}
+/** The one sentence that *asks* for a PIN, so both doors word it identically. */
+const ASK_PIN = `Enter the ${PIN_MIN_DIGITS}-to-${PIN_MAX_DIGITS} digit PIN set on the desktop.`
 
 /** One JWKS response, as the injected fetcher hands it over. */
 export interface JwksResponse {
@@ -228,23 +215,25 @@ export type JwksFetcher = (url: string) => Promise<JwksResponse>
  */
 export function googleJwksFetcher(): JwksFetcher {
   return async (url: string): Promise<JwksResponse> => {
-    const res = await globalThis.fetch(url)
+    // Bounded, because an unbounded one is a browser stuck on "Reconnecting"
+    // with nothing to read. This fetch sits inside `hello`, and `hello` has a
+    // HEARTBEAT_GRACE_MS deadline the desktop enforces by closing the socket
+    // with no frame on it — so a cold key cache behind a slow or blocked path
+    // to googleapis.com produced a silent hang-up and a retry loop, and every
+    // retry started the same doomed fetch again. Failing at 8s instead lets the
+    // rejection reach a caller that can say what happened.
+    const res = await globalThis.fetch(url, { signal: AbortSignal.timeout(JWKS_TIMEOUT_MS) })
     if (!res.ok) throw new Error(`JWKS fetch failed: ${res.status}`)
     return { body: await res.text(), cacheControl: res.headers.get('cache-control') ?? '' }
   }
 }
 
-/** What the desktop prompt needs to ask a human the question. */
-export interface WebApprovalAsk {
-  requestId: string
-  deviceId: string
-  /** What the browser calls itself. Untrusted text — display it, never obey it. */
-  deviceName: string
-  /** The pair both screens show, e.g. "OTTER RIVER". */
-  words: string
-  /** The account the token verified as, so the prompt can name who is asking. */
-  uid: string
-}
+/**
+ * How long Google's key endpoint gets before the connection it is holding up is
+ * failed instead. Comfortably inside HEARTBEAT_GRACE_MS, which is the deadline
+ * that actually matters — see the note in `googleJwksFetcher`.
+ */
+const JWKS_TIMEOUT_MS = 8_000
 
 /**
  * Everything this class needs from the world, and nothing else.
@@ -255,9 +244,9 @@ export interface WebApprovalAsk {
  * socket, or a file.
  */
 export interface WebAuthHost {
-  /** The approved browsers as they stand in settings. */
+  /** The admitted browsers as they stand in settings. */
   load: () => WebDevice[]
-  /** Persist a changed device list. Called on approve, revoke and last-seen bumps. */
+  /** Persist a changed device list. Called on admit, revoke and last-seen bumps. */
   save: (devices: WebDevice[]) => void
   /** Google's keys. Required, never defaulted — see `JwksFetcher`. */
   fetchJwks: JwksFetcher
@@ -271,59 +260,18 @@ export interface WebAuthHost {
   projectId: () => string
   uid: () => string
   /**
-   * When "Accept new browsers" disarms itself (ms epoch), 0 when it is not
-   * armed. Read on every unknown device, so disarming takes effect on the very
-   * next connection rather than whenever a timer happens to fire.
-   */
-  acceptUntil?: () => number
-  /**
-   * Is the hardening toggle on? Read per connection, like everything else here,
-   * so switching it at the desk bites on the next hello.
+   * The unlock PIN as it stands on disk — the `scrypt$1$…` string, or '' when
+   * none is set. Never the digits: this class compares, and what a stored PIN
+   * looks like is electron/web/pin.ts's business.
    *
-   * A host that omits it gets `false`, which is the shipped default and the
-   * account-only path: a browser holding a verified token for the configured
-   * uid is admitted and recorded without a prompt. See the header.
+   * Read per connection like everything else here, so setting or clearing a PIN
+   * at the desk bites on the next hello rather than the next restart. A host
+   * that omits it has no PIN, which is the account-only door and what makes a
+   * test server safe to construct in one line.
    */
-  requireApproval?: () => boolean
-  /**
-   * The second factor as it stands on disk, or undefined on a host that has
-   * none. `secret` is the *unsealed* base32 — this class does arithmetic, and
-   * the host is what knows about `electron/web/secret-box.ts`.
-   */
-  totp?: () => WebTotpState
-  /**
-   * Persist a changed second factor: a spent counter, a spent recovery code, an
-   * enrolment, a removal. Called on every accepted code, because "single use"
-   * that only holds until the next restart is not single use.
-   */
-  saveTotp?: (state: WebTotpState) => void
-  /** How long "trust this browser" lasts. Defaults to TRUST_WINDOW_MS. */
-  trustWindowMs?: number
-  /**
-   * Put the question to the human, and resolve with the verdict. A rejected
-   * promise is treated exactly like a `false` — every path that is not an
-   * explicit allow is a deny. A host that omits this hook has no approval door
-   * at all, which is what makes a test server and any future host safe by
-   * default.
-   */
-  requestApproval?: (ask: WebApprovalAsk) => Promise<boolean>
-  /**
-   * The question is moot — the browser hung up, or nobody answered. The host
-   * takes the prompt down; a prompt that outlives its socket is one whose Allow
-   * lands on nothing.
-   */
-  cancelApproval?: (requestId: string) => void
+  pinHash?: () => string
   /** Injected so a check script can drive expiry and lockout on a fake clock. */
   now?: () => number
-  /**
-   * How long a browser is left at the "showing OTTER RIVER" screen. Defaults to
-   * APPROVAL_TIMEOUT_MS. Injectable so a check script can watch the wait
-   * actually fire without sleeping through two minutes of it — the same
-   * arrangement electron/mobile/server.ts makes, and for the same reason.
-   */
-  approvalTimeoutMs?: number
-  /** Floor between prompts. Defaults to PROMPT_COOLDOWN_MS. */
-  promptCooldownMs?: number
   log?: (line: string) => void
 }
 
@@ -356,15 +304,6 @@ export type WebAuthOutcome =
   | { ok: true; device: WebDevice; claims: WebTokenClaims }
   | { ok: false; reason: WebRefusal; message: string; retryAfterMs?: number }
 
-/** What the browser is shown while a human is being asked. See `WebPendingFrame`. */
-export interface WebAuthPending {
-  words: string
-  /** ms epoch on this desktop's clock. */
-  expiresAt: number
-  /** Correlates with `WebApprovalAsk.requestId`, for `abandon`. */
-  requestId: string
-}
-
 export interface WebAuthInput {
   /** The remote address. The unit of lockout, exactly as in mobile/auth.ts. */
   source: string
@@ -375,15 +314,10 @@ export interface WebAuthInput {
   /** Untrusted display text. */
   deviceName: string
   /**
-   * The second factor off the `hello` frame: six digits, or a recovery code.
-   * Absent on the first attempt of every sign-in — see `WebHelloFrame.totp`.
+   * The unlock PIN off the `hello` frame. Absent on the first attempt of every
+   * sign-in — see `WebHelloFrame.pin`.
    */
-  totp?: string
-  /**
-   * "Trust this browser for 30 days". Honoured only alongside a code that was
-   * actually accepted; on its own it grants nothing.
-   */
-  trust?: boolean
+  pin?: string
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -455,21 +389,6 @@ interface Strike {
   until: number
 }
 
-interface ApprovalWait {
-  requestId: string
-  words: string
-  expiresAt: number
-  /**
-   * The wait has exactly one outcome, whichever of allow / deny / timeout /
-   * hangup arrives first. Everything that can settle it checks this flag, so a
-   * timeout racing a tap can never approve after a close — or close after an
-   * approval.
-   */
-  settled: boolean
-  settle: (outcome: WebAuthOutcome) => void
-  timer: ReturnType<typeof setTimeout>
-}
-
 /* -------------------------------------------------------------------- class */
 
 export class WebAuth {
@@ -483,16 +402,6 @@ export class WebAuth {
   private keysFetchedAt = 0
   /** One in-flight fetch, shared: a burst of reconnects is one request, not ten. */
   private fetching: Promise<void> | null = null
-
-  /** At most one approval in flight, ever. See `beginApproval`. */
-  private pending: ApprovalWait | null = null
-  private lastPromptAt = 0
-
-  /**
-   * A second factor somebody has been offered and not yet proved. In memory
-   * only, deliberately: see `beginEnrolment`.
-   */
-  private enrolment: { secret: string; recovery: string[] } | null = null
 
   constructor(host: WebAuthHost) {
     this.host = host
@@ -547,10 +456,11 @@ export class WebAuth {
   /**
    * Authenticate a `hello`.
    *
-   * Five gates, in this order, and the order is load-bearing:
+   * Six gates, in this order, and the order is load-bearing:
    *
    *  1. **Lockout**, so a source that has been failing does not get to keep
-   *     trying while the rest of this runs.
+   *     trying while the rest of this runs — and, since the PIN is short, so
+   *     that the guessing is what runs out rather than the guesser's patience.
    *  2. **The token**, verified against Google's keys — signature *and* every
    *     claim. A token that does not verify is `bad-token` whatever uid it
    *     claims, which is why this runs before the uid is looked at: a token
@@ -560,23 +470,20 @@ export class WebAuth {
    *  3. **The account**, which is `wrong-account` and a genuinely different
    *     outcome: a different sentence, a different recovery, and never a retry
    *     loop on a correct credential.
-   *  4. **Revocation**, which is the one answer that is identical in both
-   *     modes. A browser somebody ended at this desk stays ended, and the
-   *     permissive mode does not soften it by so much as a prompt.
-   *  5. **The second factor** when one is enrolled, and then **the device** —
-   *     recorded and admitted on the default path, or put to a human when
-   *     `requireApproval` is on.
+   *  4. **A device id at all**, because an admission is recorded against one
+   *     and a revocation later names one.
+   *  5. **Revocation.** A browser somebody ended at this desk stays ended, and
+   *     it is turned away *before* being invited to type a PIN — there is
+   *     nothing a correct one could have bought it, and a revoked browser being
+   *     asked to guess is a revoked browser being given attempts.
+   *  6. **The PIN**, when one is set. Asked of every browser on every
+   *     connection; being on the device list excuses nothing.
    *
-   * The second factor is checked before the device is admitted and *after*
-   * revocation, so a revoked browser is turned away without being invited to
-   * type a code — there is nothing a correct code could have bought it.
-   *
-   * `onPending` fires exactly once, before any waiting, when a prompt has gone
-   * up on the desktop — it is how the server knows to send `WebPendingFrame`
-   * and what words to put in it. The returned promise settles later, with the
-   * human's answer or with `timed-out`.
+   * Then one admission path, not two: a known row is updated and an unknown one
+   * is created. There is no prompt branch any more, so there is no way for the
+   * two to drift.
    */
-  async authenticate(input: WebAuthInput, onPending?: (pending: WebAuthPending) => void): Promise<WebAuthOutcome> {
+  async authenticate(input: WebAuthInput): Promise<WebAuthOutcome> {
     const locked = this.lockout(input.source)
     if (locked) return locked
 
@@ -593,7 +500,7 @@ export class WebAuth {
       return this.fail(input.source, {
         ok: false,
         reason: 'not-approved',
-        message: 'This browser did not identify itself, so it cannot be approved. Reload the page and try again.'
+        message: 'This browser did not identify itself, so it cannot be admitted. Reload the page and try again.'
       })
     }
 
@@ -601,9 +508,6 @@ export class WebAuth {
     const known = devices.find((d) => sameString(d.id, deviceId))
 
     if (known?.revokedAt) {
-      // No prompt, deliberately: a revoked browser that keeps knocking would
-      // otherwise be a prompt storm on somebody's desk, which is the exact
-      // failure `revoked` exists to prevent.
       return this.fail(input.source, {
         ok: false,
         reason: 'revoked',
@@ -611,38 +515,29 @@ export class WebAuth {
       })
     }
 
-    // Spends the code, if there was one to spend, before anything is written.
-    const second = this.secondFactor(known ?? null, input)
-    if (!second.ok) {
-      // `totp-required` is the first half of every ordinary sign-in on a
-      // desktop with 2FA — not a failure, and struck for as such would lock
-      // somebody out on their fifth login. Every other refusal here counts.
-      if (second.reason === 'totp-required') {
-        this.host.log?.(`web auth: asking "${deviceName}" at ${input.source} for a code`)
-        return second
+    const pin = this.checkPin(input.pin)
+    if (!pin.ok) {
+      // `pin-required` is the first half of every ordinary sign-in on a desktop
+      // with a PIN — not a failure, and striking for it would lock somebody out
+      // on their fifth login. A wrong PIN is the other kind, and counts.
+      if (pin.reason === 'pin-required') {
+        this.host.log?.(`web auth: asking "${deviceName}" at ${input.source} for the PIN`)
+        return pin
       }
-      return this.fail(input.source, second)
+      return this.fail(input.source, pin)
     }
 
     if (known) {
       known.name = deviceName
       known.lastSeenAt = this.now()
-      if (second.trustedUntil) known.trustedUntil = second.trustedUntil
       this.host.save(devices)
       this.clearStrikes(input.source)
       return { ok: true, device: known, claims: verified.claims }
     }
 
-    // A browser this desktop has never seen. Which of the two doors it goes
-    // through is the whole of `webRequireApproval`, and the default is the one
-    // that needs nobody at the desk.
-    if (this.host.requireApproval?.() === true) {
-      return this.beginApproval(input.source, deviceId, deviceName, verified.claims, onPending, second.trustedUntil)
-    }
-
-    this.host.log?.(`"${deviceName}" admitted from ${input.source} on the account alone, and recorded`)
+    this.host.log?.(`"${deviceName}" admitted from ${input.source}, and recorded`)
     this.clearStrikes(input.source)
-    return { ok: true, device: this.approve(deviceId, deviceName, second.trustedUntil), claims: verified.claims }
+    return { ok: true, device: this.record(deviceId, deviceName), claims: verified.claims }
   }
 
   /**
@@ -651,9 +546,11 @@ export class WebAuth {
    *
    * The same check the `hello` took, because "this credential does not get in"
    * is one answer whether it is heard at the start of a connection or an hour
-   * into it. Deliberately no device work: the browser on the far end of an open
-   * socket was approved when it opened it, and nothing about a fresh token
-   * changes that.
+   * into it. Deliberately no device work and no PIN: the browser on the far end
+   * of an open socket answered both when it opened it, and nothing about a
+   * fresh token changes that. Asking again mid-connection would be asking
+   * somebody to retype a PIN because Google rotated a token, which is a prompt
+   * with no question behind it.
    */
   async verifyToken(idToken: string, source: string): Promise<WebTokenOutcome> {
     const locked = this.lockout(source)
@@ -664,149 +561,63 @@ export class WebAuth {
     return verified
   }
 
-  /**
-   * The browser hung up while a human was still being asked. Withdraw the
-   * prompt and settle the wait; deny by default, as every non-allow does.
-   */
-  abandon(requestId: string): void {
-    const wait = this.pending
-    if (!wait || wait.requestId !== requestId) return
-    this.settle(wait, {
-      ok: false,
-      reason: 'declined',
-      message: 'The browser stopped waiting for an answer.'
-    })
-  }
-
-  /* -------------------------------------------------------- the second factor */
+  /* --------------------------------------------------------------- the PIN */
 
   /**
-   * Is the second factor satisfied for this connection?
+   * Is the PIN satisfied for this connection?
    *
-   * Four ways to be satisfied and two ways not, and the ordering is what makes
-   * it usable rather than merely correct:
+   * Three answers, and the ordering is what makes it usable rather than merely
+   * correct:
    *
-   *  1. **Nothing enrolled** — no secret, nothing asked, and this is the state
-   *     the desktop ships in.
-   *  2. **This browser is trusted** and the window has not closed. See
-   *     TRUST_WINDOW_MS; the whole point is that a code is a monthly event.
-   *  3. **A correct TOTP code**, inside TOTP_DRIFT_STEPS, *and* on a counter
-   *     that has not been spent. The replay guard is not decoration: without it
-   *     the drift window is three chances at the same six digits, and somebody
-   *     who reads a code over a shoulder has thirty seconds to use it.
-   *  4. **An unspent recovery code**, which is burned as it is accepted.
+   *  1. **No PIN set** — nothing asked, and this is the state the desktop ships
+   *     in. See `webPin` in shared/types.ts for what that costs.
+   *  2. **Nothing presented** — `pin-required`, which is a question rather than
+   *     a failure and is deliberately not struck by the caller.
+   *  3. **Something presented** — `verifyPin` decides, and a no is one
+   *     sentence for every cause.
    *
-   * Every accepted code is written back through `saveTotp` *before* this
-   * returns, so a code cannot be spent twice by two sockets racing, and a
-   * restart between the two attempts does not hand it back.
-   *
-   * The two refusals are one sentence between them on purpose: telling "wrong
-   * code" apart from "already used" out loud tells somebody holding a stolen
-   * code which half of the guess was right.
+   * Note what is *not* here, and is not an oversight: no trust window, no
+   * exemption for a browser already on the device list, and nothing persisted
+   * on success. A PIN is not spent by being used, so unlike the TOTP counter
+   * this replaces there is nothing to write down — which also means there is no
+   * race between two sockets presenting it at once.
    */
-  private secondFactor(
-    known: WebDevice | null,
-    input: WebAuthInput
-  ): { ok: true; trustedUntil: number } | { ok: false; reason: 'totp-required' | 'totp-invalid'; message: string } {
-    const state = this.host.totp?.()
-    if (!state?.secret) return { ok: true, trustedUntil: 0 }
+  private checkPin(
+    presented: string | undefined
+  ): { ok: true } | { ok: false; reason: 'pin-required' | 'pin-invalid'; message: string } {
+    const stored = this.host.pinHash?.() ?? ''
+    if (!stored) return { ok: true }
 
-    const now = this.now()
-    if (known && known.trustedUntil > now) return { ok: true, trustedUntil: known.trustedUntil }
-
-    const presented = String(input.totp ?? '').trim()
-    if (!presented) {
-      return {
-        ok: false,
-        reason: 'totp-required',
-        message: `Enter the ${TOTP_DIGITS}-digit code from your authenticator app, or one of your recovery codes.`
-      }
-    }
-
-    const wrong = {
-      ok: false as const,
-      reason: 'totp-invalid' as const,
-      message: 'That code was not accepted. Codes last 30 seconds and each one works once.'
-    }
-    // The trust window is only granted alongside a code that was accepted; the
-    // flag on its own is a browser asking to skip the factor.
-    const granted = input.trust === true ? now + (this.host.trustWindowMs ?? TRUST_WINDOW_MS) : 0
-
-    if (new RegExp(`^\\d{${TOTP_DIGITS}}$`).test(presented)) {
-      const counter = checkTotp(state.secret, presented, now)
-      if (counter === null) return wrong
-      // `<=`, not `<`: the counter that was spent is the one that is dead, and
-      // this is the assertion the whole feature stands on.
-      if (counter <= state.lastCounter) return wrong
-      this.host.saveTotp?.({ ...state, lastCounter: counter })
-      return { ok: true, trustedUntil: granted }
-    }
-
-    const hash = hashRecoveryCode(presented)
-    const index = state.recovery.findIndex((held) => sameString(held, hash))
-    if (index < 0) return wrong
-    this.host.saveTotp?.({ ...state, recovery: state.recovery.filter((_, i) => i !== index) })
-    this.host.log?.(`web auth: a recovery code was spent — ${state.recovery.length - 1} left`)
-    return { ok: true, trustedUntil: granted }
-  }
-
-  /* ------------------------------------------------------------- enrolment */
-
-  /**
-   * Start enrolling a second factor: a fresh secret, and the URI a QR is made
-   * of.
-   *
-   * Held in this object's memory and written nowhere. An unverified secret is
-   * never persisted, and that is the rule the whole enrolment is shaped around:
-   * a secret saved before somebody proved their app has it is a lockout with a
-   * green tick on it. Starting again replaces any offer already outstanding —
-   * two live secrets would mean two ways in and only one on screen.
-   */
-  beginEnrolment(account: string): WebTotpEnrolment {
-    const secret = newTotpSecret()
-    this.enrolment = { secret, recovery: newRecoveryCodes() }
-    return { secret, uri: totpUri(secret, account) }
-  }
-
-  /** Abandon an outstanding offer — the panel was closed, or somebody said no. */
-  cancelEnrolment(): void {
-    this.enrolment = null
+    const pin = String(presented ?? '').trim()
+    if (!pin) return { ok: false, reason: 'pin-required', message: ASK_PIN }
+    if (!verifyPin(pin, stored)) return { ok: false, reason: 'pin-invalid', message: BAD_PIN }
+    return { ok: true }
   }
 
   /**
-   * Finish enrolling: prove the app holds the secret, and only then write it.
+   * The PIN again, for something that happens *inside* an already authenticated
+   * session — today, starting a screen mirror.
    *
-   * The recovery codes come back here and nowhere else, ever. They are hashed
-   * on the way to the host and there is no call that returns them a second
-   * time, which is the same rule the ngrok authtoken field follows and the same
-   * reason: a panel that can render spare keys on demand is a panel a
-   * screen-share renders them on.
+   * The distinction from the `hello` check is the whole reason this exists, and
+   * it is deliberately not a shade of it: what this guards is not "is this the
+   * browser signed in as the right account" — that was settled at `hello` — but
+   * "is the person who typed the PIN still there, right now". A PIN typed at
+   * the start of a working day, on a socket that has been open ever since, is
+   * not an answer to that question.
    *
-   * `lastCounter` is seeded with the counter that verified, so the code somebody
-   * just typed into the settings panel cannot immediately be typed into a
-   * browser as well.
+   * `needed` separates the two refusals for the caller, because they are a PIN
+   * box and an apology respectively: true means one is set and none was
+   * offered, which is the first half of every ordinary use and not a failure.
+   *
+   * A desktop with no PIN answers yes. That is not a hole: it is the shipped
+   * state, and what stands behind it is the escalation guard in
+   * electron/web-host.ts, which refuses *control* outright on a desktop with no
+   * PIN to ask for.
    */
-  completeEnrolment(code: string): { ok: true; recovery: string[] } | { ok: false; error: string } {
-    const pending = this.enrolment
-    if (!pending) return { ok: false, error: 'Start the setup again — there is no code waiting to be confirmed.' }
-    const counter = checkTotp(pending.secret, String(code ?? '').trim(), this.now())
-    if (counter === null) {
-      return { ok: false, error: 'That code did not match. Check the app has finished adding Forge, then try the next one.' }
-    }
-    if (!this.host.saveTotp) return { ok: false, error: 'This desktop cannot store a second factor.' }
-    this.host.saveTotp({
-      secret: pending.secret,
-      recovery: pending.recovery.map(hashRecoveryCode),
-      lastCounter: counter
-    })
-    this.enrolment = null
-    return { ok: true, recovery: pending.recovery }
-  }
-
-  /** Remove the second factor entirely, along with every unspent recovery code. */
-  disableTotp(): void {
-    this.enrolment = null
-    this.host.saveTotp?.({ secret: '', recovery: [], lastCounter: 0 })
+  checkFreshPin(pin: string): { ok: true } | { ok: false; needed: boolean; message: string } {
+    const outcome = this.checkPin(pin)
+    if (outcome.ok) return { ok: true }
+    return { ok: false, needed: outcome.reason === 'pin-required', message: outcome.message }
   }
 
   /* ---------------------------------------------------------- token verification */
@@ -972,133 +783,25 @@ export class WebAuth {
     return this.fetching
   }
 
-  /* ------------------------------------------------------------ device approval */
+  /* ------------------------------------------------------------ the device list */
 
   /**
-   * A browser this desktop has never approved: mint the word pair, tell the
-   * caller to show it, and hold on while a human is asked.
-   *
-   * Three ways this never even asks, and all three answer `not-approved` with
-   * the same sentence — the protocol's own definition of that value is "no
-   * prompt can be raised right now", and a caller must not be able to tell
-   * which of the three it hit:
-   *
-   *  - the host has no approval door at all;
-   *  - "Accept new browsers" is not armed;
-   *  - another approval is already in flight, or the last prompt was too
-   *    recently.
+   * Record an admission. The one place a device row is created, and the reason
+   * it is one place is the reason `mintDevice` is one place in mobile/auth.ts:
+   * the authorisation happened before this was called, and what this guarantees
+   * is the invariant the rest of the app leans on — what reaches `save` is an
+   * id, a name and three timestamps, and never anything a browser could present
+   * later as a credential.
    */
-  private async beginApproval(
-    source: string,
-    deviceId: string,
-    deviceName: string,
-    claims: WebTokenClaims,
-    onPending?: (pending: WebAuthPending) => void,
-    trustedUntil = 0
-  ): Promise<WebAuthOutcome> {
-    const shut = {
-      ok: false as const,
-      reason: 'not-approved' as const,
-      message: 'This desktop has not approved this browser and is not accepting new ones right now.'
-    }
-    const cooldownMs = this.host.promptCooldownMs ?? PROMPT_COOLDOWN_MS
-    if (!this.host.requestApproval) return this.fail(source, shut)
-    if ((this.host.acceptUntil?.() ?? 0) <= this.now()) return this.fail(source, shut)
-    if (this.pending || this.now() - this.lastPromptAt < cooldownMs) return this.fail(source, shut)
-
-    // The pair is not a secret — 4096 possibilities is not entropy — but it has
-    // to be unpredictable, or a stranger timing their ask to Steve's own could
-    // show the matching words while he is looking at the prompt. So:
-    // node:crypto, not Math.random.
-    const words = wordPair(randomBytes(2))
-    const requestId = randomUUID()
-    const timeoutMs = this.host.approvalTimeoutMs ?? APPROVAL_TIMEOUT_MS
-    const expiresAt = this.now() + timeoutMs
-
-    const settled = new Promise<WebAuthOutcome>((resolve) => {
-      const wait: ApprovalWait = {
-        requestId,
-        words,
-        expiresAt,
-        settled: false,
-        settle: resolve,
-        // The socket is held open and unauthenticated for the whole wait, so an
-        // approval nobody is standing next to must not pin a connection open
-        // until the process restarts. See APPROVAL_TIMEOUT_MS.
-        timer: setTimeout(() => {
-          this.settle(wait, {
-            ok: false,
-            reason: 'timed-out',
-            message: 'Nobody answered on the desktop — open Forge there and try again.'
-          })
-        }, timeoutMs)
-      }
-      this.pending = wait
-      this.lastPromptAt = this.now()
-
-      // The words reach the browser before the human is asked, so the pair on
-      // screen is on screen while somebody is comparing it to the prompt.
-      onPending?.({ words, expiresAt, requestId })
-      this.host.log?.(`"${deviceName}" is asking to connect from ${source}`)
-
-      this.host
-        .requestApproval!({ requestId, deviceId, deviceName, words, uid: claims.uid })
-        .then((allowed) => {
-          // The `settled` check is here as well as inside `settle`, and it has
-          // to be: an Allow that arrives after the wait timed out must not
-          // write an approval row for a connection that was already refused.
-          if (wait.settled) return
-          if (allowed === true) {
-            this.settle(wait, { ok: true, device: this.approve(deviceId, deviceName, trustedUntil), claims })
-            return
-          }
-          this.settle(wait, { ok: false, reason: 'declined', message: 'The desktop said no.' })
-        })
-        .catch(() => {
-          this.settle(wait, { ok: false, reason: 'declined', message: 'The desktop could not ask.' })
-        })
-    })
-
-    const outcome = await settled
-    if (!outcome.ok) return this.fail(source, outcome)
-    this.clearStrikes(source)
-    return outcome
-  }
-
-  /**
-   * The one exit from an approval wait. `settled` makes the outcomes race-proof:
-   * whichever of allow / deny / timeout / hangup lands first wins, and the rest
-   * are no-ops.
-   */
-  private settle(wait: ApprovalWait, outcome: WebAuthOutcome): void {
-    if (wait.settled) return
-    wait.settled = true
-    clearTimeout(wait.timer)
-    if (this.pending === wait) this.pending = null
-    // Withdraw the desktop prompt whichever way this ended — a no-op when the
-    // prompt itself is what answered.
-    this.host.cancelApproval?.(wait.requestId)
-    wait.settle(outcome)
-  }
-
-  /**
-   * Record an approval. The one place a device row is created, and the reason
-   * it is one place rather than two is the reason `mintDevice` is one place in
-   * mobile/auth.ts: the authorisation happened before this was called, and what
-   * this guarantees is the invariant the rest of the app leans on — what
-   * reaches `save` is an id, a name and three timestamps, and never anything a
-   * browser could present later as a credential.
-   */
-  private approve(deviceId: string, deviceName: string, trustedUntil = 0): WebDevice {
+  private record(deviceId: string, deviceName: string): WebDevice {
     const device: WebDevice = {
       id: deviceId,
       name: deviceName,
       createdAt: this.now(),
       lastSeenAt: this.now(),
-      revokedAt: 0,
-      trustedUntil
+      revokedAt: 0
     }
-    // Approving a browser this desktop already has a row for replaces it, rather
+    // Recording a browser this desktop already has a row for replaces it, rather
     // than leaving a second row with the same id and a stale name.
     const devices = this.host.load().filter((d) => d.id !== device.id)
     devices.push(device)
@@ -1137,11 +840,13 @@ export class WebAuth {
   /**
    * Count one refusal against a source, and hand the refusal back unchanged.
    *
-   * Every refusal counts, not only the credential ones. A wrong account, an
-   * unapproved device and a declined prompt are all things a stranger with the
-   * address can generate on repeat, and the strike counter is what stops the
-   * third one from being a prompt storm even when the per-prompt cooldown has
-   * lapsed. The one thing that does not count is success, which clears the slate.
+   * Every refusal counts, not only the credential ones. A wrong account, a
+   * browser that names itself nothing and a wrong PIN are all things a stranger
+   * with the address can generate on repeat, and the strike counter is what
+   * turns a four-digit secret from ten thousand guesses into weeks of them. The
+   * one refusal that does *not* come here is `pin-required`, which is a
+   * question rather than a failure — see `authenticate`. Nor does success,
+   * which clears the slate.
    */
   private fail<T extends { ok: false; reason: WebRefusal; message: string; retryAfterMs?: number }>(
     source: string,

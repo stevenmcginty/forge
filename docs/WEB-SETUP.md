@@ -245,24 +245,28 @@ Reload the page, or come back to it days later on the same browser: it signs
 you back in with nothing typed. That is the account-only default working as
 intended, not a bug — see "Getting in", next.
 
-### Getting in — the two optional locks
+### Getting in — the one optional lock
 
 Off by default, and the default is real usability, not a placeholder: a
 verified Firebase token for the account you signed in as **is** the
-credential. Two further locks live under Settings › Forge Web › **"Getting
-in"**, and neither is required to use any of the above:
+credential. One further lock lives under Settings › Forge Web › **"Getting
+in"**, and it is not required to use any of the above:
 
-- **Require approval at this desk** — a browser Forge has never seen has to be
-  allowed by hand, comparing a word pair, exactly like pairing a phone. The
-  price is that this cannot be answered from anywhere but this chair.
-- **A TOTP code** — set up from the same card: scan the QR with an
-  authenticator app, type the six digits it shows to confirm, and write down
-  the recovery codes shown once. "Trust this browser for 30 days" is offered
-  per browser after that, so you are not asked for a code every time.
+- **An unlock PIN** — four to twelve digits, set once from the same card.
+  Don't reuse anything guessable; it is short by design, and the thing that
+  makes it defensible is that Forge locks out an address after a handful of
+  wrong guesses, not the length of the PIN itself. Once it is set, every
+  browser types it at sign-in — not just the first time, and not just new
+  ones — and it also gates screen control: a browser cannot be handed the
+  mouse at all on a desktop with no PIN set, and starting to watch the screen
+  asks for the PIN fresh even on a browser already signed in. There are no
+  recovery codes to keep. Forget the PIN and there is nothing to recover — walk
+  to the desktop and set a new one from this same card, which replaces the old
+  one outright. Clear it to fall back to the account alone.
 
 Every browser that has ever signed in is listed at the bottom of the panel,
-with **Revoke** (drops it now, refuses it if it comes back) and **Forget**
-(clears the row — a fresh start, not a lock).
+with **Revoke** (drops it now, refuses it if it comes back, whether or not a
+PIN is set) and **Forget** (clears the row — a fresh start, not a lock).
 
 ---
 

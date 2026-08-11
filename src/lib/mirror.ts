@@ -145,6 +145,20 @@ let generation = 0
  * Open a stream onto the primary screen, or null when there is no screen to
  * open one onto.
  *
+ * Exported, and the only thing in this file that is exported without being a
+ * peer connection's business. The capture is not a WebRTC idea: it is a
+ * `desktopCapturer` id and a `getUserMedia` call with the caps above written
+ * into it, and a second way of getting this desktop's picture off this desktop
+ * needs exactly that stream and none of the machinery around it. So it lives
+ * here, beside the numbers that explain themselves — MAX_WIDTH and its long
+ * argument about macroblocks are the reason this function is worth reusing
+ * rather than writing twice — instead of in a module of its own where the caps
+ * would be a bare pair of integers.
+ *
+ * `preferSharpness` is deliberately not folded in. `contentHint` tells a WebRTC
+ * encoder which way to fail when it cannot fit, and anything driving its own
+ * encoder decides that for itself; a capture is a capture either way.
+ *
  * Video always; sound only when `withAudio`, which is main's answer to the
  * `mobileMirrorAudio` setting and arrives with the request rather than being
  * read here (see MobileMirrorEvent in shared/types.ts). Off by default for the
@@ -161,7 +175,7 @@ let generation = 0
  * picture down with it. A mirror with no sound is the feature working slightly
  * less well; a mirror with no picture is the feature not working.
  */
-async function captureScreen(withAudio: boolean): Promise<MediaStream | null> {
+export async function captureScreen(withAudio: boolean): Promise<MediaStream | null> {
   const sourceId = await window.forge.mobile.mirrorSource()
   if (!sourceId) return null
   const video: DesktopCaptureConstraints = {

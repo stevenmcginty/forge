@@ -18,6 +18,20 @@ import { CommandsButton, SkillsButton } from './Flyouts'
  * there is no `setActiveTab` anywhere in this file, and why clicking a tab on a
  * frozen desktop does nothing rather than lying about it.
  *
+ * ## What a request may say about itself
+ *
+ * That rule made clicking a tab feel dead, because nothing at all moved until
+ * the desktop's persist — debounced 250ms in src/state/AppState.tsx — pushed the
+ * workspace back, while clicking a *project* moved instantly. Two identical
+ * gestures behaving differently for a reason nobody outside this file can see.
+ *
+ * The fix is the smallest one that is not a lie: the clicked tab says it has
+ * been asked for. It does not say it has been granted — no local `setActiveTab`
+ * appears below, and the strip still moves only when the push arrives — because
+ * a switch this page performed and the desk then contradicted is worse than a
+ * beat of latency. `pending` is cleared by the answer, whichever answer it is:
+ * the push that agrees, or the sentence that refuses.
+ *
  * Absent, deliberately: renaming, tab colours, drag reordering and the mosaic
  * toggle. `WEB_LAYOUT_OPS` has seven verbs and none of them is any of those —
  * the browser can create, close, select, split, focus and switch project, and a
@@ -31,11 +45,39 @@ export function TabStrip(): ReactNode {
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
   const project = (state.picture?.projects ?? state.cached?.projects ?? []).find((p) => p.id === state.projectId)
 
+  /**
+   * The tab this browser has asked for, and where the strip stood when it asked.
+   *
+   * Derived on the way out rather than cleared in an effect, so the mark comes
+   * off in the same commit as the `workspace` push that answers it rather than a
+   * paint later. Any move at all is the answer — to the tab that was asked for,
+   * or to a different one, because the desk is entitled to do either and a mark
+   * that outlived its own answer would be this page inventing a state the
+   * desktop knows nothing about.
+   */
+  const [ask, setAsk] = useState<{ tabId: string; from: string | null } | null>(null)
+  const pending = ask && ask.from === workspace.activeTabId ? ask.tabId : null
+
+  const select = async (tabId: string): Promise<void> => {
+    setAsk({ tabId, from: workspace.activeTabId })
+    // `layout` resolves with the desktop's refusal sentence rather than throwing
+    // one, and a tab that was refused must not go on looking like one that is
+    // about to open.
+    if (await actions.layout({ op: 'select-tab', tabId })) setAsk(null)
+  }
+
   return (
     <div className="tabstrip" role="tablist" aria-label="Terminal tabs">
       <div className="tabstrip__tabs">
         {workspace.tabs.map((tab) => (
-          <Tab key={tab.id} tab={tab} active={tab.id === workspace.activeTabId} />
+          <Tab
+            key={tab.id}
+            tab={tab}
+            active={tab.id === workspace.activeTabId}
+            pending={tab.id === pending}
+            live={live}
+            onSelect={() => void select(tab.id)}
+          />
         ))}
       </div>
 
@@ -59,14 +101,27 @@ export function TabStrip(): ReactNode {
         anchor={newTabRef.current}
         open={chooserOpen}
         onClose={() => setChooserOpen(false)}
-        onPick={(profileId) => void actions.layout({ op: 'create-tab', profileId })}
+        onPick={(profileId, permissionMode) => void actions.layout({ op: 'create-tab', profileId, permissionMode })}
         selectedId={project?.defaultProfileId}
       />
     </div>
   )
 }
 
-function Tab({ tab, active }: { tab: TerminalTab; active: boolean }): ReactNode {
+function Tab({
+  tab,
+  active,
+  pending,
+  live,
+  onSelect
+}: {
+  tab: TerminalTab
+  active: boolean
+  /** Asked for, not yet granted. See the header. */
+  pending: boolean
+  live: boolean
+  onSelect: () => void
+}): ReactNode {
   const { state, actions } = useForge()
   const profiles = useProfiles()
   const leaves = collectLeaves(tab.root)
@@ -83,10 +138,20 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }): ReactNode 
       className="tab"
       role="tab"
       aria-selected={active}
+      aria-busy={pending || undefined}
       data-active={active}
+      data-pending={pending ? 'true' : undefined}
       data-tint={tint ? 'true' : undefined}
       data-working={asking ? 'true' : undefined}
-      title={asking ? `${tab.title} — a pane in here is waiting on an answer` : tab.title}
+      title={
+        !live
+          ? `${tab.title} — the desktop is not answering, so it cannot switch tab`
+          : pending
+            ? `${tab.title} — asked for; waiting for the desktop to say it has switched`
+            : asking
+              ? `${tab.title} — a pane in here is waiting on an answer`
+              : tab.title
+      }
       style={
         {
           ...(tint ? { '--tab-tint': tint } : {}),
@@ -94,7 +159,10 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }): ReactNode 
         } as CSSProperties
       }
       onPointerDown={() => {
-        if (!active) void actions.layout({ op: 'select-tab', tabId: tab.id })
+        // Nothing at all on a link that cannot carry the request, exactly as the
+        // header says: a strip that moved on a dropped socket would be claiming
+        // the desk had agreed to something it has not been told about.
+        if (!active && !pending && live) onSelect()
       }}
     >
       <div className="tab__badges">

@@ -647,11 +647,11 @@ async function pickPack(): Promise<string | null> {
  * confident and wrong whole. The only stable answer is one writer per key, so
  * these never travel inward.
  *
- * `webDevices`/`webAcceptUntil` are here on the same ticket, before they can
- * repeat the bug rather than after: they are minted and revoked in main by
- * electron/web/auth.ts exactly as the mobile pair are, so a browser approved
- * after launch lives in a key the renderer still believes is empty. Any new
- * device list belongs on this line the day it is added.
+ * `webDevices` is here on the same ticket, before it can repeat the bug rather
+ * than after: it is written and revoked in main by electron/web/auth.ts exactly
+ * as the mobile pair are, so a browser admitted after launch lives in a key the
+ * renderer still believes is empty. Any new device list belongs on this line
+ * the day it is added.
  *
  * `webUid`/`webRefreshToken`/`webEmail` are here for the same reason and with
  * sharper consequences: they are written by Forge Web's sign-in, in main, and
@@ -666,18 +666,13 @@ const MAIN_OWNED_SETTINGS = [
   'mobileDevices',
   'mobileAcceptUntil',
   'webDevices',
-  'webAcceptUntil',
   'webUid',
   'webRefreshToken',
   'webEmail',
-  // The second factor is written by main alone (`web:totp-confirm`), and the
-  // secret is sealed on the way in. Without these three here the renderer's
-  // debounced whole-object save would post its pre-enrolment copy back and
-  // silently un-enrol 2FA — and, worse, replay the pre-enrolment
-  // `webTotpCounter`, which is the value that stops a code being used twice.
-  'webTotpSecret',
-  'webTotpRecovery',
-  'webTotpCounter'
+  // The unlock PIN is written by main alone (`web:pin-set`/`web:pin-clear`),
+  // hashed on the way in. Without it here the renderer's debounced whole-object
+  // save would post its pre-PIN copy back and silently unlock the door.
+  'webPin'
 ] as const
 
 function rendererOwned(patch: Partial<Settings>): Partial<Settings> {
@@ -747,6 +742,15 @@ function registerAppHandlers(): void {
     if (
       before.webEnabled !== next.webEnabled ||
       before.webProjectId !== next.webProjectId ||
+      // Not because the listener reads it — `webAllowedOrigins` asks the store
+      // afresh on every upgrade, so a new site name admits browsers with or
+      // without this line. It is here because `applyWebSettings` is also what
+      // calls `clearRefusalIfFixed`, and without it the red "a browser was
+      // turned away" warning outlives the act that fixes it. Somebody who names
+      // the site and watches nothing whatsoever change on the panel concludes
+      // the setting did not take — which is the failure this warning exists to
+      // prevent, arriving by another door.
+      before.webSiteId !== next.webSiteId ||
       before.webUid !== next.webUid ||
       before.webApiKey !== next.webApiKey ||
       before.webDatabaseURL !== next.webDatabaseURL ||

@@ -15,8 +15,8 @@
 
 /* -------------------------------------------------------------- the gate
  *
- * One centred card, used by sign-in and by all seven connection states. They
- * share a shell on purpose: "waiting to be let in" and "the desktop said no"
+ * One centred card, used by sign-in and by every connection screen. They share a
+ * shell on purpose: "enter the desktop's PIN" and "this browser was removed"
  * should feel like the same doorway with different words on it, not like two
  * different applications.
  */
@@ -116,56 +116,6 @@
   margin-top: var(--s-3);
   justify-content: center;
   width: 100%;
-}
-
-/*
- * "Trust this browser for 30 days", under the code box.
- *
- * Left-aligned with the field above it rather than centred with the card,
- * because a checkbox and its sentence are one line of reading and a centred one
- * puts the box somewhere different on every screen width. The whole row is the
- * label, so the sentence is the hit target — this is a thing people tick on a
- * phone.
- */
-.gate__check {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  width: 100%;
-  font-size: var(--t-sm);
-  line-height: 1.4;
-  color: var(--text-secondary);
-  text-align: left;
-  cursor: pointer;
-}
-
-.gate__check input {
-  flex: none;
-  width: 15px;
-  height: 15px;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-/*
- * The word pair, and the only place in this client that shouts.
- *
- * shared/web.ts asks for it in large type because comparing it against the
- * desktop's prompt is the whole anti-confusion device — a pair somebody has to
- * squint at is a pair somebody stops comparing. Selectable, unlike the rest of
- * the app, so it can be read out or pasted into a message.
- */
-.gate__words {
-  margin: var(--s-3) 0;
-  padding: var(--s-5) var(--s-6);
-  font-size: var(--t-display);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  background: var(--accent-softer);
-  border: 1px solid var(--accent-line);
-  border-radius: var(--r-lg);
-  user-select: text;
 }
 
 /* A slow breath under "Connecting", so a wait reads as a wait rather than a stall. */
@@ -278,10 +228,96 @@
   color: var(--warn);
 }
 
+/*
+ * The same strip, for the link rather than for the machine.
+ *
+ * Asleep and reconnecting are the same *shape* of news — what you are looking at
+ * is real but not live, here is why, here is the one thing to do — and different
+ * news, because one needs somebody to wake a PC and the other needs a moment. So
+ * the band is shared and the palette is not. `--info` because the link badge in
+ * the titlebar has spent it on this exact state since the day it was written,
+ * and a second colour for one state would be two vocabularies for one fact.
+ *
+ * Mixed rather than taken from `--info-soft` and `--info-line`, which do not
+ * exist: these are the strengths tokens.css itself mixes `--warn` at for its
+ * own soft and line variants, so the two strips are weighted identically rather
+ * than by eye.
+ */
+.offline[data-link='reconnecting'] {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 9%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--info) 34%, transparent);
+}
+
+.offline[data-link='reconnecting'] .offline__text strong,
+.offline[data-link='reconnecting'] .offline__look {
+  color: var(--info);
+}
+
 /* A frozen pane wears the same chip its live twin wears for a permission mode. */
 .pane__perm[data-frozen='true'] {
   color: var(--warn);
   border-color: var(--warn-line);
+}
+
+/* And a pane whose link dropped wears the same chip in the strip's own colour. */
+.pane__perm[data-reconnecting='true'] {
+  color: var(--info);
+  border-color: color-mix(in srgb, var(--info) 34%, transparent);
+  background: color-mix(in srgb, var(--info) 9%, transparent);
+}
+
+/* ------------------------------------------------------------ a tab, asked for
+ *
+ * The desktop owns the split tree, so a tab does not become active because this
+ * page clicked it — it becomes active when the `workspace` push says so. That is
+ * decision 5 and it is right, and until this rule existed it also meant clicking
+ * a tab did nothing visible for a quarter of a second while clicking a project
+ * moved at once.
+ *
+ * What this draws is the asking, not the answer. The tab takes the hover
+ * surface, so the press is acknowledged, and a hairline runs under it in the
+ * accent to say something is outstanding — deliberately not the active tab's
+ * seam, because a tab that looked selected before the desk had agreed would be
+ * the page telling a story it cannot back up.
+ */
+.tab[data-pending='true'] {
+  position: relative;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.tab[data-pending='true']::after {
+  content: '';
+  position: absolute;
+  right: var(--s-3);
+  bottom: 0;
+  left: var(--s-3);
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--accent-line);
+  animation: tab-pending 900ms var(--ease-in-out) infinite;
+}
+
+@keyframes tab-pending {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Both switches the desktop's own strip honours, honoured the same way here. */
+@media (prefers-reduced-motion: reduce) {
+  .tab[data-pending='true']::after {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .tab[data-pending='true']::after {
+  animation: none;
 }
 
 /* ---------------------------------------------------------------- notices */
@@ -302,6 +338,155 @@
   transform: translateX(-50%);
 }
 
+/* ------------------------------------------------------- the folder picker
+ *
+ * Web-only chrome by definition: the desktop's Add project is a native dialog
+ * drawn by Windows, so there is nothing in src/ to import for this and nothing
+ * here that repaints anything there. It lives inside a `.popover`, which
+ * already supplies the surface, the border and the elevation — what follows is
+ * only the three bands inside it (where you are, what is in it, what you can do
+ * with it) and every value is a token.
+ */
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+/* One line that scrolls sideways rather than wrapping: a deep path would
+   otherwise push the list down the screen every time somebody went one folder
+   further in. */
+.picker__crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  overflow-x: auto;
+  padding: 0 var(--s-2);
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.picker__crumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.picker__crumb-step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  color: var(--text-dim);
+}
+
+.picker__crumb {
+  padding: var(--s-1) var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  border-radius: var(--r-xs);
+  transition: color var(--dur-instant) var(--ease-out), background var(--dur-instant) var(--ease-out);
+}
+
+.picker__crumb:hover:not([disabled]) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* The last crumb is where you are, and it is the one thing on this line that is
+   not somewhere to go. */
+.picker__crumb-step:last-child .picker__crumb {
+  color: var(--text-primary);
+}
+
+.picker__list {
+  display: flex;
+  flex-direction: column;
+  min-height: 96px;
+  /* Eight rows or so, then it scrolls. Bounded here rather than left to the
+     popover's own ceiling, because that one would let a long folder push the
+     "Use this folder" button off the bottom of a laptop screen — which is the
+     one control the whole panel exists to reach. */
+  max-height: 264px;
+  overflow-y: auto;
+  padding: var(--s-1) 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.picker__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  width: 100%;
+  min-height: 28px;
+  padding: var(--s-2) var(--s-4);
+  color: var(--text-primary);
+  text-align: left;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-instant) var(--ease-out);
+}
+
+.picker__row:hover:not([disabled]):not([data-file='true']) {
+  background: var(--bg-hover);
+}
+
+/* A file is drawn so a folder full of source does not read as empty, and dimmed
+   so it never looks like something to press. */
+.picker__row[data-file='true'] {
+  color: var(--text-muted);
+}
+
+.picker__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-sm);
+}
+
+.picker__repo {
+  flex: none;
+  padding: 0 var(--s-2);
+  color: var(--accent);
+  background: var(--accent-softer);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-full);
+}
+
+.picker__note {
+  margin: 0;
+  padding: var(--s-3) var(--s-4);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.picker__error {
+  margin: 0;
+  padding: var(--s-2) var(--s-4);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  color: var(--danger);
+}
+
+.picker__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: 0 var(--s-2);
+}
+
+/* The path in full, because "Use this folder" is a sentence about *this* one
+   and the breadcrumb above has already been scrolled sideways by then. */
+.picker__here {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+}
+
+.picker__use {
+  flex: none;
+  gap: var(--s-2);
+}
+
 /* ------------------------------------------------------------ rail extras */
 
 .rail__empty {
@@ -312,17 +497,75 @@
   color: var(--text-muted);
 }
 
+/* ------------------------------------------------------------ the pane wall
+ *
+ * The desktop nests a `.split` inside a `.split__side` inside a `.split` and
+ * lets flex do the arithmetic. This client cannot, and the reason is in the
+ * header of components/Panes.tsx: nesting means React changes the element *type*
+ * at a position whenever the tree is reshaped, which unmounts the subtree — and
+ * here a pane's xterm belongs to the component rather than to a host outside
+ * React, so an unmount is a disposed emulator, a detach and a fresh replay for
+ * panes that never moved.
+ *
+ * So the tree is flattened and every leaf is placed. The arithmetic that flex
+ * was doing arrives as inline `calc()` instead, composed down the tree by
+ * Panes.tsx, and it reproduces the same geometry: each side takes its share of
+ * the box less half the divider, and the divider sits in the gap.
+ */
+
+.panes {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The desktop's `.split__side`, one per leaf, placed rather than nested. */
+.panes__slot {
+  position: absolute;
+  display: flex;
+}
+
+.panes__slot > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 /*
- * The divider a browser cannot drag. It keeps the hairline — the *shape* of the
+ * The divider a browser cannot drag. It keeps the 6px gap — the *shape* of the
  * split is what is being mirrored — and drops the grab cursor, because offering
  * one for a gesture that cannot be performed is worse than not offering it.
+ *
+ * `position` overrides the `relative` on `.split__divider` by source order:
+ * styles.css is imported last (see main.tsx) and both are single-class
+ * selectors, so this is the same specificity arriving later.
  */
+.panes__divider {
+  position: absolute;
+}
+
 .split__divider[data-fixed='true'] {
   cursor: default;
 }
 
-.split__divider[data-fixed='true'] .split__grip {
-  opacity: 0;
+/* -------------------------------------------------------- the hidden tabs
+ *
+ * Every tab of the active project that has been looked at stays mounted, so
+ * flipping between two of them is not sixteen disposed terminals and sixteen
+ * catch-up buffers. `display: none` rather than a zero-height box because
+ * `fit()` in lib/term.ts refuses to measure a container under 8px, which is
+ * exactly what keeps a hidden tab from resizing its PTYs to nonsense.
+ */
+
+.grid__tab {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.grid__tab[data-active='false'] {
+  display: none;
 }
 
 /* ---------------------------------------------------------- GitHub mode

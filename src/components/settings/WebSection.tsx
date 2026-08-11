@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { toDataURL } from 'qrcode'
 import { normaliseNgrokDomain } from '@shared/mobile'
-import { TOTP_DIGITS, TRUST_WINDOW_MS } from '@shared/web'
+import { PIN_MAX_DIGITS, PIN_MIN_DIGITS } from '@shared/web'
 import type { WebDeviceRecord, WebStatus, WebTunnelMode } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTone } from './parts'
@@ -20,12 +19,17 @@ import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTon
  *                                publish because nobody is signed in
  *   3. Who is allowed in?        the account card: the Firebase project, and
  *                                Forge Web's *own* sign-in
- *   4. How careful do I want     the "Getting in" card: the device-approval
- *      to be?                    toggle, and the second factor
- *   5. How does anyone reach me? the tunnel card, and what got published
- *   6. Let a new browser ask     the accept window, armed for ten minutes —
- *                                only shown while approval is the door
+ *   4. How careful do I want     the "Getting in" card: the unlock PIN, asked
+ *      to be?                    of every browser on every sign-in
+ *   5. Can it see this screen?   the "This screen" card: watching, driving and
+ *                                sound — and whether one is happening now
+ *   6. How does anyone reach me? the tunnel card, and what got published
  *   7. Which browsers?           the list, and the two different ways to end one
+ *
+ * Card 5 sits under card 4 rather than beside the link switch because the
+ * desktop enforces exactly that order: driving this desk is refused outright
+ * unless card 4's PIN is set, so the greyed switch in the middle of card 5 is
+ * explained by the card immediately above it.
  *
  * Three states, told apart deliberately, because they fail in different ways
  * and only one of them is a problem:
@@ -100,16 +104,6 @@ function refusedSite(origin: string): string {
   return match?.[1] ?? ''
 }
 
-/** Seconds remaining until a ms-epoch deadline, floored at zero. */
-function secondsLeft(deadline: number, now: number): number {
-  return Math.max(0, Math.ceil((deadline - now) / 1000))
-}
-
-/** `9:42` — the accept window is minutes long, so bare seconds would mislead. */
-function countdown(seconds: number): string {
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-}
-
 /** "2 minutes ago" is more use in a device list than a timestamp nobody reads. */
 function ago(at: number): string {
   if (!at) return 'never'
@@ -125,7 +119,6 @@ function ago(at: number): string {
 export function WebSection(): ReactNode {
   const { state, actions } = useApp()
   const [status, setStatus] = useState<WebStatus | null>(null)
-  const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState(false)
   const [password, setPassword] = useState('')
   const [email, setEmail] = useState('')
@@ -135,16 +128,16 @@ export function WebSection(): ReactNode {
   const [domainError, setDomainError] = useState('')
   const [copied, setCopied] = useState('')
   /*
-   * The half-finished second factor. All four of these are React state and
-   * nothing else: the secret arrives from main for as long as this card is
-   * open, the recovery codes are rendered once and dropped, and closing the
-   * setup drops both. Nothing here is written to any store on this side.
+   * The unlock PIN, typed here for as long as the form is open and nowhere
+   * else. Only a hash of it is ever persisted — see `WebStatus.pinSet` — so
+   * there is nothing to render back and nothing here survives a save.
+   * `pinEditing` is what shows the two inputs at all once a PIN is already
+   * set; with no PIN, the form is simply always there.
    */
-  const [totpOffer, setTotpOffer] = useState<{ secret: string; uri: string } | null>(null)
-  const [totpQr, setTotpQr] = useState('')
-  const [totpCode, setTotpCode] = useState('')
-  const [totpError, setTotpError] = useState('')
-  const [recovery, setRecovery] = useState<string[] | null>(null)
+  const [pinDraft, setPinDraft] = useState('')
+  const [pinConfirm, setPinConfirm] = useState('')
+  const [pinEditing, setPinEditing] = useState(false)
+  const [pinError, setPinError] = useState('')
 
   // Live rather than polled: main pushes a whole `WebStatus` on every change it
   // makes — a socket opening, a tunnel dying, an approval landing — and this
@@ -153,16 +146,6 @@ export function WebSection(): ReactNode {
     void window.forge.web.status().then(setStatus)
     return window.forge.web.onStatus(setStatus)
   }, [])
-
-  const acceptUntil = status?.acceptUntil ?? 0
-  const armed = acceptUntil > now
-
-  // Only ticks while something on this page changes second by second.
-  useEffect(() => {
-    if (!armed) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [armed])
 
   /*
    * `webEnabled` is written by main (`web:start` / `web:stop` persist it), but
@@ -189,9 +172,9 @@ export function WebSection(): ReactNode {
     }
   }, [])
 
-  const toggleAccept = useCallback(async (on: boolean) => {
-    setNow(Date.now())
-    setStatus(await window.forge.web.setAccept(on))
+  /** Take the screen back. See `IPC.webMirrorEnd` — the watch ends at the socket. */
+  const stopMirror = useCallback(async () => {
+    setStatus(await window.forge.web.stopMirror())
   }, [])
 
   const revoke = useCallback(async (device: WebDeviceRecord) => {
@@ -236,86 +219,52 @@ export function WebSection(): ReactNode {
     setStatus(await window.forge.web.signOut())
   }, [])
 
-  /* ------------------------------------------------------ the second factor */
-
-  /*
-   * The QR, drawn on this machine. `otpauth://` carries the shared secret in
-   * plain sight — that is what it is for — so it must never reach a
-   * QR-rendering service, which is the same rule the pairing QR in
-   * MobileSection follows and the same reason. Dark on light with a real quiet
-   * zone whatever theme the panel is in: inverted codes fail on many scanner
-   * libraries and a margin-less one fails on most.
-   */
-  useEffect(() => {
-    if (!totpOffer?.uri) {
-      setTotpQr('')
-      return
-    }
-    let stale = false
-    toDataURL(totpOffer.uri, {
-      errorCorrectionLevel: 'M',
-      margin: 3,
-      width: 220,
-      color: { dark: '#000000', light: '#ffffff' }
-    })
-      .then((url) => {
-        if (!stale) setTotpQr(url)
-      })
-      .catch(() => {
-        if (!stale) setTotpQr('')
-      })
-    return () => {
-      stale = true
-    }
-  }, [totpOffer?.uri])
-
-  const beginTotp = useCallback(async () => {
-    setTotpError('')
-    setTotpCode('')
-    setRecovery(null)
-    const offer = await window.forge.web.totpBegin()
-    if (!offer.ok) {
-      setTotpError(offer.error)
-      return
-    }
-    setTotpOffer({ secret: offer.secret, uri: offer.uri })
-  }, [])
-
-  const cancelTotp = useCallback(() => {
-    setTotpOffer(null)
-    setTotpCode('')
-    setTotpError('')
-  }, [])
+  /* ---------------------------------------------------------------- the PIN */
 
   /**
-   * Confirm the setup. Nothing was written until this succeeded — see
-   * `IPC.webTotpConfirm` — so a person who never types a code is a person who
-   * never enrolled, rather than one who is locked out by a secret their phone
-   * did not keep.
+   * Set or change the PIN. The server validates the digit count itself —
+   * `PIN_MIN_DIGITS`/`PIN_MAX_DIGITS` here only keep the button from being
+   * pressable on something that cannot possibly be right — so `{ error }` is
+   * still the thing that actually decides whether this landed.
    */
-  const confirmTotp = useCallback(async () => {
-    setTotpError('')
+  const submitPin = useCallback(async () => {
+    setPinError('')
     setBusy(true)
     try {
-      const result = await window.forge.web.totpConfirm(totpCode.trim())
-      if (!result.ok) {
-        setTotpError(result.error)
+      const result = await window.forge.web.setPin(pinDraft)
+      if ('error' in result) {
+        setPinError(result.error)
         return
       }
-      setTotpOffer(null)
-      setTotpCode('')
-      // The one and only time these exist as text on this side.
-      setRecovery(result.recovery)
-      setStatus(await window.forge.web.status())
+      setStatus(result)
+      setPinDraft('')
+      setPinConfirm('')
+      setPinEditing(false)
     } finally {
       setBusy(false)
     }
-  }, [totpCode])
+  }, [pinDraft])
 
-  const disableTotp = useCallback(async () => {
-    setTotpError('')
-    setRecovery(null)
-    setStatus(await window.forge.web.totpDisable())
+  const cancelPinEdit = useCallback(() => {
+    setPinDraft('')
+    setPinConfirm('')
+    setPinError('')
+    setPinEditing(false)
+  }, [])
+
+  /**
+   * Remove the PIN. See `IPC.webClearPin` — this puts the account back to
+   * being the whole key, and it turns screen control off, so the row beside
+   * this button says exactly that rather than leaving it implied.
+   */
+  const removePin = useCallback(async () => {
+    setPinError('')
+    setBusy(true)
+    try {
+      setStatus(await window.forge.web.clearPin())
+    } finally {
+      setBusy(false)
+    }
   }, [])
 
   /* ---------------------------------------------------------- the tunnel */
@@ -354,6 +303,30 @@ export function WebSection(): ReactNode {
   const authtoken = settings.webNgrokAuthtoken
   const tunnelMode = settings.webTunnel
   const listening = status.state === 'listening'
+  /**
+   * Whether "let it move the mouse" could mean anything at all, mirroring the
+   * escalation guard in electron/web-host.ts rather than guessing at it: control
+   * is refused outright unless an unlock PIN is set, so a switch offered
+   * without one would be a permission the desktop then ignores.
+   *
+   * `status.pinSet` rather than the settings copy, for the reason the whole
+   * panel reads its picture from main: this is what the *door* is using, and a
+   * card that drew this from a debounced renderer copy could offer the
+   * control a moment before the desktop would.
+   */
+  const controlPossible = status.pinSet
+
+  /* Whether the typed-in PIN could be submitted at all — the server still has
+     the final word, via `pinError`, but there is no point pressing "Set PIN"
+     on something it will only refuse. */
+  const pinDigitsOk = /^\d+$/.test(pinDraft) && pinDraft.length >= PIN_MIN_DIGITS && pinDraft.length <= PIN_MAX_DIGITS
+  const pinMismatch = pinConfirm.length > 0 && pinDraft !== pinConfirm
+  const pinLocalError = pinDraft && !pinDigitsOk
+    ? `${PIN_MIN_DIGITS}–${PIN_MAX_DIGITS} digits, numbers only.`
+    : pinMismatch
+      ? 'Those two do not match.'
+      : ''
+  const canSubmitPin = pinDigitsOk && pinConfirm.length > 0 && !pinMismatch
 
   const tone: ChipTone = listening ? 'ok' : status.state === 'error' ? 'danger' : 'off'
   const tunnelTone: ChipTone =
@@ -381,7 +354,7 @@ export function WebSection(): ReactNode {
           on. Read this bit once, because it is the whole of it: switching Forge Web on puts a shell on this PC behind
           an address anybody on the internet can reach. Two things stand in the way, and both have to hold — a
           Firebase account you own, and the switch below, which is off until you turn it on. Until then nothing binds
-          a port, publishes an address or reads a credential. Two further locks are yours to add under
+          a port, publishes an address or reads a credential. An unlock PIN is yours to set under
           <em> Getting in</em>, and every browser that gets in is listed at the bottom and can be thrown out from
           there. The full picture is in <code>docs/forge-web.md</code>.
         </>
@@ -440,10 +413,39 @@ export function WebSection(): ReactNode {
               ' — it serves none at all yet'
             )}
             . That page is retrying and will keep saying <em>Reconnecting to the desktop</em> until the two agree.
+            {/*
+              The button, rather than only the sentence naming the value. The
+              sentence shipped first and was not enough: it asks somebody who
+              has just been told their browser does not work to read a
+              hostname, find a text field further down the page, and retype
+              part of it correctly. The desktop already knows the exact answer —
+              it is the address it just refused — so the honest UI is one click
+              at the place the problem is described. Only offered for an origin
+              that parses as a Firebase Hosting site, because `webSiteId` is
+              interpolated into an allowlist and must never be set from a string
+              this desktop has not recognised the shape of.
+            */}
             {refusedSite(status.refusal.origin) ? (
               <>
                 {' '}
-                Set <strong>Hosting site</strong> below to <code className="mono">{refusedSite(status.refusal.origin)}</code>.
+                It wants <strong>Hosting site</strong> set to{' '}
+                <code className="mono">{refusedSite(status.refusal.origin)}</code>.
+                {/*
+                  `sbtn--go` and a line of its own, because the first cut of
+                  this put a bare `sbtn` inline at the end of a paragraph, where
+                  a 26px hairline border beside running text is indistinguishable
+                  from the sentence around it. It was read as prose and not
+                  clicked, and the person reading it went on believing there was
+                  nothing here to press. A button nobody can see is a button
+                  that does not exist.
+                */}
+                <button
+                  type="button"
+                  className="sbtn sbtn--go web-refusal__fix"
+                  onClick={() => actions.patchSettings({ webSiteId: refusedSite(status.refusal!.origin) })}
+                >
+                  Serve this address
+                </button>
               </>
             ) : null}
           </p>
@@ -591,118 +593,166 @@ export function WebSection(): ReactNode {
       </Card>
 
       {/*
-        The two locks that are *choices*, together, because they trade against
-        each other: one of them cannot be opened from anywhere but this chair,
-        and the other travels with you.
+        The one lock, and it is a choice with weight rather than a toggle:
+        unset, the Firebase account above is the whole key, from anywhere.
+        Set, it is asked of every browser on every sign-in, and it is also
+        what "This screen", below, needs before it will hand out control.
       */}
       <Card
         title="Getting in"
         actions={
-          <StateChip tone={status.totpEnabled ? 'ok' : 'off'}>{status.totpEnabled ? 'Code required' : 'Account only'}</StateChip>
+          <StateChip tone={status.pinSet ? 'ok' : 'off'}>{status.pinSet ? 'Unlock PIN set' : 'Account only'}</StateChip>
         }
-        hint="Switch the approval prompt on and a browser this desktop has never seen has to be allowed by hand at this desk, holding the word pair — the safest door there is, and the one nobody can open while you are three hundred miles away. A code from an authenticator app is the lock that travels with you."
+        hint="A PIN set here is asked of every browser, on every sign-in, on top of the account above — and it is the only thing that can turn on driving this desktop's screen, in the card below."
       >
+        <p className="web-lede">
+          {status.pinSet ? (
+            <>
+              <strong>Unlock PIN set.</strong> Every browser types it on every sign-in, and it also unlocks driving
+              this desktop's screen, below.
+            </>
+          ) : (
+            <>
+              <strong>No unlock PIN</strong> — browsers signed in to your account get in with the password alone, and
+              remote control of the screen stays off.
+            </>
+          )}
+        </p>
+
+        {status.pinSet && !pinEditing && (
+          <Row
+            label="Unlock PIN"
+            hint="Removing it returns this desktop to account-only admission: any browser signed in to your account gets in with the password alone, and screen control turns off."
+          >
+            <div className="web-url">
+              <button type="button" className="sbtn" onClick={() => setPinEditing(true)}>
+                Change PIN
+              </button>
+              <button type="button" className="sbtn sbtn--danger" onClick={() => void removePin()}>
+                Remove PIN
+              </button>
+            </div>
+          </Row>
+        )}
+
+        {(!status.pinSet || pinEditing) && (
+          <div className="web-signin">
+            <SignInField
+              id="web-pin"
+              label={status.pinSet ? 'New PIN' : 'PIN'}
+              type="password"
+              inputMode="numeric"
+              maxLength={PIN_MAX_DIGITS}
+              value={pinDraft}
+              placeholder={`${PIN_MIN_DIGITS}-${PIN_MAX_DIGITS} digits`}
+              onChange={(next) => setPinDraft(next.replace(/\D/g, '').slice(0, PIN_MAX_DIGITS))}
+              onSubmit={() => void submitPin()}
+            />
+            <SignInField
+              id="web-pin-confirm"
+              label="Confirm"
+              type="password"
+              inputMode="numeric"
+              maxLength={PIN_MAX_DIGITS}
+              value={pinConfirm}
+              placeholder="type it again"
+              onChange={(next) => setPinConfirm(next.replace(/\D/g, '').slice(0, PIN_MAX_DIGITS))}
+              onSubmit={() => void submitPin()}
+            />
+            <button
+              type="button"
+              className="sbtn sbtn--go web-signin__go"
+              disabled={busy || !canSubmitPin}
+              onClick={() => void submitPin()}
+            >
+              {busy ? 'Saving…' : status.pinSet ? 'Change PIN' : 'Set PIN'}
+            </button>
+            {status.pinSet && (
+              <button type="button" className="sbtn web-signin__go" onClick={cancelPinEdit}>
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
+
+        {pinLocalError && <p className="web-error">{pinLocalError}</p>}
+        {pinError && <p className="web-error">{pinError}</p>}
+      </Card>
+
+      {/*
+        The screen itself, and it is deliberately *below* "Getting in" rather
+        than beside the link switch. Reading top to bottom, the PIN is set
+        first and this card then says what it unlocks — which is the order
+        the escalation guard actually enforces, and the order somebody needs
+        to meet the greyed-out control in the middle of it.
+      */}
+      <Card
+        title="This screen"
+        actions={
+          <StateChip tone={status.mirroring ? 'warn' : settings.webMirrorEnabled ? 'ok' : 'off'}>
+            {status.mirroring ? 'Being watched' : settings.webMirrorEnabled ? 'Allowed' : 'Off'}
+          </StateChip>
+        }
+        hint="Watching this desktop is not the same as reaching its terminals, so it is a separate switch: what a browser would see is the whole display — every window, not just Forge. Driving it is a third thing again, and this desktop refuses that outright unless the unlock PIN above is set."
+      >
+        {/* Above the switches, because it is a statement about right now rather
+            than about what is permitted, and because the button that ends it
+            belongs beside the sentence that reports it. */}
+        {status.mirroring && (
+          <Row
+            label="A browser is watching this screen"
+            hint={
+              controlPossible && settings.webControlEnabled
+                ? 'It can also move the mouse and type on this machine.'
+                : 'It can see this screen but cannot touch it.'
+            }
+          >
+            <button type="button" className="sbtn sbtn--danger" onClick={() => void stopMirror()}>
+              Stop
+            </button>
+          </Row>
+        )}
+
         <Row
-          label="Approve new browsers at this desk"
-          /* The one sentence about what off means. It is said here and nowhere
-             else in this panel — a warning repeated is a warning skipped. */
-          hint="Off — the default — means your Firebase account is the whole key: a browser signed in to it reaches these terminals from anywhere with nobody at this desk, so a stolen password is a shell on this PC."
+          label="Let a browser watch this screen"
+          hint="Off by default. On, a browser signed in to your account can ask to see this display — the whole of it, not just Forge — and you are told here and by a notification each time one starts."
         >
           <Toggle
-            checked={settings.webRequireApproval}
-            onChange={(on) => actions.patchSettings({ webRequireApproval: on })}
-            label="Require approval at this desk"
+            checked={settings.webMirrorEnabled}
+            onChange={(on) => actions.patchSettings({ webMirrorEnabled: on })}
+            label="Let a browser watch this screen"
           />
         </Row>
 
-        {status.totpEnabled ? (
-          <Row
-            label="Two-factor code"
-            hint={`On. ${status.recoveryLeft} recovery ${status.recoveryLeft === 1 ? 'code' : 'codes'} left, and a browser you trusted is not asked again for ${TRUST_WINDOW_MS / (24 * 60 * 60_000)} days.`}
-          >
-            <button type="button" className="sbtn sbtn--danger" onClick={() => void disableTotp()}>
-              Turn off
-            </button>
-          </Row>
-        ) : totpOffer ? (
-          <div className="web-2fa">
-            <p className="web-lede">
-              <strong>Scan this</strong> with an authenticator app, then type the {TOTP_DIGITS} digits it shows to prove
-              it took. Nothing is saved until you do.
-            </p>
-            <div className="web-2fa__scan">
-              {totpQr ? <img className="web-2fa__qr" src={totpQr} alt="Two-factor setup code" /> : null}
-              <div className="web-2fa__manual">
-                <span className="field__label">Or type this in by hand</span>
-                <code className="web-address">{totpOffer.secret}</code>
-                <button type="button" className="sbtn" onClick={() => void copyUrl(totpOffer.secret)}>
-                  {copied === totpOffer.secret ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-            </div>
-            <div className="web-signin">
-              <SignInField
-                id="web-totp-code"
-                label="Code from the app"
-                type="text"
-                value={totpCode}
-                placeholder={'0'.repeat(TOTP_DIGITS)}
-                onChange={setTotpCode}
-                onSubmit={() => void confirmTotp()}
-              />
-              <button
-                type="button"
-                className="sbtn sbtn--go web-signin__go"
-                disabled={busy || !totpCode.trim()}
-                onClick={() => void confirmTotp()}
-              >
-                {busy ? 'Checking…' : 'Confirm'}
-              </button>
-              <button type="button" className="sbtn web-signin__go" onClick={cancelTotp}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
-          <Row
-            label="Two-factor code"
-            hint="Off. With it on, a browser signing in has to show a six-digit code as well as the account — which is the part a stolen password does not come with."
-          >
-            <button type="button" className="sbtn sbtn--go" onClick={() => void beginTotp()}>
-              Set up
-            </button>
-          </Row>
-        )}
+        <Row
+          label="Let it move the mouse and type"
+          /* The greyed state's own sentence. It says what to do rather than
+             what is wrong, because the fix is one switch away and on this very
+             card's neighbour. */
+          hint={
+            controlPossible
+              ? 'A real cursor and real keystrokes, on whatever window is under them — not just on Forge. Read per click, so switching this off stops the next one.'
+              : 'Unavailable until you set an unlock PIN, above. A browser that can move the mouse could reach this very setting and switch the PIN off itself, so this desktop will not hand control to an account alone.'
+          }
+        >
+          <Toggle
+            checked={settings.webControlEnabled && controlPossible}
+            disabled={!controlPossible}
+            onChange={(on) => actions.patchSettings({ webControlEnabled: on })}
+            label="Let a browser drive this desktop"
+          />
+        </Row>
 
-        {totpError && <p className="web-error">{totpError}</p>}
-
-        {/* Shown once, here, and never again. There is no call that returns
-            them a second time — see IPC.webTotpConfirm — because a panel that
-            could render ten spare keys on demand is a panel a screen-share
-            renders them on. */}
-        {recovery && (
-          <div className="web-2fa">
-            <p className="web-note">
-              <strong>Write these down now.</strong> Each one gets you in once if you lose the app, and this is the only
-              time they will ever be shown. Keep them somewhere that is not this machine.
-            </p>
-            <ul className="web-2fa__codes">
-              {recovery.map((code) => (
-                <li key={code}>
-                  <code>{code}</code>
-                </li>
-              ))}
-            </ul>
-            <div className="web-2fa__done">
-              <button type="button" className="sbtn" onClick={() => void copyUrl(recovery.join('\n'))}>
-                {copied === recovery.join('\n') ? 'Copied' : 'Copy all'}
-              </button>
-              <button type="button" className="sbtn sbtn--go" onClick={() => setRecovery(null)}>
-                I have saved them
-              </button>
-            </div>
-          </div>
-        )}
+        <Row
+          label="Send this desktop's sound too"
+          hint="Off by default. Windows shares the whole system mix, so this sends every notification, call and video playing on this machine — not just Forge's. It takes effect on the next watch, not the one happening now."
+        >
+          <Toggle
+            checked={settings.webMirrorAudio}
+            onChange={(on) => actions.patchSettings({ webMirrorAudio: on })}
+            label="Send this desktop's sound too"
+          />
+        </Row>
       </Card>
 
       <Card
@@ -829,38 +879,6 @@ export function WebSection(): ReactNode {
         </p>
       </Card>
 
-      {/* Only while the prompt is the door. With approval off there is nothing
-          to arm — an unknown browser is admitted on the account — and a switch
-          that changed nothing would be the panel lying about the lock. */}
-      {listening && settings.webRequireApproval && (
-        <Card
-          title="Accept new browsers"
-          actions={
-            <StateChip tone={armed ? 'ok' : 'off'}>
-              {armed ? (
-                <>
-                  Accepting · <span className="web-accept__left">{countdown(secondsLeft(acceptUntil, now))}</span>
-                </>
-              ) : (
-                'Off'
-              )}
-            </StateChip>
-          }
-          hint={
-            armed
-              ? 'Open the page in the browser and sign in. It shows two words, and a prompt appears here with the same two. Nothing is approved until you press Allow on that prompt.'
-              : 'A browser this desktop has never seen cannot even ask while this is off — it is refused before a prompt is raised. Arm it for the minute you are actually sitting down with a new browser, not permanently: this door faces the internet.'
-          }
-        >
-          <Row
-            label="Accept new browsers"
-            hint={armed ? 'On — it switches itself off when the countdown ends.' : 'Arms for ten minutes, then switches itself off.'}
-          >
-            <Toggle checked={armed} onChange={(on) => void toggleAccept(on)} label="Accept new browsers" />
-          </Row>
-        </Card>
-      )}
-
       <Card
         title="Approved browsers"
         hint={
@@ -926,6 +944,8 @@ function SignInField({
   type,
   value,
   placeholder,
+  inputMode,
+  maxLength,
   onChange,
   onSubmit
 }: {
@@ -934,6 +954,8 @@ function SignInField({
   type: 'email' | 'password' | 'text'
   value: string
   placeholder?: string
+  inputMode?: 'numeric'
+  maxLength?: number
   onChange: (next: string) => void
   onSubmit: () => void
 }): ReactNode {
@@ -946,6 +968,8 @@ function SignInField({
         id={id}
         className="field__input"
         type={type}
+        inputMode={inputMode}
+        maxLength={maxLength}
         autoComplete="off"
         spellCheck={false}
         placeholder={placeholder}

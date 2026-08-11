@@ -13,7 +13,16 @@ import { useActiveProject, useForge } from '../state'
  * the connection badge, which on the desktop has no equivalent because there is
  * no link to be honest about.
  */
-export function TopBar({ collapsed, onToggleRail }: { collapsed: boolean; onToggleRail: () => void }): ReactNode {
+export function TopBar({
+  collapsed,
+  onToggleRail,
+  onWatchScreen
+}: {
+  collapsed: boolean
+  onToggleRail: () => void
+  /** Open the screen mirror. Absent while there is no live desktop to ask. */
+  onWatchScreen: (() => void) | null
+}): ReactNode {
   const { state, actions } = useForge()
   const project = useActiveProject()
   const offline = state.stage.kind === 'offline'
@@ -78,6 +87,26 @@ export function TopBar({ collapsed, onToggleRail }: { collapsed: boolean; onTogg
             {offline ? 'Asleep' : state.connection.state === 'live' ? desktopName || 'Live' : 'Connecting'}
           </span>
         </span>
+
+        {/*
+          The desktop's own screen. Only while the link is live, because it is
+          the one control here that cannot mean anything against a cached
+          picture: there is no frozen screenshot to show and nothing to ask.
+          Everything about whether it is *allowed* is decided on that machine —
+          the setting, the second factor, the escalation guard — so this button
+          asks and the answer arrives in the overlay.
+        */}
+        {onWatchScreen ? (
+          <button
+            type="button"
+            className="ghost-btn titlebar__btn"
+            title={`Watch ${desktopName || 'this desktop'}’s screen`}
+            aria-label="Watch this desktop’s screen"
+            onClick={onWatchScreen}
+          >
+            <Icon name="expand" size={15} />
+          </button>
+        ) : null}
 
         <button
           type="button"

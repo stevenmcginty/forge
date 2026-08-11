@@ -148,10 +148,15 @@ export function clearSnapshot(): void {
 /**
  * The picture, as `hello-ok` handed it over. Replaces everything except the
  * transcripts, which belong to sessions and outlive one connection.
+ *
+ * Hands back what it stored, so a caller that keeps the snapshot in state has it
+ * without a second `loadSnapshot()` — a `JSON.parse` of everything this browser
+ * has cached, for a value the write already had in its hands. Null means nothing
+ * was stored and there is nothing to refresh from; see `write`.
  */
-export function rememberPicture(frame: WebHelloOkFrame): void {
+export function rememberPicture(frame: WebHelloOkFrame): Snapshot | null {
   const previous = loadSnapshot()
-  write({
+  return write({
     version: SNAPSHOT_VERSION,
     at: Date.now(),
     desktopName: frame.desktopName,
@@ -177,19 +182,52 @@ export function rememberPicture(frame: WebHelloOkFrame): void {
  * absolute path on Steve's disk, and a per-project seq, none of which mean
  * anything with the desktop off — and writing desktop paths into localStorage to
  * keep them company would be a cost with no reader.
+ *
+ * Returns the snapshot it stored, and null when it stored nothing — either
+ * because there is no snapshot to fold a remote into or because the remote is
+ * already the one written down. The two cases are one answer on purpose: both
+ * mean "the cache did not move", which is the only thing the caller can act on.
+ * The git watcher fires on every file save, so this is the difference between a
+ * new snapshot object per keystroke-triggered rebuild and one per actual change.
  */
-export function rememberGit(snapshot: GitSnapshot): void {
+export function rememberGit(snapshot: GitSnapshot): Snapshot | null {
   const cached = loadSnapshot()
-  if (!cached) return
+  if (!cached) return null
   const slug = typeof snapshot.slug === 'string' && snapshot.slug ? snapshot.slug : null
-  if (Object.hasOwn(cached.slugs, snapshot.projectId) && cached.slugs[snapshot.projectId] === slug) return
-  write({ ...cached, at: Date.now(), slugs: { ...cached.slugs, [snapshot.projectId]: slug } })
+  if (Object.hasOwn(cached.slugs, snapshot.projectId) && cached.slugs[snapshot.projectId] === slug) return null
+  return write({ ...cached, at: Date.now(), slugs: { ...cached.slugs, [snapshot.projectId]: slug } })
+}
+
+/**
+ * Are these two project lists the same list?
+ *
+ * Worth asking because the desktop answers a great many things with a `projects`
+ * push whether or not the list changed — a click into a pane is a `focus-pane`,
+ * and a `focus-pane` comes back with one — and every push that is acted on costs
+ * a parse, a stringify and a synchronous `setItem` of the whole snapshot. The
+ * comparison lives here, in one place, because the two halves that need it —
+ * this file deciding whether to write, and the provider deciding whether to
+ * replace the picture it is holding — must not be able to disagree about what
+ * "unchanged" means.
+ *
+ * Compared as JSON rather than field by field, and the asymmetry is what makes
+ * that safe: both lists are built by the same desktop and serialised by the same
+ * JSON writer, so equal content produces equal text — and any doubt falls the
+ * harmless way, because a list wrongly read as *changed* costs exactly what
+ * every push costs today.
+ */
+export function sameProjects(a: Project[], b: Project[]): boolean {
+  return a.length === b.length && JSON.stringify(a) === JSON.stringify(b)
 }
 
 /** Project list, workspace and session-list pushes, folded into the snapshot. */
 export function rememberProjects(projects: Project[]): void {
   const snapshot = loadSnapshot()
   if (!snapshot) return
+  // The same early return `rememberGit` makes, for the same reason: a push that
+  // says what the cache already says is a full rewrite of up to five megabytes
+  // for no change, on the main thread, while somebody is typing at a terminal.
+  if (sameProjects(snapshot.projects, projects)) return
   write({ ...snapshot, at: Date.now(), projects, slugs: pruneSlugs(snapshot.slugs, projects) })
 }
 
@@ -211,20 +249,38 @@ export function rememberSessions(sessions: WebSession[]): void {
 }
 
 /**
- * One pane's transcript, as of the last time it was read.
+ * What the attached panes have said, as of the last time they were read.
  *
  * The replay *plus* whatever live data arrived after it, because the frozen view
  * should show what was last on screen and not what was on screen at the moment
  * the tab attached. Held to MAX_REPLAY_BYTES per session — the same ceiling the
  * desktop sends — so the cache can never describe more scrollback than a live
  * attach would have given it.
+ *
+ * Every pane that has said something in one call, and that is the whole reason
+ * it is plural rather than a function about one session. A snapshot is read and
+ * written whole: one call is a `JSON.parse` of everything this browser has
+ * cached, plus a `JSON.stringify` and a *synchronous* `localStorage.setItem` of
+ * the same, which for a cache near its ceiling is most of a megabyte each way.
+ * The flush that calls this runs every three seconds, so one call per pane meant
+ * three complete round trips through the main thread every three seconds with
+ * three busy panes open — a stutter somebody can feel under their own typing,
+ * and the reason this file's timer exists in the first place.
  */
-export function rememberTranscript(sessionId: string, data: string): void {
+export function rememberTranscripts(entries: Snapshot['transcripts']): void {
+  if (entries.length === 0) return
   const snapshot = loadSnapshot()
   if (!snapshot) return
-  const trimmed = data.length > MAX_REPLAY_BYTES ? data.slice(data.length - MAX_REPLAY_BYTES) : data
-  const rest = snapshot.transcripts.filter((t) => t.sessionId !== sessionId)
-  write({ ...snapshot, at: Date.now(), transcripts: [...rest, { sessionId, data: trimmed }] })
+  const fresh = entries.map(({ sessionId, data }) => ({
+    sessionId,
+    data: data.length > MAX_REPLAY_BYTES ? data.slice(data.length - MAX_REPLAY_BYTES) : data
+  }))
+  const replaced = new Set(fresh.map((t) => t.sessionId))
+  const rest = snapshot.transcripts.filter((t) => !replaced.has(t.sessionId))
+  // Newest last, exactly as writing them one at a time left them: `write` drops
+  // oldest-first when the total is over MAX_CACHED_REPLAY_BYTES, so the order of
+  // this array decides which transcript survives a cache that has filled up.
+  write({ ...snapshot, at: Date.now(), transcripts: [...rest, ...fresh] })
 }
 
 export function transcriptFor(snapshot: Snapshot | null, sessionId: string): string {
@@ -243,8 +299,14 @@ function pruneSlugs(slugs: Record<string, string | null>, projects: Project[]): 
 /**
  * Write, trimming oldest transcripts first until it fits, and giving up quietly
  * rather than throwing into whatever was rendering.
+ *
+ * Hands back what is now on disk, which is not always what it was given: the
+ * transcripts may have been trimmed, and a quota failure keeps the picture and
+ * drops them entirely. A caller holding this in state gets the truth for free,
+ * where re-reading it would cost a parse of what was just serialised. Null means
+ * storage refused everything and there is no cache any more.
  */
-function write(snapshot: Snapshot): void {
+function write(snapshot: Snapshot): Snapshot | null {
   const transcripts = [...snapshot.transcripts]
   let total = transcripts.reduce((sum, t) => sum + t.data.length, 0)
   while (transcripts.length > 0 && total > MAX_CACHED_REPLAY_BYTES) {
@@ -253,15 +315,19 @@ function write(snapshot: Snapshot): void {
   const next: Snapshot = { ...snapshot, transcripts }
   try {
     localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(next))
+    return next
   } catch {
     // Out of quota, or private mode. Drop the transcripts and keep the picture:
     // a project list with no scrollback is still a recognisable Forge, and a
     // failed write that left the *old* snapshot in place would be a frozen view
     // claiming to be newer than it is.
+    const bare: Snapshot = { ...next, transcripts: [] }
     try {
-      localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({ ...next, transcripts: [] }))
+      localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(bare))
+      return bare
     } catch {
       clearSnapshot()
+      return null
     }
   }
 }

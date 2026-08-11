@@ -13,7 +13,9 @@
  *
  * ## What is stubbed, and what is not
  *
- * Exactly one thing is stubbed: Google. A tiny HTTP server stands in for the
+ * Two things are stubbed, and the second only in the phase that needs it.
+ *
+ * The first is Google. A tiny HTTP server stands in for the
  * Identity Toolkit, the securetoken endpoint and the Realtime Database, because
  * the alternative is a test that needs somebody's Firebase project and their
  * password. Everything about that stub is the *shape* Google publishes: the
@@ -26,6 +28,15 @@
  * The token verifier is the real one and it is not told to trust anything: the
  * JWKS *fetcher* is injected, exactly as `JwksFetcher`'s comment intends, and
  * every claim check in electron/web/auth.ts runs for real.
+ *
+ * The second is the display, in phase 5d and nowhere else. A machine running a
+ * check has no screen worth capturing and Windows will not hand one to a
+ * headless run, so `getUserMedia` there answers with a canvas being redrawn
+ * thirty times a second. Everything above it is the shipped code: the real
+ * `captureScreen` and its constraints, the real `VideoEncoder` in the real
+ * Chrome, the real chunk ceiling on the real server, and the real decoder
+ * painting the real component's canvas. What is stubbed is the picture, not the
+ * pipe.
  *
  * ## Why the dev server rather than the built bundle
  *
@@ -46,11 +57,29 @@
  * source address and every socket here comes from 127.0.0.1, so a phase that
  * spends a strike must not be able to fail the next one for a reason that has
  * nothing to do with what it is testing.
+ *
+ * ## The two ways this link used to loop forever
+ *
+ * Phases 3b and 5 are not features being shown off; they are corrections being
+ * held down. Each is a bug that shipped behind a full suite of passing checks,
+ * and both looked identical from the outside — "Reconnecting to the desktop
+ * (attempt 41)…" on a page that was never going to connect. A refusal the
+ * desktop had explained in words, erased in the same React batch by the retry
+ * that acts on it (3b); and an address that had been retired under a browser
+ * which went on re-dialling it (5).
+ *
+ * Phase 6 is the third shape of that disease, moved. It used to be a browser
+ * hung up on mid-approval by its own heartbeat, twenty seconds into a two-minute
+ * window; there is no approval to sit through any more, and a `pin-required` is
+ * answered and then hung up on by the desktop itself, so there is no held-open
+ * socket either. What is left is the property underneath both: the one screen
+ * where this client waits on a person has to hold still while it waits. That is
+ * now the PIN box, and that is what phase 6 asserts.
  */
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
@@ -161,10 +190,31 @@ const b64url = (value) => Buffer.from(value).toString('base64url')
  */
 
 const SESSION_ID = 'w1'
+/** A second real shell, so Phase 1d's split is two live terminals. */
+const SECOND_ID = 'w2'
+/** A pane in Phase 1d's second tab that never gets a shell — see that phase. */
+const THIRD_ID = 'w3'
 const PROJECTS = [
   { id: 'p1', name: 'forge', path: ROOT, color: '#7C5CFF', defaultProfileId: 'shell', createdAt: 0 }
 ]
-const PROFILES = [{ id: 'shell', name: 'Shell', command: '', accent: '#8e9093', badge: 'SH' }]
+/*
+ * Two profiles, because one of them has to carry a permission ladder. `claude`
+ * is the only reason the chooser draws a mode submenu at all, and the check
+ * below picks the dangerous rung off it to prove the override survives the trip
+ * to the desktop instead of being flattened into the profile's own default.
+ */
+const PROFILES = [
+  { id: 'shell', name: 'Shell', command: '', accent: '#8e9093', badge: 'SH' },
+  {
+    id: 'claude',
+    name: 'Claude Code',
+    command: 'claude',
+    accent: '#C6FF4A',
+    badge: 'CC',
+    kind: 'agent',
+    permissionMode: 'default'
+  }
+]
 const WORKSPACES = {
   p1: {
     tabs: [
@@ -193,8 +243,45 @@ async function main() {
     absWorkingDir: ROOT
   })
 
-  const { WebServer, WebAuth, PtySessionManager, WEB_PROTO, webHostPath, TOTP_STEP_MS, totpCode, hashRecoveryCode } =
-    await import(pathToFileURL(join(scratch, 'web.mjs')).href)
+  const {
+    WebServer,
+    WebAuth,
+    PtySessionManager,
+    checkFolder,
+    listFolder,
+    WEB_PROTO,
+    webHostPath,
+    hashPin,
+    HEARTBEAT_GRACE_MS,
+    HEARTBEAT_MS,
+    MAX_MIRROR_CHUNK_BYTES,
+    PIN_MIN_DIGITS
+  } = await import(pathToFileURL(join(scratch, 'web.mjs')).href)
+
+  /*
+   * The desktop's *encoder*, bundled on its own so a browser can run it.
+   *
+   * src/lib/web-mirror.ts is renderer code — it opens a capture and drives a
+   * `VideoEncoder`, neither of which exists in Node — so the mirror phase runs
+   * the shipped file inside the same Chrome the client is in and hands what it
+   * produces to the real `WebServer`. That is the only way this end of the
+   * feature can be driven at all without a display, and it is worth the trouble:
+   * the alternative is a check that invents its own chunks, which would prove
+   * the viewer decodes something rather than that these two halves fit.
+   */
+  await build({
+    entryPoints: [join(ROOT, 'src', 'lib', 'web-mirror.ts')],
+    outfile: join(scratch, 'web-mirror.js'),
+    bundle: true,
+    format: 'iife',
+    globalName: 'ForgeWebMirror',
+    platform: 'browser',
+    target: 'es2022',
+    alias: { '@shared': join(ROOT, 'shared') },
+    logLevel: 'silent',
+    absWorkingDir: ROOT
+  })
+  const encoderBundle = readFileSync(join(scratch, 'web-mirror.js'), 'utf8')
 
   const google = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const served = { [KID]: certificateFor(google, 'securetoken.google.com') }
@@ -308,6 +395,41 @@ async function main() {
   }
 
   const layoutOps = []
+  /** Every folder a browser has asked this desktop to add, in order. */
+  const projectAdds = []
+
+  /* ------------------------------------------------------- the screen mirror
+   *
+   * The desktop's half of the mirror, as `electron/web-host.ts` supplies it
+   * minus the two things this process does not have: a display and a settings
+   * file. What is left is exactly the part worth driving — the PIN spent at
+   * `mirror-start`, whether control is allowed at the moment the watch begins,
+   * and every input frame that survives `readMirrorInput`.
+   *
+   * Everything between these hooks and the browser is the shipped server: the
+   * one-viewer rule, the chunk ceiling, the input budget and the gate that
+   * refuses an input frame from a socket that is not the one watching.
+   */
+
+  /** The PIN `mirror-start` must carry, or '' for a desktop with none set. */
+  let mirrorPin = ''
+  /** Every PIN a browser has presented at `mirror-start`, in order. */
+  const mirrorStarts = []
+  /** Every input that reached the desktop, after `readMirrorInput` read it. */
+  const mirrorInputs = []
+  /** What `mirrorControl` answers when a watch begins. */
+  let screenControl = true
+  /** Is a browser watching right now, as the server's own edge reports it? */
+  let mirroring = false
+  /**
+   * Every session the desktop has served a catch-up buffer for, in order.
+   *
+   * The one observation that decides Phase 1d. A replay is served on exactly one
+   * event — an `attach` the server accepted — so this list is a record of which
+   * panes the browser threw away and rebuilt, taken at the desktop rather than
+   * inferred from what the screen looks like afterwards.
+   */
+  const replayServed = []
   const makeAuth = (devices, extra = {}) => {
     let saved = devices
     return new WebAuth({
@@ -345,7 +467,10 @@ async function main() {
        */
       allowedOrigins: () => [ORIGIN],
       sessions: () => manager.list(),
-      replay: (id) => replay.get(id) ?? '',
+      replay: (id) => {
+        replayServed.push(id)
+        return replay.get(id) ?? ''
+      },
       write: (id, data) => manager.write(id, data),
       resize: (id, cols, rows) => manager.resize(id, cols, rows),
       snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: WORKSPACES }),
@@ -354,8 +479,59 @@ async function main() {
         return null
       },
       agents: async (commands) => ({ agents: [], commands: commands.map((c) => ({ command: c, exe: c, found: true, unknown: false })) }),
+      /*
+       * The shipped listing code, bundled straight out of
+       * electron/web/fs-browse.ts by the entry fixture — so the picker on
+       * screen walks a real directory tree through the same function the real
+       * desktop answers with, rather than through a fixture written to agree
+       * with it. That module has no Electron in it for exactly this reason.
+       */
+      fsList: async (path, name) => listFolder(path, name),
+      /*
+       * What `electron/web-host.ts` does, minus the renderer it does not have:
+       * check the folder is really there, add it, and then *push the list*. The
+       * push is the half worth having here — the browser's rail must redraw
+       * because the desktop said so, never because the click that asked for it
+       * optimistically added a row.
+       */
+      projectAdd: async (path) => {
+        const checked = checkFolder(path)
+        if (!checked.ok) return checked.error
+        projectAdds.push(checked.path)
+        PROJECTS.push({
+          id: `p${PROJECTS.length + 1}`,
+          name: basename(checked.path),
+          path: checked.path,
+          color: '#4AA3FF',
+          defaultProfileId: 'shell',
+          createdAt: Date.now()
+        })
+        active?.pushProjects(PROJECTS)
+        return null
+      },
       onWatch: (ids) => {
         watched = ids.length > 0
+      },
+      /*
+       * `startMirror` in electron/web-host.ts, with the settings check and the
+       * window lookup removed and the PIN kept — that is the gate the browser
+       * has to draw a text box for, and the only one of the three that is
+       * visible from a page.
+       */
+      mirrorStart: (pin) => {
+        mirrorStarts.push(pin)
+        if (mirrorPin && pin !== mirrorPin) {
+          return { error: 'Type the desktop’s unlock PIN to take its screen.', needsPin: true }
+        }
+        return null
+      },
+      mirrorControl: () => screenControl,
+      mirrorInput: (input) => {
+        mirrorInputs.push(input)
+        return true
+      },
+      onMirror: (watching) => {
+        mirroring = watching
       }
     })
 
@@ -411,6 +587,15 @@ async function main() {
 
   const browser = await chromium.launch({ channel: 'chrome' })
   const consoleErrors = []
+  /**
+   * Every address this browser has dialled, in order.
+   *
+   * The one observation that survives a socket which never opens: Playwright
+   * raises `websocket` when the page *constructs* one, so a dial at a hostname
+   * that resolves nowhere is as visible here as one that connects. Phase 5 is
+   * about nothing else — which of two addresses the client chose.
+   */
+  const dialled = []
   const noteError = (text) => {
     // The one thing filtered, and it is not the client's doing: a socket the
     // *desktop* hung up on — which is every refusal phase, on purpose — is
@@ -438,6 +623,19 @@ async function main() {
     // revoked browser has to be *this* browser. Seeded rather than read back so
     // no phase depends on a previous one having run.
     await made.addInitScript(`localStorage.setItem('forge-web-device', ${JSON.stringify(DEVICE_ID)})`)
+    // Every write of the offline cache, counted. The snapshot is written whole
+    // and synchronously, so "how many times was it written" is the honest cost
+    // of a push arriving — which is what the identical-projects assertion in
+    // phase 1 is about. Counted rather than timed: a stopwatch here would be
+    // measuring the machine the check happens to be running on.
+    await made.addInitScript(`{
+      const real = Storage.prototype.setItem
+      window.__forgeSnapshotWrites = 0
+      Storage.prototype.setItem = function (key, value) {
+        if (key === 'forge-web-snapshot') window.__forgeSnapshotWrites++
+        return real.call(this, key, value)
+      }
+    }`)
     return made
   }
 
@@ -450,6 +648,7 @@ async function main() {
       if (message.type() === 'error') noteError(`${message.text()} (${message.location()?.url ?? '?'})`)
     })
     made.on('pageerror', (err) => noteError(String(err)))
+    made.on('websocket', (socket) => dialled.push(socket.url()))
     return made
   }
 
@@ -460,6 +659,13 @@ async function main() {
 
   /** Everything the terminal is currently rendering, as text. */
   const screenText = () => page.locator('.xterm-rows').first().innerText().catch(() => '')
+  /** The same, for one named pane, once there is more than one on screen. */
+  const paneText = (id) =>
+    page
+      .locator(`.pane[data-pane-id="${id}"] .xterm-rows`)
+      .first()
+      .innerText()
+      .catch(() => '')
   const gateReason = () => page.getAttribute('.gate__card', 'data-reason').catch(() => null)
 
   /**
@@ -520,7 +726,7 @@ async function main() {
   log(true, 'signing in through the form reaches a live link and the app is drawn')
   log(
     (await page.locator('.linkbadge[data-state="live"]').count()) === 1,
-    'the connection badge says live, which is WebApprovalState "live" and not a spinner'
+    'the connection badge says live, which is WebConnectionState "live" and not a spinner'
   )
 
   /* ------------------------------- the opening picture, on screen */
@@ -604,6 +810,44 @@ async function main() {
     `carrying the name the browser called itself, which is what the desktop's device list shows ("${layoutOps.at(-1).deviceName}")`
   )
 
+  /* ------------------------------------ and one of them carries a permission mode
+   *
+   * The ladder end to end. The rungs the browser draws are not the browser's:
+   * they come out of the same PERMISSION_FAMILIES table the desk reads, so the
+   * assertion is on the desktop's own words in the desktop's own order, and a
+   * client that invented its own vocabulary would fail here rather than at the
+   * moment somebody launched a mode this machine cannot spell.
+   *
+   * Bypass specifically, for both halves: it is the rung marked dangerous, and
+   * it is the one nobody wants to discover was quietly dropped on the way — a
+   * `create-tab` that arrived without `permissionMode` would open Claude asking
+   * for permission after the person had deliberately chosen the mode that never
+   * asks, and would look like the chooser rather than the wire.
+   */
+
+  await page.click('.tabstrip__new')
+  const claudeLine = page.locator('.agent-chooser__line', { hasText: 'Claude Code' })
+  await claudeLine.locator('.agent-chooser__modes').click()
+  const rungs = (await page.locator('.agent-chooser__submenu .agent-chooser__mode-name').allInnerTexts()).join(' / ')
+  log(rungs === 'Default / Accept edits / Plan / Bypass', `the chooser offers the desktop's own ladder, in its order ("${rungs}")`)
+  const bypass = page.locator('.agent-chooser__mode-row[data-danger="true"]')
+  log(
+    (await bypass.count()) === 1 && (await bypass.locator('.agent-chooser__mode-name').innerText()) === 'Bypass',
+    'with exactly one rung marked dangerous, and it is the one that never asks'
+  )
+  const modeOpsBefore = layoutOps.length
+  await bypass.click()
+  await waitFor(() => layoutOps.length > modeOpsBefore, 10_000, 'the create-tab request')
+  const opened = layoutOps.at(-1).op
+  log(
+    opened.op === 'create-tab' && opened.profileId === 'claude' && opened.permissionMode === 'bypass',
+    `and picking a rung opens the tab in that mode rather than the profile's default (${opened.op}, ${opened.profileId}, ${opened.permissionMode})`
+  )
+  log(
+    (await page.locator('.agent-chooser__submenu').count()) === 0,
+    'and the chooser closes on the pick, so the ladder is not still hanging open behind the new tab'
+  )
+
   /* ------------------------------------------------------- screenshots */
 
   await page.screenshot({ path: join(shots, 'live-1440.png'), fullPage: false })
@@ -613,6 +857,279 @@ async function main() {
   await page.setViewportSize({ width: 1440, height: 900 })
   await sleep(400)
   log(true, 'screenshots taken at 1440px and 390px')
+
+  /* --------------------------- a push that says nothing, and costs nothing
+   *
+   * The desktop answers a `focus-pane` — which is every click into a terminal —
+   * with the project list, whether or not the list changed. The browser used to
+   * act on each one: a fresh picture object, so every pane in the app
+   * re-rendered, and a fresh snapshot, so the whole offline cache was parsed,
+   * serialised and written back to `localStorage` synchronously, on the same
+   * thread as the keystroke that caused it.
+   *
+   * The write is the observable half, counted by the patch every context above
+   * carries. A changed list goes first, because a check that only proved
+   * "nothing was written" would pass exactly as well if the push had never
+   * arrived at all.
+   */
+
+  const snapshotWrites = () => page.evaluate(() => window.__forgeSnapshotWrites ?? 0)
+  // The transcript flush writes on its own three-second timer whenever a pane
+  // has said something, and the resize above made this one say plenty. Wait for
+  // a full second with no write before measuring anything.
+  await waitFor(
+    async () => {
+      const settled = await snapshotWrites()
+      await sleep(1000)
+      return (await snapshotWrites()) === settled
+    },
+    30_000,
+    'the offline cache to go quiet'
+  )
+
+  const quiet = await snapshotWrites()
+  server.pushProjects([{ ...PROJECTS[0], name: 'forge-renamed' }])
+  await waitFor(async () => (await snapshotWrites()) > quiet, 15_000, 'the changed project list to be cached')
+  log(true, 'a project list that changed is drawn and written into the offline cache')
+
+  server.pushProjects(PROJECTS)
+  await waitFor(
+    async () => (await page.locator('.prow .prow__name').first().innerText()) === 'forge',
+    15_000,
+    'the rail to go back to the real name'
+  )
+  // Drain the transcript timer before measuring, rather than hoping it has
+  // already fired. Waiting for a quiet second is not the same thing: the flush
+  // runs on its own three-second interval, so output that stopped one second ago
+  // leaves a *pending* write that has not happened yet and is not visible as one
+  // — and if it lands inside the window below, this check fails having observed
+  // nothing about the projects push at all. `pagehide` is the flush the client
+  // already performs for a closed tab, so this drains the dirty set through a
+  // real code path rather than a test hook, and the interval that follows writes
+  // nothing because `flush` returns early on an empty set. Anything counted
+  // after this line was caused by the pushes below.
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
+  const writesBefore = await snapshotWrites()
+  server.pushProjects(PROJECTS)
+  server.pushProjects(PROJECTS)
+  await sleep(1500)
+  log(
+    (await snapshotWrites()) === writesBefore,
+    'and pushing that same list again rewrites nothing — which is what every click into a pane costs'
+  )
+
+  /* ======== PHASE 1d — a split and a tab flip that cost the other panes nothing
+   *
+   * Two complaints that turned out to be one shape: "the UI keeps glitching" and
+   * "I can't flip between tabs". Both were React unmounting `PaneView`, and a
+   * `PaneView` that unmounts disposes a live xterm, detaches from the session and
+   * buys a fresh catch-up buffer when it comes back — up to MAX_REPLAY_BYTES,
+   * down a tunnel, for a pane that did not move.
+   *
+   * Splitting did it because the layout was drawn by recursion: React reconciles
+   * by position and element *type*, and splitting a pane turns the `<PaneView>`
+   * at a position into a `<div className="split">`, which unmounts the whole
+   * subtree beside it. Switching tabs did it because only the active tab was
+   * mounted at all.
+   *
+   * The assertion is taken at the desktop, not on screen: `replayServed` records
+   * every session the server has handed a catch-up buffer to, and a buffer is
+   * served on exactly one event, an accepted `attach`. A pane that was never
+   * thrown away asks for nothing. Reading the screen instead would pass just as
+   * happily against a client that destroyed the pane and rebuilt it perfectly.
+   */
+
+  const second = manager.create({ id: SECOND_ID, cwd: ROOT, cols: 90, rows: 30 })
+  log(second.ok === true, 'spawned a second real pwsh session, so the split under test is two live terminals')
+  if (!second.ok) throw new Error(second.error)
+  await waitFor(() => (replay.get(SECOND_ID) ?? '').includes('> '), 40_000, "the second shell's first prompt")
+
+  const leafOf = (id) => ({ type: 'leaf', id, profileId: 'shell', title: '' })
+  const splitTab = {
+    id: 't1',
+    title: 'e2e',
+    root: { type: 'split', id: 's1', direction: 'row', ratio: 0.5, a: leafOf(SESSION_ID), b: leafOf(SECOND_ID) },
+    activePaneId: SECOND_ID
+  }
+  // Its pane never gets a shell, on purpose: this phase is about what happens to
+  // the *other* tab, and a second PTY spawn is forty seconds of somebody's life.
+  const asideTab = { id: 't2', title: 'aside', root: leafOf(THIRD_ID), activePaneId: THIRD_ID }
+  const servedFor = (id) => replayServed.filter((served) => served === id).length
+  /** Push a workspace the way the desk does — the snapshot moves with it. */
+  const pushWorkspace = (tabs, activeTabId) => {
+    WORKSPACES.p1 = { tabs, activeTabId }
+    server.pushWorkspace('p1', WORKSPACES.p1)
+  }
+
+  const beforeSplit = servedFor(SESSION_ID)
+  pushWorkspace([splitTab], 't1')
+  server.pushSessions()
+  await waitFor(
+    () => page.locator('.grid__tab[data-active="true"] .pane').count().then((n) => n === 2),
+    20_000,
+    'the split to be drawn'
+  )
+  log(
+    servedFor(SESSION_ID) === beforeSplit,
+    `splitting a pane left the one beside it alone — the desktop served it no second catch-up buffer (${beforeSplit}, before and after)`
+  )
+  log(
+    (await paneText(SESSION_ID)).includes(`forge-web-${nonce}`),
+    'and it still shows what was typed into it rather than a repainted blank'
+  )
+
+  /*
+   * The arithmetic flex used to do. Panes.tsx composes it into `calc()` down the
+   * tree now, and an expression that is out by a pixel per level is exactly the
+   * kind of thing that looks fine on one split and wrong on four — so it is
+   * measured rather than looked at.
+   */
+  const rect = (el) => {
+    const r = el.getBoundingClientRect()
+    return { left: r.left, right: r.right, width: r.width }
+  }
+  const wall = await page.locator('.grid__tab[data-active="true"] .panes').evaluate(rect)
+  const halves = await page.locator('.grid__tab[data-active="true"] .panes__slot').evaluateAll((slots) => {
+    const box = (el) => {
+      const r = el.getBoundingClientRect()
+      return { left: r.left, right: r.right, width: r.width }
+    }
+    return slots.map(box)
+  })
+  const near = (a, b) => Math.abs(a - b) < 0.5
+  log(
+    halves.length === 2 &&
+      near(halves[0].left, wall.left) &&
+      near(halves[1].right, wall.right) &&
+      near(halves[1].left - halves[0].right, 6) &&
+      near(halves[0].width, halves[1].width),
+    `and the two halves tile the box the way the nested flex version did — flush to both edges, equal, the desktop's 6px divider between them (${Math.round(halves[0]?.width ?? 0)}px + 6 + ${Math.round(halves[1]?.width ?? 0)}px in ${Math.round(wall.width)}px)`
+  )
+
+  /* --------------------------------------------------- and now the tabs */
+
+  pushWorkspace([splitTab, asideTab], 't1')
+  await waitFor(() => page.locator('.tab').count().then((n) => n === 2), 20_000, 'the second tab')
+
+  const beforeFlip = [servedFor(SESSION_ID), servedFor(SECOND_ID)]
+  await page.click('.tab:nth-of-type(2)')
+  log(
+    (await page.locator('.tab[data-pending="true"]').count()) === 1,
+    'clicking a tab says so at once rather than looking dead until the desk answers'
+  )
+  log(
+    (await page.locator('.tab[data-active="true"] .tab__title').innerText()) === 'e2e',
+    'and does not move the strip on its own — the desktop still owns which tab is active (decision 5)'
+  )
+  log(
+    layoutOps.at(-1).op.op === 'select-tab' && layoutOps.at(-1).op.tabId === 't2',
+    'while the request that would move it is on its way to the desktop'
+  )
+
+  // The desk agreeing, which is the only thing that switches a tab.
+  pushWorkspace([splitTab, asideTab], 't2')
+  await waitFor(
+    () => page.locator('.tab[data-active="true"] .tab__title').innerText().then((title) => title === 'aside'),
+    20_000,
+    'the switch to land'
+  )
+  log((await page.locator('.tab[data-pending="true"]').count()) === 0, 'and the asked-for mark clears when the push arrives')
+  log(
+    servedFor(SESSION_ID) === beforeFlip[0] && servedFor(SECOND_ID) === beforeFlip[1],
+    `flipping tabs re-replayed neither pane in the tab being left (${beforeFlip.join(' and ')} buffers, unchanged)`
+  )
+  log(
+    (await page.locator('.grid__tab[data-active="true"] .pane').count()) === 1 &&
+      (await page.locator('.pane').count()) === 3,
+    'because the tab that went away is hidden rather than destroyed — one pane on screen, three still mounted'
+  )
+
+  pushWorkspace([splitTab, asideTab], 't1')
+  await waitFor(
+    () => page.locator('.tab[data-active="true"] .tab__title').innerText().then((title) => title === 'e2e'),
+    20_000,
+    'the switch back'
+  )
+  log(
+    servedFor(SESSION_ID) === beforeFlip[0] && servedFor(SECOND_ID) === beforeFlip[1],
+    'and coming back cost nothing either, which is the half a lazily-mounted tab would still have got wrong'
+  )
+  log(
+    (await paneText(SESSION_ID)).includes(`forge-web-${nonce}`),
+    'with the terminal showing exactly what it was showing before both switches'
+  )
+
+  /* ------------------------------------- and closing, which is the same bug */
+
+  const beforeClose = servedFor(SESSION_ID)
+  pushWorkspace([{ ...splitTab, root: leafOf(SESSION_ID), activePaneId: SESSION_ID }], 't1')
+  await waitFor(() => page.locator('.pane').count().then((n) => n === 1), 20_000, 'the pane count after the close')
+  log(
+    servedFor(SESSION_ID) === beforeClose,
+    'closing the pane beside it — and the whole second tab with it — left this one untouched as well'
+  )
+  log(
+    (await paneText(SESSION_ID)).includes(`forge-web-${nonce}`),
+    'and it is the same terminal it has been since Phase 1, with the same transcript in it'
+  )
+
+  /* ============== PHASE 1e — the socket drops, and the workspace stays put
+   *
+   * `lib/client.ts` announces `connecting` at the top of every `open()` and on
+   * every scheduled retry, and `App` used to answer that by replacing the entire
+   * application with the full-page gate. That unmounted `Workspace`, which
+   * unmounted every `PaneView`, which disposed every xterm and detached every
+   * pane — so a socket that merely flinched took away the thing the person was
+   * reading and bought each pane a fresh catch-up buffer on the way back in.
+   *
+   * Dropped without a `shutdown` notice on purpose. A shutdown is the desktop
+   * saying in words that it is going away, which is a different screen and is
+   * Phase 4's; this is the network flinching, which is the case the gate was
+   * wrong about.
+   */
+
+  const droppedAt = [servedFor(SESSION_ID), servedFor(SECOND_ID)]
+  await server.stop()
+  await waitFor(
+    () => page.locator('[data-testid="reconnecting-banner"]').count().then((n) => n > 0),
+    30_000,
+    'the reconnecting strip'
+  )
+  log(
+    (await page.locator('.gate__card').count()) === 0 && (await page.locator('.pane').count()) === 1,
+    'a socket that dropped badges the workspace rather than replacing it with a spinner — the pane is still on screen'
+  )
+  log(
+    (await screenText()).includes(`forge-web-${nonce}`),
+    'still showing the transcript it was showing, because the terminal was never disposed'
+  )
+  log(
+    (await page.locator('.pane__perm[data-reconnecting="true"]').count()) === 1 &&
+      (await page.locator('.pane__terminal .xterm-helper-textarea').evaluate((el) => el.readOnly)) === true,
+    'and it says so rather than pretending — the pane is badged and its keyboard is shut'
+  )
+
+  server = makeServer(makeAuth(approved))
+  active = server
+  await server.start({ host: '127.0.0.1', port: livePort })
+  await waitFor(
+    () => page.locator('.linkbadge[data-state="live"]').count().then((n) => n === 1),
+    40_000,
+    'the link to come back'
+  )
+  log(
+    (await page.locator('[data-testid="reconnecting-banner"]').count()) === 0,
+    'and the badge comes off on its own when the link is back, with no reload anywhere'
+  )
+  await waitFor(async () => (await screenText()).includes(`forge-web-${nonce}`), 30_000, 'the repaint')
+  log(
+    servedFor(SESSION_ID) === droppedAt[0] + 1 && servedFor(SECOND_ID) === droppedAt[1],
+    'and the hello-ok re-attach loop re-armed exactly the pane still on screen — one catch-up buffer, and none for the pane that was closed before the drop'
+  )
+  log(
+    (await page.locator('.notice').count()) === 0,
+    'raising no "that pane is gone" on the way, which is what that loop used to be good for'
+  )
 
   /* ================================== PHASE 1b — coming back, and typing nothing
    *
@@ -669,80 +1186,104 @@ async function main() {
     'with a live link rather than a cached picture — it reconnected on its own'
   )
 
-  /* ===================================== PHASE 1c — the second factor, on screen
+  /* ======================================= PHASE 1c — the unlock PIN, on screen
    *
-   * A desktop with 2FA enrolled, driven with the codes the real arithmetic
-   * mints. The claim `scripts/web-auth-check.mjs` cannot make is this one: that
-   * a person in a browser is asked, can answer, and gets in.
+   * A desktop with a PIN set, answered from a browser. The claim
+   * `scripts/web-auth-check.mjs` cannot make is this one: that a person in a
+   * browser is asked, can answer, and gets in — and that the same person is
+   * asked again on the next connection, because shared/web.ts says there is no
+   * "remember this browser" and there must not be one.
+   *
+   * The PIN is seeded through the shipped `hashPin`, so what stands on this
+   * desktop is the exact `scrypt$1$…` string the settings panel would have
+   * written and what judges the browser is the real `verifyPin`. A comparison
+   * written into this file would agree with itself forever.
    */
 
-  const TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
-  let totpState = { secret: TOTP_SECRET, recovery: [hashRecoveryCode('abcd-efgh')], lastCounter: 0 }
-  const totpPort = await startPhase(approved, {
-    totp: () => totpState,
-    saveTotp: (next) => {
-      totpState = next
+  const PIN = '483920'
+  const PIN_HASH = hashPin(PIN)
+  /**
+   * How many connections have reached the PIN gate, counted at the desktop.
+   *
+   * `pinHash` is read once per `hello` that gets as far as `checkPin` — see
+   * `authenticate` in electron/web/auth.ts — so this counts *dials that were
+   * judged*, which is the observation a screen cannot give: whether the browser
+   * asked once and waited, or kept knocking.
+   */
+  let pinChecks = 0
+  const pinHost = {
+    pinHash: () => {
+      pinChecks++
+      return PIN_HASH
     }
-  })
-  setConfig({ devHost: `127.0.0.1:${totpPort}` })
-  await signInFresh()
-  await waitFor(async () => (await gateReason()) === 'totp', 30_000, 'the code prompt')
-  log(true, 'a desktop with a second factor enrolled asks the browser for a code rather than refusing it')
+  }
 
-  await page.screenshot({ path: join(shots, 'totp-1440.png') })
+  const pinPort = await startPhase(approved, pinHost)
+  setConfig({ devHost: `127.0.0.1:${pinPort}` })
+  await signInFresh()
+  await waitFor(async () => (await gateReason()) === 'pin', 30_000, 'the PIN prompt')
+  log(true, 'a desktop with an unlock PIN asks the browser for it rather than refusing the connection')
+  log(
+    (await page.locator('[data-testid="pin-input"]').count()) === 1 && pinChecks === 1,
+    'and the ask is a box on a gate card, reached by a first hello that deliberately carried no PIN'
+  )
+  log(
+    (await page.locator('.gate__card[data-reason="pin"] button[type="submit"]').isDisabled()) === true,
+    `with nothing to send until there are ${PIN_MIN_DIGITS} digits in it, which is the shortest PIN this desktop would accept`
+  )
+
+  await page.screenshot({ path: join(shots, 'pin-1440.png') })
   await page.setViewportSize({ width: 390, height: 844 })
   await sleep(400)
-  await page.screenshot({ path: join(shots, 'totp-390.png') })
+  await page.screenshot({ path: join(shots, 'pin-390.png') })
   await page.setViewportSize({ width: 1440, height: 900 })
   await sleep(300)
 
-  await page.fill('[data-testid="totp-input"]', '000000')
-  await page.click('.gate__card[data-reason="totp"] button[type="submit"]')
-  await waitFor(async () => (await page.locator('.gate__error').count()) > 0, 20_000, 'the refusal for a wrong code')
-  log((await gateReason()) === 'totp', 'a wrong code is answered on the same screen rather than by a dead end')
-
-  await page.fill('[data-testid="totp-input"]', totpCode(TOTP_SECRET, Math.floor(Date.now() / TOTP_STEP_MS)))
-  await page.click('.gate__card[data-reason="totp"] button[type="submit"]')
-  await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace after the code')
-  log(true, 'and the code the app is showing gets the browser in')
+  const asked = await page.locator('.gate__card[data-reason="pin"] .gate__body').innerText()
+  await page.fill('[data-testid="pin-input"]', '000000')
+  await page.click('.gate__card[data-reason="pin"] button[type="submit"]')
+  await waitFor(async () => (await page.locator('.gate__error').count()) > 0, 20_000, 'the refusal for a wrong PIN')
+  log((await gateReason()) === 'pin', 'a wrong PIN is answered on the same screen rather than by a dead end')
+  const refusedPin = await page.locator('.gate__error').innerText()
   log(
-    totpState.lastCounter > 0,
-    'with the counter it used written back, so those same six digits will not work a second time'
+    refusedPin !== asked && pinChecks === 2,
+    `carrying the desktop's own sentence about the PIN that did not work rather than the one that asked for it ("${refusedPin}")`
   )
 
-  /* ============================================ PHASE 2 — pending, with words */
+  await page.fill('[data-testid="pin-input"]', PIN)
+  await page.click('.gate__card[data-reason="pin"] button[type="submit"]')
+  await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace after the PIN')
+  log(true, 'and the PIN set on that desktop gets the browser in')
+  log(pinChecks === 3, `each answer costing exactly one dial (${pinChecks} connections judged, and no others)`)
 
-  // No approved devices, the desk armed, and a prompt nobody answers — which is
-  // exactly the screen somebody stands in front of comparing two word pairs.
-  const prompts = []
-  const pendingPort = await startPhase([], {
-    // The hardening toggle, which is what the word-pair prompt now *is*: with it
-    // off — the shipped default, exercised by phase 1 above — this browser
-    // would simply have been admitted and recorded.
-    requireApproval: () => true,
-    acceptUntil: () => Date.now() + 600_000,
-    requestApproval: (ask) => {
-      prompts.push(ask)
-      return new Promise(() => {})
-    },
-    cancelApproval: () => {}
-  })
-  setConfig({ devHost: `127.0.0.1:${pendingPort}` })
-  await signInFresh()
-  await waitFor(async () => (await gateReason()) === 'pending', 30_000, 'the pending screen')
+  /* ------------------- and asked again next time, because it is not a device key */
 
-  const words = await page.locator('[data-testid="approval-words"]').innerText()
-  log(/^[A-Z]+ [A-Z]+$/.test(words), `the pending screen shows the word pair in large type ("${words}")`)
+  const typedBeforePin = credentialsTyped
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await waitFor(async () => (await gateReason()) === 'pin', 30_000, 'the PIN prompt on the next connection')
   log(
-    prompts.length === 1 && prompts[0].words === words,
-    'and it is the pair the desktop minted, which is the whole anti-confusion device'
+    true,
+    'the next connection is asked for it again — there is no "trust this browser", so answering once does not buy tomorrow'
   )
-  const wordSize = await page.locator('[data-testid="approval-words"]').evaluate((el) => getComputedStyle(el).fontSize)
   log(
-    Number.parseFloat(wordSize) >= 20,
-    `"large type" is literal rather than aspirational — the pair renders at ${wordSize}`
+    credentialsTyped === typedBeforePin && (await page.locator('input[type="email"]').count()) === 0,
+    'and it is the PIN alone being asked for: the account is still signed in, and no password was typed'
   )
-  await page.screenshot({ path: join(shots, 'pending-1440.png') })
+  await page.fill('[data-testid="pin-input"]', PIN)
+  await page.click('.gate__card[data-reason="pin"] button[type="submit"]')
+  await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace after the second PIN')
+
+  const stashed = await page.evaluate((pin) => {
+    for (let at = 0; at < localStorage.length; at++) {
+      const key = localStorage.key(at) ?? ''
+      if ((localStorage.getItem(key) ?? '').includes(pin)) return key || '(a blank key)'
+    }
+    return ''
+  }, PIN)
+  log(
+    stashed === '',
+    `and nothing on this page wrote the PIN down${stashed ? ` — "${stashed}" is holding it` : ', so a page only ever holds one it was just asked for'}`
+  )
 
   /* ================================ PHASE 3 — two refusals, two sentences */
 
@@ -790,6 +1331,47 @@ async function main() {
     'and a different recovery: sign in as somebody else, against forget this browser and ask again'
   )
 
+  /* ============== PHASE 3b — the refusal that is retried, and read anyway
+   *
+   * `busy` is the one refusal this client is *supposed* to come back from on its
+   * own, and that is exactly why it used to be the one nobody could read:
+   * `scheduleRetry` announced `connecting` the instant it was called, in the
+   * same React batch as the refusal that called it, so the screen carrying the
+   * desktop's own sentence and the "worth trying again" line never rendered at
+   * all. What was on screen instead was a rising attempt count against a desktop
+   * that had just said, in words, what was wrong with it.
+   *
+   * A desktop with no uid configured is the reachable way to be told this: see
+   * `checkToken` in electron/web/auth.ts, which answers a desktop that is up but
+   * not set up with `busy` and a minute's back-off rather than with `bad-token`,
+   * because no amount of re-authenticating would fix it.
+   */
+
+  const busyPort = await startPhase(approved, { uid: () => '' })
+  setConfig({ devHost: `127.0.0.1:${busyPort}` })
+  await signInFresh()
+  await waitFor(async () => (await gateReason()) === 'busy', 30_000, 'the busy screen')
+  const busyCard = await page.locator('.gate__card').innerText()
+  log(true, 'a desktop that is up but not set up refuses with busy, and that refusal is drawn rather than skipped past')
+  log(
+    busyCard.includes('This desktop is not set up for Forge Web yet.'),
+    "carrying the desktop's own sentence about what is wrong with it, verbatim"
+  )
+  log(
+    /trying again in about \d+s/i.test(busyCard),
+    'and the line that says when coming back is worth it, which is the only thing a back-off is good for'
+  )
+  await page.screenshot({ path: join(shots, 'refused-busy-1440.png') })
+
+  // The refusal is the screen for the whole of the back-off rather than for one
+  // frame of it. A second and a half is far longer than the batch that used to
+  // overwrite it, and far shorter than the minute the desktop asked for.
+  await sleep(1500)
+  log(
+    (await gateReason()) === 'busy',
+    'and it is still there a second and a half later, rather than replaced by the retry that is waiting on it'
+  )
+
   /* ====================================== PHASE 4 — the desktop is asleep */
 
   if (server) await server.stop()
@@ -817,6 +1399,21 @@ async function main() {
     (await page.locator('.pane .pane__title').innerText()) === 'Shell',
     'and it still wears its own agent, because the cache keeps the profiles rather than letting resolveProfile fall back to a built-in'
   )
+  // Waited for rather than read once, which is the same correction the commit
+  // "The offline check waits for the editor to be filled, not to exist" already
+  // made one phase earlier. The frozen pane is a *fresh* xterm mounted against
+  // the cached transcript, so between the badge appearing — which the assertions
+  // above have just proved — and the first row being painted there is a tick
+  // this read was landing inside, on roughly two runs in three under load. It
+  // failed while the screenshot taken moments later showed the text present,
+  // which is a check calling the product broken because the check was early.
+  // The wait is bounded, and a genuine regression still arrives as a FAIL
+  // carrying what was on screen rather than as a thrown timeout.
+  await waitFor(
+    async () => (await screenText()).includes(`forge-web-${nonce}`),
+    15_000,
+    'the frozen terminal to paint the cached transcript'
+  ).catch(() => {})
   const frozenText = await screenText()
   log(
     frozenText.includes(`forge-web-${nonce}`),
@@ -826,6 +1423,501 @@ async function main() {
   await page.setViewportSize({ width: 390, height: 844 })
   await sleep(600)
   await page.screenshot({ path: join(shots, 'offline-390.png') })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await sleep(300)
+
+  /* ================================ PHASE 5 — the desktop moved, mid-loop
+   *
+   * A cloudflared quick tunnel comes back on a **new hostname every time it
+   * starts**, and the desktop republishes the record within seconds. So the
+   * address a browser was handed can be retired under it while the machine it
+   * names is up and two seconds away — and a reconnect loop that re-dials the
+   * string it was constructed with then dials a hostname that no longer exists,
+   * forever, against a desktop that would answer. On screen that is
+   * "Reconnecting to the desktop (attempt 41)…", which is exactly what a PC that
+   * is switched off looks like.
+   *
+   * Neither address here answers, and neither needs to: the assertion is *which
+   * one the browser dials*. Both are under `.invalid`, which RFC 6761 reserves
+   * precisely so that it resolves nowhere — the dial fails without a packet
+   * leaving the machine, and this phase therefore needs no tunnel, no
+   * certificate and no public hostname, none of which belong in a check (see the
+   * header). What it does exercise for real is the whole production route: the
+   * rendezvous record read out of the database, `webSocketUrl` composing the
+   * address from it, and — on the retry, and only on the retry — that read
+   * happening *again* rather than the loop trusting the address it already has.
+   */
+
+  const OLD_HOST = 'forge-e2e-old.invalid'
+  const NEW_HOST = 'forge-e2e-new.invalid'
+  const publish = (host) => {
+    hostRecord = { host, proto: WEB_PROTO, app: '0.0.0-e2e', name: 'E2E-PC', at: Date.now() }
+  }
+
+  publish(OLD_HOST)
+  setConfig({})
+  await signInFresh()
+  await waitFor(() => dialled.some((url) => url.includes(OLD_HOST)), 30_000, 'the first dial')
+  log(true, `a live record is dialled at the address it publishes (wss://${OLD_HOST}/web)`)
+  const readsAtFirstDial = rtdbReads.length
+
+  // The tunnel restarted and came back somewhere else, which is the only thing
+  // that happens here — the desktop is no more reachable than it was a moment
+  // ago, and no less.
+  publish(NEW_HOST)
+  await waitFor(() => dialled.some((url) => url.includes(NEW_HOST)), 60_000, 'the dial at the new address')
+  log(true, `a reconnect dials where the desktop is now, not where it was (wss://${NEW_HOST}/web)`)
+  log(
+    rtdbReads.length > readsAtFirstDial,
+    'which it can only have learnt by reading the rendezvous record again on the retry, rather than re-dialling the string it was handed'
+  )
+  log(
+    (dialled.at(-1) ?? '').includes(NEW_HOST),
+    'and it stays on the new address afterwards rather than alternating between the two'
+  )
+
+  /* ------------------------ and a record that turns out not to be true
+   *
+   * Neither address here answers, which is the fourth way this link used to loop
+   * forever and the only one with no way back. A record is a *claim* about a
+   * desktop, and `isHostLive` keeps believing it for HOST_STALE_MS — three
+   * minutes — so a machine that slept without saying so leaves the browser
+   * dialling nothing. That much is by design. What was not is where it left the
+   * page: `Connecting` has no button on it, and the poll that would read the
+   * record again runs only while the stage is `offline`, so the tab sat on a
+   * rising attempt count until somebody reloaded it. A bounded number of failed
+   * dials now hands the page back to the frozen picture, which has both.
+   *
+   * The wait is the client's own back-off rather than anything this file
+   * invented, so the ceiling below is generous on purpose: what is being
+   * asserted is that the page arrives, not how fast.
+   */
+  await waitFor(
+    () => page.locator('[data-testid="offline-banner"]').count().then((n) => n > 0),
+    90_000,
+    'the page to stop waiting on a record nothing is answering'
+  )
+  log(
+    (await page.locator('.app').count()) === 1 && (await page.locator('.gate__card').count()) === 0,
+    'a live record that nothing answers drops the page back to the frozen picture, where the poll runs and there is something to press, rather than stranding it on a Connecting screen forever'
+  )
+
+  /* ============ PHASE 5c — adding a project, from three hundred miles away
+   *
+   * The desktop's own Add project opens `dialog.showOpenDialog`, which draws a
+   * window on the desktop's screen — the one screen the person adding the
+   * project is definitively not sitting at. So Forge Web browses that machine's
+   * folders in the page instead, and this is the whole route in one gesture: a
+   * click on the rail's +, an `fs-list` per screen answered by the shipped
+   * `listFolder`, a `project-add` on the folder somebody chose, and a rail that
+   * redraws because the desktop pushed a new list rather than because the
+   * browser assumed one.
+   *
+   * The tree below is real and made here, so the names on screen can be
+   * asserted exactly: a folder that is a repository, a folder that is not, and
+   * a file, which is drawn — a folder full of source that rendered as empty
+   * would be the moment somebody loses their bearings — but cannot be picked.
+   */
+
+  const browseRoot = join(scratch, 'browse')
+  mkdirSync(join(browseRoot, 'alpha', '.git'), { recursive: true })
+  mkdirSync(join(browseRoot, 'beta'), { recursive: true })
+  writeFileSync(join(browseRoot, 'notes.txt'), 'not a folder')
+
+  /*
+   * A second project, pointing at the scratch folder, so the picker opens
+   * somewhere this file controls the contents of. It is added before the phase
+   * starts rather than pushed afterwards, so it arrives in `hello-ok` like any
+   * other project this desktop already had.
+   */
+  PROJECTS.push({ id: 'p2', name: 'scratch', path: scratch, color: '#4AA3FF', defaultProfileId: 'shell', createdAt: 0 })
+
+  const pickPort = await startPhase(approved)
+  setConfig({ devHost: `127.0.0.1:${pickPort}` })
+  await signInFresh()
+  await waitFor(() => page.locator('.rail').count().then((n) => n > 0), 30_000, 'the rail')
+
+  const pickerList = page.locator('[data-testid="folder-picker-list"] .picker__row')
+  const pickerRow = (name) => pickerList.filter({ hasText: name }).first()
+  const pickerHere = () => page.locator('.picker__here').innerText()
+
+  await page.locator('.prow').filter({ hasText: 'scratch' }).first().click()
+  await page.click('[data-testid="add-project"]')
+  await waitFor(() => page.locator('[data-testid="folder-picker"]').count().then((n) => n > 0), 15_000, 'the picker')
+  log(true, 'the rail has a + that opens a folder browser onto the desktop, which it could not have before')
+
+  await waitFor(async () => (await pickerHere()) === scratch, 15_000, 'the first listing')
+  log(
+    true,
+    `it opens inside the project this browser is looking at (${basename(scratch)}) rather than at the top of a disk nobody wants to walk down`
+  )
+
+  await pickerRow('browse').click()
+  await waitFor(async () => (await pickerHere()) === browseRoot, 15_000, 'the walk into browse')
+  log(true, 'and clicking a folder walks into it, one request per screen')
+
+  const alphaRow = pickerRow('alpha')
+  log((await alphaRow.locator('.picker__repo').count()) === 1, 'a folder with a .git in it is badged, so a project stands out from the folders around it')
+  log((await pickerRow('beta').locator('.picker__repo').count()) === 0, 'and one without is not')
+  log(
+    (await pickerRow('notes.txt').evaluate((el) => el.tagName)) === 'DIV',
+    'a file is drawn — a folder of source that looked empty would lose somebody entirely — but is not something that can be pressed'
+  )
+  log(
+    (await page.locator('.picker__crumb').allInnerTexts()).includes('browse'),
+    'the breadcrumb names every folder above this one, each carrying the path the desktop gave for it'
+  )
+
+  await page.screenshot({ path: join(shots, 'folder-picker.png') })
+
+  await alphaRow.click()
+  await waitFor(async () => (await pickerHere()) === join(browseRoot, 'alpha'), 15_000, 'the walk into alpha')
+  await page.click('.picker__use')
+  await waitFor(() => Promise.resolve(projectAdds.length > 0), 15_000, 'the desktop to be asked')
+  log(
+    projectAdds.at(-1) === join(browseRoot, 'alpha'),
+    `the folder the browser chose is the folder the desktop was asked for (${projectAdds.at(-1)})`
+  )
+  await waitFor(
+    () => page.locator('.prow').filter({ hasText: 'alpha' }).count().then((n) => n > 0),
+    15_000,
+    'the new project in the rail'
+  )
+  log(
+    true,
+    'and it appears in the rail because the desktop pushed a new project list — the browser adds nothing to its own picture, exactly as it adds no tab of its own'
+  )
+  log((await page.locator('[data-testid="folder-picker"]').count()) === 0, 'the picker closes behind it rather than sitting there over the answer')
+
+  /*
+   * And the fold, which is the case this whole feature is for: below 640px
+   * `useNarrow` collapses the rail by the *window*, so there is no toggle to
+   * press and a header hidden at that width would take Add project away from
+   * the one screen most likely to be nowhere near the desk.
+   */
+  await page.setViewportSize({ width: 390, height: 844 })
+  await sleep(400)
+  log(
+    (await page.locator('[data-testid="add-project"]').count()) === 1,
+    'and the + is still there at phone width, where the rail is collapsed by the window rather than by a click'
+  )
+  await page.screenshot({ path: join(shots, 'add-project-390.png') })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await sleep(300)
+
+  /* ============ PHASE 5d — the desktop's screen, watched and then driven
+   *
+   * The one feature on this link that does not end inside Forge. Everything
+   * else here is a pane, a tab or a folder; this is a display, and in its second
+   * mode a mouse and a keyboard on somebody's actual machine — so it is the
+   * phase most worth driving end to end rather than reasoning about.
+   *
+   * Both ends are the shipped code and neither is a stand-in. The picture is
+   * produced by src/lib/web-mirror.ts, bundled and run inside this same Chrome
+   * against a canvas standing in for the display, and handed to the real
+   * `WebServer` exactly as electron/web-host.ts hands it over on IPC. The
+   * browser half is the real `Mirror` component, the real `startScreen` decoder
+   * and the real `fractionFor` arithmetic. What is asserted is what neither half
+   * can prove alone: that a chunk this encoder produced decodes and *paints* at
+   * the other end, and that a click at a known place on that picture arrives at
+   * the desktop as the fraction of the screen it was actually over.
+   *
+   * The mode is the other half of the phase, and it is a safety device rather
+   * than a feature. Watching sends nothing at all — not "sends nothing because a
+   * flag says so", but because no keyboard listener exists — and driving is
+   * entered by a click and left by Escape *twice*, never once, because Escape is
+   * one of the fifteen keys this link can send and is the one somebody driving a
+   * remote desktop needs most.
+   */
+
+  /**
+   * The PIN this desktop demands before it will show its screen.
+   *
+   * Compared as a plain string by the hook above rather than through `verifyPin`,
+   * and deliberately: the hashing is already driven end to end in phase 1c, and
+   * what is being asserted here is the round trip — the browser is refused,
+   * draws a box, and the PIN it was asked for reaches `mirrorStart` on the
+   * *second* frame rather than being replayed from the one that opened the
+   * connection an hour ago.
+   */
+  mirrorPin = '424242'
+  screenControl = true
+  mirrorStarts.length = 0
+  mirrorInputs.length = 0
+
+  const screenPort = await startPhase(approved)
+  setConfig({ devHost: `127.0.0.1:${screenPort}` })
+  await signInFresh()
+  await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace')
+
+  await page.click('button[aria-label^="Watch this desktop"]')
+  await waitFor(() => Promise.resolve(mirrorStarts.length > 0), 15_000, 'the browser to ask for the screen')
+  log(mirrorStarts[0] === '', 'the first ask for the screen carries no PIN, so a page only ever holds one it was just asked for')
+
+  await waitFor(() => page.locator('.mirror__card input').count().then((n) => n > 0), 15_000, 'the PIN box')
+  log(true, 'and a desktop that wants its PIN before it shares a screen gets a box rather than an apology')
+
+  await page.fill('.mirror__card input', mirrorPin)
+  await page.click('.mirror__card button[type="submit"]')
+  await waitFor(() => Promise.resolve(mirrorStarts.length > 1), 15_000, 'the second ask')
+  log(mirrorStarts[1] === mirrorPin, 'the PIN typed into that box is what reaches the desktop, on a second ask')
+  await waitFor(() => Promise.resolve(mirroring), 15_000, 'the desktop to record a viewer')
+  log(mirroring === true, 'and the desktop now believes it is being watched')
+
+  /* --- the encoder, running in this browser and speaking to the real server */
+
+  /** Every config and chunk that left the shipped encoder, as the server saw it. */
+  const mirrorConfigs = []
+  const mirrorChunks = []
+  const mirrorEndings = []
+  await page.exposeFunction('forgeMirrorReady', (config) => {
+    mirrorConfigs.push(config)
+    active?.pushMirrorReady(config)
+  })
+  await page.exposeFunction('forgeMirrorChunk', (chunk) => {
+    // The same arithmetic the server uses to judge a chunk against its ceiling —
+    // three bytes per four characters of base64 — so what is asserted below is
+    // the number that would have ended the watch.
+    mirrorChunks.push({ key: chunk.key === true, bytes: Math.floor((chunk.data.length * 3) / 4) })
+    active?.pushMirrorFrame(chunk)
+  })
+  await page.exposeFunction('forgeMirrorStopped', (reason) => {
+    mirrorEndings.push(reason)
+    active?.pushMirrorStop(reason)
+  })
+  await page.addScriptTag({ content: encoderBundle })
+
+  /*
+   * The display, and the *second* thing this file stubs. A canvas being redrawn
+   * thirty times a second is handed back from `getUserMedia`, so `captureScreen`
+   * in src/lib/mirror.ts runs its real constraints against a real stream and the
+   * encoder above it never learns the difference. Bright, and moving, because
+   * both halves of the assertion need it: a still frame proves nothing about a
+   * codec, and a dark one proves nothing about a canvas.
+   *
+   * Deliberately *noisy* over most of its area, too. A flat picture compresses
+   * to a few hundred bytes a frame, which would make the ceiling assertion below
+   * true by accident; a field of random blocks is the nearest a canvas gets to
+   * the worst case a real desktop presents an encoder — every pixel changing at
+   * once — and pushes a keyframe into the kilobytes where the number means
+   * something. The bottom quarter is left flat because that is the strip the
+   * decoded-pixel assertion reads.
+   */
+  const encoderError = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 640
+    canvas.height = 400
+    const ctx = canvas.getContext('2d')
+    const draw = () => {
+      for (let y = 0; y < 300; y += 8) {
+        for (let x = 0; x < canvas.width; x += 8) {
+          ctx.fillStyle = `rgb(${(Math.random() * 256) | 0},${(Math.random() * 256) | 0},${(Math.random() * 256) | 0})`
+          ctx.fillRect(x, y, 8, 8)
+        }
+      }
+      ctx.fillStyle = '#00e0a0'
+      ctx.fillRect(0, 300, canvas.width, 100)
+    }
+    draw()
+    const stream = canvas.captureStream(30)
+    window.__forgeDrawing = window.setInterval(draw, 33)
+    navigator.mediaDevices.getUserMedia = async () => stream
+    window.forge = { mobile: { mirrorSource: async () => 'screen:0:0' } }
+    return await window.ForgeWebMirror.startWebMirror(false, {
+      ready: (config) => window.forgeMirrorReady(config),
+      chunk: (chunk) => window.forgeMirrorChunk(chunk),
+      closed: (reason) => window.forgeMirrorStopped(reason)
+    })
+  })
+  log(encoderError === null, `the desktop's encoder started${encoderError ? `: ${encoderError}` : ''}`)
+
+  await waitFor(() => Promise.resolve(mirrorConfigs.length > 0), 20_000, 'the encoder to describe its stream')
+  const shape = mirrorConfigs[0]
+  log(mirrorConfigs.length === 1, 'a decoder is described exactly once per watch, before any chunk')
+  log(
+    typeof shape.codec === 'string' && shape.codec.length > 0 && shape.width === 640 && shape.height === 400,
+    `and it names what it actually encoded (${shape.codec}, ${shape.width}x${shape.height})`
+  )
+
+  await waitFor(() => Promise.resolve(mirrorChunks.length >= 8), 20_000, 'a run of encoded chunks')
+  log(mirrorChunks[0].key === true, 'the first chunk of a watch is a keyframe, so a viewer has something it can start from')
+  const biggest = Math.max(...mirrorChunks.map((c) => c.bytes))
+  log(
+    biggest < MAX_MIRROR_CHUNK_BYTES,
+    `and the largest chunk (${biggest} bytes) is inside the ${MAX_MIRROR_CHUNK_BYTES}-byte ceiling the server would end the watch over`
+  )
+  log(mirrorEndings.length === 0, 'and nothing on the desktop side has ended the watch')
+
+  /*
+   * The assertion the whole feature exists for: those bytes are pixels now.
+   *
+   * Read off the canvas the client is painting into, near the bottom where the
+   * moving square never reaches, and judged loosely — a codec at 4:2:0 shifts a
+   * colour by a few units and a limited-range one shifts it further. What is
+   * being proved is that this is the picture the desktop sent rather than an
+   * empty canvas, and the green screen is unmistakable at any tolerance.
+   */
+  await waitFor(
+    () =>
+      page.evaluate(() => {
+        const canvas = document.querySelector('.mirror__picture')
+        return Boolean(canvas && canvas.width > 1)
+      }),
+    20_000,
+    'a decoded frame on the canvas'
+  )
+  const painted = await page.evaluate(() => {
+    const canvas = document.querySelector('.mirror__picture')
+    const pixel = canvas.getContext('2d').getImageData(Math.floor(canvas.width / 2), canvas.height - 12, 1, 1).data
+    return { width: canvas.width, height: canvas.height, r: pixel[0], g: pixel[1], b: pixel[2] }
+  })
+  log(painted.width === 640 && painted.height === 400, `the browser is painting the desktop's own frames (${painted.width}x${painted.height})`)
+  log(
+    painted.g > 120 && painted.r < 110,
+    `and what decoded is the picture that was sent, not a blank canvas (rgb ${painted.r},${painted.g},${painted.b})`
+  )
+  await page.screenshot({ path: join(shots, 'mirror-1440.png') })
+
+  log(
+    (await page.locator('.mirror__limits').innerText()).includes('Ctrl+C'),
+    'the toolbar says out loud that Ctrl+C, Ctrl+V, Alt+Tab and the F-keys cannot be sent at all'
+  )
+
+  /* ----------------------------------------- watching sends nothing at all */
+
+  const picture = await page.locator('.mirror__picture').boundingBox()
+  const at = (fx, fy) => [picture.x + picture.width * fx, picture.y + picture.height * fy]
+  await page.mouse.move(...at(0.6, 0.4))
+  await sleep(200)
+  log(mirrorInputs.length === 0, 'a pointer moving over the picture in watching mode sends nothing to that desk')
+  log(
+    (await page.getAttribute('.mirror__mode', 'data-driving')) === 'false',
+    'and the toolbar says so rather than leaving anybody to guess which mode they are in'
+  )
+
+  /* ------------------------------------------------- driving, and leaving */
+
+  await page.mouse.down()
+  await page.mouse.up()
+  await waitFor(
+    () => page.getAttribute('.mirror__mode', 'data-driving').then((v) => v === 'true'),
+    10_000,
+    'driving mode'
+  )
+  log(mirrorInputs.length === 0, 'the click that takes the mouse is not also sent, so reaching for control costs no press on that desk')
+
+  await page.mouse.move(...at(0.25, 0.75))
+  await sleep(200)
+  const moved = mirrorInputs.filter((i) => i.a === 'move').pop()
+  log(
+    moved !== undefined && Math.abs(moved.x - 0.25) < 0.01 && Math.abs(moved.y - 0.75) < 0.01,
+    `a pointer a quarter across and three quarters down arrives as that fraction of the screen (${moved?.x?.toFixed(3)}, ${moved?.y?.toFixed(3)})`
+  )
+
+  const beforeClick = mirrorInputs.length
+  await page.mouse.down()
+  await page.mouse.up()
+  await sleep(150)
+  const pressed = mirrorInputs.slice(beforeClick)
+  log(
+    pressed.some((i) => i.a === 'down' && i.button === 'left') && pressed.some((i) => i.a === 'up' && i.button === 'left'),
+    'and a click once driving is a press and a release, each carrying its own position'
+  )
+
+  await page.keyboard.press('Escape')
+  await sleep(150)
+  log(
+    mirrorInputs.some((i) => i.a === 'key' && i.key === 'escape' && i.down === true) &&
+      mirrorInputs.some((i) => i.a === 'key' && i.key === 'escape' && i.down === false),
+    'one Escape is a real Escape on that desk — pressed and released — because dismissing a dialog is what somebody opened this to do'
+  )
+  log(
+    (await page.getAttribute('.mirror__mode', 'data-driving')) === 'true',
+    'and it does not hand the browser back, which is the whole reason leaving takes two'
+  )
+
+  // Comfortably past DOUBLE_ESC_MS, so the pair below is unambiguously a pair
+  // rather than the tail of the press above.
+  await sleep(700)
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await waitFor(
+    () => page.getAttribute('.mirror__mode', 'data-driving').then((v) => v === 'false'),
+    10_000,
+    'driving mode to end'
+  )
+  log(true, 'Escape twice inside half a second gives the browser back')
+  const afterLeaving = mirrorInputs.length
+  await page.mouse.move(...at(0.4, 0.4))
+  await sleep(200)
+  log(mirrorInputs.length === afterLeaving, 'and nothing is sent afterwards, because the listeners are gone rather than gated')
+
+  /* --------------------------------------------- closing takes the screen back */
+
+  await page.evaluate(() => {
+    window.clearInterval(window.__forgeDrawing)
+    window.ForgeWebMirror.stopWebMirror()
+  })
+  await page.click('button[aria-label="Stop watching this screen"]')
+  await waitFor(() => Promise.resolve(!mirroring), 10_000, 'the desktop to stop capturing')
+  log(mirroring === false, "closing the viewer tells the desktop to stop, rather than leaving it encoding for a tab nobody is looking at")
+  log((await page.locator('.mirror').count()) === 0, 'and the workspace is back')
+
+  mirrorPin = ''
+
+  /* ==================== PHASE 6 — held at the PIN box, past the heartbeat
+   *
+   * The one screen where this client waits on a person: a box, and however long
+   * it takes somebody to remember the PIN their desktop is set to. Nothing
+   * behind the page may disturb that wait.
+   *
+   * This phase used to assert something else, and the change is worth writing
+   * down rather than quietly making. A browser used to sit *unauthenticated on
+   * an open socket* for the whole of an approval window, and a client that
+   * started its own ping at `onopen` hung up on that socket one HEARTBEAT_MS in
+   * — a sixth of the way through — so approval could essentially never be
+   * completed by a human. There is no such socket now: `pin-required` is a
+   * `refused` frame, and `refuse` in electron/web/server.ts says it once and
+   * then drops the connection, so this page draws its box with nothing open at
+   * all and `submitPin` dials afresh.
+   *
+   * What survives is the property underneath both: a page waiting on a human
+   * holds still. The window is the shipped HEARTBEAT_MS plus HEARTBEAT_GRACE_MS
+   * — the span in which a socket nobody was minding would have been swept away —
+   * and it is sat through for real rather than compressed, because there is no
+   * longer a timer to bend: the client's own beat starts at `hello-ok`, and this
+   * page has never reached one. What would fail here is a client that retried
+   * `pin-required` on its back-off — `retryPolicy`'s judgement in lib/client.ts
+   * — which is invisible on screen until the third or fourth knock, and so is
+   * counted at the desktop instead.
+   */
+
+  const heldPort = await startPhase(approved, pinHost)
+  setConfig({ devHost: `127.0.0.1:${heldPort}` })
+  pinChecks = 0
+  await signInFresh()
+  await waitFor(async () => (await gateReason()) === 'pin', 30_000, 'the PIN box')
+  log(pinChecks === 1, 'a browser at the PIN box has knocked exactly once, and is now waiting on a person')
+
+  const heldMs = HEARTBEAT_MS + HEARTBEAT_GRACE_MS
+  await sleep(heldMs + 500)
+  log(
+    (await gateReason()) === 'pin',
+    `and it is still there ${Math.round(heldMs / 1000)}s later — a whole heartbeat and its grace — rather than having drifted off into a reconnect`
+  )
+  log(
+    pinChecks === 1,
+    'having knocked no further times in all of that, so nothing behind the screen is retrying a question only a person can answer'
+  )
+  log(
+    (await page.locator('.gate__card[data-reason="pin"] button[type="submit"]').isDisabled()) === true,
+    'with the box still empty and its button still shut, which is where somebody who went to look up their PIN left it'
+  )
+
+  await page.fill('[data-testid="pin-input"]', PIN)
+  await page.click('.gate__card[data-reason="pin"] button[type="submit"]')
+  await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace after the wait')
+  log(pinChecks === 2, 'and the PIN typed after all of that still gets the browser in, on the second dial and no more')
 
   /* ---------------------------------------------------------------- tidy */
 

@@ -52,7 +52,7 @@ here because most of them are the kind that look arbitrary in six months.
 | 4 | The web client is its own app, but wears the desktop's face. | Steve wants it to *feel* like Forge desktop. It reuses the desktop's components and CSS through a transport shim rather than reimplementing them. |
 | 5 | The browser **mirrors** the desktop's sessions. It does not spawn its own. | One workspace, one truth. Open a tab in the browser and it appears on the desk. Forge Mobile already works this way. |
 | 6 | The terminal widget is xterm.js fed real PTY bytes. | Claude Code is a full-screen TUI. A prettier "blocks of output" view cannot render it. A structured layer can be added on top later; it cannot be the foundation. |
-| 7 | Everything bound to physical hardware is out: voice/dictation, screenshot tray, desktop control/overlay, Forge Mobile, Forge TV. | A browser tab has no microphone worth the plumbing, and a public URL that moves the real mouse is a different risk class entirely. |
+| 7 | Voice/dictation, the screenshot tray, the overlay, Forge Mobile and Forge TV stay out. **The desktop's screen does not**: a browser may watch it, and behind a second lock drive it. | A browser tab has no microphone worth the plumbing. The screen is the one hardware-bound thing that earns its risk — seeing and fixing the machine you are away from is most of what "Forge from anywhere" means, and a terminal cannot answer a dialog that is not in one. It travels over the existing WebSocket rather than WebRTC, whose media is peer-to-peer over UDP and would need a paid TURN relay to cross this tunnel at all. |
 | 8 | Desktop online: edits land straight in the working tree on the PC. | The agent in the terminal sees them immediately, uncommitted — exactly like editing on the desktop. |
 | 9 | Desktop offline: the browser reads and writes GitHub directly, committing to a `forge-web/*` branch. The desktop shows a banner and reconciles with an ordinary `git pull`. | GitHub is the durable place. A bespoke sync protocol would be a second source of truth. |
 | 10 | Desktop offline: terminals show the last known transcript, frozen and badged. | Forge asleep should not look like Forge broken. `pty-host`'s replay buffer already holds it. |
@@ -90,27 +90,32 @@ whole risk in one sentence, and every decision below exists because of it.
   the desktop's configured uid is the only one admitted.
 - **The account is the credential, by default.** A verified token for the
   configured uid is admitted with no prompt on the desktop. That default was
-  chosen deliberately and it is the thing that makes the feature usable: the
-  word-pair prompt can only be answered by somebody standing at this machine,
-  so a door that always demanded one locked Steve out of his own desktop from
-  anywhere he actually wanted to use a browser. The trade — a stolen Firebase
-  password is a shell — is stated once beside the setting in shared/types.ts
-  (`webRequireApproval`) and repeated nowhere.
+  chosen deliberately and it is the thing that makes the feature usable: a
+  prompt at the desk can only be answered by somebody standing at this
+  machine, so a door that always demanded one locked Steve out of his own
+  desktop from anywhere he actually wanted to use a browser. The trade — a
+  stolen Firebase password is a shell — is stated once beside the setting in
+  shared/types.ts (`webPin`) and repeated nowhere.
 - **Every browser is still recorded, listed and revocable.** Revoking one drops
-  its live socket immediately, and a revoked browser stays refused in *both*
-  modes. That is the one thing the permissive mode does not soften, and the
-  device-list cap in `electron/store.ts` spends its budget on live rows so a
-  tombstone can never be squeezed off the end of it.
-- **Device approval is an optional hardening toggle**, off by default. Switched
-  on, behaviour is exactly what it was: "Accept new browsers" must be armed and
-  a human at the desk presses Allow on a prompt carrying the word pair.
-- **A TOTP second factor**, also optional, RFC 6238 over `node:crypto` with no
-  new dependency. Codes are single-use — the accepted counter is remembered, so
-  the ±1 drift window is not three chances at the same six digits — recovery
-  codes are hashed at rest exactly as `electron/mobile/auth.ts` hashes device
-  tokens, and the secret is sealed with a key in a file of its own rather than
-  written into settings.json. "Trust this browser for 30 days" lives on the
-  device row, so revoking the browser revokes the trust in the same act.
+  its live socket immediately, and a revoked browser stays refused whether or
+  not a PIN is set — that is the one thing the account-only default does not
+  soften, and the device-list cap in `electron/store.ts` spends its budget on
+  live rows so a tombstone can never be squeezed off the end of it.
+- **An unlock PIN is the one optional lock.** Four to twelve digits, set once
+  in Settings › Forge Web, and asked of every browser on every connection —
+  not just the first, and being on the device list excuses nothing
+  (`electron/web/auth.ts`). It is stored as a versioned scrypt hash
+  (`scrypt$1$salt$hash` in `electron/web/pin.ts`); the digits themselves are
+  never written to settings.json. A wrong PIN gets one sentence for every
+  cause — `pin-invalid`, never a reason why — and counts against the same
+  per-source lockout mobile pairing uses (`AUTH_MAX_FAILURES`/
+  `AUTH_LOCKOUT_MS`), which is what makes a four-digit secret defensible at
+  all. It replaces both locks this feature shipped with first — the word-pair
+  prompt a human answered at the desk, and a TOTP enrolment with ten recovery
+  codes to keep — because neither survives being away from the desk and this
+  one thing does. With no PIN set the account alone gets in, which is the
+  shipped default; what a PIN buys beyond the door is the mouse, see the
+  escalation guard below.
 - **Off by default.** Nothing binds a socket, publishes a hostname or reads a
   credential until `webEnabled` is switched on in the desktop's settings.
 - **The source allowlist stays.** The tunnel dials the listener from loopback,
@@ -132,6 +137,37 @@ whole risk in one sentence, and every decision below exists because of it.
 - **Defence in depth, not the defence.** The allowlist and the device list are
   the second and third locks. The token is the first, and it is the one that
   matters.
+- **The screen is off, control is off, and control cannot be switched on
+  alone.** Decision 7 used to say the desktop's screen was out of scope
+  entirely, on the grounds that "a public URL that moves the real mouse is a
+  different risk class". The sentence was right and the conclusion has been
+  reversed deliberately: the screen is in, and what answers the risk is an
+  escalation rule rather than an absence.
+
+  The rule is that **a browser may only be given the mouse on a desktop that
+  has an unlock PIN set** (`canControl` in `electron/web-host.ts`, which is
+  nothing more than `Boolean(settings.webPin)`), and that is not
+  belt-and-braces. It is the only thing standing between the account-only
+  default and a stolen password rewriting every remaining lock: a browser
+  that can move the real cursor can open Settings on this desk and clear the
+  PIN itself, silently, in a couple of clicks, and dissolve the one lock that
+  was standing in the way. Requiring a PIN before the mouse is offered at all
+  means the cursor always arrives behind something a stolen password does not
+  come with: a short secret set by somebody who was actually sitting at this
+  desk.
+
+  Three further things hold it in place. **Starting a mirror spends a fresh
+  PIN** when one is set — not the one that opened the connection, because what
+  is being asked is "is that person still there" rather than "is this a
+  browser that once signed in" (`checkFreshPin` in `electron/web/auth.ts`; the
+  first `mirror-start` carries no PIN, the desktop answers `needsPin`, and the
+  second carries what was typed — the same round trip `hello` itself uses).
+  **Both gates are read per event**, so switching control off at the desk, or
+  clearing the PIN, stops the next click rather than the next session. And
+  **the desk is told out loud**: a watch raises an OS notification whether or
+  not anybody is looking at Forge, and the Settings card says it is happening
+  and offers a Stop, because a capture in progress is otherwise
+  indistinguishable from no capture at all.
 
 ---
 
@@ -192,7 +228,7 @@ scripts (`pty:smoke`, `git:check`, `session:check`, `mobile:smoke`,
   a smoke script can drive it with no Electron at all — the standard this
   repo already holds `mobile/server.ts` to.
 - `electron/web/auth.ts`: Firebase ID token verification (Google JWKS, cached),
-  uid matching, device records, approval prompts, revocation.
+  uid matching, device records, the unlock PIN, revocation.
 - `electron/web-host.ts`: the Electron wiring — settings, lifecycle against
   `webEnabled`, PTY sink registration via `addPtySink`, renderer ops for
   tab/pane layout.
@@ -213,7 +249,7 @@ scripts (`pty:smoke`, `git:check`, `session:check`, `mobile:smoke`,
 - Project rail, tabs, splits/mosaic, git panel, skills and commands flyouts,
   agent chooser, approvals.
 - Connection states are first-class UI: connecting, live, offline (GitHub),
-  awaiting device approval.
+  asking for the unlock PIN.
 
 ### Phase 4 — GitHub mode
 
@@ -243,7 +279,7 @@ scripts (`pty:smoke`, `git:check`, `session:check`, `mobile:smoke`,
 ### Phase 5 — desktop settings and the background service
 
 - Settings: `webEnabled`, Firebase sign-in, the public URL, the device list
-  with revoke, the device-approval toggle and the TOTP enrolment.
+  with revoke, and the unlock PIN — set, change or clear.
 - `forge-server` survives the window closing — a tray process, `electron/tray.ts`
   — so that GitHub-only mode is rare rather than nightly.
 
@@ -279,13 +315,15 @@ be torn down before the success phase starts).
 - A valid token for the configured uid attaches to a live session, receives the
   replay buffer, writes a command and reads its output back.
 - Each refusal is asserted *separately*, because each is a different sentence on
-  screen: malformed token, expired token, valid token for the wrong uid,
-  unapproved device (with the hardening toggle on), revoked device, stale
-  protocol version. `scripts/web-auth-check.mjs` carries the ones that are about
-  the admission decision rather than the wire — the account-only path with no
-  prompt raised, revocation and the uid match holding in *both* modes, and the
-  second factor, including the assertion the feature stands on: a replayed TOTP
-  code is refused.
+  screen: malformed token, expired token, valid token for the wrong uid, a
+  blank device id, revoked device, stale protocol version. `scripts/web-auth-check.mjs`
+  carries the ones that are about the admission decision rather than the wire —
+  the account-only path with no prompt raised, revocation holding whether or
+  not a PIN is set, and the PIN itself: `pin-required` on the first hello of a
+  sign-in, `pin-invalid` on a wrong one, the per-source lockout that is what
+  makes four digits defensible at all, and the assertion the feature stands
+  on — a set PIN never lands on disk as anything but a versioned
+  `scrypt$1$…` string.
 - Rate limits and the max-write cap bite.
 - Heartbeat loss closes the session inside the grace window.
 - Token verification runs against injected JWKS, so the test needs no network
@@ -301,8 +339,8 @@ Steve's own data root.
   state over, and land back in the workspace **with no credential typed** —
   which is the whole promise of the account-only default and the only assertion
   that catches a session that survives a reload but not a restart.
-- With a second factor enrolled: the browser is asked for a code, a wrong one is
-  answered on the same screen, and the code the app is showing gets it in.
+- With an unlock PIN set: the browser is asked for it, a wrong one is refused
+  on the same screen, and the right one gets it in.
 - Type `echo forge-web-<nonce>` and assert the nonce appears in the browser's
   terminal.
 - Assert the same nonce appears in the desktop window's terminal — that is the
@@ -512,5 +550,9 @@ cannot see the process.
 
 - No cloud runner and no per-session containers.
 - No agent execution when the PC is off.
-- No voice, screenshots, desktop control, Mobile or TV in the browser.
+- No voice, screenshots, Mobile or TV in the browser. The desktop's screen *is*
+  in the browser now, and so is its mouse — see decision 7 and the escalation
+  paragraph in the security posture, which is what pays for it.
+- No WebRTC anywhere in Forge Web: no ICE, no STUN, no TURN. The picture rides
+  the WebSocket the terminals do, for the reason decision 7 gives.
 - No second user. One account, one machine, one human.

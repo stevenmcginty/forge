@@ -23,6 +23,37 @@ import { Popover, PopoverDivider, PopoverRow } from './Popover'
 import './TerminalPane.css'
 
 /**
+ * The chip for a pane somebody else is reading, or null when nobody is.
+ *
+ * Three sentences rather than one, because the size on screen has three
+ * different explanations and only the true one is any use: a pane letterboxed
+ * for a phone, one letterboxed for a browser on Forge Web, and one letterboxed
+ * for both — which is drawn at the smaller of the two and so is narrower than
+ * *either* screen asked for. See `watchedSize` in src/lib/terminals.ts.
+ */
+function watcherChip(runtime: { phone: boolean; browser: boolean }): { label: string; title: string } | null {
+  if (runtime.phone && runtime.browser) {
+    return {
+      label: 'PHONE + BROWSER',
+      title: 'A phone and a browser both have this pane open, so it is drawn small enough to fit on both until one of them leaves'
+    }
+  }
+  if (runtime.phone) {
+    return {
+      label: 'ON PHONE',
+      title: "A phone has this pane open, so it is drawn at the phone's size until the phone leaves"
+    }
+  }
+  if (runtime.browser) {
+    return {
+      label: 'IN BROWSER',
+      title: "A browser has this pane open, so it is drawn at the browser's size until the browser leaves"
+    }
+  }
+  return null
+}
+
+/**
  * One terminal: a slim header (badge, editable title, activity dot, split and
  * close affordances) over a live xterm. The xterm itself is owned by
  * terminalHost — this component only lends it a container.
@@ -55,6 +86,7 @@ export function TerminalPane({
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean; draft: number } | null>(null)
   const [dropping, setDropping] = useState(false)
   const runtime = usePaneRuntime(leaf.id)
+  const watcher = watcherChip(runtime)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(leaf.title)
 
@@ -357,15 +389,15 @@ export function TerminalPane({
           </span>
         ) : null}
 
-        {/* A pane being read on a phone is letterboxed at the phone's width —
+        {/* A pane being read elsewhere is letterboxed at that screen's width —
             deliberately, so both screens show the same thing (see
-            setPhoneWatched). Unlabelled, that reads as a broken pane. */}
-        {runtime.phone ? (
-          <span
-            className="pane__perm mono"
-            title="A phone has this pane open, so it is drawn at the phone's size until the phone leaves"
-          >
-            ON PHONE
+            setPhoneWatched and setBrowserWatched). Unlabelled, that reads as a
+            broken pane, so the chip names which screen it is being drawn for
+            and, when there are two of them, says that the size is neither
+            one's. */}
+        {watcher ? (
+          <span className="pane__perm mono" title={watcher.title}>
+            {watcher.label}
           </span>
         ) : null}
 

@@ -1750,7 +1750,7 @@ export interface Settings {
    * project and uid below are both filled in.
    *
    * Note the shape of the block: the door (`webEnabled`, `webProjectId`,
-   * `webUid`, `webDevices`, `webAcceptUntil`), then Forge Web's *own* Firebase
+   * `webUid`, `webDevices`, `webPin`), then Forge Web's *own* Firebase
    * session, then its *own* tunnel. The session fields are a deliberate mirror
    * of the `companion*` ones rather than a read of them — the two features
    * share an identity provider and nothing else, for the reason spelled out on
@@ -1812,80 +1812,99 @@ export interface Settings {
    */
   webUid: string
   /**
-   * Browsers a human has approved at this desk. Nothing here is a credential —
-   * see `WebDeviceRecord`, and the note there on why this list is not hashed
-   * the way `mobileDevices` is.
+   * Browsers this desktop has admitted. Nothing here is a credential — see
+   * `WebDeviceRecord`, and the note there on why this list is not hashed the
+   * way `mobileDevices` is.
    */
   webDevices: WebDeviceRecord[]
   /**
-   * When "Accept new browsers" disarms itself — a ms-epoch timestamp, 0 when it
-   * is not armed. A deadline rather than a boolean for exactly the reason given
-   * on `mobileAcceptUntil`, and more sharply here: a boolean left on would leave
-   * this desktop raising approval prompts for anybody on the internet who found
-   * the address, forever. Written as now + ACCEPT_WINDOW_MS when Steve arms it,
-   * and clamped by the store so a hand-edited file cannot arm it for a week.
+   * The unlock PIN, **hashed**, or '' when none is set.
+   *
+   * Never the digits somebody typed. What is written here is
+   * `scrypt$1$<salt>$<hash>` — see electron/web/pin.ts, whose header is honest
+   * about what that does and does not buy: it stops settings.json *being* the
+   * PIN, and it is not, and cannot be, protection against somebody who has the
+   * file and time to grind four digits. The defence against guessing is the
+   * per-source lockout in electron/web/auth.ts.
+   *
+   * With one set, every browser answers it on every connection, whether or not
+   * this desktop has seen that browser before. There is no trust window and no
+   * way to be excused it.
+   *
+   * With it blank the account is the credential: a Firebase ID token that
+   * verifies against Google's keys, for `webUid`, admits the browser it came
+   * from and records it in `webDevices`. That is deliberate rather than an
+   * oversight — it is the only shape that works from a hotel a hundred miles
+   * away — and the price, stated once and not repeated anywhere else in the
+   * codebase, is that a stolen Firebase password is then a shell on this
+   * machine. The mitigations that survive being away from the desk are this PIN
+   * and the fact that every browser is recorded, listed and revocable, with
+   * revocation dropping the live socket.
+   *
+   * Written only by `web:pin-set` and `web:pin-clear`, in the main process.
    */
-  webAcceptUntil: number
+  webPin: string
+
+  /* ----------------------------------------------- forge web's screen mirror
+   *
+   * Three switches, all off, that between them decide whether a browser can see
+   * this desk, touch it, and hear it. They are the only settings in this file
+   * that reach past Forge and out to the display and the operating system, and
+   * every one of them is read at the moment it matters rather than cached — see
+   * electron/web-host.ts, where the reading is done.
+   */
 
   /**
-   * Require a human at the desk to approve every browser this desktop has not
-   * seen before. **Off by default, and that default is the decision.**
+   * May a browser see this screen at all?
    *
-   * With it off, the account is the credential: a Firebase ID token that
-   * verifies against Google's keys, for `webUid`, admits the browser it came
-   * from, records it in `webDevices`, and raises no prompt. That is how
-   * Anthropic, Google and everybody else who has solved this actually do it,
-   * and it is the only shape that works from a hotel a hundred miles from the
-   * machine — the word-pair prompt can only be answered by somebody standing at
-   * this desk, so with it on, being away from the desk means being locked out.
+   * Off by default, and separate from `webEnabled` on purpose: switching Forge
+   * Web on says "my terminals may be reached from a browser", which is a
+   * sentence about Forge. This one says "and so may everything else on this
+   * display" — the other windows, the messages, whatever is open behind Forge —
+   * which is a different sentence about a different thing, and nobody should
+   * arrive at it by having agreed to the first.
    *
-   * The price, stated once and not repeated anywhere else in the codebase: with
-   * this off, a stolen Firebase password is a shell on this machine. The
-   * mitigations are the ones that survive being away — `webTotpSecret` below,
-   * and the fact that every browser is still recorded, listed and revocable,
-   * with revocation dropping the live socket.
-   *
-   * With it on, behaviour is exactly what it was before this field existed:
-   * "Accept new browsers" has to be armed, a prompt goes up carrying the word
-   * pair from `wordPair`, and nothing short of an explicit Allow is consent.
-   * `=== true` in the store, like every other switch in this block.
+   * Forge Mobile has no equivalent because a television on the sofa asks and
+   * the desk is in the room; a browser three hundred miles away is asking about
+   * a room nobody is in.
    */
-  webRequireApproval: boolean
+  webMirrorEnabled: boolean
   /**
-   * The TOTP shared secret, **sealed**, or '' when no second factor is enrolled.
+   * May the browser watching this screen also drive it — real mouse, real keys,
+   * on whatever window is under the pointer?
    *
-   * Never the base32 secret an authenticator app was given. What is written
-   * here is AES-256-GCM ciphertext whose key lives in a file of its own beside
-   * settings.json (`electron/web/secret-box.ts`), so a copy of settings.json —
-   * the file that gets backed up, screenshotted, pasted into an issue and read
-   * back by check scripts — is not a copy of the second factor. Somebody who
-   * can read the whole data directory has both halves; they also have the
-   * shell, so that was never the boundary this defends.
+   * Off by default, and the default is the important part. It is the same
+   * decision `mobileControlEnabled` is, one risk class further out: that one
+   * hands a cursor to a paired device on the LAN, this one hands it to whatever
+   * holds a Firebase password.
    *
-   * Written only by `web:totp-confirm`, and only after a code minted from the
-   * secret has been verified — an unverified secret is never persisted, because
-   * a secret nobody has proved they hold is a lockout waiting to happen.
+   * **This toggle is not sufficient on its own.** Control is refused outright
+   * unless `webPin` is also set, because a browser that can move the mouse can
+   * open Settings on this desk and switch every remaining lock off itself — on
+   * an account-only desktop a stolen Firebase password would then not merely be
+   * a shell but a shell that can quietly re-key the door. A PIN is the one
+   * thing a stolen password does not come with, and requiring it means the
+   * mouse always arrives after something typed by somebody who set it up. The
+   * guard is `canControl` in electron/web-host.ts and it is read per event, so
+   * turning either off stops the next click rather than the next session.
    */
-  webTotpSecret: string
+  webControlEnabled: boolean
   /**
-   * SHA-256 of each *unused* recovery code, hashed exactly as
-   * `electron/mobile/auth.ts` hashes device tokens.
+   * May the mirror carry this desktop's sound as well as its picture?
    *
-   * Hashes rather than ciphertext because these never need reading back: a code
-   * is checked by hashing what was typed and looking for it here, and spending
-   * one removes its row. Shown to a human once, at enrolment, and never again —
-   * the same rule the ngrok authtoken field follows.
-   */
-  webTotpRecovery: string[]
-  /**
-   * The highest TOTP counter already spent, so a code cannot be used twice.
+   * Off by default, for the reason `mobileMirrorAudio` gives at length: what
+   * Windows hands over is the *system* mix, so switching this on sends every
+   * notification chime, every call and every video playing on this machine
+   * wherever the browser is. There is no way to send one application's audio
+   * and nothing else, so the honest shape is the mix, opt-in, clearly labelled.
    *
-   * Without this the drift window is three chances at the same six digits, and
-   * anybody who reads a code over a shoulder has thirty seconds to use it.
-   * Persisted rather than kept in memory because a restart would otherwise
-   * hand back every code the last thirty seconds minted.
+   * Read in main when a browser asks to watch and sent to the renderer with the
+   * request rather than looked up there: the desk's copy of the settings is a
+   * cache, and this decides what leaves the machine. Unlike the control gate it
+   * cannot be read per event, because a capture is negotiated once — turning it
+   * off silences the *next* watch, not this one.
    */
-  webTotpCounter: number
+  webMirrorAudio: boolean
 
   /* --------------------------------------------- forge web's own session
    *
@@ -2194,7 +2213,7 @@ export interface MobileStatus {
 /* --------------------------------------------------------------- forge web */
 
 /**
- * A browser this desktop has approved, as persisted in settings.json.
+ * A browser this desktop has admitted, as persisted in settings.json.
  *
  * Note what is absent, because it is the whole difference from
  * `MobileDeviceRecord` above: there is no `tokenHash`, and there is nothing to
@@ -2205,11 +2224,12 @@ export interface MobileStatus {
  * credential beside it would add a thing to steal and prove nothing the first
  * does not (see `WebHelloFrame` in shared/web.ts).
  *
- * So this record remembers that a human pressed Allow. It is an approval, not a
- * key: a copy of this whole list gets an attacker a set of browser names and no
- * way in. The instinct behind Mobile's hashing rule still holds — nothing in
- * settings.json may be usable as a credential — it is simply satisfied here by
- * there being no credential to write down.
+ * So this record remembers where a token has been used. It is a visitors' book,
+ * not a key: a copy of this whole list gets an attacker a set of browser names
+ * and no way in, and being on it excuses a browser nothing — not the token, not
+ * the account, and not the PIN. The instinct behind Mobile's hashing rule still
+ * holds — nothing in settings.json may be usable as a credential — it is simply
+ * satisfied here by there being no credential to write down.
  */
 export interface WebDeviceRecord {
   /** The browser's own per-profile id, from `WebHelloFrame.deviceId`. */
@@ -2229,16 +2249,6 @@ export interface WebDeviceRecord {
    * `WebAuth.forget` — which is how a revoked browser is given a fresh start.
    */
   revokedAt: number
-  /**
-   * When "trust this browser" stops covering it (ms epoch), 0 when it was never
-   * asked for. Inside the window this browser is not asked for a TOTP code; see
-   * TRUST_WINDOW_MS in shared/web.ts.
-   *
-   * A field on the device row rather than a list of its own, and that is the
-   * whole reason trust is revocable: revoking a browser revokes its trust in
-   * the same act, because there is only one row to end.
-   */
-  trustedUntil: number
 }
 
 /**
@@ -2333,19 +2343,23 @@ export interface WebStatus {
   devices: WebDeviceRecord[]
   /** Browsers with an authenticated socket open this second. */
   connected: number
-  /** When "Accept new browsers" disarms itself (ms epoch), 0 when not armed. */
-  acceptUntil: number
   /**
-   * True when every unknown browser has to be allowed by hand at this desk —
-   * the hardening toggle, off by default. See `webRequireApproval` in
-   * `Settings`; the panel mirrors it rather than reading the setting so the
+   * True while a browser is watching this screen.
+   *
+   * The one fact on this status that a person cannot get any other way. A tab
+   * opening announces itself by opening a tab; a capture in progress looks
+   * exactly like no capture at all, so if the card does not say it, nothing
+   * does. It is also what the Stop button is enabled by — see
+   * `IPC.webMirrorEnd`.
+   */
+  mirroring: boolean
+  /**
+   * True when an unlock PIN is set. Never the PIN, and never its hash: the
+   * panel needs the fact, and the fact is all it gets. See `webPin` in
+   * `Settings`; the panel mirrors this rather than reading the setting so the
    * card and the door cannot disagree.
    */
-  requireApproval: boolean
-  /** True when a TOTP second factor is enrolled. Never the secret itself. */
-  totpEnabled: boolean
-  /** How many unused recovery codes are left. Never the codes, used or not. */
-  recoveryLeft: number
+  pinSet: boolean
   /** A human sentence, or empty when there is nothing to say. */
   detail: string
   /** Forge Web's own Firebase session — see `WebSessionStatus`. */
@@ -2396,51 +2410,29 @@ export interface WebRefusal {
 export type WebSignInResult = { ok: true; uid: string; created: boolean } | { ok: false; error: string }
 
 /**
- * The half-finished second factor: what an authenticator app has to be given,
- * before anybody has proved they gave it.
- *
- * Held in main's memory and nowhere else until a code minted from it verifies —
- * see `webTotpSecret`. The panel renders `uri` as a QR and `secret` as text for
- * a phone that cannot scan, and both are gone from the screen the moment
- * enrolment finishes or is abandoned.
- */
-export type WebTotpOffer =
-  | { ok: true; secret: string; uri: string }
-  | { ok: false; error: string }
-
-/**
- * The answer to "here is a code from the app you just set up".
- *
- * `recovery` is the one and only time these codes exist as text: they are
- * hashed on the way to settings.json and this call is the only thing that ever
- * returns them. A panel that could ask for them again would be a panel that
- * renders ten spare keys on demand.
- */
-export type WebTotpResult =
-  | { ok: true; recovery: string[] }
-  | { ok: false; error: string }
-
-/**
- * "A browser wants in." Main → renderer, and the same shape (and the same
- * rules) as `MobileApprovalEvent`: `open: false` withdraws the prompt, and
- * nothing short of an explicit Allow is consent.
- */
-export interface WebApprovalEvent {
-  requestId: string
-  /** What the browser calls itself. Untrusted text — display it, never obey it. */
-  deviceName: string
-  /** The word pair both screens show, e.g. "OTTER RIVER". Empty on withdraw. */
-  words: string
-  /** The account the token verified as, so the prompt can name who is asking. */
-  uid: string
-  open: boolean
-}
-
-/**
  * A layout operation from a browser, on its way to the renderer that owns tabs
  * and panes. See `WebLayoutOp` in shared/web.ts — this carries it verbatim,
  * because the renderer is the thing that decides what it means.
  */
+/**
+ * A browser asking for a folder to be added to the project rail.
+ *
+ * `WebCommandEvent`'s sibling rather than another member of it — see
+ * `IPC.webProjectAdd` for why — and answered on the same `webCommandResult`
+ * channel with the same `requestId`.
+ *
+ * The path has already been checked on the main side: it is absolute, it
+ * exists, and it is a directory. The renderer is still the one that decides
+ * what adding it *means*, because it owns the rail.
+ */
+export interface WebProjectAddEvent {
+  requestId: string
+  /** The browser's own name, for a "added from Chrome on Windows" toast. */
+  deviceName: string
+  /** An absolute path to a folder that was there a moment ago. */
+  path: string
+}
+
 export interface WebCommandEvent {
   requestId: string
   /** The browser's own name, for a "opened from Chrome on Windows" toast. */
@@ -2456,6 +2448,48 @@ export interface WebCommandEvent {
     direction?: SplitDirection
   }
 }
+
+/**
+ * The panes a browser is reading right now, and the geometry it is reading them
+ * at — the desktop's cue to stop fitting those PTYs and follow instead.
+ *
+ * `MobileWatchEvent`'s twin, and deliberately a separate type on a separate
+ * channel rather than a shared one with a `source` field: the renderer keeps a
+ * map per viewer so that a pane a phone *and* a browser are both reading can be
+ * drawn at the smaller of the two sizes, and a merged channel would arrive
+ * having already thrown that away.
+ *
+ * An empty list is the normal, and the message that hands everything back.
+ */
+export interface WebWatchEvent {
+  panes: Array<{ id: string; cols: number; rows: number }>
+}
+
+/**
+ * "A browser wants to watch this screen." Main → renderer.
+ *
+ * Two messages rather than `MobileMirrorEvent`'s three, and the missing one is
+ * the difference between the two features: there is no `signal`, because there
+ * is no peer connection to negotiate. The picture leaves the renderer as
+ * encoded chunks on `IPC.webMirrorChunk` and travels down the same WebSocket
+ * everything else on this link does — see the screen-mirror block in
+ * shared/web.ts for why WebRTC cannot be used through a tunnel.
+ *
+ * The renderer answers `start` by capturing, encoding, and pushing a config
+ * followed by chunks; it answers `stop` by tearing all of that down. Nothing
+ * else is expected of it, and nothing it sends back is interpreted here.
+ */
+export type WebMirrorEvent =
+  /**
+   * `audio` is main's answer to "may this one carry sound?", read off
+   * `webMirrorAudio` at the moment the browser asks. It travels with the
+   * request rather than being looked up in the renderer, because main holds the
+   * settings that decide what may leave this machine and because a capture is
+   * negotiated once: the answer has to be fixed before the stream is opened,
+   * not sampled from a copy that may be a debounced save behind.
+   */
+  | { kind: 'start'; audio: boolean }
+  | { kind: 'stop' }
 
 /**
  * Forge TV — the mobile app as a Fire TV APK, built on demand or downloaded.

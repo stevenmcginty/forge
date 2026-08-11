@@ -1,14 +1,5 @@
 import { type ReactNode } from 'react'
-import {
-  Connecting,
-  Declined,
-  Pending,
-  Refused,
-  TimedOut,
-  TotpPrompt,
-  Unconfigured,
-  Unreachable
-} from './components/Connection'
+import { Connecting, PinPrompt, Refused, Unconfigured, Unreachable } from './components/Connection'
 import { SignIn } from './components/SignIn'
 import { Workspace } from './components/Workspace'
 import { useForge } from './state'
@@ -21,12 +12,20 @@ import { useForge } from './state'
  *  1. **`stage`** — can this page get to a desktop at all? Configuration,
  *     sign-in, the rendezvous read, and the frozen view when the answer is no.
  *  2. **`connection`** — given that there is a desktop, where does this browser
- *     stand with it? That is `WebApprovalState`'s vocabulary, and every value in
- *     it is a different screen with a different recovery.
+ *     stand with it? That is `WebConnectionState`'s vocabulary, and every value
+ *     in it is a different screen with a different recovery.
  *
  * The one crossing between them is deliberate: an `offline` stage still draws
  * the whole workspace, from the cache, because Forge asleep must not look like
- * Forge broken.
+ * Forge broken. `connecting` crosses the same way once there is a picture to
+ * cross with, and for a reason that is cheaper to state than to discover:
+ * `lib/client.ts` announces `connecting` at the top of every `open()` and on
+ * every scheduled retry, so a socket that so much as flinched used to replace
+ * the entire application with a spinner — which unmounted every `PaneView`,
+ * disposed every xterm, detached every pane, and bought each of them a fresh
+ * catch-up buffer on the way back in. The full-page gate is therefore only for a
+ * browser that has never seen this desktop; after that a reconnect is a badge
+ * and a read-only keyboard, which is what `Workspace` draws.
  *
  * There is no third axis for GitHub mode, and that is the point of it being a
  * *mode*: `Workspace` swaps what is inside the grid when `offlineMode` says so,
@@ -60,15 +59,10 @@ export function App(): ReactNode {
     case 'live':
       return <Workspace />
     case 'connecting':
-      return <Connecting attempt={state.connection.attempt} />
-    case 'pending':
-      return <Pending words={state.connection.words} expiresAt={state.connection.expiresAt} />
-    case 'totp':
-      return <TotpPrompt message={state.connection.message} invalid={state.connection.invalid} />
-    case 'declined':
-      return <Declined message={state.connection.message} />
-    case 'timed-out':
-      return <TimedOut message={state.connection.message} />
+      // The workspace, badged, for anybody who has already seen one. See above.
+      return state.picture ? <Workspace /> : <Connecting attempt={state.connection.attempt} />
+    case 'pin':
+      return <PinPrompt message={state.connection.message} invalid={state.connection.invalid} />
     case 'refused':
       return (
         <Refused

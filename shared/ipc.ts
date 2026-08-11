@@ -301,14 +301,6 @@ export const IPC = {
    */
   webSignOut: 'web:sign-out',
   /**
-   * Arm or disarm "Accept new browsers". Arming writes `webAcceptUntil` and the
-   * window closes itself; the deadline rides `webStatusEvent` like everything
-   * else here. Unlike Forge Mobile there is no pairing code to mint: the
-   * credential is a Firebase ID token the browser already holds, so the only
-   * thing this desktop grants is an approval.
-   */
-  webAccept: 'web:accept',
-  /**
    * Revoke a browser. The row stays as a tombstone so a revoked browser is
    * refused with `revoked` rather than re-prompted as a stranger, and its live
    * socket is closed immediately — "revoked" must not mean "revoked next time".
@@ -317,32 +309,22 @@ export const IPC = {
   /** Drop a row entirely, tombstone and all — the only way back for a revoked browser. */
   webForget: 'web:forget',
   /**
-   * Start enrolling a TOTP second factor: mint a secret, hand back the
-   * `otpauth://` URI the panel draws as a QR, and hold the secret in main's
-   * memory.
+   * Set the unlock PIN every browser has to present. The digits cross this
+   * boundary once, are hashed in main by `electron/web/pin.ts`, and only the
+   * hash reaches settings.json — the same rule the ngrok authtoken follows, and
+   * for a sharper reason: this is the second half of the lock on a shell.
    *
-   * Nothing is persisted by this call, deliberately. A secret written before
-   * somebody has proved their authenticator holds it is a lockout with a green
-   * tick on it — see `webTotpConfirm`, which is the only thing that writes one.
+   * Answered with the new status, or with a sentence when what was typed is not
+   * a PIN. The validation is main's rather than the panel's, because a renderer
+   * is not the thing that decides what opens this door.
    */
-  webTotpBegin: 'web:totp-begin',
+  webPinSet: 'web:pin-set',
   /**
-   * Finish enrolling by presenting a code minted from the offered secret. The
-   * only call that ever writes `webTotpSecret`, and the only one that ever
-   * returns the recovery codes as text — they are hashed on the way to disk and
-   * there is no call that shows them a second time.
+   * Remove the unlock PIN. The desktop falls back to admitting a verified token
+   * for the configured uid on the account alone, and refuses screen *control*
+   * outright — see `canControl` in electron/web-host.ts.
    */
-  webTotpConfirm: 'web:totp-confirm',
-  /** Remove the second factor and every unspent recovery code with it. */
-  webTotpDisable: 'web:totp-disable',
-  /**
-   * A browser is asking to connect. Main → renderer, carrying the word pair the
-   * browser is showing; the renderer raises the prompt and answers with
-   * `webApprovalResult`. Every outcome that is not an explicit Allow is a deny.
-   */
-  webApproval: 'web:approval',
-  /** The renderer's verdict on a `webApproval`. Absence of an answer is a deny. */
-  webApprovalResult: 'web:approval-result',
+  webPinClear: 'web:pin-clear',
   /**
    * A layout operation arriving from a browser. Main → renderer, because the
    * renderer owns the split tree and persists it — the browser must take the
@@ -350,8 +332,96 @@ export const IPC = {
    * (docs/forge-web.md, decision 5).
    */
   webCommand: 'web:command',
-  /** The renderer's answer to a `webCommand`. */
+  /**
+   * A browser asking for a folder to be added to the project rail. Main →
+   * renderer, for the same reason `webCommand` is: the renderer owns the
+   * project list and persists it, so the browser has to reach `addProjectPath`
+   * — the very function the desktop's own button reaches — rather than a second
+   * route into the rail that could disagree with it.
+   *
+   * A channel beside `webCommand` rather than a widening of it, and the reason
+   * is the payload rather than tidiness. `WebCommandEvent.op` is a
+   * `WebLayoutOp`: every field on it is optional except `projectId`, which is
+   * required *because* every layout operation happens inside a project. Adding
+   * a project happens inside no project and carries a path instead, so folding
+   * it in would mean either a union the renderer has to narrow before its
+   * switch, or a `projectId` that lies on one member. Two events, one *answer*
+   * channel below, is the cheaper honesty — and it is the same judgement
+   * src/state/AppState.tsx already made about handling the phone's `onCommand`
+   * and the browser's separately.
+   */
+  webProjectAdd: 'web:project-add',
+  /**
+   * The renderer's answer to a `webCommand` or a `webProjectAdd`.
+   *
+   * One channel for both, deliberately: `requestId` is what the main side
+   * matches on, both questions are answered with the same "an error sentence,
+   * or nothing", and both are settled by the same pending map and the same
+   * deadline. A second result channel would be a second timeout to get wrong.
+   */
   webCommandResult: 'web:command-result',
+  /**
+   * Which panes a browser currently has open, and at what geometry. Main →
+   * renderer, on every change.
+   *
+   * The same message `mobileWatched` is, for the same reason and with the same
+   * shape: a PTY has one size and a browser is a second viewer of it, so while
+   * a pane is on this list the renderer stops refitting it and letterboxes its
+   * own terminal at the browser's size. Two channels rather than one because a
+   * phone and a browser can be reading the same pane at once and the renderer
+   * has to take the smaller of the two — see `setBrowserWatched` in
+   * src/lib/terminals.ts, which merges them.
+   */
+  webWatched: 'web:watched',
+
+  /* ------------------------------------------------------ forge web mirror
+   *
+   * A browser watching this desktop's actual screen. The capture and the
+   * encoder live in the *renderer*, because that is the half of Electron with
+   * a display to open a stream onto and a `VideoEncoder` to hand it to, so
+   * these are pass-throughs in both directions:
+   *
+   *   browser --ws--> main --webMirror-------------> renderer  (capture, encode)
+   *   renderer --webMirrorReady/Chunk--> main --ws--> browser  (config, chunks)
+   *
+   * Unlike the Forge TV block above there is no signalling and no peer
+   * connection: WebRTC media never enters the tunnel this link is reached
+   * through, so the picture rides the socket that is already open. The
+   * reasoning is set out in full in the screen-mirror block of shared/web.ts.
+   *
+   * There is deliberately no `webMirrorSource` beside these. The renderer needs
+   * the primary display's `desktopCapturer` id and `mobileMirrorSource` already
+   * hands it over — the id is a fact about this machine, not about which link
+   * asked for it, and a second channel returning the same string would be a
+   * second thing to keep in step with Electron's main-only `desktopCapturer`.
+   */
+  /** Main → renderer: start capturing (with or without sound), or stop. WebMirrorEvent. */
+  webMirror: 'web:mirror',
+  /**
+   * Renderer → main: the capture is up, and here is what a decoder on the far
+   * end has to be configured with. Sent once per watch, before any chunk —
+   * `WebMirrorConfig` in shared/web.ts is the shape, carried through main
+   * unchanged because main has no opinion about codecs.
+   */
+  webMirrorReady: 'web:mirror-ready',
+  /** Renderer → main: one encoded chunk, base64. See `WebMirrorChunk`. */
+  webMirrorChunk: 'web:mirror-chunk',
+  /**
+   * Renderer → main: the capture ended here, and why — it was refused, Steve
+   * stopped sharing at the OS level, the encoder died. The sentence is what the
+   * browser shows instead of a frozen last frame.
+   */
+  webMirrorStop: 'web:mirror-stop',
+  /**
+   * The person at the desk taking their screen back. Renderer → main *invoke*,
+   * answered with the new `WebStatus`.
+   *
+   * A separate channel from `webMirrorStop` because they are opposite errands
+   * that happen to end the same way: that one is the capture reporting its own
+   * death, this one is a human ending a watch that is working perfectly. Only
+   * one of the two is a button.
+   */
+  webMirrorEnd: 'web:mirror-end',
 
   // skills library (M8) — %APPDATA%\Forge\skills, junctioned into
   // ~/.claude/skills so every claude and kimi session on the machine sees them.

@@ -8,7 +8,8 @@
  * It is not a credential. `WebHelloFrame` is explicit that Forge Web mints no
  * device token — the Firebase ID token is the credential, and a second one
  * beside it would be a second thing to steal. So this lives in `localStorage`
- * beside the session, and losing it costs one press of Allow.
+ * beside the session, and losing it only costs this browser its row in the
+ * desktop's device list — the next connection is recorded as a new one.
  */
 
 const DEVICE_KEY = 'forge-web-device'
@@ -18,8 +19,8 @@ export function deviceId(): string {
   try {
     existing = localStorage.getItem(DEVICE_KEY)
   } catch {
-    // Private mode. A fresh id per tab means a prompt per tab, which is
-    // annoying and correct — there is nowhere to remember an approval.
+    // Private mode. A fresh id per tab means a fresh device row per tab,
+    // which is untidy and correct — there is nowhere to remember an identity.
     return randomId()
   }
   if (existing) return existing

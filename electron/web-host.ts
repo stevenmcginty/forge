@@ -1,33 +1,52 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, Notification, powerSaveBlocker } from 'electron'
+import { app, BrowserWindow, ipcMain, Notification, powerSaveBlocker, screen } from 'electron'
 import { IPC } from '@shared/ipc'
-import { ACCEPT_WINDOW_MS } from '@shared/mobile'
-import { APPROVAL_TIMEOUT_MS, normaliseHost, webSocketUrl, type WebHelloOkFrame, type WebLayoutOp } from '@shared/web'
+import { type MirrorInput } from '@shared/mobile'
+import {
+  normaliseHost,
+  PIN_MAX_DIGITS,
+  PIN_MIN_DIGITS,
+  webSocketUrl,
+  type WebHelloOkFrame,
+  type WebLayoutOp,
+  type WebMirrorChunk,
+  type WebMirrorConfig
+} from '@shared/web'
 import type {
   AgentPresence,
   CommandPresence,
   GitSnapshot,
   TunnelStatus,
-  WebApprovalEvent,
   WebCommandEvent,
+  WebMirrorEvent,
+  WebProjectAddEvent,
   WebRefusal,
   WebRendezvousStatus,
   WebSessionStatus,
   WebSignInResult,
   WebStatus,
-  WebTotpOffer,
-  WebTotpResult,
   WebTunnelStatus,
+  WebWatchEvent,
   Workspace
 } from '@shared/types'
-import { WebAuth, googleJwksFetcher, type WebApprovalAsk, type WebTotpState } from './web/auth'
-import { open as openSecret, seal as sealSecret, sealingKey } from './web/secret-box'
+import { WebAuth, googleJwksFetcher } from './web/auth'
+import { checkFolder, listFolder } from './web/fs-browse'
+import { hashPin, isValidPin } from './web/pin'
 import { WebServer, type WebServerHost } from './web/server'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
 import { describe, FirebaseRest } from './companion/rest'
 import { NgrokTunnel, ensureNgrokExe, resolveNgrokExe } from './mobile-tunnel'
+/*
+ * The input injector, borrowed whole from the phone link. It is a module-level
+ * singleton in this process — one PowerShell child, started on the first event
+ * and torn down with the picture — so a second link driving the same desk needs
+ * no new plumbing and, more importantly, cannot end up with a second helper. Its
+ * header is the file to read before believing anything about what a browser can
+ * do to this machine; `npm run input:check` is what proves it.
+ */
+import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
 import { CloudflareTunnel, ensureCloudflaredExe, resolveCloudflaredExe } from './cloudflare-tunnel'
 import { addPtySink, getManager, getReplay } from './pty-host'
 import { addGitSink, gitRefresh, runAction } from './git-watcher'
@@ -48,7 +67,7 @@ import { probeCommands } from './which'
  * `PtySessionManager` with no Electron in the process. **This is the only file
  * in the feature that imports Electron.**
  *
- * Six jobs:
+ * Seven jobs:
  *
  *  0. Hold Forge Web's *own* Firebase session, and supervise Forge Web's *own*
  *     tunnel. Both used to be borrowed, and both borrowings were wrong in the
@@ -76,6 +95,10 @@ import { probeCommands } from './which'
  *     (docs/forge-web.md, decision 5).
  *  5. Ask the human. A browser this desktop has never approved raises a prompt
  *     here, and every outcome that is not an explicit Allow is a deny.
+ *  6. Hand a pane's geometry to the browser reading it, and take it back when
+ *     the browser leaves. One PTY, two viewers — the block of that name below
+ *     is the whole of it, and it is Forge Mobile's arrangement reached through
+ *     a channel of its own.
  *
  * ## What this file used to get wrong
  *
@@ -108,23 +131,19 @@ import { probeCommands } from './which'
  *
  * ## What this file deliberately does not do
  *
- * **It does not implement `onWatch`, and it does not push `attention`.** Both
- * are optional on `WebServerHost`, and both are half of a pair whose other half
- * lives in the renderer, which is a different milestone's file:
+ * **It does not push `attention`.** It is optional on `WebServerHost`, and it
+ * is half of a pair whose other half nothing owns: Forge has no structured
+ * agent-permission channel at all, and the desktop learns a pane is waiting by
+ * watching *settled output* in `src/lib/terminals.ts`. There is no main-side
+ * source to forward, so "cheaply available" is not true here — it would mean a
+ * second detector.
  *
- *  - `onWatch` is the "one PTY, two viewers" arrangement. Naming the watched
- *    sessions is only useful if the renderer then stands down and letterboxes
- *    its own terminal at the browser's size — see the `mobileWatched` block in
- *    electron/mobile-host.ts and its handler in src/state/AppState.tsx. Sending
- *    a message nothing listens to would look like the feature exists.
- *  - `attention` is worse: Forge has no structured agent-permission channel at
- *    all, and the desktop learns a pane is waiting by watching *settled output*
- *    in `src/lib/terminals.ts`. There is no main-side source to forward, so
- *    "cheaply available" is not true here — it would mean a second detector.
- *
- * Neither is a refusal, and both are one IPC channel each when the renderer
- * half is written. What must not happen in the meantime is a channel that
- * implies a behaviour nothing performs.
+ * That is not a refusal, and it is one IPC channel on the day something exists
+ * to forward. What must not happen in the meantime is a channel that implies a
+ * behaviour nothing performs. `onWatch` stood in this same list for a
+ * milestone on exactly that reasoning — naming the watched sessions is only
+ * worth anything if the renderer then stands down — and left it the day the
+ * renderer half was written, not before.
  */
 
 /* ----------------------------------------------------------------- the port
@@ -159,12 +178,24 @@ function webPort(): number {
  * Only ever added in an unpackaged run — see `webAllowedOrigins` — so a shipped
  * Forge cannot be opened from a page on somebody's localhost.
  *
- * 5173 is Vite's default and the number docs/forge-web.md names. It is also the
- * port this repo's *desktop* renderer takes in `npm run dev`, so the two cannot
- * both have it: whichever the `web/` app ends up on, `FORGE_WEB_ORIGINS` is the
- * way to say so without editing this file.
+ * **5174 is the one that matters**, because it is the port `web/vite.config.ts`
+ * pins the web client to with `strictPort` — and its comment there says exactly
+ * why: the desktop renderer's own dev server already has 5173 in `npm run dev`,
+ * and both are routinely up at once. Naming only 5173 here meant `npm run
+ * web:dev` was refused at the door by every desktop in the repo, with a bare
+ * 403 during the upgrade and so nothing on screen but a retry loop.
+ *
+ * 5173 stays because docs/forge-web.md names it and because a desktop that is
+ * *not* also running its own renderer can hand it to the web client. Two ports
+ * on loopback in an unpackaged build is not a wider door than one.
+ * `FORGE_WEB_ORIGINS` remains the way to name a third without editing this file.
  */
-const DEV_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173']
+const DEV_ORIGINS = [
+  'http://localhost:5174',
+  'http://127.0.0.1:5174',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173'
+]
 
 let server: WebServer | null = null
 let auth: WebAuth | null = null
@@ -219,71 +250,76 @@ function tunnelAgentName(): string {
  */
 let blockerId = 0
 
+/* ---------------------------------------------------- one PTY, two viewers
+ *
+ * A pane on the desktop and the same pane in a browser tab are the same
+ * ConPTY, and a ConPTY has one width. Both ends used to fit it to their own
+ * box, so whichever moved last won — and the desktop moves on every layout
+ * change, which meant switching tabs at the desk quietly dragged the width back
+ * from a browser reading that pane from somewhere else, and every line after
+ * that was wrapped for a screen it was not being drawn on. Switching tabs in
+ * the browser dragged it the other way. The two fought.
+ *
+ * The rule is Forge Mobile's, because the problem is Forge Mobile's: while a
+ * browser has a pane open, the browser owns its geometry. The set of watched
+ * panes and their current size is broadcast to the renderer (`webWatched`),
+ * which stops refitting those panes and letterboxes its own terminal at the
+ * browser's size — so both ends draw the same screen. Handing a pane back is
+ * the same message with the pane no longer in it.
+ *
+ * A pane a phone *and* a browser are both reading is drawn at the smaller of
+ * the two sizes, so it fits on both. That merge happens in the renderer, which
+ * is the only place that hears both lists; see `setBrowserWatched` in
+ * src/lib/terminals.ts.
+ */
+
+/** Session ids at least one browser currently has open. */
+let watched = new Set<string>()
+
+/**
+ * The last size each browser asked for, kept so it can be re-asserted.
+ *
+ * The case that needs it is a renderer reload (dev HMR, or a crash) while a
+ * browser is reading a pane: the renderer re-adopts every session and resizes
+ * it to its own idea of the geometry, which would take the width back from the
+ * browser without the browser ever knowing. See the `onSpawn` sink.
+ */
+const browserGeometry = new Map<string, { cols: number; rows: number }>()
+
+/**
+ * Tell the renderer which panes a browser is reading and at what size.
+ *
+ * Sizes come from the session manager rather than from the browser's frame, so
+ * this reports what the PTY *is*, clamped and all, not what was asked for.
+ */
+function publishWatched(): void {
+  const sessions = getManager().list()
+  broadcast(IPC.webWatched, {
+    panes: sessions.filter((s) => watched.has(s.id)).map((s) => ({ id: s.id, cols: s.cols, rows: s.rows }))
+  } satisfies WebWatchEvent)
+}
+
+/**
+ * A browser asked for a size. The resize itself is the pass-through to the
+ * session manager this host has always done; what is added is remembering the
+ * size and telling the renderer what the PTY ended up at.
+ *
+ * The publish is the part that cannot be left out. `onWatch` fires when the
+ * *set* changes, and an attach announces itself one line *before* it applies
+ * its cols/rows — deliberately, so the desktop hands the width over as early
+ * as possible (see the `attach` case in electron/web/server.ts). Without a
+ * publish here the renderer would letterbox every freshly attached pane at the
+ * size it had a moment before the browser arrived, and never hear the size it
+ * actually settled on.
+ */
+function resizeForBrowser(id: string, cols: number, rows: number): boolean {
+  browserGeometry.set(id, { cols, rows })
+  const ok = getManager().resize(id, cols, rows)
+  publishWatched()
+  return ok
+}
+
 /* ------------------------------------------------------------------- auth */
-
-/**
- * The key that seals the TOTP secret, read once and kept for the process.
- *
- * Lazy, because a desktop that never enrols a second factor should never make
- * the file: `getDataDir()` is where it lands, beside settings.json rather than
- * inside it. A failure here is not fatal — it means "no second factor", which
- * `totpState()` reports as an empty secret and the panel reports as a sentence.
- * See electron/web/secret-box.ts for what this does and does not buy.
- */
-let totpKey: Buffer | null = null
-
-function getTotpKey(): Buffer | null {
-  if (totpKey) return totpKey
-  try {
-    totpKey = sealingKey(getDataDir())
-  } catch (err) {
-    console.log(`[web] could not read the second-factor key (${String(err)})`)
-    totpKey = null
-  }
-  return totpKey
-}
-
-/**
- * The second factor as `WebAuth` needs it: unsealed here, so that class stays
- * arithmetic and the check script can drive it with a secret it invented.
- *
- * A secret that will not open reports as absent rather than throwing, which is
- * the honest answer — a settings.json restored from a backup taken before the
- * key file existed has no usable second factor, and the recovery is to set one
- * up again, not to be locked out by an exception mid-`hello`.
- */
-function totpState(): WebTotpState {
-  const s = getSettings()
-  if (!s.webTotpSecret) return { secret: '', recovery: s.webTotpRecovery, lastCounter: s.webTotpCounter }
-  const key = getTotpKey()
-  const secret = key ? openSecret(s.webTotpSecret, key) : ''
-  if (!secret) console.log('[web] the stored second factor could not be opened — set it up again in Settings')
-  return { secret, recovery: s.webTotpRecovery, lastCounter: s.webTotpCounter }
-}
-
-/**
- * Persist a changed second factor. The secret is sealed on the way in and is
- * the only field that is: recovery codes are already one-way images, and the
- * counter is a number.
- *
- * A secret that cannot be sealed is not written in the clear as a fallback —
- * the enrolment fails instead, which is the whole reason this returns a
- * boolean.
- */
-function saveTotpState(next: WebTotpState): boolean {
-  if (!next.secret) {
-    setSettings({ webTotpSecret: '', webTotpRecovery: [], webTotpCounter: 0 })
-    return true
-  }
-  const key = getTotpKey()
-  if (!key) return false
-  setSettings({
-    webTotpSecret: sealSecret(next.secret, key),
-    webTotpRecovery: next.recovery,
-    webTotpCounter: next.lastCounter
-  })
-  return true
-}
 
 function getAuth(): WebAuth {
   if (!auth) {
@@ -302,17 +338,11 @@ function getAuth(): WebAuth {
       // than the next launch.
       projectId: () => getSettings().webProjectId,
       uid: () => getSettings().webUid,
-      acceptUntil: () => armedUntil(),
-      // The hardening toggle, read per connection like everything else here.
-      // Off is the shipped default and the account-only path — see the header
-      // of electron/web/auth.ts.
-      requireApproval: () => getSettings().webRequireApproval,
-      totp: totpState,
-      saveTotp: (next) => {
-        saveTotpState(next)
-      },
-      requestApproval,
-      cancelApproval,
+      // The stored hash, never the digits, and read per connection like
+      // everything else here — so setting or clearing a PIN at the desk bites
+      // on the next hello rather than the next launch. Blank is the shipped
+      // state and the account-only path; see the header of electron/web/auth.ts.
+      pinHash: () => getSettings().webPin,
       log: (line) => console.log(`[web] ${line}`)
     })
   }
@@ -543,13 +573,15 @@ export function webStatus(): WebStatus {
     url: address ? webSocketUrl(tunnel.host) : '',
     devices: settings.webDevices,
     connected: server?.connectedCount ?? 0,
-    acceptUntil: armedUntil(),
-    requireApproval: settings.webRequireApproval,
-    // Whether one is enrolled, never what it is. `webTotpSecret` is sealed and
-    // this status crosses an IPC boundary into a renderer — the panel needs the
-    // fact, and the fact is all it gets.
-    totpEnabled: Boolean(settings.webTotpSecret),
-    recoveryLeft: settings.webTotpRecovery.length,
+    // Read off the server rather than tracked here, so the card cannot say
+    // "being watched" about a viewer the socket has already lost. The card is
+    // the only place a person can find this out: a capture in progress looks
+    // exactly like no capture at all.
+    mirroring: server?.mirroring ?? false,
+    // Whether one is set, never what it is and never its hash. This status
+    // crosses an IPC boundary into a renderer — the panel needs the fact, and
+    // the fact is all it gets.
+    pinSet: Boolean(settings.webPin),
     detail: lastDetail,
     session,
     tunnel,
@@ -590,48 +622,6 @@ function report(detail?: string): void {
   }
 }
 
-/* --------------------------------------------------- accept new browsers
- *
- * The same arrangement `mobileAcceptUntil` gets, and for the same two reasons:
- * a *deadline* rather than a boolean survives a restart mid-window without
- * arming forever, and two things enforce it — auth.ts reads `armedUntil()` on
- * every unknown device (so disarming is instant) and the timer below zeroes the
- * setting when the window lapses (so the Settings toggle visibly switches
- * itself off rather than silently meaning nothing).
- *
- * It matters more here than it does for a phone link. Forge Mobile's door faces
- * a LAN; this one faces the internet, so a boolean left on would leave this
- * desktop raising approval prompts for anybody who found the address, forever.
- */
-
-let acceptTimer: NodeJS.Timeout | null = null
-
-function armedUntil(): number {
-  const until = getSettings().webAcceptUntil
-  return until > Date.now() ? until : 0
-}
-
-function syncAcceptTimer(): void {
-  if (acceptTimer) {
-    clearTimeout(acceptTimer)
-    acceptTimer = null
-  }
-  const until = armedUntil()
-  if (!until) return
-  // A short grace past the deadline, so the timer fires on the disarmed side of
-  // the comparison auth.ts makes rather than racing it.
-  acceptTimer = setTimeout(() => {
-    acceptTimer = null
-    setSettings({ webAcceptUntil: 0 })
-    report('')
-  }, until - Date.now() + 250)
-}
-
-function disarmAccept(): void {
-  setSettings({ webAcceptUntil: 0 })
-  syncAcceptTimer()
-}
-
 /* ------------------------------------------------------------ op dispatch */
 
 interface PendingOp {
@@ -644,17 +634,24 @@ const pendingOps = new Map<string, PendingOp>()
 const OP_TIMEOUT_MS = 8000
 
 /**
- * Ask the renderer to perform a layout operation, and wait for its verdict.
+ * Ask the renderer a question that only it can answer, and wait for its verdict.
  *
- * Returns an error sentence, or null on success — `WebServerHost.layout`'s
- * contract, and the reason it is a sentence rather than a boolean is the
- * failure below: Forge minimised is fine, Forge with its window closed is not,
- * because the split tree lives in the renderer. The server turns any sentence
- * into `no-window`, which is exactly what this one is.
+ * Returns an error sentence, or null on success. The reason it is a sentence
+ * rather than a boolean is the failure this cannot avoid: Forge minimised is
+ * fine, Forge with its window closed is not, because the split tree and the
+ * project list both live in the renderer.
+ *
+ * One function for both questions, because the *mechanism* is the same — a
+ * request id, a pending map, a deadline, and an answer on
+ * `IPC.webCommandResult` — even though the payloads are different enough to
+ * deserve channels of their own (see `IPC.webProjectAdd`). The caller supplies
+ * the channel, the payload, and the sentence to use when there is no window,
+ * because "it cannot change tabs" and "it cannot add a project" are different
+ * things to be told.
  */
-async function dispatchLayout(op: WebLayoutOp, deviceName: string): Promise<string | null> {
+function askRenderer(channel: string, payload: object, noWindow: string): Promise<string | null> {
   const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
-  if (windows.length === 0) return 'Forge has no window open on the desktop, so it cannot change tabs.'
+  if (windows.length === 0) return Promise.resolve(noWindow)
 
   const requestId = randomUUID()
   return new Promise<string | null>((resolve) => {
@@ -663,97 +660,228 @@ async function dispatchLayout(op: WebLayoutOp, deviceName: string): Promise<stri
       resolve('The desktop did not answer in time.')
     }, OP_TIMEOUT_MS)
     pendingOps.set(requestId, { resolve, timer })
-    windows[0].webContents.send(IPC.webCommand, { requestId, deviceName, op } satisfies WebCommandEvent)
+    windows[0].webContents.send(channel, { ...payload, requestId })
   })
-}
-
-/* ------------------------------------------------------- device approval
- *
- * auth.ts asks; this turns the question into a renderer prompt and waits for
- * the verdict — the same request/response-with-timeout shape as dispatchLayout
- * above, because two pending-map patterns in one file is one too many. The rule
- * that must survive every edit is mobile-host.ts's, and it is sharper here
- * because this door faces the internet: **no path below resolves true except an
- * explicit Allow from the renderer.** Timeout is a deny. No window is a deny.
- * Shutdown is a deny.
- */
-
-interface PendingApproval {
-  resolve: (allow: boolean) => void
-  timer: NodeJS.Timeout
-}
-
-const pendingApprovals = new Map<string, PendingApproval>()
-
-/** The single exit: withdraw the prompt everywhere, then deliver the verdict. */
-function settleApproval(requestId: string, allow: boolean): void {
-  const pending = pendingApprovals.get(requestId)
-  if (!pending) return
-  pendingApprovals.delete(requestId)
-  clearTimeout(pending.timer)
-  // Every window hears the withdrawal, including the one that answered — a
-  // prompt left up in a second window would offer an Allow that lands on a
-  // question already closed.
-  broadcast(IPC.webApproval, {
-    requestId,
-    deviceName: '',
-    words: '',
-    uid: '',
-    open: false
-  } satisfies WebApprovalEvent)
-  pending.resolve(allow)
-}
-
-function requestApproval(ask: WebApprovalAsk): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    // auth.ts has its own deadline on the same question and cancels this one
-    // when it fires. The timer here is the backstop for the case that cannot:
-    // an auth instance torn down mid-question. Both are denies.
-    const timer = setTimeout(() => settleApproval(ask.requestId, false), APPROVAL_TIMEOUT_MS)
-    pendingApprovals.set(ask.requestId, { resolve, timer })
-    broadcast(IPC.webApproval, {
-      requestId: ask.requestId,
-      deviceName: ask.deviceName,
-      words: ask.words,
-      uid: ask.uid,
-      open: true
-    } satisfies WebApprovalEvent)
-    notifyApproval(ask)
-  })
-}
-
-/** auth.ts's "the browser hung up / the wait is over" — a deny like any other. */
-function cancelApproval(requestId: string): void {
-  settleApproval(requestId, false)
 }
 
 /**
- * The out-of-window fallback: an OS notification when no Forge window is
- * focused to show the prompt. A doorbell, not a control — it carries no buttons
- * and can approve nothing; clicking it brings the app (and the real prompt,
- * with the words to compare) to the front. If nobody comes, the approval times
- * out as a deny, which is the only acceptable answer to an unattended question
- * about a shell.
+ * One layout operation, performed by the renderer. The server turns any
+ * sentence this resolves with into `no-window`, which is exactly what the
+ * windowless case is.
  */
-function notifyApproval(ask: WebApprovalAsk): void {
+function dispatchLayout(op: WebLayoutOp, deviceName: string): Promise<string | null> {
+  return askRenderer(
+    IPC.webCommand,
+    { deviceName, op } satisfies Omit<WebCommandEvent, 'requestId'>,
+    'Forge has no window open on the desktop, so it cannot change tabs.'
+  )
+}
+
+/**
+ * A folder a browser picked, on its way to the project rail.
+ *
+ * The folder is checked *here*, before the renderer hears about it at all:
+ * `checkFolder` is what turns "a string arrived off a socket" into "an absolute
+ * path that is a directory on this disk right now". The listing the browser
+ * chose from could be minutes old, and a project row pointing at a folder that
+ * has been renamed is a rail entry every terminal opened from it would fail on.
+ *
+ * Past that check it is the renderer's, through `addProjectPath` — the same
+ * function the desktop's own button reaches. That is decision 5 applied to the
+ * rail rather than to tabs: the renderer owns the project list and persists it,
+ * so a browser must not be able to reach a code path a local click cannot.
+ */
+function dispatchProjectAdd(path: string, deviceName: string): Promise<string | null> {
+  const checked = checkFolder(path)
+  if (!checked.ok) return Promise.resolve(checked.error)
+  return askRenderer(
+    IPC.webProjectAdd,
+    { deviceName, path: checked.path } satisfies Omit<WebProjectAddEvent, 'requestId'>,
+    'Forge has no window open on the desktop, so it cannot add a project.'
+  )
+}
+
+/* -------------------------------------------------------- the screen mirror
+ *
+ * A browser watching this desktop's own screen, and — behind the guard below —
+ * driving it.
+ *
+ * Nothing about capturing or encoding lives in the main process: it has no
+ * display to open a stream onto and no `VideoEncoder` to hand one to. So the
+ * picture half is a pass-through, exactly as Forge Mobile's is — the server's
+ * hook becomes a message to the window, and the window's chunks become frames
+ * on the socket. The renderer half is src/lib/mirror.ts.
+ *
+ * The *input* half is not a pass-through. It ends at `user32.dll`, on whatever
+ * window happens to be under the pointer, and everything below `canControl` is
+ * arranged around that one sentence.
+ */
+
+/** The window the capture runs in, or null when Forge has none open. */
+function mirrorWindow(): BrowserWindow | null {
   const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
-  if (windows.some((w) => w.isFocused())) return
-  if (!Notification.isSupported()) return
-  const note = new Notification({
-    title: 'A browser wants to connect to Forge',
-    body: `"${ask.deviceName}" is asking to connect. Its screen should be showing ${ask.words}. Open Forge to allow or deny.`
-  })
-  note.on('click', () => {
-    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
-    if (win) {
-      if (win.isMinimized()) win.restore()
-      win.show()
-      win.focus()
-    } else {
-      app.focus({ steal: true })
+  return windows[0] ?? null
+}
+
+function sendMirror(event: WebMirrorEvent): void {
+  mirrorWindow()?.webContents.send(IPC.webMirror, event)
+}
+
+/**
+ * Begin a mirror, or say why not — three gates, in the order that costs least
+ * to fail.
+ *
+ *  1. **The setting.** Off is the shipped state, and a desktop that is not
+ *     sharing its screen should say so before anything else is spent on the
+ *     question — in particular before somebody is asked for a PIN to unlock a
+ *     feature that was never going to start.
+ *  2. **A fresh PIN**, when one is set. Not the one that opened the connection
+ *     an hour ago: see `checkFreshPin` in electron/web/auth.ts, which exists
+ *     for this and says why a PIN typed at the start of the day is not an
+ *     answer to "is somebody still there".
+ *  3. **A window.** The capture runs in the renderer, so a Forge with its
+ *     window closed cannot share its screen at all. Minimised is fine — a
+ *     minimised window still captures.
+ *
+ * Everything discoverable only once capture is attempted — a refused permission,
+ * no display to name, an encoder that will not configure — comes back later on
+ * `IPC.webMirrorStop` instead, and reaches the browser as the same
+ * `mirror-stop` frame.
+ *
+ * Whether this one carries sound is decided here, now, and travels with the
+ * request. `webMirrorAudio` is read at the moment the browser asks rather than
+ * captured at boot — the same rule the control gate follows — but unlike an
+ * input frame a capture is negotiated once, so switching the sound off silences
+ * the next watch and not this one.
+ */
+function startMirror(pin: string): { error: string; needsPin?: boolean } | null {
+  const settings = getSettings()
+  if (!settings.webMirrorEnabled) {
+    return { error: 'This desktop does not share its screen with browsers. Turn it on in Settings › Forge Web.' }
+  }
+  const fresh = getAuth().checkFreshPin(pin)
+  if (!fresh.ok) return { error: fresh.message, ...(fresh.needed ? { needsPin: true } : {}) }
+  const win = mirrorWindow()
+  if (!win) return { error: 'Forge has no window open on the desktop, so it cannot share its screen.' }
+  win.webContents.send(IPC.webMirror, { kind: 'start', audio: settings.webMirrorAudio } satisfies WebMirrorEvent)
+  return null
+}
+
+/**
+ * A watch began or ended. Both edges, because the desk has to do something
+ * different at each.
+ *
+ * The notification is not a courtesy. Everything else Forge Web does is visible
+ * in the app itself — a tab opens, a pane appears, git moves — but a screen
+ * being captured looks exactly like a screen not being captured, and this door
+ * faces the internet. So the desk says it out loud, whether or not anybody is
+ * looking at Forge. It is a statement of fact about the machine rather than a
+ * question anybody is being asked.
+ */
+function onMirror(watching: boolean): void {
+  if (watching) {
+    console.log('[web] a browser is watching this screen')
+    if (Notification.isSupported()) {
+      new Notification({
+        title: 'A browser is watching this screen',
+        body: canControl()
+          ? 'It can also move the mouse and type. Stop it from Settings › Forge Web.'
+          : 'It can see this screen but cannot touch it. Stop it from Settings › Forge Web.'
+      }).show()
     }
-  })
-  note.show()
+  } else {
+    // The helper is torn down with the picture. It costs half a second to start
+    // and nothing to keep, but a PowerShell process outliving the browser that
+    // needed it is the kind of thing people find in a task manager and
+    // reasonably worry about. Every ending routes through here — a hang-up, a
+    // `mirror-stop` frame, a revocation, `stop()` — which is what makes one
+    // teardown enough.
+    stopDesktopInput()
+    sendMirror({ kind: 'stop' })
+  }
+  report()
+}
+
+/* ---------------------------------------------- driving from another country
+ *
+ * The mirror pointing back the other way: a browser's pointer as this desktop's
+ * mouse. Everything else in this file ends inside Forge; this ends at the
+ * operating system, on whatever window is under the cursor.
+ *
+ * ## The escalation guard
+ *
+ * Control is refused outright unless an unlock PIN is set, and that rule is the
+ * load-bearing one rather than the `webControlEnabled` toggle beside it.
+ *
+ * The reason is that a browser which can move the mouse can open Settings on
+ * this desk and switch every remaining lock off itself. On an account-only
+ * desktop a stolen Firebase password would therefore not merely be a shell: it
+ * would be a shell that can quietly re-key the door. Requiring the PIN means
+ * the mouse always arrives *after* something a stolen password does not come
+ * with — and, because `startMirror` asks for it again rather than accepting the
+ * one that opened the socket, after something typed seconds ago.
+ *
+ * Both gates are read per event, never captured. Switching control off, or
+ * clearing the PIN, while somebody is holding the pointer stops the next click
+ * rather than the next session.
+ */
+
+/** May the browser watching this screen touch this machine, right now? */
+function canControl(): boolean {
+  const settings = getSettings()
+  if (!canDriveDesktop() || !settings.webControlEnabled) return false
+  // The escalation guard. See the block above — this is the line, and it is
+  // deliberately not a second toggle somebody could switch off from the browser
+  // it is protecting against.
+  return Boolean(settings.webPin)
+}
+
+/**
+ * A fraction of the mirrored screen, as a physical pixel on it.
+ *
+ * `pointFor` in electron/mobile-host.ts, restated rather than imported for the
+ * reason shared/web.ts restates MAX_SESSIONS: importing it would drag Forge
+ * Mobile's whole host — its discovery, its APK route, its tunnel supervisor —
+ * into this file to borrow six lines. The two must stay identical, and the
+ * reasoning lives there in full:
+ *
+ * three coordinate systems meet here and none of them is the browser's. The
+ * capture is of the *primary* display, so that display's bounds are what a 0..1
+ * pair is a fraction of; Electron reports those bounds in device-independent
+ * pixels, and `SetCursorPos` wants real ones, which on a screen at 150% is a
+ * different number. `dipToScreenPoint` is the conversion, and it is only correct
+ * because the input helper declares itself DPI-aware before its first call —
+ * changing either place alone puts the cursor where nobody aimed it.
+ *
+ * Clamped one pixel inside the far edges: a fraction of exactly 1 lands on the
+ * first pixel of the next monitor on a multi-display desk.
+ */
+function pointFor(x: number, y: number): { x: number; y: number } {
+  const bounds = screen.getPrimaryDisplay().bounds
+  const dip = {
+    x: Math.round(bounds.x + x * Math.max(0, bounds.width - 1)),
+    y: Math.round(bounds.y + y * Math.max(0, bounds.height - 1))
+  }
+  return screen.dipToScreenPoint(dip)
+}
+
+/**
+ * Perform one input, or refuse it.
+ *
+ * `false` is the answer the browser is told about — see `onMirrorInput` in
+ * electron/web/server.ts, which turns it into one sentence per watch rather
+ * than a silence somebody has to interpret. A pointer that moves in the tab and
+ * nowhere else is the failure this exists to prevent.
+ */
+function applyInput(input: MirrorInput): boolean {
+  if (!canControl()) return false
+  // A key stroke and a typed phrase both have no position — they land wherever
+  // the focus already is, which is the whole point of them. The coordinates are
+  // ignored for those two and asked for anyway everywhere else, so the helper's
+  // grammar stays one shape.
+  const at = input.a === 'key' || input.a === 'text' ? { x: 0, y: 0 } : pointFor(input.x, input.y)
+  driveDesktop(input, at)
+  return true
 }
 
 /* -------------------------------------------------------------- rendezvous
@@ -991,7 +1119,7 @@ async function start(): Promise<void> {
     sessions: () => getManager().list(),
     replay: (id) => getReplay(id),
     write: (id, data) => getManager().write(id, data),
-    resize: (id, cols, rows) => getManager().resize(id, cols, rows),
+    resize: (id, cols, rows) => resizeForBrowser(id, cols, rows),
     snapshot: snapshotForBrowser,
     layout: dispatchLayout,
     // The exported functions, not the IPC handlers: a second host calls what
@@ -1007,10 +1135,31 @@ async function start(): Promise<void> {
       },
     commands: () => commandsFeed(),
     agents: async (commands) => probeForBrowser(commands),
+    // Pure filesystem work with no renderer in it: the browser is being shown
+    // what is on this disk, not asking for anything to change, so this one is
+    // answered here rather than forwarded. Everything it will and will not do
+    // is in electron/web/fs-browse.ts, including why a refusal is a value.
+    fsList: async (path, name) => listFolder(path, name),
+    projectAdd: (path, deviceName) => dispatchProjectAdd(path, deviceName),
+    mirrorStart: startMirror,
+    onMirror,
+    // Two hooks rather than one, and read per event rather than captured: the
+    // first decides whether to *offer* a cursor when the picture starts, the
+    // second decides whether to move it, and between those two moments somebody
+    // may have switched control off at this desk.
+    mirrorControl: canControl,
+    mirrorInput: applyInput,
     onPresence: (connected) => {
       if (connected > 0) holdBlocker()
       else releaseBlocker()
       report()
+    },
+    onWatch: (ids) => {
+      watched = new Set(ids)
+      // A pane nobody is reading has no browser geometry to remember; keeping
+      // it would let a stale size be re-asserted at the next reload.
+      for (const id of [...browserGeometry.keys()]) if (!watched.has(id)) browserGeometry.delete(id)
+      publishWatched()
     },
     log: (line) => console.log(line)
   }
@@ -1047,8 +1196,20 @@ async function start(): Promise<void> {
         .find((s) => s.id === id)
       if (session) instance.pushSessionStarted(session)
       instance.pushSessions()
+      // Re-adoption after a renderer reload arrives here too. pty-host resizes
+      // a re-adopted session to the renderer's own geometry *after* announcing
+      // the spawn (see the `existed` branch of its create), so a browser
+      // reading that pane has just had the width taken off it without being
+      // told. Putting it back therefore has to happen once that resize has
+      // run, which is what the microtask buys — nothing between the two is
+      // asynchronous, so this lands immediately afterwards rather than at some
+      // guessed interval.
+      const geometry = watched.has(id) ? browserGeometry.get(id) : undefined
+      if (geometry) queueMicrotask(() => resizeForBrowser(id, geometry.cols, geometry.rows))
+      else publishWatched()
     },
     onExit: (id, exitCode) => {
+      browserGeometry.delete(id)
       instance.pushExit(id, exitCode)
       // A dead pane changes the picture, so the list is refreshed too.
       instance.pushSessions()
@@ -1061,9 +1222,6 @@ async function start(): Promise<void> {
   })
 
   report('')
-  // A restart mid-window stays armed for the remainder — re-hang the disarm
-  // timer so the remainder still ends itself.
-  syncAcceptTimer()
   // After the server, never before: a tunnel pointed at a port nothing listens
   // on is a public address that refuses, and the record that would advertise it
   // says "dial this and a Forge will answer". `isEnabled()` checks
@@ -1269,14 +1427,6 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   // in goes, then the door.
   stopTunnel()
 
-  // Switching the link off disarms it too: "off" must mean off, not "off but
-  // primed to accept strangers the moment it is switched back on". Guarded on
-  // being armed so a Forge that never had this feature on does not write
-  // settings.json on the way out of every quit.
-  if (armedUntil()) disarmAccept()
-  else syncAcceptTimer()
-  for (const requestId of [...pendingApprovals.keys()]) settleApproval(requestId, false)
-
   unsubscribePty?.()
   unsubscribePty = null
   unsubscribeGit?.()
@@ -1344,27 +1494,6 @@ export function registerWebHandlers(): void {
     return webStatus()
   })
 
-  /**
-   * Arm or disarm "Accept new browsers". Arming needs a listening server — an
-   * armed door on a stopped server would be a toggle that lies — and always
-   * arms for exactly one window from now; there is no "arm forever".
-   */
-  ipcMain.handle(IPC.webAccept, (_e, on: unknown): WebStatus => {
-    if (on === true) {
-      if (!server) {
-        report('Turn Forge Web on first.')
-        return webStatus()
-      }
-      setSettings({ webAcceptUntil: Date.now() + ACCEPT_WINDOW_MS })
-      syncAcceptTimer()
-      report('Accepting new browsers — open the page and sign in.')
-    } else {
-      disarmAccept()
-      report('')
-    }
-    return webStatus()
-  })
-
   ipcMain.handle(IPC.webRevoke, (_e, deviceId: string): WebStatus => {
     const id = String(deviceId ?? '')
     if (getAuth().revoke(id)) {
@@ -1389,40 +1518,86 @@ export function registerWebHandlers(): void {
   })
 
   /**
-   * Start enrolling a second factor. The secret lives in `WebAuth`'s memory
-   * until a code proves an app holds it; nothing reaches settings.json here.
+   * Set the unlock PIN. The only call that writes one, and the digits stop
+   * here: what reaches settings.json is `hashPin`'s output and nothing else.
+   *
+   * The shape is checked in main rather than trusted from the panel, because a
+   * renderer is not the thing that decides what opens this door — and a refusal
+   * is a sentence rather than a silent no-op, since the person typing it is the
+   * one who has to fix it.
    */
-  ipcMain.handle(IPC.webTotpBegin, (): WebTotpOffer => {
-    if (!getTotpKey()) {
-      return { ok: false, error: 'Forge could not create the key that protects a second factor on this machine.' }
+  ipcMain.handle(IPC.webPinSet, (_e, pin: unknown): WebStatus | { error: string } => {
+    const typed = String(pin ?? '')
+    if (!isValidPin(typed)) {
+      return { error: `A PIN is ${PIN_MIN_DIGITS} to ${PIN_MAX_DIGITS} digits, and nothing else.` }
     }
-    const offer = getAuth().beginEnrolment(getSettings().webEmail)
-    return { ok: true, secret: offer.secret, uri: offer.uri }
-  })
-
-  /**
-   * Confirm it. The one call that writes a secret, and it writes it sealed —
-   * see `saveTotpState`, which refuses rather than falling back to plaintext.
-   */
-  ipcMain.handle(IPC.webTotpConfirm, (_e, code: string): WebTotpResult => {
-    const result = getAuth().completeEnrolment(String(code ?? ''))
-    if (result.ok) report('Two-factor is on. Keep the recovery codes somewhere that is not this machine.')
-    return result
-  })
-
-  ipcMain.handle(IPC.webTotpDisable, (): WebStatus => {
-    getAuth().disableTotp()
-    report('Two-factor is off.')
+    setSettings({ webPin: hashPin(typed) })
+    report('Browsers will be asked for the PIN from the next connection.')
     return webStatus()
   })
 
   /**
-   * The human's verdict on an approval prompt. `=== true` twice over (here and
-   * in preload), because the difference between truthy and true is the
-   * difference between a stranger with a shell and none.
+   * Remove it. Browsers then get in on the account alone, and screen control is
+   * refused outright — see `canControl`.
    */
-  ipcMain.on(IPC.webApprovalResult, (_e, payload: { requestId?: string; allow?: boolean }) => {
-    settleApproval(String(payload?.requestId ?? ''), payload?.allow === true)
+  ipcMain.handle(IPC.webPinClear, (): WebStatus => {
+    setSettings({ webPin: '' })
+    report('The PIN is off — browsers signed in as this account get in without one.')
+    return webStatus()
+  })
+
+  /* ------------------------------------------------------ the screen mirror
+   *
+   * The renderer's half, all three of them sends: the capture is a stream, not
+   * a question, so there is no request/response pair and no pending map. What
+   * arrives here is clamped and rebuilt field by field before it goes near a
+   * socket — this is a renderer talking, but what it says ends up on a public
+   * wire, and `WebMirrorConfig` is the shape a decoder is configured from.
+   */
+
+  /** The capture is up, and here is what the browser's decoder needs. */
+  ipcMain.on(IPC.webMirrorReady, (_e, payload: Partial<WebMirrorConfig>) => {
+    const description = String(payload?.description ?? '')
+    server?.pushMirrorReady({
+      codec: String(payload?.codec ?? ''),
+      width: Math.max(0, Math.floor(Number(payload?.width) || 0)),
+      height: Math.max(0, Math.floor(Number(payload?.height) || 0)),
+      // Absent means "the chunks are self-describing", which is a different
+      // instruction to a decoder than an empty string — see `WebMirrorConfig`.
+      ...(description ? { description } : {})
+    })
+  })
+
+  /** One encoded chunk. The server holds it to MAX_MIRROR_CHUNK_BYTES. */
+  ipcMain.on(IPC.webMirrorChunk, (_e, payload: Partial<WebMirrorChunk>) => {
+    const duration = Number(payload?.duration)
+    server?.pushMirrorFrame({
+      data: String(payload?.data ?? ''),
+      key: payload?.key === true,
+      timestamp: Math.floor(Number(payload?.timestamp) || 0),
+      ...(Number.isFinite(duration) && duration > 0 ? { duration: Math.floor(duration) } : {})
+    })
+  })
+
+  /**
+   * The capture ended on this side — it was refused, Steve stopped sharing at
+   * the OS level, the encoder died. A sentence the browser shows instead of a
+   * frozen last frame.
+   */
+  ipcMain.on(IPC.webMirrorStop, (_e, payload: { reason?: string }) => {
+    server?.pushMirrorStop(String(payload?.reason ?? '') || 'The desktop stopped sharing its screen.')
+  })
+
+  /**
+   * The person at the desk pressed Stop. Distinct from `webMirrorStop` above,
+   * which is the capture reporting its own death: this is somebody taking their
+   * screen back, so it is an invoke that answers with the new status, and it
+   * ends the watch at the socket — the teardown of the capture follows from
+   * that through `onMirror`, rather than being asked for separately.
+   */
+  ipcMain.handle(IPC.webMirrorEnd, (): WebStatus => {
+    server?.pushMirrorStop('The screen was taken back at the desk.')
+    return webStatus()
   })
 
   /** The renderer's verdict on a `webCommand`. */
@@ -1496,12 +1671,5 @@ export async function disposeWeb(): Promise<void> {
     pending.resolve('Forge is shutting down.')
   }
   pendingOps.clear()
-  // stop() below also settles these (as denies — shutdown is not consent), but
-  // dispose must not depend on stop being reached.
-  for (const requestId of [...pendingApprovals.keys()]) settleApproval(requestId, false)
-  if (acceptTimer) {
-    clearTimeout(acceptTimer)
-    acceptTimer = null
-  }
   await stop('quit')
 }

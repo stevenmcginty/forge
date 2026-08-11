@@ -1,11 +1,11 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { countLeaves } from '@/lib/splitTree'
 import { EmptyState } from '@/components/EmptyState'
 import { Icon } from '@/components/Icon'
 import { useNarrow } from '../lib/narrow'
 import { useActiveProject, useForge, useWorkspace } from '../state'
 import { AgentChooser } from './AgentChooser'
 import { GitHubMode } from './GitHubMode'
+import { Mirror } from './Mirror'
 import { OfflineBanner } from './OfflineBanner'
 import { Rail } from './Rail'
 import { SplitView } from './Panes'
@@ -22,6 +22,15 @@ import { TopBar } from './TopBar'
  * board, no settings page. A browser tab has none of the hardware any of those
  * are attached to, and a public URL that could reach them would be a different
  * risk class.
+ *
+ * ## Three states, one shell
+ *
+ * Live, reconnecting and asleep all draw this same furniture, and the difference
+ * between them is a strip under the titlebar plus what the panes will accept.
+ * That is deliberate and it is decision 10's rule applied one state wider: Forge
+ * asleep must not look like Forge broken, and neither must Forge on a socket
+ * that hiccupped. Blanking the page for a reconnect used to cost every terminal
+ * in it — see `PaneView` — which is a great deal to spend on a spinner.
  */
 export function Workspace(): ReactNode {
   const { state, actions } = useForge()
@@ -35,8 +44,38 @@ export function Workspace(): ReactNode {
   const newTabRef = useRef<HTMLButtonElement | null>(null)
   const [chooserOpen, setChooserOpen] = useState(false)
   const offline = state.stage.kind === 'offline'
+  const live = !offline && state.connection.state === 'live'
+  /**
+   * Is the screen mirror open?
+   *
+   * Mounted rather than hidden, because mounting *is* the request: the overlay
+   * asks the desktop for its screen when it appears and tells it to stop when it
+   * goes away, so a hidden one would leave a capture running — and an OS
+   * notification standing — for something nobody can see. See Mirror.tsx.
+   */
+  const [watching, setWatching] = useState(false)
 
-  const tab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0] ?? null
+  const activeTabId =
+    (workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0])?.id ?? null
+
+  /**
+   * Which tabs have been looked at, and therefore stay drawn.
+   *
+   * Mounting only the active tab meant flipping between two tabs disposed every
+   * xterm in one and rebuilt every xterm in the other, which is a detach, an
+   * attach and a replay per pane for a gesture that moves nothing. So a tab that
+   * has been on screen once stays mounted and is hidden with CSS instead — the
+   * `fit()` in lib/term.ts refuses to measure a container under 8px, which is
+   * what stops a hidden tab resizing its PTYs to nonsense while it waits.
+   *
+   * Mounted on first *view* rather than all at once, because the alternative is
+   * paying for every tab's catch-up buffer on every connection — sixteen panes
+   * at up to MAX_REPLAY_BYTES each — to save a wait nobody has asked for yet. A
+   * ref rather than state because this is derived from what is already being
+   * rendered and adding it to state would cost a second render on every switch.
+   */
+  const drawn = useRef(new Set<string>())
+  if (activeTabId) drawn.current.add(activeTabId)
 
   // Nothing here listens for a window resize, on purpose: a window resize
   // changes every pane container's box, and each terminal's own ResizeObserver
@@ -45,8 +84,13 @@ export function Workspace(): ReactNode {
 
   return (
     <div className="app" data-ready="true">
-      <TopBar collapsed={collapsed} onToggleRail={() => setRailCollapsed((v) => !v)} />
+      <TopBar
+        collapsed={collapsed}
+        onToggleRail={() => setRailCollapsed((v) => !v)}
+        onWatchScreen={live ? () => setWatching(true) : null}
+      />
       <OfflineBanner />
+      <ReconnectingBanner />
       <div className="app__body">
         <aside className="app__left" data-collapsed={collapsed}>
           <Rail collapsed={collapsed} />
@@ -70,10 +114,16 @@ export function Workspace(): ReactNode {
                   icon="folder"
                   eyebrow="Forge"
                   title="No project selected"
-                  body="Pick one in the rail. Projects are added at the desk — a browser cannot choose a folder on somebody else’s disk."
+                  body="Pick one in the rail, or press + there to look through that desktop’s folders and add one."
                 />
-              ) : tab ? (
-                <SplitView node={tab.root} activePaneId={tab.activePaneId} onlyPane={countLeaves(tab.root) === 1} />
+              ) : activeTabId ? (
+                workspace.tabs
+                  .filter((t) => drawn.current.has(t.id))
+                  .map((t) => (
+                    <div className="grid__tab" key={t.id} data-active={t.id === activeTabId}>
+                      <SplitView node={t.root} activePaneId={t.activePaneId} onScreen={t.id === activeTabId} />
+                    </div>
+                  ))
               ) : (
                 <EmptyState
                   icon="terminal"
@@ -90,7 +140,7 @@ export function Workspace(): ReactNode {
                       ref={newTabRef}
                       type="button"
                       className="cta-btn"
-                      disabled={offline}
+                      disabled={!live}
                       onClick={() => setChooserOpen(true)}
                     >
                       <Icon name="plus" size={14} />
@@ -111,13 +161,50 @@ export function Workspace(): ReactNode {
         </div>
       ) : null}
 
+      {watching ? <Mirror onClose={() => setWatching(false)} /> : null}
+
       <AgentChooser
         anchor={newTabRef.current}
         open={chooserOpen}
         onClose={() => setChooserOpen(false)}
-        onPick={(profileId) => void actions.layout({ op: 'create-tab', profileId })}
+        onPick={(profileId, permissionMode) => void actions.layout({ op: 'create-tab', profileId, permissionMode })}
         selectedId={project?.defaultProfileId}
       />
+    </div>
+  )
+}
+
+/**
+ * "The link dropped and this page is getting it back."
+ *
+ * `OfflineBanner`'s strip, in the connecting palette, and that pairing is the
+ * whole design of it. The *shape* is shared because the news is the same shape —
+ * what is on screen is real but not live right now, here is why, here is the one
+ * thing you can do — and the colour differs because the recovery does: asleep
+ * needs somebody to wake a machine, this needs nothing but a moment. The link
+ * badge in the titlebar has spent `--info` on exactly this state since the day
+ * it was written, so the strip is agreeing with it rather than inventing a
+ * second vocabulary. Compare `.ghfail[data-reason]`, which is the same band in
+ * two palettes for the same reason.
+ *
+ * Only ever drawn over a picture that has already arrived — `App` sends a first
+ * connection to the full-page gate — so it is never the whole of what somebody
+ * is looking at.
+ */
+function ReconnectingBanner(): ReactNode {
+  const { state, actions } = useForge()
+  if (state.stage.kind !== 'connected' || state.connection.state === 'live') return null
+
+  return (
+    <div className="offline" data-link="reconnecting" role="status" data-testid="reconnecting-banner">
+      <Icon name="restart" size={13} />
+      <span className="offline__text truncate">
+        <strong>The link to {state.picture?.desktopName || 'the desktop'} dropped.</strong> This is where the terminals
+        had got to; they repaint themselves when it comes back, and nothing can be typed into them until it does.
+      </span>
+      <button type="button" className="ghost-btn offline__look" onClick={() => actions.retry()}>
+        Try now
+      </button>
     </div>
   )
 }

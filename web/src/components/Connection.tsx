@@ -1,12 +1,12 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { APPROVAL_TIMEOUT_MS, TOTP_DIGITS, TRUST_WINDOW_MS, type WebRefusal } from '@shared/web'
+import { useState, type FormEvent, type ReactNode } from 'react'
+import { PIN_MAX_DIGITS, PIN_MIN_DIGITS, type WebRefusal } from '@shared/web'
 import { Icon, type IconName } from '@/components/Icon'
 import { useForge } from '../state'
 
 /**
  * The connection screens — the part of this client that is not a spinner.
  *
- * shared/web.ts is blunt about why these are seven values rather than one error
+ * shared/web.ts is blunt about why these are eight values rather than one error
  * string: "These are different sentences on screen and different recovery paths
  * — sign in again, sign in as somebody else, wait for a human, ask a human,
  * update the page, come back later — so they are different values rather than
@@ -54,24 +54,14 @@ function recovery(reason: WebRefusal, email: string): Recovery {
       }
     case 'not-approved':
       return {
-        title: 'This browser has not been approved',
-        icon: 'panel',
-        hint: 'Nobody has said no — nobody has been asked. Open Forge on the desktop, switch on "Accept new browsers", then try again.',
-        action: 'retry'
-      }
-    case 'declined':
-      return {
-        title: 'The desktop said no',
-        icon: 'close',
-        hint: 'Asking again raises a new prompt rather than retrying this one, so it needs somebody at the desk either way.',
-        action: 'retry'
-      }
-    case 'timed-out':
-      return {
-        title: 'Nobody answered',
+        title: 'This browser did not identify itself',
         icon: 'restart',
-        hint: 'The question expired on the desktop. Trying again asks it afresh.',
-        action: 'retry'
+        // The one thing the desktop cannot say, because it is a fact about this
+        // page: the id is minted in browser storage and sent on every `hello`,
+        // so a blank one is a page whose storage was unavailable rather than a
+        // browser anybody has judged. Retrying would send the same blank id.
+        hint: 'Reloading mints a fresh id for this browser. If it says the same thing afterwards, this browser is refusing the page any storage to keep one in — private browsing, or blocked site data.',
+        action: 'reload'
       }
     case 'revoked':
       return {
@@ -79,7 +69,7 @@ function recovery(reason: WebRefusal, email: string): Recovery {
         icon: 'close',
         // "The page should forget its device id and stop reconnecting; a revoked
         // device that keeps knocking is a prompt storm."
-        hint: 'It was approved once and has since been revoked in the desktop’s settings. Forgetting this browser lets it ask to be let in again — somebody at the desk has to allow it.',
+        hint: 'It was admitted once and has since been revoked in the desktop’s settings. Forgetting this browser mints it a fresh id, so the next connection is a new row rather than the revoked one — and it still has to answer the desktop’s PIN.',
         action: 'forget'
       }
     case 'proto':
@@ -96,16 +86,17 @@ function recovery(reason: WebRefusal, email: string): Recovery {
         hint: 'It is up, but not ready — still starting, or holding too many sockets. This page will try again on its own.',
         action: 'retry'
       }
-    // Both are drawn by `TotpPrompt` rather than by `Refused`, because a
-    // question is not a failure. They are still in this table: leaving them out
-    // would mean a desktop that somehow sent one on a path this page did not
-    // expect fell through to nothing at all.
-    case 'totp-required':
-    case 'totp-invalid':
+    // Both are drawn by `PinPrompt` rather than by `Refused`, because a question
+    // is not a failure — `lib/client.ts` intercepts them into the `pin`
+    // connection state before this table is ever reached. They are still in it:
+    // leaving them out would mean a desktop that somehow sent one on a path this
+    // page did not expect fell through to nothing at all.
+    case 'pin-required':
+    case 'pin-invalid':
       return {
-        title: 'This desktop wants a code',
+        title: 'This desktop wants its unlock PIN',
         icon: 'gear',
-        hint: 'Open your authenticator app and try again with the code it is showing.',
+        hint: `The ${PIN_MIN_DIGITS}-to-${PIN_MAX_DIGITS} digit PIN set in Forge's settings on that PC. Try again to be asked for it.`,
         action: 'retry'
       }
   }
@@ -147,43 +138,6 @@ export function Connecting({ attempt, note }: { attempt: number; note?: string }
         {note ?? (attempt > 0 ? `Reconnecting to the desktop (attempt ${attempt + 1})…` : 'Looking for the desktop…')}
       </p>
       <div className="gate__pulse" aria-hidden="true" />
-    </Screen>
-  )
-}
-
-/**
- * "Steve is being asked about you. Hold on."
- *
- * The word pair is in large type because comparing it against the desktop's
- * prompt is the entire anti-confusion device — shared/web.ts: "the browser shows
- * the pair in large type, the desktop shows the same pair in its prompt, and the
- * human is told to compare them. Without it, a stranger who guessed the hostname
- * could make a prompt appear at the moment Steve happened to be approving his
- * own laptop, and Allow would go to the wrong device."
- *
- * The string is rendered exactly as sent. There is no second word list here, and
- * there must not be: two lists is how the two screens end up showing different
- * words.
- */
-export function Pending({ words, expiresAt }: { words: string; expiresAt: number }): ReactNode {
-  const [left, setLeft] = useState(() => remaining(expiresAt))
-  useEffect(() => {
-    setLeft(remaining(expiresAt))
-    const timer = window.setInterval(() => setLeft(remaining(expiresAt)), 1000)
-    return () => clearInterval(timer)
-  }, [expiresAt])
-
-  return (
-    <Screen reason="pending" title="Waiting to be let in" icon="panel">
-      <p className="gate__body">Forge is asking on the desktop. Check that it is showing these two words:</p>
-      <p className="gate__words mono" data-testid="approval-words">
-        {words}
-      </p>
-      <p className="gate__hint">
-        {left > 0
-          ? `The question expires in ${formatLeft(left)}.`
-          : `Nobody has ${APPROVAL_TIMEOUT_MS / 60_000} minutes to answer — this one has run out.`}
-      </p>
     </Screen>
   )
 }
@@ -234,106 +188,84 @@ export function Refused({
 }
 
 /**
- * "This desktop wants a code."
+ * "This desktop asks for its unlock PIN."
  *
- * A text box rather than an apology, because nothing has gone wrong: the
- * desktop has a second factor enrolled and this browser has not shown one yet.
- * The same screen serves the second visit, with the desktop's sentence about
- * the code that did not work above it — deliberately not two screens, because
- * the thing to do next is identical and a person who mistyped six digits should
- * not have to navigate back to where they were.
+ * A text box rather than an apology, because nothing has gone wrong: the desktop
+ * has a PIN set and the first `hello` of every sign-in deliberately carries
+ * none, so this screen is the ordinary second half of getting in rather than a
+ * failure anybody has to recover from.
  *
- * "Trust this browser" is what stops this being a daily event: inside the
- * window (TRUST_WINDOW_MS) the desktop stops asking, and revoking the browser
- * in Settings ends that in the same act, because it is a field on the same row.
+ * The same screen serves the second visit, with the desktop's sentence about the
+ * PIN that did not open the door above it — deliberately not two screens,
+ * because the thing to do next is identical and a person who mistyped four
+ * digits should not have to navigate back to where they were.
+ *
+ * There is no "trust this browser" and no recovery code, and neither is an
+ * omission. shared/web.ts: the PIN "is not a device credential — it is the thing
+ * that says the person holding the account is the person who set it up — so a
+ * browser that has answered it once still answers it on the next connection".
  */
-export function TotpPrompt({ message, invalid }: { message: string; invalid: boolean }): ReactNode {
+export function PinPrompt({ message, invalid }: { message: string; invalid: boolean }): ReactNode {
   const { actions } = useForge()
-  const [code, setCode] = useState('')
-  const [trust, setTrust] = useState(true)
+  const [pin, setPin] = useState('')
 
   const submit = (event: FormEvent): void => {
     event.preventDefault()
-    if (!code.trim()) return
-    actions.submitTotp(code.trim(), trust)
-    setCode('')
+    if (pin.length < PIN_MIN_DIGITS) return
+    actions.submitPin(pin)
+    // Dropped the moment it is handed over, exactly as `lib/client.ts` drops it
+    // after one `hello`: a page holds a PIN for as long as it takes to send it
+    // and no longer.
+    setPin('')
   }
 
   return (
     <div className="gate">
-      <form className="gate__card" data-reason="totp" onSubmit={submit}>
+      <form className="gate__card" data-reason="pin" onSubmit={submit}>
         <div className="gate__mark">
           <Icon name="gear" size={22} />
         </div>
-        <h1 className="gate__title">Enter your code</h1>
+        <h1 className="gate__title">Enter the desktop’s PIN</h1>
         {/* The desktop's own sentence, verbatim, exactly as `Refused` shows it:
             it is the half that knows whether this is the first ask or a wrong
             answer, and this page only knows what the box is for. */}
         <p className={invalid ? 'gate__error' : 'gate__body'}>
-          {message || `The ${TOTP_DIGITS}-digit code from your authenticator app.`}
+          {message || `The ${PIN_MIN_DIGITS}-to-${PIN_MAX_DIGITS} digit PIN set on the desktop.`}
         </p>
 
         <label className="gate__field">
-          <span className="eyebrow">Code</span>
+          <span className="eyebrow">Unlock PIN</span>
           <input
             className="gate__input mono"
-            type="text"
-            /* `one-time-code` is what makes a phone offer the code from its own
-               notification, and `numeric` is what gives it a number pad. Neither
-               is decoration on a screen somebody is using one-handed. */
+            /* Masked, because this one is typed in a coffee shop as often as at
+               a desk, and unlike a rotating code it is the same digits tomorrow. */
+            type="password"
+            /* `one-time-code` is what makes a phone offer to fill it rather than
+               offering the password for this site, and `numeric` is what gives
+               it a number pad. Neither is decoration on a screen somebody is
+               using one-handed. */
             autoComplete="one-time-code"
             inputMode="numeric"
+            maxLength={PIN_MAX_DIGITS}
             autoFocus
-            data-testid="totp-input"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
+            data-testid="pin-input"
+            value={pin}
+            /* Digits only, and never more than the protocol allows, because
+               that is the whole of what `isValidPin` on the desktop accepts —
+               a box that took a stray space would spend a lockout strike on a
+               keystroke rather than on a wrong PIN. */
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, PIN_MAX_DIGITS))}
           />
         </label>
 
-        <label className="gate__check">
-          <input type="checkbox" checked={trust} onChange={(e) => setTrust(e.target.checked)} />
-          <span>Trust this browser for {TRUST_WINDOW_MS / (24 * 60 * 60_000)} days</span>
-        </label>
-
-        <button type="submit" className="cta-btn gate__go" disabled={!code.trim()}>
-          Continue
+        <button type="submit" className="cta-btn gate__go" disabled={pin.length < PIN_MIN_DIGITS}>
+          Unlock
         </button>
         <p className="gate__hint">
-          Lost the app? A recovery code works here instead — each one works once.
+          This is the PIN set in Forge’s settings on that PC, and it is asked for on every connection.
         </p>
       </form>
     </div>
-  )
-}
-
-/**
- * `declined` and `timed-out` are states of their own in `WebApprovalState`, not
- * shades of `refused`, so they get their own screens — a human said no, or
- * nobody was there, and those are not the same news.
- */
-export function Declined({ message }: { message: string }): ReactNode {
-  const { actions } = useForge()
-  return (
-    <Screen reason="declined" title="The desktop said no" icon="close">
-      <p className="gate__body">{message || 'Somebody at the desk declined this browser.'}</p>
-      <p className="gate__hint">Asking again raises a new prompt, with new words, rather than retrying this one.</p>
-      <button type="button" className="cta-btn gate__go" onClick={() => actions.retry()}>
-        Ask again
-      </button>
-    </Screen>
-  )
-}
-
-export function TimedOut({ message }: { message: string }): ReactNode {
-  const { actions } = useForge()
-  return (
-    <Screen reason="timed-out" title="Nobody answered" icon="restart">
-      <p className="gate__body">{message || 'The question expired on the desktop.'}</p>
-      <p className="gate__hint">Try again when somebody is at the machine — the words are minted fresh each time.</p>
-      <button type="button" className="cta-btn gate__go" onClick={() => actions.retry()}>
-        Ask again
-      </button>
-    </Screen>
   )
 }
 
@@ -364,16 +296,4 @@ export function Unconfigured({ error }: { error: string }): ReactNode {
       </p>
     </Screen>
   )
-}
-
-/* ---------------------------------------------------------------- helpers */
-
-function remaining(expiresAt: number): number {
-  return Math.max(0, expiresAt - Date.now())
-}
-
-function formatLeft(ms: number): string {
-  const seconds = Math.ceil(ms / 1000)
-  if (seconds < 60) return `${seconds}s`
-  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`
 }

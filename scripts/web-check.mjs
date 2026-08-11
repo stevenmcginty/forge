@@ -58,11 +58,11 @@
  * out.
  */
 import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse as parsePath, sep } from 'node:path'
 import { WebSocket } from 'ws'
 
 /* ------------------------------------------------------------- the sandbox */
@@ -231,6 +231,19 @@ globalThis.__forgeIpc = { handlers: new Map(), listeners: new Map() }
 globalThis.__forgeTray = null
 globalThis.__forgeBalloons = []
 
+/**
+ * The windows `BrowserWindow.getAllWindows()` reports, which is none for almost
+ * the whole of this run.
+ *
+ * None is the honest state for a head-less check and the one `dispatchLayout`
+ * has to refuse cleanly in, so it stays the default. The exception is the "one
+ * PTY, two viewers" phase: what a browser's watch produces is a *broadcast to
+ * every renderer*, and a broadcast with nothing to receive it cannot be
+ * observed at all. That phase installs a window that records what it is sent
+ * and takes it away again afterwards.
+ */
+globalThis.__forgeWindows = []
+
 const ELECTRON_STUB = 'forge-web-check:electron'
 
 /* --------------------------------------------- a scripted tunnel agent
@@ -334,9 +347,9 @@ registerHooks({
           '  on: (channel, fn) => ipc.listeners.set(channel, fn),',
           '  removeHandler: (channel) => ipc.handlers.delete(channel)',
           '}',
-          // No windows, ever. That is the honest state for a head-less run, and
-          // it is also the state `dispatchLayout` has to refuse cleanly in.
-          'export const BrowserWindow = { getAllWindows: () => [], fromWebContents: () => null }',
+          // Whatever `__forgeWindows` holds, which is nothing unless a phase has
+          // deliberately put a recorder there — see the declaration above.
+          'export const BrowserWindow = { getAllWindows: () => globalThis.__forgeWindows, fromWebContents: () => null }',
           'export const Notification = { isSupported: () => false }',
           'export class Tray {',
           '  constructor(image) { this.image = image; globalThis.__forgeTray = this }',
@@ -523,6 +536,9 @@ const dbCalls = (method, suffix) =>
 const store = await import('../electron/store.ts')
 const host = await import('../electron/web-host.ts')
 const { WEB_PROTO, WEB_SUBPROTOCOL, WEB_WS_PATH } = await import('../shared/web.ts')
+// The channel name, from the file that owns it: a literal here would keep
+// passing after somebody renamed the real one.
+const { IPC } = await import('../shared/ipc.ts')
 
 const ipc = globalThis.__forgeIpc
 const invoke = (channel, ...args) => {
@@ -536,7 +552,7 @@ const invoke = (channel, ...args) => {
  * arrived in — which is the whole of the shutdown assertion: a `shutdown` frame
  * sent *after* the close is a frame nobody receives.
  */
-function browser(deviceId, { origin, totp } = {}) {
+function browser(deviceId, { origin, pin } = {}) {
   const socket = new WebSocket(`ws://127.0.0.1:${PORT}${WEB_WS_PATH}`, [WEB_SUBPROTOCOL], {
     ...(origin ? { origin } : {})
   })
@@ -559,9 +575,9 @@ function browser(deviceId, { origin, totp } = {}) {
           client: 'web-check',
           deviceId,
           deviceName: 'Check',
-          // Omitted unless a phase is exercising the second factor, so every
-          // other phase sends the hello it always sent.
-          ...(totp ? { totp } : {})
+          // Omitted unless a phase is exercising the unlock PIN, so every other
+          // phase sends the hello it always sent.
+          ...(pin ? { pin } : {})
         })
       )
       resolvePromise(tab)
@@ -617,7 +633,8 @@ store.setSettings({
     { id: 'browser-1', name: 'Check', createdAt: 1, lastSeenAt: 1, revokedAt: 0 },
     { id: 'browser-2', name: 'Check two', createdAt: 1, lastSeenAt: 1, revokedAt: 0 }
   ],
-  webAcceptUntil: 0,
+  // No unlock PIN, which is what this desktop ships as. Phase 5b sets one.
+  webPin: '',
   // The Companion, signed in — as a *different account*. This is the whole
   // point of the arrangement: there is a perfectly good Firebase session on this
   // desktop, and it belongs to somebody else's subtree. Forge Web must not
@@ -777,70 +794,235 @@ log(afterRevoke.devices.find((d) => d.id === 'browser-1')?.revokedAt > 0, 'the r
 await waitFor(() => host.webStatus().connected === 0, 2000, 'the connection count to fall')
 log(host.webStatus().connected === 0, 'nobody is connected any more')
 
-/* ================================================================== phase 5b
+/* ================================================================== phase 5a
  *
- * The second factor, through the real host and over a real socket.
+ * The folder browser, and the project it adds.
  *
- * `scripts/web-auth-check.mjs` proves the arithmetic and every refusal; what
- * only this file can prove is the *lifecycle* — that the three IPC calls the
- * settings panel makes write what they claim, that the secret is sealed by the
- * time it reaches the file, and that a browser holding no code is turned away
- * by the server rather than merely by the class.
+ * The one part of Forge Web that reads this machine's disk on a browser's say-so
+ * — so it is driven the way a browser drives it: real `request` frames down a
+ * real socket into the real `electron/web-host.ts`, against a real directory
+ * tree made below inside the sandbox. Nothing here is a unit test of
+ * `listFolder`; what is being proved is the whole route, including the two
+ * things it must refuse and the ceiling it must not exceed.
+ *
+ * The refusals are the point of the phase. Every path here arrives off a socket,
+ * and a picker is a thing somebody clicks around in — so a relative path, a
+ * `..`, a folder that has gone and a file where a folder was are all ordinary
+ * events, and each of them has to come back as a *sentence on the same rid*
+ * rather than as a throw. A rejected promise inside the host would settle
+ * nothing, and the browser would be left holding a request forever.
  */
 
-console.log('\nthe second factor')
+console.log('\nbrowsing this desktop’s folders from a browser')
 
-const { totpCode } = await import('../electron/web/totp.ts')
+const { MAX_FS_ENTRIES } = await import('../electron/web/fs-browse.ts')
 
-log(store.getSettings().webRequireApproval === false, 'the desktop ships with device approval off — the account is the key')
-log(host.webStatus().requireApproval === false, 'and the panel is told so')
-log(host.webStatus().totpEnabled === false, 'with no second factor enrolled either')
+/* A small tree with one of each thing the picker has to draw: a repository, a
+ * plain folder, and a file. */
+const browseDir = join(dataDir, 'browse')
+mkdirSync(join(browseDir, 'alpha', '.git'), { recursive: true })
+mkdirSync(join(browseDir, 'beta'), { recursive: true })
+writeFileSync(join(browseDir, 'notes.txt'), 'not a folder')
 
-const totpOffer = await invoke('web:totp-begin')
-log(totpOffer.ok === true && totpOffer.uri.startsWith('otpauth://totp/'), 'starting the setup hands back an otpauth:// URI')
-log(store.getSettings().webTotpSecret === '', 'and writes nothing — an unproved secret is never persisted')
+/* And one folder with more in it than an answer may carry. Made three past the
+ * ceiling rather than ten thousand: what is being tested is that the cap is
+ * applied and confessed, and building fifty thousand directories to prove it
+ * would only be testing NTFS. */
+const manyDir = join(dataDir, 'many')
+for (let i = 0; i < MAX_FS_ENTRIES + 3; i++) mkdirSync(join(manyDir, `d${String(i).padStart(4, '0')}`), { recursive: true })
 
-const badConfirm = await invoke('web:totp-confirm', '000000')
-log(badConfirm.ok === false, 'a wrong code does not complete the setup')
-log(store.getSettings().webTotpSecret === '', 'and still writes nothing')
+const picker = await browser('browser-picker', { origin: `https://${PROJECT}.web.app` })
+await waitFor(() => frameOf(picker, 'hello-ok') || picker.closed !== null, 4000, 'the browser that will do the picking')
+log(Boolean(frameOf(picker, 'hello-ok')), 'a browser is let in to do the picking')
 
-const confirmed = await invoke('web:totp-confirm', totpCode(totpOffer.secret, Math.floor(Date.now() / 30_000)))
-log(confirmed.ok === true, 'a correct code completes it')
-log(confirmed.ok && confirmed.recovery.length === 10, 'and hands back ten recovery codes, this once')
-log(host.webStatus().totpEnabled === true && host.webStatus().recoveryLeft === 10, 'the panel now reads code required')
+let rid = 0
+const ask = async (body) => {
+  const id = `pick-${++rid}`
+  picker.socket.send(JSON.stringify({ type: 'request', rid: id, body }))
+  await waitFor(() => picker.frames.some((f) => f.type === 'result' && f.rid === id), 8000, `the result for ${id}`)
+  return picker.frames.find((f) => f.type === 'result' && f.rid === id).body
+}
 
-const totpOnDisk = readFileSync(join(dataDir, 'settings.json'), 'utf8')
-log(!totpOnDisk.includes(totpOffer.secret), 'the secret is not in settings.json — what is written there is sealed')
+const roots = await ask({ kind: 'fs-list', path: '' })
+log(roots.kind === 'folder' && roots.folder.path === '', 'an empty path is answered with the drive roots rather than with a guess')
 log(
-  confirmed.ok && confirmed.recovery.every((code) => !totpOnDisk.includes(code)),
-  'and no recovery code is either, only their digests'
+  roots.kind === 'folder' && roots.folder.entries.every((e) => e.dir) && roots.folder.entries.length > 0,
+  `and every root is a folder the picker can open (${roots.kind === 'folder' ? roots.folder.entries.length : 0})`
 )
-log(existsSync(join(dataDir, 'web-totp.key')), 'the key that opens it is a file of its own beside settings.json')
+log(
+  roots.kind === 'folder' && roots.folder.sep === sep,
+  `the answer carries this desktop’s own separator (${roots.kind === 'folder' ? JSON.stringify(roots.folder.sep) : '?'}), so the browser never has to guess at one`
+)
+log(roots.kind === 'folder' && roots.folder.crumbs.length === 0, 'and nothing above the roots, because there is nothing above them')
 
-const noCode = await browser('browser-2', { origin: `https://${PROJECT}.web.app` })
-await waitFor(() => noCode.closed !== null, 4000, 'the browser with no code to be turned away')
-log(frameOf(noCode, 'refused')?.reason === 'totp-required', 'a browser with no code is refused over the wire, not let in')
-log(!frameOf(noCode, 'hello-ok'), 'and never sees the opening picture')
+const listed = await ask({ kind: 'fs-list', path: browseDir })
+const names = listed.kind === 'folder' ? listed.folder.entries.map((e) => e.name) : []
+log(listed.kind === 'folder' && listed.folder.path === browseDir, `a real folder comes back resolved (${browseDir})`)
+log(
+  names.join(',') === 'alpha,beta,notes.txt',
+  `with folders before files, in name order (${names.join(', ')})`
+)
+log(
+  listed.kind === 'folder' && listed.folder.entries[0].repo === true && listed.folder.entries[1].repo === false,
+  'and the one with a .git in it is flagged, so a project stands out from the folder above it'
+)
+log(
+  listed.kind === 'folder' && listed.folder.entries[2].dir === false,
+  'a file is named but is not something to open'
+)
+log(
+  listed.kind === 'folder' &&
+    listed.folder.crumbs.at(-1)?.path === browseDir &&
+    listed.folder.crumbs.at(-1)?.name === 'browse' &&
+    listed.folder.crumbs[0].path === parsePath(browseDir).root,
+  'the breadcrumb is built on the desktop, root first, each step carrying the path to send back for it'
+)
 
-// A recovery code rather than a TOTP one, deliberately: the code that completed
-// the enrolment is spent by having completed it, and inside the same 30 seconds
-// there is no *other* TOTP code to present.
-const withCode = await browser('browser-2', {
-  origin: `https://${PROJECT}.web.app`,
-  totp: confirmed.ok ? confirmed.recovery[0] : ''
-})
-await waitFor(() => frameOf(withCode, 'hello-ok') || withCode.closed !== null, 4000, 'the browser with a code')
-log(Boolean(frameOf(withCode, 'hello-ok')), 'a browser presenting a valid code is let in')
-log(host.webStatus().recoveryLeft === 9, 'and the code it used is struck off, so it will not work twice')
-withCode.socket.close()
+const descended = await ask({ kind: 'fs-list', path: browseDir, name: 'alpha' })
+log(
+  descended.kind === 'folder' && descended.folder.path === join(browseDir, 'alpha'),
+  'a name is appended by the desktop, so the browser never joins two strings and calls the result a path'
+)
+
+const capped = await ask({ kind: 'fs-list', path: manyDir })
+log(
+  capped.kind === 'folder' && capped.folder.entries.length === MAX_FS_ENTRIES,
+  `a folder of ${MAX_FS_ENTRIES + 3} is cut to the ${MAX_FS_ENTRIES} one answer carries (${capped.kind === 'folder' ? capped.folder.entries.length : 0})`
+)
+log(capped.kind === 'folder' && capped.folder.truncated === true, 'and says so, rather than quietly describing a smaller folder')
+
+const relative = await ask({ kind: 'fs-list', path: 'scripts' })
+log(
+  relative.kind === 'failed' && relative.message.length > 0,
+  `a relative path is refused with a sentence rather than resolved against wherever Forge was started ("${relative.message ?? ''}")`
+)
+const dotdot = await ask({ kind: 'fs-list', path: browseDir, name: '..' })
+log(dotdot.kind === 'failed', `".." is not a folder name this desktop appends ("${dotdot.message ?? ''}")`)
+
+const gone = await ask({ kind: 'fs-list', path: join(browseDir, 'never-existed') })
+log(
+  gone.kind === 'failed' && gone.message.includes('not there'),
+  `a folder that is not there comes back as a sentence, not a crash ("${gone.message ?? ''}")`
+)
+const notAFolder = await ask({ kind: 'fs-list', path: join(browseDir, 'notes.txt') })
+log(
+  notAFolder.kind === 'failed' && notAFolder.message.includes('file'),
+  `and so does a file where a folder was ("${notAFolder.message ?? ''}")`
+)
+
+const stillAlive = await ask({ kind: 'fs-list', path: browseDir })
+log(stillAlive.kind === 'folder', 'and the socket is still good after all four refusals — none of them threw')
+
+/* ------------------------------------------------- and adding one, for real
+ *
+ * `project-add` goes to the renderer, because the renderer owns the project
+ * list. So the two things worth proving are that it *does* — the window below
+ * records what it is handed — and that the folder is checked before the
+ * renderer hears anything, which is what the file and the relative path assert.
+ */
+
+const noWindowAdd = await ask({ kind: 'project-add', path: browseDir })
+log(
+  noWindowAdd.kind === 'failed' && noWindowAdd.message.includes('no window'),
+  `with no window on the desktop there is nothing that owns the rail, and the browser is told so ("${noWindowAdd.message ?? ''}")`
+)
+
+const added = []
+globalThis.__forgeWindows = [
+  {
+    isDestroyed: () => false,
+    webContents: {
+      send: (channel, payload) => {
+        if (channel !== IPC.webProjectAdd) return
+        added.push(payload)
+        // The renderer's half, in one line: it is the thing that answers, and
+        // until it does the request is still in flight on the main side.
+        ipc.listeners.get(IPC.webCommandResult)({}, { requestId: payload.requestId, error: '' })
+      }
+    }
+  }
+]
+
+const addedOk = await ask({ kind: 'project-add', path: browseDir })
+log(addedOk.kind === 'ok', `a folder that is really there is added (${addedOk.kind})`)
+log(
+  added.length === 1 && added[0].path === browseDir,
+  'and it reached the renderer — which owns the project list — rather than being written from main behind its back'
+)
+
+const addedFile = await ask({ kind: 'project-add', path: join(browseDir, 'notes.txt') })
+log(addedFile.kind === 'failed' && addedFile.message.includes('file'), `a file is not a project ("${addedFile.message ?? ''}")`)
+const addedRelative = await ask({ kind: 'project-add', path: 'browse' })
+log(addedRelative.kind === 'failed', `and neither is a relative path ("${addedRelative.message ?? ''}")`)
+log(added.length === 1, 'neither of which the renderer was ever told about: the folder is checked before anything is asked of it')
+
+globalThis.__forgeWindows = []
+picker.socket.close()
+await waitFor(() => host.webStatus().connected === 0, 4000, 'the picking browser to go')
+
+/* ================================================================== phase 5b
+ *
+ * The unlock PIN, through the real host and over a real socket.
+ *
+ * `scripts/web-auth-check.mjs` proves the decision and every refusal; what only
+ * this file can prove is the *lifecycle* — that the two IPC calls the settings
+ * panel makes write what they claim, that only a hash reaches the file, and
+ * that a browser holding no PIN is turned away by the server rather than merely
+ * by the class.
+ */
+
+console.log('\nthe unlock PIN')
+
+// Eight digits rather than four, so "these digits are not in settings.json" is
+// a claim about this PIN rather than about a run of digits that could turn up
+// inside a timestamp by luck.
+const PIN = '81547309'
+
+log(store.getSettings().webPin === '', 'the desktop ships with no PIN — the account alone is the key')
+log(host.webStatus().pinSet === false, 'and the panel is told so')
+
+const shipped = await browser('browser-2', { origin: `https://${PROJECT}.web.app` })
+await waitFor(() => frameOf(shipped, 'hello-ok') || shipped.closed !== null, 4000, 'the browser on the shipped door')
+log(Boolean(frameOf(shipped, 'hello-ok')), 'so a browser signed in as this account gets in without one')
+shipped.socket.close()
 await waitFor(() => host.webStatus().connected === 0, 4000, 'that browser to go')
 
-const afterDisable = await invoke('web:totp-disable')
-log(afterDisable.totpEnabled === false && afterDisable.recoveryLeft === 0, 'turning it off takes the spare codes with it')
-log(
-  store.getSettings().webTotpSecret === '' && store.getSettings().webTotpCounter === 0,
-  'and leaves nothing behind in settings.json'
-)
+const badPin = await invoke('web:pin-set', '12ab')
+log(typeof badPin.error === 'string' && badPin.error.length > 0, `something that is not a PIN is refused with a sentence ("${badPin.error ?? ''}")`)
+log(store.getSettings().webPin === '', 'and nothing is written')
+
+const pinSet = await invoke('web:pin-set', PIN)
+log(pinSet.pinSet === true, 'a real PIN is accepted, and the panel is told the door has one')
+log(store.getSettings().webPin.startsWith('scrypt$1$'), 'what reaches settings is the versioned scrypt string')
+
+const pinOnDisk = readFileSync(join(dataDir, 'settings.json'), 'utf8')
+log(!pinOnDisk.includes(PIN), 'the PIN itself is nowhere in settings.json')
+log(pinOnDisk.includes('scrypt$1$'), 'only its hash is, which is the whole point of hashing it')
+
+const noPin = await browser('browser-2', { origin: `https://${PROJECT}.web.app` })
+await waitFor(() => noPin.closed !== null, 4000, 'the browser with no PIN to be turned away')
+log(frameOf(noPin, 'refused')?.reason === 'pin-required', 'a browser with no PIN is refused over the wire, not let in')
+log(!frameOf(noPin, 'hello-ok'), 'and never sees the opening picture')
+
+const wrongPin = await browser('browser-2', { origin: `https://${PROJECT}.web.app`, pin: '00000000' })
+await waitFor(() => wrongPin.closed !== null, 4000, 'the browser with a wrong PIN')
+log(frameOf(wrongPin, 'refused')?.reason === 'pin-invalid', 'and a wrong one is refused pin-invalid')
+
+const withPin = await browser('browser-2', { origin: `https://${PROJECT}.web.app`, pin: PIN })
+await waitFor(() => frameOf(withPin, 'hello-ok') || withPin.closed !== null, 4000, 'the browser with the PIN')
+log(Boolean(frameOf(withPin, 'hello-ok')), 'a browser presenting the right PIN is let in')
+withPin.socket.close()
+await waitFor(() => host.webStatus().connected === 0, 4000, 'that browser to go')
+
+const afterClear = await invoke('web:pin-clear')
+log(afterClear.pinSet === false, 'clearing it puts the panel back to no PIN')
+log(store.getSettings().webPin === '', 'and leaves nothing behind in settings.json')
+
+const afterCleared = await browser('browser-2', { origin: `https://${PROJECT}.web.app` })
+await waitFor(() => frameOf(afterCleared, 'hello-ok') || afterCleared.closed !== null, 4000, 'the browser after the PIN went')
+log(Boolean(frameOf(afterCleared, 'hello-ok')), 'and browsers are admitted on the account alone again')
+afterCleared.socket.close()
+await waitFor(() => host.webStatus().connected === 0, 4000, 'that browser to go')
 
 /* ================================================================== phase 6
  *
@@ -1419,8 +1601,86 @@ const textFor = (tab, id) =>
     .map((f) => f.data)
     .join('')
 
+/**
+ * Answer the shell's "where is the cursor?", which a real browser's xterm does
+ * and a raw socket does not.
+ *
+ * pwsh asks `CSI 6 n` hardest right after a resize, because PSReadLine has to
+ * know where its line begins before it can repaint — and with nothing
+ * answering, ConPTY waits out a timeout measured in tens of seconds, during
+ * which the pane accepts input and prints nothing. That is not a detail of the
+ * resize below; it is what makes the resize below testable at all.
+ * scripts/web-smoke.mjs answers the same question for the same reason, and only
+ * live output is scanned: electron/pty/replay.ts is careful that a *replay*
+ * never carries these questions, precisely so they are not answered twice.
+ */
+held.socket.on('message', (raw) => {
+  const frame = JSON.parse(String(raw))
+  if (frame.type !== 'data' || frame.sessionId !== 'tray-1') return
+  const asked = String(frame.data).match(/\x1b\[6n/g)
+  for (let i = 0; i < (asked?.length ?? 0); i++) ptyHost.getManager().write('tray-1', '\x1b[1;1R')
+})
+
+/* ----------------------------------------------- one PTY, two viewers
+ *
+ * The desktop and a browser are two viewers of one ConPTY, which has one width,
+ * and until this existed both ends fitted it to their own box — so switching
+ * tabs at the desk re-wrapped the browser's pane for a screen it was not on,
+ * and switching tabs in the browser did the same back. The fix is that the
+ * browser's watch list reaches the renderer, which then stands down; that list
+ * is a broadcast, so the window installed here is what makes it observable.
+ *
+ * The size in it is the load-bearing part. It is read back off the session
+ * manager rather than echoed from the browser's frame, so what the renderer is
+ * told is what the PTY *is* — clamped, and after any adjustment on the way in —
+ * rather than what was asked for. A renderer letterboxing itself at a size the
+ * PTY never took would be the same corruption from the other direction.
+ */
+
+const watched = []
+globalThis.__forgeWindows = [
+  {
+    isDestroyed: () => false,
+    webContents: {
+      send: (channel, payload) => {
+        if (channel === IPC.webWatched) watched.push(payload)
+      }
+    }
+  }
+]
+
 sendFrame(held, { type: 'attach', sessionId: 'tray-1', cols: 90, rows: 30 })
 await waitFor(() => frameOf(held, 'replay'), 5000, 'the replay frame')
+
+const namesTray = () => watched.length > 0 && watched.at(-1).panes.some((p) => p.id === 'tray-1')
+await waitFor(namesTray, 5000, 'the watch broadcast')
+log(true, 'a browser attaching to a pane is named to the renderer, so the desk can stand down and hand the geometry over')
+
+// A size neither the session was created at (90x30) nor a default, so the
+// number below can only have come from this frame travelling the whole way.
+sendFrame(held, { type: 'resize', sessionId: 'tray-1', cols: 104, rows: 27 })
+await waitFor(
+  () => watched.at(-1).panes.some((p) => p.id === 'tray-1' && p.cols === 104 && p.rows === 27),
+  5000,
+  "the browser's geometry reaching the renderer"
+)
+const reported = watched.at(-1).panes.find((p) => p.id === 'tray-1')
+const livePane = ptyHost.getManager().list().find((s) => s.id === 'tray-1')
+log(
+  reported.cols === livePane.cols && reported.rows === livePane.rows,
+  `and it is reported at the size the PTY actually is (${livePane.cols}x${livePane.rows}), read off the session rather than off the frame`
+)
+
+sendFrame(held, { type: 'detach', sessionId: 'tray-1' })
+await waitFor(() => watched.at(-1).panes.length === 0, 5000, 'the pane being handed back')
+log(true, 'and dropping off the list is the same message with the pane no longer in it — the desk owns its geometry again')
+
+// Re-attached at the browser's own size, because everything below reads this
+// pane's output back down this socket, and only a subscriber is sent it.
+sendFrame(held, { type: 'attach', sessionId: 'tray-1', cols: 104, rows: 27 })
+await waitFor(namesTray, 5000, 'the re-attach')
+// Away again: no window is the honest state for the rest of this run.
+globalThis.__forgeWindows = []
 
 // A string that only ever exists in pwsh's *output* — what was typed is a
 // concatenation of two halves of it — so a client-side echo cannot fake this.
@@ -1577,6 +1837,33 @@ for (const tab of [first, second, held]) {
   }
 }
 rmSync(dataDir, { recursive: true, force: true })
+
+/*
+ * Let the pane this check spawned actually finish dying before the process
+ * leaves, because on Windows `process.exit()` is not the escape hatch it reads
+ * like. node-pty's `ConoutConnection` runs its console reader on a real
+ * `worker_threads` Worker, and a live Worker keeps this process up *through* an
+ * explicit exit — the exit event fires, and then nothing happens, for as long as
+ * anybody waits. `killAll()` above kills the ConPTY, but the Worker it takes
+ * with it is torn down a tick later, so exiting in the same turn is a race this
+ * check lost the moment it grew enough phases to change its timing. It ran
+ * green and hung anyway, which is the worst of both: every assertion passed and
+ * the run never ended, so `npm run web:check` looked like a check that failed.
+ *
+ * Bounded, so a pane that will not die still ends the run rather than replacing
+ * one hang with another, and reported rather than swallowed — a pty that
+ * outlives `killAll` is worth knowing about.
+ */
+const settled = await waitFor(
+  () => ptyHost.getManager().list().length === 0,
+  5_000,
+  'the pane to finish exiting'
+).then(
+  () => true,
+  () => false
+)
+if (!settled) console.log('  --   a pty outlived killAll; exiting anyway')
+await sleep(150)
 
 console.log(`\n${failures === 0 ? 'web lifecycle: all good' : `web lifecycle: ${failures} failure(s)`}`)
 process.exit(failures === 0 ? 0 : 1)

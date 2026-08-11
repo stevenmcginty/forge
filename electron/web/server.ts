@@ -6,9 +6,12 @@ import {
   HEARTBEAT_MS,
   MAX_FRAME_BYTES,
   MAX_INPUT_PER_SECOND,
+  MAX_MIRROR_CHUNK_BYTES,
+  MAX_MIRROR_INPUT_PER_SECOND,
   MAX_REPLAY_BYTES,
   MAX_SESSIONS,
   MAX_WRITE_CHARS,
+  PIN_MAX_DIGITS,
   WEB_PROTO,
   WEB_SUBPROTOCOL,
   WEB_WS_PATH,
@@ -18,14 +21,24 @@ import {
   wireString,
   type WebClientFrame,
   type WebErrorCode,
+  type WebFolder,
   type WebHelloOkFrame,
   type WebLayoutOp,
+  type WebMirrorChunk,
+  type WebMirrorConfig,
   type WebRefusal,
   type WebResult,
   type WebServerFrame,
   type WebSession,
   type WebShutdownReason
 } from '@shared/web'
+/*
+ * The one validator, shared with the phone link. `readMirrorInput` never looks
+ * at a frame's discriminant, so it reads a `WebMirrorInputFrame` exactly as it
+ * reads a `MirrorInputFrame` — which is the whole reason shared/web.ts imports
+ * the input vocabulary instead of restating it. See the note there.
+ */
+import { readMirrorInput, type MirrorInput } from '@shared/mobile'
 import type {
   AgentPresence,
   CommandPresence,
@@ -105,6 +118,20 @@ import type { WebAuth, WebDevice } from './auth'
  * dozens, not thousands.
  */
 const MAX_PROBE_COMMANDS = 64
+
+/**
+ * Longest path, and longest entry name, one `fs-list` frame may carry.
+ *
+ * A clamp on the wire rather than a rule about the disk: Windows' own path
+ * limit is 260 traditionally and 32767 on a long-path-enabled system, so
+ * neither of these is the authority on what is a valid path — electron/web/
+ * fs-browse.ts is, and it holds the same 2048 for the same reason. What they
+ * are is a bound on how much string one frame can make this desktop think
+ * about before anything has been decided about it. A megabyte of `\` is
+ * refused here, cheaply, rather than becoming a syscall.
+ */
+const MAX_PATH_CHARS = 2048
+const MAX_NAME_CHARS = 512
 
 /** The five verbs `GitActionKind` enumerates, as something the wire can be checked against. */
 const GIT_ACTIONS: readonly GitActionKind[] = ['fetch', 'pull', 'push', 'switch', 'commit']
@@ -208,6 +235,30 @@ export interface WebServerHost {
   agents?: (commands: string[]) => Promise<{ agents: AgentPresence[]; commands: CommandPresence[] }>
 
   /**
+   * One folder of this machine's disk, for the browser's project picker.
+   *
+   * The one request whose arguments name a place on this desktop, and the
+   * paragraph on `WebRequest` in shared/web.ts is where that is reckoned with
+   * rather than here. What this interface is for is the shape: a refusal is a
+   * *value* (`{ ok: false }` with a sentence), never a throw, because the
+   * things that go wrong here — a folder that has gone, a folder Windows will
+   * not open — are ordinary events in a picker somebody is clicking around in,
+   * and an exception would reach the browser as "the desktop failed while
+   * handling that".
+   */
+  fsList?: (path: string, name: string) => Promise<{ ok: true; folder: WebFolder } | { ok: false; error: string }>
+
+  /**
+   * Add a folder to the project rail. Implemented by web-host by checking the
+   * folder is really there and then asking the *renderer* to do it, so a
+   * browser reaches `addProjectPath` — the same function the button at the desk
+   * reaches — rather than a second route into the project list that could
+   * disagree with it. Resolves to an error sentence, or null when it worked;
+   * the same contract as `layout`, for the same reason.
+   */
+  projectAdd?: (path: string, deviceName: string) => Promise<string | null>
+
+  /**
    * The number of authenticated browsers changed. Drives the power-save blocker
    * in web-host: a machine that suspends mid-session drops every socket.
    */
@@ -228,6 +279,71 @@ export interface WebServerHost {
    * diff the receiver has to reassemble is a diff that can be missed.
    */
   onWatch?: (ids: string[]) => void
+
+  /* --------------------------------------------------------- screen mirror
+   *
+   * A browser watching this desktop's own screen, and — behind the gates in
+   * electron/web-host.ts — driving it. All four hooks are optional, and a host
+   * that supplies none of them simply cannot be watched: a `mirror-start` is
+   * refused outright rather than half-started, leaving a tab on a black
+   * rectangle. That is what makes `scripts/web-smoke.mjs`'s server, and any
+   * future host, safe by not remembering to be.
+   *
+   * This server relays, counts and gates. It never encodes, never decodes and
+   * never looks inside a chunk — the capture and the encoder live in the
+   * desktop *renderer*, because that is the half of Electron with a display to
+   * capture and a `VideoEncoder` to hand it to. See src/lib/mirror.ts.
+   */
+
+  /**
+   * Begin a mirror, or say why not.
+   *
+   * `pin` is whatever the browser presented, unread by this file: whether a PIN
+   * is set at all and whether this one matches are decisions with persisted
+   * state behind them, and they live beside that state in electron/web/auth.ts.
+   *
+   * Null means it has begun — the picture itself arrives later, as
+   * `pushMirrorReady` and `pushMirrorFrame` calls. A refusal is a sentence the
+   * browser tab shows, plus the one bit that changes what it shows it *in*: see
+   * `needsPin` on `WebMirrorStopFrame`.
+   */
+  mirrorStart?: (pin: string) => { error: string; needsPin?: boolean } | null
+
+  /**
+   * A browser started or stopped watching this screen.
+   *
+   * `onPresence`'s twin, and one hook for both edges rather than Forge Mobile's
+   * separate `mirrorStop`, because on this link the desk has something to do at
+   * each end of a watch and they are not the same something: it says out loud
+   * that the screen is being watched when one begins, and tears the capture and
+   * the input helper down when one ends. Two hooks that always fire together
+   * are two places to forget one.
+   *
+   * Fired on the *edges* and after the viewer is committed or cleared, so a
+   * host that reports its own status from in here reports the truth rather than
+   * the state a moment before. A browser restarting a watch it already holds is
+   * not an edge and says nothing: the desk has already been told, and a tab
+   * retrying in a loop must not be able to raise a notification a second.
+   */
+  onMirror?: (watching: boolean) => void
+
+  /**
+   * May the screen being watched also be *driven* right now?
+   *
+   * Asked when a picture starts, and answered by settings the desktop's owner
+   * switched on deliberately — see `webControlEnabled` in shared/types.ts and
+   * the escalation guard in electron/web-host.ts. A host that does not supply
+   * this hook can never be controlled.
+   */
+  mirrorControl?: () => boolean
+
+  /**
+   * Perform one input on the desktop. `false` means it was refused — control is
+   * off, the escalation guard says no, or this platform has no way to do it —
+   * and the server turns that into one sentence per watch rather than a silence
+   * the browser has to interpret.
+   */
+  mirrorInput?: (input: MirrorInput) => boolean
 
   /**
    * Injected so the smoke test can drive the rate-limit buckets and a short
@@ -258,16 +374,17 @@ interface Client {
   device: WebDevice | null
   /** Sessions this browser is reading. */
   subs: Set<string>
-  /**
-   * The `requestId` of an approval in flight for this socket, or ''. Held so a
-   * hang-up mid-question can withdraw it: a prompt that outlives its socket is
-   * one whose Allow lands on nothing — and, worse, primes the desk for the next
-   * asker.
-   */
-  approval: string
   /** The second the input counter belongs to, and its tally. See `allowInput`. */
   inputSecond: number
   inputCount: number
+  /**
+   * The same pair again for `mirror-input`, and deliberately not the same
+   * counter. A pointer moving smoothly is thirty frames a second and must not
+   * spend the budget that answers this browser's keystrokes — see
+   * MAX_MIRROR_INPUT_PER_SECOND in shared/web.ts.
+   */
+  mirrorSecond: number
+  mirrorCount: number
   /** Whether this second's `limit` refusal has already been sent. */
   toldLimit: boolean
   /** Drops a socket that never says hello. Cleared once it has. */
@@ -290,6 +407,22 @@ export class WebServer {
   private listening: { host: string; port: number } | null = null
   /** The last set handed to `onWatch`, so an unchanged set says nothing. */
   private announcedWatch = ''
+  /**
+   * The one socket watching this desktop's screen, if any.
+   *
+   * At most one, ever, and for a sharper reason than Forge Mobile's: there the
+   * limit avoided turning a relay into a media server, and here the *desktop*
+   * does the encoding, so a second viewer is a second encoder on the machine
+   * somebody is trying to work on. A second browser asking is refused with a
+   * sentence rather than queued.
+   */
+  private mirrorViewer: Client | null = null
+  /**
+   * Whether this watch has already been told its input is not wanted. Reset
+   * with the viewer, so switching control on at the desk and watching again
+   * gets an honest answer rather than the last watch's silence.
+   */
+  private refusedControl = false
 
   constructor(host: WebServerHost) {
     this.host = host
@@ -376,6 +509,11 @@ export class WebServer {
     if (notice) this.pushShutdown(notice)
     for (const client of [...this.clients]) this.drop(client, CLOSE_GOING_AWAY, 'Server stopping')
     this.clients.clear()
+    // Whoever was watching is not watching any more. Said explicitly rather
+    // than left to the drops above, because a screen capture that outlives the
+    // server relaying it is a desktop being encoded for nobody — and on this
+    // link that is a real encoder burning a real core.
+    this.dropViewer(this.mirrorViewer)
     this.wss?.close()
     this.wss = null
     const http = this.http
@@ -439,8 +577,8 @@ export class WebServer {
 
   /**
    * "This desktop is going away." Sent to every socket, authenticated or not: a
-   * browser sitting at the approval screen deserves to know the desk it is
-   * waiting on is shutting down as much as a live one does.
+   * browser sitting at the PIN box deserves to know the desk it is typing into
+   * is shutting down as much as a live one does.
    */
   pushShutdown(notice: WebShutdownNotice): void {
     for (const client of this.clients) {
@@ -465,6 +603,92 @@ export class WebServer {
         this.drop(client, CLOSE_REVOKED, 'Device revoked')
       }
     }
+  }
+
+  /* -------------------------------------------------------- screen mirror */
+
+  /**
+   * The capture is up: here is what a decoder needs to be configured with.
+   *
+   * To the viewer and nobody else, like everything else in this block — this
+   * describes a stream of Steve's screen, and broadcasting it the way `pushData`
+   * broadcasts terminal bytes would hand it to every connected tab. A no-op when
+   * nobody is watching, which is the ordinary shape of a browser that hung up
+   * while the renderer was still opening a display.
+   *
+   * `canControl` is added here rather than carried in by the caller, because the
+   * server is the thing that knows a watch has begun and the host is the thing
+   * that knows whether it may be driven; asking at the moment the two meet is
+   * what keeps a stale yes off this frame.
+   */
+  pushMirrorReady(config: WebMirrorConfig): void {
+    if (!this.mirrorViewer) return
+    this.send(this.mirrorViewer, {
+      type: 'mirror-ok',
+      canControl: this.host.mirrorControl?.() === true,
+      ...config
+    })
+  }
+
+  /**
+   * One encoded chunk, on its way to the viewer's decoder.
+   *
+   * The ceiling is enforced here and nowhere else, because this is the only
+   * place an outbound frame can be large: `maxPayload` on the WebSocket server
+   * is `ws`'s limit on what it will *read*. A chunk over it ends the watch
+   * rather than being dropped — see MAX_MIRROR_CHUNK_BYTES, which sets out why
+   * a silently missing keyframe is worse news than a stopped picture.
+   *
+   * The size is worked out from the base64 rather than by decoding it: three
+   * bytes per four characters is exact enough for a ceiling, and decoding half a
+   * megabyte to find out whether it is too big to send would be doing the
+   * expensive half of the work anyway.
+   */
+  pushMirrorFrame(chunk: WebMirrorChunk): void {
+    if (!this.mirrorViewer) return
+    const bytes = Math.floor((chunk.data.length * 3) / 4)
+    if (bytes > MAX_MIRROR_CHUNK_BYTES) {
+      this.log(`a ${bytes}-byte chunk is over the ${MAX_MIRROR_CHUNK_BYTES}-byte ceiling — ending the watch`)
+      this.pushMirrorStop(
+        'The picture this desktop produced was too large to send, so the mirror stopped rather than showing a broken one.'
+      )
+      return
+    }
+    this.send(this.mirrorViewer, { type: 'mirror-frame', ...chunk })
+  }
+
+  /**
+   * End the watch from this side, with a sentence the browser can show.
+   *
+   * The viewer is cleared whether or not the frame lands, so a socket that died
+   * between the capture failing and this call cannot leave the server believing
+   * it still has a viewer — and refusing the next `mirror-start` on the strength
+   * of it.
+   */
+  pushMirrorStop(reason: string): void {
+    const viewer = this.mirrorViewer
+    if (viewer) this.send(viewer, { type: 'mirror-stop', reason })
+    this.dropViewer(viewer)
+  }
+
+  /** Is a browser watching this screen right now? */
+  get mirroring(): boolean {
+    return this.mirrorViewer !== null
+  }
+
+  /**
+   * This socket is no longer the viewer, if it ever was — and the host is told,
+   * so the capture stops with it.
+   *
+   * Total against a client that is not the viewer and against null, because it
+   * is called from four endings (a hang-up, a `mirror-stop` frame, `stop()`, an
+   * oversized chunk) and three of them cannot know whether there is anything to
+   * end.
+   */
+  private dropViewer(client: Client | null): void {
+    if (!client || this.mirrorViewer !== client) return
+    this.mirrorViewer = null
+    this.host.onMirror?.(false)
   }
 
   private broadcast(frame: WebServerFrame): void {
@@ -500,9 +724,10 @@ export class WebServer {
       source,
       device: null,
       subs: new Set(),
-      approval: '',
       inputSecond: 0,
       inputCount: 0,
+      mirrorSecond: 0,
+      mirrorCount: 0,
       toldLimit: false,
       helloTimer: null,
       pingTimer: null,
@@ -510,17 +735,16 @@ export class WebServer {
     }
     this.clients.add(client)
 
-    // An unauthenticated socket is not allowed to sit there holding a slot —
-    // with one exception: a socket *waiting on a human* has said its hello and
-    // must not be cut off mid-question. It is not immortal either; that wait is
-    // bounded by APPROVAL_TIMEOUT_MS inside auth.ts.
+    // An unauthenticated socket is not allowed to sit there holding a slot, and
+    // there is no longer any exception: nothing waits on a human at the desk,
+    // so a `hello` is answered — admitted or refused — inside one round trip.
     //
     // The shipped HEARTBEAT_GRACE_MS rather than the injected one, on purpose:
     // this deadline is not part of the heartbeat, and a host that dials the
     // heartbeat down for a test must not accidentally leave a browser a
     // fraction of a second to say hello in.
     client.helloTimer = setTimeout(() => {
-      if (!client.device && !client.approval) this.drop(client, CLOSE_UNAUTHENTICATED, 'No hello')
+      if (!client.device) this.drop(client, CLOSE_UNAUTHENTICATED, 'No hello')
     }, HEARTBEAT_GRACE_MS)
 
     socket.on('message', (raw) => {
@@ -532,19 +756,31 @@ export class WebServer {
         if (!client.device) this.drop(client, CLOSE_UNAUTHENTICATED, 'Not authenticated')
         return
       }
-      void this.handle(client, frame)
+      // A throw in here used to leave the socket open and mute: `onHello` is
+      // async, it awaits token verification and several injected host
+      // callbacks, and an unhandled rejection reaching nobody means the browser
+      // waits out the hello deadline and is closed with no frame — which reads
+      // on screen as a network fault and is retried forever. Whatever went
+      // wrong, the page is told something it can act on, and the desk gets the
+      // line that names it.
+      void this.handle(client, frame).catch((err: unknown) => {
+        this.log(`frame "${frame.type}" failed: ${err instanceof Error ? err.message : String(err)}`)
+        this.send(client, {
+          type: 'error',
+          code: 'failed',
+          message: 'The desktop failed while handling that. Nothing was changed by it.'
+        })
+        if (!client.device) this.drop(client, CLOSE_UNAUTHENTICATED, 'Failed before hello completed')
+      })
     })
     socket.on('pong', () => this.schedulePing(client))
     socket.on('close', () => {
       this.clients.delete(client)
       this.clearTimers(client)
-      // A browser that hangs up mid-approval takes its question with it. Without
-      // this the prompt outlives the tab that caused it, and Steve's Allow lands
-      // on a socket that no longer exists.
-      if (client.approval) {
-        this.host.auth.abandon(client.approval)
-        client.approval = ''
-      }
+      // A browser that hangs up stops the capture behind it. A mirror outliving
+      // its viewer is a screen being encoded and sent to a socket that closed,
+      // which nothing else in this file would ever notice.
+      this.dropViewer(client)
       if (client.device) {
         this.log(`${client.device.name} disconnected`)
         this.host.onPresence?.(this.connectedCount)
@@ -582,6 +818,12 @@ export class WebServer {
       this.drop(client, CLOSE_UNAUTHENTICATED, 'Not authenticated')
       return
     }
+
+    // Ahead of the general budget, and with a counter of its own. A pointer
+    // moving smoothly over a mirrored screen is thirty frames a second, and
+    // spending the terminal's budget on them would starve the keystrokes this
+    // link exists to carry — see MAX_MIRROR_INPUT_PER_SECOND in shared/web.ts.
+    if (frame.type === 'mirror-input') return this.onMirrorInput(client, frame)
 
     if (!this.allowInput(client)) return
 
@@ -683,7 +925,139 @@ export class WebServer {
 
       case 'request':
         return this.onRequest(client, wireString(frame.rid, 128), frame.body)
+
+      /* --------------------------------------------------- screen mirror
+       *
+       * Below the authentication gate above, like everything else in this
+       * switch: a stranger must not be able to make this desktop start
+       * capturing its own screen, and the line that guarantees it is the
+       * blanket `!client.device` drop, not anything written here.
+       */
+
+      case 'mirror-start': {
+        if (!this.host.mirrorStart) {
+          this.send(client, { type: 'mirror-stop', reason: 'This Forge cannot share its screen.' })
+          return
+        }
+        // One screen at a time — but the *same* browser asking again is a
+        // restart, not a second viewer. A tab whose first attempt died where
+        // this side cannot see it (a decoder that would not configure, a
+        // reload) leaves the server still believing it has a watcher, and
+        // refusing the retry would tell the only browser in the room that it
+        // was busy watching itself. The renderer replaces its capture on every
+        // start, so a repeat is safe; two different sockets is the case worth
+        // refusing.
+        if (this.mirrorViewer && this.mirrorViewer !== client) {
+          this.send(client, {
+            type: 'mirror-stop',
+            reason: 'Another browser is already watching this desktop.'
+          })
+          return
+        }
+        // The PIN is passed through unread: whether one is set and whether this
+        // one matches are decisions with persisted state behind them, and they
+        // belong beside that state.
+        const refusal = this.host.mirrorStart(wireString(frame.pin, PIN_MAX_DIGITS))
+        if (refusal) {
+          // Refused before it began, so this socket does not become the viewer
+          // — it has to be able to ask again once the reason is fixed, and the
+          // commonest reason is "type a code", which is a question rather than
+          // a failure.
+          this.dropViewer(client)
+          this.send(client, {
+            type: 'mirror-stop',
+            reason: refusal.error,
+            ...(refusal.needsPin ? { needsPin: true } : {})
+          })
+          return
+        }
+        const wasWatching = this.mirrorViewer === client
+        this.mirrorViewer = client
+        // A fresh watch, so a refusal from the last one is not carried into it.
+        // Reset here rather than at every ending because this is the single
+        // place a watch begins, and the endings are many.
+        this.refusedControl = false
+        this.log(`${client.device.name} is watching the screen`)
+        // The *edge*, not every start. A restart is the same watch beginning
+        // again, and the desk has already said so out loud — a tab retrying in
+        // a loop would otherwise be a notification a second until somebody
+        // muted the app, which is how a warning stops being one.
+        if (!wasWatching) this.host.onMirror?.(true)
+        return
+      }
+
+      case 'mirror-stop':
+        this.dropViewer(client)
+        return
     }
+  }
+
+  /**
+   * The browser driving the desktop's pointer.
+   *
+   * Four gates, in the order that costs least to fail: it must come from the
+   * socket that is currently watching the screen, it must survive a budget of
+   * its own, it must parse into one of six exact shapes, and only then is the
+   * host asked — whose answer is the last gate, because the settings behind it
+   * can change between one frame and the next.
+   *
+   * "Watching" as the first test is deliberate, and it is the same judgement
+   * electron/mobile/server.ts makes: a browser that cannot see the screen has no
+   * business pointing at it. Every legitimate input frame is a response to a
+   * picture, and a socket with no picture is asking to click on something it
+   * cannot see.
+   */
+  private onMirrorInput(client: Client, frame: Extract<WebClientFrame, { type: 'mirror-input' }>): void {
+    // A stranger's input is dropped in silence: a frame arriving from a socket
+    // that has just stopped being the viewer is ordinary timing, not something
+    // worth an error frame.
+    if (this.mirrorViewer !== client) return
+    if (!this.allowMirrorInput(client)) return
+    const input = readMirrorInput(frame)
+    if (!input) {
+      this.send(client, {
+        type: 'error',
+        code: 'bad-frame',
+        message: 'That is not an input this desktop understands.'
+      })
+      return
+    }
+    if (this.host.mirrorInput?.(input) === true) return
+    // Refused. Said once per watch, not once per press: a held button or a
+    // dragged pointer sends dozens more frames before anybody can read the
+    // first sentence, and a screen full of the same refusal is not more honest
+    // than one copy of it.
+    if (this.refusedControl) return
+    this.refusedControl = true
+    // `unsupported` rather than a code of its own: `WebErrorCode` already
+    // spells it "this desktop cannot do that at all — an older build, or a
+    // disabled feature", which is exactly what a refused control is, and the
+    // client's decision is the same either way — stop offering the cursor.
+    this.send(client, {
+      type: 'error',
+      code: 'unsupported',
+      message: 'This desktop is not accepting control from a browser. Turn it on in Settings › Forge Web.'
+    })
+  }
+
+  /**
+   * The `mirror-input` budget: a whole second's worth, then silence until the
+   * next.
+   *
+   * A second counter beside `allowInput`, which is the entire point — see
+   * MAX_MIRROR_INPUT_PER_SECOND. Silent rather than answered, unlike the
+   * terminal's: a dropped pointer frame costs nothing a person notices, because
+   * the next one carries the position too (every pointer event carries its own,
+   * by design), whereas a dropped keystroke is a word that never got typed.
+   */
+  private allowMirrorInput(client: Client): boolean {
+    const second = Math.floor(this.now() / 1000)
+    if (second !== client.mirrorSecond) {
+      client.mirrorSecond = second
+      client.mirrorCount = 0
+    }
+    client.mirrorCount += 1
+    return client.mirrorCount <= MAX_MIRROR_INPUT_PER_SECOND
   }
 
   /**
@@ -724,7 +1098,7 @@ export class WebServer {
   /* ------------------------------------------------------------------ hello */
 
   private async onHello(client: Client, frame: Extract<WebClientFrame, { type: 'hello' }>): Promise<void> {
-    if (client.device || client.approval) return // one hello per socket
+    if (client.device) return // one hello per socket
 
     if (Number(frame.proto) !== WEB_PROTO) {
       // `proto` is the one refusal auth never returns: it is decided here,
@@ -740,32 +1114,17 @@ export class WebServer {
       return
     }
 
-    const outcome = await this.host.auth.authenticate(
-      {
-        source: client.source,
-        // The same 8192 ceiling auth.ts holds a token to; `wireString`'s default
-        // 256 would truncate every real JWT into a broken one.
-        idToken: wireString(frame.idToken, 8192),
-        deviceId: wireString(frame.deviceId, 128),
-        deviceName: wireString(frame.deviceName, 64) || 'Browser',
-        // A six-digit code or a recovery code, so 32 is generous and a cap is
-        // still the right thing: this string is hashed and pattern-matched, and
-        // a megabyte of it would be a megabyte of hashing per hello.
-        totp: wireString(frame.totp, 32),
-        // `=== true`, the strictest form, because this is the field that skips
-        // the second factor for a month — the same rule `webApprovalResult`
-        // holds an Allow to.
-        trust: frame.trust === true
-      },
-      (pending) => {
-        // Fired once, before any waiting. Recorded first so a hang-up during the
-        // wait can withdraw the prompt, then shown to the browser: the words are
-        // on screen while somebody is comparing them to the desktop's.
-        client.approval = pending.requestId
-        this.send(client, { type: 'pending', words: pending.words, expiresAt: pending.expiresAt })
-      }
-    )
-    client.approval = ''
+    const outcome = await this.host.auth.authenticate({
+      source: client.source,
+      // The same 8192 ceiling auth.ts holds a token to; `wireString`'s default
+      // 256 would truncate every real JWT into a broken one.
+      idToken: wireString(frame.idToken, 8192),
+      deviceId: wireString(frame.deviceId, 128),
+      deviceName: wireString(frame.deviceName, 64) || 'Browser',
+      // Clamped to the longest PIN there can be, so a megabyte of "PIN" is not
+      // a megabyte fed to a key-derivation function once per hello.
+      pin: wireString(frame.pin, PIN_MAX_DIGITS)
+    })
 
     if (!outcome.ok) {
       this.refuse(client, outcome.reason, outcome.message, outcome.retryAfterMs)
@@ -964,6 +1323,52 @@ export class WebServer {
           return
         }
 
+        case 'fs-list': {
+          if (!this.host.fsList) {
+            failed('unsupported', 'This Forge cannot show its folders to a browser.')
+            return
+          }
+          // Both fields are clamped here and understood in
+          // electron/web/fs-browse.ts: whether the path is absolute, whether
+          // the name is a single segment and whether either exists are
+          // questions about *this machine*, and answering them in one place
+          // beside the syscalls is what stops two half-checks disagreeing.
+          const listing = await this.host.fsList(
+            wireString(request.path, MAX_PATH_CHARS),
+            wireString(request.name, MAX_NAME_CHARS)
+          )
+          if (!listing.ok) {
+            failed('failed', listing.error)
+            return
+          }
+          answer({ kind: 'folder', folder: listing.folder })
+          return
+        }
+
+        case 'project-add': {
+          if (!this.host.projectAdd) {
+            failed('unsupported', 'This Forge cannot add a project for a browser.')
+            return
+          }
+          const path = wireString(request.path, MAX_PATH_CHARS)
+          if (!path) {
+            failed('bad-frame', 'That request named no folder.')
+            return
+          }
+          const error = await this.host.projectAdd(path, client.device?.name ?? 'Browser')
+          if (error) {
+            // `failed` rather than `no-window`: unlike a layout op, most of the
+            // ways this goes wrong are about the folder — renamed, unplugged,
+            // not a folder at all — and only one of them is about the desktop
+            // having no window. The sentence says which; the code would only
+            // ever be guessing.
+            failed('failed', error)
+            return
+          }
+          answer({ kind: 'ok' })
+          return
+        }
+
         default:
           // A newer client asking for something this build has never heard of.
           // `unsupported` is the honest answer and the one `WebErrorCode`
@@ -1005,10 +1410,11 @@ export class WebServer {
   private drop(client: Client, code: number, reason: string): void {
     this.clients.delete(client)
     this.clearTimers(client)
-    if (client.approval) {
-      this.host.auth.abandon(client.approval)
-      client.approval = ''
-    }
+    // Here as well as in the close handler, and not instead of it. `close`
+    // arrives on the next tick, so a revoked browser would otherwise keep its
+    // desktop encoding for it after `disconnectDevice` had supposedly ended
+    // things; `dropViewer` is idempotent, so the second call is free.
+    this.dropViewer(client)
     try {
       client.socket.close(code, reason)
     } catch {

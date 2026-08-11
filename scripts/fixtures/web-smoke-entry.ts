@@ -10,6 +10,10 @@
 export { WebServer, isAllowedSource } from '../../electron/web/server'
 export { WebAuth } from '../../electron/web/auth'
 export { PtySessionManager } from '../../electron/pty/session-manager'
+// The real PIN hashing, so the phases that put a PIN on a stub host seed it
+// with exactly what `web:pin-set` would write rather than with a fixture that
+// could keep passing after the stored form moved.
+export { hashPin } from '../../electron/web/pin'
 // Re-exported so the checks assert against exactly the shipped values rather
 // than numbers that could drift from them.
 export {
@@ -17,6 +21,8 @@ export {
   HEARTBEAT_MS,
   MAX_FRAME_BYTES,
   MAX_INPUT_PER_SECOND,
+  MAX_MIRROR_CHUNK_BYTES,
+  MAX_MIRROR_INPUT_PER_SECOND,
   MAX_REPLAY_BYTES,
   MAX_WRITE_CHARS,
   WEB_PROTO,

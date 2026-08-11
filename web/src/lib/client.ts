@@ -6,10 +6,13 @@ import {
   WEB_SUBPROTOCOL,
   isWebRefusal,
   isWebShutdownReason,
-  type WebApprovalState,
   type WebClientFrame,
+  type WebConnectionState,
   type WebHelloOkFrame,
   type WebLayoutOp,
+  type WebMirrorChunk,
+  type WebMirrorInputFrame,
+  type WebMirrorOkFrame,
   type WebRefusal,
   type WebRequest,
   type WebResult,
@@ -33,13 +36,12 @@ import type { GitSnapshot, Project, Workspace } from '@shared/types'
  *
  * ## Connection state is the product, not a spinner
  *
- * `WebApprovalState` names the vocabulary — connecting, pending, live, declined,
- * timed-out, refused, offline — and shared/web.ts says why it is a vocabulary
- * rather than a boolean: each one is a different sentence with a different
- * recovery. So this class never collapses a refusal into "disconnected", and it
- * never retries one that a retry cannot fix. `retryPolicy` below is that
- * judgement written down once, per `WebRefusal`, instead of scattered through a
- * reconnect loop.
+ * `WebConnectionState` names the vocabulary — connecting, pin, live, refused,
+ * offline — and shared/web.ts says why it is a vocabulary rather than a boolean:
+ * each one is a different sentence with a different recovery. So this class never
+ * collapses a refusal into "disconnected", and it never retries one that a retry
+ * cannot fix. `retryPolicy` below is that judgement written down once, per
+ * `WebRefusal`, instead of scattered through a reconnect loop.
  *
  * ## Mirror, never a parallel world
  *
@@ -82,23 +84,20 @@ const WARM_MS = HEARTBEAT_MS * 2
  * Where this browser stands, as the one word the connection UI switches on plus
  * whatever that word needs to say.
  *
- * The tag is `WebApprovalState` itself rather than a parallel enum, so a state
+ * The tag is `WebConnectionState` itself rather than a parallel enum, so a state
  * the protocol names and this client forgot to handle is a compile error.
  */
 export type Connection =
-  | { state: Extract<WebApprovalState, 'connecting'>; attempt: number }
-  | { state: Extract<WebApprovalState, 'pending'>; words: string; expiresAt: number }
+  | { state: Extract<WebConnectionState, 'connecting'>; attempt: number }
   /**
-   * The desktop wants a six-digit code. `invalid` distinguishes "you have not
-   * been asked yet" from "that one did not work" — the same screen either way,
-   * but only one of them owes the person a red line.
+   * The desktop wants its unlock PIN. `invalid` distinguishes "you have not been
+   * asked yet" from "that one did not open the door" — the same screen either
+   * way, but only one of them owes the person a red line.
    */
-  | { state: Extract<WebApprovalState, 'totp'>; message: string; invalid: boolean }
-  | { state: Extract<WebApprovalState, 'live'>; desktopName: string; appVersion: string }
-  | { state: Extract<WebApprovalState, 'declined'>; message: string }
-  | { state: Extract<WebApprovalState, 'timed-out'>; message: string }
-  | { state: Extract<WebApprovalState, 'refused'>; reason: WebRefusal; message: string; retryAfterMs?: number }
-  | { state: Extract<WebApprovalState, 'offline'>; message: string; reason?: WebShutdownReason; retryAfterMs?: number }
+  | { state: Extract<WebConnectionState, 'pin'>; message: string; invalid: boolean }
+  | { state: Extract<WebConnectionState, 'live'>; desktopName: string; appVersion: string }
+  | { state: Extract<WebConnectionState, 'refused'>; reason: WebRefusal; message: string; retryAfterMs?: number }
+  | { state: Extract<WebConnectionState, 'offline'>; message: string; reason?: WebShutdownReason; retryAfterMs?: number }
 
 export interface ForgeHandlers {
   /** The connection state changed. The whole of the connection UI is this. */
@@ -134,13 +133,32 @@ export interface ForgeCredentials {
   getToken: (force: boolean) => Promise<string>
   deviceId: string
   deviceName: string
+  /**
+   * Read the desktop's *current* address out of the rendezvous record, for a
+   * retry that has already failed against the one this link was handed.
+   *
+   * Optional because the dev loop's loopback host is a constant and has nothing
+   * to look up. Everywhere else it is the difference between working and not:
+   * a cloudflared quick tunnel is a **new hostname every time it starts**, and
+   * the desktop republishes within seconds — so a link that re-dials the string
+   * it was constructed with re-dials a hostname that has been retired, forever,
+   * against a desktop that is up and two seconds away. That is
+   * indistinguishable on screen from a PC that is off: "Reconnecting to the
+   * desktop (attempt 41)…".
+   *
+   * Only consulted on a *re*-connect (`attempt > 0`), so the first dial costs no
+   * extra round trip, and an empty string means "no better answer than the one
+   * you have" rather than "give up" — a failed lookup must not turn a retry loop
+   * that might still succeed into one that cannot.
+   */
+  refindUrl?: () => Promise<string>
 }
 
 /**
  * What a refusal means for the reconnect loop.
  *
  * One table rather than a chain of ifs, because the whole value of `WebRefusal`
- * being seven words instead of one string is that each has a different recovery,
+ * being eight words instead of one string is that each has a different recovery,
  * and a recovery that only exists in prose is one the code does not have.
  */
 type Retry =
@@ -159,18 +177,10 @@ function retryPolicy(reason: WebRefusal): Retry {
     // Retrying a correct credential against the wrong desktop loops forever.
     case 'wrong-account':
       return { kind: 'stop' }
-    // Nobody has said no, and nobody has been asked. Retrying knocks again on a
-    // door that is not being answered — the prompt storm `not-approved` exists
-    // to prevent.
+    // This browser sent a blank `deviceId`, so there is nothing to record an
+    // admission against. Reconnecting would send the same blank one forever;
+    // recovery is a reload, which mints one.
     case 'not-approved':
-      return { kind: 'stop' }
-    // "Asking again is a new prompt, not a retry."
-    case 'declined':
-      return { kind: 'stop' }
-    // Retrying is reasonable, but by a human pressing the button: an automatic
-    // one would mint fresh words every two minutes under the eyes of somebody
-    // comparing the old pair.
-    case 'timed-out':
       return { kind: 'stop' }
     // "The page should forget its device id and stop reconnecting."
     case 'revoked':
@@ -181,12 +191,92 @@ function retryPolicy(reason: WebRefusal): Retry {
     case 'busy':
       return { kind: 'after' }
     // Both are answered by a human typing something, so neither is a reconnect
-    // this loop can decide on its own. `submitTotp` is what starts the next
+    // this loop can decide on its own. `submitPin` is what starts the next
     // attempt, and it carries the thing that was missing.
-    case 'totp-required':
-    case 'totp-invalid':
+    case 'pin-required':
+    case 'pin-invalid':
       return { kind: 'stop' }
   }
+}
+
+/* ------------------------------------------------------------ screen mirror
+ *
+ * The one part of this link that does not travel through `ForgeHandlers` and the
+ * state provider, and the exception is deliberate.
+ *
+ * Everything else on this socket is *the workspace* — projects, panes, bytes,
+ * git — which every screen reads and which `state.tsx` therefore owns. The
+ * desktop's screen is not that. At most one surface on this page is ever
+ * watching it, that surface owns a decoder and a canvas which must outlive
+ * renders and must never be rebuilt by one (see web/src/lib/screen.ts), and
+ * chunks arrive thirty times a second. Routing them through a React context
+ * would mean either a re-render per frame or a ref that the provider holds for
+ * one component's benefit — a second owner of a thing with one owner.
+ *
+ * So it is a pair of module-level slots instead: one for the surface that is
+ * watching, and one for the live socket's own sender, filled in by the client's
+ * constructor. There is exactly one `ForgeClient` per page (`state.tsx` builds it
+ * once and keeps it in a ref) and exactly one viewer, which is what makes a slot
+ * the honest shape rather than a shortcut — a list here would be pretending this
+ * link can serve two watchers, which shared/web.ts says it cannot.
+ */
+
+/** What a surface watching the screen is told. Every one of these is a frame. */
+export interface MirrorWatcher {
+  /** The capture is up: configure a decoder from this and start painting. */
+  onOk: (frame: WebMirrorOkFrame) => void
+  onChunk: (chunk: WebMirrorChunk) => void
+  /**
+   * The watch is over, or is not going to happen. `needsPin` is a question
+   * rather than a failure — show a PIN box and ask again with what was typed.
+   */
+  onStop: (reason: string, needsPin: boolean) => void
+}
+
+let watcher: MirrorWatcher | null = null
+/**
+ * How a frame gets *out*, without the viewer holding the client.
+ *
+ * A closure over the client's own private `send`, so the mirror does not add a
+ * public method to this class for every frame it needs and cannot send anything
+ * else through it. Rebuilt by each `ForgeClient` that is constructed, which in
+ * this page is one.
+ */
+let sendUp: ((frame: WebClientFrame) => void) | null = null
+
+/**
+ * Take the screen slot. Returns the release, which the caller must run when its
+ * surface goes away — a stale watcher would be handed the next watch's frames.
+ */
+export function watchMirror(next: MirrorWatcher): () => void {
+  watcher = next
+  return () => {
+    if (watcher === next) watcher = null
+  }
+}
+
+/**
+ * "Show me that screen", with the unlock PIN when the desktop has asked for one.
+ * An empty PIN is omitted rather than sent, so a desktop with none set sees the
+ * frame it has always seen.
+ */
+export function askForScreen(pin: string): void {
+  sendUp?.({ type: 'mirror-start', ...(pin ? { pin } : {}) })
+}
+
+/** The viewer closed. The desktop stops capturing on this frame. */
+export function stopWatching(): void {
+  sendUp?.({ type: 'mirror-stop' })
+}
+
+/**
+ * One input, on its way to somebody's actual mouse and keyboard.
+ *
+ * Takes the frame's body rather than the frame, so the discriminant is written
+ * in one place and a caller cannot send anything else up this path by accident.
+ */
+export function sendMirrorInput(input: Omit<WebMirrorInputFrame, 'type'>): void {
+  sendUp?.({ type: 'mirror-input', ...input })
 }
 
 /* ------------------------------------------------------------------- class */
@@ -209,12 +299,15 @@ export class ForgeClient {
   private waiting = new Map<string, { settle: (result: WebResult) => void; timer: number }>()
   /** sessionId → the geometry this browser is reading it at, re-sent on reconnect. */
   private subs = new Map<string, { cols: number; rows: number } | null>()
-  /** The second factor for the *next* hello only. See `submitTotp`. */
-  private totp = ''
-  private trust = false
+  /** The unlock PIN for the *next* hello only. See `submitPin`. */
+  private pin = ''
 
   constructor(handlers: ForgeHandlers) {
     this.handlers = handlers
+    // The outbound half of the screen-mirror slot pair above. A closure rather
+    // than the instance, so nothing outside this file can reach the rest of the
+    // client through it.
+    sendUp = (frame) => this.send(frame)
   }
 
   /** Is the link answering? Drives the badge, and nothing else. See WARM_MS. */
@@ -243,17 +336,17 @@ export class ForgeClient {
   }
 
   /**
-   * A human typed the second factor. Reconnect, carrying it.
+   * A human typed the unlock PIN. Reconnect, carrying it.
    *
-   * The code is held for exactly one `hello` and dropped in `open()`, whatever
-   * the desktop makes of it. A client that kept it would retry a spent code on
-   * every reconnect for the rest of the session, and every one of those retries
-   * would be a strike against this address at the far end.
+   * Held for exactly one `hello` and dropped in `open()`, whatever the desktop
+   * makes of it — which is the property shared/web.ts asks for: a page only ever
+   * holds a PIN it was just asked for. A client that kept it would replay a
+   * wrong one on every reconnect for the rest of the session, and every one of
+   * those replays would be a strike against this address at the far end.
    */
-  submitTotp(code: string, trust: boolean): void {
+  submitPin(pin: string): void {
     if (!this.credentials) return
-    this.totp = code.trim()
-    this.trust = trust
+    this.pin = pin.trim()
     this.retry()
   }
 
@@ -371,6 +464,28 @@ export class ForgeClient {
     // A token fetch is a network round trip, and the page may have moved on.
     if (this.closedByUs || this.stopped) return
 
+    // Ask where the desktop is *now* before re-dialling where it was. See
+    // `refindUrl`: the address a tunnel publishes does not survive the tunnel
+    // restarting, and this loop would otherwise never learn that.
+    if (this.attempt > 0 && credentials.refindUrl) {
+      let fresh = ''
+      try {
+        fresh = await credentials.refindUrl()
+      } catch {
+        // A lookup that failed says nothing about the address in hand.
+      }
+      if (this.closedByUs || this.stopped) return
+      // Adopted without resetting `attempt`, which is not the obvious choice
+      // and is the right one. A new address does look like a fresh start worth
+      // a fresh backoff — but a cloudflared quick tunnel that is *flapping*
+      // publishes a new hostname every time it comes up, so zeroing the counter
+      // here meant every retry saw a new URL, took `BACKOFF[0]` again, and
+      // strobed the page against a tunnel that was never up long enough to
+      // reach. The backoff exists to survive exactly that, and a moving target
+      // is not grounds to abandon it.
+      if (fresh && fresh !== credentials.url) credentials.url = fresh
+    }
+
     let socket: WebSocket
     try {
       // The subprotocol is the only field a browser's WebSocket constructor
@@ -386,15 +501,22 @@ export class ForgeClient {
 
     // Spent on this attempt and this attempt only, whatever comes of it — read
     // before `onopen` so a socket that never opens still burns it rather than
-    // leaving a stale code to be replayed by the reconnect loop.
-    const totp = this.totp
-    const trust = this.trust
-    this.totp = ''
-    this.trust = false
+    // leaving a stale PIN to be replayed by the reconnect loop.
+    const pin = this.pin
+    this.pin = ''
 
     socket.onopen = () => {
       this.lastFrameAt = Date.now()
-      this.startBeating()
+      // No ping until `hello-ok`. The desktop honours *nothing* but `hello`
+      // before a browser has been let in — it answers anything else with an
+      // `error` frame and closes the socket (see `handle` in
+      // electron/web/server.ts) — so a beat started here would hang up on this
+      // desktop while its answer to the `hello` was still being decided, which
+      // on a machine that has to verify a token against Google's keys and then
+      // run a PIN through scrypt is not a moment. The pre-`hello-ok` socket does
+      // not need one: the *real* heartbeat is the native WebSocket ping, which
+      // the browser answers in its network stack whether or not the page has
+      // been admitted.
       this.sendFrame(socket, {
         type: 'hello',
         proto: WEB_PROTO,
@@ -403,9 +525,10 @@ export class ForgeClient {
         deviceId: credentials.deviceId,
         deviceName: credentials.deviceName,
         // Omitted entirely rather than sent empty: the field is optional in the
-        // protocol and a desktop with no second factor should see a `hello`
-        // that looks exactly like it always did.
-        ...(totp ? { totp, trust } : {})
+        // protocol, the first `hello` of every sign-in carries no PIN by design,
+        // and a desktop with none set should see a frame that looks exactly like
+        // it always did.
+        ...(pin ? { pin } : {})
       })
     }
 
@@ -415,6 +538,12 @@ export class ForgeClient {
       this.socket = null
       this.stopBeating()
       this.failWaiting('The link to the desktop dropped before that answered.')
+      // A watcher hears about it here rather than working it out from a picture
+      // that stopped moving: a decoder holding a last frame looks exactly like a
+      // desktop that is sitting still, and the two want different sentences. A
+      // reconnect does not resume a watch — the desktop tore its capture down
+      // with the socket — so this is an ending, not a pause.
+      watcher?.onStop('The link to the desktop dropped, so the picture stopped.', false)
       if (this.closedByUs || this.stopped) return
       this.scheduleRetry()
     }
@@ -443,6 +572,9 @@ export class ForgeClient {
         this.reauthed = false
         this.handlers.onPicture(frame)
         this.handlers.onConnection({ state: 'live', desktopName: frame.desktopName, appVersion: frame.appVersion })
+        // Both timers start here rather than at `onopen`, because this frame is
+        // the first moment the desktop will accept a frame that is not `hello`.
+        this.startBeating()
         this.startRefreshing()
         // Re-arm every pane the UI still believes it is watching. Each answers
         // with a replay frame, which is what repaints the terminal.
@@ -451,17 +583,6 @@ export class ForgeClient {
         }
         return
       }
-
-      case 'pending':
-        // Shown exactly as sent. The desktop minted the pair and this side only
-        // displays it; both screens rendering the same string is the entire
-        // anti-confusion property (see WebPendingFrame).
-        this.handlers.onConnection({
-          state: 'pending',
-          words: typeof frame.words === 'string' ? frame.words : '',
-          expiresAt: typeof frame.expiresAt === 'number' ? frame.expiresAt : 0
-        })
-        return
 
       case 'refused':
         this.onRefused(frame.reason, typeof frame.message === 'string' ? frame.message : '', frame.retryAfterMs)
@@ -539,6 +660,30 @@ export class ForgeClient {
         if (typeof frame.message === 'string' && frame.message) this.handlers.onNotice(frame.message)
         return
 
+      /* --------------------------------------------------- screen mirror
+       *
+       * Straight to the surface that is watching, without passing through the
+       * page's state — see the slot pair above. A frame arriving with nobody
+       * watching is dropped in silence: it is the ordinary shape of a viewer
+       * that closed while a chunk was in flight, and the desktop has already
+       * been told to stop by the `mirror-stop` that closing sent.
+       */
+
+      case 'mirror-ok':
+        watcher?.onOk(frame)
+        return
+
+      case 'mirror-frame':
+        watcher?.onChunk(frame)
+        return
+
+      case 'mirror-stop':
+        watcher?.onStop(
+          typeof frame.reason === 'string' && frame.reason ? frame.reason : 'The desktop stopped sharing its screen.',
+          frame.needsPin === true
+        )
+        return
+
       case 'pong':
         return
     }
@@ -565,10 +710,10 @@ export class ForgeClient {
     // Not a failure and not a shade of one: the desktop is asking a question,
     // and the screen it earns is a text box rather than an apology. Handled
     // ahead of the retry table because the answer comes from a person, so there
-    // is nothing for the loop to schedule until `submitTotp` is called.
-    if (reason === 'totp-required' || reason === 'totp-invalid') {
+    // is nothing for the loop to schedule until `submitPin` is called.
+    if (reason === 'pin-required' || reason === 'pin-invalid') {
       this.stopped = true
-      this.handlers.onConnection({ state: 'totp', message, invalid: reason === 'totp-invalid' })
+      this.handlers.onConnection({ state: 'pin', message, invalid: reason === 'pin-invalid' })
       return
     }
 
@@ -593,30 +738,31 @@ export class ForgeClient {
 
     if (policy.kind === 'after') {
       this.handlers.onConnection({ state: 'refused', reason, message, ...(retryAfterMs ? { retryAfterMs } : {}) })
-      this.scheduleRetry(retryAfterMs)
+      // Silently, or the refusal is erased by the thing that acts on it:
+      // `scheduleRetry` announces `connecting` the instant it is called, in the
+      // same React batch, so the screen that carries the desktop's sentence and
+      // the "worth trying again in 60s" line never rendered at all. What was
+      // shown instead was a rising attempt count against a desktop that had
+      // just said, in words, what was wrong with it. The `connecting` screen
+      // still arrives — from `open`, when the wait is actually up.
+      this.scheduleRetry(retryAfterMs, false)
       return
     }
 
     this.stopped = true
-    // `declined` and `timed-out` are their own states in `WebApprovalState`
-    // rather than shades of `refused`, and they are surfaced as such: a human
-    // said no, or nobody was there, and each screen says a different thing.
-    if (reason === 'declined') {
-      this.handlers.onConnection({ state: 'declined', message })
-      return
-    }
-    if (reason === 'timed-out') {
-      this.handlers.onConnection({ state: 'timed-out', message })
-      return
-    }
     this.handlers.onConnection({ state: 'refused', reason, message, ...(retryAfterMs ? { retryAfterMs } : {}) })
   }
 
-  private scheduleRetry(waitMs?: number): void {
+  /**
+   * `announce` is false only where the caller has just put a *better* screen up
+   * — see the `after` branch of `onRefused`. It does not change what the loop
+   * does, only whether it overwrites a sentence somebody needs to read.
+   */
+  private scheduleRetry(waitMs?: number, announce = true): void {
     if (this.closedByUs || this.stopped || this.retryTimer !== null) return
     const wait = waitMs ?? BACKOFF[Math.min(this.attempt, BACKOFF.length - 1)]!
     this.attempt += 1
-    this.handlers.onConnection({ state: 'connecting', attempt: this.attempt })
+    if (announce) this.handlers.onConnection({ state: 'connecting', attempt: this.attempt })
     this.retryTimer = window.setTimeout(() => {
       this.retryTimer = null
       void this.open()

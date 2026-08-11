@@ -1,18 +1,27 @@
-import { type CSSProperties, type ReactNode } from 'react'
+import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { collectLeaves } from '@/lib/splitTree'
+import { Icon } from '@/components/Icon'
 import type { Project } from '@shared/types'
 import { shortPath } from '../lib/paths'
 import { useForge } from '../state'
+import { FolderPicker } from './FolderPicker'
 import { GitPanel } from './GitPanel'
 
 /**
  * The project rail, drawn with the desktop's own `.rail` and `.prow` classes.
  *
- * Read-only compared with the desktop's: there is no "add a project" here and
- * there cannot be, because adding one means picking a folder on a machine this
- * page is not on — and the protocol deliberately models no path a browser can
- * send (shared/web.ts: "Nothing on this wire chooses a cwd or an executable").
- * Selecting one is a `select-project` layout op, so the desk follows.
+ * Selecting a project is a `select-project` layout op, so the desk follows.
+ *
+ * **Adding one is now here too**, and this comment used to say at length that it
+ * could not be: adding a project meant picking a folder on a machine this page
+ * is not on, and the protocol modelled no path a browser could send. The second
+ * half of that was true and has been changed on purpose — `fs-list` and
+ * `project-add` exist, and the reckoning about what that does and does not cost
+ * is on `WebRequest` in shared/web.ts. The first half was never an argument for
+ * anything: a native folder picker opens on the desktop's screen, which is
+ * precisely the screen the person adding the project is not sitting at. So the
+ * folders are browsed in the page — see `FolderPicker` — and the desktop's own
+ * `addProjectPath` is what actually adds one.
  *
  * The attention dot is `WebAttentionFrame`: which pane has settled on a
  * question, so a project you are not looking at can say that something in it is
@@ -23,6 +32,16 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
   const projects = state.picture?.projects ?? state.cached?.projects ?? []
   const workspaces = state.picture?.workspaces ?? state.cached?.workspaces ?? {}
   const sessions = state.picture?.sessions ?? state.cached?.sessions ?? []
+  const addRef = useRef<HTMLButtonElement | null>(null)
+  const [picking, setPicking] = useState(false)
+  /**
+   * Adding a project reaches the desktop's disk and then its renderer, so it is
+   * offered only while there is a desktop on the end of the socket. The frozen
+   * picture draws the button and refuses it rather than hiding it, for the
+   * reason the whole offline view exists: Forge asleep should not look like
+   * Forge missing a feature.
+   */
+  const live = state.stage.kind === 'connected' && state.connection.state === 'live'
 
   const paneCount = (project: Project): number => {
     const workspace = workspaces[project.id]
@@ -40,18 +59,39 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
   return (
     <div className="rail" data-collapsed={collapsed}>
       {/*
-        No header when collapsed, for the reason ProjectRail.tsx gives about its
-        own: "at 56px there is no header to speak of, and the dot column *is* the
-        rail." The desktop still draws a bare one there because it holds the
-        add-project button; this rail has no such button — a browser cannot pick
-        a folder on somebody else's disk — so there is nothing left to draw.
+        Collapsed, the header keeps its button and loses its words — which is
+        exactly what the desktop's does, and ProjectRail.css already centres
+        `.rail__head` and drops its padding at 56px for that very purpose. This
+        used to draw nothing at all when collapsed, on the reasoning
+        ProjectRail.tsx gives about its own rail ("at 56px there is no header to
+        speak of, and the dot column *is* the rail") — which was fine while
+        there was no button to lose. It is not fine now: `useNarrow` collapses
+        this rail by *window* below 640px, so on a phone there is no toggle to
+        press, and hiding the header there would take Add project away from the
+        one screen most likely to be nowhere near the desk.
       */}
-      {collapsed ? null : (
-        <div className="rail__head">
-          <span className="eyebrow">Projects</span>
-          <span className="rail__count mono">{projects.length}</span>
-        </div>
-      )}
+      <div className="rail__head">
+        {collapsed ? null : (
+          <>
+            <span className="eyebrow">Projects</span>
+            <span className="rail__count mono">{projects.length}</span>
+          </>
+        )}
+        <span className="rail__head-actions">
+          <button
+            ref={addRef}
+            type="button"
+            className="ghost-btn rail__head-add"
+            title={live ? 'Add a project from a folder on that desktop' : 'The desktop is not answering right now'}
+            aria-label="Add project"
+            data-testid="add-project"
+            disabled={!live}
+            onClick={() => setPicking((v) => !v)}
+          >
+            <Icon name="plus" size={14} />
+          </button>
+        </span>
+      </div>
 
       <div className="rail__list">
         {projects.map((project) => {
@@ -98,13 +138,16 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
         })}
         {projects.length === 0 ? (
           <p className="rail__empty">
-            No projects on that desktop yet. Add one in Forge on the machine itself — a browser cannot pick a folder on
-            somebody else’s disk.
+            {live
+              ? 'No projects on that desktop yet. Press + above to look through its folders and pick one.'
+              : 'No projects on that desktop yet. Adding one needs the desktop awake, because the folder is on it.'}
           </p>
         ) : null}
       </div>
 
       <GitPanel collapsed={collapsed} />
+
+      <FolderPicker anchor={addRef.current} open={picking} onClose={() => setPicking(false)} />
     </div>
   )
 }

@@ -38,9 +38,17 @@
  * that comes back with a result, never a local mutation announced afterwards.
  *
  * Out of scope on purpose, and modelled nowhere in this file: voice and
- * dictation, screenshots, desktop control and the overlay, Forge Mobile, Forge
- * TV (docs/forge-web.md, decision 7). A public URL that moves the real mouse is
- * a different risk class, and this file must not grow the vocabulary for one.
+ * dictation, screenshots, the overlay, Forge Mobile, Forge TV
+ * (docs/forge-web.md, decision 7).
+ *
+ * The desktop's *screen* used to be on that list, under a sentence saying that
+ * "a public URL that moves the real mouse is a different risk class, and this
+ * file must not grow the vocabulary for one". The vocabulary is now here — see
+ * the screen-mirror block at the bottom — because Steve decided it should be,
+ * not because anybody stopped believing that sentence. It is still true, and it
+ * is answered by the escalation guard in electron/web-host.ts rather than by an
+ * absence of frames: a browser that may drive this desk has had to type the
+ * desktop's unlock PIN seconds earlier, on a desktop that has one set at all.
  *
  * Also out of scope: the GitHub-only fallback the client drops to when the PC
  * is off. That is a different transport with a different API, and nothing here
@@ -79,6 +87,17 @@ import type {
 } from './types'
 import type { SkillsList } from './skills'
 import type { CommandsFeed } from './commands'
+/*
+ * The input vocabulary, borrowed whole from the phone link rather than restated
+ * here. The rule this file usually follows is the opposite one — MAX_SESSIONS
+ * is restated so the browser bundle does not carry the desktop's IPC table for
+ * one integer — and it is deliberately broken for these three, because they are
+ * not a *value* both files happen to agree on but the exact grammar that
+ * `readMirrorInput` validates against. Two copies of a closed key list is how
+ * one link ends up able to press a key the other cannot, in a frame that ends
+ * at the operating system. Type-only, so nothing is bundled by it.
+ */
+import type { MirrorButton, MirrorInputAction, MirrorKey } from './mobile'
 
 /* --------------------------------------------------------- protocol identity */
 
@@ -90,8 +109,23 @@ import type { CommandsFeed } from './commands'
  * Adding an *optional* field is not a bump — an older client ignores it and a
  * newer one falls back — exactly as `permissionMode` was added to
  * shared/mobile.ts's `OpFrame` without moving MOBILE_PROTO.
+ *
+ * Nor is adding a whole *frame type*, which is why the screen mirror at the
+ * bottom of this file did not move either this number or WEB_SUBPROTOCOL. An
+ * older client never sends `mirror-start`, so a newer desktop never has to
+ * answer one; an older desktop sends the frame through `parseFrame`, which does
+ * not know it, and answers `bad-frame` — a code the client has tolerated since
+ * the first release. Bumping would have refused every existing tab at the
+ * upgrade to gain nothing either end could use.
+ *
+ * **2** is the unlock PIN replacing the TOTP second factor and the word-pair
+ * approval, and it is a bump by every one of the tests above: `pending` is gone
+ * as a frame type, four refusals a client switches on are gone with it, and
+ * `hello` answers a different question. A page built against 1 would sit at a
+ * "showing OTTER RIVER" screen that can never arrive; refusing it at the
+ * upgrade and telling it to reload is the honest failure.
  */
-export const WEB_PROTO = 1
+export const WEB_PROTO = 2
 
 /** Where the WebSocket upgrade lands, on whatever port the desktop listens on. */
 export const WEB_WS_PATH = '/web'
@@ -107,7 +141,7 @@ export const WEB_WS_PATH = '/web'
  * has been spent. `hello.proto` stays the authority; this is the cheap gate in
  * front of it, and the two must be moved together.
  */
-export const WEB_SUBPROTOCOL = 'forge-web.v1'
+export const WEB_SUBPROTOCOL = 'forge-web.v2'
 
 /* -------------------------------------------------------------- rendezvous
  *
@@ -411,17 +445,6 @@ export const HEARTBEAT_MS = 20_000
 export const HEARTBEAT_GRACE_MS = 10_000
 
 /**
- * How long a browser waits at the "showing OTTER RIVER" screen before the
- * desktop gives up on it.
- *
- * The same two minutes as shared/mobile.ts, and bounded for the same reason:
- * the socket is held open and unauthenticated for the whole duration, so an
- * approval nobody is standing next to must not pin a connection open until the
- * process restarts.
- */
-export const APPROVAL_TIMEOUT_MS = 2 * 60_000
-
-/**
  * Firebase ID tokens are minted with a one-hour life, and this link is meant to
  * stay up for a working day. So the credential is re-presented mid-connection
  * rather than only at `hello` — see `WebAuthFrame`. Ten minutes of margin
@@ -432,46 +455,39 @@ export const APPROVAL_TIMEOUT_MS = 2 * 60_000
 export const TOKEN_LIFETIME_MS = 60 * 60_000
 export const TOKEN_REFRESH_MS = 50 * 60_000
 
-/* ------------------------------------------------------- the second factor
+/* ------------------------------------------------------------- the unlock PIN
  *
- * RFC 6238, and every number below is that document's rather than one invented
- * here. They live in this file because both ends read them: the desktop
- * computes codes against them and the browser tells the person what it is
- * asking for ("a six-digit code", "it changes every thirty seconds").
+ * The second half of the door, and the whole of the second factor: a run of
+ * digits set once at the desk, asked of every browser on every connection.
  *
- * The second factor is optional and off until somebody enrols one. What it
- * guards is the case account-only admission deliberately allows: a browser
- * nobody at the desk has ever seen. See `webRequireApproval` in
- * shared/types.ts for the other half of that trade.
+ * The two numbers live here because both ends read them — the desktop refuses
+ * anything outside them and the browser draws a box that will not accept
+ * anything else — and they are the *only* thing about the PIN this file knows.
+ * How it is stored is electron/web/pin.ts's business and is deliberately not
+ * described on this wire: what travels is what somebody typed, once, over a
+ * socket already inside TLS and already past a verified Firebase ID token.
+ *
+ * There is no "trust this browser for thirty days" and no way to be excused the
+ * question. The PIN is not a device credential — it is the thing that says the
+ * person holding the account is the person who set it up — so a browser that
+ * has answered it once still answers it on the next connection.
  */
-
-/** RFC 6238's default time step. Every authenticator app assumes it. */
-export const TOTP_STEP_MS = 30_000
-
-/** Six digits, which is what every authenticator app shows. */
-export const TOTP_DIGITS = 6
 
 /**
- * How many steps either side of now are accepted.
- *
- * One, which is RFC 6238's own recommendation and the smallest window that is
- * usable: a person reading six digits off a phone and typing them takes a few
- * seconds, and a code that turned over mid-typing would otherwise be refused.
- * Two steps would be a minute and a half of life for a code that is supposed to
- * live thirty seconds, and the replay guard below is what stops even this
- * window being three chances at the same code.
+ * Four, which is what a person will actually set and remember, and which is
+ * only defensible because of what stands either side of it: a verified token
+ * for one configured account in front, and the per-source lockout in
+ * electron/web/auth.ts behind. Ten thousand possibilities are nothing offline
+ * and are weeks of work through a door that stops answering after five wrong
+ * ones.
  */
-export const TOTP_DRIFT_STEPS = 1
+export const PIN_MIN_DIGITS = 4
 
 /**
- * How long "trust this browser" lasts.
- *
- * Thirty days, so a code is a monthly event rather than a daily one — the
- * difference between a second factor somebody keeps and one they turn off. The
- * trust is per device and dies with the device: revoking a browser in Settings
- * revokes its trust in the same act, because it is a field on the same row.
+ * Twelve, so a longer one is possible for somebody who wants it, and bounded so
+ * a `hello` cannot carry a megabyte of "PIN" into a key-derivation function.
  */
-export const TRUST_WINDOW_MS = 30 * 24 * 60 * 60_000
+export const PIN_MAX_DIGITS = 12
 
 /* ------------------------------------------------------------------ records */
 
@@ -506,32 +522,20 @@ export interface WebSession {
  *
  * Named here rather than invented in the client because both ends use the
  * vocabulary: the desktop decides which of these a connection is in, and the
- * browser draws it. `connecting` and `live` are the socket's own states;
- * everything from `pending` down is about the device.
+ * browser draws it.
  *
  *   connecting  the socket is opening, or `hello` is in flight
- *   pending     a prompt is up on the desktop; `WebPendingFrame` has the words
- *   totp        the desktop wants a six-digit code before it will say more
+ *   pin         the desktop wants its unlock PIN before it will say more
  *   live        authenticated and mirroring — `WebHelloOkFrame` has arrived
- *   declined    a human said no. Asking again is a new prompt, not a retry
- *   timed-out   nobody answered within APPROVAL_TIMEOUT_MS
- *   refused     any other refusal; `WebRefusedFrame.reason` says which
+ *   refused     any refusal; `WebRefusedFrame.reason` says which
  *   offline     no desktop to talk to. This is the GitHub-mode state
  *
- * `totp` is its own state rather than a shade of `refused` for the same reason
- * `pending` is: nothing has gone wrong and there is nothing to recover from —
- * the page is being asked a question, and the screen it draws is a text box
- * rather than an apology.
+ * `pin` is its own state rather than a shade of `refused` because nothing has
+ * gone wrong and there is nothing to recover from — the page is being asked a
+ * question, and the screen it draws is a text box rather than an apology. It is
+ * the only state on this list that a browser reaches on an ordinary sign-in.
  */
-export type WebApprovalState =
-  | 'connecting'
-  | 'pending'
-  | 'totp'
-  | 'live'
-  | 'declined'
-  | 'timed-out'
-  | 'refused'
-  | 'offline'
+export type WebConnectionState = 'connecting' | 'pin' | 'live' | 'refused' | 'offline'
 
 /* ------------------------------------------------------------ client frames */
 
@@ -542,7 +546,8 @@ export type WebApprovalState =
  * has no identity provider and needs something to remember a phone by; Forge
  * Web has a verified Firebase ID token in hand, and minting a second credential
  * beside it would add a thing to steal and prove nothing the first does not.
- * The device record on the desktop records an approval; it is not a key.
+ * The device record on the desktop records where a token has been used; it is
+ * not a key.
  */
 export interface WebHelloFrame {
   type: 'hello'
@@ -558,34 +563,30 @@ export interface WebHelloFrame {
   /**
    * Stable per-browser-profile id, minted once and kept in the browser's own
    * storage. Two profiles on one machine are two devices, which is correct: the
-   * thing being approved is a place a token can be used from.
+   * thing being recorded is a place a token has been used from.
    */
   deviceId: string
   /**
-   * What the browser calls itself in the approval prompt — "Chrome on
+   * What the browser calls itself in the desktop's device list — "Chrome on
    * Windows", typically. Untrusted display text: show it, never obey it.
    */
   deviceName?: string
   /**
-   * The second factor, when the desktop has asked for one: six digits from an
-   * authenticator app, or one of the recovery codes minted at enrolment.
+   * The desktop's unlock PIN, when it has one set: PIN_MIN_DIGITS to
+   * PIN_MAX_DIGITS digits, as somebody typed them.
    *
-   * Optional, so adding it is not a protocol bump — an older desktop ignores
-   * the field, and a desktop with no second factor enrolled never asks for one.
-   * The browser does not send this unprompted: the first `hello` carries no
-   * code, the desktop answers `totp-required`, and the second carries what the
-   * person typed. That costs a round trip and buys the property that a page
-   * only ever holds a code it was just asked for.
-   */
-  totp?: string
-  /**
-   * "Trust this browser for 30 days" — see TRUST_WINDOW_MS.
+   * The browser does not send this unprompted. The first `hello` carries no
+   * PIN, the desktop answers `pin-required`, and the second carries what the
+   * person typed — a round trip, bought so that a page only ever holds a PIN it
+   * was just asked for, and so a desktop with no PIN set never causes one to be
+   * typed at all.
    *
-   * Only honoured alongside a `totp` the desktop actually accepted, because a
-   * flag that granted trust on its own would be a second factor a browser could
-   * skip by asking nicely.
+   * Asked on **every** connection. There is no "remember this browser": the
+   * device row on the desktop records where a token has been used, it is not a
+   * key, and letting it excuse the PIN would turn the one thing a stolen
+   * password does not come with back into something it does.
    */
-  trust?: boolean
+  pin?: string
 }
 
 /**
@@ -691,13 +692,19 @@ export type WebClientFrame =
   | WebResizeFrame
   | WebRequestFrame
   | WebPingFrame
+  | WebMirrorStartFrame
+  | WebMirrorStopFrame
+  | WebMirrorInputFrame
 
 /* --------------------------------------------------------- layout operations
  *
  * The operations that mutate the workspace. Deliberately *not* "run this
  * command": the browser names a profile id, which the desktop resolves against
  * its own settings, and a project id, whose folder the desktop already knows.
- * Nothing on this wire chooses a cwd or an executable.
+ * Nothing in *this* block chooses a cwd or an executable — and that is still
+ * true of every operation in it now that `fs-list` and `project-add` exist
+ * elsewhere in `WebRequest`. Opening a pane picks neither; adding a project
+ * names a folder and launches nothing.
  *
  * Forwarded to the desktop renderer, which owns tabs and panes and persists
  * them — the same code path a local click takes, never a second one that could
@@ -743,14 +750,112 @@ export interface WebLayoutOp {
 }
 
 /**
+ * A folder on the desktop's disk, as the browser is shown it.
+ *
+ * Everything a picker needs to draw one screen and ask for the next, composed
+ * *on the desktop* — which is the whole shape of it. A browser has no idea
+ * whether the machine it is looking at spells a path with `\` or `/`, where a
+ * drive root ends, or what `..` means there; so it never builds one. It sends
+ * back a `path` this desktop handed it, or an entry `name` for this desktop to
+ * append. See `fs-list`.
+ */
+export interface WebFolder {
+  /**
+   * The absolute path that was actually listed, spelled the way this desktop
+   * spells it, or '' for the list of drive roots.
+   *
+   * Resolved rather than echoed: what comes back is what the desktop opened,
+   * so a client that displays it is displaying the truth about where it is.
+   */
+  path: string
+  /** This desktop's own separator — `\` on Windows, `/` elsewhere. */
+  sep: string
+  /**
+   * This folder and every folder above it, root first, so the breadcrumb has a
+   * path to send back for each crumb instead of rebuilding one by slicing
+   * `path` — which is precisely the string-surgery a browser cannot do
+   * correctly for a machine it is not on. Empty at the drive roots.
+   */
+  crumbs: WebCrumb[]
+  /**
+   * What is in it: folders first, then files, each case-insensitively by name.
+   *
+   * The order is part of the contract rather than a detail of the sort, because
+   * it is the order `truncated` cuts in — a cap that buried the folders under
+   * ten thousand files would leave a picker with nothing to click.
+   */
+  entries: WebDirEntry[]
+  /**
+   * The folder holds more than one answer may carry, so what is here is the
+   * first page of it in that order and not the whole folder. Said out loud
+   * because a list silently cut at a ceiling is a folder somebody will swear no
+   * longer contains their project.
+   */
+  truncated: boolean
+}
+
+/** One step of the breadcrumb: what to draw, and what to ask for. */
+export interface WebCrumb {
+  /** The segment as it is shown — `C:\`, then `Users`, then `steve`. */
+  name: string
+  /** The absolute path of that step, to send straight back as `fs-list.path`. */
+  path: string
+}
+
+/**
+ * One thing inside a folder. A *name*, and two facts about it.
+ *
+ * Never a path, and never any content: this is `readdir` with the type bit that
+ * came free with it, plus one `.git` probe. A file's bytes are not on this wire
+ * and there is no frame that carries them.
+ */
+export interface WebDirEntry {
+  name: string
+  /** A folder, and therefore something the picker may open. */
+  dir: boolean
+  /**
+   * It holds a `.git`, so it is very probably a project rather than somewhere
+   * on the way to one. The one adornment worth the stat: it is what makes a
+   * list of forty folders readable at a glance.
+   */
+  repo: boolean
+}
+
+/**
  * What a browser can ask for.
  *
- * Read-mostly by design. The only two members that can change anything are
- * `layout`, which the renderer performs, and `git-action`, whose five verbs are
- * enumerated by `GitActionKind` in shared/types.ts and implemented in
- * electron/git/git-actions.ts. Nothing here names a path: `git-action` carries a
- * project id exactly as `GitActionRequest` does, so the browser cannot ask this
- * desktop to run git in an arbitrary folder.
+ * Read-mostly by design. The members that can change anything are `layout`,
+ * which the renderer performs, `git-action`, whose five verbs are enumerated by
+ * `GitActionKind` in shared/types.ts and implemented in
+ * electron/git/git-actions.ts, and `project-add`, which the renderer performs
+ * through the same `addProjectPath` a click at the desk reaches.
+ *
+ * ## Two members here do name a path, and that is a deliberate change
+ *
+ * This paragraph used to say "Nothing here names a path", and offered
+ * `git-action`'s project id as the proof — it still carries one, and still
+ * cannot ask this desktop to run git in an arbitrary folder. But `fs-list` and
+ * `project-add` name folders outright, so the old sentence would now be a
+ * comforting lie, and a lie in this file is worse than the thing it describes.
+ *
+ * The honest reckoning is that the no-paths rule was never a containment
+ * boundary. A browser that is in already types into a live shell — that is what
+ * `write` *is* — and a shell can `cd` anywhere on this PC and read anything the
+ * account can read. A protocol with no path in it therefore bought no
+ * confinement whatsoever; what it bought was a smaller vocabulary, which is
+ * worth something and is not worth being unable to add a project from a
+ * hotel room three hundred miles away.
+ *
+ * The lock is, and has always been, the account plus the second factor: a
+ * Firebase ID token verified against Google's keys on every connection, matched
+ * to the one uid this desktop is configured for, behind the desktop's unlock
+ * PIN when one is set, from a page served by an origin this desktop names.
+ * Everything in this union is
+ * behind all of that. What these two members must therefore be careful about is
+ * not confinement but *behaviour*: they read names and never contents, they
+ * answer a refusal in a sentence rather than throwing, and they cap what one
+ * answer may carry — see `WebFolder` above, and the note on each of the two
+ * members below.
  */
 export type WebRequest =
   | { kind: 'layout'; op: WebLayoutOp }
@@ -777,6 +882,42 @@ export type WebRequest =
    * built-ins alone. Capped by the server, not by the type — a list is a list.
    */
   | { kind: 'agents'; commands?: string[] }
+  /**
+   * One folder on the desktop's disk, so a browser can find a project to add.
+   *
+   * Answered with `WebFolder`, or with `{ kind: 'failed' }` carrying a sentence
+   * — a path that is not absolute, a folder that has gone, a folder this
+   * account may not read. None of those is exceptional enough to throw over,
+   * and all of them are things a person navigating with the mouse will do.
+   *
+   * `path` is '' for the drive roots and otherwise a path *this desktop
+   * handed over*: `WebFolder.path`, or one of its `crumbs`. `name` is one entry
+   * from the folder just listed, which the desktop appends itself — the browser
+   * never joins two strings and calls the result a Windows path. A `name` that
+   * is not a single plain segment is refused rather than resolved, so `..` is
+   * not a way of walking anywhere the sender could not have named outright
+   * (which, being past the token, it could have).
+   *
+   * How many entries one answer carries is capped by the desktop and not by
+   * this type, the same arrangement `agents` has: the number is MAX_FS_ENTRIES
+   * in electron/web/fs-browse.ts, beside the code that does the reading.
+   */
+  | { kind: 'fs-list'; path: string; name?: string }
+  /**
+   * Add a folder to the project rail — the browser's half of "Add project".
+   *
+   * `path` is a folder this desktop named in an `fs-list` answer, and the
+   * desktop checks again that it exists and is a directory before doing
+   * anything with it: the folder may have been renamed between the listing and
+   * the click, and "the browser was told so a moment ago" is not a fact about
+   * the disk now.
+   *
+   * Performed by the desktop *renderer*, through the same `addProjectPath` the
+   * button at the desk reaches, for decision 5's reason — the renderer owns the
+   * project list and persists it, and a browser must not be able to reach a
+   * code path a local click cannot. Answered `{ kind: 'ok' }`.
+   */
+  | { kind: 'project-add'; path: string }
 
 /* ------------------------------------------------------------ server frames */
 
@@ -813,30 +954,6 @@ export interface WebHelloOkFrame {
 }
 
 /**
- * "Steve is being asked about you. Hold on."
- *
- * Sent instead of `hello-ok` when a browser this desktop has not approved
- * connects. The socket stays open and unauthenticated until he answers.
- *
- * `words` is the anti-confusion device, and it is the only reason this is safe
- * to leave facing the internet at all: the browser shows the pair in large
- * type, the desktop shows the same pair in its prompt, and the human is told to
- * compare them. Without it, a stranger who guessed the hostname could make a
- * prompt appear at the moment Steve happened to be approving his own laptop,
- * and Allow would go to the wrong device.
- *
- * The pair is generated on the desktop by `wordPair` in shared/mobile.ts. There
- * is deliberately no second word list here — two lists is how the two screens
- * end up showing different words.
- */
-export interface WebPendingFrame {
-  type: 'pending'
-  words: string
-  /** ms epoch on the desktop's clock. See APPROVAL_TIMEOUT_MS. */
-  expiresAt: number
-}
-
-/**
  * Why a connection is not going to happen.
  *
  * These are different sentences on screen and different recovery paths — sign
@@ -859,16 +976,17 @@ export const WEB_REFUSALS = [
    */
   'wrong-account',
   /**
-   * This device has never been approved, and no prompt can be raised right now
-   * — the desktop is not accepting new devices, or another approval is already
-   * in flight. Distinct from `declined`: nobody has said no, nobody has been
-   * asked.
+   * This browser did not identify itself — `hello` carried a blank `deviceId`,
+   * so there is nothing to record an admission against and nothing a revocation
+   * could later name. Recovery is a reload, which mints one.
+   *
+   * It used to mean "no prompt can be raised for you right now", back when an
+   * unknown browser had to be allowed by a human at the desk. There is no such
+   * prompt any more: a browser holding a verified token for the configured uid
+   * and the desktop's PIN is admitted whether or not this desktop has seen it
+   * before.
    */
   'not-approved',
-  /** A human was asked and said no. Asking again is a new prompt, not a retry. */
-  'declined',
-  /** Nobody answered within APPROVAL_TIMEOUT_MS. Retrying is reasonable. */
-  'timed-out',
   /**
    * This device was approved once and has since been revoked in settings. The
    * page should forget its device id and stop reconnecting; a revoked device
@@ -886,22 +1004,23 @@ export const WEB_REFUSALS = [
    */
   'busy',
   /**
-   * A second factor is enrolled and this browser has not presented one. Nothing
-   * has gone wrong: the recovery is to show a text box and send the `hello`
-   * again with `totp` filled in.
+   * This desktop has an unlock PIN set and this browser has not presented one.
+   * Nothing has gone wrong: the recovery is to show a PIN box and send the
+   * `hello` again with `pin` filled in.
    *
    * Deliberately not counted as a failed attempt by the desktop's lockout — it
-   * is the first half of every ordinary sign-in on a machine with 2FA, and a
-   * door that struck for it would lock somebody out on their fifth login.
+   * is the first half of every ordinary sign-in, and a door that struck for it
+   * would lock somebody out on their fifth login.
    */
-  'totp-required',
+  'pin-required',
   /**
-   * A code was presented and did not open the door: wrong, expired, already
-   * spent, or a recovery code that has been used. One value rather than four,
-   * because telling them apart out loud tells an attacker which half of the
-   * guess was right. This one *does* count against the lockout.
+   * A PIN was presented and did not open the door. One value and one sentence
+   * for every cause, because telling "wrong" apart from "not a PIN at all" out
+   * loud tells somebody guessing which half of their guess was right. This one
+   * *does* count against the lockout, which is the whole defence of a secret
+   * only four digits long.
    */
-  'totp-invalid'
+  'pin-invalid'
 ] as const
 
 export type WebRefusal = (typeof WEB_REFUSALS)[number]
@@ -1035,10 +1154,15 @@ export interface WebWorkspaceFrame {
  * `GitSnapshot` carries absolute paths (`repoRoot`, and `absPath` on every
  * changed file) because the desktop's git panel is reused wholesale in the
  * browser — decision 4 in docs/forge-web.md — and the component reads them.
- * That is the one place this protocol carries desktop paths it did not strictly
- * have to, and it is worth being awake about: they travel *down* only. Nothing
- * the browser sends back names a path. `git-action` carries a project id, and
- * the desktop resolves the folder itself.
+ *
+ * This used to be the one place the protocol carried desktop paths, and the
+ * note here said they travel *down* only. They no longer do: `fs-list` and
+ * `project-add` send paths back up, and the paragraph on `WebRequest` sets out
+ * why that costs nothing this protocol was ever protecting. What is still true,
+ * and is the part worth keeping, is that **git** is never told a path — a
+ * `git-action` carries a project id and the desktop resolves the folder itself,
+ * so no frame can point this machine's git at somewhere it was not already
+ * watching.
  */
 export interface WebGitFrame {
   type: 'git'
@@ -1071,6 +1195,12 @@ export type WebResult =
   | { kind: 'commands'; feed: CommandsFeed }
   /** The built-in agents, and whatever arbitrary command lines were asked about. */
   | { kind: 'agents'; agents: AgentPresence[]; commands: CommandPresence[] }
+  /**
+   * One folder of the desktop's disk — the answer to `fs-list`. Named after
+   * what it carries rather than after the request, exactly as `git-status` is
+   * answered with `git`.
+   */
+  | { kind: 'folder'; folder: WebFolder }
 
 /**
  * "This desktop is going away."
@@ -1145,7 +1275,6 @@ export interface WebPongFrame {
 
 export type WebServerFrame =
   | WebHelloOkFrame
-  | WebPendingFrame
   | WebRefusedFrame
   | WebReplayFrame
   | WebDataFrame
@@ -1160,6 +1289,270 @@ export type WebServerFrame =
   | WebShutdownFrame
   | WebErrorFrame
   | WebPongFrame
+  | WebMirrorOkFrame
+  | WebMirrorChunkFrame
+  | WebMirrorStopFrame
+
+/* ------------------------------------------------------------ screen mirror
+ *
+ * The browser watching this desktop's actual screen — and, behind two further
+ * locks, driving it.
+ *
+ * Everything above this line ends inside Forge: a pane, a tab, a project, a
+ * folder listing. Everything in this block ends at a display or at the
+ * operating system, so it is the part of the protocol worth reading twice.
+ *
+ * ## Why this is not WebRTC
+ *
+ * Forge Mobile and Forge TV already mirror this desktop, over a peer connection
+ * the server merely relays signalling for (`MirrorStartFrame` in
+ * shared/mobile.ts). Copying that here was the obvious move and it does not
+ * work, for a reason that has nothing to do with taste: WebRTC media is
+ * peer-to-peer over UDP, so it never enters the Cloudflare tunnel this link is
+ * reached through. On a LAN the two peers find each other and everything looks
+ * fine. From a hotel three hundred miles away they do not, and the fix is a
+ * TURN relay — a server somebody runs, pays for, and through which every pixel
+ * of Steve's screen would pass. The television is on the sofa; the browser is
+ * anywhere. That difference is the whole argument.
+ *
+ * So the picture travels on the socket that is already open. Same tunnel, same
+ * origin check, same Firebase token, same device list, same revocation — one
+ * transport with one set of locks, and nothing new to reason about at the
+ * network layer. There is deliberately no ICE, no STUN, no TURN and no
+ * signalling frame anywhere in this file.
+ *
+ * ## How the chunk bytes travel, and what that costs
+ *
+ * `mirror-frame` carries one encoded chunk as **base64 inside the JSON frame**,
+ * and the third it adds is spent on purpose.
+ *
+ * A binary WebSocket message would be cheaper and it would also be a second
+ * wire format. `parseFrame` below is string-based; `electron/web/server.ts`
+ * reads every message as `String(raw)`; every other frame on this link is JSON.
+ * A binary path therefore means a second decoder at both ends *and* somewhere
+ * to put the two facts a decoder needs per chunk — whether it is a keyframe and
+ * what time it belongs at. Those either ride in a hand-rolled header that only
+ * two files in the repository understand, or in a companion JSON frame that can
+ * be separated from its bytes by an ordering nobody has to think about today.
+ * base64 keeps one frame, one parser, and one description of this protocol in
+ * this file, which is the property the whole file exists for.
+ *
+ * The cost is a third of a video bitrate that is already chosen to fit a home
+ * upload. If it ever stops paying, the honest replacement is a binary message
+ * with a fixed header in its first bytes — not a JSON frame beside one.
+ */
+
+/**
+ * The largest encoded chunk this desktop will put on the wire, before base64.
+ *
+ * MAX_FRAME_BYTES is `ws`'s own `maxPayload` and bounds the *inbound* direction
+ * only, so until this constant nothing bounded a frame travelling the other
+ * way. That was harmless while the largest outbound frame was a 192KB replay
+ * written by this desktop's own PTY buffer; a video encoder is the first thing
+ * on this link that can produce something bigger, and can do it thirty times a
+ * second.
+ *
+ * Half a megabyte is chosen against what an encoder actually emits rather than
+ * as a round number: a keyframe at the resolutions a desktop capture runs at is
+ * tens to low hundreds of kilobytes, and the delta frames between them are an
+ * order of magnitude smaller again. So this sits several times above the worst
+ * legitimate chunk and well below the point where one frame is a memory event —
+ * 512KB becomes about 700KB of base64, once, rather than a megabyte per frame
+ * for as long as somebody is watching.
+ *
+ * A chunk over it **ends the watch** rather than being quietly dropped. A
+ * decoder that loses a keyframe paints a smear that never resolves, and
+ * somebody staring at one cannot tell it from a tunnel that has died; a
+ * sentence saying the picture was too big to send is worse news and better
+ * information.
+ */
+export const MAX_MIRROR_CHUNK_BYTES = 512 * 1024
+
+/**
+ * How many `mirror-input` frames a second this desktop will act on — counted
+ * **separately** from MAX_INPUT_PER_SECOND, which is the point rather than an
+ * implementation detail.
+ *
+ * A pointer moving smoothly over a mirrored screen is around thirty frames a
+ * second, and a wheel spun hard is more. Sharing one counter with `write` would
+ * mean that moving the mouse spends the budget that answers the same person's
+ * keystrokes, and the half that stalls would be the terminal — the thing this
+ * link is actually for. Forge Mobile keeps a second counter for exactly this
+ * reason; see `allowInput` in electron/mobile/server.ts.
+ *
+ * The value is the same 120 as MAX_INPUT_PER_SECOND, reached by the same
+ * arithmetic rather than by copying it: four times a smooth pointer, so nobody
+ * meets it by moving a mouse, and low enough that a runaway `setInterval` in a
+ * tab exhausts a counter rather than a desk. Two counters that happen to hold
+ * the same number are still two counters, and merging them because the numbers
+ * match would reintroduce the starvation the split exists to prevent.
+ */
+export const MAX_MIRROR_INPUT_PER_SECOND = 120
+
+/**
+ * "Show me that screen." Browser → desktop.
+ *
+ * `pin` is the desktop's unlock PIN, presented *again* — not the one that
+ * opened the connection an hour ago on a socket that has been open ever since.
+ * A password alone must not buy the mouse, and neither must a PIN typed at the
+ * start of a working day. The dance is `hello`'s, for the same reason it is
+ * `hello`'s: the first `mirror-start` carries no PIN, the desktop answers
+ * `mirror-stop` with `needsPin`, and the second carries what the person typed.
+ * That costs a round trip and buys the property that a page only ever holds a
+ * PIN it was just asked for.
+ *
+ * A desktop with no PIN set never asks, and the field is simply absent —
+ * watching is then gated by the settings toggle alone. Driving is not: see the
+ * escalation guard in electron/web-host.ts, which refuses control outright on a
+ * desktop that has no PIN to ask for.
+ */
+export interface WebMirrorStartFrame {
+  type: 'mirror-start'
+  pin?: string
+}
+
+/**
+ * The watch is over, or is not going to happen. Both directions.
+ *
+ * Upward it means the browser closed the viewer. Downward it is every refusal
+ * and every ending: the setting is off, the PIN was wrong, Forge has no window
+ * to capture in, the capture failed, another browser is already watching, the
+ * encoder produced something too big to send, the desktop is shutting down.
+ *
+ * `needsPin` exists so the page can draw a PIN box rather than an apology.
+ * Without it every refusal renders as the same dead end, and the single most
+ * common one — "type the PIN again before you take the mouse" — would look like
+ * a failure instead of a question. Same reasoning as `pin-required` being its
+ * own `WebRefusal` rather than a shade of `refused`.
+ */
+export interface WebMirrorStopFrame {
+  type: 'mirror-stop'
+  /** One sentence, written for the person reading the browser tab. */
+  reason?: string
+  /** Ask for the PIN and send `mirror-start` again. Nothing has gone wrong. */
+  needsPin?: boolean
+}
+
+/**
+ * What a decoder has to be told before it can be handed a single chunk.
+ *
+ * Its own interface rather than four fields on the frame, because the desktop's
+ * *renderer* is where these values are decided — it owns the encoder — and they
+ * therefore travel over IPC before they ever reach a socket. One shape, named
+ * once, means the main process passes it along instead of unpicking and
+ * rebuilding it. See `IPC.webMirrorReady`.
+ */
+export interface WebMirrorConfig {
+  /**
+   * A WebCodecs codec string, e.g. `avc1.42E01E` or `vp8`. Chosen by the
+   * encoder at capture time and never by this file: what a machine can encode
+   * in hardware is a property of that machine, and a codec named here would be
+   * a guess that fails on somebody's laptop.
+   */
+  codec: string
+  /** The coded size of the picture, which is not the browser's window size. */
+  width: number
+  height: number
+  /**
+   * Codec-private setup bytes, base64 — H.264's `avcC`, and its equivalents.
+   *
+   * Optional because only some configurations need one: an Annex-B H.264 stream
+   * and VP8 carry their own parameter sets inline, and a decoder handed a
+   * `description` it does not want will refuse to configure. Absent means "the
+   * chunks are self-describing".
+   */
+  description?: string
+}
+
+/**
+ * The answer to `mirror-start`, sent when the capture is actually up.
+ *
+ * Deliberately *not* sent the moment the frame arrives. The renderer has to
+ * open a stream onto the display and configure an encoder before anything here
+ * is known, and a `mirror-ok` full of guesses would be a decoder configured
+ * wrongly rather than a decoder configured early. Between the request and this
+ * frame the browser has been told nothing, which is correct: it is waiting on a
+ * machine, and the only other thing that can arrive is `mirror-stop` saying why
+ * it is not coming.
+ *
+ * `canControl` is this desktop's answer to "may I also drive it", read at the
+ * moment the picture starts. A snapshot, not a subscription, and the same
+ * arrangement `HelloOkFrame.canControl` has for a television: switching control
+ * *on* at the desk reaches the browser on its next watch; switching it *off* is
+ * felt immediately, because every input frame is judged afresh.
+ */
+export interface WebMirrorOkFrame extends WebMirrorConfig {
+  type: 'mirror-ok'
+  canControl: boolean
+}
+
+/**
+ * One encoded video chunk. Desktop → browser, and the only high-rate frame on
+ * this link that this desktop originates rather than relays.
+ *
+ * There is no acknowledgement and there must not be one — the same rule
+ * `WebDataFrame` states for terminal bytes, and for a harder reason: what is on
+ * the far end is a decoder, and a decoder cannot ask for a frame again. A chunk
+ * that does not arrive is a chunk that never existed.
+ */
+export interface WebMirrorChunk {
+  /** The encoded bytes, base64. See the block comment above for why. */
+  data: string
+  /**
+   * A keyframe, decodable on its own. The one bit a viewer joining or
+   * recovering has to have: everything else in the stream is a difference from
+   * a picture it may not hold.
+   */
+  key: boolean
+  /**
+   * Microseconds, on the encoder's own timeline — WebCodecs' unit, passed
+   * through rather than converted, so nothing in the middle of this pipe has an
+   * opinion about time.
+   */
+  timestamp: number
+  /** How long the chunk covers, in microseconds, when the encoder says. */
+  duration?: number
+}
+
+export interface WebMirrorChunkFrame extends WebMirrorChunk {
+  type: 'mirror-frame'
+}
+
+/**
+ * The browser driving this desktop's pointer and keyboard. Only ever sent
+ * upward, and the only frame in this protocol that ends in a synthetic event at
+ * the operating system.
+ *
+ * Every field is Forge Mobile's, imported rather than restated: `readMirrorInput`
+ * in shared/mobile.ts is the validator both links use, it never looks at a
+ * frame's discriminant, and so it validates one of these verbatim. A second
+ * copy of that parser is the thing most likely to disagree with the first about
+ * what a clamped coordinate or an unlisted key means — and disagreements
+ * between two validators of an OS-level input frame are not the kind anybody
+ * finds by reading.
+ *
+ * What can be expressed at all is set out at length in shared/mobile.ts's input
+ * block: a closed vocabulary, never a keycode; every pointer event carrying its
+ * own position; positions as fractions of the mirrored screen rather than
+ * pixels. All three arguments hold here unchanged, and the third holds harder —
+ * a browser window has no idea what resolution this desk is and is very
+ * probably not even the same shape.
+ */
+export interface WebMirrorInputFrame {
+  type: 'mirror-input'
+  a: MirrorInputAction
+  /** Where the pointer is, as a fraction of the mirrored screen. 0..1. */
+  x?: number
+  y?: number
+  button?: MirrorButton
+  /** Wheel notches; positive scrolls away from the reader, like a real wheel. */
+  wheel?: number
+  key?: MirrorKey
+  /** For `key`: the stroke's direction. Both are sent, always in pairs. */
+  down?: boolean
+  /** For `text`: a phrase to type, as one instruction. */
+  text?: string
+}
 
 /* ----------------------------------------------------------------- decoding */
 
@@ -1197,6 +1590,13 @@ export function parseFrame(raw: string): WebClientFrame | null {
     // boundary and becomes an action later, in one place.
     case 'request':
     case 'ping':
+    case 'mirror-start':
+    case 'mirror-stop':
+    // Admitted and nothing more, exactly as `request` is: what an input frame
+    // *means* is decided by `readMirrorInput` in shared/mobile.ts, in one place,
+    // after the server has established that this socket is the one watching the
+    // screen. Nothing here reads `a`, `x` or `key`.
+    case 'mirror-input':
       return value as WebClientFrame
     default:
       return null

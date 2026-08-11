@@ -42,19 +42,36 @@ import { AgentChooser } from './AgentChooser'
  * must not look like Forge broken (decision 10) — and a read-only xterm still
  * renders a TUI's last frame properly, which a `<pre>` of the same bytes would
  * not.
+ *
+ * ## A dropped socket is not the frozen twin
+ *
+ * These are two different states and this component used to run them together,
+ * which was expensive in a way nobody could see. A reconnect is not a new
+ * terminal: the xterm on screen is the one the person was reading, it holds
+ * their scrollback, and the catch-up buffer repaints it when the link comes
+ * back. So `cached` — the frozen twin — keys the mount effects, and `live`
+ * merely decides whether the pane takes input. Rebuilding on every blip cost a
+ * detach, a re-attach and up to MAX_REPLAY_BYTES per pane, and it happened
+ * whenever a socket so much as flinched.
  */
 export function PaneView({
   leaf,
   focused,
-  onlyPane
+  onlyPane,
+  onScreen
 }: {
   leaf: PaneLeaf
   focused: boolean
   onlyPane: boolean
+  /** Whether this pane's tab is the one on screen. See `SplitView`. */
+  onScreen: boolean
 }): ReactNode {
   const { state, actions } = useForge()
   const profile = resolveProfile(useProfiles(), leaf.profileId)
-  const frozen = state.stage.kind === 'offline' || state.connection.state !== 'live'
+  /** No desktop at all: decision 10's read-only twin, drawn from the cache. */
+  const cached = state.stage.kind === 'offline'
+  /** Is the socket answering this second? Only input and the badge read this. */
+  const live = !cached && state.connection.state === 'live'
   const asking = state.asking.has(leaf.id)
   const alive = (state.picture?.sessions ?? []).some((s) => s.id === leaf.id)
 
@@ -76,7 +93,7 @@ export function PaneView({
 
   useLayoutEffect(() => {
     const holder = holderRef.current
-    if (!holder || frozen) return
+    if (!holder || cached) return
 
     let attached = false
     const host = mountTerm(holder, {
@@ -122,18 +139,20 @@ export function PaneView({
       host.dispose()
       hostRef.current = null
     }
-    // Keyed on the session and on frozen, and on nothing else on purpose.
+    // Keyed on the session and on `cached`, and on nothing else on purpose.
     // `profile.accent` is a construction-time input read once when the emulator
     // is built: re-running this effect would tear down a live terminal and
     // re-attach it, which costs a full replay and a screen flash. The desktop's
-    // own pane keeps its spec in a ref for exactly the same reason.
-  }, [leaf.id, frozen])
+    // own pane keeps its spec in a ref for exactly the same reason. `live` is
+    // deliberately *not* here — a dropped socket keeps this terminal, and the
+    // effect below is what makes it stop taking input instead.
+  }, [leaf.id, cached])
 
   /* ----------------------------------------------------- the frozen twin */
 
   useLayoutEffect(() => {
     const holder = holderRef.current
-    if (!holder || !frozen) return
+    if (!holder || !cached) return
     const host = mountTerm(holder, {
       fontSize: 12,
       fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
@@ -156,7 +175,24 @@ export function PaneView({
       hostRef.current = null
     }
     // Same reason as above: the accent is a construction-time input.
-  }, [leaf.id, frozen, state.cached])
+  }, [leaf.id, cached, state.cached])
+
+  /* ------------------------------------------------- input follows the link */
+
+  /**
+   * A terminal that cannot reach its shell must not look like one that can.
+   *
+   * Declared after both mount effects so it runs after them in the same commit,
+   * which is what lets a terminal built during a reconnect come up read-only
+   * rather than blinking a caret for a frame first. Nothing is torn down here —
+   * that is the whole point of it being a separate effect.
+   */
+  useLayoutEffect(() => {
+    hostRef.current?.setReadOnly(!live)
+    // `leaf.id` and `cached` are here because they are what builds a new host
+    // above; without them a terminal rebuilt while the link was down would come
+    // up taking keys for a socket that is not there.
+  }, [live, cached, leaf.id])
 
   /**
    * A pane whose shell started *after* this component mounted has to attach a
@@ -179,25 +215,32 @@ export function PaneView({
   useEffect(() => {
     const became = !wasAlive.current && alive
     wasAlive.current = alive
-    if (!became || frozen) return
+    if (!became || !live) return
     const host = hostRef.current
     if (host) actions.attach(leaf.id, host.size())
-  }, [alive, frozen, leaf.id, actions])
+  }, [alive, live, leaf.id, actions])
 
-  /** The desktop focuses the caret when the pane is the active one; so do we. */
+  /**
+   * The desktop focuses the caret when the pane is the active one; so do we.
+   *
+   * `onScreen` is load-bearing rather than defensive: every tab of the active
+   * project stays mounted, so without it each tab's own active pane would take
+   * the caret as it mounted and the last one to do so — a tab nobody is looking
+   * at — would win.
+   */
   useEffect(() => {
-    if (focused && !frozen) hostRef.current?.focus()
-  }, [focused, frozen])
+    if (focused && live && onScreen) hostRef.current?.focus()
+  }, [focused, live, onScreen])
 
   return (
     <section
       className="pane"
       data-pane-id={leaf.id}
       data-focused={focused}
-      data-status={frozen ? 'frozen' : alive ? 'live' : 'dead'}
+      data-status={!live ? 'frozen' : alive ? 'live' : 'dead'}
       style={{ '--pane-accent': profile.accent } as CSSProperties}
       onPointerDownCapture={() => {
-        if (!focused && !frozen) void actions.layout({ op: 'focus-pane', paneId: leaf.id })
+        if (!focused && live) void actions.layout({ op: 'focus-pane', paneId: leaf.id })
       }}
     >
       <header className="pane__header">
@@ -217,9 +260,24 @@ export function PaneView({
             CUT
           </span>
         ) : null}
-        {frozen ? (
+        {cached ? (
           <span className="pane__perm mono" data-frozen="true" title="The last transcript this browser was sent">
             FROZEN
+          </span>
+        ) : null}
+        {/*
+          Not the same chip and not the same news. FROZEN says there is no
+          desktop; this says there is one and the link to it dropped, so what is
+          on screen is where the pane had got to and the catch-up buffer will
+          repaint it the moment the socket is back.
+        */}
+        {!cached && !live ? (
+          <span
+            className="pane__perm mono"
+            data-reconnecting="true"
+            title="The link dropped — this is where the pane had got to, and it repaints when it comes back"
+          >
+            RECONNECTING
           </span>
         ) : null}
 
@@ -229,7 +287,7 @@ export function PaneView({
             type="button"
             className="ghost-btn pane__action"
             title="Split right"
-            disabled={frozen}
+            disabled={!live}
             onClick={() => setChooser('row')}
           >
             <Icon name="splitRight" size={13} />
@@ -238,7 +296,7 @@ export function PaneView({
             type="button"
             className="ghost-btn pane__action"
             title="Split down"
-            disabled={frozen}
+            disabled={!live}
             onClick={() => setChooser('column')}
           >
             <Icon name="splitDown" size={13} />
@@ -248,7 +306,7 @@ export function PaneView({
             className="ghost-btn pane__action"
             data-danger="true"
             title={onlyPane ? 'Close tab' : 'Close pane'}
-            disabled={frozen}
+            disabled={!live}
             onClick={() => void actions.layout({ op: 'close-pane', paneId: leaf.id })}
           >
             <Icon name="close" size={13} />
@@ -264,8 +322,9 @@ export function PaneView({
         align="end"
         title={chooser === 'column' ? 'Split down with' : 'Split right with'}
         onClose={() => setChooser(null)}
-        onPick={(profileId) => {
-          if (chooser) void actions.layout({ op: 'create-pane', paneId: leaf.id, direction: chooser, profileId })
+        onPick={(profileId, permissionMode) => {
+          if (chooser)
+            void actions.layout({ op: 'create-pane', paneId: leaf.id, direction: chooser, profileId, permissionMode })
         }}
       />
     </section>

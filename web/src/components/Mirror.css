@@ -1,0 +1,188 @@
+/*
+ * The screen mirror's overlay.
+ *
+ * A sheet of its own rather than more of web/src/styles.css, because this is the
+ * one surface in Forge Web that is not Forge: everything in that file is chrome
+ * around the app — the gate, the badge, the offline strip — and this covers the
+ * app entirely to show somebody else's desktop. Keeping it separate is also what
+ * lets the rule at the top of styles.css stay true, that nothing there is bigger
+ * than a strip.
+ *
+ * Every value is a token, for the reason styles.css gives: a literal here would
+ * be the first place the browser and the desktop started to look different. The
+ * two exceptions are `black` for the letterbox and the `contain`/`crosshair`
+ * pair, and neither is a colour anybody themes — the bars beside a captured
+ * screen are the absence of picture, not a surface.
+ */
+
+.mirror {
+  position: fixed;
+  inset: 0;
+  /* The desktop's own full-page layer — the one the settings page occupies
+     there. Over the panes, the tab bar and the rail, and under the popovers,
+     which is the arrangement src/theme/tokens.css already sets for a surface
+     that covers the application. */
+  z-index: var(--z-settings);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+}
+
+/* ------------------------------------------------------------- the toolbar
+ *
+ * One row: which mode this page is in, whose screen it is, what cannot be sent,
+ * and the two ways out. The limits sit in the middle and take the slack,
+ * because they are the sentence somebody needs *before* they try Ctrl+C rather
+ * than after.
+ */
+
+.mirror__bar {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--s-4);
+  align-items: center;
+  padding: var(--s-3) var(--s-4);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.mirror__mode {
+  display: inline-flex;
+  gap: var(--s-2);
+  align-items: center;
+  flex-shrink: 0;
+  padding: 2px var(--s-3);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+}
+
+/* Driving is the state worth noticing from the corner of an eye, so it is the
+   only one that spends the accent. Watching is deliberately quiet: it is the
+   resting state, and a badge that shouted in both would say nothing in either. */
+.mirror__mode[data-driving='true'] {
+  color: var(--accent);
+  background: var(--accent-softer);
+  border-color: var(--accent-line);
+}
+
+.mirror__dot {
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  border-radius: var(--r-full);
+}
+
+.mirror__name {
+  flex-shrink: 0;
+  max-width: 220px;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.mirror__limits {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--t-xs);
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.mirror__limits strong {
+  color: var(--text-secondary);
+}
+
+.mirror__btn {
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------- the stage
+ *
+ * Black, and the picture centred in it. The canvas is sized by its own frames
+ * (lib/screen.ts writes `width`/`height` on it as they decode), so the two max
+ * constraints below are all it takes to fit one into the box with its aspect
+ * ratio intact — which is what makes the element's rectangle *be* the picture's
+ * rectangle, and the pointer arithmetic in lib/mirror-input.ts a no-op rather
+ * than a correction.
+ */
+
+.mirror__stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: var(--s-4);
+  background: black;
+}
+
+.mirror__picture {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  /* Nothing until a frame has decoded: an empty canvas is a 300x150 white
+     rectangle by specification, which reads as a broken picture rather than as
+     one that has not arrived. */
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease-out);
+}
+
+.mirror__picture[data-live='true'] {
+  opacity: 1;
+}
+
+/* The cursor is the other half of the mode. In watching mode the pointer is an
+   ordinary one over an ordinary picture; in driving mode it is a crosshair,
+   because what is under it is a click on somebody else's machine. */
+.mirror__stage[data-driving='true'] .mirror__picture {
+  cursor: crosshair;
+}
+
+/* ----------------------------------------------------- what it has to say
+ *
+ * Notes float over the picture rather than displacing it, so a sentence
+ * arriving mid-watch does not resize the thing being watched — and so the
+ * pointer arithmetic is never measured against a box that moved.
+ */
+
+.mirror__note {
+  margin: 0;
+  font-size: var(--t-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.mirror__hint {
+  position: absolute;
+  bottom: var(--s-5);
+  left: 50%;
+  margin: 0;
+  padding: var(--s-2) var(--s-4);
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+  transform: translateX(-50%);
+}
+
+.mirror__card {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  align-items: center;
+  width: 100%;
+  max-width: 340px;
+  padding: var(--s-7) var(--s-6);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-card);
+}
