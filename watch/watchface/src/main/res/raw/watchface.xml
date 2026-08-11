@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Forge watch face (Watch Face Format v2).
+  Dark digital face: weekday + day, big clock, and a microphone shortcut at the
+  bottom that launches Forge Watch's DictationActivity.
+  Validate with Google's wff-validator before shipping changes.
+-->
+<WatchFace width="450" height="450" clipShape="CIRCLE">
+    <Metadata key="CLOCK_TYPE" value="DIGITAL" />
+    <Metadata key="PREVIEW_TIME" value="10:08:32" />
+    <Scene backgroundColor="#ff000000">
+
+        <PartText x="0" y="95" width="450" height="40">
+            <Text align="CENTER">
+                <Font family="SYNC_TO_DEVICE" size="26" color="#ff9aa0b0">
+                    <Template>%s %s
+                        <Parameter expression="[DAY_OF_WEEK_S]" />
+                        <Parameter expression="[DAY]" />
+                    </Template>
+                </Font>
+            </Text>
+        </PartText>
+
+        <DigitalClock x="0" y="140" width="450" height="130">
+            <TimeText
+                format="hh:mm"
+                hourFormat="SYNC_TO_DEVICE"
+                align="CENTER"
+                x="0" y="0" width="450" height="130">
+                <Font family="SYNC_TO_DEVICE" size="110" weight="MEDIUM" color="#ffffffff" />
+            </TimeText>
+        </DigitalClock>
+
+        <Group x="185" y="320" width="80" height="80" name="dictate">
+            <Launch target="com.forge.watch/com.forge.watch.DictationActivity" />
+            <PartDraw x="0" y="0" width="80" height="80">
+                <!-- Subtle hit-target ring. -->
+                <Ellipse x="2" y="2" width="76" height="76">
+                    <Stroke color="#ff2a2a3e" thickness="3" />
+                </Ellipse>
+                <!-- Microphone: capsule, cradle arc, stem, base. -->
+                <RoundRectangle x="31" y="14" width="18" height="30" cornerRadiusX="9" cornerRadiusY="9">
+                    <Fill color="#ffffffff" />
+                </RoundRectangle>
+                <Arc centerX="40" centerY="38" width="34" height="34" startAngle="90" endAngle="270" direction="CLOCKWISE">
+                    <Stroke color="#ffffffff" thickness="4" cap="ROUND" />
+                </Arc>
+                <Line startX="40" startY="55" endX="40" endY="62">
+                    <Stroke color="#ffffffff" thickness="4" cap="ROUND" />
+                </Line>
+                <Line startX="30" startY="63" endX="50" endY="63">
+                    <Stroke color="#ffffffff" thickness="4" cap="ROUND" />
+                </Line>
+            </PartDraw>
+        </Group>
+    </Scene>
+</WatchFace>

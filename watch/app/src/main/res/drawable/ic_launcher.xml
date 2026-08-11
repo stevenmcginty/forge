@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Round badge with a microphone glyph. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#1A1A2E"
+        android:pathData="M24,24m-24,0a24,24 0,1 1,48 0a24,24 0,1 1,-48 0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,26c2.2,0 4,-1.8 4,-4v-8c0,-2.2 -1.8,-4 -4,-4s-4,1.8 -4,4v8C20,24.2 21.8,26 24,26z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M31,22c0,3.9 -3.1,7 -7,7s-7,-3.1 -7,-7h-2c0,4.5 3.3,8.2 7.7,8.9V34h-3.7v2h9.4v-2h-3.7v-3.1c4.4,-0.7 7.7,-4.4 7.7,-8.9H31z" />
+</vector>

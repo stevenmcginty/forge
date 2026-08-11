@@ -1,0 +1,23 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Watch Face Format package — declarative XML only, no code ships in this APK.
+android {
+    namespace 'com.forge.watch.face'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.forge.watch.face'
+        minSdk 33
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+}

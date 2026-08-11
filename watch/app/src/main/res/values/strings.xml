@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Forge Watch</string>
+    <string name="dictate">Dictate</string>
+    <string name="warmup_start">Hold LTE on</string>
+    <string name="warmup_stop">Release LTE</string>
+    <string name="auto_warmup">Auto LTE on phone loss</string>
+    <string name="listening">Listening…</string>
+    <string name="warmup_notification_title">Forge LTE warm-up</string>
+    <string name="warmup_notification_text">Keeping cellular attached</string>
+</resources>
