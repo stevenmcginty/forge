@@ -38,7 +38,7 @@ import {
   tvApkPath,
   tvBuildState
 } from './mobile-tv'
-import { addPtySink, getManager, getReplay } from './pty-host'
+import { addPtySink, getManager, getReplay, viewerGone, viewerResize, viewerWrite } from './pty-host'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
 
 /**
@@ -96,7 +96,7 @@ let tunnelStarting = false
  */
 let blockerId = 0
 
-/* ---------------------------------------------------- one PTY, two viewers
+/* ------------------------------------------------- one PTY, several viewers
  *
  * A pane on the desktop and the same pane on a phone are the same ConPTY, and
  * a ConPTY has one width. Both ends used to fit it to their own box, so
@@ -112,100 +112,54 @@ let blockerId = 0
  * somebody is working at re-flowing because a phone came out of a pocket is
  * precisely that.
  *
- * So the rule is now the other way round, and it has one line: **while this
- * desktop has a window open, the desk owns the grid.** A phone still says what
- * size it is reading at — the frames are unchanged — but that wish is only
- * granted when there is no window to disturb. With a window open the wish is
- * dropped in electron/mobile/server.ts, and the phone draws the desk's grid at
- * a font small enough to fit its own box; see `follow` in mobile/src/lib/term.ts.
+ * The correction after that was to hand the grid to the desk outright whenever
+ * it had a window, and it went too far the other way: a phone then drew a
+ * desktop-width grid at a font small enough to fit a handset, which is a
+ * 200-column terminal at 7px and unreadable. Rejected in its turn.
  *
- * What the renderer is still told is *which* panes a phone is reading
+ * So the rule is now neither device's by default. **The grid belongs to the
+ * device somebody last typed into the pane on.** Type on the phone and the
+ * phone's `cols`/`rows` land on the real PTY — native, at a width a handset can
+ * read — and every other viewer, this desktop's renderer included, draws that
+ * grid font-scaled into its own box. Sit down at the desk and type, and the desk
+ * has it back on the first keystroke. Taking the phone out and looking at it
+ * moves nothing.
+ *
+ * The policy itself is electron/pty/grid-owner.ts, reached through
+ * `viewerWrite` / `viewerResize` / `viewerGone` on electron/pty-host.ts; this
+ * file supplies nothing but the viewer's name. Forge Web's link is wired
+ * identically — see the block of the same name in electron/web-host.ts — so the
+ * two links answer the question with the same code rather than with two copies
+ * of the same paragraph.
+ *
+ * What the renderer is still told separately is *which* panes a phone is reading
  * (mobileWatched), because "ON PHONE" on a pane header is honest and useful.
- * It is no longer told a size, because it no longer follows one. This is the
- * arrangement Forge Web reached first — see the block of the same name in
- * electron/web-host.ts — and the two links now answer the question the same way.
+ * That message stays ids-only: reading is not typing.
  */
 
 /** Session ids at least one phone currently has open. */
 let watched = new Set<string>()
 
 /**
- * Is there a desktop window to disturb?
- *
- * The same question `broadcast` below asks, in the same terms, because it is
- * the same fact: a window that is not destroyed has a renderer holding the
- * split tree, drawing panes, and refitting them. Note that closing Forge's
- * window with Forge Web on *hides* it rather than destroying it (see the close
- * handler in electron/main.ts), so a Forge sitting in the tray still counts as
- * open — which is the answer this policy wants. That window comes back, and it
- * must come back to the grid it was left at rather than to one a phone chose
- * while nobody was looking.
- */
-function deskOpen(): boolean {
-  return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed())
-}
-
-/**
  * How long a PTY resize waits before the session list is pushed again.
  *
- * The desk owns the grid, so every pane it refits is news a phone reading that
- * pane has to hear — and the desk refits in bursts: a window drag, a split, a
- * tab switch move several panes at once. Long enough to make one message out of
- * a burst, short enough that a phone is never drawing last second's geometry.
+ * Whoever owns a pane's grid, every phone that is not that owner is drawing a
+ * shape it did not choose — so every move is news it has to hear. Bursts are the
+ * normal case: a window drag, a split or a tab switch at the desk moves several
+ * panes at once, and a granted remote wish is itself two resizes 60ms apart (the
+ * repaint jiggle in electron/pty-host.ts). Long enough to make one message out
+ * of a burst, short enough that a phone is never drawing last second's geometry.
  */
 const GEOMETRY_PUSH_MS = 80
 let geometryPush: NodeJS.Timeout | null = null
 
 /**
- * Gap between the short size and the true one when a phone resizes — the same
- * repaint jiggle `resizePty` does in the renderer, and for the same reason: an
- * Ink TUI (Claude Code, Codex) only rewrites the rows it thinks changed, and
- * ConPTY's reflow leaves fragments of the old frame behind. No program is
- * obliged to honour a "please repaint" sequence, but every one of them redraws
- * for a size change. Without this the phone's first screen after a resize is
- * the desktop-width frame with a phone-width frame drawn through it.
- */
-const REDRAW_JIGGLE_MS = 60
-
-/** Pending second halves, keyed by session id. */
-const jiggles = new Map<string, NodeJS.Timeout>()
-
-function clearJiggle(id: string): void {
-  const timer = jiggles.get(id)
-  if (timer) {
-    clearTimeout(timer)
-    jiggles.delete(id)
-  }
-}
-
-/**
- * A phone asked for a size, and there was no window here to refuse it. Applied
- * one row short, then true a beat later.
- *
- * Only ever reached with the desk asleep — the server drops the frame outright
- * while `deskOpen` is true — so nothing on this machine is watching the pane
- * flinch, and the jiggle is purely for the program inside the PTY.
- */
-function resizeForPhone(id: string, cols: number, rows: number): boolean {
-  clearJiggle(id)
-  if (rows < 3) return getManager().resize(id, cols, rows)
-  const ok = getManager().resize(id, cols, rows - 1)
-  jiggles.set(
-    id,
-    setTimeout(() => {
-      jiggles.delete(id)
-      getManager().resize(id, cols, rows)
-    }, REDRAW_JIGGLE_MS)
-  )
-  return ok
-}
-
-/**
  * Tell the renderer which panes a phone is reading.
  *
- * Ids and nothing else: the renderer draws these panes at its own size like any
- * other, and the one thing it does differently is label them. A size in this
- * message would be a size somebody would eventually follow.
+ * Ids and nothing else, and that is not an accident of history: a size *does*
+ * reach the renderer now, but on `IPC.ptyGeometry` and only when somebody has
+ * typed into the pane from away. Reading is not typing, so this message must
+ * stay what it is — a label — or glancing at a pane would move it after all.
  */
 function publishWatched(): void {
   broadcast(IPC.mobileWatched, { ids: [...watched] } satisfies MobileWatchEvent)
@@ -601,14 +555,13 @@ async function start(): Promise<void> {
     desktopName: () => hostname(),
     sessions: () => getManager().list(),
     replay: (id) => getReplay(id),
-    write: (id, data) => getManager().write(id, data),
-    resize: (id, cols, rows) => resizeForPhone(id, cols, rows),
-    // The policy point is the server, which drops a phone's cols/rows while
-    // this is true rather than passing them here. It is a thunk, not a value,
-    // for the reason every other thunk on this host is one: the window can go
-    // and come back inside one connection, and a captured answer would be a
-    // stale one for the rest of it.
-    deskOpen,
+    // Through pty-host's ownership gate rather than straight at the manager:
+    // typing is what hands a pane's grid over, and a size is a wish granted only
+    // to whoever is holding it. The repaint jiggle a granted phone wish needs
+    // lives there too, beside the gate that decides whether it happens at all.
+    write: (id, data, viewer) => viewerWrite(id, data, viewer),
+    resize: (id, cols, rows, viewer) => viewerResize(id, cols, rows, viewer),
+    release: (viewer, id) => viewerGone(viewer, id),
     snapshot: () => snapshotForPhone(),
     dispatchOp,
     acceptUntil: () => armedUntil(),
@@ -676,13 +629,14 @@ async function start(): Promise<void> {
       publishWatched()
     },
     onResize: () => {
-      // The desk moved a pane's grid, and every phone reading it has just been
-      // left drawing the wrong one. `state` already carries the session list
-      // with its cols/rows, so the news needs no new frame — only sending.
-      // Coalesced, because a window drag or a split is several panes resizing
-      // in the same breath and each one would otherwise broadcast the whole
-      // list. A phone's *own* resize lands here too, jiggle and all, and one
-      // push at the end of it is exactly what should reach the phone.
+      // A pane's grid moved — at this desk, in a browser, or on another phone —
+      // and every phone that is not the one that moved it has just been left
+      // drawing the wrong shape. `state` already carries the session list with
+      // its cols/rows, so the news needs no new frame — only sending. Coalesced,
+      // because a window drag or a split is several panes resizing in the same
+      // breath and each one would otherwise broadcast the whole list. A phone's
+      // *own* resize lands here too, jiggle and all, and one push at the end of
+      // it is exactly what should reach the phone.
       if (geometryPush) return
       geometryPush = setTimeout(() => {
         geometryPush = null
@@ -690,7 +644,6 @@ async function start(): Promise<void> {
       }, GEOMETRY_PUSH_MS)
     },
     onExit: (id, exitCode) => {
-      clearJiggle(id)
       instance.pushExit(id, exitCode)
       // A dead pane changes the picture, so the phone's list is refreshed too.
       instance.pushState({ sessions: getManager().list() })
@@ -756,14 +709,13 @@ async function stop(): Promise<void> {
   for (const requestId of [...pendingApprovals.keys()]) settleApproval(requestId, false)
   unsubscribePty?.()
   unsubscribePty = null
-  // Switching the link off takes every "ON PHONE" chip off the desk with it —
-  // a pane labelled as read by a server that no longer exists is a pane telling
-  // a lie nothing would ever correct.
-  for (const id of [...jiggles.keys()]) clearJiggle(id)
   // A pending push would fire into a server that has stopped, which is the
   // ordinary shape of switching the link off a beat after moving a pane.
   if (geometryPush) clearTimeout(geometryPush)
   geometryPush = null
+  // Switching the link off takes every "ON PHONE" chip off the desk with it —
+  // a pane labelled as read by a server that no longer exists is a pane telling
+  // a lie nothing would ever correct.
   if (watched.size > 0) {
     watched = new Set()
     publishWatched()

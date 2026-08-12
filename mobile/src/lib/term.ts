@@ -33,18 +33,21 @@ import { FitAddon } from '@xterm/addon-fit'
  * Canvas rendering, not WebGL: the WebGL addon is the desktop's default but
  * loses its context whenever Android backgrounds the app, and comes back blank.
  *
- * ## Whose grid this is, which is not this phone's
+ * ## Whose grid this is, which is sometimes this phone's
  *
- * A PTY has one grid and a phone is a second viewer of it. While the desktop
- * has a window open the desktop owns that grid — nothing a phone sends moves
- * it, by design, because plugging a device in must not change the resolution of
- * the machine somebody is working at (see `deskOpen` in
- * electron/mobile/server.ts). So this file does two things at once: it goes on
- * fitting the container and reporting that geometry through `onResize` — the
- * wish, which is granted the moment the desk's window closes — and it draws
- * whatever grid the desktop says the session really has, shrinking the *font*
- * until that grid fits the screen it has. `follow` is where the second half
- * happens, and when the two agree it does nothing at all.
+ * A PTY has one grid and a phone is one viewer of it. **The grid belongs to the
+ * device somebody last typed into the pane on** (electron/pty/grid-owner.ts):
+ * type here and this phone's own fit lands on the real PTY, native and readable;
+ * type at the desk and the desk takes it back, and this phone draws the desk's
+ * grid instead. Merely looking at a pane moves nothing anywhere.
+ *
+ * So this file does two things at once, and neither of them depends on knowing
+ * the policy: it goes on fitting the container and reporting that geometry
+ * through `onResize` — the wish, granted whenever this phone is the device being
+ * typed on — and it draws whatever grid the desktop says the session really has,
+ * shrinking the *font* until that grid fits the screen it has. `follow` is where
+ * the second half happens, and when the two agree, which is the whole of the
+ * case where this phone is the one holding the pane, it does nothing at all.
  */
 
 export interface TermHost {
@@ -52,7 +55,8 @@ export interface TermHost {
   /**
    * Refit to the container and return this phone's own geometry, or null if it
    * is unchanged. Note that this is the size this phone *would like* — what is
-   * on screen afterwards may be the desktop's grid instead. See `follow`.
+   * on screen afterwards is somebody else's grid whenever somebody else is the
+   * one holding this pane. See `follow`.
    */
   fit: () => { cols: number; rows: number } | null
   /**
@@ -133,10 +137,10 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
   /**
    * Put the right grid on screen at the largest font it fits in.
    *
-   * The desktop's grid whenever this pane has been told one, and this phone's
+   * The session's real grid whenever this pane has been told one, and this phone's
    * own until then. When the two agree — which is the whole of the case where
-   * the desk has no window and the wish below was granted — the second branch
-   * finds nothing to change and costs a comparison.
+   * this phone is the device being typed on and the wish below was granted —
+   * the second branch finds nothing to change and costs a comparison.
    *
    * The scale comes out of the two grids rather than out of any measurement of
    * a character: `natural` is what this holder holds at `options.fontSize`, so

@@ -555,29 +555,55 @@ back on a different hostname republishes rather than waiting for a heartbeat.
 run by hand, and says `configured` rather than `live` because on that path Forge
 cannot see the process.
 
-**A browser used to resize the desktop.** A PTY has one grid and this link gives
-it two viewers, and the first arrangement was Forge Mobile's: the browser said
-what size it was reading at, the desktop stood down, and the desk letterboxed
-its own pane to match. It works, it is symmetrical, and it is wrong — the first
-time a tab connected, every pane on the desk re-flowed in front of the person
-using it. The desktop is where the work is, and nothing arriving over a tunnel
-should rearrange it.
+**Whose grid is it? Two answers were shipped before this one.** A PTY has one
+grid and this link gives it another viewer, so something has to decide whose
+size wins. The record matters, because both losing answers looked obviously
+right on the day they were written:
 
-So the rule is now: **while this desktop has a window open, the desk owns the
-grid**, and a browser draws the desk's grid at a font shrunk to fit its own box
-(`follow` in `web/src/lib/term.ts`, floored at 7px, below which the pane
-overflows and scrolls). Nothing on the wire changed — a browser still sends its
-`cols`/`rows` on `attach` and on every `resize` — because those frames are a
-*wish*, and the wish is granted whole the moment the desk's window closes, which
-is the case Forge Web is for: the desk shut to the tray, the terminals still
-running, the browser the only viewer there is. The gate is one hook,
-`WebServerHost.deskOpen`, so the policy lives in one place and a head-less host
-(the smoke test's, and any future one) is treated as having no window. The desk
-is still told *which* panes a browser is reading, because "IN BROWSER" on a pane
-header is worth knowing; it is no longer told a size, because it no longer
-follows one. Forge Mobile has since been brought to the same rule through the
-same hook, `MobileServerHost.deskOpen` — see "One PTY, two viewers" in
-`docs/MOBILE.md`.
+1. **Last mover wins** (Forge Mobile's original arrangement). The browser said
+   what size it was reading at, the desktop stood down, and the desk letterboxed
+   its own pane to match. Symmetrical, simple, and wrong: the first time a tab
+   connected, every pane on the desk re-flowed in front of the person using it.
+2. **The desk owns it while it has a window.** A browser's `cols`/`rows` were
+   dropped outright whenever a window existed here, and the browser drew the
+   desk's grid at a shrunken font. That stopped the fighting and threw away the
+   point of a big screen: a browser on a 32-inch monitor spent two thirds of it
+   letterboxing a laptop's pane, and a phone on the same rule drew a 200-column
+   grid at 7px. Rejected in its turn.
+
+So the rule is now: **the width follows the typist.** The grid belongs to the
+device somebody last *typed* into the pane on. That device's wishes are honoured
+on the real PTY — native, at whatever its own screen holds — and every other
+viewer, this desktop's own renderer included, draws that grid at a font shrunk to
+fit its box (`follow` in `web/src/lib/term.ts` and `applyGrid` in
+`src/lib/terminals.ts`, both floored at 7px, below which the pane overflows and
+is clipped). Sit at the desk and type, and the desk is native; pick up the phone
+and type, and the phone is; glance at any screen without touching it and nothing
+moves anywhere.
+
+Nothing on the wire changed for any of it — a browser still sends its
+`cols`/`rows` on `attach` and on every `resize`, unconditionally, because those
+frames are a *wish* and a client that tracked the policy would be a client that
+could hold a stale copy of it. What changed on this side is that the server no
+longer decides: it names the viewer (minted per socket, so two browsers are two
+viewers) on `write`, `resize` and `attach`, and the registry in
+`electron/pty/grid-owner.ts` is the single place the rule lives. A host that
+ignores the name — `scripts/web-e2e.mjs`'s does — behaves as it always did, which
+is also what an unowned pane does: yes.
+
+Three edges are worth stating because they are what makes the rule liveable.
+**A `write` is not always typing**: a browser watching a busy pane sends the
+terminal's own replies (`CSI 6 n` above all) down the same frame, and counting
+those would mean watching moved a grid after all — `shared/typing.ts` is the
+line, and the desk's typed-draft tracker uses the very same predicate.
+**Departure releases**: a browser that hangs up, or detaches from a pane, stops
+holding anything it held, and so does this desktop's window when it is destroyed;
+ownership goes back to unclaimed and the next wish — very often the desk's own
+next fit — takes it. **The desk is a follower like any other**, told the real
+geometry on `IPC.ptyGeometry` and font-scaling to it; it is still told *which*
+panes a browser is reading separately, because "IN BROWSER" on a pane header is
+worth knowing and because that message must stay a label. Forge Mobile is wired
+through the same registry — see "One PTY, several viewers" in `docs/MOBILE.md`.
 
 ## What is deliberately not here
 

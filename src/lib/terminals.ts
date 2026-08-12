@@ -1,7 +1,8 @@
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import type { PtyDataEvent, PtyExitEvent } from '@shared/types'
+import type { PtyDataEvent, PtyExitEvent, PtyGeometryEvent } from '@shared/types'
 import { findRemoteSessionUrl } from '@shared/remote'
+import { isTypedInput } from '@shared/typing'
 import { commandExe } from '@shared/agents'
 import { SHARE_CAPTURE_DEFAULT_LINES } from '@shared/share'
 import { advanceDraft, clampDraft } from './draft'
@@ -35,8 +36,8 @@ export interface PaneRuntime {
   remoteUrl: string | null
   /**
    * True while a phone has this pane open. It decides nothing about the pane's
-   * size — the desk keeps its grid and the phone scales to it — so this is news
-   * rather than an explanation of what is on screen, and never a lock.
+   * size — only *typing* moves a grid, and this flag is set by watching — so it
+   * is news rather than an explanation of what is on screen, and never a lock.
    */
   phone: boolean
   /**
@@ -169,28 +170,16 @@ const REDRAW_JIGGLE_MS = 60
 export const DEFAULT_PANE_GEOMETRY: PaneGeometry = { width: 640, height: 400 }
 
 /**
- * The terminal answering a question, as opposed to a person typing.
+ * How small the font may go while shrinking somebody else's grid into a pane.
  *
- * A TUI probes its terminal as it starts — "what are you?", "where is the
- * cursor?", "what is palette slot 4?" — and xterm replies down the very same
- * `onData` channel a keystroke takes, because to the PTY they are both input.
- * They are not typing, though, and the typed-draft tracker must not count them:
- * "Take back typed" erases one backspace per character, and a draft holding
- * bytes Steve never pressed would fire backspaces at a prompt on their behalf.
- *
- * Told apart by their opening bytes rather than by parsing them. No key on any
- * keyboard sends a DCS, OSC, APC, PM or SOS string, and none sends a CSI ending
- * in one of the report finals below — the arrows, the function keys and
- * shift-tab all end in something else. So everything a keyboard can actually
- * produce, bracketed paste included, still goes to advanceDraft, which already
- * models it (see lib/draft.ts).
- *
- * Half of this is belt and braces: advanceDraft skips a CSI or SS3 whole, so
- * the Device Attributes reply never reached the draft anyway. The string forms
- * did — `\x1b]4;1;rgb:…\x1b\\` reads to that parser as an Alt+] chord followed
- * by a dozen printable characters — and they are the leak this closes.
+ * The same floor, for the same reason, as `MIN_FONT_PX` in web/src/lib/term.ts
+ * and mobile/src/lib/term.ts — those two have always had to draw this desk's
+ * grid, and now that the width follows the typist this desk has to draw theirs.
+ * Below about this size a terminal stops being readable and starts being a
+ * texture. At the floor the shrinking stops and the terminal overflows its box,
+ * which `.pane__terminal` clips.
  */
-const REPORT_RESPONSE = /^(?:\x1b[P\]_^X]|\x1b\[[?>=<]?[0-9;]*(?:\$?[cnRty]|[IOMm]))/
+const MIN_FONT_PX = 7
 
 interface Entry {
   paneId: string
@@ -209,6 +198,16 @@ interface Entry {
   resizeTimer: number | null
   /** The last size actually sent down the PTY, so a no-op never jiggles. */
   ptyDims: { cols: number; rows: number } | null
+  /**
+   * The grid this pane's box would hold at this pane's own font — the size the
+   * desk *wishes* for, whether or not it is the one on screen.
+   */
+  natural: { cols: number; rows: number } | null
+  /**
+   * The grid the PTY really has while somebody else is holding it, or null when
+   * this desk is free to choose. See `setGeometry` and `applyGrid`.
+   */
+  desired: { cols: number; rows: number } | null
   /** Pending second half of a repaint jiggle — see resizePty. */
   jiggleTimer: number | null
   /** Tail of the last output chunk, kept only until the RC URL is found. */
@@ -347,8 +346,8 @@ class TerminalHost {
   private attentionListeners = new Set<() => void>()
   /**
    * Panes a phone is reading. A set, not a map, because no geometry comes with
-   * them: this desk owns the grid of every pane it has a window for, and the
-   * list is here only so a pane can say it is being read.
+   * them: a viewer that is only reading changes nothing about a pane, and the
+   * list is here so a pane can say it is being read and for nothing else.
    */
   private phoneWatched = new Set<string>()
   /** The same, for a browser on Forge Web. Two lists because each is complete
@@ -383,6 +382,12 @@ class TerminalHost {
       // A dead shell is not working, whatever it was doing a moment ago.
       this.clearBusy(entry)
       this.chimeOnExit(e.exitCode)
+    })
+
+    // The other half of the geometry conversation. The desk's `fit` says what it
+    // would like; this says what the pane actually is, and who chose it.
+    window.forge.pty.onGeometry((e: PtyGeometryEvent) => {
+      this.setGeometry(e.id, e.deskOwns ? null : { cols: e.cols, rows: e.rows })
     })
   }
 
@@ -780,6 +785,8 @@ class TerminalHost {
       pendingResize: null,
       resizeTimer: null,
       ptyDims: null,
+      natural: null,
+      desired: null,
       jiggleTimer: null,
       scanTail: '',
       typed: '',
@@ -804,18 +811,23 @@ class TerminalHost {
       }
       this.setAttention(entry, false)
       // A reply xterm composed itself is still sent — the program asked for it —
-      // but it is not part of what was typed. See REPORT_RESPONSE.
-      if (!REPORT_RESPONSE.test(data)) entry.typed = advanceDraft(entry.typed, data)
+      // but it is not part of what was typed. See shared/typing.ts, which the
+      // main process consults on this same stream to decide whether the person
+      // at this desk has just taken the pane's grid back.
+      if (isTypedInput(data)) entry.typed = advanceDraft(entry.typed, data)
       window.forge.pty.write(paneId, data)
     })
     entry.disposers.push(() => dataSub.dispose())
 
-    // Not sent straight down: xterm resizes with the drag, ConPTY waits for it
-    // to finish. See queuePtyResize.
-    const resizeSub = term.onResize(({ cols, rows }) => {
-      this.queuePtyResize(entry, cols, rows)
-    })
-    entry.disposers.push(() => resizeSub.dispose())
+    /*
+     * Deliberately no `term.onResize` subscription. It used to be how a settled
+     * fit reached ConPTY, and it cannot be any more: `applyGrid` resizes this
+     * terminal to somebody *else's* grid while they hold the pane, and a
+     * subscription would read that back as this desk's wish and ask for it — so
+     * the desk would ask for the phone's width and never get its own back. `fit`
+     * measures and reports instead, which is also what the remote clients do
+     * (see `fit` in web/src/lib/term.ts).
+     */
 
     /*
      * opencode (the DeepSeek V4 pane) is a full-screen TUI on the alternate
@@ -1015,13 +1027,13 @@ class TerminalHost {
   /* --------------------------------------------------------------- resize */
 
   /**
-   * Remember the size xterm just took, and tell ConPTY about it once the
+   * Remember the size this pane's box just measured at, and wish for it once the
    * geometry has held still for RESIZE_SETTLE_MS.
    *
    * The pending size is held on the entry rather than captured in the timer
-   * because `onResize` only fires when cols/rows actually *change*: the last
-   * observation of a drag is often a repeat, and the flush has to send the
-   * dimensions the terminal ended up at, not the ones the timer was armed with.
+   * because the last observation of a drag is often a repeat of an earlier one,
+   * and the flush has to send the dimensions the box ended up at, not the ones
+   * the timer was armed with. `ptyDims` is what makes a repeat cost nothing.
    */
   private queuePtyResize(entry: Entry, cols: number, rows: number): void {
     entry.pendingResize = { cols, rows }
@@ -1058,9 +1070,11 @@ class TerminalHost {
       clearTimeout(entry.jiggleTimer)
       entry.jiggleTimer = null
     }
-    // Nothing to jiggle *into* on a pane with no program in it, and a two-row
-    // terminal has no row to spare.
-    if (entry.runtime.status !== 'live' || rows < 3) {
+    // Nothing to jiggle *into* on a pane with no program in it, a two-row
+    // terminal has no row to spare, and a pane somebody else is holding is a
+    // pane where this is only a wish — jiggling a wish is two messages that
+    // change nothing, and the repaint belongs to whoever's resize lands.
+    if (entry.runtime.status !== 'live' || rows < 3 || entry.desired) {
       window.forge.pty.resize(entry.paneId, cols, rows)
       return
     }
@@ -1187,22 +1201,106 @@ class TerminalHost {
 
   /* ------------------------------------------------------------ actions */
 
+  /**
+   * Measure the pane's box, put the right grid on screen, and say what this desk
+   * would like.
+   *
+   * "What this desk would like" is a *wish* now, not an instruction: the width
+   * follows the typist (electron/pty/grid-owner.ts), so this only reaches the
+   * real PTY when nobody else is holding this pane. Merely laying out a window
+   * must not drag a grid away from the phone somebody is working on — and the
+   * wish is sent unconditionally anyway, because it is what lands the instant
+   * somebody types here.
+   */
   fit(paneId: string): void {
     const entry = this.entries.get(paneId)
     if (!entry || !entry.container) return
-    // No viewer gets to stop this any more. A phone or a browser reading this
-    // pane is read at *this desk's* size — see setPhoneWatched — so the desk
-    // goes on fitting exactly as it would with nobody watching.
     const { clientWidth, clientHeight } = entry.container
     if (clientWidth < 8 || clientHeight < 8) return
     // Only a full-size layout is worth remembering — a peek tile's box is
     // itself derived from this number.
     if (entry.mode === 'tab') entry.geometry = { width: clientWidth, height: clientHeight }
+    // Measured at this pane's *own* type size whatever it is currently drawn at:
+    // the wish is "the grid I would choose", not "the grid I would choose if I
+    // stayed squinting at somebody else's". xterm remeasures its cell
+    // synchronously when the option is set. `proposeDimensions` rather than
+    // `fit`, because measuring the box and deciding what goes on screen are two
+    // different questions here; `applyGrid` answers the second.
+    if (entry.term.options.fontSize !== entry.spec.fontSize) entry.term.options.fontSize = entry.spec.fontSize
+    let proposed
     try {
-      entry.fit.fit()
+      proposed = entry.fit.proposeDimensions()
+    } catch {
+      /* xterm throws if measured mid-teardown — harmless */
+      return
+    }
+    if (!proposed || !Number.isFinite(proposed.cols) || !Number.isFinite(proposed.rows)) return
+    entry.natural = { cols: proposed.cols, rows: proposed.rows }
+    this.applyGrid(entry)
+    this.queuePtyResize(entry, proposed.cols, proposed.rows)
+  }
+
+  /**
+   * Put the right grid on screen at the largest font it fits in.
+   *
+   * Somebody else's grid whenever this pane has been told one, and this desk's
+   * own until then — which is the ordinary case and costs a comparison. The
+   * scale comes out of the two grids rather than out of any measurement of a
+   * character: `natural` is what this box holds at `spec.fontSize`, so
+   * `natural.cols / desired.cols` is exactly the factor the type has to come
+   * down by for `desired.cols` of them to fit the same width. Never *up*,
+   * because a remote pane narrower than this one is better letterboxed than
+   * blown up past the size the rest of the app is set in.
+   *
+   * The port of `apply` in web/src/lib/term.ts, including the lesson recorded
+   * there: a resize is not on its own a repaint. `FitAddon.fit` wipes the
+   * rendered rows before it resizes and skipping that step is measurably not
+   * free, so the explicit `refresh` below is doing that job by hand.
+   */
+  private applyGrid(entry: Entry): void {
+    const { term, spec, desired, natural } = entry
+    if (!desired) {
+      if (term.options.fontSize !== spec.fontSize) term.options.fontSize = spec.fontSize
+      try {
+        entry.fit.fit()
+      } catch {
+        /* xterm throws if measured mid-teardown — harmless */
+      }
+      return
+    }
+    if (desired.cols < 1 || desired.rows < 1) return
+    const scale = natural ? Math.min(natural.cols / desired.cols, natural.rows / desired.rows) : 1
+    const size = scale >= 1 ? spec.fontSize : Math.max(MIN_FONT_PX, Math.floor(spec.fontSize * scale))
+    if (term.options.fontSize !== size) term.options.fontSize = size
+    if (term.cols === desired.cols && term.rows === desired.rows) return
+    try {
+      term.resize(desired.cols, desired.rows)
+      term.refresh(0, term.rows - 1)
     } catch {
       /* xterm throws if measured mid-teardown — harmless */
     }
+  }
+
+  /**
+   * A pane's real grid, and whether this desk is the one choosing it —
+   * `IPC.ptyGeometry`, from electron/pty-host.ts.
+   *
+   * `null` means the desk is free again: nobody remote holds this pane, so it
+   * goes back to its own fit at its own type size. That is a `fit` rather than
+   * an `applyGrid`, because coming back means *asking for* the desk's grid as
+   * well as drawing it — the PTY is still at whoever-it-was's size until this
+   * desk wishes for its own, and `ptyDims` is cleared first so the wish is not
+   * mistaken for the no-op it would otherwise look like.
+   */
+  setGeometry(paneId: string, size: { cols: number; rows: number } | null): void {
+    const entry = this.entries.get(paneId)
+    if (!entry) return
+    const next = size && size.cols > 0 && size.rows > 0 ? { cols: size.cols, rows: size.rows } : null
+    if (next?.cols === entry.desired?.cols && next?.rows === entry.desired?.rows) return
+    entry.desired = next
+    entry.ptyDims = null
+    if (next) this.applyGrid(entry)
+    else this.fit(paneId)
   }
 
   fitAll(): void {
@@ -1213,15 +1311,11 @@ class TerminalHost {
    * Which panes a phone is reading — `mobileWatched`, from
    * electron/mobile-host.ts.
    *
-   * Note what this does *not* do, because it used to. A phone once owned the
-   * geometry of every pane it had open: it sent the size it was reading at, and
-   * this desk letterboxed its own pane to match. Steve rejected that — plugging
-   * a device in must not change the resolution at the desk, and watching every
-   * pane on the machine you are working at re-flow because a phone came out of
-   * a pocket is the app rearranging your work on a stranger's behalf. So the
-   * desk now keeps its grid, the phone draws the desk's grid at a font that
-   * fits its own screen (`follow` in mobile/src/lib/term.ts), and all this list
-   * does here is put a label on the pane header.
+   * A label and nothing more, which is the whole point of it being separate from
+   * `setGeometry`. Reading a pane from a phone changes nothing here; *typing*
+   * into one does, and that arrives on `IPC.ptyGeometry` instead. Keeping the
+   * two messages apart is what stops a device that is merely being glanced at
+   * from reshaping the work in front of somebody.
    */
   setPhoneWatched(ids: string[]): void {
     this.phoneWatched = new Set(ids)
@@ -1238,9 +1332,9 @@ class TerminalHost {
   /**
    * Say which panes are being read from away.
    *
-   * The whole of it, now that neither viewer moves any geometry: a pane on
-   * either list gets `runtime.phone` or `runtime.browser`, which is a chip on
-   * the pane header, and the size is left exactly where the desk put it.
+   * The whole of it: a pane on either list gets `runtime.phone` or
+   * `runtime.browser`, which is a chip on the pane header, and no geometry
+   * decision hangs on it either way.
    */
   private applyWatched(): void {
     for (const [paneId, entry] of this.entries) {
@@ -1269,9 +1363,15 @@ class TerminalHost {
     const entry = this.entries.get(paneId)
     if (!entry) return
     const { cols, rows } = entry.term
-    entry.ptyDims = { cols, rows }
     // The renderer's own copy first, in case the corruption is only on screen.
     entry.term.refresh(0, rows - 1)
+    // A pane somebody else is holding is one this desk may not move, and the
+    // grid on screen is theirs — sending it back as *this* desk's wish would
+    // mean sitting down and typing landed on their width rather than on the one
+    // this box measured. Repainting locally is the whole of what can be done
+    // here, and it is also the half that fixes a mess that is only on screen.
+    if (entry.desired) return
+    entry.ptyDims = { cols, rows }
     this.resizePty(entry, cols, rows)
   }
 

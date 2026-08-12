@@ -115,6 +115,8 @@ async function main() {
     MobileServer,
     MobileAuth,
     PtySessionManager,
+    GridOwners,
+    DESK_VIEWER,
     isAllowedSource,
     resolveWithin,
     ACCEPT_WINDOW_MS,
@@ -159,24 +161,31 @@ async function main() {
   // the set actually changed" are both worth proving.
   const watches = []
   /**
-   * Whether this pretend desktop has a window open, which is what decides who
-   * owns a PTY's grid — see `deskOpen` in electron/mobile/server.ts.
+   * The *real* ownership registry, wired to the real PTY.
    *
-   * False for every phase but the one that flips it, because a head-less server
-   * driving a real PTY is a desktop with no window by any honest reading. A host
-   * that omits the hook entirely has to behave the same way, which is what every
-   * other server built below proves by never setting it.
+   * The width follows the typist (electron/pty/grid-owner.ts), so "does this
+   * frame move the pane?" is a question with state behind it rather than a
+   * boolean a phase can flip. Driving the shipped registry rather than a
+   * stand-in is the whole point: a stand-in written to agree with the policy is
+   * a check that keeps passing after the policy moves.
+   *
+   * No repaint jiggle here, unlike electron/pty-host.ts, which is where it lives
+   * — a check that had to wait one out would be asserting a timer rather than a
+   * rule. The phases below therefore read one resize as one size.
    */
-  let deskHasWindow = false
+  const owners = new GridOwners({ apply: (id, cols, rows) => manager.resize(id, cols, rows) })
   const makeServer = (auth) =>
     new MobileServer({
       auth,
       appVersion: '0.0.0-smoke',
       sessions: () => manager.list(),
       replay: (id) => replay.get(id) ?? '',
-      write: (id, data) => manager.write(id, data),
-      resize: (id, cols, rows) => manager.resize(id, cols, rows),
-      deskOpen: () => deskHasWindow,
+      write: (id, data, viewer) => {
+        owners.noteWrite(id, viewer, data)
+        return manager.write(id, data)
+      },
+      resize: (id, cols, rows, viewer) => owners.noteWish(id, viewer, cols, rows),
+      release: (viewer, id) => owners.release(viewer, id),
       snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: {} }),
       dispatchOp: async (op) => {
         ops.push(op)
@@ -342,37 +351,90 @@ async function main() {
   const geometry = manager.list().find((s) => s.id === 'm1')
   log(
     geometry.cols === 132 && geometry.rows === 44,
-    'a resize from the phone resized the real PTY, because nothing is drawing this pane at a desk'
+    'a resize from the phone resized the real PTY, because this phone is the device that has been typing into it'
   )
 
-  /* ------------------------------------ 7b. the same frame, with a window open
+  /* ----------------------------------------- 7b. the width follows the typist
    *
-   * A PTY has one grid, and while somebody is at the desk the desk keeps it:
-   * the frame is dropped rather than obeyed, in silence, because the phone is
-   * told the real geometry by the `state` push anyway and scales its own type
-   * to it. The ping is what sequences this — it is answered on the same socket
-   * the resize was sent down, so its pong is proof the resize has been handled
-   * and not merely posted.
+   * A PTY has one grid, and it belongs to whichever device somebody last typed
+   * into the pane on. Everything below is that rule seen from four sides, driven
+   * through the *real* registry: a pane the desk is holding does not move because
+   * a phone slid its keyboard up; it moves the instant somebody types on the
+   * phone; the terminal's own replies are not typing; and a phone that hangs up
+   * hands the pane back.
+   *
+   * The ping is what sequences each step — it is answered on the same socket the
+   * resize was sent down, so its pong is proof the frames before it have been
+   * handled and not merely posted.
    */
 
-  deskHasWindow = true
-  const held = manager.list().find((s) => s.id === 'm1')
+  const paneNow = () => manager.list().find((s) => s.id === 'm1')
+  const settled = async (label) => {
+    const before = phone.of('pong').length
+    phone.send({ t: 'ping' })
+    await waitFor(() => phone.of('pong').length > before, 6000, label)
+  }
+
+  // (a) The desk takes the pane back by typing into it, exactly as the renderer
+  //     does — `owners.noteWrite(id, DESK_VIEWER, …)` is the line
+  //     electron/pty-host.ts runs on `IPC.ptyWrite`.
+  owners.noteWish('m1', DESK_VIEWER, 96, 28)
+  owners.noteWrite('m1', DESK_VIEWER, 'x')
+  const reclaimed = paneNow()
+  log(
+    reclaimed.cols === 96 && reclaimed.rows === 28,
+    `typing at the desk took the pane back and applied the desk's own stored wish at once (now ${reclaimed.cols}x${reclaimed.rows})`
+  )
+
+  // (b) A keyboard sliding up is not typing, so the wish is stored and nothing
+  //     on the desk moves.
+  const held = paneNow()
   const errsBeforeHeld = phone.of('err').length
-  const pongsBeforeHeld = phone.of('pong').length
   phone.send({ t: 'resize', id: 'm1', cols: 40, rows: 12 })
-  phone.send({ t: 'ping' })
-  await waitFor(() => phone.of('pong').length > pongsBeforeHeld, 6000, 'the frame behind the held resize')
-  const unmoved = manager.list().find((s) => s.id === 'm1')
+  await settled('the frame behind the held resize')
+  const unmoved = paneNow()
   log(
     unmoved.cols === held.cols && unmoved.rows === held.rows,
-    `with a window open at the desk, a resize from the phone did not move the real PTY (still ${unmoved.cols}x${unmoved.rows})`
+    `while the desk holds the pane, a resize from the phone did not move the real PTY (still ${unmoved.cols}x${unmoved.rows})`
   )
-  log(phone.of('err').length === errsBeforeHeld, 'and it was not refused out loud — a dropped wish is not an error')
+  log(phone.of('err').length === errsBeforeHeld, 'and it was not refused out loud — a stored wish is not an error')
 
-  deskHasWindow = false
-  phone.send({ t: 'resize', id: 'm1', cols: 120, rows: 40 })
-  await waitFor(() => manager.list().find((s) => s.id === 'm1')?.cols === 120, 6000, 'the resize once the window has gone')
-  log(true, 'and the moment the desk has no window, the same frame is honoured again — the phone never changed what it sends')
+  // (c) Nor does the terminal answering a question, which is what a phone sends
+  //     constantly while a pane is busy. If that counted, glancing at a phone
+  //     would reshape the desk.
+  phone.send({ t: 'write', id: 'm1', data: '\x1b[24;80R' })
+  await settled('the cursor-report write to be handled')
+  const afterReport = paneNow()
+  log(
+    afterReport.cols === held.cols && afterReport.rows === held.rows,
+    "a phone's cursor-position reply did not take the pane — watching a busy pane is not typing into it"
+  )
+
+  // (d) And now somebody types on the phone. The wish stored at (b) lands on the
+  //     keystroke, without the phone re-sending anything. Ctrl+C rather than a
+  //     character, so the line the reply at (c) left in the prompt is abandoned
+  //     rather than run by the phases below.
+  phone.send({ t: 'write', id: 'm1', data: '\x03' })
+  await waitFor(() => paneNow().cols === 40 && paneNow().rows === 12, 6000, 'the pane changing hands')
+  log(
+    true,
+    'one keystroke on the phone took the pane and applied the size it had already asked for (40x12) — the phone re-sent nothing'
+  )
+
+  // (e) Unsubscribing hands it straight back: a pane this phone has closed is
+  //     one it is certainly not typing into. Then the next wish wins outright.
+  phone.send({ t: 'unsub', id: 'm1' })
+  await waitFor(() => owners.ownerOf('m1') === null, 6000, 'the pane being released')
+  log(true, 'a phone that closes a pane stops holding its grid — ownership goes back to unclaimed')
+  owners.noteWish('m1', DESK_VIEWER, 120, 40)
+  const afterRelease = paneNow()
+  log(
+    afterRelease.cols === 120 && afterRelease.rows === 40,
+    `and the next wish wins outright, with no typing needed (now ${afterRelease.cols}x${afterRelease.rows})`
+  )
+  // Back on, because everything below reads this pane's output down this socket.
+  phone.send({ t: 'sub', id: 'm1' })
+  await waitFor(() => watches[watches.length - 1] === 'm1', 6000, 'the re-subscribe')
 
   /* ------------------------------------------------- 8. a late subscriber */
 

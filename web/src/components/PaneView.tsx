@@ -14,20 +14,21 @@ import { AgentChooser } from './AgentChooser'
  *
  * ## Geometry, which is the part that is easy to get wrong
  *
- * A PTY has one geometry and this link gives it two viewers. The desktop owns
- * it whenever it has a window open, because panes re-flowing on the machine
- * somebody is sitting at is not a price a tab in another town gets to charge —
- * see `deskOpen` in electron/web/server.ts. So this component does both halves
- * of that arrangement:
+ * A PTY has one geometry and this link gives it another viewer. It belongs to
+ * whichever device somebody last typed into the pane on — see
+ * electron/pty/grid-owner.ts — so this tab has it natively while somebody is
+ * working here, and follows somebody else's the moment they take it back. Either
+ * way this component does both halves, and neither half knows which case it is
+ * in:
  *
  *  - It still fits its container and still attaches with the result. That is
- *    the *wish*, and it is granted whole the moment the desk's window closes,
- *    which is the case Forge Web exists for. It is sent first for the reason it
- *    always was: attaching first and resizing afterwards paints the replay
- *    buffer at the wrong width and then reflows it.
+ *    the *wish*, granted whenever this browser is the device being typed on. It
+ *    is sent first for the reason it always was: attaching first and resizing
+ *    afterwards paints the replay buffer at the wrong width and then reflows it.
  *  - It follows the session's real `cols`/`rows` out of the picture — the
  *    desktop's answer, pushed on every change — and hands them to `follow`,
- *    which draws that grid at a font small enough to fit this box.
+ *    which draws that grid at a font small enough to fit this box. When the
+ *    grid is this browser's own, that is nothing to do.
  *
  * The fit can legitimately fail on the first pass, because the effect runs
  * before flex has settled and a container under 8px must not be measured. That

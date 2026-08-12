@@ -184,6 +184,8 @@ async function main() {
     WebServer,
     WebAuth,
     PtySessionManager,
+    GridOwners,
+    DESK_VIEWER,
     hashPin,
     isAllowedSource,
     webSocketUrl,
@@ -340,16 +342,19 @@ async function main() {
   let layoutAnswer = null
   const watches = []
   /**
-   * Whether this pretend desktop has a window open, which is what decides who
-   * owns a PTY's grid — see `deskOpen` in electron/web/server.ts.
+   * The *real* ownership registry, wired to the real PTY.
    *
-   * False for every phase but the one that flips it, because a head-less server
-   * driving a real PTY is a desktop with no window by any honest reading, and it
-   * is also the state Forge Web is *for*. A host that omits the hook entirely
-   * has to behave the same way; scripts/web-e2e.mjs's server is the one that
-   * omits it, and it asserts the browser's geometry landing.
+   * The width follows the typist (electron/pty/grid-owner.ts), so "does this
+   * frame move the pane?" is a question with state behind it rather than a
+   * boolean a phase can flip. Driving the shipped registry rather than a
+   * stand-in is the whole point: a stand-in written to agree with the policy is
+   * a check that keeps passing after the policy moves.
+   *
+   * No jiggle here, unlike electron/pty-host.ts: the repaint jiggle belongs to
+   * the host, and a check that had to wait one out would be asserting a timer
+   * rather than a rule. The phases below therefore read one resize as one size.
    */
-  let deskHasWindow = false
+  const owners = new GridOwners({ apply: (id, cols, rows) => manager.resize(id, cols, rows) })
   let releaseSkills = null
   let releaseCommands = null
 
@@ -383,8 +388,12 @@ async function main() {
       onOriginRefused: (origin, allowed) => refusedOrigins.push({ origin, allowed }),
       sessions: () => manager.list(),
       replay: (id) => replay.get(id) ?? '',
-      write: (id, data) => manager.write(id, data),
-      resize: (id, cols, rows) => manager.resize(id, cols, rows),
+      write: (id, data, viewer) => {
+        owners.noteWrite(id, viewer, data)
+        return manager.write(id, data)
+      },
+      resize: (id, cols, rows, viewer) => owners.noteWish(id, viewer, cols, rows),
+      release: (viewer, id) => owners.release(viewer, id),
       snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: WORKSPACES }),
       layout: async (op, deviceName) => {
         ops.push({ op, deviceName })
@@ -396,7 +405,6 @@ async function main() {
       skills: () => new Promise((r) => (releaseSkills = () => r(SKILLS))),
       commands: () => new Promise((r) => (releaseCommands = () => r(FEED))),
       onWatch: (ids) => watches.push(ids.join(' ')),
-      deskOpen: () => deskHasWindow,
       ...extra
     })
 
@@ -618,7 +626,10 @@ async function main() {
   await waitFor(() => watches.length > 0, 5000, 'the watch announcement')
   log(watches.at(-1) === 'w1', 'a browser opening a pane says so, so the desktop can label it as read from away')
   await waitFor(() => manager.list().find((s) => s.id === 'w1')?.cols === 100, 6000, "attach's own geometry")
-  log(true, "and with no window at this desk, attach's optional cols/rows resized the real PTY to what the browser is reading it at")
+  log(
+    true,
+    "attach's optional cols/rows landed on the real PTY, because nobody had claimed this pane — an unowned pane takes the first wish"
+  )
 
   /* ------------------------------ 2b. a real byte, through a real PTY */
 
@@ -640,35 +651,111 @@ async function main() {
   browser.send({ type: 'resize', sessionId: 'w1', cols: 132, rows: 44 })
   await waitFor(() => manager.list().find((s) => s.id === 'w1')?.cols === 132, 6000, 'resize to land')
   const geometry = manager.list().find((s) => s.id === 'w1')
-  log(geometry.cols === 132 && geometry.rows === 44, 'a resize from the browser resized the real PTY, because nothing is drawing this pane here')
+  log(
+    geometry.cols === 132 && geometry.rows === 44,
+    'a resize from the browser resized the real PTY, because this browser is the device that has been typing into it'
+  )
 
-  /* --------------------------------- 3b. the same frames, with a window open
+  /* ----------------------------------------- 3b. the width follows the typist
    *
-   * A PTY has one grid, and while somebody is at the desk the desk keeps it:
-   * both frames that carry a size are dropped rather than obeyed, in silence,
-   * because the browser is told the real geometry by `sessions` anyway and
-   * scales its own type to it. The `attach` is what sequences this — it is
-   * answered on the same socket the resize was sent down, so its `replay` is
-   * proof that both frames have been handled and not merely posted.
+   * A PTY has one grid, and it belongs to whichever device somebody last typed
+   * into the pane on. Everything below is that one rule seen from five sides,
+   * driven through the *real* registry: a pane the desk is holding does not move
+   * because a browser looked at it or resized its window; it moves the instant
+   * that browser types; and it comes straight back when the desk types.
+   *
+   * The `attach` is what sequences each step — it is answered on the same socket
+   * the resize was sent down, so its `replay` is proof that the frames before it
+   * have been handled and not merely posted.
    */
 
-  deskHasWindow = true
-  const held = manager.list().find((s) => s.id === 'w1')
+  const paneNow = () => manager.list().find((s) => s.id === 'w1')
+  /** Send a bare `attach` and wait for its `replay` — proof the frames before it landed. */
+  const settled = async (label) => {
+    const before = browser.of('replay').length
+    browser.send({ type: 'attach', sessionId: 'w1' })
+    await waitFor(() => browser.of('replay').length > before, 8000, label)
+  }
+
+  // (a) The desk takes the pane back by typing into it, exactly as the renderer
+  //     does — `owners.noteWrite(id, DESK_VIEWER, …)` is the line
+  //     electron/pty-host.ts runs on `IPC.ptyWrite`.
+  owners.noteWish('w1', DESK_VIEWER, 96, 28)
+  owners.noteWrite('w1', DESK_VIEWER, 'x')
+  const reclaimed = paneNow()
+  log(
+    reclaimed.cols === 96 && reclaimed.rows === 28,
+    `typing at the desk took the pane back and applied the desk's own stored wish at once (now ${reclaimed.cols}x${reclaimed.rows})`
+  )
+
+  // (b) Looking at it changes nothing. Both frames that carry a size, from a
+  //     browser that is not the one being typed on.
+  const held = paneNow()
   const replaysBefore = browser.of('replay').length
   browser.send({ type: 'resize', sessionId: 'w1', cols: 80, rows: 24 })
   browser.send({ type: 'attach', sessionId: 'w1', cols: 81, rows: 25 })
   await waitFor(() => browser.of('replay').length > replaysBefore, 8000, 'the re-attach to be answered')
-  const unmoved = manager.list().find((s) => s.id === 'w1')
+  const unmoved = paneNow()
   log(
     unmoved.cols === held.cols && unmoved.rows === held.rows,
-    `with a window open at the desk, neither a resize nor an attach moved the real PTY (still ${unmoved.cols}x${unmoved.rows})`
+    `while the desk holds the pane, neither a resize nor an attach from the browser moved the real PTY (still ${unmoved.cols}x${unmoved.rows})`
   )
-  log(browser.of('error').every((e) => e.sessionId !== 'w1'), 'and neither was refused out loud — a dropped wish is not an error')
+  log(browser.of('error').every((e) => e.sessionId !== 'w1'), 'and neither was refused out loud — a stored wish is not an error')
 
-  deskHasWindow = false
-  browser.send({ type: 'resize', sessionId: 'w1', cols: 120, rows: 40 })
-  await waitFor(() => manager.list().find((s) => s.id === 'w1')?.cols === 120, 6000, 'the resize once the window has gone')
-  log(true, 'and the moment the desk has no window, the same frame is honoured again — the client never changed what it sends')
+  // (c) A terminal answering a question is not a person typing. This exact frame
+  //     is what a browser sends constantly while a pane is busy, and if it
+  //     counted as typing then merely *watching* would reshape the desk.
+  browser.send({ type: 'write', sessionId: 'w1', data: '\x1b[24;80R' })
+  await settled('the cursor-report write to be handled')
+  const afterReport = paneNow()
+  log(
+    afterReport.cols === held.cols && afterReport.rows === held.rows,
+    "a browser's cursor-position reply did not take the pane — watching a busy pane is not typing into it"
+  )
+
+  // (d) And now somebody actually types in the browser. The wish stored at (b)
+  //     is applied on the keystroke, without the client re-sending anything.
+  //     Ctrl+C rather than a character, so the line the reply at (c) left in the
+  //     prompt is abandoned rather than run by the phases below.
+  browser.send({ type: 'write', sessionId: 'w1', data: '\x03' })
+  await waitFor(() => paneNow().cols === 81 && paneNow().rows === 25, 6000, 'the pane changing hands')
+  log(
+    true,
+    "one keystroke in the browser took the pane and applied the size it had already asked for (81x25) — the client re-sent nothing"
+  )
+
+  // (e) A *second* browser — because two browsers must be two viewers — takes
+  //     the pane by typing, then hangs up. What it held goes back to unclaimed,
+  //     and the next wish, from anybody, wins outright.
+  const second = await connect()
+  second.send({
+    type: 'hello',
+    proto: WEB_PROTO,
+    idToken: mint(),
+    client: '0.0.0-smoke',
+    deviceId: 'browser-2',
+    deviceName: 'Chrome on the other machine'
+  })
+  await waitFor(() => second.first('hello-ok'), 8000, "the second browser's hello-ok")
+  second.send({ type: 'attach', sessionId: 'w1', cols: 150, rows: 50 })
+  await waitFor(() => second.first('replay'), 8000, "the second browser's replay")
+  log(
+    paneNow().cols === 81,
+    'a second browser attaching did not take the pane from the first — two sockets are two viewers, and only typing moves a grid'
+  )
+  second.send({ type: 'write', sessionId: 'w1', data: 'a' })
+  await waitFor(() => paneNow().cols === 150 && paneNow().rows === 50, 6000, 'the second browser taking the pane')
+  log(true, 'and typing in the second browser took it, at the size that browser had asked for (150x50)')
+
+  second.socket.close()
+  await waitFor(() => owners.ownerOf('w1') === null, 6000, 'the pane being released')
+  log(true, 'a browser that hangs up stops holding the pane it was holding — ownership goes back to unclaimed')
+  owners.noteWish('w1', DESK_VIEWER, 120, 40)
+  const afterRelease = paneNow()
+  log(
+    afterRelease.cols === 120 && afterRelease.rows === 40,
+    `and the next wish wins outright, with no typing needed (now ${afterRelease.cols}x${afterRelease.rows})`
+  )
 
   /* ------------------------------- 11. typing into a pane that has gone */
 

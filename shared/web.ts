@@ -615,16 +615,21 @@ export interface WebAuthFrame {
  *
  * `cols`/`rows` are optional and mean "and this is the size I am reading it
  * at". They are a *wish*, not an instruction: a PTY has one grid and this link
- * gives it two viewers, and while the desktop has a window open the desk owns
- * that grid and the wish is dropped — see `deskOpen` in
- * electron/web/server.ts. With no window at the desk there is nothing to
- * disturb and the wish is granted, which is the arrangement Forge Mobile makes
- * unconditionally and this one makes only when the desk is asleep.
+ * gives it several viewers, and **the grid belongs to the device somebody last
+ * typed into the pane on** (electron/pty/grid-owner.ts). Attaching is not
+ * typing, so an attach never moves a pane on its own — the size is stored, and
+ * it lands the moment somebody types in this tab.
+ *
+ * Two earlier rules are recorded there and worth not resurrecting: "last mover
+ * wins", which meant connecting a device reshaped the desktop, and "the desk
+ * owns it while it has a window", which meant a large browser wasted its screen
+ * letterboxing a laptop's pane.
  *
  * So a browser sends these and then draws whatever the `sessions` list says the
  * grid actually is, at a font small enough to fit its own box (`follow` in
- * web/src/lib/term.ts). Omitting them means "I will take whatever size it is",
- * which is what a read-only or thumbnail view should send.
+ * web/src/lib/term.ts) — which is nothing to do when it is the browser's own
+ * grid the desktop granted. Omitting them means "I will take whatever size it
+ * is", which is what a read-only or thumbnail view should send.
  */
 export interface WebAttachFrame {
   type: 'attach'

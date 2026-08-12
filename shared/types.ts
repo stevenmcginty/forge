@@ -2111,12 +2111,14 @@ export interface MobileCommandEvent {
  * The panes a phone is reading right now — a label for those pane headers, and
  * nothing more.
  *
- * It used to carry a geometry, because the desktop used to follow a phone. It
- * no longer does: while there is a window open the desk owns every grid and a
- * phone draws what the desk chose (see the "one PTY, two viewers" block in
- * electron/mobile-host.ts). `WebWatchEvent` is now its twin in shape as well as
- * in purpose, and both are kept as their own type on their own channel because
- * a shared message would have to be read twice as carefully at both ends.
+ * It used to carry a geometry, because reading a pane used to move it. It must
+ * not carry one again: only *typing* moves a grid now (see the "one PTY, several
+ * viewers" block in electron/mobile-host.ts), and a size on this channel would
+ * be a size somebody eventually followed — which would make glancing at a pane
+ * reshape it after all. The real geometry has its own channel, `IPC.ptyGeometry`.
+ * `WebWatchEvent` is its twin in shape as well as in purpose, and both are kept
+ * as their own type on their own channel because a shared message would have to
+ * be read twice as carefully at both ends.
  *
  * An empty list is the normal, and the message that says nobody is reading.
  */
@@ -2413,10 +2415,10 @@ export interface WebCommandEvent {
  * The panes a browser is reading right now — a label for those pane headers,
  * and nothing more.
  *
- * `MobileWatchEvent`'s twin. Both carry ids and no geometry, because the desktop
- * follows nobody: while there is a window open, the desk owns every grid and a
- * remote viewer draws what the desk chose (see the "one PTY, two viewers" block
- * in electron/web-host.ts). Still its own type on its own channel, because the
+ * `MobileWatchEvent`'s twin. Both carry ids and no geometry, because reading a
+ * pane must never move it — only typing does (see the "one PTY, several viewers"
+ * block in electron/web-host.ts), and the real geometry travels on
+ * `IPC.ptyGeometry` instead. Still its own type on its own channel, because the
  * two viewers arrive on different links with different lifecycles and a shared
  * message would have to be read twice as carefully at both ends.
  *
@@ -2664,6 +2666,22 @@ export interface PtyExitEvent {
   id: string
   exitCode: number
   signal?: number
+}
+
+/**
+ * A pane's real grid, and whether this desk is the one choosing it.
+ *
+ * `deskOwns` false means a phone or a browser typed into this pane last and
+ * therefore holds its geometry: the desk draws `cols`×`rows` shrunk to fit,
+ * rather than refitting the PTY out from under whoever is working on it. True
+ * covers both "the desk owns it" and "nobody does", because a pane no remote
+ * has claimed is one the desk may size freely. See `IPC.ptyGeometry`.
+ */
+export interface PtyGeometryEvent {
+  id: string
+  cols: number
+  rows: number
+  deskOwns: boolean
 }
 
 export interface WindowStateEvent {

@@ -191,28 +191,40 @@ export interface WebServerHost {
   sessions: () => WebSession[]
   /** The catch-up buffer from pty-host, or '' when there is none. */
   replay: (id: string) => string
-  write: (id: string, data: string) => boolean
-  resize: (id: string, cols: number, rows: number) => boolean
+
+  /* ------------------------------------------------ one PTY, several viewers
+   *
+   * A PTY has one grid and this link gives it another viewer, so something has
+   * to decide whose size wins. This server does not: it *names the viewer* on
+   * every frame that could bear on the question and leaves the policy to
+   * electron/pty/grid-owner.ts, which is the one place it is written down.
+   *
+   * The rule there, in a line: **the grid belongs to the device that last typed
+   * into the pane.** Type in the browser and the browser's `cols`/`rows` are
+   * honoured on the real PTY; type at the desk and the desk takes it back on the
+   * first keystroke. Attaching, resizing a window, or simply reading a pane
+   * moves nothing anywhere — which is why `attach` and `resize` below hand their
+   * sizes over unconditionally rather than gating them. Two browsers are two
+   * viewers, because `viewer` is minted per socket.
+   *
+   * A host that ignores the argument (scripts/web-e2e.mjs's does) gets the old
+   * unconditional behaviour, which is also what an unowned pane does: yes.
+   */
+
+  /** `viewer` is this socket's identity — see the block above. */
+  write: (id: string, data: string, viewer: string) => boolean
+  resize: (id: string, cols: number, rows: number, viewer: string) => boolean
 
   /**
-   * Does this desktop have a window open right now?
+   * A browser stopped reading one pane (`id` given) or went away entirely.
    *
-   * The one question the geometry policy turns on. A PTY has one grid and this
-   * link gives it two viewers, and the answer used to be Forge Mobile's — the
-   * browser wins, the desk letterboxes itself. For a phone that is right; for
-   * the machine somebody is sitting at it is not, because it means every pane
-   * in front of them re-flows the moment a tab opens elsewhere. So: while there
-   * is a window, the desk owns the grid and a browser's `cols`/`rows` are
-   * *dropped* here rather than obeyed — see the `attach` and `resize` cases.
-   * With no window there is nothing to disturb and the browser's wish is
-   * granted exactly as it always was, which is the case Forge Web is for.
-   *
-   * Optional, and a host that omits it is treated as having no window: this
-   * file must stay Electron-free (scripts/web-smoke.mjs drives it with a fake
-   * host and a real PTY), and "head-less, so the browser is the only viewer" is
-   * the honest reading of a host that cannot answer.
+   * Optional, and the departure half of the ownership rule: a viewer that has
+   * hung up cannot be the device somebody is typing on, so anything it held goes
+   * back to unclaimed and the next wish — very often the desk's own next fit —
+   * takes it. Without this a browser closed mid-pane would keep the grid it left
+   * behind until somebody typed somewhere.
    */
-  deskOpen?: () => boolean
+  release?: (viewer: string, id?: string) => void
 
   /** The opening picture: whatever the browser needs to draw the workspace. */
   snapshot: () => Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces'>
@@ -286,11 +298,11 @@ export interface WebServerHost {
   /**
    * Which sessions a browser currently has open, whenever that set changes.
    *
-   * Nothing on the desktop changes shape because of this — `deskOpen` above is
-   * where that was decided — so what it buys is a *label*: a pane on the desk
-   * that says a browser is reading it, which is worth knowing and cheap to say.
-   * The phone's identical hook still moves geometry, because a phone is a
-   * glance rather than a second desk.
+   * Nothing on the desktop changes shape because of this: watching is not
+   * typing, and only typing moves a grid (see the "one PTY, several viewers"
+   * block above). So what it buys is a *label*: a pane on the desk that says a
+   * browser is reading it, which is worth knowing and cheap to say. The phone's
+   * identical hook says the same thing about the same panes.
    *
    * Fired on attach, detach, exit and hangup, with the full set each time; a
    * diff the receiver has to reassemble is a diff that can be missed.
@@ -385,10 +397,23 @@ export interface WebShutdownNotice {
   retryAfterMs?: number
 }
 
+/**
+ * Mints a viewer id per socket, which is what makes two browsers two viewers.
+ *
+ * Per *socket* rather than per `deviceId`, deliberately: two tabs on one machine
+ * are two people's worth of screen as far as a grid is concerned, and the one
+ * being typed into should be the one that gets it. A reconnect is a new viewer
+ * with no wish stored, which is correct — the fresh `attach` carries the size it
+ * is reading at, and by then the pane it left is unclaimed again.
+ */
+let viewerSeq = 0
+
 interface Client {
   socket: WebSocket
   source: string
   device: WebDevice | null
+  /** This socket's identity for the grid-ownership rule. See `viewerSeq`. */
+  viewer: string
   /** Sessions this browser is reading. */
   subs: Set<string>
   /** The second the input counter belongs to, and its tally. See `allowInput`. */
@@ -726,6 +751,7 @@ export class WebServer {
       socket,
       source,
       device: null,
+      viewer: `web-${++viewerSeq}`,
       subs: new Set(),
       inputSecond: 0,
       inputCount: 0,
@@ -784,6 +810,11 @@ export class WebServer {
       // its viewer is a screen being encoded and sent to a socket that closed,
       // which nothing else in this file would ever notice.
       this.dropViewer(client)
+      // A browser that has hung up is not a device anybody is typing on, so it
+      // stops holding the grid of anything it held. Unconditional, because a
+      // socket that never said hello never owned anything and this costs a walk
+      // of an empty map.
+      this.host.release?.(client.viewer)
       if (client.device) {
         this.log(`${client.device.name} disconnected`)
         this.host.onPresence?.(this.connectedCount)
@@ -856,14 +887,17 @@ export class WebServer {
         this.announceWatch()
         // `cols`/`rows` are optional and mean "and this is the size I am reading
         // it at". Omitting them means "I will take whatever size it is", which
-        // is what a read-only or thumbnail view should send — and with a window
-        // open at the desk, `deskOpen` makes that of *every* attach. Dropped
-        // silently rather than refused: the browser is about to be sent a
-        // `replay` written at the desk's grid and it has the real cols/rows
-        // from `sessions` already, so it has everything it needs to draw this
-        // pane properly. There is nothing for an error frame to say.
-        if ((frame.cols !== undefined || frame.rows !== undefined) && !this.host.deskOpen?.()) {
-          this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows))
+        // is what a read-only or thumbnail view should send.
+        //
+        // Handed over as this viewer's wish and no more than that: opening a
+        // pane is not typing into it, so a pane somebody is working on elsewhere
+        // does not move because this tab looked at it. It is stored, and it is
+        // what lands the instant somebody types here. Nothing is refused out
+        // loud — the browser is about to be sent a `replay` at the pane's real
+        // grid and has its cols/rows from `sessions`, so it has everything it
+        // needs to draw this pane properly whichever way the wish went.
+        if (frame.cols !== undefined || frame.rows !== undefined) {
+          this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows), client.viewer)
         }
         const buffer = this.host.replay(id)
         // `truncated` is a claim about the *ceiling*, not about the session:
@@ -882,10 +916,16 @@ export class WebServer {
         return
       }
 
-      case 'detach':
-        client.subs.delete(wireString(frame.sessionId, 128))
+      case 'detach': {
+        const id = wireString(frame.sessionId, 128)
+        client.subs.delete(id)
+        // A pane this browser has closed is one it is certainly not typing into,
+        // so it stops holding that pane's grid — the same thing a hang-up does,
+        // for one pane rather than all of them.
+        this.host.release?.(client.viewer, id)
         this.announceWatch()
         return
+      }
 
       case 'write': {
         const id = wireString(frame.sessionId, 128)
@@ -906,7 +946,12 @@ export class WebServer {
         // would otherwise swallow the words and answer exactly as a successful
         // write does, which is the worst thing a remote can do: look like it
         // worked.
-        if (!this.host.write(id, data)) {
+        // Named, because this is the frame the whole geometry policy turns on:
+        // typing is what hands a pane's grid to the device it was typed on. What
+        // counts as typing is decided past this hook — a browser reading a busy
+        // pane sends terminal *replies* down here too, and those are not
+        // somebody working. See shared/typing.ts.
+        if (!this.host.write(id, data, client.viewer)) {
           this.send(client, {
             type: 'error',
             code: 'unknown-session',
@@ -925,13 +970,12 @@ export class WebServer {
         // is about to be told the session ended by its own `exit` frame. The
         // same silence, and the same reasoning, as electron/mobile/server.ts.
         if (!current) return
-        // And the same silence for a resize that arrives while somebody is
-        // working at the desk — see `deskOpen`. The browser keeps sending these
-        // on every box change on purpose: the wish is honoured the moment the
-        // desk's window goes, and a client that had to be told the policy would
-        // be a client that could hold a stale copy of it.
-        if (this.host.deskOpen?.()) return
-        this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows))
+        // A wish, handed over with the name of who wished it. The browser keeps
+        // sending these on every box change on purpose: whether one lands
+        // depends on whether this is the device somebody last typed on, which
+        // can change between two frames, and a client that had to be told the
+        // policy would be a client that could hold a stale copy of it.
+        this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows), client.viewer)
         return
       }
 

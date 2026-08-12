@@ -21,7 +21,8 @@ const api: ForgeApi = {
     kill: (id) => ipcRenderer.invoke(IPC.ptyKill, id),
     list: () => ipcRenderer.invoke(IPC.ptyList),
     onData: (cb) => subscribe(IPC.ptyData, cb),
-    onExit: (cb) => subscribe(IPC.ptyExit, cb)
+    onExit: (cb) => subscribe(IPC.ptyExit, cb),
+    onGeometry: (cb) => subscribe(IPC.ptyGeometry, cb)
   },
 
   store: {

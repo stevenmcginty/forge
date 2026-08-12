@@ -1,7 +1,8 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
-import type { CreateSessionRequest, CreateSessionResult } from '@shared/types'
+import type { CreateSessionRequest, CreateSessionResult, PtyGeometryEvent } from '@shared/types'
 import { installCommandFor, toolSpecForCommand } from '@shared/tools'
+import { DESK_VIEWER, GridOwners } from './pty/grid-owner'
 import { PtySessionManager } from './pty/session-manager'
 import { withoutQuestions } from './pty/replay'
 import { checkableExe, whichCommand } from './which'
@@ -110,10 +111,11 @@ export interface PtySink {
    * A session's grid changed, whoever moved it. Optional for the same reason
    * `onSpawn` is: a sink that only relays bytes has no use for it.
    *
-   * Forge Web needs it because the desktop owns the grid while it has a window
-   * open (see the "one PTY, two viewers" block in electron/web-host.ts): a
-   * browser reading a pane the desk has just refitted is drawing the wrong
-   * shape until it is told, and nothing else on this link would tell it.
+   * Every remote link needs it, because the width follows the typist (see
+   * ./pty/grid-owner.ts) and so every viewer that is not the current owner is
+   * drawing a grid it did not choose: the moment the owner moves it, everybody
+   * else is drawing the wrong shape until they are told, and nothing else on
+   * these links would tell them.
    */
   onResize?: (id: string, cols: number, rows: number) => void
 }
@@ -201,6 +203,122 @@ function queue(id: string, data: string): void {
   scheduleFlush()
 }
 
+/* ------------------------------------------------ who owns which pane's grid
+ *
+ * The registry itself is ./pty/grid-owner.ts, which is where the policy and its
+ * two rejected predecessors are written down. What lives here is the plumbing
+ * around it: how a granted wish reaches ConPTY, and how the desktop renderer
+ * hears that a pane it is drawing now belongs to somebody else.
+ */
+
+/**
+ * Gap between the short size and the true one when a *remote* wish is granted —
+ * the same repaint jiggle `resizePty` does in the renderer, and for the same
+ * reason: an Ink TUI (Claude Code, Codex) only rewrites the rows it thinks
+ * changed, and ConPTY's reflow leaves fragments of the old frame behind. No
+ * program is obliged to honour a "please repaint" sequence, but every one of
+ * them redraws for a size change.
+ */
+const REDRAW_JIGGLE_MS = 60
+
+/** Pending second halves, keyed by session id. */
+const jiggles = new Map<string, NodeJS.Timeout>()
+
+function clearJiggle(id: string): void {
+  const timer = jiggles.get(id)
+  if (timer) {
+    clearTimeout(timer)
+    jiggles.delete(id)
+  }
+}
+
+/**
+ * Put a granted wish on the real PTY.
+ *
+ * The desk's own wishes arrive already jiggled — `resizePty` in
+ * src/lib/terminals.ts sends the short size and the true one itself — so
+ * jiggling them again here would be four resizes for one drag. A phone's and a
+ * browser's arrive as one number, so this is where theirs happens. (It used to
+ * live in electron/mobile-host.ts as `resizeForPhone`; a browser needs it for
+ * exactly the same reason a phone does, and now that both links reach the PTY
+ * through one gate there is one place for it.)
+ */
+function resizeForViewer(id: string, cols: number, rows: number, viewer: string): boolean {
+  clearJiggle(id)
+  if (viewer === DESK_VIEWER || rows < 3) return getManager().resize(id, cols, rows)
+  const ok = getManager().resize(id, cols, rows - 1)
+  jiggles.set(
+    id,
+    setTimeout(() => {
+      jiggles.delete(id)
+      getManager().resize(id, cols, rows)
+    }, REDRAW_JIGGLE_MS)
+  )
+  return ok
+}
+
+/**
+ * How long an ownership or geometry change waits before the renderer is told.
+ *
+ * The same number, for the same reason, as `GEOMETRY_PUSH_MS` in the two remote
+ * hosts: the desk refits in bursts — a window drag, a split, a tab switch move
+ * several panes at once — and the repaint jiggle above is itself two resizes
+ * 60ms apart, of which only the second is a shape anybody should draw.
+ */
+const GEOMETRY_PUSH_MS = 80
+const geometryDirty = new Set<string>()
+let geometryTimer: NodeJS.Timeout | null = null
+
+function flushGeometry(): void {
+  geometryTimer = null
+  const ids = [...geometryDirty]
+  geometryDirty.clear()
+  const sessions = manager?.list() ?? []
+  for (const id of ids) {
+    const session = sessions.find((s) => s.id === id)
+    if (!session) continue
+    send(IPC.ptyGeometry, {
+      id,
+      cols: session.cols,
+      rows: session.rows,
+      deskOwns: owners.deskOwns(id)
+    } satisfies PtyGeometryEvent)
+  }
+}
+
+function noteGeometry(id: string): void {
+  geometryDirty.add(id)
+  if (geometryTimer) return
+  geometryTimer = setTimeout(flushGeometry, GEOMETRY_PUSH_MS)
+}
+
+const owners = new GridOwners({ apply: resizeForViewer, onOwner: noteGeometry })
+
+/**
+ * A remote viewer typed into a pane. Ownership moves to it if this was really
+ * typing rather than the terminal answering a question — see shared/typing.ts,
+ * which is the difference between "somebody is working on their phone" and
+ * "somebody has a busy pane open in a tab".
+ */
+export function viewerWrite(id: string, data: string, viewer: string): boolean {
+  owners.noteWrite(id, viewer, data)
+  return getManager().write(id, data)
+}
+
+/** A remote viewer said what size it is reading a pane at. Granted only if it owns it. */
+export function viewerResize(id: string, cols: number, rows: number, viewer: string): boolean {
+  return owners.noteWish(id, viewer, cols, rows)
+}
+
+/**
+ * A remote viewer stopped reading one pane, or went away entirely. Anything it
+ * owned goes back to unclaimed, and the next wish — very often this desk's own
+ * next fit — takes it.
+ */
+export function viewerGone(viewer: string, id?: string): void {
+  owners.release(viewer, id)
+}
+
 export function getManager(): PtySessionManager {
   if (!manager) {
     const settings = getSettings()
@@ -211,7 +329,12 @@ export function getManager(): PtySessionManager {
       env: { CLAUDE_CLIENT_PRESENCE_FILE: presenceFile() },
       maxSessions: MAX_SESSIONS,
       onData: queue,
-      onResize: (id, cols, rows) => toSinks((sink) => sink.onResize?.(id, cols, rows)),
+      onResize: (id, cols, rows) => {
+        toSinks((sink) => sink.onResize?.(id, cols, rows))
+        // And this desktop's own renderer, which is a follower like any other
+        // whenever a phone or a browser is the one holding this pane's grid.
+        noteGeometry(id)
+      },
       onExit: (id, exitCode, signal) => {
         // Flush whatever the process said on its way out before the exit event.
         if (pending.has(id)) {
@@ -222,6 +345,10 @@ export function getManager(): PtySessionManager {
           toSinks((sink) => sink.onData(id, data))
         }
         live.delete(id)
+        clearJiggle(id)
+        // Nothing in the registry outlives the session it describes — and a
+        // reused pane id must not inherit a dead pane's owner.
+        owners.forget(id)
         send(IPC.ptyExit, { id, exitCode, signal })
         toSinks((sink) => sink.onExit(id, exitCode))
       }
@@ -232,6 +359,12 @@ export function getManager(): PtySessionManager {
 
 export function setPtyTarget(win: BrowserWindow | null): void {
   target = win
+  // A destroyed window is a viewer that has gone, exactly as a browser hanging
+  // up is (electron/main.ts calls this from `closed`, which a Forge merely
+  // hidden to the tray never reaches). Every pane the desk was holding goes back
+  // to unclaimed, so the phone or browser still reading one takes it with its
+  // next wish rather than being letterboxed by a window nobody can see.
+  if (!win) owners.release(DESK_VIEWER)
 }
 
 /* ------------------------------------------------- the CLI that isn't there */
@@ -382,12 +515,23 @@ export function registerPtyHandlers(): void {
       return result
     }
 
+    // A pane is born to whoever opened it, and every pane is opened here — the
+    // renderer owns the split tree, so a tab a browser asks for is still created
+    // by this desk. It changes hands the moment somebody types somewhere else.
+    // Only a genuinely new one, though: re-adoption below is this renderer
+    // *reconnecting* to a shell that was already running, which is arriving
+    // rather than opening, and arriving must not take a grid off a phone
+    // somebody has been working on.
+    if (!existed) owners.created(spec.id, DESK_VIEWER)
+
     // Announced for both branches below: a re-adopted session is new to
     // anything that was not watching when it first started.
     toSinks((sink) => sink.onSpawn?.(spec.id))
 
     if (existed) {
-      getManager().resize(spec.id, spec.cols, spec.rows)
+      // A wish, like every other size this desk asks for: granted when nothing
+      // remote is holding this pane, stored when something is.
+      owners.noteWish(spec.id, DESK_VIEWER, spec.cols, spec.rows)
       // Through getReplay rather than the raw map: the questions in it have to
       // come out, or the reload answers them into a program that has long since
       // stopped listening and reads the answers as typing.
@@ -401,17 +545,27 @@ export function registerPtyHandlers(): void {
   })
 
   ipcMain.on(IPC.ptyWrite, (_e, id: string, data: string) => {
+    // Typing at the desk takes the pane back, instantly and with no ceremony —
+    // that is the whole of "sit down and it is native again". Everything xterm
+    // sends that nobody pressed is filtered out by `noteWrite`; see
+    // shared/typing.ts.
+    owners.noteWrite(String(id), DESK_VIEWER, String(data))
     getManager().write(String(id), String(data))
   })
 
   ipcMain.on(IPC.ptyResize, (_e, id: string, cols: number, rows: number) => {
-    getManager().resize(String(id), Number(cols), Number(rows))
+    // A wish, not an instruction. The renderer fits its container and says what
+    // it would like; whether the PTY moves depends on who owns the pane, which
+    // is the same rule a phone's and a browser's frames go through.
+    owners.noteWish(String(id), DESK_VIEWER, Number(cols), Number(rows))
   })
 
   ipcMain.handle(IPC.ptyKill, (_e, id: string) => {
     replay.delete(String(id))
     pending.delete(String(id))
     live.delete(String(id))
+    clearJiggle(String(id))
+    owners.forget(String(id))
     return getManager().kill(String(id))
   })
 
@@ -423,6 +577,13 @@ export function disposePtyHost(): void {
     clearTimeout(flushTimer)
     flushTimer = null
   }
+  if (geometryTimer) {
+    clearTimeout(geometryTimer)
+    geometryTimer = null
+  }
+  geometryDirty.clear()
+  for (const id of [...jiggles.keys()]) clearJiggle(id)
+  owners.clear()
   pending.clear()
   replay.clear()
   live.clear()

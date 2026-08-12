@@ -8,6 +8,21 @@ export const IPC = {
   ptyList: 'pty:list',
   ptyData: 'pty:data',
   ptyExit: 'pty:exit',
+  /**
+   * A pane's grid moved, or changed hands. Main → renderer.
+   *
+   * The width follows the typist (see electron/pty/grid-owner.ts), so this desk
+   * is a *follower* of any pane a phone or a browser last typed into: it has to
+   * draw that pane at the grid the PTY really has, font-scaled into its own box,
+   * exactly as the remote clients have always drawn the desk's. `deskOwns` is
+   * which of the two this is, and it has to travel with the size because
+   * changing hands is not always a resize — the new owner may already want the
+   * shape the pane has.
+   *
+   * Coalesced in electron/pty-host.ts on the same 80ms the remote links use, so
+   * a window drag or a split is one message rather than one per pane per frame.
+   */
+  ptyGeometry: 'pty:geometry',
 
   // store
   storeSnapshot: 'store:snapshot',

@@ -1198,15 +1198,18 @@ function ProjectCard({
  * effect below).
  *
  * That ask is now a *wish* rather than a contract, and this screen has not been
- * reworked for it. The desktop only grants a remote's geometry while it has no
- * window open (`deskOpen` in electron/mobile/server.ts) — plugging a device in
- * must not change the resolution of the machine somebody is sitting at — so
- * against a desktop with a window this split view is back to holding the desk's
- * grid in half a panel, which is the clipping it was written to end. The phone
- * answers this by scaling its font to the desk's grid (`follow` in
- * mobile/src/lib/term.ts); a sofa cannot read the result at half width, which
- * is exactly why that route was rejected here in the first place. Deciding what
- * a television should do instead is unfinished work.
+ * reworked for it. The desktop grants a viewer's geometry only while that viewer
+ * is the one somebody last typed into the pane on (electron/pty/grid-owner.ts),
+ * and a television is a screen driven by a remote control: it is watched far
+ * more often than it is typed into, so in practice this split view holds
+ * somebody else's grid in half a panel, which is the clipping it was written to
+ * end. The phone answers that by scaling its font to whatever the real grid is
+ * (`follow` in mobile/src/lib/term.ts); a sofa cannot read the result at half
+ * width, which is exactly why that route was rejected here in the first place.
+ * Deciding what a television should do instead is unfinished work — the new rule
+ * narrows the gap (type on the TV and it does get its shape) without closing it,
+ * because a television that has to be typed into to be readable is not a
+ * television.
  *
  * stdin is disabled for the same reason the wall has no buttons: this surface
  * watches. Up/Down walk the scrollback in a plain shell (a full-screen TUI

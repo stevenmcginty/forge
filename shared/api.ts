@@ -53,6 +53,7 @@ import type {
   Project,
   PtyDataEvent,
   PtyExitEvent,
+  PtyGeometryEvent,
   Settings,
   Shot,
   StoreSnapshot,
@@ -156,6 +157,11 @@ export interface ForgeApi {
     /** Returns an unsubscribe function. */
     onData(cb: (e: PtyDataEvent) => void): () => void
     onExit(cb: (e: PtyExitEvent) => void): () => void
+    /**
+     * A pane's grid moved, or changed hands — including when the device that
+     * moved it was somewhere else entirely. See `IPC.ptyGeometry`.
+     */
+    onGeometry(cb: (e: PtyGeometryEvent) => void): () => void
   }
 
   store: {

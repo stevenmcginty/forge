@@ -10,6 +10,10 @@
 export { WebServer, isAllowedSource } from '../../electron/web/server'
 export { WebAuth } from '../../electron/web/auth'
 export { PtySessionManager } from '../../electron/pty/session-manager'
+// The real geometry policy, so the ownership phases drive the shipped registry
+// against a real PTY rather than a stand-in written to agree with it. This is
+// what that module has no Electron in it for.
+export { DESK_VIEWER, GridOwners } from '../../electron/pty/grid-owner'
 // The real PIN hashing, so the phases that put a PIN on a stub host seed it
 // with exactly what `web:pin-set` would write rather than with a fixture that
 // could keep passing after the stored form moved.

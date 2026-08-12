@@ -771,15 +771,18 @@ async function main() {
     'and a pane that had not started yet raised no "that pane is gone" — a sentence nobody could act on'
   )
 
-  // This server has no `deskOpen` hook, which is a desktop with no window open
-  // by the reading electron/web/server.ts gives a host that cannot answer — so
-  // the browser is the only viewer there is and its geometry is honoured. The
-  // other branch, where a window is open and this frame is dropped, is asserted
-  // in scripts/web-smoke.mjs and scripts/web-check.mjs.
+  // This server's host resizes unconditionally: it takes no viewer name and
+  // keeps no ownership registry, which is the branch electron/web/server.ts
+  // documents as "a host that ignores the argument behaves as it always did".
+  // That is the same answer an *unowned* pane gives — nothing here ever claimed
+  // this one — so the browser's attach geometry lands, and a head-less setup
+  // needs no registry to work. The branches where a pane is already held, and
+  // where typing takes it, are asserted in scripts/web-smoke.mjs and
+  // scripts/web-check.mjs, both of which drive the real registry.
   const geometry = manager.list().find((s) => s.id === SESSION_ID)
   log(
     geometry.cols !== 90 || geometry.rows !== 30,
-    `and with no window at that desk, attach carried the browser's own geometry, so the PTY is no longer at the size the desk set (now ${geometry.cols}×${geometry.rows})`
+    `and against a host with no ownership registry, attach carried the browser's own geometry, so the PTY is no longer at the size the desk set (now ${geometry.cols}×${geometry.rows})`
   )
 
   /* ------------------------------- and the other pointer, which is a finger

@@ -289,19 +289,24 @@ export interface WriteFrame {
  * the single most common resize in this app's life.
  *
  * `cols`/`rows` are a *wish*, not an instruction. A PTY has one grid and this
- * link gives it two viewers, and while the desktop has a window open the desk
- * owns that grid and the wish is dropped — see `deskOpen` in
- * electron/mobile/server.ts. With no window at the desk there is nothing to
- * disturb and the wish is granted, which is how this link behaved
- * unconditionally until Steve pointed out what it costs: plugging a phone in
- * changed the resolution of the machine he was sitting at.
+ * link gives it several viewers, and **the grid belongs to the device somebody
+ * last typed into the pane on** (electron/pty/grid-owner.ts). A keyboard
+ * sliding up is not typing, so this frame on its own never moves a pane the
+ * desk is holding — the size is stored, and it lands on the first keystroke
+ * from this phone.
+ *
+ * Two earlier rules are recorded there and worth not resurrecting: "last mover
+ * wins", which meant plugging a phone in changed the resolution of the machine
+ * Steve was sitting at, and "the desk owns it while it has a window", which
+ * left a handset drawing a 200-column desktop grid at 7px.
  *
  * So a phone sends these and then draws whatever the `state` frame's session
  * list says the grid actually is, at a font small enough to fit its own screen
- * (`follow` in mobile/src/lib/term.ts). A client keeps sending them regardless
- * rather than tracking the policy, because the desk's window can close between
- * one frame and the next and a client holding a stale copy of the rule would
- * keep quiet through exactly the moment its size started to matter.
+ * (`follow` in mobile/src/lib/term.ts) — which is nothing to do when it is the
+ * phone's own grid the desktop granted. A client keeps sending them regardless
+ * rather than tracking the policy, because ownership can change between one
+ * frame and the next and a client holding a stale copy of the rule would keep
+ * quiet through exactly the moment its size started to matter.
  */
 export interface ResizeFrame {
   t: 'resize'
@@ -743,10 +748,11 @@ export interface ExitFrame {
  * — or a pane's grid moved.
  *
  * That last one is why `sessions` is pushed more often than a list of *which*
- * panes exist would need to be. The desk owns the grid (see `ResizeFrame`), so
- * every pane it refits is news a phone reading that pane has to hear, and
- * `MobileSession` already carries cols/rows — the news needs no frame of its
- * own, only sending. See the `onResize` sink in electron/mobile-host.ts.
+ * panes exist would need to be. A pane's grid belongs to whoever last typed into
+ * it (see `ResizeFrame`), so every pane that moves is news to every phone that
+ * was not the one that moved it, and `MobileSession` already carries cols/rows —
+ * the news needs no frame of its own, only sending. See the `onResize` sink in
+ * electron/mobile-host.ts.
  */
 export interface StateFrame {
   t: 'state'

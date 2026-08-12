@@ -26,28 +26,29 @@ import './TerminalPane.css'
  * The chip for a pane somebody else is reading, or null when nobody is.
  *
  * Three sentences rather than one because the chip names *which* screen is
- * reading, and that is the whole of what it says: neither viewer changes what
- * is on this desk any more — the desk keeps its grid and both of them scale to
- * it — so this is news rather than an explanation of the size. See
- * `setPhoneWatched` and `setBrowserWatched` in src/lib/terminals.ts.
+ * reading, and that is the whole of what it says. It is deliberately not an
+ * ownership indicator: a pane's grid belongs to whichever screen was last typed
+ * into (electron/pty/grid-owner.ts), and reading is not typing, so this chip and
+ * that question are independent. See `setPhoneWatched` and `setBrowserWatched`
+ * in src/lib/terminals.ts.
  */
 function watcherChip(runtime: { phone: boolean; browser: boolean }): { label: string; title: string } | null {
   if (runtime.phone && runtime.browser) {
     return {
       label: 'PHONE + BROWSER',
-      title: "A phone and a browser both have this pane open. Both follow this desktop's size; nothing here changes shape for them"
+      title: 'A phone and a browser both have this pane open. Reading it changes nothing — a pane is sized by whichever screen was last typed into'
     }
   }
   if (runtime.phone) {
     return {
       label: 'ON PHONE',
-      title: "A phone has this pane open. It is drawn at this desktop's size — nothing here changes shape for it"
+      title: 'A phone has this pane open. Reading it changes nothing — a pane is sized by whichever screen was last typed into'
     }
   }
   if (runtime.browser) {
     return {
       label: 'IN BROWSER',
-      title: "A browser has this pane open. It is drawn at this desktop's size — nothing here changes shape for it"
+      title: 'A browser has this pane open. Reading it changes nothing — a pane is sized by whichever screen was last typed into'
     }
   }
   return null
@@ -389,10 +390,9 @@ export function TerminalPane({
           </span>
         ) : null}
 
-        {/* Neither a phone nor a browser changes anything about this pane —
-            both draw this desk's grid scaled to their own screen (see
-            setPhoneWatched). They are named anyway: "somebody is reading this
-            from away" is worth knowing on its own. */}
+        {/* Neither a phone nor a browser changes anything about this pane by
+            reading it (see setPhoneWatched). They are named anyway: "somebody is
+            reading this from away" is worth knowing on its own. */}
         {watcher ? (
           <span className="pane__perm mono" title={watcher.title}>
             {watcher.label}

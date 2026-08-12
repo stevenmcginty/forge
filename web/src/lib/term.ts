@@ -27,18 +27,24 @@ import { FitAddon } from '@xterm/addon-fit'
  *     whatever the desktop last set — output wrapped for a screen twice as wide
  *     as the one showing it.
  *
- * ## Whose grid this is, which is not this browser's
+ * ## Whose grid this is, which is sometimes this browser's
  *
- * A PTY has one grid and Forge Web is a second viewer of it. While the desktop
- * has a window open the desktop owns that grid — nothing a browser sends moves
- * it, by design, because panes re-flowing on the machine somebody is working at
- * is not a price a remote tab gets to charge (see `deskOpen` in
- * electron/web/server.ts). So this file does two things at once: it goes on
- * fitting the container and reporting that geometry through `onResize` — the
- * wish, which is granted the moment the desk's window closes — and it draws
- * whatever grid the desktop says the session really has, shrinking the *font*
- * until that grid fits the box it has. `follow` is where the second half
- * happens, and when the two agree it does nothing at all.
+ * A PTY has one grid and Forge Web is one viewer of it. **The grid belongs to
+ * the device somebody last typed into the pane on**
+ * (electron/pty/grid-owner.ts): type in this tab and its own fit lands on the
+ * real PTY, so a big screen is a big terminal; type at the desk and the desk
+ * takes it back, and this tab draws the desk's grid instead. Merely opening a
+ * pane and reading it moves nothing anywhere, which is what makes it safe to
+ * leave a browser watching a machine somebody else is working at.
+ *
+ * So this file does two things at once, and neither of them depends on knowing
+ * the policy: it goes on fitting the container and reporting that geometry
+ * through `onResize` — the wish, granted whenever this browser is the device
+ * being typed on — and it draws whatever grid the desktop says the session
+ * really has, shrinking the *font* until that grid fits the box it has.
+ * `follow` is where the second half happens, and when the two agree, which is
+ * the whole of the case where this browser is the one holding the pane, it does
+ * nothing at all.
  *
  * ## The cursor-position query, which is not optional
  *
@@ -59,7 +65,8 @@ export interface TermHost {
   /**
    * Refit to the container and return the browser's own geometry, or null if it
    * is unchanged. Note that this is the size this browser *would like* — what is
-   * on screen afterwards may be the desktop's grid instead. See `follow`.
+   * on screen afterwards is somebody else's grid whenever somebody else is the
+   * one holding this pane. See `follow`.
    */
   fit: () => { cols: number; rows: number } | null
   /** The geometry this browser wants, whether or not the last fit changed it. */
@@ -258,10 +265,10 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
   /**
    * Put the right grid on screen at the largest font it fits in.
    *
-   * The desktop's grid whenever this pane has been told one, and this browser's
+   * The session's real grid whenever this pane has been told one, and this browser's
    * own until then. When the two agree — which is the whole of the case where
-   * the desk has no window and the wish below was granted — the second branch
-   * finds nothing to change and costs a comparison.
+   * this browser is the device being typed on and the wish below was granted —
+   * the second branch finds nothing to change and costs a comparison.
    *
    * The scale comes out of the two grids rather than out of any measurement of
    * a character: `natural` is what this box holds at `options.fontSize`, so

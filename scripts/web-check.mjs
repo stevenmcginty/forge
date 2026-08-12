@@ -1644,19 +1644,23 @@ held.socket.on('message', (raw) => {
   for (let i = 0; i < (asked?.length ?? 0); i++) ptyHost.getManager().write('tray-1', '\x1b[1;1R')
 })
 
-/* ----------------------------------------------- one PTY, two viewers
+/* -------------------------------------------- one PTY, several viewers
  *
  * The desktop and a browser are two viewers of one ConPTY, which has one width.
- * The rule is that while this desktop has a *window*, the desk owns that width:
- * a browser says what it is reading at, the desktop ignores it, and the browser
- * scales its own type instead. Nothing in front of the person at the desk moves
- * because somebody opened a tab in another town.
+ * The rule is that the width **follows the typist**: the grid belongs to the
+ * device somebody last typed into the pane on, and every other viewer — the desk
+ * included — draws that grid font-scaled. Reading a pane from anywhere changes
+ * nothing anywhere.
  *
- * Both halves are asserted here because the window is what decides which one
- * runs, and this file is the only check that can install one and take it away
- * again. What the renderer is told is now a list of ids and no geometry — it
- * draws these panes at its own size like any other, and all it does with the
- * list is label them.
+ * This file is the only check that can drive the *whole* of that: the real
+ * registry, the real host, the real IPC handlers electron/main.ts registers, and
+ * a real browser on a real socket. So both directions are asserted here, and so
+ * is the message the desktop renderer needs in order to be a follower at all.
+ *
+ * Two separate messages reach the renderer and they must stay separate. The
+ * watch list (`IPC.webWatched`) carries ids and no geometry, because reading is
+ * not typing; the geometry (`IPC.ptyGeometry`) carries the real grid and who
+ * owns it, and only moves when somebody actually types.
  */
 
 const watched = []
@@ -1671,7 +1675,38 @@ globalThis.__forgeWindows = [
   }
 ]
 
+/*
+ * The desk's own half, through the handlers electron/main.ts registers rather
+ * than through the registry directly: `IPC.ptyWrite` is what a keystroke in
+ * src/lib/terminals.ts reaches, and `IPC.ptyResize` is what a settled fit
+ * reaches. Driving those is what makes this phase about the shipped wiring.
+ */
+ptyHost.registerPtyHandlers()
+const deskTyped = (id, data) => ipc.listeners.get(IPC.ptyWrite)({}, id, data)
+const deskWished = (id, cols, rows) => ipc.listeners.get(IPC.ptyResize)({}, id, cols, rows)
+
+/** Every `IPC.ptyGeometry` the renderer was sent, in order. */
+const geometries = []
+ptyHost.setPtyTarget({
+  isDestroyed: () => false,
+  webContents: {
+    send: (channel, payload) => {
+      if (channel === IPC.ptyGeometry) geometries.push(payload)
+    }
+  }
+})
+const lastGeometry = () => geometries.filter((g) => g.id === 'tray-1').at(-1)
+
 const paneNow = () => ptyHost.getManager().list().find((s) => s.id === 'tray-1')
+
+/*
+ * The desk sits down and works: a fit, then a keystroke. A backspace, because it
+ * is unambiguously typing and is a no-op at an empty prompt — everything below
+ * runs real commands in this shell and must not find a stray character in front
+ * of them.
+ */
+deskWished('tray-1', 90, 30)
+deskTyped('tray-1', '\x7f')
 const deskGeometry = paneNow()
 
 // A size neither the session was created at (90x30) nor a default, so a PTY
@@ -1684,13 +1719,13 @@ await waitFor(namesTray, 5000, 'the watch broadcast')
 log(true, 'a browser attaching to a pane is named to the renderer, so the pane can say it is being read from away')
 log(
   Array.isArray(watched.at(-1).ids) && watched.at(-1).ids.every((id) => typeof id === 'string'),
-  'and named is all it is — the message carries ids and no geometry, because the desk follows nobody'
+  'and named is all it is — that message carries ids and no geometry, because watching decides nothing'
 )
 
 const afterAttach = paneNow()
 log(
   afterAttach.cols === deskGeometry.cols && afterAttach.rows === deskGeometry.rows,
-  `with a window open, the browser's attach geometry did not move the real PTY (still ${afterAttach.cols}x${afterAttach.rows})`
+  `while the desk holds the pane, the browser's attach geometry did not move the real PTY (still ${afterAttach.cols}x${afterAttach.rows})`
 )
 
 sendFrame(held, { type: 'resize', sessionId: 'tray-1', cols: 132, rows: 44 })
@@ -1701,14 +1736,14 @@ await new Promise((r) => setTimeout(r, 500))
 const afterResize = paneNow()
 log(
   afterResize.cols === deskGeometry.cols && afterResize.rows === deskGeometry.rows,
-  'and neither did a resize frame — the desk keeps the grid it had while its window is open'
+  'and neither did a resize frame — a browser resizing its window is not somebody typing in it'
 )
 
 // The other direction: the desk moves the pane, and a browser reading it has to
 // be told, or it goes on drawing a shape the PTY no longer has. `sessions`
 // already carries cols/rows, so this is a push rather than a new frame.
 const sessionsBefore = held.frames.filter((f) => f.type === 'sessions').length
-ptyHost.getManager().resize('tray-1', 96, 28)
+deskWished('tray-1', 96, 28)
 await waitFor(
   () =>
     held.frames
@@ -1720,9 +1755,41 @@ await waitFor(
 )
 log(true, 'while a resize made at the desk is pushed to every browser, which is how they follow it')
 
+await waitFor(() => lastGeometry()?.cols === 96, 5000, 'the geometry message to the renderer')
+log(
+  lastGeometry().deskOwns === true && lastGeometry().rows === 28,
+  `and the renderer is told the same thing on its own channel, marked as the desk's own (${lastGeometry().cols}x${lastGeometry().rows}, deskOwns ${lastGeometry().deskOwns})`
+)
+
+/* ------------------------------------------- and now somebody types elsewhere
+ *
+ * One keystroke in the browser, and the pane changes hands: the size that
+ * browser has already asked for lands on the real PTY without it re-sending
+ * anything, and the desk is told it is now a follower.
+ */
+sendFrame(held, { type: 'write', sessionId: 'tray-1', data: '\x7f' })
+await waitFor(() => paneNow().cols === 132 && paneNow().rows === 44, 8000, 'the pane changing hands')
+log(
+  true,
+  'one keystroke in the browser took the pane and applied the size it had already asked for (132x44) — the client re-sent nothing'
+)
+await waitFor(() => lastGeometry()?.deskOwns === false, 5000, 'the renderer being told it is now following')
+log(
+  lastGeometry().cols === 132 && lastGeometry().rows === 44,
+  `and the desk is told to follow that exact grid (${lastGeometry().cols}x${lastGeometry().rows}, deskOwns ${lastGeometry().deskOwns})`
+)
+
+// And back. Sitting down at the desk and typing is the whole promise, so it is
+// asserted as one keystroke and no ceremony.
+deskTyped('tray-1', '\x7f')
+await waitFor(() => paneNow().cols === 96 && paneNow().rows === 28, 6000, 'the desk taking the pane back')
+log(true, "typing at the desk took it straight back, at the desk's own last fit (96x28)")
+await waitFor(() => lastGeometry()?.deskOwns === true, 5000, 'the renderer being told it is native again')
+log(true, 'and the renderer is told it owns its grid again, so it stops font-scaling somebody else\'s')
+
 sendFrame(held, { type: 'detach', sessionId: 'tray-1' })
 await waitFor(() => watched.at(-1).ids.length === 0, 5000, 'the pane being handed back')
-log(true, 'and dropping off the list is the same message with the pane no longer in it')
+log(true, 'and dropping off the watch list is the same message with the pane no longer in it')
 
 // Re-attached because everything below reads this pane's output back down this
 // socket, and only a subscriber is sent it. Still with the window installed,
@@ -1730,14 +1797,21 @@ log(true, 'and dropping off the list is the same message with the pane no longer
 sendFrame(held, { type: 'attach', sessionId: 'tray-1', cols: 104, rows: 27 })
 await waitFor(namesTray, 5000, 'the re-attach')
 
-// And away: the window closes, Forge Web keeps the terminals, and with nobody
-// at the desk to disturb, the browser's own geometry is honoured again — which
-// is the whole case this feature exists for. No window is also the honest state
-// for the rest of this run.
+/*
+ * And away: the desktop window is destroyed. `setPtyTarget(null)` is the line
+ * electron/main.ts runs from the window's `closed` event, and it releases every
+ * pane the desk was holding — so the browser, which is now the only viewer left,
+ * takes this one with its very next wish and no typing at all. No window is also
+ * the honest state for the rest of this run.
+ */
 globalThis.__forgeWindows = []
+ptyHost.setPtyTarget(null)
 sendFrame(held, { type: 'resize', sessionId: 'tray-1', cols: 104, rows: 27 })
 await waitFor(() => paneNow().cols === 104 && paneNow().rows === 27, 6000, "the browser's geometry with no window open")
-log(true, 'with the window closed, the very same frame resizes the real PTY — the browser is the only viewer left')
+log(
+  true,
+  'a destroyed window hands its panes back, and the same frame the desk was ignoring now resizes the real PTY — the browser is the only viewer left'
+)
 
 // A string that only ever exists in pwsh's *output* — what was typed is a
 // concatenation of two halves of it — so a client-side echo cannot fake this.

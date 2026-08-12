@@ -17,17 +17,19 @@ import { KeyBar } from './KeyBar'
  *
  * ## Geometry, which is the part that is easy to get wrong
  *
- * A PTY has one geometry and this link gives it two viewers. The desktop owns
- * it whenever it has a window open, because plugging a phone in must not change
- * the resolution of the machine somebody is working at — see `deskOpen` in
- * electron/mobile/server.ts. So this component does both halves of that
- * arrangement:
+ * A PTY has one geometry and this link gives it another viewer. It belongs to
+ * whichever device somebody last typed into the pane on — see
+ * electron/pty/grid-owner.ts — so this phone has it natively while somebody is
+ * working here, and follows somebody else's the moment they take it back. Either
+ * way this component does both halves, and neither half knows which case it is
+ * in:
  *
  *  - It still fits its holder and still reports the result up the link. That is
- *    the *wish*, and it is granted whole the moment the desk's window closes.
+ *    the *wish*, granted whenever this phone is the device being typed on.
  *  - It follows the session's real `cols`/`rows` out of the desktop's `state`
  *    pushes and hands them to `follow`, which draws that grid at a font small
- *    enough to fit this screen.
+ *    enough to fit this screen. When the grid is this phone's own, that is
+ *    nothing to do.
  *
  * The key bar is raised from the header rather than always present — see
  * KEYBAR_PREF below. The compose row still lives inside it, so opening the keys

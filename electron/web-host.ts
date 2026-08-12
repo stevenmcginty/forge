@@ -48,7 +48,7 @@ import { NgrokTunnel, ensureNgrokExe, resolveNgrokExe } from './mobile-tunnel'
  */
 import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
 import { CloudflareTunnel, ensureCloudflaredExe, resolveCloudflaredExe } from './cloudflare-tunnel'
-import { addPtySink, getManager, getReplay } from './pty-host'
+import { addPtySink, getManager, getReplay, viewerGone, viewerResize, viewerWrite } from './pty-host'
 import { addGitSink, gitRefresh, runAction } from './git-watcher'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
 import { getSkillsStore } from './skills-store'
@@ -93,10 +93,10 @@ import { probeCommands } from './which'
  *     tree and persists the workspace — so the browser joins that code path
  *     instead of growing a parallel one in main that could disagree with it
  *     (docs/forge-web.md, decision 5).
- *  5. Keep this desktop's terminal geometry out of a browser's hands while
- *     there is a window here to disturb, and hand it over when there is not.
- *     One PTY, two viewers — the block of that name below is the whole of it,
- *     and it is deliberately *not* Forge Mobile's arrangement.
+ *  5. Name the viewer on every frame that bears on a pane's geometry, so the
+ *     ownership registry can decide whose size wins. One PTY, several viewers —
+ *     the block of that name below says what the rule is and what the two
+ *     rejected rules before it were.
  *
  * ## What this file used to get wrong
  *
@@ -205,11 +205,13 @@ let unsubscribeGit: (() => void) | null = null
 /**
  * How long a PTY resize waits before the session list is pushed again.
  *
- * The desk owns the grid, so every pane it refits is news a browser reading
- * that pane has to hear — and the desk refits in bursts: a window drag, a
- * split, a tab switch move several panes at once. Long enough to make one
- * message out of a burst, short enough that a browser is never drawing last
- * second's geometry.
+ * Whoever owns a pane's grid, every browser that is not that owner is drawing a
+ * shape it did not choose — so every move is news it has to hear. Bursts are the
+ * normal case: a window drag, a split or a tab switch at the desk moves several
+ * panes at once, and a granted remote wish is itself two resizes 60ms apart (the
+ * repaint jiggle in electron/pty-host.ts). Long enough to make one message out
+ * of a burst, short enough that a browser is never drawing last second's
+ * geometry.
  */
 const GEOMETRY_PUSH_MS = 80
 let geometryPush: NodeJS.Timeout | null = null
@@ -260,64 +262,50 @@ function tunnelAgentName(): string {
  */
 let blockerId = 0
 
-/* ---------------------------------------------------- one PTY, two viewers
+/* ------------------------------------------------- one PTY, several viewers
  *
  * A pane on the desktop and the same pane in a browser tab are the same
- * ConPTY, and a ConPTY has one width. Both ends used to fit it to their own
- * box, so whichever moved last won — and the desktop moves on every layout
- * change, which meant switching tabs at the desk quietly dragged the width back
- * from a browser reading that pane from somewhere else, and every line after
- * that was wrapped for a screen it was not being drawn on. Switching tabs in
- * the browser dragged it the other way. The two fought.
+ * ConPTY, and a ConPTY has one width. Forge has answered "whose width?" three
+ * times, and the first two are worth keeping in view because both were shipped:
  *
- * This used to be settled Forge Mobile's way — while a browser had a pane open,
- * the browser owned its geometry and the desktop letterboxed itself at the
- * browser's size. That is the wrong trade for a *desk*. A phone is a glance at
- * a pane; the desktop is the machine somebody is working at, and watching every
- * pane on it re-flow because a tab opened somewhere else is the app rearranging
- * the work in front of you on a stranger's behalf.
+ *  1. **Last mover wins.** Every viewer fitted the PTY to its own box. The
+ *     desktop moves on every layout change, so switching tabs at the desk
+ *     dragged the width back from a browser reading that pane from another
+ *     town, and switching panes in the browser dragged it the other way.
+ *     Rejected: connecting a device must not reshape the desktop.
+ *  2. **The desk owns it while it has a window.** A browser's cols/rows were
+ *     dropped outright whenever a window existed here, and the browser drew the
+ *     desk's grid at a shrunken font. That stopped the fighting and threw away
+ *     the point of a big screen: a browser on a 32-inch monitor letterboxed a
+ *     laptop's pane, and a phone drew a 200-column grid at 7px. Rejected too.
+ *  3. **The width follows the typist**, which is what this file wires up now.
+ *     The grid belongs to the device somebody last *typed* into: that device
+ *     gets it natively, and every other viewer — this desktop's own renderer
+ *     included — draws that grid font-scaled into its own box. Reading a pane
+ *     from anywhere changes nothing anywhere.
  *
- * So the rule is now the other way round, and it has one line: **while this
- * desktop has a window open, the desk owns the grid.** A browser still says
- * what size it is reading at — the frames are unchanged — but that wish is only
- * granted when there is no window to disturb, which is exactly the case Forge
- * Web exists for (the desk closed to the tray, the terminals still running).
- * With a window open the wish is dropped in electron/web/server.ts, and the
- * browser draws the desk's grid at a font small enough to fit its own box; see
- * `follow` in web/src/lib/term.ts.
+ * The policy itself is electron/pty/grid-owner.ts, reached through
+ * `viewerWrite` / `viewerResize` / `viewerGone` on electron/pty-host.ts. This
+ * file supplies nothing but the viewer's name, which `electron/web/server.ts`
+ * mints per socket — so two browsers are two viewers.
  *
- * What the renderer is still told is *which* panes a browser is reading
- * (`webWatched`), because "IN BROWSER" on a pane header is honest and useful.
- * It is no longer told a size, because it no longer follows one. Phones live
- * under the same rule — see `setPhoneWatched` in src/lib/terminals.ts and the
- * matching `deskOpen` gate in electron/mobile/server.ts.
+ * What the renderer is told, besides the geometry it now follows, is *which*
+ * panes a browser is reading (`webWatched`), because "IN BROWSER" on a pane
+ * header is honest and useful. Forge Mobile's link is wired identically; the
+ * two links answer the question with the same code rather than with two copies
+ * of the same paragraph.
  */
 
 /** Session ids at least one browser currently has open. */
 let watched = new Set<string>()
 
 /**
- * Is there a desktop window to disturb?
- *
- * The same question `askRenderer` and `mirrorWindow` below ask, in the same
- * terms, because it is the same fact: a window that is not destroyed has a
- * renderer holding the split tree, drawing panes, and refitting them. Note that
- * closing Forge's window with the link on *hides* it rather than destroying it
- * (see the close handler in electron/main.ts), so a Forge sitting in the tray
- * still counts as open — which is the answer this policy wants. That window
- * comes back, and it must come back to the grid it was left at rather than to
- * one a browser chose while nobody was looking.
- */
-function deskOpen(): boolean {
-  return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed())
-}
-
-/**
  * Tell the renderer which panes a browser is reading.
  *
- * Ids and nothing else: the renderer draws these panes at its own size like any
- * other, and the one thing it does differently is label them. A size in this
- * message would be a size somebody would eventually follow.
+ * Ids and nothing else, and that is not an accident of history: a size *does*
+ * reach the renderer now, but on `IPC.ptyGeometry` and only when somebody has
+ * typed into the pane from away. Reading is not typing, so this message must
+ * stay what it is — a label — or watching a pane would move it after all.
  */
 function publishWatched(): void {
   broadcast(IPC.webWatched, { ids: [...watched] } satisfies WebWatchEvent)
@@ -1117,14 +1105,12 @@ async function start(): Promise<void> {
     onOriginRefused: noteOriginRefused,
     sessions: () => getManager().list(),
     replay: (id) => getReplay(id),
-    write: (id, data) => getManager().write(id, data),
-    resize: (id, cols, rows) => getManager().resize(id, cols, rows),
-    // The policy point is the server, which drops a browser's cols/rows while
-    // this is true rather than passing them here. It is a thunk, not a value,
-    // for the reason every other thunk on this host is one: the window can go
-    // and come back inside one connection, and a captured answer would be a
-    // stale one for the rest of it.
-    deskOpen,
+    // Through pty-host's ownership gate rather than straight at the manager:
+    // typing is what hands a pane's grid over, and a size is a wish granted only
+    // to whoever is holding it. See "one PTY, several viewers" above.
+    write: (id, data, viewer) => viewerWrite(id, data, viewer),
+    resize: (id, cols, rows, viewer) => viewerResize(id, cols, rows, viewer),
+    release: (viewer, id) => viewerGone(viewer, id),
     snapshot: snapshotForBrowser,
     layout: dispatchLayout,
     // The exported functions, not the IPC handlers: a second host calls what
@@ -1206,11 +1192,12 @@ async function start(): Promise<void> {
       publishWatched()
     },
     onResize: () => {
-      // The desk moved a pane's grid, and every browser reading it has just
-      // been left drawing the wrong one. `sessions` already carries cols/rows,
-      // so the news needs no new frame — only sending. Coalesced, because a
-      // window drag or a split is several panes resizing in the same breath and
-      // each one would otherwise broadcast the whole list.
+      // A pane's grid moved — at this desk, on a phone, or in another browser —
+      // and every browser that is not the one that moved it has just been left
+      // drawing the wrong shape. `sessions` already carries cols/rows, so the
+      // news needs no new frame — only sending. Coalesced, because a window drag
+      // or a split is several panes resizing in the same breath and each one
+      // would otherwise broadcast the whole list.
       if (geometryPush) return
       geometryPush = setTimeout(() => {
         geometryPush = null

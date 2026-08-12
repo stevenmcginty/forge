@@ -160,59 +160,86 @@ the terminal sat at xterm's default 80×24 while the PTY stayed at the desktop's
 width. Everything then arrived wrapped for a screen twice as wide as the one
 showing it, which is what "the text runs off the edge" actually was.
 
-### One PTY, two viewers
+### One PTY, several viewers
 
 A pane open on the desktop and the same pane open on a phone are one ConPTY, and
-a ConPTY has one width. Both ends fitting it to their own box means the last one
-to move wins — and the desktop moves on every layout change, so a pane being read
-on a phone would have its geometry dragged back to the desk's without the phone
-ever knowing.
+a ConPTY has one width. Forge has answered "whose width?" three times, and the
+two answers before this one were both shipped, so both are recorded here rather
+than quietly replaced:
 
-That was settled the phone's way for a long time: while a phone had a pane open
-the phone owned its geometry, and the desktop letterboxed its own terminal to
-match. It is not settled that way any more. Plugging a device in must not change
-the resolution of the machine somebody is sitting at, and every pane on the desk
-re-flowing because a phone came out of a pocket is exactly that.
+1. **Last mover wins.** Both ends fitted the PTY to their own box, and the
+   desktop moves on every layout change — so a pane being read on a phone had
+   its geometry dragged back to the desk's without the phone ever knowing.
+2. **The phone owns any pane it has open.** The desktop letterboxed its own
+   terminal to match. Rejected: plugging a device in must not change the
+   resolution of the machine somebody is sitting at, and every pane on the desk
+   re-flowing because a phone came out of a pocket is exactly that.
+3. **The desk owns the grid while it has a window.** A phone's `cols`/`rows`
+   were dropped outright and the phone drew the desk's grid font-scaled.
+   Rejected in its turn: a handset drawing a 200-column desktop grid is a 7px
+   terminal, which is unusable, and a big client screen is wasted on
+   letterboxing.
 
-**The rule: while this desktop has a window open, the desk owns the grid.**
+**The rule: the width follows the typist.** The grid belongs to the device
+somebody last *typed* into the pane on.
 
-- The server asks its host `deskOpen()` on every `resize` frame. While it
-  answers true the frame is **dropped, in silence** — the phone is about to be
-  told the real geometry anyway, so there is nothing for an error frame to say.
-  A host that does not supply the hook is treated as having no window, which is
-  what lets `scripts/mobile-smoke.mjs` drive the server head-less.
-- With no window at the desk the wish is granted exactly as it always was.
-  Phones keep sending `resize` on every keyboard slide regardless rather than
-  tracking the policy: the desk's window can close between one frame and the
-  next, and a client holding a stale copy of the rule would keep quiet through
-  exactly the moment its size started to matter.
-- The phone draws the desk's grid instead, at a font small enough to fit its own
-  screen — `follow` in `mobile/src/lib/term.ts`, floored at `MIN_FONT_PX` so a
-  pane never becomes a texture. The grid arrives on the ordinary `state` push:
-  `mobile-host` subscribes to the session manager's `onResize` and pushes the
-  session list, coalesced by `GEOMETRY_PUSH_MS` because a window drag moves
-  several panes in one breath.
-- The watch list survives, carrying **ids and no geometry**. The server still
-  announces the union of subscribed sessions through `onWatch` (subscribe,
-  unsubscribe, exit, hangup), `mobile-host` forwards it as `mobile:watched`, and
-  `terminalHost.setPhoneWatched` does one thing with it: put `ON PHONE` on the
-  pane header. Nothing on the desk changes shape.
+- The server no longer decides anything. It **names the viewer** — minted per
+  socket, so a phone and a television are two viewers — on `write`, `resize` and
+  `unsub`, and hands the question to `electron/pty/grid-owner.ts`, which is the
+  one place the policy is written down. A host that ignores the name behaves
+  unconditionally, which is also what an unowned pane does: yes. That is what
+  lets `scripts/mobile-smoke.mjs` drive the server head-less.
+- **A `resize` on its own never moves anything a phone does not already hold.**
+  The size is stored as that viewer's wish, and it lands the instant somebody
+  types there. Phones keep sending `resize` on every keyboard slide regardless
+  rather than tracking the policy: ownership can change between one frame and
+  the next, and a client holding a stale copy of the rule would keep quiet
+  through exactly the moment its size started to matter.
+- **A `write` is not always typing.** A phone reading a busy pane sends the
+  terminal's own replies (`CSI 6 n` above all) down the same frame, and counting
+  those as typing would mean looking at a pane reshaped it. `shared/typing.ts` is
+  the line, and the desktop's typed-draft tracker uses the very same predicate.
+- **Whoever is not the owner follows.** They draw the real grid at a font small
+  enough to fit their own screen — `follow` in `mobile/src/lib/term.ts` and
+  `applyGrid` in `src/lib/terminals.ts`, both floored at `MIN_FONT_PX` so a pane
+  never becomes a texture. The grid reaches a phone on the ordinary `state` push
+  (`mobile-host` subscribes to the session manager's `onResize`, coalesced by
+  `GEOMETRY_PUSH_MS`) and the desktop renderer on `IPC.ptyGeometry`, which
+  carries `deskOwns` as well as the size because changing hands is not always a
+  resize.
+- **Departure releases.** A phone that hangs up or unsubscribes stops holding
+  anything it held, and so does this desktop's window when it is destroyed.
+  Ownership goes back to unclaimed, and the next wish — very often the desk's own
+  next fit — takes it.
+- The watch list survives alongside all this, carrying **ids and no geometry**.
+  The server announces the union of subscribed sessions through `onWatch`
+  (subscribe, unsubscribe, exit, hangup), `mobile-host` forwards it as
+  `mobile:watched`, and `terminalHost.setPhoneWatched` does one thing with it:
+  put `ON PHONE` on the pane header. Keeping that message a label is what stops
+  watching from moving a grid.
 
-Forge Web reached this arrangement first and the two links now answer the
-question identically — see `docs/forge-web.md`.
+Forge Web is wired through the same registry and the two links answer the
+question with the same code — see `docs/forge-web.md`.
 
-A phone's resize, in the case where it is granted, goes down as `rows - 1` and
-then `rows`: the same jiggle `resizePty` does in the renderer and for the same
-reason: an Ink TUI only rewrites the rows it believes changed, and ConPTY's
-reflow leaves fragments of the old frame behind. No program honours a "please
-repaint" sequence; every one of them redraws for a size change.
+A granted remote resize goes down as `rows - 1` and then `rows`: the same jiggle
+`resizePty` does in the renderer and for the same reason: an Ink TUI only
+rewrites the rows it believes changed, and ConPTY's reflow leaves fragments of
+the old frame behind. No program honours a "please repaint" sequence; every one
+of them redraws for a size change. It lives in `electron/pty-host.ts` now, beside
+the gate that decides whether the resize happens at all, and it is why the pushes
+above are coalesced on 80ms — only the second half of a jiggle is a shape anybody
+should draw.
 
-Known gap: the television's **split view** (`TvDashboard.tsx`) was written on the
-old contract — it fits the grid to half a panel at sofa font and asks the desktop
-for that shape. Against a desktop with a window that ask is now dropped, and the
-split view is back to holding the desk's grid in half a screen. Scaling the font
-the way the phone does gives a 6px terminal, which is why that route was rejected
-there in the first place. Unfinished.
+Known gap, narrowed but not closed: the television's **split view**
+(`TvDashboard.tsx`) fits the grid to half a panel at sofa font and asks the
+desktop for that shape. Under the desk-locked rule that ask was dropped outright;
+under this one it is granted whenever the television is the last device typed
+into the pane — which for a screen driven by a remote control and used to watch
+is rare, and may be never. So the split view still normally holds somebody else's
+grid in half a screen, and scaling the font the way the phone does still gives a
+6px terminal, which is why that route was rejected there in the first place. A
+television is a follower by nature, and this rule does not change that.
+Unfinished.
 
 ### Reconnecting
 

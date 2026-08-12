@@ -69,28 +69,39 @@ export interface MobileServerHost {
   sessions: () => MobileSession[]
   /** The 192KB catch-up buffer from pty-host, or '' if there is none. */
   replay: (id: string) => string
-  write: (id: string, data: string) => boolean
-  resize: (id: string, cols: number, rows: number) => boolean
+  /* ------------------------------------------------ one PTY, several viewers
+   *
+   * A PTY has one grid and this link gives it another viewer, so something has
+   * to decide whose size wins. This server does not: it *names the viewer* on
+   * every frame that could bear on the question and leaves the policy to
+   * electron/pty/grid-owner.ts, which is the one place it is written down.
+   *
+   * The rule there, in a line: **the grid belongs to the device that last typed
+   * into the pane.** Type on the phone and the phone's `cols`/`rows` are
+   * honoured on the real PTY — native, at the width a handset can actually read
+   * — and type at the desk and the desk takes it back on the first keystroke.
+   * Taking the phone out of a pocket and looking at it moves nothing, which is
+   * why the `resize` case below hands its size over unconditionally rather than
+   * gating it.
+   *
+   * A host that ignores the argument gets the old unconditional behaviour, which
+   * is also what an unowned pane does: yes.
+   */
+
+  /** `viewer` is this socket's identity — see the block above. */
+  write: (id: string, data: string, viewer: string) => boolean
+  resize: (id: string, cols: number, rows: number, viewer: string) => boolean
 
   /**
-   * Does this desktop have a window open right now?
+   * A phone stopped reading one pane (`id` given) or went away entirely.
    *
-   * The one question the geometry policy turns on. A PTY has one grid and this
-   * link gives it two viewers, and the answer used to be the phone's — the
-   * phone wins, the desk letterboxes itself. Steve rejected that: whichever
-   * device he plugs in, the resolution at the desk must not move, and watching
-   * every pane in front of him re-flow because a phone came out of a pocket is
-   * exactly that happening. So while there is a window, the desk owns the grid
-   * and a phone's `cols`/`rows` are *dropped* here rather than obeyed — see the
-   * `resize` case. With no window there is nothing to disturb and the phone's
-   * wish is granted exactly as it always was.
-   *
-   * Optional, and a host that omits it is treated as having no window: this
-   * file must stay Electron-free (scripts/mobile-smoke.mjs drives it with a
-   * fake host and a real PTY), and "head-less, so the phone is the only viewer"
-   * is the honest reading of a host that cannot answer.
+   * Optional, and the departure half of the ownership rule: a device that has
+   * hung up is not one somebody is typing on, so anything it held goes back to
+   * unclaimed and the next wish — very often the desk's own next fit — takes it.
+   * Without this a phone put down mid-pane would keep the grid it left behind
+   * until somebody typed somewhere.
    */
-  deskOpen?: () => boolean
+  release?: (viewer: string, id?: string) => void
 
   /** The opening picture: whatever the phone needs to draw a project list. */
   snapshot: () => Pick<import('@shared/mobile').HelloOkFrame, 'projects' | 'profiles' | 'workspaces'>
@@ -111,9 +122,10 @@ export interface MobileServerHost {
   /**
    * Which sessions a phone currently has open, whenever that set changes.
    *
-   * Nothing on the desktop changes shape because of this — `deskOpen` above is
-   * where that was decided — so what it buys is a *label*: a pane on the desk
-   * that says a phone is reading it, which is worth knowing and cheap to say.
+   * Nothing on the desktop changes shape because of this: watching is not
+   * typing, and only typing moves a grid (see the "one PTY, several viewers"
+   * block above). So what it buys is a *label*: a pane on the desk that says a
+   * phone is reading it, which is worth knowing and cheap to say.
    *
    * Fired on subscribe, unsubscribe, exit and hangup, with the full set each
    * time — a diff the receiver has to reassemble is a diff that can be missed.
@@ -232,10 +244,20 @@ export interface MobileServerOptions {
   port: number
 }
 
+/**
+ * Mints a viewer id per socket, which is what makes a phone and a television two
+ * viewers rather than one. Per *socket* rather than per paired device, on the
+ * same reasoning electron/web/server.ts gives: a reconnect is a new viewer with
+ * no wish stored, and by then the pane it left is unclaimed again.
+ */
+let viewerSeq = 0
+
 interface Client {
   socket: WebSocket
   source: string
   device: MobileDevice | null
+  /** This socket's identity for the grid-ownership rule. See `viewerSeq`. */
+  viewer: string
   subs: Set<string>
   alive: boolean
   /** Set while a human is being asked about this socket. See beginApproval. */
@@ -492,7 +514,15 @@ export class MobileServer {
   /* --------------------------------------------------------------- inbound */
 
   private accept(socket: WebSocket, source: string): void {
-    const client: Client = { socket, source, device: null, subs: new Set(), alive: true, approval: null }
+    const client: Client = {
+      socket,
+      source,
+      device: null,
+      viewer: `phone-${++viewerSeq}`,
+      subs: new Set(),
+      alive: true,
+      approval: null
+    }
     this.clients.add(client)
 
     // An unauthenticated socket is not allowed to sit there holding a slot —
@@ -525,6 +555,11 @@ export class MobileServer {
       // outliving its viewer is a screen being encoded and sent to a socket
       // that closed — which nothing else in this file would ever notice.
       this.dropViewer(client)
+      // A phone that has hung up is not a device anybody is typing on, so it
+      // stops holding the grid of anything it held. Unconditional, because a
+      // socket that never said hello never owned anything and this costs a walk
+      // of an empty map.
+      this.host.release?.(client.viewer)
       if (client.device) {
         this.log(`${client.device.name} disconnected`)
         this.host.onPresence?.(this.connectedCount)
@@ -575,10 +610,16 @@ export class MobileServer {
         return
       }
 
-      case 'unsub':
-        client.subs.delete(wireString(frame.id, 128))
+      case 'unsub': {
+        const id = wireString(frame.id, 128)
+        client.subs.delete(id)
+        // A pane this phone has closed is one it is certainly not typing into,
+        // so it stops holding that pane's grid — the same thing a hang-up does,
+        // for one pane rather than all of them.
+        this.host.release?.(client.viewer, id)
         this.announceWatch()
         return
+      }
 
       case 'write': {
         const id = wireString(frame.id, 128)
@@ -594,7 +635,12 @@ export class MobileServer {
         // exited while the phone was in a pocket would otherwise swallow the
         // words and answer exactly as a successful write does, which is the
         // worst thing a remote can do: look like it worked.
-        if (!this.host.write(id, data)) {
+        // Named, because this is the frame the whole geometry policy turns on:
+        // typing is what hands a pane's grid to the device it was typed on. What
+        // counts as typing is decided past this hook — a phone reading a busy
+        // pane sends terminal *replies* down here too, and those are not
+        // somebody working. See shared/typing.ts.
+        if (!this.host.write(id, data, client.viewer)) {
           this.send(client, { t: 'err', code: 'unknown-session', msg: 'That pane is gone — nothing was typed' })
         }
         return
@@ -608,13 +654,12 @@ export class MobileServer {
         // about to be told the session ended anyway. Silence here is the same
         // silence `sub` would break, one frame later.
         if (!current) return
-        // And the same silence for a resize that arrives while somebody is
-        // working at the desk — see `deskOpen`. The phone keeps sending these on
-        // every keyboard slide on purpose: the wish is honoured the moment the
-        // desk's window goes, and a client that had to be told the policy would
-        // be a client that could hold a stale copy of it.
-        if (this.host.deskOpen?.()) return
-        this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows))
+        // A wish, handed over with the name of who wished it. The phone keeps
+        // sending these on every keyboard slide on purpose: whether one lands
+        // depends on whether this is the device somebody last typed on, which
+        // can change between two frames, and a client that had to be told the
+        // policy would be a client that could hold a stale copy of it.
+        this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows), client.viewer)
         return
       }
 

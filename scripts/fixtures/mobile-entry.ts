@@ -9,6 +9,10 @@
 export { MobileServer, isAllowedSource, resolveWithin } from '../../electron/mobile/server'
 export { MobileAuth, PAIR_TTL_MS, hashToken } from '../../electron/mobile/auth'
 export { PtySessionManager } from '../../electron/pty/session-manager'
+// The real geometry policy, so the ownership phases drive the shipped registry
+// against a real PTY rather than a stand-in written to agree with it. This is
+// what that module has no Electron in it for.
+export { DESK_VIEWER, GridOwners } from '../../electron/pty/grid-owner'
 // Re-exported so the checks use exactly the shipped values rather than a
 // number that could drift from them: the approval window, the screen mirror's
 // signalling payload cap, and the longest phrase one text frame may carry.
