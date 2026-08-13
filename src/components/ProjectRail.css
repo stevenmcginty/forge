@@ -213,6 +213,7 @@
 
 .prow__name {
   font-size: var(--t-md);
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
