@@ -335,8 +335,11 @@ const AMOUNTS = {
     lineSoft: 0.035,
     lineStrong: 0.128,
     secondary: 0.42, // text toward panel
-    muted: 0.6,
-    dim: 0.79,
+    // Muted is eyebrows, paths, hints — 9.5px labels, so it has to clear the
+    // body floor (4.5:1), not the large-text one. 0.6 mixed to ~3.4:1 and the
+    // rail paths vanished. Dim is chevrons and disabled chrome; 3:1 is enough.
+    muted: 0.48,
+    dim: 0.62,
     accentBright: 0.28, // accent toward white
     scrollbar: 0.14,
     scrollbarHover: 0.23,
@@ -354,8 +357,8 @@ const AMOUNTS = {
     lineSoft: 0.07,
     lineStrong: 0.26,
     secondary: 0.33,
-    muted: 0.5,
-    dim: 0.68,
+    muted: 0.36,
+    dim: 0.5,
     accentBright: 0.22, // accent toward black
     scrollbar: 0.24,
     scrollbarHover: 0.36,
@@ -541,9 +544,10 @@ export function auditTheme(core: ThemeCore, min = 4.5): ContrastFinding[] {
   const tokens = resolveTheme(core)
   check('text-primary', tokens['text-primary']!, core.bg)
   check('text-secondary', tokens['text-secondary']!, core.panel, Math.min(min, 4.5))
-  // Muted ink is eyebrows and hints — deliberately quiet, so it answers to the
-  // large-text threshold rather than the body one.
-  check('text-muted', tokens['text-muted']!, core.panel, 3)
+  // Muted is eyebrows, paths and hints — 9.5px, so the body floor. Dim is
+  // chevrons, counts and disabled chrome, so the large-text floor is enough.
+  check('text-muted', tokens['text-muted']!, core.panel, 4.5)
+  check('text-dim', tokens['text-dim']!, core.panel, 3)
   check('accent', core.accent, core.panel, 3)
   check('danger', core.danger, core.panel, 3)
   check('warn', core.warn, core.panel, 3)

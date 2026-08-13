@@ -103,7 +103,7 @@
 
 .rexp__path {
   font-size: var(--t-xs);
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .rexp__status {

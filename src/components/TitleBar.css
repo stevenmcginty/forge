@@ -122,7 +122,7 @@
 .titlebar__path {
   min-width: 0;
   font-size: var(--t-eyebrow);
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .titlebar__controls-gap {

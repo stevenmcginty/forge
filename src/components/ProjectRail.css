@@ -222,7 +222,11 @@
 
 .prow__path {
   font-size: var(--t-eyebrow);
-  color: var(--text-dim);
+  color: var(--text-muted);
+}
+
+.prow[data-active='true'] .prow__path {
+  color: var(--text-secondary);
 }
 
 /*
