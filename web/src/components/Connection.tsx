@@ -123,13 +123,37 @@ function Screen({
 /* -------------------------------------------------------------- the screens */
 
 export function Connecting({ attempt, note }: { attempt: number; note?: string }): ReactNode {
+  const { state, actions } = useForge()
   return (
     <Screen reason="connecting" title="Connecting" icon="forge">
       <p className="gate__body">
         {note ?? (attempt > 0 ? `Reconnecting to the desktop (attempt ${attempt + 1})…` : 'Looking for the desktop…')}
       </p>
       <div className="gate__pulse" aria-hidden="true" />
+      <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
     </Screen>
+  )
+}
+
+/**
+ * The escape hatch every pre-workspace screen needs and two of them lacked.
+ *
+ * A browser signed in as the wrong account used to be stuck at exactly the two
+ * places that account cannot get past — this desktop's PIN prompt, and a
+ * connect that will never succeed — with no way out short of clearing site
+ * data, because the sign-out button lives in the workspace those screens stand
+ * in front of. One person lending another their sign-in "to test" is precisely
+ * how a browser ends up here, so the way back is named after what it does.
+ */
+function SwitchAccount({ email, onSignOut }: { email: string; onSignOut: () => void }): ReactNode {
+  if (!email) return null
+  return (
+    <p className="gate__hint">
+      Signed in as <span className="mono">{email}</span> —{' '}
+      <button type="button" className="gate__switch" onClick={onSignOut}>
+        sign in as a different account
+      </button>
+    </p>
   )
 }
 
@@ -192,7 +216,7 @@ export function Refused({
  * browser that has answered it once still answers it on the next connection".
  */
 export function PinPrompt({ message, invalid }: { message: string; invalid: boolean }): ReactNode {
-  const { actions } = useForge()
+  const { state, actions } = useForge()
   const [pin, setPin] = useState('')
 
   const submit = (event: FormEvent): void => {
@@ -250,6 +274,10 @@ export function PinPrompt({ message, invalid }: { message: string; invalid: bool
         <p className="gate__hint">
           This is the PIN set in Forge’s settings on that PC, and it is asked for on every connection.
         </p>
+        {/* The one screen a wrong account is guaranteed to reach and cannot get
+            past: the PIN being asked for is the *desktop's* PIN, so no digits
+            this person knows will open a desktop that is not theirs. */}
+        <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
       </form>
     </div>
   )
@@ -257,7 +285,7 @@ export function PinPrompt({ message, invalid }: { message: string; invalid: bool
 
 /** The database could not be read at all. Not the same as "the desktop is off". */
 export function Unreachable({ error }: { error: string }): ReactNode {
-  const { actions } = useForge()
+  const { state, actions } = useForge()
   return (
     <Screen reason="unreachable" title="Could not look up the desktop" icon="gear">
       <p className="gate__body">{error}</p>
@@ -267,6 +295,7 @@ export function Unreachable({ error }: { error: string }): ReactNode {
       <button type="button" className="cta-btn gate__go" onClick={() => actions.refind()}>
         Look again
       </button>
+      <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
     </Screen>
   )
 }

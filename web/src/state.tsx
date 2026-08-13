@@ -23,6 +23,7 @@ import { ALLOW_LOOPBACK, devLoopbackHost, loadConfig, type WebClientConfig } fro
 import { Auth, isSignedOutError, type Session } from './lib/auth'
 import { ForgeClient, type Connection } from './lib/client'
 import {
+  clearSnapshot,
   loadSnapshot,
   rememberGit,
   rememberPicture,
@@ -314,7 +315,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         })
         // Written down and held, from the one object rather than by reading back
         // what was just written: `rememberPicture` hands over what it stored.
-        setCached(rememberPicture(frame))
+        // Stamped with whose picture it is, so a later sign-in as somebody else
+        // cannot inherit it — see SNAPSHOT_VERSION 4 in lib/cache.ts.
+        setCached(rememberPicture(frame, authRef.current?.current()?.uid ?? ''))
         setProjectId((current) => current ?? frame.projects[0]?.id ?? null)
       },
       onData: (sessionId, data, replay, truncated) => {
@@ -502,6 +505,15 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       authRef.current = auth
       const current = auth.current()
       setSession(current)
+      // The snapshot loaded at mount was read before anybody knew whose browser
+      // this is. If it belongs to a different account than the stored session —
+      // or there is no session at all — it is somebody else's picture, not a
+      // cache, and it goes.
+      const held = loadSnapshot()
+      if (held && held.uid !== (current?.uid ?? '')) {
+        clearSnapshot()
+        setCached(null)
+      }
       if (auth.signedIn()) void find()
       else setStage({ kind: 'signed-out', error: '' })
     })
@@ -599,14 +611,34 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         const auth = authRef.current
         if (!auth) throw new Error('This page is not configured yet.')
         const next = await auth.signIn(email, password)
+        // A different account than the one whose picture is cached starts from
+        // nothing: the frozen view, the selected project and the git panel all
+        // describe the previous account's desktop, not this one's.
+        const held = loadSnapshot()
+        if (held && held.uid !== next.uid) {
+          clearSnapshot()
+          setCached(null)
+          setPicture(null)
+          setProjectId(null)
+          setGit({})
+        }
         setSession(next)
         await find()
       },
       signOut: () => {
         client.disconnect()
         authRef.current?.signOut()
+        // The frozen picture is the signed-in account's workspace — projects,
+        // transcripts, desktop name. On a page whose whole point is "any
+        // browser, one URL", sign-out must leave nothing for the next person.
+        clearSnapshot()
+        transcripts.current.clear()
+        dirtyTranscripts.current.clear()
+        setCached(null)
         setSession(null)
         setPicture(null)
+        setProjectId(null)
+        setGit({})
         setStage({ kind: 'signed-out', error: '' })
       },
       retry: () => client.retry(),

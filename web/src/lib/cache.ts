@@ -56,8 +56,15 @@ const SNAPSHOT_KEY = 'forge-web-snapshot'
  * electron/git/gh.ts — only ever arrives in a `git` push while the desktop is
  * awake. Without it the offline client can tell nobody which repository the
  * project it is drawing belongs to.
+ *
+ * 4 added `uid`. The snapshot is one account's picture of one desktop, and
+ * before it was stamped with whose, signing out and back in as somebody else
+ * showed the previous account's projects and transcripts in the frozen view —
+ * one browser lent to a second person kept the first person's terminals on
+ * screen. The uid is checked on load and the snapshot cleared on sign-out;
+ * a mismatch is treated exactly like no cache at all.
  */
-const SNAPSHOT_VERSION = 3
+const SNAPSHOT_VERSION = 4
 
 /**
  * Total bytes of replay this cache will hold across every session.
@@ -70,6 +77,8 @@ const MAX_CACHED_REPLAY_BYTES = 4 * MAX_REPLAY_BYTES
 
 export interface Snapshot {
   version: number
+  /** The Firebase uid this picture belongs to. A snapshot is one account's view. */
+  uid: string
   /** ms epoch when the desktop last spoke. Drawn as "as of …" on the badge. */
   at: number
   desktopName: string
@@ -112,8 +121,10 @@ export function loadSnapshot(): Snapshot | null {
   const snapshot = value as Partial<Snapshot>
   if (snapshot.version !== SNAPSHOT_VERSION) return null
   if (!Array.isArray(snapshot.projects) || !Array.isArray(snapshot.sessions)) return null
+  if (typeof snapshot.uid !== 'string' || !snapshot.uid) return null
   return {
     version: SNAPSHOT_VERSION,
+    uid: snapshot.uid,
     at: typeof snapshot.at === 'number' ? snapshot.at : 0,
     desktopName: typeof snapshot.desktopName === 'string' ? snapshot.desktopName : '',
     appVersion: typeof snapshot.appVersion === 'string' ? snapshot.appVersion : '',
@@ -154,10 +165,15 @@ export function clearSnapshot(): void {
  * has cached, for a value the write already had in its hands. Null means nothing
  * was stored and there is nothing to refresh from; see `write`.
  */
-export function rememberPicture(frame: WebHelloOkFrame): Snapshot | null {
-  const previous = loadSnapshot()
+export function rememberPicture(frame: WebHelloOkFrame, uid: string): Snapshot | null {
+  // A previous account's snapshot is not "previous" — it is somebody else's.
+  // Folding its transcripts into this account's picture is exactly the leak
+  // version 4 exists to close, so a uid mismatch reads as no cache at all.
+  const held = loadSnapshot()
+  const previous = held && held.uid === uid ? held : null
   return write({
     version: SNAPSHOT_VERSION,
+    uid,
     at: Date.now(),
     desktopName: frame.desktopName,
     appVersion: frame.appVersion,

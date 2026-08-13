@@ -79,6 +79,23 @@
   color: var(--text-muted);
 }
 
+/* The "sign in as a different account" escape on the pre-workspace screens.
+   A text button inside a hint line, so it reads as the small print it is. */
+.gate__switch {
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.gate__switch:hover {
+  color: var(--text-primary);
+}
+
 .gate__error {
   margin: 0;
   width: 100%;
