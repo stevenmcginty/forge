@@ -24,13 +24,17 @@ export type ProfileKind = 'shell' | 'agent'
  * The four names are Claude Code's, because it got here first — but they are
  * rungs on a ladder, not Claude's flags, and every agent that has a comparable
  * ladder is mapped onto them. `shared/agents.ts` owns that mapping (see
- * PERMISSION_FAMILIES); today Claude Code and Codex both have one:
+ * PERMISSION_FAMILIES); today Claude Code, Codex, Antigravity and Grok each
+ * have one:
  *
  *                Claude Code                        Codex
  *   default      (no flag)                          (no flag)
  *   acceptEdits  --permission-mode acceptEdits      --full-auto
  *   plan         --permission-mode plan             --sandbox read-only
  *   bypass       --dangerously-skip-permissions     --dangerously-bypass-…
+ *
+ * Antigravity spells the same rungs with `--mode`; Grok reuses Claude's own
+ * `--permission-mode` values verbatim — see their rows in PERMISSION_FAMILIES.
  *
  * `bypass` is exactly as advertised: the agent stops asking. Panes launched
  * with it are badged BYPASS in the header, because the one thing worse than a

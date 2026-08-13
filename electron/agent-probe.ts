@@ -25,6 +25,7 @@ export { whichCommand }
 const INSTALL_URLS: Record<string, string> = {
   claude: 'https://claude.com/claude-code',
   codex: 'https://developers.openai.com/codex/cli',
+  grok: 'https://x.ai/news/grok-build-cli',
   kimi: 'https://platform.moonshot.ai',
   antigravity: 'https://antigravity.google',
   gemini: 'https://github.com/google-gemini/gemini-cli',

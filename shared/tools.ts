@@ -69,6 +69,24 @@ export const TOOL_SPECS: ToolSpec[] = [
     updateCommand: null
   },
   {
+    id: 'grok',
+    name: 'Grok Build',
+    blurb: 'xAI’s `grok` CLI — what the Grok pane runs',
+    command: 'grok',
+    versionArgs: ['--version'],
+    // A closed binary from xAI's own installer: not on npm, not on winget, so
+    // there is no registry to ask about a newer version and the row reads
+    // "managed locally". The install command is the Windows spelling of xAI's
+    // official installer (everywhere else it is install.sh piped to bash) —
+    // PowerShell only, not CMD — and `grok` signs in with a grok.com account
+    // on first run. `grok update` is a real subcommand — verified against
+    // `grok --help` (1.0.3, 2026-08-13) — and the only updater there is for a
+    // binary no registry serves.
+    latest: { source: 'local' },
+    updateCommand: 'grok update',
+    installCommand: 'irm https://x.ai/cli/install.ps1 | iex'
+  },
+  {
     id: 'kimi',
     name: 'Kimi',
     blurb: 'a local shim — it launches Claude Code against Kimi via OpenRouter',

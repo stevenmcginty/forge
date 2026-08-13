@@ -51,6 +51,31 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     // so handing it the flag would only make it refuse to start.
   },
   {
+    id: 'grok',
+    name: 'Grok',
+    // xAI's own terminal agent, Grok Build — `grok` is the binary — added the
+    // day grok-4.6 shipped (2026-08-12), which is the CLI's default model.
+    // Like Qwen and Antigravity it carries its own sign-in: first launch opens
+    // a browser to authenticate with a grok.com account (SuperGrok or
+    // X Premium+), with XAI_API_KEY as the headless fallback. So there is no
+    // key field in Forge for it, and the ENV_DENYLIST rule cannot break it.
+    //
+    // Bare `grok` on purpose: like Claude Code and Codex it reads its
+    // permission mode off a flag Forge appends at launch (see the grok row in
+    // PERMISSION_FAMILIES, verified against `grok --help` 1.0.3), so baking
+    // one in here would only fight the chooser.
+    command: 'grok',
+    permissionMode: 'default',
+    // Yellow, because it is the hue left: blues, greens, purples, orange,
+    // magenta and Codex's near-white are all spoken for above and below.
+    accent: '#F2E56B',
+    // GK on the Codex CX pattern — 'GR' next to Gemini's 'GM' is two grey-area
+    // G-badges a glance can confuse.
+    badge: 'GK',
+    builtin: true,
+    kind: 'agent'
+  },
+  {
     id: 'kimi',
     name: 'Kimi',
     command: 'kimi',
@@ -304,7 +329,7 @@ export function isClaudeCommand(command: string): boolean {
  * every chooser, sheet and settings row reads the table rather than testing for
  * a particular agent.
  */
-export type PermissionFamily = 'claude' | 'codex' | 'agy'
+export type PermissionFamily = 'claude' | 'codex' | 'agy' | 'grok'
 
 export interface PermissionModeSpec {
   id: ClaudePermissionMode
@@ -401,6 +426,40 @@ export const PERMISSION_FAMILIES: Record<PermissionFamily, PermissionModeSpec[]>
       flag: '--dangerously-skip-permissions',
       danger: true
     }
+  ],
+  // Verified against `grok --help` (Grok Build 1.0.3, installed 2026-08-13):
+  // its `--permission-mode` flag takes Claude's own rung names verbatim —
+  // `[possible values: default, acceptEdits, auto, dontAsk, bypassPermissions,
+  // plan]` — so unlike agy there is no respelling to do. `auto` and `dontAsk`
+  // are extra rungs Forge's ladder does not model; the four it does model all
+  // exist under their Claude names, so those are the four offered.
+  grok: [
+    { id: 'default', label: 'Default', note: 'Grok asks before it acts', chip: '', flag: '' },
+    {
+      id: 'acceptEdits',
+      label: 'Accept edits',
+      note: 'file edits go through, commands still ask',
+      chip: 'EDITS',
+      flag: '--permission-mode acceptEdits'
+    },
+    {
+      id: 'plan',
+      label: 'Plan',
+      note: 'read and think, change nothing',
+      chip: 'PLAN',
+      flag: '--permission-mode plan'
+    },
+    {
+      id: 'bypass',
+      label: 'Bypass',
+      // `--always-approve` exists as a shorthand for the same thing; the long
+      // spelling is used so every family's bypass reads the same way in a
+      // pane's command line.
+      note: 'never asks — it can do anything you can',
+      chip: 'BYPASS',
+      flag: '--permission-mode bypassPermissions',
+      danger: true
+    }
   ]
 }
 
@@ -414,6 +473,7 @@ export function permissionFamily(command: string): PermissionFamily | null {
   if (exe === 'claude') return 'claude'
   if (exe === 'codex') return 'codex'
   if (exe === 'agy' || exe === 'antigravity') return 'agy'
+  if (exe === 'grok') return 'grok'
   return null
 }
 
@@ -439,7 +499,12 @@ const EXPLICIT_FLAGS: Record<PermissionFamily, RegExp> = {
     /--full-auto\b|--yolo\b|--dangerously-bypass-approvals-and-sandbox\b|--sandbox\b|--ask-for-approval\b|(?:^|\s)-[as](?:\s|=|$)/,
   // \b after "mode" (not a wildcard match) so this doesn't fire on agy's
   // separate --model flag.
-  agy: /--mode\b|--dangerously-skip-permissions\b/
+  agy: /--mode\b|--dangerously-skip-permissions\b/,
+  // `--sandbox` counts for the Codex reason: it is a permission decision made
+  // by hand, and appending a mode flag on top would fight it. `--allow` /
+  // `--deny` rules deliberately do not count — they refine a mode rather than
+  // choose one.
+  grok: /--permission-mode\b|--always-approve\b|--sandbox\b/
 }
 
 /** True when the command line already says what mode it wants. */
