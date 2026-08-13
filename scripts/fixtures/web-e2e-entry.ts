@@ -30,6 +30,12 @@ export { PtySessionManager } from '../../electron/pty/session-manager'
  * Electron in it — see its header.
  */
 export { checkFolder, listFolder } from '../../electron/web/fs-browse'
+/*
+ * The real fence a browser's "New project" name goes through, so the create
+ * flow in the check is refused and allowed by the shipped rules rather than by
+ * a stand-in. Electron-free for the same reason fs-browse is — see its header.
+ */
+export { planProjectFolder } from '../../electron/projectfolder'
 export {
   HEARTBEAT_GRACE_MS,
   HEARTBEAT_MS,

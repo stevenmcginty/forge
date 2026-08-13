@@ -354,6 +354,59 @@
   gap: var(--s-3);
 }
 
+/* The opening screen: two roads, drawn as two generous rows rather than a form,
+   because the first question is a choice and not a field. */
+.picker__choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.picker__choice {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  width: 100%;
+  padding: var(--s-3) var(--s-4);
+  color: var(--text-primary);
+  text-align: left;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-instant) var(--ease-out);
+}
+
+.picker__choice:hover {
+  background: var(--bg-hover);
+}
+
+.picker__choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.picker__choice-name {
+  font-size: var(--t-sm);
+}
+
+.picker__choice-hint {
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+}
+
+/* The ‹ Back row the two inner views share. */
+.picker__top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0 var(--s-2);
+}
+
+.picker__back {
+  gap: var(--s-1);
+  font-size: var(--t-xs);
+}
+
 /* One line that scrolls sideways rather than wrapping: a deep path would
    otherwise push the list down the screen every time somebody went one folder
    further in. */

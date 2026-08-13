@@ -227,7 +227,7 @@ export interface WebServerHost {
   release?: (viewer: string, id?: string) => void
 
   /** The opening picture: whatever the browser needs to draw the workspace. */
-  snapshot: () => Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces'>
+  snapshot: () => Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'projectsRoot'>
 
   /**
    * Perform one layout operation. Implemented by web-host by forwarding to the
@@ -288,6 +288,21 @@ export interface WebServerHost {
    * the same contract as `layout`, for the same reason.
    */
   projectAdd?: (path: string, deviceName: string) => Promise<string | null>
+
+  /**
+   * Make a brand-new project folder from a name and put it on the rail — the
+   * browser's "New project" form. `parentDir` is an allow-list key, never a
+   * path; the fence itself lives in electron/projectfolder.ts and the host
+   * (web-host's `dispatchProjectCreate`) is what applies it, so this interface
+   * carries strings and gets back a verdict. `existingPath` is set only for
+   * "that name is already a folder there", so the server can answer with
+   * `project-exists` rather than a dead-end failure.
+   */
+  projectCreate?: (
+    name: string,
+    parentDir: string,
+    deviceName: string
+  ) => Promise<{ ok: true } | { ok: false; error: string; existingPath?: string }>
 
   /**
    * The number of authenticated browsers changed. Drives the power-save blocker
@@ -1202,7 +1217,11 @@ export class WebServer {
       projects: snapshot.projects,
       profiles: snapshot.profiles,
       workspaces: snapshot.workspaces,
-      sessions: this.wireSessions()
+      sessions: this.wireSessions(),
+      // Optional on the frame and optional here: spread only when the host
+      // named one, so a desktop with no nominated folder sends no field at all
+      // rather than an empty string a client has to interpret.
+      ...(snapshot.projectsRoot ? { projectsRoot: snapshot.projectsRoot } : {})
     })
     this.host.onPresence?.(this.connectedCount)
   }
@@ -1422,6 +1441,38 @@ export class WebServer {
             return
           }
           answer({ kind: 'ok' })
+          return
+        }
+
+        case 'project-create': {
+          if (!this.host.projectCreate) {
+            failed('unsupported', 'This Forge cannot create a project folder for a browser.')
+            return
+          }
+          // The clamp is the wire's; what a usable folder name is (length,
+          // reserved device names, forbidden characters) is decided by the
+          // fence in electron/projectfolder.ts, beside the mkdir.
+          const name = wireString(request.name, MAX_NAME_CHARS)
+          if (!name) {
+            failed('bad-frame', 'That request named no folder name.')
+            return
+          }
+          const made = await this.host.projectCreate(
+            name,
+            wireString(request.parentDir, MAX_NAME_CHARS),
+            client.device?.name ?? 'Browser'
+          )
+          if (made.ok) {
+            answer({ kind: 'ok' })
+            return
+          }
+          if (made.existingPath) {
+            // Not a dead end: the folder is there and opening it is one
+            // explicit click away. See `project-exists` in shared/web.ts.
+            answer({ kind: 'project-exists', path: made.existingPath, message: made.error })
+            return
+          }
+          failed('failed', made.error)
           return
         }
 

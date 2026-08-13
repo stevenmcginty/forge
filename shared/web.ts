@@ -852,8 +852,10 @@ export interface WebDirEntry {
  * Read-mostly by design. The members that can change anything are `layout`,
  * which the renderer performs, `git-action`, whose five verbs are enumerated by
  * `GitActionKind` in shared/types.ts and implemented in
- * electron/git/git-actions.ts, and `project-add`, which the renderer performs
- * through the same `addProjectPath` a click at the desk reaches.
+ * electron/git/git-actions.ts, `project-add`, which the renderer performs
+ * through the same `addProjectPath` a click at the desk reaches, and
+ * `project-create`, which makes one new fenced folder and then takes the
+ * `project-add` path with it.
  *
  * ## Two members here do name a path, and that is a deliberate change
  *
@@ -943,6 +945,23 @@ export type WebRequest =
    * code path a local click cannot. Answered `{ kind: 'ok' }`.
    */
   | { kind: 'project-add'; path: string }
+  /**
+   * Make a brand-new project folder from a name — the browser's half of the
+   * desktop's "New project" form, and deliberately *not* a third way of naming
+   * a path. `name` is a leaf the desktop sanitises, and `parentDir` is a key
+   * from a closed allow-list (`desktop`, `documents`, `projectsroot`), never a
+   * folder: the same fence the desk's own form and the voice agent's
+   * `create_project` go through (electron/projectfolder.ts), so a browser
+   * cannot ask for a folder anywhere those two could not already put one.
+   *
+   * Answered `{ kind: 'ok' }` once the folder exists *and* is on the rail —
+   * creation and adding are one act here, because a folder made and then not
+   * added is exactly the half-done state nobody at the desk would be around to
+   * notice. A name that already exists in that parent is answered with
+   * `project-exists` rather than adopted silently, carrying the path so the
+   * browser can offer "open it instead" as its own explicit act.
+   */
+  | { kind: 'project-create'; name: string; parentDir?: string }
 
 /* ------------------------------------------------------------ server frames */
 
@@ -976,6 +995,15 @@ export interface WebHelloOkFrame {
   /** projectId → layout. The split trees the desktop is persisting right now. */
   workspaces: Record<string, Workspace>
   sessions: WebSession[]
+  /**
+   * The folder nominated in Settings as where new projects go, when there is
+   * one. Display and defaulting only — the browser's "New project" form shows
+   * it as a choice and picks it first, exactly as the desk's form does — and
+   * never sent back: `project-create` names parents by allow-list *key*, so
+   * this string stays something to draw, not something to say. Optional field,
+   * added without a WEB_PROTO bump on the rule at the top of this file.
+   */
+  projectsRoot?: string
 }
 
 /**
@@ -1225,6 +1253,17 @@ export type WebResult =
    * answered with `git`.
    */
   | { kind: 'folder'; folder: WebFolder }
+  /**
+   * `project-create` asked for a name that is already a folder in that parent.
+   *
+   * Its own result rather than a `failed`, because it is not a dead end: the
+   * desktop refuses to adopt an existing folder *silently* (the same rule the
+   * desk's form and the voice agent live under), but opening it is one explicit
+   * click away, and that click needs the path — which is a path this desktop
+   * composed, exactly as `fs-list`'s are. `message` is the sentence to show
+   * beside the offer.
+   */
+  | { kind: 'project-exists'; path: string; message: string }
 
 /**
  * "This desktop is going away."

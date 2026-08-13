@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, Notification, powerSaveBlocker, screen } from 'electron'
@@ -47,6 +48,7 @@ import { NgrokTunnel, ensureNgrokExe, resolveNgrokExe } from './mobile-tunnel'
  * do to this machine; `npm run input:check` is what proves it.
  */
 import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
+import { planProjectFolder } from './projectfolder'
 import { CloudflareTunnel, ensureCloudflaredExe, resolveCloudflaredExe } from './cloudflare-tunnel'
 import { addPtySink, getManager, getReplay, viewerGone, viewerResize, viewerWrite } from './pty-host'
 import { addGitSink, gitRefresh, runAction } from './git-watcher'
@@ -688,6 +690,64 @@ function dispatchProjectAdd(path: string, deviceName: string): Promise<string | 
   )
 }
 
+/**
+ * A browser's "New project": make the folder, then put it on the rail.
+ *
+ * The creation is the same fenced plan the desk's own form and the voice
+ * agent's `create_project` go through — `planProjectFolder` sanitises the leaf,
+ * resolves the parent from the allow-list below and refuses anything that lands
+ * outside it, and an existing folder is never adopted silently. The roots are
+ * restated here rather than imported from the IPC handler in main.ts because
+ * main.ts is the entry point and nothing may import it; the fence itself is the
+ * shared part, and it lives in electron/projectfolder.ts precisely so that its
+ * two callers cannot drift.
+ *
+ * Once the folder exists it takes `dispatchProjectAdd`'s path wholesale — the
+ * renderer's `addProjectPath`, the check that the folder is really there — so
+ * creating-and-adding is one act, and a browser cannot end up with a folder on
+ * disk that the rail never heard about. That is also why the window check runs
+ * *before* the mkdir: with no renderer there is nothing that owns the rail, and
+ * failing afterwards would leave a freshly created folder no project row ever
+ * pointed at.
+ */
+async function dispatchProjectCreate(
+  name: string,
+  parentDir: string,
+  deviceName: string
+): Promise<{ ok: true } | { ok: false; error: string; existingPath?: string }> {
+  if (BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length === 0) {
+    return { ok: false, error: 'Forge has no window open on the desktop, so it cannot add a project.' }
+  }
+  const nominated = getSettings().projectsRoot?.trim()
+  const roots = [
+    // A nominated folder is the default when there is one, so it goes first —
+    // the same order the desk's form offers.
+    ...(nominated ? [{ key: 'projectsroot', path: nominated }] : []),
+    { key: 'desktop', path: app.getPath('desktop') },
+    { key: 'documents', path: app.getPath('documents') }
+  ]
+
+  const plan = planProjectFolder({ name, parentDir, roots })
+  if (!plan.ok) return { ok: false, error: plan.error }
+  if (existsSync(plan.path)) {
+    return {
+      ok: false,
+      error: `“${plan.leaf}” already exists in ${plan.root.path} — open it instead.`,
+      existingPath: plan.path
+    }
+  }
+
+  try {
+    mkdirSync(plan.path, { recursive: false })
+  } catch (err) {
+    return { ok: false, error: `Could not create it: ${(err as Error).message}` }
+  }
+
+  const error = await dispatchProjectAdd(plan.path, deviceName)
+  if (error) return { ok: false, error }
+  return { ok: true }
+}
+
 /* -------------------------------------------------------- the screen mirror
  *
  * A browser watching this desktop's own screen, and — behind the guard below —
@@ -1038,14 +1098,23 @@ async function signOut(): Promise<void> {
 
 /* -------------------------------------------------------------- the picture */
 
-function snapshotForBrowser(): Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces'> {
+function snapshotForBrowser(): Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'projectsRoot'> {
   const projects = getProjects()
   const workspaces: Record<string, Workspace> = {}
   for (const project of projects) {
     const workspace = getWorkspace(project.id)
     if (workspace) workspaces[project.id] = workspace
   }
-  return { projects, profiles: getSettings().agentProfiles, workspaces }
+  const settings = getSettings()
+  // Display and defaulting for the browser's "New project" form, never a path
+  // it sends back — see the field's note on WebHelloOkFrame.
+  const projectsRoot = settings.projectsRoot?.trim()
+  return {
+    projects,
+    profiles: settings.agentProfiles,
+    workspaces,
+    ...(projectsRoot ? { projectsRoot } : {})
+  }
 }
 
 /**
@@ -1132,6 +1201,7 @@ async function start(): Promise<void> {
     // is in electron/web/fs-browse.ts, including why a refusal is a value.
     fsList: async (path, name) => listFolder(path, name),
     projectAdd: (path, deviceName) => dispatchProjectAdd(path, deviceName),
+    projectCreate: (name, parentDir, deviceName) => dispatchProjectCreate(name, parentDir, deviceName),
     mirrorStart: startMirror,
     onMirror,
     // Two hooks rather than one, and read per event rather than captured: the

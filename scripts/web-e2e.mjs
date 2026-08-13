@@ -76,7 +76,7 @@
  * where this client waits on a person has to hold still while it waits. That is
  * now the PIN box, and that is what phase 6 asserts.
  */
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { basename, join, resolve } from 'node:path'
@@ -249,6 +249,7 @@ async function main() {
     PtySessionManager,
     checkFolder,
     listFolder,
+    planProjectFolder,
     WEB_PROTO,
     webHostPath,
     hashPin,
@@ -398,6 +399,31 @@ async function main() {
   /** Every folder a browser has asked this desktop to add, in order. */
   const projectAdds = []
 
+  /*
+   * What `electron/web-host.ts` does with a folder on its way to the rail,
+   * minus the renderer it does not have: check the folder is really there, add
+   * it, and then *push the list*. The push is the half worth having here — the
+   * browser's rail must redraw because the desktop said so, never because the
+   * click that asked for it optimistically added a row. Shared by `project-add`
+   * and the tail of `project-create`, exactly as `dispatchProjectAdd` is on the
+   * real desktop.
+   */
+  const addProjectFolder = async (path) => {
+    const checked = checkFolder(path)
+    if (!checked.ok) return checked.error
+    projectAdds.push(checked.path)
+    PROJECTS.push({
+      id: `p${PROJECTS.length + 1}`,
+      name: basename(checked.path),
+      path: checked.path,
+      color: '#4AA3FF',
+      defaultProfileId: 'shell',
+      createdAt: Date.now()
+    })
+    active?.pushProjects(PROJECTS)
+    return null
+  }
+
   /* ------------------------------------------------------- the screen mirror
    *
    * The desktop's half of the mirror, as `electron/web-host.ts` supplies it
@@ -481,27 +507,26 @@ async function main() {
        * with it. That module has no Electron in it for exactly this reason.
        */
       fsList: async (path, name) => listFolder(path, name),
+      projectAdd: async (path) => addProjectFolder(path),
       /*
-       * What `electron/web-host.ts` does, minus the renderer it does not have:
-       * check the folder is really there, add it, and then *push the list*. The
-       * push is the half worth having here — the browser's rail must redraw
-       * because the desktop said so, never because the click that asked for it
-       * optimistically added a row.
+       * `dispatchProjectCreate` in electron/web-host.ts, minus the renderer and
+       * the settings read: the same shipped fence (`planProjectFolder`), the
+       * same refusal of an existing folder with its path attached, and the same
+       * one-act tail — the folder lands on the rail through the exact
+       * `addProjectFolder` the pick flow takes, so the browser's redraw comes
+       * from the push and never from its own click. The one root points into
+       * the scratch tree so everything this makes is deleted with it.
        */
-      projectAdd: async (path) => {
-        const checked = checkFolder(path)
-        if (!checked.ok) return checked.error
-        projectAdds.push(checked.path)
-        PROJECTS.push({
-          id: `p${PROJECTS.length + 1}`,
-          name: basename(checked.path),
-          path: checked.path,
-          color: '#4AA3FF',
-          defaultProfileId: 'shell',
-          createdAt: Date.now()
-        })
-        active?.pushProjects(PROJECTS)
-        return null
+      projectCreate: async (name, parentDir) => {
+        const plan = planProjectFolder({ name, parentDir, roots: [{ key: 'desktop', path: scratch }] })
+        if (!plan.ok) return { ok: false, error: plan.error }
+        if (existsSync(plan.path)) {
+          return { ok: false, error: `“${plan.leaf}” already exists — open it instead.`, existingPath: plan.path }
+        }
+        mkdirSync(plan.path)
+        const error = await addProjectFolder(plan.path)
+        if (error) return { ok: false, error }
+        return { ok: true }
       },
       onWatch: (ids) => {
         watched = ids.length > 0
@@ -1678,8 +1703,14 @@ async function main() {
   await page.locator('.prow').filter({ hasText: 'scratch' }).first().click()
   await page.click('[data-testid="add-project"]')
   await waitFor(() => page.locator('[data-testid="folder-picker"]').count().then((n) => n > 0), 15_000, 'the picker')
-  log(true, 'the rail has a + that opens a folder browser onto the desktop, which it could not have before')
+  log(true, 'the rail has a + that opens onto the desktop, which it could not have before')
+  log(
+    (await page.locator('[data-testid="add-project-new"]').count()) === 1 &&
+      (await page.locator('[data-testid="add-project-existing"]').count()) === 1,
+    'and it opens on the desk’s own choice: create a new folder, or use an existing one'
+  )
 
+  await page.click('[data-testid="add-project-existing"]')
   await waitFor(async () => (await pickerHere()) === scratch, 15_000, 'the first listing')
   log(
     true,
@@ -1722,6 +1753,41 @@ async function main() {
     'and it appears in the rail because the desktop pushed a new project list — the browser adds nothing to its own picture, exactly as it adds no tab of its own'
   )
   log((await page.locator('[data-testid="folder-picker"]').count()) === 0, 'the picker closes behind it rather than sitting there over the answer')
+
+  /*
+   * The other road: a brand-new folder from a name. The fence is the shipped
+   * `planProjectFolder` (see the fixture's `projectCreate`), so what this
+   * drives is the browser's half — the form, the request, the rail redrawn by
+   * the push, and a duplicate refused with "open it instead" on offer.
+   */
+  await page.click('[data-testid="add-project"]')
+  await page.click('[data-testid="add-project-new"]')
+  await page.fill('#picker-name', 'minted')
+  await page.click('[data-testid="create-project"]')
+  await waitFor(() => Promise.resolve(existsSync(join(scratch, 'minted'))), 15_000, 'the folder on disk')
+  log(true, 'a name typed in a browser becomes a real folder on the desktop')
+  await waitFor(
+    () => page.locator('.prow').filter({ hasText: 'minted' }).count().then((n) => n > 0),
+    15_000,
+    'the created project in the rail'
+  )
+  log(true, 'and it lands in the rail the same way a picked folder does — because the desktop pushed the list')
+  log((await page.locator('[data-testid="folder-picker"]').count()) === 0, 'and this road closes the popover behind it too')
+
+  await page.click('[data-testid="add-project"]')
+  await page.click('[data-testid="add-project-new"]')
+  await page.fill('#picker-name', 'minted')
+  await page.click('[data-testid="create-project"]')
+  await waitFor(() => page.locator('.picker__error').count().then((n) => n > 0), 15_000, 'the duplicate refusal')
+  log(
+    (await page.locator('.picker__error').innerText()).includes('already exists'),
+    'the same name again is refused in a sentence rather than silently adopting the folder'
+  )
+  const openInstead = page.locator('.popover__actions .ghost-btn', { hasText: 'Open it instead' })
+  log((await openInstead.count()) === 1, 'with "Open it instead" one explicit click away')
+  await openInstead.click()
+  await waitFor(() => page.locator('[data-testid="folder-picker"]').count().then((n) => n === 0), 15_000, 'the popover to close')
+  log(true, 'and taking that offer lands on the project it already has, rather than a second row')
 
   /*
    * And the fold, which is the case this whole feature is for: below 640px

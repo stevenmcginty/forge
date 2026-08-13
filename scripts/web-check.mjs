@@ -960,7 +960,49 @@ const addedRelative = await ask({ kind: 'project-add', path: 'browse' })
 log(addedRelative.kind === 'failed', `and neither is a relative path ("${addedRelative.message ?? ''}")`)
 log(added.length === 1, 'neither of which the renderer was ever told about: the folder is checked before anything is asked of it')
 
+/* ------------------------------------------- and creating one from a name
+ *
+ * `project-create` is a name and an allow-list key, never a path — the same
+ * fence the desk's form and the voice agent go through
+ * (electron/projectfolder.ts). The stubbed `app.getPath` points every root at
+ * the sandbox, so what is being proved is the route: the folder appears on
+ * disk, the renderer is the thing told to add it, a duplicate is refused with
+ * its path attached rather than adopted, and a name the fence rejects never
+ * becomes a mkdir.
+ */
+
+const madePath = join(dataDir, 'web-made')
+const made = await ask({ kind: 'project-create', name: 'web-made', parentDir: 'desktop' })
+log(made.kind === 'ok', `a name and a key become a folder and a rail entry in one act (${made.kind})`)
+log(existsSync(madePath), 'the folder is really on disk')
+log(
+  added.length === 2 && added[1].path === madePath,
+  'and the renderer was handed exactly that path — creation takes the same road into the rail as picking'
+)
+
+const madeAgain = await ask({ kind: 'project-create', name: 'web-made', parentDir: 'desktop' })
+log(
+  madeAgain.kind === 'project-exists' && madeAgain.path === madePath,
+  `the same name again is refused with the path attached, so "open it instead" stays an explicit act ("${madeAgain.message ?? ''}")`
+)
+log(added.length === 2, 'and the renderer never heard about the refusal')
+
+const madeReserved = await ask({ kind: 'project-create', name: 'NUL', parentDir: 'desktop' })
+log(
+  madeReserved.kind === 'failed' && !existsSync(join(dataDir, 'NUL')),
+  `a reserved Windows name is refused by the fence before any mkdir ("${madeReserved.message ?? ''}")`
+)
+const madeDots = await ask({ kind: 'project-create', name: '..', parentDir: 'desktop' })
+log(madeDots.kind === 'failed', `and ".." is not a folder name at all ("${madeDots.message ?? ''}")`)
+
 globalThis.__forgeWindows = []
+
+const noWindowMake = await ask({ kind: 'project-create', name: 'web-orphan', parentDir: 'desktop' })
+log(
+  noWindowMake.kind === 'failed' && noWindowMake.message.includes('no window'),
+  `with no window the refusal comes before the mkdir ("${noWindowMake.message ?? ''}")`
+)
+log(!existsSync(join(dataDir, 'web-orphan')), 'so no folder is left behind that no rail entry ever pointed at')
 picker.socket.close()
 await waitFor(() => host.webStatus().connected === 0, 4000, 'the picking browser to go')
 

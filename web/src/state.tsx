@@ -58,6 +58,8 @@ export interface Picture {
   profiles: AgentProfile[]
   workspaces: Record<string, Workspace>
   sessions: WebSession[]
+  /** The desk's nominated projects folder, or '' when none is set. Display only. */
+  projectsRoot: string
 }
 
 /** What the whole page is doing, before any of the connection detail. */
@@ -307,7 +309,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           projects: frame.projects,
           profiles: frame.profiles,
           workspaces: frame.workspaces,
-          sessions: frame.sessions
+          sessions: frame.sessions,
+          projectsRoot: frame.projectsRoot ?? ''
         })
         // Written down and held, from the one object rather than by reading back
         // what was just written: `rememberPicture` hands over what it stored.
