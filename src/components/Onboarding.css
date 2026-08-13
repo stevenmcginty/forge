@@ -171,6 +171,10 @@
   font-size: var(--t-sm);
 }
 
+.onboard__step .onboard__ghost {
+  margin-top: var(--s-4);
+}
+
 .onboard__row {
   display: flex;
   align-items: center;

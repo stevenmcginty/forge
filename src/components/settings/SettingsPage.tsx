@@ -27,7 +27,7 @@ import './SettingsPage.css'
  */
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName; blurb: string }> = [
-  { id: 'account', label: 'Account', icon: 'user', blurb: 'name, avatar, connections' },
+  { id: 'account', label: 'Account', icon: 'user', blurb: 'Forge account, name, connections' },
   { id: 'agents', label: 'Agents', icon: 'terminal', blurb: 'launch profiles' },
   { id: 'terminal', label: 'Terminal', icon: 'panel', blurb: 'how panes behave' },
   { id: 'models', label: 'Models & APIs', icon: 'key', blurb: 'keys and brains' },

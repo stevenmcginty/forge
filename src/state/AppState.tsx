@@ -196,6 +196,7 @@ const FALLBACK_SETTINGS: Settings = {
   // True until the real settings arrive, so the welcome overlay cannot flash up
   // for a second on every launch while the store is still being read.
   onboarded: true,
+  webAccountPromptDismissed: true,
   sttPython: '',
   sttModelDir: '',
   sttAutoStopSeconds: 10,

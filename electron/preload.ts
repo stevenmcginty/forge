@@ -166,6 +166,7 @@ const api: ForgeApi = {
   web: {
     status: () => ipcRenderer.invoke(IPC.webStatus),
     start: () => ipcRenderer.invoke(IPC.webStart),
+    enable: () => ipcRenderer.invoke(IPC.webEnable),
     stop: () => ipcRenderer.invoke(IPC.webStop),
     // Forge Web's own Firebase session — not the Companion's. The password
     // crosses this bridge once and is never stored; see IPC.webSignIn.

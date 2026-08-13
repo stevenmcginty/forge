@@ -2,21 +2,23 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentPresence, SttModelState } from '@shared/types'
 import { Icon } from './Icon'
 import { useApp, type SettingsSection } from '@/state/AppState'
+import { ForgeAccountForm } from './settings/ForgeAccountForm'
 import './Onboarding.css'
 
 /**
  * The first-run welcome.
  *
  * It exists for exactly one person: whoever is handed a copy of Forge and opens
- * it on a machine that has never run it. Three things stand between them and a
+ * it on a machine that has never run it. Four things stand between them and a
  * working terminal, and none of them are discoverable —
  *
- *   1. Forge is empty until you point it at a folder.
- *   2. The agent panes launch `claude` / `kimi` / `gemini`, which are separate
+ *   1. A Forge account (email + password) so a browser can find this PC later.
+ *   2. Forge is empty until you point it at a folder.
+ *   3. The agent panes launch `claude` / `kimi` / `gemini`, which are separate
  *      installs. Without this, a fresh pane just says "not recognized".
- *   3. Dictation needs a 660 MB model that is deliberately not in the download.
+ *   4. Dictation needs a 660 MB model that is deliberately not in the download.
  *
- * Deliberately not a wizard: three rows, each independently skippable, one
+ * Deliberately not a wizard: four rows, each independently skippable, one
  * button out. Everything here also lives in Settings, permanently and in more
  * detail; this is only the version you see once.
  */
@@ -28,6 +30,8 @@ export function Onboarding(): ReactNode {
   const [agents, setAgents] = useState<AgentPresence[] | null>(null)
   const [model, setModel] = useState<SttModelState | null>(null)
   const [voiceTouched, setVoiceTouched] = useState(false)
+  const [accountDone, setAccountDone] = useState(false)
+  const [accountSkip, setAccountSkip] = useState(false)
   const cardRef = useRef<HTMLDivElement | null>(null)
 
   const open = state.ready && !state.settings.onboarded
@@ -65,7 +69,8 @@ export function Onboarding(): ReactNode {
   }, [open])
 
   const finish = useCallback(() => {
-    actions.patchSettings({ onboarded: true })
+    // The welcome already asked. Do not pop the existing-user card next.
+    actions.patchSettings({ onboarded: true, webAccountPromptDismissed: true })
   }, [actions])
 
   /**
@@ -76,7 +81,7 @@ export function Onboarding(): ReactNode {
    */
   const handOver = useCallback(
     (section: SettingsSection) => {
-      actions.patchSettings({ onboarded: true })
+      actions.patchSettings({ onboarded: true, webAccountPromptDismissed: true })
       actions.openSettings(section)
     },
     [actions]
@@ -86,6 +91,7 @@ export function Onboarding(): ReactNode {
 
   /* --------------------------------------------------------------- steps */
 
+  const accountStep: StepState = accountDone ? 'done' : accountSkip ? 'skip' : 'todo'
   const projectStep: StepState = state.projects.length > 0 ? 'done' : 'todo'
   const agentStep: StepState = agents === null ? 'todo' : agents.some((a) => a.found) ? 'done' : 'skip'
   const hasKey = Boolean(state.settings.geminiKey)
@@ -120,13 +126,31 @@ export function Onboarding(): ReactNode {
           </div>
         </header>
         <p className="onboard__lede">
-          A grid of real terminals, one per agent, with your projects down the side. Three things worth doing before
+          A grid of real terminals, one per agent, with your projects down the side. Four things worth doing before
           you start — none of them compulsory.
         </p>
 
         <ol className="onboard__steps">
-          {/* -------------------------------------------------- 1. project */}
-          <Step n={1} title="Add a project" state={projectStep}>
+          {/* ------------------------------------------- 1. forge account */}
+          <Step n={1} title="Your Forge account" state={accountStep}>
+            {accountDone ? (
+              <p className="onboard__body">Saved. Use this same email on the website when you want this PC from a browser.</p>
+            ) : (
+              <>
+                <p className="onboard__body">
+                  Email plus password. That is how a browser finds <em>this</em> PC rather than someone else&apos;s.
+                  Skip if you only work at this desk. Password is sent once and never stored.
+                </p>
+                <ForgeAccountForm onSignedIn={() => setAccountDone(true)} />
+                <button type="button" className="ghost-btn onboard__ghost" onClick={() => setAccountSkip(true)}>
+                  Skip for now
+                </button>
+              </>
+            )}
+          </Step>
+
+          {/* -------------------------------------------------- 2. project */}
+          <Step n={2} title="Add a project" state={projectStep}>
             {state.projects.length > 0 ? (
               <p className="onboard__body">
                 <span className="mono onboard__path">{state.projects[0]!.name}</span>
@@ -141,8 +165,8 @@ export function Onboarding(): ReactNode {
             </button>
           </Step>
 
-          {/* --------------------------------------------------- 2. agents */}
-          <Step n={2} title="Agents on this machine" state={agentStep}>
+          {/* --------------------------------------------------- 3. agents */}
+          <Step n={3} title="Agents on this machine" state={agentStep}>
             {agents === null ? (
               <p className="onboard__body">Looking…</p>
             ) : (
@@ -176,8 +200,8 @@ export function Onboarding(): ReactNode {
             )}
           </Step>
 
-          {/* ---------------------------------------------------- 3. voice */}
-          <Step n={3} title="Voice — optional" state={voiceStep}>
+          {/* ---------------------------------------------------- 4. voice */}
+          <Step n={4} title="Voice — optional" state={voiceStep}>
             <p className="onboard__body">
               Dictation runs on this machine. The voice agent — say “hey Jarvis” — thinks with the same Claude
               login your terminals use and speaks with a free neural voice, so neither needs a key. Both are off

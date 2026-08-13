@@ -2,16 +2,16 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { ACCENT_PALETTE } from '@/lib/agents'
 import { useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
+import { ForgeAccountForm } from './ForgeAccountForm'
 import { Card, ColorPicker, Row, Section, StateChip, TextField } from './parts'
 import { useAgentProbe, useConnections } from './useConnections'
 
 /**
  * Who you are to Forge, and what Forge is connected to.
  *
- * The name and colour are local decoration — there is no account system behind
- * them and none is implied. What matters here is the list underneath: the
- * services Forge can actually reach, each with a state you can trust, and two
- * that honestly say "not built yet" rather than pretending.
+ * Display name and colour are local decoration. The Forge account below is
+ * the real identity: email + password in Firebase, used by the website to
+ * find this PC. Terminals do not need it.
  */
 export function AccountSection(): ReactNode {
   const { state, actions } = useApp()
@@ -34,7 +34,18 @@ export function AccountSection(): ReactNode {
     .toUpperCase()
 
   return (
-    <Section title="Account" blurb="Your name on the chip, and everything Forge is wired into.">
+    <Section title="Account" blurb="Your name on the chip, the Forge account a browser uses to find this PC, and everything else Forge is wired into.">
+      <Card
+        title="Forge account"
+        hint="Email plus password. A new email creates the account. The password is sent once and never stored — a refresh token is what stays on this PC. Same email on https://forge-web-aadafc.web.app is how a browser finds THIS machine."
+      >
+        <ForgeAccountForm />
+        <p className="scard__hint">
+          After this is saved, turn on browser access under Settings → Forge Web. That publishes a tunnel under this
+          email. Signing in here does not open the door on its own.
+        </p>
+      </Card>
+
       <Card>
         <div className="sacct">
           <span className="sacct__avatar" style={{ '--avatar': colour } as React.CSSProperties}>

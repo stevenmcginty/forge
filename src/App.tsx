@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { AccountChip } from '@/components/AccountChip'
 import { ApprovalPrompt } from '@/components/ApprovalPrompt'
+import { AccountPrompt } from '@/components/AccountPrompt'
 import { Onboarding } from '@/components/Onboarding'
 import { WhatsNew } from '@/components/WhatsNew'
 import { RailStack } from '@/components/rail/RailStack'
@@ -101,6 +102,7 @@ export function App(): ReactNode {
       */}
       <OverlayHost />
       <Onboarding />
+      <AccountPrompt />
       {/*
         What changed in the version that just installed itself. After the welcome,
         because a fresh install has nothing to catch up on and its settings are

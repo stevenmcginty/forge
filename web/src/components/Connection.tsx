@@ -145,16 +145,25 @@ export function Connecting({ attempt, note }: { attempt: number; note?: string }
  * in front of. One person lending another their sign-in "to test" is precisely
  * how a browser ends up here, so the way back is named after what it does.
  */
-function SwitchAccount({ email, onSignOut }: { email: string; onSignOut: () => void }): ReactNode {
+export function SwitchAccount({
+  email,
+  onSignOut,
+  compact
+}: {
+  email: string
+  onSignOut: () => void
+  compact?: boolean
+}): ReactNode {
   if (!email) return null
-  return (
-    <p className="gate__hint">
+  const inner = (
+    <>
       Signed in as <span className="mono">{email}</span> —{' '}
       <button type="button" className="gate__switch" onClick={onSignOut}>
         sign in as a different account
       </button>
-    </p>
+    </>
   )
+  return compact ? <span className="offline__account">{inner}</span> : <p className="gate__hint">{inner}</p>
 }
 
 export function Refused({

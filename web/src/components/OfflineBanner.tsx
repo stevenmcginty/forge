@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
 import { useForge } from '../state'
+import { SwitchAccount } from './Connection'
 
 /**
  * "Forge is asleep on that machine, and this is what it last looked like."
@@ -64,6 +65,7 @@ export function OfflineBanner(): ReactNode {
       <button type="button" className="ghost-btn offline__look" onClick={() => actions.refind()}>
         Look again
       </button>
+      <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} compact />
     </div>
   )
 }

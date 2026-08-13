@@ -1696,3 +1696,24 @@
   height: 30px;
 }
 
+.web-advanced {
+  margin-top: var(--s-5);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.web-advanced > summary {
+  cursor: pointer;
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+  list-style: revert;
+}
+
+.web-advanced > summary:hover {
+  color: var(--text-primary);
+}
+
+.web-advanced[open] > summary {
+  margin-bottom: var(--s-4);
+}
+

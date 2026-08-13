@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react'
 import { Connecting, PinPrompt, Refused, Unconfigured, Unreachable } from './components/Connection'
 import { SignIn } from './components/SignIn'
+import { Unpaired } from './components/Unpaired'
 import { Workspace } from './components/Workspace'
 import { useForge } from './state'
 
@@ -48,8 +49,12 @@ export function App(): ReactNode {
     case 'unreachable':
       return <Unreachable error={state.stage.error} />
     case 'offline':
-      // The frozen, badged picture. Drawn by the same components as the live
-      // one, from the cache rather than from a socket.
+      // A machine we have already seen stays the frozen workspace. An account
+      // that has never published a host is a different sentence — not asleep,
+      // unpaired — and a workspace here would look like login failed.
+      if (!state.stage.record && !state.cached) {
+        return <Unpaired message={state.stage.message} />
+      }
       return <Workspace />
     case 'connected':
       break

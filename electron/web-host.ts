@@ -1543,6 +1543,26 @@ export function registerWebHandlers(): void {
     return webStatus()
   })
 
+  /**
+   * The friend path. Sign-in names the account; this is the one act that
+   * publishes this PC under it. A desktop with no tunnel chosen gets
+   * cloudflared — the transport that needs nothing pasted — rather than
+   * listening on loopback and wondering why no browser arrives.
+   */
+  ipcMain.handle(IPC.webEnable, async (): Promise<WebStatus> => {
+    const s = getSettings()
+    if (!s.webUid || !s.webRefreshToken) {
+      report('Sign in with your Forge account first. That email is how a browser finds this PC.')
+      return webStatus()
+    }
+    if (s.webTunnel === 'off') setSettings({ webTunnel: 'cloudflared' })
+    setSettings({ webEnabled: true })
+    if (!server && !starting) await start()
+    else applyWebSettings()
+    report()
+    return webStatus()
+  })
+
   ipcMain.handle(IPC.webStop, async (): Promise<WebStatus> => {
     setSettings({ webEnabled: false })
     await stop('disabled')

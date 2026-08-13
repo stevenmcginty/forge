@@ -1340,6 +1340,14 @@ export interface Settings {
    * src/components/Onboarding.tsx.
    */
   onboarded: boolean
+  /**
+   * The one-shot "set your Forge account" card for an install that already
+   * dismissed the welcome but never signed Forge Web in. David and Adam's
+   * machines: onboarded is true, webUid is blank, and without this they would
+   * never be asked. Signing in, or pressing Later, sets it. A fresh first-run
+   * never needs it — the welcome's own account row is the ask.
+   */
+  webAccountPromptDismissed: boolean
 
   /* ------------------------------------------------------ dictation (M3) */
   /** Python interpreter that can import onnx-asr + sounddevice. */

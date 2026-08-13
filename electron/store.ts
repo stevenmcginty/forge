@@ -204,6 +204,7 @@ function defaultSettings(): Settings {
     shotsKeep: DEFAULT_KEEP,
     window: { width: 1440, height: 900, maximized: false },
     onboarded: false,
+    webAccountPromptDismissed: false,
     sttPython: detectSttPython(),
     sttModelDir: detectSttModelDir(),
     sttAutoStopSeconds: 10,
@@ -601,6 +602,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // has been using Forge for months, and showing them the welcome card would
     // be the merge announcing itself rather than the feature working.
     onboarded: raw === null ? false : s.onboarded !== false,
+    webAccountPromptDismissed: Boolean(s.webAccountPromptDismissed),
     sttPython: typeof s.sttPython === 'string' ? s.sttPython : DEFAULT_SETTINGS.sttPython,
     sttModelDir: typeof s.sttModelDir === 'string' ? s.sttModelDir : DEFAULT_SETTINGS.sttModelDir,
     // 0 legitimately means "never auto-stop", so a junk value has to fall back

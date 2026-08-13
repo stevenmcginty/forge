@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { AgentPresence, ClaudeCliState } from '@shared/types'
+import type { AgentPresence, ClaudeCliState, WebStatus } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { maskKey } from './parts'
 import type { ChipTone } from './parts'
@@ -32,7 +32,7 @@ export interface Connection {
   /** Placeholders are shown but never counted as degraded. */
   placeholder?: boolean
   /** Which settings section fixes this one. */
-  section?: 'models' | 'agents' | 'advanced'
+  section?: 'account' | 'models' | 'agents' | 'advanced' | 'web'
 }
 
 export interface AgentProbe {
@@ -82,10 +82,29 @@ export function useConnections(probe: AgentProbe): {
   const { state } = useApp()
   const geminiKey = state.settings.geminiKey
   const companionEnabled = state.settings.companionEnabled
+  const [web, setWeb] = useState<WebStatus | null>(null)
   const { agents, claude } = probe
+
+  useEffect(() => {
+    void window.forge.web.status().then(setWeb)
+    return window.forge.web.onStatus(setWeb)
+  }, [])
+
+  const webUid = web?.session.uid || state.settings.webUid
+  const webEmail = web?.session.email || state.settings.webEmail
 
   return useMemo(() => {
     const connections: Connection[] = [
+      {
+        id: 'forge-account',
+        name: 'Forge account',
+        detail: webUid
+          ? `signed in as ${webEmail} — the email a browser uses to find this PC`
+          : 'Not set. Email plus password. Needed for the browser door, not for terminals.',
+        chip: webUid ? webEmail || 'signed in' : 'not set',
+        tone: webUid ? 'ok' : 'warn',
+        section: 'account'
+      },
       {
         id: 'gemini',
         name: 'Gemini API key',
@@ -153,5 +172,5 @@ export function useConnections(probe: AgentProbe): {
 
     const healthy = connections.every((c) => c.placeholder || c.tone === 'ok' || c.tone === 'off')
     return { connections, healthy }
-  }, [geminiKey, companionEnabled, agents, claude])
+  }, [geminiKey, companionEnabled, webUid, webEmail, agents, claude])
 }

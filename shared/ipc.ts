@@ -293,6 +293,12 @@ export const IPC = {
   webStatusEvent: 'web:status-event',
   /** Bind the port and start listening. Persists `webEnabled: true`. */
   webStart: 'web:start',
+  /**
+   * The one-click friend path: sign-in must already have landed, then this
+   * turns the link on *and* starts a tunnel (cloudflared if they had none).
+   * Distinct from `webStart`, which honours `webTunnel: off`.
+   */
+  webEnable: 'web:enable',
   /** Stop listening, retract the rendezvous record. Persists `webEnabled: false`. */
   webStop: 'web:stop',
   /**

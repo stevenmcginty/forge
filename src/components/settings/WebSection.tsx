@@ -3,6 +3,7 @@ import { normaliseNgrokDomain } from '@shared/mobile'
 import { PIN_MAX_DIGITS, PIN_MIN_DIGITS } from '@shared/web'
 import type { WebStatus, WebTunnelMode } from '@shared/types'
 import { useApp } from '@/state/AppState'
+import { ForgeAccountForm } from './ForgeAccountForm'
 import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTone } from './parts'
 
 /**
@@ -120,11 +121,6 @@ export function WebSection(): ReactNode {
   const { state, actions } = useApp()
   const [status, setStatus] = useState<WebStatus | null>(null)
   const [busy, setBusy] = useState(false)
-  const [password, setPassword] = useState('')
-  const [email, setEmail] = useState('')
-  const [emailTouched, setEmailTouched] = useState(false)
-  const [signInError, setSignInError] = useState('')
-  const [created, setCreated] = useState(false)
   const [domainError, setDomainError] = useState('')
   const [copied, setCopied] = useState('')
   /*
@@ -172,6 +168,15 @@ export function WebSection(): ReactNode {
     }
   }, [])
 
+  const enable = useCallback(async () => {
+    setBusy(true)
+    try {
+      setStatus(await window.forge.web.enable())
+    } finally {
+      setBusy(false)
+    }
+  }, [])
+
   /** Take the screen back. See `IPC.webMirrorEnd` — the watch ends at the socket. */
   const stopMirror = useCallback(async () => {
     setStatus(await window.forge.web.stopMirror())
@@ -181,34 +186,6 @@ export function WebSection(): ReactNode {
     await window.forge.clipboard.writeText(url)
     setCopied(url)
     setTimeout(() => setCopied(''), 1500)
-  }, [])
-
-  /* --------------------------------------------------------- the account */
-
-  const signIn = useCallback(async () => {
-    setSignInError('')
-    setCreated(false)
-    setBusy(true)
-    try {
-      const result = await window.forge.web.signIn(email.trim(), password)
-      if (!result.ok) {
-        setSignInError(result.error)
-        return
-      }
-      setCreated(result.created)
-      // The password has done its one job. It never touched settings.json and
-      // it does not linger in a React state either.
-      setPassword('')
-      setStatus(await window.forge.web.status())
-    } finally {
-      setBusy(false)
-    }
-  }, [email, password])
-
-  const signOut = useCallback(async () => {
-    setSignInError('')
-    setCreated(false)
-    setStatus(await window.forge.web.signOut())
   }, [])
 
   /* ---------------------------------------------------------------- the PIN */
@@ -332,23 +309,15 @@ export function WebSection(): ReactNode {
             ? 'soon'
             : 'warn'
 
-  // The prefilled email survives a sign-out so the form is one field the second
-  // time, exactly as `webEmail`'s doc comment promises. `emailTouched` keeps
-  // that from stamping over what is being typed when a status push arrives.
-  const emailValue = emailTouched ? email : session.email
-
   return (
     <Section
       title="Forge Web"
       blurb={
         <>
-          Your real terminals, in a browser tab — the same projects, the same panes, from any machine you can sign in
-          on. Read this bit once, because it is the whole of it: switching Forge Web on puts a shell on this PC behind
-          an address anybody on the internet can reach. Two things stand in the way, and both have to hold — a
-          Firebase account you own, and the switch below, which is off until you turn it on. Until then nothing binds
-          a port, publishes an address or reads a credential. An unlock PIN is yours to set under
-          <em> Getting in</em>, and every browser that gets in is listed at the bottom and can be thrown out from
-          there. The full picture is in <code>docs/forge-web.md</code>.
+          Your real terminals in a browser tab. The Forge account (email + password) is this PC&apos;s name. Turning
+          browser access on publishes a tunnel under that email. On the website, sign in with the <em>same</em> email
+          — not someone else&apos;s. An unlock PIN under <em>Getting in</em> is asked of every browser. Until you turn
+          this on, nothing binds a port or publishes an address.
         </>
       }
     >
@@ -443,12 +412,34 @@ export function WebSection(): ReactNode {
           </p>
         )}
 
-        <Row
-          label="Let browsers reach this desktop"
-          hint={busy ? 'Working…' : `Port ${status.port}, bound to loopback — the tunnel below is the only way in from outside.`}
-        >
-          <Toggle checked={status.enabled} onChange={(on) => void toggle(on)} label="Enable Forge Web" />
-        </Row>
+        {session.signedIn && !listening ? (
+          <Row
+            label="Browser access"
+            hint="One click: listen on this PC and start a Cloudflare tunnel. The website then finds this machine under the email above."
+          >
+            <button type="button" className="sbtn sbtn--go" disabled={busy} onClick={() => void enable()}>
+              {busy ? 'Starting…' : 'Turn on browser access'}
+            </button>
+          </Row>
+        ) : (
+          <Row
+            label="Let browsers reach this desktop"
+            hint={
+              !session.signedIn
+                ? 'Sign in to your Forge account first — that email is how a browser finds this PC.'
+                : busy
+                  ? 'Working…'
+                  : `Port ${status.port}, bound to loopback — the tunnel below is the only way in from outside.`
+            }
+          >
+            <Toggle
+              checked={status.enabled}
+              disabled={!session.signedIn && !status.enabled}
+              onChange={(on) => void toggle(on)}
+              label="Enable Forge Web"
+            />
+          </Row>
+        )}
 
         {listening &&
           (status.url ? (
@@ -473,115 +464,71 @@ export function WebSection(): ReactNode {
       <Card
         title="The account"
         actions={<StateChip tone={session.signedIn ? 'ok' : 'off'}>{session.signedIn ? 'Signed in' : 'Signed out'}</StateChip>}
-        hint="One account, one machine. A perfectly valid token minted for any other account — or by any other Firebase project — is refused before it reaches a terminal."
+        hint="This email is this PC's name on the web. A browser signed in as anyone else cannot reach these terminals."
       >
-        <Row
-          label="Firebase project"
-          hint="The project whose sign-ins this desktop trusts, e.g. forge-sync. Every token is checked against it by name."
-        >
-          <TextField
-            value={settings.webProjectId}
-            mono
-            placeholder="forge-sync"
-            onCommit={(next) => actions.patchSettings({ webProjectId: next.trim() })}
-          />
-        </Row>
-        <Row
-          label="Hosting site"
-          hint="The Firebase Hosting site the browser page is served from — the name in https://<site>.web.app. Leave it blank when it matches the project, which is Firebase's default; fill it in when the bundle went to a site of its own, as `firebase deploy --only hosting:web` does here. Nothing else uses it, and getting it wrong refuses every browser at the door."
-        >
-          <TextField
-            value={settings.webSiteId}
-            mono
-            placeholder={settings.webProjectId || 'same as the project'}
-            onCommit={(next) => actions.patchSettings({ webSiteId: next.trim() })}
-          />
-        </Row>
-        <Row
-          label="Web API key"
-          hint="Firebase console › Project settings. Public by design: it names the project and authorises nothing."
-        >
-          <TextField
-            value={settings.webApiKey}
-            mono
-            placeholder="from the Firebase console"
-            onCommit={(next) => actions.patchSettings({ webApiKey: next.trim() })}
-          />
-        </Row>
-        <Row
-          label="Database URL"
-          hint="The Realtime Database this desktop publishes its address into, so the browser can find it."
-        >
-          <TextField
-            value={settings.webDatabaseURL}
-            mono
-            placeholder="https://…-default-rtdb.europe-west1.firebasedatabase.app"
-            onCommit={(next) => actions.patchSettings({ webDatabaseURL: next.trim() })}
-          />
-        </Row>
-
+        <ForgeAccountForm />
         {session.signedIn ? (
-          <Row label="Signed in as" hint={`Firebase uid ${session.uid}`}>
-            <div className="web-url">
-              <code className="web-address">{session.email}</code>
-              <button type="button" className="sbtn sbtn--danger" onClick={() => void signOut()}>
-                Sign out
-              </button>
-            </div>
-          </Row>
+          <p className="scard__hint">
+            On https://forge-web-aadafc.web.app sign in as <span className="mono">{session.email}</span> — the same
+            address. Then turn browser access on above so this PC publishes a tunnel under that account.
+          </p>
         ) : (
-          <div className="web-signin">
-            {/*
-              The password is typed here, posted once, and dropped. It is never
-              written to settings.json — a refresh token is, and that is
-              revocable from the Firebase console without touching a password
-              used anywhere else. Nothing on this page ever renders either back.
-            */}
-            <SignInField
-              id="web-signin-email"
-              label="Email"
-              type="email"
-              value={emailValue}
-              placeholder="you@example.com"
-              onChange={(next) => {
-                setEmailTouched(true)
-                setEmail(next)
-              }}
-              onSubmit={() => void signIn()}
-            />
-            <SignInField
-              id="web-signin-password"
-              label="Password"
-              type="password"
-              value={password}
-              placeholder="never saved"
-              onChange={setPassword}
-              onSubmit={() => void signIn()}
-            />
-            <button
-              type="button"
-              className="sbtn sbtn--go web-signin__go"
-              disabled={busy || !emailValue.trim() || !password}
-              onClick={() => void signIn()}
-            >
-              {busy ? 'Signing in…' : 'Sign in'}
-            </button>
-          </div>
+          <p className="scard__hint">
+            Same form as Settings → Account. New email creates the account. Then use Turn on browser access.
+          </p>
         )}
 
-        {signInError && <p className="web-error">{signInError}</p>}
-        {created && (
-          <p className="web-note">
-            That account did not exist, so signing in created it. If you meant to use an account you already had,
-            check the address before you switch the link on — this is the account that will be allowed a shell.
-          </p>
-        )}
-        {!session.signedIn && (
+        <details className="web-advanced">
+          <summary>Advanced — Firebase project</summary>
           <p className="scard__hint">
-            Signing in does not switch the link on, deliberately. It says who may reach these terminals; the switch
-            above is the separate act that lets them.
+            Pre-filled with the shared Forge deployment. Touch this only if you are pointing at your own Firebase
+            project.
           </p>
-        )}
+          <Row
+            label="Firebase project"
+            hint="The project whose sign-ins this desktop trusts. Every token is checked against it by name."
+          >
+            <TextField
+              value={settings.webProjectId}
+              mono
+              placeholder="forge-sync"
+              onCommit={(next) => actions.patchSettings({ webProjectId: next.trim() })}
+            />
+          </Row>
+          <Row
+            label="Hosting site"
+            hint="The Firebase Hosting site the browser page is served from — the name in https://&lt;site&gt;.web.app."
+          >
+            <TextField
+              value={settings.webSiteId}
+              mono
+              placeholder={settings.webProjectId || 'same as the project'}
+              onCommit={(next) => actions.patchSettings({ webSiteId: next.trim() })}
+            />
+          </Row>
+          <Row
+            label="Web API key"
+            hint="Firebase console › Project settings. Public by design: it names the project and authorises nothing."
+          >
+            <TextField
+              value={settings.webApiKey}
+              mono
+              placeholder="from the Firebase console"
+              onCommit={(next) => actions.patchSettings({ webApiKey: next.trim() })}
+            />
+          </Row>
+          <Row
+            label="Database URL"
+            hint="The Realtime Database this desktop publishes its address into, so the browser can find it."
+          >
+            <TextField
+              value={settings.webDatabaseURL}
+              mono
+              placeholder="https://…-default-rtdb.europe-west1.firebasedatabase.app"
+              onCommit={(next) => actions.patchSettings({ webDatabaseURL: next.trim() })}
+            />
+          </Row>
+        </details>
       </Card>
 
       {/*

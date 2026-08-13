@@ -699,6 +699,16 @@ log(host.webStatus().rendezvous.published === '', 'so there is no hostname publi
 
 await invoke('web:stop')
 
+const enableUnsigned = await invoke('web:enable')
+log(
+  enableUnsigned.enabled === false,
+  'enable() — the one-click friend path — refuses when nobody is signed in'
+)
+log(
+  /Forge account/i.test(enableUnsigned.detail),
+  `and names the missing account ("${enableUnsigned.detail}")`
+)
+
 /* ================================================================== phase 3
  *
  * Signing Forge Web in — its own account, its own credential.

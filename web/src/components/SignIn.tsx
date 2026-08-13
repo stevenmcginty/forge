@@ -3,16 +3,9 @@ import { Icon } from '@/components/Icon'
 import { useForge } from '../state'
 
 /**
- * One account, one machine, one human (docs/forge-web.md, "what is deliberately
- * not here"). So this is an email, a password and nothing else: no provider
- * buttons, no sign-up flow, no password reset — the account already exists,
- * because the Companion made it.
- *
- * The sign-up fallback is still in `Auth.signIn`, silently, for the very first
- * use on a fresh Firebase project. It is not a second button here for the reason
- * `companion/web/js/auth.js` gives: without the `EMAIL_EXISTS` branch a typo in
- * the password produces "couldn't sign in, couldn't sign up" and nobody can tell
- * which half was wrong.
+ * Email is the key to one PC. It must match Settings → Account (or Forge Web)
+ * on that computer. A new email creates the account; the desktop still has to
+ * turn browser access on before this page can find a machine.
  */
 export function SignIn({ error }: { error: string }): ReactNode {
   const { actions } = useForge()
@@ -39,7 +32,10 @@ export function SignIn({ error }: { error: string }): ReactNode {
           <Icon name="forge" size={22} />
         </div>
         <h1 className="gate__title">Forge</h1>
-        <p className="gate__body">Sign in with the account this desktop is paired to.</p>
+        <p className="gate__body">
+          Sign in with <em>your</em> Forge email — the same one saved on the PC you want. A different email is a
+          different machine.
+        </p>
 
         <label className="gate__field">
           <span className="eyebrow">Email</span>

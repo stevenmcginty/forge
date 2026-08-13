@@ -580,6 +580,12 @@ export interface ForgeApi {
     /** Bind the port and start listening. Persists `webEnabled: true`. */
     start(): Promise<WebStatus>
     /**
+     * Turn on browser access for the signed-in Forge account: enable the
+     * listener and start a tunnel (cloudflared if none was chosen). Refuses
+     * with a sentence on `WebStatus.detail` when nobody is signed in.
+     */
+    enable(): Promise<WebStatus>
+    /**
      * Stop listening and close every socket, telling the browsers why first.
      * Retracts the rendezvous record and stops the tunnel. Persists
      * `webEnabled: false`.
