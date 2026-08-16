@@ -13,6 +13,8 @@
     "start": "electron-vite preview",
     "pretypecheck": "node scripts/whats-new.mjs",
     "typecheck": "tsc --noEmit --composite false -p tsconfig.node.json && tsc --noEmit --composite false -p tsconfig.web.json && tsc --noEmit --composite false -p tsconfig.mobile.json && tsc --noEmit --composite false -p tsconfig.webclient.json",
+    "test": "node scripts/run-checks.mjs",
+    "test:all": "node scripts/run-checks.mjs --all",
     "build": "npm run typecheck && electron-vite build",
     "icon": "node scripts/make-icon.mjs",
     "stt:build": "node scripts/build-stt.mjs",

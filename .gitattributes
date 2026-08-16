@@ -1,0 +1,72 @@
+# One convention for text files: LF in the working tree and in the repo.
+# Normalization happens file-by-file as files are touched — never renormalize
+# the whole tree in one go while other sessions have work in flight.
+* text=auto eol=lf
+
+# Windows-only script formats that cmd.exe and wscript read as CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf
+*.ps1 text eol=crlf
+
+# Binaries — never normalize, never diff as text.
+# Images (assets/, companion icons, watch faces)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.bmp binary
+*.tif binary
+*.tiff binary
+
+# Fonts
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+
+# Audio / video
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.flac binary
+*.mp4 binary
+*.webm binary
+*.mov binary
+
+# Archives and packages (release/, dist-apk/)
+*.zip binary
+*.gz binary
+*.7z binary
+*.rar binary
+*.apk binary
+*.aab binary
+*.jar binary
+
+# Native code and VM bytecode (stt-dist/, node-pty prebuilds, gradle output)
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.lib binary
+*.a binary
+*.bin binary
+*.node binary
+*.pyd binary
+*.pyc binary
+*.class binary
+*.dex binary
+*.wasm binary
+
+# Model weights and compiled tables (stt-dist/ whisper payloads)
+*.onnx binary
+*.pak binary
+*.dat binary
+*.flat binary
+*.len binary
+*.tab binary
+*.keystream binary
