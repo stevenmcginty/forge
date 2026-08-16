@@ -135,6 +135,42 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     kind: 'agent'
   },
   {
+    id: 'glm',
+    name: 'GLM 5.3',
+    // Official Z.ai path: Claude Code aimed at the GLM Coding Plan gateway
+    // (docs.z.ai/devpack/tool/claude). Its own selector, not a hijack of the
+    // Claude Code row — that one stays on claude.ai OAuth.
+    //
+    // `--model 'glm-5.3[1m]'` is the whole of how this command is told apart
+    // from a bare `claude`. Permission modes, the MCP bridge and resume-on-restore
+    // all still apply because the executable is Claude Code. Remote Control
+    // does not: Anthropic disables it when ANTHROPIC_BASE_URL is not
+    // api.anthropic.com, and wantsRemoteControl skips this command so the
+    // Claude profile's remoteControl: true cannot leak onto it via the exe
+    // fallback.
+    //
+    // The gateway env (token, base URL, 1M model aliases) is injected by
+    // electron/pty-host.ts after ENV_DENYLIST, and only for this command.
+    // ~/.claude/settings.json is never written — that is what would steal
+    // every other Claude pane. The key lives in Settings as `zaiKey`; Steve
+    // pastes it once after signing up at z.ai/subscribe.
+    //
+    // `[1m]` is the 1M context window. Quoted because the bootstrap is typed
+    // into pwsh, and unquoted `[1m]` is a wildcard. The same alias is also set
+    // via ANTHROPIC_DEFAULT_*_MODEL so `/model sonnet` and `/model opus`
+    // inside a session stay on 1M. `--model glm-5.3` (no suffix) is 200k and
+    // beats those defaults, which is why the suffix has to live on the flag.
+    command: "claude --model 'glm-5.3[1m]'",
+    // Teal, because the mint is OpenCode's and the cyan is PowerShell's, and
+    // at badge size those two already sit next to each other.
+    accent: '#2EC4B6',
+    badge: 'GL',
+    builtin: true,
+    kind: 'agent',
+    permissionMode: 'default',
+    mcpBridge: true
+  },
+  {
     id: 'qwen',
     name: 'Qwen',
     // Alibaba's own terminal agent, so unlike DeepSeek above this is not a
@@ -205,7 +241,16 @@ export const SUPERSEDED_BUILTIN_COMMANDS: Record<string, string[]> = {
   // nobody handed a copy of Forge has, so the pane opened and died on its first
   // message. The current default routes to the same model through OpenCode Zen,
   // which answers with no credentials configured.
-  deepseek: ['opencode -m deepseek/deepseek-v4-flash']
+  deepseek: ['opencode -m deepseek/deepseek-v4-flash'],
+  // Shipped for one session as an OpenCode wrapper. The official Z.ai path is
+  // Claude Code on the Coding Plan gateway, with its own selector — that is
+  // what the current default is.
+  glm: [
+    'opencode -m zai-coding-plan/glm-5.3',
+    // Shipped as 200k. `--model glm-5.3` beats the 1M env aliases, so every
+    // pane opened on the short window. The current default quotes `[1m]`.
+    'claude --model glm-5.3'
+  ]
 }
 
 /** The current default for a built-in whose stored command is a stale default. */
@@ -319,6 +364,23 @@ export function commandExe(command: string): string {
 export function isClaudeCommand(command: string): boolean {
   return permissionFamily(command) === 'claude'
 }
+
+/**
+ * Claude Code launched as the GLM 5.3 selector — `claude --model glm-5.3`
+ * or `claude --model 'glm-5.3[1m]'`, plus any flags Forge appends
+ * (permission mode, session, MCP).
+ *
+ * The regular Claude profile is a bare `claude`. This is how the two stay
+ * apart when they share an executable: Remote Control, env injection and the
+ * missing-key notice all key off this rather than the profile id, because the
+ * PTY host only ever sees the command string.
+ */
+export function isGlmClaudeCommand(command: string): boolean {
+  return commandExe(command) === 'claude' && /\bglm-5\.3\b/.test(command)
+}
+
+/** Official Z.ai Anthropic-compatible Coding Plan gateway. */
+export const ZAI_ANTHROPIC_BASE_URL = 'https://api.z.ai/api/anthropic'
 
 /* ------------------------------------------------------------------ families */
 

@@ -85,6 +85,9 @@ const SPOKEN_ALIASES: Record<string, string[]> = {
   // "open code" and "deep seek" are what actually comes out of the microphone.
   opencode: ['opencode', 'open code', 'oc'],
   deepseek: ['deepseek', 'deep seek', 'v4', 'ds'],
+  // "G L M" and "glm five three" are what dictation actually produces; "zai"
+  // is the company name Steve will say when he cannot remember the model.
+  glm: ['glm', 'glm 5', 'glm 5.3', 'glm five', 'glm five three', 'zai', 'z.ai'],
   // Dictation has no idea what to do with "Qwen" — it comes out as Gwen, Quen
   // or Qwin about as often as it comes out right. "When" is deliberately not on
   // the list: it is a word Steve says in ordinary sentences, and a profile alias

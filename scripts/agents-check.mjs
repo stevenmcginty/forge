@@ -32,7 +32,8 @@ registerHooks({
 })
 
 const { checkableExe, probeCommands, whichCommand } = await import('../electron/which.ts')
-const { BUILTIN_AGENT_PROFILES, isShellProfile } = await import('../shared/agents.ts')
+const { BUILTIN_AGENT_PROFILES, isGlmClaudeCommand, isShellProfile, migrateBuiltinCommand } =
+  await import('../shared/agents.ts')
 const { installCommandFor, toolSpecForCommand } = await import('../shared/tools.ts')
 
 let pass = 0
@@ -95,6 +96,32 @@ ok(toolSpecForCommand('codex --full-auto')?.id === 'codex', 'flags do not break 
 ok(
   toolSpecForCommand('opencode -m opencode/deepseek-v4-flash-free')?.id === 'opencode',
   'the DeepSeek profile installs OpenCode, which is what it actually runs'
+)
+ok(
+  BUILTIN_AGENT_PROFILES.find((p) => p.id === 'glm')?.command === "claude --model 'glm-5.3[1m]'",
+  'the GLM profile launches the 1M model, quoted for pwsh'
+)
+ok(
+  toolSpecForCommand("claude --model 'glm-5.3[1m]'")?.id === 'claude',
+  'the GLM 5.3 profile installs Claude Code, which is what it actually runs'
+)
+ok(isGlmClaudeCommand("claude --model 'glm-5.3[1m]'"), 'a GLM launch is recognised')
+ok(
+  isGlmClaudeCommand("claude --model 'glm-5.3[1m]' --permission-mode acceptEdits"),
+  'flags do not hide a GLM launch'
+)
+ok(isGlmClaudeCommand('claude --model glm-5.3'), 'the old 200k launch is still recognised')
+ok(!isGlmClaudeCommand('claude'), 'a regular Claude pane is not a GLM launch')
+ok(!isGlmClaudeCommand('opencode -m zai-coding-plan/glm-5.3'), 'the old OpenCode wrapper is not a GLM Claude launch')
+ok(
+  migrateBuiltinCommand('glm', 'claude --model glm-5.3', "claude --model 'glm-5.3[1m]'") ===
+    "claude --model 'glm-5.3[1m]'",
+  'the shipped 200k default is migrated to the quoted 1M model'
+)
+ok(
+  migrateBuiltinCommand('glm', "claude --model 'glm-4.7'", "claude --model 'glm-5.3[1m]'") ===
+    "claude --model 'glm-4.7'",
+  'a hand-edited GLM command is left alone'
 )
 ok(toolSpecForCommand('forge-definitely-not-installed-xyz') === null, 'an unknown command has no row, and says so')
 

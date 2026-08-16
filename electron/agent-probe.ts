@@ -13,7 +13,7 @@ export { whichCommand }
  * Is the agent this profile launches actually installed?
  *
  * The first-run welcome shows found/not-found for every built-in that launches
- * something — `claude`, `codex`, `kimi`, `agy`, `opencode`, `gemini` — which is the difference
+ * something — `claude`, `codex`, `kimi`, `agy`, `opencode`, `gemini`, `qwen` — which is the difference
  * between "Forge is broken" and "you have not installed Claude Code yet", the
  * single most likely thing to go wrong for the first person handed a copy.
  *
@@ -33,6 +33,9 @@ const INSTALL_URLS: Record<string, string> = {
   // The DeepSeek profile *is* OpenCode with a model flag, so what has to be
   // installed — and therefore what the welcome card should link to — is OpenCode.
   deepseek: 'https://opencode.ai/docs/',
+  // GLM 5.3 is Claude Code on Z.ai's gateway. The binary to install is Claude
+  // Code; the key is a later step (Settings › Models & APIs › Z.AI).
+  glm: 'https://claude.com/claude-code',
   qwen: 'https://github.com/QwenLM/qwen-code'
 }
 

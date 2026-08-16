@@ -214,6 +214,7 @@ const FALLBACK_SETTINGS: Settings = {
   voiceWakeWord: false,
   geminiKey: '',
   geminiModel: 'gemini-2.5-flash',
+  zaiKey: '',
   accountName: 'You',
   accountColor: '#C6FF4A',
   themeId: 'volt',

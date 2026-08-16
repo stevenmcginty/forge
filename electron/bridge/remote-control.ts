@@ -1,4 +1,4 @@
-import { commandExe } from '@shared/agents'
+import { commandExe, isGlmClaudeCommand } from '@shared/agents'
 import { composeRemoteControl, remoteControlName } from '@shared/remote'
 import { getSettings } from '../store'
 
@@ -53,6 +53,11 @@ function wantsRemoteControl(command: string): boolean {
   if (!settings.remoteControlDefault) return false
   const cmd = command.trim()
   if (!cmd) return false
+  // GLM 5.3 is Claude Code on Z.ai's gateway. Remote Control is disabled for
+  // any ANTHROPIC_BASE_URL that is not api.anthropic.com, and the Claude
+  // profile's remoteControl: true must not leak onto this command via the
+  // executable-name fallback below.
+  if (isGlmClaudeCommand(cmd)) return false
   const enabled = settings.agentProfiles.filter((p) => p.remoteControl && p.command.trim())
   if (enabled.some((p) => p.command.trim() === cmd)) return true
   const exe = commandExe(cmd)

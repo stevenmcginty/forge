@@ -162,6 +162,23 @@ export function ModelsSection(): ReactNode {
         </Row>
       </Card>
 
+      <Card title="Z.AI">
+        <KeyField
+          label="Coding Plan key"
+          value={s.zaiKey}
+          onCommit={(key) => actions.patchSettings({ zaiKey: key.trim() })}
+          placeholder="from z.ai/manage-apikey"
+          note={
+            <>
+              Only the <span className="mono">GLM 5.3</span> selector uses this. It is sent to{' '}
+              <span className="mono">api.z.ai</span> as Claude Code&apos;s gateway, and never to a regular Claude pane
+              — that one stays on your claude.ai login. Sign up at <span className="mono">z.ai/subscribe</span>, then
+              paste the key from <span className="mono">z.ai/manage-apikey/apikey-list</span>.
+            </>
+          }
+        />
+      </Card>
+
       <Card title="Voice brain" hint="The voice hub keeps a shortcut to this, but it lives here now.">
         <div className="sbrains">
           {BRAINS.map((b) => (

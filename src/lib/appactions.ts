@@ -312,6 +312,15 @@ const PROFILE_ALIASES: Record<string, string> = {
   deepseekv4: 'deepseek',
   ds: 'deepseek',
   v4: 'deepseek',
+  // "glm 5.3" and "glm five three" both collapse here. "zai" is the company
+  // name; it must not be left to the sounds-close pass, which would otherwise
+  // have nothing useful to hand it to.
+  glm: 'glm',
+  glm5: 'glm',
+  glm53: 'glm',
+  glmfive: 'glm',
+  glmfivethree: 'glm',
+  zai: 'glm',
   // What dictation actually produces for "Qwen". These have to be spelled out
   // rather than left to the sounds-close pass, which hands "gwen" to `gemini`
   // (same first letter, one edit apart once the vowels go).

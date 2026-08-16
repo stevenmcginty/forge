@@ -81,6 +81,7 @@ export function useConnections(probe: AgentProbe): {
 } {
   const { state } = useApp()
   const geminiKey = state.settings.geminiKey
+  const zaiKey = state.settings.zaiKey
   const companionEnabled = state.settings.companionEnabled
   const [web, setWeb] = useState<WebStatus | null>(null)
   const { agents, claude } = probe
@@ -113,6 +114,16 @@ export function useConnections(probe: AgentProbe): {
           : 'no key stored — the voice agent falls back to offline commands',
         chip: geminiKey ? `set · ${geminiKey.slice(-4)}` : 'not set',
         tone: geminiKey ? 'ok' : 'warn',
+        section: 'models'
+      },
+      {
+        id: 'zai',
+        name: 'Z.AI Coding Plan',
+        detail: zaiKey
+          ? `key ${maskKey(zaiKey)} — the GLM 5.3 pane`
+          : 'no key stored — a GLM 5.3 pane will explain how to add one',
+        chip: zaiKey ? `set · ${zaiKey.slice(-4)}` : 'not set',
+        tone: zaiKey ? 'ok' : 'warn',
         section: 'models'
       },
       {
@@ -172,5 +183,5 @@ export function useConnections(probe: AgentProbe): {
 
     const healthy = connections.every((c) => c.placeholder || c.tone === 'ok' || c.tone === 'off')
     return { connections, healthy }
-  }, [geminiKey, companionEnabled, webUid, webEmail, agents, claude])
+  }, [geminiKey, zaiKey, companionEnabled, webUid, webEmail, agents, claude])
 }
