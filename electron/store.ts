@@ -30,6 +30,7 @@ import type {
   Workspace
 } from '@shared/types'
 import { clampKeep, DEFAULT_KEEP } from './shots/shelf'
+import { ENC_MARKER, PASS_THROUGH_CODEC, type SecretsCodec } from './secretbox'
 
 /**
  * Forge Web's listen port — next door to Forge Mobile's 8420, so one machine
@@ -104,6 +105,13 @@ export interface StoreHost {
   appDataDir: () => string
   /** The running app's version, or '' when there isn't one (headless runs). */
   appVersion: () => string
+  /**
+   * Secret-field codec for settings.json — safeStorage behind `enc:v1:` in the
+   * real app, absent (plaintext) in every headless host. Optional because
+   * every existing caller passes the two functions above and nothing else.
+   * See electron/secretbox.ts.
+   */
+  secrets?: SecretsCodec
 }
 
 /**
@@ -232,6 +240,7 @@ function defaultSettings(): Settings {
     voiceWakeWord: false,
     geminiKey: '',
     geminiModel: 'gemini-2.5-flash',
+    zaiKey: '',
     accountName: defaultAccountName(),
     accountColor: '#C6FF4A',
     themeId: 'volt',
@@ -489,6 +498,76 @@ function writeJson(name: string, value: unknown): void {
   }
 }
 
+/* ----------------------------------------------------------- secrets at rest */
+
+/**
+ * The settings fields that are credentials, and nothing else. Emails stay
+ * plaintext (they are not secrets, and Settings shows them), keys and refresh
+ * tokens do not. Every name here must be a plain string field of Settings —
+ * the two transforms below reach them by key, so a typo is a field that
+ * silently stays plaintext, not a crash.
+ */
+const SECRET_FIELDS = [
+  'anthropicKey',
+  'geminiKey',
+  'zaiKey',
+  'openrouterKey',
+  'groqKey',
+  'companionApiKey',
+  'companionRefreshToken',
+  'mobileNgrokAuthtoken',
+  'webRefreshToken',
+  'webNgrokAuthtoken'
+] as const satisfies readonly (keyof Settings)[]
+
+/** The injected codec, or the headless pass-through. Never throws. */
+function secretsCodec(): SecretsCodec {
+  try {
+    return storeHost?.secrets ?? PASS_THROUGH_CODEC
+  } catch {
+    return PASS_THROUGH_CODEC
+  }
+}
+
+/**
+ * One settings.json off disk, with its `enc:v1:` fields decrypted so the
+ * normaliser (and everything after it) sees plaintext. Values without the
+ * marker pass through untouched — that is yesterday's plaintext, and the
+ * migration: it reads fine now and gets encrypted on the next save. A value
+ * that will not decrypt reads as '' (the codebase's existing "unset"), so a
+ * blob from another machine costs a re-paste, not a settings load.
+ */
+function decryptSecretFields(raw: Partial<Settings>): Partial<Settings> {
+  const codec = secretsCodec()
+  const out: Partial<Settings> = { ...raw }
+  for (const field of SECRET_FIELDS) {
+    const value = raw[field]
+    if (typeof value === 'string' && value.startsWith(ENC_MARKER)) {
+      ;(out as Record<string, unknown>)[field] = codec.decrypt(value)
+    }
+  }
+  return out
+}
+
+/**
+ * The settings object as settings.json should hold it: a shallow copy with
+ * the secret fields encoded, leaving the in-memory cache — and every
+ * `getSettings()` consumer in main, and the IPC snapshot the renderer masks —
+ * holding plaintext. Empty fields stay empty: there is nothing to protect and
+ * a file of `enc:v1:` noise for unset keys would hide which fields are in use.
+ */
+function encryptSecretFieldsForDisk(settings: Settings): Settings {
+  const codec = secretsCodec()
+  const out = { ...settings }
+  for (const field of SECRET_FIELDS) {
+    const value = settings[field]
+    if (typeof value === 'string' && value) {
+      ;(out as Record<string, unknown>)[field] = codec.encrypt(value)
+    }
+  }
+  return out
+}
+
 /* ------------------------------------------------------------------ merging */
 
 /** A hex colour, or the fallback. Nothing off disk gets to be a CSS injection. */
@@ -658,6 +737,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     geminiKey: typeof s.geminiKey === 'string' ? s.geminiKey.trim() : '',
     geminiModel:
       typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel,
+    zaiKey: typeof s.zaiKey === 'string' ? s.zaiKey.trim() : '',
     accountName:
       typeof s.accountName === 'string' && s.accountName.trim()
         ? s.accountName.trim().slice(0, 40)
@@ -995,13 +1075,21 @@ let settingsCache: Settings | null = null
 let projectsCache: Project[] | null = null
 
 export function getSettings(): Settings {
-  if (!settingsCache) settingsCache = normaliseSettings(readJson<Partial<Settings> | null>('settings.json', null))
+  if (!settingsCache) {
+    const raw = readJson<Partial<Settings> | null>('settings.json', null)
+    settingsCache = normaliseSettings(raw ? decryptSecretFields(raw) : raw)
+  }
   return settingsCache
 }
 
 export function setSettings(patch: Partial<Settings>): Settings {
   settingsCache = normaliseSettings({ ...getSettings(), ...patch })
-  writeJson('settings.json', settingsCache)
+  // Disk gets the encrypted copy; the cache above keeps plaintext, so every
+  // getSettings() consumer — voice, tunnels, the bridge config, the renderer's
+  // snapshot — sees keys, not markers. The codec is the host's, and a host
+  // that injected none (every script, Forge Web's server) writes plaintext,
+  // which is what those readers expect off disk.
+  writeJson('settings.json', encryptSecretFieldsForDisk(settingsCache))
   return settingsCache
 }
 

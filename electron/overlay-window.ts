@@ -167,7 +167,9 @@ export function openOverlay(bounds: OverlayBounds): void {
     title: 'Forge Voice',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      // The preload uses only contextBridge/ipcRenderer/webUtils — all of them
+      // available to a sandboxed preload — so the renderer gets no Node.
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
@@ -214,6 +216,16 @@ export function openOverlay(bounds: OverlayBounds): void {
   })
 
   overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+
+  // The overlay loads the same privileged preload as the main window, so it is
+  // held to the same rule: nothing navigates it anywhere. A link or file
+  // dragged onto the pill would otherwise load with window.forge in reach, and
+  // window.forge is a shell. Mirrors the guard in createWindow() in main.ts.
+  overlay.webContents.on('will-navigate', (event, url) => {
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    if (devUrl && url.startsWith(devUrl)) return
+    event.preventDefault()
+  })
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) {

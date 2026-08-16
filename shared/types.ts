@@ -1436,6 +1436,13 @@ export interface Settings {
    */
   geminiKey: string
   geminiModel: string
+  /**
+   * Z.AI Coding Plan key for the GLM 5.3 pane. Injected only into that
+   * selector as ANTHROPIC_AUTH_TOKEN (plus the Z.ai gateway URL). Never sent
+   * to a regular Claude pane, and never written into ~/.claude/settings.json.
+   * Plain, local, same as geminiKey.
+   */
+  zaiKey: string
 
   /* --------------------------------------------------- account + themes (M6) */
   /** Display name on the account chip. Seeded from the Windows username. */

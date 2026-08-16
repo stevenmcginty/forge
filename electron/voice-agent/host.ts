@@ -436,10 +436,28 @@ export class VoiceAgentHost {
   /** Run one streamed Codex turn for an OpenAI model selected in Settings. */
   private async sendCodexUtterance(text: string, model: string, cwd: string): Promise<void> {
     if (this.closing) return
+    // The model id comes from settings.json, which a hand can edit. It is an
+    // identifier, never shell syntax, and this is the point of use.
+    if (!/^[A-Za-z0-9._-]+$/.test(model)) {
+      this.fail(`The Luna voice brain could not start: "${model}" is not a model id`)
+      return
+    }
     const codexArgs = ['exec', '--model', model, '--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '--json', '-']
-    const child = process.platform === 'win32'
-      ? spawn('cmd.exe', ['/d', '/s', '/c', `codex.cmd ${codexArgs.join(' ')}`], { cwd, windowsHide: true })
-      : spawn('codex', codexArgs, { cwd, windowsHide: true })
+    // Spawn the shim the PATH walk found, as an argv entry, rather than joining
+    // a command string for cmd.exe to re-parse — the same shape system.ts uses
+    // for `claude --version`. On Windows the CLI is an npm .cmd shim that
+    // CreateProcess will not load directly, so it goes through the interpreter
+    // as an argument and nothing from settings is ever interpolated into a
+    // command line. Elsewhere `codex` is an executable name like any other.
+    const exe = process.platform === 'win32' ? whichCommand('codex') : 'codex'
+    if (!exe) {
+      this.fail('The Luna voice brain could not start: codex not found on PATH')
+      return
+    }
+    const viaCmd = /\.(cmd|bat)$/i.test(exe)
+    const child = viaCmd
+      ? spawn(process.env['ComSpec'] ?? 'cmd.exe', ['/d', '/s', '/c', exe, ...codexArgs], { cwd, windowsHide: true })
+      : spawn(exe, codexArgs, { cwd, windowsHide: true })
     this.codexProcess = child
     child.stdin.end(text)
     let buffer = ''

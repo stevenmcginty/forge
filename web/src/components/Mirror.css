@@ -10,9 +10,12 @@
  *
  * Every value is a token, for the reason styles.css gives: a literal here would
  * be the first place the browser and the desktop started to look different. The
- * two exceptions are `black` for the letterbox and the `contain`/`crosshair`
- * pair, and neither is a colour anybody themes — the bars beside a captured
- * screen are the absence of picture, not a surface.
+ * exceptions are `black` for the letterbox and the `contain`/`crosshair` pair
+ * — neither is a colour anybody themes; the bars beside a captured screen are
+ * the absence of picture, not a surface — and, further down, the trackpad
+ * cursor's own pixel sizes, which are facts about pointing rather than values
+ * a theme owns: a ring meant to sit on a desktop pixel has to keep doing that
+ * when the theme changes.
  */
 
 .mirror {
@@ -138,9 +141,156 @@
 
 /* The cursor is the other half of the mode. In watching mode the pointer is an
    ordinary one over an ordinary picture; in driving mode it is a crosshair,
-   because what is under it is a click on somebody else's machine. */
+   because what is under it is a click on somebody else's machine. In trackpad
+   mode even that is hidden: the ring is the only pointer there is, and a
+   crosshair following a mouse that no longer means anything would be a second
+   cursor pointing somewhere the clicks do not land. */
 .mirror__stage[data-driving='true'] .mirror__picture {
   cursor: crosshair;
+}
+
+.mirror__stage[data-input='trackpad'][data-driving='true'] .mirror__picture {
+  cursor: none;
+}
+
+/* ------------------------------------------------------------- the trackpad
+ *
+ * A phone's half of driving: the finger is a trackpad and the whole stage is
+ * its glass, so the browser must be told to keep its hands off the gesture —
+ * no panning the page behind, no double-tap zoom, nothing that would eat a
+ * finger the pad is mid-way through reading. Scoped to the mode, because
+ * Direct mode belongs to a mouse and a mouse has no gestures to take.
+ */
+.mirror__stage[data-input='trackpad'] {
+  touch-action: none;
+}
+
+/* The cursor the trackpad owns — lib/touchpad.ts writes one `transform` on
+   this node and nothing else, ever, so it never invalidates layout over a
+   decoding canvas. The node itself is a zero-sized point at the position the
+   click will land; everything drawn is centred on that point by negative
+   offsets rather than placed at its corner, which is what makes the ring's
+   centre and the desktop's hotspot the same pixel by construction. */
+.mirror__pad {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  color: var(--accent);
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* The ring: hollow, so it does not hide the thing it is pointing at, and with
+   a dark rim outside the bright one so it survives a white document — the one
+   background an accent-coloured circle would vanish into. Volt, like the
+   driving badge, because this state moves somebody's real cursor. */
+.mirror__pad::before {
+  content: '';
+  position: absolute;
+  left: -11px;
+  top: -11px;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid currentColor;
+  border-radius: var(--r-full);
+  box-shadow:
+    0 0 0 2px rgb(0 0 0 / 0.72),
+    0 0 16px var(--accent-glow);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+/* The hotspot: the pixel the desktop is told about, and the only thing on
+   screen allowed to claim it. Dead centre, at pointer accuracy rather than at
+   a size the eye finds comfortable — the ring is the thing you look for, the
+   dot is the thing that clicks. */
+.mirror__pad::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: -2px;
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  border-radius: var(--r-full);
+  box-shadow: 0 0 0 1.5px rgb(0 0 0 / 0.72);
+}
+
+/* A finger is down but has not latched. Slightly gathered, because something
+   is touching the glass and the eye should be able to tell — but quietly: this
+   is the state every slide passes through, and a state that shouted here would
+   shout the whole time anybody pointed at anything. */
+.mirror__pad[data-state='press']::before {
+  transform: scale(0.86);
+}
+
+/* Latched: everything this finger does from now on involves the button, and
+   holding on reaches the right-click. Warn rather than accent, for the same
+   reason the television's scroll state does it — it is the one state where
+   leaving the finger where it is will do something the ring's colour has not
+   promised yet. One `color` recolours ring, rim-glow and dot together. */
+.mirror__pad[data-state='armed'] {
+  color: var(--warn);
+}
+
+.mirror__pad[data-state='armed']::before {
+  transform: scale(0.72);
+  background: var(--warn-soft);
+  box-shadow:
+    0 0 0 2px rgb(0 0 0 / 0.72),
+    0 0 12px var(--warn-line);
+}
+
+/* A drag, in progress on somebody's desk. Filled rather than merely gathered,
+   because "am I dragging" is a question asked in the corner of the eye while
+   looking at what is being dragged. */
+.mirror__pad[data-state='drag']::before {
+  transform: scale(0.72);
+  background: var(--accent-soft);
+}
+
+/* Two fingers: the movement is the wheel's, and the pointer is not moving at
+   all. The same warn as the armed state, saying the same thing — the glass is
+   doing something other than pointing. */
+.mirror__pad[data-state='scroll'] {
+  color: var(--warn);
+}
+
+/* The hold, ticking towards its right-click. The pulse is the only motion this
+   ring ever makes on its own, and it earns it: a state that resolves itself
+   after 700ms must say it is counting. Still under reduced motion, where the
+   colour change alone carries the state — as everywhere in this app, motion is
+   never the only signal. */
+@media (prefers-reduced-motion: no-preference) {
+  .mirror__pad[data-state='armed']::before {
+    animation: mirror-pad-hold 1.4s var(--ease-in-out) infinite;
+  }
+}
+
+@keyframes mirror-pad-hold {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px rgb(0 0 0 / 0.72),
+      0 0 10px var(--warn-line);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 2px rgb(0 0 0 / 0.72),
+      0 0 20px var(--warn);
+  }
+}
+
+/* The mode's own button in the bar, held on. The accent, spent the same way
+   the driving badge spends it: this is the state that changes what a press on
+   the picture does, and it should never be possible to be in it unawares. */
+.mirror .mirror__btn[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-softer);
 }
 
 /* ----------------------------------------------------- what it has to say

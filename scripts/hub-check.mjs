@@ -423,7 +423,13 @@ ok(
   'the main process forwards payloads without looking inside them'
 )
 ok(overlayMain.includes('disposeOverlay'), 'and an always-on-top window cannot outlive the app')
-ok(read('electron/main.ts').includes('disposeOverlay()'), 'which main actually calls on the way out')
+// The quit path funnels every disposer through `safely(name, fn)` — matching
+// either spelling, not just the bare call, so the wrapper cannot quietly
+// orphan the overlay while looking tidier.
+ok(
+  /disposeOverlay\(\)|safely\('disposeOverlay',\s*disposeOverlay\)/.test(read('electron/main.ts')),
+  'which main actually calls on the way out'
+)
 ok(read('electron/main.ts').includes('setOverlayHost(null)'), 'losing the host takes the overlay with it')
 
 console.log('\nthe overlay paints nothing opaque')

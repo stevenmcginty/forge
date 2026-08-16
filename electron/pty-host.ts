@@ -1,6 +1,7 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import type { CreateSessionRequest, CreateSessionResult, PtyGeometryEvent } from '@shared/types'
+import { isGlmClaudeCommand, ZAI_ANTHROPIC_BASE_URL } from '@shared/agents'
 import { installCommandFor, toolSpecForCommand } from '@shared/tools'
 import { DESK_VIEWER, GridOwners } from './pty/grid-owner'
 import { PtySessionManager } from './pty/session-manager'
@@ -12,7 +13,7 @@ import { applyShareBridge, shareEnvFor } from './bridge/share-mcp'
 import { applyRemoteControl } from './bridge/remote-control'
 import { applyClaudeSession } from './bridge/claude-session'
 import { presenceFile } from './presence'
-import { gitRemoteOrigin } from './git-remote'
+import { gitRemoteOrigin, stripRemoteCredentials } from './git-remote'
 
 /**
  * The PTY host: owns one PtySessionManager and bridges it to the renderer.
@@ -410,6 +411,29 @@ function missingCommandNotice(exe: string, install: string | null): string {
   return out.join('')
 }
 
+/**
+ * Same shape as missingCommandNotice: the shell is fine, Claude is not run,
+ * and the next step is sitting in Settings. Only shown when the GLM 5.3
+ * selector would otherwise launch a claude that has nowhere to send tokens.
+ */
+function missingZaiKeyNotice(): string {
+  const dim = '\x1b[2m'
+  const amber = '\x1b[33m'
+  const off = '\x1b[0m'
+  const line = (text = ''): string => `  ${text}\r\n`
+  return [
+    '\r\n',
+    line(`${amber}GLM 5.3 needs a Z.AI Coding Plan key.${off}`),
+    line(`${dim}Forge did not run Claude Code — this pane is a working PowerShell, nothing has failed.${off}`),
+    line(),
+    line('Sign up at  https://z.ai/subscribe'),
+    line('Copy a key from  https://z.ai/manage-apikey/apikey-list'),
+    line('Paste it in  Settings › Models & APIs › Z.AI'),
+    line(`${dim}Then open a new GLM 5.3 pane.${off}`),
+    '\r\n'
+  ].join('')
+}
+
 export function registerPtyHandlers(): void {
   ipcMain.handle(IPC.ptyCreate, (_e, req: CreateSessionRequest): CreateSessionResult => {
     // The one place every pane's launch command passes through, and therefore
@@ -456,6 +480,27 @@ export function registerPtyHandlers(): void {
         ? { GEMINI_API_KEY: settings.geminiKey.trim(), GEMINI_MODEL: GEMINI_CLI_MODEL }
         : undefined
 
+    // GLM 5.3 is Claude Code on Z.ai's Coding Plan gateway. Injected after
+    // ENV_DENYLIST (buildEnv applies extra last), and only for this command —
+    // a regular Claude pane never sees the token or the base URL, so it keeps
+    // the claude.ai login. ~/.claude/settings.json is not touched.
+    const glm = isGlmClaudeCommand(bootstrapCommand)
+    const zaiKey = settings.zaiKey.trim()
+    const glmEnv =
+      glm && zaiKey
+        ? {
+            ANTHROPIC_AUTH_TOKEN: zaiKey,
+            ANTHROPIC_BASE_URL: ZAI_ANTHROPIC_BASE_URL,
+            ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.7',
+            ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3[1m]',
+            ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3[1m]',
+            CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000',
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+            API_TIMEOUT_MS: '3000000'
+          }
+        : undefined
+    const glmNotice = glm && !zaiKey && !notice ? missingZaiKeyNotice() : null
+
     // Where this project pushes, in every pane — Claude, Antigravity, Codex, or
     // a bare PowerShell, because any of them can read an environment variable
     // and none of them should have to be told. It is how the second agent
@@ -463,7 +508,10 @@ export function registerPtyHandlers(): void {
     // whose renderer has none (or whose project predates the field) falls back
     // to asking git in the pane's own cwd, so a remote created five minutes ago
     // still shows up. Nothing is set when there is no repo at all.
-    const repoUrl = String(req?.repoUrl ?? '').trim() || gitRemoteOrigin(cwd) || ''
+    // Stripped even when the renderer supplied it: a URL typed into project
+    // settings before this rule existed can still be carrying a PAT, and the
+    // pane environment is the one copy every agent in the project can read.
+    const repoUrl = stripRemoteCredentials(String(req?.repoUrl ?? '').trim()) || gitRemoteOrigin(cwd) || ''
 
     /*
      * The shared scratchpad's two variables. `FORGE_SHARE_AGENT` is the pane's
@@ -478,18 +526,20 @@ export function registerPtyHandlers(): void {
 
     const env = {
       ...(geminiEnv ?? {}),
+      ...(glmEnv ?? {}),
       ...(repoUrl ? { FORGE_REPO_URL: repoUrl } : {}),
       ...shareEnv
     }
 
+    const blocked = notice ?? glmNotice
     const spec = {
       id: String(req?.id ?? ''),
       cwd,
       cols: Number(req?.cols ?? 80),
       rows: Number(req?.rows ?? 24),
       ...(Object.keys(env).length > 0 ? { env } : {}),
-      bootstrapCommand: notice ? '' : bootstrapCommand,
-      ...(notice ? { bootstrapNotice: notice } : {})
+      bootstrapCommand: blocked ? '' : bootstrapCommand,
+      ...(blocked ? { bootstrapNotice: blocked } : {})
     }
 
     // Remembered for the quit confirmation, which needs to say what is running

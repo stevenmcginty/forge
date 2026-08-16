@@ -60,7 +60,7 @@ import { verifyPin } from './pin'
  *  - the PIN, which is the one thing a stolen Firebase password does not come
  *    with, and which is asked afresh of every browser on every connection —
  *    there is no list to be on and nothing that excuses it;
- *  - the per-source lockout below, which is what makes a short PIN defensible.
+ *  - the per-bucket lockout below, which is what makes a short PIN defensible.
  *
  * With no PIN set the account alone gets in, which is the state this desktop
  * ships in and is deliberate rather than an oversight: shared/types.ts states
@@ -70,16 +70,20 @@ import { verifyPin } from './pin'
  *
  * The PIN is short, and electron/web/pin.ts is honest about what hashing four
  * digits does and does not buy. The part that belongs here is the other half of
- * that answer: **the per-source lockout below is what makes a four-digit secret
- * defensible at all.** Five wrong answers and that address is refused for a
- * minute, so ten thousand guesses are weeks of them rather than seconds.
+ * that answer: **the lockout below is what makes a four-digit secret defensible
+ * at all.** Five wrong answers and the bucket they were counted against is
+ * refused for a minute — the account's bucket once the token has verified, the
+ * address's before — so ten thousand guesses are weeks of them rather than
+ * seconds.
  *
  * ## What is kept from the neighbour
  *
  *  1. **Constant-time comparison.** See `sameString`, and the honest note there
  *     about which of these comparisons is actually secret.
- *  2. **Failure lockout per source**, on `AUTH_MAX_FAILURES`/`AUTH_LOCKOUT_MS`
- *     from shared/mobile.ts rather than numbers invented here.
+ *  2. **Failure lockout per bucket** — keyed on the address before the token
+ *     verifies and on the verified uid after — on `AUTH_MAX_FAILURES`/
+ *     `AUTH_LOCKOUT_MS` from shared/mobile.ts rather than numbers invented
+ *     here.
  *  3. **Everything injected**, including the clock and the JWKS fetcher, so a
  *     check script drives this exact class with no network and no Electron.
  *
@@ -160,18 +164,26 @@ const JWKS_MIN_REFETCH_MS = 60_000
  * The browser on the far end of one admitted connection.
  *
  * Nothing here is persisted and nothing here is a credential: it is the two
- * untrusted strings off the `hello` frame, carried so that electron/web/server.ts
- * has something to log a connection under and something to name a browser by in
- * the presence line. It lives and dies with the socket — this desktop keeps no
- * record of which browsers have been admitted, deliberately, because the list it
- * used to keep was never a gate and its Revoke button implied a lock that was
- * not there.
+ * untrusted strings off the `hello` frame plus one verified fact, carried so
+ * that electron/web/server.ts has something to log a connection under,
+ * something to name a browser by in the presence line, and somewhere later in
+ * the connection to hang a strike count on. It lives and dies with the socket —
+ * this desktop keeps no record of which browsers have been admitted,
+ * deliberately, because the list it used to keep was never a gate and its
+ * Revoke button implied a lock that was not there.
  */
 export interface WebDevice {
   /** The browser's own per-profile id, from `WebHelloFrame.deviceId`. */
   id: string
   /** What the browser called itself. Untrusted display text — show, never obey. */
   name: string
+  /**
+   * The uid the admitted token was verified against. Not a credential — the
+   * token it came from has usually lapsed by now — but the honest name of the
+   * account behind the socket, which is what later PIN checks key their
+   * lockout on. See `uidKey`.
+   */
+  uid: string
 }
 
 /**
@@ -309,7 +321,11 @@ export type WebAuthOutcome =
   | { ok: false; reason: WebRefusal; message: string; retryAfterMs?: number }
 
 export interface WebAuthInput {
-  /** The remote address. The unit of lockout, exactly as in mobile/auth.ts. */
+  /**
+   * The remote address. The unit of lockout until the token verifies; from
+   * there the verified uid is, because a tunnel funnels every caller onto one
+   * loopback address. See `authenticate`.
+   */
   source: string
   /** The Firebase ID token off the `hello` frame. */
   idToken: string
@@ -419,7 +435,7 @@ export class WebAuth {
    *
    * Five gates, in this order, and the order is load-bearing:
    *
-   *  1. **Lockout**, so a source that has been failing does not get to keep
+   *  1. **Lockout**, so a caller that has been failing does not get to keep
    *     trying while the rest of this runs — and, since the PIN is short, so
    *     that the guessing is what runs out rather than the guesser's patience.
    *  2. **The token**, verified against Google's keys — signature *and* every
@@ -438,15 +454,27 @@ export class WebAuth {
    *  5. **The PIN**, when one is set. Asked of every browser on every
    *     connection, with nothing that excuses it.
    *
+   * ## Which bucket a failure counts against
+   *
+   * Before the token verifies there is no identity to trust, so those failures
+   * count against the address (`ipKey`). From the PIN onward the account is
+   * proven, and they count against it (`uidKey`) — which is what makes the
+   * lockout honest behind a tunnel, where every client on earth dials from this
+   * machine's own loopback and an address-keyed bucket meant a stranger's five
+   * guesses locked the owner out, and the owner's next success quietly wiped
+   * the stranger's count. Nothing clears a bucket on success any more; the only
+   * thing that empties one is time (see `fail`).
+   *
    * Then one admission path and no bookkeeping: what comes back is the browser's
-   * own two strings, for the length of this socket and no longer.
+   * own two strings plus the uid they were admitted under, for the length of
+   * this socket and no longer.
    */
   async authenticate(input: WebAuthInput): Promise<WebAuthOutcome> {
-    const locked = this.lockout(input.source)
+    const locked = this.lockout(this.ipKey(input.source))
     if (locked) return locked
 
     const verified = await this.checkToken(input.idToken)
-    if (!verified.ok) return this.fail(input.source, verified)
+    if (!verified.ok) return this.fail(this.ipKey(input.source), verified)
 
     // Bounded because both arrive off a public socket and both end up in log
     // lines and, in the case of the name, on the desktop's own screen. Neither
@@ -455,13 +483,18 @@ export class WebAuth {
     const deviceId = input.deviceId.slice(0, 128)
     const deviceName = (input.deviceName || 'Browser').slice(0, 64)
     if (!deviceId) {
-      return this.fail(input.source, {
+      return this.fail(this.ipKey(input.source), {
         ok: false,
         reason: 'not-approved',
         message: 'This browser did not identify itself, so it cannot be admitted. Reload the page and try again.'
       })
     }
 
+    // Verified from here on, so the PIN is judged against the account's bucket
+    // — see "Which bucket a failure counts against" above.
+    const account = this.uidKey(verified.claims.uid)
+    const pinLocked = this.lockout(account)
+    if (pinLocked) return pinLocked
     const pin = this.checkPin(input.pin)
     if (!pin.ok) {
       // `pin-required` is the first half of every ordinary sign-in on a desktop
@@ -471,12 +504,15 @@ export class WebAuth {
         this.host.log?.(`web auth: asking "${deviceName}" at ${input.source} for the PIN`)
         return pin
       }
-      return this.fail(input.source, pin)
+      return this.fail(account, pin)
     }
 
     this.host.log?.(`"${deviceName}" admitted from ${input.source}`)
-    this.clearStrikes(input.source)
-    return { ok: true, device: { id: deviceId, name: deviceName }, claims: verified.claims }
+    return {
+      ok: true,
+      device: { id: deviceId, name: deviceName, uid: verified.claims.uid },
+      claims: verified.claims
+    }
   }
 
   /**
@@ -490,13 +526,17 @@ export class WebAuth {
    * fresh token changes that. Asking again mid-connection would be asking
    * somebody to retype a PIN because Google rotated a token, which is a prompt
    * with no question behind it.
+   *
+   * `uid` is the socket's already-verified identity when the caller has one
+   * (the `auth` frame always does), and names the bucket a failure counts
+   * against — see `authenticate`. A success clears nothing.
    */
-  async verifyToken(idToken: string, source: string): Promise<WebTokenOutcome> {
-    const locked = this.lockout(source)
+  async verifyToken(idToken: string, source: string, uid?: string): Promise<WebTokenOutcome> {
+    const key = uid !== undefined ? this.uidKey(uid) : this.ipKey(source)
+    const locked = this.lockout(key)
     if (locked) return locked
     const verified = await this.checkToken(idToken)
-    if (!verified.ok) return this.fail(source, verified)
-    this.clearStrikes(source)
+    if (!verified.ok) return this.fail(key, verified)
     return verified
   }
 
@@ -552,11 +592,37 @@ export class WebAuth {
    * state, and what stands behind it is the escalation guard in
    * electron/web-host.ts, which refuses *control* outright on a desktop with no
    * PIN to ask for.
+   *
+   * `who` is the asking socket's verified identity, and it is what makes this
+   * a check rather than a hole: a wrong PIN here counts against the account's
+   * strike bucket exactly as a wrong PIN at `hello` does, so the five-then-wait
+   * rule that makes four digits defensible applies on this door too. Without
+   * it, wrong PINs on a mirror-start were unlimited. A caller that cannot vouch
+   * for an identity gets the comparison and no counting — the honest thing
+   * available, and why every real caller passes one.
    */
-  checkFreshPin(pin: string): { ok: true } | { ok: false; needed: boolean; message: string } {
+  checkFreshPin(
+    pin: string,
+    who?: { uid: string; source: string }
+  ): { ok: true } | { ok: false; needed: boolean; message: string } {
+    const account = who ? this.uidKey(who.uid) : null
+    if (account) {
+      const locked = this.lockout(account)
+      if (locked) return { ok: false, needed: false, message: locked.message }
+    }
     const outcome = this.checkPin(pin)
     if (outcome.ok) return { ok: true }
-    return { ok: false, needed: outcome.reason === 'pin-required', message: outcome.message }
+    if (outcome.reason === 'pin-required') {
+      return { ok: false, needed: true, message: outcome.message }
+    }
+    if (account) {
+      this.fail<{ ok: false; reason: 'pin-invalid'; message: string }>(account, {
+        ok: false,
+        reason: 'pin-invalid',
+        message: outcome.message
+      })
+    }
+    return { ok: false, needed: false, message: outcome.message }
   }
 
   /* ---------------------------------------------------------- token verification */
@@ -725,7 +791,12 @@ export class WebAuth {
   /* -------------------------------------------------------------------- lockout */
 
   /**
-   * Is this source locked out right now?
+   * Is this bucket locked out right now?
+   *
+   * A bucket is keyed by `ipKey` for everything before the token verifies and
+   * by `uidKey` for everything after — see `authenticate` for why an address is
+   * the wrong unit behind a tunnel, where every caller on earth shares one
+   * loopback address with the owner.
    *
    * `busy` rather than a value of its own, because WEB_REFUSALS has no `locked`
    * and inventing one would be inventing a parallel vocabulary — the thing
@@ -733,11 +804,11 @@ export class WebAuth {
    * is up and will not take this connection, `retryAfterMs` says when to come
    * back, and a brute-forcer learns nothing from the distinction anyway.
    */
-  private lockout(source: string): { ok: false; reason: 'busy'; message: string; retryAfterMs: number } | null {
-    const strike = this.strikes.get(source)
+  private lockout(key: string): { ok: false; reason: 'busy'; message: string; retryAfterMs: number } | null {
+    const strike = this.strikes.get(key)
     if (!strike) return null
     if (this.now() >= strike.until) {
-      this.strikes.delete(source)
+      this.strikes.delete(key)
       return null
     }
     if (strike.count < AUTH_MAX_FAILURES) return null
@@ -751,29 +822,45 @@ export class WebAuth {
   }
 
   /**
-   * Count one refusal against a source, and hand the refusal back unchanged.
+   * Count one refusal against a bucket, and hand the refusal back unchanged.
    *
    * Every refusal counts, not only the credential ones. A wrong account, a
    * browser that names itself nothing and a wrong PIN are all things a stranger
    * with the address can generate on repeat, and the strike counter is what
    * turns a four-digit secret from ten thousand guesses into weeks of them. The
    * one refusal that does *not* come here is `pin-required`, which is a
-   * question rather than a failure — see `authenticate`. Nor does success,
-   * which clears the slate.
+   * question rather than a failure — see `authenticate`.
+   *
+   * Success clears nothing, and that is deliberate. The bucket only ever decays
+   * with time — `until` passes, the entry goes, the count starts again — so a
+   * legitimate sign-in can neither unlock a guesser (its success used to wipe
+   * the stranger's tally on the shared address) nor be locked out by one whose
+   * guesses landed on a bucket of its own.
    */
   private fail<T extends { ok: false; reason: WebRefusal; message: string; retryAfterMs?: number }>(
-    source: string,
+    key: string,
     outcome: T
   ): T {
-    this.host.log?.(`web auth refused from ${source}: ${outcome.reason} — ${outcome.message}`)
-    const strike = this.strikes.get(source) ?? { count: 0, until: 0 }
+    this.host.log?.(`web auth refused at ${key}: ${outcome.reason} — ${outcome.message}`)
+    const strike = this.strikes.get(key) ?? { count: 0, until: 0 }
     strike.count += 1
     strike.until = this.now() + AUTH_LOCKOUT_MS
-    this.strikes.set(source, strike)
+    this.strikes.set(key, strike)
     return outcome
   }
 
-  private clearStrikes(source: string): void {
-    this.strikes.delete(source)
+  /** Pre-verification bucket: one per source address. */
+  private ipKey(source: string): string {
+    return `ip:${source}`
+  }
+
+  /**
+   * Post-verification bucket: one per account. There is exactly one account
+   * admitted here (see `WebAuthHost.uid`), so in practice one entry — the point
+   * of the key is that it is the owner's own, and not an address shared with
+   * every stranger a tunnel funnels onto loopback.
+   */
+  private uidKey(uid: string): string {
+    return `uid:${uid}`
   }
 }

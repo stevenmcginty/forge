@@ -47,7 +47,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     id: 'claude',
     name: 'Claude Code',
-    blurb: 'the `claude` CLI',
+    blurb: 'the `claude` CLI — also what the GLM 5.3 pane runs',
     command: 'claude',
     versionArgs: ['--version'],
     latest: { source: 'npm', npmPackage: '@anthropic-ai/claude-code' },
@@ -425,7 +425,7 @@ export function isPlainCommand(command: string): boolean {
 }
 
 /** A version argument: a flag or a word, never a fragment of shell. */
-function isPlainArg(arg: string): boolean {
+export function isPlainArg(arg: string): boolean {
   const a = String(arg ?? '').trim()
   return a.length > 0 && a.length <= 40 && /^[A-Za-z0-9._=\-\/]+$/.test(a)
 }

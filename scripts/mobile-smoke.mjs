@@ -269,8 +269,12 @@ async function main() {
   await waitFor(() => sneaky.closed !== null, 5000, 'unauthenticated write to be refused')
   log(sneaky.closed === 4001, 'a write before hello is refused and the socket dropped')
 
-  // Five failures in total trips the lockout. One was spent by `anon` above.
-  for (let i = 0; i < 4; i++) {
+  // Strike buckets are keyed on the credential presented, not the address —
+  // every phone a tunnel funnels onto loopback shares one source. The
+  // credential-less `anon` above struck a bucket of its own; these five all
+  // present the same wrong token, so they share one, and the next holder of
+  // it finds the lock.
+  for (let i = 0; i < 5; i++) {
     const s = await connect()
     s.send({ t: 'hello', proto: 1, deviceId: `bad${i}`, token: 'nope' })
     await waitFor(() => s.closed !== null, 5000, 'lockout attempt to close')

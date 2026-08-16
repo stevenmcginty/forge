@@ -1,11 +1,12 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, screen, session, shell } from 'electron'
-import { existsSync, mkdirSync } from 'node:fs'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, screen, session, shell } from 'electron'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import { PACK_EXTENSION } from '@shared/skillpack'
 import { planProjectFolder } from './projectfolder'
 import { gitRemoteOrigin } from './git-remote'
+import { makeSafeStorageCodec } from './secretbox'
 import type {
   AppInfo,
   MakeProjectFolderRequest,
@@ -109,8 +110,15 @@ const TITLEBAR_HEIGHT = 38
 
 // store.ts is Electron-free and takes Electron by injection — see the
 // StoreHost comment there. This has to run before resolveDataRoot() below,
-// which is what the single-instance lock is keyed on.
-setStoreHost({ appDataDir: () => app.getPath('appData'), appVersion: () => app.getVersion() })
+// which is what the single-instance lock is keyed on. The secrets codec is
+// safeStorage (DPAPI here on Windows) behind the `enc:v1:` marker — see
+// electron/secretbox.ts; the codec itself degrades to plaintext when the
+// platform has nothing to offer.
+setStoreHost({
+  appDataDir: () => app.getPath('appData'),
+  appVersion: () => app.getVersion(),
+  secrets: makeSafeStorageCodec(safeStorage)
+})
 const DATA_ROOT = resolveDataRoot()
 // setPath throws on a directory that is not there yet.
 mkdirSync(DATA_ROOT, { recursive: true })
@@ -293,7 +301,9 @@ function createWindow(): void {
     },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      // The preload is contextBridge/ipcRenderer/webUtils only — all available
+      // to a sandboxed preload — so the renderer gets no Node of its own.
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
@@ -901,7 +911,25 @@ function registerAppHandlers(): void {
     return { ok: true, path: plan.path, name: plan.leaf }
   })
 
-  ipcMain.handle(IPC.openPath, async (_e, target: string) => shell.openPath(String(target)))
+  // Existing directories only. openPath is ShellExecute underneath, so a
+  // renderer string naming an .exe/.bat/.hta would not be "reveal it" but "run
+  // it". The one caller (revealProject) opens a project folder; the path is
+  // resolved before the check so tricks like a trailing " ..\x.exe" cannot
+  // smuggle a non-directory through, and every refusal is logged.
+  ipcMain.handle(IPC.openPath, async (_e, target: string): Promise<string> => {
+    const candidate = resolve(String(target ?? ''))
+    let directory = false
+    try {
+      directory = statSync(candidate).isDirectory()
+    } catch {
+      directory = false
+    }
+    if (!directory) {
+      console.error(`[shell] refused openPath — not an existing directory: ${candidate}`)
+      return ''
+    }
+    return shell.openPath(candidate)
+  })
 
   // http(s) only. openExternal hands a string straight to the OS launcher, so
   // an unfiltered channel would let any renderer bug turn into "run this".
@@ -911,7 +939,14 @@ function registerAppHandlers(): void {
       console.error(`[shell] refused to open non-http url: ${target.slice(0, 80)}`)
       return false
     }
-    await shell.openExternal(target)
+    try {
+      await shell.openExternal(target)
+    } catch (err) {
+      // It can reject (no handler, malformed target); an unhandled rejection
+      // here would surface as an opaque invoke error in the renderer.
+      console.error(`[shell] openExternal failed for ${target.slice(0, 80)}:`, err)
+      return false
+    }
     return true
   })
 

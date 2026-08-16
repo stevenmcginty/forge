@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
@@ -53,8 +53,12 @@ interface Cached {
 let memory: Cached | null = null
 /** Set once the disk cache has been consulted, successfully or not. */
 let diskRead = false
-/** In-flight fetch, so three components mounting at once make one request. */
+/** The build callers join when one is already running. */
 let inflight: Promise<CommandsFeed> | null = null
+/** Whether that build is a refresh — one that hits the network. */
+let inflightRefresh = false
+/** Everything that must run one at a time: build() mutates `memory` and writes the cache. */
+let chain: Promise<unknown> = Promise.resolve()
 
 function cacheFile(): string {
   return join(getDataDir(), 'claude-docs.json')
@@ -77,8 +81,13 @@ async function readDisk(): Promise<Cached | null> {
 }
 
 async function writeDisk(value: Cached): Promise<void> {
+  // Write-then-rename, like store.ts's writeJson: a rename replaces the file
+  // atomically, while a bare writeFile can be read mid-write by the next launch
+  // and lose the disk-cache layer to a parse failure for no visible reason.
+  const p = cacheFile()
   try {
-    await writeFile(cacheFile(), JSON.stringify(value), 'utf8')
+    await writeFile(`${p}.tmp`, JSON.stringify(value), 'utf8')
+    await rename(`${p}.tmp`, p)
   } catch {
     // A cache that cannot be written is a slower app, not a broken one.
   }
@@ -199,14 +208,26 @@ async function build(refresh: boolean): Promise<CommandsFeed> {
   }
 }
 
-export async function commandsFeed(refresh = false): Promise<CommandsFeed> {
-  // One request at a time. Without this, a flyout that mounts while a refresh
-  // is running fires a second pair of GETs and the two race to write the cache.
-  if (inflight && !refresh) return inflight
-  const run = build(refresh).finally(() => {
-    if (inflight === run) inflight = null
-  })
+export function commandsFeed(refresh = false): Promise<CommandsFeed> {
+  // One build at a time, always. A caller while a build is running joins it, so
+  // three components mounting at once make one pair of GETs. A refresh cannot
+  // join a build that started before it, but it does not elbow past one either:
+  // it queues behind whatever is running (and behind any earlier queued
+  // refresh), because two builds side by side would both mutate `memory` and
+  // race the cache write. A second refresh while one is already queued joins
+  // that one — it is about to hit the network, which is all a refresh wants.
+  if (inflight && (!refresh || inflightRefresh)) return inflight
+  const run = chain
+    .then(() => build(refresh))
+    .finally(() => {
+      if (inflight === run) {
+        inflight = null
+        inflightRefresh = false
+      }
+    })
+  chain = run.catch(() => undefined)
   inflight = run
+  inflightRefresh = refresh
   return run
 }
 

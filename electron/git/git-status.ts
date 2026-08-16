@@ -2,6 +2,7 @@ import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { gitFailureReason } from '@shared/tools'
 import type { GhState, GitBranch, GitSnapshot } from '@shared/types'
+import { stripRemoteCredentials } from '../git-remote'
 import { gitAvailable, runGit } from './git-run'
 import {
   FOR_EACH_REF_FORMAT,
@@ -189,6 +190,10 @@ export async function readStatus(
     const remote = await runGit(cwd, ['remote', 'get-url', 'origin'], { repoKey: repoRoot })
     remoteUrl = remote.ok ? remote.out.trim() || null : null
   }
+  // This snapshot is broadcast to every authenticated browser peer, so a PAT
+  // embedded in the origin URL must not survive into it — not from git now,
+  // and not from a previous snapshot taken before this rule existed.
+  remoteUrl = remoteUrl ? stripRemoteCredentials(remoteUrl) || null : null
 
   /* 7 — when was this last fetched? A stat, not a process. */
   const fetchedAt = fetchHeadMtime(gitDir)

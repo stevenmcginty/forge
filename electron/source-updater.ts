@@ -38,6 +38,16 @@ const FOCUS_CHECK_MIN_GAP_MS = 60_000
 const GIT_TIMEOUT_MS = 45_000
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000
 
+/**
+ * The one remote this updater will pull from: the Forge repo itself, over
+ * https — the same repo every release URL in the app already names. The pull
+ * is only the first half of the update; what lands is then npm-installed and
+ * run, so the transport is part of the trust decision and not a detail. An
+ * ssh://, git:// or plain http:// origin is refused here even though git
+ * itself would happily talk to all three.
+ */
+const EXPECTED_ORIGIN_URL = 'https://github.com/stevenmcginty/forge'
+
 let status: SourceUpdateStatus = { phase: 'unsupported' }
 let target: BrowserWindow | null = null
 let timer: NodeJS.Timeout | null = null
@@ -80,6 +90,12 @@ function git(args: string[]): Promise<{ ok: boolean; out: string; err: string }>
       }
     )
   })
+}
+
+/** `https://github.com/stevenmcginty/forge`, with or without `.git` — nothing else. */
+function isTrustedOriginUrl(url: string): boolean {
+  const u = url.trim().toLowerCase().replace(/\/+$/, '')
+  return u === EXPECTED_ORIGIN_URL || u === `${EXPECTED_ORIGIN_URL}.git`
 }
 
 /** The version a pull would bring: origin's package.json, without touching the tree. */
@@ -129,6 +145,19 @@ export async function applySourceUpdate(): Promise<boolean> {
   if (!enabled || status.phase !== 'available') return false
   const version = status.version
   broadcast({ phase: 'updating', step: 'pull', ...(version ? { version } : {}) })
+
+  // Where the code would come from. A pull here is followed by npm install and
+  // a restart — by running whatever origin sends — so origin has to be the
+  // Forge repo over https. Anything else (an ssh remote, a renamed fork, a
+  // file:// clone) is a checkout this updater has no business updating.
+  const originUrl = await git(['remote', 'get-url', 'origin'])
+  if (!originUrl.ok || !isTrustedOriginUrl(originUrl.out)) {
+    broadcast({
+      phase: 'error',
+      error: `this checkout does not update from ${EXPECTED_ORIGIN_URL} over https — update it by hand`
+    })
+    return false
+  }
 
   // Ask before jumping. A dirty tree is the failure this updater actually hits
   // — the stable checkout gets edited, by Steve or by an agent working in it —

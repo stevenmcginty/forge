@@ -29,7 +29,34 @@ export default defineConfig({
   },
   renderer: {
     root: '.',
-    plugins: [react()],
+    plugins: [
+      react(),
+      {
+        // index.html ships the loose CSP the dev server needs: Vite's dev
+        // pipeline injects inline scripts and HMR relies on eval, so
+        // script-src carries 'unsafe-inline' and 'unsafe-eval' there. The
+        // production build loads none of that — it emits plain module chunks
+        // from 'self' (the WebGL xterm addon is a bundled dynamic import, not
+        // a remote script) — so both flags are stripped on the way out and an
+        // injected script in the renderer has no way to execute. Everything
+        // else in the policy is untouched: style-src keeps 'unsafe-inline'
+        // because React sets element style attributes, and connect-src stays
+        // as written because the renderer talks to services over IPC, not
+        // fetch. If index.html's policy ever drifts, this fails the build
+        // loudly rather than silently shipping the loose one.
+        name: 'tighten-csp-for-production',
+        apply: 'build',
+        transformIndexHtml(html) {
+          const loose = "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+          if (!html.includes(loose)) {
+            throw new Error(
+              `[tighten-csp-for-production] index.html no longer contains "${loose}" — update the CSP or this plugin, do not ship the loose policy by accident`
+            )
+          }
+          return html.replace(loose, "script-src 'self'")
+        }
+      }
+    ],
     server: {
       watch: {
         // The renderer's root is the repo root, so vite's watcher sees every

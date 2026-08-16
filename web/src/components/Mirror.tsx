@@ -1,9 +1,18 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
+} from 'react'
 import { Icon } from '@/components/Icon'
 import type { MirrorButton, MirrorKey } from '@shared/mobile'
 import { PIN_MAX_DIGITS, PIN_MIN_DIGITS } from '@shared/web'
 import { askForScreen, sendMirrorInput, stopWatching, watchMirror } from '../lib/client'
 import { fractionFor, keyFor, notchesFor } from '../lib/mirror-input'
+import { startTouchpad, type TouchpadHandle, type TouchpadState } from '../lib/touchpad'
 import { canPaintScreen, startScreen, type ScreenPainter } from '../lib/screen'
 import { useForge } from '../state'
 import './Mirror.css'
@@ -41,6 +50,26 @@ import './Mirror.css'
  * driving a remote desktop reaches for most: a single Escape that quietly meant
  * "give me back my browser" would make dismissing a dialog on that desk
  * impossible, which is precisely the thing somebody opened this to do.
+ *
+ * ## Two ways to point, and why a phone needs the second
+ *
+ * **Direct** maps a pointer event absolutely: where you press is where the desk
+ * is told you pressed. Right for a mouse, unusable for a finger — a 1920-pixel
+ * desktop squeezed into a 390-pixel screen puts most of its targets under
+ * something bigger than they are, a fingertip's drift during a tap becomes a
+ * drag, and there is no scroll and no right-click from glass at all. So there
+ * is **Trackpad**, which hands the same three verbs to `lib/touchpad.ts`: the
+ * finger moves a cursor this end owns, a tap clicks, a still hold right-clicks,
+ * two fingers scroll — the grammar the television already uses, written for a
+ * touchscreen (mobile/src/lib/pointer.ts is the original).
+ *
+ * The mode picks itself — `(pointer: coarse)` at mount, or the first touch
+ * this surface ever sees — because the person who needs it is holding a phone
+ * and has no way to reach a toggle through a mode that does not fit their
+ * hand. The toggle in the bar is for the opposite: a desktop must never be
+ * trapped in it, and a phone must be able to give the absolute mapping one
+ * more chance. Direct itself is untouched by any of this: with the mode off,
+ * every trackpad path below returns before doing anything.
  */
 
 /**
@@ -88,6 +117,15 @@ type Phase =
   | { kind: 'over'; message: string }
 
 /**
+ * How a pointer becomes the desk's: absolutely, or through the trackpad.
+ *
+ * A union rather than a boolean because both ends of it are named in the bar —
+ * a toggle that says "Trackpad: off" has explained nothing, and this is a
+ * grammar somebody is being asked to learn in one word.
+ */
+type InputMode = 'direct' | 'trackpad'
+
+/**
  * One base64 field off the wire, as the bytes a decoder wants.
  *
  * The buffer is named in the type because `BufferSource` — what `screen.ts` and
@@ -119,9 +157,24 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
   /** What `lib/screen.ts` says is wrong with the picture, or '' when nothing is. */
   const [trouble, setTrouble] = useState('')
   const [pin, setPin] = useState('')
+  /**
+   * Which way a pointer becomes the desk's. Chosen at mount by the only honest
+   * signal there is — `(pointer: coarse)` is a phone or a tablet — and then by
+   * the first touch this surface sees, because a finger that has to reach a
+   * toggle through the absolute mapping is a finger that cannot reach it.
+   */
+  const [input, setInput] = useState<InputMode>(() =>
+    window.matchMedia('(pointer: coarse)').matches ? 'trackpad' : 'direct'
+  )
+  /** What the trackpad's ring should look like. Owned by `lib/touchpad.ts`. */
+  const [padState, setPadState] = useState<TouchpadState>('idle')
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const painterRef = useRef<ScreenPainter | null>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const padCursorRef = useRef<HTMLDivElement | null>(null)
+  /** The running trackpad, or null outside trackpad-and-driving. */
+  const padRef = useRef<TouchpadHandle | null>(null)
   const answerTimer = useRef(0)
   /**
    * Re-arm the silence timer. Held in a ref because the timer belongs to the
@@ -149,6 +202,26 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
    * only two places either changes.
    */
   const drivingRef = useRef(false)
+  /**
+   * The input mode, outside React, for exactly the reason `drivingRef` exists:
+   * the pointer handlers below are plain functions on a canvas that never
+   * re-attaches, and the copy they close over would be whichever one was
+   * rendered when the page loaded.
+   */
+  const inputRef = useRef<InputMode>('direct')
+  inputRef.current = input
+  /**
+   * Has anybody chosen the mode by hand? Until they have, the first touch
+   * anywhere on the picture may switch it — after, it may not, because a phone
+   * that flipped back on every touch could never take the toggle's other path.
+   */
+  const choseInput = useRef(false)
+  /**
+   * The press that armed driving is spent on arming, and must not also become
+   * a trackpad gesture when it bubbles on to the stage one dispatch later —
+   * see `onStageDown`, which consumes it.
+   */
+  const armBounce = useRef(false)
   /** Everything held down right now, so leaving can let go of all of it. */
   const heldKeys = useRef(new Set<MirrorKey>())
   const heldButtons = useRef(new Set<MirrorButton>())
@@ -191,6 +264,12 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
   const release = useCallback((): void => {
     if (!drivingRef.current) return
     drivingRef.current = false
+    // The trackpad settles here too, first: every way out of driving passes
+    // through this function while the socket is still open, and a trackpad
+    // drag is a button held on the desk exactly as a Direct one is. The pad's
+    // own effect tears down after this and calls `stop()` again — harmlessly,
+    // because the first call already let go.
+    padRef.current?.stop()
     for (const key of heldKeys.current) sendMirrorInput({ a: 'key', key, down: false })
     heldKeys.current.clear()
     for (const button of heldButtons.current) {
@@ -204,6 +283,10 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
 
   const drive = useCallback((): void => {
     drivingRef.current = true
+    // The press that armed the mode bubbles on to the stage's own handlers one
+    // dispatch later; this is how they know to let it pass unprocessed. The
+    // arming click is never forwarded — not in Direct mode, and not here.
+    armBounce.current = true
     lastEscape.current = 0
     setDriving(true)
   }, [])
@@ -377,6 +460,14 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
     const onWheel = (event: WheelEvent): void => {
       const notches = notchesFor(event.deltaY, event.deltaMode)
       if (!notches) return
+      // In trackpad mode the ring is the only pointer there is: these notches
+      // belong at the cursor the fingers left, not under a mouse that happens
+      // to be sitting on the canvas while the finger grammar is on.
+      if (inputRef.current === 'trackpad') {
+        event.preventDefault()
+        padRef.current?.wheel(notches)
+        return
+      }
       const at = fractionAt(event.clientX, event.clientY)
       if (!at) return
       event.preventDefault()
@@ -411,6 +502,114 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
     }
   }, [driving, fractionAt, release])
 
+  /* --------------------------------------------------- the trackpad's half */
+
+  /**
+   * The trackpad's whole lifetime, modelled on the pointer's in the television
+   * (TvDashboard): built when trackpad driving starts, torn down when it stops
+   * or the mode changes — and the teardown is the safety device. A drag
+   * abandoned by a hidden tab, a lost socket or a flip of the toggle would
+   * otherwise leave a mouse button held down on somebody's real desktop, and
+   * `stop()` is what releases it.
+   */
+  useEffect(() => {
+    if (!driving || input !== 'trackpad') return
+    const stage = stageRef.current
+    const cursor = padCursorRef.current
+    const canvas = canvasRef.current
+    if (!stage || !cursor || !canvas) return
+    const handle = startTouchpad({
+      cursor,
+      stage,
+      picture: canvas,
+      frameSize: () => {
+        const size = painterRef.current?.size()
+        // Zeroes are "nothing has decoded", and a fraction of nothing is not a
+        // place. The pad falls back to the canvas's own box until a frame
+        // arrives, which is the whole stage's honest middle.
+        return size && size.width > 0 && size.height > 0 ? size : null
+      },
+      send: sendMirrorInput,
+      onChange: setPadState
+    })
+    padRef.current = handle
+    return () => {
+      padRef.current = null
+      handle.stop()
+    }
+  }, [driving, input])
+
+  /**
+   * The trackpad's own pointer handlers, on the stage and not the canvas.
+   *
+   * A finger on a phone is a trackpad, and a trackpad is the whole surface: in
+   * this mode the black bars around the picture are glass like any other part
+   * of it, and a pad that stopped tracking the finger at the edge of the video
+   * would be a pointer that can only ever move half as far as its user's thumb.
+   * They are gated rather than conditionally attached, so that Direct mode is
+   * untouched — when the mode is 'direct', every one of these returns before
+   * doing anything, and the canvas's own handlers below do all the work.
+   */
+  const onStageDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    // The arming press arrives here twice — once at its target and once by
+    // bubbling — and the second copy has already been spent on entering the
+    // mode. Consumed here whatever the mode, so a flag set in Direct mode
+    // cannot sit waiting to eat the first trackpad tap of a later session.
+    if (armBounce.current) {
+      armBounce.current = false
+      return
+    }
+    if (!drivingRef.current || inputRef.current !== 'trackpad') return
+    const pad = padRef.current
+    if (!pad) return
+    event.preventDefault()
+    // Keep the finger's events even when it slides off the stage or off the
+    // screen entirely: a gesture that ends because the glass ran out is a
+    // grammar with an edge in it, and the edge is always exactly where the
+    // pointer was heading.
+    event.currentTarget.setPointerCapture(event.pointerId)
+    if (event.pointerType !== 'touch' && event.button !== 0) {
+      // A real mouse button pressed while the finger grammar is on. The
+      // grammar has no gesture for it, but the button does not need one — it
+      // goes through whole, at the cursor the fingers left.
+      const button = buttonOf(event.button)
+      if (button) pad.click(button)
+      return
+    }
+    pad.down(event.pointerId, event.clientX, event.clientY)
+  }
+
+  const onStageMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!drivingRef.current || inputRef.current !== 'trackpad') return
+    padRef.current?.move(event.pointerId, event.clientX, event.clientY)
+  }
+
+  const onStageUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!drivingRef.current || inputRef.current !== 'trackpad') return
+    padRef.current?.up(event.pointerId)
+  }
+
+  /**
+   * The browser took the gesture away — a call, a notification, a palm landing
+   * beside the finger. A cancelled press never clicks (see `cancel` in
+   * lib/touchpad.ts), so there is nothing to forward and everything to release.
+   */
+  const onStageCancel = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!drivingRef.current || inputRef.current !== 'trackpad') return
+    padRef.current?.cancel(event.pointerId)
+  }
+
+  /**
+   * No browser menu over the glass in trackpad mode: a long press is this
+   * grammar's right-click, half of a gesture the pad is mid-way through
+   * reading, and a menu that stole it would turn the hold into nothing.
+   */
+  const onStageMenu = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    if (drivingRef.current && inputRef.current === 'trackpad') event.preventDefault()
+  }
+
+  /* ------------------------------------------------------- the canvas's half */
+
   /**
    * The pointer, coalesced.
    *
@@ -423,6 +622,9 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
    */
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (!drivingRef.current) return
+    // Trackpad gestures are the stage's: the same event reaches its handler by
+    // bubbling, and routing it here as well would count every movement twice.
+    if (inputRef.current === 'trackpad') return
     move.current.x = event.clientX
     move.current.y = event.clientY
     if (move.current.frame) return
@@ -453,12 +655,19 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
    * under the cursor on that desk.
    */
   const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
+    // The first touch this surface has ever seen picks the mode by itself.
+    // After a hand has chosen, it stops: a phone that flipped back on every
+    // touch could never take the toggle's other path.
+    if (event.pointerType === 'touch' && !choseInput.current) setInput('trackpad')
     if (!drivingRef.current) {
       if (!canControl || phase.kind !== 'live') return
       event.preventDefault()
       drive()
       return
     }
+    // The stage's, by bubbling — see the block above for why handling it here
+    // as well would double every gesture.
+    if (inputRef.current === 'trackpad') return
     const button = buttonOf(event.button)
     const at = fractionAt(event.clientX, event.clientY)
     if (!button || !at) return
@@ -472,6 +681,9 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
 
   const onPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (!drivingRef.current) return
+    // The stage's, by bubbling — including the release of the press that armed
+    // driving, which the pad never saw land and so ignores.
+    if (inputRef.current === 'trackpad') return
     const button = buttonOf(event.button)
     const at = fractionAt(event.clientX, event.clientY)
     if (!button || !at) return
@@ -506,6 +718,32 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
           not accept anything typed from here.
         </p>
 
+        {/*
+          The input mode, both ways out of it always one press. Auto-selected
+          for a touch, but never locked: a desktop that strayed into trackpad
+          has no finger and needs the way back, and a phone that wants the
+          picture pressed directly — a big button on the desk is easier to hit
+          absolutely than a cursor is to drive — has the way back too. The
+          label names where it is, not where the press goes, because "Direct:
+          off" has told nobody anything.
+        */}
+        <button
+          type="button"
+          className="ghost-btn mirror__btn"
+          aria-pressed={input === 'trackpad'}
+          title={
+            input === 'trackpad'
+              ? 'Trackpad: slide to move the pointer, tap to click, hold still to right-click, two fingers to scroll'
+              : 'Direct: the pointer goes where you press'
+          }
+          onClick={() => {
+            choseInput.current = true
+            setInput(input === 'trackpad' ? 'direct' : 'trackpad')
+          }}
+        >
+          {input === 'trackpad' ? 'Trackpad' : 'Direct'}
+        </button>
+
         {driving ? (
           <button type="button" className="ghost-btn mirror__btn" onClick={() => release()}>
             Stop driving
@@ -522,7 +760,17 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
         </button>
       </div>
 
-      <div className="mirror__stage" data-driving={driving}>
+      <div
+        className="mirror__stage"
+        data-driving={driving}
+        data-input={input}
+        ref={stageRef}
+        onPointerDown={onStageDown}
+        onPointerMove={onStageMove}
+        onPointerUp={onStageUp}
+        onPointerCancel={onStageCancel}
+        onContextMenu={onStageMenu}
+      >
         <canvas
           ref={canvasRef}
           className="mirror__picture"
@@ -535,8 +783,27 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
           onContextMenu={(event) => event.preventDefault()}
         />
 
+        {/*
+          The trackpad's cursor, over the picture and outside React entirely:
+          lib/touchpad.ts moves it by writing one transform, because a cursor
+          that re-rendered the component sixty times a second would re-render a
+          decoding canvas with it. Placed by the same picture-box arithmetic
+          the clicks are measured with, so the ring and the click cannot
+          disagree about where the desk is being pointed.
+        */}
+        {driving && input === 'trackpad' ? (
+          <div ref={padCursorRef} className="mirror__pad" data-state={padState} aria-hidden="true" />
+        ) : null}
+
         {phase.kind === 'live' && !driving && canControl ? (
-          <p className="mirror__hint">Click the picture to take the mouse and keyboard. Press Escape twice to let go.</p>
+          input === 'trackpad' ? (
+            <p className="mirror__hint">
+              Tap the picture to take the mouse and keyboard. Slide to point, tap to click, hold still for a
+              right-click, hold a beat then slide to drag, two fingers to scroll.
+            </p>
+          ) : (
+            <p className="mirror__hint">Click the picture to take the mouse and keyboard. Press Escape twice to let go.</p>
+          )
         ) : null}
         {phase.kind === 'live' && !canControl ? (
           <p className="mirror__hint">Watching only — this desktop is not letting a browser drive it.</p>

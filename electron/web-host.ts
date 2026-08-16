@@ -219,6 +219,15 @@ const GEOMETRY_PUSH_MS = 80
 let geometryPush: NodeJS.Timeout | null = null
 let lastDetail = ''
 let starting = false
+/**
+ * Bumped by every `stop()`, read by every in-flight `start()` when its port
+ * bind resolves. Without it, a stop() that lands while `start()` is still
+ * awaiting sees `server === null`, returns, and the awaited start then assigns
+ * the server anyway — the link coming up a moment *after* the person at the
+ * desk switched it off. The epoch is the start-token: stop invalidates, start
+ * re-checks before committing.
+ */
+let startEpoch = 0
 
 /**
  * The last browser refused at the door for the page it was on, or null.
@@ -801,12 +810,17 @@ function sendMirror(event: WebMirrorEvent): void {
  * input frame a capture is negotiated once, so switching the sound off silences
  * the next watch and not this one.
  */
-function startMirror(pin: string): { error: string; needsPin?: boolean } | null {
+function startMirror(
+  pin: string,
+  who: { uid: string; source: string }
+): { error: string; needsPin?: boolean } | null {
   const settings = getSettings()
   if (!settings.webMirrorEnabled) {
     return { error: 'This desktop does not share its screen with browsers. Turn it on in Settings › Forge Web.' }
   }
-  const fresh = getAuth().checkFreshPin(pin)
+  // `who` so a wrong PIN counts against the account that guessed it, exactly as
+  // the same wrong PIN at hello does — see `checkFreshPin` in electron/web/auth.ts.
+  const fresh = getAuth().checkFreshPin(pin, who)
   if (!fresh.ok) return { error: fresh.message, ...(fresh.needed ? { needsPin: true } : {}) }
   const win = mirrorWindow()
   if (!win) return { error: 'Forge has no window open on the desktop, so it cannot share its screen.' }
@@ -1224,6 +1238,9 @@ async function start(): Promise<void> {
 
   const instance = new WebServer(host)
 
+  // Read before the port is bound; re-checked the moment the bind resolves.
+  // See `startEpoch`.
+  const epoch = startEpoch
   try {
     await instance.start({ host: WEB_BIND_HOST, port: webPort() })
   } catch (err) {
@@ -1235,6 +1252,18 @@ async function start(): Promise<void> {
       : message
     console.error(`[web] failed to start: ${message}`)
     report(detail)
+    return
+  }
+
+  if (epoch !== startEpoch) {
+    // stop() ran while the port was being bound. Tear this one down rather than
+    // letting it come up behind the user's back; the rendezvous and the tunnel
+    // were already stopped on that side.
+    starting = false
+    await instance.stop({
+      reason: 'disabled',
+      message: 'Forge Web was switched off on the desktop.'
+    })
     return
   }
 
@@ -1479,6 +1508,10 @@ function stopTunnel(): void {
  * nothing is on.
  */
 async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
+  // First, before anything awaits: invalidate any start() still binding its
+  // port, so it tears itself down instead of assigning the server the moment
+  // its bind resolves. See `startEpoch`.
+  startEpoch += 1
   // Before the socket closes, and before anything else here can throw. A
   // rendezvous failure is logged and swallowed inside `shutdown()` by design,
   // so this cannot be the reason Forge will not close.

@@ -494,14 +494,22 @@ async function main() {
     'and so is something that is not a PIN at all, in the same sentence — the door never says which half was wrong'
   )
 
-  /* ---------------- 17d. the lockout is what makes four digits defensible */
+  /* ---------------- 17d. the lockout is what makes four digits defensible
+   *
+   * Wrong PINs strike the ACCOUNT bucket, not the source address — every
+   * browser a tunnel funnels onto loopback shares one address, so a per-source
+   * bucket is a bucket the whole internet holds with the owner. The two
+   * strikes 17c just spent land on that account bucket regardless of source,
+   * so expire the window first and prove the count from a clean slate.
+   */
 
+  clock += AUTH_LOCKOUT_MS + 1000
   let lockedByPins = null
   for (let i = 0; i < AUTH_MAX_FAILURES; i++) {
     const outcome = await auth.authenticate(hello('10.4.0.3', mint(), 'pin-browser', 'Chrome', { pin: WRONG_PIN }))
     if (outcome.reason !== 'pin-invalid') lockedByPins = outcome
   }
-  log(lockedByPins === null, `${AUTH_MAX_FAILURES} wrong PINs from one source are each answered on their own merits`)
+  log(lockedByPins === null, `${AUTH_MAX_FAILURES} wrong PINs from one account are each answered on their own merits`)
   const pinLockout = await auth.authenticate(hello('10.4.0.3', mint(), 'pin-browser', 'Chrome', { pin: PIN }))
   log(
     pinLockout.ok === false && pinLockout.reason === 'busy' && pinLockout.retryAfterMs > 0,

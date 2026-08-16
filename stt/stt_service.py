@@ -24,6 +24,14 @@ not install into it, so this is a raw line protocol. It carries the exact same
 messages a WebSocket would.)
 
 client -> server
+    {"hello": "<token>"}            when started with --auth-token / the
+                                     FORGE_STT_AUTH_TOKEN env var: the FIRST
+                                     line every client must send. Anything
+                                     else — or silence past the window — gets
+                                     the connection closed before it has seen
+                                     a single phrase or landed a single
+                                     command. Without a token (a dev run by
+                                     hand) there is no handshake at all.
     {"cmd": "start"}                 begin listening
     {"cmd": "start", "autoStop": 10}  ...and set the silence timeout for it
     {"cmd": "start", "mode": "wake"}  ...always-listening instead (see below)
@@ -36,6 +44,8 @@ client -> server
     {"cmd": "shutdown"}              exit cleanly
 
 server -> client
+    {"evt": "auth-ok"}                          handshake accepted (token mode only)
+    {"evt": "auth-rejected"}                    wrong token; the socket then closes
     {"evt": "ready"}                            model loaded, start is allowed
     {"evt": "level", "rms": 0.42}               ~10/s while listening
     {"evt": "phrase", "text": "..."}            one chunked phrase
@@ -82,6 +92,7 @@ import json
 import os
 import queue
 import re
+import secrets
 import sys
 import threading
 import time
@@ -132,6 +143,10 @@ MODEL_FILES = {
 
 LEVEL_HZ = 10.0
 DEFAULT_AUTO_STOP_S = 10.0
+
+# How long a token-checking sidecar waits for the client's hello line before
+# closing the connection.
+AUTH_WINDOW_S = 5.0
 
 # What the model hears in a chunk of breath.
 BREATH_TEXT = {"you", "thank you", "thanks for watching", "bye", "uh", "um"}
@@ -730,6 +745,15 @@ class SttService:
     def __init__(self, engine: ParakeetEngine, opts):
         self.engine = engine
         self.opts = opts
+        # Set only when somebody asked for it — --auth-token, or the
+        # FORGE_STT_AUTH_TOKEN env var Forge passes its child. Without a token
+        # the socket behaves exactly as it always has, so a dev run by hand
+        # needs no ceremony (and no token to guess).
+        self.auth_token = (
+            getattr(opts, "auth_token", None)
+            or os.environ.get("FORGE_STT_AUTH_TOKEN")
+            or ""
+        ).strip() or None
         self.loop = None
         self.clients: set = set()
         self.state = IDLE
@@ -1016,8 +1040,57 @@ class SttService:
 
     # -- clients -----------------------------------------------------------
 
+    async def _authenticate(self, reader, writer) -> bool:
+        """The token handshake, run before the socket joins `clients` — an
+        unproven connection must never see a phrase or land a command.
+
+        The client's FIRST line must be {"hello": "<token>"}. A wrong token,
+        a malformed line, or nothing at all inside AUTH_WINDOW_S gets the
+        connection closed; only the wrong-token case is told why, so the
+        parent can tell a refusal apart from a sidecar that predates the
+        handshake (and so answers the hello with `unknown command None`
+        instead of either auth event).
+        """
+        peer = writer.get_extra_info("peername")
+        try:
+            line = await asyncio.wait_for(reader.readline(), timeout=AUTH_WINDOW_S)
+        except (asyncio.TimeoutError, TimeoutError):
+            log(f"client {peer}: no auth line within {AUTH_WINDOW_S:.0f}s — closing")
+            return False
+        if not line.strip():
+            log(f"client {peer}: hung up before authenticating")
+            return False
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            log(f"client {peer}: auth line was not JSON — closing")
+            return False
+        got = msg.get("hello") if isinstance(msg, dict) else None
+        if not isinstance(got, str) or not secrets.compare_digest(
+            got.encode("utf-8"), self.auth_token.encode("utf-8")
+        ):
+            log(f"client {peer}: bad auth token — closing")
+            try:
+                writer.write((json.dumps({"evt": "auth-rejected"}) + "\n").encode("utf-8"))
+                await writer.drain()
+            except Exception:
+                pass
+            return False
+        try:
+            writer.write((json.dumps({"evt": "auth-ok"}) + "\n").encode("utf-8"))
+            await writer.drain()
+        except Exception:
+            return False
+        return True
+
     async def handle(self, reader, writer) -> None:
         peer = writer.get_extra_info("peername")
+        if self.auth_token and not await self._authenticate(reader, writer):
+            try:
+                writer.close()
+            except Exception:
+                pass
+            return
         self.clients.add(writer)
         log(f"client {peer} connected")
         self.greet()
@@ -1108,6 +1181,8 @@ class SttService:
         # The one thing stdout is for: the parent parses this line.
         print(f"FORGE_STT_PORT={port}", flush=True)
         log(f"listening on {self.opts.host}:{port}")
+        if self.auth_token:
+            log("token auth required: every client must open with the hello line")
 
         threading.Thread(target=self.load_engine, daemon=True).start()
         tick = asyncio.create_task(self.ticker())
@@ -1224,6 +1299,12 @@ def parse_args(argv=None):
     )
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=0, help="0 = let the OS pick")
+    p.add_argument(
+        "--auth-token",
+        default=None,
+        help="require clients to open with this token (default: FORGE_STT_AUTH_TOKEN env; "
+        "unset = no handshake, plain dev behaviour)",
+    )
     p.add_argument(
         "--auto-stop",
         type=float,

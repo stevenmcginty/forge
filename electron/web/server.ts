@@ -346,12 +346,20 @@ export interface WebServerHost {
    * is set at all and whether this one matches are decisions with persisted
    * state behind them, and they live beside that state in electron/web/auth.ts.
    *
+   * `who` is the asking socket's verified identity — the uid off the token its
+   * `hello` presented and the address it came from — so a wrong PIN is counted
+   * against the *account* that guessed it rather than an address every tunnel
+   * caller shares. See the strike-keying note in electron/web/auth.ts.
+   *
    * Null means it has begun — the picture itself arrives later, as
    * `pushMirrorReady` and `pushMirrorFrame` calls. A refusal is a sentence the
    * browser tab shows, plus the one bit that changes what it shows it *in*: see
    * `needsPin` on `WebMirrorStopFrame`.
    */
-  mirrorStart?: (pin: string) => { error: string; needsPin?: boolean } | null
+  mirrorStart?: (
+    pin: string,
+    who: { uid: string; source: string }
+  ) => { error: string; needsPin?: boolean } | null
 
   /**
    * A browser started or stopped watching this screen.
@@ -500,7 +508,22 @@ export class WebServer {
   async start(options: WebServerOptions): Promise<{ host: string; port: number }> {
     if (this.listening) return this.listening
 
-    const http = createServer((req, res) => this.serveHttp(req, res))
+    // Wrapped for the same reason mobile wraps its listener: a throw out of a
+    // request handler is an uncaught exception, and nothing in Forge installs
+    // a process-level net for one — the answer here is a 500, not a dead app.
+    const http = createServer((req, res) => {
+      try {
+        this.serveHttp(req, res)
+      } catch (err) {
+        this.log(`http request failed: ${err instanceof Error ? err.message : String(err)}`)
+        try {
+          if (res.headersSent) res.destroy()
+          else res.writeHead(500).end('Server error')
+        } catch {
+          /* the peer has already gone */
+        }
+      }
+    })
     // `noServer` so the upgrade is only accepted on WEB_WS_PATH, only from an
     // allowed source, only with the right subprotocol and only from an expected
     // origin — a WebSocketServer bound directly to the http server would answer
@@ -514,30 +537,46 @@ export class WebServer {
     })
 
     http.on('upgrade', (req, socket, head) => {
-      const source = sourceOf(req)
-      const path = (req.url ?? '').split('?')[0]
-      if (path !== WEB_WS_PATH || !isAllowedSource(source)) {
-        refuseUpgrade(socket, 403, 'Forbidden')
-        return
+      try {
+        const source = sourceOf(req)
+        const path = (req.url ?? '').split('?')[0]
+        if (path !== WEB_WS_PATH || !isAllowedSource(source)) {
+          refuseUpgrade(socket, 403, 'Forbidden')
+          return
+        }
+        if (!offersSubprotocol(req)) {
+          // Refused here rather than after the handshake, because it costs no
+          // round trip and because a client that cannot name the protocol is
+          // either the wrong version or not a Forge client at all.
+          this.log(`refusing an upgrade from ${source} that did not ask for ${WEB_SUBPROTOCOL}`)
+          refuseUpgrade(socket, 400, 'Unsupported subprotocol')
+          return
+        }
+        if (!this.originAllowed(req)) {
+          const origin = typeof req.headers.origin === 'string' ? req.headers.origin : ''
+          this.log(`refusing an upgrade from ${source} with origin ${origin || '(none)'}`)
+          // Told to the desktop as well as the log, because this refusal is the
+          // one the browser cannot be told about. See `onOriginRefused`.
+          this.host.onOriginRefused?.(origin, this.host.allowedOrigins())
+          refuseUpgrade(socket, 403, 'Origin not allowed')
+          return
+        }
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          try {
+            this.accept(ws, source)
+          } catch (err) {
+            this.log(`accepting a socket failed: ${err instanceof Error ? err.message : String(err)}`)
+            try {
+              ws.close(1011, 'Server error')
+            } catch {
+              /* already gone */
+            }
+          }
+        })
+      } catch (err) {
+        this.log(`upgrade failed: ${err instanceof Error ? err.message : String(err)}`)
+        refuseUpgrade(socket, 500, 'Upgrade failed')
       }
-      if (!offersSubprotocol(req)) {
-        // Refused here rather than after the handshake, because it costs no
-        // round trip and because a client that cannot name the protocol is
-        // either the wrong version or not a Forge client at all.
-        this.log(`refusing an upgrade from ${source} that did not ask for ${WEB_SUBPROTOCOL}`)
-        refuseUpgrade(socket, 400, 'Unsupported subprotocol')
-        return
-      }
-      if (!this.originAllowed(req)) {
-        const origin = typeof req.headers.origin === 'string' ? req.headers.origin : ''
-        this.log(`refusing an upgrade from ${source} with origin ${origin || '(none)'}`)
-        // Told to the desktop as well as the log, because this refusal is the
-        // one the browser cannot be told about. See `onOriginRefused`.
-        this.host.onOriginRefused?.(origin, this.host.allowedOrigins())
-        refuseUpgrade(socket, 403, 'Origin not allowed')
-        return
-      }
-      wss.handleUpgrade(req, socket, head, (ws) => this.accept(ws, source))
     })
 
     await new Promise<void>((resolve, reject) => {
@@ -1027,8 +1066,13 @@ export class WebServer {
         }
         // The PIN is passed through unread: whether one is set and whether this
         // one matches are decisions with persisted state behind them, and they
-        // belong beside that state.
-        const refusal = this.host.mirrorStart(wireString(frame.pin, PIN_MAX_DIGITS))
+        // belong beside that state. The identity travels with it, so the
+        // counting a wrong PIN earns lands on the account that guessed rather
+        // than on an address a tunnel lets everybody share.
+        const refusal = this.host.mirrorStart(wireString(frame.pin, PIN_MAX_DIGITS), {
+          uid: client.device.uid,
+          source: client.source
+        })
         if (refusal) {
           // Refused before it began, so this socket does not become the viewer
           // — it has to be able to ask again once the reason is fixed, and the
@@ -1236,7 +1280,14 @@ export class WebServer {
    */
   private async onAuth(client: Client, frame: Extract<WebClientFrame, { type: 'auth' }>): Promise<void> {
     const rid = wireString(frame.rid, 128)
-    const outcome = await this.host.auth.verifyToken(wireString(frame.idToken, 8192), client.source)
+    // The uid rides along so a failure counts against the account presenting
+    // it, not an address every tunnel caller shares — see the strike-keying
+    // note in electron/web/auth.ts.
+    const outcome = await this.host.auth.verifyToken(
+      wireString(frame.idToken, 8192),
+      client.source,
+      client.device?.uid
+    )
     if (!outcome.ok) {
       this.refuse(client, outcome.reason, outcome.message, outcome.retryAfterMs)
       return

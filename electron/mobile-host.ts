@@ -2,7 +2,16 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { hostname, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, desktopCapturer, ipcMain, Notification, powerSaveBlocker, screen } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  desktopCapturer,
+  ipcMain,
+  Notification,
+  powerSaveBlocker,
+  screen,
+  type DesktopCapturerSource
+} from 'electron'
 import { IPC } from '@shared/ipc'
 import {
   ACCEPT_WINDOW_MS,
@@ -76,6 +85,15 @@ let discovery: DiscoveryResponder | null = null
 let unsubscribePty: (() => void) | null = null
 let lastDetail = ''
 let starting = false
+/**
+ * Bumped by every `stop()`, read by every in-flight `start()` when its port
+ * bind resolves. Without it, a stop() that lands while `start()` is still
+ * awaiting sees `server === null`, returns — and the awaited start then assigns
+ * the server anyway, so the link comes up a moment *after* the person at the
+ * desk switched it off. The epoch is the start-token: stop invalidates, start
+ * re-checks before committing.
+ */
+let startEpoch = 0
 
 /**
  * The ngrok tunnel rides the server's lifecycle: started after the server is
@@ -595,6 +613,9 @@ async function start(): Promise<void> {
     log: (line) => console.log(line)
   })
 
+  // Read before the port is bound; re-checked the moment the bind resolves.
+  // See `startEpoch`.
+  const epoch = startEpoch
   try {
     await instance.start({ host: settings.mobileBindHost, port: settings.mobilePort })
   } catch (err) {
@@ -606,6 +627,15 @@ async function start(): Promise<void> {
       : message
     console.error(`[mobile] failed to start: ${message}`)
     report(detail)
+    return
+  }
+
+  if (epoch !== startEpoch) {
+    // stop() ran while the port was being bound. Tear this one down rather than
+    // letting it come up behind the user's back; the tunnel and the discovery
+    // responder were already stopped on that side.
+    starting = false
+    await instance.stop()
     return
   }
 
@@ -697,6 +727,10 @@ function offerPairingOnStart(): void {
 }
 
 async function stop(): Promise<void> {
+  // First, before anything awaits: invalidate any start() still binding its
+  // port, so it tears itself down instead of assigning the server the moment
+  // its bind resolves. See `startEpoch`.
+  startEpoch += 1
   stopTunnel()
   // Before everything else: a desktop that still answers "I am here" after the
   // link is off is advertising a door that has been bricked up.
@@ -1084,10 +1118,20 @@ export function registerMobileHandlers(): void {
    */
   ipcMain.handle(IPC.mobileMirrorSource, async (): Promise<string> => {
     const primary = screen.getPrimaryDisplay()
-    const sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: { width: 0, height: 0 }
-    })
+    let sources: DesktopCapturerSource[] = []
+    try {
+      sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 0, height: 0 }
+      })
+    } catch (err) {
+      // `getSources` rejects when the OS refuses the enumeration (a locked
+      // session, a display subsystem still coming up), and a rejected invoke is
+      // an unhandled rejection in the renderer. The empty answer is the one the
+      // renderer already knows how to show.
+      console.error(`[mobile] could not enumerate screens: ${err instanceof Error ? err.message : String(err)}`)
+      return ''
+    }
     // One entry per display; the primary is the one whose id matches, and the
     // first entry is the sane fallback when none does — the same rule
     // electron/voice-agent/ipc.ts uses for its screenshots.

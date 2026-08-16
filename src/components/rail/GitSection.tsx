@@ -336,12 +336,13 @@ function Foot({ snap }: { snap: GitSnapshot }): ReactNode {
       {gh.status === 'unauthenticated' ? (
         <span className="gsec__foot-line">Sign in to gh for pull requests</span>
       ) : null}
-      {gh.status === 'ready' && gh.currentPr ? (
+      {/* The URL is gh's output, not Forge's, so it is only a link once it is really https. */}
+      {gh.status === 'ready' && gh.currentPr && gh.currentPr.url.startsWith('https://') ? (
         <a
           className="gsec__foot-line gsec__pr"
           href={gh.currentPr.url}
           target="_blank"
-          rel="noreferrer"
+          rel="noreferrer noopener"
           title={gh.currentPr.title}
         >
           #{gh.currentPr.number} {gh.currentPr.title}

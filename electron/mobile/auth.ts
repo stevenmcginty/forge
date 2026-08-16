@@ -35,6 +35,8 @@ const TOKEN_BYTES = 32
 const PAIR_TOKEN_BYTES = 16
 /** How long a QR stays good for. */
 export const PAIR_TTL_MS = 5 * 60_000
+/** Backstop on the strike map's size — see `pruneStrikes`. */
+const MAX_STRIKE_BUCKETS = 10_000
 
 /**
  * A paired phone, as persisted in Settings. Note: no raw token anywhere.
@@ -153,7 +155,20 @@ export class MobileAuth {
    *
    * Two doors. An existing device presents its token; a new one presents the
    * pairing token from the QR and is issued a device token in the `hello-ok`.
-   * `source` is the remote address, and the unit of lockout.
+   *
+   * ## Which bucket a failure counts against
+   *
+   * The key is chosen before anything is checked: a presented credential gets a
+   * bucket of its own, keyed by that credential's digest, and only a
+   * credential-less hello counts against its source address. The reason is the
+   * tunnel: `cloudflared` and ngrok dial from loopback, so behind one every
+   * caller on earth shares a single `127.0.0.1` with the owner — and on a
+   * shared address-keyed bucket, a stranger's five guesses locked the owner's
+   * own phone out, while the owner's next success wiped the stranger's tally.
+   * Digest-keyed, a wrong guess lands in a bucket only the guesser can fill,
+   * and the right token lands in one that is always empty. Guessing a bucket is
+   * not a way in: the credentials themselves are 128 and 256 bits, and what the
+   * shared address bucket still buys is a stop on credential-less hammering.
    */
   authenticate(input: {
     source: string
@@ -162,7 +177,8 @@ export class MobileAuth {
     token?: string
     pairToken?: string
   }): AuthResult {
-    const locked = this.lockout(input.source)
+    const key = this.strikeKey(input)
+    const locked = this.lockout(key)
     if (locked) return locked
 
     if (input.pairToken) return this.pair(input)
@@ -174,20 +190,33 @@ export class MobileAuth {
     // no token learns the desktop is not accepting it right now, and a probe
     // learns nothing it could not learn by omitting the flag — the two
     // refusals are one refusal.
-    return this.fail(input.source, 'This phone is not paired, and the desktop is not accepting new phones right now.')
+    return this.fail(key, 'This phone is not paired, and the desktop is not accepting new phones right now.')
+  }
+
+  /**
+   * The strike bucket for one hello, as `authenticate` describes. The digest
+   * rather than the raw credential so the key is fixed-width and never itself
+   * something worth reading out of a heap dump.
+   */
+  private strikeKey(input: { source: string; token?: string; pairToken?: string }): string {
+    if (input.token) return `token:${sha256(String(input.token))}`
+    if (input.pairToken) return `pair:${sha256(String(input.pairToken))}`
+    return `ip:${input.source}`
   }
 
   private pair(input: { source: string; deviceId: string; deviceName: string; pairToken?: string }): AuthResult {
+    const key = this.strikeKey(input)
     const offer = this.pendingOffer()
-    if (!offer) return this.fail(input.source, 'No pairing is open — start one in Settings')
+    if (!offer) return this.fail(key, 'No pairing is open — start one in Settings')
     if (!sameDigest(sha256(offer.token), sha256(String(input.pairToken)))) {
-      return this.fail(input.source, 'Pairing code is not valid')
+      return this.fail(key, 'Pairing code is not valid')
     }
 
     // Single-use: burn it before issuing anything, so even a re-entrant caller
-    // cannot spend the same offer twice.
+    // cannot spend the same offer twice. Nothing is cleared on success — a
+    // bucket empties with time, not because its owner happened to succeed; see
+    // `fail`.
     this.pending = null
-    this.clearStrikes(input.source)
 
     const { device, issuedToken } = this.mintDevice(input.deviceId, input.deviceName)
     return { ok: true, device, issuedToken }
@@ -232,11 +261,10 @@ export class MobileAuth {
     // trusting a client-supplied id to pick which hash to compare against would
     // let a caller choose its own oracle.
     const found = devices.find((d) => sameDigest(d.tokenHash, presented))
-    if (!found) return this.fail(input.source, 'This device is not paired')
+    if (!found) return this.fail(this.strikeKey(input), 'This device is not paired')
 
     found.lastSeenAt = this.now()
     this.host.save(devices)
-    this.clearStrikes(input.source)
     return { ok: true, device: found }
   }
 
@@ -255,11 +283,16 @@ export class MobileAuth {
 
   /* -------------------------------------------------------------- lockout */
 
-  private lockout(source: string): { ok: false; code: 'locked'; msg: string } | null {
-    const strike = this.strikes.get(source)
+  /**
+   * Is this bucket locked out right now? The key it is handed is chosen by
+   * `strikeKey` — see the note on `authenticate` for why that is not simply the
+   * source address.
+   */
+  private lockout(key: string): { ok: false; code: 'locked'; msg: string } | null {
+    const strike = this.strikes.get(key)
     if (!strike) return null
     if (this.now() >= strike.until) {
-      this.strikes.delete(source)
+      this.strikes.delete(key)
       return null
     }
     if (strike.count < AUTH_MAX_FAILURES) return null
@@ -267,16 +300,39 @@ export class MobileAuth {
     return { ok: false, code: 'locked', msg: `Too many attempts — try again in ${seconds}s` }
   }
 
-  private fail(source: string, msg: string): { ok: false; code: 'auth'; msg: string } {
-    const strike = this.strikes.get(source) ?? { count: 0, until: 0 }
+  /**
+   * Count one failure against a bucket, and hand the refusal back unchanged.
+   *
+   * Nothing a caller does — including succeeding — empties a bucket early. The
+   * only mercy is time: `until` passes and the count goes with it. That is the
+   * fix for the tunnel, where a success and a stranger's failures used to share
+   * one address-keyed bucket and each could reset the other's.
+   */
+  private fail(key: string, msg: string): { ok: false; code: 'auth'; msg: string } {
+    const strike = this.strikes.get(key) ?? { count: 0, until: 0 }
     strike.count += 1
     strike.until = this.now() + AUTH_LOCKOUT_MS
-    this.strikes.set(source, strike)
+    this.strikes.set(key, strike)
+    this.pruneStrikes()
     return { ok: false, code: 'auth', msg }
   }
 
-  private clearStrikes(source: string): void {
-    this.strikes.delete(source)
+  /**
+   * Drop buckets whose window has lapsed, so a key derived from
+   * attacker-chosen bytes cannot grow the map without bound — a wrong token a
+   * second for a minute is six thousand live entries otherwise.
+   *
+   * The backstop clear is deliberately blunt and errs the safe way: dropping a
+   * bucket can only *un*lock a guesser, never lock the owner out, and an
+   * attacker fast enough to reach it has a fresh empty map to start over in,
+   * which is no worse than the position they were already in.
+   */
+  private pruneStrikes(): void {
+    const now = this.now()
+    for (const [key, strike] of this.strikes) {
+      if (now >= strike.until) this.strikes.delete(key)
+    }
+    if (this.strikes.size > MAX_STRIKE_BUCKETS) this.strikes.clear()
   }
 }
 

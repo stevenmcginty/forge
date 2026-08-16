@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { createConnection, type Socket } from 'node:net'
 import { join } from 'node:path'
@@ -6,12 +7,15 @@ import { app, ipcMain, type BrowserWindow } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { SttErrorKind, SttMode, SttPhase, SttStartOptions, SttStatus } from '@shared/types'
 import {
+  AUTH_CONFIRM_MS,
   MAX_RAPID_RESTARTS,
   OFF_STATUS,
   RestartBudget,
+  isStaleSidecarHelloError,
   isTransientSttError,
   pythonLooksMissing,
   reduceSttEvent,
+  sttAuthLine,
   sttStatusEqual
 } from './stt-protocol'
 import { activeModelDir } from './stt-model'
@@ -38,6 +42,12 @@ import { getSettings } from './store'
  *  - **Degrading honestly.** A missing interpreter or an incomplete model is a
  *    *typed* error all the way to the UI, so the pill can offer to fix the path
  *    instead of just going dark.
+ *
+ * Plus one quiet rule: every sidecar launch mints a token, and the socket only
+ * carries phrases and commands once the sidecar has seen it (see the handshake
+ * in ./stt-protocol and stt_service.py). A sidecar too old to know the
+ * handshake — a stale stt-dist — is tolerated with a warning rather than
+ * breaking dictation.
  */
 
 /** The sidecar binds its socket before printing the port — well inside this. */
@@ -53,6 +63,20 @@ let target: BrowserWindow | null = null
 let child: ChildProcess | null = null
 let sock: Socket | null = null
 let port = 0
+
+/**
+ * Handshake token, freshly minted per sidecar launch. The sidecar refuses
+ * every unproven socket while it is set, so no other local process that
+ * stumbles on the port can read what is dictated or send commands.
+ */
+let authToken: string | null = null
+/** True from hello until auth-ok / a refusal verdict / the window lapsing. */
+let authPending = false
+/** Set once a sidecar refused the handshake: every respawn goes tokenless. */
+let authDisabled = false
+/** One "predates the handshake" warning per sidecar launch, not per reconnect. */
+let authWarned = false
+let authTimer: NodeJS.Timeout | null = null
 
 let status: SttStatus = { ...OFF_STATUS }
 const budget = new RestartBudget()
@@ -216,10 +240,28 @@ function ensure(): void {
   stdoutBuf = ''
   lineBuf = ''
   port = 0
+  authToken = authDisabled ? null : randomBytes(32).toString('hex')
+  authPending = false
+  authWarned = false
+  if (authTimer) {
+    clearTimeout(authTimer)
+    authTimer = null
+  }
 
   let proc: ChildProcess
   try {
-    proc = spawn(launch.exe, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+    // The token rides the environment rather than argv: a command line is
+    // readable by any local process listing commands, which is exactly the
+    // audience it exists to keep out. A no-token spawn (the compat fallback)
+    // simply inherits the parent environment.
+    const authEnv = authToken
+      ? { ...process.env, FORGE_STT_AUTH_TOKEN: authToken }
+      : undefined
+    proc = spawn(launch.exe, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+      ...(authEnv ? { env: authEnv } : {})
+    })
   } catch (err) {
     fail(launch.frozen ? 'sidecar-missing' : 'python-missing', err instanceof Error ? err.message : String(err))
     return
@@ -309,6 +351,30 @@ function connect(proc: ChildProcess, p: number, attempt: number): void {
     }
     sock = s
     lineBuf = ''
+    // The hello line goes out before anything else, so a token-checking
+    // sidecar never sees so much as a `status` from an unproven socket.
+    authPending = authToken !== null
+    if (authToken) {
+      try {
+        s.write(sttAuthLine(authToken))
+      } catch {
+        /* the error/close handlers own a failed socket */
+      }
+      const attempt = s
+      authTimer = setTimeout(() => {
+        if (attempt !== sock) return
+        // Neither a verdict nor the "unknown command" of a pre-handshake
+        // sidecar. Carrying on is safe — the connection itself is ordinary —
+        // but say so once instead of failing silently forever.
+        authPending = false
+        if (!authWarned) {
+          authWarned = true
+          console.warn(
+            '[stt] the sidecar never confirmed the auth handshake — continuing without it; rebuild stt-dist with `node scripts/build-stt.mjs --force` if this keeps happening'
+          )
+        }
+      }, AUTH_CONFIRM_MS)
+    }
     write({ cmd: 'status' })
   })
 
@@ -352,6 +418,11 @@ function connect(proc: ChildProcess, p: number, attempt: number): void {
 function dropSocket(): void {
   const s = sock
   sock = null
+  authPending = false
+  if (authTimer) {
+    clearTimeout(authTimer)
+    authTimer = null
+  }
   if (s) {
     s.removeAllListeners()
     s.destroy()
@@ -367,6 +438,24 @@ function write(msg: Json): void {
   }
 }
 
+/**
+ * The sidecar checked our token and said no — which cannot happen between the
+ * process we spawned and the token we handed it unless the two halves of the
+ * protocol have drifted (a stt-dist frozen from newer code than this file, or
+ * a dev interpreter running something else on that port). Rather than loop on
+ * refusals, drop auth for every respawn after this one: the token exists to
+ * keep other local processes out, not to break dictation.
+ */
+function onAuthRejected(): void {
+  console.error('[stt] the sidecar rejected the auth token — respawning it without auth')
+  if (authDisabled) {
+    kill()
+    return
+  }
+  authDisabled = true
+  reload(true)
+}
+
 /* ----------------------------------------------------------------- events */
 
 function handleLine(line: string): void {
@@ -375,6 +464,37 @@ function handleLine(line: string): void {
     msg = JSON.parse(line) as Json
   } catch {
     console.error(`[stt] unparseable line: ${line.slice(0, 120)}`)
+    return
+  }
+
+  // Handshake bookkeeping, before anything is folded into the status: these
+  // three are about the connection itself, not about dictation.
+  if (msg['evt'] === 'auth-ok') {
+    authPending = false
+    if (authTimer) {
+      clearTimeout(authTimer)
+      authTimer = null
+    }
+    return
+  }
+  if (msg['evt'] === 'auth-rejected') {
+    onAuthRejected()
+    return
+  }
+  if (authPending && isStaleSidecarHelloError(msg)) {
+    // A sidecar frozen before the handshake: it shrugged at the hello line
+    // and kept talking. The socket works; only the token does not.
+    authPending = false
+    if (authTimer) {
+      clearTimeout(authTimer)
+      authTimer = null
+    }
+    if (!authWarned) {
+      authWarned = true
+      console.warn(
+        '[stt] the dictation sidecar predates the auth handshake — dictation works, but any local process can still read it. Rebuild it with `node scripts/build-stt.mjs --force`.'
+      )
+    }
     return
   }
 

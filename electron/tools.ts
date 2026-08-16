@@ -3,6 +3,7 @@ import { ipcMain } from 'electron'
 import { IPC } from '@shared/ipc'
 import {
   allToolSpecs,
+  isPlainArg,
   isPlainCommand,
   npmLatestUrl,
   parseNpmLatest,
@@ -134,6 +135,14 @@ async function probeOne(spec: ToolSpec): Promise<ToolProbe> {
   // A tool with no version arguments is found and nothing more — see the note
   // on Kimi in shared/tools.ts.
   if (!spec.versionArgs) return { id, found: true, path: resolved }
+
+  // The arguments get the same rule as the command. They ride through a shell
+  // to reach a .cmd shim, and `sanitiseCustomTool` is only a load-time filter —
+  // a settings.json edited by hand never went through it, so the shape is
+  // asserted here too, one statement away from the spawn it protects.
+  if (!spec.versionArgs.every(isPlainArg)) {
+    return { id, found: true, path: resolved, error: 'not plain version arguments — a flag or a word, nothing more' }
+  }
 
   const result = await runVersion(spec.command, spec.versionArgs)
   if (!result.ok) return { id, found: true, path: resolved, error: result.error }

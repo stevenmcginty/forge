@@ -1,6 +1,22 @@
 import { execFileSync } from 'node:child_process'
 
 /**
+ * A remote URL minus its embedded credentials, because everywhere Forge repeats
+ * one — the Repository URL field, `FORGE_REPO_URL`, git snapshots broadcast to
+ * browsers — it is naming a place, not authenticating to it. A user who pasted
+ * `https://steve:ghp_…@github.com/…` into a clone command has a PAT sitting in
+ * `.git/config`; every copy Forge makes of that URL must drop it, or the next
+ * prompt that says "run `Get-ChildItem env:FORGE_REPO_URL`" exfiltrates it.
+ * Git's own credential helper still authenticates pushes against the bare URL.
+ */
+export function stripRemoteCredentials(url: string): string {
+  // userinfo@ after a scheme — `https://user:token@host`, `https://:token@host`,
+  // `https://token@host`. The ssh form (`git@host:path`) carries no secret: the
+  // "user" there is literally `git` and the auth lives in a key elsewhere.
+  return `${url}`.replace(/^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)([^@/\s]+)@/, '$1')
+}
+
+/**
  * "Where does this folder push?" — asked of git, in one line.
  *
  * Two callers, one question. The project menu asks it when it opens, so a
@@ -32,7 +48,7 @@ export function gitRemoteOrigin(dir: string): string | null {
       // printing into Forge's log every time a pane opens.
       stdio: ['ignore', 'pipe', 'ignore']
     })
-    return `${out}`.trim() || null
+    return stripRemoteCredentials(`${out}`.trim()) || null
   } catch {
     return null
   }

@@ -363,20 +363,64 @@ export class MobileServer {
   async start(options: MobileServerOptions): Promise<{ host: string; port: number }> {
     if (this.listening) return this.listening
 
-    const http = createServer((req, res) => this.serveStatic(req, res))
+    // A request listener that throws is an uncaught exception, and nothing in
+    // Forge installs a process-level `uncaughtException` net — one malformed
+    // escape in a URL used to be enough to take the whole app down. Every entry
+    // point handed to Node is therefore wrapped: the request answered with a
+    // 500, the socket destroyed, the process left standing.
+    const http = createServer((req, res) => {
+      try {
+        this.serveStatic(req, res)
+      } catch (err) {
+        this.log(`static request failed: ${err instanceof Error ? err.message : String(err)}`)
+        try {
+          if (res.headersSent) res.destroy()
+          else res.writeHead(400).end('Bad request')
+        } catch {
+          /* the peer has already gone */
+        }
+      }
+    })
     // `noServer` so the upgrade is only accepted on MOBILE_WS_PATH and only
     // from an allowed source — a WebSocketServer bound directly to the http
     // server would answer any path.
     const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
 
     http.on('upgrade', (req, socket, head) => {
-      const source = sourceOf(req)
-      const path = (req.url ?? '').split('?')[0]
-      if (path !== MOBILE_WS_PATH || !isAllowedSource(source)) {
+      try {
+        const source = sourceOf(req)
+        const path = (req.url ?? '').split('?')[0]
+        if (path !== MOBILE_WS_PATH || !isAllowedSource(source)) {
+          socket.destroy()
+          return
+        }
+        if (!originMatchesHost(req)) {
+          // DNS rebinding, or a page on another site pointing at this port: a
+          // browser sets `Origin` itself, and the one thing a legitimate caller
+          // here can never produce is an Origin whose host differs from the
+          // address it dialled — a phone loads the bundle from this very
+          // server and a tunnel preserves the hostname on both headers. See
+          // `originMatchesHost`.
+          this.log(`refusing an upgrade from ${source} whose Origin is not this address`)
+          socket.destroy()
+          return
+        }
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          try {
+            this.accept(ws, source)
+          } catch (err) {
+            this.log(`accepting a socket failed: ${err instanceof Error ? err.message : String(err)}`)
+            try {
+              ws.close(1011, 'Server error')
+            } catch {
+              /* already gone */
+            }
+          }
+        })
+      } catch (err) {
+        this.log(`upgrade failed: ${err instanceof Error ? err.message : String(err)}`)
         socket.destroy()
-        return
       }
-      wss.handleUpgrade(req, socket, head, (ws) => this.accept(ws, source))
     })
 
     await new Promise<void>((resolve, reject) => {
@@ -539,7 +583,20 @@ export class MobileServer {
         this.send(client, { t: 'err', code: 'bad-frame', msg: 'Unreadable frame' })
         return
       }
-      void this.handle(client, frame)
+      // The web server's rule, word for word the same reasoning (see its twin
+      // in electron/web/server.ts): `handle` is async — the op and hello paths
+      // await injected host callbacks — and a throw nobody catches leaves the
+      // phone waiting out its heartbeat for an answer that is never coming,
+      // which reads on the device as a network fault and is retried forever.
+      void this.handle(client, frame).catch((err: unknown) => {
+        this.log(`frame "${frame.t}" failed: ${err instanceof Error ? err.message : String(err)}`)
+        this.send(client, {
+          t: 'err',
+          code: 'no-window',
+          msg: 'The desktop failed while handling that. Nothing was changed by it.'
+        })
+        if (!client.device) this.drop(client, 4001, 'Failed before hello completed')
+      })
     })
     socket.on('pong', () => {
       client.alive = true
@@ -1085,8 +1142,20 @@ export class MobileServer {
       res.writeHead(403).end('Forbidden')
       return
     }
+    // The same Origin/Host test as the upgrade: a subresource load from some
+    // other page is the one browser-borne request whose Origin cannot lie, and
+    // a plain navigation — a phone typing this address in — sends no Origin at
+    // all and passes. See `originMatchesHost`.
+    if (!originMatchesHost(req)) {
+      res.writeHead(403).end('Forbidden')
+      return
+    }
 
-    const requested = decodeURIComponent((req.url ?? '/').split('?')[0])
+    // Never a bare `decodeURIComponent`: `/%` throws URIError, and this is a
+    // network-facing request handler. A malformed escape falls through with the
+    // raw string, which resolves to nothing and lands on the 404/fallback paths
+    // below exactly as an unknown path does.
+    const requested = safeDecodePath((req.url ?? '/').split('?')[0])
 
     // Before the web root, and before the single-page fallback: this path must
     // answer with an APK or with a 404, never with index.html. A Downloader app
@@ -1118,7 +1187,13 @@ export class MobileServer {
       // makes a rebuilt bundle look broken.
       'cache-control': 'no-store'
     })
-    createReadStream(target).pipe(res)
+    // A read that fails after the headers were sent — the file deleted between
+    // the stat and the open — is an `error` event on a stream with no listener,
+    // which throws in its own right. The answer is cut short instead; the peer
+    // sees a truncated body, which is the honest thing that happened.
+    const stream = createReadStream(target)
+    stream.on('error', () => res.destroy())
+    stream.pipe(res)
   }
 
   /**
@@ -1135,20 +1210,81 @@ export class MobileServer {
         .end('No Forge TV app has been built yet — build it on the desktop under Settings, Forge Mobile.')
       return
     }
+    let size = 0
+    try {
+      size = statSync(apk).size
+    } catch {
+      // The path is read per request and the build replaces the file in place;
+      // a stat that races that is a missing APK, not a crash.
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+        .end('No Forge TV app has been built yet — build it on the desktop under Settings, Forge Mobile.')
+      return
+    }
     res.writeHead(200, {
       'content-type': 'application/vnd.android.package-archive',
-      'content-length': statSync(apk).size,
+      'content-length': size,
       // Named, so the Downloader app's own file list says what it downloaded.
       'content-disposition': `attachment; filename="${TV_APK_NAME}"`,
       // A rebuilt APK at the same URL must not be answered from a cache — that
       // is the whole update mechanism for the television.
       'cache-control': 'no-store'
     })
-    createReadStream(apk).pipe(res)
+    const stream = createReadStream(apk)
+    stream.on('error', () => res.destroy())
+    stream.pipe(res)
   }
 }
 
 /* ----------------------------------------------------------------- helpers */
+
+/**
+ * A request path, decoded, with the one input that can throw neutralised.
+ *
+ * `decodeURIComponent('/%')` raises URIError, and this server hands the result
+ * straight to the filesystem — so the raw string is returned rather than the
+ * throw, and a malformed escape is answered like any other unknown path. The
+ * caller wraps the whole handler as well (see `start`), but a guard nobody has
+ * to remember is better than one somebody has to.
+ */
+export function safeDecodePath(raw: string): string {
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
+/**
+ * Is this request's `Origin` — when it carries one — the address it dialled?
+ *
+ * What this stops is DNS rebinding and a foreign page pointing at this port: a
+ * browser sets `Origin` itself and cannot be told to lie about it, so the one
+ * thing a legitimate caller can never produce is an Origin whose host differs
+ * from the `Host` it connected to. Both real shapes satisfy that without any
+ * allowlist — a phone loads the PWA from this very server (same LAN IP and
+ * port on both headers), and a tunnel preserves its hostname end to end
+ * (`Origin: https://x.ngrok.app`, `Host: x.ngrok.app`).
+ *
+ * An absent header passes, deliberately: it means the caller is not a browser
+ * (the APK's own client, curl, a television app), and there is no page to
+ * protect. `null` — a sandboxed frame — parses to nothing and is refused,
+ * which is also right: an opaque origin has no business opening a shell.
+ *
+ * What it does *not* stop is a non-browser client, which sets any headers it
+ * likes; that is what the token in auth.ts is for, exactly as with
+ * `isAllowedSource`.
+ */
+export function originMatchesHost(req: IncomingMessage): boolean {
+  const origin = req.headers.origin
+  if (typeof origin !== 'string' || origin.trim() === '') return true
+  const host = (req.headers.host ?? '').trim().toLowerCase()
+  if (!host) return false
+  try {
+    return new URL(origin).host.toLowerCase() === host
+  } catch {
+    return false
+  }
+}
 
 function sourceOf(req: IncomingMessage): string {
   return normaliseAddress(req.socket.remoteAddress ?? '')

@@ -14,6 +14,30 @@ import type { SttError, SttErrorKind, SttMode, SttStatus } from '@shared/types'
 export const RAPID_WINDOW_MS = 60_000
 export const MAX_RAPID_RESTARTS = 3
 
+/**
+ * How long the manager waits for `auth-ok` after saying hello. The sidecar's
+ * own window is longer, so a genuine refusal (`auth-rejected`) always arrives
+ * first; silence past this point means the sidecar predates the handshake or
+ * ignored the line, and dictation carries on without auth rather than dying.
+ */
+export const AUTH_CONFIRM_MS = 4_000
+
+/** The opening line every client must send when the sidecar runs with a token. */
+export function sttAuthLine(token: string): string {
+  return `${JSON.stringify({ hello: token })}\n`
+}
+
+/**
+ * A sidecar built before the handshake answers the hello line with
+ * {"evt":"error","msg":"unknown command None"} — and carries on, because an
+ * unknown line is not fatal to it. The connection is fine; only the greeting
+ * confused it. Recognising this keeps a stale stt-dist/ from surfacing as a
+ * dictation error while the manager logs its rebuild hint.
+ */
+export function isStaleSidecarHelloError(msg: Record<string, unknown>): boolean {
+  return msg['evt'] === 'error' && /unknown command/i.test(String(msg['msg'] ?? ''))
+}
+
 export const OFF_STATUS: SttStatus = {
   phase: 'off',
   level: 0,
