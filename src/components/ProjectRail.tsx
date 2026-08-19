@@ -276,6 +276,27 @@ function ProjectRow({
 
           <span className="prow__panes mono">{panes}</span>
 
+          {/*
+            Straight to this project's phones. Selecting the project first is
+            the whole trick: the Devices view has no project of its own, it
+            shows whichever one is open — so one click does both, and the rail
+            becomes the way into the previews from any project rather than
+            only from the one already showing.
+          */}
+          <button
+            type="button"
+            className="ghost-btn prow__phone"
+            title={`Preview ${project.name} on the phones`}
+            aria-label="Open device preview"
+            onClick={(e) => {
+              e.stopPropagation()
+              actions.selectProject(project.id)
+              actions.openDevices()
+            }}
+          >
+            <Icon name="phone" size={13} />
+          </button>
+
           <button
             ref={menuRef}
             type="button"

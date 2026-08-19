@@ -224,6 +224,26 @@ export function isSelfPreview(manual: string | undefined, sniffed: PreviewDevCom
 }
 
 /**
+ * Which mode the phones open in for the project now showing.
+ *
+ * `project` for every ordinary project, because that is the question being
+ * asked at this desk — the mode is simply what the view is, which is why no
+ * toggle is drawn for it. The exception is the checkout Forge is running from:
+ * project mode there has nothing to point at and nothing to offer (see
+ * `isSelfPreview`), so the honest opening position is Forge Mobile itself, and
+ * the toggle appears beside it for the one case that wants project mode back —
+ * a URL typed by hand.
+ *
+ * The sniff arrives a beat after the view does, so this answers `project` for
+ * everyone until it lands. That is the right way round: the wrong guess costs
+ * the Forge checkout one flip late in the frame, and the opposite default would
+ * mint a pairing code for every project on the way past.
+ */
+export function defaultPreviewMode(manual: string | undefined, sniffed: PreviewDevCommand | null): PreviewMode {
+  return isSelfPreview(manual, sniffed) ? 'forge' : 'project'
+}
+
+/**
  * The iframe's box inside a project-mode shell.
  *
  * The difference between the two modes, in one function. Forge Mobile *reserves*

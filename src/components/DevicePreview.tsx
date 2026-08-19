@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { MobileStatus, PreviewDevCommand } from '@shared/types'
 import {
+  defaultPreviewMode,
   effectiveDevCommand,
   fitScale,
   isSelfPreview,
@@ -19,8 +20,9 @@ import { Icon } from './Icon'
 import './DevicePreview.css'
 
 /**
- * The Devices preview — two phones on the desk, and a switch for what is in
- * them.
+ * The Devices preview — two phones on the desk, showing the project that is
+ * open. Every row in the project rail has a button straight into here, so the
+ * phones for any project are one click away from anywhere.
  *
  * **This project** (the default) points both frames at whatever the open project
  * is serving. Nobody types a port for it in the normal case: the dev server
@@ -40,7 +42,11 @@ import './DevicePreview.css'
  * it stops being one: whatever is typed there is this project's start command
  * from then on, so a folder Forge cannot read still gets the same button.
  *
- * **Forge Mobile** is the original preview, unchanged: each frame is the real
+ * **Forge Mobile** is the original preview, unchanged, and now reached from one
+ * project only: the checkout this Forge is running from, which is the one place
+ * project mode cannot work (`defaultPreviewMode`) and therefore the one place
+ * the switch is drawn — everywhere else "what the phones show" is the project,
+ * and a question with one answer is not a question. Each frame is the real
  * bundle served by the real `MobileServer`, paired through the same single-use
  * code door a QR takes, driving the same PTYs. Its two frames are sequenced,
  * never parallel — pairing codes are single-use *and* single-pending (a second
@@ -101,6 +107,13 @@ export function DevicePreview(): ReactNode {
   /** The port the current frames were built against, so a change re-runs the loader. */
   const loadedPortRef = useRef(0)
   const startedRef = useRef(false)
+  /**
+   * The project whose mode toggle has been touched. A choice made by hand is
+   * the last word for as long as that project is the open one — the same rule
+   * the URL and command fields follow — and opening a different project hands
+   * the decision back to `defaultPreviewMode`.
+   */
+  const modeChosenRef = useRef('')
 
   useEffect(() => {
     void window.forge.mobile.status().then(setStatus)
@@ -248,6 +261,32 @@ export function DevicePreview(): ReactNode {
   const command = effectiveDevCommand(manualCommand, sniffed)
   const selfPreview = isSelfPreview(manualCommand, sniffed)
   const sniffedCommand = sniffed?.kind === 'command' ? sniffed.command : ''
+
+  /** The toggle, and the empty state's button: a mode picked on purpose. */
+  const chooseMode = useCallback(
+    (next: PreviewMode): void => {
+      modeChosenRef.current = projectId
+      setMode(next)
+    },
+    [projectId]
+  )
+
+  /*
+   * Where the view opens, and the only place the mode moves on its own.
+   *
+   * The switch above is drawn for this checkout alone, so the mode has to be
+   * right without one for everybody else: an ordinary project *is* project
+   * mode. It is an effect rather than an initial state because the sniff lands
+   * after the first paint — the Forge checkout shows its own "no dev server"
+   * empty state for an instant and then settles into Forge Mobile, which is the
+   * cheap way round. Defaulting to `forge` and correcting would mint a pairing
+   * code for every project on the way past, and codes are single-pending: one
+   * spent here replaces an outstanding QR offer.
+   */
+  useEffect(() => {
+    if (modeChosenRef.current === projectId) return
+    setMode(defaultPreviewMode(manualCommand, sniffed))
+  }, [projectId, manualCommand, sniffed])
 
   const [cmdDraft, setCmdDraft] = useState(manualCommand)
   // Follows the project and anything committed elsewhere, never itself — the
@@ -453,7 +492,7 @@ export function DevicePreview(): ReactNode {
       type="button"
       className="sbtn sbtn--go"
       title="Show the Forge Mobile app in both phones"
-      onClick={() => setMode('forge')}
+      onClick={() => chooseMode('forge')}
     >
       Open the Forge Mobile preview
     </button>
@@ -502,26 +541,34 @@ export function DevicePreview(): ReactNode {
         </button>
         <h1 className="dprev__title">Devices</h1>
         <span className="dprev__hint eyebrow">esc to close</span>
-        <div className="dprev__modes" role="group" aria-label="What the phones show">
-          <button
-            type="button"
-            className="ghost-btn dprev__mode"
-            data-on={mode === 'project' ? 'true' : undefined}
-            title="Preview the site this project is serving"
-            onClick={() => setMode('project')}
-          >
-            This project
-          </button>
-          <button
-            type="button"
-            className="ghost-btn dprev__mode"
-            data-on={mode === 'forge' ? 'true' : undefined}
-            title="Preview the Forge Mobile app itself"
-            onClick={() => setMode('forge')}
-          >
-            Forge Mobile
-          </button>
-        </div>
+        {/*
+          Only this checkout gets the switch. Everywhere else the phones show
+          the project — that is what the view is, and a toggle offering to
+          preview Forge Mobile from somebody else's project was a choice
+          nobody at this desk was asking to make.
+        */}
+        {selfPreview ? (
+          <div className="dprev__modes" role="group" aria-label="What the phones show">
+            <button
+              type="button"
+              className="ghost-btn dprev__mode"
+              data-on={mode === 'project' ? 'true' : undefined}
+              title="Preview the site this project is serving"
+              onClick={() => chooseMode('project')}
+            >
+              This project
+            </button>
+            <button
+              type="button"
+              className="ghost-btn dprev__mode"
+              data-on={mode === 'forge' ? 'true' : undefined}
+              title="Preview the Forge Mobile app itself"
+              onClick={() => chooseMode('forge')}
+            >
+              Forge Mobile
+            </button>
+          </div>
+        ) : null}
         <div className="dprev__headspace" />
         {mode === 'project' ? (
           <>

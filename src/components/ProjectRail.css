@@ -376,7 +376,14 @@
   color: color-mix(in srgb, var(--prow-tint, var(--accent)) 62%, var(--text-secondary));
 }
 
-.prow__menu {
+/*
+ * The row's two controls: the phones for this project, and its menu. Both are
+ * hover furniture under one rule rather than two, because they arrive and leave
+ * together — a row at rest is a name, a path and a count, and nothing a pointer
+ * is not already near.
+ */
+.prow__menu,
+.prow__phone {
   flex: none;
   width: 22px;
   height: 22px;
@@ -384,7 +391,9 @@
 }
 
 .prow:hover .prow__menu,
-.prow[data-active='true'] .prow__menu {
+.prow[data-active='true'] .prow__menu,
+.prow:hover .prow__phone,
+.prow[data-active='true'] .prow__phone {
   opacity: 1;
 }
 

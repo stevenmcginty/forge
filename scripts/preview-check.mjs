@@ -334,6 +334,34 @@ ok(
   'no other project is ever sent to the Forge Mobile mode'
 )
 
+/* Which mode the view opens in, which is now also the only mode most projects
+ * have: the header toggle is drawn for the self checkout alone, so a default of
+ * `forge` anywhere else would be a mode with no way out of it — and a pairing
+ * code minted for a project nobody switched to. */
+ok(
+  D.defaultPreviewMode('', { kind: 'self' }) === 'forge' &&
+    D.defaultPreviewMode(undefined, { kind: 'self' }) === 'forge',
+  'the checkout Forge runs from opens straight into the Forge Mobile preview'
+)
+ok(
+  D.defaultPreviewMode('', SNIFF) === 'project' && D.defaultPreviewMode(undefined, null) === 'project',
+  'every other project opens on its own site — the mode is simply what the view is'
+)
+ok(
+  D.defaultPreviewMode('npm run mobile:build', { kind: 'self' }) === 'project',
+  'and a command typed for the checkout by hand opens on the site that command serves'
+)
+for (const args of [
+  ['', null],
+  ['', SNIFF],
+  ['', { kind: 'self' }],
+  ['npx serve .', null],
+  [undefined, { kind: 'self' }]
+]) {
+  const m = D.defaultPreviewMode(...args)
+  ok(m === 'project' || m === 'forge', `defaultPreviewMode(${JSON.stringify(args)}) is one of the two modes`, m)
+}
+
 for (const preset of presets) {
   const box = D.siteViewport(preset)
   ok(box.w === preset.viewport.w, `${preset.id}: a site frame is the full viewport wide`)
