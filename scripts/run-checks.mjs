@@ -60,6 +60,7 @@ const CHECKS = [
   { name: 'mirror:check', lane: 'fast' },
   { name: 'mobile:auth', lane: 'fast' },
   { name: 'pack:check', lane: 'fast', note: 'shells out to PowerShell Expand-Archive as the zip oracle' },
+  { name: 'preview:check', lane: 'fast' },
   { name: 'pwa:check', lane: 'fast' },
   { name: 'shots:smoke', lane: 'fast' },
   { name: 'skills:smoke', lane: 'fast' },

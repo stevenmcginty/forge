@@ -76,6 +76,18 @@ export const IPC = {
   // git — "where does this folder push?", for the project menu's Repository URL
   gitRemoteOrigin: 'git:remote-origin',
 
+  /**
+   * "How does this project start its dev server?" — one read of the folder's
+   * package.json, for the Devices preview's Start button.
+   *
+   * A sibling of `gitRemoteOrigin` above in every way that matters: it takes a
+   * folder, it answers a question about that folder, and it is incapable of
+   * doing anything else. It reads one file and never runs one — the command it
+   * comes back with is typed into a terminal pane by the renderer, where a
+   * person can see it before it goes anywhere.
+   */
+  previewDevCommand: 'preview:dev-command',
+
   // onboarding — is `claude` / `kimi` / `gemini` on this machine's PATH?
   agentsProbe: 'agents:probe',
   // the same question about an arbitrary profile command, for the chooser and
@@ -183,6 +195,13 @@ export const IPC = {
   /** Mint a single-use pairing token for the QR in Settings. */
   mobilePair: 'mobile:pair',
   mobilePairCancel: 'mobile:pair-cancel',
+  /**
+   * Mint a pairing code for the Devices preview — the same single-use machinery
+   * as the QR, but pointed at loopback and without touching the Settings detail
+   * line, because a preview frame reloading is not a pairing event anyone asked
+   * to be told about. See docs/MOBILE.md's "Preview from the desk" section.
+   */
+  mobilePreviewPair: 'mobile:preview-pair',
   mobileRevoke: 'mobile:revoke',
   /**
    * Arm or disarm "Accept new phones" — the tap-to-pair window. Arming writes
@@ -628,3 +647,10 @@ export const MAX_PANES_PER_TAB = 8
  */
 export const MAX_TASK_CARDS = 32
 export const MAX_TASK_TEXT = 4000
+
+/**
+ * The Devices preview's hand-typed start command. One command line — `npx serve
+ * .`, `python app.py` — and it ends up typed into a real shell, so it is bounded
+ * on the way in and again on the way off disk.
+ */
+export const MAX_DEV_COMMAND = 512

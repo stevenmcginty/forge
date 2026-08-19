@@ -28,6 +28,7 @@ import type {
   MobileApprovalEvent,
   MobileDeviceRecord,
   MobileMirrorEvent,
+  MobilePreviewOffer,
   MobileStatus,
   MobileTunnelStatus,
   MobileWatchEvent,
@@ -237,6 +238,7 @@ export function mobileStatus(): MobileStatus {
     port: address?.port ?? settings.mobilePort,
     addresses: address ? reachableAddresses() : [],
     devices: settings.mobileDevices,
+    web: !!mobileWebRoot(),
     connected: server?.connectedCount ?? 0,
     acceptUntil: armedUntil(),
     detail: lastDetail,
@@ -855,15 +857,21 @@ function holdBlocker(): void {
  * The real client is the APK, which carries its own copy — this is the browser
  * route: point a phone at `http://<desktop>:8420` and the same app loads, which
  * is how the link is usable before an APK exists and how it is debugged after.
+ * It is also what the Devices preview frames, which is why a packaged build
+ * carries a copy in `resources/mobile-web` (see electron-builder.yml) rather
+ * than shipping none: a Forge with a Devices button that can only say "the
+ * bundle is not built" would be a button that lies about whose fault that is.
  *
- * A packaged Forge ships `out/**` and nothing else (see electron-builder.yml),
- * so `mobile/dist` only exists in a checkout. `FORGE_MOBILE_WEB` overrides it
- * for anyone who wants to serve a built bundle from elsewhere.
+ * `FORGE_MOBILE_WEB` overrides all of it for anyone who wants to serve a
+ * built bundle from elsewhere.
  */
 function mobileWebRoot(): string {
   const override = process.env.FORGE_MOBILE_WEB?.trim()
   if (override) return existsSync(override) ? override : ''
-  if (app.isPackaged) return ''
+  if (app.isPackaged) {
+    const packed = join(process.resourcesPath, 'mobile-web')
+    return existsSync(packed) ? packed : ''
+  }
   // `app.getAppPath()` is the checkout root in a plain `electron .` run but not
   // reliably under electron-vite, where the main bundle lives in `out/main`.
   // Both are tried rather than assumed, because the failure mode of guessing
@@ -1001,6 +1009,35 @@ export function registerMobileHandlers(): void {
     getAuth().cancelPairing()
     report('')
     return true
+  })
+
+  /**
+   * Mint a pairing code for the Devices preview frames.
+   *
+   * Same single-use, single-pending machinery as the QR — which is why this
+   * hands back ONE code and the Devices view spends it before asking for the
+   * next: a second mint replaces the first outstanding offer (see offerPairing),
+   * so two live codes cannot coexist. Deliberately does not touch the Settings
+   * detail line (`report`), because a preview frame reloading is not a pairing
+   * event anyone asked to be told about. Note the flip side, documented here so
+   * nobody has to rediscover it: opening Devices *does* replace an outstanding
+   * Settings QR offer — the same thing pressing the QR button a second time in
+   * Settings does, and no worse.
+   *
+   * The port is the one the server actually bound, never the setting: a preview
+   * URL naming a port the server has since left behind is a frame that loads and
+   * then can never dial home.
+   */
+  ipcMain.handle(IPC.mobilePreviewPair, (): MobilePreviewOffer => {
+    if (!server) return { ok: false, error: 'Turn the phone link on first.' }
+    if (!mobileWebRoot()) return { ok: false, error: 'The mobile bundle is not built.' }
+    const offer = getAuth().offerPairing()
+    return {
+      ok: true,
+      code: offer.token,
+      port: server.address()?.port ?? getSettings().mobilePort,
+      expiresAt: offer.expiresAt
+    }
   })
 
   /**

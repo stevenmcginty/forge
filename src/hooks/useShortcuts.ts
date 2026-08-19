@@ -55,6 +55,15 @@ export function useShortcuts(): void {
         return
       }
 
+      // The Devices preview, from anywhere — the same register as the settings
+      // pair above. Ctrl+Shift+D is nobody's editing key.
+      if (ctrl && shift && e.code === 'KeyD') {
+        stop()
+        if (state.view === 'devices') actions.closeDevices()
+        else actions.openDevices()
+        return
+      }
+
       // Text fields (renaming a pane/tab, popover forms, the voice composer)
       // keep their keys.
       //
@@ -71,9 +80,10 @@ export function useShortcuts(): void {
 
       /*
        * Everything below drives the terminal workspace, which is not on screen
-       * while settings is. Ctrl+W in there would close a pane you cannot see.
+       * while settings or the Devices preview is. Ctrl+W in there would close a
+       * pane you cannot see.
        */
-      if (state.view === 'settings') return
+      if (state.view !== 'terminals') return
 
       /* --------------------------------------------------- tabs & panes */
 

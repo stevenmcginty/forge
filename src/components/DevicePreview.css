@@ -1,0 +1,386 @@
+/*
+ * The Devices preview. Layout follows the Settings page's skeleton (head strip,
+ * one filling body) but the body is a stage rather than a scroll: two phones,
+ * zoomed to fit, never clipped by a scrollbar.
+ *
+ * The phone chrome is drawn at scale 1 inside .dprev__scaler (which carries the
+ * transform), so bezels, radii and system bars keep their real-device pixel
+ * sizes and the whole phone shrinks as one object.
+ */
+
+.dprev {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-sunken);
+}
+
+/* ------------------------------------------------------------ head strip */
+
+.dprev__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: 0 var(--s-6) 0 var(--s-4);
+  height: 42px;
+  flex: none;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.dprev__back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.dprev__title {
+  font-size: var(--t-lg);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+}
+
+.dprev__hint {
+  color: var(--text-dim);
+}
+
+.dprev__headspace {
+  flex: 1;
+}
+
+.dprev__reload {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+/* What the phones show. A segmented pair rather than two loose buttons: the
+ * choice is exclusive, and the hairline around them is what says so. The chosen
+ * half wears the accent under the same rule as the "Live" chip below. */
+.dprev__modes {
+  display: inline-flex;
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+  flex: none;
+}
+
+.dprev__mode {
+  height: 20px;
+  font-size: var(--t-sm);
+
+  &[data-on='true'] {
+    color: var(--accent);
+    background: var(--accent-softer);
+  }
+}
+
+/* The URL both phones load. Mono because it is a URL, and wide enough for a
+ * loopback one without ever crowding the reload button off the strip. */
+.dprev__url {
+  height: 22px;
+  flex: 1 1 auto;
+  min-width: 120px;
+  max-width: 300px;
+}
+
+.dprev__url[disabled] {
+  color: var(--text-dim);
+}
+
+/* The detected URL, offered rather than applied. Deliberately small: it is a
+ * suggestion standing next to a decision somebody already made. */
+.dprev__adopt {
+  max-width: 220px;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: none;
+}
+
+/* ----------------------------------------------------------------- stage */
+
+.dprev__row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 24px;
+  padding: var(--s-6);
+}
+
+.dprev__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 0;
+}
+
+.dprev__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+}
+
+.dprev__label {
+  font-size: var(--t-md);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.dprev__phase {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+  padding: 1px var(--s-3);
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-hairline);
+  /* Live is the only state that earns the accent — the same rule the rest of
+     the app follows for "this thing is on". */
+  &[data-live='true'] {
+    color: var(--accent);
+    border-color: var(--accent-line);
+    background: var(--accent-softer);
+  }
+}
+
+.dprev__frame-reload {
+  padding: 2px;
+}
+
+/* The slot is the scaled footprint the phone occupies in the flow; the scaler
+ * is the full-size phone carrying the transform. The scaler sits at the top
+ * left of the slot and shrinks toward it — the slot itself is already centred
+ * by the cell, so no transform-origin math is needed beyond "top left". */
+.dprev__slot {
+  position: relative;
+}
+
+.dprev__scaler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+}
+
+/* ------------------------------------------------------------ phone body */
+
+.dprev__phone {
+  position: relative;
+  background: #060707;
+  border: var(--dprev-bezel, 10px) solid #101113;
+  border-radius: var(--dprev-radius, 26px);
+  box-shadow: var(--shadow-card), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.dprev__scaler[data-sim='ios'] .dprev__phone {
+  --dprev-bezel: 12px;
+  --dprev-radius: 55px;
+}
+
+.dprev__scaler[data-sim='android'] .dprev__phone {
+  --dprev-bezel: 10px;
+  --dprev-radius: 26px;
+}
+
+/* iPhone: the Dynamic Island. Android: the punch hole. Both sit over the top
+ * inset the app reserves under `?sim=`, exactly where the real one sits. */
+.dprev__notch {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  background: #060707;
+}
+
+.dprev__scaler[data-sim='ios'] .dprev__notch {
+  width: 125px;
+  height: 36px;
+  border-radius: var(--r-full);
+  top: 11px;
+}
+
+.dprev__scaler[data-sim='android'] .dprev__notch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  top: 7px;
+}
+
+.dprev__frame {
+  display: block;
+  border: 0;
+  background: var(--bg-terminal);
+}
+
+/* The system bar, drawn over the app's reserved top inset. It never overlaps
+ * content: `--sa-top` inside the frame (mobile/src/styles.css under ?sim=) is
+ * exactly this bar's height. */
+.dprev__statusbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px 0 28px;
+  color: #e8eaed;
+  pointer-events: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dprev__scaler[data-sim='ios'] .dprev__statusbar {
+  height: 59px;
+  padding-top: 18px;
+}
+
+.dprev__scaler[data-sim='android'] .dprev__statusbar {
+  height: 28px;
+  padding: 0 18px;
+  font-size: 12px;
+}
+
+.dprev__signals {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.dprev__glyph {
+  fill: currentColor;
+}
+
+/* The home indicator / gesture pill, over the reserved bottom inset. */
+.dprev__homebar {
+  position: absolute;
+  bottom: 9px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  background: rgba(232, 234, 237, 0.85);
+  border-radius: var(--r-full);
+  pointer-events: none;
+}
+
+.dprev__scaler[data-sim='ios'] .dprev__homebar {
+  width: 134px;
+  height: 5px;
+}
+
+.dprev__scaler[data-sim='android'] .dprev__homebar {
+  width: 108px;
+  height: 4px;
+  background: rgba(232, 234, 237, 0.65);
+}
+
+/* ------------------------------------------------- a website in the shell
+ *
+ * The one structural difference between the two modes. Forge Mobile reserves
+ * the system bars (`--sa-*` under `?sim=`), so the bars above are drawn *over*
+ * a full-height frame and cover nothing. A site loaded in project mode reserves
+ * nothing and cannot be asked to, so the same overlay would sit on its header
+ * and its footer. Here the phone is a column instead: bar, page, bar. The frame
+ * is sized to the viewport minus both insets (see siteViewport), so the phone's
+ * outside dimensions — and therefore the fit — are identical either way.
+ */
+.dprev__phone[data-shell='site'] {
+  display: flex;
+  flex-direction: column;
+}
+
+.dprev__phone[data-shell='site'] .dprev__statusbar,
+.dprev__phone[data-shell='site'] .dprev__frame {
+  /* Every band is its exact pixel height and none of them may be squeezed:
+     the three add back up to the viewport, so any shrink is a lie about the
+     phone. */
+  flex: none;
+}
+
+.dprev__phone[data-shell='site'] .dprev__statusbar {
+  position: static;
+  background: #060707;
+}
+
+.dprev__homerow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  background: #060707;
+}
+
+.dprev__phone[data-shell='site'] .dprev__homebar {
+  position: static;
+  transform: none;
+}
+
+/* ------------------------------------------------------------ empty state */
+
+.dprev__empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-4);
+  text-align: center;
+  padding: var(--s-8);
+  background: radial-gradient(ellipse at 50% 38%, var(--empty-grad-a), var(--empty-grad-b));
+}
+
+.dprev__empty h2 {
+  font-size: var(--t-xl);
+  font-weight: 600;
+  margin: 0;
+  /* A title now carries a URL ("Nothing is answering at http://localhost:5199/"),
+     and a long one has to break rather than push the stage wider than the
+     window it sits in. */
+  max-width: 560px;
+  overflow-wrap: anywhere;
+}
+
+.dprev__empty p {
+  font-size: var(--t-md);
+  color: var(--text-secondary);
+  max-width: 460px;
+  margin: 0;
+  line-height: 1.55;
+}
+
+/* The start command, under the button that runs it. Quiet on purpose: it is a
+ * setting standing beneath an action, and most projects never need to touch it —
+ * the sniffed command sits in the placeholder until somebody disagrees. */
+.dprev__cmd {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.dprev__cmd-input {
+  height: 24px;
+  width: 280px;
+  max-width: 100%;
+  text-align: center;
+}
+
+.dprev__dead {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-lg);
+  color: var(--text-dim);
+  font-size: var(--t-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-6);
+}

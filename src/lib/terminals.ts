@@ -2,6 +2,7 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { PtyDataEvent, PtyExitEvent, PtyGeometryEvent } from '@shared/types'
 import { findRemoteSessionUrl } from '@shared/remote'
+import { findDevServerUrl } from '@shared/devserver'
 import { isTypedInput } from '@shared/typing'
 import { commandExe } from '@shared/agents'
 import { SHARE_CAPTURE_DEFAULT_LINES } from '@shared/share'
@@ -213,6 +214,15 @@ interface Entry {
   /** Tail of the last output chunk, kept only until the RC URL is found. */
   scanTail: string
   /**
+   * The same overlap for the dev-server scan, kept for the pane's whole life:
+   * unlike the Remote Control URL there is no "found it, stop looking" — a
+   * server can be restarted onto a different port at any moment, and the newest
+   * URL is the one that is true.
+   */
+  devScanTail: string
+  /** The last dev-server URL announced for this pane, so a repeat is silent. */
+  devUrl: string | null
+  /**
    * What has been typed into this pane since the last Enter — the draft the
    * program's line editor is holding. Reconstructed from the keystroke stream
    * (see trackTyped), so cursor-movement keys make it approximate; that is
@@ -354,6 +364,12 @@ class TerminalHost {
    * in itself: every viewer sends its whole set on every change, so merging
    * them on arrival would make a browser's silence look like a phone leaving. */
   private browserWatched = new Set<string>()
+  /**
+   * Who wants to hear about a dev server appearing in a pane. A plain set of
+   * callbacks rather than anything React-shaped, for the same reason the rest of
+   * this file is: panes outlive every component that ever showed them.
+   */
+  private devUrlListeners = new Set<(cwd: string, url: string) => void>()
   private wired = false
 
   /* ----------------------------------------------------------- plumbing */
@@ -368,6 +384,7 @@ class TerminalHost {
       entry.term.write(e.data)
       if (entry.runtime.status === 'starting') this.setRuntime(entry, { status: 'live' })
       this.scanForRemoteUrl(entry, e.data)
+      this.scanForDevUrl(entry, e.data)
       this.pulse(entry)
       this.markOutput(entry)
     })
@@ -438,6 +455,30 @@ class TerminalHost {
       return
     }
     entry.scanTail = (entry.scanTail + data).slice(-URL_SCAN_OVERLAP)
+  }
+
+  /**
+   * Watch a pane's output for the local URL a dev server prints when it comes
+   * up, so the Devices preview can show the site this project is building
+   * rather than only Forge's own app.
+   *
+   * Same telescope as the Remote Control scan above and the same overlap, with
+   * one difference that matters: this one never stops. `npm run dev` restarted
+   * onto a free port, a second server started beside the first, a framework
+   * that moves — the newest URL a pane has printed is the answer, so the tail is
+   * kept for the pane's whole life and only a *change* is news.
+   *
+   * The cwd, not the pane id, is what goes out: a pane's cwd is its project's
+   * path, and the preview is a per-project thing that does not care which of the
+   * project's terminals happened to be the one running the server.
+   */
+  private scanForDevUrl(entry: Entry, data: string): void {
+    const text = entry.devScanTail + data
+    entry.devScanTail = text.slice(-URL_SCAN_OVERLAP)
+    const found = findDevServerUrl(text)
+    if (!found || found === entry.devUrl) return
+    entry.devUrl = found
+    for (const cb of this.devUrlListeners) cb(entry.spec.cwd, found)
   }
 
   private pulse(entry: Entry): void {
@@ -789,6 +830,8 @@ class TerminalHost {
       desired: null,
       jiggleTimer: null,
       scanTail: '',
+      devScanTail: '',
+      devUrl: null,
       typed: '',
       lastActivityNotify: 0,
       activityTimer: null,
@@ -1116,6 +1159,11 @@ class TerminalHost {
     // it. The *conversation* does: the pane keeps its session id, so restarting
     // a pane picks its Claude back up rather than starting over.
     entry.scanTail = ''
+    // A relaunched shell may serve somewhere else entirely, so the pane forgets
+    // where it last did. Re-announcing the same URL costs nothing — the state it
+    // reaches is already holding it.
+    entry.devScanTail = ''
+    entry.devUrl = null
     // A fresh shell holds no draft, whatever the old one was mid-typing.
     entry.typed = ''
     // The size we are about to spawn at *is* the PTY's size, recorded before
@@ -1590,6 +1638,21 @@ class TerminalHost {
     l.runtime.add(cb)
     return () => {
       l.runtime.delete(cb)
+    }
+  }
+
+  /**
+   * Hear about the local dev server any pane announces, as `(cwd, url)`.
+   *
+   * One list for the whole app rather than one per pane: the caller is the app
+   * state, which turns a cwd into a project and remembers the URL there, and it
+   * cares about every project's terminals at once — including the ones whose
+   * shells are still running in a workspace nobody is currently looking at.
+   */
+  onDevUrl(cb: (cwd: string, url: string) => void): () => void {
+    this.devUrlListeners.add(cb)
+    return () => {
+      this.devUrlListeners.delete(cb)
     }
   }
 

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, screen, session, shell } from 'electron'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
@@ -11,6 +11,7 @@ import type {
   AppInfo,
   MakeProjectFolderRequest,
   MakeProjectFolderResult,
+  PreviewDevCommand,
   Project,
   Settings,
   Workspace
@@ -688,6 +689,75 @@ function rendererOwned(patch: Partial<Settings>): Partial<Settings> {
   return out
 }
 
+/* ------------------------------------------------- the project's dev server */
+
+/**
+ * The script names that mean "serve this project", in the order they are
+ * believed. `dev` first because that is what a dev server is called in every
+ * generation of the tooling; `preview` last because in Vite's vocabulary it
+ * serves a *build*, which is the right answer only when nothing better exists.
+ */
+const DEV_SCRIPTS = ['dev', 'start', 'serve', 'preview'] as const
+
+/**
+ * Which package manager this folder is run with, read off its lockfile —
+ * `npm run dev` in a pnpm workspace is a broken command, not a near miss.
+ * npm is the fallback, because a folder with no lockfile at all is a folder
+ * nobody has installed yet and npm is what ships with node.
+ */
+const LOCKFILES: Array<{ file: string; run: (script: string) => string }> = [
+  { file: 'pnpm-lock.yaml', run: (s) => `pnpm run ${s}` },
+  { file: 'yarn.lock', run: (s) => `yarn ${s}` },
+  { file: 'bun.lockb', run: (s) => `bun run ${s}` },
+  { file: 'bun.lock', run: (s) => `bun run ${s}` }
+]
+
+/**
+ * How a project folder starts its own dev server, for the Devices preview's
+ * Start button. Reads exactly one file and spawns nothing — see the channel's
+ * note in shared/ipc.ts.
+ *
+ * Null for every uncertainty there is: not a directory, no package.json, JSON
+ * that will not parse, no `scripts`, no script by a name we recognise. The
+ * renderer guesses nothing on a null — it offers a box to type the command
+ * into instead, and remembers what is typed there on the workspace.
+ *
+ * `{ kind: 'self' }` when the folder is this very checkout. `npm run dev` in the
+ * running Forge's own tree is not a dev server, it is a second Forge fighting
+ * the first for its profile and rebuilding out/ under the app that is executing
+ * it — pressing that button took the whole app down. Forge previews itself
+ * through the Forge Mobile mode, never through a button that saws off the
+ * branch it sits on, and saying so out loud is what lets the view offer that
+ * mode instead of an apology. It is a refusal to *guess*, not a prohibition: a
+ * command somebody typed for this project by hand still wins.
+ */
+function previewDevCommand(dir: string): PreviewDevCommand | null {
+  if (!dir) return null
+  try {
+    if (!statSync(dir).isDirectory()) return null
+  } catch {
+    return null
+  }
+  // Case-insensitive on purpose: Windows paths compare that way, and this is a
+  // safety latch, not a lookup.
+  if (resolve(dir).toLowerCase() === resolve(app.getAppPath()).toLowerCase()) return { kind: 'self' }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+  } catch {
+    return null
+  }
+  const scripts = (parsed as { scripts?: Record<string, unknown> } | null)?.scripts
+  if (!scripts || typeof scripts !== 'object') return null
+  const script = DEV_SCRIPTS.find((name) => {
+    const body = scripts[name]
+    return typeof body === 'string' && body.trim() !== ''
+  })
+  if (!script) return null
+  const manager = LOCKFILES.find((m) => existsSync(join(dir, m.file)))
+  return { kind: 'command', command: manager ? manager.run(script) : `npm run ${script}`, script }
+}
+
 function registerAppHandlers(): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => {
     const settings = getSettings()
@@ -954,6 +1024,11 @@ function registerAppHandlers(): void {
   // is, never set one. Everything else about the repo stays git's business.
   ipcMain.handle(IPC.gitRemoteOrigin, (_e, dir: string) => gitRemoteOrigin(String(dir ?? '')))
 
+  // The same shape of favour for the Devices preview, and the same limit on it:
+  // a folder goes in, a fact comes back, and the only thing this touches is that
+  // folder's package.json.
+  ipcMain.handle(IPC.previewDevCommand, (_e, dir: string) => previewDevCommand(String(dir ?? '')))
+
   // The renderer never touches navigator.clipboard: it needs a permission
   // handler, rejects silently when the window is not focused, and cannot do
   // images at all.
@@ -1063,6 +1138,35 @@ void app
     // one first, and a handler that only answers the async form leaves the
     // request denied before it is ever asked.
     session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media')
+
+    /*
+     * The Devices preview iframes the current project's local dev server so it
+     * can show phone-framed live previews. Most dev servers (Next.js, Vite,
+     * CRA...) send X-Frame-Options or a frame-ancestors CSP directive that
+     * would make the browser refuse to render inside our iframe. Strip just
+     * those from loopback responses — the URL filter keeps this scoped to
+     * http(s) traffic the renderer is already allowed to frame per its own CSP.
+     */
+    session.defaultSession.webRequest.onHeadersReceived(
+      { urls: ['http://localhost:*/*', 'http://127.0.0.1:*/*'] },
+      (details, callback) => {
+        const responseHeaders: Record<string, string[]> = { ...details.responseHeaders }
+        for (const name of Object.keys(responseHeaders)) {
+          const lower = name.toLowerCase()
+          if (lower === 'x-frame-options') {
+            delete responseHeaders[name]
+          } else if (lower === 'content-security-policy' || lower === 'content-security-policy-report-only') {
+            responseHeaders[name] = responseHeaders[name].map((value) =>
+              value
+                .split(';')
+                .filter((directive) => !directive.trim().toLowerCase().startsWith('frame-ancestors'))
+                .join(';'),
+            )
+          }
+        }
+        callback({ responseHeaders })
+      },
+    )
 
     /*
      * Every subsystem, and then the window — but the window happens either way.

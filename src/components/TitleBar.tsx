@@ -14,6 +14,7 @@ export function TitleBar(): ReactNode {
   const project = useActiveProject()
   const [focused, setFocused] = useState(true)
   const inSettings = state.view === 'settings'
+  const inDevices = state.view === 'devices'
   /**
    * Before hydrate there is no info, and a window that might well be the
    * everyday Forge must not flash a DEV chip on the way in.
@@ -77,6 +78,24 @@ export function TitleBar(): ReactNode {
             the first time round.
           */}
           <Icon name="expand" size={15} />
+        </button>
+
+        {/*
+          The Devices preview — the phone-shaped view of Forge Mobile, framed
+          in iOS and Android bodies on this desk. A toggle beside the gear
+          because it is a view, the same way Settings is, and it takes the
+          terminal area over rather than floating over it.
+        */}
+        <button
+          type="button"
+          className="ghost-btn titlebar__btn"
+          title={inDevices ? 'Back to terminals (Esc)' : 'Devices (Ctrl+Shift+D)'}
+          aria-label="Devices preview"
+          aria-pressed={inDevices}
+          data-on={inDevices ? 'true' : undefined}
+          onClick={() => (inDevices ? actions.closeDevices() : actions.openDevices())}
+        >
+          <Icon name="phone" size={15} />
         </button>
 
         <button

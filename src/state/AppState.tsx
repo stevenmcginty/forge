@@ -8,7 +8,14 @@ import {
   useRef,
   type ReactNode
 } from 'react'
-import { MAX_PANES_PER_TAB, MAX_SESSIONS, MAX_TABS_PER_PROJECT, MAX_TASK_CARDS, MAX_TASK_TEXT } from '@shared/ipc'
+import {
+  MAX_DEV_COMMAND,
+  MAX_PANES_PER_TAB,
+  MAX_SESSIONS,
+  MAX_TABS_PER_PROJECT,
+  MAX_TASK_CARDS,
+  MAX_TASK_TEXT
+} from '@shared/ipc'
 import type {
   AgentProfile,
   AppInfo,
@@ -79,12 +86,12 @@ export type SettingsSection =
   | 'advanced'
 
 /**
- * What the main area is showing. Settings is a *view*, not a modal: it takes
- * the terminal area over completely, because it is a place you go to work
- * rather than a dialog you dismiss. The terminals keep running behind it — see
- * terminalHost, which owns them independently of what React has mounted.
+ * What the main area is showing. Settings and Devices are *views*, not modals:
+ * each takes the terminal area over completely, because it is a place you go to
+ * work rather than a dialog you dismiss. The terminals keep running behind them
+ * — see terminalHost, which owns them independently of what React has mounted.
  */
-export type MainView = 'terminals' | 'settings'
+export type MainView = 'terminals' | 'settings' | 'devices'
 
 /**
  * A command waiting for the pane it was opened for.
@@ -388,11 +395,19 @@ type Action =
   | { type: 'whatsNewOpen'; on: boolean }
   /** Remember the planner terminal's Claude session id on the workspace. */
   | { type: 'plannerSession'; sessionId: string }
+  /** A local dev-server URL just seen in one of a project's terminals. */
+  | { type: 'noteDetectedUrl'; projectId: string; url: string; at: number }
+  /** The Devices preview's hand-typed URL for a project; `''` clears it. */
+  | { type: 'setPreviewUrl'; projectId: string; url: string }
+  /** The Devices preview's hand-typed start command for a project; `''` clears it. */
+  | { type: 'setDevCommand'; projectId: string; command: string }
   | { type: 'setAgentListening'; on: boolean }
   | { type: 'drainKills'; ids: string[] }
   | { type: 'notice'; message: string | null }
   | { type: 'openSettings'; section?: SettingsSection }
   | { type: 'closeSettings' }
+  | { type: 'openDevices' }
+  | { type: 'closeDevices' }
   | { type: 'setSettingsSection'; section: SettingsSection }
   | { type: 'cacheThemeChrome'; bg: string; ink: string }
 
@@ -526,6 +541,28 @@ function makeTab(
   }
 }
 
+/**
+ * Replace a named project's workspace through a mapper.
+ *
+ * Only a workspace that is already *in* state can be mapped. An absent one is
+ * not an empty one: it is a workspace still being read off disk, and writing a
+ * fresh object under its id would make `workspaceLoaded` treat the read as
+ * stale and drop every tab it was carrying. Callers here are all writing a
+ * detail onto a project somebody is working in, so there is nothing to rescue
+ * by relaxing that — the workspace is loaded long before either can fire.
+ */
+function mapWorkspace(
+  state: AppState,
+  projectId: string,
+  fn: (ws: Workspace) => Workspace | null
+): AppState {
+  const current = state.workspaces[projectId]
+  if (!current) return state
+  const next = fn(current)
+  if (!next || next === current) return state
+  return { ...state, workspaces: { ...state.workspaces, [projectId]: next } }
+}
+
 /** Replace the active project's workspace through a mapper. */
 function mapActiveWorkspace(state: AppState, fn: (ws: Workspace) => Workspace | null): AppState {
   const id = state.activeProjectId
@@ -595,6 +632,16 @@ function isColor(v: unknown): v is string {
 }
 
 /** Trust nothing that came off disk. */
+/** A stored preview URL: a non-empty string of sane length, nothing more. */
+function isPreviewUrlString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '' && value.length <= 2048
+}
+
+/** A stored start command: a non-empty string of one command line's length. */
+function isDevCommandString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '' && value.length <= MAX_DEV_COMMAND
+}
+
 function sanitiseWorkspace(ws: Workspace | null, profileIds: Set<string>): Workspace {
   if (!ws || !Array.isArray(ws.tabs)) return EMPTY_WORKSPACE
   const tabs: TerminalTab[] = []
@@ -663,7 +710,22 @@ function sanitiseWorkspace(ws: Workspace | null, profileIds: Set<string>): Works
     // live shell, so a layout file only gets to put a real uuid there — same
     // rule as the pane ids above. A bad one is dropped, and the panel simply
     // mints a fresh session on next use.
-    ...(isSessionId(ws.plannerSessionId) ? { plannerSessionId: ws.plannerSessionId } : {})
+    ...(isSessionId(ws.plannerSessionId) ? { plannerSessionId: ws.plannerSessionId } : {}),
+    // The Devices preview's URLs, remembered the way the copy promises. Bounded
+    // strings only — they become an iframe src and a fetch target, and both go
+    // back through their own gates on the way out (normalizePreviewUrl,
+    // usableDetectedUrl), so the file gets to store a URL but never to smuggle
+    // one past the rules that judge it.
+    ...(isPreviewUrlString(ws.previewUrl) ? { previewUrl: ws.previewUrl.trim() } : {}),
+    ...(isPreviewUrlString(ws.detectedUrl) ? { detectedUrl: ws.detectedUrl.trim() } : {}),
+    ...(typeof ws.detectedUrlAt === 'number' && Number.isFinite(ws.detectedUrlAt)
+      ? { detectedUrlAt: ws.detectedUrlAt }
+      : {}),
+    // The preview's Start command, remembered the same way and bounded the same
+    // way. It is typed into a live shell when the button is pressed, so a layout
+    // file gets to store one command line and nothing longer — and a person sees
+    // it in the box before anything runs.
+    ...(isDevCommandString(ws.devCommand) ? { devCommand: ws.devCommand.trim() } : {})
   }
 }
 
@@ -1074,6 +1136,51 @@ function reducer(state: AppState, action: Action): AppState {
       )
     }
 
+    /*
+     * A dev server said where it is. Written on the project's own workspace, so
+     * it rides the existing persistence differ to disk and is still there next
+     * time Forge opens — and returning the workspace untouched when the URL has
+     * not moved is what keeps that differ quiet, because this fires again every
+     * time the same banner is reprinted.
+     */
+    case 'noteDetectedUrl':
+      return mapWorkspace(state, action.projectId, (ws) =>
+        ws.detectedUrl === action.url ? null : { ...ws, detectedUrl: action.url, detectedUrlAt: action.at }
+      )
+
+    case 'setPreviewUrl': {
+      const url = action.url.trim()
+      return mapWorkspace(state, action.projectId, (ws) => {
+        if ((ws.previewUrl ?? '') === url) return null
+        // Cleared rather than blanked: an empty string on disk would be a
+        // choice, and "nothing typed" is the absence of one.
+        if (!url) {
+          const { previewUrl: _dropped, ...rest } = ws
+          return rest
+        }
+        return { ...ws, previewUrl: url }
+      })
+    }
+
+    /*
+     * The command the preview's Start button runs here, typed by hand. Same
+     * shape as `setPreviewUrl` above and for the same reasons: cleared rather
+     * than blanked, because an empty string on disk would read as a choice and
+     * "nothing typed" is the absence of one — and the absence is what hands the
+     * decision back to the package.json sniff.
+     */
+    case 'setDevCommand': {
+      const command = action.command.trim().slice(0, MAX_DEV_COMMAND)
+      return mapWorkspace(state, action.projectId, (ws) => {
+        if ((ws.devCommand ?? '') === command) return null
+        if (!command) {
+          const { devCommand: _dropped, ...rest } = ws
+          return rest
+        }
+        return { ...ws, devCommand: command }
+      })
+    }
+
     case 'setAgentListening':
       return state.agentListening === action.on ? state : { ...state, agentListening: action.on }
 
@@ -1093,6 +1200,12 @@ function reducer(state: AppState, action: Action): AppState {
       }
 
     case 'closeSettings':
+      return state.view === 'terminals' ? state : { ...state, view: 'terminals' }
+
+    case 'openDevices':
+      return state.view === 'devices' ? state : { ...state, view: 'devices' }
+
+    case 'closeDevices':
       return state.view === 'terminals' ? state : { ...state, view: 'terminals' }
 
     case 'setSettingsSection':
@@ -1177,10 +1290,13 @@ export interface AppActions {
   newTab(profileId?: string, permissionMode?: ClaudePermissionMode): void
   /**
    * Open a shell pane in the current project with `command` already typed into
-   * it. Nothing is submitted unless `settings.updatesAutoRun` says so — see
-   * Settings › Updates & Tools, which is the only caller.
+   * it. Whether it also presses Enter is the caller's call: the update buttons
+   * (Settings › Updates & Tools) leave `submit` unset and inherit
+   * `settings.updatesAutoRun`; the Devices preview's Start button passes `true`,
+   * because a button that says "Start the dev server" and then waits for an
+   * Enter it never mentioned has not done what it said.
    */
-  openToolPane(title: string, command: string): void
+  openToolPane(title: string, command: string, submit?: boolean): void
   /**
    * Open an agent pane in the current project with `prompt` already in it,
    * unsubmitted.
@@ -1246,6 +1362,16 @@ export interface AppActions {
    * panel on first use; validated by the reducer.
    */
   setPlannerSessionId(sessionId: string): void
+  /**
+   * Point the Devices preview at a URL by hand. An empty string hands the
+   * decision back to whatever the project's terminals have been printing.
+   */
+  setPreviewUrl(projectId: string, url: string): void
+  /**
+   * Set the command the Devices preview's Start button runs for a project. An
+   * empty string hands the decision back to the package.json sniff.
+   */
+  setDevCommand(projectId: string, command: string): void
 
   setNotice(message: string | null): void
   openDataDir(): void
@@ -1254,6 +1380,11 @@ export interface AppActions {
   openSettings(section?: SettingsSection): void
   closeSettings(): void
   setSettingsSection(section: SettingsSection): void
+
+  /* -------------------------------------------------------- devices page */
+  /** Open the Devices preview — the phone-shaped view of Forge Mobile. */
+  openDevices(): void
+  closeDevices(): void
 
   /* ------------------------------------------------------------- themes */
   setTheme(id: string): void
@@ -1401,6 +1532,23 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       clearInterval(timer)
     }
   }, [state.pendingTypes])
+
+  /* ---------------------------------------------------- dev-server URLs
+   *
+   * The Devices preview shows the project you are working on, and the one thing
+   * it needs is where that project's site is being served. Nothing announces
+   * that — but the dev server prints it, and Forge is the terminal. TerminalHost
+   * watches every pane's output for a loopback URL (see scanForDevUrl) and says
+   * which cwd it came from; a pane's cwd is its project's path, which is the
+   * whole of the mapping. A folder nobody has in the rail is simply not ours.
+   */
+  useEffect(() => {
+    return terminalHost.onDevUrl((cwd, url) => {
+      const project = state.projects.find((p) => p.path === cwd)
+      if (!project) return
+      dispatch({ type: 'noteDetectedUrl', projectId: project.id, url, at: Date.now() })
+    })
+  }, [state.projects])
 
   /* ----------------------------------------------------- live settings */
 
@@ -1617,7 +1765,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           profileId: profileId ?? defaultProfileFor(activeProjectId),
           ...(permissionMode ? { permissionMode } : {})
         }),
-      openToolPane: (title, command) => {
+      openToolPane: (title, command, submit) => {
         // A plain shell, never an agent: `winget upgrade …` typed at a Claude
         // prompt would be a sentence asking Claude to do it, which is not what
         // the button says. The built-in pwsh profile is re-seeded by the store
@@ -1635,7 +1783,9 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           profileId: shell.id,
           title: title.slice(0, 40),
           text: command,
-          submit: state.settings.updatesAutoRun
+          // A caller that knows its own answer gives one; the update buttons
+          // don't, and inherit the auto-run setting they have always had.
+          submit: submit ?? state.settings.updatesAutoRun
         })
       },
       openAgentPane: (title, prompt) => {
@@ -1690,6 +1840,8 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       setRailExpanded: (id) => dispatch({ type: 'railExpanded', id }),
       setWhatsNewOpen: (on) => dispatch({ type: 'whatsNewOpen', on }),
       setPlannerSessionId: (sessionId) => dispatch({ type: 'plannerSession', sessionId }),
+      setPreviewUrl: (projectId, url) => dispatch({ type: 'setPreviewUrl', projectId, url }),
+      setDevCommand: (projectId, command) => dispatch({ type: 'setDevCommand', projectId, command }),
       resetMosaicLayout: () => dispatch({ type: 'mosaicReset' }),
       setNotice: (message) => dispatch({ type: 'notice', message }),
       openDataDir: () => void window.forge.store.revealDataDir(),
@@ -1697,6 +1849,9 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       openSettings: (section) => dispatch({ type: 'openSettings', ...(section ? { section } : {}) }),
       closeSettings: () => dispatch({ type: 'closeSettings' }),
       setSettingsSection: (section) => dispatch({ type: 'setSettingsSection', section }),
+
+      openDevices: () => dispatch({ type: 'openDevices' }),
+      closeDevices: () => dispatch({ type: 'closeDevices' }),
 
       setTheme: (id) => dispatch({ type: 'patchSettings', patch: { themeId: id } }),
       saveCustomTheme: (theme) => {

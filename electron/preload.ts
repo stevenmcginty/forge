@@ -138,6 +138,7 @@ const api: ForgeApi = {
     stop: () => ipcRenderer.invoke(IPC.mobileStop),
     pair: () => ipcRenderer.invoke(IPC.mobilePair),
     pairCancel: () => ipcRenderer.invoke(IPC.mobilePairCancel),
+    previewPair: () => ipcRenderer.invoke(IPC.mobilePreviewPair),
     setAccept: (on) => ipcRenderer.invoke(IPC.mobileAccept, on === true),
     revoke: (deviceId) => ipcRenderer.invoke(IPC.mobileRevoke, deviceId ?? ''),
     setTunnel: (config) => ipcRenderer.invoke(IPC.mobileTunnelConfig, config ?? {}),
@@ -277,6 +278,10 @@ const api: ForgeApi = {
   openPath: (target) => ipcRenderer.invoke(IPC.openPath, target),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
   gitRemoteOrigin: (dir) => ipcRenderer.invoke(IPC.gitRemoteOrigin, dir),
+
+  preview: {
+    devCommand: (dir) => ipcRenderer.invoke(IPC.previewDevCommand, dir ?? '')
+  },
 
   // File.path was removed in Electron 32; webUtils is the sanctioned way and
   // it only works from the preload.

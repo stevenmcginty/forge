@@ -668,6 +668,38 @@ export interface Workspace {
    * Optional so workspaces written before the panel existed still load.
    */
   plannerSessionId?: string
+  /**
+   * The URL the Devices preview points this project's phone frames at, typed by
+   * hand. It wins over `detectedUrl` whenever it is set: a URL somebody chose is
+   * never overruled by one Forge merely noticed, and an empty field is how you
+   * hand the decision back to the detector.
+   *
+   * Optional so workspaces written before the project preview existed still load.
+   */
+  previewUrl?: string
+  /**
+   * The last local dev-server URL seen in this project's own terminal output —
+   * `findDevServerUrl` in shared/devserver.ts, tapped by TerminalHost. What the
+   * preview falls back to when nothing was typed, and what the "detected"
+   * affordance offers when something was.
+   */
+  detectedUrl?: string
+  /** When that URL was seen, so a stale one can say how old it is. */
+  detectedUrlAt?: number
+  /**
+   * The command the Devices preview's Start button runs for this project, typed
+   * by hand. It wins over the sniff (`PreviewDevCommand`) whenever it is set,
+   * under the same rule as `previewUrl` over `detectedUrl`: a line somebody
+   * chose is never overruled by one Forge guessed, and an empty field hands the
+   * decision back to the guess.
+   *
+   * It is also the only way a folder with no package.json — a static site, a
+   * python app — gets a Start button at all, and the one thing that outranks
+   * the self-preview latch on Forge's own checkout.
+   *
+   * Optional so workspaces written before the Start button existed still load.
+   */
+  devCommand?: string
 }
 
 /* ------------------------------------------------------------------- shots */
@@ -2111,6 +2143,20 @@ export type MobilePairOffer =
     }
   | { ok: false; error: string }
 
+/**
+ * A pairing code minted for the Devices preview frames, on its way to the
+ * `?pair=` link an iframe loads with.
+ *
+ * Thinner than `MobilePairOffer` on purpose: the preview frames dial loopback,
+ * so there is no address half to choose — `port` is the one the server actually
+ * bound, and the frame's own host (localhost or 127.0.0.1) is what names the
+ * desktop. `code` is as much a credential as the QR token is, and is spent the
+ * same way: once, by the frame that loads it, within the TTL.
+ */
+export type MobilePreviewOffer =
+  | { ok: true; code: string; port: number; expiresAt: number }
+  | { ok: false; error: string }
+
 /** A layout operation from a phone, on its way to the renderer that owns tabs. */
 export interface MobileCommandEvent {
   requestId: string
@@ -2216,6 +2262,13 @@ export interface MobileStatus {
    */
   addresses: string[]
   devices: MobileDeviceRecord[]
+  /**
+   * Whether the server has a phone bundle to serve at all — `mobile/dist` in a
+   * checkout, `resources/mobile-web` in a packaged build, '' when neither
+   * exists. The Devices preview frames point at this server, so this is the
+   * difference between "the preview works" and "run `npm run mobile:build`".
+   */
+  web: boolean
   /** Phones with a socket open this second. */
   connected: number
   /**
@@ -2917,6 +2970,38 @@ export interface CommandPresence {
   /** Absolute path of what we found. */
   path?: string
 }
+
+/* ------------------------------------------------------- the dev server */
+
+/**
+ * How a project starts its own dev server, read off its package.json.
+ *
+ * The Devices preview's answer to "nothing is answering at that URL". Forge is
+ * already the terminal every dev server prints its banner into, so the honest
+ * next step when the banner's server has died is to offer to run the script
+ * again rather than to explain that it is gone.
+ *
+ * Null rather than a guess when the folder has no package.json, no scripts, or
+ * none of the four names Forge recognises — a guessed command is worse than no
+ * command. The empty state still offers a box to type one into, and what is
+ * typed there is remembered on the workspace (`Workspace.devCommand`), so a
+ * static site or a python app reaches the same Start button by another door.
+ *
+ * `self` is the one answer that is neither a command nor an absence: the folder
+ * *is* this checkout, and the sniff refuses to guess there for a reason the
+ * renderer has to know about rather than merely obey — see the latch in
+ * electron/main.ts. The view swaps the Start button for the Forge Mobile
+ * preview, which is how Forge looks at itself.
+ */
+export type PreviewDevCommand =
+  | {
+      kind: 'command'
+      /** The whole line to put in a pane, package manager included: `npm run dev`. */
+      command: string
+      /** Which script it runs — `dev`, `start`, `serve` or `preview`. */
+      script: string
+    }
+  | { kind: 'self' }
 
 /**
  * Errors the user has to *fix something* about, rather than retry. These put

@@ -10,6 +10,7 @@ import { TasksWorkspace } from '@/components/tasks/TasksWorkspace'
 import { StatusBar } from '@/components/StatusBar'
 import { TerminalGrid } from '@/components/TerminalGrid'
 import { SettingsPage } from '@/components/settings/SettingsPage'
+import { DevicePreview } from '@/components/DevicePreview'
 import { TitleBar } from '@/components/TitleBar'
 import { StaleBanner } from '@/components/StaleBanner'
 import { UpdateBanner } from '@/components/UpdateBanner'
@@ -74,6 +75,8 @@ export function App(): ReactNode {
           */}
           {state.view === 'settings' ? (
             <SettingsPage />
+          ) : state.view === 'devices' ? (
+            <DevicePreview />
           ) : state.tasksMaximized ? (
             <TasksWorkspace />
           ) : (

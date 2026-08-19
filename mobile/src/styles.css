@@ -24,6 +24,28 @@
   --warn: #ffb020;
   --bad: #ff5c5c;
   --radius: 10px;
+  /* The safe areas, as variables rather than env() calls, so the desk's
+     preview can pin them — a desktop iframe has no notch, so env() answers 0
+     and the app would draw under where the frame's fake system bar sits.
+     Real devices are untouched: without a `?sim=` the vars hold exactly what
+     env() would have said. */
+  --sa-top: env(safe-area-inset-top, 0px);
+  --sa-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* The Devices preview (lib/sim.ts): the phone being played supplies the
+   insets of the phone it is. These two blocks are the whole reason --sa-*
+   exist as variables; every usage site below reads the var and stays
+   agnostic about who answered it. iPhone 15 Pro / Pixel 8, matching the
+   frames the desk draws. */
+body.sim-ios {
+  --sa-top: 59px;
+  --sa-bottom: 34px;
+}
+
+body.sim-android {
+  --sa-top: 28px;
+  --sa-bottom: 24px;
 }
 
 * {
@@ -68,7 +90,7 @@ body {
      read, they were unreachable, and the update button being untappable is
      exactly how a self-updating app stops being able to update itself.
      Every other inset in this file is `-bottom`; this one was simply missed. */
-  padding: calc(6px + env(safe-area-inset-top)) 12px 6px;
+  padding: calc(6px + var(--sa-top)) 12px 6px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   font-size: 12px;
@@ -304,7 +326,7 @@ body {
    the New tab button sits under Android's gesture bar, where the system eats
    the touch and the button reads as broken rather than covered. */
 .screen-foot {
-  padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+  padding: 12px 12px calc(12px + var(--sa-bottom));
   border-top: 1px solid var(--line);
   background: var(--panel);
   flex: 0 0 auto;
@@ -343,7 +365,7 @@ body {
   flex: 0 0 auto;
   background: var(--panel);
   border-top: 1px solid var(--line);
-  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+  padding: 6px 6px calc(6px + var(--sa-bottom));
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -407,7 +429,7 @@ body {
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  padding: 8px 8px calc(8px + var(--sa-bottom));
   background: var(--panel);
   border-top: 1px solid var(--line);
 }
@@ -450,7 +472,7 @@ body {
   gap: 14px;
   /* Same edge-to-edge story as .status — the unpaired screens own the top of
      the window themselves, with no strip above them to absorb the inset. */
-  padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+  padding: calc(24px + var(--sa-top)) 24px calc(24px + var(--sa-bottom));
   overflow-y: auto;
 }
 
@@ -660,7 +682,7 @@ body {
   border: 1px solid var(--line);
   border-bottom: 0;
   border-radius: 16px 16px 0 0;
-  padding: 18px 16px calc(16px + env(safe-area-inset-bottom));
+  padding: 18px 16px calc(16px + var(--sa-bottom));
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -861,7 +883,7 @@ body {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(88px + env(safe-area-inset-bottom));
+  bottom: calc(88px + var(--sa-bottom));
   transform: translateX(-50%);
   max-width: calc(100vw - 32px);
   padding: 10px 16px;

@@ -488,6 +488,46 @@ npm run pwa:check       # 44 checks — see below
 
 ---
 
+## Preview from the desk
+
+The **Devices** view (the phone button in the title bar, or Ctrl+Shift+D) shows
+the real mobile app running as the two phones it ships as — an iPhone frame and
+a Pixel frame — without owning either phone. It exists because the look of the
+app on a phone is a web question: the APK wraps this bundle and the iPhone
+installs it as a PWA, so the frame *is* the app, minus the hardware.
+
+What is real and what is simulated:
+
+- **Real:** each frame loads the served bundle from the phone-link server on
+  loopback (`http://localhost:<port>` for the iPhone, `http://127.0.0.1:<port>`
+  for the Pixel — different origins on purpose, so each frame pairs as its own
+  device with its own stored token), pairs through the same single-use code
+  door a QR takes (minted on demand; one code at a time, iPhone first), and
+  drives the same PTYs. The device rows in Settings say
+  **Preview · iPhone** and **Preview · Android**, and can be revoked like any
+  other phone.
+- **Simulated:** the viewport, the bezel, and the system bars. `?sim=ios` /
+  `?sim=android` (`mobile/src/lib/sim.ts`) pins the safe-area variables in
+  `styles.css` to the real insets of the phone being played, so the app clears
+  the fake status bar exactly as it clears the real one. The bars themselves
+  are drawn by the desktop over that reserved space. No approval prompt is
+  ever involved — the code door bypasses it entirely.
+
+The link has to be on and a bundle has to exist (`npm run mobile:build` in a
+checkout; a packaged Forge carries `resources/mobile-web` instead). Opening
+Devices replaces any outstanding Settings QR offer — the same thing pressing
+the QR button twice does.
+
+**A real emulator is a different tier and a deliberate non-goal here.** Tools
+like Orca stream an actual iOS Simulator / Android emulator into the IDE; that
+needs macOS for the iOS half (impossible on this desk) and the Android SDK plus
+GB-sized system images for the other. The web tier above covers what this
+feature was asked for — what the app *looks like* on a phone — at none of that
+cost. If real-device behaviour ever matters (camera, UDP homing, the
+self-updater), that is what a real phone or an AVD is for.
+
+---
+
 ## Limits
 
 - **The desktop must be awake and running.** A power-save blocker is held while

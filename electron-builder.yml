@@ -21,6 +21,9 @@
 #                                           see scripts/build-bridge.mjs)
 #   resources/stt-bin/forge-stt.exe     ← electron/stt-sidecar.ts resolveFrozen()
 #   resources/stt/stt_service.py        ← electron/stt-sidecar.ts resolveScript()
+#   resources/mobile-web/               ← electron/mobile-host.ts mobileWebRoot()
+#                                          (the phone bundle the Devices preview
+#                                           frames and the browser route serve)
 #   resources/icon.ico                  ← electron/tray.ts iconCandidates()
 #   resources/icon-dev.ico              ← ditto, for the dev channel
 
@@ -77,6 +80,14 @@ extraResources:
     to: stt
     filter:
       - stt_service.py
+  # The phone bundle, read by path because MobileServer serves it as files. A
+  # packaged Forge has no checkout to build it from, so without this copy the
+  # browser route would be gone and the Devices preview would have nothing to
+  # frame — `npm run dist` builds mobile/dist first for exactly this reason.
+  - from: mobile/dist
+    to: mobile-web
+    filter:
+      - '**/*'
 
 asar: true
 # node-pty's conpty.node / conpty.dll and its OpenConsole.exe are loaded by the

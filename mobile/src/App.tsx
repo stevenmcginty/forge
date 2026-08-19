@@ -20,6 +20,7 @@ import { TvConnect } from './components/TvConnect'
 import { TvDashboard } from './components/TvDashboard'
 import { homingLine, useDesktopHoming, type KnownDesktop } from './lib/homing'
 import { isTv } from './lib/tv'
+import { simDevice } from './lib/sim'
 import { tvBridge } from './lib/tv-bridge'
 import { mirrorListeners } from './lib/mirror'
 import { UpdateSheet } from './components/Update'
@@ -872,12 +873,19 @@ function sessionNameOf(picture: LinkPicture | null, sessionId: string): string {
  * whoever is deciding whether to press Allow, and on a Fire TV every automatic
  * source answers with a build string ("AFTKA") that identifies the device to
  * nobody. "TV" is the word the person at the desk is thinking.
+ *
+ * The desk's preview says which phone it is playing (lib/sim.ts): a frame has
+ * a desktop UA, and "Windows" in the device list is a lie about what this view
+ * of the app is for. The name is also how the Devices view recognises its own
+ * frames checking in.
  */
 function deviceName(): string {
   return isTv() ? `TV (${hardwareName()})` : hardwareName()
 }
 
 function hardwareName(): string {
+  const sim = simDevice()
+  if (sim) return sim === 'ios' ? 'Preview · iPhone' : 'Preview · Android'
   const brands = (navigator as { userAgentData?: { platform?: string } }).userAgentData
   if (brands?.platform) return brands.platform
   const match = /\(([^)]+)\)/.exec(navigator.userAgent)

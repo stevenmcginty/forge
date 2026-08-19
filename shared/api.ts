@@ -24,6 +24,7 @@ import type {
   MobileCommandEvent,
   MobileMirrorEvent,
   MobilePairOffer,
+  MobilePreviewOffer,
   MobileStatus,
   MobileWatchEvent,
   WebCommandEvent,
@@ -50,6 +51,7 @@ import type {
   GitBranchCompare,
   GitSnapshot,
   PlannerUpdate,
+  PreviewDevCommand,
   Project,
   PtyDataEvent,
   PtyExitEvent,
@@ -457,6 +459,12 @@ export interface ForgeApi {
      */
     pair(): Promise<MobilePairOffer>
     pairCancel(): Promise<boolean>
+    /**
+     * Mint a single-use pairing code for the Devices preview frames. Same
+     * single-use, single-pending machinery as the QR — which is why the Devices
+     * view asks for these one frame at a time, never two at once.
+     */
+    previewPair(): Promise<MobilePreviewOffer>
     /**
      * Arm or disarm "Accept new phones" — the tap-to-pair window. While armed,
      * a phone with no credential may *ask* to connect, which raises the
@@ -908,6 +916,24 @@ export interface ForgeApi {
    * set a remote, only ask about one.
    */
   gitRemoteOrigin(dir: string): Promise<string | null>
+
+  /**
+   * The Devices preview, in its half that has to leave the renderer.
+   *
+   * One question so far, and it is the same *kind* of question as
+   * `gitRemoteOrigin` above: a folder is handed over and a fact about it comes
+   * back. Nothing here starts a process — see `devCommand`.
+   */
+  preview: {
+    /**
+     * How this project would start its own dev server (`npm run dev`, `pnpm run
+     * start`, ...), `{ kind: 'self' }` for Forge's own checkout, or null when
+     * the folder cannot say. Main reads one file, package.json, and runs
+     * nothing at all: the command is typed into a terminal pane on this side,
+     * in front of the person who asked for it.
+     */
+    devCommand(dir: string): Promise<PreviewDevCommand | null>
+  }
 
   /**
    * Absolute path of a dropped `File`. Typed as `unknown` because this contract

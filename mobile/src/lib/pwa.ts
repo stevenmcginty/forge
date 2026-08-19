@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core'
+import { simDevice } from './sim'
 
 /**
  * The home-screen route: the same bundle the APK wraps and phone Chrome loads,
@@ -54,8 +55,13 @@ export function isStandalone(): boolean {
  * check is not paranoia — without it every iPad falls through to the desktop
  * branch and is never told how to install. Nothing security-relevant hangs off
  * this; it decides which sentence appears on the pairing screen.
+ *
+ * The desk's preview answers first (lib/sim.ts): a desktop frame has a desktop
+ * UA no matter which phone it is playing, and the sentence is the point there.
  */
 export function isIos(): boolean {
+  const sim = simDevice()
+  if (sim) return sim === 'ios'
   if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) return true
   return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1
 }
