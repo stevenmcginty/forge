@@ -1257,3 +1257,275 @@
     flex-wrap: wrap;
   }
 }
+
+/* -------------------------------------------------------------- mobile
+ *
+ * A thumb on a phone: `useMobile` in lib/mobile.ts sets `.app[data-mobile]`,
+ * and everything under it is the same furniture arranged for one hand. Nothing
+ * here touches a mouse in a narrow window — that is the `narrow` fold above.
+ *
+ *  - The rail is a drawer over the terminal, not a column beside it. 260px of
+ *    rail on a 390px phone leaves nothing to type into.
+ *  - One pane at a time (`MobilePanes`), with chips to switch.
+ *  - The key bar along the bottom, above the soft keyboard — which shrinks the
+ *    viewport instead of covering it thanks to `interactive-widget` in
+ *    index.html.
+ *  - Every tap target at least 40px. The desktop's 20px pane actions are
+ *    right for a pointer and wrong for a fingertip.
+ */
+
+.app[data-mobile] {
+  /* The keyboard-shrunk viewport is what `html { height: 100% }` follows. */
+  height: 100%;
+}
+
+.app[data-mobile] .app__body {
+  position: relative;
+}
+
+/* The rail as a drawer. */
+.app[data-mobile] .app__left {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: var(--z-popover);
+  width: min(300px, 85vw);
+  min-width: 0;
+  transform: translateX(-100%);
+  transition: transform var(--dur-med) var(--ease-out);
+  box-shadow: none;
+}
+
+.app[data-mobile] .app__left[data-drawer='open'] {
+  transform: translateX(0);
+  box-shadow: var(--shadow-card);
+}
+
+.mdrawer__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: calc(var(--z-popover) - 1);
+  background: var(--bg-scrim);
+}
+
+.app[data-mobile] .titlebar__path,
+.app[data-mobile] .linkbadge__text {
+  display: none;
+}
+
+.app[data-mobile] .titlebar__btn {
+  width: 40px;
+  height: 40px;
+}
+
+/* The tab strip: taller, scrollable, and the flyouts that need a desk are gone. */
+.app[data-mobile] .tabstrip {
+  height: 44px;
+  padding: 0 var(--s-2);
+}
+
+.app[data-mobile] .tab {
+  min-height: 36px;
+  padding-left: var(--s-4);
+}
+
+.app[data-mobile] .tab__close {
+  width: 32px;
+  height: 32px;
+  opacity: 1;
+}
+
+.app[data-mobile] .tabstrip__new {
+  width: 40px;
+  height: 36px;
+}
+
+.app[data-mobile] .tabstrip__spacer ~ button {
+  display: none;
+}
+
+/* One pane at a time. */
+.mpanes {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.mpanes__chips {
+  display: flex;
+  gap: var(--s-2);
+  flex: none;
+  padding: var(--s-2) var(--s-3);
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.mpanes__chips::-webkit-scrollbar {
+  height: 0;
+}
+
+.mpanes__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  max-width: 60vw;
+  height: 34px;
+  padding: 0 var(--s-4);
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-soft);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font: 500 var(--t-sm) / 1 var(--font-ui);
+}
+
+.mpanes__chip[data-active='true'] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.mpanes__chip[data-working='true']::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.mpanes__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.mpanes__slot {
+  position: absolute;
+  inset: 0;
+}
+
+.mpanes__slot > * {
+  width: 100%;
+  height: 100%;
+}
+
+/* Hidden, not unmounted — `fit()` refuses a box under 8px, so nothing resizes. */
+.mpanes__slot[data-active='false'] {
+  visibility: hidden;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.app[data-mobile] .pane__action {
+  width: 36px;
+  height: 32px;
+}
+
+.app[data-mobile] .pane__header {
+  height: 36px;
+}
+
+/* The keys a phone keyboard has not got. */
+.mkeys {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom, 0px));
+  background: var(--bg-panel);
+  border-top: 1px solid var(--line-hairline);
+  touch-action: manipulation;
+}
+
+.mkeys__row {
+  display: flex;
+  gap: var(--s-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mkeys__row::-webkit-scrollbar {
+  height: 0;
+}
+
+.mkeys__key {
+  flex: 1 0 auto;
+  min-width: 42px;
+  height: 42px;
+  padding: 0 var(--s-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-soft);
+  background: var(--bg-panel-raised);
+  color: var(--text-primary);
+  font: 500 var(--t-md) / 1 var(--font-ui);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.mkeys__key:active {
+  background: var(--bg-active);
+}
+
+.mkeys__key--sym {
+  font-size: var(--t-lg);
+}
+
+.mkeys__key--wide {
+  flex: 0 0 auto;
+  min-width: 52px;
+}
+
+/* Sticky modifiers read as a shift key: armed for one press, or locked. */
+.mkeys__mod[data-sticky='once'] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.mkeys__mod[data-sticky='locked'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+  font-weight: 700;
+}
+
+.mcompose {
+  flex: none;
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom, 0px));
+  background: var(--bg-panel);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.mcompose__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 42px;
+  padding: 0 var(--s-4);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-soft);
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font-size: 16px; /* under 16px and iOS zooms the page on focus */
+}
+
+.mcompose__send {
+  height: 42px;
+}
+
+.mcompose__close {
+  width: 42px;
+  height: 42px;
+}
+
+/* A toast that sits clear of the key bar. */
+.app[data-mobile] ~ .notice,
+.app[data-mobile] .notice {
+  bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+}

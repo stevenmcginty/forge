@@ -2,7 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!--
+      `interactive-widget=resizes-content`: Android's soft keyboard shrinks the
+      viewport rather than sliding over it, so the key bar along the bottom of
+      the phone layout stays above the keyboard and each terminal's
+      ResizeObserver refits to the room that is actually left. Without it the
+      keyboard covers the keys it exists to supplement. Chrome 108+; ignored
+      everywhere else, where the old behaviour is what you got anyway.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0b0c0e" />
     <!--
