@@ -28,7 +28,7 @@
  */
 
 import { findDevServerUrl } from '@shared/devserver'
-import type { PreviewDevCommand } from '@shared/types'
+import type { PortOwnerResult, PreviewDevCommand } from '@shared/types'
 
 export type SimId = 'ios' | 'android'
 
@@ -182,6 +182,135 @@ export function probeTarget(url: string): string | null {
   }
   if (parsed.protocol !== 'http:') return null
   return parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' ? url : null
+}
+
+/* ------------------------------------------------------------- ownership */
+
+/**
+ * The loopback port a URL names, or null when the URL is not this machine's to
+ * account for.
+ *
+ * The companion of `probeTarget` above and drawn along the same line, because
+ * the two answer halves of one question. `probeTarget` asks whether anything is
+ * listening; this asks *who*, and neither is answerable about a deployed site —
+ * a port on `example.com` is not a port this desk can look up an owner for.
+ *
+ * The default ports are spelled out because a URL is allowed to omit them and a
+ * server on 80 is still a server somebody else can be holding.
+ */
+export function ownershipPort(url: string): number | null {
+  if (!url) return null
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') return null
+  if (parsed.port) return Number(parsed.port) || null
+  if (parsed.protocol === 'http:') return 80
+  if (parsed.protocol === 'https:') return 443
+  return null
+}
+
+/**
+ * Whose server is answering at this URL?
+ *
+ * The check the reachability probe cannot make, and the one this whole file used
+ * to be missing. A loopback URL names a *port*, ports are handed out
+ * machine-wide on a first-come basis, and "something accepted a socket there" is
+ * not the same claim as "that is your project". Two projects that both default
+ * to 3000 is the ordinary case, not the exotic one — and when the wrong one wins
+ * the race, the preview frames a stranger's app with a "Live" chip over it.
+ *
+ * `null` means the question does not apply: not a loopback URL, so not this
+ * desk's to adjudicate, and the caller should carry on exactly as before.
+ *
+ * Everything else defers to main (`electron/preview/port-owner.ts`), including
+ * every way the lookup can fail — which comes back `owned: true`, because a
+ * probe that could not run is not evidence against anybody.
+ */
+export async function checkPortOwner(
+  url: string,
+  projectPath: string,
+  pids: number[]
+): Promise<PortOwnerResult | null> {
+  const port = ownershipPort(url)
+  if (!port) return null
+  try {
+    return await window.forge.preview.portOwner({ port, pids, path: projectPath })
+  } catch {
+    return { pid: null, command: null, owned: true, reason: 'unknown' }
+  }
+}
+
+/**
+ * The squatting program, in the few words that let somebody recognise it.
+ *
+ * A pid alone identifies nothing, and a whole command line is a paragraph of
+ * `node_modules` that nobody reads to the end. What actually places a stray dev
+ * server is the *folder* it was launched out of — "oh, that is the other
+ * project I left running" — so this digs the first absolute path out of the
+ * command line and keeps the last directory that is still part of somebody's
+ * work: the segment before `node_modules` when the launcher came from there,
+ * and the containing folder otherwise.
+ *
+ * Empty when the command line says nothing useful, in which case the caller
+ * falls back to the pid alone. The trailing space is deliberate — the caller
+ * puts a pid straight after it.
+ */
+export function describeOwner(command: string | null): string {
+  if (!command) return ''
+  const path = /(?:[A-Za-z]:[\\/]|\/)[^"'\n]*/.exec(command)?.[0]
+  if (!path) return ''
+  const segments = path.split(/[\\/]/).filter(Boolean)
+  const cut = segments.findIndex((s) => s.toLowerCase() === 'node_modules')
+  const kept = cut > 0 ? segments.slice(0, cut) : segments.slice(0, -1)
+  // Drive letters and the couple of segments every path on the machine shares
+  // name nothing; if that is all there is, the pid on its own is more honest.
+  const last = kept[kept.length - 1] ?? ''
+  if (!last || /^[A-Za-z]:$/.test(last)) return ''
+  return `it looks like ${last}, `
+}
+
+/**
+ * How long to keep asking when the port is not open *yet*.
+ *
+ * A dev server prints its banner and binds its socket in whichever order it
+ * feels like, and plenty print first. Asking once would then read a perfectly
+ * good server as a closed port and throw its URL away, so a `closed` answer is
+ * retried across a few seconds before it is believed. `unowned` is never
+ * retried: a stranger holding the port is a settled fact, not a race.
+ */
+const OWNER_RETRIES = [400, 900, 1800]
+
+function wait(ms: number): Promise<void> {
+  return new Promise((done) => setTimeout(done, ms))
+}
+
+/**
+ * Is the server at this URL this project's, waiting out the bind race?
+ *
+ * The gate on *recording* a detected URL, as opposed to `checkPortOwner`, which
+ * is the gate on framing one. The difference is patience: a detection arrives
+ * the instant a banner is printed and may beat the socket it describes, while
+ * the view's probe runs on a timer and can simply ask again next tick.
+ *
+ * `true` for anything that is not a positive trace to somebody else — including
+ * a URL that is not loopback at all, which is not this desk's to judge.
+ */
+export async function confirmProjectServer(
+  url: string,
+  projectPath: string,
+  pids: number[]
+): Promise<boolean> {
+  for (let i = 0; ; i++) {
+    const owner = await checkPortOwner(url, projectPath, pids)
+    if (!owner) return true
+    if (owner.reason !== 'closed') return owner.owned
+    if (i >= OWNER_RETRIES.length) return false
+    await wait(OWNER_RETRIES[i]!)
+  }
 }
 
 /* ------------------------------------------------- starting the dev server */

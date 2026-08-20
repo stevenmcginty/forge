@@ -58,6 +58,34 @@ export default defineConfig({
       }
     ],
     server: {
+      /**
+       * Where the renderer's dev server listens — a fixed address, an
+       * uncommon port, and no room for either to drift.
+       *
+       * This is the fix for Forge opening with somebody else's app inside it.
+       * `localhost` has two addresses on Windows, 127.0.0.1 and ::1, and two
+       * dev servers can therefore both "have port 5173" without either seeing
+       * a collision: Forge's Vite took 127.0.0.1:5173, a project opened in
+       * Forge took ::1:5173. Chromium resolves `localhost` IPv6-first, so the
+       * desktop window loaded the project — a complete, working app in Forge's
+       * own frame, with no way through to Forge.
+       *
+       * Binding 127.0.0.1 explicitly is what closes that: electron-vite builds
+       * `ELECTRON_RENDERER_URL` from this host, so the address Vite listens on
+       * and the address Electron dials are the same one literal, with no name
+       * resolution in between to disagree about.
+       *
+       * The port is pinned for a related reason. electron-vite takes the
+       * *configured* port, not the one Vite bound, and Vite with `strictPort`
+       * off silently steps to the next port when one is taken — so the URL can
+       * point somewhere Forge never was. `strictPort` makes that a loud failure
+       * instead, and scripts/dev.mjs picks a port that is free before Vite
+       * starts, so the loud failure should never come up. 5273 rather than
+       * 5173 because 5173 is the port every other Vite project starts from.
+       */
+      host: '127.0.0.1',
+      port: Number(process.env['FORGE_RENDERER_PORT']) || 5273,
+      strictPort: true,
       watch: {
         // The renderer's root is the repo root, so vite's watcher sees every
         // file in the tree — and a *.html landing anywhere triggers a full

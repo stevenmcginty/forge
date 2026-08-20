@@ -88,6 +88,18 @@ export const IPC = {
    */
   previewDevCommand: 'preview:dev-command',
 
+  /**
+   * "Who is listening on this port, and is it this project's?" — the check that
+   * stops the Devices preview framing a stranger's dev server.
+   *
+   * A sibling of `previewDevCommand` above in intent and in restraint: it takes
+   * a port and a project, it answers a question about them, and it starts
+   * nothing. What it *does* do that the sniff does not is read machine-wide
+   * state — the TCP listener table and the process table — so it lives behind
+   * IPC rather than in the renderer, which can see neither.
+   */
+  previewPortOwner: 'preview:port-owner',
+
   // onboarding — is `claude` / `kimi` / `gemini` on this machine's PATH?
   agentsProbe: 'agents:probe',
   // the same question about an arbitrary profile command, for the chooser and

@@ -64,8 +64,9 @@ export default defineConfig(({ command }) => ({
     }
   },
   server: {
-    // 5174, because the desktop renderer's dev server is on 5173 and both are
-    // routinely up at once. A desktop that wants to serve this dev loop has to
+    // 5174 rather than Vite's 5173, which any project opened in Forge is liable
+    // to be using. (The desktop renderer is on 5273+ for the same reason — see
+    // scripts/dev.mjs.) A desktop that wants to serve this dev loop has to
     // name `http://localhost:5174` in its allowed origins — see `originAllowed`
     // in electron/web/server.ts.
     port: 5174,

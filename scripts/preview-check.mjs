@@ -294,6 +294,59 @@ ok(
   'what resolvePreviewUrl hands the frames is what gets probed'
 )
 
+/* --------------------------------------------------------- whose port is it
+ *
+ * The probe above asks whether anything is answering. It cannot ask whether the
+ * thing answering is *this project's*, and for a long time nothing did — which
+ * is how a car-harness preview came to show a Remotion studio running out of a
+ * different folder, with a "Live" chip over it. A loopback port is machine-wide
+ * and first-come-first-served, so "a socket was accepted" was never the same
+ * claim as "your dev server is up".
+ *
+ * `ownershipPort` is the half of that check that is decidable here: which port
+ * to ask main about, and when not to ask at all. */
+console.log('\nwhose port is it')
+ok(D.ownershipPort('http://localhost:3000/') === 3000, 'the port a loopback URL names is the port to check')
+ok(D.ownershipPort('http://127.0.0.1:8080/app') === 8080, 'on either loopback host')
+ok(
+  D.ownershipPort('http://localhost/') === 80,
+  'an omitted port is still a port somebody else can be holding',
+  JSON.stringify(D.ownershipPort('http://localhost/'))
+)
+ok(D.ownershipPort('https://localhost/') === 443, 'and https defaults to its own')
+ok(
+  D.ownershipPort('https://forge.dev/') === null,
+  'a deployed site has no local owner to look up — not this desk’s to judge'
+)
+ok(D.ownershipPort('localhost:3000') === null, 'an un-normalised host:port is not a URL yet, here either')
+ok(D.ownershipPort('') === null, 'and nothing names no port')
+
+/* What the refusal calls the squatter. A pid identifies nothing to a person and
+ * a full command line is a paragraph of node_modules, so what is shown is the
+ * folder it was launched out of — which is how you recognise it as the other
+ * project you left running. */
+// String.raw because a Windows command line is nothing but backslashes, and
+// spelling them out doubled is how this assertion stops being about escaping.
+// This exact line is what was holding port 3000 the day the bug was found.
+const REMOTION = String.raw`"node"  "C:\Users\steve\Desktop\cafe-roma-homepage\roma-2026\film\node_modules\.bin\..\@remotion\cli\remotion-cli.js" studio`
+ok(
+  D.describeOwner(REMOTION) === 'it looks like film, ',
+  'the segment before node_modules is the folder a person would recognise',
+  JSON.stringify(D.describeOwner(REMOTION))
+)
+ok(
+  D.describeOwner(String.raw`C:\Users\steve\Desktop\my-app\server.exe --port 3000`) === 'it looks like my-app, ',
+  'a bare Windows path keeps its containing folder, not the executable',
+  JSON.stringify(D.describeOwner(String.raw`C:\Users\steve\Desktop\my-app\server.exe --port 3000`))
+)
+ok(
+  D.describeOwner('/usr/local/bin/python3 /home/steve/apps/shop/run.py') === 'it looks like shop, ',
+  'with no node_modules, the containing folder is the answer',
+  JSON.stringify(D.describeOwner('/usr/local/bin/python3 /home/steve/apps/shop/run.py'))
+)
+ok(D.describeOwner('node') === '', 'a command line with no path in it names nothing')
+ok(D.describeOwner(null) === '', 'and an unknown command line says so by saying nothing')
+
 /* The Start button's command, and the one project that never gets one. A typed
  * command is a decision and the package.json sniff is a guess, so the order here
  * is the same order resolvePreviewUrl uses — and the self latch is a refusal to

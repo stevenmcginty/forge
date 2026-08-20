@@ -6,11 +6,13 @@ import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import { PACK_EXTENSION } from '@shared/skillpack'
 import { planProjectFolder } from './projectfolder'
 import { gitRemoteOrigin } from './git-remote'
+import { portOwner } from './preview/port-owner'
 import { makeSafeStorageCodec } from './secretbox'
 import type {
   AppInfo,
   MakeProjectFolderRequest,
   MakeProjectFolderResult,
+  PortOwnerQuery,
   PreviewDevCommand,
   Project,
   Settings,
@@ -513,6 +515,18 @@ function createWindow(): void {
  * hiding behind another retry.
  */
 async function loadDevUrl(win: BrowserWindow, url: string, attempt = 0): Promise<void> {
+  // Never hand the window to a server that is not ours. See devServerIdentity.
+  if ((await devServerIdentity(url)) === 'stranger') {
+    reportStartupFailure(
+      'Forge did not start',
+      new Error(
+        `Something other than Forge's renderer is serving ${url}, so Forge has not loaded it.\n\n` +
+          'Close whatever dev server is on that port (a project started from a Forge terminal is the usual one) and start Forge again.'
+      )
+    )
+    win.destroy()
+    return
+  }
   try {
     await win.loadURL(url)
   } catch (err) {
@@ -522,6 +536,38 @@ async function loadDevUrl(win: BrowserWindow, url: string, attempt = 0): Promise
       return
     }
     setTimeout(() => void loadDevUrl(win, url, attempt + 1), 1000)
+  }
+}
+
+/**
+ * Who is answering at the dev URL: our renderer, a stranger, or nobody yet.
+ *
+ * The window is told where to load from by `ELECTRON_RENDERER_URL`, and a URL
+ * is only a promise about a port — not about what is listening on it. When that
+ * port belonged to another dev server, Forge's own window came up showing one
+ * of the user's projects: a real app, fully working, with Forge's title bar
+ * around it and no way to get to Forge short of a reboot.
+ *
+ * scripts/dev.mjs and the `strictPort` in electron.vite.config.ts should make
+ * that impossible now. This check is the second lock: it costs one loopback
+ * request at startup and turns any future mix-up into a plain sentence instead
+ * of a window full of somebody else's software.
+ *
+ * 'silent' — nothing listening — is not a failure here. That is the ordinary
+ * cold-start race the retry loop above exists for.
+ */
+async function devServerIdentity(url: string): Promise<'forge' | 'stranger' | 'silent'> {
+  try {
+    const res = await fetch(url, {
+      headers: { accept: 'text/html' },
+      signal: AbortSignal.timeout(4000)
+    })
+    if (!res.ok) return 'silent'
+    const html = await res.text()
+    // index.html's entry point, which vite's dev transform leaves in place.
+    return html.includes('/src/main.tsx') ? 'forge' : 'stranger'
+  } catch {
+    return 'silent' // not up yet, or refused the connection
   }
 }
 
@@ -1028,6 +1074,18 @@ function registerAppHandlers(): void {
   // a folder goes in, a fact comes back, and the only thing this touches is that
   // folder's package.json.
   ipcMain.handle(IPC.previewDevCommand, (_e, dir: string) => previewDevCommand(String(dir ?? '')))
+
+  // And the question that comes after it: the URL was noticed, but is the server
+  // answering there actually this project's? Only main can tell — the listener
+  // table and the process table are machine-wide, and the renderer can see
+  // neither.
+  ipcMain.handle(IPC.previewPortOwner, (_e, query: PortOwnerQuery) =>
+    portOwner({
+      port: Number(query?.port ?? 0),
+      pids: Array.isArray(query?.pids) ? query.pids.map(Number) : [],
+      path: String(query?.path ?? '')
+    })
+  )
 
   // The renderer never touches navigator.clipboard: it needs a permission
   // handler, rejects silently when the window is not focused, and cannot do

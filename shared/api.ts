@@ -51,6 +51,8 @@ import type {
   GitBranchCompare,
   GitSnapshot,
   PlannerUpdate,
+  PortOwnerQuery,
+  PortOwnerResult,
   PreviewDevCommand,
   Project,
   PtyDataEvent,
@@ -920,9 +922,9 @@ export interface ForgeApi {
   /**
    * The Devices preview, in its half that has to leave the renderer.
    *
-   * One question so far, and it is the same *kind* of question as
-   * `gitRemoteOrigin` above: a folder is handed over and a fact about it comes
-   * back. Nothing here starts a process — see `devCommand`.
+   * Two questions, both the same *kind* of question as `gitRemoteOrigin` above:
+   * something is handed over and a fact about it comes back. Nothing here
+   * starts a process — see `devCommand`.
    */
   preview: {
     /**
@@ -933,6 +935,23 @@ export interface ForgeApi {
      * in front of the person who asked for it.
      */
     devCommand(dir: string): Promise<PreviewDevCommand | null>
+
+    /**
+     * Who is listening on a local port, and is it this project's server?
+     *
+     * The check the liveness probe cannot make. A port is machine-wide and
+     * first-come-first-served, so a URL noticed in a project's terminal — or
+     * saved from a session weeks ago — is only ever a claim about an *address*.
+     * A second project that also likes port 3000 will answer that address
+     * perfectly happily, and two phones will show its app instead.
+     *
+     * Main finds the listening process and accepts it as this project's on
+     * either of two grounds: it descends from one of the project's own terminal
+     * panes (`pids`), or its command line names the project's folder (`path`).
+     * Uncertainty comes back `owned: true` — a probe that could not run is not
+     * evidence of a stranger.
+     */
+    portOwner(query: PortOwnerQuery): Promise<PortOwnerResult>
   }
 
   /**

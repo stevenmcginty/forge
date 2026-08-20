@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { MobileStatus, PreviewDevCommand } from '@shared/types'
+import type { MobileStatus, PortOwnerResult, PreviewDevCommand } from '@shared/types'
 import {
+  checkPortOwner,
   defaultPreviewMode,
+  describeOwner,
   DEFAULT_DEV_COMMAND,
   effectiveDevCommand,
   fitScale,
@@ -17,6 +19,7 @@ import {
   type PreviewMode
 } from '@/lib/devicePreview'
 import { useActiveProject, useActiveWorkspace, useApp } from '@/state/AppState'
+import { terminalHost } from '@/lib/terminals'
 import { Icon } from './Icon'
 import './DevicePreview.css'
 
@@ -80,8 +83,14 @@ const PROBE_MS = 2500
  * answer, and it renders as neither phones nor an apology — showing either one
  * would be a guess, and both guesses are wrong roughly as often as they are
  * right.
+ *
+ * `down` and `foreign` are two different failures, and the difference matters to
+ * whoever is looking: nothing is listening, versus something is listening and it
+ * is not yours. The second used to be indistinguishable from success — a socket
+ * accepted is a socket accepted — which is exactly how two phones ended up
+ * showing another project's app under a chip saying "Live".
  */
-type Reach = 'checking' | 'up' | 'down'
+type Reach = 'checking' | 'up' | 'down' | 'foreign'
 
 interface FrameState {
   /** Bumped for a hard reload — a new key is a new page load, not a re-render. */
@@ -126,6 +135,7 @@ export function DevicePreview(): ReactNode {
 
   /* ------------------------------------------------------- project mode */
 
+  const projectPath = project?.path ?? ''
   const manual = workspace.previewUrl ?? ''
   const detected = usableDetectedUrl(workspace.detectedUrl)
   const resolved = resolvePreviewUrl(manual, detected)
@@ -191,6 +201,8 @@ export function DevicePreview(): ReactNode {
    * they loaded, so the first probe after a down spell reloads them.
    */
   const [reach, setReach] = useState<Reach>('checking')
+  /** Who holds the port, kept so the refusal can say whose server it is. */
+  const [owner, setOwner] = useState<PortOwnerResult | null>(null)
   const wasDownRef = useRef(false)
   useEffect(() => {
     if (mode !== 'project' || !resolved) return
@@ -199,6 +211,7 @@ export function DevicePreview(): ReactNode {
       // Not ours to judge (a deployed site, an https address) — assume it is up
       // and let the frame report whatever it finds.
       setReach('up')
+      setOwner(null)
       return
     }
     let cancelled = false
@@ -210,16 +223,32 @@ export function DevicePreview(): ReactNode {
         // unreachable connection rejects.
         await fetch(target, { mode: 'no-cors', cache: 'no-store' })
         if (cancelled) return
-        if (wasDownRef.current) {
-          wasDownRef.current = false
-          reloadSites()
-        }
-        setReach('up')
       } catch {
         if (cancelled) return
         wasDownRef.current = true
+        setOwner(null)
         setReach('down')
+        return
       }
+      // Something answered. The second question is whether it is *this
+      // project's* something: a loopback port is machine-wide, so the server
+      // that got there first answers just as cheerfully as the right one would,
+      // and the frames cannot tell the difference from the inside.
+      const held = await checkPortOwner(resolved, projectPath, terminalHost.pidsForCwd(projectPath))
+      if (cancelled) return
+      setOwner(held)
+      if (held && !held.owned) {
+        // Not a recovery to reload into — the frames stay unmounted until the
+        // port comes back to its owner.
+        wasDownRef.current = true
+        setReach('foreign')
+        return
+      }
+      if (wasDownRef.current) {
+        wasDownRef.current = false
+        reloadSites()
+      }
+      setReach('up')
     }
     void ask()
     const timer = setInterval(() => void ask(), PROBE_MS)
@@ -227,7 +256,7 @@ export function DevicePreview(): ReactNode {
       cancelled = true
       clearInterval(timer)
     }
-  }, [mode, resolved, reloadSites])
+  }, [mode, resolved, projectPath, reloadSites])
 
   /**
    * How this project would start its own dev server, so the empty states can
@@ -236,7 +265,6 @@ export function DevicePreview(): ReactNode {
    * phones, and null is a perfectly good answer — the box below still takes a
    * command by hand.
    */
-  const projectPath = project?.path ?? ''
   const [sniffed, setSniffed] = useState<PreviewDevCommand | null>(null)
   useEffect(() => {
     setSniffed(null)
@@ -489,6 +517,21 @@ export function DevicePreview(): ReactNode {
    * `isSelfPreview`): there the only honest button is the one that switches the
    * phones to Forge Mobile.
    */
+  /**
+   * How the refusal names the program squatting on the port.
+   *
+   * A pid alone tells nobody anything, and a whole command line is a paragraph
+   * of `node_modules` nobody reads. What identifies a stray dev server in
+   * practice is the *folder* it was launched out of — that is how you recognise
+   * it as the other project you left running — so the deepest recognisable
+   * directory in the command line is what gets shown, with the pid after it for
+   * anyone who wants to go and kill it.
+   */
+  const ownerLabel = ((): string => {
+    if (!owner?.pid) return ''
+    return ` (${describeOwner(owner.command)}PID ${owner.pid})`
+  })()
+
   const startBlock = selfPreview ? (
     <button
       type="button"
@@ -638,6 +681,22 @@ export function DevicePreview(): ReactNode {
               selfPreview
                 ? `That is where ${project.name} last announced itself, and nothing is listening there now. This is the checkout Forge is running from, so it will not offer to start it — a second Forge on top of the first is not a preview. The real mobile app is one click away instead.`
                 : `That is where ${project.name} last announced itself, and nothing is listening there now — the dev server looks stopped. The button below runs ${command} in a new pane; you land in the terminals to watch it boot, and Ctrl+Shift+D comes back here. Forge keeps checking either way, so the phones return the moment something answers.`
+            }
+            action={startBlock}
+          />
+        ) : reach === 'foreign' ? (
+          /* Something is answering — it is just not this project. A loopback
+             port is machine-wide and first-come-first-served, so the frames
+             would have shown a stranger's app perfectly happily, with a "Live"
+             chip over it and nothing anywhere to say otherwise. Naming the
+             process is most of the fix: once you can see it is the other
+             project's dev server, the answer is obvious and it is yours to
+             pick. */
+          <Empty
+            title={`Another program is using ${resolved}`}
+            body={
+              `That port is answering, but the server behind it is not ${project.name}'s${ownerLabel} — a local port belongs to whichever program claimed it first, and the phones would have shown you its app instead. ` +
+              `Start ${project.name}'s own server on a free port, or type the URL it is really on in the box above and Forge will remember it for this project.`
             }
             action={startBlock}
           />

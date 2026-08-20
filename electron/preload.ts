@@ -280,7 +280,8 @@ const api: ForgeApi = {
   gitRemoteOrigin: (dir) => ipcRenderer.invoke(IPC.gitRemoteOrigin, dir),
 
   preview: {
-    devCommand: (dir) => ipcRenderer.invoke(IPC.previewDevCommand, dir ?? '')
+    devCommand: (dir) => ipcRenderer.invoke(IPC.previewDevCommand, dir ?? ''),
+    portOwner: (query) => ipcRenderer.invoke(IPC.previewPortOwner, query)
   },
 
   // File.path was removed in Electron 32; webUtils is the sanctioned way and

@@ -4,7 +4,12 @@
 import { execFileSync, execSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
-const PORTS = [5173, 8420]
+// 5273-5279: the renderer dev server's range (scripts/dev.mjs picks the first
+// free one). 8420: the mobile server. 5173 stays in the sweep because builds
+// from before the renderer moved off Vite's default can still be holding it —
+// and because the command-line check below means only this checkout's own
+// processes are ever killed, whatever port they are on.
+const PORTS = [5173, 5273, 5274, 5275, 5276, 5277, 5278, 5279, 8420]
 const ROOT = resolve(import.meta.dirname, '..').toLowerCase()
 
 /**

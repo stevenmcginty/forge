@@ -67,6 +67,7 @@ import {
 import { handleSignal, startMirror, stopMirror } from '@/lib/mirror'
 import { startWebMirror, stopWebMirror } from '@/lib/web-mirror'
 import { terminalHost } from '@/lib/terminals'
+import { confirmProjectServer } from '@/lib/devicePreview'
 import { setLiveSettings } from '@/lib/livesettings'
 
 /* ------------------------------------------------------------------ state */
@@ -1542,13 +1543,40 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
    * watches every pane's output for a loopback URL (see scanForDevUrl) and says
    * which cwd it came from; a pane's cwd is its project's path, which is the
    * whole of the mapping. A folder nobody has in the rail is simply not ours.
+   *
+   * What a pane prints is only ever a claim about an *address*, though, and the
+   * gap between the two is where this used to go wrong. Every pane's output is
+   * scanned, agent panes included, so a URL merely *discussed* in a conversation
+   * counted the same as one a server announced — and a loopback port is
+   * machine-wide besides, so even a real banner can name a port a different
+   * project got to first. A car-harness pane that said `localhost:3000` in
+   * passing was enough to point both phones at a Remotion studio running out of
+   * another folder, under a "Live" chip, and nothing in the picture was wrong
+   * except all of it.
+   *
+   * So a detection is now checked before it is believed: main finds the process
+   * listening on that port and asks whether it descends from one of this
+   * project's panes, or names this project's folder in its command line
+   * (`confirmProjectServer`). A stranger's server is dropped on the floor. The
+   * check is deliberately generous about uncertainty — a probe that cannot run
+   * confirms — because failing to show a project its own site is the worse of
+   * the two mistakes.
    */
   useEffect(() => {
-    return terminalHost.onDevUrl((cwd, url) => {
+    let live = true
+    const unsub = terminalHost.onDevUrl((cwd, url) => {
       const project = state.projects.find((p) => p.path === cwd)
       if (!project) return
-      dispatch({ type: 'noteDetectedUrl', projectId: project.id, url, at: Date.now() })
+      void (async () => {
+        const ours = await confirmProjectServer(url, cwd, terminalHost.pidsForCwd(cwd))
+        if (!ours || !live) return
+        dispatch({ type: 'noteDetectedUrl', projectId: project.id, url, at: Date.now() })
+      })()
     })
+    return () => {
+      live = false
+      unsub()
+    }
   }, [state.projects])
 
   /* ----------------------------------------------------- live settings */

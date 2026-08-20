@@ -1656,6 +1656,31 @@ class TerminalHost {
     }
   }
 
+  /**
+   * The PTY pids of every live pane rooted at this folder.
+   *
+   * For the ownership check behind the Devices preview: a dev server started
+   * from one of a project's panes is a descendant of that pane's shell, however
+   * many wrappers `npm run dev` puts in between, so these pids are the roots the
+   * check walks up to. Keyed on cwd for the same reason `onDevUrl` reports one:
+   * a pane's cwd is its project, and which particular terminal ran the server is
+   * nobody's business here.
+   *
+   * Exited panes contribute nothing — their runtime pid is nulled on exit — and
+   * an empty list is a perfectly ordinary answer, meaning the server (if there
+   * is one) was started somewhere else.
+   */
+  pidsForCwd(cwd: string): number[] {
+    if (!cwd) return []
+    const pids: number[] = []
+    for (const entry of this.entries.values()) {
+      if (entry.spec.cwd !== cwd) continue
+      const pid = entry.runtime.pid
+      if (typeof pid === 'number' && pid > 0) pids.push(pid)
+    }
+    return pids
+  }
+
   subscribeActivity(paneId: string, cb: () => void): () => void {
     const l = this.listenersFor(paneId)
     l.activity.add(cb)

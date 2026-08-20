@@ -3015,6 +3015,48 @@ export type PreviewDevCommand =
   | { kind: 'self' }
 
 /**
+ * "Is the thing listening on this port *this project's*?"
+ *
+ * The question the Devices preview has to ask before it frames a loopback URL.
+ * A port is machine-wide and first-come-first-served, so a URL noticed in a
+ * project's terminal is only ever a claim about an address — never proof that
+ * the server answering there has anything to do with the project. Two projects
+ * that both like port 3000 is not an edge case, it is a Tuesday.
+ *
+ * Answered in electron/preview/port-owner.ts, which is where the two tests that
+ * settle it are written down.
+ */
+export interface PortOwnerQuery {
+  /** The port the preview wants to frame. */
+  port: number
+  /**
+   * The PTY pids of the asking project's live panes, so a server started by one
+   * of them is recognised however deep the spawn chain goes.
+   */
+  pids: number[]
+  /** The project's folder, for the command-line test. */
+  path: string
+}
+
+export interface PortOwnerResult {
+  /** The listening process, or null when nothing holds the port. */
+  pid: number | null
+  /** Its command line, for the message the view shows. Null when unknown. */
+  command: string | null
+  /**
+   * Is this the asking project's server?
+   *
+   * Uncertainty answers `true`: a probe that could not run is not evidence of a
+   * stranger, and refusing to show a project its own site because `netstat` was
+   * missing would be worse than the bug this exists to prevent. Only a listener
+   * positively traced to somebody else answers `false`.
+   */
+  owned: boolean
+  /** Which test settled it — see the module for what each one means. */
+  reason: 'descent' | 'address' | 'unowned' | 'closed' | 'unknown'
+}
+
+/**
  * Errors the user has to *fix something* about, rather than retry. These put
  * the pill in its amber state and open the setup card.
  */
