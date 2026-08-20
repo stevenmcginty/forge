@@ -33,14 +33,11 @@ import { PaneView } from './PaneView'
 export function MobilePanes({
   node,
   activePaneId,
-  onScreen,
-  onViewing
+  onScreen
 }: {
   node: LayoutNode
   activePaneId: string
   onScreen: boolean
-  /** Which pane is on screen, for the key bar to aim at. */
-  onViewing: (paneId: string) => void
 }): ReactNode {
   const { state, actions } = useForge()
   const profiles = useProfiles()
@@ -51,10 +48,6 @@ export function MobilePanes({
   // The desk's answer wins, whichever answer it is.
   useEffect(() => setViewing(activePaneId), [activePaneId])
   const shown = leaves.some((l) => l.id === viewing) ? viewing : activePaneId
-
-  useEffect(() => {
-    if (onScreen) onViewing(shown)
-  }, [shown, onScreen, onViewing])
 
   const pick = (paneId: string): void => {
     setViewing(paneId)

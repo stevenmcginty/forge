@@ -886,6 +886,16 @@ export interface WebDirEntry {
  */
 export type WebRequest =
   | { kind: 'layout'; op: WebLayoutOp }
+  /**
+   * "Make this pane's grid mine." The one deliberate way to take a pane's
+   * geometry without typing into it — see electron/pty/grid-owner.ts, where
+   * ownership otherwise follows the typist. A phone's layout sends it when a
+   * pane comes on screen, because a 150-column grid font-fitted to 390px is
+   * unreadable and the person holding the phone is the one using the pane.
+   * The desk takes the grid back the moment somebody types there. Answered
+   * `{ kind: 'ok' }`; a pane that has gone is `{ kind: 'failed' }`.
+   */
+  | { kind: 'claim'; sessionId: string }
   /** The git panel's opening read for one project. Pushes follow on `git`. */
   | { kind: 'git-status'; projectId: string }
   | {

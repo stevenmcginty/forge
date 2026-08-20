@@ -157,6 +157,23 @@ export class GridOwners {
   }
 
   /**
+   * A viewer asked for the pane outright — the one way to take a grid without
+   * typing into it, and it exists for a phone: a 150-column grid font-fitted to
+   * a 390px screen is not readable, and the person holding the phone with that
+   * pane on screen is the person using it. Same consequence as a keystroke, no
+   * more and no less — the next keystroke at the desk takes it straight back.
+   */
+  claim(id: string, viewer: string): boolean {
+    const pane = this.paneFor(id)
+    if (pane.owner === viewer) return false
+    pane.owner = viewer
+    this.onOwner?.(id)
+    const wish = pane.wishes.get(viewer)
+    if (wish) this.apply(id, wish.cols, wish.rows, viewer)
+    return true
+  }
+
+  /**
    * A viewer stopped reading — one pane when `id` is given (a detach), all of
    * them when it is not (a hang-up, or this desktop's window being destroyed).
    *

@@ -226,6 +226,13 @@ export interface WebServerHost {
    */
   release?: (viewer: string, id?: string) => void
 
+  /**
+   * A browser asked for a pane's grid without typing into it — the phone
+   * layout, when a pane comes on screen. Optional: a host without it (the e2e
+   * fixture) answers as an unowned pane would, which is "yes" on the next wish.
+   */
+  claim?: (id: string, viewer: string) => void
+
   /** The opening picture: whatever the browser needs to draw the workspace. */
   snapshot: () => Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'projectsRoot'>
 
@@ -1345,6 +1352,16 @@ export class WebServer {
 
     try {
       switch (request.kind) {
+        case 'claim': {
+          const id = wireString(request.sessionId, 128)
+          if (!this.host.sessions().some((s) => s.id === id)) {
+            failed('unknown-session', 'That pane is gone.')
+            return
+          }
+          this.host.claim?.(id, client.viewer)
+          answer({ kind: 'ok' })
+          return
+        }
         case 'layout': {
           const op = readLayoutOp(request.op)
           if (!op) {

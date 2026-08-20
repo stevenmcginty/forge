@@ -50,7 +50,7 @@ import { NgrokTunnel, ensureNgrokExe, resolveNgrokExe } from './mobile-tunnel'
 import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
 import { planProjectFolder } from './projectfolder'
 import { CloudflareTunnel, ensureCloudflaredExe, resolveCloudflaredExe } from './cloudflare-tunnel'
-import { addPtySink, getManager, getReplay, viewerGone, viewerResize, viewerWrite } from './pty-host'
+import { addPtySink, getManager, getReplay, viewerClaim, viewerGone, viewerResize, viewerWrite } from './pty-host'
 import { addGitSink, gitRefresh, runAction } from './git-watcher'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
 import { getSkillsStore } from './skills-store'
@@ -180,16 +180,16 @@ function webPort(): number {
  * Forge cannot be opened from a page on somebody's localhost.
  *
  * **5174 is the one that matters**, because it is the port `web/vite.config.ts`
- * pins the web client to with `strictPort` — and its comment there says exactly
- * why: the desktop renderer's own dev server already has 5173 in `npm run dev`,
- * and both are routinely up at once. Naming only 5173 here meant `npm run
+ * pins the web client to with `strictPort`. Naming only 5173 here meant `npm run
  * web:dev` was refused at the door by every desktop in the repo, with a bare
  * 403 during the upgrade and so nothing on screen but a retry loop.
  *
- * 5173 stays because docs/forge-web.md names it and because a desktop that is
- * *not* also running its own renderer can hand it to the web client. Two ports
- * on loopback in an unpackaged build is not a wider door than one.
- * `FORGE_WEB_ORIGINS` remains the way to name a third without editing this file.
+ * 5173 stays because docs/forge-web.md names it and because a web client run
+ * from a plain `vite` still lands there. (The desktop renderer no longer does:
+ * it moved to 5273+ so that a project dev server on Vite's default could not be
+ * mistaken for it — see scripts/dev.mjs.) Two ports on loopback in an unpackaged
+ * build is not a wider door than one; `FORGE_WEB_ORIGINS` remains the way to
+ * name a third without editing this file.
  */
 const DEV_ORIGINS = [
   'http://localhost:5174',
@@ -1194,6 +1194,7 @@ async function start(): Promise<void> {
     write: (id, data, viewer) => viewerWrite(id, data, viewer),
     resize: (id, cols, rows, viewer) => viewerResize(id, cols, rows, viewer),
     release: (viewer, id) => viewerGone(viewer, id),
+    claim: (id, viewer) => void viewerClaim(id, viewer),
     snapshot: snapshotForBrowser,
     layout: dispatchLayout,
     // The exported functions, not the IPC handlers: a second host calls what

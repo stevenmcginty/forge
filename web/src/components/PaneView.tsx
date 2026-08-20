@@ -4,6 +4,7 @@ import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
+import { useMobile } from '../lib/mobile'
 import { mountTerm, type TermHost } from '../lib/term'
 import { useForge, useProfiles } from '../state'
 import { AgentChooser } from './AgentChooser'
@@ -76,6 +77,15 @@ export function PaneView({
 }): ReactNode {
   const { state, actions } = useForge()
   const profile = resolveProfile(useProfiles(), leaf.profileId)
+  /**
+   * A phone. Two things change and nothing else: the type is set larger, because
+   * 12px at arm's length on a 6-inch screen is not reading; and a pane that is
+   * on screen *claims its grid* (see `claim` in shared/web.ts) — the desk's
+   * 150 columns font-fitted into 390px is the alternative, and that is the
+   * screenshot this exists because of. Typing at the desk takes it back.
+   */
+  const mobile = useMobile()
+  const fontSize = mobile ? 14 : 12
   /** No desktop at all: decision 10's read-only twin, drawn from the cache. */
   const cached = state.stage.kind === 'offline'
   /** Is the socket answering this second? Only input and the badge read this. */
@@ -107,7 +117,7 @@ export function PaneView({
 
     let attached = false
     const host = mountTerm(holder, {
-      fontSize: 12,
+      fontSize,
       fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
       accent: profile.accent,
       // Everything xterm produces goes up the wire, not merely the keystrokes:
@@ -155,8 +165,9 @@ export function PaneView({
     // re-attach it, which costs a full replay and a screen flash. The desktop's
     // own pane keeps its spec in a ref for exactly the same reason. `live` is
     // deliberately *not* here — a dropped socket keeps this terminal, and the
-    // effect below is what makes it stop taking input instead.
-  }, [leaf.id, cached])
+    // effect below is what makes it stop taking input instead. `fontSize` is a
+    // construction-time input in the same way, and changes only with the layout.
+  }, [leaf.id, cached, fontSize])
 
   /* ----------------------------------------------------- the frozen twin */
 
@@ -164,7 +175,7 @@ export function PaneView({
     const holder = holderRef.current
     if (!holder || !cached) return
     const host = mountTerm(holder, {
-      fontSize: 12,
+      fontSize,
       fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
       accent: profile.accent,
       onData: () => {
@@ -185,7 +196,7 @@ export function PaneView({
       hostRef.current = null
     }
     // Same reason as above: the accent is a construction-time input.
-  }, [leaf.id, cached, state.cached])
+  }, [leaf.id, cached, state.cached, fontSize])
 
   /* ------------------------------------------------- input follows the link */
 
@@ -251,6 +262,19 @@ export function PaneView({
     const host = hostRef.current
     if (host) actions.attach(leaf.id, host.size())
   }, [alive, live, leaf.id, actions])
+
+  /**
+   * On a phone, the pane on screen is the pane being used: take its grid.
+   *
+   * Re-sent on the edges that matter — this pane coming on screen, its shell
+   * starting, the link coming back — and on nothing else, so a busy pane is not
+   * claiming itself on every push. The desk's own next keystroke undoes it,
+   * which is the rule working as designed rather than a fight: whoever is
+   * actually at a pane has it.
+   */
+  useEffect(() => {
+    if (mobile && onScreen && live && alive) actions.claim(leaf.id)
+  }, [mobile, onScreen, live, alive, leaf.id, actions])
 
   /**
    * The desktop focuses the caret when the pane is the active one; so do we.
@@ -365,7 +389,13 @@ export function PaneView({
         onPointerDown={(event) => {
           if (event.pointerType !== 'touch') hostRef.current?.focus()
         }}
-        onClick={() => hostRef.current?.focus()}
+        onClick={() => {
+          hostRef.current?.focus()
+          // A tap is the clearest statement of intent there is. Somebody at the
+          // desk may have typed since this pane came on screen; the thumb that
+          // taps it now wants it back.
+          if (mobile && live && alive) actions.claim(leaf.id)
+        }}
       />
 
       <AgentChooser

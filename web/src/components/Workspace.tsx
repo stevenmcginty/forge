@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { EmptyState } from '@/components/EmptyState'
 import { Icon } from '@/components/Icon'
 import { useMobile } from '../lib/mobile'
@@ -6,7 +6,6 @@ import { useNarrow } from '../lib/narrow'
 import { useActiveProject, useForge, useWorkspace } from '../state'
 import { AgentChooser } from './AgentChooser'
 import { GitHubMode } from './GitHubMode'
-import { ComposeRow, KeyBar } from './KeyBar'
 import { MobilePanes } from './MobilePanes'
 import { Mirror } from './Mirror'
 import { OfflineBanner } from './OfflineBanner'
@@ -45,8 +44,9 @@ export function Workspace(): ReactNode {
    * A thumb on a phone. See lib/mobile.ts for the test; what it changes here is
    * the arrangement and nothing underneath it — the rail is a drawer over the
    * terminal rather than a column beside it, one pane is on screen at a time,
-   * and the keys a phone keyboard lacks sit along the bottom. A mouse in a
-   * narrow window still gets the folded desktop layout below.
+   * and the pane on screen takes the grid so it is readable (see PaneView). The
+   * phone's own keyboard types into it — there is deliberately no key bar. A
+   * mouse in a narrow window still gets the folded desktop layout below.
    */
   const mobile = useMobile()
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -56,10 +56,6 @@ export function Workspace(): ReactNode {
   const collapsed = mobile ? false : railCollapsed || narrow
   // Picking a project is why the drawer was opened; the pick closes it.
   useEffect(() => setDrawerOpen(false), [state.projectId])
-  /** The pane the key bar types into: whichever one is on screen. */
-  const [viewingPane, setViewingPane] = useState<string | null>(null)
-  const onViewing = useCallback((id: string) => setViewingPane(id), [])
-  const [composing, setComposing] = useState(false)
   const newTabRef = useRef<HTMLButtonElement | null>(null)
   const [chooserOpen, setChooserOpen] = useState(false)
   const offline = state.stage.kind === 'offline'
@@ -144,12 +140,7 @@ export function Workspace(): ReactNode {
                   .map((t) => (
                     <div className="grid__tab" key={t.id} data-active={t.id === activeTabId}>
                       {mobile ? (
-                        <MobilePanes
-                          node={t.root}
-                          activePaneId={t.activePaneId}
-                          onScreen={t.id === activeTabId}
-                          onViewing={onViewing}
-                        />
+                        <MobilePanes node={t.root} activePaneId={t.activePaneId} onScreen={t.id === activeTabId} />
                       ) : (
                         <SplitView node={t.root} activePaneId={t.activePaneId} onScreen={t.id === activeTabId} />
                       )}
@@ -183,19 +174,6 @@ export function Workspace(): ReactNode {
             </div>
           </div>
           )}
-          {/*
-            The keys a phone keyboard has not got, aimed at the pane on screen.
-            Only with a live pane to type into: against a frozen or reconnecting
-            desktop the bar would be a row of buttons that do nothing, which is
-            worse than no row.
-          */}
-          {mobile && live && activeTabId && viewingPane && !(offline && state.offlineMode === 'github') ? (
-            composing ? (
-              <ComposeRow onSend={(d) => actions.write(viewingPane, d)} onClose={() => setComposing(false)} />
-            ) : (
-              <KeyBar onSend={(d) => actions.write(viewingPane, d)} onCompose={() => setComposing(true)} />
-            )
-          ) : null}
         </main>
       </div>
 

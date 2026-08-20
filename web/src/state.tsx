@@ -137,6 +137,8 @@ export interface ForgeActions {
   detach: (sessionId: string) => void
   write: (sessionId: string, data: string) => void
   resize: (sessionId: string, cols: number, rows: number) => void
+  /** Take a pane's grid for this browser without typing. The phone layout's. */
+  claim: (sessionId: string) => void
   /** Subscribe to a pane's bytes. Returns the unsubscribe. */
   onData: (sessionId: string, listener: (data: string, replay: boolean, truncated: boolean) => void) => () => void
   setNotice: (message: string) => void
@@ -665,6 +667,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       detach: (sessionId) => client.detach(sessionId),
       write: (sessionId, data) => client.write(sessionId, data),
       resize: (sessionId, cols, rows) => client.resize(sessionId, cols, rows),
+      claim: (sessionId) => void client.request({ kind: 'claim', sessionId }),
       onData: (sessionId, listener) => {
         const map = dataListeners.current
         const set = map.get(sessionId) ?? new Set()

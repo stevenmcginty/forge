@@ -306,6 +306,11 @@ export function viewerWrite(id: string, data: string, viewer: string): boolean {
   return getManager().write(id, data)
 }
 
+/** A remote viewer asked for a pane's grid outright. See GridOwners.claim. */
+export function viewerClaim(id: string, viewer: string): boolean {
+  return owners.claim(id, viewer)
+}
+
 /** A remote viewer said what size it is reading a pane at. Granted only if it owns it. */
 export function viewerResize(id: string, cols: number, rows: number, viewer: string): boolean {
   return owners.noteWish(id, viewer, cols, rows)
