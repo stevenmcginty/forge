@@ -116,9 +116,20 @@ async function main() {
 
   const output = new Map()
   const exits = []
-  const manager = new PtySessionManager({
+  /** Assigned in the constructor's onData, which only fires after create(). */
+  let manager
+  manager = new PtySessionManager({
     maxSessions: 3,
-    onData: (id, data) => output.set(id, (output.get(id) ?? '') + data),
+    onData: (id, data) => {
+      output.set(id, (output.get(id) ?? '') + data)
+      // Only the resize-during-bootstrap session needs this: a browser xterm
+      // answers CSI 6 n, and without that ConPTY waits ~39s per resize (see
+      // web/src/lib/term.ts). Answering it on every session keeps those shells
+      // busy enough that Windows still holds their cwd at teardown.
+      if (id !== 'smoke-resize-boot') return
+      const asked = data.match(/\x1b\[6n/g)
+      for (let i = 0; i < (asked?.length ?? 0); i++) manager.write(id, '\x1b[1;1R')
+    },
     onExit: (id, exitCode) => exits.push({ id, exitCode })
   })
 
@@ -151,6 +162,37 @@ async function main() {
   log(boot.ok === true, 'spawned a session with a bootstrap command')
   await waitFor(() => (output.get('smoke-2') ?? '').includes(marker), 15000, 'bootstrap output')
   log(true, 'bootstrap command typed itself and produced output')
+
+  /* ------------------------- 2aa. resize during bootstrap, the grok→rok bug */
+
+  // A browser or phone attaching to a brand-new pane fits the PTY in the same
+  // beat the agent command is typed. ConPTY reflow then swallows the first
+  // character, so `grok` becomes `rok` and PowerShell reports it is not a
+  // command. Hold the resize until the command has been typed, then apply it.
+  // Concatenated so the finished token cannot appear in PSReadLine's echo of
+  // the command line — only in the output, which is the proof it actually ran.
+  const grokMarker = 'grok-survived'
+  const bootResize = manager.create({
+    id: 'smoke-resize-boot',
+    cwd: ROOT,
+    cols: 80,
+    rows: 24,
+    bootstrapCommand: "Write-Output ('grok' + '-survived')"
+  })
+  log(bootResize.ok === true, 'spawned a session that is resized during bootstrap')
+  manager.resize('smoke-resize-boot', 40, 12)
+  manager.resize('smoke-resize-boot', 120, 40)
+  await waitFor(() => (output.get('smoke-resize-boot') ?? '').includes(grokMarker), 15000, 'bootstrap survived resize')
+  const bootText = output.get('smoke-resize-boot') ?? ''
+  log(bootText.includes(grokMarker), 'the bootstrap command still ran after a resize during boot')
+  log(!/\brok-survived\b/.test(bootText), 'the leading g was not swallowed into rok-survived')
+  await waitFor(() => {
+    const s = manager.list().find((row) => row.id === 'smoke-resize-boot')
+    return s?.cols === 120 && s?.rows === 40
+  }, 5000, 'deferred resize to land')
+  const after = manager.list().find((s) => s.id === 'smoke-resize-boot')
+  log(after?.cols === 120 && after?.rows === 40, `the deferred resize landed after bootstrap (${after?.cols}x${after?.rows})`)
+  manager.kill('smoke-resize-boot')
 
   /* ------------------------------- 2a. the agent that is not installed */
 
@@ -295,7 +337,15 @@ async function main() {
   log(true, `killAll() emitted ${exits.length} exit events and drained the map`)
   log(manager.count === 0, 'no sessions left behind')
 
-  rmSync(probeDir, { recursive: true, force: true })
+  // Windows holds a ConPTY's cwd until the console host actually exits, which
+  // can be a beat after node-pty's onExit. A leftover temp folder is not a
+  // failed smoke test.
+  await new Promise((r) => setTimeout(r, 400))
+  try {
+    rmSync(probeDir, { recursive: true, force: true })
+  } catch {
+    /* next run mints a new directory */
+  }
 }
 
 main()

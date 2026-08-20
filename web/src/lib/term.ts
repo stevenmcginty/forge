@@ -242,6 +242,10 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     // session for its whole life; a browser only ever sees the tail.
     scrollback: 5000,
     allowProposedApi: true,
+    // Same ConPTY as the desktop renderer. Without this, xterm's wrap
+    // heuristics assume a POSIX pty and a TUI on Windows loses the first
+    // column of a wrapped row — which is how the Grok wordmark reads as "rok".
+    windowsPty: { backend: 'conpty' },
     theme: themeFor(options.accent)
   })
 

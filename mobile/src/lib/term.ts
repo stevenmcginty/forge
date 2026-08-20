@@ -103,6 +103,10 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     // memory nothing can fill.
     scrollback: 4000,
     allowProposedApi: true,
+    // Same ConPTY as the desktop renderer. Without this, xterm's wrap
+    // heuristics assume a POSIX pty and a TUI on Windows loses the first
+    // column of a wrapped row — which is how the Grok wordmark reads as "rok".
+    windowsPty: { backend: 'conpty' },
     theme: {
       background: '#0B0C0E',
       foreground: '#E8EAED',

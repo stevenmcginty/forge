@@ -82,6 +82,13 @@ interface Session {
   /** Timer that fires the bootstrap write once the prompt has settled. */
   bootstrapTimer?: NodeJS.Timeout
   bootstrapDeadline?: NodeJS.Timeout
+  /**
+   * A size wish that arrived while the agent command was still being typed.
+   * Applied a quiet beat after the command is written — see `resize`.
+   */
+  pendingResize?: { cols: number; rows: number }
+  /** Fires the deferred resize so a pane is never stuck at spawn size. */
+  pendingResizeTimer?: NodeJS.Timeout
   disposed: boolean
 }
 
@@ -231,21 +238,20 @@ export class PtySessionManager {
     if (!s || s.disposed) return false
     const c = clampDim(cols, s.info.cols)
     const r = clampDim(rows, s.info.rows)
-    if (c === s.info.cols && r === s.info.rows) return true
-    try {
-      s.proc.resize(c, r)
-      s.info.cols = c
-      s.info.rows = r
-      // After the ConPTY and after the record, so what a listener reads back
-      // off `list()` is the size that actually took. Announced here rather than
-      // at the call sites because there are four of them — the renderer, a
-      // re-adoption, a phone and a browser — and a fifth would forget.
-      this.onResize?.(id, c, r)
+    if (c === s.info.cols && r === s.info.rows) {
+      s.pendingResize = undefined
       return true
-    } catch (err) {
-      console.error(`[pty] resize of ${id} failed:`, describe(err))
-      return false
     }
+    // A browser or phone attaching to a brand-new pane fits the PTY to its own
+    // box in the same beat the shell is still coming up. ConPTY reflow during
+    // that write is how the first character of the bootstrap command disappears
+    // — `grok` becomes `rok`, and PowerShell's "not recognized" is the pane.
+    // Hold the wish until the command has been typed; then apply it.
+    if (!s.info.bootstrapped && (s.info.bootstrapCommand || s.info.bootstrapNotice)) {
+      s.pendingResize = { cols: c, rows: r }
+      return true
+    }
+    return this.applyResize(s, c, r)
   }
 
   kill(id: string): boolean {
@@ -288,19 +294,57 @@ export class PtySessionManager {
         // The notice landed where the prompt already was. An empty line brings
         // a fresh prompt back underneath it, ready to type in.
         session.proc.write('\r')
-        return
+      } else {
+        session.proc.write(`${session.info.bootstrapCommand}\r`)
       }
-      session.proc.write(`${session.info.bootstrapCommand}\r`)
     } catch (err) {
       console.error(`[pty] bootstrap of ${session.info.id} failed:`, describe(err))
+    }
+    // Do not resize in this same turn. ConPTY reflow during the write is how
+    // the first character of the command disappears (`grok` → `rok`, and the
+    // same swallow on every other agent). The wish waits a quiet beat so the
+    // shell has the line before the grid moves.
+    if (session.pendingResize) {
+      session.pendingResizeTimer = setTimeout(() => this.flushPendingResize(session), BOOTSTRAP_QUIET_MS)
+    }
+  }
+
+  private flushPendingResize(session: Session): void {
+    if (session.pendingResizeTimer) {
+      clearTimeout(session.pendingResizeTimer)
+      session.pendingResizeTimer = undefined
+    }
+    const next = session.pendingResize
+    session.pendingResize = undefined
+    if (!next || session.disposed) return
+    this.applyResize(session, next.cols, next.rows)
+  }
+
+  private applyResize(session: Session, cols: number, rows: number): boolean {
+    if (cols === session.info.cols && rows === session.info.rows) return true
+    try {
+      session.proc.resize(cols, rows)
+      session.info.cols = cols
+      session.info.rows = rows
+      // After the ConPTY and after the record, so what a listener reads back
+      // off `list()` is the size that actually took. Announced here rather than
+      // at the call sites because there are four of them — the renderer, a
+      // re-adoption, a phone and a browser — and a fifth would forget.
+      this.onResize?.(session.info.id, cols, rows)
+      return true
+    } catch (err) {
+      console.error(`[pty] resize of ${session.info.id} failed:`, describe(err))
+      return false
     }
   }
 
   private clearBootstrapTimers(session: Session): void {
     if (session.bootstrapTimer) clearTimeout(session.bootstrapTimer)
     if (session.bootstrapDeadline) clearTimeout(session.bootstrapDeadline)
+    if (session.pendingResizeTimer) clearTimeout(session.pendingResizeTimer)
     session.bootstrapTimer = undefined
     session.bootstrapDeadline = undefined
+    session.pendingResizeTimer = undefined
   }
 }
 
