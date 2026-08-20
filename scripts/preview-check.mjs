@@ -310,8 +310,8 @@ ok(
   'and is trimmed, so a folder with no package.json still gets a button'
 )
 ok(
-  D.effectiveDevCommand(undefined, null) === '' && D.effectiveDevCommand('   ', null) === '',
-  'nothing typed and nothing found is no command, not undefined — the button is simply absent'
+  D.effectiveDevCommand(undefined, null) === 'npm run dev' && D.effectiveDevCommand('   ', null) === 'npm run dev',
+  'nothing typed and nothing found falls back to npm run dev — every project gets the button'
 )
 ok(
   D.effectiveDevCommand('', { kind: 'self' }) === '',

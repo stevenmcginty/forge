@@ -207,6 +207,8 @@ export function effectiveDevCommand(manual: string | undefined, sniffed: Preview
   const typed = (manual ?? '').trim()
   if (typed) return typed
   if (sniffed?.kind === 'command') return sniffed.command
+  // This checkout gets no guess: it cannot start itself (see isSelfPreview).
+  if (sniffed?.kind === 'self') return ''
   return DEFAULT_DEV_COMMAND
 }
 
