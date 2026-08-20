@@ -105,8 +105,26 @@ async function decode(file: File): Promise<ImageBitmap> {
   try {
     return await createImageBitmap(file)
   } catch {
-    throw new Error("That image couldn't be read.")
+    /* iOS camera shots are often HEIC; some browsers only decode that via <img>. */
   }
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await loadImage(url)
+    return await createImageBitmap(img)
+  } catch {
+    throw new Error("That image couldn't be read.")
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error("That image couldn't be read."))
+    img.src = url
+  })
 }
 
 async function renderJpeg(bitmap: ImageBitmap, edge: number, quality: number): Promise<string> {

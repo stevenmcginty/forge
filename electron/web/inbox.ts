@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
+import { commandExe } from '@shared/agents'
 
 /**
  * Where a browser-pasted image becomes a real file, so a pane can be handed
- * its path — the same gesture as dropping a screenshot on an agent at the desk.
+ * it — a quoted path for Claude Code, the OS clipboard plus Alt+V for Grok.
  *
  * Electron-free on purpose, like electron/web/fs-browse.ts: the smoke test
  * drives this against a temp directory with no Electron in the process, and
@@ -18,6 +19,28 @@ import { extname, join } from 'node:path'
 
 /** Newest this-many files stay. A working day of pastes, not a photo library. */
 export const INBOX_KEEP = 20
+
+/**
+ * What a pane is typed after an image has been saved.
+ *
+ * Claude Code (and anything else that treats a dropped file as an attachment)
+ * wants the quoted path, trailing space, the same shape TerminalPane types on
+ * a desktop drop. Grok does not: a path in the prompt is just text, and an
+ * image chip is minted only from the OS clipboard — on Windows, via Alt+V
+ * (see ~/.grok/docs/user-guide/03-keyboard-shortcuts.md). The host puts the
+ * bitmap on the clipboard; this function only decides the bytes that follow.
+ */
+export const GROK_IMAGE_PASTE = '\x1bv'
+
+export function imagePasteIntoPane(
+  command: string,
+  path: string
+): { data: string; wantClipboard: boolean } {
+  if (commandExe(command) === 'grok') {
+    return { data: GROK_IMAGE_PASTE, wantClipboard: true }
+  }
+  return { data: `"${path}" `, wantClipboard: false }
+}
 
 const OK_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
 

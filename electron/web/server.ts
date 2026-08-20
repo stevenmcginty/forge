@@ -53,7 +53,7 @@ import type {
 import type { SkillsList } from '@shared/skills'
 import type { CommandsFeed } from '@shared/commands'
 import type { WebAuth, WebDevice } from './auth'
-import { extForMime } from './inbox'
+import { extForMime, imagePasteIntoPane } from './inbox'
 
 /**
  * The Forge Web link server — the socket a browser tab mirrors this desktop
@@ -326,6 +326,14 @@ export interface WebServerHost {
     bytes: Uint8Array,
     ext: string
   ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>
+
+  /**
+   * Put a pasted image on this machine's clipboard so an agent that reads
+   * images from there (Grok, via Alt+V) can mint a chip. Optional: a host
+   * that cannot touch a clipboard (the smoke fixture) omits it and the
+   * server falls back to typing the saved path.
+   */
+  offerClipboardImage?: (bytes: Uint8Array) => boolean
 
   /**
    * The number of authenticated browsers changed. Drives the power-save blocker
@@ -1575,9 +1583,10 @@ export class WebServer {
             failed('failed', saved.error)
             return
           }
-          // Quoted, with a trailing space, the same shape a file dropped on a
-          // desktop pane types — Claude Code treats that as an attachment.
-          const typed = `"${saved.path}" `
+          const session = this.host.sessions().find((s) => s.id === id)
+          const into = imagePasteIntoPane(session?.bootstrapCommand ?? '', saved.path)
+          const useClipboard = into.wantClipboard && this.host.offerClipboardImage?.(bytes) === true
+          const typed = useClipboard ? into.data : `"${saved.path}" `
           if (!this.host.write(id, typed, client.viewer)) {
             failed('unknown-session', 'That pane is gone — the image was saved but nothing was typed.')
             return

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, Notification, powerSaveBlocker, screen } from 'electron'
+import { app, BrowserWindow, clipboard, ipcMain, nativeImage, Notification, powerSaveBlocker, screen } from 'electron'
 import { IPC } from '@shared/ipc'
 import { type MirrorInput } from '@shared/mobile'
 import {
@@ -1219,6 +1219,16 @@ async function start(): Promise<void> {
     projectAdd: (path, deviceName) => dispatchProjectAdd(path, deviceName),
     projectCreate: (name, parentDir, deviceName) => dispatchProjectCreate(name, parentDir, deviceName),
     saveInboxImage: (bytes, ext) => Promise.resolve(saveInboxImage(join(getDataDir(), 'web-inbox'), bytes, ext)),
+    offerClipboardImage: (bytes) => {
+      try {
+        const img = nativeImage.createFromBuffer(Buffer.from(bytes))
+        if (img.isEmpty()) return false
+        clipboard.writeImage(img)
+        return true
+      } catch {
+        return false
+      }
+    },
     mirrorStart: startMirror,
     onMirror,
     // Two hooks rather than one, and read per event rather than captured: the

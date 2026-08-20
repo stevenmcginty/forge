@@ -1404,6 +1404,31 @@
   height: 36px;
 }
 
+/*
+ * The file picker behind the camera button. `hidden` / `display: none` is
+ * why iOS Safari ignored a programmatic click on it; visually clipping it
+ * keeps the label's activation working.
+ */
+.pane__action {
+  position: relative;
+}
+
+.pane__file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pane__action[aria-disabled='true'] {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
 /* Splits mean nothing on a phone; closing does. */
 .app[data-mobile] .pane__action[title^='Split'] {
   display: none;

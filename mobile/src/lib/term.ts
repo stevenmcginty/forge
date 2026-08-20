@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { planTouchScroll } from '@shared/touch-scroll'
 
 /**
  * An xterm instance sized for a phone.
@@ -212,7 +213,7 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     return { cols: natural.cols, rows: natural.rows }
   }
 
-  const releaseTouch = enableTouchScroll(container, term, () => options.fontSize)
+  const releaseTouch = enableTouchScroll(container, term, () => options.fontSize, options.onData)
 
   /**
    * Refit whenever the holder's own box changes — which is also the retry for a
@@ -271,34 +272,13 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
  *
  * ## Where the finger's movement is sent, which depends on what the pane is
  *
- * This used to turn the whole drag into synthetic `WheelEvent`s and let
- * xterm's own wheel pipeline sort out what that means, on the grounds that it
- * was the one route that did the right thing in every state. That stopped
- * being true at the xterm 6 upgrade: it replaced the viewport with vscode's
- * `ScrollableElement`, which reads the *legacy* `wheelDeltaY` in preference to
- * `deltaY` (see `StandardWheelEvent` in
- * node_modules/@xterm/xterm/src/vs/base/browser/mouseEvent.ts) — and Chrome
- * reports `wheelDeltaY` as 0 on any `WheelEvent` built by a constructor, so a
- * synthetic wheel over the normal buffer computed a delta of zero and
- * scrolled nothing. A finger drag silently stopped scrolling shell panes.
- *
- * Fixed first in web/src/lib/term.ts, this file's sibling: the two files are
- * not one implementation because this one also owns the touch threshold below
- * and the keyboard workarounds above the file, which the web client has no
- * need of, but the routing fix is identical and carried over from there. The
- * drag is routed rather than translated once:
- *
- *  - **A plain scrollback gets `term.scrollLines`** — the public API for the
- *    thing being asked for, unaffected by the wheelDeltaY regression because
- *    it never goes through a wheel event at all.
- *  - **A pane that has asked for the wheel still gets a wheel**, exactly as
- *    before: on the alternate screen there is no scrollback to move — an
- *    agent's TUI (Claude Code, vim, htop) lives there, and `scrollLines` is a
- *    silent no-op, which is the bug this gesture's first version shipped with
- *    — and a TUI tracking the mouse wants a wheel *report*, not a scrolled
- *    viewport. xterm turns a wheel into arrow keys for the first and into a
- *    report for the second, and both read `deltaY` straight off the event
- *    rather than the legacy field, so this path was never broken.
+ * Routed by `planTouchScroll` in shared/touch-scroll.ts, the same decision the
+ * web client uses: a constructed `WheelEvent` is how this used to talk to a
+ * TUI, and it is how Grok's conversation never moved. The normal buffer goes
+ * through `scrollLines` (xterm 6's viewport ignores constructed wheels); a TUI
+ * on the alternate screen gets SGR wheel reports or PageUp/PageDown written
+ * down the PTY. Claude Code writes the normal buffer, so it was never on this
+ * path and kept working.
  *
  * Two details that stop it fighting the rest of the app:
  *
@@ -314,7 +294,12 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
  * and interpreting it as a scroll is how a pinch scrolls the terminal to its
  * top.
  */
-function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () => number): () => void {
+function enableTouchScroll(
+  container: HTMLElement,
+  term: Terminal,
+  fontSize: () => number,
+  send?: (data: string) => void
+): () => void {
   const DRAG_START_PX = 8
 
   let tracking = false
@@ -322,8 +307,6 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
   let lastY = 0
   let startY = 0
   let carry = 0
-  /** Where the finger landed — the wheel events are dispatched from there. */
-  let target: EventTarget | null = null
 
   /** The height of one row, measured rather than assumed. */
   const rowHeight = (): number => {
@@ -343,7 +326,6 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
     tracking = true
     scrolling = false
     carry = 0
-    target = event.target
     startY = event.touches[0].clientY
     lastY = startY
   }
@@ -367,30 +349,15 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
     const lines = Math.trunc(carry / height)
     if (lines !== 0) {
       carry -= lines * height
-      // Whether this pane's own program is what a wheel would be talking to.
-      // Both of these are xterm's own conditions for treating a wheel as
-      // something other than a scroll, read through its public surface.
-      const appWantsWheel = term.buffer.active.type === 'alternate' || term.modes.mouseTrackingMode !== 'none'
-      if (!appWantsWheel) {
-        term.scrollLines(lines)
-      } else {
-        const at = (target instanceof Element ? target : null) ?? container
-        const touch = event.touches[0]
-        // One event per row rather than one carrying the total: the alt-screen
-        // path answers an event with a keypress, not a distance, so a fast flick
-        // batched into one event would scroll a TUI by a single line.
-        for (let i = Math.abs(lines); i > 0; i--) {
-          at.dispatchEvent(
-            new WheelEvent('wheel', {
-              deltaY: Math.sign(lines) * height,
-              deltaMode: WheelEvent.DOM_DELTA_PIXEL,
-              clientX: touch.clientX,
-              clientY: touch.clientY,
-              bubbles: true,
-              cancelable: true
-            })
-          )
-        }
+      const plan = planTouchScroll(
+        lines,
+        term.buffer.active.type === 'alternate',
+        term.modes.mouseTrackingMode !== 'none'
+      )
+      if (plan.kind === 'viewport') {
+        term.scrollLines(plan.lines)
+      } else if (send) {
+        send(plan.data)
       }
     }
     event.preventDefault()

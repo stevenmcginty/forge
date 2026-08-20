@@ -18,7 +18,8 @@ export { DESK_VIEWER, GridOwners } from '../../electron/pty/grid-owner'
 // with exactly what `web:pin-set` would write rather than with a fixture that
 // could keep passing after the stored form moved.
 export { hashPin } from '../../electron/web/pin'
-export { INBOX_KEEP, saveInboxImage } from '../../electron/web/inbox'
+export { GROK_IMAGE_PASTE, INBOX_KEEP, imagePasteIntoPane, saveInboxImage } from '../../electron/web/inbox'
+export { planTouchScroll } from '../../shared/touch-scroll'
 // Re-exported so the checks assert against exactly the shipped values rather
 // than numbers that could drift from them.
 export {

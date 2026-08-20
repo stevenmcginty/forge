@@ -1,5 +1,6 @@
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { planTouchScroll } from '@shared/touch-scroll'
 
 /**
  * An xterm instance fed relayed PTY bytes.
@@ -313,7 +314,12 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
   // The size handed over is the one currently *drawn* rather than
   // `options.fontSize`, because `apply` above may be shrinking the desktop's
   // grid into this box — and a row is as tall as the type it is set in.
-  const releaseTouch = enableTouchScroll(container, term, () => term.options.fontSize ?? options.fontSize)
+  const releaseTouch = enableTouchScroll(
+    container,
+    term,
+    () => term.options.fontSize ?? options.fontSize,
+    options.readOnly ? undefined : options.onData
+  )
 
   const fit = (): { cols: number; rows: number } | null => {
     // A container with no box — mid-layout, or a tab that is not on screen —
@@ -437,35 +443,14 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
  *
  * ## Where the finger's movement is sent, which depends on what the pane is
  *
- * Mobile turns the whole drag into synthetic `WheelEvent`s and lets xterm's own
- * wheel pipeline sort out what that means, on the grounds that it is the one
- * route that is right in every state. That reasoning still holds for two of the
- * three states and no longer holds for the third, because xterm 6 replaced its
- * viewport with vscode's `ScrollableElement` — and that reads the *legacy*
- * `wheelDeltaY` in preference to `deltaY` (see `StandardWheelEvent` in
- * node_modules/@xterm/xterm/src/vs/base/browser/mouseEvent.ts). Chrome reports
- * `wheelDeltaY` as 0 on any `WheelEvent` built by a constructor, so the
- * scrollback path computes a delta of zero and a synthetic wheel scrolls
- * nothing at all. Measured in a real Chrome against this very file: a
- * constructed wheel left `viewportY` where it was; the same event with
- * `wheelDeltaY` forced onto it moved it. The other two paths read `deltaY`
- * straight off the event (`CoreBrowserTerminal.bindMouse` and
- * `CoreMouseService.consumeWheelEvent`) and are unaffected.
- *
- * So the drag is routed rather than translated once:
- *
- *  - **A plain scrollback gets `term.scrollLines`** — the public API for the
- *    thing being asked for, which is what makes a drag reach the top of the
- *    transcript rather than doing nothing.
- *  - **A pane that has asked for the wheel gets a wheel.** On the alternate
- *    screen there is no scrollback to move — an agent's TUI (Claude Code, vim,
- *    htop) lives there, and `scrollLines` is a silent no-op, which is the bug
- *    mobile's comment records from its own first attempt — and a TUI tracking
- *    the mouse wants a wheel *report*, not a scrolled viewport. xterm turns a
- *    wheel into arrow keys for the first and into a report for the second, so
- *    the event goes to the element under the touch, one row at a time, with
- *    `DOM_DELTA_LINE` so a row of finger travel is exactly one line rather than
- *    a pixel count xterm has to guess a trackpad out of.
+ * Routed by `planTouchScroll` in shared/touch-scroll.ts, which is the whole of
+ * the decision: a constructed `WheelEvent` is how this used to talk to a TUI,
+ * and it is how Grok's conversation never moved. xterm 6's viewport reads
+ * `wheelDeltaY` (always 0 on a constructed event) so the normal buffer has to
+ * go through `scrollLines`; a TUI on the alternate screen wants SGR wheel
+ * reports or PageUp/PageDown written down the PTY, not arrows — Grok's prompt
+ * eats those. Claude Code writes the normal buffer, so it was never on this
+ * path and kept working.
  *
  * ## And the rest, which is mobile's design unchanged
  *
@@ -483,7 +468,12 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
  * Multi-touch is ignored outright: two fingers is a zoom or a system gesture,
  * and reading it as a scroll is how a pinch scrolls a terminal to its top.
  */
-function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () => number): () => void {
+function enableTouchScroll(
+  container: HTMLElement,
+  term: Terminal,
+  fontSize: () => number,
+  send?: (data: string) => void
+): () => void {
   const DRAG_START_PX = 8
 
   let tracking = false
@@ -491,8 +481,6 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
   let lastY = 0
   let startY = 0
   let carry = 0
-  /** Where the finger landed — the wheel events are dispatched from there. */
-  let target: EventTarget | null = null
 
   /** The height of one row, measured rather than assumed. */
   const rowHeight = (): number => {
@@ -512,15 +500,13 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
     tracking = true
     scrolling = false
     carry = 0
-    target = event.target
     startY = event.touches[0]!.clientY
     lastY = startY
   }
 
   const onMove = (event: TouchEvent): void => {
     if (!tracking || event.touches.length !== 1) return
-    const touch = event.touches[0]!
-    const y = touch.clientY
+    const y = event.touches[0]!.clientY
 
     if (!scrolling) {
       if (Math.abs(y - startY) < DRAG_START_PX) return
@@ -537,29 +523,15 @@ function enableTouchScroll(container: HTMLElement, term: Terminal, fontSize: () 
     const lines = Math.trunc(carry / height)
     if (lines !== 0) {
       carry -= lines * height
-      // Whether this pane's own program is what a wheel would be talking to.
-      // Both of these are xterm's own conditions for treating a wheel as
-      // something other than a scroll, read through its public surface.
-      const appWantsWheel = term.buffer.active.type === 'alternate' || term.modes.mouseTrackingMode !== 'none'
-      if (!appWantsWheel) {
-        term.scrollLines(lines)
-      } else {
-        const at = (target instanceof Element ? target : null) ?? container
-        // One event per row rather than one carrying the total: the alt-screen
-        // path answers an event with a keypress, not a distance, so a fast flick
-        // batched into one event would scroll a TUI by a single line.
-        for (let i = Math.abs(lines); i > 0; i--) {
-          at.dispatchEvent(
-            new WheelEvent('wheel', {
-              deltaY: Math.sign(lines),
-              deltaMode: WheelEvent.DOM_DELTA_LINE,
-              clientX: touch.clientX,
-              clientY: touch.clientY,
-              bubbles: true,
-              cancelable: true
-            })
-          )
-        }
+      const plan = planTouchScroll(
+        lines,
+        term.buffer.active.type === 'alternate',
+        term.modes.mouseTrackingMode !== 'none'
+      )
+      if (plan.kind === 'viewport') {
+        term.scrollLines(plan.lines)
+      } else if (send) {
+        send(plan.data)
       }
     }
     event.preventDefault()

@@ -188,7 +188,10 @@ async function main() {
     DESK_VIEWER,
     hashPin,
     saveInboxImage,
+    imagePasteIntoPane,
+    GROK_IMAGE_PASTE,
     INBOX_KEEP,
+    planTouchScroll,
     isAllowedSource,
     webSocketUrl,
     HEARTBEAT_GRACE_MS,
@@ -345,6 +348,8 @@ async function main() {
   let layoutAnswer = null
   const watches = []
   const writes = []
+  const clipboardOffers = []
+  let pasteCommand = ''
   const inboxDir = join(scratch, 'inbox')
   mkdirSync(inboxDir, { recursive: true })
   /**
@@ -392,7 +397,10 @@ async function main() {
       desktopName: () => 'SMOKE-PC',
       allowedOrigins: () => allowedOrigins,
       onOriginRefused: (origin, allowed) => refusedOrigins.push({ origin, allowed }),
-      sessions: () => manager.list(),
+      sessions: () =>
+        manager.list().map((s) =>
+          pasteCommand && s.id === 'w1' ? { ...s, bootstrapCommand: pasteCommand } : s
+        ),
       replay: (id) => replay.get(id) ?? '',
       write: (id, data, viewer) => {
         writes.push({ id, data, viewer })
@@ -400,6 +408,10 @@ async function main() {
         return manager.write(id, data)
       },
       saveInboxImage: async (bytes, ext) => saveInboxImage(inboxDir, bytes, ext),
+      offerClipboardImage: (bytes) => {
+        clipboardOffers.push(Buffer.from(bytes))
+        return true
+      },
       resize: (id, cols, rows, viewer) => owners.noteWish(id, viewer, cols, rows),
       release: (viewer, id) => owners.release(viewer, id),
       snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: WORKSPACES }),
@@ -432,6 +444,38 @@ async function main() {
   log(
     MAX_IMAGE_BASE64 + 512 < MAX_FRAME_BYTES,
     `a paste-image payload (${MAX_IMAGE_BASE64}) fits inside MAX_FRAME_BYTES (${MAX_FRAME_BYTES}) with envelope room`
+  )
+
+  const grokPaste = imagePasteIntoPane('grok --yolo', 'C:\\tmp\\paste.png')
+  log(
+    grokPaste.wantClipboard && grokPaste.data === GROK_IMAGE_PASTE,
+    'Grok is handed Alt+V so it can mint an image chip, not a quoted path it would treat as text'
+  )
+  const claudePaste = imagePasteIntoPane('claude', 'C:\\tmp\\paste.png')
+  log(
+    !claudePaste.wantClipboard && claudePaste.data === '"C:\\tmp\\paste.png" ',
+    'Claude Code is still typed the quoted path a desktop drop would type'
+  )
+  const agyPaste = imagePasteIntoPane('agy', 'C:\\tmp\\paste.png')
+  log(
+    !agyPaste.wantClipboard && agyPaste.data.startsWith('"'),
+    'an agent that is not Grok still gets the quoted path'
+  )
+
+  const wheelUp = planTouchScroll(-3, true, true)
+  log(
+    wheelUp.kind === 'data' && wheelUp.data === '\x1b[<64;1;1M'.repeat(3),
+    'a finger drag on a mouse-tracking TUI (Grok, Antigravity) is three SGR wheel-up reports'
+  )
+  const pageUp = planTouchScroll(-8, true, false)
+  log(
+    pageUp.kind === 'data' && pageUp.data === '\x1b[5~',
+    'the same drag on an alt-screen with no mouse is PageUp — arrows would only move Grok\'s caret'
+  )
+  const scrollback = planTouchScroll(-4, false, false)
+  log(
+    scrollback.kind === 'viewport' && scrollback.lines === -4,
+    'Claude Code\'s normal buffer is still xterm scrollback, which is why its swipe already worked'
   )
 
   const PIXEL =
@@ -885,6 +929,26 @@ async function main() {
     typedPath.startsWith(inboxDir) && existsSync(typedPath) && readFileSync(typedPath).equals(pixelBytes),
     'the file on disk is the bytes that were sent, in this desktop\'s inbox'
   )
+
+  pasteCommand = 'grok'
+  clipboardOffers.length = 0
+  browser.send({
+    type: 'request',
+    rid: 'r-img-grok',
+    body: { kind: 'paste-image', sessionId: 'w1', mime: 'image/png', data: PIXEL }
+  })
+  await waitFor(() => browser.result('r-img-grok'), 5000, 'the grok paste-image result')
+  log(browser.result('r-img-grok').body.kind === 'ok', 'a Grok pane accepts the same png')
+  const grokTyped = writes.at(-1)
+  log(
+    grokTyped?.data === GROK_IMAGE_PASTE,
+    'and is typed Alt+V rather than the quoted path Claude Code wants'
+  )
+  log(
+    clipboardOffers.length === 1 && clipboardOffers[0].equals(pixelBytes),
+    'after the bitmap has been put on this machine\'s clipboard, which is what Alt+V reads'
+  )
+  pasteCommand = ''
 
   browser.send({
     type: 'request',

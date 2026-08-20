@@ -107,7 +107,7 @@ export function PaneView({
   const holderRef = useRef<HTMLDivElement | null>(null)
   const hostRef = useRef<TermHost | null>(null)
   const splitRef = useRef<HTMLButtonElement | null>(null)
-  const fileRef = useRef<HTMLInputElement | null>(null)
+
   const sendingImage = useRef(false)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
   const [truncated, setTruncated] = useState(false)
@@ -411,15 +411,33 @@ export function PaneView({
         ) : null}
 
         <div className="pane__actions">
-          <button
-            type="button"
+          {/*
+            A label, not a button that clicks a hidden input. iOS Safari
+            refuses programmatic `.click()` on `input[hidden]`; activating the
+            file picker through the label is the gesture it will honour.
+          */}
+          <label
             className="ghost-btn pane__action"
             title="Attach an image"
-            disabled={!live || !alive}
-            onClick={() => fileRef.current?.click()}
+            aria-disabled={!live || !alive ? 'true' : undefined}
+            onClick={(event) => {
+              if (!live || !alive) event.preventDefault()
+            }}
           >
+            <input
+              className="pane__file"
+              type="file"
+              accept="image/*"
+              multiple
+              disabled={!live || !alive}
+              onChange={(event) => {
+                const files = [...(event.target.files ?? [])].filter(isImageFile)
+                event.target.value = ''
+                void sendImages(files)
+              }}
+            />
             <Icon name="camera" size={13} />
-          </button>
+          </label>
           <button
             ref={splitRef}
             type="button"
@@ -465,19 +483,6 @@ export function PaneView({
         means "tapped". The phone client focuses from `click` for the same
         reason.
       */}
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        multiple
-        hidden
-        onChange={(event) => {
-          const files = [...(event.target.files ?? [])].filter(isImageFile)
-          event.target.value = ''
-          void sendImages(files)
-        }}
-      />
-
       <div
         className="pane__terminal"
         ref={holderRef}
