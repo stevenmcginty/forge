@@ -110,8 +110,13 @@ export const TOOL_SPECS: ToolSpec[] = [
     // PowerShell one-liner — it drops the binary under %LOCALAPPDATA%, no
     // admin rights needed, and `agy` signs in with a Google account on first
     // run.
+    //
+    // `agy update` is a real subcommand — verified against `agy --help`
+    // (1.1.16, 2026-08-20) — and, like grok's, the only updater there is for a
+    // binary no registry serves. Without it this row was the one harness in the
+    // list with no way to move it forward from inside Forge.
     latest: { source: 'local' },
-    updateCommand: null,
+    updateCommand: 'agy update',
     installCommand: 'irm https://antigravity.google/cli/install.ps1 | iex'
   },
   {
