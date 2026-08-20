@@ -1626,6 +1626,17 @@ export interface Settings {
    */
   remoteControlDefault: boolean
 
+  /* ------------------------------------------------ github while away */
+  /**
+   * Keep GitHub current so Forge Web has something real to read when this
+   * machine is unreachable. After a pane goes idle: push the branch when it is
+   * ahead of its upstream, and shelve the uncommitted working tree to
+   * `forge-wip/<machine>/<branch>` on origin. The real branch, index and
+   * working tree are never touched. See electron/git/git-shelf.ts and
+   * docs/GITHUB-FALLBACK-PLAN.md.
+   */
+  gitShelfEnabled: boolean
+
   /* ------------------------------------------------ closing and resuming */
   /**
    * Give every Claude pane a session id of Forge's own, so reopening a saved

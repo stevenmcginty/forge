@@ -128,7 +128,18 @@ function Header(): ReactNode {
       <span className="mono ghmode__slug truncate" data-testid="github-slug">
         {state.slug}
       </span>
-      <span className="ghmode__ref mono">{state.ref || '…'}</span>
+      <span className="ghmode__ref mono" data-testid="github-ref">
+        {state.ref || '…'}
+      </span>
+      {state.shelf ? (
+        <span
+          className="pane__perm mono"
+          data-testid="github-shelf"
+          title={`${state.shelf.machine} shelved its uncommitted working tree of ${state.shelf.of} at ${new Date(state.shelf.at).toLocaleString()}. This is newer than ${state.shelf.of} on GitHub, so it is what you are reading.`}
+        >
+          SHELF · {state.shelf.machine.toUpperCase()}
+        </span>
+      ) : null}
       {state.info?.private ? <span className="pane__perm mono">PRIVATE</span> : null}
       {state.treeCached ? (
         <span

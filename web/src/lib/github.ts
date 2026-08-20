@@ -51,6 +51,40 @@ export const GITHUB_API_BASE = 'https://api.github.com'
  */
 export const BRANCH_PREFIX = 'forge-web/'
 
+/**
+ * Where the desktop shelves its uncommitted working tree:
+ * `forge-wip/<machine>/<branch>`, force-pushed after a pane goes idle by
+ * electron/git/git-shelf.ts. Read here, never written: a browser that found a
+ * shelf newer than the default branch shows the shelf, because that is what
+ * the machine was actually working on when it went quiet.
+ */
+export const SHELF_PREFIX = 'forge-wip/'
+
+export interface RefHead {
+  branch: string
+  sha: string
+}
+
+export interface Shelf {
+  /** The full branch name, `forge-wip/<machine>/<branch>`. */
+  branch: string
+  machine: string
+  /** Which branch the shelf is of. */
+  of: string
+  sha: string
+  /** Committer date, epoch ms. */
+  at: number
+}
+
+/** Take a shelf branch name apart, or null when it is not one. */
+export function parseShelf(branch: string): { machine: string; of: string } | null {
+  if (!branch.startsWith(SHELF_PREFIX)) return null
+  const rest = branch.slice(SHELF_PREFIX.length)
+  const cut = rest.indexOf('/')
+  if (cut <= 0 || cut === rest.length - 1) return null
+  return { machine: rest.slice(0, cut), of: rest.slice(cut + 1) }
+}
+
 /** The version this client was written against. Sent on every request. */
 const API_VERSION = '2022-11-28'
 
@@ -176,6 +210,55 @@ export class GitHub {
       throw new GitHubError({ kind: 'broken', message: `GitHub answered for ${branch} without a commit sha.` })
     }
     return sha
+  }
+
+  /** Every branch whose name begins with `prefix`, with the commit each points at. */
+  async refs(slug: string, prefix: string): Promise<RefHead[]> {
+    const body = await this.get(`/repos/${slugPath(slug)}/git/matching-refs/heads/${refPath(prefix)}`)
+    if (!Array.isArray(body)) {
+      throw new GitHubError({ kind: 'broken', message: `GitHub answered for ${prefix} with something that is not a list of refs.` })
+    }
+    const out: RefHead[] = []
+    for (const row of body as Array<{ ref?: unknown; object?: { sha?: unknown } }>) {
+      const ref = typeof row?.ref === 'string' ? row.ref : ''
+      const sha = row?.object?.sha
+      if (!ref.startsWith('refs/heads/') || typeof sha !== 'string' || !sha) continue
+      out.push({ branch: ref.slice('refs/heads/'.length), sha })
+    }
+    return out
+  }
+
+  /** When a commit was made — the committer date, as epoch ms. */
+  async commitDate(slug: string, sha: string): Promise<number> {
+    const body = await this.get(`/repos/${slugPath(slug)}/commits/${encodeURIComponent(sha)}`)
+    const date = (body as { commit?: { committer?: { date?: unknown } } } | null)?.commit?.committer?.date
+    const at = typeof date === 'string' ? Date.parse(date) : Number.NaN
+    if (!Number.isFinite(at)) {
+      throw new GitHubError({ kind: 'broken', message: `GitHub described commit ${sha.slice(0, 7)} without a date.` })
+    }
+    return at
+  }
+
+  /**
+   * The newest shelf of `of` — a `forge-wip/<machine>/<of>` branch whose commit
+   * is later than `sha` (the tip of `of` itself) — or null when there is none,
+   * or none newer. Null is the common case and costs one request; each shelf
+   * found costs one more for its date.
+   */
+  async newestShelf(slug: string, of: string, sha: string | null): Promise<Shelf | null> {
+    const heads = await this.refs(slug, SHELF_PREFIX)
+    const candidates = heads
+      .map((h) => ({ ...h, parsed: parseShelf(h.branch) }))
+      .filter((h): h is RefHead & { parsed: { machine: string; of: string } } => h.parsed !== null && h.parsed.of === of)
+    if (candidates.length === 0) return null
+    const tipAt = sha ? await this.commitDate(slug, sha) : 0
+    let best: Shelf | null = null
+    for (const c of candidates) {
+      const at = await this.commitDate(slug, c.sha)
+      if (at <= tipAt) continue
+      if (!best || at > best.at) best = { branch: c.branch, machine: c.parsed.machine, of, sha: c.sha, at }
+    }
+    return best
   }
 
   /**

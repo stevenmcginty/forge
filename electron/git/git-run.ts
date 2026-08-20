@@ -151,7 +151,7 @@ function gitEnv(): NodeJS.ProcessEnv {
 export async function runGit(
   cwd: string,
   args: string[],
-  opts?: { timeoutMs?: number; repoKey?: string }
+  opts?: { timeoutMs?: number; repoKey?: string; env?: Record<string, string> }
 ): Promise<GitResult> {
   if (!gitAvailable()) return { ok: false, code: -1, out: '', err: 'git is not installed', ms: 0 }
 
@@ -169,7 +169,7 @@ export async function runGit(
    * be broken by one rejection is a queue that deadlocks a project until
    * restart, which is not a failure mode worth leaving open.
    */
-  const call = prior.then(() => exec(cwd, args, opts?.timeoutMs ?? GIT_TIMEOUT_MS))
+  const call = prior.then(() => exec(cwd, args, opts?.timeoutMs ?? GIT_TIMEOUT_MS, opts?.env))
   const link: Promise<unknown> = call.catch(() => undefined)
   perRepo.set(key, link)
 
@@ -180,7 +180,12 @@ export async function runGit(
   return result
 }
 
-function exec(cwd: string, args: string[], timeoutMs: number): Promise<GitResult> {
+/**
+ * `extraEnv` is layered over the hardened environment, never under it: a caller
+ * may point git at a different index file (the shelf does), but it cannot
+ * re-enable a prompt or a pager by accident.
+ */
+function exec(cwd: string, args: string[], timeoutMs: number, extraEnv?: Record<string, string>): Promise<GitResult> {
   return new Promise((resolve) => {
     void acquire().then(() => {
       const started = Date.now()
@@ -196,7 +201,7 @@ function exec(cwd: string, args: string[], timeoutMs: number): Promise<GitResult
           // megabytes of paths. 8MB is far more than the 500-file cap upstream
           // will keep, and still bounded.
           maxBuffer: 8 * 1024 * 1024,
-          env: gitEnv()
+          env: extraEnv ? { ...gitEnv(), ...extraEnv } : gitEnv()
         },
         (error, stdout, stderr) => {
           release()

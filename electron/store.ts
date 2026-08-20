@@ -293,6 +293,10 @@ function defaultSettings(): Settings {
     skillsEnabled: [],
     // Steve wants his Claude panes reachable from his phone out of the box.
     remoteControlDefault: true,
+    // The shelf. On by default for the same reason a backup is: it is there
+    // for the day nobody planned to need it. It is a no-op on a folder with no
+    // origin, which is what makes "on" safe.
+    gitShelfEnabled: true,
     // Closing Forge should not be the end of the conversation. On by default:
     // a restored layout that starts four empty Claudes is a restored *shape*,
     // not restored work. See shared/session.ts.
@@ -807,6 +811,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       .filter((n, i, all) => all.indexOf(n) === i)
       .slice(0, 200),
     remoteControlDefault: s.remoteControlDefault ?? DEFAULT_SETTINGS.remoteControlDefault,
+    gitShelfEnabled: s.gitShelfEnabled ?? DEFAULT_SETTINGS.gitShelfEnabled,
     // Both undefined in any settings.json written before resume existed, and
     // the answer for that file is the default (on) rather than a silent off —
     // same reasoning as voiceEarcons above.

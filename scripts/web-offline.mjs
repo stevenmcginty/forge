@@ -73,6 +73,12 @@ const ORIGIN = `http://localhost:${VITE_PORT}`
 
 /** The repository this check reads and commits to. Nothing outside this file. */
 const SLUG = 'forge/scratch'
+/**
+ * The desktop's shelf of the default branch — what electron/git/git-shelf.ts
+ * pushes after a pane goes idle. Newer than `main`, so the browser must read
+ * it in preference (docs/GITHUB-FALLBACK-PLAN.md, Phase A).
+ */
+const SHELF_BRANCH = 'forge-wip/smoke-box/main'
 const DEFAULT_BRANCH = 'main'
 /** A token that looks like a fine-grained one and is not one. */
 const TOKEN = 'github_pat_offline_check_11ABCDEF0_notarealtoken'
@@ -298,7 +304,23 @@ async function main() {
       ])
     ]
   ])
-  const heads = new Map([[DEFAULT_BRANCH, createHash('sha1').update('head:main').digest('hex')]])
+  branches.set(
+    SHELF_BRANCH,
+    new Map([
+      ...branches.get(DEFAULT_BRANCH).entries(),
+      ['src/app.ts', blob('export const answer = 42 // shelved, uncommitted on the desktop\n')],
+      ['src/shelved.ts', blob('export const shelved = true\n')]
+    ])
+  )
+  const heads = new Map([
+    [DEFAULT_BRANCH, createHash('sha1').update('head:main').digest('hex')],
+    [SHELF_BRANCH, createHash('sha1').update('head:shelf').digest('hex')]
+  ])
+  /** Committer dates, keyed by commit sha: main an hour ago, the shelf five minutes ago. */
+  const dates = new Map([
+    [heads.get(DEFAULT_BRANCH), new Date(Date.now() - 60 * 60 * 1000).toISOString()],
+    [heads.get(SHELF_BRANCH), new Date(Date.now() - 5 * 60 * 1000).toISOString()]
+  ])
 
   /** Every request the client actually made, for the assertions to read back. */
   const ghRequests = []
@@ -385,6 +407,17 @@ async function main() {
         return
       }
 
+      if (rest.startsWith('/commits/')) {
+        const sha = decodeURIComponent(rest.slice('/commits/'.length))
+        const date = dates.get(sha)
+        if (!date) {
+          send(404, { message: 'Not Found' })
+          return
+        }
+        send(200, { sha, commit: { committer: { date, name: 'Forge', email: 'forge@localhost' }, message: 'forge wip' } })
+        return
+      }
+
       if (rest.startsWith('/git/trees/')) {
         const ref = decodeURIComponent(rest.slice('/git/trees/'.length))
         const files = branches.get(ref)
@@ -447,6 +480,7 @@ async function main() {
           files.set(path, blob(text))
           const commit = createHash('sha1').update(`${branch}:${path}:${text}`).digest('hex')
           heads.set(branch, commit)
+          dates.set(commit, new Date().toISOString())
           send(existing ? 200 : 201, {
             content: { path, sha: files.get(path).sha },
             commit: { sha: commit, message: String(body?.message ?? '') }
@@ -662,6 +696,27 @@ async function main() {
     `the tree lists the repository from GitHub — one file at the root and two folders (${fileRows} files, ${folderRows} folders)`
   )
   log((await text('[data-testid="github-slug"]')) === SLUG, `and the header names the repository it read (${SLUG})`)
+
+  /* ------------------------------------------------------------ the shelf */
+
+  const refShown = await text('[data-testid="github-ref"]')
+  log(
+    refShown === SHELF_BRANCH,
+    `the ref on screen is the desktop's shelf, because it is newer than ${DEFAULT_BRANCH} ("${refShown}")`
+  )
+  log((await count('[data-testid="github-shelf"]')) === 1, 'and the header badges it as a shelf, naming the machine')
+  log(
+    ghRequests.some((r) => r.method === 'GET' && r.path.includes('/git/matching-refs/heads/forge-wip')),
+    'found by asking for forge-wip/* refs'
+  )
+  log(
+    ghRequests.filter((r) => r.method === 'GET' && r.path.includes('/commits/')).length === 2,
+    'and dated with one commit lookup each for the tip and the shelf — no more'
+  )
+  log(
+    (await count('.ghrow[data-kind="file"]')) === 1,
+    'the tree shape is the shelf\'s (the shelved file sits inside src/, so the root is unchanged)'
+  )
   log(
     ghRequests.some((r) => r.method === 'GET' && r.path === `/gh/repos/${SLUG}` && r.authorized),
     'and every call carried the pasted token as a bearer credential'
@@ -731,6 +786,11 @@ async function main() {
   log(
     branches.get(created[0].body.ref.replace('refs/heads/', '')).get('README.md').text.includes(nonce),
     `while the forge-web branch has the new text (${nonce})`
+  )
+  log(
+    created[0].body.sha === heads.get(SHELF_BRANCH) &&
+      branches.get(created[0].body.ref.replace('refs/heads/', '')).get('src/shelved.ts') !== undefined,
+    'and it was started from the shelf commit, so the shelved files ride along rather than being silently reverted'
   )
 
   /* ------------------------------------- a commit that fails, and survives */

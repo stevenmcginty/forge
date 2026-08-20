@@ -13,6 +13,7 @@ import {
   asFailure,
   assertWebBranch,
   defaultWebBranch,
+  type Shelf,
   isSlug,
   type GitHubFailure,
   type RepoInfo,
@@ -245,8 +246,15 @@ export interface RepoState {
   info: RepoInfo | null
   /** The branch this mode reads and writes. Always `forge-web/*`. */
   branch: string
-  /** Which ref the tree on screen was read at — the branch, or the default. */
+  /** Which ref the tree on screen was read at — the branch, the default, or a shelf. */
   ref: string
+  /**
+   * Set when `ref` is a `forge-wip/*` shelf: the desktop's uncommitted working
+   * tree, shelved after a pane went idle, and newer than the default branch.
+   * The header names the machine and when, so "why is this not what GitHub
+   * shows" has an answer on screen.
+   */
+  shelf: Shelf | null
   tree: TreeEntry[]
   /** True when GitHub cut the tree at its ceiling. */
   truncated: boolean
@@ -327,6 +335,7 @@ export function RepoProvider({ children }: { children: ReactNode }): ReactNode {
   const [commitFailure, setCommitFailure] = useState<GitHubFailure | null>(null)
   const [conflict, setConflict] = useState<{ path: string; theirSha: string } | null>(null)
   const [landed, setLanded] = useState<{ sha: string; branch: string; path: string } | null>(null)
+  const [shelf, setShelf] = useState<Shelf | null>(null)
   const [reach, setReach] = useState<Reach[]>([])
   const [nonce, setNonce] = useState(0)
 
@@ -382,13 +391,28 @@ export function RepoProvider({ children }: { children: ReactNode }): ReactNode {
         // Reading the default branch is not writing to it: every write below
         // goes through `assertWebBranch`, and there is exactly one branch name
         // in this component.
-        const readAt = branchHead ? branch : repo.defaultBranch
+        /*
+         * The forge-web branch when it exists; otherwise the freshest picture of
+         * the default branch — which is the desktop's shelf when it pushed one
+         * after the last commit to the default branch, and the default branch
+         * itself when it did not. docs/GITHUB-FALLBACK-PLAN.md, Phase A.
+         */
+        let readAt = branchHead ? branch : repo.defaultBranch
+        let found: Shelf | null = null
+        if (!branchHead) {
+          const tip = await api.head(slug, repo.defaultBranch)
+          if (cancelled) return
+          found = await api.newestShelf(slug, repo.defaultBranch, tip).catch(() => null)
+          if (cancelled) return
+          if (found) readAt = found.branch
+        }
         const listing = await api.tree(slug, readAt)
         if (cancelled) return
 
         setTree(listing.entries)
         setTruncated(listing.truncated)
         setRef(readAt)
+        setShelf(found)
         setTreeCached(false)
         setFailure(null)
 
@@ -634,8 +658,12 @@ export function RepoProvider({ children }: { children: ReactNode }): ReactNode {
           // no path through this function that can name `master`.
           const head = await api.head(slug, branch)
           if (!head) {
-            const from = info?.defaultBranch ?? ref
-            const base = await api.head(slug, from)
+            // From the ref on screen — the default branch, or the desktop's
+            // shelf when that is what this page has been reading — so an edit
+            // made against the shelf is committed on top of it, not on top of
+            // an older default branch it would then silently revert.
+            const from = ref || info?.defaultBranch || ''
+            const base = from ? await api.head(slug, from) : null
             if (!base) {
               throw new Error(`There is no ${from} on GitHub to start ${branch} from.`)
             }
@@ -746,6 +774,7 @@ export function RepoProvider({ children }: { children: ReactNode }): ReactNode {
       info,
       branch,
       ref,
+      shelf,
       tree,
       truncated,
       treeCached,

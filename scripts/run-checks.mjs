@@ -43,6 +43,7 @@ const CHECKS = [
   { name: 'draft:check', lane: 'fast' },
   { name: 'gh:check', lane: 'fast' },
   { name: 'git:check', lane: 'fast' },
+  { name: 'shelf:smoke', lane: 'fast', note: 'real git, scratch repo + bare origin in the temp dir' },
   { name: 'hub:check', lane: 'fast' },
   { name: 'mosaic:check', lane: 'fast' },
   { name: 'rail:check', lane: 'fast' },

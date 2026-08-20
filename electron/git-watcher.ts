@@ -15,7 +15,8 @@ import { runGitAction } from './git/git-actions'
 import { GIT_NET_TIMEOUT_MS, invalidateGitAvailable, runGit } from './git/git-run'
 import { GH_UNKNOWN, GIT_MAX_BRANCHES, readStatus } from './git/git-status'
 import { FOR_EACH_REF_FORMAT, parseForEachRef } from './git/porcelain'
-import { getProjects } from './store'
+import { getProjects, getSettings } from './store'
+import { configureShelf, disposeShelf, flushShelves, noteBusy } from './git/git-shelf'
 
 /**
  * The GIT section's eyes on one project.
@@ -732,6 +733,16 @@ export async function ghRefresh(projectId: string): Promise<GhState> {
 /* ----------------------------------------------------------------- handlers */
 
 export function registerGitWatcherHandlers(): void {
+  /*
+   * The shelf rides the same busy edge the activity watcher records, for every
+   * project rather than only the watched one. `ipcMain.on` allows a second
+   * listener on the channel; this one never reads the activity watcher's state.
+   */
+  configureShelf({ enabled: () => getSettings().gitShelfEnabled, pathFor })
+  ipcMain.on(IPC.activityBusy, (_e, projectId: string, _paneId: string, busy: boolean) => {
+    noteBusy(String(projectId ?? ''), Boolean(busy))
+  })
+
   ipcMain.handle(IPC.gitWatch, (e, req: { projectId?: unknown; cwd?: unknown }) => {
     const result = startWatch(String(req?.projectId ?? ''), String(req?.cwd ?? ''), e.sender)
     if (!result.ok) return result
@@ -772,4 +783,8 @@ export function registerGitWatcherHandlers(): void {
 
 export function disposeGitWatchers(): void {
   stop()
+  // Whatever is armed goes now, best effort — a pane that went idle a moment
+  // before Quit is exactly the work the shelf exists to catch.
+  flushShelves()
+  disposeShelf()
 }

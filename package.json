@@ -47,6 +47,7 @@
     "rail:check": "node scripts/rail-check.mjs",
     "git:check": "node scripts/git-check.mjs",
     "gitwatch:smoke": "node scripts/gitwatch-smoke.mjs",
+    "shelf:smoke": "node scripts/shelf-smoke.mjs",
     "gh:check": "node scripts/gh-check.mjs",
     "tail:check": "node scripts/tail-check.mjs",
     "activity:check": "node scripts/activity-check.mjs",

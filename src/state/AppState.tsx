@@ -254,6 +254,7 @@ const FALLBACK_SETTINGS: Settings = {
   skillsLibraryDir: '',
   skillsEnabled: [],
   remoteControlDefault: true,
+  gitShelfEnabled: true,
   resumeSessions: true,
   confirmOnQuit: true,
   // Companion (M9): the phone link, off and unconfigured until Steve says

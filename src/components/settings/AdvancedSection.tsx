@@ -72,6 +72,27 @@ export function AdvancedSection(): ReactNode {
         </Row>
       </Card>
 
+      <Card
+        title="GitHub while away"
+        hint={
+          <>
+            After a pane goes idle, Forge pushes the branch when it is ahead of its upstream and shelves the
+            uncommitted working tree to <span className="mono">forge-wip/&lt;this machine&gt;/&lt;branch&gt;</span> on
+            origin. The branch, the index and the working tree are never touched. It is what lets Forge Web read
+            today&rsquo;s code from GitHub when this machine is asleep, and it does nothing at all in a folder with no
+            origin.
+          </>
+        }
+      >
+        <Row label="Keep GitHub current" hint="Push ahead commits and shelve uncommitted work when panes go idle">
+          <Toggle
+            checked={state.settings.gitShelfEnabled}
+            onChange={(next) => actions.patchSettings({ gitShelfEnabled: next })}
+            label="Keep GitHub current while away"
+          />
+        </Row>
+      </Card>
+
       <Card title="Right now">
         <Row label="Terminal sessions" hint="A hard ceiling — panes past it are refused, not queued">
           <span className="mono srow__readout">
