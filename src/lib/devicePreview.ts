@@ -196,13 +196,18 @@ export function probeTarget(url: string): string | null {
  * a python app `python app.py`, and both get the same button as a Vite project
  * without anybody opening a terminal to type it a second time.
  *
- * Empty means no button, which is honest: nothing has been typed and nothing
- * was found, so there is no command to offer.
+ * With nothing typed and nothing found the answer is still `npm run dev`:
+ * that is what nearly every project here starts with, and a button that runs
+ * the usual thing beats an empty state that asks for it to be typed in. The
+ * box under the button is where the unusual projects say otherwise.
  */
+export const DEFAULT_DEV_COMMAND = 'npm run dev'
+
 export function effectiveDevCommand(manual: string | undefined, sniffed: PreviewDevCommand | null): string {
   const typed = (manual ?? '').trim()
   if (typed) return typed
-  return sniffed?.kind === 'command' ? sniffed.command : ''
+  if (sniffed?.kind === 'command') return sniffed.command
+  return DEFAULT_DEV_COMMAND
 }
 
 /**

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { MobileStatus, PreviewDevCommand } from '@shared/types'
 import {
   defaultPreviewMode,
+  DEFAULT_DEV_COMMAND,
   effectiveDevCommand,
   fitScale,
   isSelfPreview,
@@ -477,11 +478,12 @@ export function DevicePreview(): ReactNode {
    * something to show.
    *
    * Under the button is the command itself, editable and remembered per project.
-   * That box is what makes the button reachable from *every* project rather than
-   * only the ones with a package.json Forge recognises — nothing here has to be
-   * typed into a terminal to be useful a second time. Empty hands the decision
-   * back to the sniff, which is why the sniffed command is the placeholder
-   * rather than the value.
+   * The button is on every project: typed command, then the one sniffed from
+   * package.json, then `npm run dev`. The box only matters for projects that
+   * start some other way, and nothing typed there has to be typed into a
+   * terminal to be useful a second time. Empty hands the decision back to the
+   * sniff, which is why the sniffed command is the placeholder rather than the
+   * value.
    *
    * The exception is this checkout, which cannot start itself (see
    * `isSelfPreview`): there the only honest button is the one that switches the
@@ -498,23 +500,21 @@ export function DevicePreview(): ReactNode {
     </button>
   ) : (
     <>
-      {command ? (
-        <button
-          type="button"
-          className="sbtn sbtn--go"
-          title={`Run ${command} in a new terminal pane`}
-          onClick={() => actions.openToolPane('dev server', command, true)}
-        >
-          Start the dev server
-        </button>
-      ) : null}
+      <button
+        type="button"
+        className="sbtn sbtn--go"
+        title={`Run ${command} in a new terminal pane`}
+        onClick={() => actions.openToolPane('dev server', command, true)}
+      >
+        Start the dev server
+      </button>
       <label className="dprev__cmd">
         <span className="eyebrow">runs in this project’s folder</span>
         <input
           className="field__input mono dprev__cmd-input"
           value={cmdDraft}
           spellCheck={false}
-          placeholder={sniffedCommand || 'npm run dev'}
+          placeholder={sniffedCommand || DEFAULT_DEV_COMMAND}
           aria-label="Start command"
           title="The command the button above types into a new terminal pane. Leave it empty to use the one Forge found in this project's package.json."
           onChange={(e) => setCmdDraft(e.target.value)}
@@ -624,9 +624,7 @@ export function DevicePreview(): ReactNode {
             body={
               selfPreview
                 ? `${project.name} is the checkout this Forge is running from — starting its dev server here would boot a second Forge on top of the one you are using, so that button is not offered. The real mobile app is the preview instead, and it is one click away.`
-                : command
-                  ? `Forge is watching ${project.name}'s terminals for a local URL — start the dev server in any pane and both phones follow it. The button below runs ${command} in a new pane for you. A URL typed in the box above wins over all of that, and is remembered for this project.`
-                  : `Forge is watching ${project.name}'s terminals for a local URL — start the dev server in any pane and both phones follow it. Nothing in this folder said how it starts, so type the command below and the button appears. A URL typed in the box above wins over all of that, and is remembered for this project.`
+                : `Forge is watching ${project.name}'s terminals for a local URL — start the dev server in any pane and both phones follow it. The button below runs ${command} in a new pane for you; change the command in the box under it if this project starts differently. A URL typed in the box above wins over all of that, and is remembered for this project.`
             }
             action={startBlock}
           />
@@ -639,9 +637,7 @@ export function DevicePreview(): ReactNode {
             body={
               selfPreview
                 ? `That is where ${project.name} last announced itself, and nothing is listening there now. This is the checkout Forge is running from, so it will not offer to start it — a second Forge on top of the first is not a preview. The real mobile app is one click away instead.`
-                : command
-                  ? `That is where ${project.name} last announced itself, and nothing is listening there now — the dev server looks stopped. The button below runs ${command} in a new pane; you land in the terminals to watch it boot, and Ctrl+Shift+D comes back here. Forge keeps checking either way, so the phones return the moment something answers.`
-                  : `That is where ${project.name} last announced itself, and nothing is listening there now — the dev server looks stopped. Type how this project starts in the box below and the button to run it appears, or put a different URL in the box above. Forge keeps checking, so the phones return the moment something answers.`
+                : `That is where ${project.name} last announced itself, and nothing is listening there now — the dev server looks stopped. The button below runs ${command} in a new pane; you land in the terminals to watch it boot, and Ctrl+Shift+D comes back here. Forge keeps checking either way, so the phones return the moment something answers.`
             }
             action={startBlock}
           />
