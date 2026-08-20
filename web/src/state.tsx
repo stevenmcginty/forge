@@ -123,8 +123,9 @@ export interface ForgeActions {
   /** A human pressed "Try again" on a screen the client had stopped at. */
   retry: () => void
   /**
-   * A human typed the desktop's unlock PIN. Reconnects carrying it; the PIN is
-   * spent on that one attempt whatever the desktop makes of it.
+   * A human typed the desktop's unlock PIN. Reconnects carrying it. A successful
+   * one is held in RAM for PIN_GRACE_MS so a phone that drops its socket on an
+   * app switch does not re-prompt; it is never written down.
    */
   submitPin: (pin: string) => void
   /** Look for the desktop again — the offline screen's button, and its poll. */

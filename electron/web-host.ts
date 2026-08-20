@@ -34,6 +34,7 @@ import type {
 } from '@shared/types'
 import { WebAuth, googleJwksFetcher } from './web/auth'
 import { checkFolder, listFolder } from './web/fs-browse'
+import { saveInboxImage } from './web/inbox'
 import { hashPin, isValidPin } from './web/pin'
 import { WebServer, type WebServerHost } from './web/server'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
@@ -1217,6 +1218,7 @@ async function start(): Promise<void> {
     fsList: async (path, name) => listFolder(path, name),
     projectAdd: (path, deviceName) => dispatchProjectAdd(path, deviceName),
     projectCreate: (name, parentDir, deviceName) => dispatchProjectCreate(name, parentDir, deviceName),
+    saveInboxImage: (bytes, ext) => Promise.resolve(saveInboxImage(join(getDataDir(), 'web-inbox'), bytes, ext)),
     mirrorStart: startMirror,
     onMirror,
     // Two hooks rather than one, and read per event rather than captured: the

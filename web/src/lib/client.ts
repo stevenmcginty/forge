@@ -1,6 +1,7 @@
 import {
   HEARTBEAT_MS,
   MAX_WRITE_CHARS,
+  PIN_GRACE_MS,
   TOKEN_REFRESH_MS,
   WEB_PROTO,
   WEB_SUBPROTOCOL,
@@ -299,6 +300,17 @@ export class ForgeClient {
   private subs = new Map<string, { cols: number; rows: number } | null>()
   /** The unlock PIN for the *next* hello only. See `submitPin`. */
   private pin = ''
+  /**
+   * A PIN that already opened the door, held in RAM so a reconnect after the
+   * tab was hidden (a phone switching apps) can answer without a re-prompt.
+   * Never written down; forgotten after PIN_GRACE_MS hidden, on a wrong PIN,
+   * and on sign-out. See PIN_GRACE_MS in shared/web.ts.
+   */
+  private rememberedPin = ''
+  /** The PIN this attempt is carrying, remembered on `hello-ok` only. */
+  private sentPin = ''
+  /** When the tab last went hidden, or 0 while it is visible. */
+  private pinHiddenAt = 0
 
   constructor(handlers: ForgeHandlers) {
     this.handlers = handlers
@@ -306,6 +318,7 @@ export class ForgeClient {
     // than the instance, so nothing outside this file can reach the rest of the
     // client through it.
     sendUp = (frame) => this.send(frame)
+    this.watchPinGrace()
   }
 
   /** Is the link answering? Drives the badge, and nothing else. See WARM_MS. */
@@ -336,11 +349,11 @@ export class ForgeClient {
   /**
    * A human typed the unlock PIN. Reconnect, carrying it.
    *
-   * Held for exactly one `hello` and dropped in `open()`, whatever the desktop
-   * makes of it — which is the property shared/web.ts asks for: a page only ever
-   * holds a PIN it was just asked for. A client that kept it would replay a
-   * wrong one on every reconnect for the rest of the session, and every one of
-   * those replays would be a strike against this address at the far end.
+   * Held for this `hello` and dropped in `open()`, whatever the desktop makes
+   * of it. A *wrong* one is forgotten immediately so it cannot be replayed as
+   * a lockout strike. A right one is remembered in RAM (see `rememberedPin`)
+   * so a phone that drops its socket on an app switch does not re-prompt for
+   * PIN_GRACE_MS. Never written to disk; a reload forgets it.
    */
   submitPin(pin: string): void {
     if (!this.credentials) return
@@ -353,7 +366,46 @@ export class ForgeClient {
     this.clearRetry()
     this.dropSocket()
     this.subs.clear()
+    this.forgetPin()
     this.failWaiting('The link to the desktop closed.')
+  }
+
+  /**
+   * The PIN this `hello` should carry: a just-typed one, or a successful one
+   * still inside the grace window. Clears the one-shot either way.
+   */
+  private pinForHello(): string {
+    const typed = this.pin
+    this.pin = ''
+    const pin = typed || this.liveRememberedPin()
+    this.sentPin = pin
+    return pin
+  }
+
+  private liveRememberedPin(): string {
+    if (!this.rememberedPin) return ''
+    if (this.pinHiddenAt && Date.now() - this.pinHiddenAt > PIN_GRACE_MS) {
+      this.forgetPin()
+      return ''
+    }
+    return this.rememberedPin
+  }
+
+  private forgetPin(): void {
+    this.rememberedPin = ''
+    this.sentPin = ''
+    this.pin = ''
+  }
+
+  private watchPinGrace(): void {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.pinHiddenAt = Date.now()
+        return
+      }
+      if (this.pinHiddenAt && Date.now() - this.pinHiddenAt > PIN_GRACE_MS) this.forgetPin()
+      this.pinHiddenAt = 0
+    })
   }
 
   /* ------------------------------------------------------------- terminals */
@@ -498,10 +550,10 @@ export class ForgeClient {
     this.lastFrameAt = Date.now()
 
     // Spent on this attempt and this attempt only, whatever comes of it — read
-    // before `onopen` so a socket that never opens still burns it rather than
-    // leaving a stale PIN to be replayed by the reconnect loop.
-    const pin = this.pin
-    this.pin = ''
+    // before `onopen` so a socket that never opens still burns the one-shot
+    // rather than leaving a stale typed PIN to be replayed by the reconnect
+    // loop. A previously-successful PIN may still ride along; see `pinForHello`.
+    const pin = this.pinForHello()
 
     socket.onopen = () => {
       this.lastFrameAt = Date.now()
@@ -568,6 +620,8 @@ export class ForgeClient {
       case 'hello-ok': {
         this.attempt = 0
         this.reauthed = false
+        if (this.sentPin) this.rememberedPin = this.sentPin
+        this.sentPin = ''
         this.handlers.onPicture(frame)
         this.handlers.onConnection({ state: 'live', desktopName: frame.desktopName, appVersion: frame.appVersion })
         // Both timers start here rather than at `onopen`, because this frame is
@@ -711,6 +765,9 @@ export class ForgeClient {
     // is nothing for the loop to schedule until `submitPin` is called.
     if (reason === 'pin-required' || reason === 'pin-invalid') {
       this.stopped = true
+      // A wrong PIN must not be replayed — each replay is a strike. A missing
+      // PIN is the ordinary first ask and leaves `rememberedPin` empty anyway.
+      if (reason === 'pin-invalid') this.forgetPin()
       this.handlers.onConnection({ state: 'pin', message, invalid: reason === 'pin-invalid' })
       return
     }

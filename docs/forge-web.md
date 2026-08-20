@@ -109,8 +109,12 @@ whole risk in one sentence, and every decision below exists because of it.
   next write.
 - **An unlock PIN is the one optional lock.** Four to twelve digits, set once
   in Settings › Forge Web, and asked of every browser on every connection —
-  not just the first, with no trust window and nothing that excuses it
-  (`electron/web/auth.ts`). It is stored as a versioned scrypt hash
+  not just the first, with no trust window on the door and nothing on disk
+  that excuses it (`electron/web/auth.ts`). The page may replay digits it
+  already typed, from memory only, for ten minutes after the tab was last
+  visible (`PIN_GRACE_MS` in shared/web.ts), so a phone that dropped its
+  socket on an app switch does not re-prompt immediately. A reload forgets
+  them. It is stored as a versioned scrypt hash
   (`scrypt$1$salt$hash` in `electron/web/pin.ts`); the digits themselves are
   never written to settings.json. A wrong PIN gets one sentence for every
   cause — `pin-invalid`, never a reason why — and counts against the same

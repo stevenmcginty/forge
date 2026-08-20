@@ -18,12 +18,14 @@ export { DESK_VIEWER, GridOwners } from '../../electron/pty/grid-owner'
 // with exactly what `web:pin-set` would write rather than with a fixture that
 // could keep passing after the stored form moved.
 export { hashPin } from '../../electron/web/pin'
+export { INBOX_KEEP, saveInboxImage } from '../../electron/web/inbox'
 // Re-exported so the checks assert against exactly the shipped values rather
 // than numbers that could drift from them.
 export {
   HEARTBEAT_GRACE_MS,
   HEARTBEAT_MS,
   MAX_FRAME_BYTES,
+  MAX_IMAGE_BASE64,
   MAX_INPUT_PER_SECOND,
   MAX_MIRROR_CHUNK_BYTES,
   MAX_MIRROR_INPUT_PER_SECOND,

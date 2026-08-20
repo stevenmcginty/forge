@@ -38,8 +38,11 @@
  * that comes back with a result, never a local mutation announced afterwards.
  *
  * Out of scope on purpose, and modelled nowhere in this file: voice and
- * dictation, screenshots, the overlay, Forge Mobile, Forge TV
- * (docs/forge-web.md, decision 7).
+ * dictation, the screenshot *tray*, the overlay, Forge Mobile, Forge TV
+ * (docs/forge-web.md, decision 7). A pasted image is in — it lands as a file
+ * on this desktop and a quoted path in a pane, which is the same gesture as
+ * dropping a screenshot on an agent at the desk. The tray that catches the
+ * clipboard is still a desktop-only thing.
  *
  * The desktop's *screen* used to be on that list, under a sentence saying that
  * "a public URL that moves the real mouse is a different risk class, and this
@@ -390,14 +393,35 @@ export const MAX_INPUT_PER_SECOND = 120
  * it (a JS string's `length` is UTF-16 code units and is neither an upper nor a
  * lower bound on the UTF-8 byte count).
  *
- * The biggest frame a browser legitimately sends is a `write` at
- * MAX_WRITE_CHARS, which JSON-escapes to at most a few times its length. 64KB
- * clears that with room to spare and is small enough that a thousand of them
- * cannot be a memory attack. It bounds the *inbound* direction only: a `replay`
+ * The biggest frame a browser legitimately sends is a `paste-image` whose
+ * base64 payload is MAX_IMAGE_BASE64, plus a small JSON envelope. 64KB clears
+ * that with room to spare and is small enough that a thousand of them cannot
+ * be a memory attack. It bounds the *inbound* direction only: a `replay`
  * travelling the other way is deliberately larger than this, see
  * MAX_REPLAY_BYTES.
  */
 export const MAX_FRAME_BYTES = 64 * 1024
+
+/**
+ * Biggest base64 payload a `paste-image` request may carry.
+ *
+ * Sized to leave a few kilobytes for the JSON envelope inside MAX_FRAME_BYTES,
+ * so a well-formed image request is admitted by `ws`'s `maxPayload` and then
+ * judged here rather than hanging up the socket. ~36 KB of JPEG, which is a
+ * readable screenshot once the page has run it down the size ladder in
+ * web/src/lib/image.ts. A phone photo that will not shrink that far is
+ * refused in a sentence, not half-uploaded.
+ */
+export const MAX_IMAGE_BASE64 = 48 * 1024
+
+/** Image types a `paste-image` request may name. Anything else is `bad-frame`. */
+export const WEB_IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
+
+export type WebImageMime = (typeof WEB_IMAGE_MIMES)[number]
+
+export function isWebImageMime(value: unknown): value is WebImageMime {
+  return typeof value === 'string' && (WEB_IMAGE_MIMES as readonly string[]).includes(value)
+}
 
 /**
  * Most sessions this link will describe.
@@ -468,9 +492,14 @@ export const TOKEN_REFRESH_MS = 50 * 60_000
  * socket already inside TLS and already past a verified Firebase ID token.
  *
  * There is no "trust this browser for thirty days" and no way to be excused the
- * question. The PIN is not a device credential — it is the thing that says the
- * person holding the account is the person who set it up — so a browser that
- * has answered it once still answers it on the next connection.
+ * question *at the door*. The PIN is not a device credential — it is the thing
+ * that says the person holding the account is the person who set it up — so
+ * the desktop still asks on every connection, and nothing on disk remembers a
+ * yes. What PIN_GRACE_MS buys is narrower: the *page* may replay digits it
+ * already typed, from memory and never from disk, so a phone that dropped its
+ * socket when the tab was hidden does not make somebody retype four digits
+ * they typed thirty seconds ago. A reload, a discarded tab, or a longer
+ * absence sends no PIN and is asked again.
  */
 
 /**
@@ -488,6 +517,16 @@ export const PIN_MIN_DIGITS = 4
  * a `hello` cannot carry a megabyte of "PIN" into a key-derivation function.
  */
 export const PIN_MAX_DIGITS = 12
+
+/**
+ * How long a page may replay a PIN it already typed, from memory.
+ *
+ * Not a trust window on the door — electron/web/auth.ts still requires the
+ * digits on every `hello`. The client holds them in RAM after a successful
+ * unlock and includes them on the next hello while the tab has been hidden
+ * for less than this. Never written to disk; a reload forgets them.
+ */
+export const PIN_GRACE_MS = 10 * 60 * 1000
 
 /* ------------------------------------------------------------------ records */
 
@@ -580,16 +619,16 @@ export interface WebHelloFrame {
    * The desktop's unlock PIN, when it has one set: PIN_MIN_DIGITS to
    * PIN_MAX_DIGITS digits, as somebody typed them.
    *
-   * The browser does not send this unprompted. The first `hello` carries no
-   * PIN, the desktop answers `pin-required`, and the second carries what the
-   * person typed — a round trip, bought so that a page only ever holds a PIN it
-   * was just asked for, and so a desktop with no PIN set never causes one to be
-   * typed at all.
+   * The first `hello` of a fresh page load carries no PIN, the desktop answers
+   * `pin-required`, and the next carries what the person typed — a round trip,
+   * bought so a desktop with no PIN set never causes one to be typed at all.
    *
-   * Asked on **every** connection. There is no "remember this browser" and
-   * nothing on the desktop that could remember one: letting anything excuse the
-   * PIN would turn the one thing a stolen password does not come with back into
-   * something it does.
+   * Asked on **every** connection at the door. There is no "remember this
+   * browser" and nothing on the desktop that could remember one. After a
+   * successful unlock the *page* may replay the same digits from memory for
+   * PIN_GRACE_MS after it was last visible, so a phone that hid the tab does
+   * not re-prompt immediately. A reload forgets them; they are never written
+   * down.
    */
   pin?: string
 }
@@ -972,6 +1011,21 @@ export type WebRequest =
    * browser can offer "open it instead" as its own explicit act.
    */
   | { kind: 'project-create'; name: string; parentDir?: string }
+  /**
+   * An image pasted (or picked) in the browser, saved on this desktop and
+   * typed as a quoted path into a pane — the same gesture as dropping a
+   * screenshot on an agent at the desk.
+   *
+   * `data` is raw base64, not a data URL, capped at MAX_IMAGE_BASE64 so the
+   * whole frame fits inside MAX_FRAME_BYTES. `mime` is one of WEB_IMAGE_MIMES.
+   * The page shrinks a phone photo to fit before sending; anything still too
+   * large is refused here with `limit` rather than hanging up the socket.
+   *
+   * Answered `{ kind: 'ok' }` once the path has been typed. A pane that has
+   * gone is `unknown-session`. Bytes never travel back: the agent reads the
+   * file off this disk, the way it already does for a dropped shot.
+   */
+  | { kind: 'paste-image'; sessionId: string; mime: string; data: string }
 
 /* ------------------------------------------------------------ server frames */
 
@@ -1321,7 +1375,7 @@ export type WebErrorCode =
   | 'unknown-session'
   /** No project by that id — the client's list is stale; expect `projects`. */
   | 'unknown-project'
-  /** Over MAX_INPUT_PER_SECOND, or over MAX_WRITE_CHARS. Slow down. */
+  /** Over MAX_INPUT_PER_SECOND, MAX_WRITE_CHARS, or MAX_IMAGE_BASE64. Slow down. */
   | 'limit'
   /**
    * The desktop renderer that owns tabs and panes is not there, so a layout

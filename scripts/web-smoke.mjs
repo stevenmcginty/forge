@@ -36,7 +36,7 @@
  * stops answering has to be dropped by a timer actually firing, not by an
  * argument.
  */
-import { mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -187,11 +187,14 @@ async function main() {
     GridOwners,
     DESK_VIEWER,
     hashPin,
+    saveInboxImage,
+    INBOX_KEEP,
     isAllowedSource,
     webSocketUrl,
     HEARTBEAT_GRACE_MS,
     HEARTBEAT_MS,
     MAX_FRAME_BYTES,
+    MAX_IMAGE_BASE64,
     MAX_INPUT_PER_SECOND,
     MAX_MIRROR_CHUNK_BYTES,
     MAX_MIRROR_INPUT_PER_SECOND,
@@ -341,6 +344,9 @@ async function main() {
   const ops = []
   let layoutAnswer = null
   const watches = []
+  const writes = []
+  const inboxDir = join(scratch, 'inbox')
+  mkdirSync(inboxDir, { recursive: true })
   /**
    * The *real* ownership registry, wired to the real PTY.
    *
@@ -389,9 +395,11 @@ async function main() {
       sessions: () => manager.list(),
       replay: (id) => replay.get(id) ?? '',
       write: (id, data, viewer) => {
+        writes.push({ id, data, viewer })
         owners.noteWrite(id, viewer, data)
         return manager.write(id, data)
       },
+      saveInboxImage: async (bytes, ext) => saveInboxImage(inboxDir, bytes, ext),
       resize: (id, cols, rows, viewer) => owners.noteWish(id, viewer, cols, rows),
       release: (viewer, id) => owners.release(viewer, id),
       snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: WORKSPACES }),
@@ -421,6 +429,32 @@ async function main() {
     WEB_MAX_SESSIONS === IPC_MAX_SESSIONS,
     `MAX_SESSIONS in shared/web.ts (${WEB_MAX_SESSIONS}) equals MAX_SESSIONS in shared/ipc.ts (${IPC_MAX_SESSIONS}), which until now nothing enforced`
   )
+  log(
+    MAX_IMAGE_BASE64 + 512 < MAX_FRAME_BYTES,
+    `a paste-image payload (${MAX_IMAGE_BASE64}) fits inside MAX_FRAME_BYTES (${MAX_FRAME_BYTES}) with envelope room`
+  )
+
+  const PIXEL =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const pixelBytes = Buffer.from(PIXEL, 'base64')
+  const inboxProbe = join(scratch, 'inbox-probe')
+  const firstShot = saveInboxImage(inboxProbe, pixelBytes, '.png', new Date(2026, 7, 20, 15, 30, 12))
+  log(
+    firstShot.ok && existsSync(firstShot.path) && firstShot.path.endsWith(`paste-20260820-153012.png`),
+    'a pasted png lands as a stamped file in the inbox'
+  )
+  log(
+    firstShot.ok && readFileSync(firstShot.path).equals(pixelBytes),
+    'and the bytes on disk are the bytes that were handed over'
+  )
+  log(!saveInboxImage(inboxProbe, new Uint8Array(), '.png').ok, 'an empty image is refused rather than written')
+  log(!saveInboxImage(inboxProbe, pixelBytes, '.exe').ok, 'a non-image suffix is refused rather than written')
+  for (let i = 0; i < INBOX_KEEP + 2; i++) {
+    const at = new Date(Date.UTC(2026, 0, 1, 0, 0, i))
+    saveInboxImage(inboxProbe, pixelBytes, '.png', at)
+  }
+  const kept = readdirSync(inboxProbe).filter((n) => n.startsWith('paste-'))
+  log(kept.length === INBOX_KEEP, `the inbox prunes back to INBOX_KEEP (${INBOX_KEEP}), so a working day of pastes is not a photo library`)
 
   /* ------------------------------------- 15. the address the browser dials */
 
@@ -827,6 +861,61 @@ async function main() {
     browser.result('r-future').body.kind === 'failed' && browser.result('r-future').body.code === 'unsupported',
     'a request kind this build has never heard of is answered unsupported, so a newer client never hangs'
   )
+
+  /* ------------------------------------------ a pasted image becomes a path */
+
+  browser.send({
+    type: 'request',
+    rid: 'r-img',
+    body: { kind: 'paste-image', sessionId: 'w1', mime: 'image/png', data: PIXEL }
+  })
+  await waitFor(() => browser.result('r-img'), 5000, 'the paste-image result')
+  log(browser.result('r-img').body.kind === 'ok', 'a pasted png is saved and answered ok')
+  const pasted = writes.at(-1)
+  log(
+    pasted?.id === 'w1' &&
+      typeof pasted?.data === 'string' &&
+      pasted.data.startsWith('"') &&
+      pasted.data.includes('paste-') &&
+      pasted.data.endsWith('.png" '),
+    'and the quoted path is typed into the pane, with a trailing space, the way a dropped screenshot is'
+  )
+  const typedPath = typeof pasted?.data === 'string' ? pasted.data.slice(1, -2) : ''
+  log(
+    typedPath.startsWith(inboxDir) && existsSync(typedPath) && readFileSync(typedPath).equals(pixelBytes),
+    'the file on disk is the bytes that were sent, in this desktop\'s inbox'
+  )
+
+  browser.send({
+    type: 'request',
+    rid: 'r-img-gone',
+    body: { kind: 'paste-image', sessionId: 'never-existed', mime: 'image/png', data: PIXEL }
+  })
+  await waitFor(() => browser.result('r-img-gone'), 5000, 'the unknown-session paste-image')
+  log(
+    browser.result('r-img-gone').body.code === 'unknown-session',
+    'a paste aimed at a pane that is gone is unknown-session rather than a file with nowhere to go'
+  )
+
+  browser.send({
+    type: 'request',
+    rid: 'r-img-mime',
+    body: { kind: 'paste-image', sessionId: 'w1', mime: 'application/pdf', data: PIXEL }
+  })
+  await waitFor(() => browser.result('r-img-mime'), 5000, 'the bad-mime paste-image')
+  log(browser.result('r-img-mime').body.code === 'bad-frame', 'a non-image mime is bad-frame, not written')
+
+  browser.send({
+    type: 'request',
+    rid: 'r-img-big',
+    body: { kind: 'paste-image', sessionId: 'w1', mime: 'image/jpeg', data: 'A'.repeat(MAX_IMAGE_BASE64 + 1) }
+  })
+  await waitFor(() => browser.result('r-img-big'), 5000, 'the oversize paste-image')
+  log(
+    browser.result('r-img-big').body.code === 'limit',
+    `a payload over MAX_IMAGE_BASE64 (${MAX_IMAGE_BASE64}) is limit, and the socket stays up`
+  )
+  log(browser.closed === null, 'and the oversize image did not hang up the socket')
 
   /* ------------------------------------------------------ the auth refresh */
 

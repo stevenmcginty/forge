@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PaneLeaf } from '@shared/types'
 import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
+import { imageFilesFromDataTransfer, isImageFile, packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 import { mountTerm, type TermHost } from '../lib/term'
 import { useForge, useProfiles } from '../state'
@@ -106,6 +107,8 @@ export function PaneView({
   const holderRef = useRef<HTMLDivElement | null>(null)
   const hostRef = useRef<TermHost | null>(null)
   const splitRef = useRef<HTMLButtonElement | null>(null)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  const sendingImage = useRef(false)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
   const [truncated, setTruncated] = useState(false)
 
@@ -288,6 +291,76 @@ export function PaneView({
     if (focused && live && onScreen) hostRef.current?.focus()
   }, [focused, live, onScreen])
 
+  /* ----------------------------------------------- pasted / dropped images */
+
+  /**
+   * An image in this browser becomes a file on the desktop and a quoted path
+   * in the pane — the same gesture as dropping a screenshot on an agent at
+   * the desk. xterm only pastes text, which is why Claude Code was answering
+   * that it could not take an image: the picture never left this tab.
+   */
+  const sendImages = useCallback(
+    async (files: File[]) => {
+      if (!files.length || !live || !alive || sendingImage.current) return
+      sendingImage.current = true
+      try {
+        for (const file of files) {
+          try {
+            const packed = await packImage(file)
+            const result = await actions.request({
+              kind: 'paste-image',
+              sessionId: leaf.id,
+              mime: packed.mime,
+              data: packed.data
+            })
+            if (result.kind === 'failed') actions.setNotice(result.message)
+          } catch (err) {
+            actions.setNotice(err instanceof Error ? err.message : 'That image could not be sent.')
+          }
+        }
+      } finally {
+        sendingImage.current = false
+        hostRef.current?.focus()
+      }
+    },
+    [actions, alive, leaf.id, live]
+  )
+
+  useEffect(() => {
+    const holder = holderRef.current
+    if (!holder || cached || !live) return
+
+    const onPaste = (event: ClipboardEvent): void => {
+      const files = imageFilesFromDataTransfer(event.clipboardData)
+      if (!files.length) return
+      event.preventDefault()
+      event.stopPropagation()
+      void sendImages(files)
+    }
+    const onDragOver = (event: DragEvent): void => {
+      const types = event.dataTransfer ? [...event.dataTransfer.types] : []
+      if (!types.includes('Files')) return
+      event.preventDefault()
+      event.dataTransfer!.dropEffect = 'copy'
+    }
+    const onDrop = (event: DragEvent): void => {
+      const files = imageFilesFromDataTransfer(event.dataTransfer)
+      if (!files.length) return
+      event.preventDefault()
+      event.stopPropagation()
+      void sendImages(files)
+    }
+
+    holder.addEventListener('paste', onPaste, true)
+    holder.addEventListener('dragover', onDragOver)
+    holder.addEventListener('drop', onDrop)
+    return () => {
+      holder.removeEventListener('paste', onPaste, true)
+      holder.removeEventListener('dragover', onDragOver)
+      holder.removeEventListener('drop', onDrop)
+    }
+  }, [cached, live, sendImages])
+
   return (
     <section
       className="pane"
@@ -339,6 +412,15 @@ export function PaneView({
 
         <div className="pane__actions">
           <button
+            type="button"
+            className="ghost-btn pane__action"
+            title="Attach an image"
+            disabled={!live || !alive}
+            onClick={() => fileRef.current?.click()}
+          >
+            <Icon name="camera" size={13} />
+          </button>
+          <button
             ref={splitRef}
             type="button"
             className="ghost-btn pane__action"
@@ -383,6 +465,19 @@ export function PaneView({
         means "tapped". The phone client focuses from `click` for the same
         reason.
       */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(event) => {
+          const files = [...(event.target.files ?? [])].filter(isImageFile)
+          event.target.value = ''
+          void sendImages(files)
+        }}
+      />
+
       <div
         className="pane__terminal"
         ref={holderRef}

@@ -1395,6 +1395,10 @@
   font-size: var(--t-md);
 }
 
+.app[data-mobile] .pane__actions {
+  opacity: 1;
+}
+
 .app[data-mobile] .pane__action {
   width: 40px;
   height: 36px;

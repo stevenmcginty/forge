@@ -5,6 +5,7 @@ import {
   HEARTBEAT_GRACE_MS,
   HEARTBEAT_MS,
   MAX_FRAME_BYTES,
+  MAX_IMAGE_BASE64,
   MAX_INPUT_PER_SECOND,
   MAX_MIRROR_CHUNK_BYTES,
   MAX_MIRROR_INPUT_PER_SECOND,
@@ -12,6 +13,7 @@ import {
   MAX_SESSIONS,
   MAX_WRITE_CHARS,
   PIN_MAX_DIGITS,
+  isWebImageMime,
   WEB_PROTO,
   WEB_SUBPROTOCOL,
   WEB_WS_PATH,
@@ -51,6 +53,7 @@ import type {
 import type { SkillsList } from '@shared/skills'
 import type { CommandsFeed } from '@shared/commands'
 import type { WebAuth, WebDevice } from './auth'
+import { extForMime } from './inbox'
 
 /**
  * The Forge Web link server — the socket a browser tab mirrors this desktop
@@ -310,6 +313,19 @@ export interface WebServerHost {
     parentDir: string,
     deviceName: string
   ) => Promise<{ ok: true } | { ok: false; error: string; existingPath?: string }>
+
+  /**
+   * Save a pasted image onto this machine so a pane can be handed its path.
+   *
+   * Optional: a host that omits it (the smoke fixture, until a phase wires
+   * one) answers `unsupported`, which is what an older desktop would say to a
+   * newer page. `ext` is a suffix this desktop will actually write — `.png`,
+   * `.jpg` — already filtered from the mime by the caller.
+   */
+  saveInboxImage?: (
+    bytes: Uint8Array,
+    ext: string
+  ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>
 
   /**
    * The number of authenticated browsers changed. Drives the power-save blocker
@@ -1506,6 +1522,64 @@ export class WebServer {
             // having no window. The sentence says which; the code would only
             // ever be guessing.
             failed('failed', error)
+            return
+          }
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'paste-image': {
+          if (!this.host.saveInboxImage) {
+            failed('unsupported', 'This Forge cannot take an image from a browser.')
+            return
+          }
+          const id = wireString(request.sessionId, 128)
+          if (!id) {
+            failed('unknown-session', 'That pane is gone.')
+            return
+          }
+          if (!this.host.sessions().some((s) => s.id === id)) {
+            failed('unknown-session', 'That pane is gone.')
+            return
+          }
+          const mime = wireString(request.mime, 32)
+          if (!isWebImageMime(mime)) {
+            failed('bad-frame', 'That is not an image this desktop will take.')
+            return
+          }
+          const data = typeof request.data === 'string' ? request.data.trim() : ''
+          if (!data) {
+            failed('bad-frame', 'That image was empty.')
+            return
+          }
+          if (data.length > MAX_IMAGE_BASE64) {
+            failed('limit', 'That image is too large to send.')
+            return
+          }
+          if (!/^[A-Za-z0-9+/]+=*$/.test(data)) {
+            failed('bad-frame', 'That image could not be read.')
+            return
+          }
+          const bytes = Buffer.from(data, 'base64')
+          if (!bytes.length) {
+            failed('bad-frame', 'That image was empty.')
+            return
+          }
+          const ext = extForMime(mime)
+          if (!ext) {
+            failed('bad-frame', 'That is not an image this desktop will take.')
+            return
+          }
+          const saved = await this.host.saveInboxImage(bytes, ext)
+          if (!saved.ok) {
+            failed('failed', saved.error)
+            return
+          }
+          // Quoted, with a trailing space, the same shape a file dropped on a
+          // desktop pane types — Claude Code treats that as an attachment.
+          const typed = `"${saved.path}" `
+          if (!this.host.write(id, typed, client.viewer)) {
+            failed('unknown-session', 'That pane is gone — the image was saved but nothing was typed.')
             return
           }
           answer({ kind: 'ok' })
