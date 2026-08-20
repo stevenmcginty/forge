@@ -1266,9 +1266,20 @@ export function safeDecodePath(raw: string): string {
  * (`Origin: https://x.ngrok.app`, `Host: x.ngrok.app`).
  *
  * An absent header passes, deliberately: it means the caller is not a browser
- * (the APK's own client, curl, a television app), and there is no page to
- * protect. `null` — a sandboxed frame — parses to nothing and is refused,
- * which is also right: an opaque origin has no business opening a shell.
+ * (curl, a plain socket), and there is no page to protect. `null` — a
+ * sandboxed frame — parses to nothing and is refused, which is also right: an
+ * opaque origin has no business opening a shell.
+ *
+ * **The APK is the one browser that cannot satisfy the rule.** Capacitor's
+ * WebView serves the bundle from `https://localhost` (mobile/capacitor.config.js,
+ * `androidScheme: 'https'`) and stamps that as the Origin on every dial — so
+ * the phone app reaches a tunnel with `Origin: https://localhost` against
+ * `Host: x.ngrok-free.dev`, and the general rule refuses it. (It did, for a
+ * while: the phone sat on "Connecting…" with ngrok reporting ERR_NGROK_3004
+ * because the upgrade socket was destroyed here.) That exact origin is admitted:
+ * scheme `https`, host `localhost`, no port — the shape Capacitor produces and
+ * one a page on this desktop's own dev servers (`http://localhost:5273`) does
+ * not. It is not a new door: the token still gates every socket.
  *
  * What it does *not* stop is a non-browser client, which sets any headers it
  * likes; that is what the token in auth.ts is for, exactly as with
@@ -1280,7 +1291,9 @@ export function originMatchesHost(req: IncomingMessage): boolean {
   const host = (req.headers.host ?? '').trim().toLowerCase()
   if (!host) return false
   try {
-    return new URL(origin).host.toLowerCase() === host
+    const url = new URL(origin)
+    if (url.protocol === 'https:' && url.host === 'localhost') return true // the Capacitor shell
+    return url.host.toLowerCase() === host
   } catch {
     return false
   }
