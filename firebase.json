@@ -11,7 +11,8 @@
     "Companion's GO-LIVE.md documents. The database rules are named from both,",
     "which is a duplicated path and not duplicated content.",
     "",
-    "Deploy:  npm run web:deploy                                  (Forge Web only)",
+    "Deploy:  a push to master that touches the browser client    (Forge Web — .github/workflows/web.yml)",
+    "         npm run web:deploy                                  (the same, from this machine)",
     "         firebase deploy --only hosting:companion            (the phone PWA)",
     "         firebase deploy --only database                     (rules for both)"
   ],

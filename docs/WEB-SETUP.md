@@ -172,6 +172,17 @@ deployment is not configured yet."
 
 ## 5. Build and deploy the client
 
+A push to `master` that touches the browser client deploys it. `.github/workflows/web.yml`
+builds `web/dist` and runs `firebase deploy --only hosting:web`, so the live site
+and `/version.json` move with the commit and an open tab can offer Update.
+
+That job authenticates with the `FIREBASE_TOKEN` repo secret. It is the token
+`firebase login:ci` prints — the same login a local deploy already uses. Set it
+once with `gh secret set FIREBASE_TOKEN`. Without it the workflow fails rather
+than shipping an unconfigured site.
+
+To ship from this machine without waiting for Actions:
+
 ```powershell
 npm run web:deploy
 ```

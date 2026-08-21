@@ -1,0 +1,84 @@
+name: Forge Web
+
+# A push to master that touches the browser client ships it to
+# https://forge-web-aadafc.web.app. That is what makes the in-page Update
+# button fire: the hosted /version.json is a new build id, and an open tab
+# notices. `git push` alone used to leave the live site on whatever was last
+# `npm run web:deploy`'d by hand.
+#
+# Auth is the FIREBASE_TOKEN repo secret — the same kind of token
+# `firebase login:ci` prints, the same login a local `npm run web:deploy`
+# already uses. The runtime /config.json is written here from the shipped
+# WEB_DEFAULT_* values in electron/store.ts, because web/public/config.json is
+# gitignored on purpose (it is Steve's project, not the repo's) and a Hosting
+# deploy without it would replace the live site with "This deployment is not
+# configured yet."
+#
+# Desktop-only commits do not run this. The path filter is the files the
+# browser bundle actually compiles.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'web/**'
+      - 'shared/**'
+      - 'src/theme/**'
+      - 'src/components/**'
+      - 'src/App.css'
+      - 'firebase.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.webclient.json'
+      - '.github/workflows/web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forge-web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+    steps:
+      - name: Check out the pushed commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck the browser client
+        run: npx tsc --noEmit --composite false -p tsconfig.webclient.json
+
+      - name: Write the runtime config the checkout does not contain
+        run: |
+          mkdir -p web/public
+          node -e 'require("fs").writeFileSync("web/public/config.json", JSON.stringify({ apiKey: "AIzaSyC2CJR7UZMyNrpXYqIMpwIGUVFp-gZpcWM", databaseUrl: "https://forge-sync-aadafc-default-rtdb.europe-west1.firebasedatabase.app" }))'
+
+      - name: Point the Hosting target at Steve's site
+        run: |
+          node -e 'require("fs").writeFileSync(".firebaserc", JSON.stringify({ projects: { default: "forge-sync-aadafc" }, targets: { "forge-sync-aadafc": { hosting: { companion: ["forge-sync-aadafc"], web: ["forge-web-aadafc"] } } } }))'
+
+      - name: Refuse to ship without a Firebase token
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "The FIREBASE_TOKEN repo secret is empty. A push cannot update the live site until one is set (firebase login:ci, then gh secret set FIREBASE_TOKEN)."
+            exit 1
+          fi
+
+      - name: Build and deploy Forge Web
+        run: |
+          npm run web:build
+          npx firebase deploy --only hosting:web --project forge-sync-aadafc --non-interactive
