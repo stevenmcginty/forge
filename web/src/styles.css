@@ -1671,9 +1671,8 @@
 }
 
 .app[data-mobile] .tab__close {
-  width: 28px;
-  height: 28px;
-  opacity: 1;
+  /* A row of ×s is noise on a phone; the pane header's × closes the tab. */
+  display: none;
 }
 
 .app[data-mobile] .tabstrip__new {

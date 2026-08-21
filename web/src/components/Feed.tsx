@@ -44,6 +44,13 @@ export function Feed({
 }): ReactNode {
   const scroller = useRef<HTMLDivElement | null>(null)
   const stick = useRef(true)
+  /**
+   * A finger is on the feed. Nothing snaps to the bottom while it is there:
+   * with the keyboard up the feed is a few lines tall, so the reader is
+   * "near the bottom" for most of a drag, and a capture landing mid-drag used
+   * to yank the feed back under their thumb.
+   */
+  const touching = useRef(false)
   const [unseen, setUnseen] = useState(false)
   const [revealed, setRevealed] = useState<string | null>(null)
 
@@ -55,7 +62,7 @@ export function Feed({
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el) return
-    if (stick.current) {
+    if (stick.current && !touching.current) {
       el.scrollTop = el.scrollHeight
       setUnseen(false)
     } else if (blocks.length) {
@@ -72,7 +79,7 @@ export function Feed({
     const column = el?.firstElementChild
     if (!el || !column || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => {
-      if (stick.current) el.scrollTop = el.scrollHeight
+      if (stick.current && !touching.current) el.scrollTop = el.scrollHeight
     })
     ro.observe(column)
     ro.observe(el)
@@ -82,10 +89,34 @@ export function Feed({
   const onScroll = useCallback(() => {
     const el = scroller.current
     if (!el) return
+    // A drag is the reader taking the wheel; the bottom is theirs again only
+    // once the finger lifts somewhere near it.
+    if (touching.current) {
+      stick.current = false
+      return
+    }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
     stick.current = near
     if (near) setUnseen(false)
   }, [])
+
+  const onTouchStart = useCallback(() => {
+    touching.current = true
+  }, [])
+
+  const onTouchEnd = useCallback(() => {
+    touching.current = false
+    const el = scroller.current
+    if (!el) return
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
+    stick.current = near
+    if (near) {
+      el.scrollTop = el.scrollHeight
+      setUnseen(false)
+    } else if (blocks.length) {
+      setUnseen(true)
+    }
+  }, [blocks.length])
 
   const jump = useCallback(() => {
     const el = scroller.current
@@ -97,7 +128,14 @@ export function Feed({
 
   return (
     <div className="feed" data-busy={busy ? 'true' : undefined}>
-      <div className="feed__scroll" ref={scroller} onScroll={onScroll}>
+      <div
+        className="feed__scroll"
+        ref={scroller}
+        onScroll={onScroll}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+      >
         <div className="feed__column">
           {blocks.length === 0 ? (
             <div className="feed__empty">
