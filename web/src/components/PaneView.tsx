@@ -124,10 +124,12 @@ export function PaneView({
   const [truncated, setTruncated] = useState(false)
   const [blocks, setBlocks] = useState<FeedBlock[]>([])
   /**
-   * The coloured terminal is the default picture. Cards are an optional lens
-   * on the same bytes — the PTY does not change, only which face is on.
+   * A phone reads a scrollable feed — native overflow, so a finger moves the
+   * conversation the way it moves any other page. xterm's canvas cannot do
+   * that (native-scrolling the DOM under a canvas smears). A desktop browser
+   * has a wheel, so it opens on the coloured terminal. Either can be flipped.
    */
-  const [view, setView] = useState<'feed' | 'term'>('term')
+  const [view, setView] = useState<'feed' | 'term'>(mobile ? 'feed' : 'term')
   const feed = view === 'feed'
 
   /* ------------------------------------------------------ the live terminal */

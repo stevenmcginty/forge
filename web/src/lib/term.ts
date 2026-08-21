@@ -500,6 +500,10 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
  * as a page pan or a pull-to-refresh — the other half of which is the
  * `touch-action` on `.pane__terminal` in styles.css.
  *
+ * **A fling when the finger lifts.** Native overflow has inertia; `scrollLines`
+ * does not. The last velocity is decayed on animation frames so a flick keeps
+ * moving. Only on the normal buffer — flinging PageUp at Grok would type.
+ *
  * The accumulator carries the remainder between moves rather than rounding each
  * one, so a slow drag scrolls smoothly instead of quantising to nothing. Rows
  * are measured rather than assumed because this client draws the desktop's grid
@@ -515,12 +519,17 @@ function enableTouchScroll(
   send?: (data: string) => void
 ): () => void {
   const DRAG_START_PX = 8
+  const DECAY = 0.94
+  const MIN_FLING = 0.35
 
   let tracking = false
   let scrolling = false
   let lastY = 0
   let startY = 0
   let carry = 0
+  let lastT = 0
+  let velocity = 0
+  let inertia = 0
 
   /** The height of one row, measured rather than assumed. */
   const rowHeight = (): number => {
@@ -531,17 +540,40 @@ function enableTouchScroll(
     return measured > 1 ? measured : Math.max(1, fontSize() * 1.2)
   }
 
+  const stopInertia = (): void => {
+    if (inertia) cancelAnimationFrame(inertia)
+    inertia = 0
+  }
+
+  const applyLines = (lines: number): 'viewport' | 'data' | null => {
+    if (lines === 0) return null
+    const plan = planTouchScroll(
+      lines,
+      term.buffer.active.type === 'alternate',
+      term.modes.mouseTrackingMode !== 'none'
+    )
+    if (plan.kind === 'viewport') {
+      term.scrollLines(plan.lines)
+      return 'viewport'
+    }
+    if (send) send(plan.data)
+    return 'data'
+  }
+
   const onStart = (event: TouchEvent): void => {
     if (event.touches.length !== 1) {
       tracking = false
       scrolling = false
       return
     }
+    stopInertia()
     tracking = true
     scrolling = false
     carry = 0
+    velocity = 0
     startY = event.touches[0]!.clientY
     lastY = startY
+    lastT = performance.now()
   }
 
   const onMove = (event: TouchEvent): void => {
@@ -556,30 +588,55 @@ function enableTouchScroll(
     // Dragging down reveals older output, which is scrolling *up* the buffer —
     // a negative count, which is what both branches below want: a negative wheel
     // delta, same as a physical wheel, and a negative `scrollLines`.
-    carry += lastY - y
+    const now = performance.now()
+    const dy = lastY - y
+    const dt = Math.max(8, now - lastT)
+    velocity = dy / dt
+    lastT = now
     lastY = y
+    carry += dy
 
     const height = rowHeight()
     const lines = Math.trunc(carry / height)
     if (lines !== 0) {
       carry -= lines * height
-      const plan = planTouchScroll(
-        lines,
-        term.buffer.active.type === 'alternate',
-        term.modes.mouseTrackingMode !== 'none'
-      )
-      if (plan.kind === 'viewport') {
-        term.scrollLines(plan.lines)
-      } else if (send) {
-        send(plan.data)
-      }
+      applyLines(lines)
     }
     event.preventDefault()
   }
 
   const onEnd = (): void => {
+    const fling = scrolling && velocity
     tracking = false
     scrolling = false
+    // Inertia only for the normal buffer. Flinging PageUp at Grok or a
+    // mouse-tracked TUI would type keys the person did not press.
+    if (
+      !fling ||
+      Math.abs(velocity) < MIN_FLING ||
+      term.buffer.active.type === 'alternate' ||
+      term.modes.mouseTrackingMode !== 'none'
+    ) {
+      velocity = 0
+      return
+    }
+    let v = velocity * 16
+    const tick = (): void => {
+      carry += v
+      v *= DECAY
+      const height = rowHeight()
+      const lines = Math.trunc(carry / height)
+      if (lines !== 0) {
+        carry -= lines * height
+        term.scrollLines(lines)
+      }
+      if (Math.abs(v) < 0.5) {
+        inertia = 0
+        return
+      }
+      inertia = requestAnimationFrame(tick)
+    }
+    inertia = requestAnimationFrame(tick)
   }
 
   // `passive: false` on move, because preventDefault is the whole point once a
@@ -590,6 +647,7 @@ function enableTouchScroll(
   container.addEventListener('touchcancel', onEnd, { passive: true })
 
   return () => {
+    stopInertia()
     container.removeEventListener('touchstart', onStart)
     container.removeEventListener('touchmove', onMove)
     container.removeEventListener('touchend', onEnd)
