@@ -253,6 +253,20 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
   term.loadAddon(fitAddon)
   term.open(container)
 
+  // xterm builds its helper textarea in open(), so these can only be set now.
+  // On a phone this page is typed into through Gboard, which is not a keyboard
+  // but an input method that *composes*: with autocorrect and prediction on,
+  // a word arrives once from the composition and once more from the input
+  // event, and the box shows it twice. Same four switches as
+  // mobile/src/lib/term.ts, for the same reason.
+  const textarea = term.textarea
+  if (textarea) {
+    textarea.setAttribute('autocapitalize', 'off')
+    textarea.setAttribute('autocorrect', 'off')
+    textarea.setAttribute('autocomplete', 'off')
+    textarea.setAttribute('spellcheck', 'false')
+  }
+
   // Canvas rendering, not WebGL. The desktop loads the WebGL addon because it is
   // one long-lived window; a browser tab loses its WebGL context whenever the
   // tab is backgrounded on a machine under memory pressure and comes back blank,
