@@ -1351,39 +1351,32 @@
 }
 
 /*
- * The title bar is the project, on one row: menu, name, tools. Two rows ate
- * a second titlebar of terminal. `--dot` is the project's colour — wash, name
- * and the seam under the bar — so a glance still names the workspace.
+ * The title bar is the project, on the desktop's own flex row: menu, name,
+ * tools. A second row was a second titlebar. `--dot` paints the wash, the
+ * name and the seam.
  */
 .app[data-mobile] .titlebar {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-rows: 48px;
+  display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  height: auto;
-  padding: env(safe-area-inset-top, 0px) var(--s-2) 0;
+  height: 40px;
+  padding: 0 var(--s-2);
   background: color-mix(in srgb, var(--dot, var(--accent)) 22%, var(--bg-base));
   border-bottom: 2px solid var(--dot, var(--accent));
 }
 
-.app[data-mobile] .titlebar__left {
-  grid-column: 1;
-  grid-row: 1;
-}
-
 .app[data-mobile] .titlebar__project {
-  grid-column: 2;
-  grid-row: 1;
   display: flex;
   align-items: center;
   gap: var(--s-3);
+  flex: 1;
   max-width: none;
   min-width: 0;
   margin: 0;
-  padding: 0 var(--s-2);
-  font-size: var(--t-xl);
+  padding: 0;
+  font-size: var(--t-lg);
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1;
   letter-spacing: var(--tracking-tight);
   color: var(--dot, var(--accent));
 }
@@ -1394,15 +1387,12 @@
 }
 
 .app[data-mobile] .titlebar__dot {
-  width: 10px;
-  height: 10px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--dot, var(--accent)) 28%, transparent);
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot, var(--accent)) 28%, transparent);
 }
 
 .app[data-mobile] .titlebar__right {
-  grid-column: 3;
-  grid-row: 1;
-  justify-self: end;
   padding-right: 0;
 }
 
@@ -1421,8 +1411,8 @@
 }
 
 .app[data-mobile] .titlebar__btn {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
 }
 
 /* Tabs as pills. */

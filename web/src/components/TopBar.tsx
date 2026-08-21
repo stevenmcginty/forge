@@ -49,19 +49,6 @@ export function TopBar({
 
   return (
     <header className="titlebar" data-focused="true" style={tint}>
-      {mobile ? (
-        <h1 className="titlebar__project">
-          {project ? (
-            <>
-              <span className="titlebar__dot" />
-              <span className="truncate">{project.name}</span>
-            </>
-          ) : (
-            'Forge'
-          )}
-        </h1>
-      ) : null}
-
       <div className="titlebar__left">
         <button
           type="button"
@@ -74,25 +61,35 @@ export function TopBar({
           <Icon name="panel" size={mobile ? 18 : 15} />
         </button>
 
-        {mobile ? null : (
+        {mobile ? (
+          <h1 className="titlebar__project">
+            {project ? (
+              <>
+                <span className="titlebar__dot" />
+                <span className="truncate">{project.name}</span>
+              </>
+            ) : (
+              'Forge'
+            )}
+          </h1>
+        ) : (
           <>
             <span className="titlebar__mark">
               <Icon name="forge" size={15} />
             </span>
             <span className="titlebar__wordmark">Forge</span>
+            {project ? (
+              <>
+                <span className="titlebar__sep" />
+                <span className="titlebar__project truncate">
+                  <span className="titlebar__dot" />
+                  {project.name}
+                </span>
+                <span className="titlebar__path mono truncate">{shortPath(project.path, 3)}</span>
+              </>
+            ) : null}
           </>
         )}
-
-        {project && !mobile ? (
-          <>
-            <span className="titlebar__sep" />
-            <span className="titlebar__project truncate">
-              <span className="titlebar__dot" />
-              {project.name}
-            </span>
-            <span className="titlebar__path mono truncate">{shortPath(project.path, 3)}</span>
-          </>
-        ) : null}
       </div>
 
       <div className="titlebar__right">
