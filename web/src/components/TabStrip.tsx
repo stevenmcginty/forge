@@ -79,18 +79,18 @@ export function TabStrip(): ReactNode {
             onSelect={() => void select(tab.id)}
           />
         ))}
-      </div>
 
-      <button
-        ref={newTabRef}
-        type="button"
-        className="ghost-btn tabstrip__new"
-        title={live ? 'New terminal tab' : 'The desktop is not answering, so it cannot open a tab'}
-        disabled={!live}
-        onClick={() => setChooserOpen(true)}
-      >
-        <Icon name="plus" size={14} />
-      </button>
+        <button
+          ref={newTabRef}
+          type="button"
+          className="ghost-btn tabstrip__new"
+          title={live ? 'New terminal tab' : 'The desktop is not answering, so it cannot open a tab'}
+          disabled={!live}
+          onClick={() => setChooserOpen(true)}
+        >
+          <Icon name="plus" size={14} />
+        </button>
+      </div>
 
       <div className="tabstrip__spacer" />
 

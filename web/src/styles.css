@@ -1855,11 +1855,17 @@
   height: 44px;
   padding: 0 var(--s-3);
   gap: var(--s-2);
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
 }
 
 .app[data-mobile] .pane__title {
   font-size: 14.5px;
   font-weight: 700;
+  text-align: right;
+  flex: 1;
+  min-width: 0;
 }
 
 /*
@@ -1889,6 +1895,7 @@
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text-primary);
+  text-align: right;
 }
 
 .app[data-mobile] .pane[data-kind='agent'] .pane__header .agent-badge {
@@ -1898,6 +1905,7 @@
   border-radius: 6px;
   font-size: 11px;
   font-weight: 800;
+  flex: none;
   background: color-mix(in srgb, var(--badge-accent, var(--pane-accent, var(--accent))) 24%, transparent);
   border: 1px solid color-mix(in srgb, var(--badge-accent, var(--pane-accent, var(--accent))) 60%, transparent);
   color: var(--badge-accent, var(--pane-accent, var(--accent)));
@@ -1911,6 +1919,7 @@
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.06em;
+  flex: none;
 }
 
 .app[data-mobile] .pane .pane__perm[title*='question'],
@@ -1958,6 +1967,7 @@
   align-items: center;
   gap: 4px;
   opacity: 1;
+  flex: none;
 }
 
 /*
