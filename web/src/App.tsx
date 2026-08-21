@@ -67,7 +67,13 @@ export function App(): ReactNode {
       // The workspace, badged, for anybody who has already seen one. See above.
       return state.picture ? <Workspace /> : <Connecting attempt={state.connection.attempt} />
     case 'pin':
-      return <PinPrompt message={state.connection.message} invalid={state.connection.invalid} />
+      return (
+        <PinPrompt
+          message={state.connection.message}
+          invalid={state.connection.invalid}
+          retryAfterMs={state.connection.retryAfterMs}
+        />
+      )
     case 'refused':
       return (
         <Refused

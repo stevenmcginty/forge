@@ -19,6 +19,7 @@ import {
   type WebSession
 } from '@shared/web'
 import type { AgentProfile, GitSnapshot, Project, Workspace } from '@shared/types'
+import { collectLeaves } from '@/lib/splitTree'
 import { ALLOW_LOOPBACK, devLoopbackHost, loadConfig, type WebClientConfig } from './config'
 import { Auth, isSignedOutError, type Session } from './lib/auth'
 import { ForgeClient, type Connection } from './lib/client'
@@ -35,6 +36,7 @@ import {
   type Snapshot
 } from './lib/cache'
 import { deviceId, deviceName } from './lib/device'
+import { registerWorker, subscribe as subscribePush, unsubscribe as unsubscribePush } from './lib/push'
 import { readHost } from './lib/rendezvous'
 
 /**
@@ -111,12 +113,20 @@ export interface ForgeState {
   asking: Set<string>
   /** The line the desktop extracted for an asking pane, keyed by session id. */
   prompts: Record<string, string>
-  /** One transient sentence — a refused write, a pane that vanished. */
+  /** The sentence currently on screen — the head of the notice queue. */
   notice: string
   /** Is the link answering right now? Only the badge reads this. */
   warm: boolean
   /** Frozen terminals, or the repository from GitHub. Only read while offline. */
   offlineMode: OfflineMode
+  /** Whether OS notifications may be raised while the tab is hidden. */
+  notifyPermission: NotifySupport
+  /**
+   * True once this browser holds a push subscription the desktop has accepted —
+   * so a pane can reach it with the tab shut, not merely hidden. Display only:
+   * the bell says so, and there is nothing to press. See `armPush`.
+   */
+  pushActive: boolean
 }
 
 export interface ForgeActions {
@@ -145,6 +155,13 @@ export interface ForgeActions {
   /** Subscribe to a pane's bytes. Returns the unsubscribe. */
   onData: (sessionId: string, listener: (data: string, replay: boolean, truncated: boolean) => void) => () => void
   setNotice: (message: string) => void
+  /** Clear the notice on screen now; the next in the queue, if any, takes its turn. */
+  dismissNotice: () => void
+  /**
+   * Ask the browser for OS-notification permission. Must run from a user
+   * gesture — see the bell control in TopBar.
+   */
+  requestNotifyPermission: () => Promise<void>
   /** Switch between the frozen picture and GitHub mode. Offline only. */
   setOfflineMode: (mode: OfflineMode) => void
 }
@@ -234,6 +251,72 @@ function capTranscript(text: string): string {
   return text.length > MAX_REPLAY_BYTES + TRANSCRIPT_SLACK_BYTES ? text.slice(text.length - MAX_REPLAY_BYTES) : text
 }
 
+/* ---------------------------------------------------------------- notices */
+
+/** How long a shown notice stays on screen before its own fuse clears it. */
+const NOTICE_MS = 6000
+/** How many may wait behind the one being shown before the oldest is dropped. */
+const NOTICE_PENDING_MAX = 3
+
+interface QueuedNotice {
+  id: number
+  text: string
+}
+
+/* ---------------------------------------------------------- notifications */
+
+/**
+ * Where this browser stands on OS notifications, as the permission API names it
+ * plus one honest extra word for "this browser has no such thing to grant".
+ */
+export type NotifySupport = 'default' | 'granted' | 'denied' | 'unsupported'
+
+function notifySupport(): NotifySupport {
+  return typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
+}
+
+/**
+ * Say something outside the tab, or as near to that as the browser allows.
+ *
+ * Every gate is read here rather than trusted from the caller: unsupported and
+ * ungranted fall through in silence, because the pane's own badge is the
+ * truthful record either way and a console error helps nobody. `tag` collapses
+ * repeated asks from the same pane into one visible notification instead of a
+ * stack of them. Clicking focuses the window — the whole point is coming back.
+ */
+function raiseNotification(title: string, body: string, tag: string): void {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  try {
+    const notification = new Notification(title, { body, tag })
+    notification.onclick = () => {
+      window.focus()
+      notification.close()
+    }
+  } catch {
+    /* a browser may still refuse at construction time; the badge already says it */
+  }
+}
+
+/**
+ * Read `?session=` once, and take it out of the address bar.
+ *
+ * That parameter is how `sw.js` names a pane to a window it had to *open* —
+ * there was no tab to postMessage, so the only channel left is the URL. It is
+ * stripped as it is read, and only it: a reload should land on Forge rather
+ * than jump to whichever pane was asking half an hour ago, and `?preview=` (the
+ * dev loop's feed harness, see main.tsx) has to survive being here.
+ */
+function takeSessionParam(): string {
+  if (typeof window === 'undefined') return ''
+  const params = new URLSearchParams(window.location.search)
+  const id = params.get('session') ?? ''
+  if (!id) return ''
+  params.delete('session')
+  const query = params.toString()
+  window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
+  return id
+}
+
 /* -------------------------------------------------------------- provider */
 
 export function ForgeProvider({ children }: { children: ReactNode }): ReactNode {
@@ -246,10 +329,60 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   const [git, setGit] = useState<Record<string, GitSnapshot>>({})
   const [asking, setAsking] = useState<Set<string>>(() => new Set())
   const [prompts, setPrompts] = useState<Record<string, string>>({})
-  const [notice, setNotice] = useState('')
+  /** Notice queue. The head is what the page shows; the rest wait their turn. */
+  const [notices, setNotices] = useState<QueuedNotice[]>([])
   const [warm, setWarm] = useState(false)
+  const [pageVisible, setPageVisible] = useState(() => !document.hidden)
+  const [notifyPermission, setNotifyPermission] = useState<NotifySupport>(notifySupport)
   const [config, setConfig] = useState<WebClientConfig | null>(null)
   const [offlineMode, setOfflineMode] = useState<OfflineMode>('frozen')
+  /**
+   * The desktop's VAPID public key, from `hello-ok`, or '' when that desktop
+   * cannot push. State rather than a ref because arming push is an effect and
+   * this is one of the three things it waits for — see `armPush`.
+   */
+  const [pushKey, setPushKey] = useState('')
+  const [pushActive, setPushActive] = useState(false)
+  /**
+   * The endpoint this browser last told the desktop about, so sign-out can
+   * retract it in one synchronous frame before the socket goes. Asking the
+   * `PushManager` for it at that moment would be a promise, and the socket
+   * would be closed by the time it settled.
+   */
+  const pushEndpoint = useRef('')
+  /**
+   * A pane somebody asked to be taken to — from a notification click, or from
+   * `?session=` on a window the worker opened because there was no tab to talk
+   * to. Held rather than acted on at once: the arrival may well beat `hello-ok`,
+   * and there is no workspace to find the pane in until that lands.
+   */
+  const [pendingSession, setPendingSession] = useState<string>(() => takeSessionParam())
+
+  /**
+   * What the client handlers (built once, below) read for the permission
+   * answer — React state they cannot see, a ref they can.
+   */
+  const notifyPermissionRef = useRef<NotifySupport>(notifyPermission)
+  const applyNotifyPermission = useCallback((value: NotifySupport) => {
+    notifyPermissionRef.current = value
+    setNotifyPermission(value)
+  }, [])
+
+  const noticeSeq = useRef(0)
+  /**
+   * Enqueue a sentence.
+   *
+   * The newest takes the screen at once; whatever was showing rejoins the
+   * front of the line, and the line is held to a few deep so a burst of
+   * failures cannot stack into an unreadable backlog — the oldest pending
+   * simply falls off, because by the time three sentences have waited their
+   * turn, the first is almost certainly stale.
+   */
+  const pushNotice = useCallback((message: string): void => {
+    const text = message.trim()
+    if (!text) return
+    setNotices((current) => [{ id: ++noticeSeq.current, text }, ...current.slice(0, NOTICE_PENDING_MAX)])
+  }, [])
 
   const configRef = useRef<WebClientConfig | null>(null)
   const authRef = useRef<Auth | null>(null)
@@ -325,6 +458,11 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // cannot inherit it — see SNAPSHOT_VERSION 4 in lib/cache.ts.
         setCached(rememberPicture(frame, authRef.current?.current()?.uid ?? ''))
         setProjectId((current) => current ?? frame.projects[0]?.id ?? null)
+        // Absent means this desktop cannot push — an older build, or one whose
+        // keys would not generate. The bell stays either way, because it is
+        // still the switch for the tab-local notification; only the sentence
+        // under it changes. See `armPush`.
+        setPushKey(frame.pushKey ?? '')
       },
       onData: (sessionId, data, replay, truncated) => {
         // The replay *replaces*, live data *appends*: a reconnect sends the
@@ -371,6 +509,19 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           if (current[sessionId] === line) return current
           return { ...current, [sessionId]: line }
         })
+        // A pane that asks while the tab is in a pocket cannot be seen asking,
+        // so it says so outside the tab. Only while hidden — the badge and the
+        // pane itself are the whole story when somebody is looking. Tagged by
+        // session so a chatty pane replaces its own notification rather than
+        // stacking them.
+        if (isAsking && document.hidden && notifyPermissionRef.current === 'granted') {
+          const line = prompt.trim()
+          raiseNotification(
+            'Forge needs you',
+            line || 'A pane is asking a question and needs an answer.',
+            sessionId
+          )
+        }
       },
       onProjects: (projects) => {
         // Only when it is actually a different list. The desktop answers a great
@@ -405,7 +556,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         const written = rememberGit(snapshot)
         if (written) setCached(written)
       },
-      onNotice: setNotice,
+      onNotice: pushNotice,
       onTokenRejected: () => {
         authRef.current?.signOut()
         setSession(null)
@@ -555,8 +706,19 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    */
   useEffect(() => {
     if (stage.kind !== 'offline') return
+    // Coming back to the tab is itself news worth checking against: the desktop
+    // may have published itself while this page sat hidden in a pocket or a
+    // background window, and the heartbeat wait that applies to an open tab
+    // should not apply to one somebody has just turned to.
+    const onVisible = (): void => {
+      if (!document.hidden) void find()
+    }
+    document.addEventListener('visibilitychange', onVisible)
     const timer = window.setInterval(() => void find(), HOST_HEARTBEAT_MS)
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [stage.kind, find])
 
   /**
@@ -613,18 +775,133 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
     }
   }, [])
 
-  /** The badge's own clock. Cheap, and the only thing that reads `warm`. */
+  /**
+   * The badge's own clock. Cheap, and the only thing that reads `warm`.
+   *
+   * Paused while the tab is hidden — nobody is reading a badge they cannot
+   * see, and the interval would only burn battery on a phone — and paused
+   * while there is no live connection to be warm or cold. Either pause ends
+   * with one immediate read, so the badge comes back truthful rather than
+   * waiting up to two seconds to say so.
+   */
   useEffect(() => {
+    if (!pageVisible || connection.state !== 'live') {
+      setWarm(false)
+      return
+    }
+    setWarm(client.warm)
     const timer = window.setInterval(() => setWarm(client.warm), 2000)
     return () => clearInterval(timer)
-  }, [client])
+  }, [client, pageVisible, connection.state])
 
-  /** A notice is a sentence, not a state. It clears itself. */
+  /**
+   * Each notice carries its own fuse, lit when it takes the screen.
+   *
+   * The effect is keyed on the notice being shown, so a newer sentence
+   * arriving does not wind back the older one's clock — the older one simply
+   * steps out of the way and lights a fresh six seconds of its own when its
+   * turn comes round again.
+   */
   useEffect(() => {
-    if (!notice) return
-    const timer = window.setTimeout(() => setNotice(''), 6000)
+    const shown = notices[0]
+    if (!shown) return
+    const timer = window.setTimeout(() => {
+      setNotices((current) => current.filter((n) => n.id !== shown.id))
+    }, NOTICE_MS)
     return () => clearTimeout(timer)
-  }, [notice])
+  }, [notices])
+
+  /** Track visibility so the clocks above can pause themselves off-screen. */
+  useEffect(() => {
+    const update = (): void => setPageVisible(!document.hidden)
+    document.addEventListener('visibilitychange', update)
+    return () => document.removeEventListener('visibilitychange', update)
+  }, [])
+
+  /* ------------------------------------------------------------- web push */
+
+  /**
+   * Arm push: subscribe this browser and hand the subscription to the desktop.
+   *
+   * Three things have to be true at once, and the effect waits on all of them:
+   * a live socket to send the subscription down, a key from `hello-ok` (absent
+   * means this desktop cannot send), and a permission already granted (the
+   * bell is what asks). When any of them lapses the bell drops back to "armed
+   * for this tab only" — the subscription itself is left in the browser, so a
+   * reconnect re-sends the same endpoint and the desktop replaces rather than
+   * duplicates its record.
+   */
+  useEffect(() => {
+    if (connection.state !== 'live' || !pushKey || notifyPermission !== 'granted') {
+      setPushActive(false)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const subscription = await subscribePush(pushKey)
+      if (cancelled || !subscription) return
+      const result = await client.request({ kind: 'push-subscribe', subscription, deviceName: deviceName() })
+      if (cancelled) return
+      if (result.kind === 'ok') {
+        pushEndpoint.current = subscription.endpoint
+        setPushActive(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [client, connection.state, pushKey, notifyPermission])
+
+  /**
+   * Tell the desktop whether this tab is on screen, on every change and once
+   * per connection. It is the one fact the desktop cannot see for itself, and
+   * it is what stops a phone buzzing about a pane it is already showing — see
+   * `anyVisible` in electron/web/server.ts.
+   */
+  useEffect(() => {
+    if (connection.state !== 'live') return
+    void client.request({ kind: 'visibility', visible: pageVisible })
+  }, [client, connection.state, pageVisible])
+
+  /**
+   * The worker, registered on load so a deploy's new `sw.js` is fetched
+   * whether or not anybody re-subscribes, and its one message listened for:
+   * a notification click on a tab that was already open says which pane.
+   */
+  useEffect(() => {
+    void registerWorker()
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    const onMessage = (event: MessageEvent): void => {
+      const data: unknown = event.data
+      if (!data || typeof data !== 'object') return
+      const message = data as { type?: unknown; sessionId?: unknown }
+      if (message.type !== 'forge-open-session') return
+      if (typeof message.sessionId === 'string' && message.sessionId) setPendingSession(message.sessionId)
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }, [])
+
+  /**
+   * Go to the pane a notification named, once there is a workspace to find it
+   * in. The pane's project is selected, its tab brought forward and the focus
+   * ring put on it — the same three requests a tap would send. A session that
+   * is in no workspace (closed since the push went out) is simply forgotten.
+   */
+  useEffect(() => {
+    if (!pendingSession || connection.state !== 'live' || !picture) return
+    const workspaces = picture.workspaces
+    for (const id of Object.keys(workspaces)) {
+      const tab = workspaces[id]?.tabs.find((t) => collectLeaves(t.root).some((leaf) => leaf.id === pendingSession))
+      if (!tab) continue
+      setProjectId(id)
+      void client.layout({ op: 'select-project', projectId: id })
+      void client.layout({ op: 'select-tab', projectId: id, tabId: tab.id })
+      void client.layout({ op: 'focus-pane', projectId: id, paneId: pendingSession })
+      break
+    }
+    setPendingSession('')
+  }, [client, connection.state, picture, pendingSession])
 
   /* --------------------------------------------------------------- actions */
 
@@ -649,6 +926,16 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         await find()
       },
       signOut: () => {
+        // Retract the subscription first, while the socket is still up: a
+        // desktop left holding it would keep posting to a browser that has
+        // signed out. The endpoint is the ref, not a PushManager promise, for
+        // exactly this moment — see `pushEndpoint`.
+        if (pushEndpoint.current) {
+          void client.request({ kind: 'push-unsubscribe', endpoint: pushEndpoint.current })
+          pushEndpoint.current = ''
+          void unsubscribePush()
+          setPushActive(false)
+        }
         client.disconnect()
         authRef.current?.signOut()
         // The frozen picture is the signed-in account's workspace — projects,
@@ -680,7 +967,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         const id = op.projectId ?? projectId
         if (!id) return 'There is no project to do that in.'
         const error = await client.layout({ ...op, projectId: id } as WebLayoutOp)
-        if (error) setNotice(error)
+        if (error) pushNotice(error)
         return error
       },
       request: (body) => client.request(body),
@@ -699,11 +986,32 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           if (set.size === 0) map.delete(sessionId)
         }
       },
-      setNotice,
+      setNotice: pushNotice,
+      dismissNotice: () => setNotices((current) => current.slice(1)),
+      requestNotifyPermission: async () => {
+        // Only ever meaningful from a click — browsers refuse a permission
+        // prompt with no gesture behind it, which is why this lives behind the
+        // bell in TopBar rather than firing on load.
+        if (typeof Notification === 'undefined') return
+        if (Notification.permission !== 'default') {
+          applyNotifyPermission(notifySupport())
+          return
+        }
+        try {
+          const result = await Promise.resolve(Notification.requestPermission())
+          applyNotifyPermission(result === 'granted' || result === 'denied' ? result : notifySupport())
+        } catch {
+          // Some browsers throw where the person (or their settings) refused.
+          applyNotifyPermission('denied')
+        }
+      },
       setOfflineMode
     }),
-    [client, find, projectId]
+    [client, find, projectId, pushNotice, applyNotifyPermission]
   )
+
+  /** What the page shows is the head of the queue; the rest wait behind it. */
+  const notice = notices[0]?.text ?? ''
 
   const state = useMemo<ForgeState>(
     () => ({
@@ -719,9 +1027,27 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       prompts,
       notice,
       warm,
-      offlineMode
+      offlineMode,
+      notifyPermission,
+      pushActive
     }),
-    [stage, connection, session, config, picture, cached, projectId, git, asking, prompts, notice, warm, offlineMode]
+    [
+      stage,
+      connection,
+      session,
+      config,
+      picture,
+      cached,
+      projectId,
+      git,
+      asking,
+      prompts,
+      notice,
+      warm,
+      offlineMode,
+      notifyPermission,
+      pushActive
+    ]
   )
 
   return <ForgeContext.Provider value={{ state, actions }}>{children}</ForgeContext.Provider>

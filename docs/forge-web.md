@@ -619,3 +619,27 @@ through the same registry — see "One PTY, several viewers" in `docs/MOBILE.md`
 - No WebRTC anywhere in Forge Web: no ICE, no STUN, no TURN. The picture rides
   the WebSocket the terminals do, for the reason decision 7 gives.
 - No second user. One account, one machine, one human.
+
+## Notifications and Web Push
+
+Two layers, and the bell in the title bar is the switch for both.
+
+1. **Tab-local.** Once notification permission is granted, a pane that settles
+   on a question while the tab is *hidden* raises a `new Notification` from the
+   page itself (`web/src/state.tsx`). Instant, no third party.
+2. **Web Push.** If the desktop sent a `pushKey` in `hello-ok`, the page also
+   subscribes through `public/sw.js` and hands the subscription to the desktop
+   (`push-subscribe`). The desktop (`electron/web/push.ts`) then posts an
+   encrypted payload to the browser vendor's push service on `asking` and
+   `done` transitions — but only when no connected browser has said it is
+   visible (`visibility` request). This is what reaches a closed tab or a
+   locked phone. Tapping the notification focuses the open tab and jumps to
+   the pane, or opens one on `/?session=<id>`.
+
+Requirements: a secure context (HTTPS, or `localhost`); on iPhone the page
+must be added to the home screen (Safari only exposes `PushManager` to an
+installed web app — hence the manifest and `apple-` tags in `index.html`).
+The desktop keeps its VAPID keypair and the subscription list in
+`web-push.json` in the data dir; dead subscriptions (404/410) are dropped on
+the next send. The service worker caches nothing — `lib/update.ts` still owns
+the update story.

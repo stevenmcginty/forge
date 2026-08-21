@@ -145,6 +145,38 @@ export function TopBar({
           </button>
         ) : null}
 
+        {/*
+          Desktop notifications, asked for here and nowhere else. A permission
+          prompt is only honoured behind a user gesture, so this bell is the
+          one place the question is raised — pressed while the answer is still
+          "default", merely stating it once it has been given or refused. What
+          it buys: a pane that asks a question while this tab is hidden says so
+          outside the tab as well.
+        */}
+        {state.notifyPermission !== 'unsupported' ? (
+          <button
+            type="button"
+            className="ghost-btn titlebar__btn"
+            data-permission={state.notifyPermission}
+            title={
+              state.notifyPermission === 'granted'
+                ? state.pushActive
+                  ? 'Notifications are on — a pane asking for you will reach this browser even with the tab closed'
+                  : 'Notifications are on — a pane asking for you will raise one while this tab is hidden'
+                : state.notifyPermission === 'denied'
+                  ? 'Desktop notifications were refused — allow them for this site in the browser’s settings if you want them'
+                  : 'Allow desktop notifications, so a pane that needs you while this tab is hidden can say so'
+            }
+            aria-label={`Desktop notifications: ${state.notifyPermission}${state.pushActive ? ', push armed' : ''}`}
+            data-push={state.pushActive ? 'true' : undefined}
+            onClick={() => {
+              if (state.notifyPermission === 'default') void actions.requestNotifyPermission()
+            }}
+          >
+            <Icon name={state.notifyPermission === 'granted' ? 'check' : 'note'} size={15} />
+          </button>
+        ) : null}
+
         <button
           type="button"
           className="ghost-btn titlebar__btn"

@@ -1026,6 +1026,48 @@ export type WebRequest =
    * file off this disk, the way it already does for a dropped shot.
    */
   | { kind: 'paste-image'; sessionId: string; mime: string; data: string }
+  /**
+   * "Notify this browser when a pane needs me." The subscription is the object
+   * `PushSubscription.toJSON()` returns; the desktop stores it beside its VAPID
+   * keys and posts to `endpoint` on the next attention transition that no
+   * visible browser is already looking at. `deviceName` labels it in the
+   * desktop's device list. Answered `{ kind: 'ok' }`. Re-sending the same
+   * endpoint replaces the record rather than duplicating it.
+   */
+  | { kind: 'push-subscribe'; subscription: WebPushSubscription; deviceName?: string }
+  /** Forget a subscription. Answered `{ kind: 'ok' }` whether or not it was known. */
+  | { kind: 'push-unsubscribe'; endpoint: string }
+  /**
+   * "I am (not) on screen." Sent on every `visibilitychange` once authenticated,
+   * so the desktop can skip the push when somebody is already watching a live
+   * page. A socket that never says is treated as not visible. Answered
+   * `{ kind: 'ok' }`.
+   */
+  | { kind: 'visibility'; visible: boolean }
+
+/**
+ * What `PushSubscription.toJSON()` yields, narrowed to the fields the desktop
+ * needs to encrypt a payload for it. Endpoints are `https:` URLs at the
+ * browser vendor's push service; the two keys are base64url.
+ */
+export interface WebPushSubscription {
+  endpoint: string
+  expirationTime?: number | null
+  keys: { p256dh: string; auth: string }
+}
+
+/** The body of a push message the desktop sends; the service worker shows it. */
+export interface WebPushPayload {
+  kind: 'attention'
+  sessionId: string
+  /** 'asking' — a question is waiting; 'done' — the pane went quiet with no question. */
+  state: 'asking' | 'done'
+  /** Pane title, for the notification heading. */
+  title: string
+  /** The extracted question line, when asking. */
+  prompt?: string
+  desktopName: string
+}
 
 /* ------------------------------------------------------------ server frames */
 
@@ -1068,6 +1110,13 @@ export interface WebHelloOkFrame {
    * added without a WEB_PROTO bump on the rule at the top of this file.
    */
   projectsRoot?: string
+  /**
+   * The desktop's VAPID public key (base64url), when it can send Web Push.
+   * The browser hands it to `pushManager.subscribe` and sends the resulting
+   * subscription back with `push-subscribe`. Absent when push is off on the
+   * desktop — the client then shows no bell. See `WebPushSubscription`.
+   */
+  pushKey?: string
 }
 
 /**

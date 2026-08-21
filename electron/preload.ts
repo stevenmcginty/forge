@@ -184,6 +184,16 @@ const api: ForgeApi = {
     // One result channel for both questions — see `IPC.webCommandResult`.
     commandResult: (requestId, error) => ipcRenderer.send(IPC.webCommandResult, { requestId, error: error ?? '' }),
     onWatched: (cb) => subscribe(IPC.webWatched, cb),
+    // The attention detector's news, going the other way to everything else in
+    // this block: the buffer it reads is here and the socket it ends on is
+    // there. One object, so main validates one payload rather than three
+    // positional arguments it has to trust the order of.
+    attention: (sessionId, state, prompt) =>
+      ipcRenderer.send(IPC.webAttention, {
+        sessionId: sessionId ?? '',
+        state: state ?? 'idle',
+        prompt: prompt ?? ''
+      }),
     // The screen mirror. Sends rather than invokes, on the same reasoning the
     // mobile pair above uses: a chunk is a stream, and a stream that waited for
     // an answer per frame would be a stream with a round trip in it.

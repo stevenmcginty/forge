@@ -450,6 +450,20 @@ export interface GitSnapshot {
 
 export type GitActionKind = 'fetch' | 'pull' | 'push' | 'switch' | 'commit'
 
+export type GitInboundKind = 'web' | 'cloud' | 'shelf'
+
+export interface GitInbound {
+  name: string
+  kind: GitInboundKind
+  sha: string
+  commits: number
+  lastCommitAt?: number
+  lastSubject?: string
+  dismissed: boolean
+  machine?: string
+  of?: string
+}
+
 export interface GitActionRequest {
   /**
    * A project id, never a path. Main resolves it against its own project list,

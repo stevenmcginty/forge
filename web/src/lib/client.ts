@@ -95,7 +95,7 @@ export type Connection =
    * asked yet" from "that one did not open the door" — the same screen either
    * way, but only one of them owes the person a red line.
    */
-  | { state: Extract<WebConnectionState, 'pin'>; message: string; invalid: boolean }
+  | { state: Extract<WebConnectionState, 'pin'>; message: string; invalid: boolean; retryAfterMs?: number }
   | { state: Extract<WebConnectionState, 'live'>; desktopName: string; appVersion: string }
   | { state: Extract<WebConnectionState, 'refused'>; reason: WebRefusal; message: string; retryAfterMs?: number }
   | { state: Extract<WebConnectionState, 'offline'>; message: string; reason?: WebShutdownReason; retryAfterMs?: number }
@@ -319,6 +319,7 @@ export class ForgeClient {
     // client through it.
     sendUp = (frame) => this.send(frame)
     this.watchPinGrace()
+    this.watchWakeups()
   }
 
   /** Is the link answering? Drives the badge, and nothing else. See WARM_MS. */
@@ -406,6 +407,42 @@ export class ForgeClient {
       if (this.pinHiddenAt && Date.now() - this.pinHiddenAt > PIN_GRACE_MS) this.forgetPin()
       this.pinHiddenAt = 0
     })
+  }
+
+  /**
+   * Come back the moment the machine does, rather than at the back-off's leisure.
+   *
+   * The retry loop exists to ride out a link that is down *somewhere between
+   * here and the desktop*. Two events say the fault was on this side and is now
+   * gone: `online` (the radio came back) and a return to visibility with a dead
+   * or closing socket (a phone coming out of an app switch that dropped the
+   * connection). Waiting out up to fifteen seconds of scheduled back-off after
+   * either is time paid for nothing, so both clear the timer and dial now.
+   *
+   * A live or still-opening socket stands down: those events also fire on a
+   * tab merely being looked at again, and `open` would hang up on a working
+   * link to open another one.
+   */
+  private watchWakeups(): void {
+    window.addEventListener('online', () => this.wake())
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) return
+      const socket = this.socket
+      const dying =
+        socket === null ||
+        socket.readyState === WebSocket.CLOSING ||
+        socket.readyState === WebSocket.CLOSED
+      if (dying) this.wake()
+    })
+  }
+
+  /** One immediate re-dial, if there is anything to dial and nothing live. */
+  private wake(): void {
+    if (this.closedByUs || this.stopped || !this.credentials) return
+    const ready = this.socket?.readyState
+    if (ready === WebSocket.OPEN || ready === WebSocket.CONNECTING) return
+    this.clearRetry()
+    void this.open()
   }
 
   /* ------------------------------------------------------------- terminals */
@@ -768,7 +805,14 @@ export class ForgeClient {
       // A wrong PIN must not be replayed — each replay is a strike. A missing
       // PIN is the ordinary first ask and leaves `rememberedPin` empty anyway.
       if (reason === 'pin-invalid') this.forgetPin()
-      this.handlers.onConnection({ state: 'pin', message, invalid: reason === 'pin-invalid' })
+      // A lockout that arrives on the pin path still carries its window, and
+      // the pin screen is where the countdown belongs — see PinPrompt.
+      this.handlers.onConnection({
+        state: 'pin',
+        message,
+        invalid: reason === 'pin-invalid',
+        ...(retryAfterMs ? { retryAfterMs } : {})
+      })
       return
     }
 

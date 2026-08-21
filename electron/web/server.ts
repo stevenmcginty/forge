@@ -28,6 +28,7 @@ import {
   type WebLayoutOp,
   type WebMirrorChunk,
   type WebMirrorConfig,
+  type WebPushSubscription,
   type WebRefusal,
   type WebResult,
   type WebServerFrame,
@@ -138,6 +139,15 @@ const MAX_NAME_CHARS = 512
 
 /** The five verbs `GitActionKind` enumerates, as something the wire can be checked against. */
 const GIT_ACTIONS: readonly GitActionKind[] = ['fetch', 'pull', 'push', 'switch', 'commit']
+
+/**
+ * Wire bounds for a push subscription. The vendors' endpoints run to a couple
+ * of hundred characters and the two keys to under a hundred; these are the
+ * ceilings past which a string is not one of those things, and they exist so a
+ * browser cannot post a megabyte into a file on this disk.
+ */
+const MAX_PUSH_ENDPOINT_CHARS = 2048
+const MAX_PUSH_KEY_CHARS = 256
 
 /**
  * Close codes, so a browser can tell one hang-up from another in its own
@@ -335,6 +345,34 @@ export interface WebServerHost {
    */
   offerClipboardImage?: (bytes: Uint8Array) => boolean
 
+  /* --------------------------------------------------------------- web push
+   *
+   * The other way of reaching a browser: not down this socket, which only
+   * exists while a tab does, but through the vendor's push service, which
+   * reaches a browser with no page running at all. All three optional and all
+   * three answered by electron/web/push.ts in production — a host without them
+   * sends no `pushKey`, so the client never asks to subscribe and the two
+   * requests below are never sent.
+   *
+   * This server holds none of it. It does not know the private key, never
+   * builds a payload and never posts to an endpoint; what it does is carry the
+   * public key out in `hello-ok` and carry subscriptions back in. The sending
+   * is a decision about *what is happening on this desktop* — which pane, how
+   * long ago, is anybody already looking — and that lives in web-host.ts beside
+   * the things that know.
+   */
+
+  /** This desktop's VAPID public key, or undefined when it cannot send push. */
+  pushKey?: () => string | undefined
+  /**
+   * Remember a browser's subscription. Re-sending the same endpoint replaces
+   * the record rather than adding a second — see `push-subscribe` in
+   * shared/web.ts. `meta` is who said so, for the desktop's own device list.
+   */
+  pushSubscribe?: (sub: WebPushSubscription, meta: { deviceName?: string; deviceId?: string }) => void
+  /** Forget one. Called whether or not the endpoint was ever known. */
+  pushUnsubscribe?: (endpoint: string) => void
+
   /**
    * The number of authenticated browsers changed. Drives the power-save blocker
    * in web-host: a machine that suspends mid-session drops every socket.
@@ -470,6 +508,14 @@ interface Client {
   viewer: string
   /** Sessions this browser is reading. */
   subs: Set<string>
+  /**
+   * Whether this tab is on screen, as its last `visibility` request said.
+   *
+   * False until a browser says otherwise, which is the safe default in the one
+   * place it is read: a socket whose visibility is unknown must not be able to
+   * swallow a push somebody is waiting for. See `anyVisible`.
+   */
+  visible: boolean
   /** The second the input counter belongs to, and its tally. See `allowInput`. */
   inputSecond: number
   inputCount: number
@@ -530,6 +576,25 @@ export class WebServer {
   /** Authenticated browsers, right now. */
   get connectedCount(): number {
     return [...this.clients].filter((c) => c.device).length
+  }
+
+  /**
+   * Is anybody actually looking at a Forge Web page right now?
+   *
+   * The question a push has to ask before it is sent: a notification for a pane
+   * on a screen somebody is already watching is noise, and one for the tab they
+   * left open behind their laptop lid is the whole feature. Answered from what
+   * the browsers themselves said in `visibility` — nothing else on this desktop
+   * can know whether a tab in another town is on screen.
+   *
+   * A connected-but-silent socket counts as not visible. That errs towards
+   * sending, which is the right way to be wrong: the cost is a notification
+   * beside a page that was open, and the cost of the other mistake is a person
+   * who never learns their agent is waiting.
+   */
+  anyVisible(): boolean {
+    for (const client of this.clients) if (client.device && client.visible) return true
+    return false
   }
 
   address(): { host: string; port: number } | null {
@@ -838,6 +903,7 @@ export class WebServer {
       device: null,
       viewer: `web-${++viewerSeq}`,
       subs: new Set(),
+      visible: false,
       inputSecond: 0,
       inputCount: 0,
       mirrorSecond: 0,
@@ -891,6 +957,10 @@ export class WebServer {
     socket.on('close', () => {
       this.clients.delete(client)
       this.clearTimers(client)
+      // Redundant with the delete above and written anyway: a socket that has
+      // gone is not a screen anybody is looking at, and `anyVisible` deciding
+      // otherwise would mean a notification nobody ever sees.
+      client.visible = false
       // A browser that hangs up stops the capture behind it. A mirror outliving
       // its viewer is a screen being encoded and sent to a socket that closed,
       // which nothing else in this file would ever notice.
@@ -1283,6 +1353,7 @@ export class WebServer {
       client.helloTimer = null
     }
     const snapshot = this.host.snapshot()
+    const pushKey = this.host.pushKey?.()
     this.log(`${outcome.device.name} connected from ${client.source} (client ${wireString(frame.client, 32) || '?'})`)
     this.send(client, {
       type: 'hello-ok',
@@ -1296,7 +1367,11 @@ export class WebServer {
       // Optional on the frame and optional here: spread only when the host
       // named one, so a desktop with no nominated folder sends no field at all
       // rather than an empty string a client has to interpret.
-      ...(snapshot.projectsRoot ? { projectsRoot: snapshot.projectsRoot } : {})
+      ...(snapshot.projectsRoot ? { projectsRoot: snapshot.projectsRoot } : {}),
+      // The same rule for the push key, and it carries a meaning: a page that
+      // is sent no key shows no bell, because a subscription minted against a
+      // desktop that cannot send is a permission prompt for nothing.
+      ...(pushKey ? { pushKey } : {})
     })
     this.host.onPresence?.(this.connectedCount)
   }
@@ -1627,6 +1702,62 @@ export class WebServer {
           return
         }
 
+        /* --------------------------------------------------------- web push
+         *
+         * Authenticated like everything else in here, and by the same line:
+         * `handle` drops any socket without a `client.device` before a
+         * `request` frame is ever unpacked, so there is no gate written here
+         * and no second one to forget. What that buys is worth naming — a
+         * subscription is a thing this desktop will later post to unbidden, so
+         * a stranger being able to leave one would be a stranger arranging to
+         * be notified about somebody else's panes.
+         */
+
+        case 'push-subscribe': {
+          if (!this.host.pushSubscribe) {
+            failed('unsupported', 'This Forge cannot send notifications to a browser.')
+            return
+          }
+          const subscription = readPushSubscription(request.subscription)
+          if (!subscription) {
+            failed('bad-frame', 'That is not a push subscription this desktop can use.')
+            return
+          }
+          this.host.pushSubscribe(subscription, {
+            // The name off the subscribe frame when there is one, and the name
+            // the socket signed in under otherwise — a device list wants a
+            // label, and "Browser" is a better one than blank.
+            deviceName: wireString(request.deviceName, 64) || client.device?.name || 'Browser',
+            ...(client.device?.id ? { deviceId: client.device.id } : {})
+          })
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'push-unsubscribe': {
+          if (!this.host.pushUnsubscribe) {
+            failed('unsupported', 'This Forge cannot send notifications to a browser.')
+            return
+          }
+          const endpoint = wireString(request.endpoint, MAX_PUSH_ENDPOINT_CHARS)
+          if (!endpoint) {
+            failed('bad-frame', 'That request named no subscription.')
+            return
+          }
+          this.host.pushUnsubscribe(endpoint)
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'visibility': {
+          // No host hook, because there is nothing for a host to do with it:
+          // this is a fact about one socket, it is stored on that socket, and
+          // the only reader is `anyVisible`. It dies with the connection.
+          client.visible = request.visible === true
+          answer({ kind: 'ok' })
+          return
+        }
+
         default:
           // A newer client asking for something this build has never heard of.
           // `unsupported` is the honest answer and the one `WebErrorCode`
@@ -1830,6 +1961,37 @@ function readLayoutOp(value: unknown): WebLayoutOp | null {
   if (paneId) op.paneId = paneId
   if (raw.direction === 'row' || raw.direction === 'column') op.direction = raw.direction
   return op
+}
+
+/**
+ * A `PushSubscription.toJSON()` off the wire, bounded and rebuilt.
+ *
+ * Bounds only, and deliberately: whether an endpoint is a real push service and
+ * whether the keys will encrypt anything are questions for the sender, and
+ * electron/web/push.ts asks them beside the code that would suffer from a bad
+ * answer. What this stops is a megabyte of "endpoint" being written to a JSON
+ * file on this disk, and it rebuilds field by field so nothing else riding on
+ * the object gets stored with it.
+ */
+function readPushSubscription(value: unknown): WebPushSubscription | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const endpoint = wireString(raw.endpoint, MAX_PUSH_ENDPOINT_CHARS)
+  if (!endpoint) return null
+
+  const keys = raw.keys
+  if (!keys || typeof keys !== 'object') return null
+  const pair = keys as Record<string, unknown>
+  const p256dh = wireString(pair.p256dh, MAX_PUSH_KEY_CHARS)
+  const auth = wireString(pair.auth, MAX_PUSH_KEY_CHARS)
+  if (!p256dh || !auth) return null
+
+  const subscription: WebPushSubscription = { endpoint, keys: { p256dh, auth } }
+  // Kept when the browser gave one, because a subscription that expires is a
+  // subscription this desktop should stop reasoning about; null is the normal
+  // value and carrying it would say nothing.
+  if (typeof raw.expirationTime === 'number') subscription.expirationTime = raw.expirationTime
+  return subscription
 }
 
 /** Does this upgrade request ask for the one subprotocol this server speaks? */

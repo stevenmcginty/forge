@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { PIN_MAX_DIGITS, PIN_MIN_DIGITS, type WebRefusal } from '@shared/web'
 import { Icon, type IconName } from '@/components/Icon'
 import { useForge } from '../state'
@@ -224,13 +224,33 @@ export function Refused({
  * that says the person holding the account is the person who set it up — so a
  * browser that has answered it once still answers it on the next connection".
  */
-export function PinPrompt({ message, invalid }: { message: string; invalid: boolean }): ReactNode {
+export function PinPrompt({
+  message,
+  invalid,
+  retryAfterMs
+}: {
+  message: string
+  invalid: boolean
+  /** The desktop's own lockout, when the last answer spent one. */
+  retryAfterMs?: number
+}): ReactNode {
   const { state, actions } = useForge()
   const [pin, setPin] = useState('')
+  // The lockout counts down here rather than being a static "about Ns", because
+  // the box is disabled while it runs and a frozen number over a dead form
+  // reads as broken rather than as waiting.
+  const [wait, setWait] = useState(retryAfterMs ? Math.ceil(retryAfterMs / 1000) : 0)
+  const waiting = wait > 0
+
+  useEffect(() => {
+    if (!waiting) return
+    const timer = window.setInterval(() => setWait((s) => Math.max(0, s - 1)), 1000)
+    return () => window.clearInterval(timer)
+  }, [waiting])
 
   const submit = (event: FormEvent): void => {
     event.preventDefault()
-    if (pin.length < PIN_MIN_DIGITS) return
+    if (waiting || pin.length < PIN_MIN_DIGITS) return
     actions.submitPin(pin)
     // Dropped the moment it is handed over, exactly as `lib/client.ts` drops it
     // after one `hello`: a page holds a PIN for as long as it takes to send it
@@ -269,6 +289,7 @@ export function PinPrompt({ message, invalid }: { message: string; invalid: bool
             autoFocus
             data-testid="pin-input"
             value={pin}
+            disabled={waiting}
             /* Digits only, and never more than the protocol allows, because
                that is the whole of what `isValidPin` on the desktop accepts —
                a box that took a stray space would spend a lockout strike on a
@@ -277,11 +298,22 @@ export function PinPrompt({ message, invalid }: { message: string; invalid: bool
           />
         </label>
 
-        <button type="submit" className="cta-btn gate__go" disabled={pin.length < PIN_MIN_DIGITS}>
+        {/* The lockout the desktop itself imposed — every strike against it was
+            a wrong PIN sent from here, so this page closes the till while it
+            runs rather than posting digits it knows will be refused. */}
+        {waiting ? (
+          <p className="gate__hint mono">
+            Too many tries — the desktop has locked the door for another {wait}s.
+          </p>
+        ) : null}
+
+        <button type="submit" className="cta-btn gate__go" disabled={waiting || pin.length < PIN_MIN_DIGITS}>
           Unlock
         </button>
         <p className="gate__hint">
-          This is the PIN set in Forge’s settings on that PC, and it is asked for on every connection.
+          This is the PIN set in Forge’s settings on that PC, and it is asked for on every connection — being asked
+          again after you were already in usually just means the phone closed the tab and forgot the digits it was
+          holding.
         </p>
         {/* The one screen a wrong account is guaranteed to reach and cannot get
             past: the PIN being asked for is the *desktop's* PIN, so no digits

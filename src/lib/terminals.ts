@@ -135,6 +135,21 @@ const BUSY_ONSET_MS = 600
 const BUSY_GAP_MS = 400
 const BUSY_QUIET_MS = 1200
 
+/**
+ * How long a pane must have been busy before going quiet counts as "done".
+ *
+ * The `done` half of what is forwarded to Forge Web exists for one moment: a
+ * long job finished while nobody was at the desk. A shell echoing a directory
+ * listing also goes from busy to idle, and a phone that buzzed for that would
+ * be a phone somebody turns notifications off on. Well above BUSY_ONSET_MS,
+ * because the two measure different things — that one is "is this an agent",
+ * this one is "was that worth walking back for".
+ */
+const DONE_MIN_BUSY_MS = 8000
+
+/** The longest question line handed to a browser or a push. See `promptFor`. */
+const PROMPT_MAX_CHARS = 200
+
 /** "1. Yes", "❯ 2. No", "(3) Skip" — one option in a prompt's list of them. */
 const CHOICE_LINE = /^[❯>▶●•*\s]*\(?\d+[.)]\s+\S/
 
@@ -236,6 +251,14 @@ interface Entry {
   busy: boolean
   /** True when settled output looks like a question or approval prompt. */
   attention: boolean
+  /**
+   * The question line pulled out of the settled screen when `attention` went
+   * on, so a client with none of this pane's bytes can be told what it is being
+   * asked. Empty whenever `attention` is false.
+   */
+  attentionPrompt: string
+  /** When this pane last became busy, so a settle can measure the stretch. */
+  busySince: number
   /** When the current unbroken run of output began. */
   busyRunStart: number
   /** When the last chunk arrived, so a gap can be measured. */
@@ -527,8 +550,11 @@ class TerminalHost {
   private setBusy(entry: Entry, busy: boolean): void {
     if (entry.busy === busy) return
     entry.busy = busy
-    // Output means the agent is talking, not waiting; whatever it asked is stale.
-    if (busy) this.setAttention(entry, false)
+    if (busy) {
+      entry.busySince = performance.now()
+      // Output means the agent is talking, not waiting; whatever it asked is stale.
+      this.setAttention(entry, false)
+    }
     for (const cb of this.busyListeners) cb()
   }
 
@@ -543,8 +569,17 @@ class TerminalHost {
    * most.
    */
   private settle(entry: Entry): void {
+    // Read before `setBusy` clears it: the interesting question is how long the
+    // stretch that just ended lasted, and after the call there is no stretch.
+    const stretch = entry.busy ? performance.now() - entry.busySince : 0
+    const alive = entry.runtime.status !== 'exited'
     this.setBusy(entry, false)
-    this.setAttention(entry, entry.runtime.status !== 'exited' && this.looksLikeWaiting(entry))
+    this.setAttention(entry, alive && this.looksLikeWaiting(entry))
+    // A long job that went quiet with nothing to ask. Announced only from here,
+    // after the attention check, because "finished" and "waiting for you" are
+    // the same edge seen twice and only one of them is this one — a pane that
+    // settled on a question is asking, not done.
+    if (alive && !entry.attention && stretch >= DONE_MIN_BUSY_MS) this.tellWeb(entry, 'done', '')
   }
 
   /**
@@ -557,7 +592,16 @@ class TerminalHost {
    * classic y/n prompt. Box-drawing characters are stripped first so a bordered
    * prompt reads the same as an unbordered one.
    */
-  private looksLikeWaiting(entry: Entry): boolean {
+  /**
+   * The last few non-empty lines on screen, de-bordered — the evidence both
+   * `looksLikeWaiting` and `promptFor` reason about.
+   *
+   * One function rather than two copies, because the two must agree: a prompt
+   * pulled from a different window than the one that decided a pane is waiting
+   * would be a notification quoting a line that had nothing to do with the
+   * badge beside it.
+   */
+  private settledTail(entry: Entry): string[] {
     const buffer = entry.term.buffer.active
     const lines: string[] = []
     const start = Math.max(0, buffer.length - 30)
@@ -565,7 +609,11 @@ class TerminalHost {
       const text = stripBoxDrawing(buffer.getLine(y)?.translateToString(true) ?? '')
       if (text) lines.push(text)
     }
-    const tail = lines.slice(-10)
+    return lines.slice(-10)
+  }
+
+  private looksLikeWaiting(entry: Entry): boolean {
+    const tail = this.settledTail(entry)
     if (tail.length === 0) return false
 
     if (tail.some((line) => /[?？]\s*$/.test(line))) return true
@@ -577,10 +625,56 @@ class TerminalHost {
     )
   }
 
+  /**
+   * The one line worth quoting off a screen that has settled on a question.
+   *
+   * Three shapes, in the order they are trusted, and they mirror
+   * `looksLikeWaiting`'s three: a line ending in a question mark is the
+   * question; a menu of numbered options has its question written *above* the
+   * list, so the last line before the first option is taken instead; and
+   * anything else falls back to the last line there is, which for a y/n prompt
+   * is the prompt itself.
+   *
+   * A courtesy and not a contract — the pane is the real answer to "what is it
+   * asking", and this is what a phone can fit on a lock screen.
+   */
+  private promptFor(entry: Entry): string {
+    const tail = this.settledTail(entry)
+    if (tail.length === 0) return ''
+
+    const asked = [...tail].reverse().find((line) => /[?？]\s*$/.test(line))
+    if (asked) return asked.trim().slice(0, PROMPT_MAX_CHARS)
+
+    const firstChoice = tail.findIndex((line) => CHOICE_LINE.test(line))
+    if (firstChoice > 0) {
+      const above = [...tail.slice(0, firstChoice)].reverse().find((line) => !CHOICE_LINE.test(line))
+      if (above) return above.trim().slice(0, PROMPT_MAX_CHARS)
+    }
+
+    return (tail[tail.length - 1] ?? '').trim().slice(0, PROMPT_MAX_CHARS)
+  }
+
   private setAttention(entry: Entry, attention: boolean): void {
     if (entry.attention === attention) return
     entry.attention = attention
+    // Read while the screen still shows what caused it: by the time anything
+    // downstream asks, the agent may have printed over the question.
+    entry.attentionPrompt = attention ? this.promptFor(entry) : ''
+    this.tellWeb(entry, attention ? 'asking' : 'idle', entry.attentionPrompt)
     for (const cb of this.attentionListeners) cb()
+  }
+
+  /**
+   * Hand one attention transition to the main process, which owns the browsers.
+   *
+   * Guarded rather than assumed: this class is also the thing a headless check
+   * loads, and a bridge without `web` on it is not a reason for a pane to stop
+   * working. On the desktop the call is always there. Nothing is awaited —
+   * whether any browser is connected, and whether the news is worth a push, are
+   * both questions for the far side.
+   */
+  private tellWeb(entry: Entry, state: 'asking' | 'done' | 'idle', prompt: string): void {
+    window.forge?.web?.attention?.(entry.paneId, state, prompt)
   }
 
   private clearBusy(entry: Entry): void {
@@ -616,6 +710,15 @@ class TerminalHost {
 
   isAttention(paneId: string): boolean {
     return this.entries.get(paneId)?.attention ?? false
+  }
+
+  /**
+   * What this pane is asking, when it is asking anything. Empty otherwise —
+   * including for a pane that has never existed, which is the same answer and
+   * for the same reason `isAttention` gives `false`.
+   */
+  attentionPrompt(paneId: string): string {
+    return this.entries.get(paneId)?.attentionPrompt ?? ''
   }
 
   anyAttention(paneIds: Iterable<string>): boolean {
@@ -837,6 +940,8 @@ class TerminalHost {
       activityTimer: null,
       busy: false,
       attention: false,
+      attentionPrompt: '',
+      busySince: 0,
       busyRunStart: 0,
       busyLastOutput: 0,
       busyTimer: null,

@@ -28,6 +28,20 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23c6ff4a' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.5h7l2.5 2 1.5-1.2v3.2H4.8z'/%3E%3Cpath d='M6.2 10.5v2.2M4 13.2h5'/%3E%3C/svg%3E"
     />
     <!--
+      The home-screen route, and on an iPhone the precondition for Web Push:
+      Safari (16.4+) only exposes `PushManager` to a web app that has been
+      added to the home screen, and it reads this manifest plus the `apple-`
+      tags to do that. See web/src/lib/push.ts. Same tags and reasoning as
+      mobile/index.html; `black-translucent` because the title bar already pads
+      itself with env(safe-area-inset-top).
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Forge" />
+    <!--
       Deliberately no Content-Security-Policy meta tag.
 
       The desktop's index.html carries one because an Electron renderer has no

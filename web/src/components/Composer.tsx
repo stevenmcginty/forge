@@ -54,6 +54,13 @@ export function Composer({
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
   const [files, setFiles] = useState<File[]>([])
+  /**
+   * Armed by the key row's Ctrl and spent on the next letter typed — the one
+   * chord a phone keyboard cannot send itself. Ctrl+C, Ctrl+D and the rest of
+   * the TUI vocabulary travel as their control codes (`\x03`, `\x04`…), which
+   * is `String.fromCharCode(letter − 64)` and nothing more.
+   */
+  const [ctrl, setCtrl] = useState(false)
 
   useEffect(() => {
     if (autoFocus) field.current?.focus()
@@ -112,6 +119,15 @@ export function Composer({
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       submit()
+      return
+    }
+    // The chord itself. One letter, armed Ctrl, one code down the PTY — and
+    // the arm clears whether or not the letter was one anybody meant, because
+    // a chord is one keystroke by definition.
+    if (ctrl && /^[a-z]$/i.test(event.key)) {
+      event.preventDefault()
+      onRaw(String.fromCharCode(event.key.toUpperCase().charCodeAt(0) - 64))
+      setCtrl(false)
     }
   }
 
@@ -180,6 +196,13 @@ export function Composer({
               title="Shift+Tab — cycle permission mode"
             />
             <Key label="Tab" onClick={() => onRaw('\t')} disabled={disabled} />
+            <Key
+              label="Ctrl"
+              onClick={() => setCtrl((v) => !v)}
+              disabled={disabled}
+              active={ctrl}
+              title={ctrl ? 'Ctrl armed — next letter sends its control code' : 'Ctrl — tap, then a letter (C, D, L, U…)'}
+            />
             <Key label="Esc" onClick={() => onRaw('\x1b')} disabled={disabled} />
           </div>
           <button
@@ -287,15 +310,25 @@ function Key({
   label,
   onClick,
   disabled,
+  active,
   title
 }: {
   label: string
   onClick: () => void
   disabled: boolean
+  /** A latched key — armed Ctrl — rather than one that fires and is done. */
+  active?: boolean
   title?: string
 }): ReactNode {
   return (
-    <button type="button" className="composer__key" onClick={onClick} disabled={disabled} title={title ?? label}>
+    <button
+      type="button"
+      className="composer__key"
+      data-active={active ? 'true' : undefined}
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? label}
+    >
       {label}
     </button>
   )

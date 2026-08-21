@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, clipboard, ipcMain, nativeImage, Notification, powerSaveBlocker, screen } from 'electron'
 import { IPC } from '@shared/ipc'
 import { type MirrorInput } from '@shared/mobile'
+import { remoteControlName } from '@shared/remote'
 import {
   normaliseHost,
   PIN_MAX_DIGITS,
@@ -36,6 +37,7 @@ import { WebAuth, googleJwksFetcher } from './web/auth'
 import { checkFolder, listFolder } from './web/fs-browse'
 import { saveInboxImage } from './web/inbox'
 import { hashPin, isValidPin } from './web/pin'
+import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
 import { WebServer, type WebServerHost } from './web/server'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
 import { describe, FirebaseRest } from './companion/rest'
@@ -51,7 +53,16 @@ import { NgrokTunnel, ensureNgrokExe, resolveNgrokExe } from './mobile-tunnel'
 import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
 import { planProjectFolder } from './projectfolder'
 import { CloudflareTunnel, ensureCloudflaredExe, resolveCloudflaredExe } from './cloudflare-tunnel'
-import { addPtySink, getManager, getReplay, viewerClaim, viewerGone, viewerResize, viewerWrite } from './pty-host'
+import {
+  addPtySink,
+  getManager,
+  getReplay,
+  liveSessions,
+  viewerClaim,
+  viewerGone,
+  viewerResize,
+  viewerWrite
+} from './pty-host'
 import { addGitSink, gitRefresh, runAction } from './git-watcher'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
 import { getSkillsStore } from './skills-store'
@@ -130,22 +141,22 @@ import { probeCommands } from './which'
  * `tunnelHostname()`, which is careful to say `configured` rather than `live`
  * on that path.
  *
- * ## What this file deliberately does not do
+ * ## Attention, and the two ways it travels
  *
- * **It does not push `attention`.** It is optional on `WebServerHost`, and it
- * is half of a pair whose other half nothing owns: Forge has no structured
- * agent-permission channel at all, and the desktop learns a pane is waiting by
- * watching *settled output* in `src/lib/terminals.ts`. There is no main-side
- * source to forward, so "cheaply available" is not true here — it would mean a
- * second detector.
+ * The detector never moved and never will: Forge has no structured
+ * agent-permission channel, so a pane that is waiting is discovered by watching
+ * *settled output* in an xterm buffer, which only the renderer has. What
+ * changed is that the renderer now says so, over `web:attention`, and this file
+ * does two different things with the same event.
  *
- * That is not a refusal, and it is one IPC channel on the day something exists
- * to forward. What must not happen in the meantime is a channel that implies a
- * behaviour nothing performs. `onWatch` stood in this same list for a
- * milestone on exactly that reasoning — naming the watched sessions is only
- * worth anything if the renderer then does something with the names — and left
- * it the day the renderer half was written, not before. What it does with them
- * has since shrunk to a label on the pane header, and that is still something.
+ * The first is the socket — `pushAttention`, a badge on a tab in a browser that
+ * is already open. The second is Web Push, which reaches a browser with no page
+ * running at all, and it is gated on `anyVisible()`: a notification for a pane
+ * on a screen somebody is watching is noise, and one for the tab behind a
+ * closed laptop lid is the entire point. Only `asking` and `done` are ever
+ * pushed; `idle` is a badge going out, which is not news anybody needs a buzz
+ * for. The keys, the subscriptions and the rate limits live in
+ * electron/web/push.ts.
  */
 
 /* ----------------------------------------------------------------- the port
@@ -158,6 +169,15 @@ import { probeCommands } from './which'
  * answer and it has its own port.
  */
 const WEB_BIND_HOST = '127.0.0.1'
+
+/**
+ * The longest question line that leaves this desktop with an attention event.
+ *
+ * The renderer already trims to this; it is applied again here because a
+ * renderer is still a boundary, and what crosses it goes on a public wire and
+ * into an encrypted payload with a size limit of its own.
+ */
+const ATTENTION_PROMPT_MAX = 200
 
 /**
  * The port, which *is* a setting (`webPort`, defaulted and clamped by
@@ -1237,6 +1257,14 @@ async function start(): Promise<void> {
     // may have switched control off at this desk.
     mirrorControl: canControl,
     mirrorInput: applyInput,
+    // Straight through to electron/web/push.ts, which owns the keypair, the
+    // subscription list and the file both live in. The server carries the key
+    // out and the subscriptions back; deciding when anything is actually *sent*
+    // happens below, at the `webAttention` handler, because that is the half
+    // that knows which pane and whether anybody is looking.
+    pushKey: () => publicKey() || undefined,
+    pushSubscribe: (sub, meta) => pushSubscribe(sub, meta),
+    pushUnsubscribe: (endpoint) => pushUnsubscribe(endpoint),
     onPresence: (connected) => {
       if (connected > 0) holdBlocker()
       else releaseBlocker()
@@ -1656,6 +1684,54 @@ export function registerWebHandlers(): void {
     setSettings({ webPin: '' })
     report('The PIN is off — browsers signed in as this account get in without one.')
     return webStatus()
+  })
+
+  /**
+   * A pane started waiting on an answer, stopped waiting, or finished.
+   *
+   * The renderer is the only half with a terminal buffer to watch, so this is
+   * where the news enters main — and it leaves by two doors. Every transition
+   * goes down the socket as an `attention` frame, which is a badge on a tab in
+   * a browser that is already open. Only `asking` and `done`, and only when no
+   * browser says it is on screen, become a Web Push: the whole reason push
+   * exists here is the tab that is *not* open, and buzzing a phone that is
+   * already showing the pane would be the fastest way to get notifications
+   * switched off. `idle` is a badge going out, which nobody needs told twice.
+   */
+  ipcMain.on(IPC.webAttention, (_e, payload: { sessionId?: string; state?: string; prompt?: string }) => {
+    const instance = server
+    // No link, no browsers, nothing to notify — and no keypair generated for a
+    // desktop that never switched Forge Web on.
+    if (!instance) return
+
+    const sessionId = String(payload?.sessionId ?? '')
+    const state = payload?.state
+    if (!sessionId) return
+    if (state !== 'asking' && state !== 'done' && state !== 'idle') return
+    // Already capped in the renderer; capped again because this is a boundary
+    // and what arrives here ends up on a public wire.
+    const prompt = String(payload?.prompt ?? '').slice(0, ATTENTION_PROMPT_MAX)
+
+    instance.pushAttention(sessionId, state === 'asking', prompt || undefined)
+
+    if (state === 'idle') return
+    if (instance.anyVisible()) return
+    const live = liveSessions().find((s) => s.id === sessionId)
+    void notify({
+      kind: 'attention',
+      sessionId,
+      state,
+      // The same "<project> — <pane>" label the phone and the quit dialog use;
+      // one naming rule for panes, wherever they are being described. It falls
+      // back to 'Forge' on its own for a pane with neither half.
+      title: remoteControlName(live?.projectName ?? '', live?.paneTitle ?? ''),
+      ...(prompt ? { prompt } : {}),
+      desktopName: hostname()
+      // `notify` answers every failure itself — a dead subscription, a push
+      // service having a bad morning — so there is nothing here to handle. The
+      // catch is the belt: an unhandled rejection in main is worse than a
+      // notification that did not arrive.
+    }).catch(() => undefined)
   })
 
   /* ------------------------------------------------------ the screen mirror

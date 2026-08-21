@@ -660,6 +660,20 @@ export interface ForgeApi {
      * src/lib/terminals.ts.
      */
     onWatched(cb: (e: WebWatchEvent) => void): () => void
+    /**
+     * A pane started waiting on an answer, stopped waiting, or finished a long
+     * stretch of work without asking anything.
+     *
+     * The one call in this block that goes renderer → main rather than the
+     * other way, and it has to: the detector is here, in an xterm buffer (see
+     * `settle` in src/lib/terminals.ts), and main is what has a socket and a
+     * push endpoint. `state` is `asking`, `idle` or `done`; `prompt` carries
+     * the extracted question line for `asking` and is empty otherwise.
+     *
+     * A send, not an invoke — nothing here waits on what the desktop does with
+     * it, and browsers may not be connected at all.
+     */
+    attention(sessionId: string, state: 'asking' | 'done' | 'idle', prompt: string): void
 
     /* --------------------------------------------------- the screen mirror
      *

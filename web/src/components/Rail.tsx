@@ -1,9 +1,12 @@
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { collectLeaves } from '@/lib/splitTree'
+import type { CommandsFeed, SlashCommand } from '@shared/commands'
+import type { SkillsList } from '@shared/skills'
 import { Icon } from '@/components/Icon'
 import type { Project } from '@shared/types'
 import { shortPath } from '../lib/paths'
-import { useForge } from '../state'
+import { useMobile } from '../lib/mobile'
+import { useForge, useWorkspace } from '../state'
 import { FolderPicker } from './FolderPicker'
 import { GitPanel } from './GitPanel'
 
@@ -29,6 +32,7 @@ import { GitPanel } from './GitPanel'
  */
 export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
   const { state, actions } = useForge()
+  const mobile = useMobile()
   const projects = state.picture?.projects ?? state.cached?.projects ?? []
   const workspaces = state.picture?.workspaces ?? state.cached?.workspaces ?? {}
   const sessions = state.picture?.sessions ?? state.cached?.sessions ?? []
@@ -147,7 +151,193 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
 
       <GitPanel collapsed={collapsed} />
 
+      {mobile ? (
+        <>
+          <MobileSkills />
+          <MobileCommands />
+        </>
+      ) : null}
+
       <FolderPicker anchor={addRef.current} open={picking} onClose={() => setPicking(false)} />
     </div>
+  )
+}
+
+/* ------------------------------------------------------- drawer references
+ *
+ * The tab strip's two flyouts are hidden on a phone — styles.css says why —
+ * but the lists themselves are not desk-only: the protocol carries exactly one
+ * verb for each (`{ kind: 'skills' }`, `{ kind: 'commands' }`, both reads) and
+ * one tap that types the name into the focused pane, which is the same honest
+ * surface Flyouts.tsx offers. The drawer is where this face already keeps its
+ * references, so the lists live here as rail sections rather than as popovers
+ * anchored to pills in a scrolling strip.
+ */
+
+/** Where a typed name lands: the active pane of the active tab, as Flyouts has it. */
+function useFocusedPaneId(): string | null {
+  const workspace = useWorkspace()
+  const tab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0]
+  if (!tab) return null
+  const leaves = collectLeaves(tab.root)
+  return leaves.find((leaf) => leaf.id === tab.activePaneId)?.id ?? leaves[0]?.id ?? null
+}
+
+function MobileSkills(): ReactNode {
+  const { state, actions } = useForge()
+  const [open, setOpen] = useState(false)
+  const [list, setList] = useState<SkillsList | null>(null)
+  const [error, setError] = useState('')
+  const paneId = useFocusedPaneId()
+  const live = state.connection.state === 'live'
+
+  useEffect(() => {
+    if (!open || !live) return
+    let cancelled = false
+    void actions.request({ kind: 'skills' }).then((result) => {
+      if (cancelled) return
+      if (result.kind === 'skills') setList(result.skills)
+      else if (result.kind === 'failed') setError(result.message)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open, live, actions])
+
+  const rows = [
+    ...(list?.skills ?? []).filter((s) => s.enabled).map((s) => ({ key: s.name, name: s.name, description: s.description, types: `/${s.name} ` })),
+    ...(list?.machineSkills ?? []).map((s) => ({ key: `m:${s.name}`, name: s.name, description: s.description, types: `/${s.name} ` })),
+    ...(list?.externalSkills ?? []).map((s) => ({ key: s.id, name: s.title || s.name, description: s.description, types: s.command }))
+  ]
+
+  return (
+    <section className="rsec" data-open={open ? 'true' : undefined}>
+      <div className="rsec__head">
+        <button type="button" className="rsec__toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          <span className="rsec__chev">
+            <Icon name={open ? 'chevronDown' : 'chevronRight'} size={11} />
+          </span>
+          <span className="rsec__title eyebrow">Skills</span>
+        </button>
+        {rows.length ? <span className="rsec__count mono">{rows.length}</span> : null}
+      </div>
+      {open ? (
+        /* The desktop flyout's own classes, so the rows read identically — only
+         * their height is restated for a thumb, in styles.css. */
+        <div className="rsec__body">
+          <div className="sfly">
+            {error ? <p className="sfly__hint">{error}</p> : null}
+            {!list && !error ? <p className="sfly__hint">Reading skills…</p> : null}
+            {rows.map((row) => (
+              <button
+                key={row.key}
+                type="button"
+                className="srow"
+                data-enabled="true"
+                title={row.description || row.name}
+                disabled={!paneId}
+                onClick={() => {
+                  if (!paneId) return
+                  actions.write(paneId, row.types)
+                }}
+              >
+                <span className="srow__text">
+                  <span className="srow__name truncate">{row.name}</span>
+                  <span className="srow__desc truncate">{row.description}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function MobileCommands(): ReactNode {
+  const { state, actions } = useForge()
+  const [open, setOpen] = useState(false)
+  const [feed, setFeed] = useState<CommandsFeed | null>(null)
+  const [error, setError] = useState('')
+  const [query, setQuery] = useState('')
+  const paneId = useFocusedPaneId()
+  const live = state.connection.state === 'live'
+
+  useEffect(() => {
+    if (!open || !live) return
+    let cancelled = false
+    void actions.request({ kind: 'commands' }).then((result) => {
+      if (cancelled) return
+      if (result.kind === 'commands') setFeed(result.feed)
+      else if (result.kind === 'failed') setError(result.message)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open, live, actions])
+
+  // The reference runs past one screen; the filter is why the desktop's flyout
+  // stays usable, so it comes along rather than being trimmed as chrome.
+  const needle = query.trim().toLowerCase()
+  const commands: SlashCommand[] = (feed?.commands ?? []).filter(
+    (command) => !needle || command.name.toLowerCase().includes(needle) || command.summary.toLowerCase().includes(needle)
+  )
+
+  return (
+    <section className="rsec" data-open={open ? 'true' : undefined}>
+      <div className="rsec__head">
+        <button type="button" className="rsec__toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          <span className="rsec__chev">
+            <Icon name={open ? 'chevronDown' : 'chevronRight'} size={11} />
+          </span>
+          <span className="rsec__title eyebrow">Commands</span>
+        </button>
+        {feed?.installed ? <span className="rsec__count mono">{feed.installed}</span> : null}
+      </div>
+      {open ? (
+        <div className="rsec__body">
+          <div className="cfly">
+            <div className="cfly__search">
+              <span className="cfly__search-slash mono">/</span>
+              <input
+                className="cfly__input"
+                placeholder="Filter"
+                spellCheck={false}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <div className="cfly__scroll">
+              {error ? <p className="cfly__empty">{error}</p> : null}
+              {!feed && !error ? <p className="cfly__empty">Reading the command reference…</p> : null}
+              {feed && commands.length === 0 ? <p className="cfly__empty">Nothing matches that.</p> : null}
+              {commands.map((command) => (
+                <button
+                  key={command.name}
+                  type="button"
+                  className="crow"
+                  title={command.detail || command.summary}
+                  disabled={!paneId}
+                  onClick={() => {
+                    if (!paneId) return
+                    // Typed, never submitted — the same contract the desktop's
+                    // flyout honours, so a command lands at the prompt for a
+                    // human to read and press Enter on.
+                    actions.write(paneId, `/${command.name} `)
+                  }}
+                >
+                  <span className="crow__main">
+                    <span className="crow__sig mono truncate">
+                      /{command.name} {command.args}
+                    </span>
+                    <span className="truncate">{command.summary}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
   )
 }

@@ -415,6 +415,28 @@ export const IPC = {
    * label them — see `setBrowserWatched` in src/lib/terminals.ts.
    */
   webWatched: 'web:watched',
+  /**
+   * A pane started waiting on an answer, or stopped. Renderer → main, a send.
+   *
+   * The detector is in the renderer and cannot move: Forge has no structured
+   * agent-permission channel, so a pane that is waiting is discovered by
+   * watching *settled output* in an xterm buffer — see `settle` and
+   * `looksLikeWaiting` in src/lib/terminals.ts. Main has no buffer to look at,
+   * so this is the only honest direction for the news to travel, and main is
+   * the only half that can put it on a socket or into a Web Push.
+   *
+   * `state` is one of three: `asking` (a question is on screen), `idle` (that
+   * question was answered, or scrolled away), `done` (a long piece of work went
+   * quiet without asking anything). The last is the one nothing else says: a
+   * pane that finished is not a pane that is waiting, and a browser in a pocket
+   * wants both. `prompt` is the extracted question line and is empty for the
+   * other two.
+   *
+   * Fire-and-forget on purpose: an attention transition is an event, and a
+   * renderer that had to await the desktop's opinion of one would be a renderer
+   * blocked on a socket.
+   */
+  webAttention: 'web:attention',
 
   /* ------------------------------------------------------ forge web mirror
    *

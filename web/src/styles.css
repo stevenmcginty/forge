@@ -1562,26 +1562,35 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  height: 48px;
-  padding: 0 var(--s-3);
-  background: color-mix(in srgb, var(--dot, var(--accent)) 22%, var(--bg-base));
-  border-bottom: 2px solid var(--dot, var(--accent));
+  /* The notch is the phone's, not this bar's: the inset lifts the whole row
+   * and the height carries it, so the seam stays at 48px of chrome. */
+  height: calc(48px + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) var(--s-3) 0;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dot, var(--accent)) 14%, var(--bg-panel-raised)) 0%,
+    color-mix(in srgb, var(--dot, var(--accent)) 6%, var(--bg-base)) 100%
+  );
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-bottom: 1px solid color-mix(in srgb, var(--dot, var(--accent)) 32%, var(--line-hairline));
+  box-shadow: 0 3px 18px color-mix(in srgb, var(--dot, var(--accent)) 10%, transparent);
 }
 
 .app[data-mobile] .titlebar__project {
   display: flex;
   align-items: center;
-  gap: var(--s-3);
+  gap: var(--s-2);
   flex: 1;
   max-width: none;
   min-width: 0;
   margin: 0;
   padding: 0;
-  font-size: var(--t-lg);
+  font-size: 15px;
   font-weight: 700;
   line-height: 1;
-  letter-spacing: var(--tracking-tight);
-  color: var(--dot, var(--accent));
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
 }
 
 .app[data-mobile] .titlebar__project .truncate {
@@ -1592,17 +1601,36 @@
 .app[data-mobile] .titlebar__dot {
   width: 8px;
   height: 8px;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot, var(--accent)) 28%, transparent);
+  border-radius: 50%;
+  background: var(--dot, var(--accent));
+  box-shadow: 0 0 10px var(--dot, var(--accent)), 0 0 3px var(--dot, var(--accent));
+  flex: none;
 }
 
 .app[data-mobile] .titlebar__right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding-right: 0;
 }
 
 .app[data-mobile] .titlebar__left .titlebar__btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--dot, var(--accent)) 16%, var(--bg-panel));
-  border: 1px solid color-mix(in srgb, var(--dot, var(--accent)) 45%, var(--line-strong));
+  background: color-mix(in srgb, var(--dot, var(--accent)) 10%, rgba(255, 255, 255, 0.04));
+  border: 1px solid color-mix(in srgb, var(--dot, var(--accent)) 25%, var(--line-strong));
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+
+.app[data-mobile] .titlebar__left .titlebar__btn:active {
+  transform: scale(0.95);
+  background: color-mix(in srgb, var(--dot, var(--accent)) 20%, var(--bg-panel));
 }
 
 .app[data-mobile] .titlebar__path,
@@ -1616,29 +1644,77 @@
 .app[data-mobile] .titlebar__btn {
   width: 36px;
   height: 36px;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--dur-fast);
+}
+
+.app[data-mobile] .titlebar__btn:active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.app[data-mobile] .linkbadge {
+  height: 30px;
+  padding: 0 9px;
+  border-radius: var(--r-full);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line-hairline);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.app[data-mobile] .linkbadge__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+  flex: none;
 }
 
 /* Tabs as pills. */
 .app[data-mobile] .tabstrip {
   align-items: center;
-  height: 48px;
+  height: 52px;
   padding: 0 var(--s-3);
   gap: var(--s-2);
+  background: var(--bg-base);
   border-bottom: 1px solid var(--line-hairline);
 }
 
 .app[data-mobile] .tabstrip__tabs {
   align-items: center;
-  gap: var(--s-2);
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 0;
+}
+
+.app[data-mobile] .tabstrip__tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .app[data-mobile] .tab {
-  height: 36px;
-  min-height: 36px;
-  padding: 0 var(--s-2) 0 var(--s-3);
+  height: 38px;
+  min-height: 38px;
+  padding: 0 12px 0 6px;
+  gap: 7px;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
   border-radius: var(--r-full);
   border: 1px solid var(--line-soft);
   background: var(--bg-panel);
+  transition: all var(--dur-fast) var(--ease-out);
 }
 
 .app[data-mobile] .tab[data-active='true'] {
@@ -1654,20 +1730,71 @@
  * titlebar uses.
  */
 .app[data-mobile] .tab[data-tint='true'] {
-  border-color: color-mix(in srgb, var(--tab-tint) 38%, var(--line-soft));
-  background: color-mix(in srgb, var(--tab-tint) 13%, var(--bg-panel));
-  color: color-mix(in srgb, var(--tab-tint) 72%, var(--text-secondary));
+  border-color: color-mix(in srgb, var(--tab-tint) 30%, var(--line-strong));
+  background: color-mix(in srgb, var(--tab-tint) 10%, #131418);
+  color: color-mix(in srgb, var(--tab-tint) 35%, var(--text-secondary));
+}
+
+.app[data-mobile] .tab[data-tint='true'] .tab__title {
+  color: color-mix(in srgb, var(--tab-tint) 35%, var(--text-secondary));
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.app[data-mobile] .tab[data-tint='true'] .agent-badge {
+  height: 20px;
+  min-width: 24px;
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  font-size: 10px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--tab-tint) 16%, transparent);
+  color: var(--tab-tint);
+  border: 1px solid color-mix(in srgb, var(--tab-tint) 45%, transparent);
 }
 
 .app[data-mobile] .tab[data-tint='true'][data-active='true'] {
   border-color: var(--tab-tint);
-  background: color-mix(in srgb, var(--tab-tint) 22%, var(--bg-base));
-  color: var(--tab-tint);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tab-tint) 28%, transparent);
+  border-width: 1.5px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--tab-tint) 32%, #1e2027) 0%,
+    color-mix(in srgb, var(--tab-tint) 20%, #121317) 100%
+  );
+  color: #ffffff;
+  box-shadow:
+    0 2px 14px color-mix(in srgb, var(--tab-tint) 35%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.app[data-mobile] .tab[data-tint='true'][data-active='true'] .tab__title {
+  color: #ffffff;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.app[data-mobile] .tab[data-tint='true'][data-active='true'] .agent-badge {
+  height: 20px;
+  min-width: 24px;
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  font-size: 10px;
+  font-weight: 800;
+  background: var(--tab-tint);
+  color: var(--text-on-accent);
+  border: 1px solid transparent;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--tab-tint) 65%, transparent);
+}
+
+.app[data-mobile] .tab[data-working='true'] {
+  box-shadow: 0 0 10px var(--warn);
 }
 
 .app[data-mobile] .tab__title {
-  font-size: var(--t-md);
+  font-size: 13.5px;
 }
 
 .app[data-mobile] .tab__close {
@@ -1676,13 +1803,31 @@
 }
 
 .app[data-mobile] .tabstrip__new {
-  width: 40px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--r-full);
-  border: 1px solid var(--line-soft);
+  background: #131418;
+  border: 1px dashed var(--line-strong);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  transition: all var(--dur-fast);
 }
 
-/* The flyouts that need a desk are gone. */
+.app[data-mobile] .tabstrip__new:active {
+  border-style: solid;
+  border-color: var(--accent-line);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/*
+ * The tab strip's own skills and commands buttons stay hidden — a popover
+ * anchored to a pill in a scrolling strip is poor thumb UI — but the lists
+ * themselves are not gone: the drawer carries them as sections, below.
+ */
 .app[data-mobile] .tabstrip__spacer ~ button {
   display: none;
 }
@@ -1703,16 +1848,18 @@
 }
 
 .app[data-mobile] .pane[data-only='true'] .pane__title {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .app[data-mobile] .pane__header {
-  height: 40px;
+  height: 44px;
   padding: 0 var(--s-3);
+  gap: var(--s-2);
 }
 
 .app[data-mobile] .pane__title {
-  font-size: var(--t-md);
+  font-size: 14.5px;
+  font-weight: 700;
 }
 
 /*
@@ -1728,39 +1875,89 @@
  */
 .app[data-mobile] .pane[data-kind='agent'] .pane__header,
 .app[data-mobile] .pane[data-kind='agent'][data-focused='true'] .pane__header {
-  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 22%, var(--bg-base));
-  border-bottom: 2px solid var(--pane-accent, var(--accent));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, #171920) 0%,
+    color-mix(in srgb, var(--pane-accent, var(--accent)) 8%, #0e0f13) 100%
+  );
+  border-bottom: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 30%, var(--line-hairline));
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--pane-accent, var(--accent)) 10%, transparent);
 }
 
 .app[data-mobile] .pane[data-kind='agent'] .pane__title {
-  font-size: var(--t-lg);
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: var(--tracking-tight);
-  color: var(--pane-accent, var(--accent));
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
 }
 
 .app[data-mobile] .pane[data-kind='agent'] .pane__header .agent-badge {
-  height: 18px;
-  min-width: 26px;
-  font-size: var(--t-xs);
-  background: color-mix(in srgb, var(--badge-accent, var(--accent)) 22%, transparent);
-  border-color: color-mix(in srgb, var(--badge-accent, var(--accent)) 55%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--badge-accent, var(--accent)) 28%, transparent);
+  height: 22px;
+  min-width: 28px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  background: color-mix(in srgb, var(--badge-accent, var(--pane-accent, var(--accent))) 24%, transparent);
+  border: 1px solid color-mix(in srgb, var(--badge-accent, var(--pane-accent, var(--accent))) 60%, transparent);
+  color: var(--badge-accent, var(--pane-accent, var(--accent)));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--badge-accent, var(--pane-accent, var(--accent))) 35%, transparent);
+}
+
+.app[data-mobile] .pane .pane__perm {
+  height: 20px;
+  border-radius: var(--r-full);
+  padding: 0 8px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.app[data-mobile] .pane .pane__perm[title*='question'],
+.app[data-mobile] .pane .pane__perm:not([data-frozen]):not([data-reconnecting]):not([data-danger]) {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 18%, #141518);
+  border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 35%, transparent);
+}
+
+.app[data-mobile] .pane .pane__perm[data-frozen='true'] {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 18%, #141518);
+  border: 1px solid color-mix(in srgb, var(--info) 60%, transparent);
+}
+
+.app[data-mobile] .pane .pane__perm[data-reconnecting='true'] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 18%, #141518);
+  border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
+  animation: astatus-pulse 1.6s infinite;
 }
 
 .app[data-mobile] .pane[data-kind='agent'] .pane__action {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 10%, rgba(255, 255, 255, 0.04));
+  border: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 25%, var(--line-hairline));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--dur-fast);
+}
+
+.app[data-mobile] .pane[data-kind='agent'] .pane__action:active {
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 25%, rgba(255, 255, 255, 0.08));
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, var(--bg-panel));
-  border: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 45%, var(--line-strong));
+  border-color: var(--pane-accent, var(--accent));
 }
 
 .app[data-mobile] .pane__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   opacity: 1;
-}
-
-.app[data-mobile] .pane__action {
-  width: 40px;
-  height: 36px;
 }
 
 /*
@@ -1848,36 +2045,49 @@
   display: flex;
   gap: var(--s-2);
   flex: none;
-  padding: var(--s-2) var(--s-3);
+  padding: 6px var(--s-3);
   overflow-x: auto;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
   background: var(--bg-base);
   border-bottom: 1px solid var(--line-hairline);
 }
 
 .mpanes__chips::-webkit-scrollbar {
-  height: 0;
+  display: none;
 }
 
 .mpanes__chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--s-3);
+  gap: var(--s-2);
   flex: none;
-  max-width: 60vw;
-  height: 36px;
-  padding: 0 var(--s-4);
+  max-width: 65vw;
+  height: 34px;
+  padding: 0 12px 0 6px;
   border-radius: var(--r-full);
   border: 1px solid var(--line-soft);
   background: var(--bg-panel);
   color: var(--text-secondary);
-  font: 500 var(--t-md) / 1 var(--font-ui);
+  font: 500 13px / 1 var(--font-ui);
+  transition: all var(--dur-fast) var(--ease-out);
+}
+
+.mpanes__chip .agent-badge {
+  height: 18px;
+  min-width: 22px;
+  padding: 0 4px;
+  border-radius: var(--r-full);
+  font-size: 9.5px;
+  font-weight: 700;
 }
 
 .mpanes__chip[data-active='true'] {
   border-color: var(--accent-line);
   background: var(--accent-soft);
-  color: var(--text-primary);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px var(--accent-glow);
 }
 
 .mpanes__chip[data-working='true']::after {
@@ -1886,6 +2096,7 @@
   height: 6px;
   border-radius: 50%;
   background: var(--warn);
+  box-shadow: 0 0 6px var(--warn);
 }
 
 .mpanes__body {
@@ -2957,9 +3168,50 @@
 }
 
 [data-mobile] .feed__tool,
-[data-mobile] .feed__ask,
 [data-mobile] .feed__busy {
   margin-left: 0;
+}
+
+[data-mobile] .feed__ask {
+  margin: var(--s-3) 0;
+  padding: 14px 16px;
+  border-radius: var(--r-xl);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--warn) 16%, var(--bg-panel-raised)) 0%,
+    color-mix(in srgb, var(--warn) 8%, var(--bg-panel)) 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line-strong));
+  box-shadow:
+    0 4px 20px color-mix(in srgb, var(--warn) 15%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+[data-mobile] .feed__ask-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+
+[data-mobile] .feed__ask-ring {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 10px var(--warn);
+}
+
+[data-mobile] .feed__ask-prompt {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--text-primary);
 }
 
 [data-mobile] .feed__busy {
@@ -2982,14 +3234,50 @@
 [data-mobile] .session-composer {
   background: color-mix(in srgb, var(--bg-base) 94%, transparent);
   backdrop-filter: blur(16px);
-  border-top-color: var(--line-soft);
+  border-top: 1px solid var(--line-hairline);
 }
 
 [data-mobile] .astatus__row {
-  gap: var(--s-3);
-  min-height: 36px;
-  padding: var(--s-3) var(--s-5) 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 38px;
+  padding: 6px var(--s-4) 2px;
   overflow: hidden;
+}
+
+[data-mobile] .astatus__who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+[data-mobile] .astatus__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+[data-mobile] .astatus__mode {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  font-size: 11px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 14%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 35%, var(--line-soft));
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all var(--dur-fast);
+}
+
+[data-mobile] .astatus__mode .astatus__mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
 }
 
 [data-mobile] .astatus__model,
@@ -2999,6 +3287,13 @@
 
 [data-mobile] .astatus__meter {
   width: 32px;
+}
+
+[data-mobile] .astatus__state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
 }
 
 /* The one word that matters more than the path: when the box has gone quiet. */
@@ -3034,8 +3329,8 @@
   height: 40px;
 }
 
-/* Seven keys, two pickers and Send have to share a phone's width without a
- * sideways scroll, so the keys are tighter here than the desktop's. */
+/* Eight keys, two pickers and Send share a phone's width, so the row scrolls
+ * sideways under its fade and every key keeps the promised 40px of thumb. */
 [data-mobile] .composer__tools {
   gap: var(--s-2);
 }
@@ -3045,10 +3340,66 @@
 }
 
 [data-mobile] .composer__key {
-  height: 36px;
-  min-width: 32px;
+  height: 40px;
+  min-width: 40px;
   padding: 0 var(--s-2);
   font-size: var(--t-sm);
+}
+
+/* Armed Ctrl — the same lit language an active chip or tab uses. */
+.composer__key[data-active='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+/*
+ * Landscape on a phone: height is the scarce axis, and a third of it was
+ * chrome. The status strip folds away — the pane header already says who is
+ * running — and the two pill rows give back what 40px targets took.
+ */
+@media (max-height: 430px) {
+  .app[data-mobile] .astatus {
+    display: none;
+  }
+
+  .app[data-mobile] .titlebar {
+    height: calc(40px + env(safe-area-inset-top, 0px));
+  }
+
+  .app[data-mobile] .tabstrip {
+    height: 40px;
+  }
+
+  .app[data-mobile] .tab,
+  .app[data-mobile] .mpanes__chip {
+    height: 36px;
+    min-height: 36px;
+  }
+
+  .app[data-mobile] .mpanes__chips {
+    padding: var(--s-1) var(--s-3);
+  }
+}
+
+/* Skills and commands in the drawer. The desktop's own rows come from
+ * SkillsFlyout.css / CommandsFlyout.css; only their height is restated, so a
+ * thumb lands on the first try. The section toggles are restated for the same
+ * reason — `.rsec__toggle` is a mouse-sized 22px at the desk. */
+.app[data-mobile] .rsec__head {
+  height: 44px;
+}
+
+.app[data-mobile] .rsec__toggle {
+  height: 40px;
+}
+
+[data-mobile] .sfly .srow {
+  height: 40px;
+}
+
+[data-mobile] .crow__main {
+  min-height: 40px;
 }
 
 /* ------------------------------------------------------------ dev preview */
