@@ -36,6 +36,7 @@ import '@/components/rail/GitSection.css'
 import './styles.css'
 
 import { App } from './App'
+import { Preview } from './components/Preview'
 import { RepoProvider } from './lib/repo'
 import { ForgeProvider } from './state'
 
@@ -58,9 +59,13 @@ if (!host) throw new Error('index.html has no #root')
  * tree every time the socket blinked.
  */
 createRoot(host).render(
-  <ForgeProvider>
-    <RepoProvider>
-      <App />
-    </RepoProvider>
-  </ForgeProvider>
+  __DEV_SERVER__ && new URLSearchParams(location.search).get('preview') === 'feed' ? (
+    <Preview />
+  ) : (
+    <ForgeProvider>
+      <RepoProvider>
+        <App />
+      </RepoProvider>
+    </ForgeProvider>
+  )
 )

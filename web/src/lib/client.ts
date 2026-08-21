@@ -862,7 +862,7 @@ export class ForgeClient {
       const credentials = this.credentials
       if (!credentials) return
       void credentials
-        .getToken(true)
+        .getToken(false)
         .then((idToken) => {
           this.rid += 1
           this.send({ type: 'auth', rid: `a${this.rid}`, idToken })

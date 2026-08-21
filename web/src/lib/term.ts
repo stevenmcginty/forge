@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SHARE_CAPTURE_MAX_LINES } from '@shared/share'
 import { planTouchScroll } from '@shared/touch-scroll'
 import { joinBufferRows, tidyCapture, type BufferRow } from '@/lib/paneText'
+import type { RichLine, Run } from './rich'
 
 /**
  * An xterm instance fed relayed PTY bytes.
@@ -89,6 +90,19 @@ export interface TermHost {
    * capture: wrapped rows become one line.
    */
   capture: () => string
+  /**
+   * The same screen with its colours kept — the conversation display's source.
+   *
+   * `capture()` throws every attribute away, which is why the feed reads as a
+   * plain-text log of something that was drawn in six colours. This walks the
+   * same buffer and the same joins, but cell by cell, grouping adjacent cells
+   * that share a style into runs (see lib/rich.ts). Capped at
+   * SHARE_CAPTURE_MAX_LINES like `capture()`, and bounded by that cap rather
+   * than by the depth of the scrollback — see `captureRichTail`.
+   */
+  captureRich: () => RichLine[]
+  /** `captureRich` with the cap chosen by the caller. Never above the shared cap. */
+  captureRichTail: (maxLines: number) => RichLine[]
   focus: () => void
   /**
    * Stop taking input, or start again, without rebuilding the terminal.
@@ -234,6 +248,190 @@ function themeFor(accent: string): ITheme {
     brightCyan: p['bright-cyan']!,
     brightWhite: p['bright-white']!
   }
+}
+
+/* --------------------------------------------------- colour, cell by cell */
+
+/**
+ * The sixteen ANSI slots in the order a cell reports them, named as tokens.
+ *
+ * Same list `themeFor` hands xterm, in the order `CSI 3(0-7) m` / `CSI 9(0-7) m`
+ * number them — so a cell that says "palette 4" and the blue xterm is painting
+ * it in are the same `--term-blue`, by construction rather than by a second
+ * list agreeing with the first.
+ */
+const ANSI_TOKENS = [
+  'black',
+  'red',
+  'green',
+  'yellow',
+  'blue',
+  'magenta',
+  'cyan',
+  'white',
+  'bright-black',
+  'bright-red',
+  'bright-green',
+  'bright-yellow',
+  'bright-blue',
+  'bright-magenta',
+  'bright-cyan',
+  'bright-white'
+] as const
+
+/**
+ * A palette index as a CSS colour.
+ *
+ * 0–15 are the theme's own; 16–231 are the 6×6×6 cube xterm defines, whose
+ * levels are 0 then 55+40n; 232–255 are the 24-step greyscale ramp. The cube
+ * and the ramp are fixed by the protocol rather than by a theme, so they are
+ * computed rather than tokenised.
+ */
+function paletteColor(index: number): string | undefined {
+  if (!Number.isFinite(index) || index < 0) return undefined
+  if (index < 16) return palette()[ANSI_TOKENS[index]!]
+  if (index < 232) {
+    const i = index - 16
+    const level = (n: number): number => (n === 0 ? 0 : 55 + n * 40)
+    return `rgb(${level(Math.floor(i / 36) % 6)}, ${level(Math.floor(i / 6) % 6)}, ${level(i % 6)})`
+  }
+  if (index < 256) {
+    const v = 8 + (index - 232) * 10
+    return `rgb(${v}, ${v}, ${v})`
+  }
+  return undefined
+}
+
+/** `0xRRGGBB`, as xterm reports a true-colour cell, to CSS. */
+function rgbColor(value: number): string {
+  return `rgb(${(value >> 16) & 0xff}, ${(value >> 8) & 0xff}, ${value & 0xff})`
+}
+
+/** Cell attribute flags, packed so a run boundary is one integer comparison. */
+const BOLD = 1
+const DIM = 2
+const ITALIC = 4
+const UNDERLINE = 8
+const STRIKE = 16
+const INVERSE = 32
+
+/**
+ * xterm's cell and line views, taken off the `Terminal` type rather than
+ * imported: the public typings declare them inside the module without an
+ * `export`, so this is the supported way to name them.
+ */
+type BufferCell = ReturnType<Terminal['buffer']['active']['getNullCell']>
+type BufferLine = NonNullable<ReturnType<Terminal['buffer']['active']['getLine']>>
+
+/** One row of cells, as the pieces a logical line is built from. */
+interface RichRow {
+  runs: Run[]
+  text: string
+  wrapped: boolean
+}
+
+/**
+ * Turn one buffer row into styled runs.
+ *
+ * Trailing blanks go, the same way `line.translateToString(true)` drops them
+ * for `capture()`, so the two produce the same text for the same row. Width-0
+ * cells are the second half of a wide glyph and are skipped — the glyph itself
+ * already carries both columns.
+ */
+function rowRich(line: BufferLine, cell: BufferCell): RichRow {
+  const width = line.length
+
+  // The last column that is not blank. Found first so the run builder never has
+  // to unpick a trailing run it should not have started.
+  let last = -1
+  for (let x = width - 1; x >= 0; x--) {
+    if (!line.getCell(x, cell)) continue
+    const chars = cell.getChars()
+    if (chars !== '' && chars.trim() !== '') {
+      last = x
+      break
+    }
+  }
+  if (last < 0) return { runs: [], text: '', wrapped: line.isWrapped }
+
+  const runs: Run[] = []
+  let text = ''
+  let buf = ''
+  // The attributes the open run was started with. -1 is "no run open yet".
+  let fgMode = -1
+  let fgColor = -1
+  let bgMode = -1
+  let bgColor = -1
+  let flags = -1
+
+  const close = (): void => {
+    if (!buf) return
+    const inverse = (flags & INVERSE) !== 0
+    let fg = fgMode === 0 ? undefined : fgMode === 1 ? paletteColor(fgColor) : rgbColor(fgColor)
+    let bg = bgMode === 0 ? undefined : bgMode === 1 ? paletteColor(bgColor) : rgbColor(bgColor)
+    if (inverse) {
+      const p = palette()
+      const swapped = { fg: bg ?? p['bg'], bg: fg ?? p['fg'] }
+      fg = swapped.fg
+      bg = swapped.bg
+    }
+    const run: Run = { text: buf }
+    if (fg) run.fg = fg
+    if (bg) run.bg = bg
+    if (flags & BOLD) run.bold = true
+    if (flags & DIM) run.dim = true
+    if (flags & ITALIC) run.italic = true
+    if (flags & UNDERLINE) run.underline = true
+    if (flags & STRIKE) run.strike = true
+    runs.push(run)
+    buf = ''
+  }
+
+  for (let x = 0; x <= last; x++) {
+    if (!line.getCell(x, cell)) continue
+    if (cell.getWidth() === 0) continue
+    // An empty cell is a space that was never written to, not a missing one.
+    const chars = cell.getChars() || ' '
+    // The colour *mode* rather than the resolved CSS: comparing five integers
+    // is what keeps this cheap enough to run on every frame of streaming
+    // output, and the CSS is only computed once per run, in `close`.
+    const nextFgMode = cell.isFgDefault() ? 0 : cell.isFgPalette() ? 1 : 2
+    const nextBgMode = cell.isBgDefault() ? 0 : cell.isBgPalette() ? 1 : 2
+    const nextFg = nextFgMode === 0 ? -1 : cell.getFgColor()
+    const nextBg = nextBgMode === 0 ? -1 : cell.getBgColor()
+    const nextFlags =
+      (cell.isBold() ? BOLD : 0) |
+      (cell.isDim() ? DIM : 0) |
+      (cell.isItalic() ? ITALIC : 0) |
+      (cell.isUnderline() ? UNDERLINE : 0) |
+      (cell.isStrikethrough() ? STRIKE : 0) |
+      (cell.isInverse() ? INVERSE : 0)
+
+    if (nextFgMode !== fgMode || nextFg !== fgColor || nextBgMode !== bgMode || nextBg !== bgColor || nextFlags !== flags) {
+      close()
+      fgMode = nextFgMode
+      fgColor = nextFg
+      bgMode = nextBgMode
+      bgColor = nextBg
+      flags = nextFlags
+    }
+    buf += chars
+    text += chars
+  }
+  close()
+  return { runs, text, wrapped: line.isWrapped }
+}
+
+/** The rows of one logical line, top-first, as a single `RichLine`. */
+function joinRichRows(rows: RichRow[]): RichLine {
+  if (rows.length === 1) return { runs: rows[0]!.runs, text: rows[0]!.text }
+  const runs: Run[] = []
+  let text = ''
+  for (const row of rows) {
+    for (const run of row.runs) runs.push(run)
+    text += row.text
+  }
+  return { runs, text }
 }
 
 export function mountTerm(container: HTMLElement, options: TermOptions): TermHost {
@@ -415,6 +613,68 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
   })
   observer.observe(container)
 
+  /**
+   * The styled tail of the buffer, oldest line first.
+   *
+   * ## Backwards, which is the whole of the performance story
+   *
+   * The feed re-reads this on every frame of streaming output, and the
+   * scrollback is 5,000 lines. Building all 5,000 to keep the last 400 is
+   * 400,000 cell reads thrown away per parse, which on a phone is the
+   * difference between a feed that scrolls and one that stutters — so the walk
+   * starts at the bottom and stops as soon as it has `cap` logical lines. The
+   * cost is therefore bounded by the *cap*, not by the depth of the scrollback:
+   * a 5,000-line buffer and a 50-line one cost the same.
+   *
+   * That bound is deliberately preferred over caching rows by buffer index.
+   * xterm's scrollback keeps its *content* stable but not its indices — once
+   * the buffer is full, every new line shifts every index by one and nothing
+   * public says by how much — so an index-keyed cache would need a fingerprint
+   * per row to be safe, and taking that fingerprint costs the pass it was meant
+   * to avoid. A stale-cache bug here draws somebody's last answer twice; this
+   * cannot.
+   *
+   * The blank-line tidy is `tidyCapture`'s, reached from the other end: no
+   * trailing blanks, no leading blanks, and never two blank lines in a row, so
+   * the sixty empty rows under a TUI's composer do not become sixty cards.
+   */
+  const captureRichTail = (maxLines: number): RichLine[] => {
+    const buffer = term.buffer.active
+    const cap =
+      Number.isFinite(maxLines) && maxLines > 0
+        ? Math.min(Math.floor(maxLines), SHARE_CAPTURE_MAX_LINES)
+        : SHARE_CAPTURE_MAX_LINES
+    // One reusable cell object, as xterm's own docs ask for: a fresh one per
+    // cell is the allocation this walk exists to avoid.
+    const cell = buffer.getNullCell()
+    /** Logical lines, bottom-first. Reversed before it is handed back. */
+    const out: RichLine[] = []
+    /** The rows of the logical line being assembled, bottom-first. */
+    let rows: RichRow[] = []
+
+    for (let y = buffer.length - 1; y >= 0 && out.length < cap; y--) {
+      const line = buffer.getLine(y)
+      if (!line) continue
+      rows.push(rowRich(line, cell))
+      // A wrapped row continues the row above it, so the line is not complete
+      // until an unwrapped one arrives. A wrapped row at index 0 has nothing
+      // above it to continue — `joinBufferRows` starts a line there too.
+      if (line.isWrapped && y > 0) continue
+      rows.reverse()
+      const joined = joinRichRows(rows)
+      rows = []
+      if (!joined.text.trim()) {
+        if (out.length === 0) continue
+        if (!out[out.length - 1]!.text.trim()) continue
+      }
+      out.push(joined)
+    }
+
+    out.reverse()
+    while (out.length > 0 && !out[0]!.text.trim()) out.shift()
+    return out
+  }
+
   return {
     term,
     fit,
@@ -443,6 +703,8 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
       }
       return tidyCapture(joinBufferRows(rows), SHARE_CAPTURE_MAX_LINES)
     },
+    captureRich: () => captureRichTail(SHARE_CAPTURE_MAX_LINES),
+    captureRichTail,
     focus: () => term.focus(),
     setReadOnly: (readOnly) => {
       // A host built read-only never wired `onData`, so letting it take input

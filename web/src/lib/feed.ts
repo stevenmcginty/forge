@@ -1,32 +1,124 @@
 /**
- * Turn a terminal screen into conversation blocks.
+ * Turn a terminal screen into a conversation.
  *
  * Forge Web still *is* a PTY mirror — the bytes come from the desktop, xterm
  * parses them — but an agent's TUI is a full-screen redraw with its own prompt
  * at the bottom, and a phone (or a browser) should not type into that. This
- * file is the other half of that split: take the text xterm already has, drop
- * the live composer the TUI is drawing, and cut what remains into user / agent
- * cards so the page can look like a chat while the PTY stays the source of
- * truth.
+ * file is the other half of that split: take the styled screen xterm already
+ * has (`captureRich` in lib/term.ts), lift the TUI's own chrome off the bottom
+ * of it, and cut what remains into user / agent / tool cards so the page can
+ * look like a chat while the PTY stays the source of truth.
  *
- * Conservative on purpose. Every agent CLI draws its chrome differently, so a
- * line this file is not sure about stays in the agent card rather than being
- * dropped or mis-attributed. scripts/feed-check.mjs holds the cuts.
+ * Two things changed when the display grew up, and both are about *not*
+ * throwing information away:
+ *
+ *  1. **Colour survives.** The input is `RichLine[]`, not text, and every line
+ *     handed to a card keeps its runs. An agent that prints a diff in red and
+ *     green was previously drawn as grey text about a diff.
+ *  2. **The footer is read rather than binned.** Every CLI prints what it is
+ *     and what it is allowed to do along the bottom of its own screen — model,
+ *     permission mode, cwd, context left, and whether it is mid-turn. That is
+ *     exactly what a chat UI wants in its header, so it is parsed into
+ *     `PaneStatus` (lib/rich.ts) on the way out instead of being dropped.
+ *
+ * Conservative on purpose, and the conservatism is the design. Every agent CLI
+ * draws its chrome differently and all of them are free to redraw it tomorrow,
+ * so: a line this file is not sure about stays in the agent card rather than
+ * being dropped or mis-attributed, and a status field it cannot find stays
+ * `undefined` rather than being guessed. A wrong badge is worse than no badge.
+ * scripts/feed-check.mjs holds the cuts.
  */
 
-export type FeedRole = 'user' | 'agent' | 'system'
+import type { FeedBlock, FeedRole, PaneStatus, PermissionMode, RichLine, Run, Transcript } from './rich'
 
-export interface FeedBlock {
-  /** Stable for a given (role, text) pair in one capture — not a uuid. */
-  id: string
-  role: FeedRole
-  text: string
+export type { FeedBlock, FeedRole, RichLine, Transcript } from './rich'
+
+/**
+ * A pane nothing has been captured from yet.
+ *
+ * Shared rather than rebuilt per render so that a pane which parses to nothing
+ * does not hand React a new object every frame. Never mutated.
+ */
+export const EMPTY_TRANSCRIPT: Transcript = {
+  blocks: [],
+  status: { mode: 'unknown', busy: false, footer: [] }
 }
+
+/* ------------------------------------------------------------- line plumbing */
+
+/** Box drawing and block elements — the border a TUI draws, not its words. */
+const BOX_ANY = /[─-╿▀-▟]/
+const BOX_ALL = /[─-╿▀-▟]/g
 
 /** Drop the border a TUI draws around a prompt, so the text inside reads as ordinary lines. */
 export function stripBoxDrawing(line: string): string {
   return line.replace(/[─-╿▀-▟]/g, ' ').replace(/\s+/g, ' ').trim()
 }
+
+function runsText(runs: Run[]): string {
+  let text = ''
+  for (const run of runs) text += run.text
+  return text
+}
+
+/** The runs between two character offsets of the line's text, styles intact. */
+function sliceRuns(runs: Run[], start: number, end: number): Run[] {
+  const out: Run[] = []
+  let at = 0
+  for (const run of runs) {
+    const from = Math.max(start, at)
+    const to = Math.min(end, at + run.text.length)
+    if (to > from) out.push({ ...run, text: run.text.slice(from - at, to - at) })
+    at += run.text.length
+  }
+  return out
+}
+
+/**
+ * The same line with the TUI's border taken off it, colour kept.
+ *
+ * Deliberately *not* `stripBoxDrawing` applied to the runs. That collapses runs
+ * of spaces, which is fine for matching a chrome line against a regex and wrong
+ * for a card: the indentation is the shape of a diff, of a tree, of a `⎿` tool
+ * result. So a line with no border is left exactly as captured, and a bordered
+ * one only loses the border and the padding either side of it.
+ */
+function cleanRich(line: RichLine): RichLine {
+  const boxed = BOX_ANY.test(line.text)
+  const text = boxed ? line.text.replace(BOX_ALL, ' ') : line.text
+  const runs = boxed ? line.runs.map((run) => ({ ...run, text: run.text.replace(BOX_ALL, ' ') })) : line.runs
+  const start = boxed ? text.length - text.replace(/^\s+/, '').length : 0
+  const end = text.replace(/\s+$/, '').length
+  if (start === 0 && end === text.length) return boxed ? { runs, text } : line
+  return { runs: sliceRuns(runs, start, end), text: text.slice(start, end) }
+}
+
+/** Plain text as lines with one run each — the bridge for callers that have no terminal. */
+export function richFromText(text: string): RichLine[] {
+  return String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => ({ runs: line ? [{ text: line }] : [], text: line }))
+}
+
+/** One captured line in the three forms the parser needs. */
+interface Cut {
+  /** What a card shows: border gone, colour and indentation kept. */
+  rich: RichLine
+  /** As captured, so leading whitespace still means "this continues the line above". */
+  raw: string
+  /** Border gone, whitespace collapsed — what the regexes classify on. */
+  flat: string
+}
+
+function cut(line: RichLine): Cut {
+  const runs = Array.isArray(line?.runs) ? line.runs : []
+  const raw = typeof line?.text === 'string' ? line.text : runsText(runs)
+  return { rich: cleanRich({ runs, text: raw }), raw, flat: stripBoxDrawing(raw) }
+}
+
+/* --------------------------------------------------------------- the chrome */
 
 /**
  * A line that is only the TUI's live prompt glyph — empty input, waiting.
@@ -41,44 +133,248 @@ const LIVE_PROMPT = /^\s*(?:[❯›◆●]|[>$]|PS[^>]*>)\s*$/
 const RULE = /^[\s─━_═-]+$/
 
 /**
- * Model / status chrome that often sits in the last rows next to the prompt
- * (Claude's footer, Gemini's mode line). Dropped only when it is the tail.
+ * The dim placeholder a TUI leaves sitting in an empty composer.
+ *
+ * `LIVE_PROMPT` only knows an empty box, and Gemini's box is never empty: it
+ * holds "Type your message or @path/to/file" until you type over it. Without
+ * this the placeholder reads as a `>` turn and the feed invents a message
+ * nobody sent. Only these literal phrases, so somebody who really does type
+ * "ask anything" still sees their draft.
  */
-const FOOTER_CHROME =
-  /^(?:bypass permissions|accept edits|plan mode|default|auto|shift\+tab|ctrl\+|esc\b|tab\b|~\s*$)/i
+const PLACEHOLDER = /^(?:[❯›>◆●|]\s*)?(?:type your message|ask anything|ask codex|ask claude|send a message|try ")/i
+
+/** The permission / mode line every agent prints beside its composer. */
+const MODE_LINE =
+  /(?:bypass(?:ing)? permissions|accept edits|auto-accept(?: edits)?|plan mode|yolo mode|normal mode|default mode|approval:|sandbox:)/i
+
+/** The keyboard hints a TUI prints under its box. */
+const HINT_LINE = /^(?:\?|⏎|↑|shift\+tab|ctrl\+|esc\b|tab\b|for shortcuts)/i
+
+/** Context budget, however the CLI phrases it. */
+const CONTEXT_LINE = /(?:context left|context remaining|auto-compact|% context|context:)/i
+
+/** Codex writes its whole footer as `key: value` lines. */
+const CODEX_FOOTER = /^(?:model|approval|sandbox|reasoning|workdir|directory|cwd)\s*:\s*\S/i
+
+/** A path, alone or leading a footer — Gemini's cwd, Claude's banner line. */
+const PATH_LINE = /^(?:~[\\/]|[A-Za-z]:\\|\/(?:home|Users|mnt|opt|usr|var|tmp)\/)/
+
+/** `esc to interrupt` is the one thing every Claude spinner line carries. */
+const BUSY_HINT = /\besc to interrupt\b/i
+/** A braille spinner frame, wherever it sits on the line. */
+const BRAILLE = /[⠀-⣿]/
+/** The glyphs a CLI cycles as its spinner. */
+const SPINNER_GLYPH = /^\s*[✢✳✶✻✽✻◐◓◑◒·*+•●○◆◇]\s/
+/** An elapsed-time counter, which no prose line has. */
+const ELAPSED = /\(\s*\d+s\b/
+
+/** A word that is being done to you — "Thinking…", "Baking…", "Working…". */
+const ACTIVITY = /([A-Z][A-Za-z]+(?:\s[a-z]+)?)…/
+
+/**
+ * Is this line the TUI telling you it is mid-turn?
+ *
+ * Two grades, and the difference matters. A spinner *frame* is chrome and is
+ * eaten off the bottom of the screen; a bare `Working…` on its own line is a
+ * sentence the agent wrote, which sets the busy flag but stays in the card. The
+ * cost of getting that backwards is a vanished message, so the eating rule is
+ * the strict one.
+ */
+function busyLine(flat: string): boolean {
+  if (!flat) return false
+  if (BUSY_HINT.test(flat)) return true
+  if (BRAILLE.test(flat)) return true
+  if (SPINNER_GLYPH.test(flat) && flat.includes('…')) return true
+  return /^[A-Z][A-Za-z]+(?:\s[a-z]+)?…\s*$/.test(flat)
+}
+
+/** The strict half of `busyLine`: safe to lift off the screen. */
+function spinnerChrome(flat: string): boolean {
+  if (!flat) return false
+  if (BUSY_HINT.test(flat)) return true
+  if (BRAILLE.test(flat) && flat.includes('…')) return true
+  if (SPINNER_GLYPH.test(flat) && flat.includes('…') && ELAPSED.test(flat)) return true
+  return SPINNER_GLYPH.test(flat) && flat.includes('…') && flat.length < 40
+}
+
+/** Everything that is the TUI talking about itself rather than to you. */
+function chromeLine(flat: string): boolean {
+  if (!flat) return true
+  if (LIVE_PROMPT.test(flat) || RULE.test(flat) || PLACEHOLDER.test(flat)) return true
+  if (MODE_LINE.test(flat) || CODEX_FOOTER.test(flat)) return true
+  if (CONTEXT_LINE.test(flat)) return true
+  if (HINT_LINE.test(flat)) return true
+  if (spinnerChrome(flat)) return true
+  return PATH_LINE.test(flat) && flat.length < 120
+}
+
+/**
+ * How much of the bottom of a screen may be chrome.
+ *
+ * Claude's tail is a spinner, a blank, three box rows and a mode line, which is
+ * six; Gemini and Codex print a couple more. Twelve is room for all of them and
+ * still a hard floor under "ate somebody's message", which is what an unbounded
+ * walk up a screen of short lines would eventually do.
+ */
+const MAX_TAIL = 12
+
+/**
+ * Split the TUI's own composer and footer off the end of a capture.
+ *
+ * Walks up from the bottom, eating chrome, and stops dead at the first line
+ * that looks like something somebody said. A *filled* prompt (`❯ fix the
+ * thing`) is content by that rule and stays — better to show a draft than to
+ * eat a user turn.
+ */
+function splitTail(lines: Cut[]): { body: Cut[]; footer: string[] } {
+  let end = lines.length
+  let eaten = 0
+  while (end > 0 && eaten < MAX_TAIL && chromeLine(lines[end - 1]!.flat)) {
+    end -= 1
+    eaten += 1
+  }
+  const footer: string[] = []
+  for (let i = end; i < lines.length; i++) {
+    const flat = lines[i]!.flat
+    if (flat) footer.push(flat)
+  }
+  return { body: lines.slice(0, end), footer }
+}
 
 /**
  * Cut the TUI's own composer off the end of a capture, so our box is the only
- * input on screen.
- *
- * Walks up from the bottom and eats empty lines, a live prompt, a rule, and a
- * single footer-chrome line. Stops at the first line that looks like content.
- * Never eats more than eight lines, so a short screen that is *only* a prompt
- * still yields something rather than vanishing.
+ * input on screen. Text in, text out — the shape callers outside this file
+ * (and scripts/feed-check.mjs) have always used.
  */
 export function stripLiveComposer(text: string): string {
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '').split('\n')
-  let end = lines.length
-  let eaten = 0
-  const eat = (ok: (line: string) => boolean): boolean => {
-    if (end === 0 || eaten >= 8) return false
-    const line = stripBoxDrawing(lines[end - 1] ?? '')
-    if (!ok(line)) return false
-    end -= 1
-    eaten += 1
-    return true
-  }
-  while (eat((line) => line === '')) {
-    /* trailing blanks */
-  }
-  eat((line) => LIVE_PROMPT.test(line))
-  eat((line) => line === '' || RULE.test(line))
-  eat((line) => FOOTER_CHROME.test(line) || RULE.test(line))
-  while (eat((line) => line === '')) {
-    /* blanks above the composer */
-  }
-  return lines.slice(0, end).join('\n').replace(/\s+$/, '')
+  const { body } = splitTail(richFromText(text).map(cut))
+  return body
+    .map((line) => line.raw)
+    .join('\n')
+    .replace(/\s+$/, '')
 }
+
+/* --------------------------------------------------------------- the status */
+
+/**
+ * Model names, most specific first.
+ *
+ * Codex prints `model: gpt-5-codex`, so the labelled form wins over any bare
+ * name that might also be on the line; Claude prints either `Opus 4.1` in its
+ * banner or a full `claude-opus-4-1` in `/status`.
+ */
+const MODEL_PATTERNS: RegExp[] = [
+  /\bmodel\s*:\s*([\w.-]+)/i,
+  /\b(claude-(?:opus|sonnet|haiku)-[\w.-]+)/i,
+  /\b((?:opus|sonnet|haiku)\s+\d+(?:\.\d+)?)\b/i,
+  /\b(gemini-[\w.-]+)/i,
+  /\b(gpt-[\w.-]+)/i,
+  /\b(grok-[\w.-]+)/i
+]
+
+/**
+ * Permission modes, most specific first.
+ *
+ * The label is the phrase as the CLI printed it, trailing "on" included, so a
+ * tooltip can quote the screen rather than this file's vocabulary.
+ */
+const MODE_PATTERNS: { re: RegExp; mode: PermissionMode }[] = [
+  { re: /\b(bypass(?:ing)? permissions(?:\s+on)?)/i, mode: 'bypass' },
+  { re: /\b(plan mode(?:\s+on)?)/i, mode: 'plan' },
+  { re: /\bapproval\s*:\s*(full-auto)/i, mode: 'auto' },
+  { re: /\bapproval\s*:\s*(auto-edit)/i, mode: 'accept-edits' },
+  { re: /\bapproval\s*:\s*(suggest)/i, mode: 'default' },
+  { re: /\b(yolo mode(?:\s+on)?)/i, mode: 'auto' },
+  { re: /\b(auto-accept(?: edits)?(?:\s+on)?)/i, mode: 'accept-edits' },
+  { re: /\b(accept edits(?:\s+on)?)/i, mode: 'accept-edits' },
+  { re: /\b(normal mode|default mode)\b/i, mode: 'default' }
+]
+
+const CONTEXT_PATTERNS: RegExp[] = [
+  /context left until auto-compact\s*:\s*(\d+%)/i,
+  /(\d+%)\s*context left/i,
+  /context(?: left| remaining| used)?\s*:\s*(\d+%)/i,
+  /(\d+(?:\.\d+)?k)\s*(?:tokens\s*)?left/i
+]
+
+/** A cwd as any of the three shells Forge launches prints one. */
+const CWD_PATTERN = /(?:^|\s)(~[\\/][^\s()>]*|[A-Za-z]:\\[^\s()>]*|\/(?:home|Users|mnt|opt|usr|var|tmp)\/[^\s()>]*)/
+
+/** `(main*)` — a branch, and not `(97% context left)`, which has spaces in it. */
+const BRANCH_PATTERN = /\(([A-Za-z0-9._/-]+\*?)\)/
+
+function firstMatch(lines: string[], patterns: RegExp[]): string | undefined {
+  for (const line of lines) {
+    for (const re of patterns) {
+      const m = re.exec(line)
+      if (m?.[1]) return m[1].trim()
+    }
+  }
+  return undefined
+}
+
+/**
+ * Read the agent's own footer back as a status.
+ *
+ * The footer is searched first and the body only as a fallback, because the
+ * footer is the CLI's current answer and the body may hold an older one — a
+ * `/status` from ten minutes ago, a banner from before a `/model`. The
+ * exception is the cwd and the model name, which several CLIs print only once,
+ * in the banner, and never repeat.
+ */
+function readStatus(footer: string[], body: Cut[]): PaneStatus {
+  const bodyFlat = body.map((line) => line.flat).filter(Boolean)
+  const everywhere = [...footer, ...bodyFlat]
+
+  const status: PaneStatus = { mode: 'unknown', busy: false, footer }
+
+  const model = firstMatch(everywhere, MODEL_PATTERNS)
+  if (model) status.model = model
+
+  for (const line of everywhere) {
+    let hit = false
+    for (const { re, mode } of MODE_PATTERNS) {
+      const m = re.exec(line)
+      if (!m?.[1]) continue
+      status.mode = mode
+      status.modeLabel = m[1].trim()
+      hit = true
+      break
+    }
+    if (hit) break
+  }
+
+  const context = firstMatch(everywhere, CONTEXT_PATTERNS)
+  if (context) status.context = context
+
+  const cwd = firstMatch(everywhere, [CWD_PATTERN])
+  if (cwd) status.cwd = cwd
+
+  for (const line of footer) {
+    if (!CWD_PATTERN.test(line)) continue
+    const branch = BRANCH_PATTERN.exec(line)?.[1]
+    if (branch && !/^\d+$/.test(branch)) {
+      status.branch = branch
+      break
+    }
+  }
+
+  // Busy is a *now* fact: only the footer that was just lifted off the screen
+  // and the last few lines still on it can say anything about it. A spinner
+  // fifty lines up is a turn that finished.
+  const recent = [...footer, ...bodyFlat.slice(-3)]
+  for (const line of recent) {
+    if (!busyLine(line)) continue
+    status.busy = true
+    const activity = ACTIVITY.exec(line)?.[1]
+    if (activity) status.activity = activity.trim()
+    break
+  }
+
+  return status
+}
+
+/* --------------------------------------------------------------- the blocks */
 
 /**
  * A line that starts a user turn in the TUIs Forge actually launches.
@@ -88,9 +384,29 @@ export function stripLiveComposer(text: string): string {
  * (`❯` alone) is not a turn — it has been stripped already.
  */
 const USER_TURN = /^(?:>\s+|(?:you|user|human)\s*:\s+)\S/i
+const USER_MARKER = /^(?:>\s+|(?:you|user|human)\s*:\s+)/i
 
-function userText(line: string): string {
-  return line.replace(/^(?:>\s+|(?:you|user|human)\s*:\s+)/i, '')
+/**
+ * A tool call, as opposed to the agent talking.
+ *
+ * Claude draws both with the same bullet — `⏺ Read(file)` is a call and
+ * `⏺ The tests pass.` is a sentence — so the call *shape* (a name, then an
+ * open bracket) is the whole of the distinction, and anything else stays prose.
+ * Codex shells out with `$ cmd` / `exec`; Gemini ticks its finished tools.
+ */
+const TOOL_START = [
+  /^[⏺●]\s+[A-Za-z][\w.-]*\(/,
+  /^\$\s+\S/,
+  /^⚙/,
+  /^exec\s+\S/i,
+  /^[✓✔✗✖]\s+[A-Z][A-Za-z0-9_]*\b/
+]
+
+/** Claude's result gutter, and the box rows some CLIs hang under a call. */
+const TOOL_CONT = /^[⎿⋮↳]/
+
+function isToolStart(flat: string): boolean {
+  return TOOL_START.some((re) => re.test(flat))
 }
 
 function isBanner(line: string): boolean {
@@ -103,67 +419,129 @@ function isBanner(line: string): boolean {
   return false
 }
 
-function flush(
-  blocks: FeedBlock[],
-  role: FeedRole,
-  lines: string[]
-): void {
-  const text = lines.join('\n').replace(/^\n+/, '').replace(/\s+$/, '')
-  if (!text) return
-  blocks.push({
-    id: `${role}-${blocks.length}-${text.length}`,
-    role,
-    text
-  })
+/**
+ * A cheap, stable digest of a block's text.
+ *
+ * djb2, because the only requirement is that the same text gives the same key
+ * and different text usually does not: this ends up in a React `key`, so the
+ * cost of a collision is a card that fails to re-mount, not a wrong answer.
+ */
+function digest(text: string): string {
+  let h = 5381
+  for (let i = 0; i < text.length; i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0
+  return h.toString(36)
+}
+
+function trimEdges(lines: RichLine[]): RichLine[] {
+  let start = 0
+  let end = lines.length
+  while (start < end && !lines[start]!.text.trim()) start += 1
+  while (end > start && !lines[end - 1]!.text.trim()) end -= 1
+  return lines.slice(start, end)
 }
 
 /**
- * Cut a (composer-stripped) capture into cards.
+ * Push a card, if there is anything in it.
+ *
+ * The id is role, position and a digest of the text and nothing else — no
+ * counter, no uuid — so that re-parsing a screen that has grown by one line
+ * hands React the same keys for every card above the new one. A key that
+ * changed on every PTY chunk would re-mount the whole conversation ten times a
+ * second, which is how a feed loses its scroll position mid-sentence.
+ */
+function flush(blocks: FeedBlock[], role: FeedRole, lines: RichLine[]): void {
+  const kept = trimEdges(lines)
+  const text = kept
+    .map((line) => line.text)
+    .join('\n')
+    .replace(/\s+$/, '')
+  if (!text.trim()) return
+  blocks.push({ id: `${role}-${blocks.length}-${digest(text)}`, role, lines: kept, text })
+}
+
+/**
+ * Cut a (footer-stripped) screen into cards.
  *
  * Preamble that looks like a TUI banner becomes one system block. Each `> …`
- * or `You:` line opens a user card; everything after it until the next one is
- * the agent. A capture with no user markers at all is a single agent card —
- * that is the honest shape of a shell, or of an agent that has not been
- * spoken to yet.
+ * or `You:` line opens a user card; a tool call and its indented results become
+ * a tool card; everything else is the agent. A capture with no markers at all
+ * is a single agent card — that is the honest shape of a shell, or of an agent
+ * that has not been spoken to yet.
  */
-export function blocksFromCapture(text: string): FeedBlock[] {
-  const raw = stripLiveComposer(text)
-  if (!raw.trim()) return []
-
-  const lines = raw.split('\n').map((line) => stripBoxDrawing(line))
+function cutBlocks(body: Cut[]): FeedBlock[] {
   const blocks: FeedBlock[] = []
-
   let i = 0
-  const banner: string[] = []
-  while (i < lines.length && !USER_TURN.test(lines[i] ?? '') && isBanner(lines[i] ?? '')) {
-    if ((lines[i] ?? '').trim()) banner.push(lines[i]!)
+
+  const banner: RichLine[] = []
+  while (i < body.length && !USER_TURN.test(body[i]!.flat) && isBanner(body[i]!.flat)) {
+    if (body[i]!.flat) banner.push(body[i]!.rich)
     i += 1
   }
   flush(blocks, 'system', banner)
 
   let role: FeedRole = 'agent'
-  let buf: string[] = []
-  for (; i < lines.length; i++) {
-    const line = lines[i] ?? ''
-    if (USER_TURN.test(line)) {
+  let buf: RichLine[] = []
+
+  for (; i < body.length; i++) {
+    const line = body[i]!
+
+    if (USER_TURN.test(line.flat)) {
       flush(blocks, role, buf)
       role = 'user'
-      buf = [userText(line)]
+      const marker = USER_MARKER.exec(line.rich.text)?.[0]?.length ?? 0
+      buf = [{ runs: sliceRuns(line.rich.runs, marker, line.rich.text.length), text: line.rich.text.slice(marker) }]
       continue
     }
-    if (role === 'user' && line.trim() && !/^\s/.test(line) && !USER_TURN.test(line)) {
-      // An unindented non-prompt line after a user turn is the agent starting.
+
+    if (isToolStart(line.flat)) {
+      flush(blocks, role, buf)
+      const tool: RichLine[] = [line.rich]
+      let j = i + 1
+      for (; j < body.length; j++) {
+        const next = body[j]!
+        // A blank line ends the call: every CLI that draws results under one
+        // draws them contiguously, and reading past a gap is how the agent's
+        // next sentence ends up inside the tool card.
+        if (!next.flat) break
+        if (!TOOL_CONT.test(next.flat) && !/^\s/.test(next.raw)) break
+        tool.push(next.rich)
+      }
+      i = j - 1
+      flush(blocks, 'tool', tool)
+      role = 'agent'
+      buf = []
+      continue
+    }
+
+    if (role === 'user' && line.flat && !/^\s/.test(line.raw)) {
+      // An unindented line after a user turn is the agent starting; an indented
+      // one is the rest of what was typed.
       flush(blocks, 'user', buf)
       role = 'agent'
-      buf = [line]
+      buf = [line.rich]
       continue
     }
-    buf.push(line)
-  }
-  flush(blocks, role, buf)
 
-  if (blocks.length === 0 && raw.trim()) {
-    flush(blocks, 'agent', [raw.trim()])
+    buf.push(line.rich)
   }
+
+  flush(blocks, role, buf)
   return blocks
+}
+
+/**
+ * The whole read: a styled screen in, cards plus the agent's own status out.
+ */
+export function transcriptFromLines(lines: RichLine[]): Transcript {
+  const cuts = (Array.isArray(lines) ? lines : []).map(cut)
+  const { body, footer } = splitTail(cuts)
+  return { blocks: cutBlocks(body), status: readStatus(footer, body) }
+}
+
+/**
+ * The same read from plain text, for callers that have no styled capture —
+ * and for the checks, which hold this file to its cuts without a terminal.
+ */
+export function blocksFromCapture(text: string): FeedBlock[] {
+  return transcriptFromLines(richFromText(text)).blocks
 }

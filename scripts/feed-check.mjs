@@ -24,7 +24,16 @@ registerHooks({
   }
 })
 
-const { stripBoxDrawing, stripLiveComposer, blocksFromCapture } = await import('../web/src/lib/feed.ts')
+const { stripBoxDrawing, stripLiveComposer, blocksFromCapture, transcriptFromLines, richFromText } = await import(
+  '../web/src/lib/feed.ts'
+)
+
+/** A whole screen, the way the terminal would hand one over. */
+const screen = (text) => transcriptFromLines(richFromText(text))
+/** The roles of a transcript's cards, in order. */
+const roles = (blocks) => blocks.map((b) => b.role).join(' ')
+/** Does any card carry this text? Used to prove the footer is *not* in one. */
+const inAnyBlock = (blocks, re) => blocks.some((b) => re.test(b.text))
 
 let pass = 0
 let fail = 0
@@ -93,6 +102,205 @@ ok(shellBlocks.every((b) => b.role !== 'user'), 'and does not invent a user turn
 console.log('empty')
 ok(blocksFromCapture('').length === 0, 'empty capture is no cards')
 ok(blocksFromCapture('❯ ').length === 0, 'a prompt alone is no cards')
+
+/*
+ * From here down the fixtures are whole screens, as close to what each CLI
+ * actually paints as a template string can be — banner, turns, tool calls,
+ * spinner, composer box, footer. They are the difference between a parser that
+ * passes its own unit tests and one that survives a real pane.
+ */
+
+console.log('claude code, a whole screen')
+const claudeFull = [
+  '╭──────────────────────────────────────────────────╮',
+  '│ ✻ Welcome to Claude Code                         │',
+  '│                                                  │',
+  '│   Opus 4.1 · claude.ai/code                      │',
+  '│   C:\\Users\\steve\\Desktop\\forge                   │',
+  '╰──────────────────────────────────────────────────╯',
+  '',
+  '> read the feed parser and tell me what it drops',
+  '',
+  '⏺ I will look at the parser first.',
+  '',
+  '⏺ Read(web/src/lib/feed.ts)',
+  '  ⎿  Read 169 lines (ctrl+o to expand)',
+  '',
+  '⏺ It drops the footer, which is where the mode lives.',
+  '',
+  '> now fix it',
+  '',
+  '⏺ Update(web/src/lib/feed.ts)',
+  '  ⎿  Updated web/src/lib/feed.ts with 12 additions',
+  '',
+  '✢ Thinking… (12s · ↓ 1.2k tokens · esc to interrupt)',
+  '',
+  '╭──────────────────────────────────────────────────╮',
+  '│ >                                                │',
+  '╰──────────────────────────────────────────────────╯',
+  '  ⏵⏵ bypass permissions on (shift+tab to cycle)      Context left until auto-compact: 23%'
+].join('\n')
+const claudeScreen = screen(claudeFull)
+is(roles(claudeScreen.blocks), 'system user agent tool agent user tool', 'banner, two turns and two tool calls, in order')
+is(claudeScreen.status.model, 'Opus 4.1', 'the model comes off the banner')
+is(claudeScreen.status.mode, 'bypass', 'the permission mode comes off the footer')
+ok(/bypass permissions/i.test(claudeScreen.status.modeLabel ?? ''), 'and keeps the words the TUI printed')
+is(claudeScreen.status.context, '23%', 'context left is read')
+is(claudeScreen.status.cwd, 'C:\\Users\\steve\\Desktop\\forge', 'the cwd is read')
+is(claudeScreen.status.busy, true, 'a spinner line means busy')
+is(claudeScreen.status.activity, 'Thinking', 'and names what it is doing')
+ok(
+  claudeScreen.status.footer.some((line) => /bypass permissions/.test(line)),
+  'the footer lines are kept in status.footer'
+)
+ok(!inAnyBlock(claudeScreen.blocks, /bypass permissions/), 'and the mode line is in no card')
+ok(!inAnyBlock(claudeScreen.blocks, /esc to interrupt/), 'nor is the spinner')
+ok(!inAnyBlock(claudeScreen.blocks, /^❯|\n❯/), 'nor is the live prompt')
+const claudeTool = claudeScreen.blocks.find((b) => b.role === 'tool')
+ok(/^⏺ Read\(/.test(claudeTool?.text ?? ''), 'a tool card starts at the call')
+ok(/⎿/.test(claudeTool?.text ?? ''), 'and carries its ⎿ result line')
+ok(
+  claudeScreen.blocks.some((b) => b.role === 'agent' && /I will look at the parser/.test(b.text)),
+  'prose under the same ⏺ bullet stays agent prose'
+)
+
+console.log('gemini, a whole screen')
+const geminiFull = [
+  ' ███ GEMINI',
+  '',
+  ' Tips for getting started:',
+  ' 1. Ask questions, edit files, run commands.',
+  '',
+  '> summarise the diff',
+  '',
+  '✦ The diff adds a status strip above the feed.',
+  '',
+  '✓ ReadFile web/src/lib/rich.ts',
+  '   Read 76 lines',
+  '',
+  '╭────────────────────────────────────────────────────╮',
+  '│ > Type your message or @path/to/file               │',
+  '╰────────────────────────────────────────────────────╯',
+  '~/Desktop/forge (main*)   no sandbox (see /docs)   gemini-2.5-pro (97% context left)'
+].join('\n')
+const geminiScreen = screen(geminiFull)
+is(roles(geminiScreen.blocks), 'system agent user agent tool', 'banner, tips, the turn, the reply, the tool')
+is(geminiScreen.status.model, 'gemini-2.5-pro', 'gemini names its model in the footer')
+is(geminiScreen.status.context, '97%', 'and its context left')
+is(geminiScreen.status.cwd, '~/Desktop/forge', 'and its cwd')
+is(geminiScreen.status.branch, 'main*', 'and its branch')
+is(geminiScreen.status.busy, false, 'an idle screen is not busy')
+ok(!inAnyBlock(geminiScreen.blocks, /Type your message/), 'the composer placeholder is not a user turn')
+ok(!inAnyBlock(geminiScreen.blocks, /no sandbox/), 'and the footer line is in no card')
+ok(
+  geminiScreen.blocks.some((b) => b.role === 'user' && b.text === 'summarise the diff'),
+  'the > turn is the user'
+)
+ok(
+  geminiScreen.blocks.some((b) => b.role === 'tool' && /ReadFile/.test(b.text)),
+  'a ticked tool is a tool card'
+)
+
+console.log('codex, a whole screen')
+const codexFull = [
+  '╭──────────────────────────────────────────────╮',
+  '│  >_ OpenAI Codex (v0.5.0)                    │',
+  '│                                              │',
+  '│  model: gpt-5-codex                          │',
+  '│  approval: full-auto                         │',
+  '│  sandbox: workspace-write                    │',
+  '╰──────────────────────────────────────────────╯',
+  '',
+  '> run the fast checks',
+  '',
+  'Running the fast lane now.',
+  '',
+  '$ npm run check',
+  '  1 failed, 42 passed',
+  '',
+  '▌ Ask Codex to do anything',
+  '⏎ send   ctrl+c quit'
+].join('\n')
+const codexScreen = screen(codexFull)
+is(roles(codexScreen.blocks), 'system agent user agent tool', 'banner, settings, the turn, the reply, the command')
+is(codexScreen.status.model, 'gpt-5-codex', 'codex names its model')
+is(codexScreen.status.mode, 'auto', 'full-auto approval is an auto mode')
+ok(
+  codexScreen.blocks.some((b) => b.role === 'tool' && /^\$ npm run check/.test(b.text)),
+  'a $ command is a tool card'
+)
+ok(
+  codexScreen.blocks.some((b) => b.role === 'tool' && /42 passed/.test(b.text)),
+  'and its indented output belongs to it'
+)
+ok(!inAnyBlock(codexScreen.blocks, /Ask Codex to do anything/), 'the placeholder is not a card')
+ok(!inAnyBlock(codexScreen.blocks, /ctrl\+c quit/), 'nor are the key hints')
+
+console.log('grok, a whole screen')
+const grokFull = [
+  ' grok-4',
+  '',
+  'You: is it the sensor or the wiring',
+  '',
+  'I think it is the wiring — the sensor reads fine at idle.',
+  '',
+  '› '
+].join('\n')
+const grokScreen = screen(grokFull)
+is(roles(grokScreen.blocks), 'system user agent', 'the wordmark, the question, the answer')
+is(grokScreen.status.model, 'grok-4', 'grok names its model')
+is(grokScreen.status.mode, 'unknown', 'and prints no mode, so none is guessed')
+ok(
+  grokScreen.blocks.some((b) => b.role === 'user' && b.text === 'is it the sensor or the wiring'),
+  'You: is still a user turn'
+)
+
+console.log('a plain shell')
+const pwshFull = [
+  'Windows PowerShell',
+  'Copyright (C) Microsoft Corporation. All rights reserved.',
+  '',
+  'PS C:\\Users\\steve\\Desktop\\forge> npm run feed:check',
+  '18 passed',
+  'PS C:\\Users\\steve\\Desktop\\forge>'
+].join('\n')
+const pwshScreen = screen(pwshFull)
+is(pwshScreen.status.mode, 'unknown', 'a shell has no permission mode')
+is(pwshScreen.status.model, undefined, 'and no model')
+is(pwshScreen.status.busy, false, 'and is not busy')
+is(roles(pwshScreen.blocks), 'agent', 'a shell is one agent card — the honest shape of it')
+ok(!inAnyBlock(pwshScreen.blocks, /forge>\s*$/), 'its live prompt is still chrome')
+
+console.log('colour survives')
+const coloured = [
+  { runs: [{ text: '> ' }, { text: 'paint it red', fg: 'rgb(224, 108, 117)' }], text: '> paint it red' },
+  { runs: [], text: '' },
+  { runs: [{ text: 'Done', fg: '#8bd5ca', bold: true }, { text: '.' }], text: 'Done.' }
+]
+const rich = transcriptFromLines(coloured)
+const userBlock = rich.blocks.find((b) => b.role === 'user')
+const agentBlock = rich.blocks.find((b) => b.role === 'agent')
+is(userBlock?.text, 'paint it red', 'the > marker is cut off the user turn')
+ok(
+  userBlock?.lines[0]?.runs.some((run) => run.fg === 'rgb(224, 108, 117)'),
+  'and the run under it keeps its colour'
+)
+ok(
+  agentBlock?.lines[0]?.runs.some((run) => run.fg === '#8bd5ca' && run.bold === true),
+  'an agent run keeps colour and weight'
+)
+
+console.log('ids hold still')
+const before = ['> one', '', 'the first answer', '', '> two', '', 'the second answer'].join('\n')
+const after = `${before}\n  and a little more of it`
+const beforeIds = blocksFromCapture(before).map((b) => b.id)
+const afterIds = blocksFromCapture(after).map((b) => b.id)
+is(afterIds.length, beforeIds.length, 'appending to the last turn adds no card')
+ok(
+  beforeIds.slice(0, -1).every((id, i) => id === afterIds[i]),
+  'every earlier card keeps its id across a re-parse'
+)
+ok(beforeIds[beforeIds.length - 1] !== afterIds[afterIds.length - 1], 'and the card that grew does not')
 
 if (fail) {
   console.log(`\n${fail} failed, ${pass} passed`)

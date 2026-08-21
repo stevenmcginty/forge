@@ -4,13 +4,26 @@ import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
-import { blocksFromCapture, type FeedBlock } from '../lib/feed'
+import { EMPTY_TRANSCRIPT, transcriptFromLines } from '../lib/feed'
 import { imageFilesFromDataTransfer, packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
+import { publishPaneStatus } from '../lib/pane-status'
+import type { Transcript } from '../lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
 import { useForge, useProfiles } from '../state'
 import { AgentChooser } from './AgentChooser'
 import { Feed } from './Feed'
+
+/**
+ * How long a burst of output may hold the conversation view still.
+ *
+ * Roughly twelve reads a second: fast enough that an agent's sentence appears
+ * as it is written, slow enough that a phone is not re-cutting the screen for
+ * every 20-byte chunk of it. The trailing timer means the *last* chunk of a
+ * burst is always read, so a pane never settles showing one line less than it
+ * has.
+ */
+const PARSE_INTERVAL_MS = 80
 
 /**
  * One terminal: the desktop's slim `.pane` header over a live xterm fed relayed
@@ -122,15 +135,84 @@ export function PaneView({
   const sendingImage = useRef(false)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
   const [truncated, setTruncated] = useState(false)
-  const [blocks, setBlocks] = useState<FeedBlock[]>([])
+  const [transcript, setTranscript] = useState<Transcript>(EMPTY_TRANSCRIPT)
   /**
-   * A phone reads a scrollable feed — native overflow, so a finger moves the
-   * conversation the way it moves any other page. xterm's canvas cannot do
-   * that (native-scrolling the DOM under a canvas smears). A desktop browser
-   * has a wheel, so it opens on the coloured terminal. Either can be flipped.
+   * An agent opens as a conversation on every screen — the coloured transcript
+   * with the agent's own footer lifted into the status strip — because that is
+   * the display this app is for; the raw terminal is one tap away in the header.
+   * A shell has no turns to cut, so it opens on the terminal. Either can be
+   * flipped.
    */
-  const [view, setView] = useState<'feed' | 'term'>(mobile ? 'feed' : 'term')
+  const [view, setView] = useState<'feed' | 'term'>(agent ? 'feed' : 'term')
   const feed = view === 'feed'
+
+  /* ------------------------------------------------------- reading the screen */
+
+  /**
+   * The conversation is re-read on a schedule, not on every chunk.
+   *
+   * A streaming agent arrives as dozens of small PTY writes a second, and the
+   * previous shape of this — parse the whole screen inside every `write`
+   * callback — re-cut hundreds of lines into cards for each of them, then threw
+   * all but the last result away. On a phone that is the difference between a
+   * feed that scrolls and one that hitches while the agent is typing.
+   *
+   * So a write only *arms* a parse. The armed frame reads whatever the terminal
+   * has by the time it runs, which is every chunk that landed in the meantime,
+   * and nothing is lost: the arming is level-triggered, so the last chunk of a
+   * burst is always followed by a parse that sees it.
+   */
+  const parseFrame = useRef(0)
+  const parseTimer = useRef(0)
+  const parsedAt = useRef(0)
+
+  const parseNow = useCallback(() => {
+    parseFrame.current = 0
+    parsedAt.current = performance.now()
+    const host = hostRef.current
+    setTranscript(host ? transcriptFromLines(host.captureRich()) : EMPTY_TRANSCRIPT)
+  }, [])
+
+  /**
+   * Arm a parse: next animation frame, or as soon after PARSE_INTERVAL_MS as
+   * there is one. A frame or timer already in flight *is* the dirty flag — it
+   * will read the newest screen when it fires, so a second arm would only be a
+   * second read of the same thing.
+   */
+  const scheduleParse = useCallback(() => {
+    if (parseFrame.current || parseTimer.current) return
+    const wait = PARSE_INTERVAL_MS - (performance.now() - parsedAt.current)
+    if (wait <= 0) {
+      parseFrame.current = requestAnimationFrame(parseNow)
+      return
+    }
+    parseTimer.current = window.setTimeout(() => {
+      parseTimer.current = 0
+      parseFrame.current = requestAnimationFrame(parseNow)
+    }, wait)
+  }, [parseNow])
+
+  useEffect(
+    () => () => {
+      if (parseFrame.current) cancelAnimationFrame(parseFrame.current)
+      if (parseTimer.current) clearTimeout(parseTimer.current)
+    },
+    []
+  )
+
+  /**
+   * The agent's own footer, read off this pane's screen, handed to whoever is
+   * drawing the status strip.
+   *
+   * That strip sits over the app's one composer (`SessionComposer`), which is
+   * not in this pane's tree and is several splits away from it — so the route
+   * is the small store in lib/pane-status.ts rather than a prop. Cleared on
+   * unmount so a closed pane's model and mode do not outlive it.
+   */
+  useEffect(() => {
+    publishPaneStatus(leaf.id, transcript.status)
+  }, [leaf.id, transcript.status])
+  useEffect(() => () => publishPaneStatus(leaf.id, undefined), [leaf.id])
 
   /* ------------------------------------------------------ the live terminal */
 
@@ -161,7 +243,7 @@ export function PaneView({
         host.reset()
         setTruncated(wasTruncated)
       }
-      host.write(data, () => setBlocks(blocksFromCapture(host.capture())))
+      host.write(data, scheduleParse)
     })
 
     // Fit before attach, so the desktop is handed the width this browser is
@@ -211,10 +293,9 @@ export function PaneView({
     })
     hostRef.current = host
     host.fit()
-    const painted = (): void => setBlocks(blocksFromCapture(host.capture()))
-    const transcript = transcriptFor(state.cached, leaf.id)
-    if (transcript) host.write(transcript, painted)
-    else host.write('\r\n\x1b[2m  Nothing of this pane was cached before the desktop went away.\x1b[0m\r\n', painted)
+    const cachedBytes = transcriptFor(state.cached, leaf.id)
+    if (cachedBytes) host.write(cachedBytes, scheduleParse)
+    else host.write('\r\n\x1b[2m  Nothing of this pane was cached before the desktop went away.\x1b[0m\r\n', scheduleParse)
     return () => {
       host.dispose()
       hostRef.current = null
@@ -498,7 +579,8 @@ export function PaneView({
       <div className="pane__stage">
         {feed ? (
           <Feed
-            blocks={blocks}
+            blocks={transcript.blocks}
+            status={transcript.status}
             asking={asking}
             prompt={prompt}
             empty={cached ? 'Nothing of this pane was cached.' : 'Waiting for the desktop…'}
