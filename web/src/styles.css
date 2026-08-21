@@ -1429,6 +1429,44 @@
   opacity: 0.45;
 }
 
+/*
+ * The fallback for a clipboard the browser will not read: a box to paste into
+ * by hand, sat over the bottom of the pane so the long-press menu has
+ * somewhere to land.
+ */
+.pane__pastebox {
+  position: absolute;
+  left: var(--s-3);
+  right: var(--s-3);
+  bottom: var(--s-3);
+  z-index: 2;
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-3);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
+}
+
+.pane__pastebox-text {
+  width: 100%;
+  resize: vertical;
+  padding: var(--s-3);
+  font: inherit;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+}
+
+.pane__pastebox-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+}
+
 /* Splits mean nothing on a phone; closing does. */
 .app[data-mobile] .pane__action[title^='Split'] {
   display: none;

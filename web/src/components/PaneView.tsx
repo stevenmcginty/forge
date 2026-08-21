@@ -111,6 +111,9 @@ export function PaneView({
   const sendingImage = useRef(false)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
   const [truncated, setTruncated] = useState(false)
+  /** The typed-in fallback for a browser that will not hand the clipboard over. */
+  const [pasteBox, setPasteBox] = useState(false)
+  const [pasteDraft, setPasteDraft] = useState('')
 
   /* ------------------------------------------------------ the live terminal */
 
@@ -326,6 +329,74 @@ export function PaneView({
     [actions, alive, leaf.id, live]
   )
 
+  /* ---------------------------------------------------- pasting from outside */
+
+  /**
+   * Hand whatever is on the clipboard to the pane, text or image.
+   *
+   * A desktop browser already pastes with Ctrl+V, because xterm listens on its
+   * own textarea. A phone has no such route: the textarea is a 1px box with
+   * no long-press menu, so text written in some other app — the whole point of
+   * brainstorming somewhere else and bringing it here — had no way in. This
+   * goes through xterm's `paste` rather than `write` on the socket so that
+   * bracketed-paste mode and the newline translation are xterm's, the same as
+   * a Ctrl+V would get.
+   *
+   * `navigator.clipboard.read` needs a secure context and, on Chrome, a one-off
+   * permission; Firefox and some WebViews refuse it outright. Refusal opens a
+   * box to paste into by hand instead of a dead button.
+   */
+  const pasteText = useCallback(
+    (text: string) => {
+      if (!text) return
+      hostRef.current?.term.paste(text)
+      hostRef.current?.focus()
+      if (mobile) actions.claim(leaf.id)
+    },
+    [actions, leaf.id, mobile]
+  )
+
+  const pasteFromClipboard = useCallback(async () => {
+    if (!live || !alive) return
+    const clip = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
+    try {
+      if (clip?.read) {
+        const items = await clip.read()
+        const images: File[] = []
+        let text = ''
+        for (const item of items) {
+          const imageType = item.types.find((t) => t.startsWith('image/'))
+          if (imageType) {
+            const blob = await item.getType(imageType)
+            images.push(new File([blob], `clipboard.${imageType.split('/')[1] ?? 'png'}`, { type: imageType }))
+          } else if (item.types.includes('text/plain')) {
+            text += await (await item.getType('text/plain')).text()
+          }
+        }
+        if (images.length) {
+          void sendImages(images)
+          return
+        }
+        if (text) {
+          pasteText(text)
+          return
+        }
+        actions.setNotice('The clipboard is empty.')
+        return
+      }
+      if (clip?.readText) {
+        const text = await clip.readText()
+        if (text) pasteText(text)
+        else actions.setNotice('The clipboard is empty.')
+        return
+      }
+    } catch {
+      /* refused, or not allowed here — fall through to the box */
+    }
+    setPasteDraft('')
+    setPasteBox(true)
+  }, [actions, alive, live, pasteText, sendImages])
+
   useEffect(() => {
     const holder = holderRef.current
     if (!holder || cached || !live) return
@@ -411,6 +482,15 @@ export function PaneView({
         ) : null}
 
         <div className="pane__actions">
+          <button
+            type="button"
+            className="ghost-btn pane__action"
+            title="Paste from the clipboard"
+            disabled={!live || !alive}
+            onClick={() => void pasteFromClipboard()}
+          >
+            <Icon name="clipboard" size={13} />
+          </button>
           {/*
             A label, not a button that clicks a hidden input. iOS Safari
             refuses programmatic `.click()` on `input[hidden]`; activating the
@@ -497,6 +577,42 @@ export function PaneView({
           if (mobile && live && alive) actions.claim(leaf.id)
         }}
       />
+
+      {pasteBox ? (
+        <form
+          className="pane__pastebox"
+          onSubmit={(event) => {
+            event.preventDefault()
+            pasteText(pasteDraft)
+            setPasteBox(false)
+            setPasteDraft('')
+          }}
+        >
+          <textarea
+            className="pane__pastebox-text"
+            autoFocus
+            rows={5}
+            placeholder="This browser would not hand the clipboard over — paste here instead."
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            value={pasteDraft}
+            onChange={(event) => setPasteDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setPasteBox(false)
+              if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) event.currentTarget.form?.requestSubmit()
+            }}
+          />
+          <div className="pane__pastebox-row">
+            <button type="button" className="ghost-btn" onClick={() => setPasteBox(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="cta-btn" disabled={!pasteDraft}>
+              <Icon name="send" size={13} /> Send to pane
+            </button>
+          </div>
+        </form>
+      ) : null}
 
       <AgentChooser
         anchor={splitRef.current}

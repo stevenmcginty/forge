@@ -20,6 +20,7 @@ export type IconName =
   | 'chevronDown'
   | 'terminal'
   | 'camera'
+  | 'clipboard'
   | 'grip'
   | 'check'
   | 'trash'
@@ -110,6 +111,12 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M2.4 5.8h2.4l.9-1.3h4.6l.9 1.3h2.4v6.2a.7.7 0 0 1-.7.7H3.1a.7.7 0 0 1-.7-.7z" />
       <circle cx="8" cy="9" r="2" />
+    </>
+  ),
+  clipboard: (
+    <>
+      <rect x="3.2" y="3.4" width="9.6" height="10.4" rx="1.4" />
+      <path d="M6 3.4V2.6h4v.8M6 7.4h4M6 9.8h3" />
     </>
   ),
   grip: (
