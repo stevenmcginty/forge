@@ -14,11 +14,9 @@ import { useActiveProject, useForge } from '../state'
  * the connection badge, which on the desktop has no equivalent because there is
  * no link to be honest about.
  *
- * On a phone (`mobile`) the bar is the project: its colour paints the header and
- * the name sits on the first row in that colour, because a 390px screen that
- * still led with the Forge wordmark and a grey 12px label was a screen you
- * could not tell apart from another project at a glance. The desktop layout
- * below is untouched.
+ * On a phone (`mobile`) the bar is the project: one row, the project's colour
+ * on the name and the seam, menu on the left, tools on the right. The desktop
+ * layout below is untouched.
  */
 export function TopBar({
   collapsed,
@@ -73,7 +71,7 @@ export function TopBar({
           aria-pressed={!collapsed}
           onClick={onToggleRail}
         >
-          <Icon name="panel" size={15} />
+          <Icon name="panel" size={mobile ? 18 : 15} />
         </button>
 
         {mobile ? null : (

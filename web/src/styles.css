@@ -1351,39 +1351,37 @@
 }
 
 /*
- * The title bar is the project. A phone that still led with the Forge mark and
- * a grey 14px name in `--text-secondary` (the desktop's own `.titlebar__project`)
- * was a phone you could pick up and not know which workspace you were in.
- * `--dot` is the project's colour, inherited from the header; the wash, the
- * name, the halo and the seam are all mixes of it into the theme, the same
- * bargain ProjectRail.css strikes for a tinted row.
+ * The title bar is the project, on one row: menu, name, tools. Two rows ate
+ * a second titlebar of terminal. `--dot` is the project's colour — wash, name
+ * and the seam under the bar — so a glance still names the workspace.
  */
 .app[data-mobile] .titlebar {
   display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: 48px;
   align-items: center;
   height: auto;
-  padding: calc(env(safe-area-inset-top, 0px) + var(--s-3)) var(--s-3) var(--s-3);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--dot, var(--accent)) 36%, var(--bg-base)) 0%,
-    color-mix(in srgb, var(--dot, var(--accent)) 12%, var(--bg-base)) 100%
-  );
+  padding: env(safe-area-inset-top, 0px) var(--s-2) 0;
+  background: color-mix(in srgb, var(--dot, var(--accent)) 22%, var(--bg-base));
   border-bottom: 2px solid var(--dot, var(--accent));
 }
 
+.app[data-mobile] .titlebar__left {
+  grid-column: 1;
+  grid-row: 1;
+}
+
 .app[data-mobile] .titlebar__project {
-  grid-column: 1 / -1;
+  grid-column: 2;
   grid-row: 1;
   display: flex;
   align-items: center;
-  gap: var(--s-4);
+  gap: var(--s-3);
   max-width: none;
   min-width: 0;
   margin: 0;
-  padding: var(--s-2) var(--s-3) var(--s-4);
-  font-size: var(--t-display);
+  padding: 0 var(--s-2);
+  font-size: var(--t-xl);
   font-weight: 700;
   line-height: 1.15;
   letter-spacing: var(--tracking-tight);
@@ -1396,21 +1394,22 @@
 }
 
 .app[data-mobile] .titlebar__dot {
-  width: 12px;
-  height: 12px;
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--dot, var(--accent)) 28%, transparent);
-}
-
-.app[data-mobile] .titlebar__left {
-  grid-column: 1;
-  grid-row: 2;
+  width: 10px;
+  height: 10px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--dot, var(--accent)) 28%, transparent);
 }
 
 .app[data-mobile] .titlebar__right {
-  grid-column: 2;
-  grid-row: 2;
+  grid-column: 3;
+  grid-row: 1;
   justify-self: end;
   padding-right: 0;
+}
+
+.app[data-mobile] .titlebar__left .titlebar__btn {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--dot, var(--accent)) 16%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, var(--dot, var(--accent)) 45%, var(--line-strong));
 }
 
 .app[data-mobile] .titlebar__path,
