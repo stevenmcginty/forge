@@ -54,6 +54,7 @@
     "share:check": "node scripts/share-check.mjs",
     "whatsnew": "node scripts/whats-new.mjs",
     "draft:check": "node scripts/draft-check.mjs",
+    "feed:check": "node scripts/feed-check.mjs",
     "hub:check": "node scripts/hub-check.mjs",
     "companion:smoke": "node scripts/companion-smoke.mjs",
     "web:rendezvous": "node scripts/web-rendezvous-check.mjs",

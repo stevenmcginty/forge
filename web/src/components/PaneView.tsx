@@ -4,11 +4,13 @@ import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
-import { imageFilesFromDataTransfer, isImageFile, packImage } from '../lib/image'
+import { blocksFromCapture, type FeedBlock } from '../lib/feed'
+import { imageFilesFromDataTransfer, packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 import { mountTerm, type TermHost } from '../lib/term'
 import { useForge, useProfiles } from '../state'
 import { AgentChooser } from './AgentChooser'
+import { Feed } from './Feed'
 
 /**
  * One terminal: the desktop's slim `.pane` header over a live xterm fed relayed
@@ -44,6 +46,13 @@ import { AgentChooser } from './AgentChooser'
  * replay resets the screen and everything after it is appended. A reconnect
  * re-attaches and gets a fresh buffer, which is what repaints a terminal that
  * was on screen through a dropped socket.
+ *
+ * ## This pane is the terminal display
+ *
+ * The PTY is still the truth and xterm still paints it — decision 6 stands.
+ * Typing does not happen here. The app's one composer lives on the workspace
+ * and writes to whichever pane is focused. The header's note icon flips to a
+ * cards view if you want it; the default is the coloured terminal.
  *
  * ## The frozen twin
  *
@@ -92,6 +101,8 @@ export function PaneView({
   /** Is the socket answering this second? Only input and the badge read this. */
   const live = !cached && state.connection.state === 'live'
   const asking = state.asking.has(leaf.id)
+  const prompt = state.prompts[leaf.id] ?? ''
+  const agent = !isShellProfile(profile)
   /** The desktop's own row for this pane, which is where its real grid is. */
   const session = (state.picture?.sessions ?? []).find((s) => s.id === leaf.id)
   const alive = session !== undefined
@@ -111,9 +122,13 @@ export function PaneView({
   const sendingImage = useRef(false)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
   const [truncated, setTruncated] = useState(false)
-  /** The typed-in fallback for a browser that will not hand the clipboard over. */
-  const [pasteBox, setPasteBox] = useState(false)
-  const [pasteDraft, setPasteDraft] = useState('')
+  const [blocks, setBlocks] = useState<FeedBlock[]>([])
+  /**
+   * The coloured terminal is the default picture. Cards are an optional lens
+   * on the same bytes — the PTY does not change, only which face is on.
+   */
+  const [view, setView] = useState<'feed' | 'term'>('term')
+  const feed = view === 'feed'
 
   /* ------------------------------------------------------ the live terminal */
 
@@ -144,7 +159,7 @@ export function PaneView({
         host.reset()
         setTruncated(wasTruncated)
       }
-      host.write(data)
+      host.write(data, () => setBlocks(blocksFromCapture(host.capture())))
     })
 
     // Fit before attach, so the desktop is handed the width this browser is
@@ -194,9 +209,10 @@ export function PaneView({
     })
     hostRef.current = host
     host.fit()
+    const painted = (): void => setBlocks(blocksFromCapture(host.capture()))
     const transcript = transcriptFor(state.cached, leaf.id)
-    if (transcript) host.write(transcript)
-    else host.write('\r\n\x1b[2m  Nothing of this pane was cached before the desktop went away.\x1b[0m\r\n')
+    if (transcript) host.write(transcript, painted)
+    else host.write('\r\n\x1b[2m  Nothing of this pane was cached before the desktop went away.\x1b[0m\r\n', painted)
     return () => {
       host.dispose()
       hostRef.current = null
@@ -282,18 +298,6 @@ export function PaneView({
     if (mobile && onScreen && live && alive) actions.claim(leaf.id)
   }, [mobile, onScreen, live, alive, leaf.id, actions])
 
-  /**
-   * The desktop focuses the caret when the pane is the active one; so do we.
-   *
-   * `onScreen` is load-bearing rather than defensive: every tab of the active
-   * project stays mounted, so without it each tab's own active pane would take
-   * the caret as it mounted and the last one to do so — a tab nobody is looking
-   * at — would win.
-   */
-  useEffect(() => {
-    if (focused && live && onScreen) hostRef.current?.focus()
-  }, [focused, live, onScreen])
-
   /* ----------------------------------------------- pasted / dropped images */
 
   /**
@@ -323,7 +327,6 @@ export function PaneView({
         }
       } finally {
         sendingImage.current = false
-        hostRef.current?.focus()
       }
     },
     [actions, alive, leaf.id, live]
@@ -346,57 +349,6 @@ export function PaneView({
    * permission; Firefox and some WebViews refuse it outright. Refusal opens a
    * box to paste into by hand instead of a dead button.
    */
-  const pasteText = useCallback(
-    (text: string) => {
-      if (!text) return
-      hostRef.current?.term.paste(text)
-      hostRef.current?.focus()
-      if (mobile) actions.claim(leaf.id)
-    },
-    [actions, leaf.id, mobile]
-  )
-
-  const pasteFromClipboard = useCallback(async () => {
-    if (!live || !alive) return
-    const clip = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
-    try {
-      if (clip?.read) {
-        const items = await clip.read()
-        const images: File[] = []
-        let text = ''
-        for (const item of items) {
-          const imageType = item.types.find((t) => t.startsWith('image/'))
-          if (imageType) {
-            const blob = await item.getType(imageType)
-            images.push(new File([blob], `clipboard.${imageType.split('/')[1] ?? 'png'}`, { type: imageType }))
-          } else if (item.types.includes('text/plain')) {
-            text += await (await item.getType('text/plain')).text()
-          }
-        }
-        if (images.length) {
-          void sendImages(images)
-          return
-        }
-        if (text) {
-          pasteText(text)
-          return
-        }
-        actions.setNotice('The clipboard is empty.')
-        return
-      }
-      if (clip?.readText) {
-        const text = await clip.readText()
-        if (text) pasteText(text)
-        else actions.setNotice('The clipboard is empty.')
-        return
-      }
-    } catch {
-      /* refused, or not allowed here — fall through to the box */
-    }
-    setPasteDraft('')
-    setPasteBox(true)
-  }, [actions, alive, live, pasteText, sendImages])
-
   useEffect(() => {
     const holder = holderRef.current
     if (!holder || cached || !live) return
@@ -438,6 +390,8 @@ export function PaneView({
       data-pane-id={leaf.id}
       data-focused={focused}
       data-kind={isShellProfile(profile) ? 'shell' : 'agent'}
+      data-view={view}
+      data-only={onlyPane ? 'true' : undefined}
       data-status={!live ? 'frozen' : alive ? 'live' : 'dead'}
       style={{ '--pane-accent': profile.accent } as CSSProperties}
       onPointerDownCapture={() => {
@@ -483,42 +437,17 @@ export function PaneView({
         ) : null}
 
         <div className="pane__actions">
-          <button
-            type="button"
-            className="ghost-btn pane__action"
-            title="Paste"
-            disabled={!live || !alive}
-            onClick={() => void pasteFromClipboard()}
-          >
-            <Icon name="clipboard" size={13} />
-          </button>
-          {/*
-            A label, not a button that clicks a hidden input. iOS Safari
-            refuses programmatic `.click()` on `input[hidden]`; activating the
-            file picker through the label is the gesture it will honour.
-          */}
-          <label
-            className="ghost-btn pane__action"
-            title="Attach an image"
-            aria-disabled={!live || !alive ? 'true' : undefined}
-            onClick={(event) => {
-              if (!live || !alive) event.preventDefault()
-            }}
-          >
-            <input
-              className="pane__file"
-              type="file"
-              accept="image/*"
-              multiple
-              disabled={!live || !alive}
-              onChange={(event) => {
-                const files = [...(event.target.files ?? [])].filter(isImageFile)
-                event.target.value = ''
-                void sendImages(files)
-              }}
-            />
-            <Icon name="camera" size={13} />
-          </label>
+          {agent ? (
+            <button
+              type="button"
+              className="ghost-btn pane__action"
+              title={feed ? 'Show the terminal' : 'Show as cards'}
+              aria-pressed={feed}
+              onClick={() => setView((current) => (current === 'feed' ? 'term' : 'feed'))}
+            >
+              <Icon name={feed ? 'terminal' : 'note'} size={13} />
+            </button>
+          ) : null}
           <button
             ref={splitRef}
             type="button"
@@ -564,56 +493,33 @@ export function PaneView({
         means "tapped". The phone client focuses from `click` for the same
         reason.
       */}
-      <div
-        className="pane__terminal"
-        ref={holderRef}
-        onPointerDown={(event) => {
-          if (event.pointerType !== 'touch') hostRef.current?.focus()
-        }}
-        onClick={() => {
-          hostRef.current?.focus()
-          // A tap is the clearest statement of intent there is. Somebody at the
-          // desk may have typed since this pane came on screen; the thumb that
-          // taps it now wants it back.
-          if (mobile && live && alive) actions.claim(leaf.id)
-        }}
-      />
-
-      {pasteBox ? (
-        <form
-          className="pane__pastebox"
-          onSubmit={(event) => {
-            event.preventDefault()
-            pasteText(pasteDraft)
-            setPasteBox(false)
-            setPasteDraft('')
-          }}
-        >
-          <textarea
-            className="pane__pastebox-text"
-            autoFocus
-            rows={5}
-            placeholder="This browser would not hand the clipboard over — paste here instead."
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            value={pasteDraft}
-            onChange={(event) => setPasteDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') setPasteBox(false)
-              if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) event.currentTarget.form?.requestSubmit()
-            }}
+      <div className="pane__stage">
+        {feed ? (
+          <Feed
+            blocks={blocks}
+            asking={asking}
+            prompt={prompt}
+            empty={cached ? 'Nothing of this pane was cached.' : 'Waiting for the desktop…'}
           />
-          <div className="pane__pastebox-row">
-            <button type="button" className="ghost-btn" onClick={() => setPasteBox(false)}>
-              Cancel
-            </button>
-            <button type="submit" className="cta-btn" disabled={!pasteDraft}>
-              <Icon name="send" size={13} /> Send to pane
-            </button>
-          </div>
-        </form>
-      ) : null}
+        ) : null}
+        <div
+          className="pane__terminal"
+          ref={holderRef}
+          aria-hidden={feed || undefined}
+          onPointerDown={(event) => {
+            if (feed) return
+            if (event.pointerType !== 'touch') hostRef.current?.focus()
+          }}
+          onClick={() => {
+            if (feed) return
+            hostRef.current?.focus()
+            // A tap is the clearest statement of intent there is. Somebody at the
+            // desk may have typed since this pane came on screen; the thumb that
+            // taps it now wants it back.
+            if (mobile && live && alive) actions.claim(leaf.id)
+          }}
+        />
+      </div>
 
       <AgentChooser
         anchor={splitRef.current}

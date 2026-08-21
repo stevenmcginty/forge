@@ -1,22 +1,12 @@
 import { useEffect, type CSSProperties, type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
-import { shortPath } from '../lib/paths'
 import { useWebUpdate } from '../lib/update'
 import { useActiveProject, useForge } from '../state'
 
 /**
- * The desktop's titlebar, minus the two things a browser tab does not have: the
- * reserved strip for Windows' native window controls, and the voice hub button
- * (decision 7 — no voice in the browser).
- *
- * The same `.titlebar` classes as src/components/TitleBar.tsx, so it is the same
- * bar rather than one that resembles it. What replaces the window controls is
- * the connection badge, which on the desktop has no equivalent because there is
- * no link to be honest about.
- *
- * On a phone (`mobile`) the bar is the project: one row, the project's colour
- * on the name and the seam, menu on the left, tools on the right. The desktop
- * layout below is untouched.
+ * The app bar. Same tokens as the desktop, different job: identity, the
+ * project, and whether the link is live. No window controls, no voice
+ * (decision 7). On a phone it is the project, one row.
  */
 export function TopBar({
   collapsed,
@@ -85,7 +75,6 @@ export function TopBar({
                   <span className="titlebar__dot" />
                   {project.name}
                 </span>
-                <span className="titlebar__path mono truncate">{shortPath(project.path, 3)}</span>
               </>
             ) : null}
           </>

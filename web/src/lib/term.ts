@@ -1,13 +1,16 @@
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SHARE_CAPTURE_MAX_LINES } from '@shared/share'
 import { planTouchScroll } from '@shared/touch-scroll'
+import { joinBufferRows, tidyCapture, type BufferRow } from '@/lib/paneText'
 
 /**
  * An xterm instance fed relayed PTY bytes.
  *
  * Decision 6 in docs/forge-web.md: the terminal widget is xterm.js on real PTY
  * bytes, because Claude Code is a full-screen TUI and a prettier "blocks of
- * output" view cannot render one.
+ * output" view cannot *be* the emulator. A conversation feed can sit on top of
+ * this capture (see web/src/lib/feed.ts); it cannot replace this file.
  *
  * Deliberately *not* a copy of src/lib/terminals.ts. That file is 1,400 lines
  * because it owns the mosaic, pane peeking, remote-URL scanning, the desktop's
@@ -77,9 +80,15 @@ export interface TermHost {
    * back to drawing this browser's own fit. See the geometry note in the header.
    */
   follow: (size: { cols: number; rows: number } | null) => void
-  write: (data: string) => void
+  write: (data: string, after?: () => void) => void
   /** Wipe screen and scrollback — used before painting a replay buffer. */
   reset: () => void
+  /**
+   * The screen as text, scrollback included. Used by the conversation feed so
+   * the page can draw cards without being the TUI. Same join as a desktop
+   * capture: wrapped rows become one line.
+   */
+  capture: () => string
   focus: () => void
   /**
    * Stop taking input, or start again, without rebuilding the terminal.
@@ -419,8 +428,21 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
       desired = next
       apply()
     },
-    write: (data) => term.write(data),
+    write: (data, after) => {
+      if (after) term.write(data, after)
+      else term.write(data)
+    },
     reset: () => term.reset(),
+    capture: () => {
+      const buffer = term.buffer.active
+      const rows: BufferRow[] = []
+      for (let y = 0; y < buffer.length; y++) {
+        const line = buffer.getLine(y)
+        if (!line) continue
+        rows.push({ text: line.translateToString(true), wrapped: line.isWrapped })
+      }
+      return tidyCapture(joinBufferRows(rows), SHARE_CAPTURE_MAX_LINES)
+    },
     focus: () => term.focus(),
     setReadOnly: (readOnly) => {
       // A host built read-only never wired `onData`, so letting it take input

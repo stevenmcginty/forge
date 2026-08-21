@@ -10,20 +10,21 @@ import { MobilePanes } from './MobilePanes'
 import { Mirror } from './Mirror'
 import { OfflineBanner } from './OfflineBanner'
 import { Rail } from './Rail'
+import { SessionComposer } from './SessionComposer'
 import { SplitView } from './Panes'
 import { TabStrip } from './TabStrip'
 import { TopBar } from './TopBar'
 
 /**
- * Forge, as the browser draws it: the desktop's `.app` shell — titlebar, rail,
- * main — with the terminal grid inside it.
+ * Forge Web: three regions, not a copy of the desktop IDE.
  *
- * The layout classes are the desktop's own, so this is the same application
- * furniture rather than a lookalike. What is missing from it is missing because
- * decision 7 says so: no screenshot tray, no voice hub, no overlay, no tasks
- * board, no settings page. A browser tab has none of the hardware any of those
- * are attached to, and a public URL that could reach them would be a different
- * risk class.
+ *   1. App chrome — top bar and sidebar. Projects, identity, the link.
+ *   2. The terminal display — the live PTY, colours and all.
+ *   3. The text box — one composer, talking to the focused pane.
+ *
+ * The desktop stays an IDE of terminals. This page reuses the desktop's tokens
+ * so the colours agree. What is missing is missing because decision 7 says so:
+ * no screenshot tray, no voice hub, no overlay, no tasks board, no settings.
  *
  * ## Three states, one shell
  *
@@ -45,8 +46,8 @@ export function Workspace(): ReactNode {
    * the arrangement and nothing underneath it — the rail is a drawer over the
    * terminal rather than a column beside it, one pane is on screen at a time,
    * and the pane on screen takes the grid so it is readable (see PaneView). The
-   * phone's own keyboard types into it — there is deliberately no key bar. A
-   * mouse in a narrow window still gets the folded desktop layout below.
+   * coloured terminal stays on screen; typing happens in the composer docked
+   * over it. A mouse in a narrow window still gets the folded desktop layout below.
    */
   const mobile = useMobile()
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -98,7 +99,7 @@ export function Workspace(): ReactNode {
   // refit-everything path would send a duplicate `resize` per pane per drag.
 
   return (
-    <div className="app" data-ready="true" data-mobile={mobile ? 'true' : undefined}>
+    <div className="app" data-ready="true" data-shell="app" data-mobile={mobile ? 'true' : undefined}>
       <TopBar
         collapsed={mobile ? !drawerOpen : collapsed}
         onToggleRail={() => (mobile ? setDrawerOpen((v) => !v) : setRailCollapsed((v) => !v))}
@@ -127,7 +128,7 @@ export function Workspace(): ReactNode {
           ) : (
           <div className="grid">
             <TabStrip />
-            <div className="grid__body">
+            <div className="app__display grid__body" data-region="display">
               {!project ? (
                 <EmptyState
                   icon="folder"
@@ -173,6 +174,7 @@ export function Workspace(): ReactNode {
                 />
               )}
             </div>
+            <SessionComposer />
           </div>
           )}
         </main>
