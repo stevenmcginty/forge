@@ -3031,15 +3031,25 @@
 
 [data-mobile] .composer__icon,
 [data-mobile] .composer__send {
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
+}
+
+/* Seven keys, two pickers and Send have to share a phone's width without a
+ * sideways scroll, so the keys are tighter here than the desktop's. */
+[data-mobile] .composer__tools {
+  gap: var(--s-2);
+}
+
+[data-mobile] .composer__keys {
+  gap: 3px;
 }
 
 [data-mobile] .composer__key {
-  height: 40px;
-  min-width: 44px;
-  padding: 0 var(--s-5);
-  font-size: var(--t-md);
+  height: 36px;
+  min-width: 32px;
+  padding: 0 var(--s-2);
+  font-size: var(--t-sm);
 }
 
 /* ------------------------------------------------------------ dev preview */
