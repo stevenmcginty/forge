@@ -16,15 +16,16 @@ import { TabStrip } from './TabStrip'
 import { TopBar } from './TopBar'
 
 /**
- * Forge Web: three regions, not a copy of the desktop IDE.
+ * Forge Web: three regions, two faces, not a copy of the desktop IDE.
  *
- *   1. App chrome — top bar and sidebar. Projects, identity, the link.
- *   2. The terminal display — the live PTY, colours and all.
- *   3. The text box — one composer, talking to the focused pane.
+ *   1. App chrome — top bar and sidebar.
+ *   2. The terminal display.
+ *   3. One text box, talking to the focused pane.
  *
- * The desktop stays an IDE of terminals. This page reuses the desktop's tokens
- * so the colours agree. What is missing is missing because decision 7 says so:
- * no screenshot tray, no voice hub, no overlay, no tasks board, no settings.
+ * A wide browser uses the space (sidebar, padded well, centred composer). A
+ * phone is a different face: drawer, full-bleed display, thumb-sized dock.
+ * Electron Forge is untouched. Decision 7 still keeps voice, tray and settings
+ * off this URL.
  *
  * ## Three states, one shell
  *

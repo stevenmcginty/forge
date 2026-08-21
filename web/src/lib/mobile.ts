@@ -14,12 +14,11 @@ import { useEffect, useState } from 'react'
  *    desktop's split grid to mean something. 900px is above every phone in
  *    landscape and below every tablet in portrait.
  *
- * What flips on is a different *layout*, not a different application: the same
- * state, the same socket, the same `PaneView`, the same tab strip — arranged for
- * one hand. One pane on screen at a time, the rail as a drawer, and a row of the
- * keys a phone keyboard does not have. Forge Mobile (the APK) remains the
- * full-fat phone client; this is what somebody gets when they open the public
- * URL in phone Chrome without installing anything.
+ * What flips on is a different *face* of the same application: the same
+ * state, the same socket, the same `PaneView`. A phone gets one pane, a drawer
+ * for projects, and a composer sized for a thumb. A desktop browser keeps the
+ * sidebar and the space. Forge Mobile (the APK) remains the native client;
+ * this is what somebody gets when they open the public URL in phone Chrome.
  */
 const MOBILE = '(pointer: coarse) and (max-width: 900px)'
 

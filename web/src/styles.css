@@ -1308,162 +1308,207 @@
 
 /* -------------------------------------------------------------- the app shell
  *
- * Three regions, always, desktop browser and phone:
+ * Electron Forge is an IDE. This page is not. Three regions, two faces:
  *
- *   1. Chrome — `.titlebar` and `.app__left`. Identity, projects, the link.
- *   2. Display — `.app__display`. The live terminal, colours intact.
- *   3. Text box — `.composer`. One field, focused pane.
+ *   Chrome  — top bar + sidebar
+ *   Display — the live terminal
+ *   Compose — one text box
  *
- * Class names stay the desktop's so e2e and tokens keep working. What changes
- * is the *face*: this is an app around a session, not an IDE stuffed in a tab.
+ * The spacious rules hang off `:not([data-mobile])` so a phone does not have
+ * to undo them. The phone face is the `data-mobile` block below. Class names
+ * stay the desktop's so e2e keeps working.
  */
 
 .app[data-shell='app'] .titlebar {
-  height: 52px;
-  padding: 0 var(--s-5);
   -webkit-app-region: no-drag;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--line-hairline);
-}
-
-.app[data-shell='app'] .titlebar__btn {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--r-md);
-}
-
-.app[data-shell='app'] .titlebar__mark {
-  width: 28px;
-  height: 28px;
-  margin-left: 0;
-  border-radius: var(--r-md);
-  background: var(--accent-softer);
-}
-
-.app[data-shell='app'] .titlebar__wordmark {
-  font-size: var(--t-lg);
-  font-weight: 700;
-  letter-spacing: var(--tracking-tight);
-}
-
-.app[data-shell='app'] .titlebar__project {
-  font-size: var(--t-md);
-  font-weight: 600;
 }
 
 .app[data-shell='app'] .titlebar__path {
   display: none;
 }
 
-.app[data-shell='app'] .linkbadge {
-  height: 28px;
-  padding: 0 var(--s-4);
-  border-radius: var(--r-full);
-  background: var(--bg-sunken);
-  border: 1px solid var(--line-hairline);
-}
-
-.app[data-shell='app'] .app__left {
-  background: var(--bg-panel);
-}
-
-.app[data-shell='app'] .rail__head {
-  height: 44px;
-  padding: 0 var(--s-5);
-}
-
-.app[data-shell='app'] .rail__head .eyebrow {
-  font-size: var(--t-sm);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.app[data-shell='app'] .rail__head-add {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-md);
-}
-
-.app[data-shell='app'] .prow {
-  height: 52px;
-  padding: 0 var(--s-4);
-  border-radius: var(--r-lg);
-}
-
-.app[data-shell='app'] .prow__name {
-  font-size: var(--t-md);
-  font-weight: 600;
-}
-
-.app[data-shell='app'] .tabstrip {
-  height: 48px;
-  align-items: center;
-  padding: 0 var(--s-5);
-  background: var(--bg-panel);
-}
-
-.app[data-shell='app'] .tabstrip__tabs {
-  align-items: center;
-}
-
 .app[data-shell='app'] .tab {
-  height: 32px;
-  min-height: 32px;
-  padding: 0 var(--s-4);
   border-radius: var(--r-full);
   border: 1px solid var(--line-soft);
   border-bottom: 1px solid var(--line-soft);
-  background: var(--bg-sunken);
   box-shadow: none;
   position: static;
 }
 
 .app[data-shell='app'] .tab[data-active='true'] {
-  border-color: var(--accent-line);
-  border-bottom-color: var(--accent-line);
-  background: var(--accent-soft);
   box-shadow: none;
 }
 
-.app[data-shell='app'] .tab__close {
-  opacity: 0.55;
-}
-
 .app[data-shell='app'] .tabstrip__new {
-  width: 32px;
-  height: 32px;
   margin-bottom: 0;
   border-radius: var(--r-full);
-}
-
-.app[data-shell='app'] .app__display {
-  padding: var(--s-4);
-  background: var(--bg-base);
-}
-
-.app[data-shell='app'] .pane {
-  border-radius: var(--r-lg);
-  border: 1px solid var(--line-soft);
-  overflow: hidden;
-}
-
-.app[data-shell='app'] .pane__header {
-  height: 36px;
-  background: var(--bg-panel);
 }
 
 .app[data-shell='app'] .pane__actions {
   opacity: 1;
 }
 
-.app[data-shell='app'] .gsec {
-  padding: var(--s-4) var(--s-5) var(--s-5);
-}
-
 .app[data-shell='app'] .grid .composer {
   flex: none;
+}
+
+/* -------------------------------------------- desktop browser: use the space */
+
+.app[data-shell='app']:not([data-mobile]) .titlebar {
+  height: 56px;
+  padding: 0 var(--s-6);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.app[data-shell='app']:not([data-mobile]) .titlebar__btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+}
+
+.app[data-shell='app']:not([data-mobile]) .titlebar__mark {
+  width: 30px;
+  height: 30px;
+  margin-left: 0;
+  border-radius: var(--r-md);
+  background: var(--accent-softer);
+}
+
+.app[data-shell='app']:not([data-mobile]) .titlebar__wordmark {
+  font-size: var(--t-xl);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+}
+
+.app[data-shell='app']:not([data-mobile]) .titlebar__project {
+  font-size: var(--t-lg);
+  font-weight: 600;
+}
+
+.app[data-shell='app']:not([data-mobile]) .linkbadge {
+  height: 32px;
+  max-width: 240px;
+  padding: 0 var(--s-5);
+  font-size: var(--t-sm);
+  background: var(--bg-sunken);
+}
+
+.app[data-shell='app']:not([data-mobile]) .app__left {
+  width: 280px;
+  min-width: 280px;
+  background: var(--bg-panel);
+}
+
+.app[data-shell='app']:not([data-mobile]) .app__left[data-collapsed='true'] {
+  width: var(--rail-w-collapsed);
+  min-width: var(--rail-w-collapsed);
+}
+
+.app[data-shell='app']:not([data-mobile]) .rail__head {
+  height: 52px;
+  padding: 0 var(--s-6);
+}
+
+.app[data-shell='app']:not([data-mobile]) .rail__head .eyebrow {
+  font-size: var(--t-sm);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.app[data-shell='app']:not([data-mobile]) .rail__head-add {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
+}
+
+.app[data-shell='app']:not([data-mobile]) .rail__list {
+  padding: var(--s-4) var(--s-5) var(--s-6);
+}
+
+.app[data-shell='app']:not([data-mobile]) .prow {
+  height: 56px;
+  padding: 0 var(--s-5);
+  border-radius: var(--r-lg);
+}
+
+.app[data-shell='app']:not([data-mobile]) .prow + .prow {
+  margin-top: var(--s-2);
+}
+
+.app[data-shell='app']:not([data-mobile]) .prow__name {
+  font-size: var(--t-lg);
+  font-weight: 600;
+}
+
+.app[data-shell='app']:not([data-mobile]) .tabstrip {
+  height: 52px;
+  align-items: center;
+  padding: 0 var(--s-6);
+  gap: var(--s-4);
+  background: var(--bg-panel);
+}
+
+.app[data-shell='app']:not([data-mobile]) .tabstrip__tabs {
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.app[data-shell='app']:not([data-mobile]) .tab {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 var(--s-5);
+  background: var(--bg-sunken);
+}
+
+.app[data-shell='app']:not([data-mobile]) .tab[data-active='true'] {
+  border-color: var(--accent-line);
+  border-bottom-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.app[data-shell='app']:not([data-mobile]) .tabstrip__new {
+  width: 34px;
+  height: 34px;
+}
+
+.app[data-shell='app']:not([data-mobile]) .app__display {
+  padding: var(--s-6);
+  background: var(--bg-base);
+}
+
+.app[data-shell='app']:not([data-mobile]) .pane {
+  border-radius: var(--r-xl);
+  border: 1px solid var(--line-soft);
+  overflow: hidden;
+  box-shadow: var(--shadow-key);
+}
+
+.app[data-shell='app']:not([data-mobile]) .pane__header {
+  height: 40px;
+  padding: 0 var(--s-5) 0 var(--s-6);
+  background: var(--bg-panel);
+}
+
+.app[data-shell='app']:not([data-mobile]) .gsec {
+  padding: var(--s-5) var(--s-6) var(--s-6);
+}
+
+.app[data-shell='app']:not([data-mobile]) .composer {
+  padding: var(--s-5) var(--s-6) var(--s-6);
+}
+
+.app[data-shell='app']:not([data-mobile]) .composer__card {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: var(--s-4) var(--s-5);
+}
+
+.app[data-shell='app']:not([data-mobile]) .composer__input {
+  font-size: 15px;
+  min-height: 48px;
 }
 
 /* -------------------------------------------------------------- mobile
@@ -1517,8 +1562,8 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  height: 40px;
-  padding: 0 var(--s-2);
+  height: 48px;
+  padding: 0 var(--s-3);
   background: color-mix(in srgb, var(--dot, var(--accent)) 22%, var(--bg-base));
   border-bottom: 2px solid var(--dot, var(--accent));
 }
