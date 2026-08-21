@@ -1976,6 +1976,10 @@
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  /* Feed.tsx keeps the bottom in view itself; the browser's own anchoring
+   * fights that while cards above are still settling, and the two together
+   * read as a jitter. */
+  overflow-anchor: none;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   scrollbar-width: thin;

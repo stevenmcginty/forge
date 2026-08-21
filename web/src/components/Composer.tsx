@@ -35,7 +35,6 @@ export function Composer({
   onDraft,
   onSend,
   onRaw,
-  onPasteClick,
   onFocus,
   autoFocus
 }: {
@@ -49,8 +48,6 @@ export function Composer({
   /** Send: the pending images first, then the draft. Either may be empty. */
   onSend: (images: File[]) => void
   onRaw: (data: string) => void
-  /** Read the clipboard; any images found come back to sit as attachments. */
-  onPasteClick: () => Promise<File[] | void> | void
   onFocus?: () => void
   autoFocus: boolean
 }): ReactNode {
@@ -163,23 +160,9 @@ export function Composer({
           <FilePick label="Add an image" disabled={disabled} onFiles={addFiles}>
             {mobile ? <GalleryGlyph /> : <Icon name="camera" size={16} />}
           </FilePick>
-          <button
-            type="button"
-            className="composer__icon"
-            disabled={disabled}
-            title="Paste"
-            aria-label="Paste"
-            onClick={() => {
-              const result = onPasteClick()
-              if (result) void result.then((images) => images && addFiles(images))
-            }}
-          >
-            <Icon name="clipboard" size={16} />
-          </button>
           <div className="composer__keys" role="toolbar" aria-label="Terminal keys">
             <Key label="Esc" onClick={() => onRaw('\x1b')} disabled={disabled} />
             <Key label="Tab" onClick={() => onRaw('\t')} disabled={disabled} />
-            <Key label="Ctrl+C" onClick={() => onRaw('\x03')} disabled={disabled} />
             <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
             <Key label="↓" onClick={() => onRaw('\x1b[B')} disabled={disabled} title="Down" />
             <Key label="Enter" onClick={() => onRaw('\r')} disabled={disabled} />

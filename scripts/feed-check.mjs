@@ -297,10 +297,9 @@ const beforeIds = blocksFromCapture(before).map((b) => b.id)
 const afterIds = blocksFromCapture(after).map((b) => b.id)
 is(afterIds.length, beforeIds.length, 'appending to the last turn adds no card')
 ok(
-  beforeIds.slice(0, -1).every((id, i) => id === afterIds[i]),
-  'every earlier card keeps its id across a re-parse'
+  beforeIds.every((id, i) => id === afterIds[i]),
+  'every card keeps its id across a re-parse, the one still growing included'
 )
-ok(beforeIds[beforeIds.length - 1] !== afterIds[afterIds.length - 1], 'and the card that grew does not')
 
 if (fail) {
   console.log(`\n${fail} failed, ${pass} passed`)

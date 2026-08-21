@@ -290,7 +290,6 @@ function PreviewPane({
           onDraft={setDraft}
           onSend={() => setDraft('')}
           onRaw={() => undefined}
-          onPasteClick={() => undefined}
           autoFocus={false}
         />
       </div>

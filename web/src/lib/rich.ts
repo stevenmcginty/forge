@@ -34,7 +34,7 @@ export interface RichLine {
 export type FeedRole = 'user' | 'agent' | 'system' | 'tool'
 
 export interface FeedBlock {
-  /** Stable for a given (role, position, text) in one capture — not a uuid. */
+  /** Role and position in the capture — stable across re-parses, not a uuid. */
   id: string
   role: FeedRole
   lines: RichLine[]

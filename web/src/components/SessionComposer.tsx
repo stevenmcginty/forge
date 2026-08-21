@@ -116,43 +116,6 @@ export function SessionComposer(): ReactNode {
     [actions, canType, paneId, takePane]
   )
 
-  /** Read the clipboard: text lands in the draft, images come back as attachments. */
-  const pasteFromClipboard = useCallback(async (): Promise<File[] | void> => {
-    if (!canType) return
-    const clip = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
-    try {
-      if (clip?.read) {
-        const items = await clip.read()
-        const images: File[] = []
-        let text = ''
-        for (const item of items) {
-          const imageType = item.types.find((t) => t.startsWith('image/'))
-          if (imageType) {
-            const blob = await item.getType(imageType)
-            images.push(new File([blob], `clipboard.${imageType.split('/')[1] ?? 'png'}`, { type: imageType }))
-          } else if (item.types.includes('text/plain')) {
-            text += await (await item.getType('text/plain')).text()
-          }
-        }
-        if (images.length) return images
-        if (text) {
-          setDraft((current) => (current ? `${current}\n${text}` : text))
-          return
-        }
-        actions.setNotice('The clipboard is empty.')
-        return
-      }
-      if (clip?.readText) {
-        const text = await clip.readText()
-        if (text) setDraft((current) => (current ? `${current}\n${text}` : text))
-        else actions.setNotice('The clipboard is empty.')
-        return
-      }
-    } catch {
-      actions.setNotice('Paste into the box — this browser will not hand the clipboard over.')
-    }
-  }, [actions, canType])
-
   if (offline && state.offlineMode === 'github') return null
   if (!tab) return null
 
@@ -178,7 +141,6 @@ export function SessionComposer(): ReactNode {
         onDraft={setDraft}
         onSend={(images) => void sendDraft(images)}
         onRaw={sendRaw}
-        onPasteClick={pasteFromClipboard}
         onFocus={takePane}
         autoFocus={canType}
       />

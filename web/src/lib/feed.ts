@@ -419,19 +419,6 @@ function isBanner(line: string): boolean {
   return false
 }
 
-/**
- * A cheap, stable digest of a block's text.
- *
- * djb2, because the only requirement is that the same text gives the same key
- * and different text usually does not: this ends up in a React `key`, so the
- * cost of a collision is a card that fails to re-mount, not a wrong answer.
- */
-function digest(text: string): string {
-  let h = 5381
-  for (let i = 0; i < text.length; i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0
-  return h.toString(36)
-}
-
 function trimEdges(lines: RichLine[]): RichLine[] {
   let start = 0
   let end = lines.length
@@ -443,11 +430,12 @@ function trimEdges(lines: RichLine[]): RichLine[] {
 /**
  * Push a card, if there is anything in it.
  *
- * The id is role, position and a digest of the text and nothing else — no
- * counter, no uuid — so that re-parsing a screen that has grown by one line
- * hands React the same keys for every card above the new one. A key that
- * changed on every PTY chunk would re-mount the whole conversation ten times a
- * second, which is how a feed loses its scroll position mid-sentence.
+ * The id is role and position and nothing else — no digest, no counter, no
+ * uuid — so that re-parsing a screen hands React the same key for every card,
+ * including the one still being written. A digest of the text was in here
+ * once; it re-keyed the streaming card on every PTY chunk, each remount came
+ * back at `contain-intrinsic-size`'s 80px guess before snapping to its real
+ * height, and the feed bounced up and down until the turn ended.
  */
 function flush(blocks: FeedBlock[], role: FeedRole, lines: RichLine[]): void {
   const kept = trimEdges(lines)
@@ -456,7 +444,7 @@ function flush(blocks: FeedBlock[], role: FeedRole, lines: RichLine[]): void {
     .join('\n')
     .replace(/\s+$/, '')
   if (!text.trim()) return
-  blocks.push({ id: `${role}-${blocks.length}-${digest(text)}`, role, lines: kept, text })
+  blocks.push({ id: `${role}-${blocks.length}`, role, lines: kept, text })
 }
 
 /**
