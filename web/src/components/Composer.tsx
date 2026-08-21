@@ -90,11 +90,19 @@ export function Composer({
     if (images.length) setFiles((current) => [...current, ...images])
   }, [])
 
-  const ready = !disabled && (draft.trim().length > 0 || files.length > 0)
+  const hasDraft = draft.trim().length > 0 || files.length > 0
+  const ready = !disabled
 
+  // One button for Enter. With words in the box it sends them; with the box
+  // empty it is the Enter key itself — what confirms the option ↑/↓ landed on
+  // in a menu or a permission prompt — so the bar needs no separate Enter.
   const submit = (event?: FormEvent): void => {
     event?.preventDefault()
     if (!ready) return
+    if (!hasDraft) {
+      onRaw('\r')
+      return
+    }
     const pending = files
     setFiles([])
     onSend(pending)
@@ -165,7 +173,6 @@ export function Composer({
             <Key label="Tab" onClick={() => onRaw('\t')} disabled={disabled} />
             <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
             <Key label="↓" onClick={() => onRaw('\x1b[B')} disabled={disabled} title="Down" />
-            <Key label="Enter" onClick={() => onRaw('\r')} disabled={disabled} />
             <Key
               label="Mode"
               onClick={() => onRaw(BACK_TAB)}
@@ -173,7 +180,13 @@ export function Composer({
               title="Shift+Tab — cycle permission mode"
             />
           </div>
-          <button type="submit" className="composer__send" disabled={!ready} aria-label="Send">
+          <button
+            type="submit"
+            className="composer__send"
+            disabled={!ready}
+            aria-label={hasDraft ? 'Send' : 'Enter'}
+            title={hasDraft ? 'Send' : 'Enter'}
+          >
             <Icon name="send" size={16} />
           </button>
         </div>
