@@ -15,6 +15,13 @@ import { BACK_TAB, Composer } from './Composer'
  * still has one box, not one per sliver.
  */
 
+/** How long the TUI gets to finish taking a pasted image path before the words arrive. */
+const SETTLE_AFTER_IMAGE_MS = 400
+/** The gap between the words and the Enter that sends them. */
+const SETTLE_BEFORE_ENTER_MS = 120
+
+const pause = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms))
+
 function findLeaf(node: LayoutNode, id: string): PaneLeaf | null {
   if (node.type === 'leaf') return node.id === id ? node : null
   return findLeaf(node.a, id) ?? findLeaf(node.b, id)
@@ -75,14 +82,25 @@ export function SessionComposer(): ReactNode {
       if (!text && !images.length) return
       // Images first: the TUI takes each as a paste into its own box, and the
       // words after it become the message that refers to them.
-      if (images.length) await sendImages(images)
+      if (images.length) {
+        await sendImages(images)
+        // The TUI is still taking the pasted path into its box; words landing
+        // in the same instant get folded into that paste.
+        await pause(SETTLE_AFTER_IMAGE_MS)
+      }
       if (text) {
         // A newline in this box is a line in the prompt, not a submit. Bracketed
         // paste is how the TUI takes a multi-line draft as one message; a bare
         // `\n` down the PTY is Enter, and would send the first line alone.
-        const payload = text.includes('\n') ? `\x1b[200~${text}\x1b[201~\r` : `${text}\r`
-        actions.write(paneId, payload)
+        actions.write(paneId, text.includes('\n') ? `\x1b[200~${text}\x1b[201~` : text)
         setDraft('')
+        // Enter is its own keystroke, a beat after the words — never in the
+        // same write. Claude Code's input reads one burst holding text and a
+        // `\r` as a paste and turns the `\r` into a newline, so the message sat
+        // in its box unsent. The desktop's own `submit()` keeps the carriage
+        // return separate for the same reason.
+        await pause(SETTLE_BEFORE_ENTER_MS)
+        actions.write(paneId, '\r')
       }
       takePane()
     },
