@@ -136,10 +136,12 @@ export class Auth {
    * keeps what it has and retries. Every call site branches on that distinction,
    * which is why they are two different failures rather than one `null`.
    */
-  async idToken(): Promise<string> {
+  async idToken(force = false): Promise<string> {
     const session = this.session
     if (!session?.refreshToken) throw new Error(SIGNED_OUT)
-    if (session.idToken && Date.now() < session.expiresAt) return session.idToken
+    // `force` is the desktop having just said `bad-token` about the cached one:
+    // whatever this clock thinks, that token is spent.
+    if (!force && session.idToken && Date.now() < session.expiresAt) return session.idToken
 
     let response: Response
     try {

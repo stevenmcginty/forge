@@ -458,7 +458,12 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       setStage({ kind: 'connected' })
       client.connect({
         url,
-        getToken: (force) => (force ? auth.idToken() : Promise.resolve(idToken)),
+        // Always through `auth.idToken()`: it hands back the cached token while it
+        // is fresh and refreshes it when it is not. Handing over the string this
+        // closure captured at sign-in meant every reconnect after an hour presented
+        // an expired token, took a `bad-token` strike, and five of those in a row
+        // was the 60s lockout this page showed as "try again".
+        getToken: (force) => auth.idToken(force),
         deviceId: deviceId(),
         deviceName: deviceName()
       })
@@ -489,7 +494,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
     setStage({ kind: 'connected' })
     client.connect({
       url,
-      getToken: (force) => (force ? auth.idToken() : Promise.resolve(idToken)),
+      // See the note on the dev branch above: always through `auth.idToken()`.
+      getToken: (force) => auth.idToken(force),
       deviceId: deviceId(),
       deviceName: deviceName(),
       // Where the desktop is *now*, asked afresh before every re-dial. See

@@ -314,7 +314,18 @@ export interface WebTokenClaims {
  */
 export type WebTokenOutcome =
   | { ok: true; claims: WebTokenClaims }
-  | { ok: false; reason: WebRefusal; message: string; retryAfterMs?: number }
+  | {
+      ok: false
+      reason: WebRefusal
+      message: string
+      retryAfterMs?: number
+      /**
+       * The token was Google's — signature, audience and issuer all verified —
+       * and merely old. See `fail`: that is not a guess and is not counted as
+       * one. Never set on a token that failed any other check.
+       */
+      expired?: true
+    }
 
 export type WebAuthOutcome =
   | { ok: true; device: WebDevice; claims: WebTokenClaims }
@@ -705,7 +716,6 @@ export class WebAuth {
     const iat = numberClaim(payload.iat)
     const authTime = numberClaim(payload.auth_time)
     if (exp === null || iat === null || authTime === null) return bad(stale)
-    if (now >= exp * 1000 + CLOCK_SKEW_MS) return bad('That sign-in has expired. Sign in again.')
     if (iat * 1000 > now + CLOCK_SKEW_MS) return bad(stale)
     if (authTime * 1000 > now + CLOCK_SKEW_MS) return bad(stale)
 
@@ -713,6 +723,16 @@ export class WebAuth {
     const iss = typeof payload.iss === 'string' ? payload.iss : ''
     if (!sameString(aud, projectId)) return bad(stale)
     if (!sameString(iss, `${ISSUER_PREFIX}${projectId}`)) return bad(stale)
+
+    // Checked after the signature, audience and issuer on purpose: only a token
+    // that has passed all three is known to be one of Google's for this
+    // project, and only then is "expired" a statement about the token rather
+    // than about whoever sent it. The flag is what keeps a browser waking from
+    // a night's sleep, and re-presenting the token it fell asleep holding, from
+    // being counted as a brute-force attempt.
+    if (now >= exp * 1000 + CLOCK_SKEW_MS) {
+      return { ok: false, reason: 'bad-token', message: 'That sign-in has expired. Sign in again.', expired: true }
+    }
 
     const sub = typeof payload.sub === 'string' ? payload.sub : ''
     if (!sub || sub.length > 128) return bad(stale)
@@ -842,6 +862,11 @@ export class WebAuth {
     outcome: T
   ): T {
     this.host.log?.(`web auth refused at ${key}: ${outcome.reason} — ${outcome.message}`)
+    // A genuine token that has merely lapsed is not a wrong answer. The client
+    // re-presents a fresh one on the next attempt; counting the lapse would mean
+    // five ordinary reconnects after an hour away locked the owner out for a
+    // minute, which is the opposite of what this counter is for.
+    if ('expired' in outcome && outcome.expired) return outcome
     const strike = this.strikes.get(key) ?? { count: 0, until: 0 }
     strike.count += 1
     strike.until = this.now() + AUTH_LOCKOUT_MS
