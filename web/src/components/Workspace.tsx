@@ -103,6 +103,7 @@ export function Workspace(): ReactNode {
         collapsed={mobile ? !drawerOpen : collapsed}
         onToggleRail={() => (mobile ? setDrawerOpen((v) => !v) : setRailCollapsed((v) => !v))}
         onWatchScreen={live ? () => setWatching(true) : null}
+        mobile={mobile}
       />
       <OfflineBanner />
       <ReconnectingBanner />

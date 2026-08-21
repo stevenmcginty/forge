@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode } from 'react'
+import { useEffect, type CSSProperties, type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
 import { shortPath } from '../lib/paths'
 import { useWebUpdate } from '../lib/update'
@@ -13,16 +13,25 @@ import { useActiveProject, useForge } from '../state'
  * bar rather than one that resembles it. What replaces the window controls is
  * the connection badge, which on the desktop has no equivalent because there is
  * no link to be honest about.
+ *
+ * On a phone (`mobile`) the bar is the project: its colour paints the header and
+ * the name sits on the first row in that colour, because a 390px screen that
+ * still led with the Forge wordmark and a grey 12px label was a screen you
+ * could not tell apart from another project at a glance. The desktop layout
+ * below is untouched.
  */
 export function TopBar({
   collapsed,
   onToggleRail,
-  onWatchScreen
+  onWatchScreen,
+  mobile = false
 }: {
   collapsed: boolean
   onToggleRail: () => void
   /** Open the screen mirror. Absent while there is no live desktop to ask. */
   onWatchScreen: (() => void) | null
+  /** Phone layout. The project identity takes the top of the page. */
+  mobile?: boolean
 }): ReactNode {
   const { state, actions } = useForge()
   const project = useActiveProject()
@@ -31,8 +40,30 @@ export function TopBar({
   const desktopName =
     state.picture?.desktopName || (state.stage.kind === 'offline' ? (state.stage.record?.name ?? state.cached?.desktopName ?? '') : '')
 
+  useEffect(() => {
+    document.title = project ? `${project.name} · Forge` : 'Forge'
+    return () => {
+      document.title = 'Forge'
+    }
+  }, [project])
+
+  const tint = project ? ({ '--dot': project.color } as CSSProperties) : undefined
+
   return (
-    <header className="titlebar" data-focused="true">
+    <header className="titlebar" data-focused="true" style={tint}>
+      {mobile ? (
+        <h1 className="titlebar__project">
+          {project ? (
+            <>
+              <span className="titlebar__dot" />
+              <span className="truncate">{project.name}</span>
+            </>
+          ) : (
+            'Forge'
+          )}
+        </h1>
+      ) : null}
+
       <div className="titlebar__left">
         <button
           type="button"
@@ -45,15 +76,19 @@ export function TopBar({
           <Icon name="panel" size={15} />
         </button>
 
-        <span className="titlebar__mark">
-          <Icon name="forge" size={15} />
-        </span>
-        <span className="titlebar__wordmark">Forge</span>
+        {mobile ? null : (
+          <>
+            <span className="titlebar__mark">
+              <Icon name="forge" size={15} />
+            </span>
+            <span className="titlebar__wordmark">Forge</span>
+          </>
+        )}
 
-        {project ? (
+        {project && !mobile ? (
           <>
             <span className="titlebar__sep" />
-            <span className="titlebar__project truncate" style={{ '--dot': project.color } as CSSProperties}>
+            <span className="titlebar__project truncate">
               <span className="titlebar__dot" />
               {project.name}
             </span>
