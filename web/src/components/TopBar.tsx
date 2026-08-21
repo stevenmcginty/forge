@@ -141,7 +141,7 @@ export function TopBar({
             aria-label="Watch this desktop’s screen"
             onClick={onWatchScreen}
           >
-            <Icon name="expand" size={15} />
+            <Icon name="screen" size={15} />
           </button>
         ) : null}
 

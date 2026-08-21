@@ -2451,7 +2451,7 @@
 /* ------------------------------------------------------ the status strip
  *
  * The agent's own footer, as one row between the feed and the box. Its badge
- * and name wear the accent; the mode chip wears a meaning (amber = bypass,
+ * and name wear the accent; the mode chip wears a meaning (red = bypass,
  * blue = plan, green = accept edits); everything else is ink.
  */
 
@@ -2552,12 +2552,12 @@
 }
 
 .astatus__mode[data-mode='bypass'] {
-  color: var(--warn);
-  background: var(--warn-soft);
-  border-color: var(--warn-line);
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-line);
 }
 .astatus__mode[data-mode='bypass'] .astatus__mode-dot {
-  background: var(--warn);
+  background: var(--danger);
 }
 
 .astatus__mode[data-mode='plan'] {

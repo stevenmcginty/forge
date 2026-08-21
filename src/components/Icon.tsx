@@ -35,6 +35,7 @@ export type IconName =
   | 'palette'
   | 'mic'
   | 'panelRight'
+  | 'screen'
   | 'phone'
   | 'globe'
   | 'chevronRight'
@@ -164,6 +165,14 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M9.6 2.6h3.8v3.8M13.4 2.6L8.5 7.5" />
       <path d="M6.4 13.4H2.6V9.6M2.6 13.4l4.9-4.9" />
+    </>
+  ),
+  // A monitor with a pointer on it: watch, and take hold of, the desktop's screen.
+  screen: (
+    <>
+      <rect x="1.8" y="2.6" width="12.4" height="8.4" rx="1.4" />
+      <path d="M5.6 13.6h4.8M8 11v2.6" />
+      <path d="M6.6 5.2l3.8 1.5-1.6.6-.6 1.6z" fill="currentColor" stroke="none" />
     </>
   ),
   // A handset: this pane can be driven from the Claude app.
