@@ -485,7 +485,7 @@ export function PaneView({
           <button
             type="button"
             className="ghost-btn pane__action"
-            title="Paste from the clipboard"
+            title="Paste"
             disabled={!live || !alive}
             onClick={() => void pasteFromClipboard()}
           >

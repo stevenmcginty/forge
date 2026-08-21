@@ -1,6 +1,7 @@
+import { execSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
 /**
@@ -28,8 +29,44 @@ const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.
   version: string
 }
 
+/**
+ * The identity of *this* build, as opposed to the version of Forge it came
+ * from. Two deploys of the same package.json version are two different
+ * bundles, and the update prompt (web/src/lib/update.ts) has to tell them
+ * apart — so the commit plus the minute of the build, which no two deploys
+ * share. Written into the bundle as `__WEB_BUILD_ID__` and alongside it as
+ * `/version.json`; the page compares the two.
+ */
+function buildId(): string {
+  let sha = 'local'
+  try {
+    sha = execSync('git rev-parse --short HEAD', { cwd: resolve(import.meta.dirname, '..') }).toString().trim()
+  } catch {
+    /* no git — the timestamp still distinguishes builds */
+  }
+  return `${sha}-${Date.now().toString(36)}`
+}
+
+const BUILD_ID = buildId()
+
+/** Emits `/version.json` next to the bundle, so a running page can ask what the newest build is. */
+function versionFile(version: string): Plugin {
+  return {
+    name: 'forge-web-version-file',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: JSON.stringify({ build: BUILD_ID, version })
+      })
+    }
+  }
+}
+
 export default defineConfig(({ command }) => ({
   define: {
+    __WEB_BUILD_ID__: JSON.stringify(BUILD_ID),
     /**
      * The build this bundle is, sent in `hello.client` and shown in the
      * desktop's device list. Stamped from the root package.json so the browser
@@ -56,7 +93,7 @@ export default defineConfig(({ command }) => ({
   // of a domain and rewrites every unknown path to index.html, so a relative
   // base would break the moment somebody deep-linked.
   base: '/',
-  plugins: [react()],
+  plugins: [react(), versionFile(process.env.FORGE_WEB_VERSION ?? pkg.version)],
   resolve: {
     alias: {
       '@shared': resolve(import.meta.dirname, '..', 'shared'),

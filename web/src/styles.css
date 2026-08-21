@@ -144,6 +144,54 @@
   animation: gate-pulse 1.4s var(--ease-in-out) infinite;
 }
 
+/*
+ * The "a newer build is live" button in the titlebar. The accent, pulsing,
+ * because it is the one thing on the page asking to be pressed, and it
+ * appears at most once per deploy.
+ */
+.titlebar__update {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 24px;
+  padding: 0 var(--s-4);
+  margin-right: var(--s-2);
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-full);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  animation: update-pulse 1.6s ease-in-out infinite;
+}
+
+.titlebar__update:hover {
+  background: var(--accent-bright);
+  border-color: var(--accent-bright);
+  animation: none;
+}
+
+@keyframes update-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--accent-line);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+    opacity: 0.72;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .titlebar__update {
+    animation: none;
+  }
+}
+
 @keyframes gate-pulse {
   0%,
   100% {

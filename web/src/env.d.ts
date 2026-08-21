@@ -13,3 +13,6 @@ declare const __WEB_CLIENT_VERSION__: string
  * in web/src/config.ts and the note beside the `define` that sets it.
  */
 declare const __DEV_SERVER__: boolean
+
+/** The id of this bundle — commit plus build minute — compared against `/version.json`. See lib/update.ts. */
+declare const __WEB_BUILD_ID__: string
