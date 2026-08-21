@@ -171,8 +171,10 @@ export function Composer({
           <div className="composer__keys" role="toolbar" aria-label="Terminal keys">
             <Key label="Esc" onClick={() => onRaw('\x1b')} disabled={disabled} />
             <Key label="Tab" onClick={() => onRaw('\t')} disabled={disabled} />
+            <Key label="←" onClick={() => onRaw('\x1b[D')} disabled={disabled} title="Left" />
             <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
             <Key label="↓" onClick={() => onRaw('\x1b[B')} disabled={disabled} title="Down" />
+            <Key label="→" onClick={() => onRaw('\x1b[C')} disabled={disabled} title="Right" />
             <Key
               label="Mode"
               onClick={() => onRaw(BACK_TAB)}
