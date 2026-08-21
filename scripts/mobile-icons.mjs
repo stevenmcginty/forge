@@ -31,16 +31,25 @@ import { fileURLToPath } from 'node:url'
 import { drawIcon } from './icon-lib.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const OUT = join(ROOT, 'mobile', 'public', 'icons')
+const DIRS = [
+  join(ROOT, 'mobile', 'public', 'icons'),
+  join(ROOT, 'web', 'public', 'icons')
+]
 
-mkdirSync(OUT, { recursive: true })
+for (const dir of DIRS) {
+  mkdirSync(dir, { recursive: true })
+}
+
 const files = [
   ['icon-192.png', drawIcon(192, 0.02)],
   ['icon-512.png', drawIcon(512, 0.02)],
   ['icon-512-maskable.png', drawIcon(512, 0.2)],
   ['apple-touch-icon.png', drawIcon(180, 0.02, { bleed: true })]
 ]
-for (const [name, bytes] of files) {
-  writeFileSync(join(OUT, name), bytes)
-  console.log(`wrote mobile/public/icons/${name}  ${bytes.length} bytes`)
+
+for (const dir of DIRS) {
+  for (const [name, bytes] of files) {
+    writeFileSync(join(dir, name), bytes)
+    console.log(`wrote ${dir}/${name}  ${bytes.length} bytes`)
+  }
 }
