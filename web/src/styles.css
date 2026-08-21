@@ -1443,6 +1443,26 @@
   background: var(--accent-soft);
 }
 
+/*
+ * Agent tabs keep their own colour on the phone. The rules above would
+ * otherwise paint every live pill in volt, and volt is already the project
+ * bar's language — two green seams stacked is "the app is on", not "this is
+ * Grok". `--tab-tint` is the profile accent; the seam is the same 2px the
+ * titlebar uses.
+ */
+.app[data-mobile] .tab[data-tint='true'] {
+  border-color: color-mix(in srgb, var(--tab-tint) 38%, var(--line-soft));
+  background: color-mix(in srgb, var(--tab-tint) 13%, var(--bg-panel));
+  color: color-mix(in srgb, var(--tab-tint) 72%, var(--text-secondary));
+}
+
+.app[data-mobile] .tab[data-tint='true'][data-active='true'] {
+  border-color: var(--tab-tint);
+  background: color-mix(in srgb, var(--tab-tint) 22%, var(--bg-base));
+  color: var(--tab-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tab-tint) 28%, transparent);
+}
+
 .app[data-mobile] .tab__title {
   font-size: var(--t-md);
 }
@@ -1483,6 +1503,45 @@
 
 .app[data-mobile] .pane__title {
   font-size: var(--t-md);
+}
+
+/*
+ * The pane header is the agent, the same recipe as the titlebar is the project.
+ * `--pane-accent` paints the wash, the name and the seam, so which agent is
+ * running is as loud as which folder you are in. Shells stay furniture — a
+ * prompt is not a collaborator, and a cyan PowerShell bar would shout the
+ * wrong thing.
+ *
+ * Focused is restated because TerminalPane.css paints a live header in
+ * `--bg-header-live`; same specificity, later sheet, but the attribute is
+ * named so a future reorder cannot quietly take the identity back.
+ */
+.app[data-mobile] .pane[data-kind='agent'] .pane__header,
+.app[data-mobile] .pane[data-kind='agent'][data-focused='true'] .pane__header {
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 22%, var(--bg-base));
+  border-bottom: 2px solid var(--pane-accent, var(--accent));
+}
+
+.app[data-mobile] .pane[data-kind='agent'] .pane__title {
+  font-size: var(--t-lg);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--pane-accent, var(--accent));
+}
+
+.app[data-mobile] .pane[data-kind='agent'] .pane__header .agent-badge {
+  height: 18px;
+  min-width: 26px;
+  font-size: var(--t-xs);
+  background: color-mix(in srgb, var(--badge-accent, var(--accent)) 22%, transparent);
+  border-color: color-mix(in srgb, var(--badge-accent, var(--accent)) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--badge-accent, var(--accent)) 28%, transparent);
+}
+
+.app[data-mobile] .pane[data-kind='agent'] .pane__action {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 45%, var(--line-strong));
 }
 
 .app[data-mobile] .pane__actions {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PaneLeaf } from '@shared/types'
-import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
@@ -437,6 +437,7 @@ export function PaneView({
       className="pane"
       data-pane-id={leaf.id}
       data-focused={focused}
+      data-kind={isShellProfile(profile) ? 'shell' : 'agent'}
       data-status={!live ? 'frozen' : alive ? 'live' : 'dead'}
       style={{ '--pane-accent': profile.accent } as CSSProperties}
       onPointerDownCapture={() => {
