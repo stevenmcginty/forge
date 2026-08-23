@@ -429,6 +429,22 @@ function openServer(env) {
   const child = spawn(process.execPath, [SERVER], { cwd: FORGE, stdio: ['pipe', 'pipe', 'pipe'], env })
   let buffer = ''
   let stderr = ''
+  // A spawn that fails is reported with the facts it depends on, not as an
+  // unhandled 'error' event five frames deep in node:events.
+  child.on('error', (error) => {
+    console.error(
+      `     spawn failed: ${error.message}
+` +
+        `       execPath ${process.execPath} exists=${existsSync(process.execPath)}
+` +
+        `       cwd      ${FORGE} exists=${existsSync(FORGE)}
+` +
+        `       server   ${SERVER} exists=${existsSync(SERVER)}
+` +
+        `       env keys ${Object.keys(env).length}, PATH set=${'PATH' in env || 'Path' in env}`
+    )
+    process.exit(1)
+  })
   const waiters = new Map()
 
   child.stdout.on('data', (chunk) => {

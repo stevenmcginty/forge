@@ -712,7 +712,8 @@ function modelFamily(command: string): string | null {
  * Qwen from qwen-code `/model <id>` + QwenCloud text-generation models;
  * Gemini CLI from geminicli.com/docs/cli/model; GLM from docs.z.ai Coding Plan;
  * OpenCode from `opencode models` (Zen free + the Gemini coding ids on this
- * machine); DeepSeek from the OpenCode-wrapped V4 ids the profile launches with.
+ * machine; `x-preview-f-free` is listed upstream as "Ox Alpha Free
+ * (Unlimited)" — the label follows that, not the raw id); DeepSeek from the OpenCode-wrapped V4 ids the profile launches with.
  */
 const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
   grok: [
@@ -780,12 +781,13 @@ const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
     { id: 'qwen3.7-flash', label: 'Qwen 3.7 Flash', note: 'fast and cheap' }
   ],
   opencode: [
-    { id: 'opencode/big-pickle', label: 'Big Pickle', note: 'OpenCode Zen, free' },
-    { id: 'opencode/hy3-free', label: 'HY3', note: 'OpenCode Zen, free' },
-    { id: 'opencode/mimo-v2.5-free', label: 'MiMo V2.5', note: 'OpenCode Zen, free' },
-    { id: 'opencode/nemotron-3-ultra-free', label: 'Nemotron 3 Ultra', note: 'OpenCode Zen, free' },
-    { id: 'opencode/nemotron-3.5-lightning-free', label: 'Nemotron 3.5 Lightning', note: 'OpenCode Zen, free' },
-    { id: 'opencode/x-preview-f-free', label: 'X Preview F', note: 'OpenCode Zen, free' },
+    { id: 'opencode/x-preview-f-free', label: 'Ox Alpha', note: 'newest — 1M context, free' },
+    { id: 'opencode/muse-spark-1.2-contributor-free', label: 'Muse Spark 1.2', note: 'contributor tier, free' },
+    { id: 'opencode/big-pickle', label: 'Big Pickle', note: 'the Zen classic, free' },
+    { id: 'opencode/hy3-free', label: 'HY3', note: 'free' },
+    { id: 'opencode/mimo-v2.5-free', label: 'MiMo V2.5', note: 'multimodal, free' },
+    { id: 'opencode/nemotron-3-ultra-free', label: 'Nemotron 3 Ultra', note: '1M context, free' },
+    { id: 'opencode/nemotron-3.5-lightning-free', label: 'Nemotron 3.5 Lightning', note: 'fastest, free' },
     { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: 'Google, newest Flash' },
     { id: 'google/gemini-3.6-flash', label: 'Gemini 3.6 Flash', note: 'Google' },
     { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'Google' },

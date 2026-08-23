@@ -33,6 +33,35 @@ export const BACK_TAB = '\x1b[Z'
 
 const MAX_GROW_PX = 196
 
+/** The heading a model group gets, by the prefix of its ids ("google/…"). */
+const PROVIDER_TITLES: Record<string, string> = {
+  opencode: 'OpenCode Zen · free',
+  google: 'Google',
+  deepseek: 'DeepSeek'
+}
+
+/**
+ * Model rows split into provider groups, in first-seen order. One group comes
+ * back as `null` — a single-provider CLI (Claude, Grok) paints the flat list
+ * it always has, with no heading it does not need.
+ */
+function groupModels(models: AgentModelSpec[]): { title: string; models: AgentModelSpec[] }[] | null {
+  const groups: { title: string; models: AgentModelSpec[] }[] = []
+  const byKey = new Map<string, AgentModelSpec[]>()
+  for (const model of models) {
+    const slash = model.id.indexOf('/')
+    const key = slash > 0 ? model.id.slice(0, slash) : ''
+    let bucket = key ? byKey.get(key) : undefined
+    if (!bucket) {
+      bucket = []
+      if (key) byKey.set(key, bucket)
+      groups.push({ title: PROVIDER_TITLES[key] ?? key, models: bucket })
+    }
+    bucket.push(model)
+  }
+  return groups.length > 1 ? groups : null
+}
+
 export function Composer({
   draft,
   disabled,
@@ -271,20 +300,25 @@ export function Composer({
                 label="Model"
               >
                 <PopoverSection title="Model">
-                  {modelList.map((model) => (
-                    <PopoverRow
-                      key={model.id}
-                      selected={model.id === currentModelId}
-                      onClick={() => {
-                        setOpenPick(null)
-                        onModel(model.id)
-                      }}
-                    >
-                      <span className="ceffort">
-                        <strong className="ceffort__label">{model.label}</strong>
-                        {model.note ? <span className="ceffort__note">{model.note}</span> : null}
-                      </span>
-                    </PopoverRow>
+                  {(groupModels(modelList) ?? [{ title: '', models: modelList }]).map((group) => (
+                    <div key={group.title || 'all'} className="composer__model-group">
+                      {group.title ? <div className="ceffort__group">{group.title}</div> : null}
+                      {group.models.map((model) => (
+                        <PopoverRow
+                          key={model.id}
+                          selected={model.id === currentModelId}
+                          onClick={() => {
+                            setOpenPick(null)
+                            onModel(model.id)
+                          }}
+                        >
+                          <span className="ceffort">
+                            <strong className="ceffort__label">{model.label}</strong>
+                            {model.note ? <span className="ceffort__note">{model.note}</span> : null}
+                          </span>
+                        </PopoverRow>
+                      ))}
+                    </div>
                   ))}
                 </PopoverSection>
               </Popover>
