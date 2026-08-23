@@ -410,7 +410,7 @@ function enableTouchScroll(
   const applyDelta = (deltaY: number): void => {
     const alt = term.buffer.active.type === 'alternate'
     const mouse = term.modes.mouseTrackingMode !== 'none'
-    const plan = planPointerDelta(carry, deltaY, measureRow(), alt, mouse)
+    const plan = planPointerDelta(carry, deltaY, measureRow(), alt, mouse, term.cols)
     if (plan.kind === 'viewport') {
       if (plan.lines !== 0) term.scrollLines(plan.lines)
       return

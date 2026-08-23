@@ -19,7 +19,13 @@ export { DESK_VIEWER, GridOwners } from '../../electron/pty/grid-owner'
 // could keep passing after the stored form moved.
 export { hashPin } from '../../electron/web/pin'
 export { GROK_IMAGE_PASTE, INBOX_KEEP, imagePasteIntoPane, saveInboxImage } from '../../electron/web/inbox'
-export { planPointerDelta, planTouchScroll, TUI_PAGE_ROWS, wheelDeltaPx } from '../../shared/touch-scroll'
+export {
+  planPointerDelta,
+  planTouchScroll,
+  TUI_PAGE_ROWS,
+  wheelDeltaPx,
+  wheelReportCell
+} from '../../shared/touch-scroll'
 // Re-exported so the checks assert against exactly the shipped values rather
 // than numbers that could drift from them.
 export {

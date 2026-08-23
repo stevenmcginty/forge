@@ -155,7 +155,7 @@ export class PtySessionManager {
     const cwd = resolveCwd(spec.cwd)
     if (!cwd) return { ok: false, id: spec.id, error: `Folder not found: ${spec.cwd}` }
 
-    const cols = clampDim(spec.cols, 80)
+    const cols = clampDim(spec.cols, 80, MIN_PTY_COLS)
     const rows = clampDim(spec.rows, 24)
 
     let proc: pty.IPty
@@ -236,7 +236,7 @@ export class PtySessionManager {
   resize(id: string, cols: number, rows: number): boolean {
     const s = this.sessions.get(id)
     if (!s || s.disposed) return false
-    const c = clampDim(cols, s.info.cols)
+    const c = clampDim(cols, s.info.cols, MIN_PTY_COLS)
     const r = clampDim(rows, s.info.rows)
     if (c === s.info.cols && r === s.info.rows) {
       s.pendingResize = undefined
@@ -350,9 +350,21 @@ export class PtySessionManager {
 
 /* ----------------------------------------------------------------- helpers */
 
-function clampDim(n: number, fallback: number): number {
+/**
+ * The narrowest grid a pane is ever given, whatever a viewer asked for.
+ *
+ * Measured, not chosen: OpenCode 1.18 (a Bun binary) crashes outright — "oh no:
+ * Bun has crashed", exit 3 — when its terminal is resized to thirty columns or
+ * fewer, and a phone mid-layout, a sliver of a split, or a drawer animating
+ * closed can all propose a grid that narrow. Forty columns is still a phone's
+ * worth of text; a viewer that wanted less font-fits to this, the same as any
+ * viewer that does not own the grid.
+ */
+const MIN_PTY_COLS = 40
+
+function clampDim(n: number, fallback: number, floor = 2): number {
   if (!Number.isFinite(n)) return fallback
-  return Math.max(2, Math.min(1000, Math.floor(n)))
+  return Math.max(floor, Math.min(1000, Math.floor(n)))
 }
 
 function resolveCwd(cwd: string): string | null {

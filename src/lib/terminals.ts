@@ -865,9 +865,9 @@ class TerminalHost {
 
   /**
    * A wheel or a finger over an alt-screen agent TUI. Writes PageUp/PageDown
-   * or SGR at 1;1. Returns true when the TUI took the gesture so the caller
-   * can preventDefault. False on Claude Code's normal buffer, which keeps
-   * xterm's own scrollback.
+   * or an SGR wheel at `wheelReportCell`. Returns true when the TUI took the
+   * gesture so the caller can preventDefault. False on Claude Code's normal
+   * buffer, which keeps xterm's own scrollback.
    */
   driveScroll(paneId: string, deltaY: number, deltaMode = 0): boolean {
     const entry = this.entries.get(paneId)
@@ -885,7 +885,8 @@ class TerminalHost {
       wheelDeltaPx(deltaY, deltaMode, height),
       height,
       alt,
-      mouse
+      mouse,
+      term.cols
     )
     if (plan.kind === 'data') window.forge.pty.write(paneId, plan.data)
     return true
@@ -1043,12 +1044,15 @@ class TerminalHost {
      * Alternate-screen TUIs (Grok, OpenCode, Antigravity, vim) have no xterm
      * scrollback. Left alone, xterm would turn a wheel into one arrow key
      * (Grok's focused prompt eats those as caret motion) or into an SGR
-     * report at the cursor (OpenCode hit-tests the composer along the
-     * bottom and treats that as a nudge, not as message scroll).
+     * report at the cursor, which sits in OpenCode's composer along the
+     * bottom.
      *
      * The same planner the phone and the browser already use writes PageUp
-     * or an SGR wheel at 1;1 instead. Claude Code writes the normal buffer,
-     * so the handler returns true and xterm keeps the wheel.
+     * or an SGR wheel aimed at the top row instead — mid-width, because
+     * OpenCode drops a report on the left gutter entirely, which is what
+     * kept this pane frozen at the desk as well as on a phone. See
+     * `wheelReportCell` in shared/touch-scroll.ts. Claude Code writes the
+     * normal buffer, so the handler returns true and xterm keeps the wheel.
      *
      * What opencode still cannot get natively are the chords xterm reserves
      * or mangles — Shift+PageUp scrolls xterm's own (empty) scrollback, and

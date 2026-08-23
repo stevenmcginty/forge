@@ -194,6 +194,7 @@ async function main() {
     planTouchScroll,
     planPointerDelta,
     wheelDeltaPx,
+    wheelReportCell,
     TUI_PAGE_ROWS,
     isAllowedSource,
     webSocketUrl,
@@ -466,22 +467,22 @@ async function main() {
     'an agent that is not Grok still gets the quoted path'
   )
 
-  const wheelUp = planTouchScroll(-3, true, true)
+  const wheelUp = planTouchScroll(-3, true, true, 120)
   log(
-    wheelUp.kind === 'data' && wheelUp.data === '\x1b[<64;1;1M'.repeat(3),
+    wheelUp.kind === 'data' && wheelUp.data === '\x1b[<64;60;1M'.repeat(3),
     'a finger drag on a mouse-tracking TUI (Grok, Antigravity) is three SGR wheel-up reports'
   )
-  const pageUp = planTouchScroll(-8, true, false)
+  const pageUp = planTouchScroll(-8, true, false, 120)
   log(
     pageUp.kind === 'data' && pageUp.data === '\x1b[5~',
     'the same drag on an alt-screen with no mouse is PageUp — arrows would only move Grok\'s caret'
   )
-  const notYet = planTouchScroll(-3, true, false)
+  const notYet = planTouchScroll(-3, true, false, 120)
   log(
     notYet.kind === 'viewport' && notYet.lines === 0,
     'fewer than a page of travel on that alt-screen is held, not fired — one row used to be one PageUp'
   )
-  const scrollback = planTouchScroll(-4, false, false)
+  const scrollback = planTouchScroll(-4, false, false, 120)
   log(
     scrollback.kind === 'viewport' && scrollback.lines === -4,
     'Claude Code\'s normal buffer is still xterm scrollback, which is why its swipe already worked'
@@ -491,24 +492,46 @@ async function main() {
   log(wheelDeltaPx(-16, 0, 16) === -16, 'a trackpad pixel delta is left as pixels')
   log(TUI_PAGE_ROWS === 8, 'one PageUp is eight rows of travel')
   const carry = { px: 0 }
-  const pending = planPointerDelta(carry, -16, 16, true, false)
+  const pending = planPointerDelta(carry, -16, 16, true, false, 120)
   log(
     pending.kind === 'viewport' && pending.lines === 0 && carry.px === -16,
     'one row of wheel on Grok is held in the remainder'
   )
-  const paged = planPointerDelta(carry, -16 * 7, 16, true, false)
+  const paged = planPointerDelta(carry, -16 * 7, 16, true, false, 120)
   log(
     paged.kind === 'data' && paged.data === '\x1b[5~' && carry.px === 0,
     'eight rows of wheel on Grok is one PageUp, remainder spent'
   )
   const sgrCarry = { px: 0 }
-  const sgr = planPointerDelta(sgrCarry, -48, 16, true, true)
+  const sgr = planPointerDelta(sgrCarry, -48, 16, true, true, 120)
   log(
-    sgr.kind === 'data' && sgr.data === '\x1b[<64;1;1M'.repeat(3),
-    'the same pixels on a mouse-tracking TUI are three SGR reports at 1;1, not at the prompt'
+    sgr.kind === 'data' && sgr.data === '\x1b[<64;60;1M'.repeat(3),
+    'the same pixels on a mouse-tracking TUI are three SGR reports mid-width on the top row'
   )
+
+  // The cell those reports claim to be over. opencode 1.18.21, measured in a
+  // PTY, drops a wheel report on columns 1-2 and on the last column without a
+  // byte of response, and its composer owns the bottom of a short grid — so a
+  // report has to be mid-width and at the top to land in the message list.
+  log(
+    wheelReportCell(120).col === 60 && wheelReportCell(120).row === 1,
+    'a wheel report is aimed mid-width at the top row, not at the 1;1 that opencode ignores'
+  )
+  log(
+    [24, 45, 60, 80, 120, 200].every((cols) => {
+      const cell = wheelReportCell(cols)
+      return cell.col > 2 && cell.col < cols && cell.row === 1
+    }),
+    'at every grid width a phone or a desktop can produce, that column clears both gutters'
+  )
+  const phoneSgr = planPointerDelta({ px: 0 }, -16, 16, true, true, 45)
+  log(
+    phoneSgr.kind === 'data' && phoneSgr.data === '\x1b[<64;22;1M',
+    'a phone-width pane aims its finger-drag report at its own middle, not at column 60'
+  )
+
   const viewCarry = { px: 0 }
-  const view = planPointerDelta(viewCarry, 64, 16, false, false)
+  const view = planPointerDelta(viewCarry, 64, 16, false, false, 120)
   log(
     view.kind === 'viewport' && view.lines === 4,
     'Claude Code still gets viewport lines, which is why its wheel already worked'

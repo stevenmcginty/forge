@@ -100,6 +100,34 @@ const WARM_MS = HEARTBEAT_MS * 2
 const PROBE_MS = 3_000
 
 /**
+ * How many probes in a row may go unanswered before the link is hung up on.
+ *
+ * One was too few. A phone on 5G through a cloudflared quick tunnel sees round
+ * trips past three seconds whenever the tunnel's QUIC leg stalls, and hanging
+ * up on the first slow answer meant the beat redialled every twenty seconds —
+ * the desktop log showed "connected / disconnected" in a steady rhythm — and
+ * every redial re-attached and replayed every pane, which on a phone is the
+ * screen going blank mid-sentence. A second ask costs one more PROBE_MS before
+ * a genuinely dead socket is noticed; a merely slow one gets the benefit of it.
+ */
+const PROBE_STRIKES = 2
+
+/**
+ * How long a keystroke waits for the link to come back before it is dropped.
+ *
+ * `write` used to hand its frame to a socket that was not open and say
+ * nothing, which is how a message arrived at the desktop without its Enter:
+ * the words went down the old socket a beat before the probe hung up on it,
+ * and the carriage return a beat later went down nothing. Anything a person
+ * typed while the link is being re-dialled is held and sent once the desktop
+ * has let this browser back in and re-attached its panes — unless the outage
+ * was long enough that the pane may be a different conversation by now, in
+ * which case they are told what was not typed rather than having it typed
+ * into whatever is there.
+ */
+const WRITE_HOLD_MS = 15_000
+
+/**
  * How long a freshly-dialled socket has to reach `OPEN`.
  *
  * The other half of the same problem. When the desktop's address has moved —
@@ -391,6 +419,10 @@ export class ForgeClient {
   /** Set when the last refusal was `bad-token`, so a second one signs out. */
   private reauthed = false
   private lastFrameAt = 0
+  /** Probes that have gone unanswered on this socket, in a row. */
+  private strikes = 0
+  /** Keystrokes typed while the link was down, in order, to send once it is back. */
+  private held: Array<{ sessionId: string; data: string; at: number }> = []
   private rid = 0
   private waiting = new Map<string, { settle: (result: WebResult) => void; timer: number }>()
   /** sessionId → the geometry this browser is reading it at, re-sent on reconnect. */
@@ -666,7 +698,12 @@ export class ForgeClient {
     this.pingedAt = Date.now()
     this.probeTimer = window.setTimeout(() => {
       this.probeTimer = null
-      if (this.admitted && this.pingedAt !== 0) this.declareDead()
+      if (!this.admitted || this.pingedAt === 0) return
+      this.strikes += 1
+      // A slow answer is not a dead link. Ask once more before giving up on it;
+      // a socket that is really gone fails this one just the same.
+      if (this.strikes < PROBE_STRIKES) this.challenge()
+      else this.declareDead()
     }, PROBE_MS)
   }
 
@@ -770,7 +807,34 @@ export class ForgeClient {
       return
     }
     this.probeIfStale()
-    this.send({ type: 'write', sessionId, data })
+    // A link being re-dialled is not a reason to lose a keystroke. Hold it;
+    // `hello-ok` sends it after the panes are re-attached, in the order typed.
+    if (this.held.length || !this.send({ type: 'write', sessionId, data })) {
+      this.held.push({ sessionId, data, at: Date.now() })
+      this.wake()
+    }
+  }
+
+  /**
+   * Type what was held while the link was down, now that it is back.
+   *
+   * Order is preserved, which matters: a draft is words then Enter as two
+   * writes a beat apart, and sending the Enter first would send nothing. What
+   * was held past WRITE_HOLD_MS is dropped and said so, once, rather than typed
+   * into a pane that may have moved on.
+   */
+  private flushHeld(): void {
+    if (!this.held.length) return
+    const held = this.held
+    this.held = []
+    const now = Date.now()
+    let dropped = 0
+    for (const entry of held) {
+      if (now - entry.at > WRITE_HOLD_MS || !this.send({ type: 'write', sessionId: entry.sessionId, data: entry.data })) {
+        dropped += 1
+      }
+    }
+    if (dropped) this.handlers.onNotice('The link was down too long — what you typed meanwhile was not sent.')
   }
 
   /**
@@ -1022,6 +1086,7 @@ export class ForgeClient {
     // still carrying anything at all, not whether the desktop is polite.
     this.lastFrameAt = Date.now()
     this.pingedAt = 0
+    this.strikes = 0
 
     let frame: WebServerFrame
     try {
@@ -1047,6 +1112,7 @@ export class ForgeClient {
         // re-establishes what this browser has told the desktop about its size,
         // which `dropSocket` voided on the way into this connection.
         for (const [sessionId, size] of this.subs) this.sendAttach(sessionId, size)
+        this.flushHeld()
         return
       }
 
@@ -1296,6 +1362,7 @@ export class ForgeClient {
     this.refreshTimer = null
     if (this.probeTimer !== null) clearTimeout(this.probeTimer)
     this.probeTimer = null
+    this.strikes = 0
     if (this.connectTimer !== null) clearTimeout(this.connectTimer)
     this.connectTimer = null
     this.pingedAt = 0

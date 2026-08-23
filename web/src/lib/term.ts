@@ -142,8 +142,9 @@ export interface TermHost {
   setReadOnly: (readOnly: boolean) => void
   /**
    * A wheel or a finger over an alt-screen TUI (Grok, OpenCode). Returns true
-   * when the gesture was spent as PTY bytes — PageUp/PageDown or SGR wheel at
-   * 1;1 — so the caller can preventDefault. False on the normal buffer: the
+   * when the gesture was spent as PTY bytes — PageUp/PageDown or an SGR wheel
+   * at `wheelReportCell` — so the caller can preventDefault. False on the
+   * normal buffer: the
    * feed should native-scroll the captured scrollback, and xterm should keep
    * the physical wheel.
    */
@@ -887,7 +888,8 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
         wheelDeltaPx(deltaY, deltaMode, height),
         height,
         alt,
-        mouse
+        mouse,
+        term.cols
       )
       if (plan.kind === 'data') options.onData(plan.data)
       return true
@@ -940,8 +942,11 @@ function rowHeight(term: Terminal, fontSize: number): number {
  * conversation never moved: on the alternate screen xterm turns a notch into
  * one arrow key, and Grok's focused prompt eats those. `attachCustomWheelEventHandler`
  * intercepts before that conversion; `planPointerDelta` then writes PageUp or
- * an SGR report at 1;1. Claude Code writes the normal buffer, so the handler
- * returns true and xterm keeps the wheel.
+ * an SGR report at the cell `wheelReportCell` picks — the top row, mid-width,
+ * because OpenCode ignores a report on the left gutter outright and that is
+ * what left its pane frozen under both a wheel and a finger. Claude Code
+ * writes the normal buffer, so the handler returns true and xterm keeps the
+ * wheel.
  *
  * ## Where the finger's movement is sent, which depends on what the pane is
  *
@@ -992,7 +997,7 @@ function enableTouchScroll(
   const applyDelta = (deltaY: number): 'viewport' | 'data' | null => {
     const alt = term.buffer.active.type === 'alternate'
     const mouse = term.modes.mouseTrackingMode !== 'none'
-    const plan = planPointerDelta(carry, deltaY, measureRow(), alt, mouse)
+    const plan = planPointerDelta(carry, deltaY, measureRow(), alt, mouse, term.cols)
     if (plan.kind === 'viewport') {
       if (plan.lines === 0) return null
       term.scrollLines(plan.lines)

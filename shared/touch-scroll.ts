@@ -19,9 +19,9 @@
  *    viewport. Claude Code is *not* in this bucket: it writes the normal
  *    buffer, so a finger drag is scrollback. Grok, OpenCode, Antigravity, vim
  *    and htop take the alternate screen and (usually) enable mouse tracking.
- *    Reports are written at column 1 row 1 so a TUI that hit-tests the prompt
- *    along the bottom still treats the gesture as scrollback rather than as a
- *    nudge of the composer.
+ *    Reports are written at the cell `wheelReportCell` picks — the top row,
+ *    mid-width — so a TUI that hit-tests the composer along the bottom still
+ *    treats the gesture as scrollback rather than as a nudge of the composer.
  *  - **Alternate screen, no mouse.** xterm would turn a wheel into arrow keys,
  *    which in Grok (prompt focused, the resting state) only move the caret.
  *    PageUp / PageDown scroll the conversation even then; Grok's own
@@ -40,13 +40,34 @@ export interface ScrollCarry {
 }
 
 /**
- * SGR mouse wheel: button 64 up, 65 down, 1-based cell. Written at column 1
- * row 1 so a TUI that hit-tests the prompt along the bottom still treats the
- * gesture as scrollback rather than as a nudge of the composer.
+ * The cell a synthesised wheel report claims to be over, 1-based.
+ *
+ * This used to be a flat `1;1`, and column 1 is why an OpenCode pane could not
+ * be scrolled by a finger or by the wheel on any surface. OpenCode hit-tests
+ * the report against its message list, and the list does not start at the left
+ * edge of the grid: measured against opencode 1.18.21 in a PTY, wheel reports
+ * at columns 1 and 2 produce *no output at all* — not a nudge of the composer,
+ * simply nothing — while column 3 and inwards scroll the conversation. The
+ * last column is the right-hand gutter and is dead in the same way.
+ *
+ * Mid-width is the column that cannot be a border however wide the gutter
+ * grows. The *row* stays at the top, which the same measurements say is the
+ * safe end: a 120x40 grid took the report at every row tried from 1 to 20 and
+ * ignored every one from 36 down, but on a phone-shaped 45x24 grid the dead
+ * zone starts at row 5, and on 60x16 at row 4 — the composer grows into the
+ * middle of a short pane. Row 1 is inside the transcript at every size, which
+ * is exactly the property the old `1;1` was reaching for.
  */
-function sgrWheel(up: boolean, count: number): string {
+export function wheelReportCell(cols: number): { col: number; row: number } {
+  const width = Number.isFinite(cols) && cols > 0 ? Math.floor(cols) : 1
+  return { col: Math.max(1, Math.floor(width / 2)), row: 1 }
+}
+
+/** SGR mouse wheel: button 64 up, 65 down, 1-based cell. See `wheelReportCell`. */
+function sgrWheel(up: boolean, count: number, cols: number): string {
   const button = up ? 64 : 65
-  const one = `\x1b[<${button};1;1M`
+  const { col, row } = wheelReportCell(cols)
+  const one = `\x1b[<${button};${col};${row}M`
   return one.repeat(count)
 }
 
@@ -70,14 +91,21 @@ export function wheelDeltaPx(deltaY: number, deltaMode: number, rowHeight: numbe
   return deltaY
 }
 
+/**
+ * `cols` is the terminal's current width, which is what aims the wheel report
+ * at a cell the TUI will accept — see `wheelReportCell`. It is required rather
+ * than defaulted, because the one value a default could plausibly take is the
+ * left gutter that this whole path used to fire into.
+ */
 export function planTouchScroll(
   lines: number,
   altScreen: boolean,
-  mouseTracking: boolean
+  mouseTracking: boolean,
+  cols: number
 ): TouchScrollPlan {
   if (lines === 0) return { kind: 'viewport', lines: 0 }
   if (mouseTracking) {
-    return { kind: 'data', data: sgrWheel(lines < 0, Math.abs(lines)) }
+    return { kind: 'data', data: sgrWheel(lines < 0, Math.abs(lines), cols) }
   }
   if (altScreen) {
     const pages = Math.floor(Math.abs(lines) / TUI_PAGE_ROWS)
@@ -100,7 +128,8 @@ export function planPointerDelta(
   deltaY: number,
   rowHeight: number,
   altScreen: boolean,
-  mouseTracking: boolean
+  mouseTracking: boolean,
+  cols: number
 ): TouchScrollPlan {
   const height = rowHeight > 0 ? rowHeight : 1
   const unitRows = scrollUnitRows(altScreen, mouseTracking)
@@ -109,5 +138,5 @@ export function planPointerDelta(
   const steps = Math.trunc(carry.px / unit)
   if (steps === 0) return { kind: 'viewport', lines: 0 }
   carry.px -= steps * unit
-  return planTouchScroll(steps * unitRows, altScreen, mouseTracking)
+  return planTouchScroll(steps * unitRows, altScreen, mouseTracking, cols)
 }
