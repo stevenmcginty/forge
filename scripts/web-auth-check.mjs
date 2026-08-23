@@ -388,23 +388,28 @@ async function main() {
   log(!onDisk.includes('webDevices'), 'and the next write leaves no trace of it on disk')
   log(!onDisk.includes('gone-1') && !onDisk.includes('Old Chrome'), 'so no stale browser row survives the upgrade')
 
-  /* -------------------------------------------------------------- 14. lockout */
+  /* ------------------------------------- 14. bad tokens never lock anybody out
+   *
+   * There is no address bucket. Behind the tunnel every caller on earth shares
+   * this machine's loopback, so striking bad tokens per address handed any
+   * stranger a way to lock the owner out for a renewable minute. A JWT is not a
+   * guessable secret, so counting them bought nothing; the only bucket is the
+   * account's, and the only thing that fills it is a wrong PIN (see 17d).
+   */
 
   const junk = 'not.a.token'
   let lockedOut = null
-  for (let i = 0; i < AUTH_MAX_FAILURES; i++) {
+  for (let i = 0; i < AUTH_MAX_FAILURES * 3; i++) {
     const outcome = await auth.authenticate(hello('10.9.9.9', junk, 'browser-1'))
     if (outcome.reason !== 'bad-token') lockedOut = outcome
   }
-  log(lockedOut === null, `${AUTH_MAX_FAILURES} bad tokens from one source are each answered on their own merits`)
-  const locked = await auth.authenticate(hello('10.9.9.9', mint(), 'laptop-1'))
-  log(
-    locked.ok === false && locked.reason === 'busy' && locked.retryAfterMs > 0,
-    'the next attempt from that source is refused with busy and a retry hint, even holding a good token'
-  )
-  clock += AUTH_LOCKOUT_MS + 1000
-  const forgiven = await auth.authenticate(hello('10.9.9.9', mint(), 'laptop-1'))
-  log(forgiven.ok === true, 'and the lockout expires on the injected clock')
+  log(lockedOut === null, `${AUTH_MAX_FAILURES * 3} bad tokens from one source are each answered bad-token — none is ever busy`)
+  const unbothered = await auth.authenticate(hello('10.9.9.9', mint(), 'laptop-1'))
+  log(unbothered.ok === true, "and the owner signing in from that same address is admitted — a stranger's junk cannot lock the door")
+  const refreshJunk = await auth.verifyToken(junk, '10.9.9.9', UID)
+  log(refreshJunk.ok === false && refreshJunk.reason === 'bad-token', "a bad token on an open socket's refresh is bad-token, not busy")
+  const refreshGood = await auth.verifyToken(mint(), '10.9.9.9', UID)
+  log(refreshGood.ok === true, 'and a good one still verifies afterwards — refresh failures strike nothing either')
 
   /* --------------------------------------------------- 15. Google's key set */
 

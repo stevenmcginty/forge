@@ -255,6 +255,19 @@ export function googleJwksFetcher(): JwksFetcher {
  */
 const JWKS_TIMEOUT_MS = 8_000
 
+/** Blunt backstop on the strike map — see `pruneStrikes`. Same figure as electron/mobile/auth.ts. */
+const MAX_STRIKE_BUCKETS = 10_000
+
+/** Strip control characters before text off the socket reaches a log line. Same guard as shared/web.ts's, which is module-private. */
+function printable(text: string): string {
+  return [...text]
+    .filter((ch) => {
+      const code = ch.codePointAt(0) ?? 0
+      return code > 31 && code !== 127
+    })
+    .join('')
+}
+
 /**
  * Everything this class needs from the world, and nothing else.
  *
@@ -444,36 +457,39 @@ export class WebAuth {
   /**
    * Authenticate a `hello`.
    *
-   * Five gates, in this order, and the order is load-bearing:
+   * Four gates, in this order, and the order is load-bearing:
    *
-   *  1. **Lockout**, so a caller that has been failing does not get to keep
-   *     trying while the rest of this runs — and, since the PIN is short, so
-   *     that the guessing is what runs out rather than the guesser's patience.
-   *  2. **The token**, verified against Google's keys — signature *and* every
+   *  1. **The token**, verified against Google's keys — signature *and* every
    *     claim. A token that does not verify is `bad-token` whatever uid it
    *     claims, which is why this runs before the uid is looked at: a token
    *     minted by somebody else's Firebase project whose `sub` happens to equal
    *     ours must not be able to reach the `wrong-account` branch and learn it
    *     guessed right.
-   *  3. **The account**, which is `wrong-account` and a genuinely different
+   *  2. **The account**, which is `wrong-account` and a genuinely different
    *     outcome: a different sentence, a different recovery, and never a retry
    *     loop on a correct credential.
-   *  4. **A device id at all.** Not an admission check — nothing is looked up
+   *  3. **A device id at all.** Not an admission check — nothing is looked up
    *     and nothing is recorded — but a page that sent a blank one is a page
    *     whose storage is unavailable, and telling it so is the only way it ever
    *     finds out. See `not-approved` in shared/web.ts.
-   *  5. **The PIN**, when one is set. Asked of every browser on every
+   *  4. **The PIN**, when one is set. Asked of every browser on every
    *     connection, with nothing that excuses it.
    *
-   * ## Which bucket a failure counts against
+   * ## Which failures count against which bucket
    *
-   * Before the token verifies there is no identity to trust, so those failures
-   * count against the address (`ipKey`). From the PIN onward the account is
-   * proven, and they count against it (`uidKey`) — which is what makes the
-   * lockout honest behind a tunnel, where every client on earth dials from this
-   * machine's own loopback and an address-keyed bucket meant a stranger's five
-   * guesses locked the owner out, and the owner's next success quietly wiped
-   * the stranger's count. Nothing clears a bucket on success any more; the only
+   * Only the PIN's. Everything before it — the garbage token, the expired one,
+   * the blank device id — counts against nothing at all, and that is deliberate
+   * rather than lax. A JWT keyspace is unguessable, so repeated bad tokens are
+   * noise rather than progress, and striking them buys no security; what they
+   * would buy is a weapon, because behind the tunnel every caller on earth
+   * arrives from this machine's own loopback, so an address-keyed bucket is one
+   * bucket shared by the owner and every stranger — five garbage tokens from
+   * anyone who could reach the hostname locked the owner out for a renewable
+   * minute. The old address bucket is gone outright; the lockout now lives only
+   * on the account (`uidKey`), where the identity is proven and the secret —
+   * the short PIN — is actually worth guessing, and where a stranger cannot
+   * spend somebody else's strikes because they cannot produce a token carrying
+   * their uid in the first place. Nothing clears a bucket on success; the only
    * thing that empties one is time (see `fail`).
    *
    * Then one admission path and no bookkeeping: what comes back is the browser's
@@ -481,28 +497,29 @@ export class WebAuth {
    * this socket and no longer.
    */
   async authenticate(input: WebAuthInput): Promise<WebAuthOutcome> {
-    const locked = this.lockout(this.ipKey(input.source))
-    if (locked) return locked
-
     const verified = await this.checkToken(input.idToken)
-    if (!verified.ok) return this.fail(this.ipKey(input.source), verified)
+    if (!verified.ok) return verified
 
     // Bounded because both arrive off a public socket and both end up in log
     // lines and, in the case of the name, on the desktop's own screen. Neither
     // is stored, so the bound is about what an unbounded string can do on the
     // way past rather than about what a row on disk should look like.
     const deviceId = input.deviceId.slice(0, 128)
-    const deviceName = (input.deviceName || 'Browser').slice(0, 64)
+    // printable() before it reaches a log line: a control character arriving
+    // off a public socket is at best a broken line and at worst something a
+    // terminal has an opinion about. Same guard as shared/web.ts's, kept local
+    // because that one is module-private to the wire file.
+    const deviceName = printable((input.deviceName || 'Browser').slice(0, 64)) || 'Browser'
     if (!deviceId) {
-      return this.fail(this.ipKey(input.source), {
+      return {
         ok: false,
         reason: 'not-approved',
         message: 'This browser did not identify itself, so it cannot be admitted. Reload the page and try again.'
-      })
+      }
     }
 
     // Verified from here on, so the PIN is judged against the account's bucket
-    // — see "Which bucket a failure counts against" above.
+    // — see "Which failures count against which bucket" above.
     const account = this.uidKey(verified.claims.uid)
     const pinLocked = this.lockout(account)
     if (pinLocked) return pinLocked
@@ -539,16 +556,18 @@ export class WebAuth {
    * with no question behind it.
    *
    * `uid` is the socket's already-verified identity when the caller has one
-   * (the `auth` frame always does), and names the bucket a failure counts
-   * against — see `authenticate`. A success clears nothing.
+   * (the `auth` frame always does). A bad token never strikes — here exactly as
+   * in `authenticate`, a JWT is not a guessable secret — but an account that is
+   * locked out for PIN guessing is refused a refresh too, so a lockout cannot be
+   * ridden out on an open socket. `source` is unused since the address bucket
+   * went away; it stays in the signature for the caller's sake.
    */
-  async verifyToken(idToken: string, source: string, uid?: string): Promise<WebTokenOutcome> {
-    const key = uid !== undefined ? this.uidKey(uid) : this.ipKey(source)
-    const locked = this.lockout(key)
-    if (locked) return locked
-    const verified = await this.checkToken(idToken)
-    if (!verified.ok) return this.fail(key, verified)
-    return verified
+  async verifyToken(idToken: string, _source: string, uid?: string): Promise<WebTokenOutcome> {
+    if (uid !== undefined) {
+      const locked = this.lockout(this.uidKey(uid))
+      if (locked) return locked
+    }
+    return this.checkToken(idToken)
   }
 
   /* --------------------------------------------------------------- the PIN */
@@ -813,10 +832,10 @@ export class WebAuth {
   /**
    * Is this bucket locked out right now?
    *
-   * A bucket is keyed by `ipKey` for everything before the token verifies and
-   * by `uidKey` for everything after — see `authenticate` for why an address is
-   * the wrong unit behind a tunnel, where every caller on earth shares one
-   * loopback address with the owner.
+   * Every bucket is keyed by `uidKey` — see `authenticate` for why an address
+   * is the wrong unit behind a tunnel, where every caller on earth shares one
+   * loopback address with the owner, and why no bucket exists at all before the
+   * token verifies.
    *
    * `busy` rather than a value of its own, because WEB_REFUSALS has no `locked`
    * and inventing one would be inventing a parallel vocabulary — the thing
@@ -844,18 +863,16 @@ export class WebAuth {
   /**
    * Count one refusal against a bucket, and hand the refusal back unchanged.
    *
-   * Every refusal counts, not only the credential ones. A wrong account, a
-   * browser that names itself nothing and a wrong PIN are all things a stranger
-   * with the address can generate on repeat, and the strike counter is what
-   * turns a four-digit secret from ten thousand guesses into weeks of them. The
-   * one refusal that does *not* come here is `pin-required`, which is a
-   * question rather than a failure — see `authenticate`.
+   * The only caller left is the wrong-PIN path — see `authenticate` for why
+   * everything before the PIN verifies counts against nothing. A wrong PIN is
+   * exactly what the strike counter exists for: it is the one secret here short
+   * enough to guess, and five-then-wait is what turns ten thousand tries into
+   * weeks of them.
    *
    * Success clears nothing, and that is deliberate. The bucket only ever decays
    * with time — `until` passes, the entry goes, the count starts again — so a
-   * legitimate sign-in can neither unlock a guesser (its success used to wipe
-   * the stranger's tally on the shared address) nor be locked out by one whose
-   * guesses landed on a bucket of its own.
+   * legitimate sign-in can neither unlock a guesser nor be locked out by one,
+   * because since the address bucket went away they no longer share one.
    */
   private fail<T extends { ok: false; reason: WebRefusal; message: string; retryAfterMs?: number }>(
     key: string,
@@ -871,12 +888,23 @@ export class WebAuth {
     strike.count += 1
     strike.until = this.now() + AUTH_LOCKOUT_MS
     this.strikes.set(key, strike)
+    this.pruneStrikes()
     return outcome
   }
 
-  /** Pre-verification bucket: one per source address. */
-  private ipKey(source: string): string {
-    return `ip:${source}`
+  /**
+   * Drop buckets whose window has lapsed, so the map cannot grow without bound,
+   * and clear it outright past a blunt backstop. Borrowed whole from
+   * electron/mobile/auth.ts, for the same reason: the keys here derive from
+   * material a client chose, and dropping a bucket can only *un*lock somebody —
+   * never lock the owner out — so erring towards empty errs safely.
+   */
+  private pruneStrikes(): void {
+    const now = this.now()
+    for (const [key, strike] of this.strikes) {
+      if (now >= strike.until) this.strikes.delete(key)
+    }
+    if (this.strikes.size > MAX_STRIKE_BUCKETS) this.strikes.clear()
   }
 
   /**
