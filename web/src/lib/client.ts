@@ -619,6 +619,24 @@ export class ForgeClient {
   }
 
   /**
+   * The person's own gesture as a liveness test.
+   *
+   * The beat bounds how long a swallowed link sits unnoticed at one heartbeat,
+   * but a beat is still up to twenty seconds of somebody typing into a socket
+   * that stopped carrying bytes while the tab was away — the one stretch where
+   * "nothing appears" reads as broken rather than as waiting. So the two things
+   * a returning hand does first — send a line, ask for something — start the
+   * same challenge the wake-ups do, and a link that cannot answer is hung up on
+   * within PROBE_MS of the keystroke instead of within a beat of it. Cheap on
+   * every other path: a link that heard something recently asks nothing.
+   */
+  private probeIfStale(): void {
+    if (this.closedByUs || this.stopped || !this.admitted) return
+    if (Date.now() - this.lastFrameAt < PROBE_MS) return
+    this.challenge()
+  }
+
+  /**
    * Ask the link to prove it is alive, and hang up on it if it will not.
    *
    * Zeroing `pingedAt` before asking is what makes this a test rather than an
@@ -751,6 +769,7 @@ export class ForgeClient {
       )
       return
     }
+    this.probeIfStale()
     this.send({ type: 'write', sessionId, data })
   }
 
@@ -793,6 +812,7 @@ export class ForgeClient {
     if (this.socket?.readyState !== WebSocket.OPEN) {
       return Promise.resolve({ kind: 'failed', code: 'no-window', message: 'Not connected to the desktop.' })
     }
+    this.probeIfStale()
     this.rid += 1
     const rid = `r${this.rid}`
     return new Promise<WebResult>((resolve) => {
