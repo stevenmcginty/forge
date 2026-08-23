@@ -1529,6 +1529,15 @@
   position: relative;
 }
 
+/*
+ * A grey flash on every tap is browser chrome speaking where the app should.
+ * Pressed states are drawn by the rules below (`:active` washes and scales),
+ * so the OS's own highlight is noise on top of an answer that already exists.
+ */
+.app[data-mobile] {
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* The rail as a drawer. */
 .app[data-mobile] .app__left {
   position: absolute;
@@ -1697,6 +1706,10 @@
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   padding: 2px 0;
+  /* The strip scrolls past both ends of itself, so a snap point — and the
+   * scroll-into-view walk that centres the active pill — leaves one row of
+   * breathing room either side instead of pinning a pill to the glass. */
+  scroll-padding-inline: var(--s-3);
 }
 
 .app[data-mobile] .tabstrip__tabs::-webkit-scrollbar {
@@ -2059,6 +2072,7 @@
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
+  scroll-padding-inline: var(--s-3);
   background: var(--bg-base);
   border-bottom: 1px solid var(--line-hairline);
 }
@@ -3361,6 +3375,31 @@
   color: var(--accent);
   background: var(--accent-soft);
   border-color: var(--accent-line);
+}
+
+/*
+ * One row of the effort picker: the rung's name, and under it what choosing
+ * costs or buys. Web-only furniture, so it lives here rather than in
+ * Popover.css — which stays the desktop's own sheet.
+ */
+.ceffort {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ceffort__label {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+}
+
+.ceffort__note {
+  font-size: var(--t-xs);
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 
 /*

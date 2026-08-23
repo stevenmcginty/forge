@@ -10,6 +10,8 @@ import {
   type ReactNode
 } from 'react'
 import { Icon } from '@/components/Icon'
+import { Popover, PopoverRow, PopoverSection } from '@/components/Popover'
+import { EFFORT_LEVELS, type EffortLevel } from '@shared/agents'
 import { imageFilesFromDataTransfer, isImageFile } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 
@@ -35,6 +37,7 @@ export function Composer({
   onDraft,
   onSend,
   onRaw,
+  onEffort,
   onFocus,
   autoFocus
 }: {
@@ -48,6 +51,13 @@ export function Composer({
   /** Send: the pending images first, then the draft. Either may be empty. */
   onSend: (images: File[]) => void
   onRaw: (data: string) => void
+  /**
+   * Pick an effort level for the focused pane. Present whenever a *agent* is
+   * focused — every agent gets the picker, and one whose CLI has no dial gets
+   * a sentence saying so when a level is chosen, rather than keystrokes fired
+   * into the dark. Absent for shells: a prompt is not a collaborator.
+   */
+  onEffort?: (level: EffortLevel) => void
   onFocus?: () => void
   autoFocus: boolean
 }): ReactNode {
@@ -61,6 +71,9 @@ export function Composer({
    * is `String.fromCharCode(letter − 64)` and nothing more.
    */
   const [ctrl, setCtrl] = useState(false)
+  /** The effort picker, anchored to its own key in the row under the box. */
+  const [effortOpen, setEffortOpen] = useState(false)
+  const effortRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     if (autoFocus) field.current?.focus()
@@ -189,6 +202,18 @@ export function Composer({
             <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
             <Key label="↓" onClick={() => onRaw('\x1b[B')} disabled={disabled} title="Down" />
             <Key label="→" onClick={() => onRaw('\x1b[C')} disabled={disabled} title="Right" />
+            {/* Its own element rather than `Key`: the popover anchors to it. */}
+            <button
+              ref={effortRef}
+              type="button"
+              className="composer__key"
+              data-active={effortOpen ? 'true' : undefined}
+              onClick={() => setEffortOpen((v) => !v)}
+              disabled={disabled}
+              title="Effort — how hard the model works on the next turns"
+            >
+              Effort
+            </button>
             <Key
               label="Mode"
               onClick={() => onRaw(BACK_TAB)}
@@ -205,6 +230,38 @@ export function Composer({
             />
             <Key label="Esc" onClick={() => onRaw('\x1b')} disabled={disabled} />
           </div>
+          {onEffort ? (
+            /*
+             * Portalled rather than inline so it clears the on-screen keyboard:
+             * `side='top'` opens it over the box, where the thumb already is.
+             */
+            <Popover
+              anchor={effortRef.current}
+              open={effortOpen}
+              onClose={() => setEffortOpen(false)}
+              align="start"
+              side="top"
+              width={272}
+              label="Effort"
+            >
+              <PopoverSection title="Effort">
+                {EFFORT_LEVELS.map((level) => (
+                  <PopoverRow
+                    key={level.id}
+                    onClick={() => {
+                      setEffortOpen(false)
+                      onEffort(level.id)
+                    }}
+                  >
+                    <span className="ceffort">
+                      <strong className="ceffort__label">{level.label}</strong>
+                      <span className="ceffort__note">{level.note}</span>
+                    </span>
+                  </PopoverRow>
+                ))}
+              </PopoverSection>
+            </Popover>
+          ) : null}
           <button
             type="submit"
             className="composer__send"

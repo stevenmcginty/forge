@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { TerminalTab } from '@shared/types'
 import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
@@ -58,6 +58,19 @@ export function TabStrip(): ReactNode {
   const [ask, setAsk] = useState<{ tabId: string; from: string | null } | null>(null)
   const pending = ask && ask.from === workspace.activeTabId ? ask.tabId : null
 
+  /**
+   * The strip scrolls sideways on a phone, and an active pill that sits past
+   * the edge is a pill the thumb cannot reach — or worse, half of one, cut
+   * mid-word by the viewport with no hint there is more either way. So the
+   * active tab is walked to the middle of the strip whenever the answer to
+   * "which tab" changes. `block: 'nearest'` keeps the walk horizontal: the
+   * strip's ancestors must not scroll a pixel vertically for a pill.
+   */
+  const activeRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  }, [workspace.activeTabId])
+
   const select = async (tabId: string): Promise<void> => {
     setAsk({ tabId, from: workspace.activeTabId })
     // `layout` resolves with the desktop's refusal sentence rather than throwing
@@ -77,6 +90,13 @@ export function TabStrip(): ReactNode {
             pending={tab.id === pending}
             live={live}
             onSelect={() => void select(tab.id)}
+            ref={
+              tab.id === workspace.activeTabId
+                ? (el) => {
+                    activeRef.current = el
+                  }
+                : undefined
+            }
           />
         ))}
 
@@ -113,7 +133,8 @@ function Tab({
   active,
   pending,
   live,
-  onSelect
+  onSelect,
+  ref
 }: {
   tab: TerminalTab
   active: boolean
@@ -121,6 +142,8 @@ function Tab({
   pending: boolean
   live: boolean
   onSelect: () => void
+  /** The active tab hands its element up so the strip can walk it into view. */
+  ref?: (el: HTMLDivElement | null) => void
 }): ReactNode {
   const { state, actions } = useForge()
   const profiles = useProfiles()
@@ -135,6 +158,7 @@ function Tab({
 
   return (
     <div
+      ref={ref}
       className="tab"
       role="tab"
       aria-selected={active}

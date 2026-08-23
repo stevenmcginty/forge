@@ -578,3 +578,66 @@ export function hasExplicitPermissionFlag(command: string): boolean {
 export function isPermissionMode(value: unknown): value is ClaudePermissionMode {
   return value === 'default' || value === 'acceptEdits' || value === 'plan' || value === 'bypass'
 }
+
+/* ------------------------------------------------------------------- effort */
+
+/**
+ * How hard the model works, on the ladder the effort-capable CLIs share.
+ *
+ * The rungs are Claude Code's names (`/effort low|medium|high|xhigh|max`), and
+ * every driver below spells its own dialect over the same five. A shell has no
+ * dial at all and never reaches this code.
+ */
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+export interface EffortLevelSpec {
+  id: EffortLevel
+  label: string
+  /** One line under the label in the picker — what choosing it costs or buys. */
+  note: string
+}
+
+export const EFFORT_LEVELS: EffortLevelSpec[] = [
+  { id: 'low', label: 'Low', note: 'fast and cheap — routine edits, known steps' },
+  { id: 'medium', label: 'Medium', note: 'trades some thoroughness for cost' },
+  { id: 'high', label: 'High', note: 'the balanced default for most coding work' },
+  { id: 'xhigh', label: 'Xhigh', note: 'deeper reasoning at a higher token spend' },
+  { id: 'max', label: 'Max', note: 'the deepest — session-only in Claude Code' }
+]
+
+/** The picker row for a level, or null for junk. */
+export function effortLevelSpec(level: string): EffortLevelSpec | null {
+  return EFFORT_LEVELS.find((l) => l.id === level) ?? null
+}
+
+/**
+ * What typing "set the effort to X" looks like in *this* pane's own TUI.
+ *
+ * A function per pane command rather than one global string, because the CLIs
+ * disagree about where the dial lives:
+ *
+ *  - **Claude Code** (the `claude` profile and the GLM selector built on it)
+ *    takes a literal `/effort <level>` in the composer — verified against
+ *    code.claude.com/docs/en/commands (2026-08-23). This covers every
+ *    claude-exe profile by construction, which is most of the roster.
+ *  - **Codex** keeps reasoning effort behind its interactive `/model` picker
+ *    (developers.openai.com/codex/cli, 2026-08-23): there is no slash command
+ *    a helper can type blind, so this answers null and the caller says so
+ *    rather than firing keystrokes into a menu it cannot see.
+ *  - **OpenCode, Kimi, Qwen, Gemini** have no effort concept at all — null,
+ *    and honestly so.
+ *
+ * Null is not an error state; it is the control's reason to explain itself.
+ * Adding a dialect is one more branch down here and nothing else anywhere.
+ */
+export function effortSlash(command: string): ((level: EffortLevel) => string) | null {
+  if (commandExe(command) !== 'claude') return null
+  return (level) => `/effort ${level}`
+}
+
+/** Why the effort picker cannot drive this pane, when effortSlash is null. */
+export function effortRefusal(command: string): string {
+  const exe = commandExe(command)
+  if (exe === 'codex') return 'Codex sets effort through its /model picker — type /model in the pane.'
+  return `${exe || 'This CLI'} has no effort dial Forge can reach.`
+}

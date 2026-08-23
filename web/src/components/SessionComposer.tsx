@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
 import type { LayoutNode, PaneLeaf } from '@shared/types'
-import { resolveProfile } from '@/lib/agents'
+import type { EffortLevel } from '@shared/agents'
+import { effortRefusal, effortSlash } from '@shared/agents'
+import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { packImage } from '../lib/image'
 import { usePaneStatus } from '../lib/pane-status'
 import { useForge, useProfiles, useWorkspace } from '../state'
@@ -116,6 +118,33 @@ export function SessionComposer(): ReactNode {
     [actions, canType, paneId, takePane]
   )
 
+  /**
+   * An effort level, picked for this pane.
+   *
+   * Every agent pane gets the picker; what a pick does is the dialect question
+   * `effortSlash` answers. A Claude-exe pane takes `/effort <level>` typed as
+   * words and Enter as its own keystroke a beat later — the same two-write
+   * rhythm `sendDraft` uses, because a slash command that arrives holding its
+   * own `\r` reads as a paste and sits in the TUI's box unsent. A pane whose
+   * CLI has no reachable dial gets the refusal sentence as a notice instead of
+   * keystrokes into a menu this browser cannot see.
+   */
+  const sendEffort = useCallback(
+    async (level: EffortLevel) => {
+      if (!canType || !paneId || !profile) return
+      const type = effortSlash(profile.command)
+      if (!type) {
+        actions.setNotice(effortRefusal(profile.command))
+        return
+      }
+      actions.write(paneId, type(level))
+      await pause(SETTLE_BEFORE_ENTER_MS)
+      actions.write(paneId, '\r')
+      takePane()
+    },
+    [actions, canType, paneId, profile, takePane]
+  )
+
   if (offline && state.offlineMode === 'github') return null
   if (!tab) return null
 
@@ -141,6 +170,7 @@ export function SessionComposer(): ReactNode {
         onDraft={setDraft}
         onSend={(images) => void sendDraft(images)}
         onRaw={sendRaw}
+        onEffort={profile && !isShellProfile(profile) ? (level) => void sendEffort(level) : undefined}
         onFocus={takePane}
         autoFocus={canType}
       />
