@@ -331,6 +331,96 @@ export function slotOf(parsed: ShareSlotBody): ShareSlot {
   }
 }
 
+/* --------------------------------------------------------------- the link
+ *
+ * The second half of the feature, and the one that is not a file: a pane can
+ * *type into* another pane. The slots above are a noticeboard — you leave
+ * something and hope somebody looks. The link is a tap on the shoulder.
+ *
+ * Everything below is protocol rather than format: the names of the two
+ * environment variables, the timings the idle gate uses, and the shape of a
+ * request and a reply. It lives here for the same reason the format does —
+ * electron/share-link.ts owns the server, bridge/share-bridge.mjs owns the
+ * client, and neither may own the other's idea of what a request looks like.
+ */
+
+/** The pipe (or unix socket) path. Set per-pane by Forge; the client's only way in. */
+export const SHARE_LINK_ENV = 'FORGE_SHARE_LINK'
+
+/**
+ * The exact share directory for this pane's project.
+ *
+ * Forge knows which project a pane belongs to; the server would otherwise have
+ * to guess by walking up from its cwd. The walk stays as the fallback for a
+ * server started by hand, but a pane Forge launched is told outright.
+ */
+export const SHARE_DIR_ENV = 'FORGE_SHARE_DIR'
+
+/**
+ * The most one pane may type into another in a single message.
+ *
+ * 8 KiB is a long paragraph of instruction and nowhere near a document — a
+ * document belongs in a slot, which is what the slots are for. Over it the send
+ * is *refused* rather than truncated: half an instruction typed into somebody
+ * else's agent is worse than none, and the caller can split it.
+ */
+export const SHARE_SEND_MAX_BYTES = 8 * 1024
+
+/** How much of a pane's screen `pane_read` returns by default. Capped by SHARE_CAPTURE_MAX_LINES. */
+export const SHARE_READ_DEFAULT_LINES = 60
+
+/**
+ * The idle gate, mirrored from the renderer's own busy heuristic
+ * (src/lib/terminals.ts) so the two cannot disagree about what "working" means.
+ *
+ * A keystroke echo is one chunk and then silence; an agent thinking is a spinner
+ * repainting for as long as it takes. So a pane is idle when it has been quiet
+ * for QUIET *and* nothing in the last WINDOW looked like a run of work: a run is
+ * output whose gaps stay under GAP, and it counts as work once it has lasted
+ * ONSET.
+ *
+ * Requiring both is the point. Quiet alone is satisfied by the 1.2s pause an
+ * agent takes between two tool calls, and typing into that pause is typing over
+ * somebody's shoulder.
+ */
+export const SHARE_BUSY_ONSET_MS = 600
+export const SHARE_BUSY_GAP_MS = 400
+export const SHARE_BUSY_QUIET_MS = 1200
+export const SHARE_BUSY_WINDOW_MS = 3000
+
+/** A request line longer than this is a client that has lost its mind, not a message. */
+export const SHARE_LINK_MAX_REQUEST_BYTES = 64 * 1024
+
+/** What a caller says. One JSON object, one line, one reply. */
+export interface ShareLinkRequest {
+  op: 'send' | 'read' | 'panes'
+  /** The calling pane's name — `FORGE_SHARE_AGENT`. Unknown names are refused. */
+  from?: string
+  /** The calling process's cwd, used only to break a tie between same-named panes. */
+  cwd?: string
+  /** Which pane to act on: its name, its id, or its agent if only one pane runs that agent. */
+  pane?: string
+  text?: string
+  force?: boolean
+  multiline?: boolean
+  lines?: number
+}
+
+/** One pane, as the link describes it to a caller. */
+export interface ShareLinkPaneView {
+  id: string
+  title: string
+  agent: string
+  idle: boolean
+  quietForMs: number
+}
+
+export type ShareLinkResponse =
+  | { ok: true; op: 'send'; pane: string; id: string; bytes: number; quietForMs: number; forced: boolean }
+  | { ok: true; op: 'read'; pane: string; id: string; text: string; idle: boolean; quietForMs: number; lines: number }
+  | { ok: true; op: 'panes'; panes: ShareLinkPaneView[] }
+  | { ok: false; error: string; candidates?: string[]; panes?: ShareLinkPaneView[]; quietForMs?: number }
+
 /** The empty pigeonhole, for a slot with no file. */
 export function emptySlot(index: number): ShareSlot {
   return {

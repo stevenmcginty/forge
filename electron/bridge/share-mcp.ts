@@ -83,9 +83,19 @@ export function shareBridgeScript(): string | null {
   return scriptPath
 }
 
-/** The one switch. Off out of the box; see Settings → Agents. */
-function wanted(): boolean {
+/**
+ * The one switch. Off out of the box; see Settings → Agents.
+ *
+ * Exported as well as used here because the PTY host gates one thing on it that
+ * has nothing to do with registration: whether to create `.forge/share` before a
+ * pane's agent starts. One reading of the setting, in one place.
+ */
+export function shareToolsEnabled(): boolean {
   return getSettings().shareTools === true
+}
+
+function wanted(): boolean {
+  return shareToolsEnabled()
 }
 
 /* ------------------------------------------------------------------ codex */

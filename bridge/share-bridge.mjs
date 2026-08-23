@@ -1,12 +1,21 @@
 #!/usr/bin/env node
 /**
- * forge-share — five markdown slots, four agents, no key and no socket.
+ * forge-share — five markdown slots, a tap on the shoulder, and no key.
  *
  * A standalone MCP server (stdio) that Forge registers into Claude Code, Codex,
  * Qwen and OpenCode panes so an agent in one pane can leave something where an
  * agent in another pane will find it. It reads and writes one folder, resolves
  * that folder from its own working directory, and refuses rather than creating
  * one.
+ *
+ * `pane_send` and `pane_read` are the other half, and the only part of this file
+ * that is not a file: they reach Forge's main process over a **local pipe** whose
+ * path arrives in FORGE_SHARE_LINK, so one agent can type into another agent's
+ * terminal and read the answer back. The transport is a Windows named pipe (a
+ * unix socket elsewhere) and never a port — see electron/share-link.ts, which
+ * owns the listening end and every rule about who may address whom. Without that
+ * variable the two tools say so and the other five carry on; this server never
+ * connects to anything it was not handed the path to.
  *
  * **Separate from bridge/gemini-bridge.mjs on purpose**, and the first reason
  * decides it: that server's environment carries GEMINI_API_KEY, and registering
@@ -15,9 +24,9 @@
  * key's blast radius. Beyond that: these tools need no key at all, so they cannot
  * live behind a header that says "one key, one road"; scripts/bridge-smoke.mjs
  * asserts that server offers *exactly* its five Gemini tools, a guard worth
- * keeping undiluted; and "it opens no socket and touches the network zero times"
- * is the sentence that makes this one safe to hand to four vendors, which a
- * shared server could never say.
+ * keeping undiluted; and "it holds no credential and touches the network zero
+ * times" is the sentence that makes this one safe to hand to four vendors, which
+ * a shared server could never say.
  *
  * Run standalone (for testing):  node bridge/share-bridge.mjs
  * It speaks JSON-RPC over stdin/stdout, so stdout stays clean — every diagnostic
@@ -32,6 +41,7 @@
  */
 
 import { existsSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { connect } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -58,6 +68,11 @@ const SHARE_PREVIEW_CHARS = 240
  */
 const SHARE_KEYS = ['slot', 'title', 'updatedAt', 'author', 'via']
 const VIA_VALUES = ['rail', 'mcp', 'capture', 'agent']
+
+/** The link's caps, mirrored from the same file. See `pane_send` and `pane_read`. */
+const SHARE_SEND_MAX_BYTES = 8 * 1024
+const SHARE_READ_DEFAULT_LINES = 60
+const SHARE_CAPTURE_MAX_LINES = 400
 
 function slotFileName(index) {
   return `slot-${index}.md`
@@ -205,12 +220,24 @@ function parseSlot(index, text, mtimeMs = 0) {
  * for the odd pane started somewhere strange; it is deliberately *not* the
  * primary route, and nothing in Forge sets it per-project, because a value baked
  * into a config at app start would be wrong the moment the project changed.
+ *
+ * FORGE_SHARE_DIR is the same override arriving from the other direction, and it
+ * *is* set by Forge: not in a config file written once at app start, but on the
+ * environment of each pane as that pane is created, by which time the project is
+ * known for certain. It also carries the fix for the oldest bug in this feature
+ * — the folder now exists before the agent starts, because the PTY host makes it
+ * (electron/pty-host.ts `shareDirFor`), rather than only when somebody happens to
+ * open the rail's SHARE section. The walk stays as the fallback for a server
+ * started by hand.
  */
 const MAX_WALK = 12
 
 function shareRoot() {
   const override = String(process.env['FORGE_SHARE_ROOT'] ?? '').trim()
   if (override) return existsSync(override) ? resolve(override) : null
+
+  const told = String(process.env['FORGE_SHARE_DIR'] ?? '').trim()
+  if (told && existsSync(told)) return resolve(told)
 
   let dir = resolve(process.cwd())
   for (let i = 0; i < MAX_WALK; i++) {
@@ -235,6 +262,90 @@ function noRoot() {
 /** Who wrote it, when the tool did not say. Set per-pane by Forge. */
 function defaultAuthor() {
   return String(process.env['FORGE_SHARE_AGENT'] ?? '').trim()
+}
+
+/* --------------------------------------------------------------- the link */
+
+/**
+ * The one channel out of this process, and the whole of it.
+ *
+ * A path from FORGE_SHARE_LINK — a Windows named pipe, or a unix socket file —
+ * that Forge's main process is listening on. No host, no port, no DNS and no
+ * credential: if the variable is absent there is nothing to connect to and the
+ * two tools that need it say so plainly. Every other tool in this file works
+ * exactly as it did before.
+ *
+ * One request per connection, newline-terminated JSON both ways. Short-lived on
+ * purpose: an MCP tool call is a round trip, there is no server-initiated
+ * traffic to keep a socket open for, and a dropped connection is then a thing
+ * that cannot happen between calls.
+ */
+const LINK_TIMEOUT_MS = 5000
+
+function linkPath() {
+  return String(process.env['FORGE_SHARE_LINK'] ?? '').trim()
+}
+
+function noLink() {
+  return fail(
+    'This pane has no link to Forge, so it cannot reach other panes.\n\n' +
+      'FORGE_SHARE_LINK is set by Forge on every pane it launches. It is missing here, which means either this ' +
+      'server was started by hand rather than by a Forge pane, or this copy of Forge is older than the link. ' +
+      'The share_* tools still work — leave a note in a slot instead.'
+  )
+}
+
+/** Ask main one question. Resolves to a reply object, or rejects with why not. */
+function linkAsk(request) {
+  const path = linkPath()
+  return new Promise((res, rej) => {
+    const socket = connect(path)
+    let buffer = ''
+    let settled = false
+    const done = (err, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket.destroy()
+      if (err) rej(err)
+      else res(value)
+    }
+    const timer = setTimeout(() => done(new Error(`Forge did not answer within ${LINK_TIMEOUT_MS}ms`)), LINK_TIMEOUT_MS)
+
+    socket.setEncoding('utf8')
+    socket.on('connect', () => {
+      socket.write(`${JSON.stringify({ ...request, from: defaultAuthor(), cwd: process.cwd() })}\n`)
+    })
+    socket.on('data', (chunk) => {
+      buffer += chunk
+      const nl = buffer.indexOf('\n')
+      if (nl === -1) return
+      try {
+        done(null, JSON.parse(buffer.slice(0, nl)))
+      } catch (err) {
+        done(new Error(`Forge sent something that was not JSON: ${err?.message ?? err}`))
+      }
+    })
+    socket.on('error', (err) => done(new Error(`could not reach Forge on ${path}: ${err?.message ?? err}`)))
+    socket.on('close', () => done(new Error('Forge closed the link without answering')))
+  })
+}
+
+/** A refusal from main, turned into the sentence the calling model reads. */
+function linkRefusal(reply) {
+  const lines = [String(reply?.error ?? 'Forge refused the request.')]
+  if (Array.isArray(reply?.candidates) && reply.candidates.length > 0) {
+    lines.push('', 'Candidates:', ...reply.candidates.map((c) => `  • ${c}`))
+  }
+  if (Array.isArray(reply?.panes) && reply.panes.length > 0) {
+    lines.push('', 'Panes open in this project:', ...reply.panes.map(paneLine))
+  }
+  return fail(lines.join('\n'))
+}
+
+function paneLine(pane) {
+  const state = pane?.idle ? `idle for ${Math.round(Number(pane.quietForMs ?? 0) / 1000)}s` : 'busy'
+  return `  • ${String(pane?.title ?? '?')} — ${String(pane?.agent || 'shell')}, ${state}`
 }
 
 function slotPath(root, index) {
@@ -350,6 +461,60 @@ const TOOLS = [
       'Use it to find out who else is working here before you address a note to somebody, or when the person says ' +
       'something like "hand this to the Codex tab" and you need to know what it is called.',
     inputSchema: { type: 'object', properties: {}, required: [] }
+  },
+  {
+    name: 'pane_send',
+    description:
+      'Say something to another agent right now, by typing it into that agent\'s terminal exactly as if the person ' +
+      'at the keyboard had typed it and pressed Enter. The receiving agent sees a normal message prefixed with ' +
+      '"[from <your pane name>]" and will answer in its own pane, not to you — use pane_read to see what it said. ' +
+      'Pane names come from share_panes. This REFUSES while the target is busy working, and refuses rather than ' +
+      'queueing, so a refusal means nothing was sent: wait, poll with pane_read, and try again. Prefer a share slot ' +
+      'for anything long — this is a sentence or two of instruction, not a document. Use it when the person asks ' +
+      'you to tell, ask or hand something to another pane, or when you need something another agent is holding.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pane: {
+          type: 'string',
+          description: 'Which pane to type into: its name, or its agent (e.g. "OpenCode") if only one pane runs that agent.'
+        },
+        text: { type: 'string', description: 'What to say. One or two sentences; the cap is 8 KiB and it is refused, not cut.' },
+        force: {
+          type: 'boolean',
+          description: 'Send even though the pane is busy. Interrupts whatever it is doing — only when the person asked for that.'
+        },
+        multiline: {
+          type: 'boolean',
+          description:
+            'Keep the line breaks. Off by default because most agent CLIs submit on Enter, so a three-line message ' +
+            'would arrive as three separate prompts.'
+        }
+      },
+      required: ['pane', 'text']
+    }
+  },
+  {
+    name: 'pane_read',
+    description:
+      'Read what is currently on another pane\'s screen — the last lines of its terminal, with the colours and ' +
+      'cursor codes stripped. This is how you see another agent\'s reply after a pane_send, how you check whether it ' +
+      'is still working, and how you find out what went wrong in a pane the person is asking you about. Also reports ' +
+      'whether the pane is idle, so you can poll here rather than retrying a refused pane_send blindly. Reading ' +
+      'changes nothing and never interrupts the other agent.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pane: { type: 'string', description: 'Which pane to read: its name, or its agent if only one pane runs that agent.' },
+        lines: {
+          type: 'integer',
+          minimum: 1,
+          maximum: SHARE_CAPTURE_MAX_LINES,
+          description: `How many lines from the end of its screen. Default ${SHARE_READ_DEFAULT_LINES}, most ${SHARE_CAPTURE_MAX_LINES}.`
+        }
+      },
+      required: ['pane']
+    }
   }
 ]
 
@@ -482,6 +647,32 @@ async function shareClear(args) {
 }
 
 async function sharePanes() {
+  /*
+   * The link first, the file second. `panes.json` is written by the renderer's
+   * roster push, which only happens while the rail's SHARE section is open — so
+   * in most projects the file is stale or absent, while main always knows what
+   * is running. A failure to reach the link is not reported here: falling back
+   * to the file silently is right, because the file is a perfectly good answer
+   * and the two tools that genuinely need the link say so themselves.
+   */
+  if (linkPath()) {
+    try {
+      const reply = await linkAsk({ op: 'panes' })
+      if (reply?.ok && Array.isArray(reply.panes) && reply.panes.length > 0) {
+        return ok(
+          [
+            `${reply.panes.length} pane${reply.panes.length === 1 ? '' : 's'} open in this project:`,
+            ...reply.panes.map(paneLine),
+            '',
+            'Names come from Forge, and are what the person calls each pane. Use pane_send to say something to one.'
+          ].join('\n')
+        )
+      }
+    } catch {
+      /* the file below is a perfectly good answer */
+    }
+  }
+
   const root = shareRoot()
   if (!root) return noRoot()
   const path = join(root, 'panes.json')
@@ -503,6 +694,77 @@ async function sharePanes() {
   )
 }
 
+async function paneSend(args) {
+  if (!linkPath()) return noLink()
+  if (typeof args?.text !== 'string') return fail('`text` is required and must be a string.')
+  if (typeof args?.pane !== 'string' || !args.pane.trim()) {
+    return fail('`pane` is required — name the pane to type into. share_panes lists them.')
+  }
+  if (shareBytes(args.text) > SHARE_SEND_MAX_BYTES) {
+    // Caught here as well as in main so the round trip is not spent on a message
+    // that was always going to be refused.
+    return fail(
+      `That message is ${shareBytes(args.text)} bytes and the limit is ${SHARE_SEND_MAX_BYTES}. It is refused rather ` +
+        'than cut in half. Put the long version in a share slot with share_write and send the slot number instead.'
+    )
+  }
+
+  let reply
+  try {
+    reply = await linkAsk({
+      op: 'send',
+      pane: args.pane,
+      text: args.text,
+      ...(args?.force === true ? { force: true } : {}),
+      ...(args?.multiline === true ? { multiline: true } : {})
+    })
+  } catch (err) {
+    return fail(`Nothing was sent: ${err?.message ?? err}`)
+  }
+  if (!reply?.ok) return linkRefusal(reply)
+
+  return ok(
+    [
+      `Typed into ${reply.pane}: it now has your message, prefixed with your pane's name.` +
+        (reply.forced ? ' It was busy and you forced it, so you may have interrupted a turn.' : ''),
+      `${reply.bytes} bytes. It will answer in its own pane — use pane_read on ${reply.pane} to see what it says.`
+    ].join('\n')
+  )
+}
+
+async function paneRead(args) {
+  if (!linkPath()) return noLink()
+  if (typeof args?.pane !== 'string' || !args.pane.trim()) {
+    return fail('`pane` is required — name the pane to read. share_panes lists them.')
+  }
+
+  let reply
+  try {
+    reply = await linkAsk({
+      op: 'read',
+      pane: args.pane,
+      ...(typeof args?.lines === 'number' ? { lines: args.lines } : {})
+    })
+  } catch (err) {
+    return fail(`That pane could not be read: ${err?.message ?? err}`)
+  }
+  if (!reply?.ok) return linkRefusal(reply)
+
+  if (!reply.text) {
+    return ok(`${reply.pane} has printed nothing yet. It is ${reply.idle ? 'idle' : 'busy'}.`)
+  }
+  return ok(
+    [
+      `${reply.pane} — last ${reply.lines} line${reply.lines === 1 ? '' : 's'}, ` +
+        `${reply.idle ? `idle for ${Math.round(reply.quietForMs / 1000)}s` : 'still working'}.`,
+      '',
+      '```text',
+      reply.text,
+      '```'
+    ].join('\n')
+  )
+}
+
 /* -------------------------------------------------------------------- serve */
 
 const HANDLERS = {
@@ -510,7 +772,9 @@ const HANDLERS = {
   share_read: shareRead,
   share_write: shareWrite,
   share_clear: shareClear,
-  share_panes: sharePanes
+  share_panes: sharePanes,
+  pane_send: paneSend,
+  pane_read: paneRead
 }
 
 const server = new Server({ name: SERVER_NAME, version: SERVER_VERSION }, { capabilities: { tools: {} } })
@@ -535,7 +799,7 @@ async function main() {
   const root = shareRoot()
   process.stderr.write(
     `[${SERVER_NAME}] ready (cwd: ${process.cwd()}, scratchpad: ${root ?? 'NONE FOUND — every tool will say so'}` +
-      `, author: ${defaultAuthor() || 'unset'})\n`
+      `, author: ${defaultAuthor() || 'unset'}, link: ${linkPath() || 'none — pane_send/pane_read will say so'})\n`
   )
 }
 

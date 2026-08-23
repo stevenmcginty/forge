@@ -52,6 +52,7 @@
     "tail:check": "node scripts/tail-check.mjs",
     "activity:check": "node scripts/activity-check.mjs",
     "share:check": "node scripts/share-check.mjs",
+    "share-link:check": "node scripts/share-link-check.mjs",
     "whatsnew": "node scripts/whats-new.mjs",
     "draft:check": "node scripts/draft-check.mjs",
     "feed:check": "node scripts/feed-check.mjs",

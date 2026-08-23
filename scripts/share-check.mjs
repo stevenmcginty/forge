@@ -510,7 +510,21 @@ const { fileURLToPath } = await import('node:url')
 // and a percent-encoded path is a module Node cannot find.
 const SERVER = fileURLToPath(new URL('../bridge/share-bridge.mjs', import.meta.url))
 
-function openServer(cwd, env = process.env) {
+/**
+ * The environment every case below starts from: this machine's, less every
+ * variable Forge sets on a pane.
+ *
+ * Not hygiene for its own sake. This script is normally run *inside a Forge
+ * pane*, which means FORGE_SHARE_DIR (the scratchpad of whatever project Forge
+ * is showing) and FORGE_SHARE_LINK (a live pipe to a running Forge, with real
+ * panes behind it) are both in the inherited environment. Without this, the
+ * cwd-walk cases would find Steve's actual scratchpad and "refuses when there is
+ * no scratchpad" would be answered by his actual panes — a check that passes or
+ * fails depending on where it was run from is not a check.
+ */
+const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('FORGE_SHARE_')))
+
+function openServer(cwd, env = CLEAN_ENV) {
   const child = spawn(process.execPath, [SERVER], { cwd, stdio: ['pipe', 'pipe', 'pipe'], env })
   let buffer = ''
   let stderr = ''
@@ -599,8 +613,9 @@ console.log('\nthe MCP server')
     const list = await server.request('tools/list', {})
     const names = (list?.result?.tools ?? []).map((t) => t.name).sort()
     ok(
-      JSON.stringify(names) === JSON.stringify(['share_clear', 'share_list', 'share_panes', 'share_read', 'share_write']),
-      'exactly the five share tools, and nothing else',
+      JSON.stringify(names) ===
+        JSON.stringify(['pane_read', 'pane_send', 'share_clear', 'share_list', 'share_panes', 'share_read', 'share_write']),
+      'exactly the five share tools and the two pane tools, and nothing else',
       JSON.stringify(names)
     )
     ok(
@@ -613,7 +628,9 @@ console.log('\nthe MCP server')
         JSON.stringify(required.share_write) === '["slot","body"]' &&
         JSON.stringify(required.share_clear) === '["slot"]' &&
         JSON.stringify(required.share_list) === '[]' &&
-        JSON.stringify(required.share_panes) === '[]',
+        JSON.stringify(required.share_panes) === '[]' &&
+        JSON.stringify(required.pane_send) === '["pane","text"]' &&
+        JSON.stringify(required.pane_read) === '["pane"]',
       'and asks for exactly the arguments it needs',
       JSON.stringify(required)
     )
@@ -712,7 +729,7 @@ console.log('\nFORGE_SHARE_ROOT')
   store.write({ index: 5, title: 'pointed at', body: 'found by the override', author: 'a', via: 'rail' }, 3_000_000_000_000)
 
   const elsewhere = project()
-  const server = openServer(elsewhere, { ...process.env, FORGE_SHARE_ROOT: store.root })
+  const server = openServer(elsewhere, { ...CLEAN_ENV, FORGE_SHARE_ROOT: store.root })
   try {
     await handshake(server)
     const listed = await server.request('tools/call', { name: 'share_list', arguments: {} })
@@ -722,20 +739,41 @@ console.log('\nFORGE_SHARE_ROOT')
   }
 }
 
-console.log('\nno key, no socket')
+console.log('\nno key, no network')
 {
+  /*
+   * This block used to assert "no socket at all", and that was the right claim
+   * while the server only ever touched files. `pane_send` and `pane_read` gave it
+   * one channel — a local pipe to Forge's own main process — so the claim is now
+   * the narrower true one, and deliberately *stronger* in the dimension that
+   * mattered: no port, no host, no DNS, no fetch, and the one path it connects to
+   * is the one Forge handed it in an environment variable. See the file header
+   * and electron/share-link.ts.
+   */
   const src = readFileSync(new URL('../bridge/share-bridge.mjs', import.meta.url), 'utf8')
-  ok(!/node:net|node:http|node:https|undici/.test(src), 'the server imports nothing that can open a socket')
+  ok(!/node:http|node:https|node:dgram|node:tls|undici|from 'ws'/.test(src), 'the server imports nothing that can reach the network')
   ok(!/\bfetch\(/.test(src), 'and never calls fetch')
   ok(!/\bspawn\(|execFile|child_process/.test(src), 'and never spawns a process')
+  ok(!/createServer/.test(src), 'and never listens for anything')
+  // `connect(path)` and nothing else: a port, a host or an options object would
+  // all be a socket that could leave this machine. Bare calls only — the MCP
+  // SDK's own `server.connect(transport)` is a method on an object, not a dial.
+  const connects = [...src.matchAll(/(?<![.\w])connect\(([^)]*)\)/g)].map((m) => m[1].trim())
+  ok(
+    connects.length === 1 && connects[0] === 'path',
+    'and dials exactly once, by path — never a host or a port',
+    JSON.stringify(connects)
+  )
+  ok(/const path = linkPath\(\)/.test(src), 'with that path coming from the environment rather than from a literal')
   // The header is allowed to explain *why* it holds no key; the code may not
-  // read one. Asserted as "these two variables and nothing else", which is a
+  // read one. Asserted as "these four variables and nothing else", which is a
   // stronger claim than the absence of the word KEY and cannot be defeated by a
   // rename.
   const envReads = [...src.matchAll(/process\.env\['([^']+)'\]/g)].map((m) => m[1]).sort()
   ok(
-    JSON.stringify([...new Set(envReads)]) === JSON.stringify(['FORGE_SHARE_AGENT', 'FORGE_SHARE_ROOT']),
-    'and reads exactly two environment variables, neither of them a credential',
+    JSON.stringify([...new Set(envReads)]) ===
+      JSON.stringify(['FORGE_SHARE_AGENT', 'FORGE_SHARE_DIR', 'FORGE_SHARE_LINK', 'FORGE_SHARE_ROOT']),
+    'and reads exactly four environment variables, none of them a credential',
     JSON.stringify(envReads)
   )
 }

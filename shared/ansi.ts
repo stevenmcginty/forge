@@ -86,7 +86,7 @@ export function stripAnsi(text: string): string {
       if (!line.includes('\r')) return line
       // The last segment wins, which is what a carriage return does. An empty
       // last segment (a line ending in \r) leaves the segment before it.
-      const parts = line.split('\r').filter((p, i, all) => p.length > 0 || i === all.length - 1)
+      const parts = line.split('\r').filter((p) => p.length > 0)
       return parts[parts.length - 1] ?? ''
     })
     .join('\n')

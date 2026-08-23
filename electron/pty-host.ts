@@ -1,15 +1,19 @@
 import { ipcMain, type BrowserWindow } from 'electron'
+import { resolve as resolvePath, sep } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import type { CreateSessionRequest, CreateSessionResult, PtyGeometryEvent } from '@shared/types'
-import { isGlmClaudeCommand, ZAI_ANTHROPIC_BASE_URL } from '@shared/agents'
+import { commandExe, isGlmClaudeCommand, ZAI_ANTHROPIC_BASE_URL } from '@shared/agents'
+import { SHARE_DIR_ENV, SHARE_LINK_ENV } from '@shared/share'
 import { installCommandFor, toolSpecForCommand } from '@shared/tools'
 import { DESK_VIEWER, GridOwners } from './pty/grid-owner'
 import { PtySessionManager } from './pty/session-manager'
 import { withoutQuestions } from './pty/replay'
 import { checkableExe, whichCommand } from './which'
-import { getSettings } from './store'
+import { getProjects, getSettings } from './store'
+import { ShareLink } from './share-link'
+import { ShareStore } from './share-store'
 import { applyMcpBridge } from './bridge/mcp-config'
-import { applyShareBridge, shareEnvFor } from './bridge/share-mcp'
+import { applyShareBridge, shareEnvFor, shareToolsEnabled } from './bridge/share-mcp'
 import { applyRemoteControl } from './bridge/remote-control'
 import { applyClaudeSession } from './bridge/claude-session'
 import { presenceFile } from './presence'
@@ -181,6 +185,85 @@ function flush(): void {
 function remember(id: string, data: string): void {
   const next = (replay.get(id) ?? '') + data
   replay.set(id, next.length > REPLAY_LIMIT ? next.slice(next.length - REPLAY_LIMIT) : next)
+  // The same bytes, counted rather than kept: this is the only place in main
+  // that sees every chunk a pane prints, and "has this pane been quiet" is what
+  // decides whether another agent may type into it. See electron/share-link.ts.
+  link?.noteOutput(id)
+}
+
+/* ------------------------------------------------- one pane, another's inbox
+ *
+ * The link is started here and disposed here rather than from electron/main.ts,
+ * because everything it needs is in this file: the session manager it writes
+ * through, the replay buffer it reads from, and the create/exit pair that tells
+ * it which panes exist. main.ts already owns this module's lifecycle through
+ * registerPtyHandlers/disposePtyHost, and a second lifecycle beside it would be
+ * a second thing to forget.
+ */
+
+let link: ShareLink | null = null
+
+function getLink(): ShareLink {
+  if (!link) {
+    link = new ShareLink({
+      // Deliberately the same two calls IPC.ptyWrite makes below: a message from
+      // another agent arrives at the PTY exactly as the person's own typing does,
+      // grid ownership and all. A second write path would be a second answer to
+      // "who owns this pane's width".
+      write: (id, data) => {
+        owners.noteWrite(id, DESK_VIEWER, data)
+        return getManager().write(id, data)
+      },
+      replay: getReplay
+    })
+  }
+  return link
+}
+
+/**
+ * The project folder a pane's cwd sits in, according to main's own project list.
+ *
+ * Never a path from the renderer, and never a guess: the longest registered
+ * project path that contains the pane's cwd, or null. A pane opened somewhere
+ * Forge does not know about gets no scratchpad created for it, which is the same
+ * refusal-to-litter rule bridge/share-bridge.mjs has.
+ */
+function projectRootFor(cwd: string): string | null {
+  const here = resolvePath(cwd || '.').toLowerCase()
+  let best: string | null = null
+  for (const project of getProjects()) {
+    const root = resolvePath(project.path)
+    const key = root.toLowerCase()
+    if (here !== key && !(here + sep).startsWith(key + sep)) continue
+    if (!best || root.length > best.length) best = root
+  }
+  return best
+}
+
+/**
+ * Make sure `.forge/share` exists before the agent CLI in this pane starts, and
+ * say where it is.
+ *
+ * Until this existed the folder was created in exactly one place — the moment
+ * somebody opened the rail's SHARE section — so in every project where nobody
+ * ever had, all five MCP tools answered "No shared scratchpad found" and the
+ * feature looked broken rather than unopened. `ensure()` is idempotent and
+ * leaves a de-marked README alone, so running it per pane costs one `existsSync`.
+ *
+ * Gated on the same setting the tools themselves are: a machine that never asked
+ * for this still gets no directory made in its repository.
+ */
+function shareDirFor(cwd: string): string | null {
+  if (!shareToolsEnabled()) return null
+  const root = projectRootFor(cwd)
+  if (!root) return null
+  const store = new ShareStore(root)
+  const ensured = store.ensure()
+  if (!ensured.ok) {
+    console.error(`[share] could not open the scratchpad for ${root}: ${ensured.error}`)
+    return null
+  }
+  return store.root
 }
 
 function queue(id: string, data: string): void {
@@ -355,6 +438,7 @@ export function getManager(): PtySessionManager {
         // Nothing in the registry outlives the session it describes — and a
         // reused pane id must not inherit a dead pane's owner.
         owners.forget(id)
+        link?.unregister(id)
         send(IPC.ptyExit, { id, exitCode, signal })
         toSinks((sink) => sink.onExit(id, exitCode))
       }
@@ -529,11 +613,26 @@ export function registerPtyHandlers(): void {
      */
     const shareEnv = shareEnvFor(bootstrapCommand, paneTitle || projectName)
 
+    /*
+     * And the link's two. `FORGE_SHARE_LINK` is the path of the pipe main is
+     * listening on, which is what turns `pane_send`/`pane_read` from an error
+     * message into a feature; it goes to every pane for the same reason
+     * `FORGE_SHARE_AGENT` does — the pane's environment is what the MCP server
+     * the CLI spawns inherits, and Forge does not know in advance which panes
+     * will end up with an agent in them. `FORGE_SHARE_DIR` saves the server a
+     * walk up from its own cwd, and is set only when the scratchpad is actually
+     * open for this project. See electron/share-link.ts.
+     */
+    const linkPath = getLink().listen()
+    const shareDir = shareDirFor(cwd)
+
     const env = {
       ...(geminiEnv ?? {}),
       ...(glmEnv ?? {}),
       ...(repoUrl ? { FORGE_REPO_URL: repoUrl } : {}),
-      ...shareEnv
+      ...shareEnv,
+      ...(linkPath ? { [SHARE_LINK_ENV]: linkPath } : {}),
+      ...(shareDir ? { [SHARE_DIR_ENV]: shareDir } : {})
     }
 
     const blocked = notice ?? glmNotice
@@ -570,6 +669,18 @@ export function registerPtyHandlers(): void {
       return result
     }
 
+    // Addressable by another agent from this moment. Registered after the spawn
+    // succeeded, so a pane that failed to start is never a pane somebody can be
+    // told to talk to. Re-registering a re-adopted session is deliberate and
+    // harmless: it refreshes the title without resetting the quiet clock.
+    getLink().register({
+      id: spec.id,
+      title: paneTitle || projectName,
+      agent: commandExe(bootstrapCommand),
+      cwd,
+      projectName
+    })
+
     // A pane is born to whoever opened it, and every pane is opened here — the
     // renderer owns the split tree, so a tab a browser asks for is still created
     // by this desk. It changes hands the moment somebody types somewhere else.
@@ -605,6 +716,9 @@ export function registerPtyHandlers(): void {
     // sends that nobody pressed is filtered out by `noteWrite`; see
     // shared/typing.ts.
     owners.noteWrite(String(id), DESK_VIEWER, String(data))
+    // The person is at this pane. That counts as the pane being busy, so an
+    // agent elsewhere cannot type into the middle of somebody's sentence.
+    link?.noteWrite(String(id))
     getManager().write(String(id), String(data))
   })
 
@@ -621,6 +735,7 @@ export function registerPtyHandlers(): void {
     live.delete(String(id))
     clearJiggle(String(id))
     owners.forget(String(id))
+    link?.unregister(String(id))
     return getManager().kill(String(id))
   })
 
@@ -638,6 +753,8 @@ export function disposePtyHost(): void {
   }
   geometryDirty.clear()
   for (const id of [...jiggles.keys()]) clearJiggle(id)
+  link?.close()
+  link = null
   owners.clear()
   pending.clear()
   replay.clear()
