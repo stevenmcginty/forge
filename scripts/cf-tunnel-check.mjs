@@ -105,6 +105,8 @@ async function main() {
     KILL_ESCALATE_MS,
     PROBE_INTERVAL_MS,
     PROBE_STRIKES,
+    BIRTH_PROBE_INTERVAL_MS,
+    BIRTH_PROBE_LIMIT,
     normaliseHost,
     webSocketUrl
   } = await import(pathToFileURL(join(scratch, 'cf-tunnel.mjs')).href)
@@ -373,10 +375,11 @@ async function main() {
     last().state === 'error' && /flag provided but not defined/.test(last().detail),
     "a permanent refusal surfaces as error, carrying cloudflared's own text"
   )
-  // Only backoff timers count here: the probe timer arms on every live banner
+  // Only backoff timers count here: the probe timers arm on every live banner
   // and this harness's clearTimer deliberately forgets nothing.
   log(
-    timers.filter((t) => t.ms !== PROBE_INTERVAL_MS).length === 0 && spawned.length === 5,
+    timers.filter((t) => t.ms !== PROBE_INTERVAL_MS && t.ms !== BIRTH_PROBE_INTERVAL_MS).length === 0 &&
+      spawned.length === 5,
     'and is NOT retried — no timer set, nothing respawned'
   )
 
@@ -590,6 +593,59 @@ async function main() {
     // stop() must not leave a probe behind to fire on a dead rig.
     rig.tunnel.stop()
     log(!rig.hasTimer(PROBE_INTERVAL_MS), 'stop() disarms the probe along with everything else')
+  }
+
+  /* --- the newborn check: an address that is dead on arrival --- */
+  {
+    let answer = false
+    const rig = watchdogRig({ probe: async () => answer })
+    rig.tunnel.start()
+    rig.child.say(banner(HOST_ONE))
+    log(rig.hasTimer(BIRTH_PROBE_INTERVAL_MS), 'going live also arms the short newborn clock')
+
+    for (let i = 0; i < BIRTH_PROBE_LIMIT - 1; i++) {
+      rig.fire(BIRTH_PROBE_INTERVAL_MS)
+      await settle()
+    }
+    log(
+      rig.killed.length === 0 && rig.last().state === 'live' && rig.hasTimer(BIRTH_PROBE_INTERVAL_MS),
+      `${BIRTH_PROBE_LIMIT - 1} unanswered newborn probes are patience, not a verdict — the banner says it may take time`
+    )
+    rig.fire(BIRTH_PROBE_INTERVAL_MS)
+    await settle()
+    log(
+      rig.killed.includes(6001) && rig.last().state === 'retrying',
+      `probe ${BIRTH_PROBE_LIMIT} kills a tunnel that never answered — a minute, not four, before the fresh address`
+    )
+    log(!rig.hasTimer(BIRTH_PROBE_INTERVAL_MS) && !rig.hasTimer(PROBE_INTERVAL_MS), 'both clocks are disarmed with it')
+
+    rig.child.die(1)
+    rig.fire(1000)
+    answer = true
+    rig.child.say(banner(HOST_TWO))
+    rig.fire(BIRTH_PROBE_INTERVAL_MS)
+    await settle()
+    log(
+      rig.last().state === 'live' && !rig.hasTimer(BIRTH_PROBE_INTERVAL_MS) && rig.hasTimer(PROBE_INTERVAL_MS),
+      'the successor answers first time: the newborn clock stands down and the 2-minute probe carries on alone'
+    )
+    rig.tunnel.stop()
+  }
+
+  /* --- the newborn check waits out an offline desktop --- */
+  {
+    const rig = watchdogRig({ probe: async () => false, probeControl: async () => false })
+    rig.tunnel.start()
+    rig.child.say(banner(HOST_ONE))
+    for (let i = 0; i < BIRTH_PROBE_LIMIT + 2; i++) {
+      rig.fire(BIRTH_PROBE_INTERVAL_MS)
+      await settle()
+    }
+    log(
+      rig.killed.length === 0 && rig.last().state === 'live' && rig.hasTimer(BIRTH_PROBE_INTERVAL_MS),
+      'a newborn that cannot be reached because this desktop is offline is not convicted — it keeps waiting'
+    )
+    rig.tunnel.stop()
   }
 
   /* --- the kill that does not land --- */

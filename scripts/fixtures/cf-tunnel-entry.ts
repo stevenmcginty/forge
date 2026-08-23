@@ -25,6 +25,8 @@ export {
   PROBE_INTERVAL_MS,
   PROBE_STRIKES,
   PROBE_TIMEOUT_MS,
+  BIRTH_PROBE_INTERVAL_MS,
+  BIRTH_PROBE_LIMIT,
   CONTROL_PROBE_URL
 } from '../../electron/cloudflare-tunnel'
 /**

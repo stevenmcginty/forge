@@ -136,12 +136,26 @@ export const HEALTHY_RESET_MS = 30_000
  * if the child has not exited KILL_ESCALATE_MS after taskkill, the exit is
  * synthesised — a supervisor stuck at `retrying` with every detector disarmed
  * would be the original incident back again, minus the self-heal.
+ *
+ * **The newborn check.** A quick tunnel can be dead on arrival: cloudflared
+ * prints the banner, the desktop publishes the hostname, and Cloudflare never
+ * puts it into DNS at all (2026-08-23, dev-2.log — the browser showed "it
+ * published an address a moment ago, but nothing is answering there" for four
+ * minutes). On the 2-minute clock that costs PROBE_STRIKES × PROBE_INTERVAL_MS
+ * before the restart, which is the whole outage. So a freshly announced
+ * address is probed every BIRTH_PROBE_INTERVAL_MS until it answers *once*;
+ * if BIRTH_PROBE_LIMIT probes in a row fail with the control probe passing,
+ * the child is killed straight away and the next address is drawn. The banner
+ * itself warns "it may take some time to be reachable", which is why one
+ * failure is not a verdict and the limit is a minute's worth of tries.
  */
 export const EDGE_FAILURE_LIMIT = 6
 export const PROBE_INTERVAL_MS = 120_000
 export const PROBE_TIMEOUT_MS = 10_000
 export const PROBE_STRIKES = 2
 export const KILL_ESCALATE_MS = 10_000
+export const BIRTH_PROBE_INTERVAL_MS = 5_000
+export const BIRTH_PROBE_LIMIT = 12
 
 /** cloudflared's serving-failure line — the signature of a dead quick tunnel. */
 export const EDGE_FAILURE_LINE = /Serve tunnel error/i
@@ -445,6 +459,7 @@ export class CloudflareTunnel {
   private child: TunnelChild | null = null
   private timer: unknown = null
   private probeTimer: unknown = null
+  private birthTimer: unknown = null
   private killTimer: unknown = null
   private attempt = 0
   private liveSince = 0
@@ -453,6 +468,7 @@ export class CloudflareTunnel {
   private stopped = false
   private edgeFailures = 0
   private probeStrikes = 0
+  private birthProbes = 0
   private current: TunnelStatus = { state: 'off', url: '', detail: '' }
 
   constructor(host: CloudflareTunnelHost) {
@@ -485,6 +501,7 @@ export class CloudflareTunnel {
       this.timer = null
     }
     this.clearProbe()
+    this.clearBirthProbe()
     this.clearKillTimer()
     const child = this.child
     this.child = null
@@ -550,6 +567,9 @@ export class CloudflareTunnel {
       this.report({ state: 'live', url: event.url, detail: '' })
       this.host.log?.(`tunnel live at ${event.url}`)
       this.scheduleProbe()
+      this.birthProbes = 0
+      this.clearBirthProbe()
+      this.scheduleBirthProbe()
       return
     }
 
@@ -589,6 +609,51 @@ export class CloudflareTunnel {
       ;(this.host.clearTimer ?? clearTimeout)(this.probeTimer as NodeJS.Timeout)
       this.probeTimer = null
     }
+  }
+
+  private clearBirthProbe(): void {
+    if (this.birthTimer !== null) {
+      ;(this.host.clearTimer ?? clearTimeout)(this.birthTimer as NodeJS.Timeout)
+      this.birthTimer = null
+    }
+  }
+
+  private scheduleBirthProbe(): void {
+    if (this.stopped || this.birthTimer !== null) return
+    this.birthTimer = (this.host.setTimer ?? setTimeout)(() => {
+      this.birthTimer = null
+      void this.runBirthProbe()
+    }, BIRTH_PROBE_INTERVAL_MS)
+  }
+
+  /**
+   * The newborn check: the fresh address is dialled on a short clock until it
+   * answers once, then this clock stops and the 2-minute probe carries on
+   * alone. An address that never answers — with the internet demonstrably up —
+   * is dead on arrival, and a minute of that is all it gets. The control probe
+   * rules the same way it does for the scheduled one: an offline desktop
+   * cannot convict anything, so the tries are not counted while it lasts.
+   */
+  private async runBirthProbe(): Promise<void> {
+    if (this.stopped || this.current.state !== 'live' || !this.child) return
+    const child = this.child
+    const alive = await (this.host.probe ?? probeTunnelUrl)(this.current.url)
+    if (this.staleSince(child)) return
+    if (alive) {
+      this.probeStrikes = 0
+      this.edgeFailures = 0
+      return
+    }
+    const online = await (this.host.probeControl ?? probeControlUrl)()
+    if (this.staleSince(child)) return
+    if (online) {
+      this.birthProbes += 1
+      if (this.birthProbes >= BIRTH_PROBE_LIMIT) {
+        this.restartDead(`the new public address never answered (${this.birthProbes} probes since it was announced)`)
+        return
+      }
+    }
+    this.scheduleBirthProbe()
   }
 
   private clearKillTimer(): void {
@@ -688,6 +753,7 @@ export class CloudflareTunnel {
     this.edgeFailures = 0
     this.probeStrikes = 0
     this.clearProbe()
+    this.clearBirthProbe()
     this.host.log?.(`cloudflared: ${reason} — restarting the tunnel for a fresh address`)
     this.report({ state: 'retrying', url: '', detail: 'The tunnel went dead — restarting cloudflared.' })
     const child = this.child
@@ -714,6 +780,7 @@ export class CloudflareTunnel {
     // A probe armed for a tunnel that no longer exists proves nothing; the
     // next live banner arms a fresh one.
     this.clearProbe()
+    this.clearBirthProbe()
     if (this.stopped) return
 
     // A door that will not open. Stop knocking — switching the tunnel off and on

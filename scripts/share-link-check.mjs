@@ -27,6 +27,8 @@
  * is the only way to know the two ends agree about the protocol.
  */
 import { registerHooks } from 'node:module'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 registerHooks({
   resolve(spec, context, next) {
@@ -419,7 +421,7 @@ ok(link.listen(PIPE) === PIPE, 'listening twice is the same link, not a second o
  */
 
 const { spawn } = await import('node:child_process')
-const { fileURLToPath } = await import('node:url')
+
 const SERVER = fileURLToPath(new URL('../bridge/share-bridge.mjs', import.meta.url))
 const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('FORGE_SHARE_')))
 
