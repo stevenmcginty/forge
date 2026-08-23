@@ -200,24 +200,31 @@ export const BUILTIN_AGENT_PROFILES: AgentProfile[] = [
     // No mcpBridge, for the Codex and OpenCode reason: qwen speaks MCP through
     // `qwen mcp` and its own settings file, not Claude Code's --mcp-config, so
     // handing it the flag would only make it refuse to start.
-  },
-  {
-    id: 'gemini',
-    name: 'Gemini',
-    // Last on purpose: since June 2026 the `gemini` CLI serves API-key users
-    // only — personal Google-account sign-in moved to Antigravity above. The
-    // profile stays because a pane with a paid key still works (the PTY host
-    // hands GEMINI_API_KEY to gemini panes), but Antigravity is the one to
-    // reach for, so it gets the shelf position and this one gets the bottom.
-    command: 'gemini',
-    accent: '#7C9CFF',
-    badge: 'GM',
-    builtin: true,
-    kind: 'agent'
   }
 ]
 
 export const DEFAULT_PROFILE_ID = 'claude'
+
+/**
+ * Built-ins Forge used to ship and has now withdrawn, by profile id.
+ *
+ * Deleting a row from BUILTIN_AGENT_PROFILES only reaches machines that have
+ * never run Forge. Everywhere else settings.json still carries the profile, and
+ * `normaliseSettings` keeps a stored profile it does not recognise — correctly,
+ * because that is where a custom profile lives. So a withdrawn built-in would
+ * simply be demoted to a custom one and sit in the chooser for good. Naming its
+ * id here is what actually takes it off the shelf.
+ *
+ * Safe against a user's own profiles by construction: a custom profile's id comes
+ * from `makeId('agent')`, so nothing a person made can ever collide with a name
+ * Forge itself minted. Only ever append.
+ */
+export const RETIRED_BUILTIN_PROFILE_IDS: readonly string[] = [
+  // Since June 2026 the `gemini` CLI serves API-key users only — personal
+  // Google-account sign-in moved to Antigravity, which has a profile of its own.
+  // Unrelated to the `ask_gemini` bridge, which is a Claude tool and stays.
+  'gemini'
+]
 
 /**
  * Commands a built-in used to ship with, keyed by profile id.

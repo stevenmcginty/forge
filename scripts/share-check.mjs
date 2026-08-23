@@ -896,6 +896,69 @@ console.log('\nthe Qwen entry')
   ok(M.mergeQwenSettings(null, SCRIPT_PATH).action === 'write', 'no file and tools wanted creates one')
 }
 
+console.log('\nthe Antigravity commands')
+{
+  /*
+   * `agy` has no launch flag either, but unlike Qwen it ships an idempotent
+   * upsert, so Forge asks the CLI instead of learning its config format. The argv
+   * is asserted rather than the string a shell would see: Forge spawns `agy`
+   * directly, so a path with a space needs no quoting and must not acquire any.
+   */
+  const add = M.planAgy(SCRIPT_PATH, null)
+  ok(add.action === 'add', 'a wanted script is added', add.action)
+  ok(
+    JSON.stringify(add.args) === JSON.stringify(['mcp', 'add', 'forge_share', 'node', SCRIPT_PATH]),
+    'as exactly `agy mcp add forge_share node <path>` — flags-free, so the flags-before-name rule cannot bite',
+    JSON.stringify(add.args)
+  )
+  ok(add.args.every((a) => !a.startsWith('-')), 'and nothing in it looks like a flag, so no `--` separator is needed')
+  ok(
+    JSON.stringify(M.planAgy(SCRIPT_PATH, 'forge_share  stdio  enabled  node x').args) === JSON.stringify(add.args),
+    'an entry that is already there is upserted rather than skipped — `agy mcp add` is add-or-update'
+  )
+
+  // `NAME TYPE STATUS COMMAND/URL`, as `agy mcp list` prints it.
+  const listed = 'NAME                 TYPE   STATUS   COMMAND/URL\nfirebase-mcp-server  stdio  enabled  npx -y firebase-tools@latest mcp\nforge_share          stdio  enabled  node C:\\Forge\\bridge\\share-bridge.mjs\n'
+  const remove = M.planAgy(null, listed)
+  ok(remove.action === 'remove', 'turning the setting off takes a registered forge_share out again', remove.action)
+  ok(
+    JSON.stringify(remove.args) === JSON.stringify(['mcp', 'remove', 'forge_share']),
+    'with `agy mcp remove forge_share`',
+    JSON.stringify(remove.args)
+  )
+
+  const theirs = 'NAME                 TYPE   STATUS   COMMAND/URL\nfirebase-mcp-server  stdio  enabled  npx -y firebase-tools@latest mcp\n'
+  ok(M.planAgy(null, theirs).action === 'none', 'a list without it removes nothing')
+  ok(M.planAgy(null, '').action === 'none', 'and neither does an empty list')
+  ok(M.planAgy(null, null).action === 'none', 'a list that could not be run at all is never guessed at')
+  // The name is the marker — the same thing `description` is for Qwen — so it has
+  // to be matched as a whole column. A server called something else that merely
+  // runs a path with forge_share in it is somebody else's row.
+  const lookalike = 'NAME       TYPE   STATUS   COMMAND/URL\nnotesrv    stdio  enabled  node C:\\x\\forge_share\\thing.mjs\n'
+  ok(M.planAgy(null, lookalike).action === 'none', 'a forge_share in the command column is not a forge_share server')
+  ok(M.planAgy(null, 'forge_share_two  stdio  enabled  node x').action === 'none', 'and neither is a name that starts with it')
+}
+
+console.log('\nthe Antigravity sync')
+{
+  const src = readFileSync(new URL('../electron/bridge/share-mcp.ts', import.meta.url), 'utf8')
+  /*
+   * `syncAgyConfig` reads a setting, so — like `applyShareBridge` below — it is
+   * asserted by source rather than called. Its runner is injectable so that this
+   * file never spawns the real `agy`, and never writes to Steve's own config.
+   */
+  const body = /export function syncAgyConfig\(([\s\S]*?)\n\}/.exec(src)?.[0] ?? ''
+  ok(body.length > 0, 'syncAgyConfig exists')
+  ok(/run: AgyRunner = runAgy/.test(body), 'its command runner is injectable, defaulting to the real one')
+  ok(/wanted\(\) && script \? script : null/.test(body), 'nothing is registered while the setting is off')
+  ok(/wantedScript \? null : run\(AGY_LIST_ARGS\)/.test(body), 'and the list is only run when deciding a removal')
+  ok(/if \(plan\.action === 'none'\) return/.test(body), 'a plan of nothing spawns nothing')
+  const runner = /function runAgy\(([\s\S]*?)\n\}/.exec(src)?.[0] ?? ''
+  ok(/timeout: 10_000/.test(runner), 'the spawn is bounded by a timeout')
+  ok(/try \{[\s\S]*catch \(err\) \{/.test(runner), 'and it can never throw at its caller — a pane launching matters more')
+  ok(/if \(!exe\) return null/.test(runner), 'a machine without agy does nothing rather than failing')
+}
+
 console.log('\nevery other command is left alone')
 {
   const src = readFileSync(new URL('../electron/bridge/share-mcp.ts', import.meta.url), 'utf8')
@@ -908,7 +971,7 @@ console.log('\nevery other command is left alone')
   ok(/if \(commandExe\(cmd\) !== 'codex'\) return cmd/.test(src), 'and nothing is appended to anything that is not codex')
   ok(/if \(cmd\.includes\(`mcp_servers\.\$\{SERVER_KEY\}`\)\) return cmd/.test(src), 'and applying it twice appends once')
   ok(/if \(!fragment\) \{[\s\S]{0,220}return cmd\s*\}/.test(src), 'a path that cannot be expressed skips registration rather than breaking the launch')
-  ok(/agy|antigravity/i.test(src), 'the vendors that are deliberately out of scope are named')
+  ok(/kimi/i.test(src), 'the one vendor that is deliberately out of scope is named')
 }
 
 /* ---------------------------------------------------------- live CLI probes
@@ -1005,6 +1068,25 @@ if (!has('qwen')) {
   ok(!/--mcp-config/.test(help.out ?? ''), 'qwen still has no --mcp-config, so the config write is still the only way in')
   const mcpHelp = runCli('qwen mcp --help')
   ok(/\badd\b/.test(mcpHelp.out ?? ''), 'and `qwen mcp add` still exists, which is the surface the written entry imitates')
+}
+
+console.log('\nlive: agy')
+if (!has('agy')) {
+  skip('the agy mcp surface is unchanged', 'agy is not installed')
+} else {
+  /*
+   * Help pages only. `agy mcp add` writes a user-scoped config that this machine
+   * actually uses, so the one thing this block may never do is run the command it
+   * is checking — the shapes are asserted against planAgy above.
+   */
+  // `2>&1`: agy prints its help on stderr, which runCli otherwise drops.
+  const addHelp = runCli('agy mcp add --help 2>&1')
+  ok(/Add or update an MCP server/i.test(addHelp.out ?? ''), '`agy mcp add` is still the idempotent upsert Forge relies on', addHelp.out?.slice(0, 200))
+  ok(/stdio/.test(addHelp.out ?? ''), 'and still defaults to stdio, which is why Forge passes no --type')
+  const mcpHelp = runCli('agy mcp --help 2>&1')
+  ok(/\bremove\b/.test(mcpHelp.out ?? ''), 'and `agy mcp remove` still exists, so turning the setting off can undo it')
+  const list = runCli('agy mcp list')
+  ok(/NAME\s+TYPE\s+STATUS/.test(list.out ?? ''), 'the list is still the table planAgy reads a name out of', list.out?.slice(0, 120))
 }
 
 /* --------------------------------------------------------- the release notes

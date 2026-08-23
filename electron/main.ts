@@ -36,7 +36,7 @@ import { registerSkillsHandlers, setSkillsDirs } from './skills-store'
 import { disposePtyHost, getReplay, registerPtyHandlers, setPtyTarget } from './pty-host'
 import { askBeforeClose, shouldConfirmClose } from './quit-guard'
 import { writeBridgeConfig } from './bridge/mcp-config'
-import { syncQwenConfig } from './bridge/share-mcp'
+import { syncAgyConfig, syncQwenConfig } from './bridge/share-mcp'
 import { disposePresence, initPresence, setPresence } from './presence'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
 import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-sidecar'
@@ -833,15 +833,17 @@ function registerAppHandlers(): void {
     if (before.geminiKey !== next.geminiKey || before.geminiImageModel !== next.geminiImageModel) {
       writeBridgeConfig()
     }
-    // Turning the share tools on or off changes both halves of their
+    // Turning the share tools on or off changes every half of their
     // registration: the mcp.json Claude reads (rewritten above only for a key
-    // change, so it needs saying separately) and the one config file Forge owns,
-    // ~/.qwen/settings.json. Qwen reloads that without a restart; Claude, Codex
-    // and OpenCode read theirs once per pane, so those take effect on the next
-    // pane rather than in the ones already open.
+    // change, so it needs saying separately), the one config file Forge owns
+    // (~/.qwen/settings.json) and the one it asks a CLI to write for it
+    // (Antigravity's, via `agy mcp`). Qwen reloads its file without a restart;
+    // Claude, Codex, OpenCode and Antigravity read theirs once per pane, so
+    // those take effect on the next pane rather than in the ones already open.
     if (before.shareTools !== next.shareTools) {
       writeBridgeConfig()
       syncQwenConfig()
+      syncAgyConfig()
     }
     // Flipping the phone link on or repointing it at another Firebase project
     // should take effect now, not at the next launch. Restarting the service is
@@ -1241,10 +1243,13 @@ void app
       // Regenerate the cross-agent bridge's MCP config with absolute paths before
       // any pane can launch, so Claude panes pick it up on the first bootstrap.
       writeBridgeConfig()
-      // The share server's one config file, for the one vendor with no flag. A
-      // no-op — including a *removal* — when the setting is off, so a machine that
-      // never asked for this ends up with nothing in ~/.qwen.
+      // The share server's registrations for the two vendors with no launch
+      // flag: Qwen's config file, written directly, and Antigravity's, written
+      // for us by `agy mcp add`. Both are a no-op — including a *removal* — when
+      // the setting is off, so a machine that never asked for this ends up with
+      // nothing in ~/.qwen and nothing in `agy mcp list`.
       syncQwenConfig()
+      syncAgyConfig()
       // Before the PTY host builds its manager: the marker path goes into every
       // pane's CLAUDE_CLIENT_PRESENCE_FILE, and init also clears a marker left
       // behind by a crash (a stale one would mute the phone for good).

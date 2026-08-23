@@ -1,12 +1,14 @@
 import { app } from 'electron'
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { commandExe } from '@shared/agents'
 import { getSettings } from '../store'
+import { whichCommand } from '../which'
 
 /**
- * Four vendors, four different ways of being told about an MCP server, and one
+ * Five vendors, five different ways of being told about an MCP server, and one
  * rule: **a flag we can verify beats a config file we have to own.**
  *
  * Every string in this file was checked against the installed CLI rather than
@@ -25,6 +27,11 @@ import { getSettings } from '../store'
  *             user's own `$schema`, agents and commands all survived.
  *   Qwen      has no MCP flag at all (`qwen --help` offers only `qwen mcp`), so
  *             it is the one vendor that needs a file written. See writeQwen.
+ *   Antigravity  `agy mcp add forge_share node <path>`. No launch flag exists
+ *             either, but unlike Qwen it ships an idempotent upsert — verified
+ *             against `agy mcp add --help` (1.1.19): "Add or update an MCP
+ *             server configuration", flags before the name, stdio by default.
+ *             So Forge asks the CLI instead of writing its config file.
  *
  * Three specifics that each cost a debugging session if guessed:
  *
@@ -43,10 +50,11 @@ import { getSettings } from '../store'
  *     honoured, and share-bridge.mjs resolves the project from its own cwd
  *     anyway.
  *
- * Antigravity (`agy`), Kimi and Gemini are deliberately absent. They reach the
- * scratchpad the way every agent can — by reading `.forge/share/slot-2.md` with
- * the tools they already have — and adding a fourth registration mechanism for
- * each of them is work with a launch failure at the end of it if it is wrong.
+ * Kimi is deliberately absent — a local `.cmd` shim nobody here has probed for an
+ * MCP surface. It reaches the scratchpad the way every agent can, by reading
+ * `.forge/share/slot-2.md` with the tools it already has, and adding another
+ * registration mechanism for it is work with a launch failure at the end of it if
+ * it is wrong.
  *
  * Everything here is a no-op while `settings.shareTools` is false, which is the
  * default. A wrong guess about a vendor's flag therefore cannot stop a pane
@@ -174,7 +182,7 @@ export function applyShareBridge(bootstrapCommand: string): string {
 /**
  * The environment a pane needs, keyed off which CLI it is about to run.
  *
- * `FORGE_SHARE_AGENT` goes to every agent pane, not just the four that get the
+ * `FORGE_SHARE_AGENT` goes to every agent pane, not just the ones that get the
  * tools: an agent that writes `.forge/share/slot-2.md` with its own Write tool
  * can read this variable and sign its work, and that is the path every vendor
  * has. The stdio MCP server a CLI spawns inherits the CLI's environment, which is
@@ -322,4 +330,109 @@ function safeRead(path: string): string | undefined {
     console.error(`[share] could not read ${path}:`, err)
     return undefined
   }
+}
+
+/* ------------------------------------------------------------- antigravity */
+
+/** Where the installer puts `agy` when PATH has not caught up with it yet. */
+function agyFallbackPath(): string {
+  const local = process.env['LOCALAPPDATA'] || join(homedir(), 'AppData', 'Local')
+  return join(local, 'agy', 'bin', 'agy.exe')
+}
+
+/** Absolute path to the Antigravity CLI, or null when it is not on this machine. */
+function agyExe(): string | null {
+  const onPath = whichCommand('agy')
+  if (onPath) return onPath
+  const fallback = agyFallbackPath()
+  return existsSync(fallback) ? fallback : null
+}
+
+/** What `agy mcp list` is asked, and nothing else — see planAgy. */
+export const AGY_LIST_ARGS: readonly string[] = ['mcp', 'list']
+
+export type AgyPlan =
+  | { action: 'add'; args: string[] }
+  | { action: 'remove'; args: string[] }
+  | { action: 'none' }
+
+/**
+ * Which `agy mcp` command to run — decided without spawning anything.
+ *
+ * Pure, and split out from the running for the reason `mergeQwenSettings` is:
+ * this writes into a config file shared with the rest of somebody's Antigravity
+ * setup, and scripts/share-check.mjs holds the argv to its exact shape rather
+ * than letting a release find out.
+ *
+ * Two rules, and they are the Qwen rules with one difference:
+ *
+ *   • Adding needs no lookup. `agy mcp add` is documented as "Add or update",
+ *     and the flags-before-name rule the help page warns about is moot here
+ *     because Forge passes none — stdio is the default type.
+ *   • Removing needs one. Qwen refuses to touch an entry under our name that
+ *     Forge did not write, and marks its own in `description`; `agy mcp add`
+ *     has no description to mark, so the *name* is the marker. `forge_share`
+ *     is the key Forge registers under with every vendor, and a row by that
+ *     name in `agy mcp list` is therefore Forge's to withdraw again.
+ *
+ * `listOutput` is null when the list could not be run at all — no `agy` on the
+ * machine, or a CLI that failed — and nothing is removed on a guess.
+ */
+export function planAgy(script: string | null, listOutput: string | null): AgyPlan {
+  if (script) return { action: 'add', args: ['mcp', 'add', SERVER_KEY, 'node', script] }
+  if (listOutput === null) return { action: 'none' }
+  // The table is `NAME TYPE STATUS COMMAND/URL`, so the server's name is the
+  // first column. Matched as a whole column rather than as a substring: a server
+  // *called* something else that merely runs a path with forge_share in it is
+  // somebody else's row.
+  const listed = listOutput.split(/\r?\n/).some((line) => line.trim().split(/\s+/)[0] === SERVER_KEY)
+  return listed ? { action: 'remove', args: ['mcp', 'remove', SERVER_KEY] } : { action: 'none' }
+}
+
+/** Runs one `agy mcp …`, and hands back what it said. Null when it could not run. */
+export type AgyRunner = (args: readonly string[]) => string | null
+
+function runAgy(args: readonly string[]): string | null {
+  const exe = agyExe()
+  if (!exe) return null
+  try {
+    const r = spawnSync(exe, [...args], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
+    if (r.error) {
+      console.error(`[share] agy ${args.join(' ')} could not run:`, r.error)
+      return null
+    }
+    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`
+    if (r.status !== 0) {
+      console.error(`[share] agy ${args.join(' ')} exited ${r.status}: ${out.trim()}`)
+      return null
+    }
+    return out
+  } catch (err) {
+    console.error(`[share] agy ${args.join(' ')} failed:`, err)
+    return null
+  }
+}
+
+/**
+ * Add or remove `forge_share` in Antigravity's user-scoped MCP config.
+ *
+ * The second vendor with no launch flag, and the opposite answer to Qwen's: `agy`
+ * owns the file (`~/.gemini/antigravity-cli/`), it offers an idempotent upsert,
+ * and asking the CLI is cheaper than learning the format of a config nobody has
+ * promised to keep. It costs one ~200 ms spawn on the paths that call it — app
+ * start, and flipping the setting — which is why it is not on the pane path.
+ *
+ * Never throws, on purpose. Antigravity registration failing is a log line; a
+ * pane not launching is not.
+ *
+ * `run` is injectable so share-check can assert the shapes without an `agy` on
+ * the machine, and without writing to the real one.
+ */
+export function syncAgyConfig(run: AgyRunner = runAgy): void {
+  const script = shareBridgeScript()
+  const wantedScript = wanted() && script ? script : null
+  // Only a removal needs to know what is there; an upsert does not.
+  const plan = planAgy(wantedScript, wantedScript ? null : run(AGY_LIST_ARGS))
+  if (plan.action === 'none') return
+  run(plan.args)
 }

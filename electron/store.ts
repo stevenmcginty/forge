@@ -6,7 +6,8 @@ import {
   inferKind,
   isPermissionMode,
   migrateBuiltinCommand,
-  permissionFamily
+  permissionFamily,
+  RETIRED_BUILTIN_PROFILE_IDS
 } from '@shared/agents'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
@@ -616,8 +617,12 @@ function normaliseTheme(raw: unknown): ThemeCore | null {
 function normaliseSettings(raw: Partial<Settings> | null): Settings {
   const s = raw ?? {}
   const DEFAULT_SETTINGS = defaultSettings()
+  // A withdrawn built-in is dropped rather than demoted to a custom profile:
+  // without this, deleting a row from BUILTIN_AGENT_PROFILES only ever reaches
+  // machines that never ran the version that shipped it. See
+  // RETIRED_BUILTIN_PROFILE_IDS for why this cannot catch a profile a user made.
   const profiles: AgentProfile[] = Array.isArray(s.agentProfiles)
-    ? s.agentProfiles.filter((p) => p && p.id && p.name)
+    ? s.agentProfiles.filter((p) => p && p.id && p.name && !RETIRED_BUILTIN_PROFILE_IDS.includes(p.id))
     : []
   // Re-seed any built-in the user deleted by hand, preserving their edits.
   for (const builtin of BUILTIN_AGENT_PROFILES) {
@@ -626,9 +631,9 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
   // The chooser shows profiles in this order and nothing lets a user reorder
   // them, so a stored order is only an accident of when each row was written —
   // a built-in added later (Antigravity) would otherwise sit below every custom
-  // profile forever, and a built-in demoted in the roster (Gemini, now
-  // API-key-only) would keep its old shelf position. Built-ins follow the
-  // roster; customs keep their creation order after them.
+  // profile forever, and a built-in demoted in the roster would keep its old
+  // shelf position. Built-ins follow the roster; customs keep their creation
+  // order after them.
   const rosterOrder = new Map(BUILTIN_AGENT_PROFILES.map((b, i) => [b.id, i]))
   profiles.sort((a, b) => (rosterOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rosterOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER))
   for (const p of profiles) {

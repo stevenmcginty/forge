@@ -604,7 +604,7 @@ export function registerPtyHandlers(): void {
 
     /*
      * The shared scratchpad's two variables. `FORGE_SHARE_AGENT` is the pane's
-     * name, and it goes to every pane rather than only the four that get the MCP
+     * name, and it goes to every pane rather than only the ones that get the MCP
      * tools: an agent that writes `.forge/share/slot-2.md` with its own Write
      * tool can read this and sign its work, and writing the file is the path
      * every vendor has. `OPENCODE_CONFIG_CONTENT` is how OpenCode is told about
