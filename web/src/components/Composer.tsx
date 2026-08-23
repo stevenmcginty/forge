@@ -282,7 +282,7 @@ export function Composer({
                     >
                       <span className="ceffort">
                         <strong className="ceffort__label">{model.label}</strong>
-                        <span className="ceffort__note">{model.note}</span>
+                        {model.note ? <span className="ceffort__note">{model.note}</span> : null}
                       </span>
                     </PopoverRow>
                   ))}

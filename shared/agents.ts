@@ -678,58 +678,144 @@ export interface AgentModelSpec {
 }
 
 /**
- * The models *this* pane's picker should list. Empty when Forge has no `/model`
- * dialect for the CLI — the chip then stays off, rather than offering Claude's
- * aliases to a tool that does not speak them.
- *
- *  - **Grok Build**: the version names the TUI and `grok models` use
- *    (`grok-4.7` … `grok-2`). Labels are the product names ("Grok 4.6"),
- *    because that is how the picker is supposed to read, not the id.
- *  - **Claude Code** (every `claude`-exe profile, including GLM): the `/model`
- *    aliases from code.claude.com/docs/en/model-config (2026-08-23) — Fable,
- *    Opus, Sonnet, Haiku. Version numbers move under those names.
- *  - **Codex, OpenCode, Kimi, Qwen, Gemini, a shell**: empty. Codex keeps the
- *    choice behind its own `/model` menu, same as effort.
+ * Which model table this command reads. GLM and DeepSeek reuse another
+ * agent's executable (`claude`, `opencode`) so the exe alone is not enough —
+ * the same test the permission ladder uses for GLM.
  */
-export function agentModels(command: string): AgentModelSpec[] {
+function modelFamily(command: string): string | null {
+  if (isGlmClaudeCommand(command)) return 'glm'
   const exe = commandExe(command)
-  if (exe === 'grok') {
-    return [
-      { id: 'grok-4.7', label: 'Grok 4.7', note: 'the newest' },
-      { id: 'grok-4.6', label: 'Grok 4.6', note: 'Grok Build’s current default' },
-      { id: 'grok-4.5', label: 'Grok 4.5', note: 'the previous flagship' },
-      { id: 'grok-3', label: 'Grok 3', note: 'the older generation' },
-      { id: 'grok-2', label: 'Grok 2', note: 'the oldest this picker still names' }
-    ]
-  }
-  if (exe === 'claude') {
-    return [
-      { id: 'fable', label: 'Fable', note: 'the hardest, longest-running tasks' },
-      { id: 'opus', label: 'Opus', note: 'complex reasoning — the usual default' },
-      { id: 'sonnet', label: 'Sonnet', note: 'daily coding, faster and cheaper' },
-      { id: 'haiku', label: 'Haiku', note: 'simple tasks, the lightest' }
-    ]
-  }
-  return []
+  if (exe === 'opencode' && /\bdeepseek\b/i.test(command)) return 'deepseek'
+  if (exe === 'antigravity') return 'agy'
+  if (!exe || exe === 'pwsh' || exe === 'powershell' || exe === 'cmd') return null
+  return exe
+}
+
+/**
+ * The models *this* pane's picker should list, in that CLI's own words.
+ *
+ * Empty when Forge has no `/model` dialect — a shell, a batch file — and the
+ * chip then stays off rather than offering Claude's aliases to a tool that
+ * does not speak them. Adding a family is one more key in MODEL_FAMILIES.
+ *
+ * Snapshot 2026-08-23: Claude aliases from code.claude.com/docs/en/model-config;
+ * Grok versions from `grok models` plus the older ids the TUI still takes;
+ * Codex from `codex debug models --bundled` + learn.chatgpt.com/codex/models;
+ * Antigravity from `agy models`; Kimi from kimi.com/code/docs models;
+ * Qwen from qwen-code `/model <id>` + QwenCloud text-generation models;
+ * Gemini CLI from geminicli.com/docs/cli/model; GLM from docs.z.ai Coding Plan;
+ * OpenCode from `opencode models` (Zen free + the Gemini coding ids on this
+ * machine); DeepSeek from the OpenCode-wrapped V4 ids the profile launches with.
+ */
+const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
+  grok: [
+    { id: 'grok-4.7', label: 'Grok 4.7', note: 'the newest' },
+    { id: 'grok-4.6', label: 'Grok 4.6', note: 'Grok Build’s current default' },
+    { id: 'grok-4.5', label: 'Grok 4.5', note: 'the previous flagship' },
+    { id: 'grok-3', label: 'Grok 3', note: 'the older generation' },
+    { id: 'grok-2', label: 'Grok 2', note: 'the oldest this picker still names' }
+  ],
+  claude: [
+    { id: 'fable', label: 'Fable', note: 'the hardest, longest-running tasks' },
+    { id: 'opus', label: 'Opus', note: 'complex reasoning — the usual default' },
+    { id: 'sonnet', label: 'Sonnet', note: 'daily coding, faster and cheaper' },
+    { id: 'haiku', label: 'Haiku', note: 'simple tasks, the lightest' }
+  ],
+  glm: [
+    { id: 'glm-5.3[1m]', label: 'GLM 5.3', note: 'the Coding Plan flagship, 1M context' },
+    { id: 'glm-5-turbo', label: 'GLM 5 Turbo', note: 'faster, lighter on credits' },
+    { id: 'glm-4.7', label: 'GLM 4.7', note: 'the older Coding Plan model' }
+  ],
+  codex: [
+    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'flagship — complex coding and research' },
+    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'everyday workhorse' },
+    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'fast and cheap, clear repeatable work' },
+    { id: 'gpt-5.5', label: 'GPT-5.5', note: 'the previous frontier' },
+    { id: 'gpt-5.2', label: 'GPT-5.2', note: 'still on the bundled list' },
+    { id: 'gpt-5.3-codex-spark', label: 'Codex Spark', note: 'near-instant iteration — Pro' }
+  ],
+  kimi: [
+    { id: 'k3', label: 'Kimi K3', note: 'flagship, up to 1M context' },
+    { id: 'k3-256k', label: 'Kimi K3 256k', note: 'the same K3, cheaper 256k window' },
+    { id: 'kimi-for-coding', label: 'K2.7 Code', note: 'routine coding and completion' },
+    { id: 'kimi-for-coding-highspeed', label: 'K2.7 HighSpeed', note: 'same coding model, ~6× faster' }
+  ],
+  agy: [
+    { id: 'gemini-3.7-flash-high', label: 'Gemini 3.7 Flash (High)', note: 'newest Flash, deepest effort' },
+    { id: 'gemini-3.7-flash-medium', label: 'Gemini 3.7 Flash (Medium)', note: 'newest Flash, balanced' },
+    { id: 'gemini-3.7-flash-low', label: 'Gemini 3.7 Flash (Low)', note: 'newest Flash, fastest' },
+    { id: 'gemini-3.6-flash-high', label: 'Gemini 3.6 Flash (High)', note: 'previous Flash, deepest effort' },
+    { id: 'gemini-3.6-flash-medium', label: 'Gemini 3.6 Flash (Medium)', note: 'previous Flash, balanced' },
+    { id: 'gemini-3.6-flash-low', label: 'Gemini 3.6 Flash (Low)', note: 'previous Flash, fastest' },
+    { id: 'gemini-3.5-flash-high', label: 'Gemini 3.5 Flash (High)', note: 'older Flash, deepest effort' },
+    { id: 'gemini-3.5-flash-medium', label: 'Gemini 3.5 Flash (Medium)', note: 'older Flash, balanced' },
+    { id: 'gemini-3.5-flash-low', label: 'Gemini 3.5 Flash (Low)', note: 'older Flash, fastest' },
+    { id: 'gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)', note: 'Pro reasoning, deep' },
+    { id: 'gemini-3.1-pro-low', label: 'Gemini 3.1 Pro (Low)', note: 'Pro reasoning, faster' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', note: 'thinking — all-round coding' },
+    { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6', note: 'thinking — the hard jobs' },
+    { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B', note: 'open-weights option' }
+  ],
+  gemini: [
+    { id: 'auto', label: 'Auto', note: 'let Gemini pick Pro or Flash' },
+    { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: 'newest Flash' },
+    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', note: 'previous Flash' },
+    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'older Flash' },
+    { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', note: 'deep reasoning' },
+    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', note: '2.5 reasoning' },
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', note: '2.5, faster' },
+    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite', note: 'simplest and cheapest' }
+  ],
+  qwen: [
+    { id: 'qwen3.8-max', label: 'Qwen 3.8 Max', note: 'flagship, 1M context' },
+    { id: 'qwen3.7-max', label: 'Qwen 3.7 Max', note: 'Token Plan’s top 3.7' },
+    { id: 'qwen3.7-plus', label: 'Qwen 3.7 Plus', note: 'Coding Plan’s usual default' },
+    { id: 'qwen3.7-flash', label: 'Qwen 3.7 Flash', note: 'fast and cheap' }
+  ],
+  opencode: [
+    { id: 'opencode/big-pickle', label: 'Big Pickle', note: 'OpenCode Zen, free' },
+    { id: 'opencode/hy3-free', label: 'HY3', note: 'OpenCode Zen, free' },
+    { id: 'opencode/mimo-v2.5-free', label: 'MiMo V2.5', note: 'OpenCode Zen, free' },
+    { id: 'opencode/nemotron-3-ultra-free', label: 'Nemotron 3 Ultra', note: 'OpenCode Zen, free' },
+    { id: 'opencode/nemotron-3.5-lightning-free', label: 'Nemotron 3.5 Lightning', note: 'OpenCode Zen, free' },
+    { id: 'opencode/x-preview-f-free', label: 'X Preview F', note: 'OpenCode Zen, free' },
+    { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: 'Google, newest Flash' },
+    { id: 'google/gemini-3.6-flash', label: 'Gemini 3.6 Flash', note: 'Google' },
+    { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'Google' },
+    { id: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', note: 'Google, deep reasoning' },
+    { id: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', note: 'Google' },
+    { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', note: 'Google' }
+  ],
+  deepseek: [
+    { id: 'opencode/deepseek-v4-flash-free', label: 'V4 Flash (free)', note: 'OpenCode Zen — this profile’s default' },
+    { id: 'deepseek/deepseek-v4-flash', label: 'V4 Flash', note: 'fast and cheap on DeepSeek’s own API' },
+    { id: 'deepseek/deepseek-v4-pro', label: 'V4 Pro', note: 'the larger V4, 1M context' }
+  ]
+}
+
+export function agentModels(command: string): AgentModelSpec[] {
+  const family = modelFamily(command)
+  return family ? (MODEL_FAMILIES[family] ?? []) : []
 }
 
 /**
  * What typing "switch to this model" looks like in *this* pane's own TUI.
  *
- * Claude and Grok both take `/model <id>` as words, then Enter as its own
- * keystroke — the same two-write rhythm as `/effort`. Null for everything
- * else, and the caller says so rather than firing keystrokes into a menu.
+ * Most CLIs take `/model <id>` as words, then Enter as its own keystroke —
+ * the same two-write rhythm as `/effort`. Gemini CLI is the odd one:
+ * `/model set <id>` (geminicli.com/docs/cli/model, 2026-08-23). Null for a
+ * shell, and the caller says so rather than firing keystrokes into the dark.
  */
 export function modelSlash(command: string): ((id: string) => string) | null {
-  const exe = commandExe(command)
-  if (exe !== 'claude' && exe !== 'grok') return null
+  const family = modelFamily(command)
+  if (!family || !MODEL_FAMILIES[family]) return null
+  if (family === 'gemini') return (id) => `/model set ${id}`
   return (id) => `/model ${id}`
 }
 
 /** Why the model picker cannot drive this pane, when modelSlash is null. */
 export function modelRefusal(command: string): string {
   const exe = commandExe(command)
-  if (exe === 'codex') return 'Codex sets the model through its /model picker — type /model in the pane.'
   return `${exe || 'This CLI'} has no model dial Forge can reach.`
 }
 
