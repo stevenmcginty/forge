@@ -1,6 +1,6 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { planTouchScroll } from '@shared/touch-scroll'
+import { planPointerDelta, wheelDeltaPx, type ScrollCarry } from '@shared/touch-scroll'
 
 /**
  * An xterm instance sized for a phone.
@@ -276,13 +276,12 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
  *
  * ## Where the finger's movement is sent, which depends on what the pane is
  *
- * Routed by `planTouchScroll` in shared/touch-scroll.ts, the same decision the
- * web client uses: a constructed `WheelEvent` is how this used to talk to a
- * TUI, and it is how Grok's conversation never moved. The normal buffer goes
- * through `scrollLines` (xterm 6's viewport ignores constructed wheels); a TUI
- * on the alternate screen gets SGR wheel reports or PageUp/PageDown written
- * down the PTY. Claude Code writes the normal buffer, so it was never on this
- * path and kept working.
+ * Routed by `planPointerDelta` in shared/touch-scroll.ts, the same decision the
+ * web client and the desktop wheel use. A constructed `WheelEvent` is how this
+ * used to talk to a TUI, and it is how Grok's conversation never moved. The
+ * normal buffer goes through `scrollLines`; a TUI on the alternate screen gets
+ * SGR wheel reports or PageUp/PageDown written down the PTY. Claude Code writes
+ * the normal buffer, so it was never on this path and kept working.
  *
  * Two details that stop it fighting the rest of the app:
  *
@@ -310,15 +309,26 @@ function enableTouchScroll(
   let scrolling = false
   let lastY = 0
   let startY = 0
-  let carry = 0
+  const carry: ScrollCarry = { px: 0 }
 
   /** The height of one row, measured rather than assumed. */
-  const rowHeight = (): number => {
+  const measureRow = (): number => {
     const rows = term.element?.querySelector('.xterm-rows') as HTMLElement | null
     const measured = rows && term.rows > 0 ? rows.clientHeight / term.rows : 0
     // Before the first paint there is nothing to measure; the font size is a
     // serviceable stand-in and only affects the first few pixels of a drag.
     return measured > 1 ? measured : Math.max(1, fontSize() * 1.2)
+  }
+
+  const applyDelta = (deltaY: number): void => {
+    const alt = term.buffer.active.type === 'alternate'
+    const mouse = term.modes.mouseTrackingMode !== 'none'
+    const plan = planPointerDelta(carry, deltaY, measureRow(), alt, mouse)
+    if (plan.kind === 'viewport') {
+      if (plan.lines !== 0) term.scrollLines(plan.lines)
+      return
+    }
+    if (send) send(plan.data)
   }
 
   const onStart = (event: TouchEvent): void => {
@@ -329,7 +339,7 @@ function enableTouchScroll(
     }
     tracking = true
     scrolling = false
-    carry = 0
+    carry.px = 0
     startY = event.touches[0].clientY
     lastY = startY
   }
@@ -346,24 +356,8 @@ function enableTouchScroll(
     // Dragging down reveals older output, which is scrolling *up* the buffer —
     // a negative count, which is what both branches below want: a negative
     // wheel delta, same as a physical wheel, and a negative `scrollLines`.
-    carry += lastY - y
+    applyDelta(lastY - y)
     lastY = y
-
-    const height = rowHeight()
-    const lines = Math.trunc(carry / height)
-    if (lines !== 0) {
-      carry -= lines * height
-      const plan = planTouchScroll(
-        lines,
-        term.buffer.active.type === 'alternate',
-        term.modes.mouseTrackingMode !== 'none'
-      )
-      if (plan.kind === 'viewport') {
-        term.scrollLines(plan.lines)
-      } else if (send) {
-        send(plan.data)
-      }
-    }
     event.preventDefault()
   }
 
@@ -371,6 +365,19 @@ function enableTouchScroll(
     tracking = false
     scrolling = false
   }
+
+  term.attachCustomWheelEventHandler((ev) => {
+    if (ev.ctrlKey || ev.shiftKey) return true
+    const alt = term.buffer.active.type === 'alternate'
+    const mouse = term.modes.mouseTrackingMode !== 'none'
+    if (!alt && !mouse) {
+      carry.px = 0
+      return true
+    }
+    ev.preventDefault()
+    applyDelta(wheelDeltaPx(ev.deltaY, ev.deltaMode, measureRow()))
+    return false
+  })
 
   // `passive: false` on move, because preventDefault is the whole point once a
   // drag has been claimed; the others stay passive so they cost nothing.

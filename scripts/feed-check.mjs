@@ -24,9 +24,8 @@ registerHooks({
   }
 })
 
-const { stripBoxDrawing, stripLiveComposer, blocksFromCapture, transcriptFromLines, richFromText } = await import(
-  '../web/src/lib/feed.ts'
-)
+const { stripBoxDrawing, stripLiveComposer, blocksFromCapture, transcriptFromLines, richFromText, mergeBlocks } =
+  await import('../src/lib/feed.ts')
 
 /** A whole screen, the way the terminal would hand one over. */
 const screen = (text) => transcriptFromLines(richFromText(text))
@@ -299,6 +298,47 @@ is(afterIds.length, beforeIds.length, 'appending to the last turn adds no card')
 ok(
   beforeIds.every((id, i) => id === afterIds[i]),
   'every card keeps its id across a re-parse, the one still growing included'
+)
+
+console.log('merge, so Grok keeps what scrolled off the screen')
+const frame1 = blocksFromCapture(['> first question', '', 'first answer, which is long enough to matter', '', '❯ '].join('\n'))
+const frame2 = blocksFromCapture(
+  ['first answer, which is long enough to matter', '', '> second question', '', 'second answer', '', '❯ '].join('\n')
+)
+const grown = mergeBlocks(frame1, frame2)
+ok(
+  grown.some((b) => b.role === 'user' && b.text.includes('first question')),
+  'a turn that left the TUI frame is still in the log'
+)
+ok(
+  grown.some((b) => b.role === 'user' && b.text.includes('second question')),
+  'and the new turn is there too'
+)
+ok(grown.filter((b) => b.role === 'user').length === 2, 'two user turns, not a replace of the frame')
+
+const streaming = mergeBlocks(
+  blocksFromCapture('> ask\n\nHello'),
+  blocksFromCapture('> ask\n\nHello world')
+)
+ok(
+  streaming.filter((b) => b.role === 'agent').length === 1 &&
+    streaming.some((b) => b.role === 'agent' && b.text === 'Hello world'),
+  'the live agent card grows in place rather than duplicating'
+)
+
+const claudeReplace = mergeBlocks(blocksFromCapture(before), blocksFromCapture(after))
+ok(
+  claudeReplace.length === afterIds.length && claudeReplace.every((b, i) => b.role === blocksFromCapture(after)[i]?.role),
+  'a full-scrollback capture (Claude Code) still replaces cleanly'
+)
+
+const paged = mergeBlocks(
+  grown,
+  blocksFromCapture(['> first question', '', 'first answer, which is long enough to matter', '', '❯ '].join('\n'))
+)
+ok(
+  paged.filter((b) => b.role === 'user').length === 2,
+  'paging the TUI back to an older frame does not drop the turns we already have'
 )
 
 if (fail) {

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { PaneStatus } from './rich'
+import type { PaneStatus } from '@/lib/rich'
 
 /**
  * The latest `PaneStatus` each pane has read off its own screen, published by

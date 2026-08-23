@@ -2,7 +2,7 @@ import { useState, type CSSProperties, type ReactNode } from 'react'
 import type { AgentProfile } from '@shared/types'
 import { AgentBadge } from '@/components/AgentBadge'
 import { badgeColor, isShellProfile } from '@/lib/agents'
-import type { PaneStatus, PermissionMode } from '../lib/rich'
+import type { PaneStatus, PermissionMode } from '@/lib/rich'
 
 /**
  * The agent's own footer, lifted out of the TUI and drawn as one strip between

@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PaneLeaf } from '@shared/types'
-import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { isClaudeCommand, isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
-import { EMPTY_TRANSCRIPT, transcriptFromLines } from '../lib/feed'
+import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines } from '@/lib/feed'
 import { imageFilesFromDataTransfer, packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 import { publishPaneStatus } from '../lib/pane-status'
-import type { Transcript } from '../lib/rich'
+import type { Transcript } from '@/lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
 import { useForge, useProfiles } from '../state'
 import { AgentChooser } from './AgentChooser'
@@ -137,13 +137,19 @@ export function PaneView({
   const [truncated, setTruncated] = useState(false)
   const [transcript, setTranscript] = useState<Transcript>(EMPTY_TRANSCRIPT)
   /**
-   * An agent opens as a conversation on every screen — the coloured transcript
-   * with the agent's own footer lifted into the status strip — because that is
-   * the display this app is for; the raw terminal is one tap away in the header.
-   * A shell has no turns to cut, so it opens on the terminal. Either can be
-   * flipped.
+   * Grok/OpenCode (and any other alt-screen TUI) have no xterm scrollback, so
+   * the feed's cards are one frame. The feed pages the TUI itself when this
+   * is true; Claude Code writes the normal buffer and stays on native scroll.
    */
-  const [view, setView] = useState<'feed' | 'term'>(agent ? 'feed' : 'term')
+  const [tui, setTui] = useState(false)
+  /**
+   * Claude Code writes the normal buffer, so the raw terminal already scrolls.
+   * Grok/OpenCode do not — they open on the accumulating cards log. Either
+   * can be flipped in the header. A shell has no turns to cut.
+   */
+  const [view, setView] = useState<'feed' | 'term'>(
+    agent && !isClaudeCommand(profile.command) ? 'feed' : 'term'
+  )
   const feed = view === 'feed'
 
   /* ------------------------------------------------------- reading the screen */
@@ -170,7 +176,17 @@ export function PaneView({
     parseFrame.current = 0
     parsedAt.current = performance.now()
     const host = hostRef.current
-    setTranscript(host ? transcriptFromLines(host.captureRich()) : EMPTY_TRANSCRIPT)
+    if (!host) {
+      setTranscript(EMPTY_TRANSCRIPT)
+      setTui(false)
+      return
+    }
+    setTranscript((prev) => mergeTranscript(prev, transcriptFromLines(host.captureRich())))
+    setTui(host.term.buffer.active.type === 'alternate')
+  }, [])
+
+  const onTuiScroll = useCallback((deltaY: number, deltaMode?: number) => {
+    return hostRef.current?.driveScroll(deltaY, deltaMode) ?? false
   }, [])
 
   /**
@@ -242,6 +258,7 @@ export function PaneView({
         // sends it again, and appending it would double the transcript.
         host.reset()
         setTruncated(wasTruncated)
+        setTranscript(EMPTY_TRANSCRIPT)
       }
       host.write(data, scheduleParse)
     })
@@ -584,6 +601,8 @@ export function PaneView({
             asking={asking}
             prompt={prompt}
             empty={cached ? 'Nothing of this pane was cached.' : 'Waiting for the desktop…'}
+            pageTui={tui && live}
+            onTuiScroll={onTuiScroll}
           />
         ) : null}
         <div

@@ -192,6 +192,9 @@ async function main() {
     GROK_IMAGE_PASTE,
     INBOX_KEEP,
     planTouchScroll,
+    planPointerDelta,
+    wheelDeltaPx,
+    TUI_PAGE_ROWS,
     isAllowedSource,
     webSocketUrl,
     HEARTBEAT_GRACE_MS,
@@ -472,10 +475,42 @@ async function main() {
     pageUp.kind === 'data' && pageUp.data === '\x1b[5~',
     'the same drag on an alt-screen with no mouse is PageUp — arrows would only move Grok\'s caret'
   )
+  const notYet = planTouchScroll(-3, true, false)
+  log(
+    notYet.kind === 'viewport' && notYet.lines === 0,
+    'fewer than a page of travel on that alt-screen is held, not fired — one row used to be one PageUp'
+  )
   const scrollback = planTouchScroll(-4, false, false)
   log(
     scrollback.kind === 'viewport' && scrollback.lines === -4,
     'Claude Code\'s normal buffer is still xterm scrollback, which is why its swipe already worked'
+  )
+
+  log(wheelDeltaPx(-3, 1, 16) === -48, 'a three-line mouse notch is three rows of pixels')
+  log(wheelDeltaPx(-16, 0, 16) === -16, 'a trackpad pixel delta is left as pixels')
+  log(TUI_PAGE_ROWS === 8, 'one PageUp is eight rows of travel')
+  const carry = { px: 0 }
+  const pending = planPointerDelta(carry, -16, 16, true, false)
+  log(
+    pending.kind === 'viewport' && pending.lines === 0 && carry.px === -16,
+    'one row of wheel on Grok is held in the remainder'
+  )
+  const paged = planPointerDelta(carry, -16 * 7, 16, true, false)
+  log(
+    paged.kind === 'data' && paged.data === '\x1b[5~' && carry.px === 0,
+    'eight rows of wheel on Grok is one PageUp, remainder spent'
+  )
+  const sgrCarry = { px: 0 }
+  const sgr = planPointerDelta(sgrCarry, -48, 16, true, true)
+  log(
+    sgr.kind === 'data' && sgr.data === '\x1b[<64;1;1M'.repeat(3),
+    'the same pixels on a mouse-tracking TUI are three SGR reports at 1;1, not at the prompt'
+  )
+  const viewCarry = { px: 0 }
+  const view = planPointerDelta(viewCarry, 64, 16, false, false)
+  log(
+    view.kind === 'viewport' && view.lines === 4,
+    'Claude Code still gets viewport lines, which is why its wheel already worked'
   )
 
   const PIXEL =

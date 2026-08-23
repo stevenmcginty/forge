@@ -1,9 +1,9 @@
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SHARE_CAPTURE_MAX_LINES } from '@shared/share'
-import { planTouchScroll } from '@shared/touch-scroll'
+import { planPointerDelta, wheelDeltaPx, type ScrollCarry } from '@shared/touch-scroll'
 import { joinBufferRows, tidyCapture, type BufferRow } from '@/lib/paneText'
-import type { RichLine, Run } from './rich'
+import type { RichLine, Run } from '@/lib/rich'
 
 /**
  * An xterm instance fed relayed PTY bytes.
@@ -114,6 +114,14 @@ export interface TermHost {
    * never wired `onData` in the first place.
    */
   setReadOnly: (readOnly: boolean) => void
+  /**
+   * A wheel or a finger over an alt-screen TUI (Grok, OpenCode). Returns true
+   * when the gesture was spent as PTY bytes — PageUp/PageDown or SGR wheel at
+   * 1;1 — so the caller can preventDefault. False on the normal buffer: the
+   * feed should native-scroll the captured scrollback, and xterm should keep
+   * the physical wheel.
+   */
+  driveScroll: (deltaY: number, deltaMode?: number) => boolean
   dispose: () => void
 }
 
@@ -535,14 +543,18 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     }
   }
 
-  // The finger, which is the only pointer a phone has. See `enableTouchScroll`.
-  // The size handed over is the one currently *drawn* rather than
-  // `options.fontSize`, because `apply` above may be shrinking the desktop's
-  // grid into this box — and a row is as tall as the type it is set in.
+  // The finger, which is the only pointer a phone has, and the wheel on a
+  // desktop browser. See `enableTouchScroll`. The size handed over is the one
+  // currently *drawn* rather than `options.fontSize`, because `apply` above may
+  // be shrinking the desktop's grid into this box — and a row is as tall as
+  // the type it is set in.
+  const scrollCarry: ScrollCarry = { px: 0 }
+  const rowHeightOf = (): number => rowHeight(term, term.options.fontSize ?? options.fontSize)
   const releaseTouch = enableTouchScroll(
     container,
     term,
-    () => term.options.fontSize ?? options.fontSize,
+    rowHeightOf,
+    scrollCarry,
     options.readOnly ? undefined : options.onData
   )
 
@@ -706,6 +718,25 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     captureRich: () => captureRichTail(SHARE_CAPTURE_MAX_LINES),
     captureRichTail,
     focus: () => term.focus(),
+    driveScroll: (deltaY, deltaMode = 0) => {
+      if (options.readOnly) return false
+      const alt = term.buffer.active.type === 'alternate'
+      const mouse = term.modes.mouseTrackingMode !== 'none'
+      if (!alt && !mouse) {
+        scrollCarry.px = 0
+        return false
+      }
+      const height = rowHeightOf()
+      const plan = planPointerDelta(
+        scrollCarry,
+        wheelDeltaPx(deltaY, deltaMode, height),
+        height,
+        alt,
+        mouse
+      )
+      if (plan.kind === 'data') options.onData(plan.data)
+      return true
+    },
     setReadOnly: (readOnly) => {
       // A host built read-only never wired `onData`, so letting it take input
       // again would put keystrokes somewhere there is nothing to receive them.
@@ -731,28 +762,38 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
   }
 }
 
+/** The height of one row, measured rather than assumed. */
+function rowHeight(term: Terminal, fontSize: number): number {
+  const rows = term.element?.querySelector('.xterm-rows') as HTMLElement | null
+  const measured = rows && term.rows > 0 ? rows.clientHeight / term.rows : 0
+  // Before the first paint there is nothing to measure; the font size is a
+  // serviceable stand-in and only affects the first few pixels of a drag.
+  return measured > 1 ? measured : Math.max(1, fontSize * 1.2)
+}
+
 /**
- * Drag the scrollback with a finger.
+ * Drag the scrollback with a finger, and page a TUI with the wheel.
  *
  * Ported from mobile/src/lib/term.ts, whose comment there explains the shape at
  * length; the short version is that xterm scrolls its viewport from wheel events
  * and from the keyboard, and a phone has neither. `scrollback: 5000` above was
  * therefore history that was kept and could not be reached: on a handset the
  * window is around twenty rows, so what an agent said thirty lines ago was gone
- * for good. The desktop's wheel works, which is exactly why this went unnoticed
- * — the client is the same client in both browsers and only one of them has a
- * wheel.
+ * for good.
+ *
+ * The desktop browser *has* a wheel, but leaving it to xterm is how Grok's
+ * conversation never moved: on the alternate screen xterm turns a notch into
+ * one arrow key, and Grok's focused prompt eats those. `attachCustomWheelEventHandler`
+ * intercepts before that conversion; `planPointerDelta` then writes PageUp or
+ * an SGR report at 1;1. Claude Code writes the normal buffer, so the handler
+ * returns true and xterm keeps the wheel.
  *
  * ## Where the finger's movement is sent, which depends on what the pane is
  *
- * Routed by `planTouchScroll` in shared/touch-scroll.ts, which is the whole of
- * the decision: a constructed `WheelEvent` is how this used to talk to a TUI,
- * and it is how Grok's conversation never moved. xterm 6's viewport reads
- * `wheelDeltaY` (always 0 on a constructed event) so the normal buffer has to
- * go through `scrollLines`; a TUI on the alternate screen wants SGR wheel
- * reports or PageUp/PageDown written down the PTY, not arrows — Grok's prompt
- * eats those. Claude Code writes the normal buffer, so it was never on this
- * path and kept working.
+ * Routed by `planPointerDelta` in shared/touch-scroll.ts. A slow drag used to
+ * call the planner once per row, and on Grok each call was a PageUp — the
+ * conversation leapt. Remainder is held until a whole page (or a whole row of
+ * SGR) has been travelled.
  *
  * ## And the rest, which is mobile's design unchanged
  *
@@ -766,18 +807,14 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
  * does not. The last velocity is decayed on animation frames so a flick keeps
  * moving. Only on the normal buffer — flinging PageUp at Grok would type.
  *
- * The accumulator carries the remainder between moves rather than rounding each
- * one, so a slow drag scrolls smoothly instead of quantising to nothing. Rows
- * are measured rather than assumed because this client draws the desktop's grid
- * at a shrunken font (see `follow`), so a row here is not `fontSize` tall.
- *
  * Multi-touch is ignored outright: two fingers is a zoom or a system gesture,
  * and reading it as a scroll is how a pinch scrolls a terminal to its top.
  */
 function enableTouchScroll(
   container: HTMLElement,
   term: Terminal,
-  fontSize: () => number,
+  measureRow: () => number,
+  carry: ScrollCarry,
   send?: (data: string) => void
 ): () => void {
   const DRAG_START_PX = 8
@@ -788,33 +825,21 @@ function enableTouchScroll(
   let scrolling = false
   let lastY = 0
   let startY = 0
-  let carry = 0
   let lastT = 0
   let velocity = 0
   let inertia = 0
-
-  /** The height of one row, measured rather than assumed. */
-  const rowHeight = (): number => {
-    const rows = term.element?.querySelector('.xterm-rows') as HTMLElement | null
-    const measured = rows && term.rows > 0 ? rows.clientHeight / term.rows : 0
-    // Before the first paint there is nothing to measure; the font size is a
-    // serviceable stand-in and only affects the first few pixels of a drag.
-    return measured > 1 ? measured : Math.max(1, fontSize() * 1.2)
-  }
 
   const stopInertia = (): void => {
     if (inertia) cancelAnimationFrame(inertia)
     inertia = 0
   }
 
-  const applyLines = (lines: number): 'viewport' | 'data' | null => {
-    if (lines === 0) return null
-    const plan = planTouchScroll(
-      lines,
-      term.buffer.active.type === 'alternate',
-      term.modes.mouseTrackingMode !== 'none'
-    )
+  const applyDelta = (deltaY: number): 'viewport' | 'data' | null => {
+    const alt = term.buffer.active.type === 'alternate'
+    const mouse = term.modes.mouseTrackingMode !== 'none'
+    const plan = planPointerDelta(carry, deltaY, measureRow(), alt, mouse)
     if (plan.kind === 'viewport') {
+      if (plan.lines === 0) return null
       term.scrollLines(plan.lines)
       return 'viewport'
     }
@@ -831,7 +856,7 @@ function enableTouchScroll(
     stopInertia()
     tracking = true
     scrolling = false
-    carry = 0
+    carry.px = 0
     velocity = 0
     startY = event.touches[0]!.clientY
     lastY = startY
@@ -856,14 +881,7 @@ function enableTouchScroll(
     velocity = dy / dt
     lastT = now
     lastY = y
-    carry += dy
-
-    const height = rowHeight()
-    const lines = Math.trunc(carry / height)
-    if (lines !== 0) {
-      carry -= lines * height
-      applyLines(lines)
-    }
+    applyDelta(dy)
     event.preventDefault()
   }
 
@@ -884,14 +902,8 @@ function enableTouchScroll(
     }
     let v = velocity * 16
     const tick = (): void => {
-      carry += v
+      applyDelta(v)
       v *= DECAY
-      const height = rowHeight()
-      const lines = Math.trunc(carry / height)
-      if (lines !== 0) {
-        carry -= lines * height
-        term.scrollLines(lines)
-      }
       if (Math.abs(v) < 0.5) {
         inertia = 0
         return
@@ -900,6 +912,19 @@ function enableTouchScroll(
     }
     inertia = requestAnimationFrame(tick)
   }
+
+  term.attachCustomWheelEventHandler((ev) => {
+    if (ev.ctrlKey || ev.shiftKey) return true
+    const alt = term.buffer.active.type === 'alternate'
+    const mouse = term.modes.mouseTrackingMode !== 'none'
+    if (!alt && !mouse) {
+      carry.px = 0
+      return true
+    }
+    ev.preventDefault()
+    applyDelta(wheelDeltaPx(ev.deltaY, ev.deltaMode, measureRow()))
+    return false
+  })
 
   // `passive: false` on move, because preventDefault is the whole point once a
   // drag has been claimed; the others stay passive so they cost nothing.

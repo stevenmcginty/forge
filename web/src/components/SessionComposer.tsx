@@ -18,7 +18,7 @@ import {
 import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { packImage } from '../lib/image'
 import { usePaneStatus } from '../lib/pane-status'
-import type { PermissionMode } from '../lib/rich'
+import type { PermissionMode } from '@/lib/rich'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStatus } from './AgentStatus'
 import { BACK_TAB, Composer } from './Composer'

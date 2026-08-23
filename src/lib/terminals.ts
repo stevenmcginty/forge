@@ -5,6 +5,7 @@ import { findRemoteSessionUrl } from '@shared/remote'
 import { findDevServerUrl } from '@shared/devserver'
 import { isTypedInput } from '@shared/typing'
 import { commandExe } from '@shared/agents'
+import { planPointerDelta, wheelDeltaPx, type ScrollCarry } from '@shared/touch-scroll'
 import { SHARE_CAPTURE_DEFAULT_LINES } from '@shared/share'
 import { advanceDraft, clampDraft } from './draft'
 import { joinBufferRows, tidyCapture, type BufferRow } from './paneText'
@@ -99,6 +100,36 @@ type PaneMode = 'tab' | 'peek'
 export interface PaneGeometry {
   width: number
   height: number
+}
+
+/** One row, measured off the painted grid, falling back to the font. */
+function terminalRowHeight(term: Terminal, fontSize: number): number {
+  const rows = term.element?.querySelector('.xterm-rows') as HTMLElement | null
+  const measured = rows && term.rows > 0 ? rows.clientHeight / term.rows : 0
+  return measured > 1 ? measured : Math.max(1, fontSize * 1.2)
+}
+
+/**
+ * True when this pane *is* a chat TUI, not a shell that happens to be running
+ * one. vim and htop inside PowerShell still want xterm's native wheel (arrows
+ * without mouse tracking, reports at the cursor with it). Grok and OpenCode
+ * are the pane — their prompt eats arrows and hit-tests the composer.
+ */
+function isChatAgentCommand(command: string): boolean {
+  const exe = commandExe(command)
+  if (!exe) return false
+  switch (exe) {
+    case 'pwsh':
+    case 'powershell':
+    case 'cmd':
+    case 'bash':
+    case 'zsh':
+    case 'fish':
+    case 'sh':
+      return false
+    default:
+      return true
+  }
 }
 
 const IDLE_RUNTIME: PaneRuntime = {
@@ -269,6 +300,8 @@ interface Entry {
   webglWanted: boolean
   webglLoading: boolean
   disposers: Array<() => void>
+  /** Remainder of a TUI wheel/finger gesture. Shared with the cards view. */
+  wheelCarry: ScrollCarry
 }
 
 interface Listeners {
@@ -831,6 +864,34 @@ class TerminalHost {
   }
 
   /**
+   * A wheel or a finger over an alt-screen agent TUI. Writes PageUp/PageDown
+   * or SGR at 1;1. Returns true when the TUI took the gesture so the caller
+   * can preventDefault. False on Claude Code's normal buffer, which keeps
+   * xterm's own scrollback.
+   */
+  driveScroll(paneId: string, deltaY: number, deltaMode = 0): boolean {
+    const entry = this.entries.get(paneId)
+    if (!entry || !isChatAgentCommand(entry.spec.bootstrapCommand)) return false
+    const { term } = entry
+    const alt = term.buffer.active.type === 'alternate'
+    const mouse = term.modes?.mouseTrackingMode != null && term.modes.mouseTrackingMode !== 'none'
+    if (!alt && !mouse) {
+      entry.wheelCarry.px = 0
+      return false
+    }
+    const height = terminalRowHeight(term, entry.spec.fontSize)
+    const plan = planPointerDelta(
+      entry.wheelCarry,
+      wheelDeltaPx(deltaY, deltaMode, height),
+      height,
+      alt,
+      mouse
+    )
+    if (plan.kind === 'data') window.forge.pty.write(paneId, plan.data)
+    return true
+  }
+
+  /**
    * The last `lines` lines of a pane, as text. Null for a pane this window has no
    * terminal for.
    *
@@ -948,7 +1009,8 @@ class TerminalHost {
       webgl: null,
       webglWanted: false,
       webglLoading: false,
-      disposers: []
+      disposers: [],
+      wheelCarry: { px: 0 }
     }
 
     const dataSub = term.onData((data) => {
@@ -978,27 +1040,37 @@ class TerminalHost {
      */
 
     /*
-     * opencode (the DeepSeek V4 pane) is a full-screen TUI on the alternate
-     * screen. Unlike Claude Code, which writes into the normal buffer so the
-     * terminal's own scrollback scrolls under the wheel, it takes the alternate
-     * screen — which keeps no scrollback — and enables every mouse tracking
-     * mode (DECSET 1000/1002/1003 + SGR 1006, verified against 1.18.11), so
-     * the wheel stops meaning "scroll the terminal" and is handed to the
-     * program as a mouse report.
+     * Alternate-screen TUIs (Grok, OpenCode, Antigravity, vim) have no xterm
+     * scrollback. Left alone, xterm would turn a wheel into one arrow key
+     * (Grok's focused prompt eats those as caret motion) or into an SGR
+     * report at the cursor (OpenCode hit-tests the composer along the
+     * bottom and treats that as a nudge, not as message scroll).
      *
-     * There used to be a wheel→PgUp workaround here, written against an older
-     * opencode that dropped those wheel reports on the floor. Since at least
-     * 1.18.11 it scrolls its message viewport from them (a few lines per
-     * notch, verified end-to-end through ConPTY), so the right thing is to
-     * stay out of the way and let xterm deliver the reports the TUI asked
-     * for — exactly what vim and htop already get. Intercepting here would
-     * only re-break a program that has fixed itself.
+     * The same planner the phone and the browser already use writes PageUp
+     * or an SGR wheel at 1;1 instead. Claude Code writes the normal buffer,
+     * so the handler returns true and xterm keeps the wheel.
      *
-     * What opencode cannot get natively are the chords xterm reserves or
-     * mangles — Shift+PageUp scrolls xterm's own (empty) scrollback, and
+     * What opencode still cannot get natively are the chords xterm reserves
+     * or mangles — Shift+PageUp scrolls xterm's own (empty) scrollback, and
      * Ctrl+Home/End have no default TUI meaning. Those are re-aimed at
      * opencode's message navigation in handleKey below.
      */
+    try {
+      term.attachCustomWheelEventHandler((ev) => {
+        try {
+          if (ev.ctrlKey || ev.shiftKey) return true
+          if (!isChatAgentCommand(spec.bootstrapCommand)) return true
+          const consumed = this.driveScroll(paneId, ev.deltaY, ev.deltaMode)
+          if (!consumed) return true
+          ev.preventDefault()
+          return false
+        } catch {
+          return true
+        }
+      })
+    } catch {
+      /* xterm without a wheel hook — leave the physical wheel to it */
+    }
     term.attachCustomKeyEventHandler((e) => this.handleKey(entry, e))
 
     // Answer "what colour are you?" — see answerColour.

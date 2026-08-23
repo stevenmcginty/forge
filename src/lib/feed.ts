@@ -29,6 +29,7 @@
  * scripts/feed-check.mjs holds the cuts.
  */
 
+import { SHARE_CAPTURE_MAX_LINES } from '@shared/share'
 import type { FeedBlock, FeedRole, PaneStatus, PermissionMode, RichLine, Run, Transcript } from './rich'
 
 export type { FeedBlock, FeedRole, RichLine, Transcript } from './rich'
@@ -532,4 +533,111 @@ export function transcriptFromLines(lines: RichLine[]): Transcript {
  */
 export function blocksFromCapture(text: string): FeedBlock[] {
   return transcriptFromLines(richFromText(text)).blocks
+}
+
+/* ---------------------------------------------------------- growing log */
+
+/** How many conversation cards we keep. Matches the capture cap. */
+const MAX_MERGED_BLOCKS = SHARE_CAPTURE_MAX_LINES
+
+function bodyOf(blocks: FeedBlock[]): FeedBlock[] {
+  return blocks.filter((block) => block.role !== 'system')
+}
+
+function systemOf(blocks: FeedBlock[]): FeedBlock | undefined {
+  return blocks.find((block) => block.role === 'system')
+}
+
+/** Same turn, possibly still being written. */
+function sameTurn(a: FeedBlock, b: FeedBlock): boolean {
+  if (a.role !== b.role) return false
+  if (a.text === b.text) return true
+  if (a.text.startsWith(b.text) || b.text.startsWith(a.text)) return true
+  // A TUI frame often starts mid-turn: the visible tail of a card we already have.
+  if (a.text.endsWith(b.text) || b.text.endsWith(a.text)) return true
+  return false
+}
+
+function pickTurn(a: FeedBlock, b: FeedBlock): FeedBlock {
+  return b.text.length >= a.text.length ? { ...b, id: a.id } : a
+}
+
+function matchLen(prev: FeedBlock[], i: number, next: FeedBlock[], j: number): number {
+  let n = 0
+  while (i + n < prev.length && j + n < next.length && sameTurn(prev[i + n]!, next[j + n]!)) n++
+  return n
+}
+
+function nextId(role: FeedRole, used: Set<string>): string {
+  let n = 0
+  while (used.has(`${role}-${n}`)) n++
+  const id = `${role}-${n}`
+  used.add(id)
+  return id
+}
+
+function withIds(blocks: FeedBlock[], used: Set<string>): FeedBlock[] {
+  return blocks.map((block) => {
+    if (used.has(block.id)) return block
+    const id = nextId(block.role, used)
+    return block.id === id ? block : { ...block, id }
+  })
+}
+
+/**
+ * Fold a newly captured screen into the conversation we already have.
+ *
+ * Claude Code writes the normal buffer, so one capture *is* the conversation
+ * and a replace is correct. Grok and OpenCode live on the alternate screen:
+ * a capture is one frame, and replacing would throw away every turn that had
+ * scrolled off the top. That is why only Claude Code scrolled like a log.
+ *
+ * Finds the longest alignment between the two bodies, keeps everything on
+ * either side of it, and prefers the longer text for a turn still being
+ * written. System banners are not conversation and are taken from `next`.
+ */
+export function mergeBlocks(prev: FeedBlock[], next: FeedBlock[]): FeedBlock[] {
+  const prevBody = bodyOf(prev)
+  const nextBody = bodyOf(next)
+  if (!nextBody.length) return prev.length ? prev : next
+  if (!prevBody.length) return next
+
+  let best = { i: 0, j: 0, L: 0 }
+  for (let i = 0; i < prevBody.length; i++) {
+    for (let j = 0; j < nextBody.length; j++) {
+      const L = matchLen(prevBody, i, nextBody, j)
+      if (L > best.L) best = { i, j, L }
+    }
+  }
+
+  let merged: FeedBlock[]
+  if (best.L === 0) {
+    const last = prevBody[prevBody.length - 1]!
+    const first = nextBody[0]!
+    merged = sameTurn(last, first) ? [...prevBody.slice(0, -1), ...nextBody] : [...prevBody, ...nextBody]
+  } else {
+    const { i, j, L } = best
+    const head = [...nextBody.slice(0, j), ...prevBody.slice(0, i)]
+    const overlap: FeedBlock[] = []
+    for (let k = 0; k < L; k++) overlap.push(pickTurn(prevBody[i + k]!, nextBody[j + k]!))
+    const prevTail = prevBody.slice(i + L)
+    const nextTail = nextBody.slice(j + L)
+    const tail = j === 0 && nextTail.length ? nextTail : prevTail.length ? [...prevTail, ...nextTail] : nextTail
+    merged = [...head, ...overlap, ...tail]
+  }
+
+  if (merged.length > MAX_MERGED_BLOCKS) merged = merged.slice(merged.length - MAX_MERGED_BLOCKS)
+
+  const used = new Set<string>()
+  const identified = withIds(merged, used)
+  const sys = systemOf(next) ?? systemOf(prev)
+  if (!sys) return identified
+  const sysId = used.has(sys.id) ? nextId('system', used) : sys.id
+  used.add(sysId)
+  return [{ ...sys, id: sysId }, ...identified]
+}
+
+/** Cards plus the newest status line. */
+export function mergeTranscript(prev: Transcript, next: Transcript): Transcript {
+  return { blocks: mergeBlocks(prev.blocks, next.blocks), status: next.status }
 }
