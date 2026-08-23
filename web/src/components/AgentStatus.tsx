@@ -105,7 +105,21 @@ export function AgentStatus({
         {context ? (
           <span className="astatus__ctx" title={`Context: ${status?.context}`}>
             <span className="astatus__meter" aria-hidden>
-              <span style={{ width: `${context.pct}%` }} data-hot={context.pct >= 80 ? 'true' : undefined} />
+              {/*
+                The fill is the whole bar, slid into view by however much of the
+                context is gone — not a bar whose width is the reading. A width
+                is a layout on every tick of a number that moves all through a
+                streaming turn, and this strip sits directly under the pane
+                whose smoothness is the point of the phone layout; a transform
+                is the compositor's alone. `-100%` is a full bar's width, so the
+                percentage lands on the same pixel the growing version did. See
+                `.astatus__meter > span` in styles.css, which is the other half
+                of this and cannot be read without it.
+              */}
+              <span
+                style={{ transform: `translateX(${context.pct - 100}%)` }}
+                data-hot={context.pct >= 80 ? 'true' : undefined}
+              />
             </span>
             <span className="astatus__ctx-text">{context.label}</span>
           </span>

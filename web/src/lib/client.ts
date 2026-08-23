@@ -322,6 +322,30 @@ export class ForgeClient {
   private waiting = new Map<string, { settle: (result: WebResult) => void; timer: number }>()
   /** sessionId → the geometry this browser is reading it at, re-sent on reconnect. */
   private subs = new Map<string, { cols: number; rows: number } | null>()
+  /**
+   * sessionId → the grid the desktop has actually been told, on *this* socket.
+   *
+   * `subs` cannot answer that question, and the difference is the point. `subs`
+   * is the standing wish: it is written whether or not a frame went out, it
+   * survives a dropped socket on purpose, and it is what the reconnect
+   * re-attaches with. This is a record of what was *said*, and it is only ever
+   * written when a frame left the building.
+   *
+   * It exists because a `resize` is not a cheap thing to repeat. The desktop
+   * answers one with a deliberate two-step jiggle — `rows - 1`, then the true
+   * size 60ms later, see `resizeForViewer` in electron/pty-host.ts — so that
+   * every TUI on the end of it redraws. That is the intended cost of a real
+   * size change and an absurd one for a frame that asked for the size the pane
+   * already had, because the redraw it forces lands in the normal buffer's
+   * scrollback as a second copy of the screen. One duplicate per redundant
+   * frame, and the browser has several paths that can produce one.
+   *
+   * Cleared whenever this link's voice is taken away — `dropSocket` and the
+   * socket's own `onclose` — because after a reconnect the desktop's idea of
+   * this browser's wish is whatever the re-`attach` carried, and a memory
+   * carried across that boundary would suppress the one frame that was needed.
+   */
+  private told = new Map<string, { cols: number; rows: number }>()
   /** The unlock PIN for the *next* hello only. See `submitPin`. */
   private pin = ''
   /**
@@ -505,10 +529,29 @@ export class ForgeClient {
    */
   attach(sessionId: string, size: { cols: number; rows: number } | null): void {
     this.subs.set(sessionId, size)
-    this.send({ type: 'attach', sessionId, ...(size ? { cols: size.cols, rows: size.rows } : {}) })
+    this.sendAttach(sessionId, size)
+  }
+
+  /**
+   * One `attach` frame, and the note that the desktop has now been told a size.
+   *
+   * Shared with the reconnect's re-arm loop rather than written twice, because
+   * the two have to agree: `WebAttachFrame`'s optional `cols`/`rows` *are* a
+   * resize — the desktop hands them straight to `GridOwners.noteWish` — so an
+   * attach that carried a size while `told` stayed empty would be followed by
+   * the browser's next fit sending that same size again as a `resize`. On the
+   * desktop that redundant frame is a jiggle pair, a SIGWINCH and a full agent
+   * repaint, on the heels of every single reconnect. A phone reconnects
+   * constantly.
+   */
+  private sendAttach(sessionId: string, size: { cols: number; rows: number } | null): void {
+    const sent = this.send({ type: 'attach', sessionId, ...(size ? { cols: size.cols, rows: size.rows } : {}) })
+    if (sent && size) this.told.set(sessionId, { cols: size.cols, rows: size.rows })
+    else this.told.delete(sessionId)
   }
 
   detach(sessionId: string): void {
+    this.told.delete(sessionId)
     if (!this.subs.delete(sessionId)) return
     this.send({ type: 'detach', sessionId })
   }
@@ -533,9 +576,31 @@ export class ForgeClient {
     this.send({ type: 'write', sessionId, data })
   }
 
+  /**
+   * "This is the size I am reading it at."
+   *
+   * The wish is recorded first and unconditionally, because `subs` is what a
+   * reconnect re-attaches with and the newest wish is the one that should ride
+   * along — including one formed while the socket was down, which is exactly
+   * the case a phone rotating in a tunnel produces.
+   *
+   * What is *sent* is then filtered against `told`: a frame that would ask for
+   * the grid the desktop has already been given on this socket asks for
+   * nothing, and a frame that asks for nothing still costs a full agent
+   * repaint. See `told`. This is a floor rather than the whole defence — the
+   * fits upstream in lib/term.ts are where a redundant call is stopped from
+   * being made at all — but it is the floor every path has to cross, which is
+   * why it is here rather than only there.
+   */
   resize(sessionId: string, cols: number, rows: number): void {
     if (this.subs.has(sessionId)) this.subs.set(sessionId, { cols, rows })
-    this.send({ type: 'resize', sessionId, cols, rows })
+    const told = this.told.get(sessionId)
+    if (told && told.cols === cols && told.rows === rows) return
+    // Recorded only if it actually went out. A `send` on a socket that is not
+    // open is dropped in silence, and remembering that as something the desktop
+    // knows would silence the frame that has to be sent when it comes back.
+    if (!this.send({ type: 'resize', sessionId, cols, rows })) return
+    this.told.set(sessionId, { cols, rows })
   }
 
   /* -------------------------------------------------------------- requests */
@@ -710,6 +775,9 @@ export class ForgeClient {
         if (superseded()) return
         this.socket = null
         this.stopBeating()
+        // Nothing has been told to anybody down a socket that has closed. The
+        // next connection re-establishes it from `subs`; see `told`.
+        this.told.clear()
         this.failWaiting('The link to the desktop dropped before that answered.')
         // A watcher hears about it here rather than working it out from a picture
         // that stopped moving: a decoder holding a last frame looks exactly like a
@@ -756,10 +824,10 @@ export class ForgeClient {
         this.startBeating()
         this.startRefreshing()
         // Re-arm every pane the UI still believes it is watching. Each answers
-        // with a replay frame, which is what repaints the terminal.
-        for (const [sessionId, size] of this.subs) {
-          this.send({ type: 'attach', sessionId, ...(size ? { cols: size.cols, rows: size.rows } : {}) })
-        }
+        // with a replay frame, which is what repaints the terminal — and each
+        // re-establishes what this browser has told the desktop about its size,
+        // which `dropSocket` voided on the way into this connection.
+        for (const [sessionId, size] of this.subs) this.sendAttach(sessionId, size)
         return
       }
 
@@ -777,6 +845,7 @@ export class ForgeClient {
 
       case 'exit':
         this.subs.delete(frame.sessionId)
+        this.told.delete(frame.sessionId)
         this.handlers.onExit(frame.sessionId, typeof frame.exitCode === 'number' ? frame.exitCode : 0)
         return
 
@@ -843,6 +912,7 @@ export class ForgeClient {
         // for as long as the tab stayed open.
         if (frame.code === 'unknown-session' && typeof frame.sessionId === 'string') {
           this.subs.delete(frame.sessionId)
+          this.told.delete(frame.sessionId)
         }
         // Only `message` is meant to be shown; the codes exist so a client can
         // decide whether to retry or re-sync, not so it can compose a sentence.
@@ -1017,17 +1087,26 @@ export class ForgeClient {
     }, TOKEN_REFRESH_MS)
   }
 
-  private send(frame: WebClientFrame): void {
+  /**
+   * Returns whether the frame actually left, which most callers rightly ignore:
+   * this link's answer to a socket that is not open is to say nothing and let
+   * the reconnect re-establish the picture. `resize` is the exception, because
+   * it keeps a memory of what the desktop has been told and a memory of an
+   * unsent frame is worse than no memory at all.
+   */
+  private send(frame: WebClientFrame): boolean {
     const socket = this.socket
-    if (socket?.readyState !== WebSocket.OPEN) return
-    this.sendFrame(socket, frame)
+    if (socket?.readyState !== WebSocket.OPEN) return false
+    return this.sendFrame(socket, frame)
   }
 
-  private sendFrame(socket: WebSocket, frame: WebClientFrame): void {
+  private sendFrame(socket: WebSocket, frame: WebClientFrame): boolean {
     try {
       socket.send(JSON.stringify(frame))
+      return true
     } catch {
       /* a dead socket is closed by its own close handler */
+      return false
     }
   }
 
@@ -1042,6 +1121,10 @@ export class ForgeClient {
     const socket = this.socket
     this.socket = null
     this.stopBeating()
+    // Whatever the next socket is, it starts out having been told nothing —
+    // and the size it will be told is the one the re-`attach` carries. See
+    // `told`.
+    this.told.clear()
     if (!socket) return
     this.retire(socket)
   }

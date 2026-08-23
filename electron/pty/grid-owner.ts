@@ -82,6 +82,18 @@ interface Pane {
   owner: string | null
   /** The last size each viewer said it was reading at. */
   wishes: Map<string, Grid>
+  /**
+   * The grid this registry last put on the real PTY, or null while it has never
+   * moved this pane. See `applyGrid` — this is what makes a wish or a claim that
+   * changes nothing cost nothing.
+   *
+   * Safe to trust because this registry is the only way a grid reaches ConPTY:
+   * every path — the desktop renderer's fit, a re-adoption, a phone, a browser —
+   * arrives at `PtySessionManager.resize` through the one `apply` handed in here
+   * (`resizeForViewer` in electron/pty-host.ts). Nothing else in Forge resizes a
+   * session, so nothing else can make this a lie.
+   */
+  applied: Grid | null
 }
 
 export class GridOwners {
@@ -131,7 +143,7 @@ export class GridOwners {
       pane.owner = viewer
       this.onOwner?.(id)
     }
-    return this.apply(id, cols, rows, viewer)
+    return this.applyGrid(id, pane, cols, rows, viewer)
   }
 
   /**
@@ -152,7 +164,7 @@ export class GridOwners {
     pane.owner = viewer
     this.onOwner?.(id)
     const wish = pane.wishes.get(viewer)
-    if (wish) this.apply(id, wish.cols, wish.rows, viewer)
+    if (wish) this.applyGrid(id, pane, wish.cols, wish.rows, viewer)
     return true
   }
 
@@ -162,6 +174,12 @@ export class GridOwners {
    * a 390px screen is not readable, and the person holding the phone with that
    * pane on screen is the person using it. Same consequence as a keystroke, no
    * more and no less — the next keystroke at the desk takes it straight back.
+   *
+   * Idempotent in *effect* as well as in ownership, which is not the same thing
+   * and used not to be true: a second claim from the viewer that already owns
+   * the pane returned early, but a first claim by a viewer whose stored wish
+   * happened to be the grid already in force still called through to a resize —
+   * and a resize is never free (see `applyGrid`).
    */
   claim(id: string, viewer: string): boolean {
     const pane = this.paneFor(id)
@@ -169,7 +187,7 @@ export class GridOwners {
     pane.owner = viewer
     this.onOwner?.(id)
     const wish = pane.wishes.get(viewer)
-    if (wish) this.apply(id, wish.cols, wish.rows, viewer)
+    if (wish) this.applyGrid(id, pane, wish.cols, wish.rows, viewer)
     return true
   }
 
@@ -201,10 +219,45 @@ export class GridOwners {
     this.panes.clear()
   }
 
+  /**
+   * Put a grid on the PTY, unless it is already the grid on the PTY.
+   *
+   * The three ways a pane's size can move — a wish, a keystroke that changes
+   * hands, an outright claim — all end here, because all three can perfectly
+   * well ask for the size that is already in force and none of them used to
+   * notice. A browser re-sends its wish on every box change and on every
+   * reconnect; a phone claims a pane it has been reading for an hour; somebody
+   * types at the desk into a pane the desk was already sized for.
+   *
+   * The reason that has to cost nothing rather than merely be harmless: a resize
+   * is a SIGWINCH, and a SIGWINCH makes the program in the pane repaint its
+   * whole screen. On the alternate screen that repaint overwrites and nobody
+   * sees it; on the normal buffer it lands in the scrollback and in the replay
+   * buffer as another copy of the screen, which is the text that repeats on the
+   * phone. "It resizes to the same numbers" is not the same as "nothing
+   * happens".
+   *
+   * `apply` has its own equality guard against the pane's real grid and so does
+   * PtySessionManager beneath it. This one is not a duplicate of either: it
+   * stops the call before the repaint jiggle downstream gets the chance to turn
+   * a no-op into two real resizes, which is a thing only the caller's own
+   * bookkeeping can see coming.
+   *
+   * Recorded only when `apply` succeeds — a resize that failed because the
+   * session had gone must not leave this believing it moved something.
+   */
+  private applyGrid(id: string, pane: Pane, cols: number, rows: number, viewer: string): boolean {
+    const applied = pane.applied
+    if (applied && applied.cols === cols && applied.rows === rows) return true
+    const ok = this.apply(id, cols, rows, viewer)
+    if (ok) pane.applied = { cols, rows }
+    return ok
+  }
+
   private paneFor(id: string): Pane {
     let pane = this.panes.get(id)
     if (!pane) {
-      pane = { owner: null, wishes: new Map() }
+      pane = { owner: null, wishes: new Map(), applied: null }
       this.panes.set(id, pane)
     }
     return pane

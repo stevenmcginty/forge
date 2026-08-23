@@ -74,8 +74,17 @@ export interface TermHost {
    * one holding this pane. See `follow`.
    */
   fit: () => { cols: number; rows: number } | null
-  /** The geometry this browser wants, whether or not the last fit changed it. */
-  size: () => { cols: number; rows: number }
+  /**
+   * The geometry this browser wants, whether or not the last fit changed it —
+   * and null when it has never had a box worth measuring.
+   *
+   * Null rather than a stand-in, because both stand-ins available here are
+   * lies the desktop would act on: xterm's unfitted 80×24 is a grid no window
+   * on this page is, and the grid currently *drawn* is somebody else's whenever
+   * `follow` is holding one. This is what `attach` carries, so either would be
+   * a browser resizing a real shell to a number it made up.
+   */
+  size: () => { cols: number; rows: number } | null
   /**
    * Draw the grid the desktop says this session actually has, or null to go
    * back to drawing this browser's own fit. See the geometry note in the header.
@@ -218,6 +227,39 @@ const SETTLE_FALLBACK = 180
  * clipping. It takes a desk pane roughly twice this window's width to reach it.
  */
 const MIN_FONT_PX = 7
+
+/**
+ * The smallest grid worth asking a real shell for, and the largest the wire
+ * carries.
+ *
+ * `clientWidth < 8` in `measure` below catches a container with *no* box, which
+ * is the common way to arrive at nonsense — a hidden tab, a pane mid-mount, the
+ * inactive slot on the phone's one-pane layout. It is not the only way. A rail
+ * animating closed, a handset mid-orientation-change, and a pane whose own flex
+ * basis has resolved while its sibling's has not all present a box that is
+ * real, measurable and the wrong shape: a 40px sliver a hundred rows tall
+ * proposes something like 3×90, and there is nothing in that number to tell the
+ * desktop it was measured off a shape nobody will ever read at.
+ *
+ * That matters more than an ugly frame, because a resize is not a cheap thing
+ * to be wrong about. Every TUI on the end of one repaints its entire screen for
+ * a SIGWINCH, and on the normal buffer that repaint lands in the scrollback as
+ * a *second copy* of what was already there. So the floor is checked on the
+ * proposed grid as well as on the box, and a proposal under it is refused the
+ * same way a box with no size is: nothing is adopted, nothing is sent, and the
+ * ResizeObserver is the retry.
+ *
+ * The floor is deliberately low, because a pane genuinely can be a narrow
+ * split; twenty columns is under 150px of pane at this font, which is a sliver
+ * rather than a terminal. The ceiling is `wireDim`'s own in shared/web.ts, and
+ * it *clamps* rather than refusing — a proposal that big came off a box that is
+ * genuinely that big (an 8K desk), and refusing it would strand the pane on a
+ * stale grid forever, where clamping merely lands on the size the desktop was
+ * going to clamp it to anyway.
+ */
+const MIN_COLS = 20
+const MIN_ROWS = 4
+const MAX_DIM = 1000
 
 function settleMs(): number {
   if (settleCache !== null) return settleCache
@@ -459,6 +501,22 @@ function joinRichRows(rows: RichRow[]): RichLine {
   return { runs, text }
 }
 
+/**
+ * A proposal from FitAddon, or null if it is not a grid a shell should be given.
+ *
+ * Non-integers and non-finite numbers fall out first: `proposeDimensions`
+ * divides by a measured cell, and a cell measured before the font has loaded
+ * can be zero. Then the floor, which is the judgement — see MIN_COLS — and the
+ * ceiling, which is only `wireDim`'s and so is clamped rather than refused.
+ */
+function sensibleGrid(proposed: { cols: number; rows: number } | undefined): { cols: number; rows: number } | null {
+  if (!proposed || !Number.isFinite(proposed.cols) || !Number.isFinite(proposed.rows)) return null
+  const cols = Math.min(MAX_DIM, Math.floor(proposed.cols))
+  const rows = Math.min(MAX_DIM, Math.floor(proposed.rows))
+  if (cols < MIN_COLS || rows < MIN_ROWS) return null
+  return { cols, rows }
+}
+
 export function mountTerm(container: HTMLElement, options: TermOptions): TermHost {
   const term = new Terminal({
     fontSize: options.fontSize,
@@ -575,11 +633,22 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     options.readOnly ? undefined : options.onData
   )
 
-  const fit = (): { cols: number; rows: number } | null => {
+  /**
+   * Measure the box, adopt the grid it would hold, and put the right one on
+   * screen — without telling anybody.
+   *
+   * Split out of `fit` because "redraw this browser's own terminal" and "ask a
+   * real shell on another machine to change shape" are not the same act and
+   * must not be forced to happen together. The first is free and local; the
+   * second costs a SIGWINCH, a full agent repaint and, on the normal buffer, a
+   * duplicate copy of the screen in the scrollback. `fit` below decides which
+   * of the two an observation has earned.
+   */
+  const measure = (): void => {
     // A container with no box — mid-layout, or a tab that is not on screen —
     // makes FitAddon compute a nonsense geometry, and a nonsense geometry is
     // what the desktop would be asked for.
-    if (container.clientWidth < 8 || container.clientHeight < 8) return null
+    if (container.clientWidth < 8 || container.clientHeight < 8) return
     // Measured at this browser's own type size, whatever the terminal is
     // currently drawn at: the wish is "the grid I would choose", not "the grid
     // I would choose if I stayed squinting at the desktop's". xterm remeasures
@@ -587,19 +656,55 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     // reads a line later is already the new one — and `propose` rather than
     // `fit`, because measuring the box and deciding what goes on screen are two
     // different questions here. `apply` answers the second one.
-    if (term.options.fontSize !== options.fontSize) term.options.fontSize = options.fontSize
+    //
+    // Whether the font was actually moved is remembered, because every way out
+    // of here from this line on owes the screen an `apply` to put it back: a
+    // pane following a desk grid at 8px would otherwise be left drawn at the
+    // browser's own 13px, overflowing a box it has already been shrunk to fit.
+    const borrowed = term.options.fontSize !== options.fontSize
+    if (borrowed) term.options.fontSize = options.fontSize
     let proposed
     try {
       proposed = fitAddon.proposeDimensions()
     } catch {
       // Measured mid-teardown, or before the renderer exists. The observer
       // below is the retry, exactly as it is for a container with no box.
-      return null
+      if (borrowed) apply()
+      return
     }
-    if (!proposed || !Number.isFinite(proposed.cols) || !Number.isFinite(proposed.rows)) return null
-    natural = { cols: proposed.cols, rows: proposed.rows }
-    apply()
+    const grid = sensibleGrid(proposed)
+    if (!grid) {
+      // A box that is real but the wrong shape. See MIN_COLS: refused rather
+      // than sent, so the pane keeps the last grid that made sense while the
+      // observer waits for the layout to finish arriving.
+      if (borrowed) apply()
+      return
+    }
+    const moved = !natural || natural.cols !== grid.cols || natural.rows !== grid.rows
+    natural = grid
+    // Nothing moved and nothing was borrowed, so there is nothing to redraw —
+    // and `apply` is not free: with no desk grid to follow it calls
+    // `FitAddon.fit`, which measures the box all over again to reach the same
+    // answer this function already has.
+    if (moved || borrowed) apply()
+  }
+
+  /**
+   * Refit, and hand the desktop the result when it is a result it has not
+   * already been handed.
+   *
+   * `announce` is the whole of the difference between the two callers below.
+   * The dedupe against `lastCols`/`lastRows` is what makes a container change
+   * that lands on the *same* grid cost nothing on the wire; suppressing the
+   * announcement on the leading edge of a burst is what makes a container that
+   * changes several times cost one frame at the end rather than one per shape
+   * it passed through on the way.
+   */
+  const fit = (announce = true): { cols: number; rows: number } | null => {
+    measure()
+    if (!natural) return null
     if (natural.cols === lastCols && natural.rows === lastRows) return null
+    if (!announce) return null
     lastCols = natural.cols
     lastRows = natural.rows
     options.onResize(natural.cols, natural.rows)
@@ -625,6 +730,26 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
    * still for `--dur-med`. An animation therefore costs two fits rather than
    * one per frame, and only the ones that actually changed the geometry send
    * anything, because `fit` returns null otherwise.
+   *
+   * ## And the leading edge is not allowed to speak
+   *
+   * Two fits per animation is two fits, and the first of them is taken *during*
+   * the movement — at whatever half-collapsed shape the box happened to be in
+   * on that frame. Announcing that one meant a rail collapse, a keyboard
+   * sliding open or a phone's URL bar retracting cost the desktop two resizes:
+   * one at a shape that existed for 180ms and one at the shape that stayed. On
+   * a TUI that is two full-screen repaints for a gesture that should have cost
+   * at most one, and on the normal buffer the first of them is a copy of the
+   * screen at a width nothing will ever be read at again.
+   *
+   * So the leading edge redraws this browser's own terminal — which is local,
+   * free, and the whole reason it exists — and stays quiet on the wire unless
+   * this browser has never said anything at all (`lastCols === 0`). That one
+   * exception is the just-mounted pane whose first `fit()` found no box: it has
+   * attached without a size and must not wait out a settle before the desktop
+   * learns it exists. Every other burst reaches the wire once, from the settle
+   * timer, at the geometry that survived — and if the box came back to where it
+   * started, the dedupe in `fit` means it reaches the wire not at all.
    */
   let frame = 0
   let settling = 0
@@ -633,7 +758,7 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     frame = requestAnimationFrame(() => {
       frame = 0
       if (settling) clearTimeout(settling)
-      else fit()
+      else fit(lastCols === 0)
       settling = window.setTimeout(() => {
         settling = 0
         fit()
@@ -709,8 +834,9 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     fit,
     // The wish, not what is on screen: this is what `attach` carries, and an
     // attach that carried the desktop's own grid back to it would be a browser
-    // that could never say what it wants once it had been told once.
-    size: () => natural ?? { cols: term.cols, rows: term.rows },
+    // that could never say what it wants once it had been told once. Null until
+    // there has been a box to want anything about — see the interface.
+    size: () => natural,
     follow: (size) => {
       const next = size && size.cols > 0 && size.rows > 0 ? { cols: size.cols, rows: size.rows } : null
       if (next?.cols === desired?.cols && next?.rows === desired?.rows) return

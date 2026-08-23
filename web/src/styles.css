@@ -2062,10 +2062,13 @@
   gap: var(--s-2);
 }
 
-/* Splits mean nothing on a phone; closing does. */
-.app[data-mobile] .pane__action[title^='Split'] {
-  display: none;
-}
+/*
+ * Splits mean nothing on a phone; closing does. That is now said where it is
+ * true — PaneView does not render the two split buttons on a phone at all —
+ * rather than here, where a rule matching on the text of a `title` hid a
+ * button that had still been built and still anchored a flyout nothing could
+ * open. Nothing is left to hide, so the rule that hid it is gone with it.
+ */
 
 .app[data-mobile] .pane__terminal {
   padding: var(--s-2) 0 var(--s-2) var(--s-2);
@@ -2360,12 +2363,29 @@ button.astatus__mode:not(:disabled):hover {
   border-radius: var(--r-full);
 }
 
+/*
+ * A full-width bar that slides, rather than a bar that grows.
+ *
+ * The reading is `translateX` on the whole bar (AgentStatus.tsx sets it), and
+ * the parent's `overflow: hidden` — a pill of this same radius — cuts the left
+ * end off exactly where the growing version's left end used to be. The picture
+ * is the one that was here; what changed is that a percentage which ticks all
+ * through a streaming turn no longer re-lays out the strip under the pane, on
+ * the layout where that costs the most.
+ *
+ * Slid and not scaled, though `scaleX` is the usual answer: a scale takes the
+ * horizontal radius with it, so the 2px cap on the end of a 4px-tall bar would
+ * be squashed to a fifth of itself at 10% and the meter would read as a flat
+ * stub at exactly the values it most needs to look deliberate. A translation
+ * moves the caps the bar was drawn with.
+ */
 .astatus__meter > span {
   display: block;
+  width: 100%;
   height: 100%;
   background: var(--feed-accent);
   border-radius: inherit;
-  transition: width var(--dur-med) var(--ease-out);
+  transition: transform var(--dur-med) var(--ease-out);
 }
 
 .astatus__meter > span[data-hot='true'] {
@@ -2881,18 +2901,57 @@ button.astatus__mode:not(:disabled):hover {
 
 /*
  * The terminal face of the same pane: the pill floats at the same corner, so
- * the grid starts below it — the same 52px the feed reserves. FitAddon reads
- * the container's computed padding, so the rows simply begin under the pill
- * rather than being covered by it.
+ * the grid starts below it — the same 52px the feed reserves — rather than
+ * covering the top rows.
+ *
+ * Held in *both* faces, though only one of them can show it. Be careful about
+ * *why*, because the obvious reason is not the true one and it was written down
+ * wrongly here once already. FitAddon reads
+ * `parseInt(getComputedStyle(container).height)` and then subtracts the padding
+ * of `.xterm`, not the container's — and under this project's global
+ * `box-sizing: border-box` (src/theme/global.css) that resolved height is the
+ * *border* box, padding included. Measured both ways in
+ * scripts/viewtoggle-check.mjs: at `padding-top: 52px` and at `137px` the
+ * container still reports the same height. So this padding on its own never
+ * moved the proposed grid at all; the resize frame that made the pane duplicate
+ * itself came from the composer's key row changing the stage's height (see the
+ * rule below).
+ *
+ * It is held in both faces anyway, and the reason is worth the four lines: this
+ * element's box is what FitAddon measures, the rows it works out are sent to
+ * the desktop as a real PTY resize, and the desktop answers a resize by
+ * jiggling the row count to force a repaint (`resizeForViewer` in
+ * electron/pty-host.ts). Claude Code paints the normal buffer, so every one of
+ * those repaints lands in the scrollback as another copy of the screen instead
+ * of overwriting it. A padding that comes and goes with the view flip is
+ * therefore one `box-sizing` change away from minting duplicate screens under a
+ * thumb, and in cards view the terminal is `opacity: 0` and nothing can be seen
+ * there anyway — so reserving the space costs nothing and buys a grid that
+ * cannot depend on which face is up.
  */
-.app[data-mobile] .pane[data-kind='agent'][data-view='term'] .pane__terminal,
-[data-mobile] .pane[data-kind='agent'][data-view='term'] .pane__terminal {
+.app[data-mobile] .pane[data-kind='agent'] .pane__terminal,
+[data-mobile] .pane[data-kind='agent'] .pane__terminal {
   padding-top: 52px;
 }
 
-/* Arrow / Tab / Ctrl / Esc drive the TUI. Cards view is a conversation. */
+/*
+ * Arrow / Tab / Ctrl / Esc drive the TUI. Cards view is a conversation, and
+ * still has no key bar — but the row is hidden rather than removed, because it
+ * is the tallest thing in `.composer__tools` (a 40px key inside 2px of padding,
+ * against 40px icons) and `display: none` therefore took 4px off the height of
+ * the whole composer. The composer is the pane's sibling in the same column, so
+ * a shorter composer is a taller `.pane__stage` and a taller terminal — the
+ * other half of the duplicated-screen bug the padding above describes, moving
+ * the row count the opposite way so the two never even cancelled.
+ *
+ * `visibility` keeps the row's box, and with it the composer's height, while
+ * taking the keys out of the picture, out of the tab order and out of reach of
+ * a thumb. It reserves the true height by construction; a `min-height` on the
+ * tools row copied off the key's would say the same thing today and drift the
+ * day a key changes size, which is the same silent-geometry bug again.
+ */
 [data-mobile] .session-composer[data-view='feed'] .composer__keys {
-  display: none;
+  visibility: hidden;
 }
 
 [data-mobile] .feed__tool-lines {

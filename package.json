@@ -79,6 +79,7 @@
     "mobile:build": "vite build --config mobile/vite.config.ts",
     "mobile:serve": "node scripts/mobile-serve.mjs",
     "preview:check": "node scripts/preview-check.mjs",
+    "viewtoggle:check": "node scripts/viewtoggle-check.mjs",
     "mobile:tunnel": "node scripts/mobile-tunnel.mjs",
     "mobile:go": "node scripts/mobile-go.mjs",
     "tunnel:check": "node scripts/tunnel-check.mjs",

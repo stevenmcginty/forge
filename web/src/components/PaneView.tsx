@@ -204,12 +204,49 @@ export function PaneView({
   }, [])
 
   /**
+   * Whether this pane is the one being looked at, readable from inside a
+   * callback that must not be re-made.
+   *
+   * `scheduleParse` below is handed to `host.write` from the `onData` handler
+   * the mount effect registers, and that effect deliberately runs once per
+   * terminal — so the callback it captured is the one it keeps for the life of
+   * the pane. Anything it needs to know about a *later* render has to arrive
+   * through a ref; a dependency would leave a live terminal arming last
+   * render's copy.
+   */
+  const onScreenRef = useRef(onScreen)
+
+  /**
+   * Bytes arrived while nobody was looking. See `scheduleParse`.
+   */
+  const parseWanted = useRef(false)
+
+  /**
    * Arm a parse: next animation frame, or as soon after PARSE_INTERVAL_MS as
    * there is one. A frame or timer already in flight *is* the dirty flag — it
    * will read the newest screen when it fires, so a second arm would only be a
    * second read of the same thing.
+   *
+   * A pane nobody is looking at arms nothing at all. Its bytes still went into
+   * xterm — the emulator has to stay current or the pane is wrong the moment it
+   * is chosen — but that write is comparatively cheap, and cutting the whole
+   * screen into cards for a feed no eye is on is not. It matters most exactly
+   * where it is least affordable: `MobilePanes` draws one leaf of a tab and
+   * hides the rest rather than unmounting them, so a four-way split made at the
+   * desk had four parsers running on a phone showing one pane, and every tab
+   * this project has ever opened stays mounted behind the active one.
+   *
+   * The flag is the same level-triggered arming as the timer, one step slower:
+   * a frame in flight says "the screen moved and will be read", and this says
+   * "the screen moved and will be read when it can be seen". Any number of
+   * writes set it and one parse discharges it, so coming back costs a single
+   * merge rather than a queue of them.
    */
   const scheduleParse = useCallback(() => {
+    if (!onScreenRef.current) {
+      parseWanted.current = true
+      return
+    }
     if (parseFrame.current || parseTimer.current) return
     const wait = PARSE_INTERVAL_MS - (performance.now() - parsedAt.current)
     if (wait <= 0) {
@@ -221,6 +258,24 @@ export function PaneView({
       parseFrame.current = requestAnimationFrame(parseNow)
     }, wait)
   }, [parseNow])
+
+  /**
+   * Coming back on screen: read the screen once, before it is painted.
+   *
+   * A layout effect rather than an ordinary one because the pane is about to be
+   * shown in this very commit — an effect that ran after the paint would put
+   * the cards as they were when the pane was hidden on screen for a frame, and
+   * a chip tap that flashes a stale answer is the sort of thing that reads as
+   * the wrong pane rather than as an old one. `parseNow` and not
+   * `scheduleParse`: the interval exists to throttle a *burst*, and this is one
+   * read of a screen that has already finished moving.
+   */
+  useLayoutEffect(() => {
+    onScreenRef.current = onScreen
+    if (!onScreen || !parseWanted.current) return
+    parseWanted.current = false
+    parseNow()
+  }, [onScreen, parseNow])
 
   useEffect(
     () => () => {
@@ -601,25 +656,43 @@ export function PaneView({
                 <Icon name={feed ? 'terminal' : 'note'} size={13} />
               </button>
             ) : null}
-            <button
-              ref={splitRef}
-              type="button"
-              className="ghost-btn pane__action"
-              title="Split right"
-              disabled={!live}
-              onClick={() => setChooser('row')}
-            >
-              <Icon name="splitRight" size={13} />
-            </button>
-            <button
-              type="button"
-              className="ghost-btn pane__action"
-              title="Split down"
-              disabled={!live}
-              onClick={() => setChooser('column')}
-            >
-              <Icon name="splitDown" size={13} />
-            </button>
+            {/*
+              Splitting is an operation this layout cannot express, so a phone
+              is not offered it. `MobilePanes` draws one leaf of a tab at a
+              time behind a strip of chips — there is no second box for a new
+              pane to appear in, and the only thing a tap here produced was one
+              more chip and a pane the desk had to be visited to see. Reading a
+              split made at the desk is untouched: every leaf is still mounted,
+              still fed, and still a chip away.
+
+              Not rendered rather than hidden in CSS, which is what this was
+              before. A `display: none` button is still a button — it is still
+              built, still asks whether the socket is live on every push, and
+              still anchors a flyout that nothing on this layout can open.
+            */}
+            {!mobile ? (
+              <>
+                <button
+                  ref={splitRef}
+                  type="button"
+                  className="ghost-btn pane__action"
+                  title="Split right"
+                  disabled={!live}
+                  onClick={() => setChooser('row')}
+                >
+                  <Icon name="splitRight" size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn pane__action"
+                  title="Split down"
+                  disabled={!live}
+                  onClick={() => setChooser('column')}
+                >
+                  <Icon name="splitDown" size={13} />
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               className="ghost-btn pane__action"
@@ -679,17 +752,26 @@ export function PaneView({
         />
       </div>
 
-      <AgentChooser
-        anchor={splitRef.current}
-        open={chooser !== null}
-        align="end"
-        title={chooser === 'column' ? 'Split down with' : 'Split right with'}
-        onClose={() => setChooser(null)}
-        onPick={(profileId, permissionMode) => {
-          if (chooser)
-            void actions.layout({ op: 'create-pane', paneId: leaf.id, direction: chooser, profileId, permissionMode })
-        }}
-      />
+      {/*
+        The two split buttons are the only things that open this, and a phone
+        does not have them — so on a phone the chooser is a flyout anchored to a
+        button that was never built, waiting on a state nothing can set. It goes
+        with them rather than sitting there as an `open={false}` that is now a
+        promise about the rest of the file instead of a fact about the layout.
+      */}
+      {mobile ? null : (
+        <AgentChooser
+          anchor={splitRef.current}
+          open={chooser !== null}
+          align="end"
+          title={chooser === 'column' ? 'Split down with' : 'Split right with'}
+          onClose={() => setChooser(null)}
+          onPick={(profileId, permissionMode) => {
+            if (chooser)
+              void actions.layout({ op: 'create-pane', paneId: leaf.id, direction: chooser, profileId, permissionMode })
+          }}
+        />
+      )}
     </section>
   )
 }

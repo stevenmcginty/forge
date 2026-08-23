@@ -400,6 +400,34 @@ function clearJiggle(id: string): void {
  * live in electron/mobile-host.ts as `resizeForPhone`; a browser needs it for
  * exactly the same reason a phone does, and now that both links reach the PTY
  * through one gate there is one place for it.)
+ *
+ * ## When the jiggle is actually earned
+ *
+ * A repaint is not free. On the alternate screen it overwrites and costs
+ * nothing anybody sees; on the normal buffer — Claude Code's — every repaint
+ * lands *below* its predecessor, in the scrollback and in the replay buffer,
+ * which is the duplicated text on the phone. So the jiggle has to be spent only
+ * where the thing it was written for can actually happen, and that thing is
+ * narrower than "a resize":
+ *
+ *  - **Columns moved.** ConPTY re-wraps every line in its buffer, and an Ink TUI
+ *    only rewrites the rows it believes changed, so fragments of the pre-reflow
+ *    frame are left on screen with nothing to clear them. This is the case the
+ *    jiggle exists for, and it still gets one.
+ *  - **Only rows moved.** Nothing re-wraps — a row change moves the viewport,
+ *    it does not reflow a single line — so there are no fragments to clear, and
+ *    the row change is itself a SIGWINCH the TUI redraws for. One repaint, and
+ *    it is a clean one. This is also the common case by a wide margin: a phone
+ *    keyboard opening and closing is a rows-only change several times a minute,
+ *    and it used to cost two full repaints each way.
+ *
+ * The jiggle's own second half is the proof of that split: it moves rows and
+ * never columns, precisely so that it provokes a redraw without provoking
+ * another reflow. If a rows-only change could not be trusted to repaint, the
+ * jiggle would not work either.
+ *
+ * A wish for the grid the pane already has is not a resize at all and returns
+ * before any of this — see the guard below.
  */
 function resizeForViewer(id: string, cols: number, rows: number, viewer: string): boolean {
   clearJiggle(id)
@@ -414,14 +442,41 @@ function resizeForViewer(id: string, cols: number, rows: number, viewer: string)
   // two full agent repaints for a wish that asked for nothing, and on a link
   // that reconnects every few seconds it is the pump that fills the replay
   // buffer with duplicate frames.
+  //
+  // An attaching viewer still gets a painted screen, and never got one from
+  // here: the replay buffer is what paints it, sent unconditionally and *before*
+  // the attach's wish is applied (see the `attach` case in electron/web/server.ts
+  // and `replay` in electron/mobile-host.ts). Forcing a repaint to fill a screen
+  // that is already being filled is how the screen ends up filled twice.
   const grid = sessionGrid(id)
   if (grid && grid.cols === cols && grid.rows === rows) return true
-  if (viewer === DESK_VIEWER || rows < 3) return getManager().resize(id, cols, rows)
+  // Three panes with no row to spare between them: the desk jiggles its own
+  // wishes in the renderer, a two-row terminal has no row to borrow, and a
+  // session this process cannot find is one there is nothing to compare against
+  // — and nothing to schedule a second half for either, since the resize below
+  // is about to fail.
+  if (viewer === DESK_VIEWER || rows < 3 || !grid) return getManager().resize(id, cols, rows)
+  // Rows moved and columns did not: nothing reflowed, so there is no debris for
+  // a second repaint to clear, and the SIGWINCH this one resize sends is already
+  // the redraw event. Half the repaints, for the change that happens most.
+  if (grid.cols === cols) return getManager().resize(id, cols, rows)
   const ok = getManager().resize(id, cols, rows - 1)
   jiggles.set(
     id,
     setTimeout(() => {
       jiggles.delete(id)
+      // The buffer is thrown away a second time, and only on this path.
+      //
+      // `noteWidth` already blanked it 60ms ago when the width moved, so what is
+      // in it now is at most one jiggle's worth of output — and on a pane that
+      // redraws, that output *is* the first half's frame, which the resize on
+      // the next line is about to draw again. Keeping it would mean a viewer
+      // attaching a moment later replays both copies, stacked, which on the
+      // normal buffer is exactly the bug this whole path is being narrowed for.
+      // The price is anything else the pane happened to print inside those 60ms;
+      // that is a real loss and a small one, and it is bounded by the reset that
+      // has already happened rather than eating any scrollback that survived it.
+      replay.set(id, CLEAR_SCREEN)
       getManager().resize(id, cols, rows)
     }, REDRAW_JIGGLE_MS)
   )
