@@ -48,4 +48,4 @@ export {
  */
 export { MAX_SESSIONS as WEB_MAX_SESSIONS } from '../../shared/web'
 export { MAX_SESSIONS as IPC_MAX_SESSIONS } from '../../shared/ipc'
-export { AUTH_MAX_FAILURES } from '../../shared/mobile'
+export { AUTH_MAX_FAILURES, AUTH_LOCKOUT_MS } from '../../shared/mobile'

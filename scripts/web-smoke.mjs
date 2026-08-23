@@ -211,7 +211,8 @@ async function main() {
     WEB_WS_PATH,
     WEB_MAX_SESSIONS,
     IPC_MAX_SESSIONS,
-    AUTH_MAX_FAILURES
+    AUTH_MAX_FAILURES,
+    AUTH_LOCKOUT_MS
   } = await import(pathToFileURL(join(scratch, 'web.mjs')).href)
 
   const google = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -610,13 +611,38 @@ async function main() {
     'a browser that did not identify itself is not-approved, whatever its token says'
   )
 
-  // Five strikes spent. The lockout is now shut, which is the whole reason this
-  // phase cannot be shared with the ones that have to succeed.
-  const lockedOut = await refusedBy({ idToken: mint(), deviceId: 'browser-1' }, 'a locked-out source')
+  // Five refusals spent, and *nothing is shut behind them*. This assertion used
+  // to say the opposite — that the address was now locked out — and it is worth
+  // saying why it was inverted rather than deleted, because the old sentence
+  // reads like the safer one.
+  //
+  // Behind a tunnel every caller on earth arrives from this machine's own
+  // loopback, so an address-keyed bucket is one bucket shared by the owner and
+  // every stranger who can reach the hostname: five garbage tokens from anyone
+  // at all locked the owner out of their own desktop for a renewable minute.
+  // A JWT keyspace is not guessable, so striking bad tokens bought no security
+  // and handed over a denial-of-service. The address bucket is gone (see "Which
+  // failures count against which bucket" in electron/web/auth.ts); the lockout
+  // now lives only on the account, where the identity is proven and the secret
+  // is short enough to be worth guessing. That is asserted below in phase C.
+  //
+  // So what this phase proves now is the *absence*: an unguessable credential
+  // presented badly, five times, costs a good credential nothing.
+  const stillWelcome = await connect()
+  stillWelcome.send({
+    type: 'hello',
+    proto: WEB_PROTO,
+    idToken: mint(),
+    client: '0.0.0-smoke',
+    deviceId: 'browser-1',
+    deviceName: 'Chrome on Windows'
+  })
+  await waitFor(() => stillWelcome.first('hello-ok'), 8000, 'the good credential after five bad ones')
   log(
-    lockedOut.first('refused')?.reason === 'busy' && lockedOut.first('refused')?.retryAfterMs > 0,
-    `${AUTH_MAX_FAILURES} refusals lock 127.0.0.1 out, so every later phase needs a fresh WebAuth`
+    Boolean(stillWelcome.first('hello-ok')) && !stillWelcome.first('refused'),
+    `${AUTH_MAX_FAILURES} bad tokens lock nobody out — a stranger cannot spend the owner's strikes`
   )
+  stillWelcome.socket.close()
 
   await serverA.stop()
 
@@ -1170,6 +1196,73 @@ async function main() {
   strangerWithPin.socket.close()
 
   await serverC.stop()
+
+  /* ------------------------------------- 12b. the lockout, which is the PIN's
+   *
+   * The five-then-wait that makes a six-digit secret defensible. This is the
+   * only thing in the whole door that counts a failure, and it is keyed on the
+   * *account* rather than the address — phase A proves the other half, that a
+   * stranger throwing bad tokens at the same loopback cannot spend these
+   * strikes.
+   *
+   * On a server of its own because the count has to be unambiguous: the wrong
+   * PIN in section 12 above already put one strike on this account, and a test
+   * that has to reason about "five, less the one earlier" is a test nobody can
+   * safely edit later.
+   */
+
+  const authL = makeAuth({ pinHash: () => hashPin(PIN) })
+  const serverL = makeServer(authL)
+  active = serverL
+  await serverL.start({ host: '127.0.0.1', port: PORT })
+
+  const guessPin = async (pin, label) => {
+    const tab = await connect()
+    tab.send({
+      type: 'hello',
+      proto: WEB_PROTO,
+      idToken: mint(),
+      client: '0.0.0-smoke',
+      deviceId: 'guessing-browser',
+      deviceName: 'Chrome on Windows',
+      pin
+    })
+    await waitFor(() => tab.first('refused') || tab.first('hello-ok'), 8000, label)
+    return tab
+  }
+
+  // Spend exactly the budget. Each is still answered on its own merits, which is
+  // what makes the next one the interesting question rather than this one.
+  const spent = []
+  for (let i = 0; i < AUTH_MAX_FAILURES; i++) {
+    spent.push(await guessPin(String(100000 + i), `wrong PIN ${i + 1} of ${AUTH_MAX_FAILURES}`))
+  }
+  log(
+    spent.every((tab) => tab.first('refused')?.reason === 'pin-invalid'),
+    `each of the first ${AUTH_MAX_FAILURES} wrong PINs is answered pin-invalid on its own merits`
+  )
+
+  const locked = await guessPin('999999', 'the wrong PIN past the budget')
+  const lockedRefusal = locked.first('refused')
+  log(
+    lockedRefusal?.reason === 'busy' && lockedRefusal?.retryAfterMs > 0,
+    `the ${AUTH_MAX_FAILURES + 1}th wrong PIN is busy with a retryAfterMs, not another pin-invalid`
+  )
+  log(
+    lockedRefusal?.retryAfterMs <= AUTH_LOCKOUT_MS,
+    'and the wait it names is no longer than the lockout itself, so the sentence can be believed'
+  )
+
+  // The half that makes it a lockout rather than a counter: the *right* PIN is
+  // refused too. If knowing the secret got you in during the wait, the wait
+  // would cost a guesser nothing — they would simply keep guessing.
+  const rightPinWhileLocked = await guessPin(PIN, 'the correct PIN during the lockout')
+  log(
+    rightPinWhileLocked.first('refused')?.reason === 'busy' && !rightPinWhileLocked.first('hello-ok'),
+    'and the correct PIN is refused busy while the lockout stands — it is a lockout, not a counter'
+  )
+
+  await serverL.stop()
 
   /* ===================================================== PHASE D — heartbeat */
 
