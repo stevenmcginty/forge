@@ -611,6 +611,26 @@ export function effortLevelSpec(level: string): EffortLevelSpec | null {
 }
 
 /**
+ * The rungs *this* pane's effort picker should list. Empty when the CLI has
+ * no dial Forge can reach — the picker itself then stays off the composer
+ * rather than offering Claude's words for a tool that does not speak them.
+ *
+ *  - **Claude Code** (every `claude`-exe profile, including GLM): the five
+ *    names `/effort` takes, verified against code.claude.com/docs/en/commands
+ *    (2026-08-23).
+ *  - **Grok Build**: the same ladder minus `max`, which Grok treats as an
+ *    alias of `xhigh` rather than a fifth rung (grok `--help` / `/effort`,
+ *    2026-08-23).
+ *  - **Codex, OpenCode, Kimi, Qwen, Gemini, a shell**: empty.
+ */
+export function effortLevels(command: string): EffortLevelSpec[] {
+  const exe = commandExe(command)
+  if (exe === 'claude') return EFFORT_LEVELS
+  if (exe === 'grok') return EFFORT_LEVELS.filter((l) => l.id !== 'max')
+  return []
+}
+
+/**
  * What typing "set the effort to X" looks like in *this* pane's own TUI.
  *
  * A function per pane command rather than one global string, because the CLIs
@@ -620,6 +640,8 @@ export function effortLevelSpec(level: string): EffortLevelSpec | null {
  *    takes a literal `/effort <level>` in the composer — verified against
  *    code.claude.com/docs/en/commands (2026-08-23). This covers every
  *    claude-exe profile by construction, which is most of the roster.
+ *  - **Grok Build** takes the same `/effort <level>` spelling (verified
+ *    against grok `--help` 2026-08-23).
  *  - **Codex** keeps reasoning effort behind its interactive `/model` picker
  *    (developers.openai.com/codex/cli, 2026-08-23): there is no slash command
  *    a helper can type blind, so this answers null and the caller says so
@@ -631,7 +653,8 @@ export function effortLevelSpec(level: string): EffortLevelSpec | null {
  * Adding a dialect is one more branch down here and nothing else anywhere.
  */
 export function effortSlash(command: string): ((level: EffortLevel) => string) | null {
-  if (commandExe(command) !== 'claude') return null
+  const exe = commandExe(command)
+  if (exe !== 'claude' && exe !== 'grok') return null
   return (level) => `/effort ${level}`
 }
 
@@ -640,4 +663,171 @@ export function effortRefusal(command: string): string {
   const exe = commandExe(command)
   if (exe === 'codex') return 'Codex sets effort through its /model picker — type /model in the pane.'
   return `${exe || 'This CLI'} has no effort dial Forge can reach.`
+}
+
+/* -------------------------------------------------------------------- model */
+
+/**
+ * One row of the model picker: the name the composer shows, and the id `/model`
+ * actually types. Same shape as an effort rung so the two dropdowns paint alike.
+ */
+export interface AgentModelSpec {
+  id: string
+  label: string
+  note: string
+}
+
+/**
+ * The models *this* pane's picker should list. Empty when Forge has no `/model`
+ * dialect for the CLI — the chip then stays off, rather than offering Claude's
+ * aliases to a tool that does not speak them.
+ *
+ *  - **Grok Build**: the version names the TUI and `grok models` use
+ *    (`grok-4.7` … `grok-2`). Labels are the product names ("Grok 4.6"),
+ *    because that is how the picker is supposed to read, not the id.
+ *  - **Claude Code** (every `claude`-exe profile, including GLM): the `/model`
+ *    aliases from code.claude.com/docs/en/model-config (2026-08-23) — Fable,
+ *    Opus, Sonnet, Haiku. Version numbers move under those names.
+ *  - **Codex, OpenCode, Kimi, Qwen, Gemini, a shell**: empty. Codex keeps the
+ *    choice behind its own `/model` menu, same as effort.
+ */
+export function agentModels(command: string): AgentModelSpec[] {
+  const exe = commandExe(command)
+  if (exe === 'grok') {
+    return [
+      { id: 'grok-4.7', label: 'Grok 4.7', note: 'the newest' },
+      { id: 'grok-4.6', label: 'Grok 4.6', note: 'Grok Build’s current default' },
+      { id: 'grok-4.5', label: 'Grok 4.5', note: 'the previous flagship' },
+      { id: 'grok-3', label: 'Grok 3', note: 'the older generation' },
+      { id: 'grok-2', label: 'Grok 2', note: 'the oldest this picker still names' }
+    ]
+  }
+  if (exe === 'claude') {
+    return [
+      { id: 'fable', label: 'Fable', note: 'the hardest, longest-running tasks' },
+      { id: 'opus', label: 'Opus', note: 'complex reasoning — the usual default' },
+      { id: 'sonnet', label: 'Sonnet', note: 'daily coding, faster and cheaper' },
+      { id: 'haiku', label: 'Haiku', note: 'simple tasks, the lightest' }
+    ]
+  }
+  return []
+}
+
+/**
+ * What typing "switch to this model" looks like in *this* pane's own TUI.
+ *
+ * Claude and Grok both take `/model <id>` as words, then Enter as its own
+ * keystroke — the same two-write rhythm as `/effort`. Null for everything
+ * else, and the caller says so rather than firing keystrokes into a menu.
+ */
+export function modelSlash(command: string): ((id: string) => string) | null {
+  const exe = commandExe(command)
+  if (exe !== 'claude' && exe !== 'grok') return null
+  return (id) => `/model ${id}`
+}
+
+/** Why the model picker cannot drive this pane, when modelSlash is null. */
+export function modelRefusal(command: string): string {
+  const exe = commandExe(command)
+  if (exe === 'codex') return 'Codex sets the model through its /model picker — type /model in the pane.'
+  return `${exe || 'This CLI'} has no model dial Forge can reach.`
+}
+
+/**
+ * Which of `models` the status strip is talking about, or null when the
+ * printed name does not match anything on the list.
+ *
+ * Longest id wins, so "grok-4.6" does not land on "grok-4" and "Opus 4.1"
+ * still matches the `opus` alias.
+ */
+export function matchAgentModel(models: AgentModelSpec[], printed: string | undefined): AgentModelSpec | null {
+  if (!printed || !models.length) return null
+  const raw = printed.trim().toLowerCase()
+  const compact = raw.replace(/\s+/g, '-')
+  const exact = models.find((m) => {
+    const id = m.id.toLowerCase()
+    return id === compact || id === raw || m.label.toLowerCase() === raw
+  })
+  if (exact) return exact
+  let best: AgentModelSpec | null = null
+  for (const m of models) {
+    const id = m.id.toLowerCase()
+    const family = id.replace(/\[.*\]$/, '')
+    if (compact.includes(id) || raw.includes(family) || raw.includes(m.label.toLowerCase())) {
+      if (!best || m.id.length > best.id.length) best = m
+    }
+  }
+  return best
+}
+
+/**
+ * The rungs Shift+Tab actually walks in a live TUI, in cycle order.
+ *
+ * Not the same list as PERMISSION_FAMILIES: that table is what a pane can be
+ * *launched* with. The cycle is what the running CLI will land on, and bypass
+ * is often a launch-only flag (Claude) or a cycle member (Grok).
+ *
+ *  - **Claude / Antigravity**: default → acceptEdits → plan → default.
+ *    Claude's docs (code.claude.com/docs/en/permission-modes, 2026-08-21):
+ *    bypass joins the cycle only when the session started in it; auto sits
+ *    *before* default and is handled by the caller, not listed here.
+ *  - **Grok**: default → plan → bypass → default (Shift+Tab: Normal → Plan
+ *    → Always-approve, grok user-guide 2026-08-23).
+ *  - **Codex**: empty. There is no Shift+Tab cycle; Codex opens its own
+ *    `/permissions` menu (see `modePickerSlash`).
+ */
+export function permissionCycle(
+  command: string,
+  current?: ClaudePermissionMode | 'auto' | null
+): ClaudePermissionMode[] {
+  const family = permissionFamily(command)
+  if (family === 'claude' || family === 'agy') {
+    // Bypass only walks the live cycle when the session started in it.
+    return current === 'bypass' ? ['default', 'acceptEdits', 'plan', 'bypass'] : ['default', 'acceptEdits', 'plan']
+  }
+  if (family === 'grok') return ['default', 'plan', 'bypass']
+  return []
+}
+
+/**
+ * Slash command that opens this CLI's own mode picker, when Forge cannot land
+ * on a named rung itself. Codex is the one today: `/permissions` is a menu,
+ * not a setter.
+ */
+export function modePickerSlash(command: string): string | null {
+  return commandExe(command) === 'codex' ? '/permissions' : null
+}
+
+/** Why a named mode cannot be applied in this pane. */
+export function modeRefusal(command: string): string {
+  const exe = commandExe(command)
+  if (exe === 'codex') return 'Codex sets permissions through its /permissions picker — pick the mode there.'
+  return `${exe || 'This CLI'} has no permission modes Forge can reach.`
+}
+
+/**
+ * How many Shift+Tabs take `from` to `to` on this command's cycle.
+ *
+ * `from` of `'auto'` is Claude's extra rung that sits before default: one
+ * press lands on default, then the cycle runs as usual. `null` means the
+ * pane has not printed a mode Forge recognises, so the distance is unknown.
+ *
+ * Returns null when the target is not on the cycle (Claude bypass, typically)
+ * or when the starting point is unknown.
+ */
+export function tabsToPermissionMode(
+  command: string,
+  from: ClaudePermissionMode | 'auto' | null,
+  to: ClaudePermissionMode
+): number | null {
+  const cycle = permissionCycle(command, from)
+  if (!cycle.length) return null
+  const toIndex = cycle.indexOf(to)
+  if (toIndex < 0) return null
+  if (from === to) return 0
+  if (from === 'auto') return toIndex + 1
+  if (from === null) return null
+  const fromIndex = cycle.indexOf(from)
+  if (fromIndex < 0) return null
+  return (toIndex - fromIndex + cycle.length) % cycle.length
 }

@@ -2768,14 +2768,14 @@
   background: var(--bg-hover);
   border: 1px solid var(--line-hairline);
   border-radius: var(--r-full);
-  cursor: pointer;
+  cursor: default;
   transition:
     background var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out);
 }
 
-.astatus__mode:disabled {
-  cursor: default;
+button.astatus__mode {
+  cursor: pointer;
 }
 
 .astatus__mode-dot {
@@ -2814,7 +2814,7 @@
   background: var(--ok);
 }
 
-.astatus__mode:not(:disabled):hover {
+button.astatus__mode:not(:disabled):hover {
   filter: brightness(1.12);
 }
 
@@ -3030,6 +3030,71 @@
   border-radius: 50%;
   box-shadow: var(--shadow-key);
   cursor: pointer;
+}
+
+.composer__picks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 2px var(--s-1) 0;
+}
+
+.composer__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 26px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-full);
+  background: var(--bg-hover);
+  border: 1px solid var(--line-hairline);
+  color: var(--text-secondary);
+  font: 600 var(--t-xs) / 1 var(--font-ui);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.composer__pick:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-active);
+}
+
+.composer__pick:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.composer__pick[data-active='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.composer__pick svg {
+  flex: none;
+  opacity: 0.65;
+}
+
+.composer__pick[data-mode='bypass'] {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-line);
+}
+.composer__pick[data-mode='plan'] {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+  border-color: color-mix(in srgb, var(--info) 36%, transparent);
+}
+.composer__pick[data-mode='accept-edits'] {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+  border-color: color-mix(in srgb, var(--ok) 36%, transparent);
 }
 
 .composer__tools {
@@ -3353,10 +3418,21 @@
   height: 40px;
 }
 
-/* Eight keys, two pickers and Send share a phone's width, so the row scrolls
- * sideways under its fade and every key keeps the promised 40px of thumb. */
+/* The arrows, Tab, Ctrl, Esc and Send share a phone's width, so the row
+ * scrolls sideways under its fade and every key keeps the promised 40px of
+ * thumb. Effort and Mode live above the box, not in this row. */
 [data-mobile] .composer__tools {
   gap: var(--s-2);
+}
+
+[data-mobile] .composer__picks {
+  padding: 0 var(--s-1);
+}
+
+[data-mobile] .composer__pick {
+  height: 28px;
+  padding: 0 10px 0 12px;
+  font-size: 11px;
 }
 
 [data-mobile] .composer__keys {

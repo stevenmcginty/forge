@@ -7,9 +7,10 @@ import type { PaneStatus, PermissionMode } from '../lib/rich'
 /**
  * The agent's own footer, lifted out of the TUI and drawn as one strip between
  * the conversation and the box: who you are talking to, which model, which
- * permission mode (tap to cycle it — Shift+Tab down the PTY), how much context
- * is spent, and where it is working. Tap anywhere else to see the raw footer
- * lines the parser read this from.
+ * permission mode is in effect, how much context is spent, and where it is
+ * working. The mode chip is a readout — picking a different rung is the
+ * Mode dropdown on the composer. Tap anywhere else on the strip to see the
+ * raw footer lines the parser read this from.
  */
 
 const MODE_LABEL: Record<PermissionMode, string> = {
@@ -79,24 +80,26 @@ export function AgentStatus({
         </span>
 
         {!shell ? (
-          <button
-            type="button"
-            className="astatus__mode"
-            data-mode={mode}
-            disabled={!canCycle}
-            title={
-              canCycle
-                ? `${status?.modeLabel ?? MODE_LABEL[mode]} — tap to cycle (Shift+Tab)`
-                : (status?.modeLabel ?? MODE_LABEL[mode])
-            }
-            onClick={(event) => {
-              event.stopPropagation()
-              onCycleMode?.()
-            }}
-          >
-            <span className="astatus__mode-dot" aria-hidden />
-            {MODE_LABEL[mode]}
-          </button>
+          canCycle ? (
+            <button
+              type="button"
+              className="astatus__mode"
+              data-mode={mode}
+              title={`${status?.modeLabel ?? MODE_LABEL[mode]} — tap to cycle (Shift+Tab)`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onCycleMode?.()
+              }}
+            >
+              <span className="astatus__mode-dot" aria-hidden />
+              {MODE_LABEL[mode]}
+            </button>
+          ) : (
+            <span className="astatus__mode" data-mode={mode} title={status?.modeLabel ?? MODE_LABEL[mode]}>
+              <span className="astatus__mode-dot" aria-hidden />
+              {MODE_LABEL[mode]}
+            </span>
+          )
         ) : null}
 
         {context ? (

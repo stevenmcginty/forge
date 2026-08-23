@@ -1,10 +1,24 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
-import type { LayoutNode, PaneLeaf } from '@shared/types'
+import type { ClaudePermissionMode, LayoutNode, PaneLeaf } from '@shared/types'
 import type { EffortLevel } from '@shared/agents'
-import { effortRefusal, effortSlash } from '@shared/agents'
+import {
+  agentModels,
+  effortLevels,
+  effortRefusal,
+  effortSlash,
+  matchAgentModel,
+  modePickerSlash,
+  modeRefusal,
+  modelRefusal,
+  modelSlash,
+  permissionModes,
+  permissionSpec,
+  tabsToPermissionMode
+} from '@shared/agents'
 import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { packImage } from '../lib/image'
 import { usePaneStatus } from '../lib/pane-status'
+import type { PermissionMode } from '../lib/rich'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStatus } from './AgentStatus'
 import { BACK_TAB, Composer } from './Composer'
@@ -21,6 +35,16 @@ import { BACK_TAB, Composer } from './Composer'
 const SETTLE_AFTER_IMAGE_MS = 400
 /** The gap between the words and the Enter that sends them. */
 const SETTLE_BEFORE_ENTER_MS = 120
+/** The gap between Shift+Tab presses while walking a permission cycle. */
+const SETTLE_BETWEEN_TABS_MS = 80
+
+/** The Forge rung the status strip is reporting, plus Claude's extra `auto`. */
+function liveRung(mode: PermissionMode | undefined): ClaudePermissionMode | 'auto' | null {
+  if (mode === 'default' || mode === 'plan' || mode === 'bypass') return mode
+  if (mode === 'accept-edits') return 'acceptEdits'
+  if (mode === 'auto') return 'auto'
+  return null
+}
 
 const pause = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -121,13 +145,12 @@ export function SessionComposer(): ReactNode {
   /**
    * An effort level, picked for this pane.
    *
-   * Every agent pane gets the picker; what a pick does is the dialect question
-   * `effortSlash` answers. A Claude-exe pane takes `/effort <level>` typed as
-   * words and Enter as its own keystroke a beat later — the same two-write
-   * rhythm `sendDraft` uses, because a slash command that arrives holding its
-   * own `\r` reads as a paste and sits in the TUI's box unsent. A pane whose
-   * CLI has no reachable dial gets the refusal sentence as a notice instead of
-   * keystrokes into a menu this browser cannot see.
+   * The composer only offers the picker when `effortLevels` is non-empty;
+   * what a pick does is the dialect question `effortSlash` answers. A Claude
+   * or Grok pane takes `/effort <level>` typed as words and Enter as its own
+   * keystroke a beat later — the same two-write rhythm `sendDraft` uses,
+   * because a slash command that arrives holding its own `\r` reads as a paste
+   * and sits in the TUI's box unsent.
    */
   const sendEffort = useCallback(
     async (level: EffortLevel) => {
@@ -145,6 +168,72 @@ export function SessionComposer(): ReactNode {
     [actions, canType, paneId, profile, takePane]
   )
 
+  /**
+   * A model, picked for this pane from that CLI's own list.
+   *
+   * Claude and Grok take `/model <id>` typed as words and Enter a beat later,
+   * the same two-write rhythm as effort. A CLI with no dialect gets a sentence
+   * rather than keystrokes into a menu this browser cannot see.
+   */
+  const sendModel = useCallback(
+    async (id: string) => {
+      if (!canType || !paneId || !profile) return
+      const type = modelSlash(profile.command)
+      if (!type) {
+        actions.setNotice(modelRefusal(profile.command))
+        return
+      }
+      actions.write(paneId, type(id))
+      await pause(SETTLE_BEFORE_ENTER_MS)
+      actions.write(paneId, '\r')
+      takePane()
+    },
+    [actions, canType, paneId, profile, takePane]
+  )
+
+  /**
+   * A permission rung, picked for this pane from that CLI's own list.
+   *
+   * Claude and Grok walk Shift+Tab from the mode the status strip reports to
+   * the one that was picked. Codex has no cycle — `/permissions` opens its
+   * own menu. A rung that is launch-only (Claude bypass) is a sentence, not
+   * a keystroke into a cycle that will never land there.
+   */
+  const sendMode = useCallback(
+    async (mode: ClaudePermissionMode) => {
+      if (!canType || !paneId || !profile) return
+      const command = profile.command
+      const picker = modePickerSlash(command)
+      if (picker) {
+        actions.write(paneId, picker)
+        await pause(SETTLE_BEFORE_ENTER_MS)
+        actions.write(paneId, '\r')
+        takePane()
+        return
+      }
+      const from = liveRung(status?.mode)
+      const steps = tabsToPermissionMode(command, from, mode)
+      if (steps === null) {
+        const spec = permissionSpec(command, mode)
+        actions.setNotice(
+          from === null
+            ? 'This pane has not printed its mode yet.'
+            : spec
+              ? `${spec.label} has to be chosen when the pane opens.`
+              : modeRefusal(command)
+        )
+        return
+      }
+      if (steps === 0) return
+      for (let i = 0; i < steps; i++) {
+        actions.write(paneId, BACK_TAB)
+        if (i < steps - 1) await pause(SETTLE_BETWEEN_TABS_MS)
+      }
+      takePane()
+    },
+    [actions, canType, paneId, profile, status?.mode, takePane]
+  )
+
   if (offline && state.offlineMode === 'github') return null
   if (!tab) return null
 
@@ -156,12 +245,16 @@ export function SessionComposer(): ReactNode {
       : !alive
         ? 'This pane has closed'
         : 'Reconnecting…'
+  const roster = profile && !isShellProfile(profile) ? agentModels(profile.command) : []
+  const levels = profile && !isShellProfile(profile) ? effortLevels(profile.command) : []
+  const ladder = profile && !isShellProfile(profile) ? permissionModes(profile.command) : []
+  const rung = liveRung(status?.mode)
+  const currentModeId = rung === 'auto' || rung === null ? null : rung
+  const currentModelId = matchAgentModel(roster, status?.model)?.id ?? null
 
   return (
     <div className="session-composer">
-      {profile ? (
-        <AgentStatus profile={profile} status={status} live={canType} onCycleMode={() => sendRaw(BACK_TAB)} />
-      ) : null}
+      {profile ? <AgentStatus profile={profile} status={status} live={canType} /> : null}
       <Composer
         draft={draft}
         disabled={!canType}
@@ -170,7 +263,14 @@ export function SessionComposer(): ReactNode {
         onDraft={setDraft}
         onSend={(images) => void sendDraft(images)}
         onRaw={sendRaw}
-        onEffort={profile && !isShellProfile(profile) ? (level) => void sendEffort(level) : undefined}
+        models={roster}
+        currentModelId={currentModelId}
+        onModel={roster.length ? (id) => void sendModel(id) : undefined}
+        effortLevels={levels}
+        onEffort={levels.length ? (level) => void sendEffort(level) : undefined}
+        modes={ladder}
+        currentModeId={currentModeId}
+        onMode={ladder.length ? (mode) => void sendMode(mode) : undefined}
         onFocus={takePane}
         autoFocus={canType}
       />

@@ -1,11 +1,17 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import type { AgentProfile } from '@shared/types'
-import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
+import type { AgentProfile, ClaudePermissionMode } from '@shared/types'
+import { agentModels, BUILTIN_AGENT_PROFILES, effortLevels, matchAgentModel, permissionModes } from '@shared/agents'
 import { useMobile } from '../lib/mobile'
-import type { FeedBlock, PaneStatus, RichLine, Run } from '../lib/rich'
+import type { FeedBlock, PaneStatus, PermissionMode, RichLine, Run } from '../lib/rich'
 import { AgentStatus } from './AgentStatus'
 import { Composer } from './Composer'
 import { Feed } from './Feed'
+
+function liveRung(mode: PermissionMode | undefined): ClaudePermissionMode | null {
+  if (mode === 'default' || mode === 'plan' || mode === 'bypass') return mode
+  if (mode === 'accept-edits') return 'acceptEdits'
+  return null
+}
 
 /**
  * `?preview=feed` on the dev server: the conversation display, the status
@@ -256,6 +262,9 @@ function PreviewPane({
   const [draft, setDraft] = useState('')
   const [live, setLive] = useState(true)
   const [blocks, setBlocks] = useState(initial)
+  const roster = agentModels(profile.command)
+  const levels = effortLevels(profile.command)
+  const ladder = permissionModes(profile.command)
   // A late turn, so stick-to-bottom and the "jump to latest" pill can be seen.
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -282,7 +291,7 @@ function PreviewPane({
         </div>
       </section>
       <div className="session-composer">
-        <AgentStatus profile={profile} status={status} live={live} onCycleMode={() => undefined} />
+        <AgentStatus profile={profile} status={status} live={live} />
         <Composer
           draft={draft}
           disabled={!live}
@@ -290,6 +299,14 @@ function PreviewPane({
           onDraft={setDraft}
           onSend={() => setDraft('')}
           onRaw={() => undefined}
+          models={roster}
+          currentModelId={matchAgentModel(roster, status.model)?.id ?? null}
+          onModel={roster.length ? () => undefined : undefined}
+          effortLevels={levels}
+          onEffort={levels.length ? () => undefined : undefined}
+          modes={ladder}
+          currentModeId={liveRung(status.mode)}
+          onMode={ladder.length ? () => undefined : undefined}
           autoFocus={false}
         />
       </div>

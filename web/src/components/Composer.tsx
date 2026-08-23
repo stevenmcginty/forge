@@ -11,7 +11,8 @@ import {
 } from 'react'
 import { Icon } from '@/components/Icon'
 import { Popover, PopoverRow, PopoverSection } from '@/components/Popover'
-import { EFFORT_LEVELS, type EffortLevel } from '@shared/agents'
+import type { ClaudePermissionMode } from '@shared/types'
+import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
 import { imageFilesFromDataTransfer, isImageFile } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 
@@ -20,6 +21,9 @@ import { useMobile } from '../lib/mobile'
  * dictation and the phone's long-press menu all work. Images picked, shot or
  * pasted wait as thumbnails above the box until Send, which sends them first
  * and the words after — one gesture, one turn.
+ *
+ * Model, Effort and Mode sit just above the textarea — not in the arrow row —
+ * and each opens a dropdown of *this* pane's own rungs. A shell has none.
  *
  * Spellcheck and autocapitalize stay on. The hidden xterm helper turns them
  * off because an IME double-fires into a TUI; this field is a normal box.
@@ -37,7 +41,14 @@ export function Composer({
   onDraft,
   onSend,
   onRaw,
+  models,
+  currentModelId,
+  onModel,
+  effortLevels,
   onEffort,
+  modes,
+  currentModeId,
+  onMode,
   onFocus,
   autoFocus
 }: {
@@ -52,12 +63,29 @@ export function Composer({
   onSend: (images: File[]) => void
   onRaw: (data: string) => void
   /**
-   * Pick an effort level for the focused pane. Present whenever a *agent* is
-   * focused — every agent gets the picker, and one whose CLI has no dial gets
-   * a sentence saying so when a level is chosen, rather than keystrokes fired
-   * into the dark. Absent for shells: a prompt is not a collaborator.
+   * The models this pane's CLI lists, in that CLI's own words. Empty / absent
+   * means the Model chip stays off — Grok's "Grok 4.6" and Claude's "Opus"
+   * are different rows of the same table.
    */
+  models?: AgentModelSpec[]
+  currentModelId?: string | null
+  onModel?: (id: string) => void
+  /**
+   * The rungs this pane's CLI actually lists. Empty / absent means the Effort
+   * chip stays off the composer — we do not offer Claude's words for a tool
+   * that does not speak them.
+   */
+  effortLevels?: EffortLevelSpec[]
   onEffort?: (level: EffortLevel) => void
+  /**
+   * The permission ladder this pane's CLI lists, in that CLI's own words.
+   * Empty / absent means the Mode chip stays off. Codex's "Full auto" and
+   * Grok's "Bypass" are different rows of the same table.
+   */
+  modes?: PermissionModeSpec[]
+  /** The rung the status strip currently reports, when Forge recognises it. */
+  currentModeId?: ClaudePermissionMode | null
+  onMode?: (id: ClaudePermissionMode) => void
   onFocus?: () => void
   autoFocus: boolean
 }): ReactNode {
@@ -71,9 +99,20 @@ export function Composer({
    * is `String.fromCharCode(letter − 64)` and nothing more.
    */
   const [ctrl, setCtrl] = useState(false)
-  /** The effort picker, anchored to its own key in the row under the box. */
-  const [effortOpen, setEffortOpen] = useState(false)
+  /** Which of the chips above the box is open. One at a time. */
+  const [openPick, setOpenPick] = useState<'model' | 'effort' | 'mode' | null>(null)
+  const modelRef = useRef<HTMLButtonElement | null>(null)
   const effortRef = useRef<HTMLButtonElement | null>(null)
+  const modeRef = useRef<HTMLButtonElement | null>(null)
+  const [pickedEffort, setPickedEffort] = useState<EffortLevel | null>(null)
+
+  const modelList = models ?? []
+  const effortList = effortLevels ?? []
+  const modeList = modes ?? []
+  const showPicks =
+    (onModel && modelList.length > 0) || (onEffort && effortList.length > 0) || (onMode && modeList.length > 0)
+  const currentModel = currentModelId ? (modelList.find((m) => m.id === currentModelId) ?? null) : null
+  const currentMode = currentModeId ? (modeList.find((m) => m.id === currentModeId) ?? null) : null
 
   useEffect(() => {
     if (autoFocus) field.current?.focus()
@@ -162,6 +201,156 @@ export function Composer({
       onPaste={onPaste}
     >
       <div className="composer__card">
+        {showPicks ? (
+          <div className="composer__picks" role="toolbar" aria-label="Agent settings">
+            {onModel && modelList.length ? (
+              <button
+                ref={modelRef}
+                type="button"
+                className="composer__pick"
+                data-active={openPick === 'model' ? 'true' : undefined}
+                aria-haspopup="menu"
+                aria-expanded={openPick === 'model'}
+                onClick={() => setOpenPick((v) => (v === 'model' ? null : 'model'))}
+                disabled={disabled}
+                title="Model — which model this pane is talking to"
+              >
+                {currentModel?.label ?? 'Model'}
+                <Icon name="chevronDown" size={10} />
+              </button>
+            ) : null}
+            {onEffort && effortList.length ? (
+              <button
+                ref={effortRef}
+                type="button"
+                className="composer__pick"
+                data-active={openPick === 'effort' ? 'true' : undefined}
+                aria-haspopup="menu"
+                aria-expanded={openPick === 'effort'}
+                onClick={() => setOpenPick((v) => (v === 'effort' ? null : 'effort'))}
+                disabled={disabled}
+                title="Effort — how hard the model works on the next turns"
+              >
+                {pickedEffort ? effortList.find((l) => l.id === pickedEffort)?.label ?? 'Effort' : 'Effort'}
+                <Icon name="chevronDown" size={10} />
+              </button>
+            ) : null}
+            {onMode && modeList.length ? (
+              <button
+                ref={modeRef}
+                type="button"
+                className="composer__pick"
+                data-active={openPick === 'mode' ? 'true' : undefined}
+                data-mode={
+                  currentModeId === 'bypass'
+                    ? 'bypass'
+                    : currentModeId === 'plan'
+                      ? 'plan'
+                      : currentModeId === 'acceptEdits'
+                        ? 'accept-edits'
+                        : undefined
+                }
+                aria-haspopup="menu"
+                aria-expanded={openPick === 'mode'}
+                onClick={() => setOpenPick((v) => (v === 'mode' ? null : 'mode'))}
+                disabled={disabled}
+                title="Permission mode — how much this agent may do without asking"
+              >
+                {currentMode?.label ?? 'Mode'}
+                <Icon name="chevronDown" size={10} />
+              </button>
+            ) : null}
+            {onModel && modelList.length ? (
+              <Popover
+                anchor={modelRef.current}
+                open={openPick === 'model'}
+                onClose={() => setOpenPick(null)}
+                align="start"
+                side="top"
+                width={272}
+                label="Model"
+              >
+                <PopoverSection title="Model">
+                  {modelList.map((model) => (
+                    <PopoverRow
+                      key={model.id}
+                      selected={model.id === currentModelId}
+                      onClick={() => {
+                        setOpenPick(null)
+                        onModel(model.id)
+                      }}
+                    >
+                      <span className="ceffort">
+                        <strong className="ceffort__label">{model.label}</strong>
+                        <span className="ceffort__note">{model.note}</span>
+                      </span>
+                    </PopoverRow>
+                  ))}
+                </PopoverSection>
+              </Popover>
+            ) : null}
+            {onEffort && effortList.length ? (
+              <Popover
+                anchor={effortRef.current}
+                open={openPick === 'effort'}
+                onClose={() => setOpenPick(null)}
+                align="start"
+                side="top"
+                width={272}
+                label="Effort"
+              >
+                <PopoverSection title="Effort">
+                  {effortList.map((level) => (
+                    <PopoverRow
+                      key={level.id}
+                      selected={level.id === pickedEffort}
+                      onClick={() => {
+                        setOpenPick(null)
+                        setPickedEffort(level.id)
+                        onEffort(level.id)
+                      }}
+                    >
+                      <span className="ceffort">
+                        <strong className="ceffort__label">{level.label}</strong>
+                        <span className="ceffort__note">{level.note}</span>
+                      </span>
+                    </PopoverRow>
+                  ))}
+                </PopoverSection>
+              </Popover>
+            ) : null}
+            {onMode && modeList.length ? (
+              <Popover
+                anchor={modeRef.current}
+                open={openPick === 'mode'}
+                onClose={() => setOpenPick(null)}
+                align="start"
+                side="top"
+                width={272}
+                label="Mode"
+              >
+                <PopoverSection title="Mode">
+                  {modeList.map((mode) => (
+                    <PopoverRow
+                      key={mode.id}
+                      selected={mode.id === currentModeId}
+                      danger={mode.danger}
+                      onClick={() => {
+                        setOpenPick(null)
+                        onMode(mode.id)
+                      }}
+                    >
+                      <span className="ceffort">
+                        <strong className="ceffort__label">{mode.label}</strong>
+                        <span className="ceffort__note">{mode.note}</span>
+                      </span>
+                    </PopoverRow>
+                  ))}
+                </PopoverSection>
+              </Popover>
+            ) : null}
+          </div>
+        ) : null}
         {files.length ? (
           <Attachments
             files={files}
@@ -202,24 +391,6 @@ export function Composer({
             <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
             <Key label="↓" onClick={() => onRaw('\x1b[B')} disabled={disabled} title="Down" />
             <Key label="→" onClick={() => onRaw('\x1b[C')} disabled={disabled} title="Right" />
-            {/* Its own element rather than `Key`: the popover anchors to it. */}
-            <button
-              ref={effortRef}
-              type="button"
-              className="composer__key"
-              data-active={effortOpen ? 'true' : undefined}
-              onClick={() => setEffortOpen((v) => !v)}
-              disabled={disabled}
-              title="Effort — how hard the model works on the next turns"
-            >
-              Effort
-            </button>
-            <Key
-              label="Mode"
-              onClick={() => onRaw(BACK_TAB)}
-              disabled={disabled}
-              title="Shift+Tab — cycle permission mode"
-            />
             <Key label="Tab" onClick={() => onRaw('\t')} disabled={disabled} />
             <Key
               label="Ctrl"
@@ -230,38 +401,6 @@ export function Composer({
             />
             <Key label="Esc" onClick={() => onRaw('\x1b')} disabled={disabled} />
           </div>
-          {onEffort ? (
-            /*
-             * Portalled rather than inline so it clears the on-screen keyboard:
-             * `side='top'` opens it over the box, where the thumb already is.
-             */
-            <Popover
-              anchor={effortRef.current}
-              open={effortOpen}
-              onClose={() => setEffortOpen(false)}
-              align="start"
-              side="top"
-              width={272}
-              label="Effort"
-            >
-              <PopoverSection title="Effort">
-                {EFFORT_LEVELS.map((level) => (
-                  <PopoverRow
-                    key={level.id}
-                    onClick={() => {
-                      setEffortOpen(false)
-                      onEffort(level.id)
-                    }}
-                  >
-                    <span className="ceffort">
-                      <strong className="ceffort__label">{level.label}</strong>
-                      <span className="ceffort__note">{level.note}</span>
-                    </span>
-                  </PopoverRow>
-                ))}
-              </PopoverSection>
-            </Popover>
-          ) : null}
           <button
             type="submit"
             className="composer__send"
