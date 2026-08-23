@@ -105,6 +105,13 @@
   padding-left: var(--s-6);
 }
 
+.feed__block[data-role='agent'] .feed__text {
+  font-family: var(--font-ui);
+  font-size: 14.5px;
+  line-height: 1.55;
+  letter-spacing: var(--tracking-tight);
+}
+
 .feed__block[data-role='agent']::before {
   content: '';
   position: absolute;
@@ -266,8 +273,10 @@
   font-size: 12px;
   line-height: 1.55;
   color: var(--text-secondary);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  word-break: normal;
   tab-size: 4;
 }
 

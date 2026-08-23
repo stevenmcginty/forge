@@ -193,7 +193,10 @@ function busyLine(flat: string): boolean {
 function spinnerChrome(flat: string): boolean {
   if (!flat) return false
   if (BUSY_HINT.test(flat)) return true
-  if (BRAILLE.test(flat) && flat.includes('…')) return true
+  // Grok/OpenCode cycle a braille frame with an elapsed counter and no
+  // ellipsis; that line is chrome, not a sentence. Requiring `…` left those
+  // frames in the body, and each one became a new card as the counter ticked.
+  if (BRAILLE.test(flat) && (flat.includes('…') || ELAPSED.test(flat) || flat.length < 48)) return true
   if (SPINNER_GLYPH.test(flat) && flat.includes('…') && ELAPSED.test(flat)) return true
   return SPINNER_GLYPH.test(flat) && flat.includes('…') && flat.length < 40
 }
@@ -386,6 +389,12 @@ function readStatus(footer: string[], body: Cut[]): PaneStatus {
  */
 const USER_TURN = /^(?:>\s+|(?:you|user|human)\s*:\s+)\S/i
 const USER_MARKER = /^(?:>\s+|(?:you|user|human)\s*:\s+)/i
+/**
+ * OpenCode (and Grok's sticky header) often put the role on its own line —
+ * `You` then the message — rather than `You: message`. A whole-line match so
+ * a sentence that starts with "You" stays the agent's.
+ */
+const USER_HEADER = /^(?:you|user|human)\s*$/i
 
 /**
  * A tool call, as opposed to the agent talking.
@@ -400,14 +409,31 @@ const TOOL_START = [
   /^\$\s+\S/,
   /^⚙/,
   /^exec\s+\S/i,
-  /^[✓✔✗✖]\s+[A-Z][A-Za-z0-9_]*\b/
+  /^[✓✔✗✖]\s+[A-Z][A-Za-z0-9_]*\b/,
+  // OpenCode: `# Read src/lib/feed.ts` — the hash is the whole of the tell,
+  // so a sentence that happens to start with a capital word stays prose.
+  /^#\s+[A-Z][A-Za-z][\w.-]*/
 ]
 
-/** Claude's result gutter, and the box rows some CLIs hang under a call. */
-const TOOL_CONT = /^[⎿⋮↳]/
+/** Claude's result gutter, OpenCode's `└`, and the box rows some CLIs hang under a call. */
+const TOOL_CONT = /^[⎿⋮↳└]/
 
 function isToolStart(flat: string): boolean {
   return TOOL_START.some((re) => re.test(flat))
+}
+
+/**
+ * Does this line continue the tool call above?
+ *
+ * `└` (and the rest of the box-drawing gutter) is stripped from `flat` by
+ * `stripBoxDrawing`, so the test has to look at the raw capture too — otherwise
+ * OpenCode's `└ Read 214 lines` becomes a bare sentence and falls out of the
+ * tool card.
+ */
+function isToolCont(line: Cut): boolean {
+  if (TOOL_CONT.test(line.flat)) return true
+  if (/^[⎿⋮↳└]/.test(line.raw.trimStart())) return true
+  return /^\s/.test(line.raw)
 }
 
 function isBanner(line: string): boolean {
@@ -415,7 +441,7 @@ function isBanner(line: string): boolean {
   if (!t) return true
   if (/claude code/i.test(t)) return true
   if (/^\s*\/[a-z]/.test(t) && t.length < 40) return true
-  if (/sonnet|opus|haiku|grok|gemini|codex/i.test(t) && t.length < 80) return true
+  if (/sonnet|opus|haiku|grok|gemini|codex|opencode/i.test(t) && t.length < 80) return true
   if (/^~\//.test(t) || /^[A-Z]:\\/.test(t)) return true
   return false
 }
@@ -462,7 +488,12 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
   let i = 0
 
   const banner: RichLine[] = []
-  while (i < body.length && !USER_TURN.test(body[i]!.flat) && isBanner(body[i]!.flat)) {
+  while (
+    i < body.length &&
+    !USER_TURN.test(body[i]!.flat) &&
+    !USER_HEADER.test(body[i]!.flat) &&
+    isBanner(body[i]!.flat)
+  ) {
     if (body[i]!.flat) banner.push(body[i]!.rich)
     i += 1
   }
@@ -470,13 +501,32 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
 
   let role: FeedRole = 'agent'
   let buf: RichLine[] = []
+  /**
+   * `You` on its own line: the next unindented line *is* the message, not the
+   * agent answering. Cleared once that first body line has been taken.
+   */
+  let headerPending = false
 
   for (; i < body.length; i++) {
     const line = body[i]!
 
+    // A spinner frame in the *body* (Grok/OpenCode stream one into the
+    // window, not only the footer) is chrome. Leaving it in would mint a
+    // new agent card every time the counter ticked.
+    if (spinnerChrome(line.flat)) continue
+
+    if (USER_HEADER.test(line.flat)) {
+      flush(blocks, role, buf)
+      role = 'user'
+      buf = []
+      headerPending = true
+      continue
+    }
+
     if (USER_TURN.test(line.flat)) {
       flush(blocks, role, buf)
       role = 'user'
+      headerPending = false
       const marker = USER_MARKER.exec(line.rich.text)?.[0]?.length ?? 0
       buf = [{ runs: sliceRuns(line.rich.runs, marker, line.rich.text.length), text: line.rich.text.slice(marker) }]
       continue
@@ -484,6 +534,7 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
 
     if (isToolStart(line.flat)) {
       flush(blocks, role, buf)
+      headerPending = false
       const tool: RichLine[] = [line.rich]
       let j = i + 1
       for (; j < body.length; j++) {
@@ -492,7 +543,7 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
         // draws them contiguously, and reading past a gap is how the agent's
         // next sentence ends up inside the tool card.
         if (!next.flat) break
-        if (!TOOL_CONT.test(next.flat) && !/^\s/.test(next.raw)) break
+        if (!isToolCont(next)) break
         tool.push(next.rich)
       }
       i = j - 1
@@ -502,7 +553,7 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
       continue
     }
 
-    if (role === 'user' && line.flat && !/^\s/.test(line.raw)) {
+    if (role === 'user' && line.flat && !/^\s/.test(line.raw) && !headerPending) {
       // An unindented line after a user turn is the agent starting; an indented
       // one is the rest of what was typed.
       flush(blocks, 'user', buf)
@@ -511,6 +562,7 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
       continue
     }
 
+    if (headerPending && line.flat) headerPending = false
     buf.push(line.rich)
   }
 
@@ -585,6 +637,27 @@ function withIds(blocks: FeedBlock[], used: Set<string>): FeedBlock[] {
 }
 
 /**
+ * One command painted as a sticky header must still be one bubble.
+ *
+ * Alignment usually catches this; the leftover case is consecutive user
+ * cards that say the same thing after a frame where the header reappeared
+ * next to a slice that could not be matched. Growing the later one in
+ * place is what the reader sees as "the entry didn't replicate".
+ */
+function collapseTwinUsers(blocks: FeedBlock[]): FeedBlock[] {
+  const out: FeedBlock[] = []
+  for (const block of blocks) {
+    const last = out[out.length - 1]
+    if (last && last.role === 'user' && block.role === 'user' && sameTurn(last, block)) {
+      out[out.length - 1] = pickTurn(last, block)
+      continue
+    }
+    out.push(block)
+  }
+  return out
+}
+
+/**
  * Fold a newly captured screen into the conversation we already have.
  *
  * Claude Code writes the normal buffer, so one capture *is* the conversation
@@ -592,9 +665,21 @@ function withIds(blocks: FeedBlock[], used: Set<string>): FeedBlock[] {
  * a capture is one frame, and replacing would throw away every turn that had
  * scrolled off the top. That is why only Claude Code scrolled like a log.
  *
- * Finds the longest alignment between the two bodies, keeps everything on
- * either side of it, and prefers the longer text for a turn still being
- * written. System banners are not conversation and are taken from `next`.
+ * A frame is a *window* onto the log, and two facts about windows drive every
+ * choice here. **New content only ever appears at the bottom** — a terminal
+ * appends, so anything a frame shows above its aligned region is history this
+ * log already holds, and prepending it was duplicating the visible turns once
+ * per frame: type one command into Grok and by the time the reply had streamed
+ * for ten frames your entry sat in the feed ten times over. And **the anchor
+ * must be the newest occurrence** — ask the same thing twice in a session and
+ * both turns carry your words, so an alignment that ties has to prefer the
+ * later position in the log or the reply grows on the older turn while the
+ * newer one starves.
+ *
+ * So: find the longest alignment between the two bodies, ties broken toward
+ * the bottom; keep everything the log already has around it; take blocks from
+ * `next` only where they run past what prev holds (the genuinely new tail).
+ * System banners are not conversation and are taken from `next`.
  */
 export function mergeBlocks(prev: FeedBlock[], next: FeedBlock[]): FeedBlock[] {
   const prevBody = bodyOf(prev)
@@ -606,7 +691,10 @@ export function mergeBlocks(prev: FeedBlock[], next: FeedBlock[]): FeedBlock[] {
   for (let i = 0; i < prevBody.length; i++) {
     for (let j = 0; j < nextBody.length; j++) {
       const L = matchLen(prevBody, i, nextBody, j)
-      if (L > best.L) best = { i, j, L }
+      // Longer wins; a tie anchors as far down the log — and as far into the
+      // frame — as it can, which is what picks the newest "run the tests"
+      // when an older one says the same thing.
+      if (L > best.L || (L === best.L && (i > best.i || (i === best.i && j > best.j)))) best = { i, j, L }
     }
   }
 
@@ -617,15 +705,35 @@ export function mergeBlocks(prev: FeedBlock[], next: FeedBlock[]): FeedBlock[] {
     merged = sameTurn(last, first) ? [...prevBody.slice(0, -1), ...nextBody] : [...prevBody, ...nextBody]
   } else {
     const { i, j, L } = best
-    const head = [...nextBody.slice(0, j), ...prevBody.slice(0, i)]
+    // History above the anchor comes from the log alone. The frame may show
+    // blocks there too, but they are either copies of these or slices cut by
+    // its top edge — and a slice is neither a prefix nor a suffix of the block
+    // it came from, so it can never be matched away. Taking the frame's word
+    // for its own top was the duplication.
+    const head = prevBody.slice(0, i)
     const overlap: FeedBlock[] = []
     for (let k = 0; k < L; k++) overlap.push(pickTurn(prevBody[i + k]!, nextBody[j + k]!))
     const prevTail = prevBody.slice(i + L)
-    const nextTail = nextBody.slice(j + L)
-    const tail = j === 0 && nextTail.length ? nextTail : prevTail.length ? [...prevTail, ...nextTail] : nextTail
+    let nextTail = nextBody.slice(j + L)
+    // Sticky user headers (Grok, OpenCode) reappear in every frame. If we
+    // aligned on an agent slice rather than on the turn itself, that header
+    // sits in nextTail and must not mint a second bubble for the same words.
+    // When the overlap already holds a user, a further user in nextTail is a
+    // real later turn and stays.
+    if (!overlap.some((block) => block.role === 'user')) {
+      const held = [...head, ...overlap, ...prevTail]
+      nextTail = nextTail.filter(
+        (block) => !(block.role === 'user' && held.some((h) => h.role === 'user' && sameTurn(h, block)))
+      )
+    }
+    const tail =
+      i + L >= prevBody.length
+        ? nextTail // the alignment runs to the live edge; whatever the frame holds past it is new
+        : [...prevTail, ...nextTail] // the frame ended inside our history: keep what we hold, take anything new
     merged = [...head, ...overlap, ...tail]
   }
 
+  merged = collapseTwinUsers(merged)
   if (merged.length > MAX_MERGED_BLOCKS) merged = merged.slice(merged.length - MAX_MERGED_BLOCKS)
 
   const used = new Set<string>()

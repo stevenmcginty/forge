@@ -341,6 +341,95 @@ ok(
   'paging the TUI back to an older frame does not drop the turns we already have'
 )
 
+console.log('merge, so a streamed turn does not replicate the entry (the Grok bug)')
+// A second ask of the *same* words, streamed while the visible window slides
+// through the first answer and carries a live spinner. Each frame's top edge
+// slices an older block mid-way, so nothing above the aligned region can be
+// matched away - and none of it may be prepended either.
+const again = ['> run the tests', '', 'Of course, checking the failing case first.', '', 'All green now.'].join('\n')
+let log2 = blocksFromCapture(again)
+for (let n = 1; n <= 10; n++) {
+  const frame = [
+    'Of course, checking the failing case fi', // window top, cut mid-line
+    `checking the failing case (${n}s) ⠋`, // spinner with a live counter
+    '> run the tests',
+    '',
+    `Running the suite, step ${n} of 10 done.`
+  ].join('\n')
+  log2 = mergeBlocks(log2, blocksFromCapture(frame))
+}
+ok(
+  log2.filter((b) => b.role === 'user').length === 1,
+  'the entry stays one turn, however many frames stream it',
+  `got ${log2.filter((b) => b.role === 'user').length}`
+)
+const sliceCards = log2.filter((b) => b.role === 'agent' && b.text.startsWith('Of course, checking the failing case fi\n')).length
+ok(sliceCards === 0, 'a block sliced by the frame top is never added as a card of its own', `got ${sliceCards}`)
+ok(log2.some((b) => b.role === 'agent' && b.text.includes('step 10 of 10')), 'the newest reply is in the log')
+
+// The same command asked twice, where the older turn says what the newer one
+// is still saying: the anchor has to be the newest occurrence.
+const twinPrev = blocksFromCapture(['> status', '', 'Working on it.', '', '> status', '', 'Working on it.'].join('\n'))
+const twinNext = mergeBlocks(twinPrev, blocksFromCapture(['> status', '', 'Working on it. Harder.'].join('\n')))
+is(
+  twinNext[twinNext.length - 1]?.text,
+  'Working on it. Harder.',
+  'a tie anchors at the newest occurrence, so the reply grows on the latest turn'
+)
+
+console.log('opencode-shaped screen')
+const openCodeFull = [
+  'opencode v1.18',
+  '',
+  'You',
+  'fix the feed duplications',
+  '',
+  'I will look at the merge first.',
+  '',
+  '# Read src/lib/feed.ts',
+  '└ Read 214 lines',
+  '',
+  'The merge was prepending the frame top.',
+  '',
+  'tab  for completions',
+  '› '
+].join('\n')
+const openCodeScreen = screen(openCodeFull)
+ok(
+  openCodeScreen.blocks.some((b) => b.role === 'user' && b.text === 'fix the feed duplications'),
+  'a You header on its own line is a user turn'
+)
+ok(
+  openCodeScreen.blocks.some((b) => b.role === 'tool' && /Read src\/lib\/feed/.test(b.text)),
+  'an OpenCode # tool call is a tool card'
+)
+ok(
+  openCodeScreen.blocks.some((b) => b.role === 'tool' && /Read 214 lines/.test(b.text)),
+  'and its result line belongs to it'
+)
+ok(
+  openCodeScreen.blocks.some((b) => b.role === 'agent' && /prepending the frame top/.test(b.text)),
+  'the reply after the tool stays agent prose'
+)
+ok(!inAnyBlock(openCodeScreen.blocks, /tab\s+for completions/), 'the key hint is not a card')
+
+console.log('spinner frames stay chrome')
+const spinning = [
+  '> run the tests',
+  '',
+  'Checking the suite.',
+  '',
+  'checking the failing case (4s) ⠋',
+  '',
+  '❯ '
+].join('\n')
+const spinningBlocks = blocksFromCapture(spinning)
+ok(
+  !spinningBlocks.some((b) => /checking the failing case \(4s\)/.test(b.text)),
+  'a braille spinner with a counter is not a card'
+)
+ok(spinningBlocks.some((b) => b.role === 'agent' && /Checking the suite/.test(b.text)), 'the sentence before it stays')
+
 if (fail) {
   console.log(`\n${fail} failed, ${pass} passed`)
   process.exit(1)

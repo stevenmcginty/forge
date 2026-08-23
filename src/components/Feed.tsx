@@ -380,7 +380,7 @@ function ToolCard({ block }: { block: FeedBlock }): ReactNode {
           </svg>
         </span>
         <span className="feed__tool-title">{head ? <Line line={head} /> : firstLine(block.text)}</span>
-        {rest.length ? <span className="feed__tool-count">{rest.length} lines</span> : null}
+        {rest.length ? <span className="feed__tool-count">{rest.length === 1 ? '1 line' : `${rest.length} lines`}</span> : null}
       </button>
       {rest.length ? (
         <div className="feed__tool-body">

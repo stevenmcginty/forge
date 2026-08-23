@@ -2817,6 +2817,11 @@ button.astatus__mode:not(:disabled):hover {
   padding-left: var(--s-6);
 }
 
+[data-mobile] .pane[data-view='feed'][data-kind='agent']:has(.pane__actions) .pane__title,
+[data-mobile] .pane[data-view='feed'][data-kind='agent']:has(.pane__actions) .pane__header .agent-badge {
+  display: none;
+}
+
 [data-mobile] .feed__tool-lines {
   font-size: 12.5px;
 }

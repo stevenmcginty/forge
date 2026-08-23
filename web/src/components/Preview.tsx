@@ -160,40 +160,54 @@ const claudeStatus: PaneStatus = {
   footer: ['⏵⏵ bypass permissions on (shift+tab to cycle)', 'Opus 4.1 · 23% context · ~/Desktop/forge (master)']
 }
 
-const geminiBlocks: FeedBlock[] = [
-  block('g0', 'system', [line(run('Gemini CLI 0.9 · gemini-2.5-pro', { fg: T.dim }))]),
-  block('g1', 'user', [line('Summarise what changed in the last three commits.')]),
-  block('g2', 'agent', [
-    line(run('✦ ', { fg: T.blue }), 'Three commits, one theme: Forge Web grew a phone face.'),
+const grokBlocks: FeedBlock[] = [
+  block('k0', 'system', [line(run('grok-4.6 · Grok Build', { fg: T.dim }))]),
+  block('k1', 'user', [line('The entry is replicating ten times while you answer.')]),
+  block('k2', 'agent', [
+    line('A frame is a window onto the log, not a replacement for it.'),
     line(''),
-    line(run('  84ed33a', { fg: T.yellow }), '  the conversation scrolls like a page on a phone'),
-    line(run('  de78a0b', { fg: T.yellow }), '  a spacious desktop face and a compact phone face'),
-    line(run('  e421501', { fg: T.yellow }), '  an app around the session, not a terminal in a tab')
+    line('New content only ever appears at the bottom, so the sticky header at the top of each Grok frame is history this feed already holds — taking it again was the ten copies.')
   ]),
-  block('g3', 'tool', [
-    line(run('⏺ ', { fg: T.blue }), run('Shell', { bold: true }), run('(git log --oneline -3)', { fg: T.dim })),
-    line(
-      run('  ⎿  ', { fg: T.dim }),
-      run('84ed33a Forge Web: on a phone, the conversation scrolls like a page.', { fg: T.fg })
-    ),
-    line(
-      run('     ', { fg: T.dim }),
-      run('de78a0b Forge Web: a spacious desktop face and a compact phone face.', { fg: T.fg })
-    ),
-    line(
-      run('     ', { fg: T.dim }),
-      run('e421501 Forge Web: an app around the session, not a terminal in a tab.', { fg: T.fg })
-    )
+  block('k3', 'tool', [
+    line(run('read_file', { bold: true }), run('  src/lib/feed.ts', { fg: T.dim })),
+    line(run('  611  ', { fg: T.dim }), run('export function mergeBlocks(prev, next) {', { fg: T.fg })),
+    line(run('  612  ', { fg: T.dim }), run('  const head = prevBody.slice(0, i)', { fg: T.green }))
   ])
 ]
 
-const geminiStatus: PaneStatus = {
-  model: 'gemini-2.5-pro',
-  mode: 'plan',
-  context: '61%',
+const grokStatus: PaneStatus = {
+  model: 'grok-4.6',
+  mode: 'bypass',
+  modeLabel: 'always-approve',
+  context: '41%',
+  cwd: '~/Desktop/forge',
+  busy: true,
+  activity: 'Thinking',
+  footer: ['always-approve  grok-4.6  41% context  ~/Desktop/forge']
+}
+
+const openCodeBlocks: FeedBlock[] = [
+  block('o0', 'system', [line(run('opencode · build', { fg: T.dim }))]),
+  block('o1', 'user', [line('fix the feed duplications')]),
+  block('o2', 'agent', [
+    line('The merge was prepending the top of each OpenCode frame. A slice cut by the window edge is not a new turn.')
+  ]),
+  block('o3', 'tool', [
+    line(run('# Read', { bold: true }), run('  src/lib/feed.ts', { fg: T.dim })),
+    line(run('  Read 214 lines', { fg: T.dim }))
+  ]),
+  block('o4', 'agent', [
+    line('One command, one bubble — even while the reply is still streaming.')
+  ])
+]
+
+const openCodeStatus: PaneStatus = {
+  model: 'grok-4.6',
+  mode: 'default',
+  context: '58%',
   cwd: '~/Desktop/forge',
   busy: false,
-  footer: ['~/Desktop/forge  no sandbox  gemini-2.5-pro (61% context left)']
+  footer: ['build  grok-4.6  58%  ~/Desktop/forge']
 }
 
 /* ------------------------------------------------------------------ the page */
@@ -212,19 +226,27 @@ const PANES = [
     prompt: ''
   },
   {
-    key: 'gemini',
-    profile: profileOf('gemini') ?? profileOf('antigravity'),
-    blocks: geminiBlocks,
-    status: geminiStatus,
+    key: 'grok',
+    profile: profileOf('grok'),
+    blocks: grokBlocks,
+    status: grokStatus,
+    asking: false,
+    prompt: ''
+  },
+  {
+    key: 'opencode',
+    profile: profileOf('opencode'),
+    blocks: openCodeBlocks,
+    status: openCodeStatus,
     asking: true,
-    prompt: 'Allow Gemini to run `git push origin master`?'
+    prompt: 'Allow OpenCode to edit src/lib/feed.ts?'
   }
 ] as const
 
 export function Preview(): ReactNode {
   const mobile = useMobile()
   const [which, setWhich] = useState(0)
-  const shown = mobile ? [PANES[which]!] : PANES
+  const shown = mobile ? [PANES[which]!] : PANES.filter((p) => p.key !== 'claude')
 
   return (
     <div className="preview" data-mobile={mobile ? 'true' : undefined}>
