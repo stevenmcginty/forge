@@ -34,5 +34,13 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Run the fast check suite
-        run: npm test
+      # The fast lane plus the three heavy checks a hosted runner can actually
+      # satisfy — real pwsh through node-pty, and two real WebSocket servers.
+      # See the `ci` flag in scripts/run-checks.mjs for where the line is drawn
+      # and why it exists: CI used to run the fast lane alone, and web:smoke sat
+      # failing long enough that its lockout phase was asserting a door the code
+      # had deliberately rebuilt. The rest of the heavy lane needs the `claude`
+      # or `codex` CLI, a Firebase emulator, cloud quota or a build artifact, so
+      # it stays `npm run test:all` at a desk.
+      - name: Run the check suite
+        run: npm run test:ci

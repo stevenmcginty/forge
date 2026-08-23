@@ -10,6 +10,9 @@
  *   node scripts/run-checks.mjs          fast lane (default) — self-contained
  *                                        checks: no external CLIs, no build
  *                                        artifacts, no network beyond loopback
+ *   node scripts/run-checks.mjs --ci     the fast lane plus every heavy check
+ *                                        that a hosted runner can actually
+ *                                        satisfy — see `ci` below
  *   node scripts/run-checks.mjs --all    everything, including the smokes that
  *                                        drive real shells, real WebSockets,
  *                                        Firebase emulators, the Gemini bridge,
@@ -34,6 +37,19 @@ const ROOT = resolve(import.meta.dirname, '..')
  * lane: 'heavy' — spawns real shells/sessions, binds service ports, talks to
  *        emulators or live CLIs, or inspects local build output. Needs a
  *        developer machine (and sometimes a build) to mean anything.
+ *
+ * ci: true — a heavy check a hosted runner *can* satisfy, and which therefore
+ *        runs on every push. The bar is hermetic: it may spawn a real shell and
+ *        bind a loopback port, because a Windows runner has a shell and a
+ *        loopback, but it must need no external CLI (`claude`, `codex`), no
+ *        Firebase emulator, no cloud quota and no build artifact. Only the
+ *        three below clear it; the rest of the heavy lane stays a thing you run
+ *        at a desk, which is why `--all` still exists.
+ *
+ *        This flag is here because a whole lane went unwatched: CI ran the fast
+ *        lane alone, so web:smoke sat failing for long enough that its lockout
+ *        phase was asserting a door the code had deliberately rebuilt. A check
+ *        nothing runs is a check that rots.
  */
 const CHECKS = [
   // Pure source parsers (node:module registerHooks, no builds, no children)
@@ -84,15 +100,15 @@ const CHECKS = [
   { name: 'bridge:register', lane: 'heavy', note: 'spawns the claude CLI' },
   { name: 'bridge:smoke', lane: 'heavy', note: 'spawns the bridge server; live tier spends Gemini quota' },
   { name: 'companion:smoke', lane: 'heavy', note: 'needs Firebase emulators on :9000/:9099' },
-  { name: 'mobile:smoke', lane: 'heavy', note: 'real pwsh session over a real WebSocket' },
+  { name: 'mobile:smoke', lane: 'heavy', ci: true, note: 'real pwsh session over a real WebSocket' },
   { name: 'packaged:check', lane: 'heavy', note: 'launches the packaged exe with CDP' },
-  { name: 'pty:smoke', lane: 'heavy', note: 'real pwsh through node-pty' },
+  { name: 'pty:smoke', lane: 'heavy', ci: true, note: 'real pwsh through node-pty' },
   { name: 'remote:check', lane: 'heavy', note: 'spawns a Claude RC pane through node-pty' },
   { name: 'session:check', lane: 'heavy', note: 'runs the claude CLI to check its error surface' },
   { name: 'voice:brain', lane: 'heavy', note: 'spawns a live claude session' },
   { name: 'voice:luna', lane: 'heavy', note: 'spawns the external codex CLI as the Luna brain' },
   { name: 'web:rendezvous', lane: 'heavy', note: 'needs Firebase emulators on :9000/:9099' },
-  { name: 'web:smoke', lane: 'heavy', note: 'real pwsh session over a real WebSocket' }
+  { name: 'web:smoke', lane: 'heavy', ci: true, note: 'real pwsh session over a real WebSocket' }
 ]
 
 /** package.json's script table — the source of truth for what each name runs. */
@@ -103,8 +119,9 @@ function scriptTargets() {
 
 const argv = process.argv.slice(2)
 const wantAll = argv.includes('--all')
+const wantCi = argv.includes('--ci')
 const verbose = argv.includes('--verbose')
-const lane = wantAll ? 'all' : 'fast'
+const lane = wantAll ? 'all' : wantCi ? 'ci' : 'fast'
 
 const scripts = scriptTargets()
 
@@ -115,12 +132,15 @@ if (missing.length > 0) {
   process.exit(1)
 }
 
-const selected = CHECKS.filter((c) => wantAll || c.lane === 'fast')
+const selected = CHECKS.filter((c) => wantAll || c.lane === 'fast' || (wantCi && c.ci))
 
 const OUTPUT_TAIL_ON_FAILURE = 60
-const TIMEOUT_MS = wantAll ? 10 * 60_000 : 5 * 60_000
+// A ci run carries the same real shells and sockets the --all lane does, so it
+// gets the same headroom: the fast lane's five minutes is a budget for parsers.
+const TIMEOUT_MS = wantAll || wantCi ? 10 * 60_000 : 5 * 60_000
 
-console.log(`run-checks: ${selected.length} check(s), lane: ${lane}${wantAll ? '' : ' (use --all for every check)'}\n`)
+const hint = wantAll ? '' : wantCi ? ' (use --all for every check)' : ' (use --ci or --all for more)'
+console.log(`run-checks: ${selected.length} check(s), lane: ${lane}${hint}\n`)
 
 const results = []
 for (const check of selected) {

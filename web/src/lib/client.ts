@@ -74,10 +74,60 @@ const REQUEST_TIMEOUT_MS = 30_000
  * Only the connection badge reads it. The socket's real liveness is the
  * server's native WebSocket ping (HEARTBEAT_MS), which a browser answers in its
  * network stack whether or not the tab is visible; the app-level `ping` this
- * class sends exists for exactly one thing, which shared/web.ts spells out —
- * telling the *page* the link is answering, so the badge is honest.
+ * class sends is what shared/web.ts describes — it tells the *page* the link is
+ * answering, so the badge is honest, and `challenge` below turns that same
+ * answer into the test for whether the socket is still worth keeping.
  */
 const WARM_MS = HEARTBEAT_MS * 2
+
+/**
+ * How long the link has to answer a `ping` before it is treated as dead.
+ *
+ * This is the number that decides how quickly coming back to a tab you left
+ * alone gets you a working connection, and it exists because `readyState` will
+ * not tell you. A laptop that slept, or a phone that backgrounded the tab, has
+ * its socket torn down by the OS without a close frame ever reaching the page:
+ * the browser goes on reporting `OPEN` until its own TCP timeout gives up,
+ * which is minutes. So the only honest test is to ask and see if anything comes
+ * back, and this is how long "anything" gets.
+ *
+ * Three seconds is a generous round trip — through a tunnel, from a phone on
+ * bad mobile data, to a desktop that is busy — and being wrong here is cheap
+ * but not free: a needless reconnect re-attaches every pane and replays every
+ * terminal, which is visible churn. Erring long costs a second; erring short
+ * costs a screen full of repaint.
+ */
+const PROBE_MS = 3_000
+
+/**
+ * How long a freshly-dialled socket has to reach `OPEN`.
+ *
+ * The other half of the same problem. When the desktop's address has moved —
+ * a cloudflared quick tunnel publishes a new hostname every time it restarts —
+ * the dial goes to an address nothing is listening on, and the socket sits in
+ * `CONNECTING` until the OS abandons the handshake, which is anywhere from
+ * thirty seconds to two minutes. `linkInHand` rightly counts that socket as a
+ * link in hand and refuses to open a second one beside it, so without a
+ * deadline here the whole of that wait is dead time no wake-up can shorten.
+ *
+ * Only the network is being timed: nothing on the desktop has been asked to do
+ * any work yet, because `hello` does not go out until the socket opens. Eight
+ * seconds is well past any reachable address and well short of the OS.
+ */
+const CONNECT_TIMEOUT_MS = 8_000
+
+/**
+ * How often the sleep detector reads the clock, and the jump that means the
+ * machine was not running between two of those readings.
+ *
+ * The one wake-up signal a desktop browser does not otherwise give you. A tab
+ * that was in the foreground when the lid closed is still `visible` when it
+ * opens, and no `visibilitychange`, `focus` or `online` need fire — but the
+ * wall clock moved by hours while this interval failed to tick, and that is
+ * observable. See `watchWakeups`.
+ */
+const CLOCK_TICK_MS = 5_000
+const SLEEP_JUMP_MS = CLOCK_TICK_MS * 3
 
 /* ------------------------------------------------------------------- state */
 
@@ -312,6 +362,29 @@ export class ForgeClient {
   private retryTimer: number | null = null
   private beatTimer: number | null = null
   private refreshTimer: number | null = null
+  /** The deadline on an outstanding `challenge`. See PROBE_MS. */
+  private probeTimer: number | null = null
+  /** The deadline on a socket that has not reached `OPEN`. See CONNECT_TIMEOUT_MS. */
+  private connectTimer: number | null = null
+  /**
+   * When the last `ping` went out with nothing heard since, or 0.
+   *
+   * Zeroed by `receive`, so a non-zero value means precisely one thing: this
+   * page asked the desktop a question and not one byte has arrived from it
+   * since. That is the whole liveness test — no elapsed-time arithmetic, no
+   * guessing at what `readyState` means.
+   */
+  private pingedAt = 0
+  /**
+   * True between `hello-ok` and the socket going away.
+   *
+   * A `challenge` may only be sent down an admitted link. The desktop answers
+   * *nothing* but `hello` before it has let a browser in — anything else earns
+   * an `error` frame and a closed socket (see `handle` in
+   * electron/web/server.ts) — so a liveness ping sent a moment too early would
+   * cause the very drop it exists to detect.
+   */
+  private admitted = false
   private closedByUs = false
   /** True once a `refused` frame has decided this link is not coming back. */
   private stopped = false
@@ -467,31 +540,136 @@ export class ForgeClient {
    * Come back the moment the machine does, rather than at the back-off's leisure.
    *
    * The retry loop exists to ride out a link that is down *somewhere between
-   * here and the desktop*. Two events say the fault was on this side and is now
-   * gone: `online` (the radio came back) and a return to visibility with a dead
-   * or closing socket (a phone coming out of an app switch that dropped the
-   * connection). Waiting out up to fifteen seconds of scheduled back-off after
-   * either is time paid for nothing, so both clear the timer and dial now.
+   * here and the desktop*, and these are the events that say the fault was on
+   * this side and is now over. Waiting out up to fifteen seconds of scheduled
+   * back-off after one of them is time paid for nothing.
    *
-   * A live or still-opening link stands down: those events also fire on a tab
-   * merely being looked at again, and `open` would hang up on a working link to
-   * open another one. Neither listener decides that for itself — both hand
-   * straight to `wake`, which asks `linkInHand` once, because the version of
-   * this that tested the socket here was the version that could not see a dial
-   * already in flight and opened a second one.
+   * Four signals, because no one of them covers both clients:
+   *
+   *  - `online`, the radio coming back.
+   *  - `visibilitychange` to visible, a phone returning from an app switch.
+   *  - `focus`, which is the *desktop* version of that and fires where
+   *    `visibilitychange` does not: alt-tabbing to another application leaves
+   *    the tab `visible` throughout, so a browser window that has been in the
+   *    background all afternoon produces no visibility event at all on return.
+   *  - `pageshow`, for a restore out of the back/forward cache, where the page
+   *    resumes with its sockets already torn down and, again, no visibility
+   *    change to announce it.
+   *
+   * And then the case none of the four can see: the machine slept with this tab
+   * in the foreground and woke with it still there. Nothing fires, because from
+   * the page's point of view nothing happened — except that the wall clock
+   * moved by hours while `CLOCK_TICK_MS` failed to tick, which is the whole
+   * signal. See SLEEP_JUMP_MS.
+   *
+   * Every one of them hands to `probe` rather than deciding anything itself.
    */
   private watchWakeups(): void {
-    window.addEventListener('online', () => this.wake())
+    window.addEventListener('online', () => this.probe())
+    window.addEventListener('focus', () => this.probe())
+    window.addEventListener('pageshow', () => this.probe())
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) return
-      this.wake()
+      this.probe()
     })
+    let ticked = Date.now()
+    window.setInterval(() => {
+      const now = Date.now()
+      const slept = now - ticked > SLEEP_JUMP_MS
+      ticked = now
+      if (slept) this.probe()
+    }, CLOCK_TICK_MS)
+  }
+
+  /**
+   * Something says this page has just come back. Get it a working link.
+   *
+   * The hard half is that the socket in hand is usually the problem. Every
+   * wake-up above arrives at a client whose `readyState` says `OPEN`, because
+   * that is what a socket the OS tore down without a close frame says, for
+   * minutes. Standing down on it — which is what a re-dial guard has to do, or
+   * it opens a second socket beside a working one — is how the page came to sit
+   * there disconnected long after the machine was back.
+   *
+   * So this does not stand down on a link in hand; it makes the link prove
+   * itself, and only the failure of that proof reaches the retry loop.
+   * `linkInHand` keeps its job unchanged: nothing here opens a second socket,
+   * because `declareDead` hangs the first one up before dialling.
+   */
+  private probe(): void {
+    if (this.closedByUs || this.stopped || !this.credentials) return
+    // Nothing in hand is the easy case, and the one this always handled.
+    if (!this.linkInHand()) {
+      this.wake()
+      return
+    }
+    // Bytes arrived a moment ago, so there is nothing to prove and no reason to
+    // spend a round trip proving it. This is the common path: `focus` fires on
+    // every click back into the window, against a link that is plainly fine.
+    if (Date.now() - this.lastFrameAt < PROBE_MS) return
+    this.challenge()
   }
 
   /** One immediate re-dial, if there is anything to dial and nothing live. */
   private wake(): void {
     if (this.closedByUs || this.stopped || !this.credentials) return
     if (this.linkInHand()) return
+    this.clearRetry()
+    void this.open()
+  }
+
+  /**
+   * Ask the link to prove it is alive, and hang up on it if it will not.
+   *
+   * Zeroing `pingedAt` before asking is what makes this a test rather than an
+   * inference: at the deadline, a non-zero `pingedAt` means no frame of any
+   * kind has arrived since the question went out, which is the definition of a
+   * socket that is no longer carrying anything. Whatever went unanswered before
+   * now is discarded on purpose — a ping that expired while this tab was
+   * throttled in the background says nothing about a link nobody was listening
+   * to, and treating it as evidence would drop a perfectly good connection
+   * every time somebody came back to the tab.
+   *
+   * Both callers come through here: the wake-ups above, and every beat. That is
+   * deliberate — one mechanism and one tolerance, and a link that dies while
+   * somebody is sitting watching it is noticed a beat and a probe later rather
+   * than whenever the operating system next has an opinion.
+   */
+  private challenge(): void {
+    if (!this.admitted || this.socket?.readyState !== WebSocket.OPEN) return
+    // A question is already outstanding; its deadline answers this one too.
+    if (this.probeTimer !== null) return
+    this.pingedAt = 0
+    if (!this.send({ type: 'ping' })) {
+      // The socket would not take a frame, which settles it without waiting.
+      this.declareDead()
+      return
+    }
+    this.pingedAt = Date.now()
+    this.probeTimer = window.setTimeout(() => {
+      this.probeTimer = null
+      if (this.admitted && this.pingedAt !== 0) this.declareDead()
+    }, PROBE_MS)
+  }
+
+  /**
+   * The link in hand is a corpse. Bury it and dial.
+   *
+   * `dropSocket` takes the old socket's handlers away before closing it, so no
+   * `onclose` arrives to arm a retry behind this one — which is why the dial
+   * happens here rather than being left to the close path.
+   *
+   * The `attempt` floor is the point of the exercise. A dead socket found on a
+   * wake-up is overwhelmingly a machine that has been away a while, and the
+   * thing most likely to have changed while it was away is the desktop's
+   * address. `open` only consults `refindUrl` on a re-connect, so dialling this
+   * one as attempt zero would spend a whole round trip failing against a tunnel
+   * hostname that stopped existing hours ago before it thought to ask where the
+   * desktop actually is.
+   */
+  private declareDead(): void {
+    this.dropSocket()
+    this.attempt = Math.max(this.attempt, 1)
     this.clearRetry()
     void this.open()
   }
@@ -712,6 +890,20 @@ export class ForgeClient {
       // handler below. See `generation`.
       const generation = (this.generation += 1)
       this.lastFrameAt = Date.now()
+      this.pingedAt = 0
+
+      // A socket that never opens has to be given up on by this page, because
+      // the platform will not do it in any useful time. See CONNECT_TIMEOUT_MS.
+      if (this.connectTimer !== null) clearTimeout(this.connectTimer)
+      this.connectTimer = window.setTimeout(() => {
+        this.connectTimer = null
+        if (generation !== this.generation) return
+        if (socket.readyState !== WebSocket.CONNECTING) return
+        // `dropSocket` detaches the handlers, so the `onclose` that would
+        // normally arm the next attempt never comes: this arms it instead.
+        this.dropSocket()
+        this.scheduleRetry()
+      }, CONNECT_TIMEOUT_MS)
 
       /**
        * Has this socket been replaced since it was adopted? Then it is not this
@@ -734,6 +926,10 @@ export class ForgeClient {
 
       socket.onopen = () => {
         if (superseded()) return
+        // Reached the desktop, so the dialling deadline has been met. What
+        // happens to the `hello` from here is the handshake's business.
+        if (this.connectTimer !== null) clearTimeout(this.connectTimer)
+        this.connectTimer = null
         this.lastFrameAt = Date.now()
         // No ping until `hello-ok`. The desktop honours *nothing* but `hello`
         // before a browser has been let in — it answers anything else with an
@@ -801,8 +997,11 @@ export class ForgeClient {
   private receive(raw: string): void {
     // Before parsing and whatever the frame turns out to be: bytes arriving
     // *are* the warmth signal, including the `pong` that exists for no other
-    // reason.
+    // reason. They are also the answer to any outstanding `challenge` — any
+    // frame will do, because what is being tested is whether the socket is
+    // still carrying anything at all, not whether the desktop is polite.
     this.lastFrameAt = Date.now()
+    this.pingedAt = 0
 
     let frame: WebServerFrame
     try {
@@ -1048,17 +1247,39 @@ export class ForgeClient {
    * The page's own warmth ping. Not the heartbeat — that is the server's native
    * WebSocket ping, which this browser answers in its network stack. See
    * HEARTBEAT_MS and the note on WARM_MS.
+   *
+   * Each beat is a `challenge` rather than a bare `ping`, so the answer is
+   * waited on instead of merely hoped for. That is what makes this a heartbeat
+   * in the sense that matters: a link that stops answering is hung up on and
+   * re-dialled within a beat and a probe, rather than sitting there reading
+   * `OPEN` until the browser's own TCP timeout notices, which is minutes.
    */
   private startBeating(): void {
     this.stopBeating()
-    this.beatTimer = window.setInterval(() => this.send({ type: 'ping' }), HEARTBEAT_MS)
+    this.admitted = true
+    this.beatTimer = window.setInterval(() => this.challenge(), HEARTBEAT_MS)
   }
 
+  /**
+   * Stand the link's timers down.
+   *
+   * Called from the two places a connection ends — `onclose` and `dropSocket` —
+   * and from `startBeating` re-arming, which is why every piece of per-socket
+   * liveness state is cleared here rather than at each of those call sites. A
+   * `pingedAt` or an armed probe left over from the last socket would be read
+   * as evidence about the next one.
+   */
   private stopBeating(): void {
     if (this.beatTimer !== null) clearInterval(this.beatTimer)
     this.beatTimer = null
     if (this.refreshTimer !== null) clearInterval(this.refreshTimer)
     this.refreshTimer = null
+    if (this.probeTimer !== null) clearTimeout(this.probeTimer)
+    this.probeTimer = null
+    if (this.connectTimer !== null) clearTimeout(this.connectTimer)
+    this.connectTimer = null
+    this.pingedAt = 0
+    this.admitted = false
   }
 
   /**
