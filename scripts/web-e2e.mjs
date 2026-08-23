@@ -1643,7 +1643,49 @@ async function main() {
     'and a different recovery: sign in as somebody else, against a page that is already coming back on its own'
   )
 
-  /* ====================================== PHASE 4 — the desktop is asleep */
+  /* ====================================== PHASE 4 — the desktop is asleep
+   *
+   * ## The picture this phase needs, and why it has to be made here
+   *
+   * Everything below asserts the *cached* workspace, so this phase needs a
+   * cache — and it cannot inherit one, because phase 3 correctly destroys it.
+   * That phase signs in with `tokenSub` set to `OTHER_UID` to earn a
+   * `wrong-account` refusal, which is a genuine sign-in as a second person, and
+   * `signIn` in web/src/state.tsx answers a uid that is not the cached one by
+   * clearing the snapshot. It has to: SNAPSHOT_VERSION 4 in web/src/lib/cache.ts
+   * exists for exactly that, because a browser lent to somebody else was showing
+   * the first person's projects and transcripts in the frozen view. Neither
+   * phase 3 nor 3b then reaches a `hello-ok`, both being refusals, so nothing
+   * writes a new one.
+   *
+   * So this phase used to run against an empty cache and assert a picture that
+   * had been deliberately deleted three phases earlier. It failed on the rail,
+   * the tabs and the frozen pane — one product behaviour working exactly as
+   * designed, read as three bugs — and it failed silently for as long as it did
+   * because web:e2e needs a browser and so is not one of the checks CI runs.
+   *
+   * The fix is to establish the precondition rather than to weaken the
+   * assertion: sign in once more as the real account against a live desktop, let
+   * a `hello-ok` write the snapshot, and only then take the desktop away. What
+   * follows is unchanged, and now tests what it says it tests.
+   */
+
+  const revivePort = await startPhase()
+  setConfig({ devHost: `127.0.0.1:${revivePort}` })
+  await signInFresh()
+  await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'a live desktop to cache a picture from')
+  await waitFor(
+    () => page.evaluate(() => localStorage.getItem('forge-web-snapshot') !== null),
+    15_000,
+    'the picture to reach the offline cache'
+  )
+  log(
+    await page.evaluate(() => {
+      const raw = localStorage.getItem('forge-web-snapshot')
+      return raw !== null && (JSON.parse(raw).projects ?? []).length > 0
+    }),
+    'a browser that has seen this desktop has its picture written down, which is what the rest of this phase reads'
+  )
 
   if (server) await server.stop()
   server = null
@@ -1727,7 +1769,26 @@ async function main() {
 
   publish(OLD_HOST)
   setConfig({})
-  await signInFresh()
+  /*
+   * Reloaded rather than signed into afresh, and the difference is the whole
+   * of the last assertion in this phase.
+   *
+   * `signInFresh` clears `forge-web-auth`, and a page that loads with no stored
+   * session drops the offline snapshot on mount — deliberately, because a
+   * browser nobody is signed into must not still be holding somebody's projects
+   * and transcripts. Every address in this phase is under `.invalid`, so nothing
+   * here ever reaches a `hello-ok` to write a new one, and the stranded handoff
+   * below therefore had no frozen picture to hand the page back *to*: it fell
+   * through to `Unpaired` — "No PC is publishing for this account" — under a
+   * message that said the opposite, which is that an address had been published
+   * and was not answering.
+   *
+   * Phase 4 leaves exactly what is wanted: a valid session and a cached picture
+   * of this desktop. Nothing in this phase changes `tokenSub`, which is the one
+   * thing `signInFresh` exists to keep honest, so inheriting both costs no
+   * assertion and buys the precondition the stranded case is written about.
+   */
+  await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' })
   await waitFor(() => dialled.some((url) => url.includes(OLD_HOST)), 30_000, 'the first dial')
   log(true, `a live record is dialled at the address it publishes (wss://${OLD_HOST}/web)`)
   const readsAtFirstDial = rtdbReads.length
