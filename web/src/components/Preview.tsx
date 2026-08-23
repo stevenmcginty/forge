@@ -1,6 +1,8 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import type { AgentProfile, ClaudePermissionMode } from '@shared/types'
 import { agentModels, BUILTIN_AGENT_PROFILES, effortLevels, matchAgentModel, permissionModes } from '@shared/agents'
+import { Icon } from '@/components/Icon'
+import { mergeBlocks, richFromText, transcriptFromLines } from '@/lib/feed'
 import { useMobile } from '../lib/mobile'
 import type { FeedBlock, PaneStatus, PermissionMode, RichLine, Run } from '@/lib/rich'
 import { AgentStatus } from './AgentStatus'
@@ -160,31 +162,57 @@ const claudeStatus: PaneStatus = {
   footer: ['⏵⏵ bypass permissions on (shift+tab to cycle)', 'Opus 4.1 · 23% context · ~/Desktop/forge (master)']
 }
 
-const grokBlocks: FeedBlock[] = [
-  block('k0', 'system', [line(run('grok-4.6 · Grok Build', { fg: T.dim }))]),
-  block('k1', 'user', [line('The entry is replicating ten times while you answer.')]),
-  block('k2', 'agent', [
-    line('A frame is a window onto the log, not a replacement for it.'),
-    line(''),
-    line('New content only ever appears at the bottom, so the sticky header at the top of each Grok frame is history this feed already holds — taking it again was the ten copies.')
-  ]),
-  block('k3', 'tool', [
-    line(run('read_file', { bold: true }), run('  src/lib/feed.ts', { fg: T.dim })),
-    line(run('  611  ', { fg: T.dim }), run('export function mergeBlocks(prev, next) {', { fg: T.fg })),
-    line(run('  612  ', { fg: T.dim }), run('  const head = prevBody.slice(0, i)', { fg: T.green }))
-  ])
+/**
+ * Grok's pane is not hand-built.
+ *
+ * It is ten redraws of one streaming turn, each put through the real parser
+ * and folded together by the real merge — because the bug this pane exists to
+ * show only happens *between* frames. Grok's composer is unlike anybody
+ * else's: an ASCII spinner rather than braille, a bare `2.2s` counter, a bar
+ * over each turn carrying a context figure that moves, and a quota footer
+ * under the box. A ticking line that survives the cut cannot match the frame
+ * before it, so the entry stacked down the feed once per second. A hand-written
+ * block list can never catch that; ten frames through `mergeBlocks` can.
+ */
+const GROK_REPLY = [
+  'New content only ever appears at the bottom of a frame, so everything above the',
+  'aligned region is history the log already holds. Prepending it was the ten copies.',
+  '',
+  'Grok draws none of its chrome the way the others do:',
+  '',
+  '  • an ASCII spinner, |/-\\, rather than a braille one',
+  '  • a bare 2.2s counter rather than a bracketed (2s)',
+  '  • a bar over each turn whose context figure moves',
+  '  • a quota footer under the box, which nothing else prints',
+  '',
+  'All four now come off the screen before the cut, so a redraw is the same cards.'
 ]
 
-const grokStatus: PaneStatus = {
-  model: 'grok-4.6',
-  mode: 'bypass',
-  modeLabel: 'always-approve',
-  context: '41%',
-  cwd: '~/Desktop/forge',
-  busy: true,
-  activity: 'Thinking',
-  footer: ['always-approve  grok-4.6  41% context  ~/Desktop/forge']
+function grokFrame(n: number): string {
+  return [
+    'Grok 4.6',
+    '',
+    '≡ master ~\\Desktop\\forge                                        7.8K / 500K',
+    '  The entry is replicating ten times while you answer.            12:40 PM',
+    '',
+    'A frame is a window onto the log, not a replacement for it.',
+    '',
+    // The reply *grows*, the way a streamed one does: frame n holds every
+    // sentence frame n-1 held, plus one more.
+    ...GROK_REPLY.slice(0, n),
+    '',
+    `| Waiting for response… ${n}.2s  ${n}.2s ↓7.84k [stop]`,
+    '',
+    '> ',
+    'Weekly limit left: 3% · Grok 4.6 (high)'
+  ].join('\n')
 }
+
+const grokFrames = Array.from({ length: GROK_REPLY.length }, (_, i) =>
+  transcriptFromLines(richFromText(grokFrame(i + 1)))
+)
+const grokBlocks: FeedBlock[] = grokFrames.reduce<FeedBlock[]>((log, frame) => mergeBlocks(log, frame.blocks), [])
+const grokStatus: PaneStatus = grokFrames[grokFrames.length - 1]!.status
 
 const openCodeBlocks: FeedBlock[] = [
   block('o0', 'system', [line(run('opencode · build', { fg: T.dim }))]),
@@ -223,6 +251,7 @@ const PANES = [
     blocks: claudeBlocks,
     status: claudeStatus,
     asking: false,
+    cut: false,
     prompt: ''
   },
   {
@@ -231,6 +260,9 @@ const PANES = [
     blocks: grokBlocks,
     status: grokStatus,
     asking: false,
+    // The trim seam: Grok's fixture is a windowed log, which is exactly the
+    // transcript shape a clipped catch-up buffer produces.
+    cut: true,
     prompt: ''
   },
   {
@@ -239,11 +271,15 @@ const PANES = [
     blocks: openCodeBlocks,
     status: openCodeStatus,
     asking: true,
+    cut: false,
     prompt: 'Allow OpenCode to edit src/lib/feed.ts?'
   }
 ] as const
 
 export function Preview(): ReactNode {
+  // `?phone` lives in useMobile now, so the page and every component inside it
+  // read one answer. This used to be a local override, which dressed the CSS as
+  // a phone while the components below were still told desktop.
   const mobile = useMobile()
   const [which, setWhich] = useState(0)
   const shown = mobile ? [PANES[which]!] : PANES.filter((p) => p.key !== 'claude')
@@ -260,8 +296,9 @@ export function Preview(): ReactNode {
         </div>
       ) : null}
       <div className="preview__row">
-        {shown.map(({ key, ...p }) => (
-          <PreviewPane key={key} {...p} />
+        {shown.map(({ key, cut, ...p }) => (
+          // The chip leaves the phone chrome, so the seam is the phone's story.
+          <PreviewPane key={key} {...p} cut={cut && mobile} />
         ))}
       </div>
     </div>
@@ -273,16 +310,19 @@ function PreviewPane({
   blocks: initial,
   status,
   asking,
+  cut,
   prompt
 }: {
   profile: AgentProfile
   blocks: FeedBlock[]
   status: PaneStatus
   asking: boolean
+  cut: boolean
   prompt: string
 }): ReactNode {
   const [draft, setDraft] = useState('')
   const [live, setLive] = useState(true)
+  const [view, setView] = useState<'feed' | 'term'>('feed')
   const [blocks, setBlocks] = useState(initial)
   const roster = agentModels(profile.command)
   const levels = effortLevels(profile.command)
@@ -301,18 +341,38 @@ function PreviewPane({
   }, [profile])
   return (
     <div className="preview__pane" style={{ '--pane-accent': profile.accent } as CSSProperties}>
-      <section className="pane" data-view="feed" data-focused="true" data-kind="agent">
+      <section className="pane" data-view={view} data-focused="true" data-kind="agent">
         <header className="pane__header">
           <span className="pane__title truncate">{profile.name}</span>
-          <button type="button" className="pane__perm mono" onClick={() => setLive((v) => !v)}>
-            {live ? 'live' : 'offline'}
-          </button>
+          <div className="pane__trailing">
+            <button type="button" className="pane__perm mono" onClick={() => setLive((v) => !v)}>
+              {live ? 'live' : 'offline'}
+            </button>
+            <div className="pane__actions">
+              <button
+                type="button"
+                className="ghost-btn pane__action"
+                title={view === 'feed' ? 'Show the terminal' : 'Show as cards'}
+                aria-pressed={view === 'feed'}
+                onClick={() => setView((current) => (current === 'feed' ? 'term' : 'feed'))}
+              >
+                <Icon name={view === 'feed' ? 'terminal' : 'note'} size={13} />
+              </button>
+              <button type="button" className="ghost-btn pane__action" data-danger="true" title="Close pane" disabled>
+                <Icon name="close" size={13} />
+              </button>
+            </div>
+          </div>
         </header>
         <div className="pane__stage">
-          <Feed blocks={blocks} status={status} asking={asking} prompt={prompt} empty="Waiting for the desktop…" />
+          {view === 'feed' ? (
+            <Feed blocks={blocks} status={status} asking={asking} prompt={prompt} cut={cut} empty="Waiting for the desktop…" />
+          ) : (
+            <pre className="pane__terminal preview__term">{blocks.map((b) => b.text).join('\n\n')}</pre>
+          )}
         </div>
       </section>
-      <div className="session-composer">
+      <div className="session-composer" data-view={view}>
         <AgentStatus profile={profile} status={status} live={live} />
         <Composer
           draft={draft}

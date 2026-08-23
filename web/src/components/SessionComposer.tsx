@@ -17,7 +17,7 @@ import {
 } from '@shared/agents'
 import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { packImage } from '../lib/image'
-import { usePaneStatus } from '../lib/pane-status'
+import { usePaneStatus, usePaneView } from '../lib/pane-status'
 import type { PermissionMode } from '@/lib/rich'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStatus } from './AgentStatus'
@@ -69,6 +69,7 @@ export function SessionComposer(): ReactNode {
   const leaf = tab && paneId ? findLeaf(tab.root, paneId) : null
   const profile = leaf ? resolveProfile(profiles, leaf.profileId) : null
   const status = usePaneStatus(paneId)
+  const view = usePaneView(paneId)
   const project = state.picture?.projects?.find((p) => p.id === state.projectId)?.name ?? ''
 
   const sendImages = useCallback(
@@ -253,7 +254,7 @@ export function SessionComposer(): ReactNode {
   const currentModelId = matchAgentModel(roster, status?.model)?.id ?? null
 
   return (
-    <div className="session-composer">
+    <div className="session-composer" data-view={view}>
       {profile ? <AgentStatus profile={profile} status={status} live={canType} /> : null}
       <Composer
         draft={draft}

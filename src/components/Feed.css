@@ -75,6 +75,35 @@
   animation: feed-breathe 2.4s var(--ease-in-out) infinite;
 }
 
+/*
+ * The trim, marked where it happened. A transcript whose catch-up buffer hit
+ * its ceiling begins mid-stream, and the honest place to say so is the top of
+ * the column — a dashed seam, like a torn edge — not a chip in the chrome.
+ * Whisper-quiet on purpose: it is context, not state.
+ */
+.feed__cut {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  color: var(--text-dim);
+}
+
+.feed__cut::before,
+.feed__cut::after {
+  content: '';
+  flex: 1 1 auto;
+  border-top: 1px dashed var(--line-strong);
+}
+
+.feed__cut-text {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
 /* ----------------------------------------------------------- blocks */
 
 .feed__block {

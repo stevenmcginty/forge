@@ -7,7 +7,7 @@ import { transcriptFor } from '../lib/cache'
 import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines } from '@/lib/feed'
 import { imageFilesFromDataTransfer, packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
-import { publishPaneStatus } from '../lib/pane-status'
+import { publishPaneStatus, publishPaneView } from '../lib/pane-status'
 import type { Transcript } from '@/lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
 import { useForge, useProfiles } from '../state'
@@ -228,7 +228,16 @@ export function PaneView({
   useEffect(() => {
     publishPaneStatus(leaf.id, transcript.status)
   }, [leaf.id, transcript.status])
-  useEffect(() => () => publishPaneStatus(leaf.id, undefined), [leaf.id])
+  useEffect(() => {
+    publishPaneView(leaf.id, view)
+  }, [leaf.id, view])
+  useEffect(
+    () => () => {
+      publishPaneStatus(leaf.id, undefined)
+      publishPaneView(leaf.id, undefined)
+    },
+    [leaf.id]
+  )
 
   /* ------------------------------------------------------ the live terminal */
 
@@ -502,81 +511,94 @@ export function PaneView({
         <AgentBadge profile={profile} size="sm" />
         <span className="pane__title truncate">{paneDisplayTitle(profile, leaf.title)}</span>
 
-        {asking ? (
-          <span className="pane__perm mono" title="This pane has settled on a question and is waiting on an answer">
-            WAITING
-          </span>
-        ) : null}
-        {truncated ? (
-          <span
-            className="pane__perm mono"
-            title="The catch-up buffer was cut at its ceiling, so this transcript begins mid-sentence"
-          >
-            CUT
-          </span>
-        ) : null}
-        {cached ? (
-          <span className="pane__perm mono" data-frozen="true" title="The last transcript this browser was sent">
-            FROZEN
-          </span>
-        ) : null}
         {/*
-          Not the same chip and not the same news. FROZEN says there is no
-          desktop; this says there is one and the link to it dropped, so what is
-          on screen is where the pane had got to and the catch-up buffer will
-          repaint it the moment the socket is back.
+          Chips and actions travel as one trailing cluster. On a phone the
+          title hides in cards view; if close lived outside this group, a
+          `row-reverse` header used to shove it to the other side of the screen
+          the moment the name came back.
         */}
-        {!cached && !live ? (
-          <span
-            className="pane__perm mono"
-            data-reconnecting="true"
-            title="The link dropped — this is where the pane had got to, and it repaints when it comes back"
-          >
-            RECONNECTING
-          </span>
-        ) : null}
+        <div className="pane__trailing">
+          {asking ? (
+            <span className="pane__perm mono" title="This pane has settled on a question and is waiting on an answer">
+              WAITING
+            </span>
+          ) : null}
+          {/*
+            On a phone the trim is marked where it happened — a seam at the top
+            of the feed (`cut` on <Feed/>) — instead of spending thumb-width
+            chrome on an internal flag. The chip stays on the wide layout.
+          */}
+          {truncated && !mobile ? (
+            <span
+              className="pane__perm mono"
+              title="The catch-up buffer was cut at its ceiling, so this transcript begins mid-sentence"
+            >
+              CUT
+            </span>
+          ) : null}
+          {cached ? (
+            <span className="pane__perm mono" data-frozen="true" title="The last transcript this browser was sent">
+              FROZEN
+            </span>
+          ) : null}
+          {/*
+            Not the same chip and not the same news. FROZEN says there is no
+            desktop; this says there is one and the link to it dropped, so what is
+            on screen is where the pane had got to and the catch-up buffer will
+            repaint it the moment the socket is back.
+          */}
+          {!cached && !live ? (
+            <span
+              className="pane__perm mono"
+              data-reconnecting="true"
+              title="The link dropped — this is where the pane had got to, and it repaints when it comes back"
+            >
+              RECONNECTING
+            </span>
+          ) : null}
 
-        <div className="pane__actions">
-          {agent ? (
+          <div className="pane__actions">
+            {agent ? (
+              <button
+                type="button"
+                className="ghost-btn pane__action"
+                title={feed ? 'Show the terminal' : 'Show as cards'}
+                aria-pressed={feed}
+                onClick={() => setView((current) => (current === 'feed' ? 'term' : 'feed'))}
+              >
+                <Icon name={feed ? 'terminal' : 'note'} size={13} />
+              </button>
+            ) : null}
+            <button
+              ref={splitRef}
+              type="button"
+              className="ghost-btn pane__action"
+              title="Split right"
+              disabled={!live}
+              onClick={() => setChooser('row')}
+            >
+              <Icon name="splitRight" size={13} />
+            </button>
             <button
               type="button"
               className="ghost-btn pane__action"
-              title={feed ? 'Show the terminal' : 'Show as cards'}
-              aria-pressed={feed}
-              onClick={() => setView((current) => (current === 'feed' ? 'term' : 'feed'))}
+              title="Split down"
+              disabled={!live}
+              onClick={() => setChooser('column')}
             >
-              <Icon name={feed ? 'terminal' : 'note'} size={13} />
+              <Icon name="splitDown" size={13} />
             </button>
-          ) : null}
-          <button
-            ref={splitRef}
-            type="button"
-            className="ghost-btn pane__action"
-            title="Split right"
-            disabled={!live}
-            onClick={() => setChooser('row')}
-          >
-            <Icon name="splitRight" size={13} />
-          </button>
-          <button
-            type="button"
-            className="ghost-btn pane__action"
-            title="Split down"
-            disabled={!live}
-            onClick={() => setChooser('column')}
-          >
-            <Icon name="splitDown" size={13} />
-          </button>
-          <button
-            type="button"
-            className="ghost-btn pane__action"
-            data-danger="true"
-            title={onlyPane ? 'Close tab' : 'Close pane'}
-            disabled={!live}
-            onClick={() => void actions.layout({ op: 'close-pane', paneId: leaf.id })}
-          >
-            <Icon name="close" size={13} />
-          </button>
+            <button
+              type="button"
+              className="ghost-btn pane__action"
+              data-danger="true"
+              title={onlyPane ? 'Close tab' : 'Close pane'}
+              disabled={!live}
+              onClick={() => void actions.layout({ op: 'close-pane', paneId: leaf.id })}
+            >
+              <Icon name="close" size={13} />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -601,6 +623,7 @@ export function PaneView({
             asking={asking}
             prompt={prompt}
             empty={cached ? 'Nothing of this pane was cached.' : 'Waiting for the desktop…'}
+            cut={truncated && mobile}
             pageTui={tui && live}
             onTuiScroll={onTuiScroll}
           />

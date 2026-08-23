@@ -430,6 +430,74 @@ ok(
 )
 ok(spinningBlocks.some((b) => b.role === 'agent' && /Checking the suite/.test(b.text)), 'the sentence before it stays')
 
+console.log("grok's own composer, which is nothing like anybody else's")
+// The real thing: an ASCII spinner rather than braille, a bare `2.2s` rather
+// than a bracketed one, and a quota footer under the box. None of the rules
+// written for Claude, Gemini or Codex names any of it.
+const grokFrame = (n) =>
+  [
+    'Grok 4.6',
+    '',
+    '≡ master ~\\Desktop\\forge                                     7.8K / 500K',
+    '  Have a look at the two screenshots and answer me this.        12:40 PM',
+    '',
+    `| Waiting for response… ${n}.2s  ${n}.2s ↓7.84k [stop]`,
+    '',
+    '> ',
+    'Weekly limit left: 3% · Grok 4.6 (high)'
+  ].join('\n')
+
+const grokLive = screen(grokFrame(2))
+ok(!inAnyBlock(grokLive.blocks, /Weekly limit left/), 'the quota footer is not a card')
+ok(!inAnyBlock(grokLive.blocks, /Waiting for response/), 'the ASCII spinner is not a card')
+ok(!inAnyBlock(grokLive.blocks, /500K/), 'nor is the turn bar, whose context figure moves')
+ok(
+  grokLive.blocks.some((b) => b.role === 'user' && /Have a look at the two screenshots/.test(b.text)),
+  'the bar opens a user card and the message is in it'
+)
+is(grokLive.status.model, 'Grok 4.6', 'the footer names the model')
+is(grokLive.status.context, '7.8K / 500K', 'and the bar gives the context clock')
+ok(grokLive.status.busy, 'the spinner still says busy')
+
+// The bug as it was seen: one question, ten redraws, ten copies of the entry.
+let grokLog = blocksFromCapture(grokFrame(1))
+for (let n = 2; n <= 10; n++) grokLog = mergeBlocks(grokLog, blocksFromCapture(grokFrame(n)))
+is(
+  grokLog.filter((b) => b.role === 'user').length,
+  1,
+  'a ticking counter does not stack the entry once per frame'
+)
+
+// The id is React's key, so two cards sharing one is a card that vanishes.
+const grokIds = grokLog.map((b) => b.id)
+is(new Set(grokIds).size, grokIds.length, 'every card in a merged log has an id of its own')
+
+// A frame's tail numbers itself from its own length, so it collides with the
+// log it is being folded into. That is the shape that used to leak two
+// `agent-2`s into the same render.
+const collide = mergeBlocks(
+  [
+    { id: 'agent-0', role: 'agent', lines: [], text: 'first' },
+    { id: 'user-1', role: 'user', lines: [], text: 'ask' },
+    { id: 'agent-2', role: 'agent', lines: [], text: 'second' }
+  ],
+  [
+    { id: 'user-1', role: 'user', lines: [], text: 'ask' },
+    { id: 'agent-2', role: 'agent', lines: [], text: 'second' },
+    { id: 'agent-2', role: 'agent', lines: [], text: 'third' }
+  ]
+)
+is(new Set(collide.map((b) => b.id)).size, collide.length, 'a colliding tail is renumbered, not handed over twice')
+ok(collide.some((b) => b.text === 'third'), 'and the new card is still there')
+
+// The eating rule stays the strict one: prose that quotes a duration is a
+// sentence, not a spinner, even when it opens with a dash.
+const prose = blocksFromCapture(['> time it', '', '- the build took 2.4s, which is fine'].join('\n'))
+ok(
+  prose.some((b) => b.role === 'agent' && /the build took 2\.4s/.test(b.text)),
+  'a prose bullet with a duration in it is not eaten as chrome'
+)
+
 if (fail) {
   console.log(`\n${fail} failed, ${pass} passed`)
   process.exit(1)

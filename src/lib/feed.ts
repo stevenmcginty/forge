@@ -169,6 +169,45 @@ const SPINNER_GLYPH = /^\s*[✢✳✶✻✽✻◐◓◑◒·*+•●○◆◇]\s
 /** An elapsed-time counter, which no prose line has. */
 const ELAPSED = /\(\s*\d+s\b/
 
+/**
+ * Grok's live line, which none of the rules above sees.
+ *
+ * It cycles an ASCII spinner (`|` `/` `-` `\`) rather than braille, writes its
+ * counter bare (`2.2s`) rather than bracketed, and ends in the tokens it has
+ * streamed and a `[stop]` hint:
+ *
+ *     | Waiting for response… 2.2s  2.2s ↓7.84k [stop]
+ *
+ * Because the counter ticks, a frame that kept this line never matched the
+ * frame before it, so every redraw minted another copy of the turn — the same
+ * entry stacked down the feed once per second. The `[stop]` / `↓ tokens` tail
+ * is what keeps this off a prose bullet that happens to quote a duration.
+ */
+const GROK_BUSY = /^[|/\\-]\s.*\b\d+(?:\.\d+)?s\b.*(?:\[stop\]|[↓↑]\s*[\d.]+k?\b)/i
+
+/**
+ * Grok's footer: what is left of the plan's quota, then the model.
+ *
+ *     Weekly limit left: 3% · Grok 4.6 (high)
+ *
+ * Nothing else on the screen says this, and `splitTail` stops dead at the first
+ * line it cannot name — so until this existed the walk up the screen ate
+ * *nothing*, and Grok's whole composer stayed in the conversation.
+ */
+const QUOTA_LINE = /\b(?:weekly|daily|monthly|hourly)\s+limit\s+left\b/i
+
+/**
+ * The bar Grok draws over each turn: branch, cwd, and the context clock.
+ *
+ *     ≡ master ~\Desktop\forge                          7.8K / 500K
+ *
+ * It marks a user turn the way `> ` does for Claude Code, so it opens a user
+ * card — and, like `> `, the marker itself is dropped rather than shown. The
+ * context figure on it moves, and a card carrying a moving number can never
+ * match its own next frame.
+ */
+const GROK_BAR = /^[≡☰]\s.*\b\d+(?:\.\d+)?[KM]\s*\/\s*\d+(?:\.\d+)?[KM]\b/
+
 /** A word that is being done to you — "Thinking…", "Baking…", "Working…". */
 const ACTIVITY = /([A-Z][A-Za-z]+(?:\s[a-z]+)?)…/
 
@@ -185,6 +224,7 @@ function busyLine(flat: string): boolean {
   if (!flat) return false
   if (BUSY_HINT.test(flat)) return true
   if (BRAILLE.test(flat)) return true
+  if (GROK_BUSY.test(flat)) return true
   if (SPINNER_GLYPH.test(flat) && flat.includes('…')) return true
   return /^[A-Z][A-Za-z]+(?:\s[a-z]+)?…\s*$/.test(flat)
 }
@@ -197,6 +237,7 @@ function spinnerChrome(flat: string): boolean {
   // ellipsis; that line is chrome, not a sentence. Requiring `…` left those
   // frames in the body, and each one became a new card as the counter ticked.
   if (BRAILLE.test(flat) && (flat.includes('…') || ELAPSED.test(flat) || flat.length < 48)) return true
+  if (GROK_BUSY.test(flat)) return true
   if (SPINNER_GLYPH.test(flat) && flat.includes('…') && ELAPSED.test(flat)) return true
   return SPINNER_GLYPH.test(flat) && flat.includes('…') && flat.length < 40
 }
@@ -207,6 +248,7 @@ function chromeLine(flat: string): boolean {
   if (LIVE_PROMPT.test(flat) || RULE.test(flat) || PLACEHOLDER.test(flat)) return true
   if (MODE_LINE.test(flat) || CODEX_FOOTER.test(flat)) return true
   if (CONTEXT_LINE.test(flat)) return true
+  if (QUOTA_LINE.test(flat)) return true
   if (HINT_LINE.test(flat)) return true
   if (spinnerChrome(flat)) return true
   return PATH_LINE.test(flat) && flat.length < 120
@@ -273,7 +315,9 @@ const MODEL_PATTERNS: RegExp[] = [
   /\b((?:opus|sonnet|haiku)\s+\d+(?:\.\d+)?)\b/i,
   /\b(gemini-[\w.-]+)/i,
   /\b(gpt-[\w.-]+)/i,
-  /\b(grok-[\w.-]+)/i
+  /\b(grok-[\w.-]+)/i,
+  // Grok's footer spells it out rather than using the slug: `Grok 4.6 (high)`.
+  /\b(grok\s+\d+(?:\.\d+)?)\b/i
 ]
 
 /**
@@ -298,7 +342,9 @@ const CONTEXT_PATTERNS: RegExp[] = [
   /context left until auto-compact\s*:\s*(\d+%)/i,
   /(\d+%)\s*context left/i,
   /context(?: left| remaining| used)?\s*:\s*(\d+%)/i,
-  /(\d+(?:\.\d+)?k)\s*(?:tokens\s*)?left/i
+  /(\d+(?:\.\d+)?k)\s*(?:tokens\s*)?left/i,
+  // Grok's bar prints used over budget: `7.8K / 500K`.
+  /(\d+(?:\.\d+)?[KM]\s*\/\s*\d+(?:\.\d+)?[KM])\b/
 ]
 
 /** A cwd as any of the three shells Forge launches prints one. */
@@ -492,6 +538,7 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
     i < body.length &&
     !USER_TURN.test(body[i]!.flat) &&
     !USER_HEADER.test(body[i]!.flat) &&
+    !GROK_BAR.test(body[i]!.flat) &&
     isBanner(body[i]!.flat)
   ) {
     if (body[i]!.flat) banner.push(body[i]!.rich)
@@ -514,6 +561,17 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
     // window, not only the footer) is chrome. Leaving it in would mint a
     // new agent card every time the counter ticked.
     if (spinnerChrome(line.flat)) continue
+
+    // Grok's `≡ branch cwd  7.8K / 500K` bar opens a turn the way `You` does,
+    // and is dropped rather than shown: the context figure on it moves, and a
+    // card that carries a moving number cannot match its own next frame.
+    if (GROK_BAR.test(line.flat)) {
+      flush(blocks, role, buf)
+      role = 'user'
+      buf = []
+      headerPending = true
+      continue
+    }
 
     if (USER_HEADER.test(line.flat)) {
       flush(blocks, role, buf)
@@ -628,11 +686,24 @@ function nextId(role: FeedRole, used: Set<string>): string {
   return id
 }
 
+/**
+ * Give every card in the merged log an id no other card has.
+ *
+ * A block keeps the id it arrived with whenever that id is still free, because
+ * the id is React's key and a card that changes key is a card that remounts —
+ * losing an expanded tool result, a text selection, the scroll under a thumb.
+ * Only a collision mints a new one, and `nextId` reserves as it goes, so two
+ * cards can never leave here as the same key. They used to: the guard read
+ * "already taken? then keep it", which handed React two `agent-2`s the moment
+ * a frame's tail numbered itself over a block the log already held.
+ */
 function withIds(blocks: FeedBlock[], used: Set<string>): FeedBlock[] {
   return blocks.map((block) => {
-    if (used.has(block.id)) return block
-    const id = nextId(block.role, used)
-    return block.id === id ? block : { ...block, id }
+    if (block.id && !used.has(block.id)) {
+      used.add(block.id)
+      return block
+    }
+    return { ...block, id: nextId(block.role, used) }
   })
 }
 

@@ -1864,19 +1864,26 @@
   font-weight: 700;
 }
 
-.app[data-mobile] .pane__header {
+/*
+ * Identity leading, chrome trailing — always. A previous `row-reverse` put
+ * the name on the right, which was fine until cards view hid that name and
+ * the remaining close / terminal buttons packed to the opposite edge. The
+ * thumb should not have to hunt for close after a view flip.
+ */
+.app[data-mobile] .pane__header,
+[data-mobile] .pane__header {
   height: 44px;
   padding: 0 var(--s-3);
   gap: var(--s-2);
   display: flex;
-  flex-direction: row-reverse;
+  flex-direction: row;
   align-items: center;
 }
 
 .app[data-mobile] .pane__title {
   font-size: 14.5px;
   font-weight: 700;
-  text-align: right;
+  text-align: left;
   flex: 1;
   min-width: 0;
 }
@@ -1908,7 +1915,7 @@
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text-primary);
-  text-align: right;
+  text-align: left;
 }
 
 .app[data-mobile] .pane[data-kind='agent'] .pane__header .agent-badge {
@@ -1956,7 +1963,8 @@
   animation: astatus-pulse 1.6s infinite;
 }
 
-.app[data-mobile] .pane[data-kind='agent'] .pane__action {
+.app[data-mobile] .pane[data-kind='agent'] .pane__action,
+[data-mobile] .pane[data-kind='agent'] .pane__action {
   width: 34px;
   height: 34px;
   border-radius: 8px;
@@ -1973,6 +1981,14 @@
   background: color-mix(in srgb, var(--pane-accent, var(--accent)) 25%, rgba(255, 255, 255, 0.08));
   color: var(--text-primary);
   border-color: var(--pane-accent, var(--accent));
+}
+
+.pane__trailing {
+  display: flex;
+  align-items: center;
+  gap: inherit;
+  margin-left: auto;
+  flex: none;
 }
 
 .app[data-mobile] .pane__actions {
@@ -2817,8 +2833,65 @@ button.astatus__mode:not(:disabled):hover {
   padding-left: var(--s-6);
 }
 
-[data-mobile] .pane[data-view='feed'][data-kind='agent']:has(.pane__actions) .pane__title,
-[data-mobile] .pane[data-view='feed'][data-kind='agent']:has(.pane__actions) .pane__header .agent-badge {
+[data-mobile] .pane[data-kind='agent']:has(.pane__actions) .pane__title,
+[data-mobile] .pane[data-kind='agent']:has(.pane__actions) .pane__header .agent-badge {
+  display: none;
+}
+
+/*
+ * An agent pane on a phone: the content is the page, in both faces. The name
+ * already lives on the tab strip and the status strip, so the header collapses
+ * to its trailing cluster (live chips, terminal / close) and floats over the
+ * feed *and* the terminal instead of holding a 44px bar that repeats the
+ * answer. One element, one corner, both views — the controls cannot teleport
+ * on a view flip because they never move. Shells keep the solid bar: a prompt
+ * has no status strip speaking for it.
+ */
+[data-mobile] .pane[data-kind='agent'] .pane__header,
+.app[data-mobile] .pane[data-kind='agent'] .pane__header,
+.app[data-mobile] .pane[data-kind='agent'][data-focused='true'] .pane__header {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: auto;
+  z-index: 3;
+  width: auto;
+  height: auto;
+  padding: var(--s-3) var(--s-4) 0 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+[data-mobile] .pane[data-kind='agent'] .pane__trailing {
+  margin-left: 0;
+  padding: 3px 3px 3px 8px;
+  gap: 4px;
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-key);
+}
+
+[data-mobile] .pane[data-view='feed'] .feed__scroll {
+  padding-top: 52px;
+  scroll-padding-top: 52px;
+}
+
+/*
+ * The terminal face of the same pane: the pill floats at the same corner, so
+ * the grid starts below it — the same 52px the feed reserves. FitAddon reads
+ * the container's computed padding, so the rows simply begin under the pill
+ * rather than being covered by it.
+ */
+.app[data-mobile] .pane[data-kind='agent'][data-view='term'] .pane__terminal,
+[data-mobile] .pane[data-kind='agent'][data-view='term'] .pane__terminal {
+  padding-top: 52px;
+}
+
+/* Arrow / Tab / Ctrl / Esc drive the TUI. Cards view is a conversation. */
+[data-mobile] .session-composer[data-view='feed'] .composer__keys {
   display: none;
 }
 
@@ -2940,10 +3013,21 @@ button.astatus__mode:not(:disabled):hover {
   padding: 0 var(--s-1);
 }
 
+/* One chip, not three: a phone opens Model, Effort and Mode in a single sheet,
+ * so the row's whole width belongs to it. A long model name truncates rather
+ * than wrapping the toolbar onto a second line above the box. */
 [data-mobile] .composer__pick {
-  height: 28px;
+  height: 32px;
+  max-width: 100%;
+  min-width: 0;
   padding: 0 10px 0 12px;
   font-size: 11px;
+}
+
+[data-mobile] .composer__pick-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 [data-mobile] .composer__keys {
@@ -3134,10 +3218,20 @@ button.astatus__mode:not(:disabled):hover {
   border-radius: 0;
 }
 
+.preview__term {
+  margin: 0;
+  padding: var(--s-5);
+  overflow: auto;
+  color: var(--text-secondary);
+  font: 12.5px / 1.45 var(--font-mono);
+  white-space: pre-wrap;
+}
+
 @media (prefers-reduced-transparency: reduce) {
   .composer__card,
   .feed__jump,
-  [data-mobile] .session-composer {
+  [data-mobile] .session-composer,
+  [data-mobile] .pane[data-kind='agent'] .pane__trailing {
     background: var(--bg-panel-raised);
     backdrop-filter: none;
   }

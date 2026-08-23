@@ -22,12 +22,34 @@ import { useEffect, useState } from 'react'
  */
 const MOBILE = '(pointer: coarse) and (max-width: 900px)'
 
+/**
+ * `?phone` on the dev server: answer yes without a finger.
+ *
+ * A laptop dragged to 390px has a mouse, so `(pointer: coarse)` is false and
+ * this hook — correctly — says desktop. That is the right answer for a person,
+ * and the wrong one for looking at the phone face, which is the only way most
+ * of this gets reviewed. Without the override the two halves disagreed: the
+ * app's `data-mobile` attribute came from a Preview-local `?phone` escape
+ * hatch, so the CSS wore the phone face while every component asking this hook
+ * was still told desktop — a preview that lies about exactly the thing it
+ * exists to show. One source, so both halves say the same word.
+ *
+ * `__DEV_SERVER__` is false in everything `vite build` emits, so no published
+ * bundle can be talked into the phone face by a query string.
+ */
+function askedPhone(): boolean {
+  if (!__DEV_SERVER__ || typeof window === 'undefined') return false
+  return new URLSearchParams(window.location.search).has('phone')
+}
+
 export function useMobile(): boolean {
-  const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia(MOBILE).matches)
+  const [mobile, setMobile] = useState(
+    () => askedPhone() || (typeof window !== 'undefined' && window.matchMedia(MOBILE).matches)
+  )
 
   useEffect(() => {
     const query = window.matchMedia(MOBILE)
-    const update = (): void => setMobile(query.matches)
+    const update = (): void => setMobile(askedPhone() || query.matches)
     update()
     query.addEventListener('change', update)
     return () => query.removeEventListener('change', update)

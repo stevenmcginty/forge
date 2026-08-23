@@ -36,6 +36,7 @@ export function Feed({
   asking,
   prompt,
   empty,
+  cut,
   pageTui,
   onTuiScroll
 }: {
@@ -44,6 +45,12 @@ export function Feed({
   asking: boolean
   prompt: string
   empty: string
+  /**
+   * The catch-up buffer met its ceiling, so the transcript starts mid-stream.
+   * Marked as a seam at the top of the column — where the cut actually is —
+   * rather than as a chip in the pane chrome.
+   */
+  cut?: boolean
   /**
    * This pane is an alt-screen TUI (Grok, OpenCode). The cards are a snapshot
    * of the current frame, so native overflow has nothing older to reveal —
@@ -220,6 +227,15 @@ export function Feed({
         onTouchCancel={onTouchEnd}
       >
         <div className="feed__column">
+          {cut && blocks.length ? (
+            <div
+              className="feed__cut"
+              role="note"
+              title="The catch-up buffer met its ceiling — output before this point was trimmed, so the transcript starts mid-stream."
+            >
+              <span className="feed__cut-text">earlier output trimmed</span>
+            </div>
+          ) : null}
           {blocks.length === 0 ? (
             <div className="feed__empty">
               <span className="feed__empty-dot" />

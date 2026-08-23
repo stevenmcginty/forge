@@ -10,7 +10,7 @@ import {
   type ReactNode
 } from 'react'
 import { Icon } from '@/components/Icon'
-import { Popover, PopoverRow, PopoverSection } from '@/components/Popover'
+import { Popover, PopoverDivider, PopoverRow, PopoverSection } from '@/components/Popover'
 import type { ClaudePermissionMode } from '@shared/types'
 import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
 import { imageFilesFromDataTransfer, isImageFile } from '../lib/image'
@@ -23,7 +23,9 @@ import { useMobile } from '../lib/mobile'
  * and the words after — one gesture, one turn.
  *
  * Model, Effort and Mode sit just above the textarea — not in the arrow row —
- * and each opens a dropdown of *this* pane's own rungs. A shell has none.
+ * and each opens a dropdown of *this* pane's own rungs. A shell has none. A
+ * phone has no room for three of them, so it wears one chip — the pane's model
+ * name, coloured by its permission mode — opening all three lists in one sheet.
  *
  * Spellcheck and autocapitalize stay on. The hidden xterm helper turns them
  * off because an IME double-fires into a TUI; this field is a normal box.
@@ -99,11 +101,15 @@ export function Composer({
    * is `String.fromCharCode(letter − 64)` and nothing more.
    */
   const [ctrl, setCtrl] = useState(false)
-  /** Which of the chips above the box is open. One at a time. */
-  const [openPick, setOpenPick] = useState<'model' | 'effort' | 'mode' | null>(null)
+  /**
+   * Which of the chips above the box is open. One at a time — and on a phone
+   * there is only one chip, `'all'`, whose sheet holds all three sections.
+   */
+  const [openPick, setOpenPick] = useState<'model' | 'effort' | 'mode' | 'all' | null>(null)
   const modelRef = useRef<HTMLButtonElement | null>(null)
   const effortRef = useRef<HTMLButtonElement | null>(null)
   const modeRef = useRef<HTMLButtonElement | null>(null)
+  const allRef = useRef<HTMLButtonElement | null>(null)
   const [pickedEffort, setPickedEffort] = useState<EffortLevel | null>(null)
 
   const modelList = models ?? []
@@ -113,6 +119,93 @@ export function Composer({
     (onModel && modelList.length > 0) || (onEffort && effortList.length > 0) || (onMode && modeList.length > 0)
   const currentModel = currentModelId ? (modelList.find((m) => m.id === currentModelId) ?? null) : null
   const currentMode = currentModeId ? (modeList.find((m) => m.id === currentModeId) ?? null) : null
+  const effortLabel = pickedEffort ? (effortList.find((l) => l.id === pickedEffort)?.label ?? null) : null
+  /** Bypass is red, plan is blue, accept-edits is green — on whichever chip carries the mode. */
+  const modeTone =
+    currentModeId === 'bypass'
+      ? 'bypass'
+      : currentModeId === 'plan'
+        ? 'plan'
+        : currentModeId === 'acceptEdits'
+          ? 'accept-edits'
+          : undefined
+
+  /*
+   * The three lists, written once. A phone stacks all three into one sheet
+   * behind a single chip; a desktop keeps a chip and a sheet per list.
+   */
+  const modelSection =
+    onModel && modelList.length ? (
+      <PopoverSection title="Model">
+        {modelList.map((model) => (
+          <PopoverRow
+            key={model.id}
+            selected={model.id === currentModelId}
+            onClick={() => {
+              setOpenPick(null)
+              onModel(model.id)
+            }}
+          >
+            <span className="ceffort">
+              <strong className="ceffort__label">{model.label}</strong>
+              {model.note ? <span className="ceffort__note">{model.note}</span> : null}
+            </span>
+          </PopoverRow>
+        ))}
+      </PopoverSection>
+    ) : null
+  const effortSection =
+    onEffort && effortList.length ? (
+      <PopoverSection title="Effort">
+        {effortList.map((level) => (
+          <PopoverRow
+            key={level.id}
+            selected={level.id === pickedEffort}
+            onClick={() => {
+              setOpenPick(null)
+              setPickedEffort(level.id)
+              onEffort(level.id)
+            }}
+          >
+            <span className="ceffort">
+              <strong className="ceffort__label">{level.label}</strong>
+              <span className="ceffort__note">{level.note}</span>
+            </span>
+          </PopoverRow>
+        ))}
+      </PopoverSection>
+    ) : null
+  const modeSection =
+    onMode && modeList.length ? (
+      <PopoverSection title="Mode">
+        {modeList.map((mode) => (
+          <PopoverRow
+            key={mode.id}
+            selected={mode.id === currentModeId}
+            danger={mode.danger}
+            onClick={() => {
+              setOpenPick(null)
+              onMode(mode.id)
+            }}
+          >
+            <span className="ceffort">
+              <strong className="ceffort__label">{mode.label}</strong>
+              <span className="ceffort__note">{mode.note}</span>
+            </span>
+          </PopoverRow>
+        ))}
+      </PopoverSection>
+    ) : null
+  /*
+   * What the phone's one chip says. The model is the most identifying thing a
+   * pane has, so it goes first; a pane with no model roster falls back to its
+   * mode, then its effort — the same words the three desktop chips wear.
+   */
+  const allLabel = modelSection
+    ? (currentModel?.label ?? 'Model')
+    : modeSection
+      ? (currentMode?.label ?? 'Mode')
+      : (effortLabel ?? 'Effort')
 
   useEffect(() => {
     if (autoFocus) field.current?.focus()
@@ -203,7 +296,41 @@ export function Composer({
       <div className="composer__card">
         {showPicks ? (
           <div className="composer__picks" role="toolbar" aria-label="Agent settings">
-            {onModel && modelList.length ? (
+            {mobile ? (
+              <>
+                <button
+                  ref={allRef}
+                  type="button"
+                  className="composer__pick"
+                  data-active={openPick === 'all' ? 'true' : undefined}
+                  data-mode={modeTone}
+                  aria-haspopup="menu"
+                  aria-expanded={openPick === 'all'}
+                  onClick={() => setOpenPick((v) => (v === 'all' ? null : 'all'))}
+                  disabled={disabled}
+                  title="Model, effort and permissions for this pane"
+                >
+                  <span className="composer__pick-label">{allLabel}</span>
+                  <Icon name="chevronDown" size={10} />
+                </button>
+                <Popover
+                  anchor={allRef.current}
+                  open={openPick === 'all'}
+                  onClose={() => setOpenPick(null)}
+                  align="start"
+                  side="top"
+                  width={272}
+                  label="Agent settings"
+                >
+                  {modelSection}
+                  {modelSection && (effortSection || modeSection) ? <PopoverDivider /> : null}
+                  {effortSection}
+                  {effortSection && modeSection ? <PopoverDivider /> : null}
+                  {modeSection}
+                </Popover>
+              </>
+            ) : null}
+            {!mobile && onModel && modelList.length ? (
               <button
                 ref={modelRef}
                 type="button"
@@ -219,7 +346,7 @@ export function Composer({
                 <Icon name="chevronDown" size={10} />
               </button>
             ) : null}
-            {onEffort && effortList.length ? (
+            {!mobile && onEffort && effortList.length ? (
               <button
                 ref={effortRef}
                 type="button"
@@ -231,25 +358,17 @@ export function Composer({
                 disabled={disabled}
                 title="Effort — how hard the model works on the next turns"
               >
-                {pickedEffort ? effortList.find((l) => l.id === pickedEffort)?.label ?? 'Effort' : 'Effort'}
+                {effortLabel ?? 'Effort'}
                 <Icon name="chevronDown" size={10} />
               </button>
             ) : null}
-            {onMode && modeList.length ? (
+            {!mobile && onMode && modeList.length ? (
               <button
                 ref={modeRef}
                 type="button"
                 className="composer__pick"
                 data-active={openPick === 'mode' ? 'true' : undefined}
-                data-mode={
-                  currentModeId === 'bypass'
-                    ? 'bypass'
-                    : currentModeId === 'plan'
-                      ? 'plan'
-                      : currentModeId === 'acceptEdits'
-                        ? 'accept-edits'
-                        : undefined
-                }
+                data-mode={modeTone}
                 aria-haspopup="menu"
                 aria-expanded={openPick === 'mode'}
                 onClick={() => setOpenPick((v) => (v === 'mode' ? null : 'mode'))}
@@ -260,7 +379,7 @@ export function Composer({
                 <Icon name="chevronDown" size={10} />
               </button>
             ) : null}
-            {onModel && modelList.length ? (
+            {!mobile && modelSection ? (
               <Popover
                 anchor={modelRef.current}
                 open={openPick === 'model'}
@@ -270,26 +389,10 @@ export function Composer({
                 width={272}
                 label="Model"
               >
-                <PopoverSection title="Model">
-                  {modelList.map((model) => (
-                    <PopoverRow
-                      key={model.id}
-                      selected={model.id === currentModelId}
-                      onClick={() => {
-                        setOpenPick(null)
-                        onModel(model.id)
-                      }}
-                    >
-                      <span className="ceffort">
-                        <strong className="ceffort__label">{model.label}</strong>
-                        {model.note ? <span className="ceffort__note">{model.note}</span> : null}
-                      </span>
-                    </PopoverRow>
-                  ))}
-                </PopoverSection>
+                {modelSection}
               </Popover>
             ) : null}
-            {onEffort && effortList.length ? (
+            {!mobile && effortSection ? (
               <Popover
                 anchor={effortRef.current}
                 open={openPick === 'effort'}
@@ -299,27 +402,10 @@ export function Composer({
                 width={272}
                 label="Effort"
               >
-                <PopoverSection title="Effort">
-                  {effortList.map((level) => (
-                    <PopoverRow
-                      key={level.id}
-                      selected={level.id === pickedEffort}
-                      onClick={() => {
-                        setOpenPick(null)
-                        setPickedEffort(level.id)
-                        onEffort(level.id)
-                      }}
-                    >
-                      <span className="ceffort">
-                        <strong className="ceffort__label">{level.label}</strong>
-                        <span className="ceffort__note">{level.note}</span>
-                      </span>
-                    </PopoverRow>
-                  ))}
-                </PopoverSection>
+                {effortSection}
               </Popover>
             ) : null}
-            {onMode && modeList.length ? (
+            {!mobile && modeSection ? (
               <Popover
                 anchor={modeRef.current}
                 open={openPick === 'mode'}
@@ -329,24 +415,7 @@ export function Composer({
                 width={272}
                 label="Mode"
               >
-                <PopoverSection title="Mode">
-                  {modeList.map((mode) => (
-                    <PopoverRow
-                      key={mode.id}
-                      selected={mode.id === currentModeId}
-                      danger={mode.danger}
-                      onClick={() => {
-                        setOpenPick(null)
-                        onMode(mode.id)
-                      }}
-                    >
-                      <span className="ceffort">
-                        <strong className="ceffort__label">{mode.label}</strong>
-                        <span className="ceffort__note">{mode.note}</span>
-                      </span>
-                    </PopoverRow>
-                  ))}
-                </PopoverSection>
+                {modeSection}
               </Popover>
             ) : null}
           </div>
