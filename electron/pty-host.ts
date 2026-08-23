@@ -46,11 +46,22 @@ const FLUSH_BYTES = 64 * 1024
 const GEMINI_CLI_MODEL = 'gemini-3.6-flash'
 const REPLAY_LIMIT = 192 * 1024
 
+/**
+ * Home, erase the screen, erase the scrollback. What a replay buffer is reset
+ * to when the grid it was recorded at stops existing — see `noteWidth`.
+ */
+const CLEAR_SCREEN = '\x1b[H\x1b[2J\x1b[3J'
+
 let manager: PtySessionManager | null = null
 let target: BrowserWindow | null = null
 
 const pending = new Map<string, string[]>()
 const replay = new Map<string, string>()
+/**
+ * The width each session's replay buffer was recorded at. See `noteWidth` — the
+ * buffer is only meaningful at this number, so this is kept beside it.
+ */
+const widths = new Map<string, number>()
 let flushTimer: NodeJS.Timeout | null = null
 
 /**
@@ -146,8 +157,18 @@ export function addPtySink(sink: PtySink): () => void {
  * Everything that would provoke a reply is stripped on the way out — see
  * electron/pty/replay.ts. A repaint must not re-ask a live program's startup
  * questions on its behalf.
+ *
+ * The coalescing timer is flushed first, and that is not a detail: `remember`
+ * runs the instant a chunk arrives, but the same chunk is not *sent* until the
+ * next flush up to FLUSH_MS later. Anything sitting in `pending` is therefore
+ * already inside the buffer this function returns and is also about to be
+ * delivered as ordinary `data` — so a consumer that repaints from a replay and
+ * appends what follows would draw those bytes twice. Flushing here collapses
+ * that window to nothing: everything in the buffer has already been sent, and
+ * nothing else is in flight behind it.
  */
 export function getReplay(id: string): string {
+  flush()
   return withoutQuestions(replay.get(id) ?? '')
 }
 
@@ -172,6 +193,11 @@ function scheduleFlush(): void {
 }
 
 function flush(): void {
+  // Cancelled rather than merely forgotten, because `flush` is no longer only
+  // ever called *by* that timer: `getReplay` calls it directly, and leaving the
+  // old timer armed would let it fire a beat later against a map somebody else
+  // has since refilled, sending a half-batch early for no reason.
+  if (flushTimer) clearTimeout(flushTimer)
   flushTimer = null
   if (pending.size === 0) return
   for (const [id, chunks] of pending) {
@@ -189,6 +215,54 @@ function remember(id: string, data: string): void {
   // that sees every chunk a pane prints, and "has this pane been quiet" is what
   // decides whether another agent may type into it. See electron/share-link.ts.
   link?.noteOutput(id)
+}
+
+/**
+ * The replay buffer belongs to one width, and this is where it finds out the
+ * width has moved.
+ *
+ * A terminal's output is not a picture. A TUI redraws by rewinding (`ESC[nA`),
+ * erasing (`ESC[J`, `ESC[2K`) and re-emitting its frame, and those instructions
+ * only collapse back into a single screen when they are replayed at the number
+ * of columns they were emitted at. Replay 192KB of a 150-column redraw stream
+ * into a 44-column terminal and every recorded line wraps onto four rows, so
+ * every rewind travels a quarter of the distance it meant to and every erase
+ * clears a quarter of what it meant to: each frame lands *below* its
+ * predecessor instead of on top of it. An agent redrawing once a second fills
+ * this buffer with tens to hundreds of frames, and a phone attaching to a pane
+ * that has been running at the desk's grid sees every one of them stacked up
+ * the scrollback. That is the endlessly repeating text.
+ *
+ * So the buffer is single-grid by construction: the moment the *width* changes
+ * it is thrown away and replaced with a clean screen, and the redraw that the
+ * SIGWINCH provokes refills it a few milliseconds later at the new width.
+ *
+ * **Width only, never height.** Rows moving does not reflow a single recorded
+ * line, so a rows-only change leaves the buffer perfectly replayable — and
+ * resetting on rows would destroy the scrollback every time a phone keyboard
+ * opened, which is several times a minute.
+ *
+ * The cost is real and worth stating: terminal scrollback recorded before a
+ * width change is gone, and a pane whose contents are *static* (a plain shell's
+ * prompt, the "not installed" notice) has nothing that will redraw it, so it
+ * comes back as a clean screen rather than as what was on it. That is the price
+ * of the buffer not being corrupt, and it is the cheaper half of the trade: the
+ * conversation feed keeps its own cached transcript, so the history a person
+ * actually reads back survives this untouched.
+ */
+function noteWidth(id: string, cols: number): void {
+  const previous = widths.get(id)
+  widths.set(id, cols)
+  // No previous width means this session has only just been recorded — there is
+  // nothing in the buffer that was written at a different one.
+  if (previous === undefined || previous === cols) return
+  replay.set(id, CLEAR_SCREEN)
+}
+
+/** A session's real grid, or null. `manager` rather than getManager(): asking must not create one. */
+function sessionGrid(id: string): { cols: number; rows: number } | null {
+  const session = manager?.list().find((s) => s.id === id)
+  return session ? { cols: session.cols, rows: session.rows } : null
 }
 
 /* ------------------------------------------------- one pane, another's inbox
@@ -329,6 +403,19 @@ function clearJiggle(id: string): void {
  */
 function resizeForViewer(id: string, cols: number, rows: number, viewer: string): boolean {
   clearJiggle(id)
+  // Nothing to do, and it has to be said *here*.
+  //
+  // The equality guard downstream in PtySessionManager only sees the size it is
+  // handed, and the jiggle below never hands it the size it asked for: the first
+  // half is deliberately `rows - 1`, which is never a no-op against a PTY that
+  // is already at `rows`. So a viewer re-attaching with the size it was already
+  // reading at — every idle reconnect on a flaky phone link — used to shrink the
+  // real ConPTY by a row and grow it back 60ms later. That is two SIGWINCHes and
+  // two full agent repaints for a wish that asked for nothing, and on a link
+  // that reconnects every few seconds it is the pump that fills the replay
+  // buffer with duplicate frames.
+  const grid = sessionGrid(id)
+  if (grid && grid.cols === cols && grid.rows === rows) return true
   if (viewer === DESK_VIEWER || rows < 3) return getManager().resize(id, cols, rows)
   const ok = getManager().resize(id, cols, rows - 1)
   jiggles.set(
@@ -419,6 +506,15 @@ export function getManager(): PtySessionManager {
       maxSessions: MAX_SESSIONS,
       onData: queue,
       onResize: (id, cols, rows) => {
+        // First, and before anybody is told: the replay buffer stops being
+        // replayable the instant the width moves, and a sink that reacts to this
+        // by asking for one must get the clean screen rather than a screenful of
+        // stacked frames. This is the right hook because it is the *only* place
+        // in Forge that hears about a grid actually taking — it fires from
+        // `applyResize` after ConPTY has accepted it and after the record has
+        // been updated, so it is never called for a resize that was clamped away
+        // or that asked for the size the pane already had.
+        noteWidth(id, cols)
         toSinks((sink) => sink.onResize?.(id, cols, rows))
         // And this desktop's own renderer, which is a follower like any other
         // whenever a phone or a browser is the one holding this pane's grid.
@@ -434,6 +530,7 @@ export function getManager(): PtySessionManager {
           toSinks((sink) => sink.onData(id, data))
         }
         live.delete(id)
+        widths.delete(id)
         clearJiggle(id)
         // Nothing in the registry outlives the session it describes — and a
         // reused pane id must not inherit a dead pane's owner.
@@ -694,6 +791,14 @@ export function registerPtyHandlers(): void {
     // anything that was not watching when it first started.
     toSinks((sink) => sink.onSpawn?.(spec.id))
 
+    // The width the buffer below is being recorded at, from the manager rather
+    // than from the request: `create` clamps, and a seed that disagreed with the
+    // real grid would make the very next resize look like a width change and
+    // throw away a screen nothing had moved. A re-adopted session keeps whatever
+    // it was already running at.
+    const spawned = sessionGrid(spec.id)
+    if (spawned) widths.set(spec.id, spawned.cols)
+
     if (existed) {
       // A wish, like every other size this desk asks for: granted when nothing
       // remote is holding this pane, stored when something is.
@@ -731,6 +836,7 @@ export function registerPtyHandlers(): void {
 
   ipcMain.handle(IPC.ptyKill, (_e, id: string) => {
     replay.delete(String(id))
+    widths.delete(String(id))
     pending.delete(String(id))
     live.delete(String(id))
     clearJiggle(String(id))
@@ -758,6 +864,7 @@ export function disposePtyHost(): void {
   owners.clear()
   pending.clear()
   replay.clear()
+  widths.clear()
   live.clear()
   sinks.clear()
   manager?.killAll()

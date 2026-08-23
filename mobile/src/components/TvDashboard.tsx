@@ -1335,7 +1335,14 @@ function TvPaneView({
     attach(session.id, (data, replay) => {
       // The replay is the whole screen; without the reset a reconnect stacks
       // a second copy of the scrollback under the first (see PaneView).
-      if (replay) term.reset()
+      //
+      // The reset has to be *queued*, not called. `term.reset()` acts on the
+      // buffer the instant it runs, while `write` only puts bytes in a queue
+      // that drains later — so a bare reset clears a screen that has not been
+      // painted yet and lets the backlog paint after it, which is the stacking
+      // it was meant to prevent. The empty write is the queue position: the
+      // reset happens where this line is, not before the bytes ahead of it.
+      if (replay) term.write('', () => term.reset())
       term.write(data)
     })
     return () => {

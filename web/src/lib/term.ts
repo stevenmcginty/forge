@@ -82,8 +82,25 @@ export interface TermHost {
    */
   follow: (size: { cols: number; rows: number } | null) => void
   write: (data: string, after?: () => void) => void
-  /** Wipe screen and scrollback — used before painting a replay buffer. */
-  reset: () => void
+  /**
+   * Wipe the screen and scrollback and paint a catch-up buffer over it, ordered
+   * against everything already queued.
+   *
+   * Deliberately *not* a `reset()` the caller can pair with a `write()` of its
+   * own, because those two are not on the same clock. `term.reset()` acts on the
+   * buffer the instant it is called, while `write()` only ever *queues* — xterm
+   * parses in 12ms slices off a timer (see `WriteBuffer`) — so a bare reset
+   * before a write clears a screen the live bytes have not been painted onto
+   * yet, and then lets that backlog paint *after* the wipe and *before* the
+   * replay. Since the replay is the tail of the same stream, every byte in that
+   * backlog is in the replay too, and the overlap lands on screen twice. One
+   * duplicate copy per reconnect, and a phone reconnects constantly.
+   *
+   * So the reset is sequenced through the same FIFO as the bytes it is meant to
+   * come after. See the implementation for why an empty write is a legitimate
+   * queue position.
+   */
+  repaint: (data: string, after?: () => void) => void
   /**
    * The screen as text, scrollback included. Used by the conversation feed so
    * the page can draw cards without being the TUI. Same join as a desktop
@@ -704,7 +721,19 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
       if (after) term.write(data, after)
       else term.write(data)
     },
-    reset: () => term.reset(),
+    repaint: (data, after) => {
+      // The empty write is the queue position, and it is a real one: xterm's
+      // `WriteBuffer.write` has no short-circuit for zero-length data — it
+      // pushes the chunk and its callback like any other — and `_innerWrite`
+      // walks the buffer by index rather than shifting, so a chunk that parses
+      // to nothing still fires its callback in turn. (`writeSync` *would* stop
+      // on it, because that path shifts and an empty string is falsy; nothing
+      // here calls it.) So this callback runs exactly where the caller meant
+      // the wipe to happen: after every live byte that arrived before the
+      // replay, and before the replay itself.
+      term.write('', () => term.reset())
+      term.write(data, after)
+    },
     capture: () => {
       const buffer = term.buffer.active
       const rows: BufferRow[] = []

@@ -83,10 +83,18 @@ export function PaneView({ link, session, title, fontSize, onBack }: PaneViewPro
     term.fit()
 
     // A replay frame is the whole screen, so the terminal is cleared before it
-    // is painted. Without the reset, a reconnect stacks a second copy of the
-    // scrollback underneath the first.
+    // is painted. Without that, a reconnect stacks a second copy of the
+    // scrollback underneath the first. One `repaint` rather than a `reset`
+    // followed by a `write`, because the wipe has to be *ordered* against the
+    // live bytes still sitting unparsed in xterm's write queue — a bare reset
+    // clears only what has already been painted and lets the rest paint after
+    // it, which is the same duplicate copy by a slower route. See `repaint` in
+    // lib/term.ts.
     const off = linkSubscribe(link, session.id, (data, replay) => {
-      if (replay) term.reset()
+      if (replay) {
+        term.repaint(data)
+        return
+      }
       term.write(data)
     })
 

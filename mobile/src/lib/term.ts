@@ -66,8 +66,35 @@ export interface TermHost {
    */
   follow: (size: { cols: number; rows: number } | null) => void
   write: (data: string) => void
-  /** Wipe the screen and scrollback — used before painting a replay buffer. */
+  /**
+   * Wipe the screen and scrollback.
+   *
+   * Not the thing to reach for before painting a replay buffer — see `repaint`,
+   * which is that, correctly ordered. This stays because a caller that owns the
+   * whole of a terminal's life and simply wants it blank has no ordering
+   * problem to solve.
+   */
   reset: () => void
+  /**
+   * Wipe the screen and scrollback and paint a catch-up buffer over it, ordered
+   * against everything already queued.
+   *
+   * Deliberately *not* a `reset()` the caller can pair with a `write()` of its
+   * own, because those two are not on the same clock. `term.reset()` acts on the
+   * buffer the instant it is called, while `write()` only ever *queues* — xterm
+   * parses in 12ms slices off a timer (see `WriteBuffer`) — so a bare reset
+   * before a write clears a screen the live bytes have not been painted onto
+   * yet, and then lets that backlog paint *after* the wipe and *before* the
+   * replay. Since the replay is the tail of the same stream, every byte in that
+   * backlog is in the replay too, and the overlap lands on screen twice. That is
+   * the reconnect that stacks a second copy of the scrollback under the first,
+   * and a phone reconnects constantly.
+   *
+   * So the reset is sequenced through the same FIFO as the bytes it is meant to
+   * come after. See the implementation for why an empty write is a legitimate
+   * queue position.
+   */
+  repaint: (data: string) => void
   focus: () => void
   dispose: () => void
 }
@@ -88,6 +115,19 @@ export interface TermOptions {
  * handset's width before it is reached.
  */
 const MIN_FONT_PX = 7
+
+/**
+ * How long the holder has to hold still before it is worth refitting.
+ *
+ * The web client reads its equivalent off `--dur-med`, because there the thing
+ * being waited out is a CSS transition and a number invented in that file would
+ * drift the moment somebody retimed the rail. Here the thing being waited out is
+ * Android's keyboard slide, which is the platform's animation and not one this
+ * app times, so there is no token to read — and this is deliberately the same
+ * number `onViewportSettled` has always debounced by, since the two are waiting
+ * out the same event from opposite ends.
+ */
+const SETTLE_MS = 160
 
 export function mountTerm(container: HTMLElement, options: TermOptions): TermHost {
   const term = new Terminal({
@@ -235,8 +275,40 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
    * Kept alongside `onViewportSettled` in PaneView rather than replacing it: an
    * Android soft keyboard changes the *visual viewport* without necessarily
    * changing this element's layout box, and only one of the two sees each case.
+   *
+   * ## And the throttle, which is the other half of it
+   *
+   * A box does not change once when it changes. The soft keyboard *animates*
+   * open, so the holder shrinks on every frame of that slide, and each frame
+   * that lands on a new cols/rows is a `pty:resize` the shell answers with a
+   * full TUI redraw — plus, on the desktop side, a jiggle pair per resize. An
+   * unthrottled observer therefore turns one keyboard opening into a dozen
+   * reflows of the thing you were trying to read. `onViewportSettled` has
+   * debounced its own path since it was written; this one never did.
+   *
+   * Same shape as web/src/lib/term.ts, for the same reasons: every observation
+   * in one animation frame is coalesced into a single callback, the first one
+   * after a quiet spell is acted on immediately — a pane that has just mounted
+   * must not sit at 80×24 for the length of an animation it is not part of —
+   * and everything after that waits until the box has been still for
+   * `SETTLE_MS`. An animation therefore costs two fits rather than one per
+   * frame, and only the ones that actually changed the geometry send anything,
+   * because `fit` returns null otherwise.
    */
-  const observer = new ResizeObserver(() => fit())
+  let frame = 0
+  let settling = 0
+  const observer = new ResizeObserver(() => {
+    if (frame) return
+    frame = requestAnimationFrame(() => {
+      frame = 0
+      if (settling) clearTimeout(settling)
+      else fit()
+      settling = window.setTimeout(() => {
+        settling = 0
+        fit()
+      }, SETTLE_MS)
+    })
+  })
   observer.observe(container)
 
   return {
@@ -250,8 +322,23 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     },
     write: (data) => term.write(data),
     reset: () => term.reset(),
+    repaint: (data) => {
+      // The empty write is the queue position, and it is a real one: xterm's
+      // `WriteBuffer.write` has no short-circuit for zero-length data — it
+      // pushes the chunk and its callback like any other — and `_innerWrite`
+      // walks the buffer by index rather than shifting, so a chunk that parses
+      // to nothing still fires its callback in turn. (`writeSync` *would* stop
+      // on it, because that path shifts and an empty string is falsy; nothing
+      // here calls it.) So this callback runs exactly where the caller meant
+      // the wipe to happen: after every live byte that arrived before the
+      // replay, and before the replay itself.
+      term.write('', () => term.reset())
+      term.write(data)
+    },
     focus: () => term.focus(),
     dispose: () => {
+      if (frame) cancelAnimationFrame(frame)
+      if (settling) clearTimeout(settling)
       observer.disconnect()
       releaseTouch()
       term.dispose()
@@ -407,7 +494,7 @@ function enableTouchScroll(
  * listening to both is how a terminal ends up the wrong size in exactly one
  * configuration.
  */
-export function onViewportSettled(run: () => void, delay = 160): () => void {
+export function onViewportSettled(run: () => void, delay = SETTLE_MS): () => void {
   let timer: number | null = null
   const schedule = (): void => {
     if (timer !== null) clearTimeout(timer)

@@ -509,13 +509,23 @@ interface Client {
   /** Sessions this browser is reading. */
   subs: Set<string>
   /**
-   * Whether this tab is on screen, as its last `visibility` request said.
+   * Whether this tab is on screen, as its last `visibility` request said —
+   * `null` while it has never said.
    *
-   * False until a browser says otherwise, which is the safe default in the one
-   * place it is read: a socket whose visibility is unknown must not be able to
-   * swallow a push somebody is waiting for. See `anyVisible`.
+   * Three states rather than two, because the two readers want opposite
+   * defaults for a silent socket. `anyVisible` must treat "unknown" as *not*
+   * visible, or a socket that never reports could swallow a push somebody is
+   * waiting for. `pushData` must treat "unknown" as *not hidden*, or a client
+   * that does not implement this request at all (the smoke harnesses, an older
+   * page) would silently receive no terminal output. So only an explicit
+   * `visible: false` withholds bytes.
    */
-  visible: boolean
+  visible: boolean | null
+  /**
+   * Sessions whose output was dropped while this tab was off screen, waiting to
+   * be repainted when it comes back. See `pushData` and `catchUpStale`.
+   */
+  stale: Set<string>
   /** The second the input counter belongs to, and its tally. See `allowInput`. */
   inputSecond: number
   inputCount: number
@@ -716,10 +726,35 @@ export class WebServer {
 
   /* -------------------------------------------------------------- outbound */
 
-  /** Terminal output from pty-host. Only reaches browsers that attached to it. */
+  /**
+   * Terminal output from pty-host. Only reaches browsers that attached to it —
+   * and only those with the page actually on screen.
+   *
+   * A backgrounded tab is not a slow consumer, it is a stopped one. The socket
+   * keeps servicing network events perfectly well in the background, so the
+   * frames keep arriving; what stops is the *parser*, which is driven from a
+   * `setTimeout` that Chrome throttles to once a second and that iOS Safari
+   * suspends outright. So a phone with Forge Web behind another app drains
+   * roughly twelve milliseconds of parsing per second against an inflow nothing
+   * is limiting, and the backlog only grows. Past a 50MB watermark xterm's
+   * `WriteBuffer.write` *throws*, and it throws inside the client's data
+   * listener loop — taking out every other pane's listener for that frame with
+   * it. Sending those bytes at all is the mistake.
+   *
+   * So a hidden tab is sent nothing and the session is remembered as stale. It
+   * is repainted from a fresh replay when the tab comes back, which is only safe
+   * because the client treats a `replay` as a repaint rather than a
+   * continuation: it resets the emulator and drops its transcript before writing
+   * one. See `catchUpStale`, and the `onData` handler in web/src/components/PaneView.tsx.
+   */
   pushData(id: string, data: string): void {
     for (const client of this.clients) {
-      if (client.device && client.subs.has(id)) this.send(client, { type: 'data', sessionId: id, data })
+      if (!client.device || !client.subs.has(id)) continue
+      if (client.visible === false) {
+        client.stale.add(id)
+        continue
+      }
+      this.send(client, { type: 'data', sessionId: id, data })
     }
   }
 
@@ -727,6 +762,9 @@ export class WebServer {
     for (const client of this.clients) {
       if (client.device && client.subs.has(id)) {
         client.subs.delete(id)
+        // A pane that has exited is not one there is any catching up to do on,
+        // whether or not this tab was off screen while it died.
+        client.stale.delete(id)
         this.send(client, { type: 'exit', sessionId: id, exitCode })
       }
     }
@@ -869,6 +907,46 @@ export class WebServer {
     this.host.onMirror?.(false)
   }
 
+  /**
+   * Hand one browser the catch-up buffer for one pane.
+   *
+   * The two callers are `attach` — a pane coming on screen for the first time —
+   * and `catchUpStale`, a tab coming back from the background. They are the same
+   * act: the client resets its emulator on a `replay` frame and appends
+   * everything after it, so this is a repaint whatever provoked it.
+   */
+  private sendReplay(client: Client, id: string): void {
+    const buffer = this.host.replay(id)
+    // `truncated` is a claim about the *ceiling*, not about the session: false
+    // means the transcript is whole, true means the buffer is at
+    // MAX_REPLAY_BYTES and so probably begins mid-sentence. pty-host keeps a
+    // rolling window and does not record what fell off the front, so this is the
+    // strongest honest thing that can be said — and it is the thing the client
+    // needs, which is whether to draw a rule above it.
+    const data = buffer.length > MAX_REPLAY_BYTES ? buffer.slice(buffer.length - MAX_REPLAY_BYTES) : buffer
+    // Whatever this browser missed, it has now seen the screen those bytes were
+    // building towards.
+    client.stale.delete(id)
+    this.send(client, {
+      type: 'replay',
+      sessionId: id,
+      data,
+      truncated: buffer.length >= MAX_REPLAY_BYTES
+    })
+  }
+
+  /** Repaint every pane whose output was dropped while this tab was off screen. */
+  private catchUpStale(client: Client): void {
+    const ids = [...client.stale]
+    client.stale.clear()
+    for (const id of ids) {
+      // Still reading it, and it still exists — a pane detached from or exited
+      // while the tab was away has already had its own frame.
+      if (!client.subs.has(id)) continue
+      this.sendReplay(client, id)
+    }
+  }
+
   private broadcast(frame: WebServerFrame): void {
     for (const client of this.clients) {
       if (client.device) this.send(client, frame)
@@ -903,7 +981,8 @@ export class WebServer {
       device: null,
       viewer: `web-${++viewerSeq}`,
       subs: new Set(),
-      visible: false,
+      visible: null,
+      stale: new Set(),
       inputSecond: 0,
       inputCount: 0,
       mirrorSecond: 0,
@@ -1051,29 +1130,53 @@ export class WebServer {
         // loud — the browser is about to be sent a `replay` at the pane's real
         // grid and has its cols/rows from `sessions`, so it has everything it
         // needs to draw this pane properly whichever way the wish went.
+        //
+        // The replay goes out *before* the resize, and the order is the whole
+        // point. Reversed — which is how this was written — the wish reaches
+        // ConPTY synchronously, and the snapshot taken on the next line is still
+        // the pre-SIGWINCH screen: the browser resets and paints that frame, and
+        // a few milliseconds later the redraw the resize provoked arrives as
+        // ordinary `data` and is appended *underneath* it. One guaranteed
+        // duplicate of the whole screen, on every attach that moved the grid.
+        //
+        // This does not reintroduce what the ordering was for. The reason the
+        // size travels on the `attach` frame at all is documented in
+        // web/src/components/PaneView.tsx: the client fits its box first so the
+        // desktop is handed the width this browser is really reading at, rather
+        // than being told a beat later and reflowing a replay that was painted
+        // at the wrong one. That reason is about *the client sending its size
+        // with the attach*, and it still does. What moves here is only which
+        // side of the snapshot the wish is applied on, and a microtask keeps it
+        // inside this same turn — it runs before any I/O callback, so no PTY
+        // output and no further frame from this browser can come between the
+        // two.
+        //
+        // Doing it the other way round is now actively worse, because a width
+        // change resets the replay buffer to a clean screen (see `noteWidth` in
+        // electron/pty-host.ts): resizing first would hand the browser an empty
+        // repaint and leave it blank until something redrew — which, for a plain
+        // shell sitting at a prompt, is never.
+        this.sendReplay(client, id)
         if (frame.cols !== undefined || frame.rows !== undefined) {
-          this.host.resize(id, wireDim(frame.cols, current.cols), wireDim(frame.rows, current.rows), client.viewer)
+          const cols = wireDim(frame.cols, current.cols)
+          const rows = wireDim(frame.rows, current.rows)
+          queueMicrotask(() => {
+            // The socket can have gone, or detached, between the two — a
+            // microtask is short but it is not free, and resizing a pane on
+            // behalf of a browser that has hung up would hand it a grid nobody
+            // is reading.
+            if (!this.clients.has(client) || !client.subs.has(id)) return
+            this.host.resize(id, cols, rows, client.viewer)
+          })
         }
-        const buffer = this.host.replay(id)
-        // `truncated` is a claim about the *ceiling*, not about the session:
-        // false means the transcript is whole, true means the buffer is at
-        // MAX_REPLAY_BYTES and so probably begins mid-sentence. pty-host keeps a
-        // rolling window and does not record what fell off the front, so this is
-        // the strongest honest thing that can be said — and it is the thing the
-        // client needs, which is whether to draw a rule above it.
-        const data = buffer.length > MAX_REPLAY_BYTES ? buffer.slice(buffer.length - MAX_REPLAY_BYTES) : buffer
-        this.send(client, {
-          type: 'replay',
-          sessionId: id,
-          data,
-          truncated: buffer.length >= MAX_REPLAY_BYTES
-        })
         return
       }
 
       case 'detach': {
         const id = wireString(frame.sessionId, 128)
         client.subs.delete(id)
+        // Nothing to catch this browser up on for a pane it has closed.
+        client.stale.delete(id)
         // A pane this browser has closed is one it is certainly not typing into,
         // so it stops holding that pane's grid — the same thing a hang-up does,
         // for one pane rather than all of them.
@@ -1751,9 +1854,17 @@ export class WebServer {
 
         case 'visibility': {
           // No host hook, because there is nothing for a host to do with it:
-          // this is a fact about one socket, it is stored on that socket, and
-          // the only reader is `anyVisible`. It dies with the connection.
+          // this is a fact about one socket and it dies with the connection. It
+          // has two readers here — `anyVisible`, which decides whether a push is
+          // worth sending, and `pushData`, which stops shovelling terminal bytes
+          // at a tab that has stopped parsing them.
+          const wasHidden = client.visible === false
           client.visible = request.visible === true
+          // Coming back on screen is where the second reader pays its debt: the
+          // panes whose output was dropped while the tab was away are repainted
+          // from a fresh replay, which is both cheaper and more correct than the
+          // backlog would have been.
+          if (wasHidden && client.visible) this.catchUpStale(client)
           answer({ kind: 'ok' })
           return
         }

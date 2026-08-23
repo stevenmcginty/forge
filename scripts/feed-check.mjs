@@ -498,6 +498,123 @@ ok(
   'a prose bullet with a duration in it is not eaten as chrome'
 )
 
+/*
+ * The stacking harness.
+ *
+ * Every multi-frame loop above counts user turns, because the entry stacking
+ * was the bug anybody could see. But a feed that mints a fresh *agent* or
+ * *tool* card twelve times a second is the same bug wearing a different role,
+ * and counting users lets twenty of those through without a word. So this
+ * asserts on the whole log instead, and asserts the two things that are
+ * actually true of a healthy merge:
+ *
+ *  1. **It settles.** A screen that is only redrawing — same turns, one
+ *     ticking figure — must reach a size and stay there. One card of slack,
+ *     for the turn still being written.
+ *  2. **It is idempotent.** Folding the very same frame in twice must not add
+ *     anything, because that is what the parse loop does whenever the PTY is
+ *     quiet and the 80ms timer keeps firing.
+ */
+const steady = (name, frameFn, frames = 40) => {
+  let log = blocksFromCapture(frameFn(1))
+  let settled = 0
+  let worst = 0
+  for (let n = 2; n <= frames; n++) {
+    log = mergeBlocks(log, blocksFromCapture(frameFn(n)))
+    // Five frames is long enough for the first turn to finish arriving and
+    // short enough that a leak has barely started, so it is a fair baseline.
+    if (n === 5) settled = log.length
+    if (n > 5) worst = Math.max(worst, log.length)
+  }
+  ok(
+    worst <= settled + 1,
+    `${name}: ${frames} redraws do not stack cards`,
+    `settled at ${settled}, grew to ${worst}`
+  )
+  const twice = mergeBlocks(log, blocksFromCapture(frameFn(frames)))
+  ok(twice.length === log.length, `${name}: re-folding the same frame adds no card`, `${log.length} → ${twice.length}`)
+}
+
+console.log('nothing stacks under a redraw')
+
+// Claude ticks its elapsed counter *inside* the tool card, under the ⎿ gutter,
+// where the body loop's spinner filter never looked.
+steady('claude', (n) =>
+  [
+    '> run the tests',
+    '',
+    '⏺ I will run the suite and read what fails.',
+    '',
+    '⏺ Bash(npm test)',
+    `  ⎿  Running… (${n}s)`,
+    '',
+    '╭──────────────────────────────────────────────────╮',
+    '│ >                                                │',
+    '╰──────────────────────────────────────────────────╯',
+    '  ⏵⏵ bypass permissions on (shift+tab to cycle)'
+  ].join('\n')
+)
+
+// Codex writes a bare `Thinking… (4s)` with no spinner glyph in front of it,
+// and hangs a token meter under its composer. Both figures move.
+steady('codex', (n) =>
+  [
+    '> run the fast checks',
+    '',
+    'Running the fast lane now.',
+    '',
+    `Thinking… (${n}s)`,
+    '',
+    '▌ Ask Codex to do anything',
+    `Token usage: ${12000 + n} (▲ ${2000 + n})`,
+    '⏎ send   ctrl+c quit'
+  ].join('\n')
+)
+
+// Antigravity's status line is braille, long, and says "esc to cancel" rather
+// than Claude's "esc to interrupt" — so it cleared none of the gates.
+steady('antigravity', (n) =>
+  [
+    '> refactor the planner',
+    '',
+    'Reading the planner and every one of its callers first.',
+    '',
+    `⠹ Planning changes across 14 files · ${n}s · esc to cancel`,
+    '',
+    '❯ '
+  ].join('\n')
+)
+
+// Grok drops the `[stop]` tail the moment the response starts streaming, and
+// what is left is an ASCII spinner, a word, and a clock.
+steady('grok', (n) =>
+  [
+    '≡ master ~\\Desktop\\forge                                     7.8K / 500K',
+    '  Why does the feed repeat itself?                             12:40 PM',
+    '',
+    'It is the tail rule in the merge.',
+    '',
+    `/ Thinking… ${n}.2s`,
+    '',
+    '> ',
+    'Weekly limit left: 3% · Grok 4.6 (high)'
+  ].join('\n')
+)
+
+// OpenCode hangs its status bar *below* the prompt, with a token meter that
+// climbs while the answer streams.
+steady('opencode', (n) =>
+  [
+    'You',
+    'fix the feed duplications',
+    '',
+    'I will look at the merge first.',
+    '',
+    '› ',
+    `opencode  ~/Desktop/forge  sonnet-4-6  ${12 + n}.4K/200K tokens`
+  ].join('\n')
+)
+
 if (fail) {
   console.log(`\n${fail} failed, ${pass} passed`)
   process.exit(1)

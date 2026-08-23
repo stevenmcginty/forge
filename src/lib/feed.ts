@@ -29,7 +29,6 @@
  * scripts/feed-check.mjs holds the cuts.
  */
 
-import { SHARE_CAPTURE_MAX_LINES } from '@shared/share'
 import type { FeedBlock, FeedRole, PaneStatus, PermissionMode, RichLine, Run, Transcript } from './rich'
 
 export type { FeedBlock, FeedRole, RichLine, Transcript } from './rich'
@@ -160,14 +159,57 @@ const CODEX_FOOTER = /^(?:model|approval|sandbox|reasoning|workdir|directory|cwd
 /** A path, alone or leading a footer — Gemini's cwd, Claude's banner line. */
 const PATH_LINE = /^(?:~[\\/]|[A-Za-z]:\\|\/(?:home|Users|mnt|opt|usr|var|tmp)\/)/
 
-/** `esc to interrupt` is the one thing every Claude spinner line carries. */
-const BUSY_HINT = /\besc to interrupt\b/i
+/**
+ * "you can stop me" — the one thing every spinner line carries.
+ *
+ * Claude says `esc to interrupt`, Antigravity says `esc to cancel`, and others
+ * say stop or quit. The verb is the CLI's taste; the fact that the line is
+ * offering you a key to press is what makes it the TUI talking about itself.
+ * Reading only Claude's verb is why Antigravity's status line stayed in the
+ * body and ticked itself into a new card every redraw.
+ */
+const BUSY_HINT = /\besc to (?:interrupt|cancel|stop|quit)\b/i
 /** A braille spinner frame, wherever it sits on the line. */
 const BRAILLE = /[⠀-⣿]/
+/** A line that is nothing but a braille frame — the spinner with no words yet. */
+const BRAILLE_ONLY = /^[\s⠀-⣿]+$/
 /** The glyphs a CLI cycles as its spinner. */
 const SPINNER_GLYPH = /^\s*[✢✳✶✻✽✻◐◓◑◒·*+•●○◆◇]\s/
 /** An elapsed-time counter, which no prose line has. */
 const ELAPSED = /\(\s*\d+s\b/
+
+/**
+ * A glyph spinner with nothing after its activity word: `✳ Thinking…`.
+ *
+ * This is what the `flat.length < 40` gate was reaching for — "the glyph is
+ * leading a status, not a bullet leading a sentence" — said outright, so that
+ * a long status line is still chrome and a `• the plan is… complicated`
+ * bullet is still prose. A length in characters could never tell those apart.
+ */
+const GLYPH_ONLY = /^\s*[✢✳✶✻✽◐◓◑◒·*+•●○◆◇]\s+[A-Za-z]+(?:\s+[a-z]+){0,3}…\s*$/
+
+/**
+ * An activity word and a clock, alone on the line: `Running… (12s)`.
+ *
+ * Codex writes it bare, with no spinner glyph in front at all, and Claude
+ * hangs it under the `⎿` gutter *inside* a tool card. Both tick, so both
+ * used to mint a card a frame. The clock is required on purpose: a bare
+ * `Working…` is a sentence the agent wrote and stays in the card, which is
+ * the distinction `busyLine` exists to keep.
+ */
+const TICKING = /^(?:[⎿⋮↳└]\s*)?[A-Za-z]+(?:\s+[a-z]+){0,3}…\s*\(?\s*\d+(?:\.\d+)?s\b[^)]*\)?\s*$/
+
+/**
+ * A token meter: Codex's `Token usage: 12,345 (▲ 2,001)` and the count
+ * OpenCode hangs in its status bar under the composer.
+ *
+ * The figure climbs while the answer streams, and `splitTail` stops dead at
+ * the first line it cannot name — so an unnamed token meter kept the whole
+ * composer in the conversation *and* gave the trailing card a number that
+ * changed every frame. A ratio or a labelled count only: prose that says
+ * "the build used 1,200 tokens" is still prose.
+ */
+const TOKEN_LINE = /\btokens?\s*(?:usage|used|left|remaining)\b|\btokens?\s*:|\b\d[\d.,]*[KM]?\s*\/\s*\d[\d.,]*[KM]?\s+tokens?\b/i
 
 /**
  * Grok's live line, which none of the rules above sees.
@@ -180,10 +222,21 @@ const ELAPSED = /\(\s*\d+s\b/
  *
  * Because the counter ticks, a frame that kept this line never matched the
  * frame before it, so every redraw minted another copy of the turn — the same
- * entry stacked down the feed once per second. The `[stop]` / `↓ tokens` tail
- * is what keeps this off a prose bullet that happens to quote a duration.
+ * entry stacked down the feed once per second.
+ *
+ * The tail is not always there, though. Once the answer is actually streaming
+ * Grok drops the token count and the `[stop]` hint and leaves only:
+ *
+ *     / Thinking… 2.2s
+ *
+ * which is the shape that was still stacking. So there are two forms: the
+ * long one, which is named by its tail, and the bare one, which has to be
+ * named by its shape — spinner, one activity word ending in an ellipsis, a
+ * duration, end of line. Requiring the ellipsis and the end anchor is what
+ * keeps this off `- the build took 2.4s, which is fine`.
  */
-const GROK_BUSY = /^[|/\\-]\s.*\b\d+(?:\.\d+)?s\b.*(?:\[stop\]|[↓↑]\s*[\d.]+k?\b)/i
+const GROK_BUSY =
+  /^[|/\\-]\s(?:.*\b\d+(?:\.\d+)?s\b.*(?:\[stop\]|[↓↑]\s*[\d.]+k?\b)|\s*[A-Za-z]+(?:\s+[a-z]+){0,3}…\s*\d+(?:\.\d+)?s\s*$)/i
 
 /**
  * Grok's footer: what is left of the plan's quota, then the model.
@@ -229,17 +282,27 @@ function busyLine(flat: string): boolean {
   return /^[A-Z][A-Za-z]+(?:\s[a-z]+)?…\s*$/.test(flat)
 }
 
-/** The strict half of `busyLine`: safe to lift off the screen. */
+/**
+ * The strict half of `busyLine`: safe to lift off the screen.
+ *
+ * Every gate here used to carry a character-count as its last resort — braille
+ * under 48, a glyph spinner under 40 — and a length is a guess about meaning,
+ * not a statement of it. Antigravity's status line is routinely longer than
+ * both, so it fell through every gate, sat in the body, and ticked itself into
+ * a fresh card twelve times a second. The gates now ask what the line *is*.
+ */
 function spinnerChrome(flat: string): boolean {
   if (!flat) return false
   if (BUSY_HINT.test(flat)) return true
-  // Grok/OpenCode cycle a braille frame with an elapsed counter and no
-  // ellipsis; that line is chrome, not a sentence. Requiring `…` left those
-  // frames in the body, and each one became a new card as the counter ticked.
-  if (BRAILLE.test(flat) && (flat.includes('…') || ELAPSED.test(flat) || flat.length < 48)) return true
+  // Grok/OpenCode/Antigravity cycle a braille frame beside their status. The
+  // frame alone is chrome whatever it sits next to; with words beside it, what
+  // makes it chrome is that the words are a clock, a trailing activity, or the
+  // offer of an escape key — never that the line happens to be short.
+  if (BRAILLE.test(flat) && (BRAILLE_ONLY.test(flat) || flat.includes('…') || ELAPSED.test(flat))) return true
   if (GROK_BUSY.test(flat)) return true
   if (SPINNER_GLYPH.test(flat) && flat.includes('…') && ELAPSED.test(flat)) return true
-  return SPINNER_GLYPH.test(flat) && flat.includes('…') && flat.length < 40
+  if (GLYPH_ONLY.test(flat)) return true
+  return TICKING.test(flat)
 }
 
 /** Everything that is the TUI talking about itself rather than to you. */
@@ -248,6 +311,7 @@ function chromeLine(flat: string): boolean {
   if (LIVE_PROMPT.test(flat) || RULE.test(flat) || PLACEHOLDER.test(flat)) return true
   if (MODE_LINE.test(flat) || CODEX_FOOTER.test(flat)) return true
   if (CONTEXT_LINE.test(flat)) return true
+  if (TOKEN_LINE.test(flat)) return true
   if (QUOTA_LINE.test(flat)) return true
   if (HINT_LINE.test(flat)) return true
   if (spinnerChrome(flat)) return true
@@ -601,6 +665,12 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
         // draws them contiguously, and reading past a gap is how the agent's
         // next sentence ends up inside the tool card.
         if (!next.flat) break
+        // The body loop above skips spinner frames; this one never did, and a
+        // tool card is exactly where Claude parks `⎿  Running… (12s)` while
+        // the command runs. The counter ticked inside the card, the card never
+        // matched its own next frame, and the merge stacked it. `continue`
+        // rather than `break`, because the real result lines resume under it.
+        if (spinnerChrome(next.flat)) continue
         if (!isToolCont(next)) break
         tool.push(next.rich)
       }
@@ -647,8 +717,19 @@ export function blocksFromCapture(text: string): FeedBlock[] {
 
 /* ---------------------------------------------------------- growing log */
 
-/** How many conversation cards we keep. Matches the capture cap. */
-const MAX_MERGED_BLOCKS = SHARE_CAPTURE_MAX_LINES
+/**
+ * How many conversation cards the merged log keeps.
+ *
+ * This used to be `SHARE_CAPTURE_MAX_LINES` — a constant named for *lines*,
+ * borrowed as a cap on *blocks*, on the reasoning that one is roughly the
+ * other. It is not: a tool card is twenty lines and a user turn is one, so the
+ * two counts have nothing to do with each other, and the borrowed number was
+ * only ever the ceiling the duplication bug climbed to before the feed stopped
+ * growing. Blocks get their own figure, and a smaller one — two hundred cards
+ * is a long conversation to scroll back through on a phone, and the cost of a
+ * card is a DOM subtree rather than a string.
+ */
+const MAX_MERGED_BLOCKS = 200
 
 function bodyOf(blocks: FeedBlock[]): FeedBlock[] {
   return blocks.filter((block) => block.role !== 'system')
@@ -658,14 +739,58 @@ function systemOf(blocks: FeedBlock[]): FeedBlock | undefined {
   return blocks.find((block) => block.role === 'system')
 }
 
-/** Same turn, possibly still being written. */
+/**
+ * Every figure on a card that moves when the screen is redrawn rather than
+ * when the conversation moves on.
+ *
+ * Spinner frames, and any run of digits — an elapsed counter, a token count, a
+ * context percentage, a clock. Alignment below compares two frames of the same
+ * turn, and every one of these makes a turn *different from itself*: the card
+ * still says what it said, but the number beside it has advanced.
+ */
+const VOLATILE = /[⠀-⣿▖-▟]|[✢✳✶✻✽◐◓◑◒●○◆◇]|\d+(?:[.,:]\d+)*/g
+
+/** The same text with every moving figure flattened to one neutral mark. */
+function settled(text: string): string {
+  return text.replace(VOLATILE, '·')
+}
+
+/**
+ * Same turn, possibly still being written.
+ *
+ * Equality, prefix and suffix cover a turn that *grows* — which is what a
+ * streaming reply does. They cover nothing at all for a turn that *mutates*,
+ * and a card carrying a ticking counter mutates on every redraw: it is never
+ * equal to its own next frame, never a prefix of it, never a suffix of it. So
+ * alignment stopped one block short of the live edge, the merge held both the
+ * stale copy and the fresh one, and the feed grew a card per parse. Comparing
+ * the settled text — same words, moving figures neutralised — is what lets a
+ * ticking card recognise itself.
+ *
+ * Floored at nine characters because `settled` is deliberately blunt: it turns
+ * "1" and "2" into the same mark, and two short turns that differ only in a
+ * digit are two turns, not one.
+ */
 function sameTurn(a: FeedBlock, b: FeedBlock): boolean {
   if (a.role !== b.role) return false
   if (a.text === b.text) return true
+  if (a.text.length > 8 && settled(a.text) === settled(b.text)) return true
   if (a.text.startsWith(b.text) || b.text.startsWith(a.text)) return true
   // A TUI frame often starts mid-turn: the visible tail of a card we already have.
   if (a.text.endsWith(b.text) || b.text.endsWith(a.text)) return true
   return false
+}
+
+/**
+ * The same run of cards, card for card, in the same roles.
+ *
+ * Not the same *text* — that is the point. Two bodies of equal length whose
+ * roles line up are the same conversation painted twice, however far the
+ * counters on them have moved, because a terminal cannot swap a turn out from
+ * under itself: real progress appends a card or lengthens the last one.
+ */
+function sameShape(a: FeedBlock[], b: FeedBlock[]): boolean {
+  return a.length === b.length && a.every((block, k) => block.role === b[k]!.role)
 }
 
 function pickTurn(a: FeedBlock, b: FeedBlock): FeedBlock {
@@ -773,7 +898,14 @@ export function mergeBlocks(prev: FeedBlock[], next: FeedBlock[]): FeedBlock[] {
   if (best.L === 0) {
     const last = prevBody[prevBody.length - 1]!
     const first = nextBody[0]!
-    merged = sameTurn(last, first) ? [...prevBody.slice(0, -1), ...nextBody] : [...prevBody, ...nextBody]
+    // Nothing aligned at all. Usually that means a genuinely new screen — but
+    // it is also what a redraw of a *short* conversation looks like when every
+    // card on it carries a moving figure, and what a re-wrap after a resize or
+    // a `/clear` looks like. Concatenating unconditionally is how a
+    // single-card pane doubled, then trebled. Same number of cards in the same
+    // roles is a repaint of what we already hold, so take the fresh one.
+    if (sameShape(prevBody, nextBody)) merged = nextBody
+    else merged = sameTurn(last, first) ? [...prevBody.slice(0, -1), ...nextBody] : [...prevBody, ...nextBody]
   } else {
     const { i, j, L } = best
     // History above the anchor comes from the log alone. The frame may show
@@ -797,10 +929,21 @@ export function mergeBlocks(prev: FeedBlock[], next: FeedBlock[]): FeedBlock[] {
         (block) => !(block.role === 'user' && held.some((h) => h.role === 'user' && sameTurn(h, block)))
       )
     }
-    const tail =
-      i + L >= prevBody.length
-        ? nextTail // the alignment runs to the live edge; whatever the frame holds past it is new
-        : [...prevTail, ...nextTail] // the frame ended inside our history: keep what we hold, take anything new
+    // The tail is the whole bug, and the question it answers is: which of the
+    // two of us is showing the live edge of the conversation?
+    //
+    // It used to answer "the log, unless the alignment reached its end", and
+    // took both tails whenever it did not — keeping the stale copy of a card
+    // *and* appending the frame's redrawn copy of the same card. One extra
+    // card per parse, at 80ms a parse, until the cap: the stacking.
+    //
+    // `nextTail` is the better question. A frame holding blocks past the
+    // anchor is a frame showing the bottom of the screen, so the frame is the
+    // live edge and its tail is the truth — whatever the log still holds down
+    // there is the previous paint of exactly these cards. A frame that ends
+    // *at* the anchor is a reader who has paged up: it has nothing newer to
+    // say, and the log's tail is genuine history that must survive.
+    const tail = i + L >= prevBody.length || nextTail.length > 0 ? nextTail : prevTail
     merged = [...head, ...overlap, ...tail]
   }
 

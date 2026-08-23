@@ -128,6 +128,20 @@ export function PaneView({
   const aliveRef = useRef(alive)
   aliveRef.current = alive
 
+  /**
+   * The actions, readable from an effect without being one of its dependencies.
+   *
+   * Same reason as `aliveRef` above, one step further out: an effect that fires
+   * on an *edge* — this pane coming on screen, its shell starting — must be
+   * keyed on the things that describe that edge and on nothing else, or the
+   * edge is not really what it runs on. `actions` is a `useMemo` in state.tsx,
+   * and whether it survives a given push is a fact about that file's dependency
+   * list rather than about this one's intent; a claim re-sent because the store
+   * happened to rebuild is a grid decision nobody made.
+   */
+  const actionsRef = useRef(actions)
+  actionsRef.current = actions
+
   const holderRef = useRef<HTMLDivElement | null>(null)
   const hostRef = useRef<TermHost | null>(null)
   const splitRef = useRef<HTMLButtonElement | null>(null)
@@ -264,10 +278,21 @@ export function PaneView({
     const stop = actions.onData(leaf.id, (data, replay, wasTruncated) => {
       if (replay) {
         // The catch-up buffer is a repaint, not a continuation: a reconnect
-        // sends it again, and appending it would double the transcript.
-        host.reset()
+        // sends it again, and appending it would double the transcript. One
+        // call rather than a reset followed by a write, because the wipe has to
+        // be *ordered* against the live bytes still sitting unparsed in xterm's
+        // write queue — see `repaint` in lib/term.ts for what the naive pair
+        // actually paints.
         setTruncated(wasTruncated)
+        // Emptying the transcript here is a frame early: the terminal has not
+        // been repainted yet, so for a moment the feed is showing nothing while
+        // the buffer still holds the old screen. It self-corrects, because the
+        // `scheduleParse` handed to `repaint` fires *after* the paint and
+        // re-reads the buffer — so the next parse is of the replayed screen,
+        // which is the whole of what should be there.
         setTranscript(EMPTY_TRANSCRIPT)
+        host.repaint(data, scheduleParse)
+        return
       }
       host.write(data, scheduleParse)
     })
@@ -402,10 +427,17 @@ export function PaneView({
    * claiming itself on every push. The desk's own next keystroke undoes it,
    * which is the rule working as designed rather than a fight: whoever is
    * actually at a pane has it.
+   *
+   * Through `actionsRef` rather than `actions` precisely so that "and on
+   * nothing else" is true of the code and not only of the sentence above.
+   * `GridOwners.claim` is idempotent, so a spurious repeat is wasted traffic
+   * today — but the moment a second viewer is watching the same pane, two
+   * clients re-claiming on every push is the grid changing hands over and over
+   * while nobody is typing at all.
    */
   useEffect(() => {
-    if (mobile && onScreen && live && alive) actions.claim(leaf.id)
-  }, [mobile, onScreen, live, alive, leaf.id, actions])
+    if (mobile && onScreen && live && alive) actionsRef.current.claim(leaf.id)
+  }, [mobile, onScreen, live, alive, leaf.id])
 
   /* ----------------------------------------------- pasted / dropped images */
 

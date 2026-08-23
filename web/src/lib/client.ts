@@ -284,6 +284,30 @@ export class ForgeClient {
   private readonly handlers: ForgeHandlers
   private credentials: ForgeCredentials | null = null
   private socket: WebSocket | null = null
+  /**
+   * True from the first line of `open()` until it has either handed a socket
+   * over or given up, which is the one window `this.socket` cannot describe.
+   *
+   * `open()` awaits a token and then, on a retry, a tunnel lookup — two network
+   * round trips during which the old socket has been dropped and the new one
+   * does not exist. A readyState test taken in that window reads `undefined`
+   * and says "nothing here, dial", so anything that re-dials on an event opens
+   * a *second* socket beside the one already being built. See `linkInHand`.
+   */
+  private opening = false
+  /**
+   * Which dial the live socket belongs to, so a socket from an older one can
+   * recognise itself as superseded.
+   *
+   * The guard above is the fix; this is the belt to its braces. Every handler
+   * captures the counter's value at the moment its socket was adopted and
+   * stands down when it no longer matches, so a socket that somehow outlives
+   * its dial is inert rather than a second voice on the link — and it matters
+   * that it is inert rather than merely untidy, because two sockets both
+   * delivering `data` write every byte into xterm twice, and a TUI redraw
+   * applied twice repaints the frame down the screen instead of over itself.
+   */
+  private generation = 0
   private attempt = 0
   private retryTimer: number | null = null
   private beatTimer: number | null = null
@@ -344,6 +368,12 @@ export class ForgeClient {
     this.reauthed = false
     this.attempt = 0
     this.clearRetry()
+    // A second press while the first is still crossing the network is the same
+    // race the wake-ups make, so it stands down for the same reason — and it
+    // loses nothing: every screen with this button on it is a screen the
+    // desktop hung up on, so the socket is already gone by the time a person
+    // can reach for it, and a dial in flight is the press being answered.
+    if (this.linkInHand()) return
     void this.open()
   }
 
@@ -419,30 +449,48 @@ export class ForgeClient {
    * connection). Waiting out up to fifteen seconds of scheduled back-off after
    * either is time paid for nothing, so both clear the timer and dial now.
    *
-   * A live or still-opening socket stands down: those events also fire on a
-   * tab merely being looked at again, and `open` would hang up on a working
-   * link to open another one.
+   * A live or still-opening link stands down: those events also fire on a tab
+   * merely being looked at again, and `open` would hang up on a working link to
+   * open another one. Neither listener decides that for itself — both hand
+   * straight to `wake`, which asks `linkInHand` once, because the version of
+   * this that tested the socket here was the version that could not see a dial
+   * already in flight and opened a second one.
    */
   private watchWakeups(): void {
     window.addEventListener('online', () => this.wake())
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) return
-      const socket = this.socket
-      const dying =
-        socket === null ||
-        socket.readyState === WebSocket.CLOSING ||
-        socket.readyState === WebSocket.CLOSED
-      if (dying) this.wake()
+      this.wake()
     })
   }
 
   /** One immediate re-dial, if there is anything to dial and nothing live. */
   private wake(): void {
     if (this.closedByUs || this.stopped || !this.credentials) return
-    const ready = this.socket?.readyState
-    if (ready === WebSocket.OPEN || ready === WebSocket.CONNECTING) return
+    if (this.linkInHand()) return
     this.clearRetry()
     void this.open()
+  }
+
+  /**
+   * Is a link already in hand, or on its way?
+   *
+   * The one question every re-dial path asks, written once because the answer
+   * has two halves and a caller that remembers only one of them opens a second
+   * socket. The readyState covers a link that exists; `opening` covers the
+   * stretch inside `open()` where it does not yet, which is where this went
+   * wrong: a phone fires `online` and `visibilitychange` in bursts, each one
+   * landing while the previous dial was still waiting on a token, each one
+   * seeing a null socket and dialling again. The loser of that race was never
+   * hung up on, so both sockets said `hello`, both were let in, both re-attached
+   * every pane, and every byte the desktop pushed was written into the terminal
+   * twice — which for a cursor-addressed redraw means the frame is repainted
+   * below itself, forever.
+   */
+  private linkInHand(): boolean {
+    if (this.opening) return true
+    const ready = this.socket?.readyState
+    return ready === WebSocket.OPEN || ready === WebSocket.CONNECTING
   }
 
   /* ------------------------------------------------------------- terminals */
@@ -527,116 +575,158 @@ export class ForgeClient {
 
   /* -------------------------------------------------------------- internals */
 
+  /**
+   * Dial the desktop. At most one of these is ever in flight; see `opening`.
+   *
+   * The whole body sits in a `try/finally` for that flag alone. There are five
+   * ways out of here — signed out, a token that failed, a page that moved on
+   * under either await, a constructor that threw, and the ordinary end — and a
+   * flag cleared at each of them is a flag that will be left set the day a
+   * sixth is added, which would wedge the reconnect loop shut for good.
+   */
   private async open(): Promise<void> {
     const credentials = this.credentials
     if (!credentials || this.closedByUs || this.stopped) return
 
-    this.dropSocket()
-    this.handlers.onConnection({ state: 'connecting', attempt: this.attempt })
-
-    let idToken: string
+    this.opening = true
     try {
-      idToken = await credentials.getToken(this.reauthed)
-    } catch (err) {
-      // A credential that is gone for good is the page's problem, not this
-      // loop's: it hands back to sign-in rather than retrying against nothing.
-      if (String(err instanceof Error ? err.message : err) === 'signed-out') {
-        this.stopped = true
-        this.handlers.onTokenRejected()
+      this.dropSocket()
+      this.handlers.onConnection({ state: 'connecting', attempt: this.attempt })
+
+      let idToken: string
+      try {
+        idToken = await credentials.getToken(this.reauthed)
+      } catch (err) {
+        // A credential that is gone for good is the page's problem, not this
+        // loop's: it hands back to sign-in rather than retrying against nothing.
+        if (String(err instanceof Error ? err.message : err) === 'signed-out') {
+          this.stopped = true
+          this.handlers.onTokenRejected()
+          return
+        }
+        this.scheduleRetry()
         return
       }
-      this.scheduleRetry()
-      return
-    }
-    // A token fetch is a network round trip, and the page may have moved on.
-    if (this.closedByUs || this.stopped) return
+      // A token fetch is a network round trip, and the page may have moved on.
+      if (this.closedByUs || this.stopped) return
 
-    // Ask where the desktop is *now* before re-dialling where it was. See
-    // `refindUrl`: the address a tunnel publishes does not survive the tunnel
-    // restarting, and this loop would otherwise never learn that.
-    if (this.attempt > 0 && credentials.refindUrl) {
-      let fresh = ''
-      try {
-        fresh = await credentials.refindUrl()
-      } catch {
-        // A lookup that failed says nothing about the address in hand.
+      // Ask where the desktop is *now* before re-dialling where it was. See
+      // `refindUrl`: the address a tunnel publishes does not survive the tunnel
+      // restarting, and this loop would otherwise never learn that.
+      if (this.attempt > 0 && credentials.refindUrl) {
+        let fresh = ''
+        try {
+          fresh = await credentials.refindUrl()
+        } catch {
+          // A lookup that failed says nothing about the address in hand.
+        }
+        if (this.closedByUs || this.stopped) return
+        // Adopted without resetting `attempt`, which is not the obvious choice
+        // and is the right one. A new address does look like a fresh start worth
+        // a fresh backoff — but a cloudflared quick tunnel that is *flapping*
+        // publishes a new hostname every time it comes up, so zeroing the counter
+        // here meant every retry saw a new URL, took `BACKOFF[0]` again, and
+        // strobed the page against a tunnel that was never up long enough to
+        // reach. The backoff exists to survive exactly that, and a moving target
+        // is not grounds to abandon it.
+        if (fresh && fresh !== credentials.url) credentials.url = fresh
       }
-      if (this.closedByUs || this.stopped) return
-      // Adopted without resetting `attempt`, which is not the obvious choice
-      // and is the right one. A new address does look like a fresh start worth
-      // a fresh backoff — but a cloudflared quick tunnel that is *flapping*
-      // publishes a new hostname every time it comes up, so zeroing the counter
-      // here meant every retry saw a new URL, took `BACKOFF[0]` again, and
-      // strobed the page against a tunnel that was never up long enough to
-      // reach. The backoff exists to survive exactly that, and a moving target
-      // is not grounds to abandon it.
-      if (fresh && fresh !== credentials.url) credentials.url = fresh
-    }
 
-    let socket: WebSocket
-    try {
-      // The subprotocol is the only field a browser's WebSocket constructor
-      // controls, and it is how a version mismatch is refused during the
-      // upgrade rather than after a hello round trip. See WEB_SUBPROTOCOL.
-      socket = new WebSocket(credentials.url, WEB_SUBPROTOCOL)
-    } catch {
-      this.scheduleRetry()
-      return
-    }
-    this.socket = socket
-    this.lastFrameAt = Date.now()
-
-    // Spent on this attempt and this attempt only, whatever comes of it — read
-    // before `onopen` so a socket that never opens still burns the one-shot
-    // rather than leaving a stale typed PIN to be replayed by the reconnect
-    // loop. A previously-successful PIN may still ride along; see `pinForHello`.
-    const pin = this.pinForHello()
-
-    socket.onopen = () => {
+      let socket: WebSocket
+      try {
+        // The subprotocol is the only field a browser's WebSocket constructor
+        // controls, and it is how a version mismatch is refused during the
+        // upgrade rather than after a hello round trip. See WEB_SUBPROTOCOL.
+        socket = new WebSocket(credentials.url, WEB_SUBPROTOCOL)
+      } catch {
+        this.scheduleRetry()
+        return
+      }
+      this.socket = socket
+      // Stamped on the socket the moment it is adopted, and captured by every
+      // handler below. See `generation`.
+      const generation = (this.generation += 1)
       this.lastFrameAt = Date.now()
-      // No ping until `hello-ok`. The desktop honours *nothing* but `hello`
-      // before a browser has been let in — it answers anything else with an
-      // `error` frame and closes the socket (see `handle` in
-      // electron/web/server.ts) — so a beat started here would hang up on this
-      // desktop while its answer to the `hello` was still being decided, which
-      // on a machine that has to verify a token against Google's keys and then
-      // run a PIN through scrypt is not a moment. The pre-`hello-ok` socket does
-      // not need one: the *real* heartbeat is the native WebSocket ping, which
-      // the browser answers in its network stack whether or not the page has
-      // been admitted.
-      this.sendFrame(socket, {
-        type: 'hello',
-        proto: WEB_PROTO,
-        idToken,
-        client: __WEB_CLIENT_VERSION__,
-        deviceId: credentials.deviceId,
-        deviceName: credentials.deviceName,
-        // Omitted entirely rather than sent empty: the field is optional in the
-        // protocol, the first `hello` of every sign-in carries no PIN by design,
-        // and a desktop with none set should see a frame that looks exactly like
-        // it always did.
-        ...(pin ? { pin } : {})
-      })
-    }
 
-    socket.onmessage = (event) => this.receive(String(event.data))
+      /**
+       * Has this socket been replaced since it was adopted? Then it is not this
+       * link's voice any more and must not act: not on the terminal, not on the
+       * reconnect loop, not on the watcher. It hangs itself up on the way out,
+       * because a socket left listening is a socket the desktop is still
+       * pushing bytes down.
+       */
+      const superseded = (): boolean => {
+        if (generation === this.generation) return false
+        this.retire(socket)
+        return true
+      }
 
-    socket.onclose = () => {
-      this.socket = null
-      this.stopBeating()
-      this.failWaiting('The link to the desktop dropped before that answered.')
-      // A watcher hears about it here rather than working it out from a picture
-      // that stopped moving: a decoder holding a last frame looks exactly like a
-      // desktop that is sitting still, and the two want different sentences. A
-      // reconnect does not resume a watch — the desktop tore its capture down
-      // with the socket — so this is an ending, not a pause.
-      watcher?.onStop('The link to the desktop dropped, so the picture stopped.', false)
-      if (this.closedByUs || this.stopped) return
-      this.scheduleRetry()
-    }
+      // Spent on this attempt and this attempt only, whatever comes of it — read
+      // before `onopen` so a socket that never opens still burns the one-shot
+      // rather than leaving a stale typed PIN to be replayed by the reconnect
+      // loop. A previously-successful PIN may still ride along; see `pinForHello`.
+      const pin = this.pinForHello()
 
-    socket.onerror = () => {
-      /* onclose always follows; retrying is decided there */
+      socket.onopen = () => {
+        if (superseded()) return
+        this.lastFrameAt = Date.now()
+        // No ping until `hello-ok`. The desktop honours *nothing* but `hello`
+        // before a browser has been let in — it answers anything else with an
+        // `error` frame and closes the socket (see `handle` in
+        // electron/web/server.ts) — so a beat started here would hang up on this
+        // desktop while its answer to the `hello` was still being decided, which
+        // on a machine that has to verify a token against Google's keys and then
+        // run a PIN through scrypt is not a moment. The pre-`hello-ok` socket does
+        // not need one: the *real* heartbeat is the native WebSocket ping, which
+        // the browser answers in its network stack whether or not the page has
+        // been admitted.
+        this.sendFrame(socket, {
+          type: 'hello',
+          proto: WEB_PROTO,
+          idToken,
+          client: __WEB_CLIENT_VERSION__,
+          deviceId: credentials.deviceId,
+          deviceName: credentials.deviceName,
+          // Omitted entirely rather than sent empty: the field is optional in the
+          // protocol, the first `hello` of every sign-in carries no PIN by design,
+          // and a desktop with none set should see a frame that looks exactly like
+          // it always did.
+          ...(pin ? { pin } : {})
+        })
+      }
+
+      socket.onmessage = (event) => {
+        // A frame from a superseded socket is dropped rather than handled. It
+        // would otherwise be a `data` frame written into a terminal that has
+        // already had the same bytes from the live socket, or a `hello-ok` that
+        // re-attaches every pane a second time.
+        if (superseded()) return
+        this.receive(String(event.data))
+      }
+
+      socket.onclose = () => {
+        // A superseded socket closing is the sound of it being tidied away, not
+        // of this link dropping, so it arms no retry and tells nobody.
+        if (superseded()) return
+        this.socket = null
+        this.stopBeating()
+        this.failWaiting('The link to the desktop dropped before that answered.')
+        // A watcher hears about it here rather than working it out from a picture
+        // that stopped moving: a decoder holding a last frame looks exactly like a
+        // desktop that is sitting still, and the two want different sentences. A
+        // reconnect does not resume a watch — the desktop tore its capture down
+        // with the socket — so this is an ending, not a pause.
+        watcher?.onStop('The link to the desktop dropped, so the picture stopped.', false)
+        if (this.closedByUs || this.stopped) return
+        this.scheduleRetry()
+      }
+
+      socket.onerror = () => {
+        if (superseded()) return
+        /* onclose always follows; retrying is decided there */
+      }
+    } finally {
+      this.opening = false
     }
   }
 
@@ -744,6 +834,16 @@ export class ForgeClient {
       }
 
       case 'error':
+        // `unknown-session` about a named pane is the desktop saying that pane
+        // no longer exists, which is the same news as `exit` arriving by another
+        // road — a pane closed at the desk while this browser was away never
+        // gets an `exit`, because there was no socket to send it down. So it is
+        // forgotten here too. Leaving it in `subs` meant re-attaching a dead
+        // pane on every single reconnect and re-earning this notice each time,
+        // for as long as the tab stayed open.
+        if (frame.code === 'unknown-session' && typeof frame.sessionId === 'string') {
+          this.subs.delete(frame.sessionId)
+        }
         // Only `message` is meant to be shown; the codes exist so a client can
         // decide whether to retry or re-sync, not so it can compose a sentence.
         if (typeof frame.message === 'string' && frame.message) this.handlers.onNotice(frame.message)
@@ -943,6 +1043,18 @@ export class ForgeClient {
     this.socket = null
     this.stopBeating()
     if (!socket) return
+    this.retire(socket)
+  }
+
+  /**
+   * Hang up on one socket and take its voice away, wherever it was found.
+   *
+   * The body of `dropSocket`, split out because a socket that discovers it has
+   * been superseded needs exactly this and is by definition no longer
+   * `this.socket`, so it cannot go through `dropSocket` to get it. One hang-up
+   * in the file rather than two that have to be kept saying the same thing.
+   */
+  private retire(socket: WebSocket): void {
     socket.onopen = null
     socket.onmessage = null
     socket.onclose = null
