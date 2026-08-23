@@ -75,9 +75,20 @@
  * socket either. What is left is the property underneath both: the one screen
  * where this client waits on a person has to hold still while it waits. That is
  * now the PIN box, and that is what phase 6 asserts.
+ *
+ * Phase 7 is the fourth, and it is the one none of the others could see. Every
+ * drop above is a socket that *closed* — the desktop said goodbye, or the
+ * process went away and the OS said it for it. The drop this product actually
+ * suffers says nothing at all: a laptop sleeps, a phone backgrounds the tab,
+ * and the connection is torn down somewhere in the middle with no close frame
+ * ever reaching the page. The browser goes on reporting `OPEN` for minutes, and
+ * a client that trusts `readyState` sits there disconnected the whole time. So
+ * phase 7 puts a relay in front of the desktop and has it swallow the link
+ * whole, which is the only way to write that case down.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { createServer as createTcpServer, connect as tcpConnect } from 'node:net'
 import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -553,6 +564,107 @@ async function main() {
         mirroring = watching
       }
     })
+
+  /**
+   * A TCP relay in front of the desktop, so a phase can take the link away
+   * *without closing it*.
+   *
+   * Stopping the server proves the wrong thing. It closes the socket, the
+   * browser gets an `onclose`, and the reconnect loop that has always worked
+   * runs — which is phase 1a, and it passes. What no server-side action can
+   * produce from in here is the failure this client is actually bad at: a
+   * connection that is gone while both ends still hold an open socket, because
+   * the path between them stopped carrying anything and nobody was told.
+   *
+   * `swallow()` is that, and it is deliberately total. A wedged pair forwards
+   * no bytes in either direction *and does not propagate the close* when the
+   * desktop's own heartbeat gives up on its end — because the whole point is
+   * that the browser never finds out. What the page is left holding is exactly
+   * what a phone that lost its radio is holding: a socket that says `OPEN` and
+   * a desktop that tidied up thirty seconds ago.
+   *
+   * Only the pairs alive at the moment of the call are swallowed. A re-dial
+   * therefore reaches the desktop normally, which is what makes the recovery
+   * observable rather than something the harness has to remember to permit.
+   */
+  let relayPort = 8600
+  const startRelay = async (targetPort) => {
+    const pairs = new Set()
+    let dials = 0
+    relayPort += 1
+    const tcp = createTcpServer((down) => {
+      dials += 1
+      const up = tcpConnect(targetPort, '127.0.0.1')
+      const pair = { down, up, wedged: false }
+      pairs.add(pair)
+      down.on('data', (b) => {
+        if (!pair.wedged) up.write(b)
+      })
+      up.on('data', (b) => {
+        if (!pair.wedged) down.write(b)
+      })
+      // The browser hanging up is always honoured — that is the client deciding
+      // this socket is finished, which is the behaviour under test.
+      down.on('close', () => {
+        pairs.delete(pair)
+        up.destroy()
+      })
+      // The desktop hanging up is honoured only while the pair is whole. Once
+      // swallowed, the browser is told nothing, ever.
+      up.on('close', () => {
+        if (!pair.wedged) down.destroy()
+      })
+      down.on('error', () => up.destroy())
+      up.on('error', () => {
+        if (!pair.wedged) down.destroy()
+      })
+    })
+    await new Promise((r) => tcp.listen(relayPort, '127.0.0.1', r))
+    return {
+      port: relayPort,
+      /**
+       * How many times a browser has opened a connection through here.
+       *
+       * The observation this phase turns on, and it is taken at the wire rather
+       * than off the screen for a reason the first draft of this phase ran into:
+       * the re-dial goes to a desktop on loopback and completes in single-digit
+       * milliseconds, so `Reconnecting…` can come and go between two polls of
+       * the DOM. The banner is real and it is not what is being claimed. What is
+       * being claimed is that the client hung up on a socket it had no way of
+       * knowing was dead, and a second TCP connection arriving here is that,
+       * exactly, with a timestamp.
+       */
+      dials: () => dials,
+      /**
+       * Take every live link, and report how many were newly taken.
+       *
+       * Already-swallowed pairs are counted out rather than counted again,
+       * because they linger: a client hanging up on a swallowed socket sends a
+       * close frame into the same void everything else went into, so the
+       * browser sits waiting for a close handshake that cannot come and the
+       * pair stays on the books. That is faithful — it is what a phone holding
+       * a dead socket looks like — but it means `pairs.size` answers a
+       * different question from the one each call is asking.
+       */
+      swallow: () => {
+        let taken = 0
+        for (const pair of pairs) {
+          if (pair.wedged) continue
+          pair.wedged = true
+          taken += 1
+        }
+        return taken
+      },
+      close: () =>
+        new Promise((r) => {
+          for (const pair of pairs) {
+            pair.down.destroy()
+            pair.up.destroy()
+          }
+          tcp.close(r)
+        })
+    }
+  }
 
   /** Start a phase: a fresh port, a fresh WebAuth, a fresh WebServer. */
   let port = 8500
@@ -2118,6 +2230,124 @@ async function main() {
   await page.click('.gate__card[data-reason="pin"] button[type="submit"]')
   await waitFor(() => page.locator('.app').count().then((n) => n > 0), 30_000, 'the workspace after the wait')
   log(pinChecks === 2, 'and the PIN typed after all of that still gets the browser in, on the second dial and no more')
+
+  /* ============== PHASE 7 — the link that died without saying so
+   *
+   * See the note at the top of this file. Everything else here drops a link by
+   * closing it; this drops one by swallowing it, which is what going away and
+   * coming back actually does to a socket, and it is the case the client used
+   * to be worst at by an enormous margin — `readyState` says `OPEN` and goes on
+   * saying it until the operating system abandons the TCP connection, which is
+   * minutes, and every re-dial guard in the file correctly stands down on a
+   * link that is in hand.
+   *
+   * Two halves, because there are two ways to find out and they are worth
+   * different amounts. The beat is the backstop: somebody sitting looking at
+   * the tab when the link dies. The wake-up is the fast path, and it is the one
+   * this phase exists for — the return to a tab that has been left alone, where
+   * the whole cost of being wrong is paid by a person waiting.
+   */
+
+  /**
+   * The client's own probe window, restated here rather than imported.
+   *
+   * `lib/client.ts` is browser code and this is a Node harness, so the constant
+   * cannot be shared the way `HEARTBEAT_MS` is — and it is used below only to
+   * *avoid* racing a guard, never as the thing being asserted. What is asserted
+   * is the wall-clock gap between the two halves, which is measured.
+   */
+  const PROBE_MS = 3_000
+
+  const wedgePort = await startPhase()
+  const relay = await startRelay(wedgePort)
+  setConfig({ devHost: `127.0.0.1:${relay.port}` })
+  await signInFresh()
+  await waitFor(
+    () => page.locator('.linkbadge[data-state="live"]').count().then((n) => n === 1),
+    30_000,
+    'a live link through the relay'
+  )
+  log((await page.locator('.app').count()) === 1, 'a link relayed through a plain TCP hop is a link like any other')
+
+  /* ---- half one: nobody touches anything, and the beat finds it anyway */
+
+  const swallowed = relay.swallow()
+  log(swallowed === 1, `the relay swallowed the live link whole (${swallowed} socket), closing nothing`)
+  log(
+    (await page.locator('.linkbadge[data-state="live"]').count()) === 1,
+    'and the page cannot tell — its socket still reads open, which is exactly the lie this is about'
+  )
+
+  const beatDials = relay.dials()
+  const beatStarted = Date.now()
+  await waitFor(
+    () => Promise.resolve(relay.dials() > beatDials),
+    HEARTBEAT_MS + HEARTBEAT_GRACE_MS + 30_000,
+    'the beat to notice a link that stopped answering'
+  )
+  const beatNoticedMs = Date.now() - beatStarted
+  log(
+    beatNoticedMs < HEARTBEAT_MS + HEARTBEAT_GRACE_MS,
+    `the beat noticed on its own in ${(beatNoticedMs / 1000).toFixed(1)}s and dialled again — a ping that went unanswered, rather than a close frame that never came`
+  )
+  await waitFor(
+    () => page.locator('.linkbadge[data-state="live"]').count().then((n) => n === 1),
+    40_000,
+    'the link to come back after the beat noticed'
+  )
+  log(
+    (await page.locator('[data-testid="reconnecting-banner"]').count()) === 0,
+    'and what it dialled into is a working desktop, badged live again with no reload anywhere'
+  )
+
+  /* ---- half two: the same death, found by a person coming back to the tab */
+
+  const swallowedAgain = relay.swallow()
+  log(swallowedAgain === 1, 'the relay swallowed the replacement link too, the same way')
+
+  // Long enough that the last frame is not still warm, which is a property of
+  // the client this phase has to respect rather than defeat: a wake-up arriving
+  // within PROBE_MS of live traffic asks nothing, because there is nothing to
+  // ask — bytes have just been through. That guard is why `focus`, which fires
+  // on every click back into a window, does not cost a round trip; the case it
+  // stands down for is not the case anybody is complaining about. The tab this
+  // is really about was left alone for minutes, so this waits a few seconds to
+  // be that tab instead of pretending the guard is not there.
+  await sleep(PROBE_MS + 1_000)
+
+  // The wake-up path, entered through the listener the real event reaches. A
+  // headless page is `visible` throughout and cannot be alt-tabbed away from,
+  // so the event is dispatched rather than caused — but everything downstream
+  // of `addEventListener('focus')` is the shipped client deciding for itself,
+  // including whether there is anything wrong at all.
+  const wakeDials = relay.dials()
+  const wakeStarted = Date.now()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await waitFor(
+    () => Promise.resolve(relay.dials() > wakeDials),
+    30_000,
+    'the wake-up to notice the swallowed link'
+  )
+  const wakeNoticedMs = Date.now() - wakeStarted
+  log(
+    wakeNoticedMs < 10_000,
+    `coming back to the tab found it in ${(wakeNoticedMs / 1000).toFixed(1)}s — the link was made to prove itself rather than believed`
+  )
+  log(
+    wakeNoticedMs < beatNoticedMs,
+    `which is quicker than waiting for the beat (${(wakeNoticedMs / 1000).toFixed(1)}s against ${(beatNoticedMs / 1000).toFixed(1)}s), and that gap is the whole point of the wake-up`
+  )
+  await waitFor(
+    () => page.locator('.linkbadge[data-state="live"]').count().then((n) => n === 1),
+    40_000,
+    'the link to come back after the wake-up noticed'
+  )
+  log(
+    (await page.locator('.app').count()) === 1 && (await page.locator('input[type="email"]').count()) === 0,
+    'and what came back is the workspace that was already on screen, not a fresh sign-in'
+  )
+
+  await relay.close()
 
   /* ---------------------------------------------------------------- tidy */
 
