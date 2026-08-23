@@ -82,8 +82,12 @@ const linkOf = () => {
   })
 }
 
-const FORGE = 'C:\\Users\\steve\\Desktop\\forge'
-const OTHER = 'C:\\Users\\steve\\Desktop\\car-harness'
+// The Forge project is this checkout, because the MCP server is spawned *in*
+// it further down and reports its real cwd over the wire — a made-up path is
+// a cwd spawn() cannot enter, which on CI surfaces as a baffling ENOENT for
+// node.exe itself (Checks, 2026-08-23). The other project never has to exist.
+const FORGE = resolve(fileURLToPath(new URL('..', import.meta.url)))
+const OTHER = resolve(FORGE, '..', 'car-harness')
 
 /** Rex, Zora and two more, in one project; a second Zora in another. */
 const populate = (link) => {
