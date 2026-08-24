@@ -9,7 +9,9 @@ import { isSessionId } from '@shared/session'
 import type { LayoutNode } from '@shared/types'
 import { getProjects, getSettings, getWorkspace } from '../store'
 import { bridgeConfigPath } from '../bridge/mcp-config'
-import { transcriptPath } from '../bridge/claude-transcripts'
+import { claudeHome, transcriptPath } from '../bridge/claude-transcripts'
+import { installForemanKit } from './kit'
+import { foremanKitDir } from './kit-path'
 import { getManager, getReplay, liveSessions } from '../pty-host'
 import { onAttention } from '../attention-bus'
 import { DEFAULT_FOREMAN_MODEL, ForemanHost, type ForemanPaneInfo } from './host'
@@ -273,9 +275,18 @@ export function setForemanTarget(win: BrowserWindow | null): void {
 }
 
 export function registerForemanHandlers(): void {
-  ipcMain.handle(IPC.foremanStart, (_e, request: ForemanStartRequest): ForemanState =>
-    ensureHost().start(request ?? { paneId: '', seed: '' })
-  )
+  ipcMain.handle(IPC.foremanStart, (_e, request: ForemanStartRequest): ForemanState => {
+    // The skills and agents Foreman drives the pane with (/gaffer, /fable-method,
+    // the gaffer crew) ship inside Forge and land in this machine's Claude home
+    // the first time Foreman is switched on. Idempotent, and never overwrites a
+    // file the user wrote themselves — see ./kit.ts.
+    const kitDir = foremanKitDir()
+    if (kitDir) {
+      const report = installForemanKit({ kitDir, claudeHome: claudeHome() })
+      for (const f of report.failed) console.error(`[foreman:kit] ${f.name}: ${f.error}`)
+    }
+    return ensureHost().start(request ?? { paneId: '', seed: '' })
+  })
   // Never lazily starts a host: stopping something that is not running is a
   // no-op, not a reason to build one.
   ipcMain.handle(IPC.foremanStop, (_e, paneId: string): ForemanState =>
