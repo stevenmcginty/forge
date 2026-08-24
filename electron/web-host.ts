@@ -44,6 +44,7 @@ import { WebServer, type WebServerHost } from './web/server'
 import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
 import { transcriptPath } from './bridge/claude-transcripts'
+import { publishAttention } from './attention-bus'
 import { describe, FirebaseRest } from './companion/rest'
 import { NgrokTunnel, ensureNgrokExe, resolveNgrokExe } from './mobile-tunnel'
 /*
@@ -1780,13 +1781,15 @@ export function registerWebHandlers(): void {
    * exists here is the tab that is *not* open, and buzzing a phone that is
    * already showing the pane would be the fastest way to get notifications
    * switched off. `idle` is a badge going out, which nobody needs told twice.
+   *
+   * There is a third door now, and it opens before either of these: the
+   * attention bus (electron/attention-bus.ts), which Foreman subscribes to.
+   * Note *where* the publish is — above the `if (!instance) return` that used
+   * to be the first line of this handler. Foreman is a desktop feature and must
+   * hear every transition on a machine that has never switched Forge Web on;
+   * this handler is simply where the renderer's news happens to enter main.
    */
   ipcMain.on(IPC.webAttention, (_e, payload: { sessionId?: string; state?: string; prompt?: string }) => {
-    const instance = server
-    // No link, no browsers, nothing to notify — and no keypair generated for a
-    // desktop that never switched Forge Web on.
-    if (!instance) return
-
     const sessionId = String(payload?.sessionId ?? '')
     const state = payload?.state
     if (!sessionId) return
@@ -1794,6 +1797,13 @@ export function registerWebHandlers(): void {
     // Already capped in the renderer; capped again because this is a boundary
     // and what arrives here ends up on a public wire.
     const prompt = String(payload?.prompt ?? '').slice(0, ATTENTION_PROMPT_MAX)
+
+    publishAttention({ paneId: sessionId, state, prompt })
+
+    const instance = server
+    // No link, no browsers, nothing to notify — and no keypair generated for a
+    // desktop that never switched Forge Web on.
+    if (!instance) return
 
     instance.pushAttention(sessionId, state === 'asking', prompt || undefined)
 
