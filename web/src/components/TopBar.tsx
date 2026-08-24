@@ -1,6 +1,6 @@
 import { useEffect, type CSSProperties, type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
-import { useActiveProject, useForge } from '../state'
+import { useActiveProject, useForge, useWorkspace } from '../state'
 
 /**
  * The app bar. Same tokens as the desktop, different job: identity, the
@@ -21,10 +21,19 @@ export function TopBar({
   mobile?: boolean
 }): ReactNode {
   const { state, actions } = useForge()
+  const workspace = useWorkspace()
   const project = useActiveProject()
   const offline = state.stage.kind === 'offline'
   const desktopName =
     state.picture?.desktopName || (state.stage.kind === 'offline' ? (state.stage.record?.name ?? state.cached?.desktopName ?? '') : '')
+
+  const tab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0]
+  const activePaneId = tab?.activePaneId ?? null
+
+  const onClosePane = () => {
+    if (!activePaneId) return
+    void actions.layout({ op: 'close-pane', paneId: activePaneId })
+  }
 
   useEffect(() => {
     document.title = project ? `${project.name} · Forge` : 'Forge'
@@ -168,6 +177,20 @@ export function TopBar({
         >
           <Icon name="user" size={15} />
         </button>
+
+        {/* Red X close active tab/terminal button in the top right-hand corner */}
+        {activePaneId ? (
+          <button
+            type="button"
+            className="ghost-btn titlebar__btn titlebar__btn--close"
+            data-danger="true"
+            title="Close active terminal"
+            aria-label="Close active terminal"
+            onClick={onClosePane}
+          >
+            <Icon name="close" size={15} />
+          </button>
+        ) : null}
       </div>
     </header>
   )
