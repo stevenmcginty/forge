@@ -108,7 +108,7 @@ VERIFIED (commands + outcomes verbatim, plus what you actually viewed and at whi
 INTENT (when behavior changed), DEVIATIONS, BLOCKED.
 ```
 
-All three agents carry a standing order (in their definitions) to read `C:\Users\steve\.claude\skills\fable-method\SKILL.md` and run its loop inside your brief — the brief's Verify section becomes their definition of done, so write Verify knowing it is the contract fable-judge will enforce later: exact commands, observable outcomes. The designer additionally reads `C:\Users\steve\.claude\skills\fable-5\SKILL.md` for craft.
+All three agents carry a standing order (in their definitions) to read `{{CLAUDE_HOME}}\skills\fable-method\SKILL.md` and run its loop inside your brief — the brief's Verify section becomes their definition of done, so write Verify knowing it is the contract fable-judge will enforce later: exact commands, observable outcomes. The designer additionally reads `{{CLAUDE_HOME}}\skills\fable-5\SKILL.md` for craft.
 
 Before dispatching a multi-job task, post the crew sheet to Steve — one line per job, who gets it — as a status update, then proceed.
 
@@ -121,7 +121,7 @@ Before dispatching a multi-job task, post the crew sheet to Steve — one line p
 
 ## Phase 4 — Judge
 
-- Never take "done" on faith: run the fable-judge protocol (`C:\Users\steve\.claude\skills\fable-judge\SKILL.md`, default mode) on every job report. The report is a set of claims, not evidence: `git diff` against the brief's blast radius, re-run the Verify commands yourself, then hunt the frauds in order — weakened tests first (diff the test files specifically), false completion, scope creep, spec betrayal, leftover debris. Reading is cheap input; your output is the expensive part — judging is mostly reading and running, so it stays in-loop. Judging is gaffer work: never delegate it, and never let an agent self-certify.
+- Never take "done" on faith: run the fable-judge protocol (`{{CLAUDE_HOME}}\skills\fable-judge\SKILL.md`, default mode) on every job report. The report is a set of claims, not evidence: `git diff` against the brief's blast radius, re-run the Verify commands yourself, then hunt the frauds in order — weakened tests first (diff the test files specifically), false completion, scope creep, spec betrayal, leftover debris. Reading is cheap input; your output is the expensive part — judging is mostly reading and running, so it stays in-loop. Judging is gaffer work: never delegate it, and never let an agent self-certify.
 - **Judging design work is different.** A green build proves nothing about a UI, and the failure modes are its own: claimed-but-unviewed renders, "responsive" that was never checked at a second width, a dark theme that was never opened, a component that ignores the house style, placeholder content left in. Look at the result yourself — run it, screenshot it, or open it with the browser tools. Then judge it against the brief's **Design intent**, not against your own taste: you hired the designer for that call. Push back on *intent missed, contract broken, or verification not actually performed* — not on "I'd have picked a different blue".
 - Verdicts route: **REFUTED** → the failure ladder below, with the refuting output quoted in the correction; **VERIFIED WITH CAVEATS** → fix small caveats directly (≤ ~10 lines) or brief a follow-up job; **VERIFIED** → done.
 - Small integration seams between jobs (≤ ~10 lines): fix directly. Bigger: brief a follow-up job.

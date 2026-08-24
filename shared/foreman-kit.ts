@@ -41,6 +41,30 @@ export const FOREMAN_KIT_AGENTS = ['gaffer-designer', 'gaffer-builder', 'gaffer-
 export const FOREMAN_KIT_MANIFEST = 'manifest.json'
 
 /**
+ * What stands in for the Claude home inside a bundled file.
+ *
+ * The skills refer to each other by absolute path — the gaffer skill tells its
+ * agents to read `…\.claude\skills\fable-method\SKILL.md` — and the path they
+ * were written with is the path on the machine they were written on. Shipped
+ * verbatim, every one of those reads fails for everybody else and the kit is
+ * dead on arrival: `/gaffer` runs, sends its crew at a directory that is not
+ * there, and nothing says why.
+ *
+ * So the sync script rewrites the author's own home to this placeholder, the
+ * manifest hashes are taken over the placeholder form, and the installer fills
+ * in the home it is actually writing to. Substituted into SKILL.md and agent
+ * `.md` only — the two files whose identity the marker tracks — which is why
+ * scripts/foreman-kit-check.mjs asserts that nothing else in the bundle carries
+ * one, rather than letting a stray `{{CLAUDE_HOME}}` ship as literal text.
+ */
+export const CLAUDE_HOME_PLACEHOLDER = '{{CLAUDE_HOME}}'
+
+/** Fill the placeholder in with a real Claude home. */
+export function fillClaudeHome(text: string, claudeHome: string): string {
+  return text.split(CLAUDE_HOME_PLACEHOLDER).join(claudeHome)
+}
+
+/**
  * The tag inside the HTML comment Forge appends to everything it installs.
  *
  * A string rather than a regex so a person grepping their own `~/.claude` for

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join, resolve, sep } from 'node:path'
 import {
   FOREMAN_KIT_MANIFEST,
+  fillClaudeHome,
   parseForemanKitManifest,
   readForemanMarker,
   withForemanMarker,
@@ -63,6 +64,34 @@ export interface KitOptions {
 }
 
 const sha256 = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')
+
+/** One install, resolved once and handed down rather than threaded as five arguments. */
+interface Context {
+  kitDir: string
+  claudeHome: string
+  skillsRoot: string
+  agentsRoot: string
+  version: number
+}
+
+/**
+ * The bytes for a file whose identity the marker tracks — SKILL.md, or an
+ * agent `.md`.
+ *
+ * Two things happen here and the order matters. The Claude home placeholder is
+ * filled in *first*, so the skill points at the folder it is actually being
+ * installed into rather than at the machine it was written on; then the marker
+ * is stamped over the result. The hash in the marker is therefore of the file
+ * as it lands, which is what makes "has anybody edited this?" a question the
+ * marker can answer. The manifest's hash is a different number on any file that
+ * carried a placeholder, and deliberately so: it describes the bundle, which is
+ * the same on every machine, and the marker describes the installation, which
+ * is not.
+ */
+function markedBytes(bundled: Buffer, kit: Context): Buffer {
+  const body = fillClaudeHome(bundled.toString('utf8'), kit.claudeHome)
+  return Buffer.from(withForemanMarker(body, kit.version, sha256(Buffer.from(body, 'utf8'))), 'utf8')
+}
 
 /**
  * Write one file, atomically, and only ever inside `root`.
@@ -144,7 +173,8 @@ function readKitFile(root: string, rel: string): Buffer {
  * In-place also means a file the user added inside our folder survives. Nothing
  * here deletes; the manifest decides what is written, never what is removed.
  */
-function syncSkill(kitDir: string, skillsRoot: string, skill: ForemanKitSkill, version: number, report: KitReport): void {
+function syncSkill(kit: Context, skill: ForemanKitSkill, report: KitReport): void {
+  const { kitDir, skillsRoot, version } = kit
   const name = skill.name
   if (!isValidSkillName(name)) {
     report.failed.push({ name, error: 'not a name a skill folder can have' })
@@ -182,7 +212,7 @@ function syncSkill(kitDir: string, skillsRoot: string, skill: ForemanKitSkill, v
   }
   const head = files.find((f) => f.path === SKILL_FILE)!
   const rest = files.filter((f) => f !== head)
-  const marked = Buffer.from(withForemanMarker(head.bytes.toString('utf8'), version, sha256(head.bytes)), 'utf8')
+  const marked = markedBytes(head.bytes, kit)
 
   if (verdict === 'install') {
     const staging = `${dir}.forge-kit`
@@ -212,7 +242,8 @@ function syncSkill(kitDir: string, skillsRoot: string, skill: ForemanKitSkill, v
 /* ------------------------------------------------------------------ agent */
 
 /** Install or update one agent definition. One file, so one atomic write. */
-function syncAgent(kitDir: string, agentsRoot: string, name: string, version: number, report: KitReport): void {
+function syncAgent(kit: Context, name: string, report: KitReport): void {
+  const { kitDir, agentsRoot, version } = kit
   if (!isValidSkillName(name)) {
     report.failed.push({ name, error: 'not a name an agent file can have' })
     return
@@ -232,8 +263,7 @@ function syncAgent(kitDir: string, agentsRoot: string, name: string, version: nu
   }
 
   try {
-    const bytes = readKitFile(join(kitDir, 'agents'), file)
-    const marked = Buffer.from(withForemanMarker(bytes.toString('utf8'), version, sha256(bytes)), 'utf8')
+    const marked = markedBytes(readKitFile(join(kitDir, 'agents'), file), kit)
     mkdirSync(agentsRoot, { recursive: true })
     writeInside(agentsRoot, target, marked)
     if (verdict === 'install') report.installed.push(name)
@@ -273,13 +303,22 @@ export function installForemanKit({ kitDir, claudeHome }: KitOptions): KitReport
   }
   const { version, skills, agents } = read.manifest
 
-  const skillsRoot = join(claudeHome, 'skills')
-  const agentsRoot = join(claudeHome, 'agents')
+  // Resolved, because it is substituted into the skills as text: a caller that
+  // handed over `./claude` would otherwise write a relative path into every
+  // instruction the agents follow.
+  const home = resolve(claudeHome)
+  const context: Context = {
+    kitDir,
+    claudeHome: home,
+    skillsRoot: join(home, 'skills'),
+    agentsRoot: join(home, 'agents'),
+    version
+  }
   try {
-    mkdirSync(skillsRoot, { recursive: true })
-    mkdirSync(agentsRoot, { recursive: true })
+    mkdirSync(context.skillsRoot, { recursive: true })
+    mkdirSync(context.agentsRoot, { recursive: true })
   } catch (err) {
-    report.failed.push({ name: claudeHome, error: (err as Error).message })
+    report.failed.push({ name: home, error: (err as Error).message })
     return report
   }
 
@@ -287,14 +326,14 @@ export function installForemanKit({ kitDir, claudeHome }: KitOptions): KitReport
   // unreadable folder or a locked file costs exactly one entry in `failed`.
   for (const skill of skills) {
     try {
-      syncSkill(kitDir, skillsRoot, skill, version, report)
+      syncSkill(context, skill, report)
     } catch (err) {
       report.failed.push({ name: skill.name, error: (err as Error).message })
     }
   }
   for (const agent of agents) {
     try {
-      syncAgent(kitDir, agentsRoot, agent.name, version, report)
+      syncAgent(context, agent.name, report)
     } catch (err) {
       report.failed.push({ name: agent.name, error: (err as Error).message })
     }

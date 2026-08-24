@@ -51,7 +51,8 @@ const {
   foremanMarker,
   readForemanMarker,
   stripForemanMarker,
-  parseForemanKitManifest
+  parseForemanKitManifest,
+  CLAUDE_HOME_PLACEHOLDER
 } = await import('../shared/foreman-kit.ts')
 
 const ROOT = resolve(import.meta.dirname, '..')
@@ -142,6 +143,41 @@ ok(
   ok(crlf.length === 0, 'no bundled file carries CRLF, so a fresh clone hashes the same', crlf.join(', '))
 }
 
+console.log("\nnothing in the bundle points at the machine it came from")
+{
+  // The failure this catches is total and silent: the gaffer skill sends its
+  // agents to an absolute path, and shipped verbatim that path is the author's
+  // home. On anyone else's machine every one of those reads fails and Foreman
+  // is a button that does nothing.
+  const every = [
+    ...manifest.skills.flatMap((s) => s.files.map((f) => [`skills/${s.name}/${f.path}`, join(KIT, 'skills', s.name, f.path)])),
+    ...manifest.agents.map((a) => [`agents/${a.name}.md`, join(KIT, 'agents', `${a.name}.md`)])
+  ]
+  const texts = every.map(([label, path]) => [label, readFileSync(path, 'utf8')])
+
+  for (const needle of ['Users\\steve', 'Users/steve']) {
+    const hits = texts.filter(([, text]) => text.includes(needle)).map(([label]) => label)
+    ok(hits.length === 0, `no bundled file contains ${needle}`, hits.join(', '))
+  }
+  // A bare drive letter, or a posix home. The lookbehind is what keeps
+  // `https://…` out of it — a URL is a reference anyone can follow, an absolute
+  // path is one only its author can.
+  const homes = texts.filter(([, text]) => /(?<![A-Za-z])[A-Za-z]:[\\/]|\/(?:home|Users)\//.test(text)).map(([label]) => label)
+  ok(homes.length === 0, 'and none carries an absolute local path of any shape', homes.join(', '))
+
+  // The placeholder is only substituted into SKILL.md and agent .md. One that
+  // turned up anywhere else would ship as the literal text `{{CLAUDE_HOME}}`,
+  // which is a broken path that nothing would report.
+  const stray = texts
+    .filter(([label, text]) => text.includes(CLAUDE_HOME_PLACEHOLDER) && !/(\/SKILL\.md|^agents\/)/.test(label))
+    .map(([label]) => label)
+  ok(stray.length === 0, 'the placeholder appears only where the installer fills it in', stray.join(', '))
+  ok(
+    texts.some(([, text]) => text.includes(CLAUDE_HOME_PLACEHOLDER)),
+    'and it does appear — the rewrite is doing something'
+  )
+}
+
 /* ------------------------------------------------------------- a fresh home */
 
 console.log('\na machine that has never had these')
@@ -178,17 +214,61 @@ ok(
   }
   ok(marked.length === 8, 'every installed file carries our marker at the bundled version', `${marked.length}/8`)
 
-  const head = manifest.skills.find((s) => s.name === 'gaffer').files.find((f) => f.path === 'SKILL.md')
-  const installed = readFileSync(join(fresh, 'skills', 'gaffer', 'SKILL.md'), 'utf8')
-  ok(readForemanMarker(installed).sha256 === head.sha256, "the marker's hash is the file it was taken from")
+  // fable-judge carries no placeholder, so what landed is the bundle verbatim
+  // and both hashes are the same number.
+  const plain = manifest.skills.find((s) => s.name === 'fable-judge').files.find((f) => f.path === 'SKILL.md')
+  const verbatim = readFileSync(join(fresh, 'skills', 'fable-judge', 'SKILL.md'), 'utf8')
+  ok(readForemanMarker(verbatim).sha256 === plain.sha256, "a placeholder-free file's marker carries the manifest hash")
   ok(
-    sha256(Buffer.from(stripForemanMarker(installed), 'utf8')) === head.sha256,
+    sha256(Buffer.from(stripForemanMarker(verbatim), 'utf8')) === plain.sha256,
     'and the body under the marker is byte-identical to the bundled copy'
   )
+  // gaffer does carry one, so its marker describes what landed rather than what
+  // shipped — that is the whole point of hashing the installed bytes.
+  for (const [where, path] of [
+    ['gaffer', join(fresh, 'skills', 'gaffer', 'SKILL.md')],
+    ['gaffer-builder', join(fresh, 'agents', 'gaffer-builder.md')]
+  ]) {
+    const text = readFileSync(path, 'utf8')
+    ok(
+      readForemanMarker(text).sha256 === sha256(Buffer.from(stripForemanMarker(text), 'utf8')),
+      `${where}'s marker hashes the bytes that actually landed`
+    )
+  }
   const reference = join('references', 'domains', 'marketing.md')
   ok(
     readForemanMarker(readFileSync(join(fresh, 'skills', 'fable-method', reference), 'utf8')) === null,
     'a reference file beside SKILL.md is left unmarked — identity lives on one file'
+  )
+}
+
+console.log('\nand the installed copy points at the home it landed in')
+{
+  const gaffer = readFileSync(join(fresh, 'skills', 'gaffer', 'SKILL.md'), 'utf8')
+  const bundled = readFileSync(join(KIT, 'skills', 'gaffer', 'SKILL.md'), 'utf8')
+  const occurrences = bundled.split(CLAUDE_HOME_PLACEHOLDER).length - 1
+  ok(occurrences > 0, `the bundled gaffer skill has ${occurrences} placeholders to fill`)
+  ok(!gaffer.includes(CLAUDE_HOME_PLACEHOLDER), 'none of them survived into the installed copy')
+  ok(
+    gaffer.split(fresh).length - 1 === occurrences,
+    'every one became the mkdtemp home this was installed into',
+    `${gaffer.split(fresh).length - 1} of ${occurrences}`
+  )
+  ok(
+    gaffer.includes(join(fresh, 'skills', 'fable-method', 'SKILL.md')),
+    'so the path gaffer sends its agents to is a file that is actually there'
+  )
+  ok(
+    existsSync(join(fresh, 'skills', 'fable-method', 'SKILL.md')),
+    'and that file exists — the reference resolves end to end'
+  )
+  for (const name of FOREMAN_KIT_AGENTS) {
+    const text = readFileSync(join(fresh, 'agents', `${name}.md`), 'utf8')
+    ok(!text.includes(CLAUDE_HOME_PLACEHOLDER), `${name}.md has no placeholder left either`)
+  }
+  ok(
+    readFileSync(join(fresh, 'agents', 'gaffer-designer.md'), 'utf8').includes(join(fresh, 'skills', 'fable-5', 'SKILL.md')),
+    "the designer's craft manual points into the same home"
   )
 }
 

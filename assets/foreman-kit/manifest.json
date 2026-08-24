@@ -1,12 +1,12 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": [
     {
       "name": "gaffer",
       "files": [
         {
           "path": "SKILL.md",
-          "sha256": "73c852fc1f255c0e449a9f625ceb5acaea79914b1b4c9e1cff906b0763d7e01e"
+          "sha256": "3a1e40066670c28152932378e79f0dbd8851ef0a5b25ea84097a916e551b5e19"
         }
       ]
     },
@@ -110,15 +110,15 @@
   "agents": [
     {
       "name": "gaffer-designer",
-      "sha256": "4f615aa3a7ae8e031b1711fab299150442c2a5d1790c367ba479fa7a5b44c563"
+      "sha256": "754abd2c84aad6e456e37e25fc9035b1ee3cef18dfd7eee651430ad132921da7"
     },
     {
       "name": "gaffer-builder",
-      "sha256": "942043dc5f88ac761435a7682468940372fcde35a4e8536f8c90bbd889e8257f"
+      "sha256": "d5e6b0770e37f1eec2539667df53305b7868787cd6de643ee75230d42c32c7b7"
     },
     {
       "name": "gaffer-apprentice",
-      "sha256": "f15e0ae3466f4d8d1b82ea2ca75cfca7e41330e82c3a0b195f0fa0abc2091ef4"
+      "sha256": "a6c7b34c0fe3d453642e80be4ab1470c422bc7353e3be02e58ff590b459b3bd2"
     }
   ]
 }

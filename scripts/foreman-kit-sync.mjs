@@ -16,7 +16,7 @@
  * `assets/` and expecting it to stick is the one mistake this script makes
  * cheap to notice: it wipes and rewrites the tree every run.
  *
- * ## Two properties worth protecting
+ * ## Three properties worth protecting
  *
  *  1. **Idempotent.** A run that finds nothing changed leaves `version` alone.
  *     The installer compares that number against the marker in the user's copy,
@@ -27,6 +27,11 @@
  *     sha256 no longer matches the manifest. (fable-5's catalog.md is CRLF on
  *     this machine, so this is not hypothetical.) Text is written LF; bytes
  *     that are not valid UTF-8 are copied verbatim and left to .gitattributes.
+ *  3. **No machine paths.** The skills point at each other by absolute path —
+ *     the gaffer skill sends its agents to `<home>\skills\fable-method\SKILL.md`
+ *     — and that path is the author's. Committed verbatim it is a kit that is
+ *     dead on arrival for everybody else, so the author's own Claude home is
+ *     rewritten to `{{CLAUDE_HOME}}` and filled back in at install time.
  *
  * SAFETY: reads `~/.claude`, writes only inside `assets/foreman-kit/`.
  */
@@ -50,7 +55,8 @@ registerHooks({
   }
 })
 
-const { FOREMAN_KIT_AGENTS, FOREMAN_KIT_SKILLS, FOREMAN_KIT_MANIFEST } = await import('../shared/foreman-kit.ts')
+const { FOREMAN_KIT_AGENTS, FOREMAN_KIT_SKILLS, FOREMAN_KIT_MANIFEST, CLAUDE_HOME_PLACEHOLDER } =
+  await import('../shared/foreman-kit.ts')
 const { isSafePackPath, packPathProblem } = await import('../shared/skillpack.ts')
 
 const ROOT = resolve(import.meta.dirname, '..')
@@ -69,21 +75,43 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const skipped = []
 const copied = []
 
+const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 /**
- * The bytes to write, normalised.
+ * The author's own Claude home, in both separator forms, as one pattern.
+ *
+ * `C:\Users\steve\.claude` and `C:/Users/steve/.claude` are the same folder and
+ * both shapes appear in hand-written markdown, so both are matched. Case is
+ * ignored because Windows ignores it and a skill that said `c:\users\…` would
+ * otherwise ship a machine path nobody noticed.
+ */
+const HOME_PATTERN = new RegExp(
+  `(${escape(claudeHome())}|${escape(claudeHome().split('\\').join('/'))})`,
+  'gi'
+)
+
+const rewrites = []
+
+/**
+ * The bytes to write: line endings normalised, and the author's home swapped
+ * for the placeholder the installer fills in.
  *
  * Text round-trips through UTF-8; anything that does not is carried verbatim,
  * decided by re-encoding rather than by extension — the same test skill-pack
- * uses, and for the same reason.
+ * uses, and for the same reason. A binary file is never path-rewritten either,
+ * which is the other half of why the test is worth doing properly.
  */
-function normalise(bytes) {
+function normalise(bytes, rel) {
   const text = bytes.toString('utf8')
   if (!Buffer.from(text, 'utf8').equals(bytes)) return bytes
-  return Buffer.from(text.replace(/\r\n/g, '\n'), 'utf8')
+  const flat = text.replace(/\r\n/g, '\n')
+  const filled = flat.replace(HOME_PATTERN, CLAUDE_HOME_PLACEHOLDER)
+  if (filled !== flat) rewrites.push(`${rel} — ${claudeHome()} → ${CLAUDE_HOME_PLACEHOLDER}`)
+  return Buffer.from(filled, 'utf8')
 }
 
 /** Walk a skill folder into `{ path, bytes }`, refusing what should not travel. */
-function collect(root, dir, out) {
+function collect(name, root, dir, out) {
   for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     const full = join(dir, entry.name)
     const rel = relative(root, full).split(sep).join('/')
@@ -100,7 +128,7 @@ function collect(root, dir, out) {
       continue
     }
     if (entry.isDirectory()) {
-      collect(root, full, out)
+      collect(name, root, full, out)
       continue
     }
     if (!entry.isFile()) continue
@@ -114,7 +142,7 @@ function collect(root, dir, out) {
       skipped.push(`${rel} — ${Math.round(size / 1024)} KB, over the ${MAX_FILE_BYTES / 1024} KB limit`)
       continue
     }
-    out.push({ path: rel, bytes: normalise(readFileSync(full)) })
+    out.push({ path: rel, bytes: normalise(readFileSync(full), `skills/${name}/${rel}`) })
   }
 }
 
@@ -134,7 +162,7 @@ function syncSkill(name) {
   }
 
   const files = []
-  collect(source, source, files)
+  collect(name, source, source, files)
   if (!files.some((f) => f.path === 'SKILL.md')) {
     skipped.push(`${name} — no SKILL.md, so there is nothing Claude would read`)
     return null
@@ -160,7 +188,7 @@ function syncAgent(name) {
     skipped.push(`${name} — no such agent in ${claudeHome()}`)
     return null
   }
-  const bytes = normalise(readFileSync(source))
+  const bytes = normalise(readFileSync(source), `agents/${name}.md`)
   if (bytes.length > MAX_FILE_BYTES) {
     skipped.push(`${name}.md — over the ${MAX_FILE_BYTES / 1024} KB limit`)
     return null
@@ -200,6 +228,7 @@ const version = unchanged ? previous.version : Number.isSafeInteger(previous?.ve
 writeFileSync(manifestPath, `${JSON.stringify({ version, ...content }, null, 2)}\n`, 'utf8')
 
 for (const line of copied) console.log(`  copied  ${line}`)
+for (const line of rewrites) console.log(`  path    ${line}`)
 for (const line of skipped) console.log(`  skipped ${line}`)
 
 const fileCount = skills.reduce((n, s) => n + s.files.length, 0) + agents.length
