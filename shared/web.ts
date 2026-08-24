@@ -32,10 +32,11 @@
  * ## What this protocol is *for*
  *
  * The browser **mirrors** the desktop. It does not spawn a parallel world:
- * opening a tab here opens it on the desk, and the desktop renderer stays the
- * one owner of the split tree and the one thing that persists a workspace
- * (docs/forge-web.md, decision 5). So every layout frame below is a *request*
- * that comes back with a result, never a local mutation announced afterwards.
+ * opening a tab here opens it on the desk, and there is exactly one owner of
+ * the split tree and one thing that persists a workspace (docs/forge-web.md,
+ * decision 5) — the desktop's *main process*, since electron/layout-engine.ts.
+ * So every layout frame below is a *request* that comes back with a result,
+ * never a local mutation announced afterwards.
  *
  * Out of scope on purpose, and modelled nowhere in this file: voice and
  * dictation, the screenshot *tray*, the overlay, Forge Mobile, Forge TV
@@ -787,9 +788,10 @@ export type WebClientFrame =
  * elsewhere in `WebRequest`. Opening a pane picks neither; adding a project
  * names a folder and launches nothing.
  *
- * Forwarded to the desktop renderer, which owns tabs and panes and persists
- * them — the same code path a local click takes, never a second one that could
- * disagree with the first.
+ * Performed by the desktop's main process, which owns tabs and panes and
+ * persists them (electron/layout-engine.ts) — running the same pure functions
+ * a local click runs, never a second implementation that could disagree with
+ * the first. The renderer is told the result and follows it.
  */
 
 export const WEB_LAYOUT_OPS = [

@@ -2509,9 +2509,12 @@ export interface WebRefusal {
 export type WebSignInResult = { ok: true; uid: string; created: boolean } | { ok: false; error: string }
 
 /**
- * A layout operation from a browser, on its way to the renderer that owns tabs
- * and panes. See `WebLayoutOp` in shared/web.ts — this carries it verbatim,
- * because the renderer is the thing that decides what it means.
+ * A layout operation from a browser, on its way to the renderer. See
+ * `WebLayoutOp` in shared/web.ts — this carries it verbatim.
+ *
+ * Only `select-project` still travels this way: the rest are performed in main
+ * against the authoritative layout (electron/layout-engine.ts), and the window
+ * hears about them as a `WorkspaceReplacedEvent` instead.
  */
 /**
  * A browser asking for a folder to be added to the project rail.

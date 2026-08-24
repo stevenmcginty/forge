@@ -415,10 +415,12 @@ export const IPC = {
    */
   webPinClear: 'web:pin-clear',
   /**
-   * A layout operation arriving from a browser. Main → renderer, because the
-   * renderer owns the split tree and persists it — the browser must take the
-   * same code path a local click takes, not a second one that can disagree
-   * (docs/forge-web.md, decision 5).
+   * A layout operation arriving from a browser. Main → renderer, and now only
+   * for `select-project`: everything else is performed in main against the
+   * authoritative layout (electron/layout-engine.ts) and pushed back down on
+   * `workspaceReplaced`, so a dead or hung window cannot strand a browser.
+   * Which project a *window* is looking at is the one thing main cannot answer,
+   * so that verb still comes this way — and still fails without a window.
    */
   webCommand: 'web:command',
   /**

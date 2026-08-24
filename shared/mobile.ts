@@ -328,8 +328,10 @@ export interface ResizeFrame {
  * project id, whose folder the desktop already knows. Nothing on this wire
  * chooses a cwd or an executable.
  *
- * Forwarded to the renderer, which owns tabs/panes and persists them — the same
- * code path a local click takes. See electron/mobile-host.ts.
+ * Performed in the desktop's main process, which owns tabs/panes and persists
+ * them — running the same pure functions a local click runs, so a phone works
+ * with the window closed, crashed or hung. See electron/mobile-host.ts and
+ * electron/layout-engine.ts.
  */
 export interface OpFrame {
   t: 'op'

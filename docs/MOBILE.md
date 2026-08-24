@@ -83,14 +83,26 @@ The phone never says "run this command". It sends an `op` frame naming a
 *profile id* and a *project id*; the desktop resolves both against its own
 settings. Nothing on the wire chooses a cwd or an executable.
 
-`mobile-host` forwards the op to the renderer (`IPC.mobileCommand`) and waits
-for a verdict, because the renderer owns the split tree and persists the
-workspace. The phone joins the same code path a local click takes instead of
-growing a parallel one in main that could disagree with it.
+`mobile-host` performs the op **in the main process**, against the
+authoritative layout (`electron/layout-engine.ts`), using the same pure
+functions the renderer's reducer uses (`shared/splitTree.ts`,
+`shared/workspace.ts`). Main saves the result and pushes it down to the window
+on `IPC.workspaceReplaced`; the renderer follows rather than deciding. There is
+still exactly one split tree and one workspace file — it simply lives one
+process along from where it used to.
 
-**Consequence worth knowing:** Forge minimised is fine; Forge with its window
-closed is not. Layout ops then fail with a sentence saying so, rather than
-silently doing nothing. Driving an existing terminal still works either way.
+This used to be a forward into the renderer with an 8-second deadline on it,
+and that made a dead, hung or blank window the difference between a working
+phone and a useless one. It is the fix for a real outage:
+`electron/renderer-watchdog.ts` shortens such an outage by reloading the window,
+this removes the dependency on it.
+
+**What still needs a window:** `select-project` — which project the desk is
+*looking at* is a fact about a window, so that one is still forwarded and still
+fails with a sentence when there is none. Everything else — opening a tab,
+closing one, splitting a pane, closing a pane, moving the focus ring — works
+with the window closed, crashed or hung. Driving an existing terminal always
+did.
 
 The phone greys out any pane it cannot find in the session list, so the list has
 to keep up with the tab it just asked for. It is pushed on three things: a

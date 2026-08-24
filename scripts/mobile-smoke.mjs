@@ -115,6 +115,8 @@ async function main() {
     MobileServer,
     MobileAuth,
     PtySessionManager,
+    LayoutEngine,
+    UNSUPPORTED,
     GridOwners,
     DESK_VIEWER,
     isAllowedSource,
@@ -156,6 +158,20 @@ async function main() {
 
   const ops = []
   let opAnswer = null
+  /**
+   * The real layout engine, switched on for phase 10c and off everywhere else.
+   *
+   * Off, the hook is the recorder the phases above need: they are about the
+   * *wire* — that an op frame reaches the host verbatim and that a refusal
+   * comes back as an `err` — and a host that really performed them would be
+   * answering questions those phases are not asking.
+   *
+   * On, it is the shipped `LayoutEngine` with the six lines of `dispatchOp`
+   * (electron/mobile-host.ts) around it. There is no Electron in this process
+   * and therefore no renderer at all, which is exactly the desktop this change
+   * exists for.
+   */
+  let engine = null
   // Every set of watched panes the server has announced, in order. The desktop
   // labels those panes as read from away, so "it fired" and "it fired only when
   // the set actually changed" are both worth proving.
@@ -189,7 +205,13 @@ async function main() {
       snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: {} }),
       dispatchOp: async (op) => {
         ops.push(op)
-        return opAnswer
+        if (!engine) return opAnswer
+        const result = engine.apply(op.projectId, op)
+        if (result.ok) {
+          for (const id of result.killed) manager.kill(id)
+          return null
+        }
+        return result.error === UNSUPPORTED ? opAnswer : result.error
       },
       onWatch: (ids) => watches.push(ids.join(' '))
     })
@@ -579,6 +601,64 @@ async function main() {
   // Give a refusal time to arrive if one were coming; silence is the assertion.
   await new Promise((r) => setTimeout(r, 300))
   log(phone.of('err').length === errorsBefore, 'and an op the desktop accepted produces no error frame')
+
+  /* ------------------- 10c. the same op, performed in main, with no renderer
+   *
+   * The failure this phase is about happened to Steve on a train. Every op used
+   * to be forwarded into the desktop renderer and awaited, so a window that had
+   * crashed, hung or gone blank turned every tap into "The desktop did not
+   * answer in time" — with nobody in the building to fix it.
+   *
+   * electron/layout-engine.ts is the fix, and this is the shipped class: there
+   * is no Electron in this process, so there is no renderer to fall back to and
+   * `opAnswer` is the exact sentence a windowless desktop used to refuse with.
+   * Silence from the phone's point of view therefore means the work was done
+   * somewhere a dead window cannot reach — and the pane it named is a *real*
+   * pwsh, which has to be gone afterwards, because a layout that says a
+   * terminal is closed while the process is still running is the one outcome
+   * worse than the refusal.
+   */
+
+  const spare = manager.create({ id: 'm3', cwd: ROOT, cols: 80, rows: 24 })
+  log(spare.ok === true, 'spawned a third real pwsh for the engine to close')
+  const leaf = (id) => ({ type: 'leaf', id, profileId: 'shell', title: '' })
+  const layoutSaves = []
+  engine = new LayoutEngine({
+    load: () => ({
+      tabs: [
+        {
+          id: 'tab-1',
+          title: 'One',
+          activePaneId: 'm3',
+          root: { type: 'split', id: 'sp-1', direction: 'row', ratio: 0.5, a: leaf('m3'), b: leaf('m-keep') }
+        }
+      ],
+      activeTabId: 'tab-1'
+    }),
+    save: (projectId, workspace) => layoutSaves.push({ projectId, workspace }),
+    projects: () => PROJECTS
+  })
+
+  opAnswer = 'Forge has no window open on the desktop, so it cannot change tabs.'
+  const errorsBeforeEngine = phone.of('err').length
+  phone.send({ t: 'op', op: 'close-pane', projectId: 'p1', paneId: 'm3' })
+  await waitFor(() => layoutSaves.length > 0, 5000, 'the engine to perform the close')
+  await waitFor(() => !manager.list().some((x) => x.id === 'm3'), 5000, "the closed pane's shell to go")
+  log(true, "a close-pane from a phone kills the pane's real PTY with no renderer anywhere")
+  log(
+    layoutSaves.length === 1 && !JSON.stringify(layoutSaves[0].workspace).includes('"m3"'),
+    'and the new layout was written from main, once, with the closed pane out of the tree',
+    `${layoutSaves.length} write(s)`
+  )
+  await new Promise((r) => setTimeout(r, 300))
+  log(
+    phone.of('err').length === errorsBeforeEngine,
+    'and the phone hears no refusal — the sentence about no window open is gone for an op main can perform'
+  )
+  log(manager.list().some((x) => x.id === 'm1'), 'while the pane nobody closed is still running')
+
+  engine = null
+  opAnswer = null
 
   const page = await fetch(`http://127.0.0.1:${PORT}/`)
   log(page.status === 404, 'static hosting answers 404 when no bundle is configured')

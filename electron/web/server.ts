@@ -111,12 +111,15 @@ import { extForMime, imagePasteIntoPane } from './inbox'
  *
  * ## Mirror, never a parallel world
  *
- * Layout operations are *requests* forwarded to the desktop renderer, which
- * owns the split tree and persists it (docs/forge-web.md, decision 5). Nothing
- * here mutates a workspace, and a `write` goes to the same PTY the desktop
- * window is looking at. That is why `WebServerHost.layout` returns an error
- * sentence rather than a boolean: the answer comes back from the window, and
- * "there is no window" is a thing the browser has to be told.
+ * Layout operations are *requests* handed to the host, which performs them
+ * against the one authoritative workspace (docs/forge-web.md, decision 5).
+ * Nothing here mutates a workspace, and a `write` goes to the same PTY the
+ * desktop window is looking at. That is why `WebServerHost.layout` returns an
+ * error sentence rather than a boolean: a refusal is a sentence somebody has to
+ * be able to read — a project that is gone, a tab already holding its eight.
+ * Most of those used to come back from the *window*, which is why the code on
+ * the wire is still `no-window`; since electron/layout-engine.ts the only verb
+ * that can really fail that way is `select-project`.
  */
 
 /* ------------------------------------------------------------------- limits */
@@ -258,11 +261,12 @@ export interface WebServerHost {
   snapshot: () => Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman'>
 
   /**
-   * Perform one layout operation. Implemented by web-host by forwarding to the
-   * renderer, which owns tabs and panes — the same code path a local click
-   * takes, never a second one that could disagree with the first. Resolves to
-   * an error sentence written for the person reading the browser tab, or null
-   * when it worked.
+   * Perform one layout operation. Implemented by web-host against
+   * electron/layout-engine.ts, which owns tabs and panes in the main process
+   * and runs the same pure functions a local click runs — never a second
+   * implementation that could disagree with the first. Resolves to an error
+   * sentence written for the person reading the browser tab, or null when it
+   * worked.
    */
   layout: (op: WebLayoutOp, deviceName: string) => Promise<string | null>
 
@@ -1731,8 +1735,10 @@ export class WebServer {
             failed('bad-frame', 'That is not a layout operation this desktop understands.')
             return
           }
-          // Forwarded, never performed here: the renderer owns the split tree
-          // and is the one thing that persists a workspace.
+          // Handed over, never performed here: this file parses and authorises
+          // frames, and the host (electron/web-host.ts, through
+          // electron/layout-engine.ts) is the one thing that owns a split tree
+          // and persists a workspace.
           const error = await this.host.layout(op, client.device?.name ?? 'Browser')
           if (error) {
             failed('no-window', error)
