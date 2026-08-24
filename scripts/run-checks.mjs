@@ -58,6 +58,7 @@ const CHECKS = [
   { name: 'commands:check', lane: 'fast' },
   { name: 'draft:check', lane: 'fast' },
   { name: 'feed:check', lane: 'fast' },
+  { name: 'foreman-kit:check', lane: 'fast', note: 'the real assets/foreman-kit, into a mkdtemp Claude home' },
   { name: 'gh:check', lane: 'fast' },
   { name: 'git:check', lane: 'fast' },
   { name: 'shelf:smoke', lane: 'fast', note: 'real git, scratch repo + bare origin in the temp dir' },
