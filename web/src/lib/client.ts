@@ -145,6 +145,33 @@ const WRITE_HOLD_MS = 15_000
 const CONNECT_TIMEOUT_MS = 8_000
 
 /**
+ * How long an `attach` may sit without the `replay` that answers it.
+ *
+ * The desktop answers every `attach` it receives with exactly one `replay` —
+ * there is no path through the handler that skips it (server.ts, `case
+ * 'attach'` → `sendReplay`) — so an attach with no replay on its heels means
+ * one thing only: the frame was eaten by a link that was open enough to take
+ * it and not sound enough to deliver it. The socket stays warm, the badge
+ * stays green, writes still land, and no pane this browser is watching ever
+ * paints again, because the server never registered the subscription the
+ * re-attach was meant to carry. This is the "the phone says waiting while the
+ * desk shows the agent thinking" failure, and nothing else in the page can
+ * see it: every other liveness test here proves the *link*, and this is a
+ * test of what the link carried.
+ *
+ * So the beat checks the oldest unanswered attach against this ceiling, and a
+ * breach hangs the link up (`declareDead`) rather than re-sending the frame —
+ * because a tunnel that swallowed one frame cannot be trusted to have
+ * swallowed only one, and a fresh dial re-attaches from `subs` anyway. Thirty
+ * seconds is far past any honest replay: the snapshot is taken and sent in
+ * one turn of the desktop's event loop, and the panes this guard exists for
+ * are ones an eye is actively on. Cleared per session by the `replay`,
+ * `exit`, `detach` and `unknown-session` frames that each end the question in
+ * their own way.
+ */
+const REPLAY_GRACE_MS = 30_000
+
+/**
  * How often the sleep detector reads the clock, and the jump that means the
  * machine was not running between two of those readings.
  *
@@ -451,6 +478,31 @@ export class ForgeClient {
    * carried across that boundary would suppress the one frame that was needed.
    */
   private told = new Map<string, { cols: number; rows: number }>()
+  /**
+   * sessionId → when this page sent an `attach` no `replay` has answered yet.
+   *
+   * The receipt the protocol never had. An attach is a bare frame, so a send
+   * that returned true says "the socket took it", not "the desktop got it" —
+   * and the difference is exactly the starved-pane failure REPLAY_GRACE_MS
+   * describes. Written by `sendAttach` on a successful send, cleared by every
+   * frame that answers or ends the question (`replay`, `exit`,
+   * `unknown-session`), and audited once per beat.
+   */
+  private pendingReplay = new Map<string, number>()
+  /**
+   * The visibility this page last reported to the desktop, so it can be
+   * *re-said* rather than only said.
+   *
+   * The desktop withholds every pane's bytes from a tab it last heard was
+   * hidden (server.ts, `pushData`), and the one report per connection that
+   * clears that flag travels down the same eatable link as everything else.
+   * A report lost in transit left a visible tab being starved for as long as
+   * the socket stayed up — writes still landed, so nothing else ever noticed.
+   * Re-stating it once per beat costs twenty bytes and cannot cause a repaint;
+   * it is idempotent on the desktop, where stating what is already stated does
+   * nothing at all.
+   */
+  private reportedVisible: boolean | null = null
   /** The unlock PIN for the *next* hello only. See `submitPin`. */
   private pin = ''
   /**
@@ -781,10 +833,14 @@ export class ForgeClient {
     const sent = this.send({ type: 'attach', sessionId, ...(size ? { cols: size.cols, rows: size.rows } : {}) })
     if (sent && size) this.told.set(sessionId, { cols: size.cols, rows: size.rows })
     else this.told.delete(sessionId)
+    // The receipt starts only when a frame actually left. One that did not go
+    // out is the reconnect's job, not a broken link to be diagnosed.
+    if (sent) this.pendingReplay.set(sessionId, Date.now())
   }
 
   detach(sessionId: string): void {
     this.told.delete(sessionId)
+    this.pendingReplay.delete(sessionId)
     if (!this.subs.delete(sessionId)) return
     this.send({ type: 'detach', sessionId })
   }
@@ -862,6 +918,21 @@ export class ForgeClient {
     // knows would silence the frame that has to be sent when it comes back.
     if (!this.send({ type: 'resize', sessionId, cols, rows })) return
     this.told.set(sessionId, { cols, rows })
+  }
+
+  /**
+   * Tell the desktop whether this tab is on screen.
+   *
+   * The page calls this on every `visibilitychange`; the client remembers the
+   * answer (`reportedVisible`) and says it again once per beat for as long as
+   * the link lives. The remembered value is also re-said the moment a fresh
+   * link is admitted — see `hello-ok` — so a tab that was hidden when its
+   * socket dropped arrives at the new one with its flag standing, rather than
+   * silently clear until the first beat.
+   */
+  reportVisibility(visible: boolean): void {
+    this.reportedVisible = visible
+    if (this.admitted) void this.request({ kind: 'visibility', visible })
   }
 
   /* -------------------------------------------------------------- requests */
@@ -1056,8 +1127,11 @@ export class ForgeClient {
         this.socket = null
         this.stopBeating()
         // Nothing has been told to anybody down a socket that has closed. The
-        // next connection re-establishes it from `subs`; see `told`.
+        // next connection re-establishes it from `subs`; see `told`. The same
+        // is true of an attach receipt: it was a claim about *that* socket's
+        // delivery, and no frame will ever answer it now.
         this.told.clear()
+        this.pendingReplay.clear()
         this.failWaiting('The link to the desktop dropped before that answered.')
         // A watcher hears about it here rather than working it out from a picture
         // that stopped moving: a decoder holding a last frame looks exactly like a
@@ -1113,6 +1187,12 @@ export class ForgeClient {
         // which `dropSocket` voided on the way into this connection.
         for (const [sessionId, size] of this.subs) this.sendAttach(sessionId, size)
         this.flushHeld()
+        // The new socket starts from whatever the desktop last heard about
+        // this tab, which is nothing: state the flag now rather than waiting
+        // out a beat, so a tab that was hidden when its old socket dropped
+        // does not spend up to HEARTBEAT_MS being sent bytes it will bank as
+        // stale anyway. Harmless when the page has never said (null).
+        if (this.reportedVisible !== null) void this.request({ kind: 'visibility', visible: this.reportedVisible })
         return
       }
 
@@ -1121,6 +1201,9 @@ export class ForgeClient {
         return
 
       case 'replay':
+        // The answer to an `attach`. Whatever else it repaints, it is the
+        // receipt that proves that attach landed.
+        this.pendingReplay.delete(frame.sessionId)
         this.handlers.onData(frame.sessionId, frame.data, true, frame.truncated === true)
         return
 
@@ -1131,6 +1214,7 @@ export class ForgeClient {
       case 'exit':
         this.subs.delete(frame.sessionId)
         this.told.delete(frame.sessionId)
+        this.pendingReplay.delete(frame.sessionId)
         this.handlers.onExit(frame.sessionId, typeof frame.exitCode === 'number' ? frame.exitCode : 0)
         return
 
@@ -1198,6 +1282,10 @@ export class ForgeClient {
         if (frame.code === 'unknown-session' && typeof frame.sessionId === 'string') {
           this.subs.delete(frame.sessionId)
           this.told.delete(frame.sessionId)
+          // The pane is gone, which is also the answer to its attach — the
+          // only one it will ever get. Leaving the receipt standing would
+          // have the beat hang a perfectly good link up over a closed pane.
+          this.pendingReplay.delete(frame.sessionId)
         }
         // Only `message` is meant to be shown; the codes exist so a client can
         // decide whether to retry or re-sync, not so it can compose a sentence.
@@ -1343,7 +1431,37 @@ export class ForgeClient {
   private startBeating(): void {
     this.stopBeating()
     this.admitted = true
-    this.beatTimer = window.setInterval(() => this.challenge(), HEARTBEAT_MS)
+    this.beatTimer = window.setInterval(() => this.beat(), HEARTBEAT_MS)
+  }
+
+  /**
+   * One beat of a live link: prove it, and re-assert what it was told.
+   *
+   * The `challenge` half is the heartbeat this class has always had. The two
+   * halves after it exist because proving the link is not the same as proving
+   * what travelled down it: both are re-statements of state the desktop can
+   * hold wrongly if the one frame that carried it was eaten by an open-but-
+   * dying tunnel.
+   *
+   *  - `reportedVisible` is said again, because a lost visibility report left
+   *    the desktop withholding every pane from a tab that was looking straight
+   *    at it. Idempotent, twenty bytes, no repaint.
+   *
+   *  - `pendingReplay` is audited, because a lost attach left the desktop with
+   *    no subscription at all — the same starvation, one cause deeper. A
+   *    breach hangs the link up rather than re-sending: see REPLAY_GRACE_MS.
+   */
+  private beat(): void {
+    this.challenge()
+    if (!this.admitted) return
+    if (this.reportedVisible !== null) void this.request({ kind: 'visibility', visible: this.reportedVisible })
+    const now = Date.now()
+    for (const [, sentAt] of this.pendingReplay) {
+      if (now - sentAt > REPLAY_GRACE_MS) {
+        this.declareDead()
+        return
+      }
+    }
   }
 
   /**
@@ -1431,8 +1549,10 @@ export class ForgeClient {
     this.stopBeating()
     // Whatever the next socket is, it starts out having been told nothing —
     // and the size it will be told is the one the re-`attach` carries. See
-    // `told`.
+    // `told`. The receipts go with them, for the same reason: they were about
+    // this socket's delivery, and this socket is being retired.
     this.told.clear()
+    this.pendingReplay.clear()
     if (!socket) return
     this.retire(socket)
   }

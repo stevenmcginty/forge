@@ -853,14 +853,17 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   }, [client, connection.state, pushKey, notifyPermission])
 
   /**
-   * Tell the desktop whether this tab is on screen, on every change and once
-   * per connection. It is the one fact the desktop cannot see for itself, and
-   * it is what stops a phone buzzing about a pane it is already showing — see
-   * `anyVisible` in electron/web/server.ts.
+   * Tell the desktop whether this tab is on screen, on every change. It is the
+   * one fact the desktop cannot see for itself, and it is what stops a phone
+   * buzzing about a pane it is already showing — see `anyVisible` in
+   * electron/web/server.ts. Handed to the client rather than sent directly:
+   * the client remembers the answer and re-says it once per beat and at each
+   * `hello-ok`, so a report eaten by a dying link is re-stated instead of
+   * leaving a visible tab starved until the next reconnect.
    */
   useEffect(() => {
     if (connection.state !== 'live') return
-    void client.request({ kind: 'visibility', visible: pageVisible })
+    client.reportVisibility(pageVisible)
   }, [client, connection.state, pageVisible])
 
   /**
