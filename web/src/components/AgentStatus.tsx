@@ -1,8 +1,39 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
 import type { AgentProfile } from '@shared/types'
 import { AgentBadge } from '@/components/AgentBadge'
+import { Icon } from '@/components/Icon'
 import { badgeColor, isShellProfile } from '@/lib/agents'
 import type { PaneStatus, PermissionMode } from '@/lib/rich'
+import type { PaneFace } from '../lib/pane-status'
+
+/** What the face button offers, named by the face it would give you. */
+const VIEW_TITLE: Record<PaneFace, string> = {
+  chat: 'Show the conversation (Chat)',
+  feed: 'Show as cards (Output)',
+  term: 'Show the terminal'
+}
+
+/**
+ * A speech bubble icon, matching Icon weight.
+ */
+function ChatIcon(): ReactNode {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M13.4 9.2a1.4 1.4 0 0 1-1.4 1.4H6.2L3.4 13V4.2a1.4 1.4 0 0 1 1.4-1.4h7.2a1.4 1.4 0 0 1 1.4 1.4z" />
+    </svg>
+  )
+}
 
 /**
  * The agent's own footer, lifted out of the TUI and drawn as one strip between
@@ -26,18 +57,23 @@ export function AgentStatus({
   profile,
   status,
   live,
-  onCycleMode
+  view,
+  onCycleMode,
+  onFlipView
 }: {
   profile: AgentProfile
   status?: PaneStatus
   /** False while the socket is down: the strip stays, the controls go quiet. */
   live: boolean
+  view?: PaneFace
   onCycleMode?: () => void
+  onFlipView?: () => void
 }): ReactNode {
   const [open, setOpen] = useState(false)
   const shell = isShellProfile(profile)
   const accent = badgeColor(profile)
   const mode = status?.mode ?? 'unknown'
+  const nextView: PaneFace = view === 'chat' ? 'feed' : view === 'feed' ? 'term' : 'chat'
   const context = parseContext(status?.context)
   const place =
     status?.branch && status?.cwd
@@ -143,6 +179,22 @@ export function AgentStatus({
             {!live ? 'Offline' : status?.busy ? (status.activity ?? 'Working') : 'Idle'}
           </span>
         </span>
+
+        {onFlipView && !shell ? (
+          <button
+            type="button"
+            className="ghost-btn astatus__view"
+            title={VIEW_TITLE[nextView]}
+            aria-label={VIEW_TITLE[nextView]}
+            onClick={(event) => {
+              event.stopPropagation()
+              onFlipView()
+            }}
+          >
+            {nextView === 'chat' ? <ChatIcon /> : <Icon name={nextView === 'term' ? 'terminal' : 'note'} size={12} />}
+            <span className="astatus__view-label">{view === 'chat' ? 'Chat' : view === 'feed' ? 'Cards' : 'Terminal'}</span>
+          </button>
+        ) : null}
       </div>
 
       {open && footer.length ? <pre className="astatus__footer mono">{footer.join('\n')}</pre> : null}
