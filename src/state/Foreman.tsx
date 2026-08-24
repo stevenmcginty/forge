@@ -103,8 +103,17 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
   // `list()` first, then the pushes. A pane driven before this window reloaded
   // is still being driven, and its header has to say so on the first paint.
   useEffect(() => {
+    // A renderer that hot-reloaded ahead of its preload (the desktop app has
+    // not restarted since Foreman landed) has no `foreman` on the bridge. That
+    // is a missing feature, never a reason to unmount the whole app — the phone
+    // and the browser run their layout commands through this renderer.
+    const api = window.forge?.foreman
+    if (!api) {
+      console.error('[foreman] window.forge.foreman is missing; restart Forge to load the new preload.')
+      return
+    }
     let alive = true
-    void window.forge.foreman.list().then((list) => {
+    void api.list().then((list) => {
       if (!alive) return
       setStates((prev) => {
         const out = new Map(prev)
@@ -112,7 +121,7 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
         return out
       })
     })
-    const off = window.forge.foreman.onState((next) => absorb(next))
+    const off = api.onState((next) => absorb(next))
     return () => {
       alive = false
       off()
@@ -269,7 +278,9 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
       // invoke's answer and then on every push.
       absorb({ paneId, status: 'starting', line: 'Starting Foreman', seed, log: [] })
       try {
-        absorb(await window.forge.foreman.start({ paneId, seed }))
+        const api = window.forge?.foreman
+        if (!api) throw new Error('Foreman is not loaded — restart Forge.')
+        absorb(await api.start({ paneId, seed }))
       } catch (err) {
         absorb({
           paneId,
@@ -295,7 +306,7 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
         seed: current?.seed ?? '',
         log: current?.log ?? []
       })
-      void window.forge.foreman.stop(paneId).then(absorb, (err: unknown) => {
+      void window.forge?.foreman?.stop(paneId).then(absorb, (err: unknown) => {
         console.error('[foreman] stop failed:', err)
       })
     },
