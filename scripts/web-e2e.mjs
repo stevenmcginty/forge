@@ -1319,6 +1319,123 @@ async function main() {
     'with the terminal showing exactly what it was showing before both switches'
   )
 
+  /* ------------------------------- the same two gestures, with a thumb
+   *
+   * "Which tab am I in" is two gestures and not one — go to another, and get
+   * out of this one — and on a phone they are drawn by different files, so
+   * every assertion above this one can pass while a phone is trapped.
+   *
+   * That is not hypothetical. `.app[data-mobile] .tab__close` is `display:
+   * none` and says why in its own comment: a row of ×s is noise on a phone,
+   * *the pane header's × closes the tab*. 76b716b moved that × to the top bar
+   * and turned it into `close-pane`, leaving the rule standing with nothing
+   * behind it — so a phone on a tab whose pane the desk no longer had could
+   * neither leave it nor close it, and the whole suite stayed green.
+   *
+   * So the close half is asserted on the property rather than on the button:
+   * *something visible on this page gets me out of the tab I am in*, wherever
+   * a later rework decides to put it. The selecting half is the same claim the
+   * mouse made above, re-made at 390px because the pill is a different size,
+   * in a strip that scrolls, under a different stylesheet.
+   */
+
+  /*
+   * A finger, not merely a narrow window. `useMobile` wants `(pointer: coarse)`
+   * as well as the width — deliberately, because a laptop dragged to 390px has
+   * a mouse and wants the folded desktop layout — and neither `setViewportSize`
+   * nor a context flag on a page that is already open can say that. Touch
+   * emulation can, and without a reload: this phase's panes, its replay ledger
+   * and its live shells all have to survive the trip, and a `?phone`
+   * navigation would throw every one of them away.
+   *
+   * Enabled before the resize on purpose. The query is an `and`, so with a
+   * fine pointer it is false at every width and turning the finger on at
+   * 1440px moves nothing; the narrowing is then the edge that fires it, which
+   * is the same order a phone's first paint arrives in.
+   */
+  const emulation = await context.newCDPSession(page)
+  await emulation.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await waitFor(() => page.getAttribute('.app', 'data-mobile').then((v) => v === 'true'), 10_000, 'the phone layout')
+  await sleep(500)
+
+  const thumbOps = layoutOps.length
+  await page.click('.tab:nth-of-type(2)')
+  await sleep(300)
+  /*
+   * Among the ops rather than the last of them: swapping to the phone face
+   * unmounts `SplitView` and mounts `MobilePanes`, and the pane that comes up
+   * under the thumb takes the caret on its way in. So a `focus-pane` legitimately
+   * lands after the request being asserted, and pinning this to `at(-1)` was
+   * asserting the order of two unrelated things.
+   */
+  const thumbAsked = layoutOps.slice(thumbOps).map(({ op }) => op)
+  log(
+    thumbAsked.some((op) => op.op === 'select-tab' && op.tabId === 't2'),
+    `a thumb on a tab pill asks for that tab, the same as a mouse on the folded layout does (${thumbAsked.map((op) => op.op).join(', ') || 'nothing arrived'})`
+  )
+  log(
+    (await page.locator('.tab[data-active="true"] .tab__title').innerText()) === 'e2e',
+    'and no more moves the strip by itself than the mouse did'
+  )
+  pushWorkspace([splitTab, asideTab], 't2')
+  await waitFor(
+    () => page.locator('.tab[data-active="true"] .tab__title').innerText().then((title) => title === 'aside'),
+    20_000,
+    'the phone-width switch to land'
+  )
+  log(true, 'and the strip moves to it when the desktop says so')
+
+  /**
+   * Every control on screen that would get this browser out of the tab it is
+   * in, counted as a person would count them: drawn, sized and not painted
+   * out. `:visible` alone would take a `display: none` rule's word for it and
+   * miss an opacity-0 pill.
+   */
+  const wayOut = () =>
+    page.evaluate(() => {
+      const drawn = (selector) =>
+        [...document.querySelectorAll(selector)].filter((el) => {
+          const box = el.getBoundingClientRect()
+          const style = getComputedStyle(el)
+          return (
+            box.width > 0 &&
+            box.height > 0 &&
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            style.opacity !== '0'
+          )
+        })
+      return drawn('.tab[data-active="true"] .tab__close, .grid__tab[data-active="true"] .pane__action--close').length
+    })
+  log((await wayOut()) > 0, 'and the tab it is now in can be got out of — a × on this page, drawn and not merely mounted')
+
+  const closeOps = layoutOps.length
+  await page
+    .locator('.tab[data-active="true"] .tab__close, .grid__tab[data-active="true"] .pane__action--close')
+    .filter({ visible: true })
+    .first()
+    .click()
+  log(
+    layoutOps.length > closeOps && ['close-tab', 'close-pane'].includes(layoutOps.at(-1).op.op),
+    `and pressing it reaches the desktop as a close (${layoutOps.at(-1)?.op?.op ?? 'nothing arrived'})`
+  )
+
+  await page.screenshot({ path: join(shots, 'tabs-390.png') })
+  pushWorkspace([splitTab, asideTab], 't1')
+  await waitFor(
+    () => page.locator('.tab[data-active="true"] .tab__title').innerText().then((title) => title === 'e2e'),
+    20_000,
+    'the switch back at phone width'
+  )
+  await emulation.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await waitFor(() => page.getAttribute('.app', 'data-mobile').then((v) => v === null), 10_000, 'the folded layout back')
+  await emulation.detach()
+  // The width flip re-mounts every pane, so the replay ledger below is read
+  // after it has settled rather than across it.
+  await sleep(800)
+
   /* ------------------------------------- and closing, which is the same bug */
 
   const beforeClose = servedFor(SESSION_ID)

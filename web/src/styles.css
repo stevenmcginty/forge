@@ -2003,9 +2003,29 @@
   font-size: 13.5px;
 }
 
-.app[data-mobile] .tab__close {
-  /* A row of ×s is noise on a phone; the pane header's × closes the tab. */
+/*
+ * A row of ×s is still noise on a phone, so only the pill you are standing in
+ * wears one — and it wears it because nothing else on this layout will.
+ *
+ * This rule used to hide every one of them and named the pane header's × as
+ * the way out instead. That × moved to the top bar, where it is a *pane* close
+ * that is only drawn while the tab has an `activePaneId`, so a phone on a tab
+ * whose pane the desktop no longer had was left with no way out of it at all.
+ * The strip is the one part of this page that always knows a tab is there.
+ */
+.app[data-mobile] .tab:not([data-active='true']) .tab__close {
   display: none;
+}
+
+/* Sized for a thumb rather than a cursor, and the pill gives back the padding. */
+.app[data-mobile] .tab[data-active='true'] {
+  padding-right: 4px;
+}
+
+.app[data-mobile] .tab[data-active='true'] .tab__close {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-full);
 }
 
 .app[data-mobile] .tabstrip__new {

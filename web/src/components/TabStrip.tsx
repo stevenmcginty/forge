@@ -54,9 +54,26 @@ export function TabStrip(): ReactNode {
    * or to a different one, because the desk is entitled to do either and a mark
    * that outlived its own answer would be this page inventing a state the
    * desktop knows nothing about.
+   *
+   * ## Why the request is then thrown away, and not merely stopped being drawn
+   *
+   * Deriving alone answered the wrong question. It says "is the strip still
+   * where it was when I asked", which is true again the moment the desk comes
+   * *back* to that tab — so a request that had been asked, granted and finished
+   * with rose from the dead, and the pill it named went permanently untappable:
+   * `Tab` refuses to send a second request for a tab that is already pending,
+   * which is right, and it was being told a lie. Steve met it as a phone that
+   * would not change tabs.
+   *
+   * So the answer retires the request as well as the mark, in the same render
+   * that stops drawing it. Adjusting state during render rather than in an
+   * effect keeps the promise the paragraph above makes — React re-runs this
+   * component before it paints, so nothing is ever on screen holding the stale
+   * one — and it cannot loop, because the next pass has no `ask` to retire.
    */
   const [ask, setAsk] = useState<{ tabId: string; from: string | null } | null>(null)
   const pending = ask && ask.from === workspace.activeTabId ? ask.tabId : null
+  if (ask && !pending) setAsk(null)
 
   /**
    * The strip scrolls sideways on a phone, and an active pill that sits past
