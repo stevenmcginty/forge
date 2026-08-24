@@ -603,7 +603,12 @@ export function MosaicView({
     if (interactiveId) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return
-      if (document.activeElement instanceof HTMLInputElement) return
+      if (
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement ||
+        document.activeElement instanceof HTMLSelectElement
+      )
+        return
       const index = cells.findIndex((c) => c.leaf.id === selectedId)
       if (index < 0) return
 

@@ -37,25 +37,40 @@ export function Popover({
   const ref = useRef<HTMLDivElement | null>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
 
-  useLayoutEffect(() => {
+  const updatePosition = (): void => {
     if (!open || !anchor || !ref.current) return
+    if (!anchor.isConnected) {
+      onClose()
+      return
+    }
+
     const a = anchor.getBoundingClientRect()
     const box = ref.current.getBoundingClientRect()
     const w = width ?? box.width
 
+    const vv = window.visualViewport
+    const vpTop = vv?.offsetTop ?? 0
+    const vpLeft = vv?.offsetLeft ?? 0
+    const vpWidth = vv?.width ?? window.innerWidth
+    const vpHeight = vv?.height ?? window.innerHeight
+
     let left = a.left
     if (align === 'end') left = a.right - w
     else if (align === 'center') left = a.left + a.width / 2 - w / 2
-    left = Math.min(window.innerWidth - w - MARGIN, Math.max(MARGIN, left))
+    left = Math.min(vpLeft + vpWidth - w - MARGIN, Math.max(vpLeft + MARGIN, left))
 
     let top = side === 'bottom' ? a.bottom + GAP : a.top - box.height - GAP
-    if (top + box.height > window.innerHeight - MARGIN) {
+    if (top + box.height > vpTop + vpHeight - MARGIN) {
       const flipped = a.top - box.height - GAP
-      top = flipped >= MARGIN ? flipped : Math.max(MARGIN, window.innerHeight - box.height - MARGIN)
+      top = flipped >= vpTop + MARGIN ? flipped : Math.max(vpTop + MARGIN, vpTop + vpHeight - box.height - MARGIN)
     }
-    top = Math.max(MARGIN, top)
+    top = Math.max(vpTop + MARGIN, top)
 
-    setPos({ top, left })
+    setPos((prev) => (prev && prev.top === top && prev.left === left ? prev : { top, left }))
+  }
+
+  useLayoutEffect(() => {
+    updatePosition()
   }, [open, anchor, align, side, width, children])
 
   useEffect(() => {
@@ -73,14 +88,20 @@ export function Popover({
       if (anchor?.contains(t)) return
       onClose()
     }
-    const onScrollOrResize = (): void => onClose()
+    const onViewport = (): void => updatePosition()
     window.addEventListener('keydown', onKey, true)
     window.addEventListener('pointerdown', onDown, true)
-    window.addEventListener('resize', onScrollOrResize)
+    window.addEventListener('resize', onViewport)
+    window.addEventListener('scroll', onViewport, true)
+    window.visualViewport?.addEventListener('resize', onViewport)
+    window.visualViewport?.addEventListener('scroll', onViewport)
     return () => {
       window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('pointerdown', onDown, true)
-      window.removeEventListener('resize', onScrollOrResize)
+      window.removeEventListener('resize', onViewport)
+      window.removeEventListener('scroll', onViewport, true)
+      window.visualViewport?.removeEventListener('resize', onViewport)
+      window.visualViewport?.removeEventListener('scroll', onViewport)
     }
   }, [open, onClose, anchor])
 

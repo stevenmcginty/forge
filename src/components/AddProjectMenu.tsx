@@ -47,7 +47,8 @@ export function AddProjectMenu({ anchor, open, onClose }: AddProjectMenuProps): 
     setBusy(false)
     const t = setTimeout(() => inputRef.current?.select(), 0)
     return () => clearTimeout(t)
-  }, [open, hasProjectsRoot])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   const create = async (): Promise<void> => {
     const next = name.trim()

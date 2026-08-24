@@ -132,33 +132,33 @@ export function ProjectRail(): ReactNode {
   }
 
   return (
-    <RailSection
-      id="projects"
-      title="Projects"
-      count={state.projects.length}
-      hint="Every folder Forge knows about"
-      growable={false}
-      actions={
-        <>
-          <button type="button" className="ghost-btn rail__head-new" title="New project" onClick={openAddMenu}>
-            <Icon name="folderPlus" size={14} />
-          </button>
-          <button
-            type="button"
-            className="ghost-btn rail__head-add"
-            title="Open existing folder"
-            onClick={() => void actions.addProject()}
-          >
-            <Icon name="plus" size={14} />
-          </button>
-        </>
-      }
-    >
-      <div className="rail">
-        {list}
-        {menu}
-      </div>
-    </RailSection>
+    <>
+      <RailSection
+        id="projects"
+        title="Projects"
+        count={state.projects.length}
+        hint="Every folder Forge knows about"
+        growable={false}
+        actions={
+          <>
+            <button type="button" className="ghost-btn rail__head-new" title="New project" onClick={openAddMenu}>
+              <Icon name="folderPlus" size={14} />
+            </button>
+            <button
+              type="button"
+              className="ghost-btn rail__head-add"
+              title="Open existing folder"
+              onClick={() => void actions.addProject()}
+            >
+              <Icon name="plus" size={14} />
+            </button>
+          </>
+        }
+      >
+        <div className="rail">{list}</div>
+      </RailSection>
+      {menu}
+    </>
   )
 }
 

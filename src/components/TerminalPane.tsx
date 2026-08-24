@@ -177,7 +177,18 @@ export function TerminalPane({
   // not in a pane that is up but deaf.
   useEffect(() => {
     if (!focused) return
-    const onWindowFocus = (): void => terminalHost.focus(leaf.id)
+    const onWindowFocus = (e: FocusEvent): void => {
+      if (e.target !== window && e.target !== document) return
+      const active = document.activeElement
+      if (
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement
+      ) {
+        return
+      }
+      terminalHost.focus(leaf.id)
+    }
     window.addEventListener('focus', onWindowFocus)
     return () => window.removeEventListener('focus', onWindowFocus)
   }, [focused, leaf.id])

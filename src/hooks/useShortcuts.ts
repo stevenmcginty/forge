@@ -74,7 +74,13 @@ export function useShortcuts(): void {
       // the way back out of a zoomed mosaic tile.
       const el = document.activeElement
       const inTerminal = el instanceof HTMLTextAreaElement && el.classList.contains(XTERM_TEXTAREA)
-      if (!inTerminal && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return
+      if (
+        !inTerminal &&
+        (el instanceof HTMLInputElement ||
+          el instanceof HTMLTextAreaElement ||
+          el instanceof HTMLSelectElement)
+      )
+        return
 
       const activePaneId = tab?.activePaneId ?? null
 
