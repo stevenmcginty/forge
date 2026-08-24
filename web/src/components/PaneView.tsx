@@ -13,7 +13,6 @@ import type { Transcript } from '@/lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
 import { useForge, useProfiles } from '../state'
-import { AgentChooser } from './AgentChooser'
 import { ChatView } from './ChatView'
 import { Feed } from './Feed'
 
@@ -28,6 +27,12 @@ import { Feed } from './Feed'
  */
 const PARSE_INTERVAL_MS = 80
 
+/** What the face button offers, named by the face it would give you. */
+const VIEW_TITLE: Record<PaneFace, string> = {
+  chat: 'Show the conversation (Chat)',
+  feed: 'Show as cards (Output)',
+  term: 'Show the terminal'
+}
 
 /**
  * A speech bubble, at <Icon/>'s weight and on its grid.
@@ -175,10 +180,8 @@ export function PaneView({
 
   const holderRef = useRef<HTMLDivElement | null>(null)
   const hostRef = useRef<TermHost | null>(null)
-  const splitRef = useRef<HTMLButtonElement | null>(null)
 
   const sendingImage = useRef(false)
-  const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
   const [truncated, setTruncated] = useState(false)
   /**
    * Whether a `replay` has ever answered this pane's attach. An *empty* replay
@@ -216,12 +219,9 @@ export function PaneView({
   const overlaid = feed || chat
 
   /**
-   * Switch the view face, and remember it for the next Claude pane.
-   *
-   * The preference is a fact about how this person reads an agent rather than
-   * about this pane, so only a Claude pane — the only one with all three
-   * faces — writes it.
+   * One face forward, and remember it for the next Claude pane.
    */
+  const nextView: PaneFace = claude ? (chat ? 'feed' : feed ? 'term' : 'chat') : feed ? 'term' : 'feed'
   const showView = useCallback(
     (next: PaneFace) => {
       setView(next)
@@ -762,32 +762,15 @@ export function PaneView({
           <span className="pane__title truncate">{paneDisplayTitle(profile, leaf.title)}</span>
 
           {agent ? (
-            <div className="pane__views-left">
-              {claude ? (
-                <button
-                  type="button"
-                  className="ghost-btn pane__action pane__action--output"
-                  data-active={chat ? 'true' : undefined}
-                  aria-pressed={chat}
-                  title="Show the conversation (Chat)"
-                  aria-label="Show the conversation (Chat)"
-                  onClick={() => showView('chat')}
-                >
-                  <ChatIcon />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="ghost-btn pane__action pane__action--output"
-                data-active={feed ? 'true' : undefined}
-                aria-pressed={feed}
-                title="Show as cards (Output)"
-                aria-label="Show as cards (Output)"
-                onClick={() => showView('feed')}
-              >
-                <Icon name="note" size={13} />
-              </button>
-            </div>
+            <button
+              type="button"
+              className="ghost-btn pane__action pane__action--flip"
+              title={VIEW_TITLE[nextView]}
+              aria-label={VIEW_TITLE[nextView]}
+              onClick={() => showView(nextView)}
+            >
+              {nextView === 'chat' ? <ChatIcon /> : <Icon name={nextView === 'term' ? 'terminal' : 'note'} size={13} />}
+            </button>
           ) : null}
         </div>
 
@@ -838,59 +821,9 @@ export function PaneView({
           ) : null}
 
           <div className="pane__actions">
-            {agent ? (
-              <button
-                type="button"
-                className="ghost-btn pane__action pane__action--term"
-                data-active={!overlaid ? 'true' : undefined}
-                aria-pressed={!overlaid}
-                title="Show the terminal"
-                aria-label="Show the terminal"
-                onClick={() => showView('term')}
-              >
-                <Icon name="terminal" size={13} />
-              </button>
-            ) : null}
-            {/*
-              Splitting is an operation this layout cannot express, so a phone
-              is not offered it. `MobilePanes` draws one leaf of a tab at a
-              time behind a strip of chips — there is no second box for a new
-              pane to appear in, and the only thing a tap here produced was one
-              more chip and a pane the desk had to be visited to see. Reading a
-              split made at the desk is untouched: every leaf is still mounted,
-              still fed, and still a chip away.
-
-              Not rendered rather than hidden in CSS, which is what this was
-              before. A `display: none` button is still a button — it is still
-              built, still asks whether the socket is live on every push, and
-              still anchors a flyout that nothing on this layout can open.
-            */}
-            {!mobile ? (
-              <>
-                <button
-                  ref={splitRef}
-                  type="button"
-                  className="ghost-btn pane__action"
-                  title="Split right"
-                  disabled={!live}
-                  onClick={() => setChooser('row')}
-                >
-                  <Icon name="splitRight" size={13} />
-                </button>
-                <button
-                  type="button"
-                  className="ghost-btn pane__action"
-                  title="Split down"
-                  disabled={!live}
-                  onClick={() => setChooser('column')}
-                >
-                  <Icon name="splitDown" size={13} />
-                </button>
-              </>
-            ) : null}
             <button
               type="button"
-              className="ghost-btn pane__action"
+              className="ghost-btn pane__action pane__action--close"
               data-danger="true"
               title={onlyPane ? 'Close tab' : 'Close pane'}
               disabled={!live}
@@ -969,27 +902,6 @@ export function PaneView({
           }}
         />
       </div>
-
-      {/*
-        The two split buttons are the only things that open this, and a phone
-        does not have them — so on a phone the chooser is a flyout anchored to a
-        button that was never built, waiting on a state nothing can set. It goes
-        with them rather than sitting there as an `open={false}` that is now a
-        promise about the rest of the file instead of a fact about the layout.
-      */}
-      {mobile ? null : (
-        <AgentChooser
-          anchor={splitRef.current}
-          open={chooser !== null}
-          align="end"
-          title={chooser === 'column' ? 'Split down with' : 'Split right with'}
-          onClose={() => setChooser(null)}
-          onPick={(profileId, permissionMode) => {
-            if (chooser)
-              void actions.layout({ op: 'create-pane', paneId: leaf.id, direction: chooser, profileId, permissionMode })
-          }}
-        />
-      )}
     </section>
   )
 }

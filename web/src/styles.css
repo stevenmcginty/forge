@@ -2184,57 +2184,47 @@
   flex: 1;
 }
 
-.pane__views-left {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* Output pane views (Chat & Cards) on the left: gentle luminous white */
-.pane__action--output,
-.pane[data-kind='agent'] .pane__action--output,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--output,
-[data-mobile] .pane[data-kind='agent'] .pane__action--output {
-  color: rgba(255, 255, 255, 0.85);
-  background: color-mix(in srgb, #ffffff 10%, rgba(255, 255, 255, 0.03));
-  border: 1px solid color-mix(in srgb, #ffffff 25%, var(--line-hairline));
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.08);
+/* View flip button on the left: gentle luminous white */
+.pane__action--flip,
+.pane[data-kind='agent'] .pane__action--flip,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--flip,
+[data-mobile] .pane[data-kind='agent'] .pane__action--flip {
+  color: rgba(255, 255, 255, 0.9);
+  background: color-mix(in srgb, #ffffff 10%, rgba(255, 255, 255, 0.04));
+  border: 1px solid color-mix(in srgb, #ffffff 28%, var(--line-hairline));
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.1);
   transition: all var(--dur-fast) var(--ease-out);
 }
 
-.pane__action--output:hover,
-.pane[data-kind='agent'] .pane__action--output:hover,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--output:hover,
-[data-mobile] .pane[data-kind='agent'] .pane__action--output:hover {
+.pane__action--flip:hover,
+.pane[data-kind='agent'] .pane__action--flip:hover,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--flip:hover,
+[data-mobile] .pane[data-kind='agent'] .pane__action--flip:hover {
   color: #ffffff;
-  background: color-mix(in srgb, #ffffff 18%, rgba(255, 255, 255, 0.06));
-  border-color: rgba(255, 255, 255, 0.45);
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.18);
+  background: color-mix(in srgb, #ffffff 20%, rgba(255, 255, 255, 0.08));
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.22);
 }
 
-.pane__action--output:active,
-.pane__action--output[data-active='true'],
-.pane__action--output[aria-pressed='true'],
-.pane[data-kind='agent'] .pane__action--output:active,
-.pane[data-kind='agent'] .pane__action--output[data-active='true'],
-.pane[data-kind='agent'] .pane__action--output[aria-pressed='true'],
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--output:active,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--output[data-active='true'],
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--output[aria-pressed='true'],
-[data-mobile] .pane[data-kind='agent'] .pane__action--output:active,
-[data-mobile] .pane[data-kind='agent'] .pane__action--output[data-active='true'],
-[data-mobile] .pane[data-kind='agent'] .pane__action--output[aria-pressed='true'] {
+.pane__action--flip:active,
+.pane[data-kind='agent'] .pane__action--flip:active,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--flip:active,
+[data-mobile] .pane[data-kind='agent'] .pane__action--flip:active {
   color: #ffffff;
-  background: color-mix(in srgb, #ffffff 26%, rgba(255, 255, 255, 0.1));
-  border-color: rgba(255, 255, 255, 0.7);
-  box-shadow: 0 0 14px rgba(255, 255, 255, 0.28), inset 0 0 4px rgba(255, 255, 255, 0.15);
+  background: color-mix(in srgb, #ffffff 28%, rgba(255, 255, 255, 0.12));
+  border-color: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.32), inset 0 0 4px rgba(255, 255, 255, 0.15);
 }
 
-/* Terminal view on the right: slightly red tone so it's obvious to press */
-.pane__action--term,
-.pane[data-kind='agent'] .pane__action--term,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--term,
-[data-mobile] .pane[data-kind='agent'] .pane__action--term {
+/* Close/delete button on the right: slightly red tone */
+.pane__action--close,
+.pane__action[data-danger='true'],
+.pane[data-kind='agent'] .pane__action--close,
+.pane[data-kind='agent'] .pane__action[data-danger='true'],
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--close,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action[data-danger='true'],
+[data-mobile] .pane[data-kind='agent'] .pane__action--close,
+[data-mobile] .pane[data-kind='agent'] .pane__action[data-danger='true'] {
   color: var(--danger-bright, #f87171);
   background: color-mix(in srgb, var(--danger, #ef4444) 14%, rgba(255, 255, 255, 0.03));
   border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 38%, var(--line-hairline));
@@ -2242,32 +2232,32 @@
   transition: all var(--dur-fast) var(--ease-out);
 }
 
-.pane__action--term:hover,
-.pane[data-kind='agent'] .pane__action--term:hover,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--term:hover,
-[data-mobile] .pane[data-kind='agent'] .pane__action--term:hover {
+.pane__action--close:hover,
+.pane__action[data-danger='true']:hover,
+.pane[data-kind='agent'] .pane__action--close:hover,
+.pane[data-kind='agent'] .pane__action[data-danger='true']:hover,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--close:hover,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action[data-danger='true']:hover,
+[data-mobile] .pane[data-kind='agent'] .pane__action--close:hover,
+[data-mobile] .pane[data-kind='agent'] .pane__action[data-danger='true']:hover {
   color: #ff9999;
   background: color-mix(in srgb, var(--danger, #ef4444) 24%, rgba(255, 255, 255, 0.06));
   border-color: color-mix(in srgb, var(--danger, #ef4444) 65%, transparent);
   box-shadow: 0 0 12px color-mix(in srgb, var(--danger, #ef4444) 32%, transparent);
 }
 
-.pane__action--term:active,
-.pane__action--term[data-active='true'],
-.pane__action--term[aria-pressed='true'],
-.pane[data-kind='agent'] .pane__action--term:active,
-.pane[data-kind='agent'] .pane__action--term[data-active='true'],
-.pane[data-kind='agent'] .pane__action--term[aria-pressed='true'],
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--term:active,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--term[data-active='true'],
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--term[aria-pressed='true'],
-[data-mobile] .pane[data-kind='agent'] .pane__action--term:active,
-[data-mobile] .pane[data-kind='agent'] .pane__action--term[data-active='true'],
-[data-mobile] .pane[data-kind='agent'] .pane__action--term[aria-pressed='true'] {
+.pane__action--close:active,
+.pane__action[data-danger='true']:active,
+.pane[data-kind='agent'] .pane__action--close:active,
+.pane[data-kind='agent'] .pane__action[data-danger='true']:active,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--close:active,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action[data-danger='true']:active,
+[data-mobile] .pane[data-kind='agent'] .pane__action--close:active,
+[data-mobile] .pane[data-kind='agent'] .pane__action[data-danger='true']:active {
   color: #ffffff;
-  background: color-mix(in srgb, var(--danger, #ef4444) 36%, rgba(255, 255, 255, 0.1));
+  background: color-mix(in srgb, var(--danger, #ef4444) 38%, rgba(255, 255, 255, 0.1));
   border-color: var(--danger, #ef4444);
-  box-shadow: 0 0 14px color-mix(in srgb, var(--danger, #ef4444) 45%, transparent), inset 0 0 4px rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--danger, #ef4444) 50%, transparent), inset 0 0 4px rgba(255, 255, 255, 0.15);
 }
 
 .pane__trailing {
@@ -3246,8 +3236,8 @@ button.astatus__mode:not(:disabled):hover {
  * An agent pane on a phone: the content is the page, in all faces. The name
  * already lives on the tab strip and the status strip, so the header collapses
  * to two floating clusters:
- * - Top-left: output view buttons (Chat / Cards) in gentle white.
- * - Top-right: live status chips, terminal view button (slightly red) and close.
+ * - Top-left: view flip button (Chat / Cards / Terminal) in gentle white.
+ * - Top-right: live status chips and close button (X) in slightly red.
  * Both float over the page without covering text (52px top padding reserved).
  */
 [data-mobile] .pane[data-kind='agent'] .pane__header,
