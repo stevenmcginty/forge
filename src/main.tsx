@@ -5,6 +5,7 @@ import { App } from './App'
 import { OverlayApp } from './overlay/OverlayApp'
 import { AppStateProvider } from './state/AppState'
 import { DictationProvider } from './state/Dictation'
+import { ForemanProvider } from './state/Foreman'
 import { VoiceAgentProvider } from './state/VoiceAgent'
 
 const host = document.getElementById('root')
@@ -47,7 +48,13 @@ if (window.forge.overlay.isOverlay()) {
     <AppStateProvider>
       <DictationProvider>
         <VoiceAgentProvider>
-          <App />
+          {/* Foreman is mounted here for the same reason the two above it are:
+              it holds one map of driven panes and answers main's hiring
+              requests exactly once. Two copies would answer every request
+              twice and disagree about what each pane is doing. */}
+          <ForemanProvider>
+            <App />
+          </ForemanProvider>
         </VoiceAgentProvider>
       </DictationProvider>
     </AppStateProvider>
