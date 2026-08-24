@@ -2260,64 +2260,6 @@
   box-shadow: 0 0 14px color-mix(in srgb, var(--danger, #ef4444) 50%, transparent), inset 0 0 4px rgba(255, 255, 255, 0.15);
 }
 
-/* TopBar view flip button: gentle luminous white */
-.titlebar__btn--flip,
-.app[data-mobile] .titlebar__btn--flip {
-  color: rgba(255, 255, 255, 0.9);
-  background: color-mix(in srgb, #ffffff 10%, rgba(255, 255, 255, 0.04));
-  border: 1px solid color-mix(in srgb, #ffffff 28%, var(--line-hairline));
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.1);
-  transition: all var(--dur-fast) var(--ease-out);
-}
-
-.titlebar__btn--flip:hover,
-.app[data-mobile] .titlebar__btn--flip:hover {
-  color: #ffffff;
-  background: color-mix(in srgb, #ffffff 20%, rgba(255, 255, 255, 0.08));
-  border-color: rgba(255, 255, 255, 0.55);
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.22);
-}
-
-.titlebar__btn--flip:active,
-.app[data-mobile] .titlebar__btn--flip:active {
-  color: #ffffff;
-  background: color-mix(in srgb, #ffffff 28%, rgba(255, 255, 255, 0.12));
-  border-color: rgba(255, 255, 255, 0.75);
-  box-shadow: 0 0 14px rgba(255, 255, 255, 0.32), inset 0 0 4px rgba(255, 255, 255, 0.15);
-}
-
-/* TopBar close button (red X in top right corner): slightly red */
-.titlebar__btn--close,
-.titlebar__btn[data-danger='true'],
-.app[data-mobile] .titlebar__btn--close,
-.app[data-mobile] .titlebar__btn[data-danger='true'] {
-  color: var(--danger-bright, #f87171);
-  background: color-mix(in srgb, var(--danger, #ef4444) 14%, rgba(255, 255, 255, 0.03));
-  border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 38%, var(--line-hairline));
-  box-shadow: 0 0 8px color-mix(in srgb, var(--danger, #ef4444) 20%, transparent);
-  transition: all var(--dur-fast) var(--ease-out);
-}
-
-.titlebar__btn--close:hover,
-.titlebar__btn[data-danger='true']:hover,
-.app[data-mobile] .titlebar__btn--close:hover,
-.app[data-mobile] .titlebar__btn[data-danger='true']:hover {
-  color: #ff9999;
-  background: color-mix(in srgb, var(--danger, #ef4444) 24%, rgba(255, 255, 255, 0.06));
-  border-color: color-mix(in srgb, var(--danger, #ef4444) 65%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--danger, #ef4444) 32%, transparent);
-}
-
-.titlebar__btn--close:active,
-.titlebar__btn[data-danger='true']:active,
-.app[data-mobile] .titlebar__btn--close:active,
-.app[data-mobile] .titlebar__btn[data-danger='true']:active {
-  color: #ffffff;
-  background: color-mix(in srgb, var(--danger, #ef4444) 38%, rgba(255, 255, 255, 0.1));
-  border-color: var(--danger, #ef4444);
-  box-shadow: 0 0 14px color-mix(in srgb, var(--danger, #ef4444) 50%, transparent), inset 0 0 4px rgba(255, 255, 255, 0.15);
-}
-
 .pane__trailing {
   display: flex;
   align-items: center;
@@ -2827,42 +2769,6 @@ button.astatus__mode:not(:disabled):hover {
 
 .astatus[data-busy='true'] .astatus__state-text {
   color: var(--text-secondary);
-}
-
-.astatus__view {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: var(--r-sm);
-  font-size: var(--t-xs);
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.92);
-  background: color-mix(in srgb, #ffffff 12%, rgba(255, 255, 255, 0.04));
-  border: 1px solid color-mix(in srgb, #ffffff 28%, var(--line-hairline));
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.1);
-  transition: all var(--dur-fast) var(--ease-out);
-  cursor: pointer;
-  flex: none;
-}
-
-.astatus__view:hover {
-  color: #ffffff;
-  background: color-mix(in srgb, #ffffff 22%, rgba(255, 255, 255, 0.08));
-  border-color: rgba(255, 255, 255, 0.55);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
-}
-
-.astatus__view:active {
-  color: #ffffff;
-  background: color-mix(in srgb, #ffffff 28%, rgba(255, 255, 255, 0.12));
-  border-color: rgba(255, 255, 255, 0.75);
-}
-
-[data-mobile] .astatus__view {
-  height: 24px;
-  padding: 0 6px;
 }
 
 .astatus__footer {

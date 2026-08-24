@@ -69,17 +69,3 @@ export function usePaneView(paneId: string | null): PaneFace | undefined {
     () => undefined
   )
 }
-
-const viewSetters = new Map<string, (view: PaneFace) => void>()
-
-export function registerPaneViewSetter(paneId: string, setter: (view: PaneFace) => void): () => void {
-  viewSetters.set(paneId, setter)
-  return () => {
-    if (viewSetters.get(paneId) === setter) viewSetters.delete(paneId)
-  }
-}
-
-export function requestPaneView(paneId: string, view: PaneFace): void {
-  const setter = viewSetters.get(paneId)
-  if (setter) setter(view)
-}

@@ -3,12 +3,13 @@ import type { PaneLeaf } from '@shared/types'
 import type { ChatBlock, ChatTurn } from '@shared/chat'
 import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
+import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
 import { applyChatUpdate, EMPTY_CHAT, type ChatFeed } from '../lib/chat-turns'
 import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines, type FeedBlock } from '@/lib/feed'
 import { imageFilesFromDataTransfer, packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
-import { publishPaneStatus, publishPaneView, registerPaneViewSetter, type PaneFace } from '../lib/pane-status'
+import { publishPaneStatus, publishPaneView, type PaneFace } from '../lib/pane-status'
 import type { Transcript } from '@/lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
@@ -26,6 +27,40 @@ import { Feed } from './Feed'
  * has.
  */
 const PARSE_INTERVAL_MS = 80
+
+/** What the face button offers, named by the face it would give you. */
+const VIEW_TITLE: Record<PaneFace, string> = {
+  chat: 'Show the conversation (Chat)',
+  feed: 'Show as cards (Output)',
+  term: 'Show the terminal'
+}
+
+/**
+ * A speech bubble, at <Icon/>'s weight and on its grid.
+ *
+ * Local rather than a new member of `IconName`: that set is the desktop
+ * renderer's, this browser imports it (decision 4 in docs/forge-web.md), and a
+ * glyph only Forge Web has a use for has no business being added to the desk's
+ * vocabulary from here.
+ */
+function ChatIcon(): ReactNode {
+  return (
+    <svg
+      width={13}
+      height={13}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M13.4 9.2a1.4 1.4 0 0 1-1.4 1.4H6.2L3.4 13V4.2a1.4 1.4 0 0 1 1.4-1.4h7.2a1.4 1.4 0 0 1 1.4 1.4z" />
+    </svg>
+  )
+}
 
 /** Convert screen feed blocks into conversational chat turns when no disk transcript exists. */
 function feedBlocksToChatTurns(blocks: FeedBlock[]): ChatTurn[] {
@@ -231,6 +266,10 @@ export function PaneView({
   /** Either conversation view: the terminal is behind it and must not be touched. */
   const overlaid = feed || chat
 
+  /**
+   * One face forward, and remember it for the next agent pane.
+   */
+  const nextView: PaneFace = agent ? (chat ? 'feed' : feed ? 'term' : 'chat') : 'term'
   const showView = useCallback(
     (next: PaneFace) => {
       setView(next)
@@ -238,12 +277,6 @@ export function PaneView({
     },
     [agent]
   )
-
-  useEffect(() => {
-    return registerPaneViewSetter(leaf.id, (next) => {
-      showView(next)
-    })
-  }, [leaf.id, showView])
 
   /* ------------------------------------------------------- reading the screen */
 
@@ -785,11 +818,25 @@ export function PaneView({
         <div className="pane__leading">
           <AgentBadge profile={profile} size="sm" />
           <span className="pane__title truncate">{paneDisplayTitle(profile, leaf.title)}</span>
+
+          {agent ? (
+            <button
+              type="button"
+              className="ghost-btn pane__action pane__action--flip"
+              title={VIEW_TITLE[nextView]}
+              aria-label={VIEW_TITLE[nextView]}
+              onClick={() => showView(nextView)}
+            >
+              {nextView === 'chat' ? <ChatIcon /> : <Icon name={nextView === 'term' ? 'terminal' : 'note'} size={13} />}
+            </button>
+          ) : null}
         </div>
 
         {/*
-          Chips travel as one trailing cluster. On a phone the
-          title hides in cards view.
+          Chips and actions travel as one trailing cluster. On a phone the
+          title hides in cards view; if close lived outside this group, a
+          `row-reverse` header used to shove it to the other side of the screen
+          the moment the name came back.
         */}
         <div className="pane__trailing">
           {asking ? (
@@ -830,6 +877,19 @@ export function PaneView({
               RECONNECTING
             </span>
           ) : null}
+
+          <div className="pane__actions">
+            <button
+              type="button"
+              className="ghost-btn pane__action pane__action--close"
+              data-danger="true"
+              title={onlyPane ? 'Close tab' : 'Close pane'}
+              disabled={!live}
+              onClick={() => void actions.layout({ op: 'close-pane', paneId: leaf.id })}
+            >
+              <Icon name="close" size={13} />
+            </button>
+          </div>
         </div>
       </header>
 

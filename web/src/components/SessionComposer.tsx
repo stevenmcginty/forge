@@ -17,8 +17,7 @@ import {
 } from '@shared/agents'
 import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { packImage } from '../lib/image'
-import { requestPaneView, usePaneStatus, usePaneView, type PaneFace } from '../lib/pane-status'
-import { getClaudeView, setClaudeView } from '../lib/view-pref'
+import { usePaneStatus, usePaneView } from '../lib/pane-status'
 import type { PermissionMode } from '@/lib/rich'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStatus } from './AgentStatus'
@@ -254,27 +253,9 @@ export function SessionComposer(): ReactNode {
   const currentModeId = rung === 'auto' || rung === null ? null : rung
   const currentModelId = matchAgentModel(roster, status?.model)?.id ?? null
 
-  const isAgent = profile && !isShellProfile(profile)
-  const activeView: PaneFace = view ?? (isAgent ? getClaudeView() : 'term')
-  const nextView: PaneFace = isAgent ? (activeView === 'chat' ? 'feed' : activeView === 'feed' ? 'term' : 'chat') : 'term'
-
-  const onFlipView = () => {
-    if (!paneId) return
-    requestPaneView(paneId, nextView)
-    if (isAgent) setClaudeView(nextView)
-  }
-
   return (
     <div className="session-composer" data-view={view}>
-      {profile ? (
-        <AgentStatus
-          profile={profile}
-          status={status}
-          live={canType}
-          view={activeView}
-          onFlipView={isAgent ? onFlipView : undefined}
-        />
-      ) : null}
+      {profile ? <AgentStatus profile={profile} status={status} live={canType} /> : null}
       <Composer
         draft={draft}
         disabled={!canType}
