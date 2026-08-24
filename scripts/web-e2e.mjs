@@ -1416,6 +1416,9 @@ async function main() {
     .filter({ visible: true })
     .first()
     .click()
+  if ((await page.locator('.tab-confirm__close').count()) > 0) {
+    await page.locator('.tab-confirm__close').click()
+  }
   log(
     layoutOps.length > closeOps && ['close-tab', 'close-pane'].includes(layoutOps.at(-1).op.op),
     `and pressing it reaches the desktop as a close (${layoutOps.at(-1)?.op?.op ?? 'nothing arrived'})`

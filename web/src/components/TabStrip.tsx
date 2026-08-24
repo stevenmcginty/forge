@@ -4,6 +4,7 @@ import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
+import { Popover } from '@/components/Popover'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentChooser } from './AgentChooser'
 import { CommandsButton, SkillsButton } from './Flyouts'
@@ -172,6 +173,8 @@ function Tab({
   const agentTint = primary && !isShellProfile(primary) ? primary.accent : undefined
   const tint = tab.color ?? agentTint
   const asking = leaves.some((leaf) => state.asking.has(leaf.id))
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   return (
     <div
@@ -216,17 +219,71 @@ function Tab({
       <span className="tab__title truncate">{tab.title}</span>
 
       <button
+        ref={closeBtnRef}
         type="button"
         className="ghost-btn tab__close"
         data-danger="true"
         title="Close tab"
+        aria-label={`Close tab ${tab.title}`}
+        onPointerDown={(e) => {
+          e.stopPropagation()
+        }}
         onClick={(e) => {
           e.stopPropagation()
-          void actions.layout({ op: 'close-tab', tabId: tab.id })
+          setConfirmOpen(true)
         }}
       >
         <Icon name="close" size={11} />
       </button>
+
+      {confirmOpen ? (
+        <Popover
+          anchor={closeBtnRef.current}
+          open={confirmOpen}
+          onClose={() => setConfirmOpen(false)}
+          align="center"
+          side="bottom"
+          width={240}
+          label={`Confirm closing tab ${tab.title}`}
+        >
+          <div className="tab-confirm" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="tab-confirm__head">
+              <span className="eyebrow tab-confirm__eyebrow">Close Tab</span>
+            </div>
+            <p className="tab-confirm__body">
+              Close <strong className="tab-confirm__name truncate">“{tab.title}”</strong>?
+            </p>
+            <p className="tab-confirm__hint">
+              Terminal processes in this tab will be terminated.
+            </p>
+            <div className="tab-confirm__actions">
+              <button
+                type="button"
+                className="ghost-btn tab-confirm__cancel"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setConfirmOpen(false)
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ghost-btn tab-confirm__close"
+                data-danger="true"
+                autoFocus
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setConfirmOpen(false)
+                  void actions.layout({ op: 'close-tab', tabId: tab.id })
+                }}
+              >
+                Close tab
+              </button>
+            </div>
+          </div>
+        </Popover>
+      ) : null}
     </div>
   )
 }

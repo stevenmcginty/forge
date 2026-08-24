@@ -33,7 +33,8 @@ const api: ForgeApi = {
     getWorkspace: (projectId) => ipcRenderer.invoke(IPC.storeGetWorkspace, projectId),
     setWorkspace: (projectId, workspace) => ipcRenderer.invoke(IPC.storeSetWorkspace, projectId, workspace),
     deleteWorkspace: (projectId) => ipcRenderer.invoke(IPC.storeDeleteWorkspace, projectId),
-    revealDataDir: () => ipcRenderer.invoke(IPC.storeReveal)
+    revealDataDir: () => ipcRenderer.invoke(IPC.storeReveal),
+    onWorkspaceReplaced: (cb) => subscribe(IPC.workspaceReplaced, cb)
   },
 
   clipboard: {

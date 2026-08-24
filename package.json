@@ -49,6 +49,7 @@
     "agents:check": "node scripts/agents-check.mjs",
     "commands:check": "node scripts/commands-check.mjs",
     "mosaic:check": "node scripts/mosaic-check.mjs",
+    "layout-engine:check": "node scripts/layout-engine-check.mjs",
     "rail:check": "node scripts/rail-check.mjs",
     "git:check": "node scripts/git-check.mjs",
     "gitwatch:smoke": "node scripts/gitwatch-smoke.mjs",

@@ -572,6 +572,33 @@ export function viewerGone(viewer: string, id?: string): void {
   owners.release(viewer, id)
 }
 
+/**
+ * Kill one pane and forget everything this host was holding for it.
+ *
+ * Lifted out of the `IPC.ptyKill` handler when the layout stopped being the
+ * renderer's alone: a phone that closes a pane now has its op performed in main
+ * (electron/layout-engine.ts), so the PTY behind the leaf that just vanished
+ * has to be reaped from main too — and by the *same* code the renderer's kill
+ * takes, or a pane closed from away would leave a replay buffer, an ownership
+ * row and a share-link registration behind that a pane closed at the desk does
+ * not.
+ *
+ * Idempotent, which the two callers rely on: the renderer follows the new
+ * layout and disposes its own handles, so this is very often called twice for
+ * one pane. `PtySessionManager.kill` answers false for an id it does not have,
+ * and every map below is a delete.
+ */
+export function killPane(id: string): boolean {
+  replay.delete(id)
+  widths.delete(id)
+  pending.delete(id)
+  live.delete(id)
+  clearJiggle(id)
+  owners.forget(id)
+  link?.unregister(id)
+  return getManager().kill(id)
+}
+
 export function getManager(): PtySessionManager {
   if (!manager) {
     const settings = getSettings()
@@ -917,16 +944,7 @@ export function registerPtyHandlers(): void {
     link?.rename(String(id), String(title))
   })
 
-  ipcMain.handle(IPC.ptyKill, (_e, id: string) => {
-    replay.delete(String(id))
-    widths.delete(String(id))
-    pending.delete(String(id))
-    live.delete(String(id))
-    clearJiggle(String(id))
-    owners.forget(String(id))
-    link?.unregister(String(id))
-    return getManager().kill(String(id))
-  })
+  ipcMain.handle(IPC.ptyKill, (_e, id: string) => killPane(String(id)))
 
   ipcMain.handle(IPC.ptyList, () => getManager().list())
 }

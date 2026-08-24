@@ -49,7 +49,8 @@ import {
   tvApkPath,
   tvBuildState
 } from './mobile-tv'
-import { addPtySink, getManager, getReplay, viewerGone, viewerResize, viewerWrite } from './pty-host'
+import { addPtySink, getManager, getReplay, killPane, viewerGone, viewerResize, viewerWrite } from './pty-host'
+import { UNSUPPORTED, layoutEngine } from './layout-engine'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
 
 /**
@@ -65,10 +66,12 @@ import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from 
  *  2. Feed it PTY output, by registering a sink on `pty-host` rather than
  *     opening a second route to node-pty. A phone therefore sees exactly the
  *     bytes the window sees, coalesced by the same 12ms flush.
- *  3. Turn a phone's `op` frame into a renderer command and wait for its
- *     answer. Tabs and panes are the renderer's to own — it holds the split
- *     tree and persists the workspace — so the phone joins that code path
- *     instead of growing a parallel one in main that could disagree with it.
+ *  3. Perform a phone's `op` frame. Tabs and panes used to be the renderer's
+ *     to own, and this waited on it; they are the main process's now
+ *     (electron/layout-engine.ts), because a renderer that has crashed or hung
+ *     must not be able to strand a phone that is nowhere near the desk. There
+ *     is still exactly one split tree and one workspace file — the renderer
+ *     follows what main did rather than doing it a second time.
  *  4. Ask the human. When a credential-less phone requests to pair (and only
  *     while "Accept new phones" is armed), the server's question becomes a
  *     renderer prompt here, by the same request/response shape as the ops —
@@ -309,14 +312,34 @@ const pendingOps = new Map<string, PendingOp>()
 const OP_TIMEOUT_MS = 8000
 
 /**
- * Ask the renderer to perform a layout operation, and wait for its verdict.
+ * Perform one layout operation, in main, against the authoritative layout.
  *
- * Returns an error sentence, or null on success. The known failure worth a
- * clear message is "no window": Forge minimised is fine, Forge with its window
- * closed is not, because the split tree lives in the renderer. That limit is
- * documented in docs/MOBILE.md rather than papered over.
+ * Returns an error sentence, or null on success. It used to hand the frame to
+ * the renderer and wait up to eight seconds for a verdict, which made "Forge
+ * has no window open" a real answer a phone got — and, worse, made a window
+ * that was merely *hung* look exactly the same. electron/layout-engine.ts holds
+ * the split tree now, so a tab closes for a phone whether or not anything at
+ * the desk is drawing it; the renderer is told afterwards (see
+ * `saveRemoteWorkspace` in electron/main.ts). The old path stays below as the
+ * fallback for a verb the engine does not answer — of the phone's four, none —
+ * and for the case where main has not installed an engine at all.
+ *
+ * The phone's `foreman-start`/`foreman-stop` never reach here: the mobile
+ * server answers those itself, before this.
  */
 async function dispatchOp(op: OpFrame, deviceName: string): Promise<string | null> {
+  const engine = layoutEngine()
+  if (engine) {
+    const result = engine.apply(op.projectId, op)
+    if (result.ok) {
+      // Killed from here rather than left to the renderer, for the same reason
+      // the op was performed here: the renderer might not be there.
+      for (const paneId of result.killed) killPane(paneId)
+      return null
+    }
+    if (result.error !== UNSUPPORTED) return result.error
+  }
+
   const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
   if (windows.length === 0) return 'Forge has no window open on the desktop, so it cannot change tabs.'
 

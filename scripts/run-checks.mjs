@@ -64,6 +64,7 @@ const CHECKS = [
   { name: 'git:check', lane: 'fast' },
   { name: 'shelf:smoke', lane: 'fast', note: 'real git, scratch repo + bare origin in the temp dir' },
   { name: 'hub:check', lane: 'fast' },
+  { name: 'layout-engine:check', lane: 'fast', note: 'the real engine main performs a phone\'s ops with, over a seeded workspace' },
   { name: 'mosaic:check', lane: 'fast' },
   { name: 'rail:check', lane: 'fast' },
   { name: 'share:check', lane: 'fast', note: 'its live CLI probes self-skip when the CLIs are absent' },

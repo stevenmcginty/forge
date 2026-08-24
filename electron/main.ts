@@ -17,7 +17,8 @@ import type {
   PreviewDevCommand,
   Project,
   Settings,
-  Workspace
+  Workspace,
+  WorkspaceReplacedEvent
 } from '@shared/types'
 import {
   deleteWorkspace,
@@ -35,6 +36,7 @@ import {
 import { registerMemoryHandlers, setMemoryDir } from './memory-store'
 import { registerSkillsHandlers, setSkillsDirs } from './skills-store'
 import { disposePtyHost, getReplay, registerPtyHandlers, setPtyTarget } from './pty-host'
+import { installLayoutEngine, layoutEngine } from './layout-engine'
 import { askBeforeClose, shouldConfirmClose } from './quit-guard'
 import { armRendererWatchdog, type RendererWatchdog } from './renderer-watchdog'
 import { writeBridgeConfig } from './bridge/mcp-config'
@@ -815,6 +817,31 @@ function previewDevCommand(dir: string): PreviewDevCommand | null {
   return { kind: 'command', command: manager ? manager.run(script) : `npm run ${script}`, script }
 }
 
+/**
+ * A workspace the layout engine has just changed, on its way everywhere.
+ *
+ * The engine performs a phone's or a browser's op in main
+ * (electron/layout-engine.ts) and hands the result here. "Saved" therefore
+ * means four things at once, and they are in this order on purpose: to disk
+ * first, so nothing is told about a layout that could still be lost; then down
+ * to the renderer, which follows rather than reconciles; then to the phones and
+ * the browsers, which is the same pair of publishes `storeSetWorkspace` makes
+ * for a change that started at the desk.
+ *
+ * A renderer that is dead, hung or reloading simply does not receive the second
+ * step, and nothing here waits to find out — which is the entire point of the
+ * engine. When it comes back it reads the workspace off disk on the way in.
+ */
+function saveRemoteWorkspace(projectId: string, workspace: Workspace): void {
+  setWorkspace(projectId, workspace)
+  const event: WorkspaceReplacedEvent = { projectId, workspace, reason: 'remote-op' }
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(IPC.workspaceReplaced, event)
+  }
+  publishMobileState(projectId)
+  publishWebState(projectId)
+}
+
 function registerAppHandlers(): void {
   ipcMain.handle(IPC.appInfo, (): AppInfo => {
     const settings = getSettings()
@@ -914,11 +941,16 @@ function registerAppHandlers(): void {
   ipcMain.handle(IPC.storeSetWorkspace, (_e, projectId: string, workspace: Workspace) => {
     const id = String(projectId)
     setWorkspace(id, workspace)
+    // The layout engine's copy has to move with this one. Without it a phone's
+    // next op would be applied to the layout as main last saw it, and a split
+    // made at the desk a minute ago would vanish the moment somebody closed a
+    // pane from away. See `replace` in electron/layout-engine.ts.
+    layoutEngine()?.replace(id, workspace)
     // Every tab and pane change the renderer makes lands here, whatever caused
-    // it — a click, a shortcut, or an op the phone asked for. So this is the one
-    // place that knows the layout moved, and therefore the right place to tell
-    // the phones. Publishing from here rather than from each action also means
-    // the phone is only ever told about a layout that is already on disk.
+    // it — a click, a shortcut, a drag on a divider. So this is the one place
+    // that knows the layout moved, and therefore the right place to tell the
+    // phones. Publishing from here rather than from each action also means the
+    // phone is only ever told about a layout that is already on disk.
     publishMobileState(id)
     // And the browsers, from the same place and for the same reason. Two calls
     // rather than one broadcast because the two links have different wire
@@ -1285,6 +1317,14 @@ void app
       app.on('browser-window-focus', syncPresence)
       app.on('browser-window-blur', syncPresence)
       registerPtyHandlers()
+      // Before either link can be switched on: an op that arrived with no
+      // engine installed would fall back to asking the renderer, which is the
+      // very wait this exists to remove.
+      installLayoutEngine({
+        load: getWorkspace,
+        save: saveRemoteWorkspace,
+        projects: getProjects
+      })
       registerShotsHandlers()
       registerSttHandlers()
       registerSttModelHandlers()

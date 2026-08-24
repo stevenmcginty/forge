@@ -9,6 +9,13 @@
 export { MobileServer, isAllowedSource, resolveWithin } from '../../electron/mobile/server'
 export { MobileAuth, PAIR_TTL_MS, hashToken } from '../../electron/mobile/auth'
 export { PtySessionManager } from '../../electron/pty/session-manager'
+/*
+ * The real layout engine, so the phase that closes a pane with no renderer
+ * anywhere drives the class electron/mobile-host.ts hands the frame to rather
+ * than a stand-in written to agree with it. Electron-free for exactly this
+ * reason — see its header.
+ */
+export { LayoutEngine, UNSUPPORTED } from '../../electron/layout-engine'
 // The real geometry policy, so the ownership phases drive the shipped registry
 // against a real PTY rather than a stand-in written to agree with it. This is
 // what that module has no Electron in it for.

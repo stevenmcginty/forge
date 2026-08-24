@@ -1,4 +1,5 @@
 import type { MosaicRect, MosaicState, MosaicTile } from '@shared/types'
+import { emptyMosaic } from '@shared/workspace'
 
 /**
  * The geometry of the freeform mosaic wall.
@@ -76,9 +77,14 @@ export interface MosaicEdges {
 
 export const NO_EDGES: MosaicEdges = { left: false, right: false, top: false, bottom: false }
 
-export function emptyMosaic(): MosaicState {
-  return { mode: 'auto', tiles: {}, wallTabs: [] }
-}
+/**
+ * Re-exported rather than defined here: `withPrunedMosaic` in shared/workspace.ts
+ * needs an empty wall too, and that file has to be importable from the main
+ * process (electron/layout-engine.ts closes tabs and panes there now). One
+ * definition, so a wall emptied from a phone is the same wall emptied at the
+ * desk.
+ */
+export { emptyMosaic }
 
 /* ------------------------------------------------------------------ basics */
 

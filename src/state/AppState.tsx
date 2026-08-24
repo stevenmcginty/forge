@@ -39,10 +39,17 @@ import type {
 import {
   BUILTIN_AGENT_PROFILES,
   TAB_NAME_POOL,
-  TAB_TEXT_PALETTE,
   isPermissionMode,
   isShellProfile
 } from '@shared/agents'
+/*
+ * How a tab is born, and what an empty workspace is. Imported rather than
+ * written here since electron/layout-engine.ts started performing a phone's and
+ * a browser's layout ops in the main process: a tab opened from away goes
+ * through the same three functions this reducer does, so it comes out with the
+ * same name, colour and shape.
+ */
+import { EMPTY_WORKSPACE, makeTab, nextTextColor, withPrunedMosaic } from '@shared/workspace'
 import { DEFAULT_FOREMAN_BRIEF } from '@shared/foreman'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
@@ -355,6 +362,12 @@ const INITIAL: AppState = {
 type Action =
   | { type: 'hydrate'; info: AppInfo; settings: Settings; projects: Project[]; activeProjectId: string | null }
   | { type: 'workspaceLoaded'; projectId: string; workspace: Workspace }
+  /**
+   * Main changed this project's layout and this is what it now is. See
+   * `IPC.workspaceReplaced` — unlike `workspaceLoaded`, a live workspace does
+   * not win over it.
+   */
+  | { type: 'workspaceReplaced'; projectId: string; workspace: Workspace }
   | { type: 'selectProject'; projectId: string }
   | { type: 'addProject'; project: Project }
   | { type: 'updateProject'; id: string; patch: Partial<Project> }
@@ -421,8 +434,6 @@ type Action =
 
 /* -------------------------------------------------------------- helpers */
 
-const EMPTY_WORKSPACE: Workspace = { tabs: [], activeTabId: null, viewMode: 'tabs' }
-
 /**
  * Longest repo URL Forge will keep. The same 400 the store puts on a path — a
  * clone URL is a path with a host bolted on, and anything longer than that
@@ -446,32 +457,6 @@ function mapMosaic(state: AppState, fn: (m: MosaicState) => MosaicState | null):
   })
 }
 
-/**
- * Drop wall boxes belonging to panes and tabs that have just been closed.
- *
- * Stale entries are invisible rather than harmful — nothing looks a box up by a
- * dead pane id — but a project worked in for a month would otherwise carry a
- * few hundred of them to disk forever. A wall left with nothing on it goes back
- * to the auto grid, which is the only honest thing an empty custom wall can be.
- */
-function withPrunedMosaic(ws: Workspace): Workspace {
-  const m = ws.mosaic
-  if (!m) return ws
-  const livePanes = new Set<string>()
-  for (const t of ws.tabs) for (const l of collectLeaves(t.root)) livePanes.add(l.id)
-  const liveTabs = new Set(ws.tabs.map((t) => t.id))
-
-  const tiles: Record<string, MosaicTile> = {}
-  for (const [id, rect] of Object.entries(m.tiles)) if (livePanes.has(id)) tiles[id] = rect
-  const wallTabs = m.wallTabs.filter((id) => liveTabs.has(id))
-
-  const same =
-    Object.keys(tiles).length === Object.keys(m.tiles).length && wallTabs.length === m.wallTabs.length
-  if (same) return ws
-  if (Object.keys(tiles).length === 0) return { ...ws, mosaic: emptyMosaic() }
-  return { ...ws, mosaic: { ...m, tiles, wallTabs } }
-}
-
 function workspaceOf(state: AppState, projectId: string | null): Workspace {
   if (!projectId) return EMPTY_WORKSPACE
   return state.workspaces[projectId] ?? EMPTY_WORKSPACE
@@ -483,70 +468,6 @@ function totalPanes(state: AppState): number {
     for (const tab of ws.tabs) n += countLeaves(tab.root)
   }
   return n
-}
-
-/**
- * The terminal-text colour a new tab is born with: the first one nobody in this
- * project is already using, cycling once they are all spoken for.
- *
- * Taken rather than random, because random hands you two near-identical blues
- * often enough to be annoying, and the point of the colour is that no two
- * terminals on the mosaic wall look alike. A tab whose colour the user cleared
- * counts as using none, so the colour it gave up is free again.
- */
-function nextTextColor(tabs: TerminalTab[]): string {
-  const taken = new Set(tabs.map((t) => t.textColor?.toLowerCase()).filter(Boolean))
-  return (
-    TAB_TEXT_PALETTE.find((c) => !taken.has(c.toLowerCase())) ??
-    TAB_TEXT_PALETTE[tabs.length % TAB_TEXT_PALETTE.length]!
-  )
-}
-
-/**
- * The name a new tab is born with, and where the project's cursor lands after
- * handing it out: the next name in the pool nobody in this project is already
- * wearing, wrapping when the hundred run out.
- *
- * The cursor only ever moves forward, so closing a tab does not put its name
- * back at the front of the queue — kill Otis and the next tab is whoever comes
- * after Otis, not Otis again. Names in use are skipped rather than duplicated,
- * which also covers the case where the user has renamed a tab by hand onto a
- * name the pool was about to reach.
- */
-function nextTabName(tabs: TerminalTab[], cursor: number): { title: string; cursor: number } {
-  const taken = new Set(tabs.map((t) => t.title.trim().toLowerCase()))
-  const start = ((cursor % TAB_NAME_POOL.length) + TAB_NAME_POOL.length) % TAB_NAME_POOL.length
-  for (let i = 0; i < TAB_NAME_POOL.length; i++) {
-    const at = (start + i) % TAB_NAME_POOL.length
-    const name = TAB_NAME_POOL[at]!
-    if (!taken.has(name.toLowerCase())) return { title: name, cursor: at + 1 }
-  }
-  // A hundred open tabs is well past the session limit, but a name is not worth
-  // crashing over: fall back to the next free numbered variant of the one due.
-  const base = TAB_NAME_POOL[start]!
-  let n = 2
-  while (taken.has(`${base} ${n}`.toLowerCase())) n++
-  return { title: `${base} ${n}`, cursor: start + 1 }
-}
-
-function makeTab(
-  profileId: string,
-  tabs: TerminalTab[],
-  cursor: number,
-  permissionMode?: ClaudePermissionMode
-): { tab: TerminalTab; cursor: number } {
-  const leaf = makeLeaf(profileId, '', permissionMode)
-  const name = nextTabName(tabs, cursor)
-  return {
-    tab: {
-      id: makeId('tab'),
-      title: name.title,
-      root: leaf,
-      activePaneId: leaf.id,
-      textColor: nextTextColor(tabs)
-    },
-    cursor: name.cursor
-  }
 }
 
 /**
@@ -756,6 +677,39 @@ function reducer(state: AppState, action: Action): AppState {
       // flight, their live workspace wins — never clobber it.
       if (state.workspaces[action.projectId]) return state
       return { ...state, workspaces: { ...state.workspaces, [action.projectId]: action.workspace } }
+
+    /**
+     * Main performed a phone's or a browser's layout op and this is the result.
+     *
+     * The opposite posture to `workspaceLoaded` above: a live workspace does
+     * *not* win. The op was applied to the authoritative layout in the main
+     * process (electron/layout-engine.ts) and is already on disk, so anything
+     * this window is holding that disagrees is by definition older than a
+     * quarter of a second — the persistence debounce — and losing it is a much
+     * smaller failure than a phone whose taps do nothing. Remote ops are rare;
+     * a dropped moment of divider drag is the whole cost.
+     *
+     * Panes that vanished are queued for disposal exactly as `closePane` queues
+     * them, because this window still holds their xterm and their PTY handle.
+     * Main has already killed the process itself, and a kill of an id nobody
+     * has is a no-op (`killPane` in electron/pty-host.ts), so the double is
+     * cheap and the alternative — a live pane with nothing on screen — is not.
+     */
+    case 'workspaceReplaced': {
+      const current = state.workspaces[action.projectId]
+      const before = new Set<string>()
+      if (current) for (const t of current.tabs) for (const l of collectLeaves(t.root)) before.add(l.id)
+      const after = new Set<string>()
+      for (const t of action.workspace.tabs) for (const l of collectLeaves(t.root)) after.add(l.id)
+      const kills = [...before].filter((id) => !after.has(id))
+      return {
+        ...state,
+        workspaces: { ...state.workspaces, [action.projectId]: action.workspace },
+        pendingKills: kills.length === 0 ? state.pendingKills : [...state.pendingKills, ...kills],
+        // A tile blown up on the mosaic wall cannot outlive the pane it is of.
+        mosaicZoom: kills.includes(state.mosaicZoom ?? '') ? null : state.mosaicZoom
+      }
+    }
 
     case 'selectProject': {
       if (state.activeProjectId === action.projectId) return state
@@ -2081,6 +2035,43 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       }
     })
   }, [actions, state])
+
+  /**
+   * The layout, as the main process has just changed it.
+   *
+   * This is the other half of electron/layout-engine.ts, and the reason the two
+   * `onCommand` handlers above are now dead for every verb but
+   * `select-project`. A phone's close-pane is performed in main, against the
+   * authoritative workspace, and saved there; this window is *told*. Which is
+   * the whole fix: a renderer that has crashed, hung or gone blank can no
+   * longer strand somebody three hundred miles from the desk, because nothing
+   * out there is waiting on it any more.
+   *
+   * Optional-chained the whole way down on purpose. A Forge that is already
+   * running booted with the preload bundle it had at the time, and that one has
+   * no `onWorkspaceReplaced` on it — a bare call would throw at mount and take
+   * the window out, which is precisely the failure this path exists to survive.
+   *
+   * The empty dependency list is deliberate: this subscribes once and reads
+   * nothing from render scope but the two stable refs.
+   */
+  useEffect(() => {
+    return window.forge?.store?.onWorkspaceReplaced?.(({ projectId, workspace }) => {
+      if (!projectId || !workspace || !Array.isArray(workspace.tabs)) return
+      // Marked persisted *before* the dispatch, and this line is load-bearing:
+      // main has already written this exact workspace to disk, so without it
+      // the 250ms persistence effect would wake up, notice the copy in state is
+      // not the one it last wrote, and push the window's stale idea straight
+      // back over main's. The remote op would appear to work and then undo
+      // itself half a second later.
+      persisted.current.workspaces.set(projectId, JSON.stringify(workspace))
+      dispatch({ type: 'workspaceReplaced', projectId, workspace })
+      // And the desk follows, exactly as it did when the renderer performed
+      // these ops itself: a tab opened from away into a project nobody here is
+      // looking at is a tab nobody at the desk can see.
+      dispatch({ type: 'selectProject', projectId })
+    })
+  }, [])
 
   /**
    * A folder somebody picked in a browser, on its way into the rail.

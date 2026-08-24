@@ -39,6 +39,18 @@ export const IPC = {
   storeSetProjects: 'store:set-projects',
   storeGetWorkspace: 'store:get-workspace',
   storeSetWorkspace: 'store:set-workspace',
+  /**
+   * A workspace main has just changed, on its way down to the renderer. Main →
+   * renderer, one way, no answer waited for.
+   *
+   * The other direction of `storeSetWorkspace`, and the half that makes a
+   * remote layout op survive a dead window: since electron/layout-engine.ts
+   * performs a phone's and a browser's ops in main, the renderer is a follower
+   * for those — it is told what the layout now is rather than asked to work it
+   * out. Nothing is expected back, which is the whole point: a renderer that
+   * never listens costs the phone nothing but a stale desk.
+   */
+  workspaceReplaced: 'store:workspace-replaced',
   storeDeleteWorkspace: 'store:delete-workspace',
   storeReveal: 'store:reveal',
 

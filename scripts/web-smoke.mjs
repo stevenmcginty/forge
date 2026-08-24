@@ -184,6 +184,8 @@ async function main() {
     WebServer,
     WebAuth,
     PtySessionManager,
+    LayoutEngine,
+    UNSUPPORTED,
     GridOwners,
     DESK_VIEWER,
     hashPin,
@@ -352,6 +354,21 @@ async function main() {
   const refusedOrigins = []
   const ops = []
   let layoutAnswer = null
+  /**
+   * The real layout engine, switched on for phase 10c and off everywhere else.
+   *
+   * Off, the hook is the recorder the phases above need: they are about the
+   * *wire* — that a request reaches the host verbatim and that its refusal
+   * comes back on the right rid — and a host that really performed them would
+   * be answering questions those phases are not asking.
+   *
+   * On, it is the shipped `LayoutEngine` with the six lines of
+   * `dispatchLayout` (electron/web-host.ts) around it: apply, kill what it
+   * names, fall back to the renderer only for the verb it answers UNSUPPORTED.
+   * There is no Electron in this process and therefore no renderer at all,
+   * which is precisely the desktop this whole change exists for.
+   */
+  let engine = null
   const watches = []
   const writes = []
   const clipboardOffers = []
@@ -432,7 +449,13 @@ async function main() {
       snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: WORKSPACES, foreman: [...foremanStates] }),
       layout: async (op, deviceName) => {
         ops.push({ op, deviceName })
-        return layoutAnswer
+        if (!engine) return layoutAnswer
+        const result = engine.apply(op.projectId, op)
+        if (result.ok) {
+          for (const id of result.killed) manager.kill(id)
+          return null
+        }
+        return result.error === UNSUPPORTED ? layoutAnswer : result.error
       },
       foremanStart: async (request) => {
         foremanStarts.push(request)
@@ -974,6 +997,82 @@ async function main() {
   await waitFor(() => browser.result('r-layout-ok'), 5000, 'the accepted layout result')
   log(browser.result('r-layout-ok').body.kind === 'ok', 'an accepted layout request answers ok on its own rid')
   log(ops.at(-1).op.tabId === 'tab-1', 'and its tab id survived the wire')
+
+  /* ------------------ 10c. the same op, performed in main, with no renderer
+   *
+   * The failure this phase is about happened to Steve on a train. Every layout
+   * op used to be forwarded into the desktop renderer and awaited, so a window
+   * that had crashed, hung or gone blank turned every tap on the phone into
+   * "The desktop did not answer in time" — with nobody in the building.
+   *
+   * electron/layout-engine.ts is the fix, and this is the shipped class: there
+   * is no Electron in this process, so there is no renderer here to fall back
+   * to and `layoutAnswer` below is the exact sentence a windowless desktop used
+   * to answer with. A `close-pane` that comes back `ok` therefore means the
+   * work was done somewhere a dead window cannot reach — and the pane it named
+   * is a *real* pwsh, which has to be gone afterwards, because a layout that
+   * says a terminal is closed while the process is still running is the one
+   * outcome worse than the refusal.
+   */
+
+  const spare = manager.create({ id: 'w-spare', cwd: ROOT, cols: 80, rows: 24 })
+  log(spare.ok === true, 'spawned a second real pwsh for the engine to close')
+  const leaf = (id) => ({ type: 'leaf', id, profileId: 'shell', title: '' })
+  const saved = []
+  engine = new LayoutEngine({
+    load: () => ({
+      tabs: [
+        {
+          id: 'tab-1',
+          title: 'One',
+          activePaneId: 'w-spare',
+          root: { type: 'split', id: 'sp-1', direction: 'row', ratio: 0.5, a: leaf('w-spare'), b: leaf('w-keep') }
+        }
+      ],
+      activeTabId: 'tab-1'
+    }),
+    save: (projectId, workspace) => saved.push({ projectId, workspace }),
+    projects: () => PROJECTS
+  })
+
+  layoutAnswer = 'Forge has no window open on the desktop, so it cannot change tabs.'
+  browser.send({
+    type: 'request',
+    rid: 'r-engine-close',
+    body: { kind: 'layout', op: { op: 'close-pane', projectId: 'p1', paneId: 'w-spare' } }
+  })
+  await waitFor(() => browser.result('r-engine-close'), 5000, 'the engine-backed close-pane result')
+  log(
+    browser.result('r-engine-close').body.kind === 'ok',
+    'a close-pane from a browser answers ok with no renderer anywhere — the sentence about no window open is gone'
+  )
+  log(saved.length === 1 && saved[0].projectId === 'p1', 'and the new layout was written from main, once', `${saved.length} write(s)`)
+  log(
+    saved.length === 1 && !JSON.stringify(saved[0].workspace).includes('w-spare'),
+    'with the closed pane out of the tree'
+  )
+  await waitFor(() => !manager.list().some((s) => s.id === 'w-spare'), 5000, "the closed pane's shell to go")
+  log(true, "and the pane's real PTY was killed, not merely forgotten")
+  log(manager.list().some((s) => s.id === 'w1'), 'while the pane nobody closed is still running')
+
+  // The one verb the engine does not answer. `select-project` is about which
+  // project a *window* is looking at, so it still goes to the renderer — and
+  // still fails without one, which is the same limit it has always had.
+  browser.send({
+    type: 'request',
+    rid: 'r-engine-project',
+    body: { kind: 'layout', op: { op: 'select-project', projectId: 'p1' } }
+  })
+  await waitFor(() => browser.result('r-engine-project'), 5000, 'the select-project result')
+  log(
+    browser.result('r-engine-project').body.kind === 'failed' &&
+      browser.result('r-engine-project').body.message === layoutAnswer,
+    'while select-project still falls back to the renderer, and still says so when there is none'
+  )
+  log(saved.length === 1, 'a refusal wrote nothing', `${saved.length} write(s)`)
+
+  engine = null
+  layoutAnswer = null
 
   /* ------------------------------------------- 9. two requests in flight */
 

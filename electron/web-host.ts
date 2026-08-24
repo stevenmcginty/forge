@@ -63,12 +63,14 @@ import {
   addPtySink,
   getManager,
   getReplay,
+  killPane,
   liveSessions,
   viewerClaim,
   viewerGone,
   viewerResize,
   viewerWrite
 } from './pty-host'
+import { UNSUPPORTED, layoutEngine } from './layout-engine'
 import { addGitSink, gitRefresh, runAction } from './git-watcher'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
 import { getSkillsStore } from './skills-store'
@@ -108,11 +110,13 @@ import { probeCommands } from './which'
  *     told by the same sentence the desktop's panel is, after the same
  *     suppression and stamped with the same sequence number, so the two cannot
  *     disagree about what the repository is doing.
- *  4. Turn a browser's `layout` request into a renderer command and wait for
- *     its answer. Tabs and panes are the renderer's to own — it holds the split
- *     tree and persists the workspace — so the browser joins that code path
- *     instead of growing a parallel one in main that could disagree with it
- *     (docs/forge-web.md, decision 5).
+ *  4. Perform a browser's `layout` request. Tabs and panes used to be the
+ *     renderer's to own, and this waited on it; they are the main process's now
+ *     (electron/layout-engine.ts), because a renderer that has crashed or hung
+ *     must not be able to strand a browser that is nowhere near the desk.
+ *     Decision 5 of docs/forge-web.md still holds exactly as written — one
+ *     workspace, one truth, and a tab opened in the browser appears on the desk
+ *     — the truth simply lives one process along, and the renderer follows it.
  *  5. Name the viewer on every frame that bears on a pane's geometry, so the
  *     ownership registry can decide whose size wins. One PTY, several viewers —
  *     the block of that name below says what the rule is and what the two
@@ -697,11 +701,33 @@ function askRenderer(channel: string, payload: object, noWindow: string): Promis
 }
 
 /**
- * One layout operation, performed by the renderer. The server turns any
- * sentence this resolves with into `no-window`, which is exactly what the
- * windowless case is.
+ * One layout operation, performed *here* — in main, against the authoritative
+ * layout — and only asked of the renderer for the one verb main cannot answer.
+ *
+ * This used to be `askRenderer` and nothing else, which meant a browser three
+ * hundred miles away could do nothing at all with a window that had crashed,
+ * hung or gone blank: eight seconds of waiting and then "The desktop did not
+ * answer in time". electron/layout-engine.ts now holds the split tree, so the
+ * tab closes whether or not anything is drawing it, and the renderer is told
+ * afterwards (see `saveRemoteWorkspace` in electron/main.ts).
+ *
+ * `select-project` is the exception and comes back `UNSUPPORTED`: which project
+ * the desk is *looking at* is a fact about a window, so that one still goes to
+ * the renderer and still fails without one — the same limit it has always had.
  */
-function dispatchLayout(op: WebLayoutOp, deviceName: string): Promise<string | null> {
+async function dispatchLayout(op: WebLayoutOp, deviceName: string): Promise<string | null> {
+  const engine = layoutEngine()
+  if (engine) {
+    const result = engine.apply(op.projectId, op)
+    if (result.ok) {
+      // The panes that vanished with the tab. Killed from here rather than left
+      // to the renderer, because "the renderer might not be there" is the whole
+      // reason this function stopped asking it anything.
+      for (const paneId of result.killed) killPane(paneId)
+      return null
+    }
+    if (result.error !== UNSUPPORTED) return result.error
+  }
   return askRenderer(
     IPC.webCommand,
     { deviceName, op } satisfies Omit<WebCommandEvent, 'requestId'>,

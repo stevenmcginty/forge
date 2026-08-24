@@ -79,7 +79,8 @@ import type {
   VoiceSpeakRequest,
   VoiceSpeakResult,
   WindowStateEvent,
-  Workspace
+  Workspace,
+  WorkspaceReplacedEvent
 } from './types'
 /*
  * The two wire shapes the screen mirror hands straight through this bridge.
@@ -184,6 +185,21 @@ export interface ForgeApi {
     setWorkspace(projectId: string, workspace: Workspace): Promise<void>
     deleteWorkspace(projectId: string): Promise<void>
     revealDataDir(): Promise<string>
+    /**
+     * Main has changed a workspace; take it as it stands.
+     *
+     * The other direction of `setWorkspace`, and the one that makes a phone's
+     * tap work with a window that is dead, hung or blank: the layout op was
+     * performed in main (electron/layout-engine.ts) and this is the result. No
+     * answer goes back — main is not waiting.
+     *
+     * Optional-chain the call in the renderer (`window.forge?.store
+     * ?.onWorkspaceReplaced?.(...)`). The preload bundle a running Forge booted
+     * with predates this method, and a `TypeError` at module scope in AppState
+     * is a blank window — which is the exact failure this whole path exists to
+     * survive.
+     */
+    onWorkspaceReplaced(cb: (e: WorkspaceReplacedEvent) => void): () => void
   }
 
   /**

@@ -716,6 +716,26 @@ export interface Workspace {
   devCommand?: string
 }
 
+/**
+ * A workspace the main process has just changed, on its way down to the
+ * renderer. See `IPC.workspaceReplaced`.
+ *
+ * The renderer *follows* this rather than reconciling with it: a phone's
+ * close-pane was performed in main against the authoritative layout
+ * (electron/layout-engine.ts), so what arrives here is not a suggestion. Where
+ * the desk had an unpersisted change of its own in the same quarter-second, the
+ * replacement still wins — remote ops are rare and a lost 250ms of divider drag
+ * is a cheaper failure than a phone whose taps do nothing.
+ *
+ * `reason` exists so a follower can tell a remote op from anything else that
+ * might one day push a layout down. Today there is only one.
+ */
+export interface WorkspaceReplacedEvent {
+  projectId: string
+  workspace: Workspace
+  reason: 'remote-op'
+}
+
 /* ------------------------------------------------------------------- shots */
 
 /**
