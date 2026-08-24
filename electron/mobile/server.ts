@@ -24,6 +24,7 @@ import {
   type OpFrame,
   type ServerFrame
 } from '@shared/mobile'
+import { FOREMAN_SEED_MAX, type ForemanStartRequest, type ForemanState } from '@shared/foreman'
 import type { MobileAuth, MobileDevice } from './auth'
 
 /**
@@ -104,7 +105,7 @@ export interface MobileServerHost {
   release?: (viewer: string, id?: string) => void
 
   /** The opening picture: whatever the phone needs to draw a project list. */
-  snapshot: () => Pick<import('@shared/mobile').HelloOkFrame, 'projects' | 'profiles' | 'workspaces'>
+  snapshot: () => Pick<import('@shared/mobile').HelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'foreman'>
 
   /**
    * Run a layout operation. Implemented by mobile-host by forwarding to the
@@ -112,6 +113,19 @@ export interface MobileServerHost {
    * when it worked.
    */
   dispatchOp: (op: OpFrame, deviceName: string) => Promise<string | null>
+
+  /* -------------------------------------------------------------- foreman
+   *
+   * Foreman's controls, held in main rather than forwarded with the layout
+   * verbs — the Foreman host and its loop live in this process, beside the
+   * panes. Optional so the smoke test's host is safe by default; a phone
+   * talking to a host without them is answered in a sentence.
+   */
+
+  /** Switch Foreman on for one pane. `ok: false` carries the sentence to show. */
+  foremanStart?: (request: ForemanStartRequest) => Promise<{ ok: true } | { ok: false; error: string }>
+  /** Switch it off. Total in the host's own way: stopping a stopped pane is a no-op. */
+  foremanStop?: (paneId: string) => Promise<{ ok: true } | { ok: false; error: string }>
 
   /**
    * The number of authenticated phones changed. Drives the power-save blocker
@@ -506,6 +520,17 @@ export class MobileServer {
     }
   }
 
+  /**
+   * One pane's Foreman state moved, to every authenticated phone. The whole
+   * state, every time — see `ForemanFrame` in shared/mobile.ts for why a diff
+   * would be a switch lying about a pane nobody is driving.
+   */
+  pushForeman(state: ForemanState): void {
+    for (const client of this.clients) {
+      if (client.device) this.send(client, { t: 'foreman', state })
+    }
+  }
+
   /** Close any live socket belonging to a revoked device, immediately. */
   disconnectDevice(deviceId: string): void {
     for (const client of [...this.clients]) {
@@ -721,6 +746,34 @@ export class MobileServer {
       }
 
       case 'op': {
+        // Foreman's two verbs are answered here in main, before the renderer
+        // dispatch — the same authorisation as `close-pane` (a paired phone,
+        // naming a pane that is live), held to it against the same session
+        // list `sub` checks. The seed is capped rather than refused, exactly
+        // as the browser link caps it.
+        if (frame.op === 'foreman-start' || frame.op === 'foreman-stop') {
+          const paneId = wireString(frame.paneId, 128)
+          if (!paneId || !this.host.sessions().some((s) => s.id === paneId)) {
+            this.send(client, { t: 'err', code: 'unknown-session', msg: 'That pane is gone' })
+            return
+          }
+          const hook = frame.op === 'foreman-start' ? this.host.foremanStart : this.host.foremanStop
+          if (!hook) {
+            this.send(client, { t: 'err', code: 'no-window', msg: 'This Forge cannot drive a pane from a phone.' })
+            return
+          }
+          const outcome =
+            frame.op === 'foreman-start'
+              ? await this.host.foremanStart!({ paneId, seed: wireString(frame.seed, FOREMAN_SEED_MAX) })
+              : await this.host.foremanStop!(paneId)
+          if (!outcome.ok) {
+            this.send(client, { t: 'err', code: 'no-window', msg: outcome.error })
+            return
+          }
+          // Nothing to say back: the state itself is broadcast as a `foreman`
+          // frame, to this phone along with every other one.
+          return
+        }
         const error = await this.host.dispatchOp(frame, client.device.name)
         if (error) this.send(client, { t: 'err', code: 'no-window', msg: error })
         return

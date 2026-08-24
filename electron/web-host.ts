@@ -42,6 +42,7 @@ import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
 import { WebServer, type WebServerHost } from './web/server'
 import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
+import { foremanList, foremanStart, foremanStop, onForemanState } from './foreman/ipc'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
 import { transcriptPath } from './bridge/claude-transcripts'
 import { publishAttention } from './attention-bus'
@@ -230,6 +231,13 @@ let rendezvous: WebRendezvous | null = null
 let rest: FirebaseRest | null = null
 let unsubscribePty: (() => void) | null = null
 let unsubscribeGit: (() => void) | null = null
+/**
+ * Foreman's state pushes, fanned out to every connected browser for as long as
+ * the link is up. Unsubscribed on `stop()` — the Foreman host itself is a
+ * desktop feature and outlives this link, and a push into a server that has
+ * gone is the same dead-end a pending geometry push guards against below.
+ */
+let unsubscribeForeman: (() => void) | null = null
 /**
  * How long a PTY resize waits before the session list is pushed again.
  *
@@ -1138,7 +1146,7 @@ async function signOut(): Promise<void> {
 
 /* -------------------------------------------------------------- the picture */
 
-function snapshotForBrowser(): Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'projectsRoot'> {
+function snapshotForBrowser(): Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman'> {
   const projects = getProjects()
   const workspaces: Record<string, Workspace> = {}
   for (const project of projects) {
@@ -1153,7 +1161,10 @@ function snapshotForBrowser(): Pick<WebHelloOkFrame, 'projects' | 'profiles' | '
     projects,
     profiles: settings.agentProfiles,
     workspaces,
-    ...(projectsRoot ? { projectsRoot } : {})
+    ...(projectsRoot ? { projectsRoot } : {}),
+    // Always, even empty: "no panes are driven" is a real answer a reconnecting
+    // browser should hear, not an absent one. The push frames carry the rest.
+    foreman: foremanList()
   }
 }
 
@@ -1312,6 +1323,19 @@ async function start(): Promise<void> {
       return true
     },
     transcriptStop: (paneId, onUpdate) => stopTranscript(paneId, onUpdate),
+    // The exported functions, not the IPC handlers — the same rule as the git
+    // hooks above: a second caller reaches what the handlers reach, and the
+    // window is never asked about a pane main owns. A start that comes back
+    // `error` is answered as a failure carrying Foreman's own sentence, which
+    // is what the desktop's switch would have shown in the footer.
+    foremanStart: async (request) => {
+      const state = foremanStart(request)
+      return state.status === 'error' ? { ok: false, error: state.line || 'Foreman could not start.' } : { ok: true }
+    },
+    foremanStop: async (paneId) => {
+      foremanStop(paneId)
+      return { ok: true }
+    },
     offerClipboardImage: (bytes) => {
       try {
         const img = nativeImage.createFromBuffer(Buffer.from(bytes))
@@ -1383,6 +1407,13 @@ async function start(): Promise<void> {
 
   server = instance
   starting = false
+
+  // Foreman's state, fanned out from the moment the link is up. Modelled on
+  // the git sink below it: one subscription, made after the server exists so
+  // nothing can push into a listener nobody is serving, taken down in `stop()`
+  // with the rest. A browser that connects mid-job gets the current states
+  // from the snapshot instead — this is the *changes*, that is the picture.
+  unsubscribeForeman = onForemanState((state) => instance.pushForeman(state))
 
   // The browser sees what the window sees, from the same coalesced flush.
   unsubscribePty = addPtySink({
@@ -1649,6 +1680,8 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   unsubscribePty = null
   unsubscribeGit?.()
   unsubscribeGit = null
+  unsubscribeForeman?.()
+  unsubscribeForeman = null
   // A pending push would fire into a server that has stopped, which is the
   // ordinary shape of switching the link off a beat after moving a pane.
   if (geometryPush) clearTimeout(geometryPush)

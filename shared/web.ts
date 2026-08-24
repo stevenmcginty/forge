@@ -91,6 +91,15 @@ import type {
 import type { SkillsList } from './skills'
 import type { CommandsFeed } from './commands'
 /*
+ * Foreman's state, imported whole rather than restated. `ForemanState` is
+ * already plain JSON built for exactly this crossing (see shared/foreman.ts),
+ * so a second copy here would be the thing this file exists to prevent: two
+ * descriptions of one driven pane that disagree about a field. The seed cap
+ * that travels with it, FOREMAN_SEED_MAX, is imported by the servers from
+ * shared/foreman.ts directly — this file carries the shape, not the rule.
+ */
+import type { ForemanState } from './foreman'
+/*
  * The chat transcript's own vocabulary, kept in a file of its own rather than
  * spelled out here. It is read by the desktop's transcript reader and by the
  * browser's chat view and by nothing in between — this protocol only carries
@@ -1086,6 +1095,28 @@ export type WebRequest =
    * for a tab that closed is a watch nobody will ever stop.
    */
   | { kind: 'transcript-stop'; sessionId: string }
+  /**
+   * Switch Foreman on for a pane — the browser's half of the toggle in a pane
+   * header, and the same act the desktop's switch performs.
+   *
+   * `paneId` is the PTY session id, exactly as `attach` names it. `seed` is
+   * Steve's one line, capped to FOREMAN_SEED_MAX at the boundary; it may be
+   * empty, which means "take over the session this pane is already holding"
+   * and is only meaningful for a pane that has one.
+   *
+   * Answered `{ kind: 'ok' }` — the state itself arrives as a `foreman` frame
+   * to every connected browser, this one included, so there is nothing for the
+   * result to carry. Performed by *main*, not forwarded to the renderer: the
+   * Foreman host and its loop live in the main process, and this is the one
+   * request a browser sends that the desktop's own window never handles.
+   */
+  | { kind: 'foreman-start'; paneId: string; seed: string }
+  /**
+   * Switch it off. The keyboard goes straight back to the human, on every
+   * surface at once. Answered `{ kind: 'ok' }`; the `foreman` frame that
+   * follows says `off`.
+   */
+  | { kind: 'foreman-stop'; paneId: string }
 
 /**
  * What `PushSubscription.toJSON()` yields, narrowed to the fields the desktop
@@ -1159,6 +1190,15 @@ export interface WebHelloOkFrame {
    * desktop — the client then shows no bell. See `WebPushSubscription`.
    */
   pushKey?: string
+  /**
+   * Every pane Foreman is holding state for, driven or finished, as it stands
+   * right now. The snapshot half of the `foreman` push: a browser that
+   * reconnects mid-job learns the switch is on from here rather than waiting
+   * for the next state change to arrive. Absent from an older desktop, which
+   * a client reads as "no panes are driven" — the same answer an empty array
+   * gives, and the only safe one.
+   */
+  foreman?: ForemanState[]
 }
 
 /**
@@ -1340,6 +1380,26 @@ export interface WebAttentionFrame {
    * to a line; the pane itself is the real answer to "what is it asking".
    */
   prompt?: string
+}
+
+/**
+ * One pane's Foreman state moved — the whole `ForemanState`, every time, for
+ * the same reason `sessions` is the whole list: a diff the receiver has to
+ * reassemble is a diff that can be missed, and a missed one is a switch that
+ * says "on" about a pane nobody is driving.
+ *
+ * Broadcast, not addressed: Foreman is per-pane but its consequences are not.
+ * A browser that did not switch it on still wants the footer — the pane it is
+ * reading is being driven from somewhere, and a surface that hid that would be
+ * showing a terminal somebody else is typing into as though it were quiet.
+ *
+ * Sent to hidden tabs as well as visible ones, like `transcript` and unlike
+ * `data`: a handful of small objects is nothing an xterm has to parse, and a
+ * phone coming back from the lock screen should read a footer that is true.
+ */
+export interface WebForemanFrame {
+  type: 'foreman'
+  state: ForemanState
 }
 
 /** The project list changed — renamed, reordered, added, removed. */
@@ -1540,6 +1600,7 @@ export type WebServerFrame =
   | WebSessionsFrame
   | WebSessionStartedFrame
   | WebAttentionFrame
+  | WebForemanFrame
   | WebProjectsFrame
   | WebWorkspaceFrame
   | WebGitFrame

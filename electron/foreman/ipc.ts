@@ -31,6 +31,30 @@ let target: BrowserWindow | null = null
 let host: ForemanHost | null = null
 let unsubscribeAttention: (() => void) | null = null
 
+/**
+ * Who else wants every Foreman state push, besides the window.
+ *
+ * Forge Web and Forge Mobile subscribe here when their links come up, so a
+ * pane driven at the desk reaches the browser and the phone without any of the
+ * three knowing about the others — the same fan-out shape `IPC.webAttention`
+ * gives the attention badge. Each holds its own unsubscribe; the set is walked
+ * defensively because a listener that throws must not cost the window its
+ * push.
+ */
+const stateListeners = new Set<(state: ForemanState) => void>()
+
+/**
+ * Observe every Foreman state push from main, without going through the
+ * renderer. Returns the unsubscribe; a listener that has gone away is not an
+ * error and never will be.
+ */
+export function onForemanState(cb: (state: ForemanState) => void): () => void {
+  stateListeners.add(cb)
+  return () => {
+    stateListeners.delete(cb)
+  }
+}
+
 /** Renderer round trips in flight, keyed by request id. See `runAppAction`. */
 const pending = new Map<string, { resolve: (text: string) => void; timer: ReturnType<typeof setTimeout> }>()
 
@@ -240,7 +264,19 @@ function runAppAction(action: Record<string, unknown>): Promise<string> {
 function ensureHost(): ForemanHost {
   if (host) return host
   host = new ForemanHost({
-    sendState: (state) => send(IPC.foremanState, state),
+    // Two doors for the same push: the window that draws the footer, and
+    // whoever else asked — today the web and mobile links, whose browsers and
+    // phones draw the same footer from the same object.
+    sendState: (state) => {
+      send(IPC.foremanState, state)
+      for (const listener of stateListeners) {
+        try {
+          listener(state)
+        } catch (err) {
+          console.error('[foreman] a state listener failed:', err)
+        }
+      }
+    },
     // The manager's own write, not `viewerWrite`: the grid follows the *typist*
     // (../pty/grid-owner.ts) and Foreman is not a device. Typing on the desk's
     // behalf must not take a pane's grid away from the phone that owns it.
@@ -274,25 +310,49 @@ export function setForemanTarget(win: BrowserWindow | null): void {
   }
 }
 
+/* ---------------------------------------------------- the second front door
+ *
+ * The same three verbs the IPC handlers expose, as functions for the other
+ * links this process serves — Forge Web and Forge Mobile, whose browsers and
+ * phones flip the same switch the desktop's footer does. They call what the
+ * handlers call, never pretending to be a window: one host, one loop, one set
+ * of decisions, whichever surface asked.
+ */
+
+/**
+ * Switch Foreman on for one pane. The kit install lives here rather than in
+ * the handler so a start asked from a browser gets the skills and agents
+ * Foreman drives the pane with exactly as a click at the desk does.
+ */
+export function foremanStart(request: ForemanStartRequest): ForemanState {
+  // The skills and agents Foreman drives the pane with (/gaffer, /fable-method,
+  // the gaffer crew) ship inside Forge and land in this machine's Claude home
+  // the first time Foreman is switched on. Idempotent, and never overwrites a
+  // file the user wrote themselves — see ./kit.ts.
+  const kitDir = foremanKitDir()
+  if (kitDir) {
+    const report = installForemanKit({ kitDir, claudeHome: claudeHome() })
+    for (const f of report.failed) console.error(`[foreman:kit] ${f.name}: ${f.error}`)
+  }
+  return ensureHost().start(request ?? { paneId: '', seed: '' })
+}
+
+/** Never lazily starts a host: stopping something that is not running is a no-op, not a reason to build one. */
+export function foremanStop(paneId: string): ForemanState {
+  return host ? host.stop(String(paneId ?? '')) : idleForemanState(String(paneId ?? ''))
+}
+
+/** Every pane main is holding Foreman state for. Empty until anything has been driven. */
+export function foremanList(): ForemanState[] {
+  return host?.list() ?? []
+}
+
 export function registerForemanHandlers(): void {
-  ipcMain.handle(IPC.foremanStart, (_e, request: ForemanStartRequest): ForemanState => {
-    // The skills and agents Foreman drives the pane with (/gaffer, /fable-method,
-    // the gaffer crew) ship inside Forge and land in this machine's Claude home
-    // the first time Foreman is switched on. Idempotent, and never overwrites a
-    // file the user wrote themselves — see ./kit.ts.
-    const kitDir = foremanKitDir()
-    if (kitDir) {
-      const report = installForemanKit({ kitDir, claudeHome: claudeHome() })
-      for (const f of report.failed) console.error(`[foreman:kit] ${f.name}: ${f.error}`)
-    }
-    return ensureHost().start(request ?? { paneId: '', seed: '' })
-  })
+  ipcMain.handle(IPC.foremanStart, (_e, request: ForemanStartRequest): ForemanState => foremanStart(request))
   // Never lazily starts a host: stopping something that is not running is a
   // no-op, not a reason to build one.
-  ipcMain.handle(IPC.foremanStop, (_e, paneId: string): ForemanState =>
-    host ? host.stop(String(paneId ?? '')) : idleForemanState(String(paneId ?? ''))
-  )
-  ipcMain.handle(IPC.foremanList, (): ForemanState[] => host?.list() ?? [])
+  ipcMain.handle(IPC.foremanStop, (_e, paneId: string): ForemanState => foremanStop(paneId))
+  ipcMain.handle(IPC.foremanList, (): ForemanState[] => foremanList())
   ipcMain.handle(IPC.foremanToolResult, (_e, result: { id?: string; ok?: boolean; result?: unknown; error?: string }): boolean => {
     const id = String(result?.id ?? '')
     const entry = pending.get(id)
@@ -315,6 +375,9 @@ export function registerForemanHandlers(): void {
 export function disposeForeman(): void {
   unsubscribeAttention?.()
   unsubscribeAttention = null
+  // The links that subscribed are being torn down with the app; leaving their
+  // callbacks registered would keep every ForemanState alive past the exit.
+  stateListeners.clear()
   for (const [, entry] of pending) clearTimeout(entry.timer)
   pending.clear()
   host?.dispose()

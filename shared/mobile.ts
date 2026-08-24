@@ -32,6 +32,13 @@
  * no-NAT property is kept; the lag is not. See docs/MOBILE.md.
  */
 import type { AgentProfile, Project, Workspace } from './types'
+/*
+ * Foreman's state, type-only and imported whole — the same rule shared/web.ts
+ * follows for the same reason: `ForemanState` is plain JSON built for a wire
+ * (see shared/foreman.ts), and a second copy of it in here is two descriptions
+ * of one driven pane that drift.
+ */
+import type { ForemanState } from './foreman'
 
 /**
  * A live pane, as the phone sees it.
@@ -326,7 +333,16 @@ export interface ResizeFrame {
  */
 export interface OpFrame {
   t: 'op'
-  op: 'create-tab' | 'create-pane' | 'close-pane' | 'select-tab'
+  /**
+   * The layout verbs are forwarded to the renderer, which owns tabs and panes.
+   * The two Foreman verbs are not: `foreman-start` and `foreman-stop` are held
+   * in the main process and answered there, because the Foreman host and its
+   * loop live beside the panes, not beside the windows. They ride the same
+   * frame because they ride the same authorisation — a paired phone, naming a
+   * pane — and because a second frame type for two verbs is a second thing to
+   * hold to the same rules.
+   */
+  op: 'create-tab' | 'create-pane' | 'close-pane' | 'select-tab' | 'foreman-start' | 'foreman-stop'
   projectId: string
   profileId?: string
   /**
@@ -339,6 +355,12 @@ export interface OpFrame {
   permissionMode?: string
   tabId?: string
   paneId?: string
+  /**
+   * `foreman-start` only: Steve's one line for Foreman. Capped at the boundary
+   * to FOREMAN_SEED_MAX, and may be empty — "take over the session this pane
+   * already holds", which only means something for a pane that has one.
+   */
+  seed?: string
 }
 
 export interface PingFrame {
@@ -713,6 +735,13 @@ export interface HelloOkFrame {
    * because the desktop refuses the frames whatever it said earlier.
    */
   canControl?: boolean
+  /**
+   * Every pane Foreman is holding state for, as it stands right now. The
+   * snapshot half of the `foreman` push, so a phone that reconnects mid-job
+   * learns the switch is on from here. Absent from an older desktop, which
+   * reads the same as an empty array: nothing is being driven.
+   */
+  foreman?: ForemanState[]
 }
 
 /**
@@ -765,6 +794,18 @@ export interface PongFrame {
   t: 'pong'
 }
 
+/**
+ * One pane's Foreman state moved — the whole state, every time, the same rule
+ * `StateFrame` states for its lists: a diff the receiver reassembles is a diff
+ * that can be missed, and a missed one is a switch showing "on" about a pane
+ * nobody is driving. Broadcast to every authenticated device, exactly as the
+ * browser link's twin frame is; see `WebForemanFrame` in shared/web.ts.
+ */
+export interface ForemanFrame {
+  t: 'foreman'
+  state: ForemanState
+}
+
 export type MobileErrorCode =
   | 'proto'
   | 'auth'
@@ -809,6 +850,7 @@ export type ServerFrame =
   | ExitFrame
   | StateFrame
   | PongFrame
+  | ForemanFrame
   | ErrFrame
   | TvPlayFrame
   | MirrorSignalFrame

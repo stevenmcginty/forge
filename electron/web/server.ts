@@ -43,6 +43,13 @@ import {
  */
 import { readMirrorInput, type MirrorInput } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
+/*
+ * Foreman's boundary constants and shapes, from the file that owns them — the
+ * seed cap is applied here, beside every other cap this link enforces, and the
+ * host hooks speak `ForemanStartRequest`'s vocabulary rather than this
+ * server's restatement of it.
+ */
+import { FOREMAN_SEED_MAX, type ForemanStartRequest, type ForemanState } from '@shared/foreman'
 import type {
   AgentPresence,
   CommandPresence,
@@ -248,7 +255,7 @@ export interface WebServerHost {
   claim?: (id: string, viewer: string) => void
 
   /** The opening picture: whatever the browser needs to draw the workspace. */
-  snapshot: () => Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'projectsRoot'>
+  snapshot: () => Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman'>
 
   /**
    * Perform one layout operation. Implemented by web-host by forwarding to the
@@ -370,6 +377,27 @@ export interface WebServerHost {
   transcriptWatch?: (paneId: string, onUpdate: (update: ChatUpdate) => void) => boolean
   /** End the one subscription this callback identifies. Total: a callback that was never watching is not an error. */
   transcriptStop?: (paneId: string, onUpdate: (update: ChatUpdate) => void) => void
+
+  /* --------------------------------------------------------------- foreman
+   *
+   * Foreman's controls, for the browser that flipped the switch in a pane
+   * header. Optional like every other request hook, and for the same reason:
+   * a host without them (the smoke fixture, until a phase supplies one) answers
+   * `unsupported`, which is also what an older desktop would say.
+   *
+   * Performed by main rather than forwarded to the renderer — the one request
+   * on this link with that property — because the Foreman host and its loop
+   * live in this process. The renderer's own switch reaches the same host over
+   * IPC; there is no second code path for a browser to disagree with.
+   */
+
+  /**
+   * Switch Foreman on for one pane. `ok: false` carries the sentence the
+   * browser shows — the same words the desktop's switch would hear.
+   */
+  foremanStart?: (request: ForemanStartRequest) => Promise<{ ok: true } | { ok: false; error: string }>
+  /** Switch it off. Total in the host's own way: stopping a stopped pane is a no-op, not an error. */
+  foremanStop?: (paneId: string) => Promise<{ ok: true } | { ok: false; error: string }>
 
   /**
    * Put a pasted image on this machine's clipboard so an agent that reads
@@ -840,6 +868,18 @@ export class WebServer {
   /** A pane has settled on a question, or stopped waiting on one. */
   pushAttention(sessionId: string, asking: boolean, prompt?: string): void {
     this.broadcast({ type: 'attention', sessionId, asking, ...(prompt ? { prompt } : {}) })
+  }
+
+  /**
+   * One pane's Foreman state moved, to every authenticated browser.
+   *
+   * `broadcast` rather than the per-socket filtering `pushData` does, because
+   * the reason for that filtering is xterm's parser and this is a small object
+   * — see `WebForemanFrame` in shared/web.ts, which says why a hidden tab is
+   * sent it too.
+   */
+  pushForeman(state: ForemanState): void {
+    this.broadcast({ type: 'foreman', state })
   }
 
   pushProjects(projects: Project[]): void {
@@ -1583,7 +1623,11 @@ export class WebServer {
       // The same rule for the push key, and it carries a meaning: a page that
       // is sent no key shows no bell, because a subscription minted against a
       // desktop that cannot send is a permission prompt for nothing.
-      ...(pushKey ? { pushKey } : {})
+      ...(pushKey ? { pushKey } : {}),
+      // An empty array is sent as an empty array, unlike the two above: "no
+      // panes are driven" is a real answer about this desktop, not an absent
+      // one, and only undefined — a host with no Foreman at all — is left out.
+      ...(snapshot.foreman ? { foreman: snapshot.foreman } : {})
     })
     this.host.onPresence?.(this.connectedCount)
   }
@@ -2012,6 +2056,63 @@ export class WebServer {
           // `ok` whether or not this browser was watching, the same courtesy
           // `push-unsubscribe` extends: a client tidying up should not have to
           // know what the desktop believes.
+          answer({ kind: 'ok' })
+          return
+        }
+
+        /* ---------------------------------------------------------- foreman
+         *
+         * The switch in a pane header. Both verbs hold to the same
+         * authorisation as `close-pane`: an authenticated browser, naming a
+         * pane that is live right now. The liveness check is made here, against
+         * the same `sessions()` list `close-pane`'s op is validated against in
+         * the renderer — a pane that has gone is refused at the door rather
+         * than handed to a host that would drive a terminal nobody can see.
+         */
+
+        case 'foreman-start': {
+          if (!this.host.foremanStart) {
+            failed('unsupported', 'This Forge cannot drive a pane for a browser.')
+            return
+          }
+          const paneId = wireString(request.paneId, 128)
+          if (!paneId || !this.host.sessions().some((s) => s.id === paneId)) {
+            failed('unknown-session', 'That pane is gone.')
+            return
+          }
+          // Capped, not refused, for the same reason `write` is capped: the
+          // seed is a line a person typed, and the honest answer to a very
+          // long one is the first FOREMAN_SEED_MAX characters of it rather
+          // than a dead end. The host caps again on its own side of the seam.
+          const started = await this.host.foremanStart({
+            paneId,
+            seed: wireString(request.seed, FOREMAN_SEED_MAX)
+          })
+          if (!started.ok) {
+            failed('failed', started.error)
+            return
+          }
+          // Nothing to carry: the state itself is broadcast as a `foreman`
+          // frame, to this browser along with every other one.
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'foreman-stop': {
+          if (!this.host.foremanStop) {
+            failed('unsupported', 'This Forge cannot drive a pane for a browser.')
+            return
+          }
+          const paneId = wireString(request.paneId, 128)
+          if (!paneId || !this.host.sessions().some((s) => s.id === paneId)) {
+            failed('unknown-session', 'That pane is gone.')
+            return
+          }
+          const stopped = await this.host.foremanStop(paneId)
+          if (!stopped.ok) {
+            failed('failed', stopped.error)
+            return
+          }
           answer({ kind: 'ok' })
           return
         }

@@ -38,6 +38,7 @@ import { MobileAuth, PAIR_TTL_MS } from './mobile/auth'
 import { DiscoveryResponder } from './mobile/discovery'
 import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
 import { MobileServer, TV_APK_PATH, type MobileApprovalAsk } from './mobile/server'
+import { foremanList, foremanStart, foremanStop, onForemanState } from './foreman/ipc'
 import { NgrokTunnel, ensureNgrokExe, pairEndpoint, resolveNgrokExe } from './mobile-tunnel'
 import {
   disposeTvBuild,
@@ -84,6 +85,13 @@ let auth: MobileAuth | null = null
  */
 let discovery: DiscoveryResponder | null = null
 let unsubscribePty: (() => void) | null = null
+/**
+ * Foreman's state pushes, fanned out to every connected phone for as long as
+ * the link is up. The web link holds an identical subscription — one host, two
+ * doors — and both are taken down in `stop()` so a push never lands in a
+ * server that has gone.
+ */
+let unsubscribeForeman: (() => void) | null = null
 let lastDetail = ''
 let starting = false
 /**
@@ -584,6 +592,18 @@ async function start(): Promise<void> {
     release: (viewer, id) => viewerGone(viewer, id),
     snapshot: () => snapshotForPhone(),
     dispatchOp,
+    // The exported functions from the Foreman module, not the IPC handlers: a
+    // phone reaches the same host the desktop's switch reaches, and the
+    // renderer is never asked about a pane main owns. A start that comes back
+    // `error` answers with Foreman's own sentence, as the footer would show it.
+    foremanStart: async (request) => {
+      const state = foremanStart(request)
+      return state.status === 'error' ? { ok: false, error: state.line || 'Foreman could not start.' } : { ok: true }
+    },
+    foremanStop: async (paneId) => {
+      foremanStop(paneId)
+      return { ok: true }
+    },
     acceptUntil: () => armedUntil(),
     requestApproval,
     cancelApproval,
@@ -643,6 +663,12 @@ async function start(): Promise<void> {
 
   server = instance
   starting = false
+
+  // Foreman's state, fanned out from the moment the link is up — the phone's
+  // twin of the subscription electron/web-host.ts holds. The snapshot in
+  // `snapshotForPhone` carries the current states to a phone that connects
+  // mid-job; this is everything that moves after that.
+  unsubscribeForeman = onForemanState((state) => instance.pushForeman(state))
 
   // The phone sees what the window sees, from the same coalesced flush.
   unsubscribePty = addPtySink({
@@ -745,6 +771,8 @@ async function stop(): Promise<void> {
   for (const requestId of [...pendingApprovals.keys()]) settleApproval(requestId, false)
   unsubscribePty?.()
   unsubscribePty = null
+  unsubscribeForeman?.()
+  unsubscribeForeman = null
   // A pending push would fire into a server that has stopped, which is the
   // ordinary shape of switching the link off a beat after moving a pane.
   if (geometryPush) clearTimeout(geometryPush)
@@ -831,14 +859,21 @@ function stopTunnel(): void {
   tunnelStatus = TUNNEL_OFF
 }
 
-function snapshotForPhone(): Pick<HelloOkFrame, 'projects' | 'profiles' | 'workspaces'> {
+function snapshotForPhone(): Pick<HelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'foreman'> {
   const projects = getProjects()
   const workspaces: Record<string, import('@shared/types').Workspace> = {}
   for (const project of projects) {
     const workspace = getWorkspace(project.id)
     if (workspace) workspaces[project.id] = workspace
   }
-  return { projects, profiles: getSettings().agentProfiles, workspaces }
+  return {
+    projects,
+    profiles: getSettings().agentProfiles,
+    workspaces,
+    // Always, even empty: a phone reconnecting mid-job learns the switch is on
+    // from here, and "nothing is being driven" is a real answer too.
+    foreman: foremanList()
+  }
 }
 
 /**
