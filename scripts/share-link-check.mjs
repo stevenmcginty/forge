@@ -290,6 +290,48 @@ console.log('\nwhat reaches the terminal')
   ok(!refused.ok && /may have just closed/.test(refused.error), 'a PTY that will not take the write is reported honestly', refused.error)
 }
 
+/* -------------------------------------------------------------------- renaming */
+
+console.log('\nrenaming')
+{
+  const link = linkOf()
+  link.register({ id: 'r1', title: 'Claude Code', agent: 'claude', cwd: FORGE, projectName: 'Forge' })
+  link.register({ id: 'r2', title: 'Rex', agent: 'claude', cwd: FORGE, projectName: 'Forge' })
+  link.rename('r1', 'Petra')
+
+  const panes = link.handle({ op: 'panes', from: 'Rex', cwd: FORGE }, T0)
+  ok(
+    panes.ok && panes.panes.some((p) => p.id === 'r1' && p.title === 'Petra'),
+    'panes lists the pane under its new title',
+    JSON.stringify(panes.panes)
+  )
+  ok(!panes.panes.some((p) => p.title === 'Claude Code'), 'and not under the one it launched with', JSON.stringify(panes.panes))
+
+  link.noteOutput('r1', T0 - 9000)
+  const sent = link.handle({ op: 'send', from: 'Rex', cwd: FORGE, pane: 'Petra', text: 'hi' }, T0)
+  ok(sent.ok && sent.id === 'r1', 'send resolves the pane by its new title', JSON.stringify(sent))
+
+  const read = link.handle({ op: 'read', from: 'Rex', cwd: FORGE, pane: 'Petra' }, T0)
+  ok(read.ok && read.id === 'r1', 'read resolves the pane by its new title', JSON.stringify(read))
+
+  // `FORGE_SHARE_AGENT` is set once, into the pane's own environment, when its
+  // process is spawned, and cannot change afterwards — so a renamed pane's own
+  // requests still arrive with `from` set to the name it launched under. The
+  // caller lookup has to keep recognising that name as this pane, even though
+  // `panes` (and everyone else) now sees it as "Petra".
+  const asCaller = link.handle({ op: 'panes', from: 'Claude Code', cwd: FORGE }, T0)
+  ok(asCaller.ok, 'a renamed pane still places itself as caller by the name it launched with', JSON.stringify(asCaller))
+
+  // Its new title places it too — nothing revokes the current name, this only
+  // adds the launch name back in as a second way to recognise the same pane.
+  const asNewName = link.handle({ op: 'panes', from: 'Petra', cwd: FORGE }, T0)
+  ok(asNewName.ok, 'and it places itself by its new title too', JSON.stringify(asNewName))
+
+  const renameGhost = linkOf()
+  renameGhost.rename('nobody', 'Whoever')
+  ok(true, 'renaming a pane nothing registered is a silent no-op, not a throw')
+}
+
 /* -------------------------------------------------------------------- reading */
 
 console.log('\nreading a pane')

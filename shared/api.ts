@@ -87,6 +87,12 @@ import type {
  * against that file; named here rather than re-described, so the renderer, main
  * and the tab cannot end up with three ideas of what configures a decoder.
  */
+import type {
+  ForemanStartRequest,
+  ForemanState,
+  ForemanToolRequest,
+  ForemanToolResult
+} from './foreman'
 import type { WebMirrorChunk, WebMirrorConfig } from './web'
 import type { SkillSource, SkillsList } from './skills'
 import type { PackPlugin, SkillPack } from './skillpack'
@@ -156,6 +162,8 @@ export interface ForgeApi {
     create(req: CreateSessionRequest): Promise<CreateSessionResult>
     write(id: string, data: string): void
     resize(id: string, cols: number, rows: number): void
+    /** The pane was renamed in the UI. See `IPC.ptyRename`. */
+    rename(id: string, title: string): void
     kill(id: string): Promise<boolean>
     list(): Promise<Array<{ id: string; pid: number }>>
     /** Returns an unsubscribe function. */
@@ -320,6 +328,34 @@ export interface ForgeApi {
     onEvent(cb: (event: VoiceAgentEvent) => void): () => void
     onToolRequest(cb: (request: VoiceAgentToolRequest) => void): () => void
     toolResult(result: VoiceAgentToolResult): Promise<boolean>
+  }
+
+  /**
+   * Foreman: one Agent SDK session per driven pane, whose hands are that
+   * pane's keyboard.
+   *
+   * A per-pane toggle rather than an app-wide one, so everything here takes a
+   * `paneId`. `start` hands it Steve's one-line seed and it forms the concept,
+   * writes the brief into the pane and answers every question the terminal
+   * asks from then on; `stop` gives the keyboard straight back.
+   *
+   * `onState` is the whole read surface — one ForemanState per push, carrying
+   * the status line and the log a person reads afterwards. There is no
+   * `utterance`: nobody talks to Foreman, and its turns come from the seed and
+   * from pane attention transitions.
+   *
+   * `onToolRequest`/`toolResult` are the same pair the voice agent has and for
+   * the same reason: only the renderer knows what is open, so opening a pane
+   * for a hired agent is a question asked of it. Exactly one answer per
+   * request id — and an answer that says `ok: false` is still an answer.
+   */
+  foreman: {
+    start(req: ForemanStartRequest): Promise<ForemanState>
+    stop(paneId: string): Promise<ForemanState>
+    list(): Promise<ForemanState[]>
+    onState(cb: (state: ForemanState) => void): () => void
+    onToolRequest(cb: (request: ForemanToolRequest) => void): () => void
+    toolResult(result: ForemanToolResult): Promise<boolean>
   }
 
   /**

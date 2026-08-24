@@ -18,6 +18,7 @@ const api: ForgeApi = {
     create: (req) => ipcRenderer.invoke(IPC.ptyCreate, req),
     write: (id, data) => ipcRenderer.send(IPC.ptyWrite, id, data),
     resize: (id, cols, rows) => ipcRenderer.send(IPC.ptyResize, id, cols, rows),
+    rename: (id, title) => ipcRenderer.send(IPC.ptyRename, id, title),
     kill: (id) => ipcRenderer.invoke(IPC.ptyKill, id),
     list: () => ipcRenderer.invoke(IPC.ptyList),
     onData: (cb) => subscribe(IPC.ptyData, cb),
@@ -93,6 +94,15 @@ const api: ForgeApi = {
     onEvent: (cb) => subscribe(IPC.voiceAgentEvent, cb),
     onToolRequest: (cb) => subscribe(IPC.voiceAgentToolRequest, cb),
     toolResult: (result) => ipcRenderer.invoke(IPC.voiceAgentToolResult, result)
+  },
+
+  foreman: {
+    start: (req) => ipcRenderer.invoke(IPC.foremanStart, req),
+    stop: (paneId) => ipcRenderer.invoke(IPC.foremanStop, String(paneId ?? '')),
+    list: () => ipcRenderer.invoke(IPC.foremanList),
+    onState: (cb) => subscribe(IPC.foremanState, cb),
+    onToolRequest: (cb) => subscribe(IPC.foremanToolRequest, cb),
+    toolResult: (result) => ipcRenderer.invoke(IPC.foremanToolResult, result)
   },
 
   memory: {

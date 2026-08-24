@@ -911,6 +911,12 @@ export function registerPtyHandlers(): void {
     owners.noteWish(String(id), DESK_VIEWER, Number(cols), Number(rows))
   })
 
+  ipcMain.on(IPC.ptyRename, (_e, id: string, title: string) => {
+    // Keeps the share link's registry current so share_panes/pane_send/pane_read
+    // resolve a pane by the title it has now, not the one it launched with.
+    link?.rename(String(id), String(title))
+  })
+
   ipcMain.handle(IPC.ptyKill, (_e, id: string) => {
     replay.delete(String(id))
     widths.delete(String(id))

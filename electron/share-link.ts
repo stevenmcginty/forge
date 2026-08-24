@@ -75,6 +75,20 @@ export interface ShareLinkPane {
   projectName: string
 }
 
+/**
+ * A registered pane, plus the one thing a rename must not touch.
+ *
+ * `FORGE_SHARE_AGENT` is baked into a pane's own process at spawn and cannot
+ * change for the life of that process — so a pane renamed after launch keeps
+ * asking to be found by the name it started with. `launchTitle` is that name,
+ * captured once and kept beside `title` so `caller()` can still recognise a
+ * pane as itself after `title` (what `resolve()` and everyone else sees) has
+ * moved on.
+ */
+interface StoredPane extends ShareLinkPane {
+  launchTitle: string
+}
+
 /** What the link needs from the PTY host, and nothing more. */
 export interface ShareLinkDeps {
   /**
@@ -113,7 +127,7 @@ const MAX_STAMPS = 512
 
 export class ShareLink {
   private readonly deps: ShareLinkDeps
-  private readonly panes = new Map<string, ShareLinkPane>()
+  private readonly panes = new Map<string, StoredPane>()
   private readonly activity = new Map<string, Activity>()
   private server: Server | null = null
   private path: string | null = null
@@ -129,12 +143,17 @@ export class ShareLink {
   register(pane: ShareLinkPane): void {
     const id = String(pane?.id ?? '')
     if (!id) return
+    const title = String(pane.title ?? '').trim()
+    const existing = this.panes.get(id)
     this.panes.set(id, {
       id,
-      title: String(pane.title ?? '').trim(),
+      title,
       agent: String(pane.agent ?? '').trim(),
       cwd: String(pane.cwd ?? ''),
-      projectName: String(pane.projectName ?? '').trim()
+      projectName: String(pane.projectName ?? '').trim(),
+      // Set once, from whichever registration got here first, and never moved
+      // afterwards — see StoredPane.
+      launchTitle: existing?.launchTitle ?? title
     })
     // Re-registering an existing pane must not reset its quiet clock, or a
     // renderer reload would make every pane look freshly idle.
@@ -142,6 +161,21 @@ export class ShareLink {
       const now = Date.now()
       this.activity.set(id, { lastOutputAt: 0, lastInputAt: 0, since: now, stamps: [] })
     }
+  }
+
+  /**
+   * A pane was renamed in the UI, after launch.
+   *
+   * Updates only what `resolve()` and `share_panes` show everyone else —
+   * `launchTitle` is deliberately untouched, because it is standing in for an
+   * env var on a live process, and that cannot be renamed out from under it.
+   * A pane nobody has registered yet is a no-op: it will show its real title
+   * as soon as `register` runs.
+   */
+  rename(id: string, title: string): void {
+    const pane = this.panes.get(String(id ?? ''))
+    if (!pane) return
+    pane.title = String(title ?? '').trim()
   }
 
   /** The pane is gone. Nothing outlives the session it describes. */
@@ -239,14 +273,18 @@ export class ShareLink {
    * Which pane is calling.
    *
    * By name first, because that is what `FORGE_SHARE_AGENT` holds, then by id.
-   * A name shared by two panes in two projects is broken by the caller's cwd —
-   * the process asking is running *in* one of them.
+   * "Name" means the current title or the launch title: `FORGE_SHARE_AGENT` is
+   * set once, into the pane's own environment, when its process is spawned —
+   * so a pane renamed afterwards keeps announcing itself by the name it no
+   * longer has, and matching only the current title would make it a stranger
+   * to its own request. A name shared by two panes in two projects is broken
+   * by the caller's cwd — the process asking is running *in* one of them.
    */
   private caller(from: string, cwd: string): ShareLinkPane | null {
     const needle = from.trim().toLowerCase()
     if (!needle) return null
     const all = [...this.panes.values()]
-    let matches = all.filter((p) => p.title.toLowerCase() === needle)
+    let matches = all.filter((p) => p.title.toLowerCase() === needle || p.launchTitle.toLowerCase() === needle)
     if (matches.length === 0) matches = all.filter((p) => p.id.toLowerCase() === needle)
     if (matches.length === 0) return null
     if (matches.length === 1) return matches[0] as ShareLinkPane

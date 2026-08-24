@@ -168,7 +168,13 @@ export function TerminalPane({
 
   const commitTitle = (): void => {
     setEditing(false)
-    if (draft !== leaf.title) actions.renamePane(leaf.id, draft.trim())
+    if (draft !== leaf.title) {
+      const title = draft.trim()
+      actions.renamePane(leaf.id, title)
+      // Tells main so electron/share-link.ts's registry — and therefore
+      // share_panes/pane_send/pane_read — follows the rename too.
+      window.forge.pty.rename(leaf.id, paneDisplayTitle(profile, title))
+    }
   }
 
   /* ------------------------------------------------------- context menu */

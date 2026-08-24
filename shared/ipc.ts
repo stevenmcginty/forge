@@ -1,9 +1,18 @@
+import { FOREMAN_IPC } from './foreman'
+
 /** Every IPC channel name in one place, so main and preload cannot drift. */
 export const IPC = {
   // pty
   ptyCreate: 'pty:create',
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
+  /**
+   * The pane was renamed in the UI, after launch. Renderer → main, one-way,
+   * like ptyWrite/ptyResize. Keeps electron/share-link.ts's registry (and
+   * therefore `share_panes`/`pane_send`/`pane_read`) in step with a rename —
+   * see ShareLink.rename.
+   */
+  ptyRename: 'pty:rename',
   ptyKill: 'pty:kill',
   ptyList: 'pty:list',
   ptyData: 'pty:data',
@@ -177,6 +186,29 @@ export const IPC = {
   /** The brain asking the renderer something. Answered exactly once. */
   voiceAgentToolRequest: 'voice-agent:tool-request',
   voiceAgentToolResult: 'voice-agent:tool-result',
+
+  /* ------------------------------------------------------------------ foreman
+   *
+   * The other Agent SDK session in the main process, and a very different
+   * animal: one session *per driven pane*, whose hands are that pane's
+   * keyboard. See electron/foreman/ and shared/foreman.ts, where the names
+   * below and every type on these channels are defined.
+   *
+   *   renderer --start/stop/list--------->  main      (invoke, R→M)
+   *   main     --state------------------->  renderer  (push,   M→R)
+   *   main     --tool-request------------>  renderer  (push,   M→R)
+   *   renderer --tool-result------------->  main      (invoke, R→M)
+   *
+   * There is no `utterance` here on purpose. Nobody talks to Foreman: its turns
+   * come from the seed and then from the renderer noticing that the pane is
+   * asking something or has gone quiet (see electron/attention-bus.ts).
+   */
+  foremanStart: FOREMAN_IPC.start,
+  foremanStop: FOREMAN_IPC.stop,
+  foremanList: FOREMAN_IPC.list,
+  foremanState: FOREMAN_IPC.state,
+  foremanToolRequest: FOREMAN_IPC.toolRequest,
+  foremanToolResult: FOREMAN_IPC.toolResult,
 
   // per-project agent memory (M7) — one markdown file per project, read into
   // the brain's system text and written back after every exchange.
