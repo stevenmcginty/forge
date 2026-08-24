@@ -149,6 +149,13 @@ export function PaneView({
   const sendingImage = useRef(false)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
   const [truncated, setTruncated] = useState(false)
+  /**
+   * Whether a `replay` has ever answered this pane's attach. An *empty* replay
+   * is a real answer — a freshly-spawned shell, a buffer blanked by a width
+   * change — and a pane that has one must not go on saying "Waiting for the
+   * desktop…", which reads as a fault when the desktop has in fact spoken.
+   */
+  const [painted, setPainted] = useState(false)
   const [transcript, setTranscript] = useState<Transcript>(EMPTY_TRANSCRIPT)
   /**
    * Grok/OpenCode (and any other alt-screen TUI) have no xterm scrollback, so
@@ -339,6 +346,7 @@ export function PaneView({
         // write queue — see `repaint` in lib/term.ts for what the naive pair
         // actually paints.
         setTruncated(wasTruncated)
+        setPainted(true)
         // Emptying the transcript here is a frame early: the terminal has not
         // been repainted yet, so for a moment the feed is showing nothing while
         // the buffer still holds the old screen. It self-corrects, because the
@@ -464,14 +472,28 @@ export function PaneView({
    *
    * Only on the false→true edge, so an ordinary `sessions` push does not cost a
    * second 192KB replay.
+   *
+   * The latch is consumed only by the attach itself. An earlier version wrote
+   * `wasAlive.current = alive` before its guards, and one of those guards was
+   * `!live` — so a session that started while the link was mid-redial burned
+   * the edge without attaching, and the pane sat on "Waiting for the desktop…"
+   * for the life of the component: not in `subs`, so no reconnect re-attached
+   * it, and no error ever said so. There is no `live` guard now for the same
+   * reason the mount-path attach has none: `client.attach` records the
+   * subscription whether or not a frame can leave, and `hello-ok` re-sends
+   * from `subs` — a dead link is the reconnect's problem, not this effect's.
    */
   const wasAlive = useRef(alive)
   useEffect(() => {
-    const became = !wasAlive.current && alive
-    wasAlive.current = alive
-    if (!became || !live) return
+    if (!alive) {
+      wasAlive.current = false
+      return
+    }
+    if (wasAlive.current) return
     const host = hostRef.current
-    if (host) actions.attach(leaf.id, host.size())
+    if (!host) return
+    wasAlive.current = true
+    actions.attach(leaf.id, host.size())
   }, [alive, live, leaf.id, actions])
 
   /**
@@ -727,7 +749,7 @@ export function PaneView({
             status={transcript.status}
             asking={asking}
             prompt={prompt}
-            empty={cached ? 'Nothing of this pane was cached.' : 'Waiting for the desktop…'}
+            empty={cached ? 'Nothing of this pane was cached.' : painted ? 'This pane is empty.' : 'Waiting for the desktop…'}
             cut={truncated && mobile}
             pageTui={tui && live}
             onTuiScroll={onTuiScroll}

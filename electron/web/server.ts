@@ -1093,7 +1093,7 @@ export class WebServer {
     // link exists to carry — see MAX_MIRROR_INPUT_PER_SECOND in shared/web.ts.
     if (frame.type === 'mirror-input') return this.onMirrorInput(client, frame)
 
-    if (!this.allowInput(client)) return
+    if (!this.allowInput(client, frame)) return
 
     switch (frame.type) {
       case 'ping':
@@ -1394,7 +1394,22 @@ export class WebServer {
    * It is still an answer rather than a silent drop, which is what
    * `WebErrorCode`'s `limit` is for.
    */
-  private allowInput(client: Client): boolean {
+  private allowInput(client: Client, frame: WebClientFrame): boolean {
+    /*
+     * `attach` and `detach` are never counted. A re-dial re-attaches every
+     * pane at once — deliberately, inside one second — and a budget shared
+     * with `write` meant a scroll flick's wheel reports could spend the very
+     * frame a pane's picture depended on. That drop was silent on both ends:
+     * the client's `send` had returned true, so the pane waited for a replay
+     * the desktop never knew to send, and only leaving the project and coming
+     * back re-asked. Exempting them is safe because they are bounded by
+     * something real — a client has only so many panes — where `write`,
+     * `resize`, `request` and `ping` are bounded only by a loop, which is the
+     * flood this counter exists to stop. A `ping` eaten by the budget cannot
+     * strand the link either way: the one `limit` refusal is itself a frame,
+     * and the client reads any frame as the link answering.
+     */
+    if (frame.type === 'attach' || frame.type === 'detach') return true
     const second = Math.floor(this.now() / 1000)
     if (second !== client.inputSecond) {
       client.inputSecond = second
@@ -1408,7 +1423,8 @@ export class WebServer {
       this.send(client, {
         type: 'error',
         code: 'limit',
-        message: `More than ${MAX_INPUT_PER_SECOND} frames in one second — slow down.`
+        message: `More than ${MAX_INPUT_PER_SECOND} frames in one second — slow down.`,
+        ...('sessionId' in frame && typeof frame.sessionId === 'string' ? { sessionId: frame.sessionId } : {})
       })
     }
     return false

@@ -187,6 +187,28 @@ function toSinks(run: (sink: PtySink) => void): void {
   }
 }
 
+/**
+ * The bytes a remote sink sees of a live chunk, which are the chunk itself
+ * with one exception: the questions come out while a desk is listening.
+ *
+ * A live program probes its terminal — Device Attributes, colour queries,
+ * DECRQM — and every emulator shown the probe answers, down the PTY, as
+ * though somebody typed it. The desk's xterm was always shown the probe and
+ * always answered; wiring a browser or a phone beside it meant each probe got
+ * two answers, and the remote one landed in a composer as stray characters.
+ * So while a desktop window is attached it is the *only* emulator the
+ * questions reach — the replay copy has had the same rule since the same
+ * failure was found in repaints (see electron/pty/replay.ts).
+ *
+ * With no window at all — tray, headless — the remote is the only listener
+ * left, and it must see the questions unstripped, because a ConPTY whose
+ * probes go unanswered stalls outright; web/src/lib/term.ts wires the
+ * browser's answers for exactly that case.
+ */
+function sinkCopy(data: string): string {
+  return target && !target.isDestroyed() ? withoutQuestions(data) : data
+}
+
 function scheduleFlush(): void {
   if (flushTimer) return
   flushTimer = setTimeout(flush, FLUSH_MS)
@@ -203,7 +225,7 @@ function flush(): void {
   for (const [id, chunks] of pending) {
     const data = chunks.join('')
     send(IPC.ptyData, { id, data })
-    toSinks((sink) => sink.onData(id, data))
+    toSinks((sink) => sink.onData(id, sinkCopy(data)))
   }
   pending.clear()
 }
@@ -582,7 +604,7 @@ export function getManager(): PtySessionManager {
           pending.delete(id)
           const data = chunks.join('')
           send(IPC.ptyData, { id, data })
-          toSinks((sink) => sink.onData(id, data))
+          toSinks((sink) => sink.onData(id, sinkCopy(data)))
         }
         live.delete(id)
         widths.delete(id)

@@ -124,8 +124,29 @@ const PROBE_STRIKES = 2
  * was long enough that the pane may be a different conversation by now, in
  * which case they are told what was not typed rather than having it typed
  * into whatever is there.
+ *
+ * Thirty seconds, because the ceiling has to clear the *slowest honest
+ * reconnect*, not the fastest. The retired-tunnel path — one dial burning the
+ * whole CONNECT_TIMEOUT_MS, a backoff, a second dial that has to re-find the
+ * address first — runs 22–25 seconds end to end, and at fifteen the held Enter
+ * was dropped at almost exactly the moment the link came back: the hold
+ * existed for that outage and gave up just before it ended.
  */
-const WRITE_HOLD_MS = 15_000
+const WRITE_HOLD_MS = 30_000
+
+/**
+ * How long a dial may sit in flight before a wake-up may abandon it.
+ *
+ * A dial is a link in hand (`linkInHand`), so every wake-up stands down while
+ * one is in flight — which is right until the wake-up *is the news that the
+ * dial is doomed*: `online` after a radio handover, `connection.change` when
+ * wifi hands to LTE, mean the route the dial left on no longer exists, and
+ * waiting out its CONNECT_TIMEOUT_MS is eight seconds of a person staring at
+ * "Reconnecting" on a phone that is back on the air. A dial younger than this
+ * is left to finish — most dials complete well inside it — and one older is
+ * hung up and re-run at the network that actually exists now.
+ */
+const STUCK_DIAL_MS = 4_000
 
 /**
  * How long a freshly-dialled socket has to reach `OPEN`.
@@ -159,17 +180,31 @@ const CONNECT_TIMEOUT_MS = 8_000
  * see it: every other liveness test here proves the *link*, and this is a
  * test of what the link carried.
  *
- * So the beat checks the oldest unanswered attach against this ceiling, and a
- * breach hangs the link up (`declareDead`) rather than re-sending the frame —
- * because a tunnel that swallowed one frame cannot be trusted to have
- * swallowed only one, and a fresh dial re-attaches from `subs` anyway. Thirty
- * seconds is far past any honest replay: the snapshot is taken and sent in
- * one turn of the desktop's event loop, and the panes this guard exists for
- * are ones an eye is actively on. Cleared per session by the `replay`,
- * `exit`, `detach` and `unknown-session` frames that each end the question in
- * their own way.
+ * So every ask — the beat, a wake-up, a keystroke — checks the oldest
+ * unanswered attach against this ceiling (`auditPendingReplay`), and a breach
+ * hangs the link up (`declareDead`) rather than re-sending the frame — because
+ * a tunnel that swallowed one frame cannot be trusted to have swallowed only
+ * one, and a fresh dial re-attaches from `subs` anyway. Ten seconds is far
+ * past any honest replay: the snapshot is taken and sent in one turn of the
+ * desktop's event loop, and the panes this guard exists for are ones an eye
+ * is actively on. Cleared per session by the `replay`, `exit`, `detach` and
+ * `unknown-session` frames that each end the question in their own way.
  */
-const REPLAY_GRACE_MS = 30_000
+const REPLAY_GRACE_MS = 10_000
+
+/**
+ * How often a live link is asked to prove itself, and re-told what it was told.
+ *
+ * Not HEARTBEAT_MS, which belongs to the server's native WebSocket ping and to
+ * the warmth the badge reads (WARM_MS). This is the *page's* own beat, and it
+ * bounds every silent failure the socket object cannot see: a link the OS tore
+ * down without a close frame, an attach a tunnel ate, a visibility report that
+ * never landed. Twenty seconds of that was a beat nobody was watching; five is
+ * one ping and one idempotent re-statement per beat, and the server's frame
+ * budget (MAX_INPUT_PER_SECOND) is counted against a wall-clock second, so a
+ * beat every five seconds cannot approach it.
+ */
+const CLIENT_BEAT_MS = 5_000
 
 /**
  * How often the sleep detector reads the clock, and the jump that means the
@@ -400,6 +435,27 @@ export class ForgeClient {
    * a *second* socket beside the one already being built. See `linkInHand`.
    */
   private opening = false
+  /**
+   * When the dial currently in flight left, or 0 with none in flight. Read by
+   * `probe` to decide whether a wake-up may abandon it; see STUCK_DIAL_MS.
+   */
+  private dialStartedAt = 0
+  /**
+   * Which call to `open()` is the current one, so an older call resuming from
+   * an `await` can notice it has been superseded and stand down before it
+   * builds a socket. `generation` cannot do this job: it is stamped when a
+   * socket is *adopted*, and the whole point here is to stop the older dial
+   * before it gets that far — two dials that both reach `new WebSocket` are
+   * two sockets saying `hello`, which is the double-attach disaster
+   * `linkInHand` exists to prevent.
+   */
+  private dialCount = 0
+  /**
+   * No dial before this instant, set only by a wait the desktop itself issued
+   * (`retryAfterMs`) and respected only by `wake` — the timer loop's own
+   * backoffs neither set nor read it. See the note in `wake`.
+   */
+  private retryFloor = 0
   /**
    * Which dial the live socket belongs to, so a socket from an older one can
    * recognise itself as superseded.
@@ -656,6 +712,18 @@ export class ForgeClient {
       if (document.hidden) return
       this.probe()
     })
+    /*
+     * The one wake-up none of the four above can say: the network itself
+     * changed — wifi handed over to LTE, a VPN route gone, the tunnel's edge
+     * moved — while the tab sat visible and focused the whole time, so no
+     * window, page or clock event fires at all. `connection` is not in the DOM
+     * lib yet; every browser Forge Web runs in has it, and one that does not
+     * simply never fires this.
+     */
+    const network = (
+      navigator as Navigator & { connection?: { addEventListener(type: 'change', listener: () => void): void } }
+    ).connection
+    network?.addEventListener('change', () => this.probe())
     let ticked = Date.now()
     window.setInterval(() => {
       const now = Date.now()
@@ -687,6 +755,20 @@ export class ForgeClient {
       this.wake()
       return
     }
+    // A link in hand that is not yet OPEN is a dial in flight, and the event
+    // that landed here may be the very news that dooms it — `online` after a
+    // radio handover means the route the dial left on is gone. A young dial is
+    // left to finish; a stuck one is abandoned and re-run at the network that
+    // exists now. `dialCount` makes the abandonment safe: the older `open()`
+    // stands down at its next await. See STUCK_DIAL_MS.
+    if (this.socket?.readyState !== WebSocket.OPEN) {
+      if (Date.now() - this.dialStartedAt > STUCK_DIAL_MS) {
+        this.dropSocket()
+        this.clearRetry()
+        void this.open()
+      }
+      return
+    }
     // Bytes arrived a moment ago, so there is nothing to prove and no reason to
     // spend a round trip proving it. This is the common path: `focus` fires on
     // every click back into the window, against a link that is plainly fine.
@@ -698,6 +780,13 @@ export class ForgeClient {
   private wake(): void {
     if (this.closedByUs || this.stopped || !this.credentials) return
     if (this.linkInHand()) return
+    // A wait the *desktop* asked for is a sentence, not a backoff, and no
+    // amount of tapping back into the tab commutes it: every `focus` and
+    // `visibilitychange` lands here, and before this floor each one redialled
+    // straight into a desktop that had said "try again in sixty seconds" —
+    // a phone hammering a lockout it could only wait out. The page's own
+    // backoffs never set the floor; see `scheduleRetry`.
+    if (Date.now() < this.retryFloor) return
     this.clearRetry()
     void this.open()
   }
@@ -738,6 +827,11 @@ export class ForgeClient {
    * than whenever the operating system next has an opinion.
    */
   private challenge(): void {
+    // Before the early returns below, so that every ask — beat, wake-up,
+    // keystroke — also audits what the link was told, whether or not a probe
+    // is already outstanding. An unanswered attach is a fact about the link
+    // that a ping answering perfectly does not repair.
+    this.auditPendingReplay()
     if (!this.admitted || this.socket?.readyState !== WebSocket.OPEN) return
     // A question is already outstanding; its deadline answers this one too.
     if (this.probeTimer !== null) return
@@ -833,9 +927,12 @@ export class ForgeClient {
     const sent = this.send({ type: 'attach', sessionId, ...(size ? { cols: size.cols, rows: size.rows } : {}) })
     if (sent && size) this.told.set(sessionId, { cols: size.cols, rows: size.rows })
     else this.told.delete(sessionId)
-    // The receipt starts only when a frame actually left. One that did not go
-    // out is the reconnect's job, not a broken link to be diagnosed.
-    if (sent) this.pendingReplay.set(sessionId, Date.now())
+    // The receipt starts only when a frame actually left, and a re-attach
+    // arriving while one is unanswered keeps the *older* clock: the question
+    // is whether the desktop ever registered this pane, and a remount does
+    // not un-ask it. Without this, toggling a pane often enough would push
+    // the deadline out forever — the cure gesture silencing the tripwire.
+    if (sent) this.pendingReplay.set(sessionId, Math.min(this.pendingReplay.get(sessionId) ?? Number.POSITIVE_INFINITY, Date.now()))
   }
 
   detach(sessionId: string): void {
@@ -863,9 +960,15 @@ export class ForgeClient {
       return
     }
     this.probeIfStale()
-    // A link being re-dialled is not a reason to lose a keystroke. Hold it;
-    // `hello-ok` sends it after the panes are re-attached, in the order typed.
-    if (this.held.length || !this.send({ type: 'write', sessionId, data })) {
+    // A link being re-dialled is not a reason to lose a keystroke, and neither
+    // is a link whose liveness is still being decided: a socket the OS or a
+    // tunnel has already given up on goes on saying `OPEN` and goes on
+    // *accepting* frames, and what it accepted is never re-sent — the words
+    // before the Enter were lost exactly when the person was mid-sentence. So
+    // a keystroke that arrives while a probe is outstanding waits for the
+    // probe's verdict: any frame back (see `receive`) sends it within a round
+    // trip, and a dead link sends it after the re-dial, in the order typed.
+    if (this.held.length || this.probeTimer !== null || !this.send({ type: 'write', sessionId, data })) {
       this.held.push({ sessionId, data, at: Date.now() })
       this.wake()
     }
@@ -986,6 +1089,8 @@ export class ForgeClient {
     const credentials = this.credentials
     if (!credentials || this.closedByUs || this.stopped) return
 
+    const dial = ++this.dialCount
+    this.dialStartedAt = Date.now()
     this.opening = true
     try {
       this.dropSocket()
@@ -1005,8 +1110,10 @@ export class ForgeClient {
         this.scheduleRetry()
         return
       }
-      // A token fetch is a network round trip, and the page may have moved on.
-      if (this.closedByUs || this.stopped) return
+      // A token fetch is a network round trip, and the page may have moved on —
+      // or a wake-up may have judged this dial stuck and started a fresh one,
+      // which from here on speaks for the page; see STUCK_DIAL_MS.
+      if (this.closedByUs || this.stopped || dial !== this.dialCount) return
 
       // Ask where the desktop is *now* before re-dialling where it was. See
       // `refindUrl`: the address a tunnel publishes does not survive the tunnel
@@ -1018,7 +1125,7 @@ export class ForgeClient {
         } catch {
           // A lookup that failed says nothing about the address in hand.
         }
-        if (this.closedByUs || this.stopped) return
+        if (this.closedByUs || this.stopped || dial !== this.dialCount) return
         // Adopted without resetting `attempt`, which is not the obvious choice
         // and is the right one. A new address does look like a fresh start worth
         // a fresh backoff — but a cloudflared quick tunnel that is *flapping*
@@ -1161,6 +1268,22 @@ export class ForgeClient {
     this.lastFrameAt = Date.now()
     this.pingedAt = 0
     this.strikes = 0
+    // The probe's question is answered, so its deadline comes down *now* — not
+    // when it expires on its own. Leaving the timer to run out kept `write`'s
+    // hold gate closed for the rest of PROBE_MS after every answered challenge,
+    // and with a beat every CLIENT_BEAT_MS that was most of the time: typing
+    // on a quiet pane arrived in round-trip-sized clumps instead of as typed.
+    if (this.probeTimer !== null) {
+      clearTimeout(this.probeTimer)
+      this.probeTimer = null
+    }
+    // And they are the all-clear for anything held against the link's verdict:
+    // a keystroke held while a probe was outstanding (see `write`) is sent
+    // within the same round trip that proved the link, in the order typed.
+    // Only once admitted — the frames that arrive before `hello-ok` prove the
+    // socket, but this browser has not been let in yet, and a write sent now
+    // would be the bad frame that hangs the fresh link up.
+    if (this.admitted) this.flushHeld()
 
     let frame: WebServerFrame
     try {
@@ -1402,7 +1525,16 @@ export class ForgeClient {
    */
   private scheduleRetry(waitMs?: number, announce = true): void {
     if (this.closedByUs || this.stopped || this.retryTimer !== null) return
-    const wait = waitMs ?? BACKOFF[Math.min(this.attempt, BACKOFF.length - 1)]!
+    let wait = waitMs ?? BACKOFF[Math.min(this.attempt, BACKOFF.length - 1)]!
+    // A tab somebody is looking at never sits the full fifteen seconds between
+    // tries; a hidden one still can, and should — nobody is waiting, and it is
+    // a phone battery paying for the dials. The refusal wait (`waitMs`, the
+    // desktop's own "try again in 60s") is never shortened: that one is a
+    // sentence from the other end, not a backoff.
+    if (waitMs === undefined && document.visibilityState === 'visible') wait = Math.min(wait, 8_000)
+    // A desktop-issued wait also sets the floor `wake` respects, so a focus or
+    // visibility event cannot turn a lockout into a redial storm.
+    if (waitMs !== undefined) this.retryFloor = Date.now() + wait
     this.attempt += 1
     if (announce) this.handlers.onConnection({ state: 'connecting', attempt: this.attempt })
     this.retryTimer = window.setTimeout(() => {
@@ -1431,7 +1563,7 @@ export class ForgeClient {
   private startBeating(): void {
     this.stopBeating()
     this.admitted = true
-    this.beatTimer = window.setInterval(() => this.beat(), HEARTBEAT_MS)
+    this.beatTimer = window.setInterval(() => this.beat(), CLIENT_BEAT_MS)
   }
 
   /**
@@ -1455,6 +1587,16 @@ export class ForgeClient {
     this.challenge()
     if (!this.admitted) return
     if (this.reportedVisible !== null) void this.request({ kind: 'visibility', visible: this.reportedVisible })
+  }
+
+  /**
+   * Hang the link up if any `attach` has waited past REPLAY_GRACE_MS for the
+   * `replay` that answers it. Called from every path that asks the link to
+   * prove itself — the beat, the wake-ups, a keystroke — so the wait is bound
+   * by how often the page asks, not by the beat alone.
+   */
+  private auditPendingReplay(): void {
+    if (!this.pendingReplay.size) return
     const now = Date.now()
     for (const [, sentAt] of this.pendingReplay) {
       if (now - sentAt > REPLAY_GRACE_MS) {

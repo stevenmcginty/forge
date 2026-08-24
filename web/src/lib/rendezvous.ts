@@ -39,7 +39,13 @@ export async function readHost(config: WebClientConfig, uid: string, idToken: st
   let response: Response
   try {
     response = await fetch(`${config.databaseUrl}/${path}.json?auth=${encodeURIComponent(idToken)}`, {
-      cache: 'no-store'
+      cache: 'no-store',
+      // Eight seconds, the same ceiling a dial gets (CONNECT_TIMEOUT_MS in
+      // lib/client.ts): a re-dial is serialized behind this GET, and one that
+      // hangs wedges the whole reconnect loop — nothing else can retry while
+      // it waits, because the fetch holds the "opening" flag. A refused answer
+      // in eight seconds is worth more than a possible one in thirty.
+      signal: AbortSignal.timeout(8_000)
     })
   } catch (err) {
     return { state: 'unreadable', error: `Could not reach Firebase (${err instanceof Error ? err.message : String(err)})` }

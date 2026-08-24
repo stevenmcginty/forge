@@ -148,7 +148,12 @@ export class Auth {
       response = await fetch(`${this.tokenBase()}/token?key=${this.config.apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: session.refreshToken })
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: session.refreshToken }),
+        // Eight seconds, because a re-dial is serialized behind this refresh
+        // and a hung one wedges the reconnect loop for as long as the browser
+        // feels like waiting — minutes. Throwing here is not a failure state:
+        // the caller keeps its credentials and tries again on the next dial.
+        signal: AbortSignal.timeout(8_000)
       })
     } catch (err) {
       throw new Error(`offline: ${err instanceof Error ? err.message : String(err)}`)
