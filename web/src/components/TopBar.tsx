@@ -1,6 +1,39 @@
 import { useEffect, type CSSProperties, type ReactNode } from 'react'
+import { isShellProfile, resolveProfile } from '@/lib/agents'
+import { findLeaf } from '@/lib/splitTree'
 import { Icon } from '@/components/Icon'
-import { useActiveProject, useForge } from '../state'
+import { getClaudeView, setClaudeView } from '../lib/view-pref'
+import { requestPaneView, usePaneView, type PaneFace } from '../lib/pane-status'
+import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
+
+/** What the face button offers, named by the face it would give you. */
+const VIEW_TITLE: Record<PaneFace, string> = {
+  chat: 'Show the conversation (Chat)',
+  feed: 'Show as cards (Output)',
+  term: 'Show the terminal'
+}
+
+/**
+ * A speech bubble icon, matching Icon weight.
+ */
+function ChatIcon(): ReactNode {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M13.4 9.2a1.4 1.4 0 0 1-1.4 1.4H6.2L3.4 13V4.2a1.4 1.4 0 0 1 1.4-1.4h7.2a1.4 1.4 0 0 1 1.4 1.4z" />
+    </svg>
+  )
+}
 
 /**
  * The app bar. Same tokens as the desktop, different job: identity, the
@@ -21,10 +54,32 @@ export function TopBar({
   mobile?: boolean
 }): ReactNode {
   const { state, actions } = useForge()
+  const profiles = useProfiles()
+  const workspace = useWorkspace()
   const project = useActiveProject()
   const offline = state.stage.kind === 'offline'
   const desktopName =
     state.picture?.desktopName || (state.stage.kind === 'offline' ? (state.stage.record?.name ?? state.cached?.desktopName ?? '') : '')
+
+  const tab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0]
+  const activePaneId = tab?.activePaneId ?? null
+  const leaf = tab && activePaneId ? findLeaf(tab.root, activePaneId) : null
+  const profile = leaf ? resolveProfile(profiles, leaf.profileId) : null
+  const isAgent = profile ? !isShellProfile(profile) : false
+  const activeView = usePaneView(activePaneId) ?? (isAgent ? getClaudeView() : 'term')
+
+  const nextView: PaneFace = isAgent ? (activeView === 'chat' ? 'feed' : activeView === 'feed' ? 'term' : 'chat') : 'term'
+
+  const onFlipView = () => {
+    if (!activePaneId) return
+    requestPaneView(activePaneId, nextView)
+    if (isAgent) setClaudeView(nextView)
+  }
+
+  const onClosePane = () => {
+    if (!activePaneId) return
+    void actions.layout({ op: 'close-pane', paneId: activePaneId })
+  }
 
   useEffect(() => {
     document.title = project ? `${project.name} · Forge` : 'Forge'
@@ -168,6 +223,33 @@ export function TopBar({
         >
           <Icon name="user" size={15} />
         </button>
+
+        {/* View switch button: gentle luminous white */}
+        {activePaneId && isAgent ? (
+          <button
+            type="button"
+            className="ghost-btn titlebar__btn titlebar__btn--flip"
+            title={VIEW_TITLE[nextView]}
+            aria-label={VIEW_TITLE[nextView]}
+            onClick={onFlipView}
+          >
+            {nextView === 'chat' ? <ChatIcon /> : <Icon name={nextView === 'term' ? 'terminal' : 'note'} size={15} />}
+          </button>
+        ) : null}
+
+        {/* Red X close active tab/terminal button in the top right-hand corner */}
+        {activePaneId ? (
+          <button
+            type="button"
+            className="ghost-btn titlebar__btn titlebar__btn--close"
+            data-danger="true"
+            title="Close active terminal"
+            aria-label="Close active terminal"
+            onClick={onClosePane}
+          >
+            <Icon name="close" size={15} />
+          </button>
+        ) : null}
       </div>
     </header>
   )
