@@ -882,6 +882,14 @@ export class WebServer {
     this.broadcast({ type: 'foreman', state })
   }
 
+  /**
+   * The desktop's own window died and is coming back, or has. See
+   * `WebDesktopFrame` in shared/web.ts for why a browser needs telling.
+   */
+  pushDesktop(state: 'recovering' | 'ready', reason?: string): void {
+    this.broadcast({ type: 'desktop', state, ...(reason ? { reason } : {}) })
+  }
+
   pushProjects(projects: Project[]): void {
     this.broadcast({ type: 'projects', projects })
   }

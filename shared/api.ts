@@ -1031,6 +1031,20 @@ export interface ForgeApi {
   }
 
   /**
+   * The renderer's report on its own health, for the main-process watchdog.
+   *
+   * The only part of `window.forge` whose whole purpose is to be called by code
+   * that assumes nothing else works, so it is a bare `send` with no reply, no
+   * state and no dependency on any provider. See electron/renderer-watchdog.ts
+   * for what listening to it makes possible, and `IPC.rendererHeartbeat` for
+   * why a broken tree keeps beating instead of going quiet.
+   */
+  renderer: {
+    /** One beat. Called every 2s from the root, healthy or not. */
+    heartbeat(beat: RendererHeartbeat): void
+  }
+
+  /**
    * The undocked voice hub, as its own always-on-top Windows window.
    *
    * Every method here is a relay, and the shape is deliberately lopsided: the
@@ -1086,4 +1100,24 @@ export interface OverlayBounds {
   height: number
   /** Expanded cards can be resized by their edge; pills cannot. */
   resizable?: boolean
+}
+
+/**
+ * One beat from the React root, and its opinion of itself.
+ *
+ * Declared here rather than in electron/renderer-watchdog.ts for the reason
+ * everything else in this file is: it is a contract between the renderer that
+ * sends it and the main process that judges it, and a second copy of it would
+ * be two descriptions of one wire.
+ *
+ * `healthy` is the whole point. A tree that has thrown can still run a timer —
+ * the root boundary's fallback is a mounted React component like any other — so
+ * the interesting failure is not a beat that stops but a beat that keeps coming
+ * from something with nothing behind it. Saying so is cheaper and far more
+ * useful than making the watchdog infer it from silence.
+ */
+export interface RendererHeartbeat {
+  healthy: boolean
+  /** The message the root error boundary caught, when it caught one. */
+  error?: string
 }

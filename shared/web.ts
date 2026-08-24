@@ -1402,6 +1402,32 @@ export interface WebForemanFrame {
   state: ForemanState
 }
 
+/**
+ * "The desktop's window is being rebuilt. Your taps land in a moment."
+ *
+ * The one frame on this wire that is about the *desktop* rather than about
+ * anything on it, and it exists because of what a browser cannot see. Every
+ * command this tab sends — switch tab, close pane, open a split — is executed
+ * by the desktop's renderer, and terminal output is not: that comes straight
+ * from the main process. So when the renderer dies or hangs, the socket stays
+ * up, the panes keep scrolling, and every button silently stops working. It
+ * looks exactly like a bug in this page.
+ *
+ * `recovering` is sent the moment the watchdog decides to reload, `ready` on
+ * the first healthy heartbeat after it — see electron/renderer-watchdog.ts.
+ * `reason` is for the log and the tooltip, never for a decision; a client shows
+ * the same band whatever it says.
+ *
+ * Broadcast to every authenticated browser, hidden tabs included, for the same
+ * reason `foreman` is: it is one small object, and a tab coming back from the
+ * lock screen should read a banner that is true.
+ */
+export interface WebDesktopFrame {
+  type: 'desktop'
+  state: 'recovering' | 'ready'
+  reason?: string
+}
+
 /** The project list changed — renamed, reordered, added, removed. */
 export interface WebProjectsFrame {
   type: 'projects'
@@ -1601,6 +1627,7 @@ export type WebServerFrame =
   | WebSessionStartedFrame
   | WebAttentionFrame
   | WebForemanFrame
+  | WebDesktopFrame
   | WebProjectsFrame
   | WebWorkspaceFrame
   | WebGitFrame

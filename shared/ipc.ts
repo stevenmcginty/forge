@@ -692,7 +692,18 @@ export const IPC = {
   overlayCall: 'overlay:call',
 
   // diagnostics
-  rendererError: 'diag:renderer-error'
+  rendererError: 'diag:renderer-error',
+  /**
+   * "The React tree is still standing." Renderer → main, one-way, every 2s.
+   *
+   * A `send` like `ptyWrite`/`ptyRename` and not an `invoke`, because there is
+   * no answer to want and a heartbeat that could block is not one. Sent from a
+   * component mounted outside every provider, so it is the last thing alive in
+   * a collapsing tree — and it carries `healthy: false` rather than stopping
+   * when the root error boundary catches, because "I am broken, here is what
+   * happened" is worth more than silence. See electron/renderer-watchdog.ts.
+   */
+  rendererHeartbeat: 'renderer:heartbeat'
 } as const
 
 /**

@@ -44,6 +44,7 @@
     "packaged:check": "node scripts/packaged-check.mjs",
     "secrets:test": "node scripts/secrets-audit-test.mjs",
     "theme:check": "node scripts/theme-check.mjs",
+    "watchdog:check": "node scripts/watchdog-check.mjs",
     "updates:check": "node scripts/updates-check.mjs",
     "agents:check": "node scripts/agents-check.mjs",
     "commands:check": "node scripts/commands-check.mjs",

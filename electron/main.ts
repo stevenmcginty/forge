@@ -8,6 +8,7 @@ import { planProjectFolder } from './projectfolder'
 import { gitRemoteOrigin } from './git-remote'
 import { portOwner } from './preview/port-owner'
 import { makeSafeStorageCodec } from './secretbox'
+import type { RendererHeartbeat } from '@shared/api'
 import type {
   AppInfo,
   MakeProjectFolderRequest,
@@ -35,6 +36,7 @@ import { registerMemoryHandlers, setMemoryDir } from './memory-store'
 import { registerSkillsHandlers, setSkillsDirs } from './skills-store'
 import { disposePtyHost, getReplay, registerPtyHandlers, setPtyTarget } from './pty-host'
 import { askBeforeClose, shouldConfirmClose } from './quit-guard'
+import { armRendererWatchdog, type RendererWatchdog } from './renderer-watchdog'
 import { writeBridgeConfig } from './bridge/mcp-config'
 import { syncAgyConfig, syncQwenConfig } from './bridge/share-mcp'
 import { disposePresence, initPresence, setPresence } from './presence'
@@ -51,10 +53,17 @@ import {
 } from './voice-agent/ipc'
 import { disposeForeman, registerForemanHandlers, setForemanTarget } from './foreman/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
-import { applyMobileSettings, disposeMobile, publishMobileState, registerMobileHandlers } from './mobile-host'
+import {
+  applyMobileSettings,
+  disposeMobile,
+  publishDesktopState as publishMobileDesktopState,
+  publishMobileState,
+  registerMobileHandlers
+} from './mobile-host'
 import {
   applyWebSettings,
   disposeWeb,
+  publishDesktopState,
   publishWebState,
   registerWebHandlers,
   setWebStatusListener,
@@ -136,6 +145,8 @@ app.setPath('userData', DATA_ROOT)
 app.setPath('sessionData', join(DATA_ROOT, 'chromium'))
 
 let mainWindow: BrowserWindow | null = null
+/** Watches that window's renderer for the three ways it can stop being Forge. */
+let rendererWatchdog: RendererWatchdog | null = null
 let boundsTimer: NodeJS.Timeout | null = null
 /** Set only by user-driven resize/move — see persistBounds(). */
 let boundsDirty = false
@@ -424,6 +435,11 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+    // Before anything else: its sweep asks a destroyed window whether it is
+    // visible, and a watchdog outliving the thing it watches is a timer that
+    // can only ever be wrong.
+    rendererWatchdog?.dispose()
+    rendererWatchdog = null
     setPtyTarget(null)
     setSttTarget(null)
     setSttModelTarget(null)
@@ -442,36 +458,25 @@ function createWindow(): void {
   })
 
   /**
-   * A dead renderer must not become an immortal app.
+   * A dead renderer must not become an immortal app — nor a silent one.
    *
-   * When the renderer process crashes — an update pulled under a running app,
-   * npm install rewriting node_modules beneath vite, a plain Chromium OOM —
-   * the OS process is gone but the BrowserWindow object is not. Electron
-   * therefore never fires 'window-all-closed', so none of the shutdown
-   * machinery runs, and what is left is a windowless Forge holding port 5173
-   * and the dev log against every later launch. That is the zombie behind
-   * every "Forge won't open" evening.
+   * The crash policy that used to live here (one reload, and a second death
+   * without a healthy load in between destroys the window so the quit path runs
+   * honestly rather than leaving a windowless Forge holding port 5173) has
+   * moved into the watchdog unchanged, alongside the two failures it could
+   * never see: a hung renderer, and a live renderer whose React tree has
+   * unmounted. The last of those is the one that stranded a phone in silence,
+   * and it is only detectable from the heartbeat wired up below.
    *
-   * So: one reload, because a crash during a dev-server hiccup usually comes
-   * straight back. A second death without a healthy load in between means the
-   * ground is bad; destroy the window so 'window-all-closed' fires and the
-   * quit path (with its hard-exit backstop) takes the process down honestly.
+   * The state callback is why this is a watchdog rather than a reload: the
+   * browser and the phone execute their commands *in this renderer*, so they
+   * are the ones who need telling that a tap will not land for a moment.
    */
-  let rendererDeaths = 0
-  mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    if (details.reason === 'clean-exit' || !mainWindow || mainWindow.isDestroyed()) return
-    rendererDeaths += 1
-    console.error(`[main] renderer gone (${details.reason}), death #${rendererDeaths}`)
-    if (rendererDeaths === 1) {
-      setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload()
-      }, 1500)
-    } else {
-      mainWindow.destroy()
+  rendererWatchdog = armRendererWatchdog(mainWindow, {
+    onState: (state, reason) => {
+      publishDesktopState(state, reason)
+      publishMobileDesktopState(state, reason)
     }
-  })
-  mainWindow.webContents.on('did-finish-load', () => {
-    rendererDeaths = 0
   })
 
   // Never let the renderer navigate away or spawn windows.
@@ -1113,6 +1118,21 @@ function registerAppHandlers(): void {
       )
     }
   )
+
+  /*
+   * The React root, saying it is still there. See electron/renderer-watchdog.ts.
+   *
+   * The sender check is not ceremony. Forge loads this same bundle into the
+   * undocked voice overlay (src/main.tsx branches on `#overlay`), and an
+   * overlay beating on this channel would be a *second* renderer telling the
+   * watchdog that the *main* window is healthy — which is precisely the lie
+   * this whole feature exists to catch. Only the window being watched counts.
+   */
+  ipcMain.on(IPC.rendererHeartbeat, (e, beat: RendererHeartbeat | undefined) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (e.sender !== mainWindow.webContents) return
+    rendererWatchdog?.heartbeat(beat)
+  })
 
   ipcMain.on(IPC.windowMinimize, () => mainWindow?.minimize())
   ipcMain.on(IPC.windowToggleMaximize, () => {

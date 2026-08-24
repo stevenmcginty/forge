@@ -1252,6 +1252,20 @@ function probeForBrowser(commands: string[]): { agents: AgentPresence[]; command
  * `hello-ok`, so a push of only the projects leaves that list frozen at whatever
  * it was when the tab connected.
  */
+/**
+ * Tell every connected browser that the desktop's *window* is in trouble.
+ *
+ * Called only from the renderer watchdog (see electron/renderer-watchdog.ts).
+ * A no-op with Forge Web switched off, like every publisher here — and
+ * deliberately not queued: a browser that connects after the reload has
+ * finished has nothing to be told, and one that connects during it will be told
+ * by the `ready` that follows.
+ */
+export function publishDesktopState(state: 'recovering' | 'ready', reason?: string): void {
+  if (!server) return
+  server.pushDesktop(state, reason)
+}
+
 export function publishWebState(projectId?: string): void {
   if (!server) return
   server.pushProjects(getProjects())

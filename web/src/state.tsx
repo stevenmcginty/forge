@@ -123,6 +123,16 @@ export interface ForgeState {
   prompts: Record<string, string>
   /** The sentence currently on screen — the head of the notice queue. */
   notice: string
+  /**
+   * The desktop's *window*, as distinct from the link to it.
+   *
+   * '' whenever there is nothing to say. A sentence — the watchdog's reason —
+   * whenever the desktop's renderer is being rebuilt, during which this page's
+   * commands go nowhere while its terminals keep scrolling. That combination is
+   * indistinguishable from a broken page unless somebody says so, which is what
+   * this is for. See `WebDesktopFrame` in shared/web.ts.
+   */
+  desktopRecovering: string
   /** Is the link answering right now? Only the badge reads this. */
   warm: boolean
   /** Frozen terminals, or the repository from GitHub. Only read while offline. */
@@ -359,6 +369,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   const [prompts, setPrompts] = useState<Record<string, string>>({})
   /** Notice queue. The head is what the page shows; the rest wait their turn. */
   const [notices, setNotices] = useState<QueuedNotice[]>([])
+  const [desktopRecovering, setDesktopRecovering] = useState('')
   const [warm, setWarm] = useState(false)
   const [pageVisible, setPageVisible] = useState(() => !document.hidden)
   const [notifyPermission, setNotifyPermission] = useState<NotifySupport>(notifySupport)
@@ -481,6 +492,12 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       },
       onPicture: (frame) => {
         setStage({ kind: 'connected' })
+        // A fresh `hello-ok` is a renderer that got far enough to answer, so
+        // whatever this page was told about a recovery is over. It also clears
+        // the banner for the case that matters most: the socket dropped *during*
+        // the reload, and the `ready` that would have cleared it was sent to a
+        // connection that no longer existed.
+        setDesktopRecovering('')
         setPicture({
           desktopName: frame.desktopName,
           appVersion: frame.appVersion,
@@ -535,6 +552,12 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         setPicture((current) =>
           current ? { ...current, foreman: { ...current.foreman, [state.paneId]: state } } : current
         )
+      },
+      onDesktop: (state, reason) => {
+        // A reason is a courtesy, not a requirement: the band is drawn on the
+        // state alone, so a desktop that sends 'recovering' with nothing to say
+        // still gets a banner rather than a blank one.
+        setDesktopRecovering(state === 'recovering' ? reason || 'The desktop is rebuilding its window.' : '')
       },
       onSessions: (sessions) => {
         setPicture((current) => (current ? { ...current, sessions } : current))
@@ -1134,6 +1157,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       asking,
       prompts,
       notice,
+      desktopRecovering,
       warm,
       offlineMode,
       notifyPermission,
@@ -1151,6 +1175,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       asking,
       prompts,
       notice,
+      desktopRecovering,
       warm,
       offlineMode,
       notifyPermission,

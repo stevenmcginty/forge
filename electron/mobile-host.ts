@@ -941,6 +941,19 @@ function releaseBlocker(): void {
  * asked for it, until the phone reconnected. The `workspace` field has been on
  * StateFrame all along and link.ts already merges it; nothing ever filled it in.
  */
+/**
+ * Tell every connected phone that the desktop's *window* is in trouble.
+ *
+ * The phone's half of `publishDesktopState` in electron/web-host.ts, called
+ * from the same place and for the same reason: the ops a phone sends are
+ * executed in the desktop's renderer, so a dead renderer is a phone with dead
+ * buttons and no way to know it.
+ */
+export function publishDesktopState(state: 'recovering' | 'ready', reason?: string): void {
+  if (!server) return
+  server.pushDesktop(state, reason)
+}
+
 export function publishMobileState(projectId?: string): void {
   if (!server) return
   const workspace = projectId ? getWorkspace(projectId) : null

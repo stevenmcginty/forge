@@ -806,6 +806,27 @@ export interface ForemanFrame {
   state: ForemanState
 }
 
+/**
+ * "The desktop's window is being rebuilt. Your taps land in a moment."
+ *
+ * The phone's twin of `WebDesktopFrame` in shared/web.ts, and the failure it
+ * describes is worse here than in a browser, because a phone is usually the
+ * only thing in reach when it happens. Every op this phone sends — create-tab,
+ * close-pane, select-tab — is performed by the desktop's renderer; the terminal
+ * bytes are not, they come from the main process. A dead renderer therefore
+ * leaves a phone whose screens still scroll and whose buttons do nothing, with
+ * no signal that anything is wrong at all.
+ *
+ * `recovering` on the watchdog's decision to reload, `ready` on the first
+ * healthy heartbeat after it. `reason` is a sentence for a person, never a
+ * field anything branches on. See electron/renderer-watchdog.ts.
+ */
+export interface DesktopFrame {
+  t: 'desktop'
+  state: 'recovering' | 'ready'
+  reason?: string
+}
+
 export type MobileErrorCode =
   | 'proto'
   | 'auth'
@@ -851,6 +872,7 @@ export type ServerFrame =
   | StateFrame
   | PongFrame
   | ForemanFrame
+  | DesktopFrame
   | ErrFrame
   | TvPlayFrame
   | MirrorSignalFrame

@@ -342,6 +342,25 @@
 }
 
 /*
+ * The desktop's window is rebuilding itself — see RecoveringBanner.
+ *
+ * Deliberately the same palette as the reconnect strip rather than a fourth
+ * colour. The two states differ in *where* the wait is (the link, or the window
+ * at the far end of it) and not in what the reader is being asked to do, which
+ * is nothing but wait a moment; a distinct colour would imply a distinct
+ * response that does not exist. The wording carries the difference.
+ */
+.offline[data-link='recovering'] {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 9%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--info) 34%, transparent);
+}
+
+.offline[data-link='recovering'] .offline__text strong {
+  color: var(--info);
+}
+
+/*
  * ------------------------------------------------------- the update strip
  *
  * The desktop's UpdateBanner, in the browser: the same 30px band, in the same

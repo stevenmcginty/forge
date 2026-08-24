@@ -294,6 +294,15 @@ export interface ForgeHandlers {
    * not this browser is the one that switched it on. See `WebForemanFrame`.
    */
   onForeman: (state: ForemanState) => void
+  /**
+   * The desktop's own window died or hung, and is coming back — or has.
+   *
+   * Nothing to do with any pane. It is the answer to "why did that button do
+   * nothing": the commands this page sends are executed in the desktop's
+   * renderer, and while it is being rebuilt they land nowhere. See
+   * `WebDesktopFrame` in shared/web.ts.
+   */
+  onDesktop: (state: 'recovering' | 'ready', reason: string) => void
   onProjects: (projects: Project[]) => void
   onWorkspace: (projectId: string, workspace: Workspace) => void
   onGit: (snapshot: GitSnapshot) => void
@@ -1517,6 +1526,16 @@ export class ForgeClient {
         // pane nobody is driving.
         if (frame.state && typeof frame.state === 'object' && typeof frame.state.paneId === 'string') {
           this.handlers.onForeman(frame.state)
+        }
+        return
+
+      case 'desktop':
+        // Coerced like every handler here: the frame is typed and the wire is
+        // not. Anything that is not one of the two known words is dropped
+        // rather than shown, since the only thing a third word could do is
+        // strand a banner on screen forever.
+        if (frame.state === 'recovering' || frame.state === 'ready') {
+          this.handlers.onDesktop(frame.state, typeof frame.reason === 'string' ? frame.reason : '')
         }
         return
 

@@ -531,6 +531,16 @@ export class MobileServer {
     }
   }
 
+  /**
+   * The desktop's own window died and is coming back, or has. See
+   * `DesktopFrame` in shared/mobile.ts for why a phone needs telling.
+   */
+  pushDesktop(state: 'recovering' | 'ready', reason?: string): void {
+    for (const client of this.clients) {
+      if (client.device) this.send(client, { t: 'desktop', state, ...(reason ? { reason } : {}) })
+    }
+  }
+
   /** Close any live socket belonging to a revoked device, immediately. */
   disconnectDevice(deviceId: string): void {
     for (const client of [...this.clients]) {

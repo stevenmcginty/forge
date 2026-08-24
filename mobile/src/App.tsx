@@ -481,6 +481,24 @@ export function App(): React.JSX.Element {
         onUpdate={() => setShowUpdate(true)}
       />
 
+      {/*
+        A line, not a toast. Notices self-dismiss after four seconds because
+        they are things that just happened; this is a condition that lasts, and
+        one that has to be readable at the exact moment somebody is tapping a
+        button that is not working. It sits directly under the status strip so
+        it is the first thing below "Forge 1.x" — the place a phone already
+        looks when it wonders whether the desktop is there.
+
+        Words, not colour: the palette is the strip's own waiting amber, and
+        every bit of the meaning is in the sentence.
+      */}
+      {picture.desktop && (
+        <p className="desktop-banner" role="status">
+          <strong>The desktop is restarting its window.</strong> Panes below are still live and still scrolling; taps
+          start working again when it comes back.
+        </p>
+      )}
+
       {screen.at === 'pane' ? (
         <PaneView
           link={link}

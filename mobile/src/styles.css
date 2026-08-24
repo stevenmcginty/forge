@@ -894,6 +894,35 @@ body {
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
 }
 
+/* ------------------------------------------------ the desktop is rebuilding
+ *
+ * A band under the status strip, in the same waiting amber the status dot uses
+ * for a link that is not settled — because it is the same kind of news: the
+ * desktop is between states and there is nothing to do but wait a moment.
+ *
+ * Not `.toast`. A toast is a thing that just happened and takes itself away
+ * after four seconds; this is a condition, and it has to still be on screen
+ * when somebody taps a button and it does nothing, which is the whole reason
+ * it exists. It pushes the screen down rather than covering any of it, for the
+ * same reason the desktop's own banners do.
+ *
+ * Meaning lives in the sentence and never in the colour alone.
+ */
+.desktop-banner {
+  margin: 0;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 34%, transparent);
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.45;
+  flex: 0 0 auto;
+}
+
+.desktop-banner strong {
+  font-weight: 600;
+}
+
 /* ------------------------------------------------------- foreman in a pane
  *
  * The switch in the bar, the seed sheet, the status footer and the decision

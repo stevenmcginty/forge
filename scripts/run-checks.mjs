@@ -71,6 +71,7 @@ const CHECKS = [
   { name: 'tail:check', lane: 'fast' },
   { name: 'theme:check', lane: 'fast' },
   { name: 'updates:check', lane: 'fast' },
+  { name: 'watchdog:check', lane: 'fast', note: 'the real watchdog on an injected clock — no waiting out its timeouts' },
   { name: 'voice:check', lane: 'fast', note: 'the live OpenRouter tier is opt-in via env' },
   { name: 'web:check', lane: 'fast', note: 'loopback sockets only; the heaviest fast check' },
 

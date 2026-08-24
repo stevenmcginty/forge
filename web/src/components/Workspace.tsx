@@ -118,6 +118,14 @@ export function Workspace(): ReactNode {
       <OfflineBanner />
       <ReconnectingBanner />
       {/*
+        Above the reconnect strip in the source and below it on screen, and the
+        ordering is a judgement about which sentence is more useful when both
+        are true. A dropped link is the bigger fact — nothing at all is getting
+        through — so it keeps the top. This one only ever matters when the link
+        is up, which is exactly why it is easy to miss without it.
+      */}
+      <RecoveringBanner />
+      {/*
         Last of the three strips, deliberately: a deploy you have not reloaded
         into is the least urgent thing on a page that may also be asleep or
         mid-redial, and the strips stack in that order.
@@ -245,6 +253,42 @@ function ReconnectingBanner(): ReactNode {
       <button type="button" className="ghost-btn offline__look" onClick={() => actions.retry()}>
         Try now
       </button>
+    </div>
+  )
+}
+
+/**
+ * "The desktop's window is being rebuilt. Nothing you press lands yet."
+ *
+ * The third of these strips, and the only one that appears while the link is
+ * perfectly healthy — which is the entire reason it exists. Every command this
+ * page sends is carried out by the desktop's *renderer*; terminal output is
+ * not, it comes from the main process. So a renderer that has crashed, hung, or
+ * quietly unmounted leaves a page whose panes still scroll, whose badge still
+ * says live, and whose every button silently does nothing. Without a sentence
+ * here that reads as a bug in this page, and people reload it, and reloading it
+ * does not help, because it was never this page.
+ *
+ * No button. `ReconnectingBanner` offers "Try now" because there is something
+ * this browser can do; here there is not — the desktop is already reloading
+ * itself and will say so when it is back. Offering an action that changes
+ * nothing would be worse than offering none.
+ *
+ * `OfflineBanner`'s band in the reconnect palette, deliberately borrowed rather
+ * than invented: same shape of news (what is on screen is real, this is why it
+ * is not answering, it is coming back), same colour as the other wait.
+ */
+function RecoveringBanner(): ReactNode {
+  const { state } = useForge()
+  if (state.stage.kind !== 'connected' || !state.desktopRecovering) return null
+
+  return (
+    <div className="offline" data-link="recovering" role="status" data-testid="recovering-banner">
+      <Icon name="restart" size={13} />
+      <span className="offline__text truncate">
+        <strong>{state.picture?.desktopName || 'The desktop'} is restarting its window.</strong> The terminals below are
+        still live and still scrolling; tabs, panes and buttons start working again the moment it comes back.
+      </span>
     </div>
   )
 }

@@ -77,6 +77,19 @@ export interface LinkPicture {
    * been driven has no entry, which reads the same as `off`.
    */
   foreman: Record<string, ForemanState>
+  /**
+   * The desktop's *window*, as distinct from the link to it.
+   *
+   * '' whenever there is nothing to say; the watchdog's sentence while the
+   * desktop's renderer is being rebuilt. It matters because of an asymmetry
+   * this phone cannot otherwise see: terminal bytes come from the desktop's
+   * main process and keep arriving, while every op this phone sends —
+   * create-tab, close-pane, select-tab — is performed by the renderer and lands
+   * nowhere while it is gone. Screens that scroll and buttons that do nothing
+   * is not a state anybody guesses; it has to be said. See `DesktopFrame` in
+   * shared/mobile.ts.
+   */
+  desktop: string
 }
 
 export interface LinkHandlers {
@@ -713,6 +726,21 @@ export class Link {
         return
       }
 
+      case 'desktop': {
+        // Coerced, not trusted, like every handler here. Anything that is not
+        // one of the two known words is dropped rather than shown: the only
+        // thing a third word could do is strand a banner on screen forever.
+        if (!this.picture) return
+        if (frame.state !== 'recovering' && frame.state !== 'ready') return
+        const reason = typeof frame.reason === 'string' ? frame.reason : ''
+        this.picture = {
+          ...this.picture,
+          desktop: frame.state === 'recovering' ? reason || 'The desktop is rebuilding its window.' : ''
+        }
+        this.handlers.onPicture(this.picture)
+        return
+      }
+
       case 'err':
         // The credential itself was rejected. Said here rather than left to the
         // close that follows, because only the `err` frame distinguishes "this
@@ -785,7 +813,11 @@ function pictureOf(frame: HelloOkFrame): LinkPicture {
     canControl: frame.canControl === true,
     // Absent is an older desktop, which reads the same as an empty map:
     // nothing is being driven.
-    foreman: Object.fromEntries((frame.foreman ?? []).map((state) => [state.paneId, state]))
+    foreman: Object.fromEntries((frame.foreman ?? []).map((state) => [state.paneId, state])),
+    // A fresh `hello-ok` is a renderer that got far enough to answer, so any
+    // recovery this phone was told about is over — including the case the
+    // `ready` frame cannot cover, where the socket dropped during the reload.
+    desktop: ''
   }
 }
 

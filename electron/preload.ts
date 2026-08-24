@@ -326,6 +326,12 @@ const api: ForgeApi = {
    * anything: the alternative is the whole app mounting for a moment inside a
    * 180×56 pill.
    */
+  renderer: {
+    // No invoke, no await, no guard: the one call in this bridge that has to
+    // survive a renderer where nothing else does. See IPC.rendererHeartbeat.
+    heartbeat: (beat) => ipcRenderer.send(IPC.rendererHeartbeat, beat)
+  },
+
   overlay: {
     isOverlay: () => location.hash === '#overlay',
 
