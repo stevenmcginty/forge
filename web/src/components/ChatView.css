@@ -1,0 +1,579 @@
+/* ---------------------------------------------------------- the chat view
+ *
+ * "Obsidian Reading Room": the session transcript as a reading surface, not a
+ * log. The assistant's prose is the page — the ambient UI face at a reading
+ * size, full width, no frame — and everything else recedes: the person's
+ * prompts are compact accent-washed bubbles on the right, tool calls are
+ * hairline chips in a whisper of mono, thinking folds shut. One signal colour,
+ * the pane's own accent, and it only ever means "mine" or "go": the bubble,
+ * the links, the jump pill, the working dot. Mono is confined to code and to
+ * tool gists; nothing else in this file may reach for it.
+ *
+ * Every value is a token. Both themes come free of that — verify, never trust.
+ */
+
+.chatview {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  --chat-accent: var(--pane-accent, var(--accent));
+  background: var(--bg-base);
+}
+
+.chatview__scroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  /* ChatView.tsx keeps the bottom in view itself; the browser's own anchoring
+   * fights that and the pair reads as jitter. */
+  overflow-anchor: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.chatview__column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+  width: 100%;
+  max-width: 760px;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: var(--s-8) var(--s-7) var(--s-8);
+}
+
+/* ------------------------------------------------------------------ empty */
+
+.chatview__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-5);
+  margin: auto 0;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: var(--t-md);
+}
+
+.chatview__empty p {
+  margin: 0;
+}
+
+.chatview__empty-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chat-accent);
+  opacity: 0.55;
+  animation: chatview-breathe 2.4s var(--ease-in-out) infinite;
+}
+
+/* ------------------------------------------------------------- the cut
+ *
+ * A transcript read mid-file begins mid-conversation; the honest place to say
+ * so is the top of the column, as a quiet dashed seam. Context, not state.
+ */
+
+.chatview__cut {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  color: var(--text-dim);
+}
+
+.chatview__cut::before,
+.chatview__cut::after {
+  content: '';
+  flex: 1 1 auto;
+  border-top: 1px dashed var(--line-strong);
+}
+
+.chatview__cut-text {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------------------ turns */
+
+.chatview__turns {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-7);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chatview__turn {
+  min-width: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+  animation: chatview-turn-in var(--dur-med) var(--ease-out);
+}
+
+/* The person: a compact bubble on the right, washed with the accent. */
+.chatview__turn[data-role='user'] {
+  display: flex;
+  justify-content: flex-end;
+  padding-left: 14%;
+}
+
+.chatview__bubble {
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--s-4) var(--s-6);
+  background: color-mix(in srgb, var(--chat-accent) 11%, var(--bg-panel-raised));
+  border: 1px solid color-mix(in srgb, var(--chat-accent) 28%, transparent);
+  border-radius: var(--r-xl) var(--r-xl) var(--r-sm) var(--r-xl);
+  box-shadow: var(--shadow-inset-top);
+}
+
+.chatview__prompt {
+  margin: 0;
+  font-size: var(--t-lg);
+  line-height: 1.5;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatview__prompt + .chatview__prompt {
+  margin-top: var(--s-4);
+}
+
+/* The assistant: the words, and nothing around them. */
+.chatview__reply {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ prose */
+
+.chatview__prose {
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.65;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.chatview__prose .md__p {
+  margin: 0 0 var(--s-5);
+}
+
+.chatview__prose > :last-child,
+.chatview__prose .md__p:last-child {
+  margin-bottom: 0;
+}
+
+.chatview__prose .md__h {
+  margin: var(--s-7) 0 var(--s-4);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+}
+
+.chatview__prose .md__h:first-child {
+  margin-top: 0;
+}
+
+.chatview__prose h3.md__h {
+  font-size: var(--t-xl);
+  line-height: 1.3;
+}
+
+.chatview__prose h4.md__h {
+  font-size: 15.5px;
+  line-height: 1.35;
+}
+
+.chatview__prose h5.md__h {
+  font-size: var(--t-lg);
+  line-height: 1.4;
+}
+
+.chatview__prose .md__list {
+  margin: 0 0 var(--s-5);
+  padding-left: var(--s-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.chatview__prose .md__list .md__list {
+  margin: var(--s-2) 0 0;
+}
+
+.chatview__prose .md__list li::marker {
+  color: var(--text-dim);
+}
+
+.chatview__prose .md__quote {
+  margin: 0 0 var(--s-5);
+  padding: var(--s-2) 0 var(--s-2) var(--s-6);
+  border-left: 2px solid var(--line-strong);
+  color: var(--text-secondary);
+}
+
+.chatview__prose .md__hr {
+  margin: var(--s-6) 0;
+  border: 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.chatview__prose .md__link {
+  color: var(--chat-accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--chat-accent) 40%, transparent);
+}
+
+.chatview__prose .md__link:hover {
+  border-bottom-color: var(--chat-accent);
+}
+
+/* Inline code as a softly-tinted chip that sits inside the prose without
+ * breaking its rhythm — the Claude-app read. The tint is `--info`, which both
+ * themes define for exactly this register: technical, calm, not the accent. */
+.chatview__prose .md__inline-code {
+  padding: var(--s-1) var(--s-2);
+  font-family: var(--font-mono);
+  font-size: 0.84em;
+  color: color-mix(in srgb, var(--info) 72%, var(--text-primary));
+  background: color-mix(in srgb, var(--info) 9%, var(--bg-panel-raised));
+  border: 1px solid color-mix(in srgb, var(--info) 16%, var(--line-soft));
+  border-radius: var(--r-sm);
+  overflow-wrap: anywhere;
+}
+
+/* Fenced code: its own quiet well, scrolling inside itself — the page never
+ * scrolls sideways. */
+.chatview__prose .md__codeblock {
+  position: relative;
+  margin: 0 0 var(--s-5);
+  min-width: 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+}
+
+.chatview__prose .md__lang {
+  position: absolute;
+  top: var(--s-3);
+  right: var(--s-4);
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  font-weight: 600;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.chatview__prose .md__code {
+  margin: 0;
+  padding: var(--s-5) var(--s-6);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--t-md);
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  tab-size: 4;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.chatview__prose .md__tablewrap {
+  margin: 0 0 var(--s-5);
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.chatview__prose .md__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-md);
+  line-height: 1.5;
+}
+
+.chatview__prose .md__table th,
+.chatview__prose .md__table td {
+  padding: var(--s-3) var(--s-5);
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.chatview__prose .md__table th {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+}
+
+.chatview__prose .md__table tr:last-child td {
+  border-bottom: 0;
+}
+
+/* -------------------------------------------------------------- tool chips
+ *
+ * One line a thumb can expand or ignore: caret, tool name, gist. The chip is
+ * quiet on purpose — hairline, no fill — because ten of them in a row must
+ * read as a margin note, not a wall of cards.
+ */
+
+.chatview__tool {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+}
+
+.chatview__tool-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  min-height: 34px;
+  padding: var(--s-2) var(--s-5) var(--s-2) var(--s-4);
+  text-align: left;
+  color: var(--text-secondary);
+  background: none;
+  border: 0;
+  border-radius: inherit;
+  cursor: pointer;
+}
+
+.chatview__tool-head:disabled {
+  cursor: default;
+}
+
+.chatview__tool-head:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.chatview__tool-caret {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-dim);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.chatview__tool[data-open='true'] .chatview__tool-caret,
+.chatview__think[data-open='true'] .chatview__tool-caret {
+  transform: rotate(90deg);
+}
+
+.chatview__tool-head:disabled .chatview__tool-caret {
+  opacity: 0;
+}
+
+.chatview__tool-name {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chatview__tool[data-failed='true'] .chatview__tool-name {
+  color: var(--danger);
+}
+
+.chatview__tool-gist {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  color: var(--text-dim);
+}
+
+.chatview__tool-flag {
+  flex: none;
+  padding: var(--s-1) var(--s-3);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-full);
+}
+
+.chatview__tool-body {
+  padding: var(--s-4) var(--s-5) var(--s-4) var(--s-8);
+  border-top: 1px solid var(--line-soft);
+}
+
+.chatview__tool-gist-full {
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chatview__tool-note {
+  margin-top: var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------- thinking */
+
+.chatview__think {
+  min-width: 0;
+}
+
+.chatview__think-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 30px;
+  padding: var(--s-1) var(--s-4);
+  margin-left: calc(-1 * var(--s-4));
+  font-size: var(--t-sm);
+  font-style: italic;
+  color: var(--text-dim);
+  background: none;
+  border: 0;
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
+
+.chatview__think-head:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.chatview__think-body {
+  margin-top: var(--s-3);
+  padding-left: var(--s-6);
+  border-left: 2px solid var(--line-soft);
+  font-size: var(--t-md);
+  line-height: 1.6;
+  font-style: italic;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------- busy */
+
+.chatview__busy {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  color: var(--text-secondary);
+  font-size: var(--t-md);
+}
+
+.chatview__busy-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--chat-accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--chat-accent) 55%, transparent);
+  animation: chatview-breathe 1.8s var(--ease-in-out) infinite;
+}
+
+/* ------------------------------------------------------------------- jump */
+
+.chatview__jump {
+  position: absolute;
+  left: 50%;
+  bottom: var(--s-6);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 34px;
+  padding: 0 var(--s-6) 0 var(--s-5);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-panel-raised) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--chat-accent) 40%, var(--line-strong));
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(12px);
+  transform: translate(-50%, 12px);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-med) var(--ease-out),
+    transform var(--dur-med) var(--ease-out);
+}
+
+.chatview__jump svg {
+  color: var(--chat-accent);
+}
+
+.chatview__jump[data-show='true'] {
+  transform: translate(-50%, 0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ------------------------------------------------------------------ focus */
+
+.chatview__tool-head:focus-visible,
+.chatview__think-head:focus-visible,
+.chatview__jump:focus-visible,
+.chatview__prose .md__link:focus-visible {
+  outline: 2px solid var(--chat-accent);
+  outline-offset: 1px;
+}
+
+/* ----------------------------------------------------------------- motion */
+
+@keyframes chatview-turn-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes chatview-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.1);
+  }
+}

@@ -91,6 +91,14 @@ import type {
 import type { SkillsList } from './skills'
 import type { CommandsFeed } from './commands'
 /*
+ * The chat transcript's own vocabulary, kept in a file of its own rather than
+ * spelled out here. It is read by the desktop's transcript reader and by the
+ * browser's chat view and by nothing in between — this protocol only carries
+ * it — so it earns a file the way `SkillsList` and `CommandsFeed` do, and for
+ * the same reason: this one describes the *wire*, not what travels on it.
+ */
+import type { ChatUpdate } from './chat'
+/*
  * The input vocabulary, borrowed whole from the phone link rather than restated
  * here. The rule this file usually follows is the opposite one — MAX_SESSIONS
  * is restated so the browser bundle does not carry the desktop's IPC table for
@@ -1044,6 +1052,40 @@ export type WebRequest =
    * `{ kind: 'ok' }`.
    */
   | { kind: 'visibility'; visible: boolean }
+  /**
+   * "Read me this pane's conversation, not its screen."
+   *
+   * `sessionId` is the **pane** id, the same one `attach` names, because that
+   * is the only id a browser has: which Claude session a pane owns, and where
+   * on this disk its transcript is filed, are facts about the desktop's own
+   * layout and its `~/.claude`, and neither has ever been on this wire. The
+   * desktop resolves the pane to a file and tails it; see
+   * electron/web/transcript-watcher.ts.
+   *
+   * Answered `{ kind: 'ok' }`, after which `transcript` frames arrive for that
+   * pane — the first of them a `reset` carrying everything already parsed.
+   * A pane with no transcript to read (not a Claude pane, or one that has
+   * never spoken) is `{ kind: 'failed', code: 'failed' }` with a sentence, and
+   * a pane that has gone is `unknown-session`; a desktop too old to do this at
+   * all answers `unsupported`, like every other optional request here.
+   *
+   * Independent of `attach`, deliberately: reading the conversation and
+   * reading the terminal are two views of one pane and a client may want
+   * either, both, or one after the other. Watching a pane twice is not an
+   * error — the second ask is answered `ok` and changes nothing.
+   */
+  | { kind: 'transcript-watch'; sessionId: string }
+  /**
+   * Stop reading it. Answered `{ kind: 'ok' }` whether or not this browser was
+   * watching, the same courtesy `push-unsubscribe` extends: a client tidying up
+   * should not have to know what the desktop believes.
+   *
+   * Not the only way a watch ends. Detaching from the pane, the pane exiting,
+   * and the socket closing all end it too, because each of them is a browser
+   * that has stopped reading — and a tail left running on a `~/.claude` file
+   * for a tab that closed is a watch nobody will ever stop.
+   */
+  | { kind: 'transcript-stop'; sessionId: string }
 
 /**
  * What `PushSubscription.toJSON()` yields, narrowed to the fields the desktop
@@ -1334,6 +1376,36 @@ export interface WebGitFrame {
   snapshot: GitSnapshot
 }
 
+/**
+ * A Claude pane's conversation, as something to read rather than to watch
+ * being typed.
+ *
+ * The counterpart to `replay`/`data`, and the whole of what `transcript-watch`
+ * buys: those two carry the *screen* — escape codes, redraws, a TUI's frame —
+ * and this carries what was said. The desktop tails the session's JSONL and
+ * distils it (electron/web/transcript-watcher.ts); the browser renders it as a
+ * chat.
+ *
+ * Sent only to the sockets that asked for this pane, never broadcast: a
+ * conversation is the most private thing on this link and a tab that did not
+ * ask for one has no business receiving it. `ChatUpdate` says how the two
+ * kinds of frame relate — a `reset` replaces what the client holds, an append
+ * adds to it, and a turn whose `id` the client already has is that same turn
+ * said again (a tool's result arriving after its call), not a second one.
+ *
+ * Unlike `data`, this is sent to a hidden tab as well as a visible one. The
+ * reason `pushData` withholds bytes is xterm's parser, which a background tab
+ * stops draining until it throws; a handful of small JSON objects is not that,
+ * and withholding them would leave a phone that came back from the lock screen
+ * reading a conversation that stopped mid-sentence.
+ */
+export interface WebTranscriptFrame {
+  type: 'transcript'
+  /** The pane, exactly as `transcript-watch` named it. */
+  sessionId: string
+  update: ChatUpdate
+}
+
 /** The answer to a `request`, correlated by `rid`. */
 export interface WebResultFrame {
   type: 'result'
@@ -1471,6 +1543,7 @@ export type WebServerFrame =
   | WebProjectsFrame
   | WebWorkspaceFrame
   | WebGitFrame
+  | WebTranscriptFrame
   | WebResultFrame
   | WebShutdownFrame
   | WebErrorFrame

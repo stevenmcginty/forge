@@ -4,14 +4,17 @@ import { isClaudeCommand, isShellProfile, paneDisplayTitle, resolveProfile } fro
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
+import { applyChatUpdate, EMPTY_CHAT, type ChatFeed } from '../lib/chat-turns'
 import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines } from '@/lib/feed'
 import { imageFilesFromDataTransfer, packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
-import { publishPaneStatus, publishPaneView } from '../lib/pane-status'
+import { publishPaneStatus, publishPaneView, type PaneFace } from '../lib/pane-status'
 import type { Transcript } from '@/lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
+import { getClaudeView, setClaudeView } from '../lib/view-pref'
 import { useForge, useProfiles } from '../state'
 import { AgentChooser } from './AgentChooser'
+import { ChatView } from './ChatView'
 import { Feed } from './Feed'
 
 /**
@@ -24,6 +27,40 @@ import { Feed } from './Feed'
  * has.
  */
 const PARSE_INTERVAL_MS = 80
+
+/** What the face button offers, named by the face it would give you. */
+const VIEW_TITLE: Record<PaneFace, string> = {
+  chat: 'Show the conversation',
+  feed: 'Show as cards',
+  term: 'Show the terminal'
+}
+
+/**
+ * A speech bubble, at <Icon/>'s weight and on its grid.
+ *
+ * Local rather than a new member of `IconName`: that set is the desktop
+ * renderer's, this browser imports it (decision 4 in docs/forge-web.md), and a
+ * glyph only Forge Web has a use for has no business being added to the desk's
+ * vocabulary from here.
+ */
+function ChatIcon(): ReactNode {
+  return (
+    <svg
+      width={13}
+      height={13}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M13.4 9.2a1.4 1.4 0 0 1-1.4 1.4H6.2L3.4 13V4.2a1.4 1.4 0 0 1 1.4-1.4h7.2a1.4 1.4 0 0 1 1.4 1.4z" />
+    </svg>
+  )
+}
 
 /**
  * One terminal: the desktop's slim `.pane` header over a live xterm fed relayed
@@ -164,14 +201,42 @@ export function PaneView({
    */
   const [tui, setTui] = useState(false)
   /**
-   * Claude Code writes the normal buffer, so the raw terminal already scrolls.
-   * Grok/OpenCode do not — they open on the accumulating cards log. Either
-   * can be flipped in the header. A shell has no turns to cut.
+   * A Claude pane has a third face, and it is the one it opens on.
+   *
+   * The chat is the session's own JSONL read as a conversation
+   * (`transcript-watch` in shared/web.ts, rendered by <ChatView/>), and it is
+   * the best reading of a Claude pane there is — the feed and the cards are
+   * both lenses over a *screen*, and this is the thing the screen is a
+   * rendering of. So it is the default, held to whatever this browser last
+   * chose across every Claude pane rather than per pane id; see lib/view-pref.ts.
+   *
+   * Everything else is unchanged. Grok/OpenCode have no such file, so they
+   * open on the cards read off their alternate screen; Claude Code's own
+   * terminal scrolls, and a shell has no turns to cut.
    */
-  const [view, setView] = useState<'feed' | 'term'>(
-    agent && !isClaudeCommand(profile.command) ? 'feed' : 'term'
-  )
+  const claude = agent && isClaudeCommand(profile.command)
+  const [view, setView] = useState<PaneFace>(() => (claude ? getClaudeView() : agent ? 'feed' : 'term'))
   const feed = view === 'feed'
+  const chat = view === 'chat'
+  /** Either conversation view: the terminal is behind it and must not be touched. */
+  const overlaid = feed || chat
+
+  /**
+   * One face forward, and remember it for the next Claude pane.
+   *
+   * The preference is a fact about how this person reads an agent rather than
+   * about this pane, so only a Claude pane — the only one with all three
+   * faces — writes it. Flipping a Grok pane to its terminal says nothing about
+   * how the next Claude session should open.
+   */
+  const nextView: PaneFace = claude ? (chat ? 'feed' : feed ? 'term' : 'chat') : feed ? 'term' : 'feed'
+  const showView = useCallback(
+    (next: PaneFace) => {
+      setView(next)
+      if (claude) setClaudeView(next)
+    },
+    [claude]
+  )
 
   /* ------------------------------------------------------- reading the screen */
 
@@ -314,6 +379,89 @@ export function PaneView({
     },
     [leaf.id]
   )
+
+  /* ---------------------------------------------------- the conversation */
+
+  /**
+   * The turns, and whether the desktop began mid-file.
+   *
+   * Accumulated here rather than in the store because they are this pane's:
+   * `applyChatUpdate` is the whole rule (a reset replaces, an append upserts by
+   * id) and lib/chat-turns.ts is where it is written down. The ref is what the
+   * subscription reads — it is registered once and must not be re-made on every
+   * turn — and the state is what renders.
+   */
+  const chatRef = useRef<ChatFeed>(EMPTY_CHAT)
+  const [chatFeed, setChatFeed] = useState<ChatFeed>(EMPTY_CHAT)
+  /**
+   * The desktop's sentence when there is nothing to read: a pane that has not
+   * spoken yet has written no file to tail. Not a failure — it is the first
+   * thing a fresh Claude pane says — so it is a note in the view with the
+   * terminal one tap away, not a notice over the whole page.
+   */
+  const [chatRefusal, setChatRefusal] = useState('')
+  /**
+   * Whether this pane has ever been asked to show its conversation.
+   *
+   * The watch starts the first time somebody opens the chat and then stays for
+   * as long as this component is mounted, including while they read the
+   * terminal instead: a tail on the desktop is cheap, the turns are already in
+   * hand, and flipping back is then instant rather than a round trip. What it
+   * must not do is start on its own — a browser full of panes nobody has asked
+   * a question of should cost the desktop nothing at all.
+   */
+  const [chatArmed, setChatArmed] = useState(chat)
+  useEffect(() => {
+    if (chat) setChatArmed(true)
+  }, [chat])
+
+  /**
+   * Read this pane's conversation for as long as it is armed and there is a
+   * desktop to read it.
+   *
+   * Keyed on `live` as well as the pane, so a socket that dropped and came back
+   * re-asks: the client re-arms its own watches at `hello-ok`, and this is the
+   * same question from the other end for the case where the *answer* changed
+   * while the link was down — a pane that had said nothing when the view opened
+   * has usually said something by the time the link is back. Asking twice is
+   * not an error; the desktop answers the second `ok` and changes nothing.
+   *
+   * Through `actionsRef` rather than `actions` for the reason that ref exists:
+   * the store rebuilding must not be able to stop and restart a tail.
+   */
+  useEffect(() => {
+    if (!chatArmed || cached || !alive || !live) return
+    let stopped = false
+    const off = actionsRef.current.onTranscript(leaf.id, (update) => {
+      chatRef.current = applyChatUpdate(chatRef.current, update)
+      setChatFeed(chatRef.current)
+    })
+    void actionsRef.current.watchTranscript(leaf.id).then((refusal) => {
+      if (!stopped) setChatRefusal(refusal ?? '')
+    })
+    return () => {
+      stopped = true
+      off()
+      actionsRef.current.stopTranscript(leaf.id)
+    }
+  }, [chatArmed, cached, alive, live, leaf.id])
+
+  /**
+   * Ask again, because the answer changes.
+   *
+   * "It has not said anything yet" is the *first* thing a fresh Claude pane
+   * says, and the file it is waiting on is written the moment somebody types
+   * into the composer under this very pane — so a note with only a way out of
+   * the view would be a dead end at exactly the moment it is most likely to be
+   * read. One ask per tap and nothing on a timer: the client deliberately does
+   * not retry a refusal by itself, and a person who has just sent a line is a
+   * better trigger than any poll. The subscription is already registered by the
+   * effect above whether or not the watch was granted, so a watch granted now
+   * paints turns without anything else being re-armed.
+   */
+  const lookAgain = useCallback(() => {
+    void actionsRef.current.watchTranscript(leaf.id).then((refusal) => setChatRefusal(refusal ?? ''))
+  }, [leaf.id])
 
   /* ------------------------------------------------------ the live terminal */
 
@@ -667,15 +815,21 @@ export function PaneView({
           ) : null}
 
           <div className="pane__actions">
+            {/*
+              One control for all three faces, cycling rather than growing into
+              a segmented row: the header's trailing cluster is already several
+              icons wide and a phone's is narrower still. It shows what the next
+              tap gives you, which is what the two-way version always did.
+            */}
             {agent ? (
               <button
                 type="button"
                 className="ghost-btn pane__action"
-                title={feed ? 'Show the terminal' : 'Show as cards'}
-                aria-pressed={feed}
-                onClick={() => setView((current) => (current === 'feed' ? 'term' : 'feed'))}
+                title={VIEW_TITLE[nextView]}
+                aria-label={VIEW_TITLE[nextView]}
+                onClick={() => showView(nextView)}
               >
-                <Icon name={feed ? 'terminal' : 'note'} size={13} />
+                {nextView === 'chat' ? <ChatIcon /> : <Icon name={nextView === 'term' ? 'terminal' : 'note'} size={13} />}
               </button>
             ) : null}
             {/*
@@ -755,16 +909,39 @@ export function PaneView({
             onTuiScroll={onTuiScroll}
           />
         ) : null}
+        {/*
+          Mounted from the first time the chat is opened and kept — hidden
+          rather than unmounted, like the terminal beneath it, so flipping back
+          is instant and the reader's scroll position survives the trip.
+        */}
+        {chatArmed ? (
+          <div className="pane__chat" aria-hidden={!chat || undefined} data-shown={chat ? 'true' : 'false'}>
+            <ChatView turns={chatFeed.turns} truncated={chatFeed.truncated} busy={live && transcript.status.busy} />
+            {chatRefusal ? (
+              <div className="pane__chat-note" role="note">
+                <p>{chatRefusal}</p>
+                <div className="pane__chat-note-actions">
+                  <button type="button" className="ghost-btn" onClick={lookAgain} disabled={!live}>
+                    Look again
+                  </button>
+                  <button type="button" className="ghost-btn" onClick={() => showView('term')}>
+                    Show the terminal
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div
           className="pane__terminal"
           ref={holderRef}
-          aria-hidden={feed || undefined}
+          aria-hidden={overlaid || undefined}
           onPointerDown={(event) => {
-            if (feed) return
+            if (overlaid) return
             if (event.pointerType !== 'touch') hostRef.current?.focus()
           }}
           onClick={() => {
-            if (feed) return
+            if (overlaid) return
             hostRef.current?.focus()
             // A tap is the clearest statement of intent there is. Somebody at the
             // desk may have typed since this pane came on screen; the thumb that

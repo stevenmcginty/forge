@@ -2384,9 +2384,59 @@
   flex: none;
 }
 
-.pane[data-view='feed'] .pane__terminal {
+.pane[data-view='feed'] .pane__terminal,
+.pane[data-view='chat'] .pane__terminal {
   opacity: 0;
   pointer-events: none;
+}
+
+/*
+ * The chat is mounted from the first time it is opened and then kept, hidden
+ * the same way the terminal is hidden behind it: the reader's place in a long
+ * conversation survives a trip to the terminal and back, and turns that arrive
+ * while it is out of sight still land at the bottom rather than in a queue.
+ */
+.pane__chat {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.pane__chat[data-shown='false'] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/*
+ * "This pane has no conversation yet." Over the empty transcript rather than
+ * instead of it, because the answer changes the moment somebody says something
+ * — and the way to say something is the composer under this very pane, which
+ * is why the note offers another look as well as the way out to the terminal.
+ */
+.pane__chat-note {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-5);
+  padding: var(--s-7);
+  text-align: center;
+  background: var(--bg-base);
+  color: var(--text-dim);
+  font-size: var(--t-md);
+}
+
+.pane__chat-note p {
+  margin: 0;
+  max-width: 34ch;
+}
+
+.pane__chat-note-actions {
+  display: flex;
+  gap: var(--s-3);
 }
 
 .app[data-mobile] .pane {
@@ -3190,7 +3240,8 @@ button.astatus__mode:not(:disabled):hover {
  * tools row copied off the key's would say the same thing today and drift the
  * day a key changes size, which is the same silent-geometry bug again.
  */
-[data-mobile] .session-composer[data-view='feed'] .composer__keys {
+[data-mobile] .session-composer[data-view='feed'] .composer__keys,
+[data-mobile] .session-composer[data-view='chat'] .composer__keys {
   visibility: hidden;
 }
 

@@ -13,8 +13,15 @@ import type { PaneStatus } from '@/lib/rich'
  * here survives a reload and nothing needs to: the next capture republishes.
  */
 
+/**
+ * The three faces a pane can wear: the session's own conversation, the cards
+ * read off its screen, or the raw terminal. Only the last of them has TUI keys
+ * worth showing a thumb.
+ */
+export type PaneFace = 'chat' | 'feed' | 'term'
+
 const statuses = new Map<string, PaneStatus>()
-const views = new Map<string, 'feed' | 'term'>()
+const views = new Map<string, PaneFace>()
 const listeners = new Set<() => void>()
 
 function emit(): void {
@@ -29,8 +36,8 @@ export function publishPaneStatus(paneId: string, status: PaneStatus | undefined
   emit()
 }
 
-/** Cards vs the raw terminal — the composer reads this to hide TUI keys on a phone. */
-export function publishPaneView(paneId: string, view: 'feed' | 'term' | undefined): void {
+/** Which face — the composer reads this to hide TUI keys on a phone. */
+export function publishPaneView(paneId: string, view: PaneFace | undefined): void {
   const previous = views.get(paneId)
   if (previous === view) return
   if (view === undefined) views.delete(paneId)
@@ -54,8 +61,8 @@ export function usePaneStatus(paneId: string | null): PaneStatus | undefined {
   )
 }
 
-/** The focused pane's cards/terminal face. */
-export function usePaneView(paneId: string | null): 'feed' | 'term' | undefined {
+/** The focused pane's face. */
+export function usePaneView(paneId: string | null): PaneFace | undefined {
   return useSyncExternalStore(
     subscribe,
     () => (paneId ? views.get(paneId) : undefined),

@@ -18,6 +18,7 @@ import {
   type WebResult,
   type WebSession
 } from '@shared/web'
+import type { ChatUpdate } from '@shared/chat'
 import type { AgentProfile, GitSnapshot, Project, Workspace } from '@shared/types'
 import { collectLeaves } from '@/lib/splitTree'
 import { ALLOW_LOOPBACK, devLoopbackHost, loadConfig, type WebClientConfig } from './config'
@@ -154,6 +155,17 @@ export interface ForgeActions {
   claim: (sessionId: string) => void
   /** Subscribe to a pane's bytes. Returns the unsubscribe. */
   onData: (sessionId: string, listener: (data: string, replay: boolean, truncated: boolean) => void) => () => void
+  /**
+   * Ask the desktop to read a pane's conversation. Resolves with null when it
+   * is reading it, and with a sentence when there is nothing to read — not a
+   * Claude pane, or one that has not spoken yet. Re-asked on every reconnect
+   * by the client, for as long as the pane is being watched.
+   */
+  watchTranscript: (sessionId: string) => Promise<string | null>
+  /** Stop reading it. Total: a pane that was not being watched is not an error. */
+  stopTranscript: (sessionId: string) => void
+  /** Subscribe to one pane's conversation updates. Returns the unsubscribe. */
+  onTranscript: (sessionId: string, listener: (update: ChatUpdate) => void) => () => void
   setNotice: (message: string) => void
   /** Clear the notice on screen now; the next in the queue, if any, takes its turn. */
   dismissNotice: () => void
@@ -394,6 +406,16 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    */
   const dataListeners = useRef(new Map<string, Set<(data: string, replay: boolean, truncated: boolean) => void>>())
   /**
+   * Per-pane conversation listeners, the same shape and outside React state for
+   * the same reason — though a gentler version of it: updates arrive at the
+   * rate an agent speaks rather than at the rate a TUI redraws. What keeps them
+   * out here is ownership: the turns are accumulated by the pane that is
+   * reading them (see `applyChatUpdate` in lib/chat-turns.ts), because a second
+   * copy of a conversation in the store would be a second thing to keep
+   * correct across a reset, and nothing outside that pane reads it.
+   */
+  const transcriptListeners = useRef(new Map<string, Set<(update: ChatUpdate) => void>>())
+  /**
    * What each attached pane has said, so the frozen view has something to show.
    *
    * Held in memory and flushed on a timer rather than written per frame: PTY
@@ -474,6 +496,11 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         const listeners = dataListeners.current.get(sessionId)
         if (!listeners) return
         for (const listener of listeners) listener(data, replay, truncated)
+      },
+      onTranscript: (sessionId, update) => {
+        const listeners = transcriptListeners.current.get(sessionId)
+        if (!listeners) return
+        for (const listener of listeners) listener(update)
       },
       onExit: (sessionId) => {
         setPicture((current) =>
@@ -1002,6 +1029,18 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       claim: (sessionId) => void client.request({ kind: 'claim', sessionId }),
       onData: (sessionId, listener) => {
         const map = dataListeners.current
+        const set = map.get(sessionId) ?? new Set()
+        set.add(listener)
+        map.set(sessionId, set)
+        return () => {
+          set.delete(listener)
+          if (set.size === 0) map.delete(sessionId)
+        }
+      },
+      watchTranscript: (sessionId) => client.watchTranscript(sessionId),
+      stopTranscript: (sessionId) => client.stopTranscript(sessionId),
+      onTranscript: (sessionId, listener) => {
+        const map = transcriptListeners.current
         const set = map.get(sessionId) ?? new Set()
         set.add(listener)
         map.set(sessionId, set)

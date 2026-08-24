@@ -42,6 +42,7 @@ import {
  * the input vocabulary instead of restating it. See the note there.
  */
 import { readMirrorInput, type MirrorInput } from '@shared/mobile'
+import type { ChatUpdate } from '@shared/chat'
 import type {
   AgentPresence,
   CommandPresence,
@@ -337,6 +338,39 @@ export interface WebServerHost {
     ext: string
   ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>
 
+  /* ---------------------------------------------------- the chat transcript
+   *
+   * A pane's *conversation*, as against its screen. Optional like everything
+   * else in this section, so a host without them answers `unsupported` and a
+   * browser simply never offers the view.
+   *
+   * The two hooks carry a callback rather than a pane id alone, and that is
+   * the whole of the design worth defending. Two tabs reading one pane are two
+   * subscriptions on one file, so `transcriptStop` has to be able to end one of
+   * them without blinding the other — a pane id on its own cannot say which.
+   * Handing the same function back is how it says so, and it is also what lets
+   * this server stay free of any notion that there is a file: it never counts
+   * readers, never seeds a late one, and never learns where `~/.claude` is.
+   * All of that is electron/web/transcript-watcher.ts's.
+   */
+
+  /**
+   * Begin reading one pane's conversation, or join a read already happening.
+   *
+   * `false` means there is nothing to read — the pane is not running Claude, or
+   * its session has never spoken and so has written no transcript — which the
+   * server turns into a `failed` result carrying a sentence. It is not an
+   * error and not an exception: a browser may ask this of any pane, and most
+   * panes are not Claude panes.
+   *
+   * Updates arrive on `onUpdate` from then on, the first of them a `reset`
+   * carrying everything already parsed. Nothing arrives synchronously from
+   * inside this call, so the request that provoked it is answered first.
+   */
+  transcriptWatch?: (paneId: string, onUpdate: (update: ChatUpdate) => void) => boolean
+  /** End the one subscription this callback identifies. Total: a callback that was never watching is not an error. */
+  transcriptStop?: (paneId: string, onUpdate: (update: ChatUpdate) => void) => void
+
   /**
    * Put a pasted image on this machine's clipboard so an agent that reads
    * images from there (Grok, via Alt+V) can mint a chip. Optional: a host
@@ -508,6 +542,16 @@ interface Client {
   viewer: string
   /** Sessions this browser is reading. */
   subs: Set<string>
+  /**
+   * Panes whose *conversation* this browser is reading, and the callback the
+   * host was handed for each.
+   *
+   * A second set beside `subs` rather than a flag on it, because the two are
+   * genuinely independent: a chat view needs no terminal bytes, and a terminal
+   * needs no transcript. The callback is kept because it is the only handle on
+   * the subscription — see `transcriptStop` on `WebServerHost`.
+   */
+  chats: Map<string, (update: ChatUpdate) => void>
   /**
    * Whether this tab is on screen, as its last `visibility` request said —
    * `null` while it has never said.
@@ -760,6 +804,12 @@ export class WebServer {
 
   pushExit(id: string, exitCode: number): void {
     for (const client of this.clients) {
+      // A pane whose process has ended writes no more transcript, so the tail
+      // behind it is a file handle and a poll timer kept alive for a
+      // conversation that has stopped. Ended here for every browser rather than
+      // waiting for each of them to notice and say `transcript-stop`, which a
+      // tab that was closed at the time never will.
+      this.stopTranscript(client, id)
       if (client.device && client.subs.has(id)) {
         client.subs.delete(id)
         // A pane that has exited is not one there is any catching up to do on,
@@ -803,6 +853,40 @@ export class WebServer {
   /** A git status the desktop's watcher produced, unbidden. */
   pushGit(snapshot: GitSnapshot): void {
     this.broadcast({ type: 'git', snapshot })
+  }
+
+  /* --------------------------------------------------- the chat transcript */
+
+  /**
+   * One update from the transcript reader, to the one browser that asked.
+   *
+   * Never broadcast, unlike every other push above it: a conversation is the
+   * most private thing this link carries, and a tab that did not ask for one
+   * has no business being sent it. Sent to a hidden tab as well as a visible
+   * one — the reason `pushData` withholds bytes is xterm's parser, and a
+   * handful of small objects is not that.
+   */
+  private sendTranscript(client: Client, sessionId: string, update: ChatUpdate): void {
+    if (!this.clients.has(client) || !client.chats.has(sessionId)) return
+    this.send(client, { type: 'transcript', sessionId, update })
+  }
+
+  /**
+   * This browser has stopped reading one pane's conversation. Total: called
+   * from four endings — the request, a `detach`, the pane exiting, the socket
+   * closing — and three of them cannot know whether there was a watch at all.
+   */
+  private stopTranscript(client: Client, sessionId: string): void {
+    const sink = client.chats.get(sessionId)
+    if (!sink) return
+    client.chats.delete(sessionId)
+    this.host.transcriptStop?.(sessionId, sink)
+  }
+
+  /** Everything this browser was reading, at a hang-up. */
+  private stopTranscripts(client: Client): void {
+    for (const [sessionId, sink] of client.chats) this.host.transcriptStop?.(sessionId, sink)
+    client.chats.clear()
   }
 
   /**
@@ -981,6 +1065,7 @@ export class WebServer {
       device: null,
       viewer: `web-${++viewerSeq}`,
       subs: new Set(),
+      chats: new Map(),
       visible: null,
       stale: new Set(),
       inputSecond: 0,
@@ -1044,6 +1129,10 @@ export class WebServer {
       // its viewer is a screen being encoded and sent to a socket that closed,
       // which nothing else in this file would ever notice.
       this.dropViewer(client)
+      // Every conversation this browser was reading, let go with it. A tail on
+      // a file in `~/.claude` polling for a socket that closed is exactly the
+      // watch nobody will ever stop.
+      this.stopTranscripts(client)
       // A browser that has hung up is not a device anybody is typing on, so it
       // stops holding the grid of anything it held. Unconditional, because a
       // socket that never said hello never owned anything and this costs a walk
@@ -1181,6 +1270,10 @@ export class WebServer {
         // so it stops holding that pane's grid — the same thing a hang-up does,
         // for one pane rather than all of them.
         this.host.release?.(client.viewer, id)
+        // And it is not reading that pane's conversation either. A client that
+        // wants the chat without the terminal never sent an `attach` for it, so
+        // it never sends a `detach` for it and nothing is taken away here.
+        this.stopTranscript(client, id)
         this.announceWatch()
         return
       }
@@ -1868,6 +1961,61 @@ export class WebServer {
           return
         }
 
+        /* ------------------------------------------------ chat transcript
+         *
+         * The pane's conversation rather than its screen. Nothing about a file
+         * is decided here: this server hands a pane id to the host and gets
+         * back yes or no, and everything about which session that pane owns,
+         * where its transcript is filed and how the JSONL parses lives in
+         * electron/web/transcript-watcher.ts.
+         */
+
+        case 'transcript-watch': {
+          if (!this.host.transcriptWatch) {
+            failed('unsupported', "This Forge cannot read a pane's conversation for a browser.")
+            return
+          }
+          const id = wireString(request.sessionId, 128)
+          if (!id || !this.host.sessions().some((s) => s.id === id)) {
+            failed('unknown-session', 'That pane is gone.')
+            return
+          }
+          // Watching a pane this socket is already watching is answered `ok` and
+          // changes nothing. A second subscription for one browser would be two
+          // copies of every frame, and the commonest way to send this twice is a
+          // view remounting — which is not a mistake worth an error.
+          if (client.chats.has(id)) {
+            answer({ kind: 'ok' })
+            return
+          }
+          const sink = (update: ChatUpdate): void => this.sendTranscript(client, id, update)
+          if (!this.host.transcriptWatch(id, sink)) {
+            // Not an error and not exceptional: most panes are not Claude panes,
+            // and a Claude pane that has not spoken yet has written no file.
+            failed(
+              'failed',
+              'That pane has no conversation to read — it is not a Claude pane, or it has not said anything yet.'
+            )
+            return
+          }
+          client.chats.set(id, sink)
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'transcript-stop': {
+          if (!this.host.transcriptStop) {
+            failed('unsupported', "This Forge cannot read a pane's conversation for a browser.")
+            return
+          }
+          this.stopTranscript(client, wireString(request.sessionId, 128))
+          // `ok` whether or not this browser was watching, the same courtesy
+          // `push-unsubscribe` extends: a client tidying up should not have to
+          // know what the desktop believes.
+          answer({ kind: 'ok' })
+          return
+        }
+
         case 'visibility': {
           // No host hook, because there is nothing for a host to do with it:
           // this is a fact about one socket and it dies with the connection. It
@@ -1938,8 +2086,10 @@ export class WebServer {
     // arrives on the next tick, so a browser hung up on for a protocol
     // mismatch or a missed heartbeat would otherwise keep its desktop encoding
     // for it after the drop had supposedly ended things; `dropViewer` is
-    // idempotent, so the second call is free.
+    // idempotent, so the second call is free. The same reasoning, and the same
+    // idempotence, for the transcript tails behind this socket.
     this.dropViewer(client)
+    this.stopTranscripts(client)
     try {
       client.socket.close(code, reason)
     } catch {

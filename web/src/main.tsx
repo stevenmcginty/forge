@@ -36,6 +36,7 @@ import '@/components/rail/GitSection.css'
 import './styles.css'
 
 import { App } from './App'
+import { ChatPreview } from './components/ChatPreview'
 import { Preview } from './components/Preview'
 import { RepoProvider } from './lib/repo'
 import { ForgeProvider } from './state'
@@ -58,9 +59,13 @@ if (!host) throw new Error('index.html has no #root')
  * alongside one), and mounting it per-screen would throw away a repository's
  * tree every time the socket blinked.
  */
+const preview = __DEV_SERVER__ ? new URLSearchParams(location.search).get('preview') : null
+
 createRoot(host).render(
-  __DEV_SERVER__ && new URLSearchParams(location.search).get('preview') === 'feed' ? (
+  preview === 'feed' ? (
     <Preview />
+  ) : preview === 'chat' ? (
+    <ChatPreview />
   ) : (
     <ForgeProvider>
       <RepoProvider>

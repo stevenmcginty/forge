@@ -1,0 +1,64 @@
+/* ----------------------------------------------------- chat preview harness
+ *
+ * Dev-server-only chrome around ChatView (`?preview=chat`). The bar is
+ * scaffolding, styled quiet and mono so it never reads as product.
+ */
+
+.chatpreview {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-base);
+}
+
+.chatpreview__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-5);
+  flex: none;
+  padding: var(--s-3) var(--s-5);
+  border-bottom: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+}
+
+.chatpreview__label {
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  font-weight: 600;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.chatpreview__controls {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.chatpreview__controls button {
+  padding: var(--s-2) var(--s-4);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
+
+.chatpreview__controls button:hover {
+  background: var(--bg-hover);
+}
+
+.chatpreview__controls button[data-active='true'] {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.chatpreview__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}

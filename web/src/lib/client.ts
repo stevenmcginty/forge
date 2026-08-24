@@ -21,6 +21,7 @@ import {
   type WebSession,
   type WebShutdownReason
 } from '@shared/web'
+import type { ChatUpdate } from '@shared/chat'
 import type { GitSnapshot, Project, Workspace } from '@shared/types'
 
 /**
@@ -279,6 +280,11 @@ export interface ForgeHandlers {
   /** Terminal bytes. `replay` marks the catch-up buffer, which must clear first. */
   onData: (sessionId: string, data: string, replay: boolean, truncated: boolean) => void
   onExit: (sessionId: string, exitCode: number) => void
+  /**
+   * One update to a pane's conversation, for whichever surface asked for it.
+   * `ChatUpdate` says how two of these relate — see `watchTranscript`.
+   */
+  onTranscript: (sessionId: string, update: ChatUpdate) => void
   onSessions: (sessions: WebSession[]) => void
   onSessionStarted: (session: WebSession) => void
   onAttention: (sessionId: string, asking: boolean, prompt: string) => void
@@ -543,6 +549,17 @@ export class ForgeClient {
   /** sessionId → the geometry this browser is reading it at, re-sent on reconnect. */
   private subs = new Map<string, { cols: number; rows: number } | null>()
   /**
+   * Panes whose *conversation* this page is reading, re-asked for on reconnect.
+   *
+   * `subs`'s counterpart and deliberately not a flag on it: a chat view needs
+   * no terminal bytes and a terminal needs no transcript, which is the same
+   * split the desktop keeps (`chats` beside `subs` in electron/web/server.ts).
+   * It has to survive a dropped socket for the same reason `subs` does — the
+   * desktop tears every tail down with the socket that asked for it, so a
+   * fresh link is a link watching nothing until this list is said again.
+   */
+  private chats = new Set<string>()
+  /**
    * sessionId → the grid the desktop has actually been told, on *this* socket.
    *
    * `subs` cannot answer that question, and the difference is the point. `subs`
@@ -675,6 +692,7 @@ export class ForgeClient {
     this.clearRetry()
     this.dropSocket()
     this.subs.clear()
+    this.chats.clear()
     this.forgetPin()
     this.failWaiting('The link to the desktop closed.')
   }
@@ -1005,6 +1023,45 @@ export class ForgeClient {
     this.reAsked.delete(sessionId)
     if (!this.subs.delete(sessionId)) return
     this.send({ type: 'detach', sessionId })
+  }
+
+  /* ------------------------------------------------------------ transcripts */
+
+  /**
+   * Read a pane's conversation as well as its screen.
+   *
+   * Resolves with null when the desktop is reading it, and with a sentence
+   * when it will not — which is the ordinary answer rather than the unhappy
+   * one: most panes are not Claude panes, and a Claude pane that has not
+   * spoken yet has written no file to tail. That answer is *not* retried. The
+   * pane is forgotten instead, so no reconnect re-asks a question the desktop
+   * has already said no to, and the caller shows the sentence and offers the
+   * terminal.
+   *
+   * A link that could not carry the frame at all (`no-window`) is the one
+   * failure that leaves the pane on the list, because nothing was asked and
+   * nothing was answered: the reconnect's re-arm is what asks.
+   */
+  async watchTranscript(sessionId: string): Promise<string | null> {
+    this.chats.add(sessionId)
+    const result = await this.request({ kind: 'transcript-watch', sessionId })
+    if (result.kind === 'ok') return null
+    if (result.kind === 'failed' && result.code === 'no-window') return result.message
+    this.chats.delete(sessionId)
+    return result.kind === 'failed'
+      ? result.message
+      : 'The desktop answered that with something this page does not understand.'
+  }
+
+  /**
+   * Stop reading it. The desktop answers `ok` whether or not this browser was
+   * watching, so a caller tidying up need not know what either end believes —
+   * but a tail left running on a `~/.claude` file for a view that has gone is
+   * a watch nobody will ever stop, which is why every unmount sends this.
+   */
+  stopTranscript(sessionId: string): void {
+    if (!this.chats.delete(sessionId)) return
+    void this.request({ kind: 'transcript-stop', sessionId })
   }
 
   /**
@@ -1383,6 +1440,16 @@ export class ForgeClient {
         // spacing the replies also keeps up to 192KB-per-pane repaints from
         // landing on a phone as one wall.
         this.sendAttachWave([...this.subs])
+        // And every conversation this page is reading, for the same reason one
+        // step over: the desktop ends each of its transcript tails with the
+        // socket that asked for it (`stopTranscripts` in electron/web/server.ts),
+        // so a fresh link starts out watching nothing at all. Each is answered
+        // with a fresh `reset` snapshot, which the view replaces what it holds
+        // with — see shared/chat.ts — so a re-arm cannot double a transcript
+        // the way a second attach would double a terminal. A copy of the set,
+        // because a pane the desktop no longer has a conversation for is
+        // dropped from it by the answer.
+        for (const sessionId of [...this.chats]) void this.watchTranscript(sessionId)
         this.flushHeld()
         // The new socket starts from whatever the desktop last heard about
         // this tab, which is nothing: state the flag now rather than waiting
@@ -1414,6 +1481,10 @@ export class ForgeClient {
         this.told.delete(frame.sessionId)
         this.pendingReplay.delete(frame.sessionId)
         this.reAsked.delete(frame.sessionId)
+        // A pane that has ended writes no more transcript, and the desktop has
+        // already stopped its own tail (`pushExit` in electron/web/server.ts).
+        // Left here it would be re-asked for on every reconnect, forever.
+        this.chats.delete(frame.sessionId)
         this.handlers.onExit(frame.sessionId, typeof frame.exitCode === 'number' ? frame.exitCode : 0)
         return
 
@@ -1443,6 +1514,10 @@ export class ForgeClient {
 
       case 'git':
         this.handlers.onGit(frame.snapshot)
+        return
+
+      case 'transcript':
+        this.handlers.onTranscript(frame.sessionId, frame.update)
         return
 
       case 'result': {
@@ -1500,6 +1575,8 @@ export class ForgeClient {
           // have the beat hang a perfectly good link up over a closed pane.
           this.pendingReplay.delete(frame.sessionId)
           this.reAsked.delete(frame.sessionId)
+          // Same news for the conversation as for the screen; see `exit`.
+          this.chats.delete(frame.sessionId)
         }
         // Only `message` is meant to be shown; the codes exist so a client can
         // decide whether to retry or re-sync, not so it can compose a sentence.

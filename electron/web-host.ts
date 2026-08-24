@@ -16,10 +16,12 @@ import {
   type WebMirrorChunk,
   type WebMirrorConfig
 } from '@shared/web'
+import { isSessionId } from '@shared/session'
 import type {
   AgentPresence,
   CommandPresence,
   GitSnapshot,
+  LayoutNode,
   TunnelStatus,
   WebCommandEvent,
   WebMirrorEvent,
@@ -39,7 +41,9 @@ import { saveInboxImage } from './web/inbox'
 import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
 import { WebServer, type WebServerHost } from './web/server'
+import { disposeTranscriptWatchers, stopTranscript, watchTranscript } from './web/transcript-watcher'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
+import { transcriptPath } from './bridge/claude-transcripts'
 import { describe, FirebaseRest } from './companion/rest'
 import { NgrokTunnel, ensureNgrokExe, resolveNgrokExe } from './mobile-tunnel'
 /*
@@ -1152,6 +1156,64 @@ function snapshotForBrowser(): Pick<WebHelloOkFrame, 'projects' | 'profiles' | '
   }
 }
 
+/* ------------------------------------------------------- the chat transcript
+ *
+ * Turning a pane id into a file in `~/.claude`, which is the one thing
+ * electron/web/server.ts must not know how to do.
+ *
+ * It takes two facts from two different places, and neither is on the wire. The
+ * pane's **folder** comes from the live PTY session, because that is the cwd
+ * `applyClaudeSession` was handed when the pane launched and therefore the one
+ * Claude filed its transcript under (electron/pty-host.ts's `ptyCreate`, and
+ * `transcriptDirName` in shared/session.ts). The pane's **Claude session uuid**
+ * comes from the saved layout, because that is where Forge keeps it —
+ * `PaneLeaf.sessionId`, the same field resume-on-restore reads, and the reason a
+ * reopened pane gets its conversation back rather than an empty box.
+ *
+ * A pane that yields neither is not a failure. Most panes are not Claude panes,
+ * and a Claude pane that has not spoken yet has no file: both answer "no", and
+ * the browser is told in a sentence.
+ */
+
+/** The Claude session uuid the layout has for this pane, or '' — see `PaneLeaf.sessionId`. */
+function paneSessionId(paneId: string): string {
+  for (const project of getProjects()) {
+    const workspace = getWorkspace(project.id)
+    if (!workspace) continue
+    for (const tab of workspace.tabs) {
+      const leaf = findLeaf(tab.root, paneId)
+      // Found, but never given an id — a pane written before the field existed,
+      // or one whose profile is not Claude at all.
+      if (leaf) return leaf.sessionId ?? ''
+    }
+  }
+  return ''
+}
+
+/** One pane in a split tree, by id. */
+function findLeaf(node: LayoutNode, paneId: string): Extract<LayoutNode, { type: 'leaf' }> | null {
+  if (node.type === 'leaf') return node.id === paneId ? node : null
+  return findLeaf(node.a, paneId) ?? findLeaf(node.b, paneId)
+}
+
+/** Where this pane's conversation is on disk, or null when there is not one there. */
+function transcriptFor(paneId: string): string | null {
+  const session = getManager()
+    .list()
+    .find((s) => s.id === paneId)
+  if (!session?.cwd) return null
+  const sessionId = paneSessionId(paneId)
+  // Anything that is not a real UUID could not name a transcript Claude Code
+  // wrote, so it is refused rather than turned into a path — the same rule the
+  // planner watcher and the activity tracker apply, for the same reason.
+  if (!isSessionId(sessionId)) return null
+  const file = transcriptPath(session.cwd, sessionId)
+  // Checked now rather than left to the tail. A tail on a path that will never
+  // exist is a poll timer for nothing, and the browser deserves to be told there
+  // is nothing to read instead of watching an empty view forever.
+  return existsSync(file) ? file : null
+}
+
 /**
  * The agent chooser's "is this actually installed" column.
  *
@@ -1239,6 +1301,16 @@ async function start(): Promise<void> {
     projectAdd: (path, deviceName) => dispatchProjectAdd(path, deviceName),
     projectCreate: (name, parentDir, deviceName) => dispatchProjectCreate(name, parentDir, deviceName),
     saveInboxImage: (bytes, ext) => Promise.resolve(saveInboxImage(join(getDataDir(), 'web-inbox'), bytes, ext)),
+    // Resolved here and tailed there: this file is the half that knows what a
+    // pane is, electron/web/transcript-watcher.ts is the half that knows what a
+    // transcript is, and the server between them knows neither.
+    transcriptWatch: (paneId, onUpdate) => {
+      const file = transcriptFor(paneId)
+      if (!file) return false
+      watchTranscript(paneId, file, onUpdate)
+      return true
+    },
+    transcriptStop: (paneId, onUpdate) => stopTranscript(paneId, onUpdate),
     offerClipboardImage: (bytes) => {
       try {
         const img = nativeImage.createFromBuffer(Buffer.from(bytes))
@@ -1574,6 +1646,11 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   // ordinary shape of switching the link off a beat after moving a pane.
   if (geometryPush) clearTimeout(geometryPush)
   geometryPush = null
+  // Every browser's socket is about to be dropped, and each drop lets its own
+  // transcript tails go — this is the backstop for a watch whose socket died in
+  // a way the server never saw, so Forge does not quit still polling a file in
+  // `~/.claude`.
+  disposeTranscriptWatchers()
   releaseBlocker()
 
   const instance = server
