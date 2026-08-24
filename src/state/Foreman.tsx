@@ -290,6 +290,9 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
       // grey while it happens. The real state lands a beat later, on the
       // invoke's answer and then on every push.
       absorb({ paneId, status: 'starting', line: 'Brief taken — starting Foreman', seed, log: [] })
+      // And a notice in the status bar, where a glance lands: the footer line
+      // is small and the brief is minutes of planning before the pane moves.
+      actions.setNotice('Foreman is on it — reading the pane and planning the brief')
       try {
         const api = window.forge?.foreman
         if (!api) throw new Error('Foreman is not loaded — restart Forge.')
@@ -304,7 +307,7 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
         })
       }
     },
-    [absorb]
+    [absorb, actions]
   )
 
   const stop = useCallback(

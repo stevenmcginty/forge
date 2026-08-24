@@ -1092,6 +1092,10 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       watchTranscript: (sessionId) => client.watchTranscript(sessionId),
       stopTranscript: (sessionId) => client.stopTranscript(sessionId),
       foremanStart: async (paneId, seed) => {
+        // Said before the round trip, not after: the brief is minutes of
+        // planning before anything lands in the pane, and the human needs to
+        // hear "got it" the moment they let go of it.
+        pushNotice('Foreman is on it — reading the pane and planning the brief')
         const result = await client.request({ kind: 'foreman-start', paneId, seed })
         if (result.kind === 'failed') {
           pushNotice(result.message)
