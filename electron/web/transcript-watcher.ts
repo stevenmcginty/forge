@@ -87,6 +87,13 @@ const MAX_TURNS = 500
  */
 const FLUSH_MS = 150
 
+/**
+ * How long pane output is coalesced before it provokes a drain of the tail.
+ * Below FLUSH_MS on purpose: the drain this schedules feeds the flush, and a
+ * nudge slower than the flush would add a frame of lag instead of removing one.
+ */
+const NUDGE_MS = 100
+
 /** Longest `thinking` carried. A long think is a summary here, not a payload. */
 const MAX_THINKING_CHARS = 2000
 
@@ -137,6 +144,8 @@ type Watch = {
   pending: ChatTurn[]
   pendingIds: Set<string>
   flush: NodeJS.Timeout | null
+  /** A pending output-provoked drain — see `nudgeTranscript`. */
+  nudge: NodeJS.Timeout | null
 }
 
 /** Keyed by pane id — one file, one parse, however many browsers. */
@@ -200,7 +209,8 @@ export function watchTranscript(paneId: string, file: string, onUpdate: Sub): vo
     truncated: sizeOf(file) > SEED_TAIL_BYTES,
     pending: [],
     pendingIds: new Set(),
-    flush: null
+    flush: null,
+    nudge: null
   }
   watches.set(paneId, w)
   // Reads what is already on disk before it returns, synchronously, so the
@@ -231,6 +241,31 @@ export function stopAll(paneId: string): void {
   w.tail.stop()
   if (w.flush) clearTimeout(w.flush)
   w.flush = null
+  if (w.nudge) clearTimeout(w.nudge)
+  w.nudge = null
+}
+
+/**
+ * The pane just produced terminal output; its transcript very likely just grew.
+ *
+ * The tail's own folder watch is the backstop, not the pacemaker: an fs event
+ * has to survive the OS noticing, a 200ms settle, and — when the watch handle
+ * has died quietly — a one-second poll before a line reaches a reader. Screen
+ * output arrives on the same flush the terminal view paints from, so using it
+ * as the trigger reads the JSONL on the same beat the other two views move to.
+ *
+ * Trailing-edge coalesced, like the client's parse timer and for the same
+ * reason: a streaming reply is dozens of chunks a second, and the drain that
+ * matters is the one after the last of them.
+ */
+export function nudgeTranscript(paneId: string): void {
+  const w = watches.get(paneId)
+  if (!w || w.nudge) return
+  w.nudge = setTimeout(() => {
+    w.nudge = null
+    if (watches.get(w.paneId) !== w) return
+    w.tail.drain()
+  }, NUDGE_MS)
 }
 
 /** Every watch, everywhere — the way out of `disposeWebHost`. */

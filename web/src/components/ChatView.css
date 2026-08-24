@@ -46,6 +46,23 @@
   padding: var(--s-8) var(--s-7) var(--s-8);
 }
 
+/*
+ * On a phone the page is the glass. The reading margin that earns its keep
+ * inside a 760px column is dead space at 390px wide — Steve's screenshot of a
+ * pane losing a fifth of its width to gutters is why these exist — so the
+ * column runs near the edges and the person's bubble gives up most of its
+ * left-hand setback.
+ */
+.app[data-mobile] .chatview__column,
+[data-mobile] .chatview__column {
+  padding: var(--s-6) var(--s-4) var(--s-8);
+}
+
+.app[data-mobile] .chatview__turn[data-role='user'],
+[data-mobile] .chatview__turn[data-role='user'] {
+  padding-left: 8%;
+}
+
 /* ------------------------------------------------------------------ empty */
 
 .chatview__empty {

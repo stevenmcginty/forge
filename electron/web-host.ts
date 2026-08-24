@@ -41,7 +41,7 @@ import { saveInboxImage } from './web/inbox'
 import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
 import { WebServer, type WebServerHost } from './web/server'
-import { disposeTranscriptWatchers, stopTranscript, watchTranscript } from './web/transcript-watcher'
+import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
 import { transcriptPath } from './bridge/claude-transcripts'
 import { describe, FirebaseRest } from './companion/rest'
@@ -1385,7 +1385,13 @@ async function start(): Promise<void> {
 
   // The browser sees what the window sees, from the same coalesced flush.
   unsubscribePty = addPtySink({
-    onData: (id, data) => instance.pushData(id, data),
+    onData: (id, data) => {
+      instance.pushData(id, data)
+      // Screen output means the transcript very likely just grew; reading it on
+      // this beat is what keeps the chat view moving with the terminal instead
+      // of a folder watch behind it. A no-op for panes nobody is reading.
+      nudgeTranscript(id)
+    },
     onSpawn: (id) => {
       // A pane that has just opened is the single moment a client has to build
       // an xterm and attach, so it gets its own frame as well as the list — see
