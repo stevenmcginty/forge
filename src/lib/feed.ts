@@ -375,8 +375,9 @@ export function stripLiveComposer(text: string): string {
  */
 const MODEL_PATTERNS: RegExp[] = [
   /\bmodel\s*:\s*([\w.-]+)/i,
-  /\b(claude-(?:opus|sonnet|haiku)-[\w.-]+)/i,
-  /\b((?:opus|sonnet|haiku)\s+\d+(?:\.\d+)?)\b/i,
+  /\b(claude-(?:fable|opus|sonnet|haiku)-[\w.-]+)/i,
+  /\b((?:fable|opus|sonnet|haiku)\s+\d*(?:\.\d+)?)\b/i,
+  /\b(fable)\b/i,
   /\b(gemini-[\w.-]+)/i,
   /\b(gpt-[\w.-]+)/i,
   /\b(grok-[\w.-]+)/i,
@@ -551,7 +552,7 @@ function isBanner(line: string): boolean {
   if (!t) return true
   if (/claude code/i.test(t)) return true
   if (/^\s*\/[a-z]/.test(t) && t.length < 40) return true
-  if (/sonnet|opus|haiku|grok|gemini|codex|opencode/i.test(t) && t.length < 80) return true
+  if (/fable|sonnet|opus|haiku|grok|gemini|codex|opencode/i.test(t) && t.length < 80) return true
   if (/^~\//.test(t) || /^[A-Z]:\\/.test(t)) return true
   return false
 }

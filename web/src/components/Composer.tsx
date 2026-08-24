@@ -111,15 +111,22 @@ export function Composer({
   const modeRef = useRef<HTMLButtonElement | null>(null)
   const allRef = useRef<HTMLButtonElement | null>(null)
   const [pickedEffort, setPickedEffort] = useState<EffortLevel | null>(null)
+  const [pickedModel, setPickedModel] = useState<string | null>(null)
 
   const modelList = models ?? []
   const effortList = effortLevels ?? []
   const modeList = modes ?? []
   const showPicks =
     (onModel && modelList.length > 0) || (onEffort && effortList.length > 0) || (onMode && modeList.length > 0)
-  const currentModel = currentModelId ? (modelList.find((m) => m.id === currentModelId) ?? null) : null
+  const activeModelId = pickedModel ?? currentModelId
+  const currentModel = activeModelId ? (modelList.find((m) => m.id === activeModelId) ?? null) : null
   const currentMode = currentModeId ? (modeList.find((m) => m.id === currentModeId) ?? null) : null
   const effortLabel = pickedEffort ? (effortList.find((l) => l.id === pickedEffort)?.label ?? null) : null
+
+  useEffect(() => {
+    setPickedModel(null)
+  }, [currentModelId])
+
   /** Bypass is red, plan is blue, accept-edits is green — on whichever chip carries the mode. */
   const modeTone =
     currentModeId === 'bypass'
@@ -140,9 +147,10 @@ export function Composer({
         {modelList.map((model) => (
           <PopoverRow
             key={model.id}
-            selected={model.id === currentModelId}
+            selected={model.id === (pickedModel ?? currentModelId)}
             onClick={() => {
               setOpenPick(null)
+              setPickedModel(model.id)
               onModel(model.id)
             }}
           >
