@@ -11,6 +11,7 @@ import {
   type ServerFrame
 } from '@shared/mobile'
 import type { AgentProfile, Project, Workspace } from '@shared/types'
+import type { ForemanState } from '@shared/foreman'
 
 /**
  * The phone's end of the Forge Mobile link.
@@ -70,6 +71,12 @@ export interface LinkPicture {
    * out, because from a sofa it is indistinguishable from a broken desktop.
    */
   canControl: boolean
+  /**
+   * Foreman's state per driven pane, keyed by pane id. From `hello-ok` on
+   * connect and kept current by the `foreman` push — a pane that has never
+   * been driven has no entry, which reads the same as `off`.
+   */
+  foreman: Record<string, ForemanState>
 }
 
 export interface LinkHandlers {
@@ -338,6 +345,20 @@ export class Link {
 
   op(op: Omit<Extract<ClientFrame, { t: 'op' }>, 't'>): void {
     this.send({ t: 'op', ...op })
+  }
+
+  /**
+   * Foreman's two verbs, thin wrappers over `op` because that is what they
+   * travel as — held to the same authorisation a layout op is, and answered
+   * by the desktop's main process rather than its window. The state itself
+   * comes back as a `foreman` push, so there is nothing to return.
+   */
+  foremanStart(projectId: string, paneId: string, seed: string): void {
+    this.send({ t: 'op', op: 'foreman-start', projectId, paneId, seed })
+  }
+
+  foremanStop(projectId: string, paneId: string): void {
+    this.send({ t: 'op', op: 'foreman-stop', projectId, paneId })
   }
 
   /**
@@ -677,6 +698,21 @@ export class Link {
         return
       }
 
+      case 'foreman': {
+        // Coerced, not trusted: the frame is typed but the wire is not. A
+        // malformed state is dropped rather than merged, which would draw a
+        // switch lit on a pane nobody is driving. The whole state replaces
+        // the pane's entry — there is no diff to merge.
+        const state = frame.state
+        if (!this.picture || !state || typeof state !== 'object' || typeof state.paneId !== 'string') return
+        this.picture = {
+          ...this.picture,
+          foreman: { ...this.picture.foreman, [state.paneId]: state }
+        }
+        this.handlers.onPicture(this.picture)
+        return
+      }
+
       case 'err':
         // The credential itself was rejected. Said here rather than left to the
         // close that follows, because only the `err` frame distinguishes "this
@@ -746,7 +782,10 @@ function pictureOf(frame: HelloOkFrame): LinkPicture {
     // `=== true` and nothing looser. This decides whether a screen offers to
     // drive somebody's desktop, and the only value that should reach it is a
     // desktop that said so in as many words.
-    canControl: frame.canControl === true
+    canControl: frame.canControl === true,
+    // Absent is an older desktop, which reads the same as an empty map:
+    // nothing is being driven.
+    foreman: Object.fromEntries((frame.foreman ?? []).map((state) => [state.paneId, state]))
   }
 }
 

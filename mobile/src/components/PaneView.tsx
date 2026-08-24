@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MobileSession } from '@shared/mobile'
+import { FOREMAN_SEED_MAX, type ForemanState } from '@shared/foreman'
 import type { Link } from '../lib/link'
 import { mountTerm, onViewportSettled, type TermHost } from '../lib/term'
 import { KeyBar } from './KeyBar'
@@ -42,6 +43,18 @@ export interface PaneViewProps {
   title: string
   fontSize: number
   onBack: () => void
+  /** Foreman's state for this pane, when the desktop has one for it. */
+  foreman: ForemanState | undefined
+  /** The switch is a Claude-pane thing: Foreman drives a Claude session. */
+  drivable: boolean
+  /**
+   * A pane that already holds a Claude session can be taken over with no seed
+   * at all — the sheet's blank answer means exactly that, so it is only
+   * offered where it means something.
+   */
+  canTakeOver: boolean
+  /** Switch Foreman on (with the seed) or off. Resolved by App, which knows the project. */
+  onForeman: (on: boolean, seed: string) => void
 }
 
 /**
@@ -63,12 +76,48 @@ function keybarWanted(): boolean {
   }
 }
 
-export function PaneView({ link, session, title, fontSize, onBack }: PaneViewProps): React.JSX.Element {
+export function PaneView({
+  link,
+  session,
+  title,
+  fontSize,
+  onBack,
+  foreman,
+  drivable,
+  canTakeOver,
+  onForeman
+}: PaneViewProps): React.JSX.Element {
   const holder = useRef<HTMLDivElement | null>(null)
   const host = useRef<TermHost | null>(null)
   const [composing, setComposing] = useState(false)
   const [draft, setDraft] = useState('')
   const [keys, setKeys] = useState(keybarWanted)
+
+  /* -------------------------------------------------------------- foreman
+   *
+   * The same switch, seed sheet, footer and log the browser pane header has.
+   * The state is never local — every draw of it comes off the picture, so a
+   * switch flipped at the desk or in a browser shows its true shape here.
+   */
+  const foremanOn = !!foreman && foreman.status !== 'off'
+  const [seeding, setSeeding] = useState(false)
+  const [seedDraft, setSeedDraft] = useState('')
+  const [logOpen, setLogOpen] = useState(false)
+
+  /** The sheet closes itself the moment Foreman is on, whichever surface flipped it. */
+  useEffect(() => {
+    if (foremanOn) setSeeding(false)
+  }, [foremanOn])
+
+  const startForeman = (): void => {
+    const seed = seedDraft.trim().slice(0, FOREMAN_SEED_MAX)
+    // A blank seed means "take over what is here", which only means something
+    // for a pane already holding a conversation — otherwise Start waits.
+    if (!seed && !canTakeOver) return
+    setSeeding(false)
+    setSeedDraft('')
+    onForeman(true, seed)
+  }
 
   useEffect(() => {
     const container = holder.current
@@ -175,6 +224,30 @@ export function PaneView({ link, session, title, fontSize, onBack }: PaneViewPro
             {session.cols}×{session.rows}
           </span>
         </div>
+        {/*
+          Foreman's switch — Claude panes only, lit while it drives. Tap-off
+          stops at once on every surface; tap-on opens the seed sheet below
+          rather than starting blind.
+        */}
+        {drivable ? (
+          <button
+            type="button"
+            className="bar-foreman"
+            data-on={foremanOn ? 'true' : undefined}
+            aria-pressed={foremanOn}
+            title={
+              foremanOn
+                ? 'Foreman is driving this pane. Tap to take the keyboard back.'
+                : 'Let Foreman drive this pane end to end from one line.'
+            }
+            onClick={() => {
+              if (foremanOn) onForeman(false, '')
+              else setSeeding(true)
+            }}
+          >
+            FOREMAN
+          </button>
+        ) : null}
         <button
           type="button"
           className="bar-keys"
@@ -186,7 +259,95 @@ export function PaneView({ link, session, title, fontSize, onBack }: PaneViewPro
         </button>
       </header>
 
+      {/*
+        The seed sheet. One line, one question — the same words the browser
+        asks — and the blank answer is a real one only where the pane already
+        holds a session: "take over what is here".
+      */}
+      {seeding ? (
+        <div className="seed-sheet">
+          <input
+            className="seed-sheet-input"
+            value={seedDraft}
+            maxLength={FOREMAN_SEED_MAX}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="What's the job? One line is enough."
+            autoFocus
+            onChange={(e) => setSeedDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                startForeman()
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setSeeding(false)
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="seed-sheet-start"
+            onClick={startForeman}
+            disabled={!seedDraft.trim() && !canTakeOver}
+          >
+            Start
+          </button>
+          <button
+            type="button"
+            className="seed-sheet-cancel"
+            aria-label="Cancel"
+            onClick={() => {
+              setSeeding(false)
+              setSeedDraft('')
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
+
       <div className="term-holder" ref={holder} onClick={() => host.current?.focus()} />
+
+      {/*
+        Foreman's status line, while there is a job to describe — the same
+        sentence the desktop's footer and the browser's footer show. Tapping it
+        opens the decision log.
+      */}
+      {foreman && foreman.status !== 'off' ? (
+        <button type="button" className="foreman-line" data-status={foreman.status} onClick={() => setLogOpen(true)}>
+          <span className="foreman-line-tag">{foreman.status.toUpperCase()}</span>
+          <span className="foreman-line-text">{foreman.line || 'Working'}</span>
+        </button>
+      ) : null}
+
+      {/*
+        The decision log: the only record of why a driven pane got the answer
+        it got. Bottom sheet over the terminal, newest at the bottom, closed
+        with the one control in its head.
+      */}
+      {logOpen && foreman ? (
+        <div className="foreman-log" role="dialog" aria-label="Foreman's decision log">
+          <div className="foreman-log-head">
+            <span className="foreman-log-title">Foreman</span>
+            <button type="button" className="foreman-log-close" aria-label="Close" onClick={() => setLogOpen(false)}>
+              ✕
+            </button>
+          </div>
+          <div className="foreman-log-list">
+            {foreman.log.length === 0 ? <p className="foreman-log-empty">Nothing decided yet.</p> : null}
+            {foreman.log.map((entry, i) => (
+              <div className="foreman-log-entry" data-kind={entry.kind} key={`${entry.at}-${i}`}>
+                <span className="foreman-log-kind">{entry.kind}</span>
+                <span className="foreman-log-at">{clockOf(entry.at)}</span>
+                <span className="foreman-log-text">{entry.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {composing ? (
         <div className="compose">
@@ -217,6 +378,13 @@ export function PaneView({ link, session, title, fontSize, onBack }: PaneViewPro
       ) : null}
     </div>
   )
+}
+
+/** HH:MM off a Foreman log entry's epoch, the way the decision log shows it. */
+function clockOf(at: number): string {
+  const date = new Date(at)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 /**

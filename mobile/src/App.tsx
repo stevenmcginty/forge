@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { MOBILE_PORT, MOBILE_PROTO, type MobileSession } from '@shared/mobile'
+import { isClaudeCommand } from '@shared/agents'
 import { Link, deviceId, type LinkPicture, type LinkState } from './lib/link'
 import {
   forgetToken,
@@ -496,6 +497,20 @@ export function App(): React.JSX.Element {
           title={screen.title}
           fontSize={13}
           onBack={() => setScreen({ at: 'browse', projectId: projectOfSession(picture, screen.session.id) })}
+          /*
+           * Foreman's controls, resolved here because the pane screen knows a
+           * session and the op needs a project. Every draw of the state comes
+           * off the picture — the phone never guesses what the desktop said.
+           */
+          foreman={picture.foreman[screen.session.id]}
+          drivable={sessionIsClaude(picture, screen.session.id)}
+          canTakeOver={Boolean(sessionLeafOf(picture, screen.session.id)?.sessionId)}
+          onForeman={(on, seed) => {
+            const projectId = projectOfSession(picture, screen.session.id)
+            if (!projectId) return
+            if (on) link.foremanStart(projectId, screen.session.id, seed)
+            else link.foremanStop(projectId, screen.session.id)
+          }}
         />
       ) : (
         <Browser
@@ -834,6 +849,25 @@ function Connect({
  * A pane's id *is* its PTY session id (see PaneLeaf in shared/types.ts), which
  * is what makes this a lookup rather than a join.
  */
+/** The layout leaf behind a pane id, or null for a pane no tab names. */
+function sessionLeafOf(picture: LinkPicture, sessionId: string): { profileId: string; sessionId?: string } | null {
+  for (const workspace of Object.values(picture.workspaces)) {
+    for (const tab of workspace.tabs) {
+      const leaf = leavesOf(tab.root).find((l) => l.id === sessionId)
+      if (leaf) return leaf
+    }
+  }
+  return null
+}
+
+/** Whether this pane's profile is Claude Code — the panes Foreman can drive. */
+function sessionIsClaude(picture: LinkPicture, sessionId: string): boolean {
+  const leaf = sessionLeafOf(picture, sessionId)
+  if (!leaf) return false
+  const profile = picture.profiles.find((p) => p.id === leaf.profileId)
+  return isClaudeCommand(profile?.command ?? '')
+}
+
 function projectOfSession(picture: LinkPicture, sessionId: string): string | null {
   for (const [projectId, workspace] of Object.entries(picture.workspaces)) {
     for (const tab of workspace.tabs) {

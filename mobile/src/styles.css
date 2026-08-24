@@ -893,3 +893,225 @@ body {
   font-size: 13px;
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
 }
+
+/* ------------------------------------------------------- foreman in a pane
+ *
+ * The switch in the bar, the seed sheet, the status footer and the decision
+ * log — the phone's half of Foreman, in the same family as the bar's own
+ * buttons: the same outline, the same radius, `--volt` as the lit state,
+ * because that is this app's "this thing is on".
+ */
+
+/* Claude panes only, and lit while it drives. Before the keys button, so the
+   right edge stays the phone's own controls and the middle says who is typing. */
+.bar-foreman {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 10px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font: 600 10px/1 var(--font-mono, monospace);
+  letter-spacing: 0.08em;
+}
+
+.bar-foreman[data-on='true'] {
+  border-color: var(--volt);
+  color: var(--volt);
+}
+
+/* The seed sheet — the same row shape as the compose row below the terminal. */
+.seed-sheet {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.seed-sheet-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font: 15px/1.4 system-ui, sans-serif;
+}
+
+.seed-sheet-input:focus {
+  outline: none;
+  border-color: var(--volt);
+}
+
+.seed-sheet-input::placeholder {
+  color: var(--dim);
+}
+
+.seed-sheet-start {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 16px;
+  background: var(--volt);
+  border: 0;
+  border-radius: var(--radius);
+  color: #0b0c0e;
+  font: 600 14px/1 system-ui, sans-serif;
+}
+
+.seed-sheet-start:disabled {
+  opacity: 0.4;
+}
+
+.seed-sheet-cancel {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  background: none;
+  border: 0;
+  color: var(--dim);
+  font-size: 15px;
+}
+
+/* The status footer, while a job runs. One line; a tap opens the log. */
+.foreman-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  text-align: left;
+}
+
+.foreman-line-tag {
+  flex: 0 0 auto;
+  font: 600 10px/1 var(--font-mono, monospace);
+  letter-spacing: 0.08em;
+  color: var(--volt);
+}
+
+.foreman-line[data-status='error'] .foreman-line-tag {
+  color: var(--warn);
+}
+
+.foreman-line[data-status='done'] .foreman-line-tag {
+  color: var(--dim);
+}
+
+.foreman-line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  color: var(--dim);
+}
+
+/* The decision log — a bottom sheet over the terminal, newest at the bottom. */
+.foreman-log {
+  position: absolute;
+  inset: auto 0 0 0;
+  max-height: 60%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-radius: var(--radius) var(--radius) 0 0;
+  z-index: 5;
+}
+
+.foreman-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.foreman-log-title {
+  font: 600 14px/1 system-ui, sans-serif;
+  color: var(--ink);
+}
+
+.foreman-log-close {
+  min-width: 44px;
+  min-height: 44px;
+  background: none;
+  border: 0;
+  color: var(--dim);
+  font-size: 15px;
+}
+
+.foreman-log-list {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px 10px calc(10px + var(--sa-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.foreman-log-entry {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 5px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.foreman-log-entry:active {
+  background: var(--bg);
+}
+
+.foreman-log-kind {
+  font: 600 10px/1 var(--font-mono, monospace);
+  letter-spacing: 0.06em;
+  color: var(--volt);
+}
+
+.foreman-log-entry[data-kind='error'] .foreman-log-kind {
+  color: var(--warn);
+}
+
+.foreman-log-entry[data-kind='seed'] .foreman-log-kind,
+.foreman-log-entry[data-kind='done'] .foreman-log-kind {
+  color: var(--dim);
+}
+
+.foreman-log-at {
+  font: 11px/1 var(--font-mono, monospace);
+  color: var(--dim);
+}
+
+.foreman-log-text {
+  min-width: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.foreman-log-empty {
+  margin: 0;
+  padding: 8px 6px;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+/* The log sheet anchors to the pane, so a pane carrying one becomes its box. */
+.pane:has(.foreman-log) {
+  position: relative;
+}
