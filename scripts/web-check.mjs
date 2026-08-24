@@ -1940,6 +1940,47 @@ menu.find((item) => item.label === 'Open Forge')?.click()
 log(opened === 1 && window.visible === true, 'clicking the way back gives the window back')
 window.visible = false
 
+/* ================================================================ phase 11a
+ *
+ * Foreman, from a browser, against the real host.
+ *
+ * What can be driven here without a brain: the real snapshot carries the
+ * foreman states to a connecting browser, the additive exports answer without
+ * a host behind them, and a real foreman-stop travels the whole chain —
+ * browser, server boundary, web-host hook, electron/foreman — and is held to
+ * the boundary rule against this desktop's *real* session list. The start
+ * verb is deliberately not exercised: it opens a real Claude session, and the
+ * boundary rules it shares with stop (live pane, capped seed) are
+ * scripts/web-smoke.mjs's to assert against a recording host.
+ */
+
+console.log('\nforeman from a browser')
+
+const foreman = await import('../electron/foreman/ipc.ts')
+const resultOf = (tab, rid) => tab.frames.find((f) => f.type === 'result' && f.rid === rid)
+
+log(
+  Array.isArray(frameOf(held, 'hello-ok').foreman),
+  "the real host's hello-ok carries the foreman states, so a reconnecting browser hears 'nothing is driven' as an answer rather than as silence"
+)
+log(
+  foreman.foremanList().length === 0,
+  'and the exported list answers with no host behind it, which is the shape a freshly booted desktop has'
+)
+
+sendFrame(held, { type: 'request', rid: 'r-fm-stop', body: { kind: 'foreman-stop', paneId: 'tray-1' } })
+await waitFor(() => resultOf(held, 'r-fm-stop'), 5000, 'the real foreman-stop')
+log(
+  resultOf(held, 'r-fm-stop').body.kind === 'ok',
+  'a foreman-stop for a live pane travels the whole chain — browser, server, web-host, the foreman module — and answers ok'
+)
+sendFrame(held, { type: 'request', rid: 'r-fm-gone', body: { kind: 'foreman-stop', paneId: 'never-existed' } })
+await waitFor(() => resultOf(held, 'r-fm-gone'), 5000, 'the refused foreman-stop')
+log(
+  resultOf(held, 'r-fm-gone').body.code === 'unknown-session',
+  'and the same verb for a pane this desktop does not have is refused at the boundary, against the real session list'
+)
+
 /* ================================================================ phase 11b
  *
  * Quitting from the tray, which must be the full shutdown the app has always

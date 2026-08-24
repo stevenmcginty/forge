@@ -213,7 +213,8 @@ async function main() {
     WEB_MAX_SESSIONS,
     IPC_MAX_SESSIONS,
     AUTH_MAX_FAILURES,
-    AUTH_LOCKOUT_MS
+    AUTH_LOCKOUT_MS,
+    FOREMAN_SEED_MAX
   } = await import(pathToFileURL(join(scratch, 'web.mjs')).href)
 
   const google = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -355,6 +356,15 @@ async function main() {
   const writes = []
   const clipboardOffers = []
   let pasteCommand = ''
+  /*
+   * Foreman's hooks, as a recording host: every start and stop the server
+   * hands over, and the states a snapshot will carry. The phase below drives
+   * the boundary rules (live pane, seed cap) against these rather than a real
+   * brain — scripts/foreman-check.mjs owns the loop itself.
+   */
+  const foremanStarts = []
+  const foremanStops = []
+  const foremanStates = []
   const inboxDir = join(scratch, 'inbox')
   mkdirSync(inboxDir, { recursive: true })
   /**
@@ -419,10 +429,18 @@ async function main() {
       },
       resize: (id, cols, rows, viewer) => owners.noteWish(id, viewer, cols, rows),
       release: (viewer, id) => owners.release(viewer, id),
-      snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: WORKSPACES }),
+      snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: WORKSPACES, foreman: [...foremanStates] }),
       layout: async (op, deviceName) => {
         ops.push({ op, deviceName })
         return layoutAnswer
+      },
+      foremanStart: async (request) => {
+        foremanStarts.push(request)
+        return { ok: true }
+      },
+      foremanStop: async (paneId) => {
+        foremanStops.push(paneId)
+        return { ok: true }
       },
       gitStatus: async (projectId) => (projectId === 'p1' ? SNAPSHOT : null),
       // Deliberately deferred, so two requests can be in flight at once and
@@ -1064,6 +1082,96 @@ async function main() {
     `a payload over MAX_IMAGE_BASE64 (${MAX_IMAGE_BASE64}) is limit, and the socket stays up`
   )
   log(browser.closed === null, 'and the oversize image did not hang up the socket')
+
+  /* ------------------------------------------ 6c. foreman, from a browser
+   *
+   * The switch in a pane header, seen from this side of the socket: the
+   * state pushes reach a connected browser, a connecting one gets them in
+   * the snapshot, and the two verbs are held to the boundary rules — a live
+   * pane (the same authorisation `close-pane` gets) and a capped seed. The
+   * loop behind the switch is scripts/foreman-check.mjs's to prove; the host
+   * here records what the server hands over, which is the part this server
+   * owns.
+   */
+
+  const driven = {
+    paneId: 'w1',
+    status: 'waiting',
+    line: 'Waiting for the pane',
+    seed: 'a website for a sweet shop',
+    log: []
+  }
+  server.pushForeman(driven)
+  await waitFor(() => browser.first('foreman'), 5000, 'the foreman frame')
+  log(
+    browser.first('foreman').state.paneId === 'w1' && browser.first('foreman').state.status === 'waiting',
+    'a Foreman state pushed on the desktop reaches a connected browser as a foreman frame'
+  )
+
+  // The snapshot half: a browser connecting *after* the push learns the same
+  // thing from hello-ok, without waiting for the next state change.
+  foremanStates.push(driven)
+  const foremanTab = await connect()
+  foremanTab.send({
+    type: 'hello',
+    proto: WEB_PROTO,
+    idToken: mint(),
+    client: '0.0.0-smoke',
+    deviceId: 'browser-foreman',
+    deviceName: 'Chrome on Windows'
+  })
+  await waitFor(() => foremanTab.first('hello-ok'), 8000, "the foreman browser's hello-ok")
+  log(
+    Array.isArray(foremanTab.first('hello-ok').foreman) &&
+      foremanTab.first('hello-ok').foreman.some((s) => s.paneId === 'w1'),
+    'and hello-ok carries the current Foreman states, so a reconnecting browser learns the switch is on from the snapshot'
+  )
+
+  // The seed cap. Capped rather than refused, exactly as `write` is capped:
+  // the seed is a line a person typed, and the honest answer to a very long
+  // one is its first FOREMAN_SEED_MAX characters.
+  browser.send({
+    type: 'request',
+    rid: 'r-fm-long',
+    body: { kind: 'foreman-start', paneId: 'w1', seed: 'x'.repeat(FOREMAN_SEED_MAX + 500) }
+  })
+  await waitFor(() => browser.result('r-fm-long'), 5000, 'the over-long foreman-start')
+  log(
+    browser.result('r-fm-long').body.kind === 'ok' &&
+      foremanStarts[0]?.seed === 'x'.repeat(FOREMAN_SEED_MAX),
+    `a seed over FOREMAN_SEED_MAX (${FOREMAN_SEED_MAX}) is capped to it and starts, not refused`
+  )
+
+  // The pane-liveness rule, both verbs. Same authorisation as `close-pane`:
+  // an authenticated browser naming a pane that is live right now.
+  browser.send({
+    type: 'request',
+    rid: 'r-fm-gone-start',
+    body: { kind: 'foreman-start', paneId: 'never-existed', seed: 'a job' }
+  })
+  await waitFor(() => browser.result('r-fm-gone-start'), 5000, 'the unknown-session foreman-start')
+  log(
+    browser.result('r-fm-gone-start').body.code === 'unknown-session' && foremanStarts.length === 1,
+    'foreman-start for a pane the client cannot see is refused as unknown-session, and the host was never asked'
+  )
+  browser.send({
+    type: 'request',
+    rid: 'r-fm-gone-stop',
+    body: { kind: 'foreman-stop', paneId: 'never-existed' }
+  })
+  await waitFor(() => browser.result('r-fm-gone-stop'), 5000, 'the unknown-session foreman-stop')
+  log(
+    browser.result('r-fm-gone-stop').body.code === 'unknown-session' && foremanStops.length === 0,
+    'and so is foreman-stop, for the same reason and with the same courtesy'
+  )
+
+  // A stop for a live pane goes through and answers ok.
+  browser.send({ type: 'request', rid: 'r-fm-stop', body: { kind: 'foreman-stop', paneId: 'w1' } })
+  await waitFor(() => browser.result('r-fm-stop'), 5000, 'the healthy foreman-stop')
+  log(
+    browser.result('r-fm-stop').body.kind === 'ok' && foremanStops[0] === 'w1',
+    'while foreman-stop for a live pane reaches the host and answers ok'
+  )
 
   /* ------------------------------------------------------ the auth refresh */
 

@@ -43,6 +43,9 @@ export {
   WEB_WS_PATH,
   webSocketUrl
 } from '../../shared/web'
+// Foreman's seed ceiling, from the file that owns it, so the boundary
+// assertion below is against the shipped number and not a copy of it.
+export { FOREMAN_SEED_MAX } from '../../shared/foreman'
 /**
  * The two `MAX_SESSIONS` constants, both of them.
  *
