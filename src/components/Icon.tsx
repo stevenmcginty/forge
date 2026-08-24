@@ -45,6 +45,7 @@ export type IconName =
   | 'refresh'
   | 'note'
   | 'pin'
+  | 'foreman'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -285,6 +286,14 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M6 2.4h4" />
       <path d="M6.7 2.4v4.1L4.7 9.4h6.6L9.3 6.5V2.4" />
       <path d="M8 9.4v4.2" />
+    </>
+  ),
+  // A hard hat: the one person on the job who is not holding a tool.
+  foreman: (
+    <>
+      <path d="M2.3 11.4h11.4" />
+      <path d="M4.6 11.4V8.6a3.4 3.4 0 0 1 6.8 0v2.8" />
+      <path d="M6.9 5.6V3.4h2.2v2.2" />
     </>
   )
 }

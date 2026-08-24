@@ -1,0 +1,355 @@
+/*
+ * Foreman's furniture inside a pane: the header switch, the seed strip, the
+ * standing footer and the decision log.
+ *
+ * Every colour here is a token. The switch in particular has one job in every
+ * theme — "something other than you has this keyboard" — so it borrows the
+ * accent, the one colour Forge reserves for live/focused/go, and never a hex.
+ */
+
+/* One number, two users: the footer's own height, and the offset the log sits
+   at above it. They cannot drift apart. */
+.pane {
+  --foreman-foot-h: 22px;
+}
+
+/* ------------------------------------------------------------------ switch */
+
+/*
+ * Outside .pane__actions, like the phone glyph: the actions strip fades in on
+ * hover, and whether a pane is being driven is a standing property of the pane,
+ * not a control you go looking for.
+ */
+.pane__foreman {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 16px;
+  padding: 0 var(--s-3) 0 var(--s-2);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+  background: none;
+  color: var(--text-dim);
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.pane__foreman-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.pane:hover .pane__foreman,
+.pane[data-focused='true'] .pane__foreman {
+  color: var(--text-muted);
+}
+
+.pane .pane__foreman:hover {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-softer);
+}
+
+/* Lit. Deliberately loud: a wall of grey chips with one volt one in it is
+   readable across a room, which is the whole requirement. */
+.pane .pane__foreman[data-on='true'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.pane .pane__foreman[data-on='true'] .pane__foreman-dot {
+  opacity: 1;
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+/* A turn is in flight — the one status where something is being typed. */
+.pane .pane__foreman[data-status='driving'] .pane__foreman-dot {
+  animation: foreman-pulse 1.4s var(--ease-in-out) infinite;
+}
+
+@keyframes foreman-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.28;
+  }
+}
+
+.pane .pane__foreman[data-status='done'] {
+  color: var(--ok);
+  border-color: var(--line-hairline);
+}
+
+.pane .pane__foreman[data-status='error'] {
+  color: var(--danger);
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+}
+
+/* -------------------------------------------------------------- seed strip */
+
+.pane__seed {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-3) var(--s-3) var(--s-4);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--accent-line);
+}
+
+.pane__seed-mark {
+  flex: none;
+  margin-top: var(--s-3);
+  color: var(--accent);
+}
+
+.pane__seed-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.pane__seed-input {
+  width: 100%;
+  height: 26px;
+  padding: 0 var(--s-3);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--t-md);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.pane__seed-input:focus {
+  border-color: var(--accent-line);
+}
+
+.pane__seed-hint {
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+}
+
+.pane__seed-go {
+  flex: none;
+  height: 26px;
+  padding: 0 var(--s-5);
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.pane__seed-go:hover {
+  background: var(--accent-wash);
+}
+
+.pane__seed-go[disabled] {
+  color: var(--text-dim);
+  background: none;
+  border-color: var(--line-hairline);
+}
+
+.pane__seed-cancel {
+  flex: none;
+  width: 24px;
+  height: 26px;
+  padding: 0;
+}
+
+/* ------------------------------------------------------------------ footer */
+
+.pane__foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: var(--foreman-foot-h);
+  padding: 0 var(--s-2) 0 var(--s-4);
+  background: var(--bg-panel);
+  border-top: 1px solid var(--line-soft);
+  color: var(--accent);
+}
+
+.pane__foot[data-status='done'] {
+  color: var(--ok);
+}
+
+.pane__foot[data-status='error'] {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.pane__foot-line {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0;
+  color: inherit;
+  text-align: left;
+}
+
+.pane__foot-mark {
+  flex: none;
+}
+
+.pane__foot-text {
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+}
+
+.pane__foot[data-status='error'] .pane__foot-text {
+  color: var(--danger);
+}
+
+.pane__foot-line:hover .pane__foot-text {
+  color: var(--text-primary);
+}
+
+.pane__foot-dismiss {
+  flex: none;
+  width: 20px;
+  height: 18px;
+  padding: 0;
+}
+
+/* -------------------------------------------------------------- the log */
+
+/*
+ * Over the pane's lower third rather than in a window of its own: what Foreman
+ * decided only means anything next to the screen it decided it about, and a
+ * floating panel would cover the pane you are checking it against.
+ */
+.pane__flog {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--foreman-foot-h);
+  height: 34%;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel-raised);
+  border-top: 1px solid var(--accent-line);
+  box-shadow: var(--shadow-ambient);
+  z-index: var(--z-divider);
+}
+
+.pane__flog-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 24px;
+  padding: 0 var(--s-2) 0 var(--s-4);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.pane__flog-seed {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.pane__flog-close {
+  flex: none;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  margin-left: auto;
+}
+
+.pane__flog-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-3) var(--s-4);
+  list-style: none;
+}
+
+.pane__flog-row {
+  display: grid;
+  grid-template-columns: 62px 34px 1fr;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.pane__flog-row:last-child {
+  border-bottom: none;
+}
+
+.pane__flog-kind {
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-xs);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+}
+
+/* The three kinds worth picking out of a wall of answers: what was asked, what
+   Foreman wrote back, and how it ended. */
+.pane__flog-kind[data-kind='seed'],
+.pane__flog-kind[data-kind='brief'],
+.pane__flog-kind[data-kind='hire'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-softer);
+}
+
+.pane__flog-kind[data-kind='done'] {
+  color: var(--ok);
+}
+
+.pane__flog-kind[data-kind='error'] {
+  color: var(--danger);
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+}
+
+.pane__flog-at {
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+  padding-top: 1px;
+}
+
+.pane__flog-text {
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pane__flog-empty {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}

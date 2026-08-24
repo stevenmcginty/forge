@@ -18,6 +18,7 @@ import { useActiveWorkspace, useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
+import { ForemanFooter, ForemanSeed, ForemanToggle } from './ForemanBar'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow } from './Popover'
 import './TerminalPane.css'
@@ -90,6 +91,23 @@ export function TerminalPane({
   const watcher = watcherChip(runtime)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(leaf.title)
+
+  /*
+   * Foreman.
+   *
+   * Claude panes only — including GLM, which is Claude Code pointed at Z.ai and
+   * so answers `isClaudeCommand` — because driving a pane means reading its
+   * questions and writing its answers, and only a Claude session asks the kind
+   * of question Foreman knows how to answer. A pwsh pane gets no switch at all
+   * rather than a disabled one: there is nothing to explain.
+   *
+   * The two flags live here rather than inside the parts because the strip and
+   * the log are opened from a *third* place — the header switch — and a pane
+   * owns its own furniture.
+   */
+  const foremanAble = isClaudeCommand(profile.command)
+  const [seedOpen, setSeedOpen] = useState(false)
+  const [logOpen, setLogOpen] = useState(false)
 
   // The spec only matters on first attach; keep it in a ref so a font-size
   // change never tears the terminal down.
@@ -396,6 +414,8 @@ export function TerminalPane({
           </span>
         ) : null}
 
+        {foremanAble ? <ForemanToggle paneId={leaf.id} onSeed={() => setSeedOpen(true)} /> : null}
+
         {/* Neither a phone nor a browser changes anything about this pane by
             reading it (see setPhoneWatched). They are named anyway: "somebody is
             reading this from away" is worth knowing on its own. */}
@@ -471,6 +491,17 @@ export function TerminalPane({
         </div>
       </header>
 
+      {foremanAble && seedOpen ? (
+        <ForemanSeed
+          paneId={leaf.id}
+          canTakeOver={runtime.status === 'live'}
+          onClose={() => {
+            setSeedOpen(false)
+            terminalHost.focus(leaf.id)
+          }}
+        />
+      ) : null}
+
       <div
         className="pane__terminal"
         ref={containerRef}
@@ -486,6 +517,10 @@ export function TerminalPane({
           })
         }}
       />
+
+      {foremanAble ? (
+        <ForemanFooter paneId={leaf.id} logOpen={logOpen} onToggleLog={() => setLogOpen((v) => !v)} />
+      ) : null}
 
       {/* A zero-size anchor parked at the cursor, so the context menu is the
           same Popover primitive as every other menu in Forge. */}
