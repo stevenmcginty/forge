@@ -409,6 +409,17 @@ async function main() {
   const layoutOps = []
   /** Every folder a browser has asked this desktop to add, in order. */
   const projectAdds = []
+  /**
+   * Every Foreman start and stop this browser has asked for, in order.
+   *
+   * The loop behind the switch belongs to scripts/foreman-check.mjs and the
+   * boundary rules to scripts/web-smoke.mjs; what is asserted here is the half
+   * neither of those can see — that a thumb on the top bar's pill names the
+   * *active pane* and carries the words that were typed. So the host records
+   * and agrees, the same shape `layout` above takes, and nothing is driven.
+   */
+  const foremanStarts = []
+  const foremanStops = []
 
   /*
    * What `electron/web-host.ts` does with a folder on its way to the rail,
@@ -508,6 +519,14 @@ async function main() {
       layout: async (op, deviceName) => {
         layoutOps.push({ op, deviceName })
         return null
+      },
+      foremanStart: async (request) => {
+        foremanStarts.push(request)
+        return { ok: true }
+      },
+      foremanStop: async (paneId) => {
+        foremanStops.push(paneId)
+        return { ok: true }
       },
       agents: async (commands) => ({ agents: [], commands: commands.map((c) => ({ command: c, exe: c, found: true, unknown: false })) }),
       /*
@@ -1431,6 +1450,88 @@ async function main() {
     20_000,
     'the switch back at phone width'
   )
+
+  /* ------------------------------------- foreman, from the top bar, with a thumb
+   *
+   * The switch used to sit in the pane header, and on a phone that header is a
+   * strip floating over the terminal a few characters wide — so it moved up
+   * here, beside the desktop's screen and the notification bell, and acts on
+   * whichever pane the desk says is active. Three things have to be true of it
+   * and none of them can be seen from the wire: it is *there* on a Claude pane
+   * and *gone* on a shell one, tapping it drops the seed box into the band
+   * under the bar, and Start carries the typed words to the active pane's id.
+   *
+   * The pill is absent rather than disabled on a shell pane, which is why this
+   * counts elements rather than reading a `disabled` attribute: a control that
+   * can never mean anything for a pwsh terminal is not news a phone has room
+   * to carry.
+   */
+  log(
+    (await page.locator('.titlebar__foreman').count()) === 0,
+    'the top bar carries no FOREMAN pill while the active pane is a shell — absent, not greyed out'
+  )
+
+  // The same tab, with the active pane wearing the Claude profile. A push and
+  // not a click, because which pane is active is the desktop's answer to give
+  // (decision 5) and this is that answer arriving.
+  const drivenTab = {
+    ...splitTab,
+    root: { ...splitTab.root, b: { type: 'leaf', id: SECOND_ID, profileId: 'claude', title: '' } }
+  }
+  pushWorkspace([drivenTab, asideTab], 't1')
+  await waitFor(() => page.locator('.titlebar__foreman').count().then((n) => n === 1), 20_000, 'the FOREMAN pill')
+  log(
+    (await page.locator('.titlebar__foreman').isDisabled()) === false,
+    'and it appears — live and tappable — the moment the active pane is a Claude one'
+  )
+
+  await page.click('.titlebar__foreman')
+  await waitFor(() => page.locator('.foreman-drop__input').count().then((n) => n === 1), 10_000, 'the seed box')
+  /*
+   * Under the bar and above the tabs, in the band the offline and reconnect
+   * strips use — measured rather than looked at, because a strip that overlaps
+   * the row it hangs from is exactly the sort of thing a screenshot at one
+   * width flatters. 390px is the width this control was moved for.
+   */
+  const foremanBand = await page.evaluate(() => {
+    const box = (selector) => {
+      const el = document.querySelector(selector)
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }
+    }
+    return { bar: box('.titlebar'), drop: box('.foreman-drop'), tabs: box('.tabstrip') }
+  })
+  log(
+    foremanBand.drop !== null &&
+      foremanBand.drop.top >= foremanBand.bar.bottom - 0.5 &&
+      (foremanBand.tabs === null || foremanBand.tabs.top >= foremanBand.drop.bottom - 0.5) &&
+      foremanBand.drop.left >= -0.5 &&
+      foremanBand.drop.right <= 390.5,
+    `a tap on it drops the seed box into its own band at 390px — under the bar, above the tabs, overlapping neither (bar ends ${Math.round(foremanBand.bar?.bottom ?? -1)}, box ${Math.round(foremanBand.drop?.top ?? -1)}–${Math.round(foremanBand.drop?.bottom ?? -1)}, tabs start ${Math.round(foremanBand.tabs?.top ?? -1)})`
+  )
+
+  const foremanSeed = 'build the sweet shop site, and mind the bank holiday'
+  await page.fill('.foreman-drop__input', foremanSeed)
+  await page.screenshot({ path: join(shots, 'foreman-390.png') })
+  const startsBefore = foremanStarts.length
+  await page.click('.foreman-drop__start')
+  await waitFor(() => foremanStarts.length > startsBefore, 10_000, 'the foreman-start')
+  const askedStart = foremanStarts.at(-1)
+  log(
+    askedStart.paneId === SECOND_ID && askedStart.seed === foremanSeed,
+    `and Start reaches the desktop as a foreman-start for the active pane, carrying what was typed (${askedStart.paneId}, ${askedStart.seed.length} characters)`
+  )
+  log(
+    (await page.locator('.foreman-drop').count()) === 0,
+    'while the box closes behind it, so a running job is never offered a second seed'
+  )
+
+  // The shell profile back, so nothing below this reads a pane wearing an
+  // agent's face — and the pill goes with it, which is the absent half again.
+  pushWorkspace([splitTab, asideTab], 't1')
+  await waitFor(() => page.locator('.titlebar__foreman').count().then((n) => n === 0), 20_000, 'the pill to go again')
+
   await emulation.send('Emulation.setTouchEmulationEnabled', { enabled: false })
   await page.setViewportSize({ width: 1440, height: 900 })
   await waitFor(() => page.getAttribute('.app', 'data-mobile').then((v) => v === null), 10_000, 'the folded layout back')

@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PaneLeaf } from '@shared/types'
 import type { ChatBlock, ChatTurn } from '@shared/chat'
-import { FOREMAN_SEED_MAX } from '@shared/foreman'
-import { isClaudeCommand } from '@shared/agents'
 import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
 import { transcriptFor } from '../lib/cache'
@@ -28,12 +26,6 @@ import { Feed } from './Feed'
  * has.
  */
 const PARSE_INTERVAL_MS = 80
-
-/**
- * How tall the seed strip's textarea grows before it scrolls instead — about
- * eight lines of `.pane__seed-input`'s own font/line-height/padding.
- */
-const SEED_MAX_GROW_PX = 160
 
 /** HH:MM off a Foreman log entry's epoch, the way the decision log shows it. */
 function clockOf(at: number): string {
@@ -190,61 +182,19 @@ export function PaneView({
 
   /* ------------------------------------------------------------ foreman
    *
-   * The switch, the seed strip and the decision log — the browser's half of
-   * what the desktop's footer does. The state is never local: every draw of
-   * it comes off the `foreman` push, so a switch flipped at the desk (or on
-   * the phone) shows its true shape here without anybody saying so.
+   * The status line and the decision log — the browser's half of what the
+   * desktop's footer does. The switch and its seed box are not here: they sit
+   * in the top bar and act on whichever pane is active (see TopBar), because a
+   * pane header on a phone floats over the terminal a few characters wide and
+   * one control in one place beats the same control in two. What stays is what
+   * genuinely belongs to *this* pane — what Foreman is doing in it, and why.
+   *
+   * The state is never local: every draw of it comes off the `foreman` push,
+   * so a switch flipped at the desk (or on the phone) shows its true shape
+   * here without anybody saying so.
    */
   const foreman = state.picture?.foreman[leaf.id]
-  const foremanOn = !!foreman && foreman.status !== 'off'
-  /** Claude panes only: Foreman drives a Claude session, not a shell. */
-  const drivable = isClaudeCommand(profile.command)
-  /**
-   * A pane that already holds a Claude session can be taken over with no seed
-   * at all — the seed strip's blank answer means exactly that, so it is only
-   * offered where it means something.
-   */
-  const canTakeOver = Boolean(leaf.sessionId)
-  const [seeding, setSeeding] = useState(false)
-  const [seedDraft, setSeedDraft] = useState('')
   const [logOpen, setLogOpen] = useState(false)
-  const seedField = useRef<HTMLTextAreaElement | null>(null)
-
-  /**
-   * The strip closes itself the moment Foreman is on, whichever surface
-   * switched it on — a strip left open over a running job would offer a
-   * second seed for a job that already has one.
-   */
-  useEffect(() => {
-    if (foremanOn) setSeeding(false)
-  }, [foremanOn])
-
-  // Rows 1 through ~8 grow with the text, past that it scrolls in place — a
-  // seed can be a whole pasted brief, not just the one line the placeholder
-  // suggests. Same shape as the composer's own autosize, sized for this box's
-  // smaller font.
-  useEffect(() => {
-    const el = seedField.current
-    if (!el) return
-    el.style.height = '0px'
-    const next = Math.min(el.scrollHeight, SEED_MAX_GROW_PX)
-    el.style.height = `${next}px`
-    el.style.overflowY = el.scrollHeight > SEED_MAX_GROW_PX ? 'auto' : 'hidden'
-  }, [seedDraft, seeding])
-
-  const switchForeman = useCallback(() => {
-    if (!live || !alive) return
-    if (foremanOn) void actions.foremanStop(leaf.id)
-    else setSeeding(true)
-  }, [live, alive, foremanOn, leaf.id, actions])
-
-  const startForeman = useCallback(() => {
-    const seed = seedDraft.trim().slice(0, FOREMAN_SEED_MAX)
-    if (!seed && !canTakeOver) return
-    setSeeding(false)
-    setSeedDraft('')
-    void actions.foremanStart(leaf.id, seed)
-  }, [seedDraft, canTakeOver, leaf.id, actions])
 
   /**
    * Whether this pane has a live shell, readable from inside the mount effect
@@ -903,90 +853,8 @@ export function PaneView({
               RECONNECTING
             </span>
           ) : null}
-          {/*
-            Foreman's switch. Claude panes only — Foreman drives a Claude
-            session — and lit with the pane's own accent while it is on, so
-            "somebody else is typing here" is the first thing the header says.
-            Click-off stops at once, on every surface; click-on opens the seed
-            strip below rather than starting blind.
-          */}
-          {drivable && !cached ? (
-            <button
-              type="button"
-              className="pane__foreman mono"
-              data-on={foremanOn ? 'true' : undefined}
-              aria-pressed={foremanOn}
-              disabled={!live || !alive}
-              title={
-                foremanOn
-                  ? 'Foreman is driving this pane. Switch it off to take the keyboard back.'
-                  : 'Let Foreman drive this pane end to end from one line.'
-              }
-              onClick={switchForeman}
-            >
-              FOREMAN
-            </button>
-          ) : null}
         </div>
       </header>
-
-      {/*
-        The seed strip — Foreman's one question before it starts. A line or a
-        whole pasted brief, and the blank answer is a real one where the pane
-        already holds a session: "take over what is here". Where it does not,
-        Start waits for words, because a job with no seed and no session is a
-        switch with nothing behind it.
-      */}
-      {seeding ? (
-        <div className="pane__seed">
-          <textarea
-            ref={seedField}
-            className="pane__seed-input"
-            value={seedDraft}
-            rows={1}
-            // The desktop caps at FOREMAN_SEED_MAX on the way in and this link
-            // caps again at the boundary; the attribute keeps the box itself
-            // from collecting a paragraph the desktop will only cut.
-            maxLength={FOREMAN_SEED_MAX}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            placeholder="What's the job? A line or a whole brief — both work."
-            autoFocus
-            onChange={(e) => setSeedDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                startForeman()
-              }
-              if (e.key === 'Escape') {
-                e.preventDefault()
-                setSeeding(false)
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="pane__seed-start"
-            onClick={startForeman}
-            disabled={!seedDraft.trim() && !canTakeOver}
-            title={canTakeOver ? 'Start Foreman — a blank seed takes over the session this pane already holds' : 'Type one line for Foreman to start from'}
-          >
-            Start
-          </button>
-          <button
-            type="button"
-            className="pane__seed-cancel"
-            aria-label="Cancel"
-            onClick={() => {
-              setSeeding(false)
-              setSeedDraft('')
-            }}
-          >
-            ✕
-          </button>
-        </div>
-      ) : null}
 
       {/*
         A tap takes the caret; a swipe does not.

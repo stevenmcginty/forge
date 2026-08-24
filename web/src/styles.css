@@ -3946,24 +3946,30 @@ button.astatus__mode:not(:disabled):hover {
   }
 }
 
-/* ---------------------------------------------------------- foreman in a pane
+/* ------------------------------------------------------------------- foreman
  *
- * The switch, the seed strip, the status footer and the decision log — the
- * browser's half of Foreman. Tokens only, the pane's own accent for the lit
- * state, so a driven pane says so in its agent's colour and nothing here can
- * drift from the desktop's look.
+ * The switch and its seed box in the top bar, the status footer and the
+ * decision log in the pane. Tokens only, the driven pane's own accent for the
+ * lit state, so a driven pane says so in its agent's colour and nothing here
+ * can drift from the desktop's look.
  */
 
 /*
- * The switch. Same family as the WAITING chip — a bordered mono pill — but a
- * button, because it is the one control in the header. Lit with the pane's
- * accent while Foreman is on: "somebody else is typing here" is the loudest
- * fact about the pane and the accent is how this page says who.
+ * The switch, in the bar's trailing cluster beside the screen and the bell.
+ *
+ * Same family as the pane's WAITING chip — a bordered mono pill — but a button,
+ * and it lives up here rather than in the pane header because on a phone that
+ * header is a floating strip a few characters wide. Lit with the driven pane's
+ * accent while a job is running: "somebody else is typing in there" is the
+ * loudest fact on the page and the accent is how this page says who. `done`
+ * and `error` take the colours the status footer already spends on them, so
+ * the pill and the line under the pane never disagree.
  */
-.pane__foreman {
+.titlebar__foreman {
+  flex: none;
   font: 600 10px / 1 var(--font-mono);
   letter-spacing: 0.08em;
-  padding: 4px 8px;
+  padding: 6px 8px;
   border-radius: var(--r-sm);
   color: var(--text-dim);
   background: transparent;
@@ -3976,39 +3982,74 @@ button.astatus__mode:not(:disabled):hover {
     box-shadow var(--dur-fast) var(--ease-out);
 }
 
-.pane__foreman:hover:not(:disabled) {
+.titlebar__foreman:hover:not(:disabled) {
   color: var(--text-primary);
   border-color: var(--pane-accent, var(--accent));
 }
 
-.pane__foreman:disabled {
+.titlebar__foreman:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-.pane__foreman[data-on='true'] {
+/* The box is open: the pill is pressed in, whether or not a job is running. */
+.titlebar__foreman[data-open='true'] {
+  color: var(--text-primary);
+  border-color: var(--pane-accent, var(--accent));
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 10%, transparent);
+}
+
+.titlebar__foreman[data-on='true'] {
   color: var(--pane-accent, var(--accent));
   border-color: color-mix(in srgb, var(--pane-accent, var(--accent)) 55%, transparent);
   background: color-mix(in srgb, var(--pane-accent, var(--accent)) 12%, transparent);
   box-shadow: 0 0 10px color-mix(in srgb, var(--pane-accent, var(--accent)) 22%, transparent);
 }
 
+.titlebar__foreman[data-status='done'] {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  box-shadow: none;
+}
+
+.titlebar__foreman[data-status='error'] {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  box-shadow: none;
+}
+
+/* A thumb's pill: the same 36px the other top-bar buttons are tapped at. */
+.app[data-mobile] .titlebar__foreman {
+  min-height: 30px;
+  padding: 8px 7px;
+  font-size: 9px;
+}
+
 /*
- * The seed strip. One line, one question, the pane's accent on the start
- * button — the same gesture as the composer's send, in the same seat.
+ * The seed box, dropped under the bar.
+ *
+ * The same band the offline and reconnect strips use — it pushes the page down
+ * rather than covering any of it — with the driven pane's accent on Start, the
+ * same gesture as the composer's send. It wraps rather than squeezing: at
+ * 390px the box owns its own row and Start sits under it, because three
+ * controls fighting over a phone's width is how a paste ends up in a field two
+ * characters wide.
  */
-.pane__seed {
+.foreman-drop {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s-2);
   flex: none;
-  padding: var(--s-2) var(--s-3);
+  padding: var(--s-2) var(--s-4);
   background: var(--bg-panel);
   border-bottom: 1px solid var(--line-hairline);
 }
 
-.pane__seed-input {
-  flex: 1 1 auto;
+.foreman-drop__input {
+  flex: 1 1 200px;
   min-width: 0;
   min-height: 30px;
   padding: 6px var(--s-3);
@@ -4021,17 +4062,25 @@ button.astatus__mode:not(:disabled):hover {
   overflow-y: hidden;
 }
 
-.pane__seed-input:focus {
+.foreman-drop__input:focus {
   outline: none;
   border-color: var(--pane-accent, var(--accent));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--pane-accent, var(--accent)) 35%, transparent);
 }
 
-.pane__seed-input::placeholder {
+.foreman-drop__input::placeholder {
   color: var(--text-muted);
 }
 
-.pane__seed-start {
+.foreman-drop__hint {
+  flex: 1 1 140px;
+  min-width: 0;
+  font-size: var(--t-xs);
+  line-height: 1.3;
+  color: var(--text-muted);
+}
+
+.foreman-drop__start {
   flex: none;
   padding: 6px 14px;
   font: 600 12.5px / 1 var(--font-ui);
@@ -4043,16 +4092,16 @@ button.astatus__mode:not(:disabled):hover {
   transition: filter var(--dur-fast) var(--ease-out);
 }
 
-.pane__seed-start:hover:not(:disabled) {
+.foreman-drop__start:hover:not(:disabled) {
   filter: brightness(1.12);
 }
 
-.pane__seed-start:disabled {
+.foreman-drop__start:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-.pane__seed-cancel {
+.foreman-drop__cancel {
   flex: none;
   width: 26px;
   height: 26px;
@@ -4066,9 +4115,22 @@ button.astatus__mode:not(:disabled):hover {
   cursor: pointer;
 }
 
-.pane__seed-cancel:hover {
+.foreman-drop__cancel:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
+}
+
+/* A phone: the box takes the first row on its own, Start and ✕ the second. */
+.app[data-mobile] .foreman-drop {
+  padding: var(--s-2) var(--s-3);
+}
+
+.app[data-mobile] .foreman-drop__input {
+  flex-basis: 100%;
+}
+
+.app[data-mobile] .foreman-drop__start {
+  min-height: 32px;
 }
 
 /*
@@ -4226,15 +4288,9 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 /*
- * A phone reads the header with less room, so the switch tightens beside the
- * chips rather than crowding the title out. The log keeps its scroll and its
+ * A phone reads the pane with less room. The log keeps its scroll and its
  * head; a phone's pane is full-height, so 55% of it is plenty.
  */
-[data-mobile] .pane__foreman {
-  padding: 4px 6px;
-  font-size: 9px;
-}
-
 [data-mobile] .pane__foreman-line {
   min-height: 34px;
   padding: var(--s-2) var(--s-3);
@@ -4242,25 +4298,6 @@ button.astatus__mode:not(:disabled):hover {
 
 [data-mobile] .pane__foreman-text {
   font-size: 13px;
-}
-
-/*
- * The seed strip on a phone: an agent pane's header floats absolutely over the
- * top of the pane there (see "An agent pane on a phone" above), so a strip
- * that simply follows it in normal flow renders at the pane's very top —
- * exactly where the header's floating trailing cluster, FOREMAN pill
- * included, sits. Pushed down by the same 52px the feed/chat/terminal already
- * reserve to clear that cluster, and wrapped so the input owns its own row
- * with Start/cancel on one beneath it, rather than the three fighting for a
- * width already this narrow.
- */
-[data-mobile] .pane[data-kind='agent'] .pane__seed {
-  margin-top: 52px;
-  flex-wrap: wrap;
-}
-
-[data-mobile] .pane[data-kind='agent'] .pane__seed-input {
-  flex-basis: 100%;
 }
 
 @media (prefers-reduced-transparency: reduce) {
