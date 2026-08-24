@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PaneLeaf } from '@shared/types'
-import { isClaudeCommand, isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import type { ChatBlock, ChatTurn } from '@shared/chat'
+import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
 import { applyChatUpdate, EMPTY_CHAT, type ChatFeed } from '../lib/chat-turns'
-import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines } from '@/lib/feed'
+import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines, type FeedBlock } from '@/lib/feed'
 import { imageFilesFromDataTransfer, packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 import { publishPaneStatus, publishPaneView, type PaneFace } from '../lib/pane-status'
@@ -59,6 +60,57 @@ function ChatIcon(): ReactNode {
       <path d="M13.4 9.2a1.4 1.4 0 0 1-1.4 1.4H6.2L3.4 13V4.2a1.4 1.4 0 0 1 1.4-1.4h7.2a1.4 1.4 0 0 1 1.4 1.4z" />
     </svg>
   )
+}
+
+/** Convert screen feed blocks into conversational chat turns when no disk transcript exists. */
+function feedBlocksToChatTurns(blocks: FeedBlock[]): ChatTurn[] {
+  const turns: ChatTurn[] = []
+  for (const block of blocks) {
+    const text = (block.text || block.lines.map((l) => l.text || l.runs.map((r) => r.text).join('')).join('\n')).trim()
+    if (!text) continue
+
+    if (block.role === 'user') {
+      turns.push({
+        id: block.id,
+        role: 'user',
+        at: 0,
+        blocks: [{ kind: 'text', text }]
+      })
+    } else if (block.role === 'tool') {
+      const firstLine = block.lines[0]?.text || text.split('\n')[0] || 'tool'
+      const toolBlock: ChatBlock = {
+        kind: 'tool',
+        name: firstLine.slice(0, 30),
+        gist: text.slice(0, 120)
+      }
+      const lastTurn = turns[turns.length - 1]
+      if (lastTurn && lastTurn.role === 'assistant') {
+        lastTurn.blocks.push(toolBlock)
+      } else {
+        turns.push({
+          id: block.id,
+          role: 'assistant',
+          at: 0,
+          blocks: [toolBlock]
+        })
+      }
+    } else {
+      // agent or system prose
+      const textBlock: ChatBlock = { kind: 'text', text }
+      const lastTurn = turns[turns.length - 1]
+      if (lastTurn && lastTurn.role === 'assistant') {
+        lastTurn.blocks.push(textBlock)
+      } else {
+        turns.push({
+          id: block.id,
+          role: 'assistant',
+          at: 0,
+          blocks: [textBlock]
+        })
+      }
+    }
+  }
+  return turns
 }
 
 /**
@@ -200,34 +252,30 @@ export function PaneView({
   /**
    * A Claude pane has a third face, and it is the one it opens on.
    *
-   * The chat is the session's own JSONL read as a conversation
-   * (`transcript-watch` in shared/web.ts, rendered by <ChatView/>), and it is
-   * the best reading of a Claude pane there is — the feed and the cards are
-   * both lenses over a *screen*, and this is the thing the screen is a
-   * rendering of. So it is the default, held to whatever this browser last
-   * chose across every Claude pane rather than per pane id; see lib/view-pref.ts.
+  /**
+   * An agent pane (Claude, Antigravity, Grok, GPT, etc.) has three faces:
+   * 1. Chat view: Conversational reading surface (JSONL transcript or structured feed turns)
+   * 2. Cards / Output view: Visual cards parsed from the terminal stream
+   * 3. Terminal view: The raw interactive xterm
    *
-   * Everything else is unchanged. Grok/OpenCode have no such file, so they
-   * open on the cards read off their alternate screen; Claude Code's own
-   * terminal scrolls, and a shell has no turns to cut.
+   * View preference is preserved across agent panes.
    */
-  const claude = agent && isClaudeCommand(profile.command)
-  const [view, setView] = useState<PaneFace>(() => (claude ? getClaudeView() : agent ? 'feed' : 'term'))
+  const [view, setView] = useState<PaneFace>(() => (agent ? getClaudeView() : 'term'))
   const feed = view === 'feed'
   const chat = view === 'chat'
   /** Either conversation view: the terminal is behind it and must not be touched. */
   const overlaid = feed || chat
 
   /**
-   * One face forward, and remember it for the next Claude pane.
+   * One face forward, and remember it for the next agent pane.
    */
-  const nextView: PaneFace = claude ? (chat ? 'feed' : feed ? 'term' : 'chat') : feed ? 'term' : 'feed'
+  const nextView: PaneFace = agent ? (chat ? 'feed' : feed ? 'term' : 'chat') : 'term'
   const showView = useCallback(
     (next: PaneFace) => {
       setView(next)
-      if (claude) setClaudeView(next)
+      if (agent) setClaudeView(next)
     },
-    [claude]
+    [agent]
   )
 
   /* ------------------------------------------------------- reading the screen */
@@ -454,6 +502,16 @@ export function PaneView({
   const lookAgain = useCallback(() => {
     void actionsRef.current.watchTranscript(leaf.id).then((refusal) => setChatRefusal(refusal ?? ''))
   }, [leaf.id])
+
+  /**
+   * The conversational turns to show in ChatView:
+   * Uses high-fidelity JSONL disk transcript if available (e.g. Claude),
+   * otherwise converts dynamic screen feed blocks into structured turns (e.g. Antigravity, Grok, GPT).
+   */
+  const effectiveTurns = useMemo(() => {
+    if (chatFeed.turns.length > 0) return chatFeed.turns
+    return feedBlocksToChatTurns(transcript.blocks)
+  }, [chatFeed.turns, transcript.blocks])
 
   /* ------------------------------------------------------ the live terminal */
 
@@ -868,8 +926,8 @@ export function PaneView({
         */}
         {chatArmed ? (
           <div className="pane__chat" aria-hidden={!chat || undefined} data-shown={chat ? 'true' : 'false'}>
-            <ChatView turns={chatFeed.turns} truncated={chatFeed.truncated} busy={live && transcript.status.busy} />
-            {chatRefusal ? (
+            <ChatView turns={effectiveTurns} truncated={chatFeed.truncated} busy={live && transcript.status.busy} />
+            {chatRefusal && effectiveTurns.length === 0 ? (
               <div className="pane__chat-note" role="note">
                 <p>{chatRefusal}</p>
                 <div className="pane__chat-note-actions">
