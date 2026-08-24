@@ -5,6 +5,7 @@ import { AccountSection } from './AccountSection'
 import { AdvancedSection } from './AdvancedSection'
 import { AgentsSection } from './AgentsSection'
 import { AppearanceSection } from './AppearanceSection'
+import { ForemanSection } from './ForemanSection'
 import { ModelsSection } from './ModelsSection'
 import { ShotsSection } from './ShotsSection'
 import { MobileSection } from './MobileSection'
@@ -32,6 +33,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName; blur
   { id: 'terminal', label: 'Terminal', icon: 'panel', blurb: 'how panes behave' },
   { id: 'models', label: 'Models & APIs', icon: 'key', blurb: 'keys and brains' },
   { id: 'voice', label: 'Voice', icon: 'voice', blurb: 'dictation and relay' },
+  { id: 'foreman', label: 'Foreman', icon: 'foreman', blurb: 'the agent that drives a pane' },
   { id: 'appearance', label: 'Appearance', icon: 'palette', blurb: 'themes and type' },
   { id: 'screenshots', label: 'Screenshots', icon: 'camera', blurb: 'the shelf' },
   { id: 'mobile', label: 'Forge Mobile', icon: 'phone', blurb: 'your terminals, on your phone' },
@@ -120,6 +122,7 @@ export function SettingsPage(): ReactNode {
             {section === 'terminal' ? <TerminalSection /> : null}
             {section === 'models' ? <ModelsSection /> : null}
             {section === 'voice' ? <VoiceSection /> : null}
+            {section === 'foreman' ? <ForemanSection /> : null}
             {section === 'appearance' ? <AppearanceSection /> : null}
             {section === 'screenshots' ? <ShotsSection /> : null}
             {section === 'mobile' ? <MobileSection /> : null}

@@ -1717,3 +1717,33 @@
   margin-bottom: var(--s-4);
 }
 
+
+/* ------------------------------------------------------------------ foreman
+ *
+ * The standing brief. A real editing surface rather than a settings field: it
+ * is house rules a model reads before every job, so it gets the monospace and
+ * the room a document needs, and none of `.field__input`'s one-line geometry.
+ */
+
+.sbrief__blurb {
+  margin-bottom: var(--s-4);
+}
+
+.sbrief {
+  width: 100%;
+  min-height: 200px;
+  padding: var(--s-4);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  resize: vertical;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.sbrief:focus {
+  border-color: var(--accent-line);
+  outline: none;
+}

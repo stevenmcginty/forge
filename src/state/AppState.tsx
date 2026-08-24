@@ -80,6 +80,7 @@ export type SettingsSection =
   | 'terminal'
   | 'models'
   | 'voice'
+  | 'foreman'
   | 'appearance'
   | 'screenshots'
   | 'mobile'
