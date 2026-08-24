@@ -26,6 +26,8 @@
 #                                           frames and the browser route serve)
 #   resources/icon.ico                  ← electron/tray.ts iconCandidates()
 #   resources/icon-dev.ico              ← ditto, for the dev channel
+#   resources/foreman-kit/              ← electron/foreman/kit-path.ts
+#                                          foremanKitDir()
 
 appId: dev.forge.app
 productName: Forge
@@ -86,6 +88,16 @@ extraResources:
   # frame — `npm run dist` builds mobile/dist first for exactly this reason.
   - from: mobile/dist
     to: mobile-web
+    filter:
+      - '**/*'
+  # The skills and agents Foreman types into a Claude pane — `/gaffer`,
+  # `/fable-method` and the three subagents gaffer spawns. Claude Code reads
+  # those out of the *user's* ~/.claude, so a machine that has never had them
+  # answers "unknown command" and Foreman is a button that does nothing.
+  # electron/foreman/kit.ts copies them across on first run, which it can only
+  # do if they were shipped. Refill the folder with `npm run foreman-kit:sync`.
+  - from: assets/foreman-kit
+    to: foreman-kit
     filter:
       - '**/*'
 
