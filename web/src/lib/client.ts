@@ -135,16 +135,19 @@ const PROBE_STRIKES = 2
 const WRITE_HOLD_MS = 30_000
 
 /**
- * How long a dial may sit in flight before a wake-up may abandon it.
+ * How long a socket may sit in CONNECTING before a wake-up may abandon it.
  *
  * A dial is a link in hand (`linkInHand`), so every wake-up stands down while
  * one is in flight — which is right until the wake-up *is the news that the
  * dial is doomed*: `online` after a radio handover, `connection.change` when
- * wifi hands to LTE, mean the route the dial left on no longer exists, and
- * waiting out its CONNECT_TIMEOUT_MS is eight seconds of a person staring at
- * "Reconnecting" on a phone that is back on the air. A dial younger than this
- * is left to finish — most dials complete well inside it — and one older is
- * hung up and re-run at the network that actually exists now.
+ * wifi hands to LTE, mean the route the handshake left on no longer exists,
+ * and waiting out its CONNECT_TIMEOUT_MS is eight seconds of a person staring
+ * at "Reconnecting" on a phone that is back on the air. A connect younger
+ * than this is left to finish — most complete well inside it — and one older
+ * is hung up and re-run at the network that actually exists now. Only the
+ * handshake leg is ever abandoned: the token and address fetches before it
+ * carry their own aborts, and restarting *them* on every wake-up turned a
+ * slow honest sign-in into one that never finished.
  */
 const STUCK_DIAL_MS = 4_000
 
@@ -436,8 +439,9 @@ export class ForgeClient {
    */
   private opening = false
   /**
-   * When the dial currently in flight left, or 0 with none in flight. Read by
-   * `probe` to decide whether a wake-up may abandon it; see STUCK_DIAL_MS.
+   * When the current dial's *socket* was created — the handshake leg alone,
+   * not the fetches before it. Read by `probe` to decide whether a wake-up
+   * may abandon a CONNECTING socket; see STUCK_DIAL_MS.
    */
   private dialStartedAt = 0
   /**
@@ -755,13 +759,17 @@ export class ForgeClient {
       this.wake()
       return
     }
-    // A link in hand that is not yet OPEN is a dial in flight, and the event
-    // that landed here may be the very news that dooms it — `online` after a
-    // radio handover means the route the dial left on is gone. A young dial is
-    // left to finish; a stuck one is abandoned and re-run at the network that
-    // exists now. `dialCount` makes the abandonment safe: the older `open()`
-    // stands down at its next await. See STUCK_DIAL_MS.
-    if (this.socket?.readyState !== WebSocket.OPEN) {
+    // A socket sitting in CONNECTING is the one leg of a dial the event that
+    // landed here may genuinely doom — `online` after a radio handover means
+    // the route the handshake left on is gone. A young connect is left to
+    // finish; a stuck one is abandoned and re-run at the network that exists
+    // now. `dialCount` makes the abandonment safe: the older `open()` stands
+    // down at its next await. Only this leg, deliberately: while `open()` is
+    // still in its token or address fetches there is no socket yet, those
+    // fetches carry their own eight-second aborts, and restarting them on
+    // every focus or visibility flicker turned a slow honest sign-in into one
+    // that never finished. See STUCK_DIAL_MS.
+    if (this.socket?.readyState === WebSocket.CONNECTING) {
       if (Date.now() - this.dialStartedAt > STUCK_DIAL_MS) {
         this.dropSocket()
         this.clearRetry()
@@ -769,6 +777,9 @@ export class ForgeClient {
       }
       return
     }
+    // A dial mid-fetch (no socket yet, `opening` true): nothing to prove and
+    // nothing worth abandoning — see above.
+    if (this.socket?.readyState !== WebSocket.OPEN) return
     // Bytes arrived a moment ago, so there is nothing to prove and no reason to
     // spend a round trip proving it. This is the common path: `focus` fires on
     // every click back into the window, against a link that is plainly fine.
@@ -1090,7 +1101,6 @@ export class ForgeClient {
     if (!credentials || this.closedByUs || this.stopped) return
 
     const dial = ++this.dialCount
-    this.dialStartedAt = Date.now()
     this.opening = true
     try {
       this.dropSocket()
@@ -1148,6 +1158,10 @@ export class ForgeClient {
         return
       }
       this.socket = socket
+      // The stuck-dial clock times the handshake alone, so it starts here —
+      // not at the top of `open()`, where it would also be counting the token
+      // and address fetches a wake-up has no business abandoning.
+      this.dialStartedAt = Date.now()
       // Stamped on the socket the moment it is adopted, and captured by every
       // handler below. See `generation`.
       const generation = (this.generation += 1)
