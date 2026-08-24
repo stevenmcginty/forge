@@ -1,6 +1,5 @@
 import { useEffect, type CSSProperties, type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
-import { useWebUpdate } from '../lib/update'
 import { useActiveProject, useForge } from '../state'
 
 /**
@@ -23,7 +22,6 @@ export function TopBar({
 }): ReactNode {
   const { state, actions } = useForge()
   const project = useActiveProject()
-  const update = useWebUpdate()
   const offline = state.stage.kind === 'offline'
   const desktopName =
     state.picture?.desktopName || (state.stage.kind === 'offline' ? (state.stage.record?.name ?? state.cached?.desktopName ?? '') : '')
@@ -82,22 +80,6 @@ export function TopBar({
       </div>
 
       <div className="titlebar__right">
-        {/*
-          A newer Forge Web is deployed. It pulses until pressed and the press
-          is a reload — see lib/update.ts for why nothing happens on its own.
-        */}
-        {update.available ? (
-          <button
-            type="button"
-            className="titlebar__update"
-            title="A newer Forge Web has been deployed — press to reload into it"
-            onClick={update.apply}
-          >
-            <Icon name="refresh" size={13} />
-            <span>Update</span>
-          </button>
-        ) : null}
-
         {/*
           The connection badge. Three states and not two: "connected" and
           "connected but the link has gone quiet" are different things to a

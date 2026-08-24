@@ -169,55 +169,11 @@
 }
 
 /*
- * The "a newer build is live" button in the titlebar. The accent, pulsing,
- * because it is the one thing on the page asking to be pressed, and it
- * appears at most once per deploy.
+ * The "a newer build is live" strip — see `.ubanner` under the offline strip.
+ * It used to be a pulsing chip up here, beside the connection badge, where it
+ * read as one more status rather than as news; the band below is its
+ * replacement and this space stays empty.
  */
-.titlebar__update {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  height: 26px;
-  padding: 0 var(--s-4);
-  margin-right: var(--s-2);
-  font: inherit;
-  font-size: var(--t-sm);
-  font-weight: 600;
-  color: var(--text-on-accent);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: var(--r-full);
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-  box-shadow: 0 2px 10px var(--accent-glow);
-  animation: update-pulse 1.6s ease-in-out infinite;
-  transition: transform var(--dur-instant) var(--ease-out);
-}
-
-.titlebar__update:hover {
-  background: var(--accent-bright);
-  border-color: var(--accent-bright);
-  transform: scale(1.03);
-  animation: none;
-}
-
-@keyframes update-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 var(--accent-line);
-    opacity: 1;
-  }
-  50% {
-    box-shadow: 0 0 0 6px transparent;
-    opacity: 0.85;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .titlebar__update {
-    animation: none;
-  }
-}
 
 @keyframes gate-pulse {
   0%,
@@ -383,6 +339,91 @@
 .offline[data-link='reconnecting'] .offline__text strong,
 .offline[data-link='reconnecting'] .offline__look {
   color: var(--info);
+}
+
+/*
+ * ------------------------------------------------------- the update strip
+ *
+ * The desktop's UpdateBanner, in the browser: the same 30px band, in the same
+ * place, panel-quiet with the accent spent exactly once — on the button that
+ * gets the new build. A banner that glowed all over would be an advertisement,
+ * and there is no progress to show anyway, because a reload is the whole of
+ * installing. See web/src/components/UpdateBanner.tsx.
+ */
+
+.ubanner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  flex: none;
+  height: 30px;
+  padding: 0 var(--s-3) 0 var(--s-5);
+  font-size: var(--t-sm);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--accent-line);
+}
+
+.ubanner__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.ubanner__text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.ubanner__text strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ubanner__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+}
+
+.ubanner__btn {
+  height: 22px;
+  padding: 0 var(--s-4);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.ubanner__btn--go {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.ubanner__btn--go:hover {
+  background: var(--accent-bright);
+  border-color: var(--accent-bright);
+}
+
+.ubanner__close {
+  width: 20px;
+  height: 20px;
+  color: var(--text-dim);
+}
+
+.ubanner__close:hover {
+  color: var(--text-primary);
 }
 
 /* A frozen pane wears the same chip its live twin wears for a permission mode. */

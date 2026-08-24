@@ -4,6 +4,7 @@ import { Icon } from '@/components/Icon'
 import { useMobile } from '../lib/mobile'
 import { useNarrow } from '../lib/narrow'
 import { useActiveProject, useForge, useWorkspace } from '../state'
+import { useWebUpdate } from '../lib/update'
 import { AgentChooser } from './AgentChooser'
 import { GitHubMode } from './GitHubMode'
 import { MobilePanes } from './MobilePanes'
@@ -14,6 +15,7 @@ import { SessionComposer } from './SessionComposer'
 import { SplitView } from './Panes'
 import { TabStrip } from './TabStrip'
 import { TopBar } from './TopBar'
+import { UpdateBanner } from './UpdateBanner'
 
 /**
  * Forge Web: three regions, two faces, not a copy of the desktop IDE.
@@ -71,6 +73,12 @@ export function Workspace(): ReactNode {
    * notification standing — for something nobody can see. See Mirror.tsx.
    */
   const [watching, setWatching] = useState(false)
+  /**
+   * "A newer Forge Web is deployed." Asked here and handed to the banner, so
+   * the question is asked once per page — see UpdateBanner for why it is a
+   * strip and not the titlebar chip it replaced.
+   */
+  const update = useWebUpdate()
 
   const activeTabId =
     (workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0])?.id ?? null
@@ -109,6 +117,12 @@ export function Workspace(): ReactNode {
       />
       <OfflineBanner />
       <ReconnectingBanner />
+      {/*
+        Last of the three strips, deliberately: a deploy you have not reloaded
+        into is the least urgent thing on a page that may also be asleep or
+        mid-redial, and the strips stack in that order.
+      */}
+      <UpdateBanner update={update} />
       <div className="app__body">
         {mobile && drawerOpen ? (
           <div className="mdrawer__scrim" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
