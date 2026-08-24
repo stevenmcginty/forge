@@ -28,12 +28,6 @@ import { Feed } from './Feed'
  */
 const PARSE_INTERVAL_MS = 80
 
-/** What the face button offers, named by the face it would give you. */
-const VIEW_TITLE: Record<PaneFace, string> = {
-  chat: 'Show the conversation',
-  feed: 'Show as cards',
-  term: 'Show the terminal'
-}
 
 /**
  * A speech bubble, at <Icon/>'s weight and on its grid.
@@ -222,14 +216,12 @@ export function PaneView({
   const overlaid = feed || chat
 
   /**
-   * One face forward, and remember it for the next Claude pane.
+   * Switch the view face, and remember it for the next Claude pane.
    *
    * The preference is a fact about how this person reads an agent rather than
    * about this pane, so only a Claude pane — the only one with all three
-   * faces — writes it. Flipping a Grok pane to its terminal says nothing about
-   * how the next Claude session should open.
+   * faces — writes it.
    */
-  const nextView: PaneFace = claude ? (chat ? 'feed' : feed ? 'term' : 'chat') : feed ? 'term' : 'feed'
   const showView = useCallback(
     (next: PaneFace) => {
       setView(next)
@@ -765,8 +757,39 @@ export function PaneView({
       }}
     >
       <header className="pane__header">
-        <AgentBadge profile={profile} size="sm" />
-        <span className="pane__title truncate">{paneDisplayTitle(profile, leaf.title)}</span>
+        <div className="pane__leading">
+          <AgentBadge profile={profile} size="sm" />
+          <span className="pane__title truncate">{paneDisplayTitle(profile, leaf.title)}</span>
+
+          {agent ? (
+            <div className="pane__views-left">
+              {claude ? (
+                <button
+                  type="button"
+                  className="ghost-btn pane__action pane__action--output"
+                  data-active={chat ? 'true' : undefined}
+                  aria-pressed={chat}
+                  title="Show the conversation (Chat)"
+                  aria-label="Show the conversation (Chat)"
+                  onClick={() => showView('chat')}
+                >
+                  <ChatIcon />
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="ghost-btn pane__action pane__action--output"
+                data-active={feed ? 'true' : undefined}
+                aria-pressed={feed}
+                title="Show as cards (Output)"
+                aria-label="Show as cards (Output)"
+                onClick={() => showView('feed')}
+              >
+                <Icon name="note" size={13} />
+              </button>
+            </div>
+          ) : null}
+        </div>
 
         {/*
           Chips and actions travel as one trailing cluster. On a phone the
@@ -815,21 +838,17 @@ export function PaneView({
           ) : null}
 
           <div className="pane__actions">
-            {/*
-              One control for all three faces, cycling rather than growing into
-              a segmented row: the header's trailing cluster is already several
-              icons wide and a phone's is narrower still. It shows what the next
-              tap gives you, which is what the two-way version always did.
-            */}
             {agent ? (
               <button
                 type="button"
-                className="ghost-btn pane__action"
-                title={VIEW_TITLE[nextView]}
-                aria-label={VIEW_TITLE[nextView]}
-                onClick={() => showView(nextView)}
+                className="ghost-btn pane__action pane__action--term"
+                data-active={!overlaid ? 'true' : undefined}
+                aria-pressed={!overlaid}
+                title="Show the terminal"
+                aria-label="Show the terminal"
+                onClick={() => showView('term')}
               >
-                {nextView === 'chat' ? <ChatIcon /> : <Icon name={nextView === 'term' ? 'terminal' : 'note'} size={13} />}
+                <Icon name="terminal" size={13} />
               </button>
             ) : null}
             {/*

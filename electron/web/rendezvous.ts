@@ -217,6 +217,13 @@ export class WebRendezvous {
   start(): void {
     this.cancelTimer()
     if (!this.host.isEnabled()) {
+      // Said once, for the same reason tick()'s signed-out arm says its state:
+      // every silent way out of this loop is a desktop no phone can find and a
+      // log that cannot say why.
+      if (this.loggedDetail !== 'not-enabled') {
+        this.loggedDetail = 'not-enabled'
+        this.log('not publishing — feature off or server not listening')
+      }
       this.running = false
       return
     }
@@ -328,8 +335,14 @@ export class WebRendezvous {
     const uid = rest?.uid ?? ''
     const path = webHostPath(uid)
     if (!rest || !path) {
-      // Enabled but not signed in yet. Not a failure and not worth a log line —
-      // sign-in calls start() anyway, so this is only the slow path.
+      // Enabled but not signed in yet — sign-in calls start() anyway, so this
+      // is only the slow path. Said once, not per heartbeat: a desktop that
+      // sits in this state is a desktop no phone can find, and a silent loop
+      // here once cost an hour of debugging everything except the cause.
+      if (this.loggedDetail !== 'signed-out') {
+        this.loggedDetail = 'signed-out'
+        this.log('enabled but not signed in — publishing nothing until sign-in')
+      }
       this.schedule(HOST_HEARTBEAT_MS)
       return
     }
@@ -407,6 +420,11 @@ export class WebRendezvous {
     await this.write(() => rest.put(path, record), () => {
       this.published = host
       this.publishedAt = record.at
+      // One line per address, because this is the fact the whole feature hangs
+      // on: when a phone cannot find this desktop, the first question is
+      // "what did we last publish, and when" — and until this line existed the
+      // log could not answer it.
+      this.log(`published ${host}`)
     })
   }
 

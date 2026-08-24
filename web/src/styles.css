@@ -2176,6 +2176,100 @@
   border-color: var(--pane-accent, var(--accent));
 }
 
+.pane__leading {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  flex: 1;
+}
+
+.pane__views-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Output pane views (Chat & Cards) on the left: gentle luminous white */
+.pane__action--output,
+.pane[data-kind='agent'] .pane__action--output,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--output,
+[data-mobile] .pane[data-kind='agent'] .pane__action--output {
+  color: rgba(255, 255, 255, 0.85);
+  background: color-mix(in srgb, #ffffff 10%, rgba(255, 255, 255, 0.03));
+  border: 1px solid color-mix(in srgb, #ffffff 25%, var(--line-hairline));
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.08);
+  transition: all var(--dur-fast) var(--ease-out);
+}
+
+.pane__action--output:hover,
+.pane[data-kind='agent'] .pane__action--output:hover,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--output:hover,
+[data-mobile] .pane[data-kind='agent'] .pane__action--output:hover {
+  color: #ffffff;
+  background: color-mix(in srgb, #ffffff 18%, rgba(255, 255, 255, 0.06));
+  border-color: rgba(255, 255, 255, 0.45);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.18);
+}
+
+.pane__action--output:active,
+.pane__action--output[data-active='true'],
+.pane__action--output[aria-pressed='true'],
+.pane[data-kind='agent'] .pane__action--output:active,
+.pane[data-kind='agent'] .pane__action--output[data-active='true'],
+.pane[data-kind='agent'] .pane__action--output[aria-pressed='true'],
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--output:active,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--output[data-active='true'],
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--output[aria-pressed='true'],
+[data-mobile] .pane[data-kind='agent'] .pane__action--output:active,
+[data-mobile] .pane[data-kind='agent'] .pane__action--output[data-active='true'],
+[data-mobile] .pane[data-kind='agent'] .pane__action--output[aria-pressed='true'] {
+  color: #ffffff;
+  background: color-mix(in srgb, #ffffff 26%, rgba(255, 255, 255, 0.1));
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.28), inset 0 0 4px rgba(255, 255, 255, 0.15);
+}
+
+/* Terminal view on the right: slightly red tone so it's obvious to press */
+.pane__action--term,
+.pane[data-kind='agent'] .pane__action--term,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--term,
+[data-mobile] .pane[data-kind='agent'] .pane__action--term {
+  color: var(--danger-bright, #f87171);
+  background: color-mix(in srgb, var(--danger, #ef4444) 14%, rgba(255, 255, 255, 0.03));
+  border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 38%, var(--line-hairline));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--danger, #ef4444) 20%, transparent);
+  transition: all var(--dur-fast) var(--ease-out);
+}
+
+.pane__action--term:hover,
+.pane[data-kind='agent'] .pane__action--term:hover,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--term:hover,
+[data-mobile] .pane[data-kind='agent'] .pane__action--term:hover {
+  color: #ff9999;
+  background: color-mix(in srgb, var(--danger, #ef4444) 24%, rgba(255, 255, 255, 0.06));
+  border-color: color-mix(in srgb, var(--danger, #ef4444) 65%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--danger, #ef4444) 32%, transparent);
+}
+
+.pane__action--term:active,
+.pane__action--term[data-active='true'],
+.pane__action--term[aria-pressed='true'],
+.pane[data-kind='agent'] .pane__action--term:active,
+.pane[data-kind='agent'] .pane__action--term[data-active='true'],
+.pane[data-kind='agent'] .pane__action--term[aria-pressed='true'],
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--term:active,
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--term[data-active='true'],
+.app[data-mobile] .pane[data-kind='agent'] .pane__action--term[aria-pressed='true'],
+[data-mobile] .pane[data-kind='agent'] .pane__action--term:active,
+[data-mobile] .pane[data-kind='agent'] .pane__action--term[data-active='true'],
+[data-mobile] .pane[data-kind='agent'] .pane__action--term[aria-pressed='true'] {
+  color: #ffffff;
+  background: color-mix(in srgb, var(--danger, #ef4444) 36%, rgba(255, 255, 255, 0.1));
+  border-color: var(--danger, #ef4444);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--danger, #ef4444) 45%, transparent), inset 0 0 4px rgba(255, 255, 255, 0.15);
+}
+
 .pane__trailing {
   display: flex;
   align-items: center;
@@ -3149,42 +3243,70 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 /*
- * An agent pane on a phone: the content is the page, in both faces. The name
+ * An agent pane on a phone: the content is the page, in all faces. The name
  * already lives on the tab strip and the status strip, so the header collapses
- * to its trailing cluster (live chips, terminal / close) and floats over the
- * feed *and* the terminal instead of holding a 44px bar that repeats the
- * answer. One element, one corner, both views — the controls cannot teleport
- * on a view flip because they never move. Shells keep the solid bar: a prompt
- * has no status strip speaking for it.
+ * to two floating clusters:
+ * - Top-left: output view buttons (Chat / Cards) in gentle white.
+ * - Top-right: live status chips, terminal view button (slightly red) and close.
+ * Both float over the page without covering text (52px top padding reserved).
  */
 [data-mobile] .pane[data-kind='agent'] .pane__header,
 .app[data-mobile] .pane[data-kind='agent'] .pane__header,
 .app[data-mobile] .pane[data-kind='agent'][data-focused='true'] .pane__header {
   position: absolute;
   top: 0;
+  left: 0;
   right: 0;
-  left: auto;
   z-index: 3;
-  width: auto;
+  width: 100%;
   height: auto;
-  padding: var(--s-3) var(--s-4) 0 0;
+  padding: var(--s-3) var(--s-4) 0 var(--s-4);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  pointer-events: none;
   background: none;
   border: 0;
   box-shadow: none;
 }
 
+[data-mobile] .pane[data-kind='agent'] .pane__leading,
 [data-mobile] .pane[data-kind='agent'] .pane__trailing {
-  margin-left: 0;
-  padding: 3px 3px 3px 8px;
+  pointer-events: auto;
+}
+
+[data-mobile] .pane[data-kind='agent'] .pane__leading {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 3px 6px 3px 3px;
   gap: 4px;
   background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
   backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   border: 1px solid var(--line-soft);
   border-radius: var(--r-full);
   box-shadow: var(--shadow-key);
 }
 
-[data-mobile] .pane[data-view='feed'] .feed__scroll {
+[data-mobile] .pane[data-kind='agent'] .pane__leading:not(:has(.pane__action)) {
+  display: none;
+}
+
+[data-mobile] .pane[data-kind='agent'] .pane__trailing {
+  margin-left: auto;
+  padding: 3px 3px 3px 8px;
+  gap: 4px;
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-key);
+}
+
+[data-mobile] .pane[data-view='feed'] .feed__scroll,
+[data-mobile] .pane[data-view='chat'] .chatview__scroll {
   padding-top: 52px;
   scroll-padding-top: 52px;
 }
