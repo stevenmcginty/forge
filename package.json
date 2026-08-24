@@ -33,6 +33,8 @@
     "memory:smoke": "node scripts/memory-smoke.mjs",
     "skills:smoke": "node scripts/skills-smoke.mjs",
     "pack:check": "node scripts/pack-check.mjs",
+    "foreman-kit:sync": "node scripts/foreman-kit-sync.mjs",
+    "foreman-kit:check": "node scripts/foreman-kit-check.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
     "bridge:register": "node scripts/bridge-register-check.mjs",
     "bridge:build": "node scripts/build-bridge.mjs",

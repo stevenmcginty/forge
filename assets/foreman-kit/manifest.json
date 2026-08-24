@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "name": "gaffer",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "73c852fc1f255c0e449a9f625ceb5acaea79914b1b4c9e1cff906b0763d7e01e"
+        }
+      ]
+    },
+    {
+      "name": "fable-method",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "3baddc565b03e5b24fc0d70e8e9e49203ecb403b62956a5c5b42f6b742ee85ef"
+        },
+        {
+          "path": "references/domains/business-ops.md",
+          "sha256": "922f2597deaeca3346acd610a1fef1ea74520c4c033d25575ddeda24b95ff75e"
+        },
+        {
+          "path": "references/domains/data-analysis.md",
+          "sha256": "3fb1116c8a1eb58c608d13f2e639c5b99207e136bc13820a2c3746b88019a7ac"
+        },
+        {
+          "path": "references/domains/design-ux.md",
+          "sha256": "7a66cbc8e4833280d23a1c37ec1cec4b5662739c9f37dca54ce45f0947bfbcb3"
+        },
+        {
+          "path": "references/domains/finance.md",
+          "sha256": "0a989edd86e8f81575171693e709d7aca586139347245748d5def99e5db56fd7"
+        },
+        {
+          "path": "references/domains/legal-compliance.md",
+          "sha256": "831569221ef8bdf8aff5e7051b40d24dfd0cfbc97d4c3f8872477b27386f1e02"
+        },
+        {
+          "path": "references/domains/marketing.md",
+          "sha256": "69600e4ce29257bd6809296b9972db60704980114cdb88761aebc49696f7b02e"
+        },
+        {
+          "path": "references/domains/research.md",
+          "sha256": "d1b58fec37b9263faf69c012c540ffc4cb0f83e50dbd858a236e406ec985717f"
+        },
+        {
+          "path": "references/examples.md",
+          "sha256": "38164477dc5de3b98fb7167e8683c6eb2241b7aa54d802aabbed4154f24f38b3"
+        },
+        {
+          "path": "references/failure-modes.md",
+          "sha256": "9a95a9c126487cc33e46fd0ca43c54e408955f8a8ab31e9ddb1bff8d035e6554"
+        },
+        {
+          "path": "references/flowcharts.md",
+          "sha256": "90a44f4a3783273f1b61ed456a4656ef9c661e8c5e2a8577445fb9778fbf6059"
+        }
+      ]
+    },
+    {
+      "name": "fable-judge",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "b6a3855beac67b8e0130e61c209486299a1d0100e58f22ee6cba89920293e20d"
+        }
+      ]
+    },
+    {
+      "name": "fable-5",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "3a9ca229dee7a39c033215c882411f0208202a0984139497e567671d5676752a"
+        },
+        {
+          "path": "references/catalog.md",
+          "sha256": "17bea6d50b5ce7f3ccaa67c1dbcd2eccce58bc5f34d11d55132ef8dadc451956"
+        },
+        {
+          "path": "references/design-languages.md",
+          "sha256": "3f4a13a8ca93faef939967c5c6fef61594dd5c7cc2901541c859e0656bc1b25e"
+        },
+        {
+          "path": "references/motion-patterns.md",
+          "sha256": "9d43d5c63e2f4cb7f2e7a5387f5cd42637d8412146f87114361adf14158b44fd"
+        },
+        {
+          "path": "references/spec-protocol.md",
+          "sha256": "35bd5a2c02b0657ae9920d5ec6c2bcb71ebee82bdaa77fb597c52b9ef9a525f6"
+        },
+        {
+          "path": "references/tech-conventions.md",
+          "sha256": "58df8f1d93bccf22d689dc56c2b2644a5b796e41a6da3e735ca5dedf53476f28"
+        }
+      ]
+    },
+    {
+      "name": "supabase-data-layer",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "b4e634484dd48aea63d433e29e66ea21cecedc21f9263f394ec49b8d6a787094"
+        }
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "name": "gaffer-designer",
+      "sha256": "4f615aa3a7ae8e031b1711fab299150442c2a5d1790c367ba479fa7a5b44c563"
+    },
+    {
+      "name": "gaffer-builder",
+      "sha256": "942043dc5f88ac761435a7682468940372fcde35a4e8536f8c90bbd889e8257f"
+    },
+    {
+      "name": "gaffer-apprentice",
+      "sha256": "f15e0ae3466f4d8d1b82ea2ca75cfca7e41330e82c3a0b195f0fa0abc2091ef4"
+    }
+  ]
+}
