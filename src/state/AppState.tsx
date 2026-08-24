@@ -462,6 +462,16 @@ function workspaceOf(state: AppState, projectId: string | null): Workspace {
   return state.workspaces[projectId] ?? EMPTY_WORKSPACE
 }
 
+/** The project and tab a pane sits in, searched across every loaded workspace. */
+function tabOwning(state: AppState, paneId: string): { projectId: string; tab: TerminalTab } | null {
+  for (const [projectId, ws] of Object.entries(state.workspaces)) {
+    for (const tab of ws.tabs) {
+      if (collectLeaves(tab.root).some((leaf) => leaf.id === paneId)) return { projectId, tab }
+    }
+  }
+  return null
+}
+
 function totalPanes(state: AppState): number {
   let n = 0
   for (const ws of Object.values(state.workspaces)) {
@@ -956,17 +966,23 @@ function reducer(state: AppState, action: Action): AppState {
       if (totalPanes(state) >= MAX_SESSIONS) {
         return { ...state, notice: `Session limit reached (${MAX_SESSIONS})` }
       }
-      const ws = workspaceOf(state, state.activeProjectId)
-      const tab = ws.tabs.find((t) => t.id === ws.activeTabId)
-      if (!tab) return state
-      if (countLeaves(tab.root) >= MAX_PANES_PER_TAB) {
+      // The split lands beside the named pane wherever that pane lives — not
+      // in whatever project happens to be on screen. Foreman hires from a pane
+      // the human may have walked away from, and a hire that followed the
+      // human's focus into another project was work leaking across folders.
+      const home = tabOwning(state, action.paneId)
+      if (!home) return state
+      if (countLeaves(home.tab.root) >= MAX_PANES_PER_TAB) {
         return { ...state, notice: `A tab holds at most ${MAX_PANES_PER_TAB} panes` }
       }
       const leaf = makeLeaf(action.profileId, '', action.permissionMode)
-      return mapActiveTab(state, (t) => ({
-        ...t,
-        root: splitLeaf(t.root, action.paneId, action.direction, leaf),
-        activePaneId: leaf.id
+      return mapWorkspace(state, home.projectId, (ws) => ({
+        ...ws,
+        tabs: ws.tabs.map((t) =>
+          t.id === home.tab.id
+            ? { ...t, root: splitLeaf(t.root, action.paneId, action.direction, leaf), activePaneId: leaf.id }
+            : t
+        )
       }))
     }
 

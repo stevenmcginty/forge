@@ -27,7 +27,7 @@ import {
 } from '@/lib/appactions'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
-import { useActiveProject, useApp } from '@/state/AppState'
+import { useApp } from '@/state/AppState'
 
 /**
  * Foreman, as the renderer holds it.
@@ -83,7 +83,6 @@ const ForemanContext = createContext<ForemanCtx | null>(null)
 
 export function ForemanProvider({ children }: { children: ReactNode }): ReactNode {
   const { state, actions } = useApp()
-  const project = useActiveProject()
 
   const [states, setStates] = useState<ReadonlyMap<string, ForemanState>>(() => new Map())
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
@@ -136,65 +135,76 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
    * answering about a Forge from ten minutes ago.
    */
 
-  const workspace = project ? state.workspaces[project.id] : undefined
-  const activeTab = workspace?.tabs.find((t) => t.id === workspace.activeTabId) ?? null
-  const paneCount = useMemo(() => {
-    let n = 0
-    for (const ws of Object.values(state.workspaces)) for (const tab of ws.tabs) n += countLeaves(tab.root)
-    return n
-  }, [state.workspaces])
-
   /**
-   * Every open terminal, numbered the way the executor numbers them.
+   * The executor's view of one project.
    *
-   * `lastFocusedAt` is 0 for all of them, and honestly so: focus order exists
-   * to disambiguate a *spoken* target ("the one I was just in") and nothing
-   * Foreman sends is spoken — it hires by profile id.
+   * Built per request rather than once per render, and for the project that
+   * *owns the driven pane* rather than the one on screen: Foreman hires from a
+   * pane the human may have left for another project minutes ago, and a hire
+   * that followed their focus was work leaking into the wrong folder. Every
+   * pane is numbered the way the executor numbers them; `lastFocusedAt` is 0
+   * for all of them, and honestly so — focus order exists to disambiguate a
+   * *spoken* target and nothing Foreman sends is spoken.
    */
-  const panes = useMemo<ActionPane[]>(() => {
-    if (!workspace) return []
-    const out: ActionPane[] = []
-    workspace.tabs.forEach((tab, tabIndex) => {
-      for (const leaf of collectLeaves(tab.root)) {
-        const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const contextFor = (projectId: string | null): ActionContext => {
+    const st = stateRef.current
+    const proj = projectId ? (st.projects.find((p) => p.id === projectId) ?? null) : null
+    const ws = proj ? st.workspaces[proj.id] : undefined
+    const tab = ws?.tabs.find((t) => t.id === ws.activeTabId) ?? null
+    const panes: ActionPane[] = []
+    ws?.tabs.forEach((t, tabIndex) => {
+      for (const leaf of collectLeaves(t.root)) {
+        const profile = resolveProfile(st.settings.agentProfiles, leaf.profileId)
         const status = terminalHost.runtime(leaf.id).status
-        out.push({
+        panes.push({
           paneId: leaf.id,
-          tabId: tab.id,
+          tabId: t.id,
           tabNumber: tabIndex + 1,
-          tabTitle: tab.title,
-          number: out.length + 1,
+          tabTitle: t.title,
+          number: panes.length + 1,
           title: leaf.title.trim() || profile.name,
           profileId: profile.id,
           profileName: profile.name,
           live: status !== 'exited' && status !== 'error',
-          focused: leaf.id === tab.activePaneId && tab.id === workspace.activeTabId,
+          focused: leaf.id === t.activePaneId && t.id === ws?.activeTabId,
           agent: !isShellProfile(profile),
           lastFocusedAt: 0
         })
       }
     })
-    return out
-  }, [workspace, state.settings.agentProfiles, paneCount])
-
-  const ctxRef = useRef<ActionContext | null>(null)
-  ctxRef.current = {
-    panes,
-    projects: state.projects.map((p) => ({ id: p.id, name: p.name })),
-    profiles: state.settings.agentProfiles,
-    defaultProfileId: project?.defaultProfileId ?? state.settings.agentProfiles[0]?.id ?? 'pwsh',
-    activeProjectId: project?.id ?? null,
-    activeProjectName: project?.name ?? null,
-    loadedProjectIds: Object.keys(state.workspaces),
-    tabs: (workspace?.tabs ?? []).map((t) => ({ id: t.id, title: t.title })),
-    activeTabId: workspace?.activeTabId ?? null,
-    focusedPaneId: activeTab?.activePaneId ?? null,
-    paneCount,
-    panesInActiveTab: activeTab ? countLeaves(activeTab.root) : 0,
-    maxSessions: MAX_SESSIONS,
-    maxPanesPerTab: MAX_PANES_PER_TAB
+    let total = 0
+    for (const w of Object.values(st.workspaces)) for (const t of w.tabs) total += countLeaves(t.root)
+    return {
+      panes,
+      projects: st.projects.map((p) => ({ id: p.id, name: p.name })),
+      profiles: st.settings.agentProfiles,
+      defaultProfileId: proj?.defaultProfileId ?? st.settings.agentProfiles[0]?.id ?? 'pwsh',
+      activeProjectId: proj?.id ?? null,
+      activeProjectName: proj?.name ?? null,
+      loadedProjectIds: Object.keys(st.workspaces),
+      tabs: (ws?.tabs ?? []).map((t) => ({ id: t.id, title: t.title })),
+      activeTabId: ws?.activeTabId ?? null,
+      focusedPaneId: tab?.activePaneId ?? null,
+      paneCount: total,
+      panesInActiveTab: tab ? countLeaves(tab.root) : 0,
+      maxSessions: MAX_SESSIONS,
+      maxPanesPerTab: MAX_PANES_PER_TAB
+    }
   }
+  const contextForRef = useRef(contextFor)
+  contextForRef.current = contextFor
 
+  /** The project whose workspace holds this pane, or null if it is gone. */
+  const projectOwning = (paneId: string): string | null => {
+    for (const [projectId, ws] of Object.entries(stateRef.current.workspaces)) {
+      for (const t of ws.tabs) if (collectLeaves(t.root).some((leaf) => leaf.id === paneId)) return projectId
+    }
+    return null
+  }
+  const projectOwningRef = useRef(projectOwning)
+  projectOwningRef.current = projectOwning
   /**
    * The layout actions, and only those.
    *
@@ -239,7 +249,10 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
           result = { id, ok: false, error: `Forge has no tool called ${String(request.name)}` }
         } else {
           const action = asAction(request.args)
-          const ctx = ctxRef.current
+          // Anchored actions run in the project that owns the anchor pane.
+          const anchor = action && 'anchorPaneId' in action ? String(action.anchorPaneId ?? '') : ''
+          const projectId = anchor ? projectOwningRef.current(anchor) : (stateRef.current.activeProjectId ?? null)
+          const ctx = contextForRef.current(projectId)
           const runner = runnerRef.current
           if (!action) {
             result = { id, ok: false, error: 'that action had no "kind" — see the tool description' }
@@ -276,7 +289,7 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
       // session is a round trip through the SDK and the toggle must not sit
       // grey while it happens. The real state lands a beat later, on the
       // invoke's answer and then on every push.
-      absorb({ paneId, status: 'starting', line: 'Starting Foreman', seed, log: [] })
+      absorb({ paneId, status: 'starting', line: 'Brief taken — starting Foreman', seed, log: [] })
       try {
         const api = window.forge?.foreman
         if (!api) throw new Error('Foreman is not loaded — restart Forge.')

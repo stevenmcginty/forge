@@ -217,6 +217,17 @@
   flex: none;
 }
 
+.pane__foot-mark--busy {
+  animation: foreman-pulse 1.4s var(--ease-in-out) infinite;
+}
+
+.pane__foot-clock {
+  flex: none;
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
 .pane__foot-text {
   min-width: 0;
   font-size: var(--t-xs);

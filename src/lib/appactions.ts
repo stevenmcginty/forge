@@ -18,7 +18,18 @@ import { skillHandler } from './skillbus'
 
 export type AppAction =
   | { kind: 'open_tabs'; profileId: string; count: number; projectName?: string }
-  | { kind: 'open_panes'; profileId: string; count: number; direction?: SplitDirection }
+  | {
+      kind: 'open_panes'
+      profileId: string
+      count: number
+      direction?: SplitDirection
+      /**
+       * Split beside this pane rather than the focused one. Foreman sets it to
+       * the pane it is driving, so a hire lands in that pane's project and tab
+       * whatever the human is looking at by then.
+       */
+      anchorPaneId?: string
+    }
   /**
    * `which` is spoken, not an enum: 'focused' / 'current' still mean what they
    * always did, but "tab one", "the second one" and "notes" now work too. They
@@ -764,16 +775,24 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       const profile = ctx.profiles.find((p) => p.id === action.profileId)
       if (!profile) return fail('I do not know that agent')
       const requested = Math.max(1, Math.floor(action.count))
-      if (!ctx.focusedPaneId) {
+      let target = ctx.focusedPaneId
+      let panesInTab = ctx.panesInActiveTab
+      if (action.anchorPaneId) {
+        const anchor = ctx.panes?.find((p) => p.paneId === action.anchorPaneId)
+        if (!anchor) return fail('The pane Foreman is driving is no longer open — nothing split', requested)
+        target = anchor.paneId
+        panesInTab = ctx.panes?.filter((p) => p.tabId === anchor.tabId).length ?? panesInTab
+      }
+      if (!target) {
         return fail('No pane to split — open a tab first', requested)
       }
       const room = Math.min(
         Math.max(0, ctx.maxSessions - ctx.paneCount),
-        Math.max(0, ctx.maxPanesPerTab - ctx.panesInActiveTab)
+        Math.max(0, ctx.maxPanesPerTab - panesInTab)
       )
       const done = Math.min(requested, room)
       const direction: SplitDirection = action.direction ?? 'row'
-      for (let i = 0; i < done; i++) run.splitPane(ctx.focusedPaneId, direction, profile.id)
+      for (let i = 0; i < done; i++) run.splitPane(target, direction, profile.id)
 
       if (done === 0) {
         return {

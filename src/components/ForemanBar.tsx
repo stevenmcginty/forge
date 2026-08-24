@@ -155,6 +155,12 @@ export function ForemanSeed({
 
 /* ------------------------------------------------------------------ footer */
 
+/** `2:34` — how long something has been going on. */
+function mmss(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
 /** `14:07` — a timestamp you read, not one you sort by. */
 function clock(at: number): string {
   const d = new Date(at)
@@ -184,8 +190,24 @@ export function ForemanFooter({
     if (el) el.scrollTop = el.scrollHeight
   }, [logOpen, entries])
 
+  // The clock: how long this job has been running, ticking once a second
+  // while Foreman is busy. A seed turn can plan for minutes before it types
+  // anything, and a footer that moves is the difference between "working" and
+  // "did it take my brief at all?".
+  const busy = state.status === 'starting' || state.status === 'driving'
+  const startedAt = useRef(0)
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (state.status === 'off') startedAt.current = 0
+    else if (!startedAt.current) startedAt.current = state.log[0]?.at ?? Date.now()
+    if (!busy) return undefined
+    const t = window.setInterval(() => tick((n) => n + 1), 1000)
+    return () => window.clearInterval(t)
+  }, [busy, state.status, state.log])
+
   if (state.status === 'off' || foreman.dismissed(paneId)) return null
   const finished = state.status === 'done' || state.status === 'error'
+  const elapsed = startedAt.current ? mmss(Date.now() - startedAt.current) : ''
 
   return (
     <>
@@ -223,8 +245,13 @@ export function ForemanFooter({
           }
           onClick={onToggleLog}
         >
-          <Icon name={state.status === 'done' ? 'check' : 'foreman'} size={12} className="pane__foot-mark" />
+          <Icon
+            name={state.status === 'done' ? 'check' : 'foreman'}
+            size={12}
+            className={busy ? 'pane__foot-mark pane__foot-mark--busy' : 'pane__foot-mark'}
+          />
           <span className="pane__foot-text truncate">{state.line || 'Working'}</span>
+          {busy && elapsed ? <span className="pane__foot-clock">{elapsed}</span> : null}
         </button>
         {finished ? (
           <button

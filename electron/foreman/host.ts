@@ -338,7 +338,7 @@ export class ForemanHost {
   private seedTurn(seed: string): Trigger {
     return {
       kind: 'seed',
-      line: 'Reading the pane and forming the concept',
+      line: 'Brief taken — reading the pane and planning (this can take a few minutes)',
       text: [
         `Seed: ${seed}`,
         '',
@@ -481,6 +481,10 @@ export class ForemanHost {
 
   /** Turn one SDK message into whatever it means for the job. */
   private emit(driven: Driven, message: SDKMessage): void {
+    if (message.type === 'assistant') {
+      this.narrate(driven, message)
+      return
+    }
     if (message.type !== 'result') return
     // A turn boundary. Whatever was queued while it ran goes in now, and if
     // nothing was, the job is waiting on the pane again.
@@ -493,6 +497,45 @@ export class ForemanHost {
       return
     }
     this.setStatus(driven, 'waiting', 'Waiting for the pane')
+  }
+
+  /**
+   * Keep the footer moving while a turn runs.
+   *
+   * A seed turn is minutes of reading and planning before the first thing is
+   * typed into the pane, and a footer that says the same sentence for all of
+   * it reads as "nothing happened". Each assistant message becomes one line:
+   * the tool it is about to use, or the first line of what it is thinking.
+   */
+  private narrate(driven: Driven, message: Extract<SDKMessage, { type: 'assistant' }>): void {
+    if (driven.state.status !== 'driving') return
+    const content = (message.message as { content?: unknown }).content
+    if (!Array.isArray(content)) return
+    let line = ''
+    for (const block of content as Array<Record<string, unknown>>) {
+      if (block['type'] === 'tool_use') {
+        const name = String(block['name'] ?? '').replace(/^mcp__[^_]+__/, '')
+        const input = (block['input'] ?? {}) as Record<string, unknown>
+        line =
+          name === 'read_transcript' || name === 'read_pane'
+            ? 'Reading the pane'
+            : name === 'send_to_pane'
+              ? `Sending: ${firstLine(String(input['text'] ?? ''))}`
+              : name === 'open_agent_pane'
+                ? `Hiring ${String(input['profileId'] ?? 'an agent')}`
+                : name === 'get_standing_brief'
+                  ? 'Reading the standing brief'
+                  : name === 'Task'
+                    ? 'Researching before writing the brief'
+                    : name
+                      ? `Using ${name}`
+                      : ''
+      } else if (block['type'] === 'text' && !line) {
+        const text = firstLine(String(block['text'] ?? ''))
+        if (text) line = `Thinking: ${text}`
+      }
+    }
+    if (line && line !== driven.state.line) this.setStatus(driven, 'driving', line)
   }
 
   private teardown(driven: Driven): void {
@@ -630,7 +673,10 @@ export class ForemanHost {
           kind: 'open_panes',
           profileId,
           count,
-          direction: 'row'
+          direction: 'row',
+          // Beside the driven pane, in its project — never wherever the human
+          // happens to be looking by now.
+          anchorPaneId: paneId
         })
         this.log(driven, 'hire', `${profileId} × ${count} — ${summary}`)
         return `${summary}${this.paneList()}`
