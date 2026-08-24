@@ -811,11 +811,26 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
     return () => clearTimeout(timer)
   }, [notices])
 
-  /** Track visibility so the clocks above can pause themselves off-screen. */
+  /**
+   * Track visibility so the clocks above can pause themselves off-screen.
+   *
+   * Read again on `pageshow` and `focus` as well, mirroring the client's own
+   * wake-ups (client.ts, `watchWakeups`): a bfcache restore or an alt-tab
+   * return re-dials the link without ever firing `visibilitychange`, and a
+   * `pageVisible` that lags reality is re-reported to the desktop as a hidden
+   * tab — which is a desktop withholding every pane from a person looking
+   * straight at them.
+   */
   useEffect(() => {
     const update = (): void => setPageVisible(!document.hidden)
     document.addEventListener('visibilitychange', update)
-    return () => document.removeEventListener('visibilitychange', update)
+    window.addEventListener('pageshow', update)
+    window.addEventListener('focus', update)
+    return () => {
+      document.removeEventListener('visibilitychange', update)
+      window.removeEventListener('pageshow', update)
+      window.removeEventListener('focus', update)
+    }
   }, [])
 
   /* ------------------------------------------------------------- web push */
@@ -862,7 +877,13 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    * leaving a visible tab starved until the next reconnect.
    */
   useEffect(() => {
-    if (connection.state !== 'live') return
+    // Unconditionally — the client itself holds the frame until it is admitted
+    // (`reportVisibility` checks, `hello-ok` re-states). Gating here on a live
+    // connection kept the client's remembered answer stale across exactly the
+    // window it changes most on a phone: hidden while live, back on screen
+    // while the link was still re-dialling. The stale `false` was then
+    // re-asserted on the fresh socket every beat, and the desktop withheld
+    // every pane from a green link until the next unmount.
     client.reportVisibility(pageVisible)
   }, [client, connection.state, pageVisible])
 

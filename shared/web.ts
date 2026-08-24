@@ -1342,8 +1342,18 @@ export interface WebResultFrame {
 }
 
 export type WebResult =
-  /** It worked and there is nothing to say — a layout op, an `auth` refresh. */
-  | { kind: 'ok' }
+  /**
+   * It worked and there is nothing to say — a layout op, an `auth` refresh.
+   *
+   * `sessions` rides on the answer to `visibility` only: the ids the desktop
+   * is actually streaming to this socket. The one list the client cannot see
+   * for itself, said back on the beat it already pays for, so a subscription
+   * the desktop never registered — an eaten attach, a refused frame, an older
+   * build — is noticed and re-asked within a beat instead of never. Absent
+   * from every other answer, and from desktops that predate it, which a
+   * client must treat as "no news" rather than "no sessions".
+   */
+  | { kind: 'ok'; sessions?: string[] }
   /**
    * It was attempted and did not work. A result rather than an `error` frame
    * because it has to settle a promise the client is holding on `rid`.

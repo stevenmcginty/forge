@@ -1874,14 +1874,22 @@ export class WebServer {
           // has two readers here — `anyVisible`, which decides whether a push is
           // worth sending, and `pushData`, which stops shovelling terminal bytes
           // at a tab that has stopped parsing them.
-          const wasHidden = client.visible === false
           client.visible = request.visible === true
           // Coming back on screen is where the second reader pays its debt: the
           // panes whose output was dropped while the tab was away are repainted
-          // from a fresh replay, which is both cheaper and more correct than the
-          // backlog would have been.
-          if (wasHidden && client.visible) this.catchUpStale(client)
-          answer({ kind: 'ok' })
+          // from a fresh replay, which is both cheaper and more correct than
+          // the backlog would have been. Level-triggered, not edge-triggered:
+          // the old `wasHidden && visible` edge could be missed — the false
+          // lost with a dying socket, the true arriving on a socket that never
+          // heard the false — and a missed edge stranded the banked panes
+          // until the next unmount. "Visible, and something is banked" cannot
+          // be missed, because the client re-says visibility every beat.
+          if (client.visible && client.stale.size) this.catchUpStale(client)
+          // The answer carries the desktop's half of the subscription ledger,
+          // so the client can spot a pane it believes it is watching that this
+          // desktop never registered — an attach eaten in transit, a refused
+          // frame — and re-ask within a beat. See `sessions` on WebResult.
+          answer({ kind: 'ok', sessions: [...client.subs] })
           return
         }
 

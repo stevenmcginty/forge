@@ -184,14 +184,16 @@ const CONNECT_TIMEOUT_MS = 8_000
  * test of what the link carried.
  *
  * So every ask — the beat, a wake-up, a keystroke — checks the oldest
- * unanswered attach against this ceiling (`auditPendingReplay`), and a breach
- * hangs the link up (`declareDead`) rather than re-sending the frame — because
- * a tunnel that swallowed one frame cannot be trusted to have swallowed only
- * one, and a fresh dial re-attaches from `subs` anyway. Ten seconds is far
- * past any honest replay: the snapshot is taken and sent in one turn of the
- * desktop's event loop, and the panes this guard exists for are ones an eye
- * is actively on. Cleared per session by the `replay`, `exit`, `detach` and
- * `unknown-session` frames that each end the question in their own way.
+ * unanswered attach against this ceiling (`auditPendingReplay`). The first
+ * breach re-sends the attach — one frame lost in transit or refused is a fact
+ * about a frame, and re-asking costs thirty bytes — and only a second breach
+ * for the same pane hangs the link up (`declareDead`), because two losses in a
+ * row about the same pane is a fact about the link, which a fresh dial
+ * re-attaches from `subs` anyway. Ten seconds is far past any honest replay:
+ * the snapshot is taken and sent in one turn of the desktop's event loop, and
+ * the panes this guard exists for are ones an eye is actively on. Cleared per
+ * session by the `replay`, `exit`, `detach` and `unknown-session` frames that
+ * each end the question in their own way.
  */
 const REPLAY_GRACE_MS = 10_000
 
@@ -208,6 +210,32 @@ const REPLAY_GRACE_MS = 10_000
  * beat every five seconds cannot approach it.
  */
 const CLIENT_BEAT_MS = 5_000
+
+/**
+ * The reconnect re-arm's wave size and spacing — see `sendAttachWave`.
+ *
+ * Thirty-two per quarter-second stays far under any desktop's per-second frame
+ * budget even with everything else `hello-ok` sends in the same tick, while a
+ * 128-pane workspace is still fully re-armed inside a second and a half.
+ */
+const ATTACH_WAVE = 32
+const ATTACH_WAVE_MS = 250
+
+/**
+ * How long an attach that has just been sent is left alone by the beat's
+ * ledger check, so a frame still honestly in flight — down a tunnel, from a
+ * phone — is not re-sent on top of itself. Anything the desktop received
+ * inside this window answers with its replay well before the next beat asks.
+ */
+const ATTACH_SETTLE_MS = 2_500
+
+/**
+ * How long to wait before re-sending an attach the desktop *refused* for
+ * budget (`error{code:'limit'}`). The budget is counted against a wall-clock
+ * second, so just over one second is the earliest re-ask that cannot land in
+ * the same counted second that refused it.
+ */
+const LIMIT_RETRY_MS = 1_100
 
 /**
  * How often the sleep detector reads the clock, and the jump that means the
@@ -549,6 +577,15 @@ export class ForgeClient {
    * `unknown-session`), and audited once per beat.
    */
   private pendingReplay = new Map<string, number>()
+  /**
+   * Sessions whose overdue attach has already been re-sent once on this
+   * socket, so the audit hangs the link up on the *second* breach rather than
+   * the first. One lost frame is a fact about a frame; two in a row about the
+   * same pane is a fact about the link. Cleared per pane by the `replay` that
+   * answers, and wholesale by `hello-ok`, where a fresh socket starts with a
+   * clean record.
+   */
+  private reAsked = new Set<string>()
   /**
    * The visibility this page last reported to the desktop, so it can be
    * *re-said* rather than only said.
@@ -946,9 +983,26 @@ export class ForgeClient {
     if (sent) this.pendingReplay.set(sessionId, Math.min(this.pendingReplay.get(sessionId) ?? Number.POSITIVE_INFINITY, Date.now()))
   }
 
+  /**
+   * The reconnect's re-arm, in waves of ATTACH_WAVE rather than one tick.
+   *
+   * Each later wave re-checks `subs` before sending: a pane detached between
+   * waves must not be re-attached by a timer that outlived the intent.
+   */
+  private sendAttachWave(entries: Array<[string, { cols: number; rows: number } | null]>): void {
+    const now = entries.slice(0, ATTACH_WAVE)
+    for (const [sessionId, size] of now) this.sendAttach(sessionId, size)
+    const rest = entries.slice(ATTACH_WAVE)
+    if (!rest.length) return
+    window.setTimeout(() => {
+      this.sendAttachWave(rest.filter(([sessionId]) => this.subs.has(sessionId)))
+    }, ATTACH_WAVE_MS)
+  }
+
   detach(sessionId: string): void {
     this.told.delete(sessionId)
     this.pendingReplay.delete(sessionId)
+    this.reAsked.delete(sessionId)
     if (!this.subs.delete(sessionId)) return
     this.send({ type: 'detach', sessionId })
   }
@@ -1310,6 +1364,7 @@ export class ForgeClient {
       case 'hello-ok': {
         this.attempt = 0
         this.reauthed = false
+        this.reAsked.clear()
         if (this.sentPin) this.rememberedPin = this.sentPin
         this.sentPin = ''
         this.handlers.onPicture(frame)
@@ -1321,8 +1376,13 @@ export class ForgeClient {
         // Re-arm every pane the UI still believes it is watching. Each answers
         // with a replay frame, which is what repaints the terminal — and each
         // re-establishes what this browser has told the desktop about its size,
-        // which `dropSocket` voided on the way into this connection.
-        for (const [sessionId, size] of this.subs) this.sendAttach(sessionId, size)
+        // which `dropSocket` voided on the way into this connection. In waves
+        // rather than one tick: a split-heavy workspace can hold more panes
+        // than a desktop's per-second frame budget, and the burst must stay
+        // correct against any desktop, not only one that exempts `attach` —
+        // spacing the replies also keeps up to 192KB-per-pane repaints from
+        // landing on a phone as one wall.
+        this.sendAttachWave([...this.subs])
         this.flushHeld()
         // The new socket starts from whatever the desktop last heard about
         // this tab, which is nothing: state the flag now rather than waiting
@@ -1341,6 +1401,7 @@ export class ForgeClient {
         // The answer to an `attach`. Whatever else it repaints, it is the
         // receipt that proves that attach landed.
         this.pendingReplay.delete(frame.sessionId)
+        this.reAsked.delete(frame.sessionId)
         this.handlers.onData(frame.sessionId, frame.data, true, frame.truncated === true)
         return
 
@@ -1352,6 +1413,7 @@ export class ForgeClient {
         this.subs.delete(frame.sessionId)
         this.told.delete(frame.sessionId)
         this.pendingReplay.delete(frame.sessionId)
+        this.reAsked.delete(frame.sessionId)
         this.handlers.onExit(frame.sessionId, typeof frame.exitCode === 'number' ? frame.exitCode : 0)
         return
 
@@ -1409,6 +1471,20 @@ export class ForgeClient {
       }
 
       case 'error':
+        // `limit` about a named pane is the desktop refusing that one frame
+        // for budget, not doubting the link — and if the frame was an attach,
+        // dropping it silently is a pane that never paints. Re-ask once the
+        // budget's second has turned over, and say nothing: a frame the page
+        // re-sends by itself is not news a person can act on.
+        if (frame.code === 'limit' && typeof frame.sessionId === 'string' && this.subs.has(frame.sessionId)) {
+          const sessionId = frame.sessionId
+          window.setTimeout(() => {
+            if (!this.subs.has(sessionId)) return
+            this.pendingReplay.delete(sessionId)
+            this.sendAttach(sessionId, this.subs.get(sessionId) ?? null)
+          }, LIMIT_RETRY_MS)
+          return
+        }
         // `unknown-session` about a named pane is the desktop saying that pane
         // no longer exists, which is the same news as `exit` arriving by another
         // road — a pane closed at the desk while this browser was away never
@@ -1423,6 +1499,7 @@ export class ForgeClient {
           // only one it will ever get. Leaving the receipt standing would
           // have the beat hang a perfectly good link up over a closed pane.
           this.pendingReplay.delete(frame.sessionId)
+          this.reAsked.delete(frame.sessionId)
         }
         // Only `message` is meant to be shown; the codes exist so a client can
         // decide whether to retry or re-sync, not so it can compose a sentence.
@@ -1594,13 +1671,40 @@ export class ForgeClient {
    *    at it. Idempotent, twenty bytes, no repaint.
    *
    *  - `pendingReplay` is audited, because a lost attach left the desktop with
-   *    no subscription at all — the same starvation, one cause deeper. A
-   *    breach hangs the link up rather than re-sending: see REPLAY_GRACE_MS.
+   *    no subscription at all — the same starvation, one cause deeper. A first
+   *    breach re-asks; a second hangs the link up: see REPLAY_GRACE_MS.
+   *
+   *  - the visibility answer's `sessions` ledger is reconciled against `subs`,
+   *    so a subscription the desktop lost by any road at all is re-asked
+   *    within a beat.
    */
   private beat(): void {
     this.challenge()
     if (!this.admitted) return
-    if (this.reportedVisible !== null) void this.request({ kind: 'visibility', visible: this.reportedVisible })
+    if (this.reportedVisible !== null) {
+      void this.request({ kind: 'visibility', visible: this.reportedVisible }).then((result) => {
+        // The answer carries the desktop's half of the subscription ledger —
+        // see `sessions` on WebResult. Absent on an older desktop, which is
+        // "no news", never "no sessions". Any pane this page believes it is
+        // watching that the desktop is not streaming had its attach lost
+        // somewhere neither end can see, and is re-asked here — the one check
+        // that makes every lost-attach failure heal in a beat instead of
+        // never. Panes with an attach honestly in flight are left alone;
+        // the receipt audit remains the backstop for those.
+        if (result.kind !== 'ok' || !Array.isArray(result.sessions)) return
+        const streaming = new Set(result.sessions)
+        const now = Date.now()
+        for (const [sessionId, size] of this.subs) {
+          if (streaming.has(sessionId)) continue
+          const askedAt = this.pendingReplay.get(sessionId)
+          if (askedAt !== undefined && now - askedAt < ATTACH_SETTLE_MS) continue
+          // The desktop has answered the receipt's question out loud: it never
+          // registered this pane. Restart the clock with the fresh ask.
+          this.pendingReplay.delete(sessionId)
+          this.sendAttach(sessionId, size)
+        }
+      })
+    }
   }
 
   /**
@@ -1612,11 +1716,20 @@ export class ForgeClient {
   private auditPendingReplay(): void {
     if (!this.pendingReplay.size) return
     const now = Date.now()
-    for (const [, sentAt] of this.pendingReplay) {
-      if (now - sentAt > REPLAY_GRACE_MS) {
-        this.declareDead()
-        return
+    for (const [sessionId, sentAt] of this.pendingReplay) {
+      if (now - sentAt <= REPLAY_GRACE_MS) continue
+      // First breach: re-ask, once. The receipt's clock restarts with the
+      // fresh frame — the delete before the send is what lets it — so the
+      // second verdict is about the re-ask, not about time already served.
+      if (!this.reAsked.has(sessionId)) {
+        this.reAsked.add(sessionId)
+        this.pendingReplay.delete(sessionId)
+        this.sendAttach(sessionId, this.subs.get(sessionId) ?? null)
+        continue
       }
+      // Second breach for the same pane: the link itself is the suspect.
+      this.declareDead()
+      return
     }
   }
 
