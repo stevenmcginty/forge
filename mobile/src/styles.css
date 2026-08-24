@@ -964,12 +964,15 @@ body {
 .seed-sheet-input {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 44px;
   padding: 10px 12px;
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--ink);
   font: 15px/1.4 system-ui, sans-serif;
+  resize: none;
+  overflow-y: hidden;
 }
 
 .seed-sheet-input:focus {

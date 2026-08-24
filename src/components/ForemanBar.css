@@ -126,13 +126,17 @@
 
 .pane__seed-input {
   width: 100%;
-  height: 26px;
-  padding: 0 var(--s-3);
+  min-height: 26px;
+  padding: 4px var(--s-3);
   background: var(--bg-sunken);
   border: 1px solid var(--line-hairline);
   border-radius: var(--r-sm);
   color: var(--text-primary);
+  font-family: inherit;
   font-size: var(--t-md);
+  line-height: 1.4;
+  resize: none;
+  overflow-y: hidden;
   transition: border-color var(--dur-fast) var(--ease-out);
 }
 

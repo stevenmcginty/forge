@@ -358,9 +358,10 @@ export interface OpFrame {
   tabId?: string
   paneId?: string
   /**
-   * `foreman-start` only: Steve's one line for Foreman. Capped at the boundary
-   * to FOREMAN_SEED_MAX, and may be empty — "take over the session this pane
-   * already holds", which only means something for a pane that has one.
+   * `foreman-start` only: Steve's line — or whole brief — for Foreman. Capped
+   * at the boundary to FOREMAN_SEED_MAX, and may be empty — "take over the
+   * session this pane already holds", which only means something for a pane
+   * that has one.
    */
   seed?: string
 }

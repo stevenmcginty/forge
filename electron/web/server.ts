@@ -2095,9 +2095,10 @@ export class WebServer {
             return
           }
           // Capped, not refused, for the same reason `write` is capped: the
-          // seed is a line a person typed, and the honest answer to a very
-          // long one is the first FOREMAN_SEED_MAX characters of it rather
-          // than a dead end. The host caps again on its own side of the seam.
+          // seed is a line or a whole brief a person typed or pasted, and the
+          // honest answer to one longer than FOREMAN_SEED_MAX is the first
+          // FOREMAN_SEED_MAX characters of it rather than a dead end. The host
+          // caps again on its own side of the seam.
           const started = await this.host.foremanStart({
             paneId,
             seed: wireString(request.seed, FOREMAN_SEED_MAX)

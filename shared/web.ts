@@ -411,14 +411,17 @@ export const MAX_INPUT_PER_SECOND = 120
  * it (a JS string's `length` is UTF-16 code units and is neither an upper nor a
  * lower bound on the UTF-8 byte count).
  *
- * The biggest frame a browser legitimately sends is a `paste-image` whose
- * base64 payload is MAX_IMAGE_BASE64, plus a small JSON envelope. 64KB clears
- * that with room to spare and is small enough that a thousand of them cannot
- * be a memory attack. It bounds the *inbound* direction only: a `replay`
- * travelling the other way is deliberately larger than this, see
- * MAX_REPLAY_BYTES.
+ * Two frames compete for the biggest a browser legitimately sends: a
+ * `paste-image` whose base64 payload is MAX_IMAGE_BASE64, and a
+ * `foreman-start` carrying a seed up to FOREMAN_SEED_MAX characters. The seed
+ * is the bigger of the two once it is not ASCII — `wireString` clamps by
+ * character count, not bytes, so 40,000 characters of pasted prose can be
+ * ~120KB of UTF-8 before it ever reaches that clamp. 192KB clears both with
+ * room to spare and is still small enough that a thousand of them cannot be a
+ * memory attack. It bounds the *inbound* direction only: a `replay` travelling
+ * the other way is deliberately larger than this, see MAX_REPLAY_BYTES.
  */
-export const MAX_FRAME_BYTES = 64 * 1024
+export const MAX_FRAME_BYTES = 192 * 1024
 
 /**
  * Biggest base64 payload a `paste-image` request may carry.

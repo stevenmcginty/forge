@@ -29,6 +29,12 @@ import { Feed } from './Feed'
  */
 const PARSE_INTERVAL_MS = 80
 
+/**
+ * How tall the seed strip's textarea grows before it scrolls instead — about
+ * eight lines of `.pane__seed-input`'s own font/line-height/padding.
+ */
+const SEED_MAX_GROW_PX = 160
+
 /** HH:MM off a Foreman log entry's epoch, the way the decision log shows it. */
 function clockOf(at: number): string {
   const date = new Date(at)
@@ -202,6 +208,7 @@ export function PaneView({
   const [seeding, setSeeding] = useState(false)
   const [seedDraft, setSeedDraft] = useState('')
   const [logOpen, setLogOpen] = useState(false)
+  const seedField = useRef<HTMLTextAreaElement | null>(null)
 
   /**
    * The strip closes itself the moment Foreman is on, whichever surface
@@ -211,6 +218,19 @@ export function PaneView({
   useEffect(() => {
     if (foremanOn) setSeeding(false)
   }, [foremanOn])
+
+  // Rows 1 through ~8 grow with the text, past that it scrolls in place — a
+  // seed can be a whole pasted brief, not just the one line the placeholder
+  // suggests. Same shape as the composer's own autosize, sized for this box's
+  // smaller font.
+  useEffect(() => {
+    const el = seedField.current
+    if (!el) return
+    el.style.height = '0px'
+    const next = Math.min(el.scrollHeight, SEED_MAX_GROW_PX)
+    el.style.height = `${next}px`
+    el.style.overflowY = el.scrollHeight > SEED_MAX_GROW_PX ? 'auto' : 'hidden'
+  }, [seedDraft, seeding])
 
   const switchForeman = useCallback(() => {
     if (!live || !alive) return
@@ -911,17 +931,19 @@ export function PaneView({
       </header>
 
       {/*
-        The seed strip — Foreman's one question before it starts. One line,
-        and the blank answer is a real one where the pane already holds a
-        session: "take over what is here". Where it does not, Start waits for
-        words, because a job with no seed and no session is a switch with
-        nothing behind it.
+        The seed strip — Foreman's one question before it starts. A line or a
+        whole pasted brief, and the blank answer is a real one where the pane
+        already holds a session: "take over what is here". Where it does not,
+        Start waits for words, because a job with no seed and no session is a
+        switch with nothing behind it.
       */}
       {seeding ? (
         <div className="pane__seed">
-          <input
+          <textarea
+            ref={seedField}
             className="pane__seed-input"
             value={seedDraft}
+            rows={1}
             // The desktop caps at FOREMAN_SEED_MAX on the way in and this link
             // caps again at the boundary; the attribute keeps the box itself
             // from collecting a paragraph the desktop will only cut.
@@ -929,11 +951,11 @@ export function PaneView({
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            placeholder="What's the job? One line is enough."
+            placeholder="What's the job? A line or a whole brief — both work."
             autoFocus
             onChange={(e) => setSeedDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 startForeman()
               }

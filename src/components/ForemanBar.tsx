@@ -15,7 +15,8 @@ import './ForemanBar.css'
  *    else is typing into must say so at a glance, from across the room, in
  *    every theme. Grey when it is yours, lit when it is not.
  *  • `ForemanSeed` is the strip that drops under the header when you switch it
- *    on — one line about the job, which Foreman turns into the actual brief.
+ *    on — a line or a whole brief about the job, which Foreman turns into the
+ *    actual concept.
  *  • `ForemanFooter` is the standing line at the bottom, and the decision log
  *    behind it. The log is the only record of *why* a pane got the answer it
  *    got, because the reasoning itself lives in a session nobody watches.
@@ -69,6 +70,13 @@ export function ForemanToggle({ paneId, onSeed }: { paneId: string; onSeed: () =
 
 /* -------------------------------------------------------------------- seed */
 
+/**
+ * How tall the seed textarea grows before it scrolls instead — about eight
+ * lines of `.pane__seed-input`'s own font/line-height/padding, the same
+ * "rows 1 to a screenful, then scroll" shape as a chat composer.
+ */
+const SEED_MAX_GROW_PX = 152
+
 export function ForemanSeed({
   paneId,
   /** The pane has a live shell, so "take over what is already here" is real. */
@@ -81,6 +89,19 @@ export function ForemanSeed({
 }): ReactNode {
   const foreman = useForeman()
   const [seed, setSeed] = useState('')
+  const field = useRef<HTMLTextAreaElement | null>(null)
+
+  // Rows 1 through ~8 grow with the text, past that it scrolls in place — a
+  // seed can be a whole pasted brief, not just the one line the placeholder
+  // suggests.
+  useEffect(() => {
+    const el = field.current
+    if (!el) return
+    el.style.height = '0px'
+    const next = Math.min(el.scrollHeight, SEED_MAX_GROW_PX)
+    el.style.height = `${next}px`
+    el.style.overflowY = el.scrollHeight > SEED_MAX_GROW_PX ? 'auto' : 'hidden'
+  }, [seed])
 
   const go = (): void => {
     const line = seed.trim()
@@ -96,20 +117,25 @@ export function ForemanSeed({
     <div className="pane__seed">
       <Icon name="foreman" size={13} className="pane__seed-mark" />
       <div className="pane__seed-field">
-        <input
+        <textarea
+          ref={field}
           className="pane__seed-input"
           value={seed}
+          rows={1}
           autoFocus
           spellCheck={false}
           maxLength={FOREMAN_SEED_MAX}
-          placeholder="What’s the job? One line is enough."
+          placeholder="What’s the job? A line or a whole brief — both work."
           aria-label="What Foreman should do in this pane"
           onChange={(e) => setSeed(e.target.value)}
           // The global shortcut map listens in the capture phase and would read
           // a typed "w" as close-pane.
           onKeyDown={(e) => {
             e.stopPropagation()
-            if (e.key === 'Enter') go()
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              go()
+            }
             if (e.key === 'Escape') onClose()
           }}
         />

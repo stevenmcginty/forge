@@ -67,6 +67,12 @@ export interface PaneViewProps {
  */
 const KEYBAR_PREF = 'forge.keybar'
 
+/**
+ * How tall the seed sheet's textarea grows before it scrolls instead — about
+ * eight lines of `.seed-sheet-input`'s own font/line-height/padding.
+ */
+const SEED_MAX_GROW_PX = 190
+
 function keybarWanted(): boolean {
   try {
     return localStorage.getItem(KEYBAR_PREF) === 'on'
@@ -103,11 +109,24 @@ export function PaneView({
   const [seeding, setSeeding] = useState(false)
   const [seedDraft, setSeedDraft] = useState('')
   const [logOpen, setLogOpen] = useState(false)
+  const seedField = useRef<HTMLTextAreaElement | null>(null)
 
   /** The sheet closes itself the moment Foreman is on, whichever surface flipped it. */
   useEffect(() => {
     if (foremanOn) setSeeding(false)
   }, [foremanOn])
+
+  // Rows 1 through ~8 grow with the text, past that it scrolls in place — a
+  // seed can be a whole pasted brief, not just the one line the placeholder
+  // suggests.
+  useEffect(() => {
+    const el = seedField.current
+    if (!el) return
+    el.style.height = '0px'
+    const next = Math.min(el.scrollHeight, SEED_MAX_GROW_PX)
+    el.style.height = `${next}px`
+    el.style.overflowY = el.scrollHeight > SEED_MAX_GROW_PX ? 'auto' : 'hidden'
+  }, [seedDraft, seeding])
 
   const startForeman = (): void => {
     const seed = seedDraft.trim().slice(0, FOREMAN_SEED_MAX)
@@ -260,24 +279,26 @@ export function PaneView({
       </header>
 
       {/*
-        The seed sheet. One line, one question — the same words the browser
-        asks — and the blank answer is a real one only where the pane already
-        holds a session: "take over what is here".
+        The seed sheet. A line or a whole pasted brief, one question — the
+        same words the browser asks — and the blank answer is a real one only
+        where the pane already holds a session: "take over what is here".
       */}
       {seeding ? (
         <div className="seed-sheet">
-          <input
+          <textarea
+            ref={seedField}
             className="seed-sheet-input"
             value={seedDraft}
+            rows={1}
             maxLength={FOREMAN_SEED_MAX}
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            placeholder="What's the job? One line is enough."
+            placeholder="What's the job? A line or a whole brief — both work."
             autoFocus
             onChange={(e) => setSeedDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 startForeman()
               }

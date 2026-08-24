@@ -1,13 +1,14 @@
 /**
  * Foreman: the facts about a driven pane that every surface has to agree on.
  *
- * Foreman is a per-pane toggle. Switched on, it takes a one-line seed from
- * Steve — "website for a sweet shop" — forms its *own* full concept, writes the
- * brief into the pane's Claude session, and then drives that session to the
- * end: it answers every question and permission prompt the terminal comes back
- * with, hires other agent panes when a job suits them, and stops only when it
- * judges the work genuinely finished. Every decision in that loop is Foreman's.
- * Switching it off hands the keyboard straight back to the human.
+ * Foreman is a per-pane toggle. Switched on, it takes a seed from Steve — one
+ * line ("website for a sweet shop") or a whole pasted brief — forms its *own*
+ * full concept, writes the brief into the pane's Claude session, and then
+ * drives that session to the end: it answers every question and permission
+ * prompt the terminal comes back with, hires other agent panes when a job
+ * suits them, and stops only when it judges the work genuinely finished.
+ * Every decision in that loop is Foreman's. Switching it off hands the
+ * keyboard straight back to the human.
  *
  * Three surfaces will draw this state — the desktop footer, Forge Web and Forge
  * Mobile — so the shape lives here rather than in any one of them, the way
@@ -79,7 +80,7 @@ export interface ForemanState {
 /** Switch Foreman on for one pane. */
 export interface ForemanStartRequest {
   paneId: string
-  /** Steve's one line. Foreman forms the actual concept from this itself. */
+  /** Steve's line, or whole brief. Foreman forms the actual concept from this itself. */
   seed: string
 }
 
@@ -175,8 +176,17 @@ Keys and credentials live in Forge's own Settings, under Models & APIs. Never pu
 /** The longest one log line may be. Screen tails and briefs are long. */
 export const FOREMAN_LOG_TEXT_MAX = 2000
 
-/** The longest seed Foreman accepts. It is one line, not a brief. */
-export const FOREMAN_SEED_MAX = 2000
+/**
+ * The longest seed Foreman accepts.
+ *
+ * A line is enough, but a whole brief — thousands of words pasted in from
+ * somewhere else — has to fit too: this is the ceiling on what reaches
+ * Foreman's first turn (see `seedTurn` in electron/foreman/host.ts), not on
+ * what the decision log keeps of it (FOREMAN_LOG_TEXT_MAX, separate and much
+ * smaller). 40,000 characters is several thousand words, an order of
+ * magnitude past anyone's actual brief.
+ */
+export const FOREMAN_SEED_MAX = 40_000
 
 /** The starting state for a pane nobody has driven. */
 export function idleForemanState(paneId: string): ForemanState {

@@ -4010,12 +4010,15 @@ button.astatus__mode:not(:disabled):hover {
 .pane__seed-input {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 30px;
   padding: 6px var(--s-3);
   font: 13px / 1.4 var(--font-ui);
   color: var(--text-primary);
   background: var(--bg-terminal);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
+  resize: none;
+  overflow-y: hidden;
 }
 
 .pane__seed-input:focus {
@@ -4239,6 +4242,25 @@ button.astatus__mode:not(:disabled):hover {
 
 [data-mobile] .pane__foreman-text {
   font-size: 13px;
+}
+
+/*
+ * The seed strip on a phone: an agent pane's header floats absolutely over the
+ * top of the pane there (see "An agent pane on a phone" above), so a strip
+ * that simply follows it in normal flow renders at the pane's very top —
+ * exactly where the header's floating trailing cluster, FOREMAN pill
+ * included, sits. Pushed down by the same 52px the feed/chat/terminal already
+ * reserve to clear that cluster, and wrapped so the input owns its own row
+ * with Start/cancel on one beneath it, rather than the three fighting for a
+ * width already this narrow.
+ */
+[data-mobile] .pane[data-kind='agent'] .pane__seed {
+  margin-top: 52px;
+  flex-wrap: wrap;
+}
+
+[data-mobile] .pane[data-kind='agent'] .pane__seed-input {
+  flex-basis: 100%;
 }
 
 @media (prefers-reduced-transparency: reduce) {
