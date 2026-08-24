@@ -43,6 +43,7 @@ import {
   isPermissionMode,
   isShellProfile
 } from '@shared/agents'
+import { DEFAULT_FOREMAN_BRIEF } from '@shared/foreman'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
 import { DEFAULT_RAIL_OPEN } from '@shared/rail'
@@ -220,6 +221,10 @@ const FALLBACK_SETTINGS: Settings = {
   // Mirrors electron/store.ts — off until the wake-word listener has earned
   // trust the way barge-in and earcons already have.
   voiceWakeWord: false,
+  // Mirrors electron/store.ts. Foreman decides a whole job on Steve's behalf,
+  // so it runs the same model the voice brain does, and needs no key either.
+  foremanModel: 'opus',
+  foremanBrief: DEFAULT_FOREMAN_BRIEF,
   geminiKey: '',
   geminiModel: 'gemini-2.5-flash',
   zaiKey: '',

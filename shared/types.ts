@@ -1476,6 +1476,26 @@ export interface Settings {
    */
   voiceWakeWord: boolean
   /**
+   * Which model Foreman runs — the agent that drives a whole coding job in a
+   * pane from one line of intent. See shared/foreman.ts and electron/foreman/.
+   *
+   * The same shape as `voiceClaudeModel` above and for the same reasons: an
+   * alias rather than a pinned id, and no API key anywhere near it — the Agent
+   * SDK session signs in with the machine's own `claude` login.
+   */
+  foremanModel: string
+  /**
+   * Foreman's standing brief: the house rules that are true of every job,
+   * whatever the seed says. Which backend, how work is planned, what has to be
+   * green before anything is finished, where keys live.
+   *
+   * Read by Foreman through a tool rather than pasted into its prompt, so
+   * editing it takes effect on the next turn of a running job instead of the
+   * next restart. Empty is a valid answer meaning "use your judgement"; the
+   * default is DEFAULT_FOREMAN_BRIEF, capped at FOREMAN_BRIEF_MAX.
+   */
+  foremanBrief: string
+  /**
    * Google AI Studio key for GeminiBrain — the one brain that really talks to a
    * model. Sent only to generativelanguage.googleapis.com, only when Gemini is
    * the selected brain.

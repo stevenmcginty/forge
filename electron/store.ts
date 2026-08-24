@@ -9,6 +9,7 @@ import {
   permissionFamily,
   RETIRED_BUILTIN_PROFILE_IDS
 } from '@shared/agents'
+import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
@@ -239,6 +240,13 @@ function defaultSettings(): Settings {
     // Off: the wake-word listener is new and unproven, so it stays an opt-in
     // rather than something that starts eavesdropping on everyone's upgrade.
     voiceWakeWord: false,
+    // Foreman's model. Opus for the same reason the voice brain runs it: this
+    // agent makes every decision in a build on Steve's behalf and answers a
+    // terminal without anybody checking, so intelligence beats latency by a
+    // wide margin. An alias, not a pinned id, and no key — the Agent SDK signs
+    // in with the machine's own `claude` login.
+    foremanModel: 'opus',
+    foremanBrief: DEFAULT_FOREMAN_BRIEF,
     geminiKey: '',
     geminiModel: 'gemini-2.5-flash',
     zaiKey: '',
@@ -743,6 +751,15 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
         ? s.voiceClaudeModel.trim().slice(0, 80)
         : DEFAULT_SETTINGS.voiceClaudeModel,
     voiceWakeWord: Boolean(s.voiceWakeWord),
+    foremanModel:
+      typeof s.foremanModel === 'string' && s.foremanModel.trim()
+        ? s.foremanModel.trim().slice(0, 80)
+        : DEFAULT_SETTINGS.foremanModel,
+    // Not trimmed to the default when empty: an empty standing brief is a
+    // deliberate answer — "no house rules, use your judgement" — and the tool
+    // says exactly that. Capped because it is read into a system-adjacent tool
+    // result on a long-running session.
+    foremanBrief: typeof s.foremanBrief === 'string' ? s.foremanBrief.slice(0, FOREMAN_BRIEF_MAX) : DEFAULT_SETTINGS.foremanBrief,
     geminiKey: typeof s.geminiKey === 'string' ? s.geminiKey.trim() : '',
     geminiModel:
       typeof s.geminiModel === 'string' && s.geminiModel.trim() ? s.geminiModel.trim() : DEFAULT_SETTINGS.geminiModel,
