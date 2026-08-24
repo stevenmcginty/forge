@@ -58,6 +58,7 @@ const CHECKS = [
   { name: 'commands:check', lane: 'fast' },
   { name: 'draft:check', lane: 'fast' },
   { name: 'feed:check', lane: 'fast' },
+  { name: 'foreman:check', lane: 'fast', note: 'the real loop, driven by a stub brain — no SDK subprocess' },
   { name: 'foreman-kit:check', lane: 'fast', note: 'the real assets/foreman-kit, into a mkdtemp Claude home' },
   { name: 'gh:check', lane: 'fast' },
   { name: 'git:check', lane: 'fast' },

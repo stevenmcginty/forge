@@ -30,6 +30,7 @@
     "voice:check": "node scripts/voice-check.mjs",
     "voice:brain": "node scripts/voice-brain-smoke.mjs",
     "voice:luna": "node scripts/voice-luna-smoke.mjs",
+    "foreman:check": "node scripts/foreman-check.mjs",
     "memory:smoke": "node scripts/memory-smoke.mjs",
     "skills:smoke": "node scripts/skills-smoke.mjs",
     "pack:check": "node scripts/pack-check.mjs",
