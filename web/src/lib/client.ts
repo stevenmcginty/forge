@@ -22,6 +22,7 @@ import {
   type WebShutdownReason
 } from '@shared/web'
 import type { ChatUpdate } from '@shared/chat'
+import type { ForemanState } from '@shared/foreman'
 import type { GitSnapshot, Project, Workspace } from '@shared/types'
 
 /**
@@ -288,6 +289,11 @@ export interface ForgeHandlers {
   onSessions: (sessions: WebSession[]) => void
   onSessionStarted: (session: WebSession) => void
   onAttention: (sessionId: string, asking: boolean, prompt: string) => void
+  /**
+   * One pane's Foreman state moved — the whole state, every time, whether or
+   * not this browser is the one that switched it on. See `WebForemanFrame`.
+   */
+  onForeman: (state: ForemanState) => void
   onProjects: (projects: Project[]) => void
   onWorkspace: (projectId: string, workspace: Workspace) => void
   onGit: (snapshot: GitSnapshot) => void
@@ -1502,6 +1508,16 @@ export class ForgeClient {
           frame.asking === true,
           typeof frame.prompt === 'string' ? frame.prompt : ''
         )
+        return
+
+      case 'foreman':
+        // Coerced, not trusted, for the same reason every handler here is: the
+        // frame is typed but the wire is not. A malformed state is dropped
+        // rather than handed to the store, which would draw a switch lit on a
+        // pane nobody is driving.
+        if (frame.state && typeof frame.state === 'object' && typeof frame.state.paneId === 'string') {
+          this.handlers.onForeman(frame.state)
+        }
         return
 
       case 'projects':

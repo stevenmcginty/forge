@@ -19,6 +19,7 @@ import {
   type WebSession
 } from '@shared/web'
 import type { ChatUpdate } from '@shared/chat'
+import type { ForemanState } from '@shared/foreman'
 import type { AgentProfile, GitSnapshot, Project, Workspace } from '@shared/types'
 import { collectLeaves } from '@/lib/splitTree'
 import { ALLOW_LOOPBACK, devLoopbackHost, loadConfig, type WebClientConfig } from './config'
@@ -64,6 +65,12 @@ export interface Picture {
   sessions: WebSession[]
   /** The desk's nominated projects folder, or '' when none is set. Display only. */
   projectsRoot: string
+  /**
+   * Foreman's state per driven pane, keyed by pane id. From `hello-ok` on
+   * connect and kept current by the `foreman` push — a pane that has never
+   * been driven simply has no entry, which reads the same as `off`.
+   */
+  foreman: Record<string, ForemanState>
 }
 
 /** What the whole page is doing, before any of the connection detail. */
@@ -166,6 +173,15 @@ export interface ForgeActions {
   stopTranscript: (sessionId: string) => void
   /** Subscribe to one pane's conversation updates. Returns the unsubscribe. */
   onTranscript: (sessionId: string, listener: (update: ChatUpdate) => void) => () => void
+  /**
+   * Switch Foreman on for a pane. Resolves with the desktop's refusal
+   * sentence, or null when it was switched on. An empty seed means "take over
+   * the session this pane already holds", which the caller should only offer
+   * for a pane that has one.
+   */
+  foremanStart: (paneId: string, seed: string) => Promise<string | null>
+  /** Switch it off — the keyboard goes back to the human on every surface. */
+  foremanStop: (paneId: string) => Promise<string | null>
   setNotice: (message: string) => void
   /** Clear the notice on screen now; the next in the queue, if any, takes its turn. */
   dismissNotice: () => void
@@ -472,7 +488,10 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           profiles: frame.profiles,
           workspaces: frame.workspaces,
           sessions: frame.sessions,
-          projectsRoot: frame.projectsRoot ?? ''
+          projectsRoot: frame.projectsRoot ?? '',
+          // The snapshot half: a browser that reconnects mid-job learns the
+          // switch is on from here. Absent (an older desktop) reads as empty.
+          foreman: Object.fromEntries((frame.foreman ?? []).map((s) => [s.paneId, s]))
         })
         // Written down and held, from the one object rather than by reading back
         // what was just written: `rememberPicture` hands over what it stored.
@@ -505,6 +524,16 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       onExit: (sessionId) => {
         setPicture((current) =>
           current ? { ...current, sessions: current.sessions.filter((s) => s.id !== sessionId) } : current
+        )
+      },
+      onForeman: (state) => {
+        // The whole state replaces the pane's entry — there is no diff to
+        // merge, and a state the desktop has moved past is the one thing this
+        // map must never keep. `off` is kept rather than deleted: the footer
+        // wants to say "Stopped — you have the keyboard" for a beat, and the
+        // switch wants its true shape from the desktop, not a guess.
+        setPicture((current) =>
+          current ? { ...current, foreman: { ...current.foreman, [state.paneId]: state } } : current
         )
       },
       onSessions: (sessions) => {
@@ -1039,6 +1068,22 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       },
       watchTranscript: (sessionId) => client.watchTranscript(sessionId),
       stopTranscript: (sessionId) => client.stopTranscript(sessionId),
+      foremanStart: async (paneId, seed) => {
+        const result = await client.request({ kind: 'foreman-start', paneId, seed })
+        if (result.kind === 'failed') {
+          pushNotice(result.message)
+          return result.message
+        }
+        return null
+      },
+      foremanStop: async (paneId) => {
+        const result = await client.request({ kind: 'foreman-stop', paneId })
+        if (result.kind === 'failed') {
+          pushNotice(result.message)
+          return result.message
+        }
+        return null
+      },
       onTranscript: (sessionId, listener) => {
         const map = transcriptListeners.current
         const set = map.get(sessionId) ?? new Set()

@@ -3831,3 +3831,305 @@ button.astatus__mode:not(:disabled):hover {
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------- foreman in a pane
+ *
+ * The switch, the seed strip, the status footer and the decision log — the
+ * browser's half of Foreman. Tokens only, the pane's own accent for the lit
+ * state, so a driven pane says so in its agent's colour and nothing here can
+ * drift from the desktop's look.
+ */
+
+/*
+ * The switch. Same family as the WAITING chip — a bordered mono pill — but a
+ * button, because it is the one control in the header. Lit with the pane's
+ * accent while Foreman is on: "somebody else is typing here" is the loudest
+ * fact about the pane and the accent is how this page says who.
+ */
+.pane__foreman {
+  font: 600 10px / 1 var(--font-mono);
+  letter-spacing: 0.08em;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.pane__foreman:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--pane-accent, var(--accent));
+}
+
+.pane__foreman:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pane__foreman[data-on='true'] {
+  color: var(--pane-accent, var(--accent));
+  border-color: color-mix(in srgb, var(--pane-accent, var(--accent)) 55%, transparent);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 12%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--pane-accent, var(--accent)) 22%, transparent);
+}
+
+/*
+ * The seed strip. One line, one question, the pane's accent on the start
+ * button — the same gesture as the composer's send, in the same seat.
+ */
+.pane__seed {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+  padding: var(--s-2) var(--s-3);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.pane__seed-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px var(--s-3);
+  font: 13px / 1.4 var(--font-ui);
+  color: var(--text-primary);
+  background: var(--bg-terminal);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.pane__seed-input:focus {
+  outline: none;
+  border-color: var(--pane-accent, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pane-accent, var(--accent)) 35%, transparent);
+}
+
+.pane__seed-input::placeholder {
+  color: var(--text-muted);
+}
+
+.pane__seed-start {
+  flex: none;
+  padding: 6px 14px;
+  font: 600 12.5px / 1 var(--font-ui);
+  color: var(--text-on-accent);
+  background: var(--pane-accent, var(--accent));
+  border: 1px solid var(--pane-accent, var(--accent));
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+
+.pane__seed-start:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.pane__seed-start:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pane__seed-cancel {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.pane__seed-cancel:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/*
+ * The status footer. One line at the foot of the pane, the status word in the
+ * accent's tint and the sentence beside it; `data-status` lets `error` and
+ * `done` speak in the colours this page already uses for them.
+ */
+.pane__foreman-line {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  min-height: 30px;
+  padding: var(--s-2) var(--s-4);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 7%, var(--bg-panel));
+  border-top: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 22%, var(--line-hairline));
+  cursor: pointer;
+  user-select: none;
+}
+
+.pane__foreman-tag {
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--pane-accent, var(--accent));
+}
+
+.pane__foreman-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.pane__foreman-line[data-status='error'] .pane__foreman-tag {
+  color: var(--warn);
+}
+
+.pane__foreman-line[data-status='done'] .pane__foreman-tag {
+  color: var(--text-dim);
+}
+
+/*
+ * The decision log. Overlays the pane from the bottom, the terminal untouched
+ * beneath it; scrollable, newest at the bottom, closed with the one control
+ * in its head.
+ */
+.pane__foreman-log {
+  position: absolute;
+  inset: auto 0 0 0;
+  max-height: 55%;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 30%, var(--line-hairline));
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  z-index: 3;
+}
+
+.pane__foreman-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.pane__foreman-log-title {
+  font: 600 12px / 1 var(--font-ui);
+  color: var(--text-secondary);
+}
+
+.pane__foreman-log-close {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.pane__foreman-log-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.pane__foreman-log-list {
+  overflow-y: auto;
+  padding: var(--s-2) var(--s-3) var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.pane__foreman-log-entry {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: var(--s-3);
+  align-items: baseline;
+  padding: 3px var(--s-2);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.pane__foreman-log-entry:hover {
+  background: var(--bg-hover);
+}
+
+.pane__foreman-log-kind {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--pane-accent, var(--accent));
+}
+
+.pane__foreman-log-entry[data-kind='error'] .pane__foreman-log-kind {
+  color: var(--warn);
+}
+
+.pane__foreman-log-entry[data-kind='seed'] .pane__foreman-log-kind,
+.pane__foreman-log-entry[data-kind='done'] .pane__foreman-log-kind {
+  color: var(--text-dim);
+}
+
+.pane__foreman-log-at {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pane__foreman-log-text {
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.pane__foreman-log-empty {
+  margin: 0;
+  padding: var(--s-2) var(--s-2);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* The log anchors to the pane, so a pane carrying one becomes its box. */
+.pane:has(.pane__foreman-log) {
+  position: relative;
+}
+
+/*
+ * A phone reads the header with less room, so the switch tightens beside the
+ * chips rather than crowding the title out. The log keeps its scroll and its
+ * head; a phone's pane is full-height, so 55% of it is plenty.
+ */
+[data-mobile] .pane__foreman {
+  padding: 4px 6px;
+  font-size: 9px;
+}
+
+[data-mobile] .pane__foreman-line {
+  min-height: 34px;
+  padding: var(--s-2) var(--s-3);
+}
+
+[data-mobile] .pane__foreman-text {
+  font-size: 13px;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .pane__foreman-log {
+    background: var(--bg-panel);
+    backdrop-filter: none;
+  }
+}
