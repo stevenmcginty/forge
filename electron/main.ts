@@ -49,6 +49,7 @@ import {
   registerVoiceAgentHandlers,
   setVoiceAgentTarget
 } from './voice-agent/ipc'
+import { disposeForeman, registerForemanHandlers, setForemanTarget } from './foreman/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import { applyMobileSettings, disposeMobile, publishMobileState, registerMobileHandlers } from './mobile-host'
 import {
@@ -429,6 +430,10 @@ function createWindow(): void {
     setUpdateTarget(null)
     setStaleTarget(null)
     setVoiceAgentTarget(null)
+    // And with it every driven pane: a Foreman still typing into a terminal
+    // after the window that could switch it off has gone is the one state this
+    // feature must never be in.
+    setForemanTarget(null)
     // Takes the overlay down with it. A topmost pill wired to a renderer that
     // no longer exists would be a dead button floating over every other app,
     // and — because it is skipTaskbar — one with no obvious way to close it.
@@ -488,6 +493,7 @@ function createWindow(): void {
   setSourceUpdateTarget(mainWindow)
   watchFocusForSourceUpdate(mainWindow)
   setVoiceAgentTarget(mainWindow)
+  setForemanTarget(mainWindow)
   // The main window is the overlay's *host*: it holds the one voice agent, so
   // it is the end the relay pushes state from and delivers callbacks to.
   setOverlayHost(mainWindow)
@@ -1268,6 +1274,10 @@ void app
       // login is touched until the renderer actually starts the brain — see
       // electron/voice-agent/host.ts.
       registerVoiceAgentHandlers()
+      // Same posture: handlers only. Foreman opens no session and touches no
+      // `claude` login until a pane is actually toggled on — see
+      // electron/foreman/host.ts.
+      registerForemanHandlers()
       // Off by default: this reads settings, sees `companionEnabled: false`, and
       // returns without touching the network or a credential.
       registerCompanionHandlers()
@@ -1399,6 +1409,10 @@ app.on('before-quit', () => {
   // Ends the Agent SDK session and its subprocess. A voice brain outliving the
   // app would hold a `claude` process open with nobody to talk to.
   safely('disposeVoiceAgent', disposeVoiceAgent)
+  // Every driven pane's session, for the same reason: a Foreman outliving the
+  // app would hold a `claude` process open with a terminal to type into and
+  // nobody watching it.
+  safely('disposeForeman', disposeForeman)
   safely('disposeCompanion', disposeCompanion)
   safely('disposeMobile', disposeMobile)
   // Retracts the rendezvous record and tells every browser why before the
