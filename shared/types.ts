@@ -1505,6 +1505,14 @@ export interface Settings {
    */
   foremanModel: string
   /**
+   * Which model Foreman's *driving* sessions run. A long job hands its session
+   * over at every plan-step boundary to keep context lean (see `recycle` in
+   * electron/foreman/host.ts); the seed session and Steve's mid-job messages
+   * use `foremanModel`, and the sessions that carry the job between steps use
+   * this. Same rules: an alias, no key, the machine's `claude` login.
+   */
+  foremanDriveModel: string
+  /**
    * Foreman's standing brief: the house rules that are true of every job,
    * whatever the seed says. Which backend, how work is planned, what has to be
    * green before anything is finished, where keys live.

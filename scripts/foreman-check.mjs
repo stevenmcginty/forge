@@ -7,7 +7,9 @@
  * app's version of it takes an hour, a real `claude` login and a real terminal:
  * the seed turn, the answer to a question, the debounce that stops Foreman
  * answering its own echo, the coalescing of triggers that arrive mid-turn, the
- * log cap, and the fact that everything it pushes at a renderer is plain JSON.
+ * log cap, the session handovers that keep a long job's context bounded, the
+ * token account, and the fact that everything it pushes at a renderer is plain
+ * JSON.
  *
  * So electron/foreman/host.ts is Electron-free and takes its whole world
  * through `ForemanDeps`, and it has two seams that make this possible:
@@ -36,8 +38,13 @@ registerHooks({
   }
 })
 
-const { ForemanHost, OWN_SEND_QUIET_MS, DEFAULT_FOREMAN_MODEL } = await import('../electron/foreman/host.ts')
+const { ForemanHost, OWN_SEND_QUIET_MS, DEFAULT_FOREMAN_MODEL, SESSION_MAX_RESULTS, QUIET_TURN_MIN_MS } = await import(
+  '../electron/foreman/host.ts'
+)
 const { FOREMAN_LOG_MAX, DEFAULT_FOREMAN_BRIEF, FOREMAN_IPC } = await import('../shared/foreman.ts')
+
+/** What the stub's every result reports, so usage assertions share one number. */
+const USAGE_PER_RESULT = 6600
 
 let pass = 0
 let fail = 0
@@ -95,7 +102,13 @@ function stubBrain(script) {
           result: 'ok',
           num_turns: 1,
           total_cost_usd: 0,
-          duration_ms: 1
+          duration_ms: 1,
+          usage: {
+            input_tokens: 1000,
+            output_tokens: 100,
+            cache_read_input_tokens: 5000,
+            cache_creation_input_tokens: 500
+          }
         }
       }
     })()
@@ -109,9 +122,10 @@ function stubBrain(script) {
     }
     opened.options = options
     opened.count++
+    opened.models.push(options.model)
     return iterator
   }
-  const opened = { count: 0, options: null, interrupted: false, returned: false, turns: seen }
+  const opened = { count: 0, options: null, models: [], interrupted: false, returned: false, turns: seen }
   return {
     open,
     opened,
@@ -162,6 +176,19 @@ function harness(script, overrides = {}) {
 
 /** The one script most cases want: answer every turn with one send. */
 const answerWith = (text) => () => [{ tool: 'send_to_pane', args: { text } }]
+
+/** A set_plan the stub can make: three steps, `active` moved, `done` marked. */
+const planCall = (active, done = []) => ({
+  tool: 'set_plan',
+  args: {
+    steps: [
+      { id: 'plan', title: 'Plan the pages', ...(done.includes('plan') ? { status: 'done' } : {}) },
+      { id: 'build', title: 'Build the shop front' },
+      { id: 'tests', title: 'Run the suite' }
+    ],
+    active
+  }
+})
 
 try {
   /* ------------------------------------------------------------- the seed */
@@ -562,6 +589,192 @@ try {
   }
 
   /* ------------------------------------------------------------- the shape */
+
+  console.log('\nthe token account')
+  {
+    const { host, states } = harness((text) =>
+      text.startsWith('Seed:') ? [{ tool: 'send_to_pane', args: { text: 'the brief' } }] : []
+    )
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    ok(host.stateOf(PANE).tokens === USAGE_PER_RESULT, 'every result adds its usage to the job total', String(host.stateOf(PANE).tokens))
+    host.noteAttention({ paneId: PANE, state: 'asking', prompt: 'Proceed?' }, Date.now() + 10_000)
+    await settle()
+    ok(host.stateOf(PANE).tokens === 2 * USAGE_PER_RESULT, 'across turns', String(host.stateOf(PANE).tokens))
+    ok(states.at(-1).tokens === 2 * USAGE_PER_RESULT, 'and it crossed the wire as a plain number', String(states.at(-1).tokens))
+    host.dispose()
+  }
+
+  console.log('\nthe handover')
+  {
+    const { host, brain } = harness(
+      (text) => {
+        if (text.startsWith('Seed:')) return [planCall('plan'), { tool: 'send_to_pane', args: { text: 'the brief' } }]
+        if (text.startsWith('The pane is asking:'))
+          return [planCall('build', ['plan']), { tool: 'send_to_pane', args: { text: 'step two' } }]
+        return [{ tool: 'send_to_pane', args: { text: 'carrying on' } }]
+      },
+      { getModel: () => 'opus', getDriveModel: () => 'sonnet' }
+    )
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    ok(brain.opened.models[0] === 'opus', 'the seed session runs the deciding model', String(brain.opened.models[0]))
+
+    host.noteAttention({ paneId: PANE, state: 'asking', prompt: 'Proceed?' }, Date.now() + 10_000)
+    await settle()
+    ok(brain.opened.count === 2, 'a finished step hands the session over', String(brain.opened.count))
+    ok(brain.opened.models[1] === 'sonnet', 'the fresh one runs the driving model', String(brain.opened.models[1]))
+
+    const handoff = brain.opened.turns[2] ?? ''
+    ok(handoff.startsWith('You are Foreman,'), 'the fresh session wakes to the handoff', handoff.slice(0, 40))
+    ok(/Plan the pages/.test(handoff) && /Build the shop front/.test(handoff), 'which restates the plan')
+    ok(/the brief/.test(handoff), 'carries the recent account')
+    ok(/1\. Yes/.test(handoff), "and the pane's screen")
+    ok(/Do not restart/.test(handoff), 'and the instruction to carry on rather than restart')
+    ok(handoff.length < 5000, 'inside its budget', String(handoff.length))
+    ok(
+      /handed over \(step\)/.test(host.stateOf(PANE).log.map((e) => e.text).join('\n')),
+      'the handover is one line in the log'
+    )
+    ok(host.stateOf(PANE).status === 'waiting', 'and the job is waiting on the pane again', host.stateOf(PANE).status)
+
+    const served = brain.opened.turns.length
+    host.noteAttention({ paneId: PANE, state: 'asking', prompt: 'Again?' }, Date.now() + 20_000)
+    await settle()
+    ok(
+      brain.opened.turns.length === served + 1 && brain.opened.count === 2,
+      'later turns are served by the fresh session',
+      `${brain.opened.count} sessions / ${brain.opened.turns.length} turns`
+    )
+    host.dispose()
+  }
+
+  console.log("\nsteve's word reaches the deciding model")
+  {
+    let release = null
+    const held = new Promise((r) => {
+      release = r
+    })
+    const { host, brain } = harness(
+      (text) => {
+        if (text.startsWith('Seed:')) return [planCall('plan'), { tool: 'send_to_pane', args: { text: 'the brief' } }]
+        if (text.startsWith('The pane is asking:'))
+          return [planCall('build', ['plan']), { tool: 'send_to_pane', args: { text: 'step two' } }]
+        if (text.startsWith('You are Foreman,')) return [{ tool: 'note', args: { text: 'settling in' } }]
+        return []
+      },
+      { getModel: () => 'opus', getDriveModel: () => 'sonnet' }
+    )
+    const original = host.callTool.bind(host)
+    host.callTool = async (paneId, name, args) => {
+      if (name === 'note' && args?.text === 'settling in') await held
+      return original(paneId, name, args)
+    }
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    host.noteAttention({ paneId: PANE, state: 'asking', prompt: 'Proceed?' }, Date.now() + 10_000)
+    await settle()
+    ok(brain.opened.count === 2, 'the step handed over to the driving tier', String(brain.opened.count))
+
+    host.say({ paneId: PANE, text: 'use pnpm' })
+    await settle()
+    ok(brain.opened.turns.length === 3, 'held while the fresh session works', String(brain.opened.turns.length))
+
+    release()
+    await settle()
+    ok(brain.opened.count === 3, 'his word hands the session back up', String(brain.opened.count))
+    ok(brain.opened.models[2] === 'opus', 'to the deciding model', String(brain.opened.models[2]))
+    ok(/Steve says: use pnpm/.test(brain.opened.turns[3] ?? ''), 'riding the handoff', (brain.opened.turns[3] ?? '').slice(0, 60))
+    ok(
+      /handed over \(your message\)/.test(host.stateOf(PANE).log.map((e) => e.text).join('\n')),
+      'and the log says whose it was'
+    )
+    host.dispose()
+  }
+
+  console.log('\nthe backstop')
+  {
+    const { host, brain } = harness((text) => (text.startsWith('Seed:') ? [{ tool: 'send_to_pane', args: { text: 'the brief' } }] : []), {
+      getModel: () => 'opus',
+      getDriveModel: () => 'sonnet'
+    })
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    for (let i = 0; i < SESSION_MAX_RESULTS - 1; i++) {
+      host.noteAttention({ paneId: PANE, state: 'asking', prompt: `q${i}` }, Date.now() + 10_000 + i)
+      await settle(4)
+    }
+    ok(
+      brain.opened.count === 2,
+      `a session that serves ${SESSION_MAX_RESULTS} results is handed over anyway`,
+      String(brain.opened.count)
+    )
+    ok((brain.opened.turns.at(-1) ?? '').startsWith('You are Foreman,'), 'with the same handoff')
+    ok(brain.opened.models[1] === 'sonnet', 'on the driving model', String(brain.opened.models[1]))
+
+    const served = brain.opened.turns.length
+    host.noteAttention({ paneId: PANE, state: 'asking', prompt: 'more?' }, Date.now() + 100_000)
+    await settle()
+    ok(brain.opened.turns.length > served && brain.opened.count === 2, 'and the job carries on', `${brain.opened.count}/${brain.opened.turns.length}`)
+    host.dispose()
+  }
+
+  console.log('\nquiet churn')
+  {
+    const { host, brain } = harness((text) =>
+      text.startsWith('Seed:') ? [{ tool: 'send_to_pane', args: { text: 'the brief' } }] : []
+    )
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    const t0 = Date.now() + OWN_SEND_QUIET_MS + 10
+
+    host.noteAttention({ paneId: PANE, state: 'idle', prompt: '' }, t0)
+    await settle()
+    ok(brain.opened.turns.length === 2, 'a quiet is served when there is nothing in between', String(brain.opened.turns.length))
+
+    host.noteAttention({ paneId: PANE, state: 'idle', prompt: '' }, t0 + Math.round(QUIET_TURN_MIN_MS / 3))
+    await settle()
+    ok(
+      brain.opened.turns.length === 2,
+      'churn inside the window, with nothing sent since, is dropped',
+      String(brain.opened.turns.length)
+    )
+
+    host.noteAttention({ paneId: PANE, state: 'idle', prompt: '' }, t0 + QUIET_TURN_MIN_MS + 1)
+    await settle()
+    ok(brain.opened.turns.length === 3, 'past the window it is served again', String(brain.opened.turns.length))
+    host.dispose()
+  }
+
+  console.log('\nquiet after a send')
+  {
+    // The other half of the rule, on its own job: a quiet that follows a send
+    // is the pane finishing that work, and must go straight in however soon it
+    // arrives — dropping it would park the job, because attention edges do not
+    // re-fire. The sleep is real on purpose: the send stamps `lastSendAt` with
+    // the wall clock, and it has to be genuinely after the quiet turn above it.
+    const { host, brain } = harness((text) =>
+      text.startsWith('Seed:') ? [{ tool: 'send_to_pane', args: { text: 'the brief' } }] : []
+    )
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    const t0 = Date.now() + OWN_SEND_QUIET_MS + 10
+
+    host.noteAttention({ paneId: PANE, state: 'idle', prompt: '' }, t0)
+    await settle()
+    ok(brain.opened.turns.length === 2, 'one quiet, served', String(brain.opened.turns.length))
+
+    await new Promise((r) => setTimeout(r, OWN_SEND_QUIET_MS + 100))
+    await host.callTool(PANE, 'send_to_pane', { text: 'nudge' })
+    host.noteAttention({ paneId: PANE, state: 'idle', prompt: '' }, t0 + 5000)
+    await settle()
+    ok(
+      brain.opened.turns.length === 3,
+      'a quiet after a send goes straight in, however soon',
+      String(brain.opened.turns.length)
+    )
+    host.dispose()
+  }
 
   console.log('\nthe wire vocabulary')
   {

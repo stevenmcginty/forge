@@ -4165,6 +4165,15 @@ button.astatus__mode:not(:disabled):hover {
   color: var(--text-secondary);
 }
 
+/* The job's running token bill, when the desktop running it is new enough to
+   send one. */
+.pane__foreman-tokens {
+  flex: none;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
 .pane__foreman-line[data-status='error'] .pane__foreman-tag {
   color: var(--warn);
 }

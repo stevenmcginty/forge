@@ -228,6 +228,15 @@
   color: var(--text-tertiary);
 }
 
+/* The job's running token bill — the number that says whether Foreman is
+   earning its keep before the quota notice says it for you. */
+.pane__foot-tokens {
+  flex: none;
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
 .pane__foot-text {
   min-width: 0;
   font-size: var(--t-xs);

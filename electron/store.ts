@@ -246,6 +246,10 @@ function defaultSettings(): Settings {
     // wide margin. An alias, not a pinned id, and no key — the Agent SDK signs
     // in with the machine's own `claude` login.
     foremanModel: 'opus',
+    // Sonnet between steps: the seed session has done the deciding by the time
+    // a recycled session takes over, and on a subscription the loop that
+    // answers menus and sends instructions is most of the bill.
+    foremanDriveModel: 'sonnet',
     foremanBrief: DEFAULT_FOREMAN_BRIEF,
     geminiKey: '',
     geminiModel: 'gemini-2.5-flash',
@@ -755,6 +759,10 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       typeof s.foremanModel === 'string' && s.foremanModel.trim()
         ? s.foremanModel.trim().slice(0, 80)
         : DEFAULT_SETTINGS.foremanModel,
+    foremanDriveModel:
+      typeof s.foremanDriveModel === 'string' && s.foremanDriveModel.trim()
+        ? s.foremanDriveModel.trim().slice(0, 80)
+        : DEFAULT_SETTINGS.foremanDriveModel,
     // Not trimmed to the default when empty: an empty standing brief is a
     // deliberate answer — "no house rules, use your judgement" — and the tool
     // says exactly that. Capped because it is read into a system-adjacent tool

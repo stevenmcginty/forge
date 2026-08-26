@@ -107,6 +107,13 @@ export interface ForemanState {
    * never heard of a plan draws the line and the log as it always did.
    */
   plan?: ForemanStep[]
+  /**
+   * Total tokens this job has burned across all of its sessions — the sum of
+   * every result message's usage (input, output, cache read, cache creation).
+   * Optional for the same reason `plan` is: desktop, web and mobile skew, and a
+   * surface that has never heard of it draws the footer exactly as before.
+   */
+  tokens?: number
 }
 
 /** Switch Foreman on for one pane. */

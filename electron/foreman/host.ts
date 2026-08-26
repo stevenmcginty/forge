@@ -83,16 +83,48 @@ const MAX_TURNS = 200
 export const DEFAULT_FOREMAN_MODEL = 'opus'
 
 /**
+ * What the recycled driving sessions run on. The seed session does the
+ * deciding; the loop that answers menus and sends the next instruction does
+ * not need the same depth, and on a subscription the difference is the job
+ * being usable or the quota being gone by lunchtime.
+ */
+export const DEFAULT_FOREMAN_DRIVE_MODEL = 'sonnet'
+
+/**
+ * A session serves at most this many results before the backstop recycles it.
+ *
+ * Step boundaries are the intended handover points, but a job can sit on one
+ * step for a hundred pane-questions, and every one of them re-reads everything
+ * before it. This is the ceiling that turns "grows for the whole job" into
+ * "grows for at most this many turns".
+ */
+export const SESSION_MAX_RESULTS = 20
+
+/**
+ * Minimum gap between quiet turns Foreman actually acts on. See `noteAttention`.
+ */
+export const QUIET_TURN_MIN_MS = 30_000
+
+/**
  * How much of a pane's screen goes into a turn.
  *
  * The replay buffer is up to 192 KB. All of it would be most of a context
- * window spent on a build log; the last few thousand characters are the
- * question, the menu and the error, which is the part that decides anything.
+ * window spent on a build log; the last couple of thousand characters are the
+ * question, the menu and the error, which is the part that decides anything —
+ * and every tail handed over stays in the session for the rest of it, so this
+ * number is paid per turn, forever.
  */
-const SCREEN_TAIL_MAX = 6000
+const SCREEN_TAIL_MAX = 2500
 
 /** How much recent assistant text `read_transcript` returns by default. */
-const TRANSCRIPT_DEFAULT_MAX = 6000
+const TRANSCRIPT_DEFAULT_MAX = 3000
+
+/** The whole handoff turn is capped around this, screen tail included. */
+const HANDOFF_MAX = 4_000
+const HANDOFF_LOG_ENTRIES = 10
+const HANDOFF_LOG_LINE_MAX = 200
+const HANDOFF_LOG_BLOCK_MAX = 1_200
+const HANDOFF_SEED_MAX = 300
 
 /**
  * Quiet that arrives this soon after Foreman's own keystrokes is Foreman's own
@@ -145,6 +177,12 @@ export interface ForemanDeps {
   paneInfo(paneId: string): ForemanPaneInfo | null
   /** `settings.foremanModel`. Read per session start, so it can change. */
   getModel(): string
+  /**
+   * `settings.foremanDriveModel` — what the recycled driving sessions run.
+   * Absent means fall back to `getModel()`; the check's minimal harness relies
+   * on that.
+   */
+  getDriveModel?(): string
   /** `settings.foremanBrief` — Steve's standing house rules. */
   getStandingBrief(): string
   /**
@@ -187,6 +225,23 @@ function tail(text: string, max: number): string {
 /* -------------------------------------------------------- one driven pane */
 
 /**
+ * One session's input side. Replaced wholesale on recycle — see `endSession`.
+ *
+ * It has to be per-session rather than per-job, and the reason is a race: the
+ * old session's generator is parked on `wake` when the recycle happens, and it
+ * resumes a microtask later. If it woke to find the *job's* inbox holding the
+ * new session's handoff turn, it would pull that message and hand it to a
+ * query nobody drains — and the new session's generator would park on an inbox
+ * that never fills. A closed mailbox is how the old generator learns it is
+ * done rather than merely behind.
+ */
+interface Mailbox {
+  inbox: SDKUserMessage[]
+  wake: (() => void) | null
+  closed: boolean
+}
+
+/**
  * The bookkeeping for a single job.
  *
  * `pending` is the coalescing rule in one field: while a turn is in flight the
@@ -198,11 +253,9 @@ function tail(text: string, max: number): string {
 interface Driven {
   state: ForemanState
   session: Query | null
-  /** Turns waiting to be pulled by the input generator. */
-  inbox: SDKUserMessage[]
-  /** Resolves the generator's current await, when it is parked. */
-  wake: (() => void) | null
-  /** Set on stop so the generator returns instead of parking again. */
+  /** The live session's input side. Null between `endSession` and `open`. */
+  mail: Mailbox | null
+  /** Set on stop so the job, not just the session, is over for good. */
   closing: boolean
   /** A turn is in flight — the brain has been handed something and has not answered. */
   inFlight: boolean
@@ -219,6 +272,14 @@ interface Driven {
   trigger: Trigger['kind']
   /** `Date.now()` of the last thing Foreman typed into the driven pane. */
   lastSendAt: number
+  /** `Date.now()` of the last quiet turn actually pushed. See `noteAttention`. */
+  lastQuietTurnAt: number
+  /** Which tier the live session opened on — the deciding brain or the driving loop. */
+  tier: 'strong' | 'drive'
+  /** Results served by the live session; the backstop recycle counts these. */
+  resultsInSession: number
+  /** A step moved; hand the session over at the next turn boundary. */
+  recycleAfterTurn: boolean
 }
 
 /**
@@ -226,7 +287,7 @@ interface Driven {
  * should show while it is being worked on.
  */
 interface Trigger {
-  kind: 'seed' | 'asking' | 'quiet' | 'human'
+  kind: 'seed' | 'asking' | 'quiet' | 'human' | 'handoff'
   text: string
   line: string
 }
@@ -263,19 +324,22 @@ export class ForemanHost {
     const driven: Driven = {
       state: { paneId, status: 'starting', line: 'Reading the pane and forming the concept', seed, log: [] },
       session: null,
-      inbox: [],
-      wake: null,
+      mail: null,
       closing: false,
       inFlight: false,
       pending: null,
       notes: [],
       trigger: 'seed',
-      lastSendAt: 0
+      lastSendAt: 0,
+      lastQuietTurnAt: 0,
+      tier: 'strong',
+      resultsInSession: 0,
+      recycleAfterTurn: false
     }
     this.panes.set(paneId, driven)
     this.log(driven, 'seed', seed || '(no seed)')
 
-    if (!this.open(driven)) return driven.state
+    if (!this.open(driven, 'strong')) return driven.state
     this.push(driven, this.seedTurn(seed))
     return driven.state
   }
@@ -327,6 +391,13 @@ export class ForemanHost {
       this.setStatus(driven, driven.state.status, `Got it — acting on that after this step: ${firstLine(text)}`)
       return driven.state
     }
+    if (driven.tier === 'drive') {
+      // A word from Steve is the one input that gets the deciding brain back:
+      // hand the session over to the strong tier now, his words riding the
+      // handoff, rather than have the driving loop interpret a redirect.
+      this.recycle(driven, 'strong', 'your message', [text], null)
+      return driven.state
+    }
     this.push(driven, this.humanTurn([text], paneId))
     return driven.state
   }
@@ -371,14 +442,22 @@ export class ForemanHost {
     if (event.state !== 'done' && event.state !== 'idle') return
     // Foreman's own keystrokes, echoed back. See OWN_SEND_QUIET_MS.
     if (now - driven.lastSendAt < OWN_SEND_QUIET_MS) return
+    // Churn: another quiet within the window where Foreman has not sent
+    // anything since the last one it acted on. Dropped — but never when a send
+    // has happened in between, because that quiet is the pane finishing the
+    // work Foreman just set it, and attention edges do not re-fire: a wrongly
+    // dropped "work finished" would park the job until Steve noticed.
+    if (now - driven.lastQuietTurnAt < QUIET_TURN_MIN_MS && driven.lastSendAt < driven.lastQuietTurnAt) return
+    driven.lastQuietTurnAt = now
     this.push(driven, this.quietTurn(driven.state.paneId))
   }
 
   /* ------------------------------------------------------------- the turns
    *
    * Four of them: a job starts, the pane asks something, the pane stops, or
-   * Steve says something. Written out here rather than composed at the call
-   * site so what the brain is actually handed is readable in one place.
+   * Steve says something — plus the handoff a recycled session wakes to.
+   * Written out here rather than composed at the call site so what the brain
+   * is actually handed is readable in one place.
    */
 
   private seedTurn(seed: string): Trigger {
@@ -401,7 +480,7 @@ export class ForemanHost {
       line: prompt ? `Answering: ${firstLine(prompt)}` : 'Answering the pane',
       text: [
         `The pane is asking: ${prompt}`,
-        'Screen:',
+        'Screen (attached, current — no need to read_pane for it):',
         tail(this.screen(paneId), SCREEN_TAIL_MAX),
         '',
         'Answer it via send_to_pane. All decisions are yours.'
@@ -415,10 +494,10 @@ export class ForemanHost {
       line: 'Working out the next step',
       text: [
         'The pane went quiet.',
-        'Screen:',
+        'Screen (attached, current — no need to read_pane for it):',
         tail(this.screen(paneId), SCREEN_TAIL_MAX),
         '',
-        'If the job is not finished, send the next step; if a suite failed, make it fix it;',
+        'If the job is not finished, send the next step (the screen above is current); if a suite failed, make it fix it;',
         'if everything is genuinely done and verified, call finish.'
       ].join('\n')
     }
@@ -433,7 +512,7 @@ export class ForemanHost {
         said,
         '',
         'This is from the person the job is for, and it overrides the seed and the standing brief wherever they disagree.',
-        'Screen:',
+        'Screen (attached, current — no need to read_pane for it):',
         tail(this.screen(paneId), SCREEN_TAIL_MAX),
         '',
         'Act on it now: if it changes the work, tell the pane via send_to_pane (interrupt it with Escape first if it is mid-task and the change cannot wait);',
@@ -460,14 +539,14 @@ export class ForemanHost {
    * most one waiting, latest wins.
    */
   private push(driven: Driven, turn: Trigger): void {
-    if (driven.closing || !driven.session) return
+    if (driven.closing || !driven.session || !driven.mail) return
     if (driven.inFlight) {
       driven.pending = turn
       return
     }
     driven.inFlight = true
     driven.trigger = turn.kind
-    driven.inbox.push({
+    driven.mail.inbox.push({
       type: 'user',
       message: { role: 'user', content: turn.text },
       parent_tool_use_id: null
@@ -476,18 +555,32 @@ export class ForemanHost {
     this.flush(driven)
   }
 
-  private open(driven: Driven): boolean {
+  /**
+   * Open a session for the job, at a tier.
+   *
+   * `strong` is the deciding brain — the seed session, and Steve's redirects.
+   * `drive` is the loop that carries the job between step boundaries: it
+   * answers menus and sends the next instruction, and it runs on the drive
+   * model because on a subscription that loop is most of the bill.
+   */
+  private open(driven: Driven, tier: 'strong' | 'drive'): boolean {
     const paneId = driven.state.paneId
     const info = this.deps.paneInfo(paneId)
-    const model = this.deps.getModel().trim() || DEFAULT_FOREMAN_MODEL
+    const chosen = tier === 'drive' ? this.deps.getDriveModel?.() ?? this.deps.getModel() : this.deps.getModel()
+    const model = chosen.trim() || DEFAULT_FOREMAN_MODEL
     const options = this.options(model, info?.cwd ?? '', paneId)
 
+    const mail: Mailbox = { inbox: [], wake: null, closed: false }
     try {
-      const prompt = this.input(driven)
+      const prompt = this.input(mail)
+      driven.tier = tier
+      driven.resultsInSession = 0
+      driven.mail = mail
       driven.session = this.deps.openQuery
         ? this.deps.openQuery(options, prompt)
         : query({ prompt, options })
     } catch (err) {
+      driven.mail = null
       this.fail(driven, `Foreman could not start: ${errText(err)}`)
       return false
     }
@@ -501,25 +594,29 @@ export class ForemanHost {
    *
    * Parking rather than ending is the whole trick, exactly as in the voice
    * host — a generator that returns ends the session, and this one has to
-   * survive minutes of silence between a pane's question and the next.
+   * survive minutes of silence between a pane's question and the next. It
+   * reads only its own mailbox, never the `Driven`, so a recycled session's
+   * generator can never be confused with its predecessor's.
    */
-  private async *input(driven: Driven): AsyncGenerator<SDKUserMessage> {
+  private async *input(mail: Mailbox): AsyncGenerator<SDKUserMessage> {
     for (;;) {
-      while (driven.inbox.length) {
-        if (driven.closing) return
-        yield driven.inbox.shift() as SDKUserMessage
+      while (mail.inbox.length) {
+        if (mail.closed) return
+        yield mail.inbox.shift() as SDKUserMessage
       }
-      if (driven.closing) return
+      if (mail.closed) return
       await new Promise<void>((resolve) => {
-        driven.wake = resolve
+        mail.wake = resolve
       })
     }
   }
 
   /** Wake the input generator if it is parked. */
   private flush(driven: Driven): void {
-    const wake = driven.wake
-    driven.wake = null
+    const mail = driven.mail
+    if (!mail) return
+    const wake = mail.wake
+    mail.wake = null
     if (wake) wake()
   }
 
@@ -552,8 +649,11 @@ export class ForemanHost {
     }
     if (message.type !== 'result') return
     // A turn boundary. Whatever was queued while it ran goes in now, and if
-    // nothing was, the job is waiting on the pane again.
+    // nothing was, the job is waiting on the pane again. Usage is counted
+    // before anything can return, so the finish turn's tokens land too.
     driven.inFlight = false
+    this.countUsage(driven, message)
+    driven.resultsInSession += 1
     const queued = driven.pending
     driven.pending = null
     if (driven.state.status === 'done' || driven.state.status === 'error') return
@@ -561,8 +661,26 @@ export class ForemanHost {
     // can be read again, and it will be — the human turn carries a fresh tail
     // and the model reads the pane before it answers anyway.
     if (driven.notes.length) {
+      const notes = driven.notes.splice(0)
+      if (driven.tier === 'drive') {
+        // His words outrank the loop that is holding the session: hand over to
+        // the strong tier now, the notes riding the handoff.
+        this.recycle(driven, 'strong', 'your message', notes, queued)
+        return
+      }
       driven.pending = queued
-      this.push(driven, this.humanTurn(driven.notes.splice(0), driven.state.paneId))
+      this.push(driven, this.humanTurn(notes, driven.state.paneId))
+      return
+    }
+    if (driven.recycleAfterTurn || driven.resultsInSession >= SESSION_MAX_RESULTS) {
+      driven.recycleAfterTurn = false
+      this.recycle(
+        driven,
+        'drive',
+        driven.resultsInSession >= SESSION_MAX_RESULTS ? 'context limit' : 'step',
+        [],
+        queued
+      )
       return
     }
     if (queued) {
@@ -570,6 +688,109 @@ export class ForemanHost {
       return
     }
     this.setStatus(driven, 'waiting', 'Waiting for the pane')
+  }
+
+  /**
+   * Add one result's usage to the job's running total.
+   *
+   * Every field the API can name goes in: on a subscription the cache reads
+   * count against the window just as surely as the fresh input does. Access is
+   * defensive because the check's stub and any SDK skew may omit `usage`
+   * entirely.
+   */
+  private countUsage(driven: Driven, message: SDKMessage): void {
+    const u = (message as { usage?: Record<string, unknown> }).usage
+    if (!u) return
+    const n = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'].reduce(
+      (sum, key) => sum + (Number(u[key]) || 0),
+      0
+    )
+    if (n > 0) {
+      driven.state.tokens = (driven.state.tokens ?? 0) + Math.round(n)
+      this.send(driven)
+    }
+  }
+
+  /**
+   * Close the live session and open a fresh one that carries on the job.
+   *
+   * This is the whole usage story: a session's context grows for the whole of
+   * its life, and every turn re-reads all of it. Handing over at a step
+   * boundary — with the plan, the recent account and the screen restated in a
+   * bounded handoff — turns "grows for the job" into "grows for a step". The
+   * handoff is built *before* `endSession` because it reads the state the old
+   * session is still part of; the notes are already captured by the caller.
+   */
+  private recycle(
+    driven: Driven,
+    tier: 'strong' | 'drive',
+    reason: string,
+    notes: string[],
+    queued: Trigger | null
+  ): void {
+    const turn = this.handoffTurn(driven, notes)
+    this.endSession(driven)
+    this.log(
+      driven,
+      'note',
+      `Session handed over (${reason}); the job continues. About ${Math.round((driven.state.tokens ?? 0) / 1000)}k tokens so far.`
+    )
+    if (!this.open(driven, tier)) return
+    this.push(driven, turn)
+    if (queued) driven.pending = queued
+  }
+
+  /**
+   * The turn a fresh session wakes to.
+   *
+   * Bounded, every section of it: a handoff that grew with the job would be
+   * the same bill in a different envelope. The screen tail gets whatever the
+   * rest left over, but never so little that the pane's question is cut off.
+   */
+  private handoffTurn(driven: Driven, notes: string[]): Trigger {
+    const paneId = driven.state.paneId
+    const text: string[] = [
+      'You are Foreman, and this job is already running. Your previous session was handed over to keep context lean — nothing went wrong, and the pane did not see any of it.',
+      'Everything below is the honest state of the job as your predecessor left it.',
+      '',
+      `Seed (truncated): ${tail(driven.state.seed, HANDOFF_SEED_MAX)}`,
+      ''
+    ]
+    const plan = driven.state.plan
+    if (plan?.length) {
+      text.push('Plan:', ...plan.map((s) => `- ${s.status} — ${s.title}${s.note ? ` — ${s.note}` : ''}`), '')
+    } else {
+      text.push('No plan has been declared yet — form one and set_plan before you send anything.', '')
+    }
+    const recent = driven.state.log
+      .slice(-HANDOFF_LOG_ENTRIES)
+      .map((e) => `- ${e.kind}: ${String(e.text ?? '').slice(0, HANDOFF_LOG_LINE_MAX)}`)
+      .join('\n')
+    if (recent) text.push('Recent account (oldest first):', tail(recent, HANDOFF_LOG_BLOCK_MAX), '')
+    text.push('Read get_standing_brief before your first decision this session.')
+    if (notes.length) {
+      const said = notes.length === 1 ? `Steve says: ${notes[0]}` : `Steve says:\n${notes.map((n) => `- ${n}`).join('\n')}`
+      text.push(
+        '',
+        said,
+        'This is from the person the job is for, and it overrides the seed and the standing brief wherever they disagree.',
+        'Act on it now: if it changes the work, tell the pane via send_to_pane (interrupt it with Escape first if it is mid-task and the change cannot wait);',
+        'if it answers something you were unsure of, use it; if it is only information, note it and carry on.'
+      )
+    }
+    const closing = [
+      '',
+      'Carry on from exactly here. Do not restart the job, do not re-brief the pane, and do not repeat work the account says is done;',
+      'read_transcript carries the depth if you need it. Restate the plan with set_plan if its statuses have drifted. Every decision is still yours.'
+    ]
+    const soFar = text.join('\n').length + closing.join('\n').length
+    const screenBudget = Math.min(SCREEN_TAIL_MAX, Math.max(600, HANDOFF_MAX - soFar))
+    text.push('', 'Screen (the pane as it is now):', tail(this.screen(paneId), screenBudget), ...closing)
+    return {
+      kind: 'handoff',
+      line: notes.length ? `Acting on: ${firstLine(notes[notes.length - 1] ?? '')}` : 'Fresh session — picking the job up',
+      text: text.join('\n')
+    }
   }
 
   /**
@@ -613,24 +834,39 @@ export class ForemanHost {
     if (line && line !== driven.state.line) this.setStatus(driven, 'driving', line)
   }
 
-  private teardown(driven: Driven): void {
-    driven.closing = true
+  /**
+   * End the live session, leaving the job itself runnable.
+   *
+   * The old generator is parked on its mailbox's `wake` when this runs; closing
+   * the mailbox is what makes it return instead of waking into the new
+   * session's inbox. Both, and in this order on the query: interrupt unwinds a
+   * turn that is mid-tool-call, return() ends the session. A rejection from an
+   * already-dead session is not news.
+   */
+  private endSession(driven: Driven): void {
+    const mail = driven.mail
     const q = driven.session
+    driven.mail = null
     driven.session = null
-    driven.inbox.length = 0
-    driven.pending = null
-    driven.notes.length = 0
     driven.inFlight = false
-    // Unblock the generator so it can return and let the SDK close the
-    // subprocess down cleanly.
-    this.flush(driven)
+    if (mail) {
+      mail.closed = true
+      mail.inbox.length = 0
+      const wake = mail.wake
+      mail.wake = null
+      if (wake) wake()
+    }
     if (q) {
-      // Both, and in this order: interrupt unwinds a turn that is mid-tool-call,
-      // return() ends the session. A rejection from an already-dead session is
-      // not news.
       void Promise.resolve(q.interrupt?.()).catch(() => undefined)
       void Promise.resolve(q.return(undefined)).catch(() => undefined)
     }
+  }
+
+  private teardown(driven: Driven): void {
+    this.endSession(driven)
+    driven.closing = true
+    driven.pending = null
+    driven.notes.length = 0
   }
 
   /**
@@ -643,8 +879,7 @@ export class ForemanHost {
    * it when he has looked.
    */
   private fail(driven: Driven, message: string): void {
-    driven.session = null
-    driven.inFlight = false
+    this.endSession(driven)
     driven.pending = null
     driven.notes.length = 0
     console.error(`[foreman] ${message}`)
@@ -737,7 +972,7 @@ export class ForemanHost {
 
       case 'read_transcript': {
         const target = String(args['pane'] ?? '').trim() || paneId
-        const max = clamp(args['max_chars'], 500, 40_000, TRANSCRIPT_DEFAULT_MAX)
+        const max = clamp(args['max_chars'], 500, 15_000, TRANSCRIPT_DEFAULT_MAX)
         const text = this.deps.readTranscript(target, max)
         return text.trim() || 'There is no transcript for that pane yet.'
       }
@@ -884,6 +1119,15 @@ export class ForemanHost {
       if (before.length !== steps.length) {
         this.log(driven, 'plan', `Plan is now ${steps.length} steps: ${steps.map((s) => s.title).join(' → ')}`)
       }
+      // A step moved — the same rule the log just used. The next turn boundary
+      // hands the session over, because everything before this point in its
+      // context belongs to a step that is finished. Not on a done/error job:
+      // `finish` restates the plan to close it, and that must not resurrect
+      // anything.
+      const moved =
+        before.find((s) => s.status === 'active')?.id !== steps.find((s) => s.status === 'active')?.id ||
+        steps.some((s) => (s.status === 'done' || s.status === 'failed') && was.get(s.id) !== s.status)
+      if (moved && driven.state.status !== 'done' && driven.state.status !== 'error') driven.recycleAfterTurn = true
     }
     // The footer follows the plan: the active step's title is the truest
     // one-liner there is, and it stays put between turns.
@@ -926,7 +1170,7 @@ export class ForemanHost {
       tools: [
         tool(
           'read_pane',
-          'Read a pane\'s recent screen, exactly as a person looking at it would. With no argument it is the pane you are driving, which is what you want almost every time. Call it before answering anything: the one-line prompt you were handed is a summary, and the menu, the error and the diff are on the screen.',
+          'Read a pane\'s recent screen, exactly as a person looking at it would. The pane you are driving already has its current tail attached to every turn you are handed, so you rarely need this for that pane: call it only to see whether the pane has changed since, when the attached tail has scrolled past what you need, or to look at a different pane — one you hired, say. With no argument it is the pane you are driving.',
           { pane: z.string().optional().describe('A pane id. Omit for the pane you are driving.') },
           async (args) => run('read_pane', { pane: args.pane })
         ),
@@ -959,7 +1203,7 @@ export class ForemanHost {
           'Read what the Claude session in a pane has actually been saying — its own words, out of the conversation on disk, rather than the screen. Richer than read_pane and the right first call when you have just been switched on over a session that was already running, or when the screen has scrolled past what you need.',
           {
             pane: z.string().optional().describe('A pane id. Omit for the pane you are driving.'),
-            max_chars: z.number().optional().describe('How much of the recent conversation to read. Default 6000.')
+            max_chars: z.number().optional().describe('How much of the recent conversation to read. Default 3000.')
           },
           async (args) => run('read_transcript', { pane: args.pane, max_chars: args.max_chars })
         ),

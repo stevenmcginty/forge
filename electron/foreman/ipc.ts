@@ -14,7 +14,7 @@ import { installForemanKit } from './kit'
 import { foremanKitDir } from './kit-path'
 import { getManager, getReplay, liveSessions } from '../pty-host'
 import { onAttention } from '../attention-bus'
-import { DEFAULT_FOREMAN_MODEL, ForemanHost, type ForemanPaneInfo } from './host'
+import { DEFAULT_FOREMAN_DRIVE_MODEL, DEFAULT_FOREMAN_MODEL, ForemanHost, type ForemanPaneInfo } from './host'
 
 /**
  * The Electron half of Foreman — and deliberately all of it.
@@ -286,6 +286,7 @@ function ensureHost(): ForemanHost {
     paneInfo,
     listPanes,
     getModel: () => getSettings().foremanModel || DEFAULT_FOREMAN_MODEL,
+    getDriveModel: () => getSettings().foremanDriveModel || DEFAULT_FOREMAN_DRIVE_MODEL,
     getStandingBrief: () => getSettings().foremanBrief,
     runAppAction,
     getBridgeServer: bridgeServer

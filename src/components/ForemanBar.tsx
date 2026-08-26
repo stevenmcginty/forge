@@ -167,6 +167,11 @@ function clock(at: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+/** `812k` / `1.4M` — the job's token bill at a glance. */
+function fmtTokens(n: number): string {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : `${Math.round(n / 1000)}k`
+}
+
 export function ForemanFooter({
   paneId,
   logOpen,
@@ -252,6 +257,11 @@ export function ForemanFooter({
           />
           <span className="pane__foot-text truncate">{state.line || 'Working'}</span>
           {busy && elapsed ? <span className="pane__foot-clock">{elapsed}</span> : null}
+          {typeof state.tokens === 'number' && state.tokens > 0 ? (
+            <span className="pane__foot-tokens" title="Tokens Foreman has used on this job, across all its sessions">
+              {fmtTokens(state.tokens)}
+            </span>
+          ) : null}
         </button>
         {finished ? (
           <button

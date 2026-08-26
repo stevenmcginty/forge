@@ -34,6 +34,11 @@ function clockOf(at: number): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
+/** `812k` / `1.4M` — the job's token bill at a glance, same as the desktop footer. */
+function fmtTokens(n: number): string {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : `${Math.round(n / 1000)}k`
+}
+
 /** Convert screen feed blocks into conversational chat turns when no disk transcript exists. */
 function feedBlocksToChatTurns(blocks: FeedBlock[]): ChatTurn[] {
   const turns: ChatTurn[] = []
@@ -947,6 +952,11 @@ export function PaneView({
         >
           <span className="pane__foreman-tag mono">{foreman.status.toUpperCase()}</span>
           <span className="pane__foreman-text truncate">{foreman.line || 'Working'}</span>
+          {typeof foreman.tokens === 'number' && foreman.tokens > 0 ? (
+            <span className="pane__foreman-tokens mono" title="Tokens Foreman has used on this job, across all its sessions">
+              {fmtTokens(foreman.tokens)}
+            </span>
+          ) : null}
         </footer>
       ) : null}
 

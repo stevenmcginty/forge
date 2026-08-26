@@ -28,6 +28,17 @@ const FOREMAN_MODELS = [
   { id: 'haiku', label: 'Haiku — lightest' }
 ]
 
+/**
+ * The recycled sessions that carry the job between step boundaries. A separate
+ * list because "the default" means something different here: the seed session
+ * above has already done the deciding by the time these take over.
+ */
+const FOREMAN_DRIVE_MODELS = [
+  { id: 'sonnet', label: 'Sonnet — the default between steps' },
+  { id: 'opus', label: 'Opus — same as the seed model' },
+  { id: 'haiku', label: 'Haiku — lightest' }
+]
+
 export function ForemanSection(): ReactNode {
   const { state, actions } = useApp()
   const s = state.settings
@@ -49,6 +60,23 @@ export function ForemanSection(): ReactNode {
             onChange={(e) => actions.patchSettings({ foremanModel: e.target.value })}
           >
             {FOREMAN_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row
+          label="Driving model (between steps)"
+          hint="A long job hands its session over at every step boundary to keep context lean, and the sessions that carry it from there run on this. Your own mid-job messages always go back to the model above."
+        >
+          <select
+            className="select"
+            value={s.foremanDriveModel}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={(e) => actions.patchSettings({ foremanDriveModel: e.target.value })}
+          >
+            {FOREMAN_DRIVE_MODELS.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
               </option>

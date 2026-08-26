@@ -232,6 +232,9 @@ const FALLBACK_SETTINGS: Settings = {
   // Mirrors electron/store.ts. Foreman decides a whole job on Steve's behalf,
   // so it runs the same model the voice brain does, and needs no key either.
   foremanModel: 'opus',
+  // Mirrors electron/store.ts — the recycled sessions that carry the job
+  // between step boundaries, once the seed session has done the deciding.
+  foremanDriveModel: 'sonnet',
   foremanBrief: DEFAULT_FOREMAN_BRIEF,
   geminiKey: '',
   geminiModel: 'gemini-2.5-flash',
