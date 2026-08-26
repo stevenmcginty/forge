@@ -31,6 +31,7 @@ import type {
   WebMirrorEvent,
   WebProjectAddEvent,
   WebSignInResult,
+  WatchdogStatus,
   WebStatus,
   WebWatchEvent,
   OpenRouterCallRequest,
@@ -640,6 +641,15 @@ export interface ForgeApi {
    *
    * See docs/forge-web.md and electron/web-host.ts.
    */
+  /** Keep Forge running — see `IPC.watchdogStatus` and electron/watchdog-host.ts. */
+  watchdog: {
+    status(): Promise<WatchdogStatus>
+    /** Register the logon task on this PC and start it. Persists `keepRunning: true`. */
+    enable(): Promise<WatchdogStatus>
+    /** Remove the task and stop the watchdog. Persists `keepRunning: false`. */
+    disable(): Promise<WatchdogStatus>
+  }
+
   web: {
     status(): Promise<WebStatus>
     /** Bind the port and start listening. Persists `webEnabled: true`. */

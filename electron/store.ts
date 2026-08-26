@@ -359,6 +359,9 @@ function defaultSettings(): Settings {
     // uid — that names one signed-in person, and only signing in sets it. See
     // docs/forge-web.md and electron/web/auth.ts.
     webEnabled: false,
+    // Off until someone flips it: enabling registers a scheduled task, and a
+    // task nobody asked for is a change to their PC.
+    keepRunning: false,
     webProjectId: WEB_DEFAULT_PROJECT_ID,
     // Steve's site id by default — see the comment above WEB_PORT. Someone
     // running their own deployment pastes their own site id here; blank is no
@@ -885,6 +888,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // cursor: this switch is what puts a shell behind a public address, so an
     // absent key, an older settings.json and a hand-edited "true" all mean no.
     webEnabled: s.webEnabled === true,
+    keepRunning: s.keepRunning === true,
     // A Firebase project id is `[a-z0-9-]`, and it is checked rather than
     // trimmed because it is concatenated into the `iss` a token is compared
     // against. Junk used to degrade to '', a desktop that admits nobody; now

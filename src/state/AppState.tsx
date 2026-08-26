@@ -92,6 +92,7 @@ export type SettingsSection =
   | 'screenshots'
   | 'mobile'
   | 'web'
+  | 'alwaysOn'
   | 'updates'
   | 'advanced'
 
@@ -303,6 +304,7 @@ const FALLBACK_SETTINGS: Settings = {
   // that guessed "on" would be a fallback that opened a door for the second
   // before the real settings landed.
   webEnabled: false,
+  keepRunning: false,
   webProjectId: '',
   webSiteId: '',
   webUid: '',

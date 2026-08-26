@@ -176,6 +176,12 @@ const api: ForgeApi = {
     mirrorStop: (reason) => ipcRenderer.send(IPC.mobileMirrorStop, { reason: reason ?? '' })
   },
 
+  watchdog: {
+    status: () => ipcRenderer.invoke(IPC.watchdogStatus),
+    enable: () => ipcRenderer.invoke(IPC.watchdogEnable),
+    disable: () => ipcRenderer.invoke(IPC.watchdogDisable)
+  },
+
   web: {
     status: () => ipcRenderer.invoke(IPC.webStatus),
     start: () => ipcRenderer.invoke(IPC.webStart),

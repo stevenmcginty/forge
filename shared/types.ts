@@ -1884,6 +1884,14 @@ export interface Settings {
   /** Master switch. False = nothing listens, nothing publishes, nothing verifies. */
   webEnabled: boolean
   /**
+   * Keep Forge running: a scheduled task on this PC (per user, per profile)
+   * runs scripts/watchdog.mjs for the whole logon session and relaunches Forge
+   * when it closes, crashes or hangs. Local only — nothing leaves the machine.
+   * Written by main (`watchdog:enable` / `watchdog:disable`), which registers
+   * or removes the task in the same act; see electron/watchdog-host.ts.
+   */
+  keepRunning: boolean
+  /**
    * The Firebase project whose ID tokens this desktop will accept, e.g.
    * `forge-sync` — the same project the Companion signs into (docs/forge-web.md,
    * decision 2), but a separate field because `CompanionConfig` has never held a
@@ -2428,6 +2436,20 @@ export interface WebRendezvousStatus {
 }
 
 /** What the Settings panel shows about Forge Web. */
+/** What the "Keep Forge running" panel shows — see electron/watchdog-host.ts. */
+export interface WatchdogStatus {
+  /** The scheduled task exists on this PC. */
+  installed: boolean
+  /** A watchdog process for this profile is alive right now. */
+  running: boolean
+  paused: boolean
+  /** Age of the heartbeat the watchdog reads, or null with no file. */
+  heartbeatAgeMs: number | null
+  /** ISO timestamp of the last relaunch the watchdog log records, or ''. */
+  lastRestart: string
+  taskName: string
+}
+
 export interface WebStatus {
   enabled: boolean
   state: WebState

@@ -46,6 +46,7 @@
     "watchdog:resume": "node scripts/watchdog.mjs --resume",
     "watchdog:install": "node scripts/watchdog-install.mjs",
     "watchdog:uninstall": "node scripts/watchdog-install.mjs --uninstall",
+    "watchdog:host-check": "node scripts/watchdog-host-check.mjs",
     "session:check": "node scripts/session-check.mjs",
     "packaged:check": "node scripts/packaged-check.mjs",
     "secrets:test": "node scripts/secrets-audit-test.mjs",

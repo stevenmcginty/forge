@@ -43,6 +43,14 @@ import { writeBridgeConfig } from './bridge/mcp-config'
 import { syncAgyConfig, syncQwenConfig } from './bridge/share-mcp'
 import { disposePresence, initPresence, setPresence } from './presence'
 import { startHeartbeat, stopHeartbeat } from './heartbeat'
+import {
+  configureWatchdogHost,
+  installWatchdog,
+  pauseWatchdog,
+  uninstallWatchdog,
+  watchdogStatus,
+  writeWatchdogConfig
+} from './watchdog-host'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
 import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-sidecar'
 import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './stt-model'
@@ -630,6 +638,65 @@ function quitForReal(): void {
   mainWindow.close()
 }
 
+/* --------------------------------------------------------------- watchdog */
+
+/**
+ * The "Keep Forge running" switch — see electron/watchdog-host.ts.
+ *
+ * What the watchdog relaunches depends on how this Forge is running: the
+ * packaged app is `process.execPath` (Forge.exe), and the scheduled task runs
+ * the script with that same exe as node (ELECTRON_RUN_AS_NODE) so an install
+ * with no node on the PATH still has a watchdog. A checkout relaunches through
+ * "Start Forge (silent).vbs" with the system node, as the npm scripts do. The
+ * script and .vbs ship beside app.asar (electron-builder.yml extraResources).
+ */
+function registerWatchdog(): void {
+  const root = app.isPackaged ? resolve(process.execPath, '..') : app.getAppPath()
+  const shipped = app.isPackaged ? join(process.resourcesPath, 'watchdog') : root
+  configureWatchdogHost({
+    config: {
+      root,
+      profile: isDevChannel ? 'Forge Dev' : 'Forge',
+      dataRoot: DATA_ROOT,
+      launcher: app.isPackaged ? process.execPath : join(root, 'Start Forge (silent).vbs'),
+      args: [],
+      cwd: root,
+      exeNames: app.isPackaged ? ['forge.exe'] : ['electron.exe']
+    },
+    launcherVbs: join(shipped, 'Start Forge Watchdog.vbs'),
+    script: join(shipped, app.isPackaged ? 'watchdog.mjs' : join('scripts', 'watchdog.mjs')),
+    nodeExe: app.isPackaged ? process.execPath : 'node',
+    log: (line) => console.log(line)
+  })
+
+  ipcMain.handle(IPC.watchdogStatus, () => watchdogStatus())
+  ipcMain.handle(IPC.watchdogEnable, () => {
+    setSettings({ keepRunning: true })
+    return installWatchdog()
+  })
+  ipcMain.handle(IPC.watchdogDisable, () => {
+    setSettings({ keepRunning: false })
+    return uninstallWatchdog()
+  })
+
+  // Somebody who switched this on once stays covered: a task lost to a
+  // Windows reset, or a data folder carried to a new PC, is put back quietly.
+  // Off the startup path — the PowerShell round-trip is a second or two.
+  if (!getSettings().keepRunning) return
+  setTimeout(() => {
+    try {
+      writeWatchdogConfig()
+      const status = watchdogStatus()
+      if (!status.installed) {
+        console.log('[watchdog] keepRunning is on but the task is missing — reinstalling')
+        installWatchdog()
+      }
+    } catch (err) {
+      console.error('[watchdog] startup check failed:', err)
+    }
+  }, 15_000)
+}
+
 /* -------------------------------------------------------------------- ipc */
 
 /**
@@ -740,7 +807,11 @@ const MAIN_OWNED_SETTINGS = [
   // The unlock PIN is written by main alone (`web:pin-set`/`web:pin-clear`),
   // hashed on the way in. Without it here the renderer's debounced whole-object
   // save would post its pre-PIN copy back and silently unlock the door.
-  'webPin'
+  'webPin',
+  // Flipped only by `watchdog:enable` / `watchdog:disable`, which register or
+  // remove the scheduled task in the same act. A renderer copy posted back
+  // would say "on" with no task behind it, or "off" with one still running.
+  'keepRunning'
 ] as const
 
 function rendererOwned(patch: Partial<Settings>): Partial<Settings> {
@@ -1367,6 +1438,15 @@ void app
       setTrayHost({
         open: openMainWindow,
         quit: quitForReal,
+        // Quit means quit: without this the watchdog has Forge back in ten
+        // seconds. Half an hour is long enough to do whatever Quit was for.
+        pauseWatchdog: () => {
+          try {
+            pauseWatchdog(30)
+          } catch (err) {
+            console.error('[watchdog] could not pause before quit:', err)
+          }
+        },
         status: webStatus,
         copy: (text) => clipboard.writeText(text),
         // The same two committed files windowIcon() picks between, and for the
@@ -1381,6 +1461,7 @@ void app
       // See docs/forge-web.md's security posture, which promises exactly that.
       registerWebHandlers()
       applyWebSettings()
+      registerWatchdog()
       // `applyWebSettings` reports asynchronously; this is the synchronous read
       // of the setting, so a Forge that starts with the link already on has its
       // icon before the first window can be closed.

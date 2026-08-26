@@ -45,8 +45,35 @@ import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSyn
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-const ROOT = resolve(import.meta.dirname, '..')
+/**
+ * Where everything is. Two shapes:
+ *
+ *  - `--config <data root>\watchdog.json`, written by electron/watchdog-host.ts
+ *    when the Settings toggle installs the task. It names the root folder, the
+ *    profile, the launcher (Forge.exe when packaged) and the exe names — the
+ *    script can then live anywhere, including resources/ of an installed Forge.
+ *  - no argument: this checkout, the way the npm script and the .vbs run it.
+ */
+const argv = process.argv.slice(2)
+const configArg = argv.indexOf('--config')
+const CONFIG = configArg !== -1 ? readConfig(argv[configArg + 1]) : null
+function readConfig(path) {
+  try {
+    const c = JSON.parse(readFileSync(path, 'utf8'))
+    if (!c || typeof c.root !== 'string' || typeof c.launcher !== 'string') return null
+    return c
+  } catch {
+    return null
+  }
+}
+if (configArg !== -1 && !CONFIG) {
+  console.error(`watchdog: cannot read config ${argv[configArg + 1]}`)
+  process.exit(2)
+}
+
+const ROOT = CONFIG ? resolve(CONFIG.root) : resolve(import.meta.dirname, '..')
 const ROOT_LC = ROOT.toLowerCase()
+const EXE_NAMES = (CONFIG?.exeNames ?? ['electron.exe']).map((n) => n.toLowerCase())
 /**
  * "Names this checkout" means the path followed by a separator, a quote or the
  * end — not a plain substring. `...\Desktop\forge` is a prefix of
@@ -63,7 +90,9 @@ function namesRoot(cl) {
     from = at + 1
   }
 }
-const LAUNCHER = join(ROOT, 'Start Forge (silent).vbs')
+const LAUNCHER = CONFIG ? CONFIG.launcher : join(ROOT, 'Start Forge (silent).vbs')
+const LAUNCHER_ARGS = CONFIG?.args ?? []
+const LAUNCHER_CWD = CONFIG?.cwd ?? ROOT
 const appData = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming')
 
 function profileFromMarker() {
@@ -73,8 +102,8 @@ function profileFromMarker() {
     return null
   }
 }
-const PROFILE = profileFromMarker() ?? 'Forge'
-const DATA_ROOT = process.env.FORGE_DATA_DIR?.trim() || join(appData, PROFILE)
+const PROFILE = CONFIG?.profile ?? profileFromMarker() ?? 'Forge'
+const DATA_ROOT = CONFIG?.dataRoot ?? (process.env.FORGE_DATA_DIR?.trim() || join(appData, PROFILE))
 const HEARTBEAT = join(DATA_ROOT, 'heartbeat')
 const PAUSE_FILE = join(DATA_ROOT, 'watchdog.pause')
 const LOG_FILE = join(DATA_ROOT, 'watchdog.log')
@@ -96,7 +125,7 @@ const PORTS = [5173, 5273, 5274, 5275, 5276, 5277, 5278, 5279, 8420]
 
 /* ------------------------------------------------------------------ cli */
 
-const args = process.argv.slice(2)
+const args = argv.filter((a, i) => !(a === '--config' || (i > 0 && argv[i - 1] === '--config')))
 if (args[0] === '--pause') {
   const minutes = Number(args[1])
   mkdirSync(DATA_ROOT, { recursive: true })
@@ -216,7 +245,7 @@ function isForgeProcess(p) {
   if (!namesRoot(p.cl)) return false
   if (p.cl.includes('watchdog')) return false
   if (p.cl.includes('bridge\\') || p.cl.includes('bridge/')) return false
-  if (p.name === 'electron.exe') return true
+  if (EXE_NAMES.includes(p.name)) return true
   if (p.name === 'wscript.exe' && p.cl.includes('start forge')) return true
   if (p.name === 'node.exe' && (p.cl.includes('electron-vite') || p.cl.includes('dev.mjs'))) return true
   return false
@@ -282,8 +311,10 @@ function launchForge() {
     return false
   }
   try {
-    const child = spawn('wscript.exe', [LAUNCHER], {
-      cwd: ROOT,
+    // A .vbs needs wscript; an .exe (packaged Forge) runs as itself.
+    const viaWscript = LAUNCHER.toLowerCase().endsWith('.vbs')
+    const child = spawn(viaWscript ? 'wscript.exe' : LAUNCHER, viaWscript ? [LAUNCHER, ...LAUNCHER_ARGS] : LAUNCHER_ARGS, {
+      cwd: LAUNCHER_CWD,
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
@@ -310,7 +341,7 @@ function launchForge() {
 function ensureSingleWatchdog() {
   const me = process.pid
   const twins = processes().filter(
-    (p) => p.pid !== me && p.name === 'node.exe' && p.cl.includes('watchdog.mjs') && namesRoot(p.cl)
+    (p) => p.pid !== me && p.cl.includes('watchdog.mjs') && namesRoot(p.cl)
   )
   if (twins.length) {
     log(`another watchdog is already running for this checkout (pid ${twins.map((t) => t.pid).join(', ')}); exiting`)
@@ -344,7 +375,7 @@ function check() {
     return
   }
   if (Date.now() < graceUntil) return
-  if (age >= GONE_MS && !processes().some((p) => p.name === 'electron.exe' && isForgeProcess(p))) {
+  if (age >= GONE_MS && !processes().some((p) => EXE_NAMES.includes(p.name) && isForgeProcess(p))) {
     restart('no Forge process running')
     return
   }
@@ -353,7 +384,7 @@ function check() {
 }
 
 ensureSingleWatchdog()
-log(`watchdog up for ${PROFILE} (${ROOT}); heartbeat ${HEARTBEAT}`)
+log(`watchdog up for ${PROFILE} (${ROOT}); heartbeat ${HEARTBEAT}; launcher ${LAUNCHER}`)
 if (ONCE) {
   check()
 } else {

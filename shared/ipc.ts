@@ -365,6 +365,16 @@ export const IPC = {
    * renderer. There is deliberately no second event stream — a panel that has
    * to subscribe to four things is a panel that forgets one.
    */
+  /**
+   * The "Keep Forge running" switch — a scheduled task on this PC that runs
+   * the out-of-process watchdog (scripts/watchdog.mjs). Enable registers the
+   * task and persists `keepRunning: true`; disable removes it. Status says
+   * whether the task exists, whether a watchdog is alive, and when it last
+   * brought Forge back. See electron/watchdog-host.ts.
+   */
+  watchdogStatus: 'watchdog:status',
+  watchdogEnable: 'watchdog:enable',
+  watchdogDisable: 'watchdog:disable',
   webStatus: 'web:status',
   webStatusEvent: 'web:status-event',
   /** Bind the port and start listening. Persists `webEnabled: true`. */

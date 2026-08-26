@@ -79,6 +79,12 @@ export interface TrayHost {
   open: () => void
   /** Quit for real, through the route that still raises the close guard. */
   quit: () => void
+  /**
+   * Stand the watchdog down before quitting, so Quit is not undone ten
+   * seconds later by scripts/watchdog.mjs. Optional: scripts/web-check.mjs
+   * drives this file without one.
+   */
+  pauseWatchdog?: () => void
   /** Forge Web, as the desktop currently understands it. */
   status: () => WebStatus
   /** Put the browser's address on the clipboard. */
@@ -193,7 +199,16 @@ export function trayMenuTemplate(): MenuItemConstructorOptions[] {
     const url = status.url
     items.push({ label: 'Copy the link', click: () => host?.copy(url) })
   }
-  items.push({ type: 'separator' }, { label: 'Quit Forge — closes every terminal', click: () => host?.quit() })
+  items.push(
+    { type: 'separator' },
+    {
+      label: 'Quit Forge — closes every terminal',
+      click: () => {
+        host?.pauseWatchdog?.()
+        host?.quit()
+      }
+    }
+  )
   return items
 }
 

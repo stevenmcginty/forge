@@ -68,6 +68,12 @@ files:
 extraResources:
   - from: build/icon.ico
     to: icon.ico
+  # The watchdog is run by a scheduled task as `Forge.exe --run-as-node
+  # <script>`, by path, outside the app — see electron/watchdog-host.ts.
+  - from: scripts/watchdog.mjs
+    to: watchdog/watchdog.mjs
+  - from: Start Forge Watchdog.vbs
+    to: watchdog/Start Forge Watchdog.vbs
   - from: build/icon-dev.ico
     to: icon-dev.ico
   - from: bridge-dist
