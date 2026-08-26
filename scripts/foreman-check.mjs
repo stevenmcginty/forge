@@ -442,6 +442,125 @@ try {
     host.dispose()
   }
 
+  /* ------------------------------------------------------------ steve says */
+
+  console.log('\na word from Steve')
+  {
+    const { host, brain, writes } = harness((text) =>
+      text.startsWith('Steve says:') ? [{ tool: 'send_to_pane', args: { text: 'Change of plan: dark theme.' } }] : []
+    )
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    const before = brain.opened.turns.length
+    ok(host.say({ paneId: PANE, text: '' }).log.every((e) => e.kind !== 'you'), 'an empty say is nothing')
+    const state = host.say({ paneId: PANE, text: 'make it dark' })
+    await settle()
+    ok(brain.opened.turns.length === before + 1, 'idle, it is the next turn straight away', String(brain.opened.turns.length))
+    ok((brain.opened.turns.at(-1) ?? '').startsWith('Steve says: make it dark'), 'and it opens with his words', (brain.opened.turns.at(-1) ?? '').slice(0, 30))
+    ok(state.log.some((e) => e.kind === 'you' && e.text === 'make it dark'), 'the log records it as his, verbatim')
+    ok(writes.some((w) => w.data.startsWith('Change of plan')), 'a send during it reaches the pane')
+    ok(
+      host.stateOf(PANE).log.filter((e) => e.kind === 'instruction').length === 1,
+      'and is logged as an instruction — his words, relayed'
+    )
+    ok(host.say({ paneId: 'nobody', text: 'hello' }).status === 'off', 'a pane nobody drives comes back off')
+    host.dispose()
+  }
+
+  console.log('\na word from Steve, mid-turn')
+  {
+    let release = null
+    const held = new Promise((r) => {
+      release = r
+    })
+    const { host, brain } = harness((text) => (text.startsWith('Seed:') ? [{ tool: 'note', args: { text: 'thinking' } }] : []))
+    const original = host.callTool.bind(host)
+    host.callTool = async (paneId, name, args) => {
+      if (name === 'note') await held
+      return original(paneId, name, args)
+    }
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    host.noteAttention({ paneId: PANE, state: 'asking', prompt: 'Trust this folder?' }, Date.now())
+    const held1 = host.say({ paneId: PANE, text: 'use pnpm' })
+    host.say({ paneId: PANE, text: 'and no tailwind' })
+    await settle()
+    ok(brain.opened.turns.length === 1, 'held while the turn is in flight', String(brain.opened.turns.length))
+    ok(/Got it/.test(held1.line), 'and the footer says so', held1.line)
+    release()
+    await settle()
+    ok(brain.opened.turns.length === 3, 'then both his words and the pane’s question go in', String(brain.opened.turns.length))
+    ok((brain.opened.turns[1] ?? '').startsWith('Steve says:'), 'his first', (brain.opened.turns[1] ?? '').slice(0, 20))
+    ok(/use pnpm/.test(brain.opened.turns[1]) && /no tailwind/.test(brain.opened.turns[1]), 'both messages, none dropped')
+    ok(/Trust this folder/.test(brain.opened.turns[2] ?? ''), 'the pane’s question second, not lost')
+    host.dispose()
+  }
+
+  /* ---------------------------------------------------------------- the plan */
+
+  console.log('\nthe plan')
+  {
+    const { host, states } = harness(() => [])
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    const plan = (extra = {}) =>
+      host.callTool(PANE, 'set_plan', {
+        steps: [
+          { id: 'plan', title: 'Plan the pages' },
+          { id: 'build', title: 'Build the shop front' },
+          { id: 'tests', title: 'Run the suite' }
+        ],
+        ...extra
+      })
+    ok(/Nothing changed/.test(await host.callTool(PANE, 'set_plan', { steps: [{ id: 'a', title: 'one' }] })), 'fewer than three steps is refused')
+    ok(
+      /Nothing changed/.test(await host.callTool(PANE, 'set_plan', { steps: Array.from({ length: 9 }, (_, i) => ({ id: `s${i}`, title: `step ${i}` })) })),
+      'more than eight is refused'
+    )
+    ok(host.stateOf(PANE).plan === undefined, 'and neither left a plan behind')
+
+    const first = await plan({ active: 'plan' })
+    ok(/Plan recorded \(0\/3, active: Plan the pages\)/.test(first), 'the first call records it', first)
+    const st = host.stateOf(PANE)
+    ok(st.plan?.length === 3 && st.plan[0].status === 'active' && st.plan[1].status === 'pending', 'active names one step, the rest are pending')
+    ok(st.log.filter((e) => e.kind === 'plan').length === 1, 'one plan line in the log', String(st.log.filter((e) => e.kind === 'plan').length))
+    ok(st.line === '0/3 — Plan the pages', 'the footer line is the progress and the active step', st.line)
+
+    ok((await plan({ active: 'plan' })) === 'Plan unchanged.', 'restating it is a no-op')
+    ok(host.stateOf(PANE).log.filter((e) => e.kind === 'plan').length === 1, 'that logs nothing')
+
+    await host.callTool(PANE, 'set_plan', {
+      steps: [
+        { id: 'plan', title: 'Plan the pages', status: 'done' },
+        { id: 'build', title: 'Build the shop front' },
+        { id: 'tests', title: 'Run the suite' }
+      ],
+      active: 'build'
+    })
+    const after = host.stateOf(PANE)
+    ok(after.plan[0].status === 'done' && after.plan[1].status === 'active', 'a step finishes and the next goes active')
+    ok(after.log.filter((e) => e.kind === 'plan').length === 2, 'one line for the step that finished', String(after.log.filter((e) => e.kind === 'plan').length))
+    ok(/Done \(1\/3\): Plan the pages/.test(after.log.at(-1).text), 'and it says which', after.log.at(-1).text)
+    ok(after.line === '1/3 — Build the shop front', 'the footer moved', after.line)
+    ok(/no step has id/.test(await plan({ active: 'nope' })), 'an unknown active id is refused')
+
+    await host.callTool(PANE, 'set_plan', {
+      steps: [
+        { id: 'plan', title: 'Plan the pages', status: 'done' },
+        { id: 'build', title: 'Build the shop front', status: 'done' },
+        { id: 'tests', title: 'Run the suite' },
+        { id: 'commit', title: 'Commit' }
+      ],
+      active: 'tests'
+    })
+    ok(host.stateOf(PANE).plan.length === 4, 'a late step can be added')
+    await host.callTool(PANE, 'finish', { summary: 'done' })
+    await settle()
+    ok(host.stateOf(PANE).plan.every((s) => s.status !== 'active'), 'finish closes the active step')
+    ok(states.every((s) => typeof JSON.stringify(s) === 'string'), 'every pushed state is still plain JSON')
+    host.dispose()
+  }
+
   /* ------------------------------------------------------------- the shape */
 
   console.log('\nthe wire vocabulary')

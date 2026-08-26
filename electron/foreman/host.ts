@@ -13,6 +13,10 @@ import {
 import { z } from 'zod'
 import {
   FOREMAN_LOG_MAX,
+  FOREMAN_PLAN_MAX,
+  FOREMAN_PLAN_MIN,
+  FOREMAN_STEP_TITLE_MAX,
+  type ForemanStep,
   FOREMAN_LOG_TEXT_MAX,
   FOREMAN_SEED_MAX,
   idleForemanState,
@@ -592,6 +596,8 @@ export class ForemanHost {
               ? `Sending: ${firstLine(String(input['text'] ?? ''))}`
               : name === 'open_agent_pane'
                 ? `Hiring ${String(input['profileId'] ?? 'an agent')}`
+                : name === 'set_plan'
+                ? 'Updating the plan'
                 : name === 'get_standing_brief'
                   ? 'Reading the standing brief'
                   : name === 'Task'
@@ -753,6 +759,45 @@ export class ForemanHost {
         return `${summary}${this.paneList()}`
       }
 
+      case 'set_plan': {
+        const raw = Array.isArray(args['steps']) ? (args['steps'] as unknown[]) : []
+        const steps: ForemanStep[] = []
+        for (const item of raw) {
+          if (!item || typeof item !== 'object') continue
+          const r = item as Record<string, unknown>
+          const title = String(r['title'] ?? '').trim().slice(0, FOREMAN_STEP_TITLE_MAX)
+          if (!title) continue
+          const id = String(r['id'] ?? '').trim() || `s${steps.length + 1}`
+          if (steps.some((s) => s.id === id)) continue
+          const status = r['status']
+          const step: ForemanStep = {
+            id,
+            title,
+            status: status === 'done' || status === 'failed' || status === 'active' ? status : 'pending'
+          }
+          const note = String(r['note'] ?? '').trim()
+          if (note) step.note = note.slice(0, FOREMAN_STEP_TITLE_MAX * 2)
+          steps.push(step)
+        }
+        if (steps.length < FOREMAN_PLAN_MIN || steps.length > FOREMAN_PLAN_MAX) {
+          return `Nothing changed: a plan is ${FOREMAN_PLAN_MIN} to ${FOREMAN_PLAN_MAX} steps, and you sent ${steps.length}.`
+        }
+        // `active` names one step; every other step that is not finished is pending.
+        const active = String(args['active'] ?? '').trim()
+        if (active && !steps.some((s) => s.id === active)) {
+          return `Nothing changed: no step has id "${active}". Steps: ${steps.map((s) => s.id).join(', ')}.`
+        }
+        if (active) {
+          for (const s of steps) {
+            if (s.status === 'done' || s.status === 'failed') continue
+            s.status = s.id === active ? 'active' : 'pending'
+          }
+        } else if (steps.filter((s) => s.status === 'active').length > 1) {
+          return 'Nothing changed: only one step can be active. Pass `active` with its id.'
+        }
+        return this.applyPlan(driven, steps)
+      }
+
       case 'get_standing_brief': {
         const brief = this.deps.getStandingBrief().trim()
         return brief || 'There is no standing brief set; use your own judgement.'
@@ -767,6 +812,12 @@ export class ForemanHost {
 
       case 'finish': {
         const summary = String(args['summary'] ?? '').trim() || 'The job is finished.'
+        // Finishing closes whatever step was open: the plan a person reads
+        // afterwards should not say "active" about a job that ended.
+        if (driven.state.plan) {
+          const closed = driven.state.plan.map((s) => (s.status === 'active' ? { ...s, status: 'done' as const } : s))
+          this.applyPlan(driven, closed)
+        }
         this.log(driven, 'done', summary)
         driven.state.status = 'done'
         driven.state.line = firstLine(summary)
@@ -796,6 +847,52 @@ export class ForemanHost {
     if (driven.trigger === 'seed') return 'brief'
     // A send during a human turn is an instruction too: Steve's words, relayed.
     return driven.trigger === 'asking' ? 'answer' : 'instruction'
+  }
+
+  /**
+   * Take a restated plan, and log only what changed.
+   *
+   * The model restates the whole list every time (one idempotent call beats
+   * add/advance/complete drifting apart), so most calls change nothing and
+   * must say nothing: a log line per restatement is the chatter this replaces.
+   * What is worth a line: the plan appearing, a step finishing, a step
+   * failing, the list changing length.
+   */
+  private applyPlan(driven: Driven, steps: ForemanStep[]): string {
+    const before = driven.state.plan
+    const same =
+      !!before &&
+      before.length === steps.length &&
+      before.every((s, i) => {
+        const n = steps[i]
+        return s.id === n.id && s.title === n.title && s.status === n.status && (s.note ?? '') === (n.note ?? '')
+      })
+    if (same) return 'Plan unchanged.'
+    driven.state.plan = steps
+    const done = steps.filter((s) => s.status === 'done').length
+    const active = steps.find((s) => s.status === 'active')
+    const progress = `${done}/${steps.length}`
+    if (!before) {
+      this.log(driven, 'plan', `Plan (${steps.length} steps): ${steps.map((s) => s.title).join(' → ')}`)
+    } else {
+      const was = new Map(before.map((s) => [s.id, s.status]))
+      for (const s of steps) {
+        const prev = was.get(s.id)
+        if (s.status === 'done' && prev !== 'done') this.log(driven, 'plan', `Done (${progress}): ${s.title}`)
+        else if (s.status === 'failed' && prev !== 'failed') this.log(driven, 'plan', `Failed: ${s.title}${s.note ? ` — ${s.note}` : ''}`)
+      }
+      if (before.length !== steps.length) {
+        this.log(driven, 'plan', `Plan is now ${steps.length} steps: ${steps.map((s) => s.title).join(' → ')}`)
+      }
+    }
+    // The footer follows the plan: the active step's title is the truest
+    // one-liner there is, and it stays put between turns.
+    if (active && driven.state.status !== 'done' && driven.state.status !== 'error') {
+      this.setStatus(driven, driven.state.status, `${progress} — ${active.title}`)
+    } else {
+      this.send(driven)
+    }
+    return `Plan recorded (${progress}${active ? `, active: ${active.title}` : ''}).`
   }
 
   /** The panes Foreman could aim at, when it has just asked for one it cannot. */
@@ -884,6 +981,29 @@ export class ForemanHost {
         ),
 
         tool(
+          'set_plan',
+          [
+            'Declare the plan for this job, or restate it when it moves. This is how Steve sees progress — "3/5, running the suite" — so call it right after you form the concept and before you send the brief, again as each step starts (pass its id as `active`), and again when a step is done.',
+            '',
+            'Always send the whole list: three to eight steps, each with a stable id. A step is `done` only when you have read the evidence on the screen — a green suite, a commit, a file you read back — never because you sent the instruction. Restating an unchanged plan is free and logs nothing; add steps late as the job reveals them.'
+          ].join('\n'),
+          {
+            steps: z
+              .array(
+                z.object({
+                  id: z.string().describe('Stable across calls, e.g. "tests"'),
+                  title: z.string().describe('A few words, as a person would read them'),
+                  status: z.enum(['pending', 'active', 'done', 'failed']).optional().describe('Default pending'),
+                  note: z.string().optional().describe('One line: why it failed, or what was found')
+                })
+              )
+              .describe('The whole plan, in order'),
+            active: z.string().optional().describe('The id of the step you are on now')
+          },
+          async (args) => run('set_plan', { steps: args.steps, active: args.active })
+        ),
+
+        tool(
           'get_standing_brief',
           'Steve\'s standing house rules — the things that are already decided, whatever this job is: which backend, how work is planned, what has to be green before anything is finished, where the keys live. Read it at the start of every job, and follow it where it differs from your instincts. Takes no arguments.',
           {},
@@ -948,6 +1068,7 @@ export class ForemanHost {
       'mcp__foreman__read_transcript',
       'mcp__foreman__open_agent_pane',
       'mcp__foreman__get_standing_brief',
+      'mcp__foreman__set_plan',
       'mcp__foreman__note',
       'mcp__foreman__finish',
       ...(bridge

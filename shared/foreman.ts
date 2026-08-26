@@ -46,6 +46,7 @@ export type ForemanStatus = 'off' | 'starting' | 'driving' | 'waiting' | 'done' 
  *
  *  - `seed` — what Steve typed to start it.
  *  - `you` — something Steve said to Foreman while the job was running.
+ *  - `plan` — the plan was declared, a step was finished, or a step failed.
  *  - `brief` — the full concept Foreman wrote and sent into the pane.
  *  - `answer` — a reply to a question or a permission prompt.
  *  - `instruction` — the next piece of work, sent into a quiet pane.
@@ -57,9 +58,32 @@ export type ForemanStatus = 'off' | 'starting' | 'driving' | 'waiting' | 'done' 
 export interface ForemanLogEntry {
   /** `Date.now()` when it happened. A number, so it survives the wire. */
   at: number
-  kind: 'seed' | 'you' | 'brief' | 'answer' | 'instruction' | 'hire' | 'note' | 'done' | 'error'
+  kind: 'seed' | 'you' | 'plan' | 'brief' | 'answer' | 'instruction' | 'hire' | 'note' | 'done' | 'error'
   text: string
 }
+
+/**
+ * One step of the plan Foreman declared for the job.
+ *
+ * The plan is what turns Foreman from a narrator into a progress display: a
+ * person coming back to a pane reads "3/5 — running the suite" rather than a
+ * wall of instruction texts. `done` is only ever set from something Foreman
+ * observed on the screen, never from having sent the instruction — the
+ * persona insists on it, and the log entry it produces is the audit.
+ */
+export interface ForemanStep {
+  /** Stable across restatements: the same id in a later set_plan is the same step. */
+  id: string
+  title: string
+  status: 'pending' | 'active' | 'done' | 'failed'
+  /** Why it failed, or what was found — one line, optional. */
+  note?: string
+}
+
+/** How many steps a plan may hold. Fewer than three is not a plan; more than eight is a to-do list. */
+export const FOREMAN_PLAN_MAX = 8
+export const FOREMAN_PLAN_MIN = 3
+export const FOREMAN_STEP_TITLE_MAX = 80
 
 /** Everything a surface needs to draw one driven pane. */
 export interface ForemanState {
@@ -76,6 +100,13 @@ export interface ForemanState {
   seed: string
   /** Oldest first, capped at FOREMAN_LOG_MAX — the oldest entries fall off. */
   log: ForemanLogEntry[]
+  /**
+   * The steps Foreman declared, in order — absent until it has. Optional on
+   * purpose: a desktop running its boot-time bundle while the web has already
+   * deployed this field must read the state as before, and a surface that has
+   * never heard of a plan draws the line and the log as it always did.
+   */
+  plan?: ForemanStep[]
 }
 
 /** Switch Foreman on for one pane. */
