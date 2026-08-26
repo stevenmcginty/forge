@@ -42,6 +42,7 @@ import { armRendererWatchdog, type RendererWatchdog } from './renderer-watchdog'
 import { writeBridgeConfig } from './bridge/mcp-config'
 import { syncAgyConfig, syncQwenConfig } from './bridge/share-mcp'
 import { disposePresence, initPresence, setPresence } from './presence'
+import { startHeartbeat, stopHeartbeat } from './heartbeat'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
 import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-sidecar'
 import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './stt-model'
@@ -1312,6 +1313,9 @@ void app
       // pane's CLAUDE_CLIENT_PRESENCE_FILE, and init also clears a marker left
       // behind by a crash (a stale one would mute the phone for good).
       initPresence(getDataDir())
+      // The out-of-process watchdog (scripts/watchdog.mjs) reads this file's
+      // age; a dead or hung main process stops beating and gets relaunched.
+      startHeartbeat(getDataDir())
       // App-level, so presence follows *any* Forge window rather than only the one
       // createWindow happens to be holding.
       app.on('browser-window-focus', syncPresence)
@@ -1457,6 +1461,7 @@ app.on('before-quit', () => {
       console.error(`[main] ${name} failed during shutdown:`, err)
     }
   }
+  safely('stopHeartbeat', stopHeartbeat)
   safely('disposePresence', disposePresence)
   safely('disposePtyHost', disposePtyHost)
   safely('disposeShotsWatcher', disposeShotsWatcher)

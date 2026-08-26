@@ -1884,18 +1884,11 @@ log(
 const balloonsBefore = globalThis.__forgeBalloons.length
 const absorbed = tray.handleWindowClose(window)
 
-log(absorbed === true, 'closing the window is absorbed rather than closing Forge')
-log(window.visible === false, 'the window is hidden')
-log(
-  window.destroyed === false,
-  'and hidden rather than destroyed, so the renderer that holds the split tree a browser dispatches layout into is still there'
-)
-log(globalThis.__forgeBalloons.length === balloonsBefore + 1, 'the first hide explains itself, once')
-log(
-  /still/i.test(String(globalThis.__forgeBalloons.at(-1)?.content ?? '')) &&
-    String(globalThis.__forgeBalloons.at(-1)?.content ?? '').includes(NGROK_DOMAIN),
-  `and what it says is that the link is still up ("${globalThis.__forgeBalloons.at(-1)?.content}")`
-)
+// Since 2026-08-26 the close is never absorbed: X quits, and the out-of-process
+// watchdog (scripts/watchdog.mjs) brings Forge back. The icon stays for the link.
+log(absorbed === false, 'closing the window is not absorbed — X quits Forge, the watchdog restarts it')
+log(window.visible === true, 'the window is not hidden away')
+log(globalThis.__forgeBalloons.length === balloonsBefore, 'and nothing pops up claiming Forge is still running')
 
 await sleep(250)
 
@@ -2028,20 +2021,16 @@ await invoke('web:start')
 await sleep(200)
 log(Boolean(globalThis.__forgeTray), 'switching Forge Web on puts the icon back without anybody asking it to')
 
-const hiddenAgain = fakeWindow()
-log(tray.handleWindowClose(hiddenAgain) === true, 'and the window can be closed to it again')
-log(hiddenAgain.visible === false, 'so Forge is hidden')
+const stillOpen = fakeWindow()
+log(tray.handleWindowClose(stillOpen) === false, 'and closing the window still quits rather than hiding to it')
+log(stillOpen.visible === true, 'so the window is never hidden')
 
-const openedBeforeOff = opened
-window = hiddenAgain
+window = stillOpen
 await invoke('web:stop')
 await sleep(200)
 
 log(globalThis.__forgeTray === null, 'switching Forge Web off takes the icon away')
-log(
-  opened > openedBeforeOff && hiddenAgain.visible === true,
-  'and hands the window back with it — a live Forge with no window and no icon is the one state this must never reach'
-)
+log(stillOpen.visible === true, 'and the window is where it was')
 
 const off = fakeWindow()
 log(tray.handleWindowClose(off) === false, 'with Forge Web off, closing the window is not absorbed')

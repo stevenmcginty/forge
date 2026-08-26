@@ -43,9 +43,9 @@ import type { WebStatus } from '@shared/types'
  *  - **No tray unless Forge Web is on.** Nobody who has not switched this
  *    feature on acquires an icon, and closing the window still quits for them,
  *    byte for byte as before. `syncTray()` is driven by `webEnabled`.
- *  - **No hiding unless the icon is actually up.** `handleWindowClose` absorbs a
- *    close only when `tray !== null`. If the icon could not be created, closing
- *    quits — the honest failure, and never a process with no way back.
+ *  - **Closing the window quits.** `handleWindowClose` never absorbs a close
+ *    any more (it did, while Forge Web was on, until 2026-08-26). The watchdog
+ *    in scripts/watchdog.mjs restarts Forge, so X can mean what X means.
  *  - **Switching Forge Web off while hidden brings the window back**, because
  *    the icon is about to go and something has to be left to click.
  *  - **Hiding is not quitting.** Nothing is killed, so quit-guard.ts's list of
@@ -92,7 +92,6 @@ let tray: Tray | null = null
 /** The window this file hid, so it can be handed back if the icon goes away. */
 let hidden: TrayWindow | null = null
 /** The balloon is shown once per run: it is an explanation, not a nag. */
-let announced = false
 /** Set for the whole of a real quit — see the header. */
 let quitting = false
 
@@ -218,7 +217,6 @@ function takeTrayDown(): void {
     console.error('[tray] could not remove the icon:', err)
   }
   tray = null
-  announced = false
   const window = hidden
   hidden = null
   if (!quitting && window && !window.isDestroyed() && !window.isVisible()) host?.open()
@@ -258,32 +256,6 @@ export function syncTray(): void {
 }
 
 /**
- * The first hide says what just happened.
- *
- * A window that vanishes without quitting is a surprise the first time, and the
- * thing somebody needs to know is precisely the thing they cannot see: the
- * terminals are still running and the browser can still reach them.
- */
-function announce(): void {
-  if (!tray || announced) return
-  announced = true
-  const host_ = host?.status().tunnel.host ?? ''
-  try {
-    tray.displayBalloon({
-      iconType: 'info',
-      title: 'Forge is still running',
-      content: host_
-        ? `Your terminals are still alive and the browser can still reach them at ${host_}. Forge is in the notification area — quit it from there.`
-        : 'Your terminals are still alive and Forge Web is still listening. Forge is in the notification area — quit it from there.'
-    })
-  } catch (err) {
-    // Balloons are win32-only and can be refused by focus-assist. The icon and
-    // its menu are the durable half of the explanation; this is the loud half.
-    console.log(`[tray] could not show the balloon: ${String(err)}`)
-  }
-}
-
-/**
  * The window's `close` handler, decided here. Returns true when the close was
  * absorbed — hidden to the tray — and the caller should `preventDefault()`.
  *
@@ -291,11 +263,15 @@ function announce(): void {
  * with no icon to get back from, and for a window that is already gone.
  */
 export function handleWindowClose(win: TrayWindow): boolean {
-  if (quitting || !tray || win.isDestroyed()) return false
-  win.hide()
-  hidden = win
-  announce()
-  return true
+  void win
+  // Closing the window quits Forge. This used to hide to the tray while Forge
+  // Web was on, to keep the terminals alive for the phone — and it made X a
+  // button that could not close the app, which is not what X means. Since
+  // 2026-08-26 the out-of-process watchdog (scripts/watchdog.mjs) brings
+  // Forge straight back whenever it goes down, so the phone's continuity no
+  // longer needs the window to pretend to close. The tray stays: it is where
+  // the Forge Web link lives, and Quit is on its menu.
+  return false
 }
 
 /** Called from `before-quit`, which every quit route in this app emits. */
