@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode
 } from 'react'
-import { MAX_PANES_PER_TAB, MAX_SESSIONS } from '@shared/ipc'
+import { MAX_PANES_PER_TAB, MAX_SESSIONS, MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import { isShellProfile } from '@shared/agents'
 import {
   idleForemanState,
@@ -67,6 +67,8 @@ export interface ForemanCtx {
   start(paneId: string, seed: string): Promise<void>
   /** Switch it off. The human has the keyboard from that line on. */
   stop(paneId: string): void
+  /** A word in Foreman's ear mid-job; on a pane whose job is over, a new seed. */
+  say(paneId: string, text: string): Promise<void>
   /**
    * Take a finished or failed footer off the screen.
    *
@@ -220,6 +222,35 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
   runnerRef.current = {
     newTab: (profileId) => actions.newTab(profileId),
     splitPane: (paneId, direction, profileId) => actions.splitPane(paneId, direction, profileId),
+    // Hires get a tab of their own, in the project that owns the driven pane,
+    // and the human's view stays where it is. The limits are checked here so
+    // Foreman hears a sentence back rather than a notice it cannot see.
+    hireTab: (anchorPaneId, profileId, count) => {
+      const st = stateRef.current
+      const projectId = projectOwningRef.current(anchorPaneId)
+      const ws = projectId ? st.workspaces[projectId] : undefined
+      if (!projectId || !ws) return { ok: false, done: 0, summary: 'The pane Foreman is driving is no longer open — nothing hired' }
+      const profile = resolveProfile(st.settings.agentProfiles, profileId)
+      let total = 0
+      for (const w of Object.values(st.workspaces)) for (const t of w.tabs) total += countLeaves(t.root)
+      const room = Math.min(4, Math.max(0, MAX_SESSIONS - total))
+      if (ws.tabs.length >= MAX_TABS_PER_PROJECT) {
+        return { ok: false, done: 0, summary: `This project already has ${MAX_TABS_PER_PROJECT} tabs — close one before hiring` }
+      }
+      if (room <= 0) return { ok: false, done: 0, summary: `Session limit reached (${MAX_SESSIONS}) — nothing hired` }
+      const done = Math.min(count, room)
+      const title = done === 1 ? `${profile.name} (hired)` : `${profile.name} ×${done} (hired)`
+      actions.hireTab(projectId, profileId, done, title)
+      const where = `in a new tab called “${title}” in this project — the hires are side by side there, not in the tab you are driving`
+      return {
+        ok: true,
+        done,
+        summary:
+          done < count
+            ? `Opened ${done} of ${count} ${profile.name} panes ${where} — session limit reached`
+            : `Opened ${done} ${profile.name} ${done === 1 ? 'pane' : 'panes'} ${where}`
+      }
+    },
     closePane: (paneId) => actions.closePane(paneId),
     closeTab: (tabId) => actions.closeTab(tabId),
     selectProject: (projectId) => actions.selectProject(projectId),
@@ -329,6 +360,37 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
     [absorb, states]
   )
 
+  /**
+   * A word in Foreman's ear.
+   *
+   * On a running job it is a turn for Foreman's session. On a pane whose job is
+   * over — finished, failed, or never started — the same sentence is a seed,
+   * because that is what typing at a finished Foreman means: "next, this". The
+   * composer stays in one place and the human never has to work out which of
+   * two boxes to type into.
+   */
+  const say = useCallback(
+    async (paneId: string, text: string): Promise<void> => {
+      const line = text.trim()
+      if (!line) return
+      const current = states.get(paneId)
+      const running = current && (current.status === 'starting' || current.status === 'driving' || current.status === 'waiting')
+      if (!running) {
+        await start(paneId, line)
+        return
+      }
+      try {
+        const api = window.forge?.foreman
+        if (!api) throw new Error('Foreman is not loaded — restart Forge.')
+        absorb(await api.say({ paneId, text: line }))
+      } catch (err) {
+        console.error('[foreman] say failed:', err)
+        actions.setNotice(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [absorb, actions, start, states]
+  )
+
   const dismiss = useCallback((paneId: string): void => {
     setHidden((prev) => {
       if (prev.has(paneId)) return prev
@@ -343,10 +405,11 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
       paneState: (paneId) => states.get(paneId) ?? idleForemanState(paneId),
       start,
       stop,
+      say,
       dismiss,
       dismissed: (paneId) => hidden.has(paneId)
     }),
-    [states, hidden, start, stop, dismiss]
+    [states, hidden, start, stop, say, dismiss]
   )
 
   return <ForemanContext.Provider value={value}>{children}</ForemanContext.Provider>

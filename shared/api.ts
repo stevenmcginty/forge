@@ -91,6 +91,7 @@ import type {
 import type {
   ForemanStartRequest,
   ForemanState,
+  ForemanSayRequest,
   ForemanToolRequest,
   ForemanToolResult
 } from './foreman'
@@ -368,6 +369,8 @@ export interface ForgeApi {
   foreman: {
     start(req: ForemanStartRequest): Promise<ForemanState>
     stop(paneId: string): Promise<ForemanState>
+    /** A word in Foreman's ear mid-job. Answers the pane's state; a pane nobody is driving comes back unchanged. */
+    say(req: ForemanSayRequest): Promise<ForemanState>
     list(): Promise<ForemanState[]>
     onState(cb: (state: ForemanState) => void): () => void
     onToolRequest(cb: (request: ForemanToolRequest) => void): () => void

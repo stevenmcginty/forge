@@ -217,6 +217,7 @@ export const IPC = {
    */
   foremanStart: FOREMAN_IPC.start,
   foremanStop: FOREMAN_IPC.stop,
+  foremanSay: FOREMAN_IPC.say,
   foremanList: FOREMAN_IPC.list,
   foremanState: FOREMAN_IPC.state,
   foremanToolRequest: FOREMAN_IPC.toolRequest,

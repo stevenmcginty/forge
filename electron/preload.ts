@@ -100,6 +100,7 @@ const api: ForgeApi = {
   foreman: {
     start: (req) => ipcRenderer.invoke(IPC.foremanStart, req),
     stop: (paneId) => ipcRenderer.invoke(IPC.foremanStop, String(paneId ?? '')),
+    say: (req) => ipcRenderer.invoke(IPC.foremanSay, req),
     list: () => ipcRenderer.invoke(IPC.foremanList),
     onState: (cb) => subscribe(IPC.foremanState, cb),
     onToolRequest: (cb) => subscribe(IPC.foremanToolRequest, cb),

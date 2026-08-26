@@ -17,6 +17,7 @@ import {
   FOREMAN_SEED_MAX,
   idleForemanState,
   type ForemanLogEntry,
+  type ForemanSayRequest,
   type ForemanStartRequest,
   type ForemanState,
   type ForemanStatus
@@ -203,6 +204,13 @@ interface Driven {
   inFlight: boolean
   /** At most one queued trigger, latest wins. See the note above. */
   pending: Trigger | null
+  /**
+   * What Steve said while a turn was in flight. Never coalesced and never
+   * dropped, unlike `pending`: a screen tail goes stale, a sentence from the
+   * person paying for the job does not. Drained, all of it, into the turn that
+   * follows the one in flight — ahead of anything the pane was about to ask.
+   */
+  notes: string[]
   /** Why the turn in flight was pushed — what a `send_to_pane` in it means. */
   trigger: Trigger['kind']
   /** `Date.now()` of the last thing Foreman typed into the driven pane. */
@@ -214,7 +222,7 @@ interface Driven {
  * should show while it is being worked on.
  */
 interface Trigger {
-  kind: 'seed' | 'asking' | 'quiet'
+  kind: 'seed' | 'asking' | 'quiet' | 'human'
   text: string
   line: string
 }
@@ -256,6 +264,7 @@ export class ForemanHost {
       closing: false,
       inFlight: false,
       pending: null,
+      notes: [],
       trigger: 'seed',
       lastSendAt: 0
     }
@@ -281,6 +290,40 @@ export class ForemanHost {
     driven.state.status = 'off'
     driven.state.line = 'Stopped — you have the keyboard'
     this.log(driven, 'note', 'Foreman was switched off; the pane is yours.')
+    return driven.state
+  }
+
+  /**
+   * A word from Steve, mid-job.
+   *
+   * The third input, after the seed and the pane — and the only one that is
+   * never coalesced. Idle, it is the next turn straight away; mid-turn it is
+   * held in `notes` and goes in the moment the turn ends, ahead of whatever
+   * the pane queued, because the pane can be re-read and Steve cannot.
+   *
+   * A pane nobody is driving (off, done, error) comes back unchanged: the
+   * renderer treats that as "start a new job with this line", which is the
+   * intuitive thing for a sentence typed at a finished Foreman to mean, and
+   * `start` is the honest way to do it.
+   */
+  say(request: ForemanSayRequest): ForemanState {
+    const paneId = String(request?.paneId ?? '').trim()
+    const text = String(request?.text ?? '')
+      .trim()
+      .slice(0, FOREMAN_SEED_MAX)
+    const driven = this.panes.get(paneId)
+    if (!driven || !driven.session || driven.closing || !text) return this.stateOf(paneId)
+    if (driven.state.status === 'done' || driven.state.status === 'error') return driven.state
+
+    this.log(driven, 'you', text)
+    if (driven.inFlight) {
+      driven.notes.push(text)
+      // Same status, new line: the footer has to say the message landed and
+      // when it will be read, or the next thing typed is the same message.
+      this.setStatus(driven, driven.state.status, `Got it — acting on that after this step: ${firstLine(text)}`)
+      return driven.state
+    }
+    this.push(driven, this.humanTurn([text], paneId))
     return driven.state
   }
 
@@ -329,10 +372,9 @@ export class ForemanHost {
 
   /* ------------------------------------------------------------- the turns
    *
-   * Three of them, and there will never be a fourth: a job starts, the pane
-   * asks something, or the pane stops. Written out here rather than composed at
-   * the call site so what the brain is actually handed is readable in one
-   * place.
+   * Four of them: a job starts, the pane asks something, the pane stops, or
+   * Steve says something. Written out here rather than composed at the call
+   * site so what the brain is actually handed is readable in one place.
    */
 
   private seedTurn(seed: string): Trigger {
@@ -374,6 +416,25 @@ export class ForemanHost {
         '',
         'If the job is not finished, send the next step; if a suite failed, make it fix it;',
         'if everything is genuinely done and verified, call finish.'
+      ].join('\n')
+    }
+  }
+
+  private humanTurn(notes: string[], paneId: string): Trigger {
+    const said = notes.length === 1 ? `Steve says: ${notes[0]}` : `Steve says:\n${notes.map((n) => `- ${n}`).join('\n')}`
+    return {
+      kind: 'human',
+      line: `Acting on: ${firstLine(notes[notes.length - 1] ?? '')}`,
+      text: [
+        said,
+        '',
+        'This is from the person the job is for, and it overrides the seed and the standing brief wherever they disagree.',
+        'Screen:',
+        tail(this.screen(paneId), SCREEN_TAIL_MAX),
+        '',
+        'Act on it now: if it changes the work, tell the pane via send_to_pane (interrupt it with Escape first if it is mid-task and the change cannot wait);',
+        'if it answers something you were unsure of, use it; if it is only information, note it and carry on.',
+        'Every decision is still yours.'
       ].join('\n')
     }
   }
@@ -492,6 +553,14 @@ export class ForemanHost {
     const queued = driven.pending
     driven.pending = null
     if (driven.state.status === 'done' || driven.state.status === 'error') return
+    // Steve first, then the pane: what the pane queued describes a screen that
+    // can be read again, and it will be — the human turn carries a fresh tail
+    // and the model reads the pane before it answers anyway.
+    if (driven.notes.length) {
+      driven.pending = queued
+      this.push(driven, this.humanTurn(driven.notes.splice(0), driven.state.paneId))
+      return
+    }
     if (queued) {
       this.push(driven, queued)
       return
@@ -544,6 +613,7 @@ export class ForemanHost {
     driven.session = null
     driven.inbox.length = 0
     driven.pending = null
+    driven.notes.length = 0
     driven.inFlight = false
     // Unblock the generator so it can return and let the SDK close the
     // subprocess down cleanly.
@@ -570,6 +640,7 @@ export class ForemanHost {
     driven.session = null
     driven.inFlight = false
     driven.pending = null
+    driven.notes.length = 0
     console.error(`[foreman] ${message}`)
     driven.state.status = 'error'
     driven.state.line = message
@@ -723,6 +794,7 @@ export class ForemanHost {
    */
   private sendKind(driven: Driven): ForemanLogEntry['kind'] {
     if (driven.trigger === 'seed') return 'brief'
+    // A send during a human turn is an instruction too: Steve's words, relayed.
     return driven.trigger === 'asking' ? 'answer' : 'instruction'
   }
 

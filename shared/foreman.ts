@@ -45,6 +45,7 @@ export type ForemanStatus = 'off' | 'starting' | 'driving' | 'waiting' | 'done' 
  * itself lives in a session nobody watches.
  *
  *  - `seed` — what Steve typed to start it.
+ *  - `you` — something Steve said to Foreman while the job was running.
  *  - `brief` — the full concept Foreman wrote and sent into the pane.
  *  - `answer` — a reply to a question or a permission prompt.
  *  - `instruction` — the next piece of work, sent into a quiet pane.
@@ -56,7 +57,7 @@ export type ForemanStatus = 'off' | 'starting' | 'driving' | 'waiting' | 'done' 
 export interface ForemanLogEntry {
   /** `Date.now()` when it happened. A number, so it survives the wire. */
   at: number
-  kind: 'seed' | 'brief' | 'answer' | 'instruction' | 'hire' | 'note' | 'done' | 'error'
+  kind: 'seed' | 'you' | 'brief' | 'answer' | 'instruction' | 'hire' | 'note' | 'done' | 'error'
   text: string
 }
 
@@ -82,6 +83,20 @@ export interface ForemanStartRequest {
   paneId: string
   /** Steve's line, or whole brief. Foreman forms the actual concept from this itself. */
   seed: string
+}
+
+/**
+ * Say something to Foreman while it is driving.
+ *
+ * The message is not a keystroke into the pane: it goes to Foreman's own
+ * session as its next turn ("Steve says: …"), so Foreman folds it into the
+ * job — a change of direction, a fact it did not have, a "stop doing that".
+ * It is never dropped: one that arrives mid-turn waits for the turn to end and
+ * then goes in ahead of whatever the pane was about to be asked.
+ */
+export interface ForemanSayRequest {
+  paneId: string
+  text: string
 }
 
 /**
@@ -116,6 +131,8 @@ export const FOREMAN_IPC = {
   start: 'foreman:start',
   /** renderer → main, invoke. Takes a paneId, returns the pane's ForemanState. */
   stop: 'foreman:stop',
+  /** renderer → main, invoke. Takes a ForemanSayRequest, returns the pane's ForemanState. */
+  say: 'foreman:say',
   /** renderer → main, invoke. Returns every ForemanState main is holding. */
   list: 'foreman:list',
   /** main → renderer, push. One ForemanState, whenever anything about it moves. */

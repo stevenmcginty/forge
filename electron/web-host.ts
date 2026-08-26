@@ -42,7 +42,7 @@ import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
 import { WebServer, type WebServerHost } from './web/server'
 import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
-import { foremanList, foremanStart, foremanStop, onForemanState } from './foreman/ipc'
+import { foremanList, foremanStart, foremanSay, foremanStop, onForemanState } from './foreman/ipc'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
 import { transcriptPath } from './bridge/claude-transcripts'
 import { publishAttention } from './attention-bus'
@@ -1375,6 +1375,11 @@ async function start(): Promise<void> {
     foremanStop: async (paneId) => {
       foremanStop(paneId)
       return { ok: true }
+    },
+    foremanSay: async (paneId, text) => {
+      const state = foremanSay({ paneId, text })
+      const driving = state.status === 'starting' || state.status === 'driving' || state.status === 'waiting'
+      return driving ? { ok: true } : { ok: false, error: 'Foreman is not driving that pane — start it with a seed instead.' }
     },
     offerClipboardImage: (bytes) => {
       try {

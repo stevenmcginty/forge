@@ -1122,6 +1122,13 @@ export type WebRequest =
    * follows says `off`.
    */
   | { kind: 'foreman-stop'; paneId: string }
+  /**
+   * A word in Foreman's ear while it drives: goes to Foreman's session as its
+   * next turn, never into the pane as keystrokes. Answered `{ kind: 'ok' }`;
+   * a pane nobody is driving answers `failed` so the browser can offer a start
+   * instead. Capped at FOREMAN_SEED_MAX like a seed.
+   */
+  | { kind: 'foreman-say'; paneId: string; text: string }
 
 /**
  * What `PushSubscription.toJSON()` yields, narrowed to the fields the desktop

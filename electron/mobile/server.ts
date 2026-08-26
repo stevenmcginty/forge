@@ -126,6 +126,8 @@ export interface MobileServerHost {
   foremanStart?: (request: ForemanStartRequest) => Promise<{ ok: true } | { ok: false; error: string }>
   /** Switch it off. Total in the host's own way: stopping a stopped pane is a no-op. */
   foremanStop?: (paneId: string) => Promise<{ ok: true } | { ok: false; error: string }>
+  /** A word in Foreman's ear mid-job. Not yet spoken by the phone; here so the host object stays one shape. */
+  foremanSay?: (paneId: string, text: string) => Promise<{ ok: true } | { ok: false; error: string }>
 
   /**
    * The number of authenticated phones changed. Drives the power-save blocker

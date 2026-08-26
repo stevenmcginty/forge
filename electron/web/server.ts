@@ -402,6 +402,8 @@ export interface WebServerHost {
   foremanStart?: (request: ForemanStartRequest) => Promise<{ ok: true } | { ok: false; error: string }>
   /** Switch it off. Total in the host's own way: stopping a stopped pane is a no-op, not an error. */
   foremanStop?: (paneId: string) => Promise<{ ok: true } | { ok: false; error: string }>
+  /** A word in Foreman's ear. `ok: false` when nobody is driving that pane. */
+  foremanSay?: (paneId: string, text: string) => Promise<{ ok: true } | { ok: false; error: string }>
 
   /**
    * Put a pasted image on this machine's clipboard so an agent that reads
@@ -2126,6 +2128,30 @@ export class WebServer {
           const stopped = await this.host.foremanStop(paneId)
           if (!stopped.ok) {
             failed('failed', stopped.error)
+            return
+          }
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'foreman-say': {
+          if (!this.host.foremanSay) {
+            failed('unsupported', 'This Forge cannot take a message for Foreman from a browser.')
+            return
+          }
+          const paneId = wireString(request.paneId, 128)
+          if (!paneId || !this.host.sessions().some((s) => s.id === paneId)) {
+            failed('unknown-session', 'That pane is gone.')
+            return
+          }
+          const text = wireString(request.text, FOREMAN_SEED_MAX)
+          if (!text.trim()) {
+            failed('failed', 'Nothing to say.')
+            return
+          }
+          const said = await this.host.foremanSay(paneId, text)
+          if (!said.ok) {
+            failed('failed', said.error)
             return
           }
           answer({ kind: 'ok' })

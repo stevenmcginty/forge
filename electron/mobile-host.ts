@@ -38,7 +38,7 @@ import { MobileAuth, PAIR_TTL_MS } from './mobile/auth'
 import { DiscoveryResponder } from './mobile/discovery'
 import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
 import { MobileServer, TV_APK_PATH, type MobileApprovalAsk } from './mobile/server'
-import { foremanList, foremanStart, foremanStop, onForemanState } from './foreman/ipc'
+import { foremanList, foremanStart, foremanSay, foremanStop, onForemanState } from './foreman/ipc'
 import { NgrokTunnel, ensureNgrokExe, pairEndpoint, resolveNgrokExe } from './mobile-tunnel'
 import {
   disposeTvBuild,
@@ -626,6 +626,11 @@ async function start(): Promise<void> {
     foremanStop: async (paneId) => {
       foremanStop(paneId)
       return { ok: true }
+    },
+    foremanSay: async (paneId, text) => {
+      const state = foremanSay({ paneId, text })
+      const driving = state.status === 'starting' || state.status === 'driving' || state.status === 'waiting'
+      return driving ? { ok: true } : { ok: false, error: 'Foreman is not driving that pane — start it with a seed instead.' }
     },
     acceptUntil: () => armedUntil(),
     requestApproval,

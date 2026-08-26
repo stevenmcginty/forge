@@ -379,6 +379,11 @@ type Action =
   | { type: 'saveProfile'; profile: AgentProfile }
   | { type: 'deleteProfile'; id: string }
   | { type: 'newTab'; profileId: string; permissionMode?: ClaudePermissionMode }
+  /**
+   * A tab of hired agent panes, in a named project, without moving the human.
+   * See `hireTab` on Actions.
+   */
+  | { type: 'hireTab'; projectId: string; profileId: string; count: number; title: string }
   | { type: 'openToolPane'; profileId: string; title: string; text: string; submit: boolean; paste?: boolean }
   | { type: 'drainTypes'; paneIds: string[] }
   | { type: 'closeTab'; tabId: string }
@@ -856,6 +861,40 @@ function reducer(state: AppState, action: Action): AppState {
     }
 
     /**
+     * Foreman hiring. A whole tab for the hires, side by side inside it, in
+     * the project that owns the driven pane — and the human's active tab left
+     * exactly where it was. Splitting the driven tab was what it did before,
+     * and four agents in one tab is four unreadable slivers; a tab of their
+     * own is a tab you can look at, or not.
+     */
+    case 'hireTab': {
+      const ws = state.workspaces[action.projectId]
+      if (!ws) return { ...state, notice: 'That project is not open — nothing hired' }
+      const count = Math.max(1, Math.min(4, Math.floor(action.count)))
+      if (totalPanes(state) + count > MAX_SESSIONS) {
+        return { ...state, notice: `Session limit reached (${MAX_SESSIONS})` }
+      }
+      if (ws.tabs.length >= MAX_TABS_PER_PROJECT) {
+        return { ...state, notice: `A project holds at most ${MAX_TABS_PER_PROJECT} tabs` }
+      }
+      const leaves = Array.from({ length: count }, () => makeLeaf(action.profileId, ''))
+      // Even columns: a/b nested rightwards with the ratio that leaves each
+      // pane the same width as the last.
+      let root: LayoutNode = leaves[leaves.length - 1]
+      for (let i = leaves.length - 2; i >= 0; i--) {
+        root = { type: 'split', id: makeId('split'), direction: 'row', ratio: 1 / (leaves.length - i), a: leaves[i], b: root }
+      }
+      const tab: TerminalTab = {
+        id: makeId('tab'),
+        title: action.title,
+        root,
+        activePaneId: leaves[0].id,
+        textColor: nextTextColor(ws.tabs)
+      }
+      return mapWorkspace(state, action.projectId, (w) => ({ ...w, tabs: [...w.tabs, tab] }))
+    }
+
+    /**
      * A named tab with a command already in it, unsubmitted.
      *
      * Not `newTab` plus `renameTab` plus a type: the whole point is that the
@@ -1266,6 +1305,12 @@ export interface AppActions {
   /** Duplicate a profile under a new id, ready to be edited. */
   duplicateProfile(id: string): void
   newTab(profileId?: string, permissionMode?: ClaudePermissionMode): void
+  /**
+   * Open a tab of `count` panes of one profile in `projectId`, side by side,
+   * without switching project or tab. Foreman's hires go here. Refusals (limits,
+   * unknown project) land in `notice`, as every other layout refusal does.
+   */
+  hireTab(projectId: string, profileId: string, count: number, title: string): void
   /**
    * Open a shell pane in the current project with `command` already typed into
    * it. Whether it also presses Enter is the caller's call: the update buttons
@@ -1810,6 +1855,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         })
       },
       closeTab: (tabId) => dispatch({ type: 'closeTab', tabId }),
+      hireTab: (projectId, profileId, count, title) => dispatch({ type: 'hireTab', projectId, profileId, count, title }),
       selectTab: (tabId) => dispatch({ type: 'selectTab', tabId }),
       renameTab: (tabId, title) => dispatch({ type: 'renameTab', tabId, title }),
       paintTab: (tabId, patch) => dispatch({ type: 'paintTab', tabId, patch }),

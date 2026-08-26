@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { ipcMain, type BrowserWindow } from 'electron'
 import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
 import { IPC } from '@shared/ipc'
-import { idleForemanState, type ForemanStartRequest, type ForemanState } from '@shared/foreman'
+import { idleForemanState, type ForemanSayRequest, type ForemanStartRequest, type ForemanState } from '@shared/foreman'
 import { isSessionId } from '@shared/session'
 import type { LayoutNode } from '@shared/types'
 import { getProjects, getSettings, getWorkspace } from '../store'
@@ -342,6 +342,12 @@ export function foremanStop(paneId: string): ForemanState {
   return host ? host.stop(String(paneId ?? '')) : idleForemanState(String(paneId ?? ''))
 }
 
+/** A word in Foreman's ear. Same rule as stop: no host means nobody is being driven, so nobody is listening. */
+export function foremanSay(request: ForemanSayRequest): ForemanState {
+  const paneId = String(request?.paneId ?? '')
+  return host ? host.say({ paneId, text: String(request?.text ?? '') }) : idleForemanState(paneId)
+}
+
 /** Every pane main is holding Foreman state for. Empty until anything has been driven. */
 export function foremanList(): ForemanState[] {
   return host?.list() ?? []
@@ -352,6 +358,7 @@ export function registerForemanHandlers(): void {
   // Never lazily starts a host: stopping something that is not running is a
   // no-op, not a reason to build one.
   ipcMain.handle(IPC.foremanStop, (_e, paneId: string): ForemanState => foremanStop(paneId))
+  ipcMain.handle(IPC.foremanSay, (_e, request: ForemanSayRequest): ForemanState => foremanSay(request))
   ipcMain.handle(IPC.foremanList, (): ForemanState[] => foremanList())
   ipcMain.handle(IPC.foremanToolResult, (_e, result: { id?: string; ok?: boolean; result?: unknown; error?: string }): boolean => {
     const id = String(result?.id ?? '')

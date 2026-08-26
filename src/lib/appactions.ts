@@ -167,6 +167,13 @@ export interface ActionContext {
 export interface ActionRunner {
   newTab(profileId: string): void
   splitPane(paneId: string, direction: SplitDirection, profileId: string): void
+  /**
+   * Foreman's hires: a tab of their own beside the anchor pane's tab, in its
+   * project. Optional because only Foreman's runner has it; without it an
+   * anchored `open_panes` falls back to splitting the anchor's tab. Answers
+   * how many panes it opened and a sentence about where.
+   */
+  hireTab?(anchorPaneId: string, profileId: string, count: number): { ok: boolean; done: number; summary: string }
   closePane(paneId: string): void
   closeTab(tabId: string): void
   selectProject(projectId: string): void
@@ -777,6 +784,10 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       const requested = Math.max(1, Math.floor(action.count))
       let target = ctx.focusedPaneId
       let panesInTab = ctx.panesInActiveTab
+      if (action.anchorPaneId && run.hireTab) {
+        const hired = run.hireTab(action.anchorPaneId, profile.id, requested)
+        return { ok: hired.ok, summary: hired.summary, requested, done: hired.done }
+      }
       if (action.anchorPaneId) {
         const anchor = ctx.panes?.find((p) => p.paneId === action.anchorPaneId)
         if (!anchor) return fail('The pane Foreman is driving is no longer open — nothing split', requested)

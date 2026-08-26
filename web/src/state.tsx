@@ -192,6 +192,8 @@ export interface ForgeActions {
   foremanStart: (paneId: string, seed: string) => Promise<string | null>
   /** Switch it off — the keyboard goes back to the human on every surface. */
   foremanStop: (paneId: string) => Promise<string | null>
+  /** A word in Foreman's ear mid-job. Null on success, the sentence to show otherwise. */
+  foremanSay: (paneId: string, text: string) => Promise<string | null>
   setNotice: (message: string) => void
   /** Clear the notice on screen now; the next in the queue, if any, takes its turn. */
   dismissNotice: () => void
@@ -1105,6 +1107,14 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       },
       foremanStop: async (paneId) => {
         const result = await client.request({ kind: 'foreman-stop', paneId })
+        if (result.kind === 'failed') {
+          pushNotice(result.message)
+          return result.message
+        }
+        return null
+      },
+      foremanSay: async (paneId, text) => {
+        const result = await client.request({ kind: 'foreman-say', paneId, text })
         if (result.kind === 'failed') {
           pushNotice(result.message)
           return result.message
