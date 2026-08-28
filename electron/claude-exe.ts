@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 
 /**
  * Where the Claude Agent SDK's own CLI binary lives, as a path the OS can run.
@@ -18,11 +18,13 @@ export function claudeSdkExecutable(): string | null {
   const name = process.platform === 'win32' ? 'claude.exe' : 'claude'
   let dir: string
   try {
-    dir = require.resolve(`${pkg}/package.json`).replace(/[\/]package\.json$/, '')
+    dir = dirname(require.resolve(`${pkg}/package.json`))
   } catch {
     return null
   }
-  for (const candidate of [dir.replace(/app\.asar([\/])/, 'app.asar.unpacked$1'), dir]) {
+  // Windows paths use backslashes; swap the segment by name, not by regex.
+  const unpacked = dir.split(sep).map((part) => (part === 'app.asar' ? 'app.asar.unpacked' : part)).join(sep)
+  for (const candidate of [unpacked, dir]) {
     const exe = join(candidate, name)
     if (existsSync(exe)) return exe
   }
