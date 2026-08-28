@@ -31,6 +31,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The frozen speech engine (resources/stt-bin) is built by PyInstaller
+      # from stt/stt_service.py. Without this step the installer ships with no
+      # engine and dictation goes amber on any PC that has no Python.
+      - name: Set up Python for the speech engine
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: stt/requirements-freeze.txt
+
+      - name: Install the speech engine's wheels
+        run: pip install -r stt/requirements-freeze.txt
+
       - name: Configure release tag identity
         run: |
           git config user.name "github-actions[bot]"
@@ -58,5 +71,5 @@ jobs:
       - name: Build, verify, and publish
         env:
           GH_TOKEN: ${{ github.token }}
-          FORGE_RELEASE_BUILD_SCRIPT: dist:nostt
+          FORGE_STT_PYTHON: ${{ env.pythonLocation }}\python.exe
         run: npm run release -- --ci

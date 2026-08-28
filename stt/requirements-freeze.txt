@@ -1,0 +1,9 @@
+# Wheels the frozen speech engine is built from (scripts/build-stt.mjs).
+# Pinned to what the local DictationMic venv freezes with, so a CI build and a
+# desk build behave the same.
+numpy==2.5.0
+onnx-asr==0.11.0
+onnxruntime==1.27.0
+sounddevice==0.5.5
+pyinstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6
