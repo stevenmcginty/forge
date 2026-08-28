@@ -47,6 +47,7 @@ import {
   configureWatchdogHost,
   installWatchdog,
   pauseWatchdog,
+  startWatchdogProcess,
   uninstallWatchdog,
   watchdogStatus,
   writeWatchdogConfig
@@ -690,6 +691,13 @@ function registerWatchdog(): void {
       if (!status.installed) {
         console.log('[watchdog] keepRunning is on but the task is missing — reinstalling')
         installWatchdog()
+      } else if (!status.running) {
+        // A registered task is not a running watchdog: the launcher can die, or
+        // wedge with the task still reading "Running", and then nothing guards
+        // Forge until the next logon. Forge is the one process certain to be up
+        // at this point, so it starts one.
+        console.log('[watchdog] the task is installed but no watchdog is running — starting one')
+        startWatchdogProcess()
       }
     } catch (err) {
       console.error('[watchdog] startup check failed:', err)

@@ -163,8 +163,11 @@ export function watchdogStatus(): WatchdogStatus {
         `if ($t) { 'installed' }; ` +
         // "watchdog.mjs" plus this root rather than the full script path: a
         // watchdog started by hand runs `node "scripts\watchdog.mjs"` with a
-        // relative path and must still count.
-        `$p = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains('watchdog.mjs') -and $_.CommandLine.ToLower().Contains(${psq(config.root.toLowerCase())}) }; ` +
+        // relative path and must still count. The wscript/cmd launchers above
+        // it are excluded: the task hands them the script path as an argument,
+        // so their command lines carry it too, and a wedged launcher with no
+        // node under it is not a running watchdog (see ensureSingleWatchdog).
+        `$p = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains('watchdog.mjs') -and $_.CommandLine.ToLower().Contains(${psq(config.root.toLowerCase())}) -and $_.Name -notin @('wscript.exe','cscript.exe','cmd.exe','conhost.exe') }; ` +
         `if ($p) { 'running' }`
     )
     installed = out.includes('installed')
@@ -197,7 +200,16 @@ export function installWatchdog(): WatchdogStatus {
     `$action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ${psq(argument)} -WorkingDirectory ${psq(config.cwd)}\n` +
       `$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME\n` +
       `$trigger.Delay = 'PT20S'\n` +
-      `$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -DontStopOnIdleEnd -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew\n` +
+      // Windows restarts a task it considers *failed*, and a launcher that
+      // hangs keeps the task "Running" for ever — one wedged wscript and the
+      // always-on promise is quietly off until the next logon, which is how it
+      // failed on 2026-08-28. So re-run every 10 minutes, indefinitely, and let
+      // the copies sort themselves out: a fresh watchdog that finds a healthy
+      // one exits 0 within a second (ensureSingleWatchdog) and takes its
+      // launcher with it. Parallel rather than IgnoreNew, because IgnoreNew is
+      // exactly what a wedged instance would use to keep replacements out.
+      `$trigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 10)).Repetition\n` +
+      `$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -DontStopOnIdleEnd -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances Parallel\n` +
       `$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited\n` +
       `Register-ScheduledTask -TaskName ${psq(name)} -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null\n` +
       `Start-ScheduledTask -TaskName ${psq(name)}\n`

@@ -338,13 +338,50 @@ function launchForge() {
 
 /* ------------------------------------------------------------------ main */
 
+/**
+ * Launchers, not watchdogs. The scheduled task runs
+ * `wscript.exe "<vbs>" "<node>" "<script>" "<config>"`, and the .vbs in turn
+ * runs `cmd /c "<node>" "<script>" --config …` — so this script's own path is
+ * in the command line of every process above it, not only in its own. A twin
+ * scan that goes by the string alone therefore finds the launcher that started
+ * it and stands down at every boot, which is exactly the watchdog never
+ * running. Only a process actually *executing* the script counts.
+ */
+const LAUNCHER_NAMES = ['wscript.exe', 'cscript.exe', 'cmd.exe', 'conhost.exe']
+
+/** This process's ancestors, so a twin scan can never match its own chain. */
+function ancestors(all) {
+  const byPid = new Map(all.map((p) => [p.pid, p]))
+  const line = new Set()
+  let pid = process.ppid
+  for (let hops = 0; pid && hops < 12; hops += 1) {
+    if (line.has(pid)) break
+    line.add(pid)
+    pid = byPid.get(pid)?.ppid
+  }
+  return line
+}
+
 function ensureSingleWatchdog() {
   const me = process.pid
-  const twins = processes().filter(
-    (p) => p.pid !== me && p.cl.includes('watchdog.mjs') && namesRoot(p.cl)
+  const all = processes()
+  const mine = ancestors(all)
+  const twins = all.filter(
+    (p) =>
+      p.pid !== me &&
+      !mine.has(p.pid) &&
+      !LAUNCHER_NAMES.includes(p.name) &&
+      p.cl.includes('watchdog.mjs') &&
+      namesRoot(p.cl)
   )
   if (twins.length) {
-    log(`another watchdog is already running for this checkout (pid ${twins.map((t) => t.pid).join(', ')}); exiting`)
+    // Console, not the log file: the task re-runs every 10 minutes to survive a
+    // wedged launcher, so the healthy case stands down constantly and would
+    // otherwise bury the restarts the log exists to record.
+    process.stdout.write(
+      `another watchdog is already running for this checkout (pid ${twins.map((t) => t.pid).join(', ')}); exiting
+`
+    )
     process.exit(0)
   }
 }
