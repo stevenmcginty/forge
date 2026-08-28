@@ -22,6 +22,7 @@ import type {
 } from '@shared/types'
 import { RestartBudget, MAX_RAPID_RESTARTS } from '../stt-protocol'
 import { whichCommand } from '../which'
+import { claudeSdkExecutable } from '../claude-exe'
 import {
   closeDesktopWindow,
   focusDesktopWindow,
@@ -1246,6 +1247,12 @@ export class VoiceAgentHost {
       options.pathToClaudeCodeExecutable = process.env['FORGE_VOICE_CLAUDE_PATH']
     } else if (process.env['FORGE_VOICE_CLAUDE_FROM_PATH'] === '1') {
       const exe = whichCommand('claude')
+      if (exe) options.pathToClaudeCodeExecutable = exe
+    }
+    else {
+      // An installed Forge's SDK lookup lands inside app.asar, which cannot be
+      // executed; this is the same binary in app.asar.unpacked.
+      const exe = claudeSdkExecutable()
       if (exe) options.pathToClaudeCodeExecutable = exe
     }
 

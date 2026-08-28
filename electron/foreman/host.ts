@@ -28,6 +28,7 @@ import {
 } from '@shared/foreman'
 import type { AttentionEvent } from '../attention-bus'
 import { FOREMAN_PERSONA } from './persona'
+import { claudeSdkExecutable } from '../claude-exe'
 
 /**
  * Foreman: one Claude Agent SDK session per driven pane, whose only hands are
@@ -1346,6 +1347,7 @@ export class ForemanHost {
       }
     }
 
+    const exe = claudeSdkExecutable()
     return {
       model,
       ...(cwd ? { cwd } : {}),
@@ -1369,7 +1371,9 @@ export class ForemanHost {
       stderr: (data: string) => {
         const line = data.trim()
         if (line) console.error(`[foreman:cli] ${line}`)
-      }
+      },
+      // Explicit, because an installed Forge's SDK lookup lands inside app.asar.
+      ...(exe ? { pathToClaudeCodeExecutable: exe } : {})
     }
   }
 }
