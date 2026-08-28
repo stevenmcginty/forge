@@ -114,6 +114,11 @@ asar: true
 asarUnpack:
   - '**/node_modules/@lydell/node-pty/**'
   - '**/node_modules/@lydell/node-pty-*/**'
+  # The Claude Agent SDK's CLI (claude.exe on Windows) is spawned as a process
+  # by Foreman and the voice agent. A path inside the asar "exists" to fs but
+  # cannot be executed, and the SDK reports that as a libc mismatch.
+  - '**/node_modules/@anthropic-ai/claude-agent-sdk/**'
+  - '**/node_modules/@anthropic-ai/claude-agent-sdk-*/**'
 
 # @lydell/node-pty ships prebuilt binaries and has no gyp step; there is nothing
 # to rebuild, and letting electron-builder try invites a toolchain it does not
