@@ -21,7 +21,7 @@ broken". It stops asking after the first run.
 ## Updates
 
 Forge keeps itself current. It checks about eight seconds after launch and
-every six hours after that, and when a newer release exists a banner appears at
+every fifteen minutes after that (and whenever you come back to the window), and when a newer release exists a banner appears at
 the top of the window: click it to download, then click **Restart to finish**.
 
 Nothing is downloaded or installed behind your back — the check is automatic,

@@ -799,7 +799,7 @@ function ForgeUpdateCard({
         hint={
           dev
             ? 'A checkout updates itself with git, not with an installer'
-            : 'Checked on launch and every six hours. Nothing downloads until you say so.'
+            : 'Checked on launch, every fifteen minutes, and whenever you come back to the window. Nothing downloads until you say so.'
         }
       >
         <StateChip tone={forgeTone(phase)}>{forgeLabel(status)}</StateChip>

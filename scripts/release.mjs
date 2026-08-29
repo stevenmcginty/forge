@@ -239,7 +239,7 @@ run(
     '--notes',
     `${notesBody}\n\n` +
       `Download **${feedPathName}** and run it. Forge updates itself from here: ` +
-      'it checks shortly after launch and every six hours, and offers the new ' +
+      'it checks shortly after launch, every fifteen minutes, and whenever you come back to it, and offers the new ' +
       'version in a banner.\n\n' +
       'Unsigned, so SmartScreen will warn once — More info → Run anyway.',
     ...assets
@@ -263,6 +263,6 @@ Published ${tag} — ${names.join(', ')}
 
 Installed copies check:
   https://github.com/${REPO}/releases/latest/download/${FEED}
-which now resolves to ${tag}. They will offer it within six hours, or eight
+which now resolves to ${tag}. They will offer it within fifteen minutes, or eight
 seconds after their next launch.
 `)

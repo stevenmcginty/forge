@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
 import { IPC } from '@shared/ipc'
 import { isNoFeedError, updaterMode } from '@shared/tools'
 import type { UpdateStatus } from '@shared/types'
@@ -30,8 +30,24 @@ import { allowClose } from './quit-guard'
 
 /** Let the window paint and the panes start before touching the network. */
 const FIRST_CHECK_DELAY_MS = 8000
-/** Steve leaves Forge open for days; six hours is roughly "once a session". */
-const RECHECK_EVERY_MS = 6 * 60 * 60 * 1000
+/**
+ * How often a running Forge asks GitHub for latest.yml.
+ *
+ * This was six hours, and six hours is why a friend's Forge sat on a build
+ * Foreman could not launch from while four fixes went out in one afternoon
+ * (2026-08-28, v0.3.108 → v0.3.111). The watchdog keeps Forge running for
+ * days, so the "eight seconds after launch" check almost never fires on an
+ * installed copy — the interval *is* the update mechanism. The check is one
+ * HTTPS GET of a 400-byte file, so fifteen minutes costs nothing.
+ */
+const RECHECK_EVERY_MS = 15 * 60 * 1000
+/**
+ * A check also runs when the person comes back — window focus, screen unlock,
+ * wake from sleep — because "I sat down at Forge" is exactly the moment an
+ * update banner is useful. This is the floor between two such checks so a
+ * flurry of alt-tabs is not a flurry of requests.
+ */
+const RETURN_CHECK_FLOOR_MS = 2 * 60 * 1000
 
 type Mode = 'real' | 'simulated' | 'off'
 
@@ -41,6 +57,7 @@ let timer: NodeJS.Timeout | null = null
 let firstTimer: NodeJS.Timeout | null = null
 let simulatedTimer: NodeJS.Timeout | null = null
 let target: BrowserWindow | null = null
+let lastCheckAt = 0
 /** electron-updater's AppUpdater, loaded lazily and only in `real` mode. */
 let autoUpdater: import('electron-updater').AppUpdater | null = null
 
@@ -52,6 +69,14 @@ function broadcast(next: UpdateStatus): void {
 
 export function setUpdateTarget(win: BrowserWindow | null): void {
   target = win
+  if (win) win.on('focus', () => checkOnReturn())
+}
+
+/** A check triggered by the person coming back, rate-limited; see RETURN_CHECK_FLOOR_MS. */
+function checkOnReturn(): void {
+  if (mode !== 'real') return
+  if (Date.now() - lastCheckAt < RETURN_CHECK_FLOOR_MS) return
+  void checkForUpdate()
 }
 
 export function getUpdateStatus(): UpdateStatus {
@@ -178,6 +203,7 @@ export async function checkForUpdate(): Promise<UpdateStatus> {
     broadcast({ phase: 'unsupported' })
     return status
   }
+  lastCheckAt = Date.now()
   try {
     await updater.checkForUpdates()
   } catch (err) {
@@ -244,6 +270,10 @@ export function initUpdater(): void {
     timer = setInterval(() => {
       void checkForUpdate()
     }, RECHECK_EVERY_MS)
+    // Wake and unlock are the other two "I'm back" signals; focus is wired in
+    // setUpdateTarget because it belongs to the window rather than the app.
+    powerMonitor.on('resume', checkOnReturn)
+    powerMonitor.on('unlock-screen', checkOnReturn)
   }
 }
 
@@ -255,6 +285,8 @@ export function registerUpdateHandlers(): void {
 }
 
 export function disposeUpdater(): void {
+  powerMonitor.removeListener('resume', checkOnReturn)
+  powerMonitor.removeListener('unlock-screen', checkOnReturn)
   if (timer) clearInterval(timer)
   if (firstTimer) clearTimeout(firstTimer)
   if (simulatedTimer) clearInterval(simulatedTimer)
