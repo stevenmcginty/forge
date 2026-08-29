@@ -62,6 +62,8 @@ const api: ForgeApi = {
     start: (options) => ipcRenderer.invoke(IPC.sttStart, options ?? {}),
     stop: () => ipcRenderer.invoke(IPC.sttStop),
     capture: () => ipcRenderer.invoke(IPC.sttCapture),
+    release: () => ipcRenderer.invoke(IPC.sttRelease),
+    warm: () => ipcRenderer.invoke(IPC.sttWarm),
     reload: (force) => ipcRenderer.invoke(IPC.sttReload, force === true),
     status: () => ipcRenderer.invoke(IPC.sttStatus),
     onStatus: (cb) => subscribe(IPC.sttStatusEvent, cb),

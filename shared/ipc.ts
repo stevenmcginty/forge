@@ -74,6 +74,10 @@ export const IPC = {
   sttStop: 'stt:stop',
   /** Wake mode only: start taking a phrase down now, without the wake word. */
   sttCapture: 'stt:capture',
+  /** Wake mode only: flush the phrase and go back to monitoring. */
+  sttRelease: 'stt:release',
+  /** Spawn and load the sidecar without opening the mic. */
+  sttWarm: 'stt:warm',
   sttReload: 'stt:reload',
   sttStatus: 'stt:status',
   sttStatusEvent: 'stt:status-event',

@@ -39,6 +39,7 @@ client -> server
                                      ...a conversation, not dictation: wait out
                                      thinking pauses instead of cutting at 1 s
     {"cmd": "capture"}               wake mode: start capturing now, no wake word
+    {"cmd": "release"}               wake mode: flush the phrase, keep monitoring
     {"cmd": "stop"}                  stop listening, transcribe what is left
     {"cmd": "status"}                 re-send the current state
     {"cmd": "shutdown"}              exit cleanly
@@ -821,6 +822,14 @@ class SttService:
                 }
             )
             return
+        # Warm the ONNX session so the first real phrase is not the slow one.
+        # DictationMic does the same with 0.5 s of silence. Whatever it
+        # hallucinates is discarded — this is not a phrase.
+        try:
+            self.engine.transcribe(np.zeros(SAMPLE_RATE // 2, np.float32))
+            log("engine warmed")
+        except Exception as e:                      # noqa: BLE001
+            log(f"engine warm-up skipped: {e}")
         self.ready = True
         log(f"model ready in {time.time() - t0:.1f}s")
         self.send_threadsafe({"evt": "ready"})
@@ -1146,6 +1155,8 @@ class SttService:
             )
         elif cmd == "capture":
             self.begin_capture()
+        elif cmd == "release":
+            self.end_capture()
         elif cmd == "stop":
             self.stop_listening()
         elif cmd == "status":

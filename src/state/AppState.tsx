@@ -219,6 +219,7 @@ const FALLBACK_SETTINGS: Settings = {
   sttModelDir: '',
   sttAutoStopSeconds: 10,
   sttHotkey: 'ControlRight',
+  sttWarmStart: true,
   voiceHub: DEFAULT_HUB,
   voiceOverlayWindow: true,
   voiceBargeIn: true,

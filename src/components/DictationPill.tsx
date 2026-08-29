@@ -212,14 +212,14 @@ export function DictationPill(): ReactNode {
   const title = needsSetup
     ? `Dictation needs setting up — ${status.error?.msg ?? ''}`
     : toAgent
-      ? 'Agent mode — what you say goes to the voice agent, not this pane. Click to turn it off'
+      ? 'Jarvis is on — what you say goes to him, not this pane. Click to stand him down'
       : status.phase === 'listening'
-        ? `Listening — ${key} to stop`
+        ? `Listening — tap ${key} to stop, or release if you are holding`
         : status.phase === 'finishing'
           ? 'Finishing the last phrase…'
           : status.phase === 'starting'
-            ? 'Loading the speech model…'
-            : `Dictate — ${key} · drag me out`
+            ? 'Loading the speech engine…'
+            : `Dictate — tap ${key}, hold to talk · drag me out`
 
   return (
     <>

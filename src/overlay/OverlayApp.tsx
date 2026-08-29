@@ -16,7 +16,7 @@ import {
   VoiceOnlyNote,
   type JarvisPresence
 } from '@/components/VoiceSurface'
-import { IDLE_TOOL_ACTIVITY, VoiceAgentContext, type PaneOption, type VoiceAgentCtx } from '@/state/VoiceAgent'
+import { IDLE_TOOL_ACTIVITY, VoiceAgentContext, useVoiceAgent, type PaneOption, type VoiceAgentCtx } from '@/state/VoiceAgent'
 import './OverlayApp.css'
 
 /**
@@ -225,6 +225,7 @@ function OverlayPill({
   thinkingFor: number
   setMode: (m: VoiceHubMode) => void
 }): ReactNode {
+  const { toggleAgent, armed } = useVoiceAgent()
   const word =
     presence === 'thinking' && thinkingFor >= 5 ? `thinking ${thinkingFor}s` : PRESENCE_WORD[presence]
   return (
@@ -259,9 +260,15 @@ function OverlayPill({
             </button>
           </span>
         </div>
-        <div className="ovl__pillbody">
+        <button
+          type="button"
+          className="ovl__pillbody"
+          title={armed ? 'Tap to stop — or hold Right Ctrl to talk' : 'Tap to talk to Jarvis'}
+          aria-label={armed ? 'Stop talking to Jarvis' : 'Talk to Jarvis'}
+          onClick={() => toggleAgent()}
+        >
           <LastLine />
-        </div>
+        </button>
       </div>
     </div>
   )

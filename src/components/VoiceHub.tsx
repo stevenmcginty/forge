@@ -88,7 +88,7 @@ function measureDock(): { point: Point; el: HTMLElement | null } {
 export function VoiceHub(): ReactNode {
   const { state, actions } = useApp()
   const { status, listening, toggle, needsSetup } = useDictation()
-  const { replyMode, armed, phase } = useVoiceAgent()
+  const { replyMode, armed, phase, toggleAgent } = useVoiceAgent()
 
   const hub = state.settings.voiceHub
   const mode = hub.mode
@@ -328,9 +328,11 @@ export function VoiceHub(): ReactNode {
 
   const dictateTitle = needsSetup
     ? `Dictation needs setting up — ${status.error?.msg ?? ''}`
-    : listening
-      ? 'Listening — tap to stop'
-      : `Dictate into the pane behind — ${hotkeyLabel(state.settings.sttHotkey)}`
+    : armed
+      ? 'Jarvis is on — tap to stand him down'
+      : listening
+        ? 'Listening — tap to stop, or release if you are holding'
+        : `Dictate — tap ${hotkeyLabel(state.settings.sttHotkey)}, hold to talk`
 
   /* --------------------------------------------------------- the pill */
 
@@ -357,7 +359,10 @@ export function VoiceHub(): ReactNode {
           onPointerDown={onDragDown}
           onClick={() => {
             if (swallowedClick()) return
-            toggle()
+            // Same rule as the status-bar pill: while Jarvis is armed this
+            // button is the off switch, not a second microphone.
+            if (armed) toggleAgent()
+            else toggle()
           }}
         >
           <DictationGlyph listening={listening} level={status.level} />
@@ -466,7 +471,7 @@ export function VoiceHub(): ReactNode {
           className="vhub__dictate"
           data-on={listening ? 'true' : undefined}
           title={dictateTitle}
-          onClick={toggle}
+          onClick={() => (armed ? toggleAgent() : toggle())}
         >
           <DictationGlyph listening={listening} level={status.level} />
           <span>{listening ? 'dictating into the pane' : 'dictate into the pane'}</span>

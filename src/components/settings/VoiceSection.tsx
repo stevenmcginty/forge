@@ -44,7 +44,7 @@ export function VoiceSection(): ReactNode {
     >
       <SpeechEngineCard />
 
-      <Card title="Dictation" hint="Push the toggle key, talk, and the words are typed into the focused pane.">
+      <Card title="Dictation" hint="Tap the talk key to start or stop. Hold it to push-to-talk. Words land in the focused pane.">
         <DictationSetup />
       </Card>
 

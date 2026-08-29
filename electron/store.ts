@@ -219,6 +219,8 @@ function defaultSettings(): Settings {
     sttModelDir: detectSttModelDir(),
     sttAutoStopSeconds: 10,
     sttHotkey: 'ControlRight',
+    // On: the first Right Ctrl should open the mic, not wait out a 660 MB load.
+    sttWarmStart: true,
     // The voice hub starts where it always was — in the status bar. Dragging it
     // out (or Ctrl+Shift+G) is the opt-in; see src/lib/voicehub.ts. There is no
     // voicePanelOpen/Width any more: the right-hand panel is gone.
@@ -714,6 +716,11 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       ? clamp(s.sttAutoStopSeconds as number, 0, 600)
       : DEFAULT_SETTINGS.sttAutoStopSeconds,
     sttHotkey: s.sttHotkey || DEFAULT_SETTINGS.sttHotkey,
+    // Undefined means a settings.json written before warm-start existed; that
+    // file gets the default (on), not a silent off — the 3–6s first-press wait
+    // is the thing this flag exists to kill.
+    sttWarmStart:
+      s.sttWarmStart === undefined ? DEFAULT_SETTINGS.sttWarmStart : Boolean(s.sttWarmStart),
     window: {
       x: typeof win.x === 'number' ? win.x : undefined,
       y: typeof win.y === 'number' ? win.y : undefined,

@@ -919,7 +919,11 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     const next = !armedRef.current
     actions.setAgentListening(next)
     if (next) {
-      setPhase('warming')
+      // The engine is warm-started with the app. Only show "waking" when it
+      // is genuinely still loading — otherwise the orb goes straight to
+      // listening and the first word is not eaten by a 3–6 s spinner.
+      const ready = sttRef.current.ready && sttRef.current.phase !== 'starting'
+      setPhase(ready ? 'listening' : 'warming')
       startListening()
     } else {
       thinkingSince.current = null

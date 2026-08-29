@@ -1424,6 +1424,12 @@ export interface Settings {
   sttAutoStopSeconds: number
   /** KeyboardEvent.code that toggles dictation while Forge is focused. */
   sttHotkey: string
+  /**
+   * Load the speech engine when Forge comes up, so the first Right Ctrl opens
+   * the microphone instead of waiting 3–6s for Parakeet. Off restores the old
+   * lazy spawn for machines that never dictate.
+   */
+  sttWarmStart: boolean
 
   /* --------------------------------------------------- voice agent (M4) */
   /** Voice-agent panel: open state and width in px. */
@@ -2869,9 +2875,9 @@ export interface StoreSnapshot {
 /**
  * The dictation sidecar's life in one word.
  *
- *   off        never started (it is spawned lazily, on first use)
- *   starting   process up, model loading — a few seconds
- *   idle       ready and waiting for the hotkey
+ *   off        never started
+ *   starting   process up, model loading — a few seconds the first time
+ *   idle       ready and waiting for the hotkey (warm-start lands here)
  *   listening  mic open, `level` is live
  *   finishing  mic closed, the last phrase is still being transcribed
  *   error      see `error`; setup-shaped kinds need the user to fix a path

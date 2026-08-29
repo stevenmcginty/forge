@@ -2,6 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isSttSetupError, type SttStatus } from '@shared/types'
 import { insertPhrase, resolveInsertTarget, type InsertTarget } from '@/lib/dictation'
 import { earconDictationOff, earconDictationOn } from '@/lib/earcon'
+import {
+  directDown,
+  directUp,
+  idleGesture,
+  isModifierHotkey,
+  MODIFIER_TAP_MS,
+  modifierDown,
+  modifierHeld,
+  modifierOther,
+  modifierUp,
+  type GestureIntent,
+  type GestureState
+} from '@/lib/stt-gesture'
 import { dictationTranscript, transcriptBus } from '@/lib/transcriptSource'
 import { useActiveTab, useApp } from '@/state/AppState'
 
@@ -14,6 +27,10 @@ import { useActiveTab, useApp } from '@/state/AppState'
  * globalShortcut for the same key would have the two apps fighting over every
  * press. A window listener only fires while a Forge window is focused, which is
  * exactly the scope we want.
+ *
+ * The *gestures* are DictationMic's: tap toggles, hold is push-to-talk, combos
+ * never fire. When Jarvis is armed the same key talks to him (capture / release)
+ * instead of opening a second dictation session on top of his.
  *
  * This is the *engine*, and it must run exactly once: it holds a phrase
  * subscription and a hotkey listener, so a second copy would insert every
@@ -47,6 +64,8 @@ export function useDictationEngine(): Dictation {
 
   const phaseRef = useRef(status.phase)
   phaseRef.current = status.phase
+  const statusRef = useRef(status)
+  statusRef.current = status
 
   const noticeRef = useRef(actions.setNotice)
   noticeRef.current = actions.setNotice
@@ -185,16 +204,59 @@ export function useDictationEngine(): Dictation {
 
   /* --------------------------------------------------------------- actions */
 
-  const toggle = useCallback(() => {
-    const phase = phaseRef.current
-    if (phase === 'listening') {
-      void window.forge.stt.stop()
-      return
-    }
-    if (phase === 'finishing') return // let the last phrase land
+  const startDictation = useCallback((): void => {
+    if (phaseRef.current === 'finishing') return
     remembered.current = resolveInsertTarget(activePaneRef.current)
     void window.forge.stt.start().then(setStatus)
   }, [])
+
+  /**
+   * One key, two jobs — but never both at once.
+   *
+   * Off, this is DictationMic: tap toggles, hold is push-to-talk, words land
+   * in the focused pane. On (Jarvis armed), the same key talks to him. A
+   * plain `start()` here would drop a wake session back to phrase mode and
+   * every “hey Jarvis” would go missing; `release` ends a capture without
+   * killing the session.
+   */
+  const applyIntent = useCallback((intent: GestureIntent): void => {
+    if (toAgentRef.current) {
+      const st = statusRef.current
+      if (intent === 'ptt-end') {
+        void window.forge.stt.release()
+        return
+      }
+      if (st.mode === 'wake') {
+        if (intent === 'toggle' && st.capturing) {
+          void window.forge.stt.release()
+          return
+        }
+        void window.forge.stt.capture()
+        return
+      }
+      if (st.phase === 'off' || st.phase === 'idle' || st.phase === 'starting') {
+        void window.forge.stt.start({ conversation: true }).then(setStatus)
+      }
+      return
+    }
+
+    if (intent === 'ptt-end') {
+      if (phaseRef.current === 'listening') void window.forge.stt.stop()
+      return
+    }
+    if (intent === 'ptt-start') {
+      if (phaseRef.current === 'listening' || phaseRef.current === 'finishing') return
+      startDictation()
+      return
+    }
+    if (phaseRef.current === 'listening') {
+      void window.forge.stt.stop()
+      return
+    }
+    startDictation()
+  }, [startDictation])
+
+  const toggle = useCallback(() => applyIntent('toggle'), [applyIntent])
 
   const reload = useCallback((force?: boolean) => {
     void window.forge.stt.reload(force).then(setStatus)
@@ -206,34 +268,63 @@ export function useDictationEngine(): Dictation {
 
   useEffect(() => {
     if (!hotkey) return
-    const bareModifier = /^(Control|Alt|Shift|Meta)(Left|Right)$/.test(hotkey)
-    // A lone modifier only counts once nothing else was pressed while it was
-    // held — otherwise Ctrl+Shift+C would start dictating on the way out.
-    let armed = false
+    const modifier = isModifierHotkey(hotkey)
+    let gesture: GestureState = idleGesture()
+    let holdTimer = 0
+
+    const listening = (): boolean => phaseRef.current === 'listening'
+
+    const clearHold = (): void => {
+      if (holdTimer) {
+        window.clearTimeout(holdTimer)
+        holdTimer = 0
+      }
+    }
 
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.code !== hotkey) {
-        armed = false
-        return
-      }
-      if (!bareModifier) {
+      if (!modifier) {
+        if (e.code !== hotkey) return
+        if (e.repeat) return
         e.preventDefault()
         e.stopPropagation()
-        toggle()
+        const next = directDown(gesture, performance.now(), listening())
+        gesture = next.state
+        if (next.intent) applyIntent(next.intent)
         return
       }
-      if (!e.repeat) armed = true
+      if (e.code !== hotkey) {
+        if (gesture.down) gesture = modifierOther(gesture)
+        return
+      }
+      if (e.repeat) return
+      gesture = modifierDown(gesture, performance.now())
+      clearHold()
+      holdTimer = window.setTimeout(() => {
+        holdTimer = 0
+        const next = modifierHeld(gesture, gesture.t0 + MODIFIER_TAP_MS, listening())
+        gesture = next.state
+        if (next.intent) applyIntent(next.intent)
+      }, MODIFIER_TAP_MS)
     }
 
     const onKeyUp = (e: KeyboardEvent): void => {
-      if (e.code !== hotkey || !bareModifier) return
-      if (!armed) return
-      armed = false
-      toggle()
+      if (!modifier) {
+        if (e.code !== hotkey) return
+        const next = directUp(gesture, performance.now(), listening())
+        gesture = next.state
+        if (next.intent) applyIntent(next.intent)
+        return
+      }
+      if (e.code !== hotkey) return
+      clearHold()
+      const next = modifierUp(gesture, performance.now(), listening())
+      gesture = next.state
+      if (next.intent) applyIntent(next.intent)
     }
 
     const disarm = (): void => {
-      armed = false
+      clearHold()
+      gesture = idleGesture()
     }
 
     window.addEventListener('keydown', onKeyDown, true)
@@ -241,12 +332,13 @@ export function useDictationEngine(): Dictation {
     window.addEventListener('pointerdown', disarm, true)
     window.addEventListener('blur', disarm)
     return () => {
+      clearHold()
       window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('keyup', onKeyUp, true)
       window.removeEventListener('pointerdown', disarm, true)
       window.removeEventListener('blur', disarm)
     }
-  }, [hotkey, toggle])
+  }, [hotkey, applyIntent])
 
   return useMemo<Dictation>(
     () => ({

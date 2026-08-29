@@ -347,11 +347,19 @@ export function ToolActivityBar(): ReactNode {
 
 /** Voice-only mode's whole transcript: the most recent thing that happened. */
 export function LastLine(): ReactNode {
-  const { turns } = useVoiceAgent()
+  const { turns, capturing, dictating, dictationBuffer, phase, wakeMode } = useVoiceAgent()
   const last = turns[turns.length - 1]
   let text = 'Nothing yet — tap the orb and talk.'
   let tone: 'idle' | 'ok' | 'warn' = 'idle'
-  if (last?.kind === 'command') {
+  if (dictating) {
+    text = dictationBuffer.trim() || 'holding every word…'
+    tone = 'ok'
+  } else if (wakeMode && capturing) {
+    text = dictationBuffer.trim() || 'hearing you…'
+    tone = 'ok'
+  } else if (phase === 'warming') {
+    text = 'waking the speech engine…'
+  } else if (last?.kind === 'command') {
     text = last.outcomes.map((o) => o.summary).join(' · ') || last.said
     tone = last.outcomes.every((o) => o.ok) ? 'ok' : 'warn'
   } else if (last?.kind === 'note') {

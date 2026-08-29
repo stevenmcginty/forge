@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { hotkeyLabel } from '@/hooks/useDictation'
 import { useApp } from '@/state/AppState'
+import { Toggle } from './settings/parts'
 import './DictationSetup.css'
 
 /**
@@ -117,8 +118,20 @@ export function DictationSetup({
         </div>
       </div>
 
+      <div className="setting-row setting-row--toggle">
+        <span className="setting-row__label">Ready when Forge opens</span>
+        <Toggle
+          checked={s.sttWarmStart}
+          onChange={(on) => {
+            actions.patchSettings({ sttWarmStart: on })
+            if (on) void window.forge.stt.warm()
+          }}
+          label="Ready when Forge opens"
+        />
+      </div>
+
       <div className="setting-row">
-        <span className="setting-row__label">Toggle key</span>
+        <span className="setting-row__label">Talk key</span>
         <select
           className="dsetup__select mono"
           value={s.sttHotkey}
@@ -160,9 +173,12 @@ export function DictationSetup({
 
       <div className="dsetup__actions">
         <span className="dsetup__hint">
-          Dictation runs entirely on this machine — nothing is uploaded. A packaged Forge carries its own speech
-          engine, so the interpreter above is only for running the sidecar from source.
-          {onRetry ? ' The model takes a few seconds to load the first time.' : ''}
+          Dictation runs entirely on this machine — nothing is uploaded. Tap the talk key to start or stop; hold
+          it to push-to-talk. A packaged Forge carries its own speech engine, so the interpreter above is only
+          for running the sidecar from source.
+          {s.sttWarmStart
+            ? ' The speech engine loads with the app, so the first press just opens the mic.'
+            : ' The model takes a few seconds to load the first time you dictate.'}
         </span>
         {onRetry ? (
           <button type="button" className="cta-btn dsetup__retry" onClick={() => save(true)}>

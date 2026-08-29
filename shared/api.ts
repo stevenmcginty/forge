@@ -230,8 +230,9 @@ export interface ForgeApi {
   }
 
   /**
-   * On-device dictation. The Python sidecar is spawned lazily by the first
-   * start() — nobody who never dictates pays for loading a 660 MB model.
+   * On-device dictation. By default the sidecar is warm-started when Forge
+   * comes up, so the first keypress just opens the microphone. `sttWarmStart:
+   * false` restores the old lazy spawn.
    */
   stt: {
     /**
@@ -248,6 +249,17 @@ export interface ForgeApi {
      * Ignored (with a log line) when the session is not in wake mode.
      */
     capture(): Promise<SttStatus>
+    /**
+     * Wake mode only: flush whatever is being said and go back to monitoring,
+     * without tearing the session down. Push-to-talk release uses this so
+     * Right Ctrl does not kill an armed Jarvis.
+     */
+    release(): Promise<SttStatus>
+    /**
+     * Spawn the sidecar and load the model without opening the microphone.
+     * Idempotent — a sidecar that is already up is left alone.
+     */
+    warm(): Promise<SttStatus>
     /**
      * Drop the running sidecar so freshly saved python/model paths take effect.
      * `force` also starts a new one immediately — that is the setup card's

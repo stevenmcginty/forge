@@ -53,7 +53,7 @@ import {
   writeWatchdogConfig
 } from './watchdog-host'
 import { applyShotSettings, disposeShotsWatcher, registerShotsHandlers } from './shots-watcher'
-import { disposeSttSidecar, registerSttHandlers, setSttTarget } from './stt-sidecar'
+import { disposeSttSidecar, registerSttHandlers, scheduleWarmStart, setSttTarget } from './stt-sidecar'
 import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './stt-model'
 import { registerAgentProbeHandlers } from './agent-probe'
 import { disposeOverlay, registerOverlayIpc, setOverlayHost } from './overlay-window'
@@ -368,6 +368,9 @@ function createWindow(): void {
     // never claimed presence would leave the phone buzzing while Steve sits in
     // front of the app.
     syncPresence()
+    // Load Parakeet now, in the background, so the first Right Ctrl opens the
+    // mic instead of waiting out a 3–6 s model load. Off via sttWarmStart.
+    scheduleWarmStart()
   })
 
   const emitWindowState = (): void => {

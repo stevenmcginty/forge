@@ -26,6 +26,7 @@
     "pty:smoke": "node scripts/pty-smoke.mjs",
     "shots:smoke": "node scripts/shots-smoke.mjs",
     "stt:manager": "node scripts/stt-manager-test.mjs",
+    "dictation:check": "node scripts/dictation-check.mjs",
     "stt:download": "node scripts/stt-download-test.mjs",
     "voice:check": "node scripts/voice-check.mjs",
     "voice:brain": "node scripts/voice-brain-smoke.mjs",

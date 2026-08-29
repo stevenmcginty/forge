@@ -177,10 +177,24 @@ body {
 }
 
 .ovl__pillbody {
+  display: block;
+  width: 100%;
   min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
   font-size: 11px;
   line-height: 1.3;
   color: var(--text-secondary);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.ovl__pillbody:hover {
+  color: var(--text-primary);
 }
 
 /* The last exchange is two rows at most, then it is cut — the plate is a

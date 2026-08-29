@@ -32,9 +32,11 @@ import { getSettings } from './store'
  *
  * Three things this file exists to get right:
  *
- *  - **Laziness.** Loading Parakeet costs a few seconds and most of a gigabyte
- *    of RSS. The sidecar is not spawned until someone actually asks to dictate,
- *    so the app starts instantly for everyone who never does.
+ *  - **Warm-start.** Loading Parakeet costs a few seconds and most of a gigabyte
+ *    of RSS. By default we spawn shortly after the window is up, load the model
+ *    and warm the ONNX session so the first real keypress just opens the mic.
+ *    `sttWarmStart: false` restores the old lazy spawn for machines that never
+ *    dictate.
  *
  *  - **Crashes.** A dead sidecar is restarted, but not forever — see
  *    RestartBudget in ./stt-protocol.
@@ -82,6 +84,13 @@ let status: SttStatus = { ...OFF_STATUS }
 const budget = new RestartBudget()
 /** A start() that arrived before the model was ready; fired on `ready`. */
 let pendingStart = false
+/**
+ * A wake-mode capture() that arrived before the session was listening. Flushed
+ * after the deferred start, so holding Right Ctrl during warmup still talks
+ * to Jarvis instead of being eaten.
+ */
+let pendingCapture = false
+let warmTimer: NodeJS.Timeout | null = null
 /**
  * What the last start() asked for, so a start deferred until `ready` opens the
  * session the caller wanted rather than a plain one. Reset to `phrase` by every
@@ -504,6 +513,7 @@ function handleLine(line: string): void {
   if (msg['evt'] === 'error') {
     console.error(`[stt] sidecar error (${String(msg['kind'])}): ${String(msg['msg'])}`)
     pendingStart = false
+    pendingCapture = false
   }
 
   patch(result.status)
@@ -516,6 +526,14 @@ function handleLine(line: string): void {
       pendingStart = false
       sendStart()
     }
+  }
+
+  // Capture is flushed on listening, not only on ready: a warm sidecar that
+  // just opened a wake session is already ready, and the PTT that arrived in
+  // the same breath would otherwise sit queued forever.
+  if (pendingCapture && status.phase === 'listening') {
+    pendingCapture = false
+    write({ cmd: 'capture' })
   }
 }
 
@@ -560,6 +578,7 @@ function sendStart(): void {
 
 function stopListening(): SttStatus {
   pendingStart = false
+  pendingCapture = false
   wantedMode = 'phrase'
   wantedConversation = false
   if (child && status.ready) write({ cmd: 'stop' })
@@ -569,12 +588,28 @@ function stopListening(): SttStatus {
 /**
  * Jump straight into capture inside an open wake session.
  *
- * Never starts anything: with no sidecar, or a session that is not in wake
- * mode, there is nothing to capture into and the sidecar says so in its log
- * rather than the app conjuring a session nobody asked for.
+ * If the sidecar is still loading, the capture is queued and fired the moment
+ * the session is listening — holding the talk key during warmup must not be
+ * a no-op. With no sidecar at all we still do not conjure a session; the
+ * agent’s own start() is what opens one.
  */
 function captureNow(): SttStatus {
-  if (child && status.ready) write({ cmd: 'capture' })
+  if (child && status.ready && status.phase === 'listening') {
+    write({ cmd: 'capture' })
+    return status
+  }
+  if (child) pendingCapture = true
+  return status
+}
+
+/**
+ * Wake mode: flush the current phrase and go back to monitoring, without
+ * tearing the session down. Dictation’s PTT release uses stop(); Jarvis’s
+ * uses this, so Right Ctrl does not kill an armed agent.
+ */
+function releaseCapture(): SttStatus {
+  pendingCapture = false
+  if (child && status.ready) write({ cmd: 'release' })
   return status
 }
 
@@ -588,6 +623,7 @@ function captureNow(): SttStatus {
  */
 function reload(force: boolean): SttStatus {
   pendingStart = false
+  pendingCapture = false
   budget.clear()
   const wasRunning = child !== null
   kill()
@@ -624,16 +660,48 @@ function kill(): void {
 
 /* -------------------------------------------------------------------- ipc */
 
+/**
+ * Spawn the sidecar and load the model without opening the microphone.
+ * Idempotent: a sidecar that is already up, or a process we are tearing
+ * down, is left alone.
+ */
+export function warmStart(): SttStatus {
+  if (retired || disposing || child) return status
+  ensure()
+  return status
+}
+
+/**
+ * Warm-start after the window has painted, so the 660 MB map does not fight
+ * the first frame. No-ops when the setting is off.
+ */
+export function scheduleWarmStart(delayMs = 400): void {
+  if (warmTimer) clearTimeout(warmTimer)
+  warmTimer = setTimeout(() => {
+    warmTimer = null
+    if (retired || disposing) return
+    if (!getSettings().sttWarmStart) return
+    warmStart()
+  }, delayMs)
+}
+
 export function registerSttHandlers(): void {
   ipcMain.handle(IPC.sttStart, (_e, options?: SttStartOptions) => startListening(options))
   ipcMain.handle(IPC.sttStop, () => stopListening())
   ipcMain.handle(IPC.sttCapture, () => captureNow())
+  ipcMain.handle(IPC.sttRelease, () => releaseCapture())
+  ipcMain.handle(IPC.sttWarm, () => warmStart())
   ipcMain.handle(IPC.sttReload, (_e, force: boolean) => reload(force === true))
   ipcMain.handle(IPC.sttStatus, () => status)
 }
 
 export function disposeSttSidecar(): void {
   pendingStart = false
+  pendingCapture = false
+  if (warmTimer) {
+    clearTimeout(warmTimer)
+    warmTimer = null
+  }
   kill()
   retired = true
   status = { ...OFF_STATUS }
