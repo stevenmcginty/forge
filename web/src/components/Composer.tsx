@@ -219,22 +219,12 @@ export function Composer({
     if (autoFocus) field.current?.focus()
   }, [autoFocus])
 
-  useEffect(() => {
-    const vv = window.visualViewport
-    if (!vv) return
-    const sync = (): void => {
-      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
-      document.documentElement.style.setProperty('--keyboard-inset', `${inset}px`)
-    }
-    vv.addEventListener('resize', sync)
-    vv.addEventListener('scroll', sync)
-    sync()
-    return () => {
-      vv.removeEventListener('resize', sync)
-      vv.removeEventListener('scroll', sync)
-      document.documentElement.style.removeProperty('--keyboard-inset')
-    }
-  }, [])
+  /*
+   * The keyboard used to lift this dock via `--keyboard-inset` (innerHeight
+   * minus the visual viewport). The shell is the visual viewport now — see
+   * lib/viewport.ts — so that difference is already the height, and padding
+   * it again would sit the box above a gap. `--keyboard-inset` stays 0.
+   */
 
   useEffect(() => {
     const el = field.current

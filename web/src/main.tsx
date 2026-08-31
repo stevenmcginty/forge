@@ -40,9 +40,19 @@ import { ChatPreview } from './components/ChatPreview'
 import { Preview } from './components/Preview'
 import { RepoProvider } from './lib/repo'
 import { ForgeProvider } from './state'
+import { watchAppViewport } from './lib/viewport'
 
 const host = document.getElementById('root')
 if (!host) throw new Error('index.html has no #root')
+
+/*
+ * Pin the shell to the visual viewport before React paints. Safari on a large
+ * iPhone reports a stale `innerHeight` (URL bar hidden, or the last orientation)
+ * until something forces a recalc — historically, rotating the phone and
+ * rotating it back. `watchAppViewport` is that recalc, without the rotate.
+ * Lives for the tab; nothing unmounts it.
+ */
+watchAppViewport()
 
 /*
  * Deliberately no <StrictMode>, for the same reason src/main.tsx gives: its

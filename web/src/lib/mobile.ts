@@ -1,18 +1,23 @@
 import { useEffect, useState } from 'react'
+import { isPhoneFace, phoneFaceFromWindow } from './viewport'
 
 /**
  * Is this page being driven by a thumb on a phone?
  *
- * Two conditions, both required, because each alone names the wrong thing:
+ * Two conditions, because each alone names the wrong thing:
  *
  *  - **A coarse pointer.** `(pointer: coarse)` is how the browser says the
  *    primary input is a finger. A desktop window dragged narrow still has a
  *    mouse, and for a mouse the folded desktop layout (`useNarrow`) is the right
  *    answer — precise clicks on 26px buttons are fine, and the person has a
  *    hardware keyboard with Esc, Tab and Ctrl on it.
- *  - **A phone's width.** A tablet with a finger is still wide enough for the
- *    desktop's split grid to mean something. 900px is above every phone in
- *    landscape and below every tablet in portrait.
+ *  - **A phone's size.** A tablet with a finger is still wide enough for the
+ *    desktop's split grid to mean something. The test is in `isPhoneFace`: a
+ *    phone's *screen* short edge is ≤ 500 CSS px even when Safari's layout
+ *    viewport is lying (first paint, desktop-site mode, Pro Max landscape at
+ *    956 CSS px). iPad Mini's short edge is 744. Viewport width ≤ 900 and
+ *    viewport height ≤ 500 are the fallbacks for a browser that reports a
+ *    swapped `screen`.
  *
  * What flips on is a different *face* of the same application: the same
  * state, the same socket, the same `PaneView`. A phone gets one pane, a drawer
@@ -20,7 +25,6 @@ import { useEffect, useState } from 'react'
  * sidebar and the space. Forge Mobile (the APK) remains the native client;
  * this is what somebody gets when they open the public URL in phone Chrome.
  */
-const MOBILE = '(pointer: coarse) and (max-width: 900px)'
 
 /**
  * `?phone` on the dev server: answer yes without a finger.
@@ -42,17 +46,29 @@ function askedPhone(): boolean {
   return new URLSearchParams(window.location.search).has('phone')
 }
 
+function readMobile(): boolean {
+  if (typeof window === 'undefined') return askedPhone()
+  return isPhoneFace(phoneFaceFromWindow(askedPhone()))
+}
+
 export function useMobile(): boolean {
-  const [mobile, setMobile] = useState(
-    () => askedPhone() || (typeof window !== 'undefined' && window.matchMedia(MOBILE).matches)
-  )
+  const [mobile, setMobile] = useState(readMobile)
 
   useEffect(() => {
-    const query = window.matchMedia(MOBILE)
-    const update = (): void => setMobile(askedPhone() || query.matches)
+    const update = (): void => setMobile(readMobile())
     update()
+    const query = window.matchMedia('(pointer: coarse)')
     query.addEventListener('change', update)
-    return () => query.removeEventListener('change', update)
+    window.addEventListener('resize', update)
+    window.addEventListener('orientationchange', update)
+    const vv = window.visualViewport
+    vv?.addEventListener('resize', update)
+    return () => {
+      query.removeEventListener('change', update)
+      window.removeEventListener('resize', update)
+      window.removeEventListener('orientationchange', update)
+      vv?.removeEventListener('resize', update)
+    }
   }, [])
 
   return mobile

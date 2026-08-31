@@ -1104,10 +1104,8 @@ function enableTouchScroll(
 
 /*
  * There is deliberately no window-level "refit everything" helper here, unlike
- * mobile's `onViewportSettled`. A phone needs one because Android's soft
- * keyboard changes the *visual viewport* without necessarily changing any
- * element's layout box, so the ResizeObserver sees nothing. A desktop browser
- * has no such case: every window resize changes the pane containers' boxes, the
- * observer above fires, and a second path would only send a duplicate `resize`
- * per pane per drag.
+ * mobile's `onViewportSettled`. The web client's shell is the visual viewport
+ * (`lib/viewport.ts` pins `#root` to it), so a keyboard, a URL bar and a
+ * rotate all change the pane containers' boxes. The ResizeObserver above
+ * fires. A second path would only send a duplicate `resize` per pane.
  */

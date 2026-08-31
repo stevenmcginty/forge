@@ -90,6 +90,7 @@ const CHECKS = [
   { name: 'skills:smoke', lane: 'fast' },
   { name: 'tv-fetch:check', lane: 'fast' },
   { name: 'viewtoggle:check', lane: 'fast', note: 'a Vite dev server and a real Chrome; self-skips the browser half without one' },
+  { name: 'viewport:check', lane: 'fast', note: 'phone-face + visual-viewport pin, no browser' },
   { name: 'tunnel:check', lane: 'fast' },
   { name: 'web:auth', lane: 'fast' },
   { name: 'cf:tunnel', lane: 'fast' },

@@ -13,6 +13,40 @@
  * theme.
  */
 
+/*
+ * The visible window, not the layout viewport.
+ *
+ * Desktop Forge's `html, body, #root { height: 100% }` is correct in Electron.
+ * In Safari on a phone it is the large viewport (URL bar hidden) or a leftover
+ * from the last orientation — the page is taller than the glass, and the only
+ * thing that used to force a recalc was rotating the phone and rotating it
+ * back. `100dvh` is the unit Android honours on first paint; `--app-height` is
+ * the visual viewport, pinned in lib/viewport.ts, for the iPhones that do not.
+ * `#root` is `position: fixed` so a percentage-height child cannot inherit a
+ * stale containing block.
+ */
+html,
+body {
+  height: 100%;
+  height: 100dvh;
+  height: var(--app-height, 100dvh);
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+#root {
+  position: fixed;
+  top: var(--app-top, 0px);
+  left: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  height: var(--app-height, 100dvh);
+  overflow: hidden;
+}
+
 /* -------------------------------------------------------------- the gate
  *
  * One centred card, used by sign-in and by every connection screen. They share a
@@ -3786,8 +3820,13 @@ button.astatus__mode:not(:disabled):hover {
  * Landscape on a phone: height is the scarce axis, and a third of it was
  * chrome. The status strip folds away — the pane header already says who is
  * running — and the two pill rows give back what 40px targets took.
+ *
+ * 500px, not 430px: iPhone 16 Pro Max is 440 CSS px tall in landscape, and
+ * the previous 430px fold missed it — the one phone that already needed a
+ * rotate to get a correct viewport would then keep the full portrait chrome
+ * in landscape too.
  */
-@media (max-height: 430px) {
+@media (max-height: 500px) {
   .app[data-mobile] .astatus {
     display: none;
   }

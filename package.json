@@ -94,6 +94,7 @@
     "mobile:serve": "node scripts/mobile-serve.mjs",
     "preview:check": "node scripts/preview-check.mjs",
     "viewtoggle:check": "node scripts/viewtoggle-check.mjs",
+    "viewport:check": "node scripts/viewport-check.mjs",
     "mobile:tunnel": "node scripts/mobile-tunnel.mjs",
     "mobile:go": "node scripts/mobile-go.mjs",
     "tunnel:check": "node scripts/tunnel-check.mjs",
