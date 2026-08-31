@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { createConnection, type Socket } from 'node:net'
@@ -704,5 +704,40 @@ export function disposeSttSidecar(): void {
   }
   kill()
   retired = true
+  status = { ...OFF_STATUS }
+}
+
+/**
+ * The update path's hard stop. quitAndInstall() tears the app down and hands
+ * the install directory to the NSIS installer, which must delete
+ * resources/stt-bin — but kill() only *asks* the sidecar to leave, and its
+ * SIGTERM backstop rides a timer that dies with the event loop. A frozen
+ * engine still unwinding a 660 MB model outlives the app, keeps its own exe
+ * open, and the install fails with "Failed to uninstall old application
+ * files". So: terminate it synchronously, tree and all, before the installer
+ * is ever spawned. The /IM sweep also reaps an orphan left behind by an
+ * earlier crashed Forge, which no PID we hold can reach.
+ */
+export function killSttSidecarSync(): void {
+  retired = true
+  pendingStart = false
+  pendingCapture = false
+  if (warmTimer) {
+    clearTimeout(warmTimer)
+    warmTimer = null
+  }
+  const proc = child
+  kill()
+  if (process.platform === 'win32') {
+    const opts = { windowsHide: true, timeout: 5_000 } as const
+    if (proc?.pid) spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], opts)
+    spawnSync('taskkill', ['/IM', 'forge-stt.exe', '/F'], opts)
+  } else if (proc && proc.exitCode === null) {
+    try {
+      proc.kill('SIGKILL')
+    } catch {
+      /* already gone */
+    }
+  }
   status = { ...OFF_STATUS }
 }

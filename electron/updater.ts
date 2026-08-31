@@ -3,6 +3,7 @@ import { IPC } from '@shared/ipc'
 import { isNoFeedError, updaterMode } from '@shared/tools'
 import type { UpdateStatus } from '@shared/types'
 import { allowClose } from './quit-guard'
+import { killSttSidecarSync } from './stt-sidecar'
 
 /**
  * Forge updating itself.
@@ -244,6 +245,11 @@ export function installUpdate(): boolean {
   // "Restart to finish" is the confirmation; being asked a second time whether
   // to close Forge would be the update dialog arguing with itself.
   allowClose()
+  // The speech engine lives in resources/stt-bin — inside the directory the
+  // installer is about to replace. It has to be *dead*, not merely asked to
+  // leave, before quitAndInstall hands over, or NSIS finds its exe locked and
+  // dies with "Failed to uninstall old application files".
+  killSttSidecarSync()
   // isSilent: false so the NSIS installer's window is visible — an unsigned
   // installer running invisibly is exactly the shape SmartScreen dislikes, and
   // exactly the shape a person should be able to see happening.

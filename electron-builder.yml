@@ -168,6 +168,10 @@ win:
 
 nsis:
   artifactName: ${productName}-${version}-setup.${ext}
+  # Reaps a live forge-stt.exe before files are touched — the speech engine
+  # runs from resources/stt-bin and a survivor makes the install fail with
+  # "Failed to uninstall old application files". See build/installer.nsh.
+  include: build/installer.nsh
   # Per-user, so no UAC prompt and no admin account needed.
   oneClick: false
   perMachine: false
