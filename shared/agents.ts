@@ -730,6 +730,7 @@ const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
   ],
   glm: [
     { id: 'glm-5.3[1m]', label: 'GLM 5.3', note: 'the Coding Plan flagship, 1M context' },
+    { id: 'glm-5.3-flash', label: 'GLM 5.3 Flash', note: 'fast and cheap, sees images' },
     { id: 'glm-5-turbo', label: 'GLM 5 Turbo', note: 'faster, lighter on credits' },
     { id: 'glm-4.7', label: 'GLM 4.7', note: 'the older Coding Plan model' }
   ],
