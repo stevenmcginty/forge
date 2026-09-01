@@ -176,6 +176,26 @@
   padding-left: 12%;
 }
 
+/* The bubble and, under it, the clock the TUI printed beside the words. */
+.feed__mine {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--s-2);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.feed__clock {
+  padding-right: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  user-select: none;
+}
+
 .feed__bubble {
   max-width: 100%;
   padding: var(--s-4) var(--s-6);
@@ -325,6 +345,60 @@
 
 .feed__tool-more:hover {
   background: color-mix(in srgb, var(--feed-accent) 8%, transparent);
+}
+
+/* ----------------------------------------------------------- thinking */
+
+.feed__think {
+  min-width: 0;
+  padding-left: var(--s-6);
+}
+
+.feed__think-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 30px;
+  padding: var(--s-1) var(--s-4);
+  margin-left: calc(-1 * var(--s-4));
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  font-style: italic;
+  color: var(--text-dim);
+  background: none;
+  border: 0;
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
+
+.feed__think-head:disabled {
+  cursor: default;
+}
+
+.feed__think-head:hover:not(:disabled) {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.feed__think-head:disabled .feed__tool-caret {
+  opacity: 0;
+}
+
+.feed__think[data-open='true'] .feed__tool-caret {
+  transform: rotate(90deg);
+}
+
+.feed__think-body {
+  margin-top: var(--s-3);
+  padding-left: var(--s-6);
+  border-left: 2px solid var(--line-soft);
+  font-family: var(--font-ui);
+  font-size: var(--t-md);
+  line-height: 1.6;
+  font-style: italic;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* --------------------------------------------------------------- copy */
@@ -538,4 +612,22 @@
     opacity: 0.8;
     transform: scale(1.1);
   }
+}
+
+/* Motion off: the dots hold still rather than breathe or ping. */
+@media (prefers-reduced-motion: reduce) {
+  .feed__busy-orb span:first-child,
+  .feed__ask-ring,
+  .feed__empty-dot {
+    animation: none;
+  }
+  .feed__empty-dot {
+    opacity: 0.8;
+  }
+}
+
+:root[data-reduced-motion='true'] .feed__busy-orb span:first-child,
+:root[data-reduced-motion='true'] .feed__ask-ring,
+:root[data-reduced-motion='true'] .feed__empty-dot {
+  animation: none;
 }

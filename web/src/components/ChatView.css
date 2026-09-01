@@ -143,6 +143,26 @@
   padding-left: 14%;
 }
 
+/* The bubble and, under it, the clock the TUI printed beside the words. */
+.chatview__mine {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--s-2);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chatview__clock {
+  padding-right: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  user-select: none;
+}
+
 .chatview__bubble {
   max-width: 100%;
   min-width: 0;
@@ -366,6 +386,12 @@
   background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
 }
 
+/* A run of calls closes up into one margin note rather than a stack of
+ * cards: the reply's gap is for prose, and three reads in a row are one act. */
+.chatview__tool + .chatview__tool {
+  margin-top: calc(var(--s-2) - var(--s-5));
+}
+
 .chatview__tool-head {
   display: flex;
   align-items: center;
@@ -524,6 +550,54 @@
   animation: chatview-breathe 1.8s var(--ease-in-out) infinite;
 }
 
+.chatview__busy-text {
+  font-weight: 500;
+}
+
+/* The count is the quiet part: dim, tabular so it does not jitter as it ticks. */
+.chatview__busy-time {
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------------ quota
+ *
+ * The plan's remaining allowance, read off the TUI's footer: a footnote under
+ * the conversation, between hairlines like the cut seam at the top. Context,
+ * not state — it never wears the accent.
+ */
+
+.chatview__quota {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  margin-top: var(--s-2);
+  color: var(--text-dim);
+}
+
+.chatview__quota::before,
+.chatview__quota::after {
+  content: '';
+  flex: 1 1 auto;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.chatview__quota-text {
+  flex: none;
+  max-width: 80%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--t-eyebrow);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
 /* ------------------------------------------------------------------- jump */
 
 .chatview__jump {
@@ -593,4 +667,19 @@
     opacity: 0.85;
     transform: scale(1.1);
   }
+}
+
+/* Motion off: the dots hold still at their brightest rather than breathe. */
+@media (prefers-reduced-motion: reduce) {
+  .chatview__busy-dot,
+  .chatview__empty-dot {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
+:root[data-reduced-motion='true'] .chatview__busy-dot,
+:root[data-reduced-motion='true'] .chatview__empty-dot {
+  animation: none;
+  opacity: 0.85;
 }

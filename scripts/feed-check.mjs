@@ -430,6 +430,47 @@ ok(
 )
 ok(spinningBlocks.some((b) => b.role === 'agent' && /Checking the suite/.test(b.text)), 'the sentence before it stays')
 
+console.log("grok's reasoning, folded rather than answered")
+// The `Thinking…` header and the lines under it are the agent talking to
+// itself, not the reply: tagged `thinking` so both faces fold them, and the
+// answer after the blank line is still the agent's.
+const grokThought = [
+  '≡ master ~\\Desktop\\forge                                     7.8K / 500K',
+  '  Why does the feed repeat itself?                             12:40 PM',
+  '',
+  'Thinking…',
+  '  The feed is cut from the alternate screen, so every redraw is a frame.',
+  '  If the merge takes the top of a frame as new, one entry becomes ten.',
+  '',
+  'It is the tail rule in the merge.',
+  '',
+  '> ',
+  'Weekly limit left: 3% · Grok 4.6 (high)'
+].join('\n')
+const grokThoughtBlocks = blocksFromCapture(grokThought)
+is(roles(grokThoughtBlocks), 'user thinking agent', 'the question, the reasoning, the answer')
+ok(
+  grokThoughtBlocks.some((b) => b.role === 'thinking' && /one entry becomes ten/.test(b.text)),
+  'the reasoning is in the thinking card'
+)
+ok(
+  !inAnyBlock(
+    grokThoughtBlocks.filter((b) => b.role === 'agent'),
+    /Thinking/
+  ),
+  'and the header is not in the answer'
+)
+ok(
+  grokThoughtBlocks.some((b) => b.role === 'user' && b.text === 'Why does the feed repeat itself?' && b.clock === '12:40 PM'),
+  'the clock comes off the question onto the card'
+)
+is(screen(grokThought).status.quota, 'Weekly limit left: 3%', 'the quota footer is read, not binned')
+// Claude's `✻ Thinking…` is a spinner frame and stays chrome, exactly as before.
+ok(
+  !blocksFromCapture('> hi\n\n✻ Thinking… (3s · esc to interrupt)\n\n❯ ').some((b) => b.role === 'thinking'),
+  "claude's spinner is not a thinking card"
+)
+
 console.log("grok's own composer, which is nothing like anybody else's")
 // The real thing: an ASCII spinner rather than braille, a bare `2.2s` rather
 // than a bracketed one, and a quota footer under the box. None of the rules

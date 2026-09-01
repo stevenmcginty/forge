@@ -36,11 +36,25 @@ const GIST_FOLD = 64
 export function ChatView({
   turns,
   truncated,
-  busy
+  busy,
+  activity,
+  quota
 }: {
   turns: ChatTurn[]
   truncated: boolean
   busy?: boolean
+  /**
+   * What the agent says it is doing, off its own status line — "Thinking",
+   * "Waiting for response". Labels the working indicator; "Working" without.
+   */
+  activity?: string
+  /**
+   * What is left of the agent's plan, as its TUI printed it (`Weekly limit
+   * left: 3%`). Set for a pane whose chat is read off the screen, where the
+   * footer that said so has been lifted away; shown as a quiet line under
+   * the conversation rather than as a card in it.
+   */
+  quota?: string
 }): ReactNode {
   const scroller = useRef<HTMLDivElement | null>(null)
   const stick = useRef(true)
@@ -147,12 +161,8 @@ export function ChatView({
               ))}
             </ol>
           )}
-          {busy ? (
-            <div className="chatview__busy" role="status" aria-live="polite">
-              <span className="chatview__busy-dot" aria-hidden />
-              <span>Working…</span>
-            </div>
-          ) : null}
+          {busy ? <Working activity={activity} /> : null}
+          {quota ? <Quota text={quota} /> : null}
         </div>
       </div>
       <button
@@ -190,16 +200,19 @@ const Turn = memo(function Turn({ turn }: { turn: ChatTurn }): ReactNode {
   return (
     <li className="chatview__turn" data-role={turn.role}>
       {turn.role === 'user' ? (
-        <div className="chatview__bubble">
-          {turn.blocks.map((block, i) =>
-            block.kind === 'text' ? (
-              <p key={i} className="chatview__prompt">
-                {block.text}
-              </p>
-            ) : (
-              <Piece key={i} block={block} />
-            )
-          )}
+        <div className="chatview__mine">
+          <div className="chatview__bubble">
+            {turn.blocks.map((block, i) =>
+              block.kind === 'text' ? (
+                <p key={i} className="chatview__prompt">
+                  {block.text}
+                </p>
+              ) : (
+                <Piece key={i} block={block} />
+              )
+            )}
+          </div>
+          {turn.clock ? <span className="chatview__clock">{turn.clock}</span> : null}
         </div>
       ) : (
         <div className="chatview__reply">
@@ -271,6 +284,47 @@ function ToolChip({
           {note ? <div className="chatview__tool-note">{note}</div> : null}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- working
+ *
+ * The agent mid-turn: its own word for what it is doing, and how long it has
+ * been at it, counted here rather than read off the screen — a counter that
+ * ticked on the TUI's line was what re-cut every frame into a new card.
+ */
+
+function Working({ activity }: { activity?: string }): ReactNode {
+  const started = useRef(Date.now())
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    started.current = Date.now()
+    setSeconds(0)
+    const id = window.setInterval(() => setSeconds(Math.floor((Date.now() - started.current) / 1000)), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  const label = (activity ?? 'Working').replace(/[…:.]+$/, '')
+  return (
+    <div className="chatview__busy" role="status" aria-live="polite">
+      <span className="chatview__busy-dot" aria-hidden />
+      <span className="chatview__busy-text">{label}</span>
+      {seconds >= 1 ? <span className="chatview__busy-time">{formatElapsed(seconds)}</span> : null}
+    </div>
+  )
+}
+
+function formatElapsed(s: number): string {
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  return `${m}m ${String(s % 60).padStart(2, '0')}s`
+}
+
+/** The plan's remaining quota, as one quiet line under the conversation. */
+function Quota({ text }: { text: string }): ReactNode {
+  return (
+    <div className="chatview__quota" role="note">
+      <span className="chatview__quota-text">{text}</span>
     </div>
   )
 }

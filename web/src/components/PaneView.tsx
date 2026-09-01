@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PaneLeaf } from '@shared/types'
-import type { ChatBlock, ChatTurn } from '@shared/chat'
 import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
 import { transcriptFor } from '../lib/cache'
 import { applyChatUpdate, EMPTY_CHAT, type ChatFeed } from '../lib/chat-turns'
-import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines, type FeedBlock } from '@/lib/feed'
+import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines } from '@/lib/feed'
 import { imageFilesFromDataTransfer, packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 import { publishPaneStatus, publishPaneView, registerPaneViewSetter, type PaneFace } from '../lib/pane-status'
 import type { Transcript } from '@/lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
+import { screenTurns } from '../lib/screen-turns'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
 import { useForge, useProfiles } from '../state'
 import { ChatView } from './ChatView'
@@ -37,57 +37,6 @@ function clockOf(at: number): string {
 /** `812k` / `1.4M` — the job's token bill at a glance, same as the desktop footer. */
 function fmtTokens(n: number): string {
   return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : `${Math.round(n / 1000)}k`
-}
-
-/** Convert screen feed blocks into conversational chat turns when no disk transcript exists. */
-function feedBlocksToChatTurns(blocks: FeedBlock[]): ChatTurn[] {
-  const turns: ChatTurn[] = []
-  for (const block of blocks) {
-    const text = (block.text || block.lines.map((l) => l.text || l.runs.map((r) => r.text).join('')).join('\n')).trim()
-    if (!text) continue
-
-    if (block.role === 'user') {
-      turns.push({
-        id: block.id,
-        role: 'user',
-        at: 0,
-        blocks: [{ kind: 'text', text }]
-      })
-    } else if (block.role === 'tool') {
-      const firstLine = block.lines[0]?.text || text.split('\n')[0] || 'tool'
-      const toolBlock: ChatBlock = {
-        kind: 'tool',
-        name: firstLine.slice(0, 30),
-        gist: text.slice(0, 120)
-      }
-      const lastTurn = turns[turns.length - 1]
-      if (lastTurn && lastTurn.role === 'assistant') {
-        lastTurn.blocks.push(toolBlock)
-      } else {
-        turns.push({
-          id: block.id,
-          role: 'assistant',
-          at: 0,
-          blocks: [toolBlock]
-        })
-      }
-    } else {
-      // agent or system prose
-      const textBlock: ChatBlock = { kind: 'text', text }
-      const lastTurn = turns[turns.length - 1]
-      if (lastTurn && lastTurn.role === 'assistant') {
-        lastTurn.blocks.push(textBlock)
-      } else {
-        turns.push({
-          id: block.id,
-          role: 'assistant',
-          at: 0,
-          blocks: [textBlock]
-        })
-      }
-    }
-  }
-  return turns
 }
 
 /**
@@ -505,8 +454,15 @@ export function PaneView({
    */
   const effectiveTurns = useMemo(() => {
     if (chatFeed.turns.length > 0) return chatFeed.turns
-    return feedBlocksToChatTurns(transcript.blocks)
+    return screenTurns(transcript.blocks)
   }, [chatFeed.turns, transcript.blocks])
+  /**
+   * Screen-read turns have no file to say what the agent is doing or how much
+   * of its plan is left, so the chat is told what the parser lifted off the
+   * TUI's own footer. A transcript pane already has the strip below for that
+   * and keeps its look.
+   */
+  const screenRead = chatFeed.turns.length === 0
 
   /* ------------------------------------------------------ the live terminal */
 
@@ -894,7 +850,13 @@ export function PaneView({
         */}
         {chatArmed ? (
           <div className="pane__chat" aria-hidden={!chat || undefined} data-shown={chat ? 'true' : 'false'}>
-            <ChatView turns={effectiveTurns} truncated={chatFeed.truncated} busy={live && transcript.status.busy} />
+            <ChatView
+              turns={effectiveTurns}
+              truncated={chatFeed.truncated}
+              busy={live && transcript.status.busy}
+              activity={transcript.status.activity}
+              quota={screenRead ? transcript.status.quota : undefined}
+            />
             {chatRefusal && effectiveTurns.length === 0 ? (
               <div className="pane__chat-note" role="note">
                 <p>{chatRefusal}</p>

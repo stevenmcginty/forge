@@ -282,16 +282,26 @@ function describeDrift(a, b) {
  * exempt the composer rule, which is half of the bug.
  */
 async function toggleView(page) {
-  const before = await page.getAttribute('.pane[data-view]', 'data-view')
-  await page.click('.pane__actions .pane__action[aria-pressed]')
-  await page.waitForFunction(
-    (was) => document.querySelector('.pane[data-view]')?.getAttribute('data-view') !== was,
-    before,
-    { timeout: 4000 }
-  )
+  // The pane's action cycles feed -> chat -> term -> feed. Chat shares feed's
+  // chrome (no key row on a phone either), so it is not a second geometry to
+  // measure: click on through it until the pane is on the *other* of the two
+  // faces the check is about.
+  const start = await page.getAttribute('.pane[data-view]', 'data-view')
+  let view = start
+  for (let clicks = 0; clicks < 3; clicks++) {
+    const before = view
+    await page.click('.pane__actions .pane__action[aria-pressed]')
+    await page.waitForFunction(
+      (was) => document.querySelector('.pane[data-view]')?.getAttribute('data-view') !== was,
+      before,
+      { timeout: 4000 }
+    )
+    view = await page.getAttribute('.pane[data-view]', 'data-view')
+    if (view === 'feed' || view === 'term') break
+  }
   // One frame, so the flip has been laid out before anything is measured.
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
-  return page.getAttribute('.pane[data-view]', 'data-view')
+  return view
 }
 
 /** Measure the pane in both views and hand back the pair, in a known order. */

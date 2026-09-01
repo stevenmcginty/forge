@@ -2573,7 +2573,23 @@ body {
  * open. Nothing is left to hide, so the rule that hid it is gone with it.
  */
 
+/*
+ * The phone terminal's margin is on `.xterm`, not on this container.
+ *
+ * FitAddon works the grid out from the *container's* computed height and
+ * width — which under this project's `box-sizing: border-box` include any
+ * padding the container wears — and subtracts only the padding of `.xterm`
+ * itself. So padding here was invisible to the fit: the rows were sized as
+ * though the box had none, drawn 4px (and, on an agent pane, 52px more)
+ * lower than the fit assumed, and the last of them ran off the bottom of the
+ * stage — a TUI's prompt line and footer, half-visible or not visible at all.
+ * Padding on `.xterm` is the one the addon was written to honour.
+ */
 .app[data-mobile] .pane__terminal {
+  padding: 0;
+}
+
+.app[data-mobile] .pane__terminal .xterm {
   padding: var(--s-2) 0 var(--s-2) var(--s-2);
 }
 
@@ -3056,7 +3072,20 @@ button.astatus__mode:not(:disabled):hover {
   }
 }
 
-/* ----------------------------------------------------------- the composer */
+/* ----------------------------------------------------------- the composer
+ *
+ * "Machined Dock": one glass slab with a lit edge, docked under the feed. The
+ * words are the surface — a plain textarea at reading size, no inner frame —
+ * and everything around them is quiet hardware: the chip that names the model
+ * (and wears its permission mode as its colour), two round tool buttons, a
+ * row of keycaps at the desk, and one round Send that is the only thing on the
+ * slab allowed the accent. With the box empty it is the Enter key and shows it
+ * — a hollow ring — and fills the moment there is something to send.
+ *
+ * Every value is a token or is derived from one, so both themes come free.
+ * Motion is press feedback and the Send fill only, all on --dur-* so a
+ * reduced-motion root zeroes it.
+ */
 
 .composer {
   flex: none;
@@ -3070,28 +3099,34 @@ button.astatus__mode:not(:disabled):hover {
 .composer__card {
   display: flex;
   flex-direction: column;
-  gap: var(--s-3);
-  padding: var(--s-3) var(--s-4) var(--s-4);
-  background: color-mix(in srgb, var(--bg-panel-raised) 86%, transparent);
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-4) var(--s-4);
+  background: color-mix(in srgb, var(--bg-panel-raised) 88%, transparent);
   border: 1px solid color-mix(in srgb, var(--line-strong) 85%, var(--line-hairline));
   border-radius: 22px;
-  box-shadow: var(--shadow-card), 0 8px 32px rgba(0, 0, 0, 0.4), var(--shadow-inset-top);
+  box-shadow:
+    var(--shadow-card),
+    0 8px 32px rgba(0, 0, 0, 0.28),
+    var(--shadow-inset-top);
   backdrop-filter: blur(24px) saturate(1.6);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
   transition:
-    border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+    border-color var(--dur-med) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out),
+    background var(--dur-med) var(--ease-out);
 }
 
+/* The lit edge: the accent rises into the border, and a 1px ring outside it
+ * doubles the line without the halo a web form wears. */
 .composer__card:focus-within {
-  border-color: color-mix(in srgb, var(--feed-accent) 65%, var(--line-strong));
-  background: color-mix(in srgb, var(--bg-panel-raised) 92%, transparent);
+  border-color: color-mix(in srgb, var(--feed-accent) 62%, var(--line-strong));
+  background: color-mix(in srgb, var(--bg-panel-raised) 94%, transparent);
   box-shadow:
     var(--shadow-card),
-    0 12px 36px rgba(0, 0, 0, 0.5),
-    0 0 0 3px color-mix(in srgb, var(--feed-accent) 15%, transparent),
-    0 0 16px color-mix(in srgb, var(--feed-accent) 20%, transparent);
+    0 12px 36px rgba(0, 0, 0, 0.34),
+    0 0 0 1px color-mix(in srgb, var(--feed-accent) 28%, transparent),
+    0 0 24px color-mix(in srgb, var(--feed-accent) 12%, transparent),
+    var(--shadow-inset-top);
 }
 
 .composer[data-disabled='true'] .composer__card {
@@ -3103,16 +3138,20 @@ button.astatus__mode:not(:disabled):hover {
 .composer__input {
   width: 100%;
   min-height: 44px;
-  padding: 10px var(--s-3) 4px;
+  padding: 9px var(--s-4) 5px;
   resize: none;
   overflow-y: hidden;
   font: inherit;
   font-size: 15px;
-  line-height: 1.4;
+  line-height: 1.45;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-primary);
   background: transparent;
   border: 0;
   caret-color: var(--feed-accent);
+  /* The box follows the words: Composer.tsx sets the height per keystroke.
+   * No transition on it: the feed above reflows for every frame of one, and
+   * on a phone that is a hitch under the thumb. */
   /* Native selection / long-press paste. Do not inherit xterm's user-select. */
   user-select: text;
   -webkit-user-select: text;
@@ -3131,10 +3170,12 @@ button.astatus__mode:not(:disabled):hover {
   font-style: italic;
 }
 
+/* ------------------------------------------------------------- attachments */
+
 .composer__attach {
   display: flex;
   gap: var(--s-4);
-  padding: var(--s-3) var(--s-2) 0;
+  padding: var(--s-3) var(--s-3) var(--s-1);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -3148,12 +3189,24 @@ button.astatus__mode:not(:disabled):hover {
   flex: none;
   width: 64px;
   height: 64px;
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   border: 1px solid var(--line-strong);
   overflow: visible;
   background: var(--bg-sunken);
   box-shadow: var(--shadow-key);
+  animation: composer-thumb-in var(--dur-med) var(--ease-out);
   transition: transform var(--dur-fast) var(--ease-out);
+}
+
+@keyframes composer-thumb-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .composer__thumb:hover {
@@ -3183,7 +3236,11 @@ button.astatus__mode:not(:disabled):hover {
   border-radius: 50%;
   box-shadow: var(--shadow-key);
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-instant) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
 }
 
 .composer__thumb-x:hover {
@@ -3193,32 +3250,36 @@ button.astatus__mode:not(:disabled):hover {
   transform: scale(1.1);
 }
 
+/* ------------------------------------------------------------------ chips */
+
 .composer__picks {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--s-2);
-  padding: 2px var(--s-1) 0;
+  padding: 0;
 }
 
 .composer__pick {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   flex: none;
-  height: 26px;
-  padding: 0 10px 0 10px;
+  height: 28px;
+  padding: 0 8px 0 11px;
   border-radius: var(--r-full);
   background: color-mix(in srgb, var(--bg-hover) 80%, transparent);
   border: 1px solid var(--line-hairline);
   color: var(--text-secondary);
-  font: 600 var(--t-xs) / 1 var(--font-ui);
-  letter-spacing: 0.02em;
+  font: 600 var(--t-sm) / 1 var(--font-ui);
+  letter-spacing: 0.01em;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition:
     background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
     transform var(--dur-instant) var(--ease-out);
 }
 
@@ -3226,7 +3287,10 @@ button.astatus__mode:not(:disabled):hover {
   color: var(--text-primary);
   background: var(--bg-active);
   border-color: var(--line-strong);
-  transform: translateY(-1px);
+}
+
+.composer__pick:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .composer__pick:disabled {
@@ -3242,27 +3306,52 @@ button.astatus__mode:not(:disabled):hover {
 
 .composer__pick svg {
   flex: none;
-  opacity: 0.7;
+  opacity: 0.6;
+  transition: transform var(--dur-fast) var(--ease-out);
 }
 
+.composer__pick[data-active='true'] svg {
+  transform: rotate(180deg);
+}
+
+/* The permission mode, worn as colour: bypass is red, plan is blue, accept
+ * edits is green — on whichever chip carries the mode. The colour is the ink
+ * and the edge; the fill stays a wash so the word is what reads. */
 .composer__pick[data-mode='bypass'] {
   color: var(--danger);
   background: var(--danger-soft);
   border-color: var(--danger-line);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--danger) 15%, transparent);
 }
 .composer__pick[data-mode='plan'] {
   color: var(--info);
-  background: color-mix(in srgb, var(--info) 10%, transparent);
+  background: color-mix(in srgb, var(--info) 11%, transparent);
   border-color: color-mix(in srgb, var(--info) 36%, transparent);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--info) 15%, transparent);
 }
 .composer__pick[data-mode='accept-edits'] {
   color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 10%, transparent);
+  background: color-mix(in srgb, var(--ok) 11%, transparent);
   border-color: color-mix(in srgb, var(--ok) 36%, transparent);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--ok) 15%, transparent);
 }
+
+.composer__pick[data-mode]:hover:not(:disabled),
+.composer__pick[data-mode][data-active='true'] {
+  color: inherit;
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
+}
+.composer__pick[data-mode='bypass']:hover:not(:disabled),
+.composer__pick[data-mode='bypass'][data-active='true'] {
+  color: var(--danger);
+}
+.composer__pick[data-mode='plan']:hover:not(:disabled),
+.composer__pick[data-mode='plan'][data-active='true'] {
+  color: var(--info);
+}
+.composer__pick[data-mode='accept-edits']:hover:not(:disabled),
+.composer__pick[data-mode='accept-edits'][data-active='true'] {
+  color: var(--ok);
+}
+
+/* ------------------------------------------------------------------ tools */
 
 .composer__tools {
   display: flex;
@@ -3290,10 +3379,11 @@ button.astatus__mode:not(:disabled):hover {
   align-items: center;
   justify-content: center;
   border-radius: var(--r-full);
-  background: var(--bg-hover);
-  border: 1px solid var(--line-hairline);
+  background: color-mix(in srgb, var(--bg-hover) 85%, transparent);
+  border: 1px solid transparent;
   color: var(--text-secondary);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition:
     background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out),
@@ -3301,24 +3391,26 @@ button.astatus__mode:not(:disabled):hover {
     border-color var(--dur-fast) var(--ease-out);
 }
 
-.composer__icon:hover:not(:disabled):not([aria-disabled='true']) {
+.composer__icon:hover:not([aria-disabled='true']) {
   color: var(--text-primary);
   background: var(--bg-active);
-  border-color: var(--line-strong);
-  transform: translateY(-1px);
+  border-color: var(--line-hairline);
 }
 
-.composer__icon:active {
-  transform: scale(0.95);
+.composer__icon:active:not([aria-disabled='true']) {
+  transform: scale(0.92);
+  background: var(--bg-active);
 }
 
-.composer__icon[aria-disabled='true'],
-.composer__icon:disabled {
+.composer__icon[aria-disabled='true'] {
   pointer-events: none;
   opacity: 0.4;
 }
 
+/* The key row: keycaps, not pills. A hairline foot under each one is the
+ * whole illusion of a key — pressed, the foot goes and the cap drops 1px. */
 .composer__keys {
+  --keys-fade: 28px;
   display: flex;
   flex: 1;
   min-width: 0;
@@ -3326,7 +3418,15 @@ button.astatus__mode:not(:disabled):hover {
   padding: 2px 0;
   overflow-x: auto;
   scrollbar-width: none;
-  mask-image: linear-gradient(to right, black calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to right, black calc(100% - var(--keys-fade)), transparent);
+}
+
+/* A spacer as wide as the fade at the end of the strip, so Esc scrolls clear
+ * of it and no key is ever read through the gradient or under Send. */
+.composer__keys::after {
+  content: '';
+  flex: none;
+  width: var(--keys-fade);
 }
 
 .composer__keys::-webkit-scrollbar {
@@ -3338,17 +3438,20 @@ button.astatus__mode:not(:disabled):hover {
   height: 32px;
   min-width: 38px;
   padding: 0 var(--s-4);
-  border-radius: var(--r-full);
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
   border: 1px solid var(--line-hairline);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--line-strong) 80%, transparent);
   color: var(--text-secondary);
   font: 600 var(--t-xs) / 1 var(--font-mono);
   letter-spacing: 0.02em;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition:
     background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-instant) var(--ease-out),
     transform var(--dur-instant) var(--ease-out);
 }
 
@@ -3356,18 +3459,31 @@ button.astatus__mode:not(:disabled):hover {
   color: var(--text-primary);
   background: var(--bg-hover);
   border-color: var(--line-strong);
-  transform: translateY(-1px);
 }
 
 .composer__key:active:not(:disabled) {
   background: var(--bg-active);
-  transform: translateY(0);
+  box-shadow: inset 0 0 0 transparent;
+  transform: translateY(1px);
 }
 
 .composer__key:disabled {
   opacity: 0.4;
   cursor: default;
 }
+
+/* Armed Ctrl — the same lit language an active chip or tab uses, held down.
+ * Stated for hover too, or the mouse that armed it paints it plain again. */
+.composer__key[data-active='true'],
+.composer__key[data-active='true']:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  box-shadow: inset 0 0 0 transparent;
+  transform: translateY(1px);
+}
+
+/* ------------------------------------------------------------------- send */
 
 .composer__send {
   flex: none;
@@ -3379,31 +3495,79 @@ button.astatus__mode:not(:disabled):hover {
   justify-content: center;
   border-radius: var(--r-full);
   background: var(--feed-accent);
-  border: 0;
+  border: 1.5px solid var(--feed-accent);
   color: var(--text-on-accent);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--feed-accent) 35%, transparent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--feed-accent) 35%, transparent);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition:
     background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out),
     transform var(--dur-instant) var(--ease-out);
 }
 
+/* Empty box: the button is the Enter key, and looks like one — a hollow ring
+ * in the accent. The first character fills it, with a small pop to say so. */
+.composer__send[data-draft='false']:not(:disabled) {
+  background: color-mix(in srgb, var(--feed-accent) 9%, transparent);
+  border-color: color-mix(in srgb, var(--feed-accent) 70%, transparent);
+  /* Ink, not accent, for the glyph: Paper's pale lime on paper is a ring you
+   * can see and an arrow you cannot. */
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+.composer__send[data-draft='true']:not(:disabled) {
+  animation: composer-arm calc(var(--dur-med) * 1.5) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes composer-arm {
+  from {
+    transform: scale(0.86);
+  }
+  60% {
+    transform: scale(1.04);
+  }
+  to {
+    transform: none;
+  }
+}
+
 .composer__send:not(:disabled):hover {
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--feed-accent) 45%, transparent), 0 0 0 3px color-mix(in srgb, var(--feed-accent) 22%, transparent);
+  box-shadow:
+    0 4px 14px color-mix(in srgb, var(--feed-accent) 45%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--feed-accent) 18%, transparent);
   transform: scale(1.04);
+}
+
+.composer__send[data-draft='false']:not(:disabled):hover {
+  background: color-mix(in srgb, var(--feed-accent) 16%, transparent);
+  border-color: var(--feed-accent);
 }
 
 .composer__send:disabled {
   background: var(--bg-hover);
+  border-color: transparent;
   color: var(--text-dim);
   box-shadow: none;
   cursor: default;
 }
 
 .composer__send:active:not(:disabled) {
-  transform: scale(0.95);
+  transform: scale(0.92);
+}
+
+/* Keyboard focus, on every control the slab carries. The textarea has the
+ * card's own lit edge for this and needs no ring of its own. */
+.composer__pick:focus-visible,
+.composer__icon:focus-within:has(.composer__file:focus-visible),
+.composer__key:focus-visible,
+.composer__send:focus-visible,
+.composer__thumb-x:focus-visible {
+  outline: 2px solid var(--feed-accent);
+  outline-offset: 2px;
 }
 
 /* ------------------------------------------------------------- the phone
@@ -3568,33 +3732,32 @@ button.astatus__mode:not(:disabled):hover {
  * the grid starts below it — the same 52px the feed reserves — rather than
  * covering the top rows.
  *
- * Held in *both* faces, though only one of them can show it. Be careful about
- * *why*, because the obvious reason is not the true one and it was written down
- * wrongly here once already. FitAddon reads
- * `parseInt(getComputedStyle(container).height)` and then subtracts the padding
- * of `.xterm`, not the container's — and under this project's global
- * `box-sizing: border-box` (src/theme/global.css) that resolved height is the
- * *border* box, padding included. Measured both ways in
- * scripts/viewtoggle-check.mjs: at `padding-top: 52px` and at `137px` the
- * container still reports the same height. So this padding on its own never
- * moved the proposed grid at all; the resize frame that made the pane duplicate
- * itself came from the composer's key row changing the stage's height (see the
- * rule below).
+ * On `.xterm`, not on `.pane__terminal`, and the difference is the whole of
+ * the rule. FitAddon reads `parseInt(getComputedStyle(container).height)` and
+ * subtracts the padding of `.xterm` — never the container's — and under this
+ * project's global `box-sizing: border-box` (src/theme/global.css) the
+ * container's resolved height is its *border* box, padding included. Measured
+ * in scripts/viewtoggle-check.mjs: at `padding-top: 52px` and at `137px` on the
+ * container it still reported the same height. So a padding on the container
+ * never moved the proposed grid at all: the rows were sized for the whole box,
+ * drawn 52px lower than the fit assumed, and the bottom three or so ran off
+ * the stage — which on an alt-screen TUI is its prompt and its footer. Padding
+ * on `.xterm` is the one the addon was written to honour, so the grid is now
+ * exactly the rows that fit under the pill.
  *
- * It is held in both faces anyway, and the reason is worth the four lines: this
- * element's box is what FitAddon measures, the rows it works out are sent to
- * the desktop as a real PTY resize, and the desktop answers a resize by
- * jiggling the row count to force a repaint (`resizeForViewer` in
- * electron/pty-host.ts). Claude Code paints the normal buffer, so every one of
- * those repaints lands in the scrollback as another copy of the screen instead
- * of overwriting it. A padding that comes and goes with the view flip is
- * therefore one `box-sizing` change away from minting duplicate screens under a
- * thumb, and in cards view the terminal is `opacity: 0` and nothing can be seen
- * there anyway — so reserving the space costs nothing and buys a grid that
- * cannot depend on which face is up.
+ * Held in *both* faces, though only one of them can show it: this box is what
+ * FitAddon measures, the rows it works out are sent to the desktop as a real
+ * PTY resize, and the desktop answers a resize by jiggling the row count to
+ * force a repaint (`resizeForViewer` in electron/pty-host.ts). Claude Code
+ * paints the normal buffer, so every one of those repaints lands in the
+ * scrollback as another copy of the screen instead of overwriting it. A
+ * padding that came and went with the view flip would mint duplicate screens
+ * under a thumb, and in cards view the terminal is `opacity: 0` and nothing
+ * can be seen there anyway — so reserving the space costs nothing and buys a
+ * grid that cannot depend on which face is up.
  */
-.app[data-mobile] .pane[data-kind='agent'] .pane__terminal,
-[data-mobile] .pane[data-kind='agent'] .pane__terminal {
+.app[data-mobile] .pane[data-kind='agent'] .pane__terminal .xterm,
+[data-mobile] .pane[data-kind='agent'] .pane__terminal .xterm {
   padding-top: 52px;
 }
 
@@ -3711,26 +3874,30 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 [data-mobile] .composer__card {
-  padding: var(--s-3) var(--s-4) var(--s-4);
-  border-radius: 24px;
+  gap: var(--s-2);
+  padding: var(--s-5) var(--s-5) var(--s-5);
+  border-radius: 26px;
 }
 
+/* 16px or Safari zooms the page on focus. */
 [data-mobile] .composer__input {
   font-size: 16px;
+  line-height: 1.4;
   min-height: 46px;
+  padding: 8px var(--s-3) 6px;
 }
 
 [data-mobile] .composer__icon,
 [data-mobile] .composer__send {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
 }
 
 /* The arrows, Tab, Ctrl, Esc and Send share a phone's width, so the row
  * scrolls sideways under its fade and every key keeps the promised 40px of
  * thumb. Effort and Mode live above the box, not in this row. */
 [data-mobile] .composer__tools {
-  gap: var(--s-2);
+  gap: var(--s-3);
 }
 
 [data-mobile] .composer__picks {
@@ -3739,13 +3906,16 @@ button.astatus__mode:not(:disabled):hover {
 
 /* One chip, not three: a phone opens Model, Effort and Mode in a single sheet,
  * so the row's whole width belongs to it. A long model name truncates rather
- * than wrapping the toolbar onto a second line above the box. */
+ * than wrapping the toolbar onto a second line above the box. Thirteen-pixel
+ * type: this chip is read at arm's length, at a glance, to know which model
+ * and which mode a tap is about to reach. */
 [data-mobile] .composer__pick {
   height: 32px;
   max-width: 100%;
   min-width: 0;
-  padding: 0 10px 0 12px;
-  font-size: 11px;
+  gap: 5px;
+  padding: 0 9px 0 13px;
+  font-size: 13px;
 }
 
 [data-mobile] .composer__pick-label {
@@ -3754,22 +3924,57 @@ button.astatus__mode:not(:disabled):hover {
   white-space: nowrap;
 }
 
+/* Forty-pixel keys under a 42px Send: the fade is a key's width, and the
+ * strip stops a step short of the button so nothing sits beneath it. */
 [data-mobile] .composer__keys {
-  gap: 3px;
+  --keys-fade: 44px;
+  gap: 4px;
+  margin-right: var(--s-2);
 }
 
 [data-mobile] .composer__key {
   height: 40px;
   min-width: 40px;
-  padding: 0 var(--s-2);
+  padding: 0 var(--s-3);
   font-size: var(--t-sm);
 }
 
-/* Armed Ctrl — the same lit language an active chip or tab uses. */
-.composer__key[data-active='true'] {
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
+/*
+ * The phone's one sheet — Model, Effort and Mode behind the single chip. It
+ * is portalled to <body>, so the phone's data attribute cannot reach it; the
+ * dialog's own label can. Rows grow to a thumb's 44px and the corners follow
+ * the slab's.
+ */
+.popover[aria-label='Agent settings'] {
+  padding: var(--s-4);
+  border-radius: 20px;
+  box-shadow:
+    var(--shadow-card),
+    0 16px 48px rgba(0, 0, 0, 0.35),
+    var(--shadow-inset-top);
+}
+
+.popover[aria-label='Agent settings'] .popover__row {
+  min-height: 44px;
+  padding: var(--s-3) var(--s-5);
+  border-radius: var(--r-lg);
+}
+
+.popover[aria-label='Agent settings'] .popover__row[data-selected='true'] {
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.popover[aria-label='Agent settings'] .ceffort__label {
+  font-size: 14px;
+}
+
+.popover[aria-label='Agent settings'] .ceffort__note {
+  font-size: var(--t-sm);
+}
+
+/* The rung that never asks reads in the same red its chip wears. */
+.popover__row[data-danger='true'] .ceffort__label {
+  color: inherit;
 }
 
 /*
@@ -3968,8 +4173,20 @@ button.astatus__mode:not(:disabled):hover {
 
 @media (prefers-reduced-motion: reduce) {
   .composer__icon:active,
-  .composer__send:active:not(:disabled) {
+  .composer__pick:active,
+  .composer__key:active,
+  .composer__send:active:not(:disabled),
+  .composer__send:not(:disabled):hover {
     transform: none;
+  }
+
+  .composer__send,
+  .composer__thumb {
+    animation: none;
+  }
+
+  .composer__input {
+    transition: none;
   }
 
   .feed__empty-dot,

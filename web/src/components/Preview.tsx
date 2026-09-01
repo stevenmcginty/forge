@@ -1,11 +1,13 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import type { AgentProfile, ClaudePermissionMode } from '@shared/types'
 import { agentModels, BUILTIN_AGENT_PROFILES, effortLevels, matchAgentModel, permissionModes } from '@shared/agents'
 import { Icon } from '@/components/Icon'
 import { mergeBlocks, richFromText, transcriptFromLines } from '@/lib/feed'
+import { screenTurns } from '../lib/screen-turns'
 import { useMobile } from '../lib/mobile'
 import type { FeedBlock, PaneStatus, PermissionMode, RichLine, Run } from '@/lib/rich'
 import { AgentStatus } from './AgentStatus'
+import { ChatView } from './ChatView'
 import { Composer } from './Composer'
 import { Feed } from './Feed'
 
@@ -188,6 +190,27 @@ const GROK_REPLY = [
   'All four now come off the screen before the cut, so a redraw is the same cards.'
 ]
 
+/**
+ * What Grok prints between the question and the answer, per its own user
+ * guide (~/.grok/docs/user-guide/06-theming.md): a `Thinking…` header over the
+ * first lines of its reasoning, then each tool call as a `◆` bullet, a verb
+ * from its fixed list (Read, Searched, Ran, Edited…) and the target, with the
+ * result's count in dimmed parentheses. Shell output hangs indented under
+ * the call. The indentation of the reasoning lines is this fixture's guess;
+ * the header, the bullet and the verbs are the guide's.
+ */
+const GROK_WORK = [
+  'Thinking…',
+  '  The feed is cut from the alternate screen, so every redraw is a whole frame.',
+  '  If the merge takes the top of a frame as new, one entry becomes ten.',
+  '',
+  '◆ Read src/lib/feed.ts (966 lines)',
+  '◆ Searched mergeBlocks in src (3 matches)',
+  '◆ Ran npm run feed:check',
+  '    103 passed',
+  ''
+]
+
 function grokFrame(n: number): string {
   return [
     'Grok 4.6',
@@ -195,6 +218,7 @@ function grokFrame(n: number): string {
     '≡ master ~\\Desktop\\forge                                        7.8K / 500K',
     '  The entry is replicating ten times while you answer.            12:40 PM',
     '',
+    ...GROK_WORK,
     'A frame is a window onto the log, not a replacement for it.',
     '',
     // The reply *grows*, the way a streamed one does: frame n holds every
@@ -322,8 +346,12 @@ function PreviewPane({
 }): ReactNode {
   const [draft, setDraft] = useState('')
   const [live, setLive] = useState(true)
-  const [view, setView] = useState<'feed' | 'term'>('feed')
+  // The three faces an agent pane has, in the order a tap cycles them; the
+  // chat here is the screen-read one (lib/screen-turns.ts), since the preview
+  // has no desktop to send a transcript.
+  const [view, setView] = useState<'feed' | 'chat' | 'term'>('feed')
   const [blocks, setBlocks] = useState(initial)
+  const turns = useMemo(() => screenTurns(blocks), [blocks])
   const roster = agentModels(profile.command)
   const levels = effortLevels(profile.command)
   const ladder = permissionModes(profile.command)
@@ -352,11 +380,11 @@ function PreviewPane({
               <button
                 type="button"
                 className="ghost-btn pane__action"
-                title={view === 'feed' ? 'Show the terminal' : 'Show as cards'}
-                aria-pressed={view === 'feed'}
-                onClick={() => setView((current) => (current === 'feed' ? 'term' : 'feed'))}
+                title={view === 'feed' ? 'Show as chat' : view === 'chat' ? 'Show the terminal' : 'Show as cards'}
+                aria-pressed={view !== 'term'}
+                onClick={() => setView((current) => (current === 'feed' ? 'chat' : current === 'chat' ? 'term' : 'feed'))}
               >
-                <Icon name={view === 'feed' ? 'terminal' : 'note'} size={13} />
+                <Icon name={view === 'term' ? 'note' : 'terminal'} size={13} />
               </button>
               <button type="button" className="ghost-btn pane__action" data-danger="true" title="Close pane" disabled>
                 <Icon name="close" size={13} />
@@ -367,6 +395,8 @@ function PreviewPane({
         <div className="pane__stage">
           {view === 'feed' ? (
             <Feed blocks={blocks} status={status} asking={asking} prompt={prompt} cut={cut} empty="Waiting for the desktop…" />
+          ) : view === 'chat' ? (
+            <ChatView turns={turns} truncated={cut} busy={status.busy} activity={status.activity} quota={status.quota} />
           ) : (
             <pre className="pane__terminal preview__term">{blocks.map((b) => b.text).join('\n\n')}</pre>
           )}

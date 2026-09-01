@@ -42,6 +42,12 @@ export interface ChatTurn {
   /** Milliseconds since epoch, from the record's own timestamp. */
   at: number
   blocks: ChatBlock[]
+  /**
+   * The clock as the CLI printed it (`12:40 PM`), for a turn read off a
+   * screen rather than a file: such a turn has no epoch (`at` is 0), and the
+   * view shows this instead. Absent on transcript turns, which carry `at`.
+   */
+  clock?: string
 }
 
 /**

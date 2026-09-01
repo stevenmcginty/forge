@@ -315,13 +315,19 @@ const Block = memo(function Block({
   switch (block.role) {
     case 'user':
       body = (
-        <div className="feed__bubble">
-          <Lines lines={block.lines} fallback={block.text} />
+        <div className="feed__mine">
+          <div className="feed__bubble">
+            <Lines lines={block.lines} fallback={block.text} />
+          </div>
+          {block.clock ? <span className="feed__clock">{block.clock}</span> : null}
         </div>
       )
       break
     case 'tool':
       body = <ToolCard block={block} />
+      break
+    case 'thinking':
+      body = <ThinkingFold block={block} />
       break
     case 'system':
       body = (
@@ -418,6 +424,65 @@ function ToolCard({ block }: { block: FeedBlock }): ReactNode {
       ) : null}
     </div>
   )
+}
+
+/* ---------------------------------------------------------------- thinking
+ *
+ * The agent's shown reasoning, folded shut: one quiet italic row a thumb can
+ * open. Never drawn as a reply card — the words under a `Thinking…` header
+ * are the agent talking to itself, and set at reading size beside the accent
+ * rule they read as the answer.
+ */
+
+function ThinkingFold({ block }: { block: FeedBlock }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const head = (block.lines[0]?.text ?? firstLine(block.text)).trim()
+  const rest = block.lines.slice(1)
+  const done = /^Thought\b/.test(head)
+  return (
+    <div className="feed__think" data-open={open ? 'true' : 'false'}>
+      <button
+        type="button"
+        className="feed__think-head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={rest.length ? open : undefined}
+        disabled={!rest.length}
+      >
+        <span className="feed__tool-caret" aria-hidden>
+          <svg
+            width="9"
+            height="9"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M6 3.5L10.5 8 6 12.5" />
+          </svg>
+        </span>
+        {done ? head : 'Thought for a moment'}
+      </button>
+      {open && rest.length ? (
+        <div className="feed__think-body">
+          {rest.map((line, i) => (
+            <Line key={i} line={{ text: line.text.trim(), runs: trimRuns(line.runs) }} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** The runs of a line with its leading indent taken off — the fold is its own indent. */
+function trimRuns(runs: Run[]): Run[] {
+  const out = runs.map((run) => ({ ...run }))
+  for (const run of out) {
+    run.text = run.text.replace(/^\s+/, '')
+    if (run.text) break
+  }
+  return out.filter((run) => run.text)
 }
 
 /* --------------------------------------------------------------- styled text */

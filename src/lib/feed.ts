@@ -248,6 +248,19 @@ const GROK_BUSY =
  * *nothing*, and Grok's whole composer stayed in the conversation.
  */
 const QUOTA_LINE = /\b(?:weekly|daily|monthly|hourly)\s+limit\s+left\b/i
+/** The same line, read: the phrase up to and including the percentage. */
+const QUOTA_READ = /\b((?:weekly|daily|monthly|hourly)\s+limit\s+left\s*:?\s*\d+%)/i
+
+/**
+ * The clock Grok hangs off the right edge of a user turn.
+ *
+ *     The entry is replicating ten times while you answer.            12:40 PM
+ *
+ * Two or more spaces and then a time, at the very end: the padding is the
+ * TUI right-aligning the clock, and it is what keeps a sentence that merely
+ * mentions 12:40 PM in the sentence.
+ */
+const TRAILING_CLOCK = /\s{2,}(\d{1,2}:\d{2}(?:\s?[AaPp][Mm])?)\s*$/
 
 /**
  * The bar Grok draws over each turn: branch, cwd, and the context clock.
@@ -261,8 +274,12 @@ const QUOTA_LINE = /\b(?:weekly|daily|monthly|hourly)\s+limit\s+left\b/i
  */
 const GROK_BAR = /^[≡☰]\s.*\b\d+(?:\.\d+)?[KM]\s*\/\s*\d+(?:\.\d+)?[KM]\b/
 
-/** A word that is being done to you — "Thinking…", "Baking…", "Working…". */
-const ACTIVITY = /([A-Z][A-Za-z]+(?:\s[a-z]+)?)…/
+/**
+ * A word that is being done to you — "Thinking…", "Baking…", "Working…".
+ * Up to two lower-case words may follow the first, so Grok's
+ * `Waiting for response…` reads as the whole phrase rather than as nothing.
+ */
+const ACTIVITY = /([A-Z][A-Za-z]+(?:\s[a-z]+){0,2})…/
 
 /**
  * Is this line the TUI telling you it is mid-turn?
@@ -465,6 +482,9 @@ function readStatus(footer: string[], body: Cut[]): PaneStatus {
   const cwd = firstMatch(everywhere, [CWD_PATTERN])
   if (cwd) status.cwd = cwd
 
+  const quota = firstMatch(footer, [QUOTA_READ])
+  if (quota) status.quota = quota
+
   for (const line of footer) {
     if (!CWD_PATTERN.test(line)) continue
     const branch = BRANCH_PATTERN.exec(line)?.[1]
@@ -523,11 +543,29 @@ const TOOL_START = [
   /^[✓✔✗✖]\s+[A-Z][A-Za-z0-9_]*\b/,
   // OpenCode: `# Read src/lib/feed.ts` — the hash is the whole of the tell,
   // so a sentence that happens to start with a capital word stays prose.
-  /^#\s+[A-Z][A-Za-z][\w.-]*/
+  /^#\s+[A-Z][A-Za-z][\w.-]*/,
+  // Grok Build: a bullet, then one of its tool verbs, then the target —
+  // `◆ Read src/lib/feed.ts (966 lines)`, `◆ Ran npm test`, `◆ Searched
+  // mergeBlocks in src (3 matches)`. The verbs are the CLI's own list
+  // (Read/Reading, Listed/Listing, Fetched/Fetching, Searched/Searching,
+  // Edited/Editing, Called/Calling, Ran/Running; the running form while the
+  // call is in flight) and the bullet is its default `◆`, or one of the two
+  // triangles it can be set to. `•` and `●` are deliberately not here: both
+  // lead ordinary bullets in prose, and `• Ran out of ideas` is a sentence.
+  /^[◆▸▶]\s+(?:Read(?:ing)?|List(?:ed|ing)|Fetch(?:ed|ing)|Search(?:ed|ing)|Edit(?:ed|ing)|Call(?:ed|ing)|Ran|Running|Wrote|Writing)\b\s*\S/
 ]
 
 /** Claude's result gutter, OpenCode's `└`, and the box rows some CLIs hang under a call. */
 const TOOL_CONT = /^[⎿⋮↳└]/
+
+/**
+ * Grok's reasoning header, alone on its line: `Thinking…` while it thinks,
+ * `Thought for 4s` once it has. The lines under it, down to the first blank,
+ * are the reasoning, and neither is the answer. Bare on purpose — Claude's
+ * `✻ Thinking…` and Codex's `Thinking… (12s)` carry a glyph or a clock and are
+ * spinner chrome, eaten before this is ever asked.
+ */
+const THINKING_HEAD = /^(?:Thinking(?:…|\.{3})|Thought(?:\s+for\s+[\w.]+)?)\s*$/
 
 function isToolStart(flat: string): boolean {
   return TOOL_START.some((re) => re.test(flat))
@@ -575,14 +613,31 @@ function trimEdges(lines: RichLine[]): RichLine[] {
  * back at `contain-intrinsic-size`'s 80px guess before snapping to its real
  * height, and the feed bounced up and down until the turn ended.
  */
-function flush(blocks: FeedBlock[], role: FeedRole, lines: RichLine[]): void {
+function flush(blocks: FeedBlock[], role: FeedRole, lines: RichLine[], clock?: string): void {
   const kept = trimEdges(lines)
   const text = kept
     .map((line) => line.text)
     .join('\n')
     .replace(/\s+$/, '')
   if (!text.trim()) return
-  blocks.push({ id: `${role}-${blocks.length}`, role, lines: kept, text })
+  const block: FeedBlock = { id: `${role}-${blocks.length}`, role, lines: kept, text }
+  if (clock) block.clock = clock
+  blocks.push(block)
+}
+
+/**
+ * A user line with its clock taken off the end — words and time apart.
+ *
+ * Returns the line untouched when there is no clock on it, so every other
+ * turn costs a regex and nothing else; with one, the leading indent goes too.
+ */
+function splitClock(line: RichLine): { line: RichLine; clock?: string } {
+  const m = TRAILING_CLOCK.exec(line.text)
+  if (!m) return { line }
+  // The indent is the TUI's, like the clock: the bubble draws its own.
+  const start = line.text.length - line.text.replace(/^\s+/, '').length
+  const end = line.text.slice(0, m.index).replace(/\s+$/, '').length
+  return { line: { runs: sliceRuns(line.runs, start, end), text: line.text.slice(start, end) }, clock: m[1] }
 }
 
 /**
@@ -618,6 +673,14 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
    * agent answering. Cleared once that first body line has been taken.
    */
   let headerPending = false
+  /** The clock off the user turn being collected, handed to its card on flush. */
+  let clock: string | undefined
+
+  /** Close the card being collected, clock and all, and forget the clock. */
+  const close = (): void => {
+    flush(blocks, role, buf, role === 'user' ? clock : undefined)
+    clock = undefined
+  }
 
   for (; i < body.length; i++) {
     const line = body[i]!
@@ -631,7 +694,7 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
     // and is dropped rather than shown: the context figure on it moves, and a
     // card that carries a moving number cannot match its own next frame.
     if (GROK_BAR.test(line.flat)) {
-      flush(blocks, role, buf)
+      close()
       role = 'user'
       buf = []
       headerPending = true
@@ -639,7 +702,7 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
     }
 
     if (USER_HEADER.test(line.flat)) {
-      flush(blocks, role, buf)
+      close()
       role = 'user'
       buf = []
       headerPending = true
@@ -647,7 +710,7 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
     }
 
     if (USER_TURN.test(line.flat)) {
-      flush(blocks, role, buf)
+      close()
       role = 'user'
       headerPending = false
       const marker = USER_MARKER.exec(line.rich.text)?.[0]?.length ?? 0
@@ -655,8 +718,24 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
       continue
     }
 
+    if (THINKING_HEAD.test(line.flat)) {
+      close()
+      headerPending = false
+      role = 'thinking'
+      buf = [line.rich]
+      continue
+    }
+
+    // The reasoning ends at the first blank line; what follows is the answer.
+    if (role === 'thinking' && !line.flat) {
+      close()
+      role = 'agent'
+      buf = []
+      continue
+    }
+
     if (isToolStart(line.flat)) {
-      flush(blocks, role, buf)
+      close()
       headerPending = false
       const tool: RichLine[] = [line.rich]
       let j = i + 1
@@ -685,17 +764,27 @@ function cutBlocks(body: Cut[]): FeedBlock[] {
     if (role === 'user' && line.flat && !/^\s/.test(line.raw) && !headerPending) {
       // An unindented line after a user turn is the agent starting; an indented
       // one is the rest of what was typed.
-      flush(blocks, 'user', buf)
+      close()
       role = 'agent'
       buf = [line.rich]
       continue
     }
 
-    if (headerPending && line.flat) headerPending = false
+    if (headerPending && line.flat) {
+      headerPending = false
+      // The first line of a Grok turn carries the clock on its right edge.
+      // Off it comes, onto the card rather than into the words.
+      if (role === 'user') {
+        const split = splitClock(line.rich)
+        clock = split.clock
+        buf.push(split.line)
+        continue
+      }
+    }
     buf.push(line.rich)
   }
 
-  flush(blocks, role, buf)
+  close()
   return blocks
 }
 

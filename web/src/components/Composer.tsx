@@ -471,6 +471,7 @@ export function Composer({
           <button
             type="submit"
             className="composer__send"
+            data-draft={hasDraft ? 'true' : 'false'}
             disabled={!ready}
             aria-label={hasDraft ? 'Send' : 'Enter'}
             title={hasDraft ? 'Send' : 'Enter'}

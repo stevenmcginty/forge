@@ -31,7 +31,11 @@ export interface RichLine {
   text: string
 }
 
-export type FeedRole = 'user' | 'agent' | 'system' | 'tool'
+/**
+ * `thinking` is the agent's shown reasoning — Grok folds it under a
+ * `Thinking…` header — and is drawn folded on both faces, never as the answer.
+ */
+export type FeedRole = 'user' | 'agent' | 'system' | 'tool' | 'thinking'
 
 export interface FeedBlock {
   /** Role and position in the capture — stable across re-parses, not a uuid. */
@@ -40,6 +44,12 @@ export interface FeedBlock {
   lines: RichLine[]
   /** Plain text of the block, for copy and for tests. */
   text: string
+  /**
+   * The clock the TUI printed beside a user turn (`12:40 PM`), lifted off the
+   * end of the line so the words and the time can be set apart. Only Grok
+   * prints one so far; absent means the screen did not say.
+   */
+  clock?: string
 }
 
 /** The permission / approval mode an agent TUI reports in its footer. */
@@ -66,6 +76,11 @@ export interface PaneStatus {
   busy: boolean
   /** A short phrase for the busy state — "Thinking", "Running tool", "Baking…". */
   activity?: string
+  /**
+   * What is left of the plan's quota, as the TUI printed it — Grok's
+   * `Weekly limit left: 3%`. Nothing else prints one, so it is absent for the rest.
+   */
+  quota?: string
   /** The raw footer lines that were stripped, for a "show footer" affordance. */
   footer: string[]
 }
