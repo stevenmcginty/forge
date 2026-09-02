@@ -4280,11 +4280,22 @@ button.astatus__mode:not(:disabled):hover {
   box-shadow: none;
 }
 
-/* A thumb's pill: the same 36px the other top-bar buttons are tapped at. */
+/* A thumb's pill: the same 36px the other top-bar buttons are tapped at.
+ * Idle ink is primary, not dim — 9px `--text-dim` vanished on a phone. */
 .app[data-mobile] .titlebar__foreman {
-  min-height: 30px;
-  padding: 8px 7px;
-  font-size: 9px;
+  min-height: 36px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.app[data-mobile] .titlebar__foreman:not([data-on='true']):not([data-open='true']):not([data-status='done']):not([data-status='error']) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, rgba(255, 255, 255, 0.05));
+  border-color: color-mix(in srgb, var(--pane-accent, var(--accent)) 45%, var(--line-strong));
+}
+
+.app[data-mobile] .titlebar__foreman:disabled {
+  opacity: 0.7;
 }
 
 /* -------------------------------------------------------- topbar handoff
@@ -4380,9 +4391,19 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 .app[data-mobile] .titlebar__handoff {
-  min-height: 30px;
-  padding: 8px 7px;
-  font-size: 9px;
+  min-height: 36px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.app[data-mobile] .titlebar__handoff:not([data-open='true']):not([data-state='sent']):not([data-state='took']):not([data-state='waiting']) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, rgba(255, 255, 255, 0.05));
+  border-color: color-mix(in srgb, var(--pane-accent, var(--accent)) 45%, var(--line-strong));
+}
+
+.app[data-mobile] .titlebar__handoff:disabled {
+  opacity: 0.7;
 }
 
 .app[data-mobile] .titlebar__handoff-chip {
