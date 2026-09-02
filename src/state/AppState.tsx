@@ -1549,6 +1549,16 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     dispatch({ type: 'drainKills', ids })
   }, [state.pendingKills])
 
+  /**
+   * When a new agent pane counts as ready for a pasted brief: it has printed at
+   * least this much since spawn (a PowerShell prompt plus an echoed command is
+   * well under 1 KiB; every agent's welcome banner is several) and has then
+   * been silent this long (longer than the busy heuristic's own quiet, so a
+   * banner still being drawn does not count as finished).
+   */
+  const BRIEF_READY_BYTES = 1500
+  const BRIEF_READY_QUIET_MS = 1500
+
   /* ------------------------------------------------------- type draining
    *
    * Deliver each queued command once its pane has a live shell.
@@ -1579,6 +1589,19 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       for (const pending of queue) {
         if (delivered.includes(pending.paneId)) continue
         const runtime = terminalHost.runtime(pending.paneId)
+        // A pasted brief is for an agent, and "the shell is live" is not "the
+        // agent is listening": between the echoed bootstrap command and the
+        // agent's banner there is a silent gap while node loads, and a paste
+        // into it lands at the PowerShell prompt — which runs it. So a paste
+        // waits until the pane has printed a banner's worth and then gone
+        // quiet. See terminalHost.readiness. The deadline is the backstop: a
+        // pane that never says enough still gets its brief rather than losing
+        // it, on the strength of the bracketed paste being harmless anywhere
+        // an agent is actually up.
+        if (runtime.status === 'live' && pending.paste && Date.now() < deadline) {
+          const r = terminalHost.readiness(pending.paneId)
+          if (r.outputBytes < BRIEF_READY_BYTES || r.quietForMs < BRIEF_READY_QUIET_MS) continue
+        }
         if (runtime.status === 'live') {
           delivered.push(pending.paneId)
           setTimeout(() => {

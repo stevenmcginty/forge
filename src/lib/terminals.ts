@@ -295,6 +295,8 @@ interface Entry {
   /** When the last chunk arrived, so a gap can be measured. */
   busyLastOutput: number
   busyTimer: number | null
+  /** Bytes printed since this shell was spawned — see `readiness`. */
+  outputBytes: number
   /** The WebGL renderer, when this terminal currently has one. */
   webgl: { dispose(): void } | null
   webglWanted: boolean
@@ -438,6 +440,7 @@ class TerminalHost {
       const entry = this.entries.get(e.id)
       if (!entry) return
       entry.term.write(e.data)
+      entry.outputBytes += e.data.length
       if (entry.runtime.status === 'starting') this.setRuntime(entry, { status: 'live' })
       this.scanForRemoteUrl(entry, e.data)
       this.scanForDevUrl(entry, e.data)
@@ -1007,6 +1010,7 @@ class TerminalHost {
       busyRunStart: 0,
       busyLastOutput: 0,
       busyTimer: null,
+      outputBytes: 0,
       webgl: null,
       webglWanted: false,
       webglLoading: false,
@@ -1352,6 +1356,7 @@ class TerminalHost {
     // resizing a shell that is already right.
     entry.ptyDims = { cols: entry.term.cols, rows: entry.term.rows }
     this.setRuntime(entry, { status: 'starting', error: null, exitCode: null, remoteUrl: null })
+    entry.outputBytes = 0
     this.writeBootHeader(entry)
     const result = await window.forge.pty.create({
       id: entry.paneId,
@@ -1753,6 +1758,27 @@ class TerminalHost {
 
   runtime(paneId: string): PaneRuntime {
     return this.entries.get(paneId)?.runtime ?? IDLE_RUNTIME
+  }
+
+  /**
+   * How much this pane has said since it was spawned, and how long ago it last
+   * spoke — the two numbers a caller needs to tell "the agent is up and waiting"
+   * from "the shell is up and the agent is still loading".
+   *
+   * `live` alone cannot tell them apart: conpty reports the shell running, the
+   * bootstrap command is echoed, and then node spends a second or three loading
+   * the agent in silence. A brief pasted into that silence lands at the
+   * PowerShell prompt, and a PowerShell prompt runs it. An agent, by contrast,
+   * announces itself with a banner of a few kilobytes and then waits — so a
+   * pane that has printed plenty and then gone quiet is one you can paste into.
+   */
+  readiness(paneId: string): { outputBytes: number; quietForMs: number } {
+    const entry = this.entries.get(paneId)
+    if (!entry) return { outputBytes: 0, quietForMs: 0 }
+    return {
+      outputBytes: entry.outputBytes,
+      quietForMs: entry.busyLastOutput > 0 ? performance.now() - entry.busyLastOutput : 0
+    }
   }
 
   /**
