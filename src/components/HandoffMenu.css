@@ -1,0 +1,21 @@
+/* The Handoff target menu. Rows are Popover's; only the three spans are ours. */
+
+.hdmenu__name {
+  flex: 1;
+  min-width: 0;
+}
+
+.hdmenu__agent {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--t-eyebrow);
+}
+
+/* 'hand back' and 'tab default' — the two rows that are shortcuts rather than
+   choices. Tinted so the eye lands on them before it starts reading names. */
+.hdmenu__note {
+  flex: none;
+  color: var(--accent);
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.04em;
+}

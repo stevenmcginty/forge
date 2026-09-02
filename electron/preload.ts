@@ -11,6 +11,21 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   }
 }
 
+/**
+ * The same thing for a channel that carries two arguments.
+ *
+ * Only `handoff:changed` does — it pushes a project id alongside the list, so a
+ * renderer holding a stale project can drop a push meant for another one rather
+ * than having to fish the id back out of the records.
+ */
+function subscribe2<A, B>(channel: string, cb: (a: A, b: B) => void): () => void {
+  const listener = (_e: Electron.IpcRendererEvent, a: A, b: B): void => cb(a, b)
+  ipcRenderer.on(channel, listener)
+  return () => {
+    ipcRenderer.removeListener(channel, listener)
+  }
+}
+
 const api: ForgeApi = {
   info: () => ipcRenderer.invoke(IPC.appInfo),
 
@@ -272,6 +287,17 @@ const api: ForgeApi = {
     roster: (projectId, panes) => ipcRenderer.send(IPC.shareRoster, projectId, panes),
     reveal: (projectId, index) => ipcRenderer.send(IPC.shareReveal, projectId, index),
     onSnapshot: (cb) => subscribe(IPC.shareSnapshot, cb)
+  },
+
+  handoff: {
+    start: (projectId, req) => ipcRenderer.invoke(IPC.handoffStart, projectId, req),
+    list: (projectId) => ipcRenderer.invoke(IPC.handoffList, projectId),
+    read: (projectId, id) => ipcRenderer.invoke(IPC.handoffRead, projectId, id),
+    mark: (projectId, id, patch) => ipcRenderer.invoke(IPC.handoffMark, projectId, id, patch),
+    watch: (projectId) => ipcRenderer.invoke(IPC.handoffWatch, projectId),
+    unwatch: (projectId) => ipcRenderer.send(IPC.handoffUnwatch, projectId),
+    reveal: (projectId, id) => ipcRenderer.send(IPC.handoffReveal, projectId, id),
+    onChanged: (cb) => subscribe2(IPC.handoffChanged, cb)
   },
 
   tools: {

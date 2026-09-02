@@ -94,6 +94,7 @@ import { disposePlannerWatchers, registerPlannerWatcherHandlers } from './planne
 import { disposeGitWatchers, registerGitWatcherHandlers } from './git-watcher'
 import { disposeActivityWatchers, registerActivityHandlers } from './activity-watcher'
 import { disposeShareWatchers, registerShareHandlers } from './share-watcher'
+import { disposeHandoffWatchers, registerHandoffHandlers } from './handoff-watcher'
 import { registerToolsHandlers } from './tools'
 import { registerCommandsHandlers } from './commands'
 import {
@@ -1491,6 +1492,9 @@ void app
       // carries no dependency on the PTY host — the same arrangement mobile-host
       // is given for the same buffer.
       registerShareHandlers({ replayFor: getReplay })
+      // Handlers only, same as the three above: nothing is watched and no
+      // .forge/handoff folder exists until a pane actually starts a handoff.
+      registerHandoffHandlers()
       registerToolsHandlers()
       registerCommandsHandlers()
       registerUpdateHandlers()
@@ -1561,6 +1565,7 @@ app.on('before-quit', () => {
   safely('disposeGitWatchers', disposeGitWatchers)
   safely('disposeActivityWatchers', disposeActivityWatchers)
   safely('disposeShareWatchers', disposeShareWatchers)
+  safely('disposeHandoffWatchers', disposeHandoffWatchers)
   safely('disposeSttSidecar', disposeSttSidecar)
   safely('disposeSttModel', disposeSttModel)
   // Ends the Agent SDK session and its subprocess. A voice brain outliving the

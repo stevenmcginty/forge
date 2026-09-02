@@ -69,6 +69,7 @@ const CHECKS = [
   { name: 'rail:check', lane: 'fast' },
   { name: 'share:check', lane: 'fast', note: 'its live CLI probes self-skip when the CLIs are absent' },
   { name: 'share-link:check', lane: 'fast', note: 'a real named pipe (no port), plus the MCP server over stdio' },
+  { name: 'handoff:check', lane: 'fast', note: 'the pack format and the real store, over a temp project' },
   { name: 'tail:check', lane: 'fast' },
   { name: 'theme:check', lane: 'fast' },
   { name: 'updates:check', lane: 'fast' },

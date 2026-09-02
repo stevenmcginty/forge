@@ -98,6 +98,55 @@
   background: var(--danger-soft);
 }
 
+/* --------------------------------------------------------- handoff chip
+ *
+ * The same pill as the Foreman switch, deliberately: both say "something other
+ * than you is involved in this pane", and two shapes for one idea would be two
+ * things to learn. Quiet while the pack is being written — that is the ordinary
+ * state and it can last minutes — and lit once it has actually moved, because
+ * "this pane's work now lives somewhere else" is worth seeing across a room.
+ */
+
+.pane__handoff-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  max-width: 190px;
+  padding: 0 var(--s-3);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+  background: none;
+  color: var(--text-dim);
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.pane:hover .pane__handoff-chip,
+.pane[data-focused='true'] .pane__handoff-chip {
+  color: var(--text-muted);
+}
+
+.pane .pane__handoff-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-softer);
+}
+
+.pane .pane__handoff-chip[data-state='sent'],
+.pane .pane__handoff-chip[data-state='took'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
 /* ---------------------------------------------------------------- status */
 
 .pane__status {
@@ -125,6 +174,7 @@
 
 .pane:hover .pane__actions,
 .pane[data-focused='true'] .pane__actions,
+.pane[data-menu] .pane__actions,
 .pane:focus-within .pane__actions {
   opacity: 1;
 }
@@ -133,6 +183,13 @@
   width: 22px;
   height: 20px;
   padding: 0;
+}
+
+/* A button whose menu is open stays lit, so the strip does not read as if
+   nothing was clicked while the popover is covering half of it. */
+.pane .pane__action[data-open='true'] {
+  color: var(--accent);
+  background: var(--accent-softer);
 }
 
 /* --------------------------------------------------------- remote control */

@@ -652,6 +652,33 @@ export const IPC = {
   /** send — show a slot, or the folder, in Explorer. */
   shareReveal: 'share:reveal',
 
+  /*
+   * handoff — one agent handing its work to another, through a markdown pack in
+   * <project>\.forge\handoff.
+   *
+   * Write-capable, and safe for the same reason share's channels are: no path
+   * ever crosses this boundary. Every channel takes a project id and, where it
+   * names a pack, an *id* — `YYYYMMDD-HHMMSS-xxxx`, validated by `isHandoffId`
+   * before it is joined to anything. The set of files the renderer can reach is
+   * the packs in one folder and cannot be widened by getting a string wrong.
+   *
+   * `handoffChanged` carries the whole list rather than a delta: a project has a
+   * handful of packs, and a delta protocol is a second thing that can be wrong
+   * about what is on disk. `open → ready` is decided in main and pushed here, so
+   * a renderer never has to judge whether a pack is filled.
+   */
+  handoffStart: 'handoff:start',
+  handoffList: 'handoff:list',
+  /** The full body of one pack, fetched when it is about to be handed on. */
+  handoffRead: 'handoff:read',
+  /** Rewrite the header — the status and the target pane — never the body. */
+  handoffMark: 'handoff:mark',
+  handoffWatch: 'handoff:watch',
+  handoffUnwatch: 'handoff:unwatch',
+  /** send — show a pack, or the folder, in Explorer. */
+  handoffReveal: 'handoff:reveal',
+  handoffChanged: 'handoff:changed',
+
   // updates & tools (M10) — what is installed, what is available
   toolsProbe: 'tools:probe',
   toolsLatest: 'tools:latest',

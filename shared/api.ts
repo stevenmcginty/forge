@@ -45,6 +45,9 @@ import type {
   ShareSnapshot,
   ShareWriteRequest,
   ShareWriteResult,
+  HandoffBody,
+  HandoffRecord,
+  HandoffStartRequest,
   GhState,
   GitActionRequest,
   GitActionResult,
@@ -915,6 +918,39 @@ export interface ForgeApi {
     /** send — `null` reveals the folder itself. */
     reveal(projectId: string, index: number | null): void
     onSnapshot(cb: (s: ShareSnapshot) => void): () => void
+  }
+
+  /**
+   * Handing a pane's work to another pane: a markdown pack in
+   * `<project>\.forge\handoff`, written by the source agent and read by the
+   * target one.
+   *
+   * Every method that names a pack names it by id — there is deliberately no way
+   * to ask this API about a path, which is what bounds it to one folder per
+   * project. The status a caller sees is always one main has already written to
+   * disk: `start` creates an `open` pack, the watcher promotes it to `ready` when
+   * the agent has actually filled it, and `mark` is how the renderer records that
+   * a target pane has been handed the take-over prompt.
+   */
+  handoff: {
+    /** Create the pack — header, template, `open`. The prompt is the caller's to deliver. */
+    start(projectId: string, req: HandoffStartRequest): Promise<HandoffRecord | null>
+    /** Every pack in the project, newest first. */
+    list(projectId: string): Promise<HandoffRecord[]>
+    /** One pack's full body. Null for a pack that is not there or cannot be read. */
+    read(projectId: string, id: string): Promise<HandoffBody | null>
+    /** Rewrite the header and only the header; the body is left byte-identical. */
+    mark(
+      projectId: string,
+      id: string,
+      patch: Partial<Pick<HandoffRecord, 'status' | 'to' | 'toAgent' | 'toTitle'>>
+    ): Promise<HandoffRecord | null>
+    watch(projectId: string): Promise<{ ok: boolean; error?: string }>
+    /** send — teardown has nothing to await, same reason as share.unwatch. */
+    unwatch(projectId: string): void
+    /** send — `null` reveals the folder itself. */
+    reveal(projectId: string, id: string | null): void
+    onChanged(cb: (projectId: string, records: HandoffRecord[]) => void): () => void
   }
 
   /**

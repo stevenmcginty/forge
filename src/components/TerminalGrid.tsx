@@ -3,7 +3,7 @@ import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import type { TerminalTab, WorkspaceViewMode } from '@shared/types'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
-import { ACCENT_PALETTE, TAB_TEXT_PALETTE, isShellProfile, resolveProfile } from '@/lib/agents'
+import { ACCENT_PALETTE, TAB_TEXT_PALETTE, isShellProfile, resolveProfile, splitProfiles } from '@/lib/agents'
 import { TAB_DRAG_TYPE } from '@/lib/mosaicLayout'
 import { terminalHost } from '@/lib/terminals'
 import { useAnyBusy } from '@/hooks/usePaneRuntime'
@@ -25,6 +25,7 @@ import { MosaicView } from './MosaicView'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
 import { SkillsButton } from './SkillsFlyout'
 import { SplitView } from './SplitView'
+import { Toggle } from './settings/parts'
 import './TerminalGrid.css'
 
 /**
@@ -530,14 +531,19 @@ function Tab({
 /* -------------------------------------------------------------- tab menu */
 
 /**
- * Right-click a tab: two colours, a rename and a close.
+ * Right-click a tab: two colours, the tab's own settings, a rename and a close.
  *
- * They are deliberately separate colours rather than one that drives both. A
+ * The colours are deliberately separate rather than one that drives both. A
  * tab's colour is how you find it in the strip; its terminal colour is how you
  * know which session you are typing into once you are looking at the terminal
  * and the strip is out of mind. Wanting one without the other is the normal
  * case — two Claudes on the same project, one tinted so you cannot confuse
  * them — so neither implies the other.
+ *
+ * The settings below them belong to the tab because a tab is one job. The
+ * project answers for the folder; the tab answers for the work going on in it,
+ * and "leave it to the project" stays the first option on both selects so the
+ * tab is never forced to hold an opinion it does not have.
  */
 function TabMenu({
   tab,
@@ -552,10 +558,12 @@ function TabMenu({
   onClose: () => void
   onRename: () => void
 }): ReactNode {
-  const { actions } = useApp()
+  const { state, actions } = useApp()
+  const { agents, shells } = splitProfiles(state.settings.agentProfiles)
+  const settings = tab.settings
 
   return (
-    <Popover anchor={anchor} open={open} onClose={onClose} align="start" width={264} label="Tab colours">
+    <Popover anchor={anchor} open={open} onClose={onClose} align="start" width={288} label="Tab settings">
       <PopoverSection title="Tab colour">
         <Swatches
           label="Tab colour"
@@ -575,6 +583,66 @@ function TabMenu({
         <div className="popover__hint">
           Repaints this tab’s terminals. New tabs pick their own colour so no two look alike; this overrides it.
           Output that picks its own colour — Claude’s highlights, a diff, an error — keeps it.
+        </div>
+      </PopoverSection>
+
+      <PopoverSection title="Settings">
+        <div className="field">
+          <label className="field__label" htmlFor={`tab-agent-${tab.id}`}>
+            New panes open as
+          </label>
+          {/* Agents first, shells last: splitting to get a prompt is the rarer
+              want, and the list is read top-down. */}
+          <select
+            id={`tab-agent-${tab.id}`}
+            className="select"
+            value={settings?.defaultProfileId ?? ''}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={(e) => actions.setTabSettings(tab.id, { defaultProfileId: e.target.value || undefined })}
+          >
+            <option value="">Project default</option>
+            {[...agents, ...shells].map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field">
+          <label className="field__label" htmlFor={`tab-handoff-${tab.id}`}>
+            Hand off to
+          </label>
+          {/* Agents only. A handoff is a brief written for somebody who can read
+              it, and a shell cannot. */}
+          <select
+            id={`tab-handoff-${tab.id}`}
+            className="select"
+            value={settings?.handoffTargetId ?? ''}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={(e) => actions.setTabSettings(tab.id, { handoffTargetId: e.target.value || undefined })}
+          >
+            <option value="">Ask each time</option>
+            {agents.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="tab__menu-toggle">
+          <span className="tab__menu-name">Send handoffs without asking</span>
+          <Toggle
+            checked={settings?.handoffAutoSend === true}
+            label="Send handoffs without asking"
+            // Off is written as absent, not as `false`: the two mean the same
+            // thing to every reader, and one of them keeps the file clean.
+            onChange={(on) => actions.setTabSettings(tab.id, { handoffAutoSend: on || undefined })}
+          />
+        </div>
+        <div className="popover__hint">
+          Forge presses Enter on the handoff prompts for you. Off, you read them first.
         </div>
       </PopoverSection>
 

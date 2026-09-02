@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import '@xterm/xterm/css/xterm.css'
 import './theme/global.css'
 import { App } from './App'
+import { HandoffProvider } from './hooks/useHandoffFlow'
 import { OverlayApp } from './overlay/OverlayApp'
 import { AppStateProvider } from './state/AppState'
 import { DictationProvider } from './state/Dictation'
@@ -169,7 +170,12 @@ if (window.forge.overlay.isOverlay()) {
                   requests exactly once. Two copies would answer every request
                   twice and disagree about what each pane is doing. */}
               <ForemanProvider>
-                <App />
+                {/* And Handoff for the third time over: main keeps exactly one
+                    `handoff:watch`, so one subscription above the grid is what
+                    stops every pane's menu restarting every other pane's. */}
+                <HandoffProvider>
+                  <App />
+                </HandoffProvider>
               </ForemanProvider>
             </VoiceAgentProvider>
           </DictationProvider>

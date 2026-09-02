@@ -28,6 +28,7 @@ import type {
   RailSectionId,
   Settings,
   SplitDirection,
+  TabSettings,
   TaskCard,
   TerminalTab,
   ThemeCore,
@@ -54,7 +55,7 @@ import { DEFAULT_FOREMAN_BRIEF } from '@shared/foreman'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
 import { DEFAULT_RAIL_OPEN } from '@shared/rail'
-import { ACCENT_PALETTE, DEFAULT_PROFILE_ID } from '@/lib/agents'
+import { ACCENT_PALETTE, DEFAULT_PROFILE_ID, tabDefaultProfileId } from '@/lib/agents'
 import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
 import { emptyMosaic, sanitiseMosaic } from '@/lib/mosaicLayout'
@@ -127,7 +128,8 @@ interface PendingType {
    * multi-sentence brief — see the git section's handoff prompts, which are the
    * only caller. `paste()` keeps the shape of the text and is bracketed-paste
    * safe, which is why the tab handover already uses it for the same class of
-   * thing. Never submitted either way.
+   * thing. Not submitted either way unless `submit` says so — which only a
+   * handoff on a tab with `handoffAutoSend` on ever asks for.
    */
   paste?: boolean
 }
@@ -396,12 +398,19 @@ type Action =
   | { type: 'selectTab'; tabId: string }
   | { type: 'renameTab'; tabId: string; title: string }
   | { type: 'paintTab'; tabId: string; patch: TabPaint }
+  | { type: 'setTabSettings'; tabId: string; patch: Partial<TabSettings> }
   | { type: 'moveTab'; from: number; to: number }
   | {
       type: 'splitPane'
       paneId: string
       direction: SplitDirection
-      profileId: string
+      /**
+       * `null` = the caller has no opinion, so the reducer picks: the owning
+       * tab's own default first, its project's behind that. Kept as a decision
+       * the reducer makes rather than one the binding makes, because only the
+       * reducer knows which tab the pane is actually in.
+       */
+      profileId: string | null
       permissionMode?: ClaudePermissionMode
     }
   | { type: 'closePane'; paneId: string }
@@ -559,6 +568,28 @@ function painted(tab: TerminalTab, patch: TabPaint): TerminalTab {
     if (patch.textColor) next.textColor = patch.textColor
     else delete next.textColor
   }
+  return next
+}
+
+/**
+ * Merge a patch into a tab's own settings, dropping anything set to
+ * `undefined` rather than storing it.
+ *
+ * Same reasoning as `painted` above: absent is what every reader treats as
+ * "ask the project", so "back to the default" has to actually remove the key,
+ * or the workspace on disk fills with `"defaultProfileId": undefined`-shaped
+ * noise that means the same thing as nothing. A settings object left with no
+ * keys goes too.
+ */
+function tabSettled(tab: TerminalTab, patch: Partial<TabSettings>): TerminalTab {
+  const settings: TabSettings = { ...tab.settings }
+  for (const [key, value] of Object.entries(patch) as [keyof TabSettings, unknown][]) {
+    if (value === undefined) delete settings[key]
+    else Object.assign(settings, { [key]: value })
+  }
+  const next: TerminalTab = { ...tab }
+  if (Object.keys(settings).length) next.settings = settings
+  else delete next.settings
   return next
 }
 
@@ -1001,6 +1032,12 @@ function reducer(state: AppState, action: Action): AppState {
         tabs: ws.tabs.map((t) => (t.id === action.tabId ? painted(t, action.patch) : t))
       }))
 
+    case 'setTabSettings':
+      return mapActiveWorkspace(state, (ws) => ({
+        ...ws,
+        tabs: ws.tabs.map((t) => (t.id === action.tabId ? tabSettled(t, action.patch) : t))
+      }))
+
     case 'moveTab':
       return mapActiveWorkspace(state, (ws) => {
         const tabs = move(ws.tabs, action.from, action.to)
@@ -1020,7 +1057,18 @@ function reducer(state: AppState, action: Action): AppState {
       if (countLeaves(home.tab.root) >= MAX_PANES_PER_TAB) {
         return { ...state, notice: `A tab holds at most ${MAX_PANES_PER_TAB} panes` }
       }
-      const leaf = makeLeaf(action.profileId, '', action.permissionMode)
+      // What the new pane opens on, when the caller did not say: the tab's own
+      // default, then the owning project's — the project the pane lives in, not
+      // whichever one is on screen, for the same reason the split lands beside
+      // the named pane rather than in the active tab.
+      const profileId =
+        action.profileId ??
+        tabDefaultProfileId(
+          home.tab,
+          state.settings.agentProfiles,
+          state.projects.find((p) => p.id === home.projectId)?.defaultProfileId ?? DEFAULT_PROFILE_ID
+        )
+      const leaf = makeLeaf(profileId, '', action.permissionMode)
       return mapWorkspace(state, home.projectId, (ws) => ({
         ...ws,
         tabs: ws.tabs.map((t) =>
@@ -1334,13 +1382,24 @@ export interface AppActions {
    * twice over: a tool pane opens on a shell and may submit itself, an agent
    * pane opens on the project's own default agent and never does. The caller is
    * the git section, for the jobs Forge hands to an agent instead of doing.
+   *
+   * `opts` is for the one caller that knows better than both defaults: a handoff
+   * names the profile the person picked out of the menu, and submits only when
+   * the tab's `handoffAutoSend` says it may. Absent, both answers are the ones
+   * above — the project's default agent, and never Enter.
    */
-  openAgentPane(title: string, prompt: string): void
+  openAgentPane(title: string, prompt: string, opts?: { profileId?: string; submit?: boolean }): void
   closeTab(tabId: string): void
   selectTab(tabId: string): void
   renameTab(tabId: string, title: string): void
   /** Recolour a tab's chip, its terminals' text, or both. `null` clears one. */
   paintTab(tabId: string, patch: TabPaint): void
+  /**
+   * Change what this tab decides for itself. The patch merges, so one field can
+   * be set without naming the others, and `undefined` on a field puts it back to
+   * "ask the project" rather than storing an empty answer.
+   */
+  setTabSettings(tabId: string, patch: Partial<TabSettings>): void
   moveTab(from: number, to: number): void
   splitPane(
     paneId: string,
@@ -1532,7 +1591,17 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
               // the terminal lost focus will drop the paste that follows it.
               terminalHost.focus(pending.paneId)
               requestAnimationFrame(() => {
-                if (!cancelled) terminalHost.paste(pending.paneId, pending.text)
+                if (cancelled) return
+                terminalHost.paste(pending.paneId, pending.text)
+                // A pasted brief can be submitted too, and one caller asks for
+                // it: a handoff on a tab with auto-send on. Another frame first
+                // — the bracketed paste and its terminator have to be down the
+                // pipe before the newline that submits them.
+                if (pending.submit) {
+                  requestAnimationFrame(() => {
+                    if (!cancelled) terminalHost.submit(pending.paneId)
+                  })
+                }
               })
               return
             }
@@ -1844,19 +1913,24 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           submit: submit ?? state.settings.updatesAutoRun
         })
       },
-      openAgentPane: (title, prompt) => {
+      openAgentPane: (title, prompt, opts) => {
         // The project's own default agent, not a shell and not a fixed profile:
         // a brief written for "an agent" belongs to whichever one this project
         // works with, and a Codex project should not have Claude opened at it.
+        // Unless the caller named one — see openAgentPane's `opts`.
+        const wanted = opts?.profileId
         dispatch({
           type: 'openToolPane',
-          profileId: defaultProfileFor(activeProjectId),
+          profileId:
+            wanted && state.settings.agentProfiles.some((p) => p.id === wanted)
+              ? wanted
+              : defaultProfileFor(activeProjectId),
           title: title.slice(0, 40),
           text: prompt,
           // Typed, never submitted — the same contract dictation, task cards and
           // the tab handover all honour. Pasted rather than typed because these
           // are multi-sentence briefs; see PendingType.paste.
-          submit: false,
+          submit: opts?.submit === true,
           paste: true
         })
       },
@@ -1865,13 +1939,14 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       selectTab: (tabId) => dispatch({ type: 'selectTab', tabId }),
       renameTab: (tabId, title) => dispatch({ type: 'renameTab', tabId, title }),
       paintTab: (tabId, patch) => dispatch({ type: 'paintTab', tabId, patch }),
+      setTabSettings: (tabId, patch) => dispatch({ type: 'setTabSettings', tabId, patch }),
       moveTab: (from, to) => dispatch({ type: 'moveTab', from, to }),
       splitPane: (paneId, direction, profileId, permissionMode) =>
         dispatch({
           type: 'splitPane',
           paneId,
           direction,
-          profileId: profileId ?? defaultProfileFor(activeProjectId),
+          profileId: profileId ?? null,
           ...(permissionMode ? { permissionMode } : {})
         }),
       closePane: (paneId) => dispatch({ type: 'closePane', paneId }),
@@ -2010,7 +2085,9 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId)
           const paneId = op.paneId ?? activeTab?.activePaneId
           if (!paneId) return answer('There is no pane open to split.')
-          actions.splitPane(paneId, 'row', op.profileId ?? project.defaultProfileId, mode)
+          // No profile named means no opinion: the same ladder the split button
+          // climbs — the tab's own default, then the project's.
+          actions.splitPane(paneId, 'row', op.profileId, mode)
           return answer()
         }
         case 'close-pane':
@@ -2083,8 +2160,9 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           const paneId = op.paneId ?? activeTab?.activePaneId
           if (!paneId) return answer('There is no pane open to split.')
           // The browser's own default when it sends nothing, matching the
-          // desktop's split button rather than inventing a third answer.
-          actions.splitPane(paneId, op.direction === 'column' ? 'column' : 'row', op.profileId ?? project.defaultProfileId, mode)
+          // desktop's split button rather than inventing a third answer: the
+          // tab's own default first, the owning project's behind it.
+          actions.splitPane(paneId, op.direction === 'column' ? 'column' : 'row', op.profileId, mode)
           return answer()
         }
         case 'close-pane':

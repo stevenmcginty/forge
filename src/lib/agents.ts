@@ -1,4 +1,4 @@
-import type { AgentProfile, ClaudePermissionMode, PaneLeaf, ProfileKind } from '@shared/types'
+import type { AgentProfile, ClaudePermissionMode, PaneLeaf, ProfileKind, TabSettings } from '@shared/types'
 import {
   ACCENT_PALETTE,
   BUILTIN_AGENT_PROFILES,
@@ -78,6 +78,26 @@ export function splitProfiles(profiles: AgentProfile[]): { shells: AgentProfile[
   const agents: AgentProfile[] = []
   for (const p of profiles) (isShellProfile(p) ? shells : agents).push(p)
   return { shells, agents }
+}
+
+/**
+ * The profile a new pane inside `tab` should open on: the tab's own answer if
+ * it still has one, else the caller's fallback (the project's default).
+ *
+ * The existence check is the point. A tab keeps the id of a profile the user
+ * may later delete or rename away, and a pane opened onto a dead id would fall
+ * all the way back to a bare shell — a tab quietly losing its agent months
+ * after somebody tidied the roster. One rule, used everywhere a pane is born
+ * inside a tab, so the split button and a phone's layout op cannot disagree.
+ */
+export function tabDefaultProfileId(
+  tab: { settings?: TabSettings } | null | undefined,
+  profiles: AgentProfile[],
+  fallback: string
+): string {
+  const wanted = tab?.settings?.defaultProfileId
+  if (wanted && profiles.some((p) => p.id === wanted)) return wanted
+  return fallback
 }
 
 export function profileKind(profile: AgentProfile): ProfileKind {

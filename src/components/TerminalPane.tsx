@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { PaneLeaf, Project } from '@shared/types'
+import { useHandoffFlow } from '@/hooks/useHandoffFlow'
 import { isPaneDead, paneStatusLabel, usePaneRuntime } from '@/hooks/usePaneRuntime'
 import {
   isClaudeCommand,
+  isShellProfile,
   launchCommand,
   leafPermissionMode,
   paneDisplayTitle,
   permissionChip,
   resolveProfile
 } from '@/lib/agents'
+import { handoffTargets, paneHandoffChip } from '@/lib/handoffview'
 import { PATH_DRAG_TYPE, TAB_DRAG_TYPE, TASK_DRAG_TYPE } from '@/lib/mosaicLayout'
 import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { collectLeaves } from '@/lib/splitTree'
@@ -19,6 +22,7 @@ import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
 import { ForemanFooter, ForemanSeed, ForemanToggle } from './ForemanBar'
+import { HandoffMenu } from './HandoffMenu'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow } from './Popover'
 import './TerminalPane.css'
@@ -81,10 +85,12 @@ export function TerminalPane({
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const splitBtnRef = useRef<HTMLButtonElement | null>(null)
+  const handoffBtnRef = useRef<HTMLButtonElement | null>(null)
   const phoneBtnRef = useRef<HTMLButtonElement | null>(null)
   const menuAnchorRef = useRef<HTMLSpanElement | null>(null)
   const [chooser, setChooser] = useState<null | 'row' | 'column'>(null)
   const [phoneOpen, setPhoneOpen] = useState(false)
+  const [handoffOpen, setHandoffOpen] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean; draft: number } | null>(null)
   const [dropping, setDropping] = useState(false)
   const runtime = usePaneRuntime(leaf.id)
@@ -108,6 +114,35 @@ export function TerminalPane({
   const foremanAble = isClaudeCommand(profile.command)
   const [seedOpen, setSeedOpen] = useState(false)
   const [logOpen, setLogOpen] = useState(false)
+
+  /*
+   * Handoff.
+   *
+   * Agent panes only, and for the same reason the rail's hand-off refuses a
+   * shell: the gesture asks this pane to *write a page of prose* into a file,
+   * which at a PowerShell prompt is a very long command that does not exist.
+   *
+   * The pane's own tab rather than the active one — the mosaic draws panes from
+   * every tab at once, and a pane's auto-send and default target belong to the
+   * tab it lives in, not to whichever one happens to be selected.
+   */
+  const handoff = useHandoffFlow()
+  const paneTab = workspace.tabs.find((t) => collectLeaves(t.root).some((l) => l.id === leaf.id)) ?? null
+  const handoffAble = !isShellProfile(profile)
+  const handoffAutoSend = paneTab?.settings?.handoffAutoSend === true
+  const handoffChip = paneHandoffChip(leaf.id, handoff.records)
+  // Only while the menu is open: this walks every pane in the project, and a
+  // wall of twelve panes would walk it twelve times on every render otherwise.
+  const targets = handoffOpen
+    ? handoffTargets({
+        paneId: leaf.id,
+        tab: paneTab,
+        workspace,
+        profiles: state.settings.agentProfiles,
+        records: handoff.records,
+        isLive: (id) => terminalHost.runtime(id).status === 'live'
+      })
+    : []
 
   // The spec only matters on first attach; keep it in a ref so a font-size
   // change never tears the terminal down.
@@ -363,6 +398,10 @@ export function TerminalPane({
       data-focused={focused}
       data-status={runtime.status}
       data-dropping={dropping ? 'true' : undefined}
+      // The actions strip only appears on hover, and the handoff menu is opened
+      // from it — moving the pointer to the menu would otherwise take the
+      // button it is anchored to off the screen underneath it.
+      data-menu={handoffOpen ? 'handoff' : undefined}
       style={{ '--pane-accent': profile.accent } as React.CSSProperties}
       onPointerDownCapture={claimFocus}
       onFocusCapture={claimFocus}
@@ -436,6 +475,22 @@ export function TerminalPane({
           </span>
         ) : null}
 
+        {/* A handoff in flight, outside .pane__actions for the same reason the
+            phone glyph is: it is a standing fact about the pane, and the one
+            thing telling you an agent was asked to write a pack and has not.
+            Clicking shows the pack itself. */}
+        {handoffChip ? (
+          <button
+            type="button"
+            className="pane__handoff-chip"
+            data-state={handoffChip.state}
+            title={handoffChip.title}
+            onClick={() => handoff.reveal(handoffChip.id)}
+          >
+            {handoffChip.label}
+          </button>
+        ) : null}
+
         <ActivityDot paneId={leaf.id} status={runtime.status} />
 
         {statusLabel ? <span className="pane__status mono">{statusLabel}</span> : null}
@@ -471,6 +526,19 @@ export function TerminalPane({
               onClick={() => actions.restartPane(leaf.id)}
             >
               <Icon name="restart" size={13} />
+            </button>
+          ) : null}
+          {handoffAble ? (
+            <button
+              ref={handoffBtnRef}
+              type="button"
+              className="ghost-btn pane__action"
+              data-open={handoffOpen ? 'true' : undefined}
+              title="Hand off… — ask this agent to write a handoff pack for another one"
+              aria-label="Hand off"
+              onClick={() => setHandoffOpen((v) => !v)}
+            >
+              <Icon name="send" size={13} />
             </button>
           ) : null}
           <button
@@ -630,6 +698,19 @@ export function TerminalPane({
           </button>
         </div>
       </Popover>
+
+      <HandoffMenu
+        anchor={handoffBtnRef.current}
+        open={handoffOpen}
+        onClose={() => setHandoffOpen(false)}
+        targets={targets}
+        profiles={state.settings.agentProfiles}
+        autoSend={handoffAutoSend}
+        onPick={(target) => {
+          setHandoffOpen(false)
+          void handoff.handOff(leaf.id, target)
+        }}
+      />
 
       <AgentChooser
         anchor={splitBtnRef.current}

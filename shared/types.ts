@@ -187,6 +187,28 @@ export interface TerminalTab {
    * Output that names its own ANSI colour keeps it — that is the point of it.
    */
   textColor?: string
+  /**
+   * The tab's own preferences. Optional so tabs written before it existed still
+   * load, and every field inside it optional for the same reason: nothing
+   * writes a default here, each reader falls back to the project's answer.
+   */
+  settings?: TabSettings
+}
+
+/**
+ * What a tab decides for itself, rather than inheriting from its project.
+ *
+ * A tab is one job — one repo, one agent, one line of work — so the answers a
+ * job needs are answers the tab is better placed to give than the project is.
+ * Absent always means "ask the project", never "no".
+ */
+export interface TabSettings {
+  /** Profile new panes in this tab open with (split, hire). Absent = the project default. */
+  defaultProfileId?: string
+  /** Profile the Handoff button offers first. Absent = ask each time. */
+  handoffTargetId?: string
+  /** Let Forge press Enter on handoff prompts. Off by default — briefs are typed, never submitted. */
+  handoffAutoSend?: boolean
 }
 
 /**
@@ -654,6 +676,76 @@ export interface ShareWriteResult {
   slot?: ShareSlot
   /** Freshly re-read, like GitActionResult — no UI ever shows a pre-write answer. */
   snapshot?: ShareSnapshot
+}
+
+/* ------------------------------------------------------------------ handoff */
+
+/**
+ * Where a handoff pack is in its short life.
+ *
+ * `open` — Forge created the file with the empty template and is waiting for the
+ * source agent to fill it. `ready` — the body has been filled, so the pack can be
+ * handed on. `taken` — the target pane has been given the take-over prompt.
+ *
+ * The `open → ready` promotion is made in the main process (see
+ * electron/handoff-watcher.ts) rather than inferred in the renderer, so no two
+ * views can disagree about whether a pack is handable yet.
+ */
+export type HandoffStatus = 'open' | 'ready' | 'taken'
+
+/**
+ * One handoff pack, as everything but its body sees it.
+ *
+ * The file is the truth — this is what `.forge/handoff/<id>.md`'s front matter
+ * says, plus the two things only the body can answer (`bytes`, `filled`). Forge
+ * keeps no index, so a record is always something just read off disk.
+ */
+export interface HandoffRecord {
+  /** `YYYYMMDD-HHMMSS-xxxx`, and the filename. No caller ever passes a path. */
+  id: string
+  title: string
+  status: HandoffStatus
+  /** The source pane's Forge id. */
+  from: string
+  /** The source profile's name: 'Claude', 'Antigravity', … */
+  fromAgent: string
+  /** The source pane's display title, for a sentence a person reads. */
+  fromTitle: string
+  /** The target pane's Forge id. Empty until a target has been chosen. */
+  to: string
+  toAgent: string
+  toTitle: string
+  /** The handoff this one replies to, or '' — how a hand-back finds its way home. */
+  origin: string
+  /** Epoch ms. The file's mtime when the front matter does not say. */
+  createdAt: number
+  updatedAt: number
+  /** Absolute path to the source pane's Claude JSONL transcript, or ''. */
+  transcript: string
+  bytes: number
+  /** Has the agent actually written the pack? `isFilled` in shared/handoff.ts. */
+  filled: boolean
+}
+
+/** A pack and its text, as `read()` answers. */
+export interface HandoffBody {
+  record: HandoffRecord
+  body: string
+}
+
+/** What the renderer says to start one. Everything but the id, which Forge makes. */
+export interface HandoffStartRequest {
+  title?: string
+  from?: string
+  fromAgent?: string
+  fromTitle?: string
+  to?: string
+  toAgent?: string
+  toTitle?: string
+  /** The pack this one hands back to, if it is a hand-back. */
+  origin?: string
+  /** The source pane's transcript path, if it has one. */
+  transcript?: string
 }
 
 export interface Workspace {
