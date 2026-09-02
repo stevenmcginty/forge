@@ -10,8 +10,9 @@ import {
   type MobileSession,
   type ServerFrame
 } from '@shared/mobile'
-import type { AgentProfile, Project, Workspace } from '@shared/types'
+import type { AgentProfile, HandoffRecord, Project, Workspace } from '@shared/types'
 import type { ForemanState } from '@shared/foreman'
+import type { HandoffTargetWire } from '@shared/handoffview'
 
 /**
  * The phone's end of the Forge Mobile link.
@@ -77,6 +78,14 @@ export interface LinkPicture {
    * been driven has no entry, which reads the same as `off`.
    */
   foreman: Record<string, ForemanState>
+  /**
+   * Every project's handoff packs, keyed by project id. From `hello-ok` on
+   * connect and kept current by the `handoff` push — a project with no packs has
+   * an empty array, and one the desktop has never mentioned has no entry, which
+   * reads the same. Every project rather than the one on screen: the desktop
+   * watches one folder at a time and this phone may be reading any of them.
+   */
+  handoff: Record<string, HandoffRecord[]>
   /**
    * The desktop's *window*, as distinct from the link to it.
    *
@@ -372,6 +381,20 @@ export class Link {
 
   foremanStop(projectId: string, paneId: string): void {
     this.send({ t: 'op', op: 'foreman-stop', projectId, paneId })
+  }
+
+  /**
+   * Hand one pane's work to another agent, as an `op` — the same authorisation
+   * a layout verb rides, and the same frame. Unlike Foreman's two verbs beside
+   * it this one is performed by the desktop's *renderer*, which owns the whole
+   * flow; the packs that result come back as `handoff` pushes, so there is
+   * nothing here to return. A refusal arrives as an `err` frame, like any op's.
+   *
+   * `target` is one of the three kinds in `HandoffTargetWire`; build it from a
+   * menu row with `handoffTargetWire`, so the phone and the desk offer one list.
+   */
+  handoffStart(projectId: string, paneId: string, target: HandoffTargetWire): void {
+    this.send({ t: 'op', op: 'handoff-start', projectId, paneId, target })
   }
 
   /**
@@ -726,6 +749,20 @@ export class Link {
         return
       }
 
+      case 'handoff': {
+        // Coerced, not trusted, like the frame above it: a list that is not a
+        // list is dropped rather than merged. The whole list replaces that
+        // project's entry — the files are the truth and the desktop has read
+        // them; there is no delta here to reassemble.
+        if (!this.picture || typeof frame.projectId !== 'string' || !Array.isArray(frame.records)) return
+        this.picture = {
+          ...this.picture,
+          handoff: { ...this.picture.handoff, [frame.projectId]: frame.records }
+        }
+        this.handlers.onPicture(this.picture)
+        return
+      }
+
       case 'desktop': {
         // Coerced, not trusted, like every handler here. Anything that is not
         // one of the two known words is dropped rather than shown: the only
@@ -814,6 +851,9 @@ function pictureOf(frame: HelloOkFrame): LinkPicture {
     // Absent is an older desktop, which reads the same as an empty map:
     // nothing is being driven.
     foreman: Object.fromEntries((frame.foreman ?? []).map((state) => [state.paneId, state])),
+    // The same snapshot rule: absent is an older desktop, which reads as no
+    // handoffs anywhere.
+    handoff: Object.fromEntries((frame.handoff ?? []).map((entry) => [entry.projectId, entry.records])),
     // A fresh `hello-ok` is a renderer that got far enough to answer, so any
     // recovery this phone was told about is over — including the case the
     // `ready` frame cannot cover, where the socket dropped during the reload.

@@ -1147,3 +1147,174 @@ body {
 .pane:has(.foreman-log) {
   position: relative;
 }
+
+/* ------------------------------------------------------- handoff in a pane
+ *
+ * The button in the bar, the chip under the pane's name, and the sheet of
+ * targets — the phone's half of Handoff. Same family again: the bar's outline
+ * and radius, `--volt` for "this is open", and the sheet built exactly like
+ * Foreman's decision log, because a phone has one way of showing a list over a
+ * terminal and it should not have two.
+ */
+
+/* Every pane but a shell. Words rather than a glyph — see .bar-tv, which is
+   the same argument on the project bar. */
+.bar-handoff {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 10px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font: 600 13px/1 system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+.bar-handoff[data-on='true'] {
+  border-color: var(--volt);
+  color: var(--volt);
+}
+
+/* The sub-line becomes a row once the chip joins the geometry on it, and
+   wraps rather than squeezing: three controls on the right of a 390px bar
+   leave about 150px here, and "Handed off → Claude Code" is longer than that
+   — cut to "Handed off →" it would name nobody. */
+.bar-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+/* A handoff in flight. Takes the second line whole when it needs one, and
+   only truncates against the full width of the bar. */
+.handoff-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--volt);
+}
+
+/* Waiting on an agent that was asked and has not answered — the one state
+   worth a second glance, and the reason the chip exists at all. */
+.handoff-chip[data-state='waiting'] {
+  color: var(--warn);
+}
+
+/* The sheet of targets, over the terminal like the decision log. */
+.handoff-sheet {
+  position: absolute;
+  inset: auto 0 0 0;
+  max-height: 70%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-radius: var(--radius) var(--radius) 0 0;
+  z-index: 5;
+}
+
+.handoff-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.handoff-sheet-title {
+  font: 600 14px/1 system-ui, sans-serif;
+  color: var(--ink);
+}
+
+.handoff-sheet-close {
+  min-width: 44px;
+  min-height: 44px;
+  background: none;
+  border: 0;
+  color: var(--dim);
+  font-size: 15px;
+}
+
+.handoff-sheet-list {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Where the running agents end and the ones that cost a pane and a boot
+   begin — the desk draws a rule here and says the same three words. */
+.handoff-sheet-group {
+  margin: 10px 6px 4px;
+  font: 600 10px/1 var(--font-mono, monospace);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.handoff-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 6px;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ink);
+  font: 14px/1.35 system-ui, sans-serif;
+  text-align: left;
+}
+
+.handoff-row:active {
+  background: var(--bg);
+}
+
+/* Hand back is first and is the answer nine times out of ten, so it is the
+   one row that says so without being read. */
+.handoff-row[data-kind='back'] .handoff-row-name {
+  color: var(--volt);
+}
+
+.handoff-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handoff-row-note {
+  flex: 0 0 auto;
+  font: 11px/1 var(--font-mono, monospace);
+  color: var(--dim);
+}
+
+.handoff-sheet-empty,
+.handoff-sheet-hint {
+  margin: 0;
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--dim);
+}
+
+.handoff-sheet-hint {
+  border-top: 1px solid var(--line);
+  padding-bottom: calc(10px + var(--sa-bottom));
+}
+
+/* Like the log above it: a pane carrying the sheet becomes its box. */
+.pane:has(.handoff-sheet) {
+  position: relative;
+}

@@ -190,6 +190,14 @@ async function main() {
    * rule. The phases below therefore read one resize as one size.
    */
   const owners = new GridOwners({ apply: (id, cols, rows) => manager.resize(id, cols, rows) })
+  /*
+   * Handoff's hook, as a recorder. The flow itself is the desktop *renderer's*
+   * and there is none in this process — which is the point of the hook — so
+   * what this file can prove is what this server owns: the boundary rules, and
+   * that a parsed target reaches the host verbatim.
+   */
+  const handoffStarts = []
+  const handoffSnapshot = []
   const makeServer = (auth) =>
     new MobileServer({
       auth,
@@ -202,7 +210,16 @@ async function main() {
       },
       resize: (id, cols, rows, viewer) => owners.noteWish(id, viewer, cols, rows),
       release: (viewer, id) => owners.release(viewer, id),
-      snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: {} }),
+      snapshot: () => ({
+        projects: PROJECTS,
+        profiles: PROFILES,
+        workspaces: {},
+        handoff: handoffSnapshot.map((entry) => ({ ...entry }))
+      }),
+      handoffStart: async (request, deviceName) => {
+        handoffStarts.push({ ...request, deviceName })
+        return null
+      },
       dispatchOp: async (op) => {
         ops.push(op)
         if (!engine) return opAnswer
@@ -656,6 +673,84 @@ async function main() {
     'and the phone hears no refusal — the sentence about no window open is gone for an op main can perform'
   )
   log(manager.list().some((x) => x.id === 'm1'), 'while the pane nobody closed is still running')
+
+  /* ------------------------------------------------------ 10d. handoff
+   *
+   * Handing a pane's work to another agent, from a phone. It rides the same
+   * `op` frame the layout verbs do and is held to the same authorisation, but
+   * it goes somewhere neither of them does: not the layout engine and not
+   * main's own Foreman, but the desktop's *renderer*, which owns the whole flow
+   * — the pack, the ask, the watch on the file, the take-over prompt. So the
+   * op is intercepted before the layout dispatch, and what is asserted here is
+   * that interception plus the closed target list in shared/handoffview.ts.
+   */
+
+  const PACK = {
+    id: '20260902-141233-9f0a',
+    title: 'The sync endpoint',
+    status: 'ready',
+    from: 'm1',
+    fromAgent: 'Claude',
+    fromTitle: 'main',
+    to: '',
+    toAgent: 'Codex',
+    toTitle: '',
+    origin: '',
+    createdAt: 1,
+    updatedAt: 2,
+    transcript: '',
+    bytes: 120,
+    filled: true
+  }
+
+  server.pushHandoff('p1', [PACK])
+  await waitFor(() => phone.first('handoff'), 5000, 'the handoff frame')
+  log(
+    phone.first('handoff').projectId === 'p1' && phone.first('handoff').records[0]?.id === PACK.id,
+    'a handoff list pushed on the desktop reaches a connected phone as a handoff frame'
+  )
+
+  // The snapshot half, project by project — the desktop watches one folder at a
+  // time and a phone may be reading any of them.
+  handoffSnapshot.push({ projectId: 'p1', records: [PACK] })
+  const handoffPhone = await authenticatedClient(auth, 'phone-handoff', 'Pixel')
+  log(
+    handoffPhone.first('hello-ok').handoff?.[0]?.projectId === 'p1' &&
+      handoffPhone.first('hello-ok').handoff[0].records[0]?.id === PACK.id,
+    'and hello-ok carries the packs project by project, so a reconnecting phone draws the chips from the snapshot'
+  )
+
+  const opsBeforeHandoff = ops.length
+  const errorsBeforeHandoff = phone.of('err').length
+  phone.send({ t: 'op', op: 'handoff-start', projectId: 'p1', paneId: 'never-existed', target: { kind: 'back' } })
+  await waitFor(() => phone.of('err').length > errorsBeforeHandoff, 5000, 'the unknown-session handoff-start')
+  log(
+    phone.of('err').at(-1).code === 'unknown-session' && handoffStarts.length === 0,
+    'handoff-start for a pane the phone cannot see is refused as unknown-session, and the host was never asked'
+  )
+
+  // Refused, never coerced: a target is a choice out of a closed list, and
+  // guessing which of the three was meant is worse than saying so.
+  const errorsBeforeBadTarget = phone.of('err').length
+  phone.send({ t: 'op', op: 'handoff-start', projectId: 'p1', paneId: 'm1', target: { kind: 'somewhere-else' } })
+  await waitFor(() => phone.of('err').length > errorsBeforeBadTarget, 5000, 'the bad-frame handoff-start')
+  log(
+    phone.of('err').at(-1).code === 'bad-frame' && handoffStarts.length === 0,
+    'a target kind this desktop does not know is bad-frame, and the host was never asked'
+  )
+
+  phone.send({ t: 'op', op: 'handoff-start', projectId: 'p1', paneId: 'm1', target: { kind: 'pane', paneId: 'm-keep' } })
+  await waitFor(() => handoffStarts.length > 0, 5000, 'the healthy handoff-start')
+  log(
+    handoffStarts[0].paneId === 'm1' &&
+      handoffStarts[0].target.kind === 'pane' &&
+      handoffStarts[0].target.paneId === 'm-keep',
+    'while handoff-start for a live pane reaches the host with the parsed target'
+  )
+  log(
+    ops.length === opsBeforeHandoff,
+    'and never reaches the layout dispatch — a handoff is the renderer\'s, not the engine\'s'
+  )
 
   engine = null
   opAnswer = null

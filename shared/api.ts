@@ -100,6 +100,7 @@ import type {
   ForemanToolResult
 } from './foreman'
 import type { WebMirrorChunk, WebMirrorConfig } from './web'
+import type { HandoffStartRemoteEvent } from './handoffview'
 import type { SkillSource, SkillsList } from './skills'
 import type { PackPlugin, SkillPack } from './skillpack'
 import type { CommandsFeed } from './commands'
@@ -951,6 +952,17 @@ export interface ForgeApi {
     /** send — `null` reveals the folder itself. */
     reveal(projectId: string, id: string | null): void
     onChanged(cb: (projectId: string, records: HandoffRecord[]) => void): () => void
+    /**
+     * A browser's or a phone's "Hand off…", to be performed here.
+     *
+     * The renderer owns the whole flow — the pack, the ask, the watch, the
+     * take-over prompt — so a remote client triggers it rather than
+     * reimplementing it. Answer with `startResult`; an empty error means it
+     * started. See `IPC.handoffStartRemote`.
+     */
+    onStartRemote(cb: (e: HandoffStartRemoteEvent) => void): () => void
+    /** Answer an `onStartRemote`. `error` empty means the handoff started. */
+    startResult(requestId: string, error?: string): void
   }
 
   /**

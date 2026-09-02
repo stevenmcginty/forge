@@ -25,6 +25,14 @@ import {
   type ServerFrame
 } from '@shared/mobile'
 import { FOREMAN_SEED_MAX, type ForemanStartRequest, type ForemanState } from '@shared/foreman'
+/*
+ * The Handoff vocabulary and its one boundary rule, from the file that owns
+ * them — the same arrangement this file has with shared/foreman.ts above, and
+ * the same reason: two copies of a closed kind list is how one link ends up
+ * able to ask for something the other cannot.
+ */
+import { readHandoffTarget, type HandoffTargetWire } from '@shared/handoffview'
+import type { HandoffRecord } from '@shared/types'
 import type { MobileAuth, MobileDevice } from './auth'
 
 /**
@@ -105,7 +113,10 @@ export interface MobileServerHost {
   release?: (viewer: string, id?: string) => void
 
   /** The opening picture: whatever the phone needs to draw a project list. */
-  snapshot: () => Pick<import('@shared/mobile').HelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'foreman'>
+  snapshot: () => Pick<
+    import('@shared/mobile').HelloOkFrame,
+    'projects' | 'profiles' | 'workspaces' | 'foreman' | 'handoff'
+  >
 
   /**
    * Run a layout operation. Implemented by mobile-host by forwarding to the
@@ -128,6 +139,21 @@ export interface MobileServerHost {
   foremanStop?: (paneId: string) => Promise<{ ok: true } | { ok: false; error: string }>
   /** A word in Foreman's ear mid-job. Not yet spoken by the phone; here so the host object stays one shape. */
   foremanSay?: (paneId: string, text: string) => Promise<{ ok: true } | { ok: false; error: string }>
+
+  /* --------------------------------------------------------------- handoff
+   *
+   * The opposite arrangement to Foreman's above. Foreman lives in main and is
+   * answered there; a handoff is performed by the desktop's *renderer*, which
+   * owns the whole flow — the pack, the ask into the source pane, the watch on
+   * the file, the take-over prompt into the target. This hook forwards, and a
+   * desktop with no window open answers in a sentence rather than acting.
+   */
+
+  /** Hand one pane's work on. Resolves to an error sentence, or null when it started. */
+  handoffStart?: (
+    request: { paneId: string; target: HandoffTargetWire },
+    deviceName: string
+  ) => Promise<string | null>
 
   /**
    * The number of authenticated phones changed. Drives the power-save blocker
@@ -534,6 +560,16 @@ export class MobileServer {
   }
 
   /**
+   * One project's handoff packs changed, to every authenticated phone. The whole
+   * list for that project, every time — see `HandoffFrame` in shared/mobile.ts.
+   */
+  pushHandoff(projectId: string, records: HandoffRecord[]): void {
+    for (const client of this.clients) {
+      if (client.device) this.send(client, { t: 'handoff', projectId, records })
+    }
+  }
+
+  /**
    * The desktop's own window died and is coming back, or has. See
    * `DesktopFrame` in shared/mobile.ts for why a phone needs telling.
    */
@@ -784,6 +820,33 @@ export class MobileServer {
           }
           // Nothing to say back: the state itself is broadcast as a `foreman`
           // frame, to this phone along with every other one.
+          return
+        }
+        // Handing a pane over is answered here too, but the other way about:
+        // it is neither performed in main nor a layout verb the engine knows.
+        // It goes to the *renderer*, which owns the whole flow — so it is
+        // intercepted before the layout dispatch, held to the same pane rule
+        // as Foreman's verbs, and its target is read at this boundary.
+        if (frame.op === 'handoff-start') {
+          const paneId = wireString(frame.paneId, 128)
+          if (!paneId || !this.host.sessions().some((s) => s.id === paneId)) {
+            this.send(client, { t: 'err', code: 'unknown-session', msg: 'That pane is gone' })
+            return
+          }
+          if (!this.host.handoffStart) {
+            this.send(client, { t: 'err', code: 'no-window', msg: 'This Forge cannot hand a pane over from a phone.' })
+            return
+          }
+          // Refused rather than coerced: a target is a choice out of a closed
+          // list, and guessing which of the three was meant is worse than a
+          // sentence saying this desktop did not understand.
+          const target = readHandoffTarget(frame.target)
+          if (!target) {
+            this.send(client, { t: 'err', code: 'bad-frame', msg: 'That is not a handoff target this desktop understands' })
+            return
+          }
+          const refusal = await this.host.handoffStart({ paneId, target }, client.device.name)
+          if (refusal) this.send(client, { t: 'err', code: 'no-window', msg: refusal })
           return
         }
         const error = await this.host.dispatchOp(frame, client.device.name)

@@ -1974,6 +1974,78 @@ log(
   'and the same verb for a pane this desktop does not have is refused at the boundary, against the real session list'
 )
 
+/* ================================================================ phase 11a2
+ *
+ * Handoff, from a browser, against the real host.
+ *
+ * The one thing here that no unit can reach: the opening picture reads the
+ * packs off disk for *every* project on the rail, not for the one the desk's
+ * window happens to be watching. electron/handoff-watcher.ts keeps a single
+ * watch — whichever project the renderer asked for — and there is no renderer
+ * in this process at all, so a snapshot built out of the watch would be empty
+ * here. It is built out of `listHandoffsFor`, and this is what proves it.
+ *
+ * The start verb is not exercised: it is forwarded to a window, and there is
+ * none. Its boundary rules are scripts/web-smoke.mjs's, against a recording
+ * host.
+ */
+
+console.log('\nhandoff from a browser')
+
+const handoffWatcher = await import('../electron/handoff-watcher.ts')
+
+log(
+  Array.isArray(handoffWatcher.listHandoffsFor('never-existed')) &&
+    handoffWatcher.listHandoffsFor('never-existed').length === 0,
+  'a project id this desktop does not have answers with no packs rather than throwing'
+)
+
+const packProject = join(dataDir, 'handoff-project')
+mkdirSync(join(packProject, '.forge', 'handoff'), { recursive: true })
+writeFileSync(
+  join(packProject, '.forge', 'handoff', '20260902-141233-9f0a.md'),
+  [
+    '---',
+    'id: 20260902-141233-9f0a',
+    'title: The sync endpoint',
+    'status: ready',
+    'from: pane-1',
+    'fromAgent: Claude',
+    '---',
+    '',
+    '# Handoff: The sync endpoint',
+    '',
+    '## Goal',
+    'Finish the sync endpoint.',
+    ''
+  ].join('\n')
+)
+store.setProjects([
+  {
+    id: 'handoff-p1',
+    name: 'handoff',
+    path: packProject,
+    color: '#7C5CFF',
+    defaultProfileId: 'shell',
+    createdAt: 0
+  }
+])
+
+const handoffTab = await browser('browser-handoff', { origin: `https://${PROJECT}.web.app` })
+await waitFor(() => frameOf(handoffTab, 'hello-ok') || handoffTab.closed !== null, 6000, "the handoff browser's hello-ok")
+const handoffPicture = frameOf(handoffTab, 'hello-ok')?.handoff
+log(
+  Array.isArray(handoffPicture) && handoffPicture.length === store.getProjects().length,
+  "the real host's hello-ok carries one handoff list per project on the rail, not one for the project the desk is watching"
+)
+log(
+  handoffPicture?.[0]?.projectId === 'handoff-p1' &&
+    handoffPicture[0].records[0]?.id === '20260902-141233-9f0a' &&
+    handoffPicture[0].records[0]?.status === 'ready',
+  'and the packs in it were read off disk by the snapshot, with no watcher running and no window to ask'
+)
+handoffTab.socket.close()
+
 /* ================================================================ phase 11b
  *
  * Quitting from the tray, which must be the full shutdown the app has always

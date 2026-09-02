@@ -43,6 +43,8 @@ import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsub
 import { WebServer, type WebServerHost } from './web/server'
 import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
 import { foremanList, foremanStart, foremanSay, foremanStop, onForemanState } from './foreman/ipc'
+import { listHandoffsFor, onHandoffChanged } from './handoff-watcher'
+import type { HandoffStartRemoteEvent } from '@shared/handoffview'
 import { WebRendezvous, type RendezvousRest } from './web/rendezvous'
 import { transcriptPath } from './bridge/claude-transcripts'
 import { publishAttention } from './attention-bus'
@@ -242,6 +244,14 @@ let unsubscribeGit: (() => void) | null = null
  * gone is the same dead-end a pending geometry push guards against below.
  */
 let unsubscribeForeman: (() => void) | null = null
+
+/**
+ * The handoff packs' changes, fanned out to every connected browser for as long
+ * as the link is up. Unsubscribed on `stop()` beside Foreman's, and for the same
+ * reason: the watcher outlives this link and must not be left pushing into a
+ * server that has gone.
+ */
+let unsubscribeHandoff: (() => void) | null = null
 /**
  * How long a PTY resize waits before the session list is pushed again.
  *
@@ -1172,7 +1182,10 @@ async function signOut(): Promise<void> {
 
 /* -------------------------------------------------------------- the picture */
 
-function snapshotForBrowser(): Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman'> {
+function snapshotForBrowser(): Pick<
+  WebHelloOkFrame,
+  'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman' | 'handoff'
+> {
   const projects = getProjects()
   const workspaces: Record<string, Workspace> = {}
   for (const project of projects) {
@@ -1190,7 +1203,11 @@ function snapshotForBrowser(): Pick<WebHelloOkFrame, 'projects' | 'profiles' | '
     ...(projectsRoot ? { projectsRoot } : {}),
     // Always, even empty: "no panes are driven" is a real answer a reconnecting
     // browser should hear, not an absent one. The push frames carry the rest.
-    foreman: foremanList()
+    foreman: foremanList(),
+    // Every project, not just the one the desk's window is watching: the
+    // watcher is singular and a browser may be reading any project on the rail.
+    // See `listHandoffsFor`, which reads the folder rather than the watch.
+    handoff: projects.map((project) => ({ projectId: project.id, records: listHandoffsFor(project.id) }))
   }
 }
 
@@ -1376,6 +1393,19 @@ async function start(): Promise<void> {
       foremanStop(paneId)
       return { ok: true }
     },
+    // Forwarded to the window and nothing more. Every other remote act either
+    // happens in main or has a main-side twin; this one deliberately does not,
+    // because the flow it starts is minutes long, spans two panes and lives in
+    // one piece in src/hooks/useHandoffFlow.tsx.
+    handoffStart: (request, deviceName) =>
+      askRenderer(
+        IPC.handoffStartRemote,
+        { deviceName, paneId: request.paneId, target: request.target } satisfies Omit<
+          HandoffStartRemoteEvent,
+          'requestId'
+        >,
+        'Forge has no window open on the desktop, so it cannot hand a pane over.'
+      ),
     foremanSay: async (paneId, text) => {
       const state = foremanSay({ paneId, text })
       const driving = state.status === 'starting' || state.status === 'driving' || state.status === 'waiting'
@@ -1459,6 +1489,12 @@ async function start(): Promise<void> {
   // with the rest. A browser that connects mid-job gets the current states
   // from the snapshot instead — this is the *changes*, that is the picture.
   unsubscribeForeman = onForemanState((state) => instance.pushForeman(state))
+
+  // And the handoff packs, on the same terms. A browser that connects mid-flow
+  // gets the current lists from the snapshot; this is everything that moves
+  // after that — including the watcher's own `open → ready` promotion, which is
+  // what lights a take-over button up.
+  unsubscribeHandoff = onHandoffChanged((projectId, records) => instance.pushHandoff(projectId, records))
 
   // The browser sees what the window sees, from the same coalesced flush.
   unsubscribePty = addPtySink({
@@ -1727,6 +1763,8 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   unsubscribeGit = null
   unsubscribeForeman?.()
   unsubscribeForeman = null
+  unsubscribeHandoff?.()
+  unsubscribeHandoff = null
   // A pending push would fire into a server that has stopped, which is the
   // ordinary shape of switching the link off a beat after moving a pane.
   if (geometryPush) clearTimeout(geometryPush)
@@ -1957,6 +1995,22 @@ export function registerWebHandlers(): void {
   ipcMain.handle(IPC.webMirrorEnd, (): WebStatus => {
     server?.pushMirrorStop('The screen was taken back at the desk.')
     return webStatus()
+  })
+
+  /**
+   * The renderer's verdict on a `handoffStartRemote`.
+   *
+   * Its own channel rather than `webCommandResult`, because the phone's host
+   * listens on the same one: the request ids are UUIDs, so each host settles
+   * the one it is holding and ignores the one it is not — which is already what
+   * the handler below does for a payload it never asked for.
+   */
+  ipcMain.on(IPC.handoffStartResult, (_e, payload: { requestId?: string; error?: string }) => {
+    const pending = pendingOps.get(String(payload?.requestId ?? ''))
+    if (!pending) return
+    pendingOps.delete(String(payload?.requestId ?? ''))
+    clearTimeout(pending.timer)
+    pending.resolve(payload?.error ? String(payload.error) : null)
   })
 
   /** The renderer's verdict on a `webCommand`. */

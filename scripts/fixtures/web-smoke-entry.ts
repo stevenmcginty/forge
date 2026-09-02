@@ -65,3 +65,9 @@ export { FOREMAN_SEED_MAX } from '../../shared/foreman'
 export { MAX_SESSIONS as WEB_MAX_SESSIONS } from '../../shared/web'
 export { MAX_SESSIONS as IPC_MAX_SESSIONS } from '../../shared/ipc'
 export { AUTH_MAX_FAILURES, AUTH_LOCKOUT_MS } from '../../shared/mobile'
+/*
+ * The handoff boundary rule, from the file both links share. Exported so the
+ * smoke test asserts against the shipped reader rather than a copy of the three
+ * kinds written to agree with it.
+ */
+export { readHandoffTarget } from '../../shared/handoffview'

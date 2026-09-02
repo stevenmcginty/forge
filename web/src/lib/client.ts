@@ -23,7 +23,7 @@ import {
 } from '@shared/web'
 import type { ChatUpdate } from '@shared/chat'
 import type { ForemanState } from '@shared/foreman'
-import type { GitSnapshot, Project, Workspace } from '@shared/types'
+import type { GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
 
 /**
  * The browser's end of the Forge Web link — one socket, and everything the page
@@ -294,6 +294,11 @@ export interface ForgeHandlers {
    * not this browser is the one that switched it on. See `WebForemanFrame`.
    */
   onForeman: (state: ForemanState) => void
+  /**
+   * One project's handoff packs changed — the whole list for that project, every
+   * time, whether or not this browser started the handoff. See `WebHandoffFrame`.
+   */
+  onHandoff: (projectId: string, records: HandoffRecord[]) => void
   /**
    * The desktop's own window died or hung, and is coming back — or has.
    *
@@ -1526,6 +1531,15 @@ export class ForgeClient {
         // pane nobody is driving.
         if (frame.state && typeof frame.state === 'object' && typeof frame.state.paneId === 'string') {
           this.handlers.onForeman(frame.state)
+        }
+        return
+
+      case 'handoff':
+        // Coerced, not trusted, like the frame above it. A list that is not a
+        // list is dropped rather than handed to the store — a Handoff menu built
+        // out of a malformed frame is a menu offering panes that do not exist.
+        if (typeof frame.projectId === 'string' && Array.isArray(frame.records)) {
+          this.handlers.onHandoff(frame.projectId, frame.records)
         }
         return
 

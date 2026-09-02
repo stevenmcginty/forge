@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { handoffAskPrompt, handoffTakePrompt } from '@shared/handoff'
 import type { HandoffRecord, HandoffStartRequest } from '@shared/types'
 import { isClaudeCommand, isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
-import { handoffPaneTitle, type HandoffTarget } from '@/lib/handoffview'
+import { handoffPaneTitle, handoffTargets, type HandoffTarget, type HandoffTargetWire } from '@/lib/handoffview'
 import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
 import { useActiveProject, useActiveWorkspace, useApp } from '@/state/AppState'
@@ -294,6 +294,75 @@ export function HandoffProvider({ children }: { children: ReactNode }): ReactNod
     },
     [actions, deliverTo, profiles, projectId, projectPath, workspace]
   )
+
+  /* -------------------------------------------------- the remote gesture
+   *
+   * A browser's or a phone's "Hand off…", performed here.
+   *
+   * The whole point of routing it through the window: this is the *same*
+   * `handOff` a click at the desk calls, reached from a different place. Main
+   * forwards the request and never performs one — a second implementation of a
+   * flow that spans two panes, a file on disk and a paste would be a second
+   * thing to be wrong about what a handoff is (`IPC.handoffStartRemote`).
+   *
+   * The menu is rebuilt here rather than trusted from the client, and that is
+   * what makes the wire's three kinds enough. A row is offerable only if
+   * `handoffTargets` still offers it *now* — the pane is open, alive and not a
+   * shell — so a client acting on a picture that is seconds old is refused with
+   * a sentence instead of writing a pack addressed to a pane that has gone.
+   */
+  const remoteTarget = useCallback(
+    (paneId: string, wire: HandoffTargetWire): { target: HandoffTarget } | { error: string } => {
+      const { workspace: ws, profiles: list } = live.current
+      const tab = ws.tabs.find((t) => collectLeaves(t.root).some((l) => l.id === paneId)) ?? null
+      if (!tab) return { error: 'That pane is not in the project Forge is looking at.' }
+      const targets = handoffTargets({
+        paneId,
+        tab,
+        workspace: ws,
+        profiles: list,
+        records,
+        isLive: (id) => terminalHost.runtime(id).status === 'live'
+      })
+      if (wire.kind === 'back') {
+        const back = targets.find((t) => t.kind === 'back')
+        return back ? { target: back } : { error: 'Nothing to hand back' }
+      }
+      if (wire.kind === 'pane') {
+        const pane = targets.find((t) => t.kind === 'pane' && t.paneId === wire.paneId)
+        return pane ? { target: pane } : { error: 'That pane cannot take a handoff.' }
+      }
+      // `default` and `new` are the same act — a fresh pane on this profile —
+      // and the wire deliberately does not tell them apart. Either row will do.
+      const fresh = targets.find((t) => (t.kind === 'new' || t.kind === 'default') && t.profileId === wire.profileId)
+      return fresh ? { target: fresh } : { error: 'That agent is not one this Forge can open.' }
+    },
+    [records]
+  )
+
+  useEffect(() => {
+    // Guarded like the two effects above: a renderer built after this feature
+    // can run against a preload built before it, and an unguarded call on a
+    // missing bridge method unmounts the whole tree.
+    if (!window.forge.handoff?.onStartRemote) return
+    return window.forge.handoff.onStartRemote(({ requestId, deviceName, paneId, target }) => {
+      const answer = (error: string): void => window.forge.handoff.startResult(requestId, error)
+      if (!projectId) {
+        answer('Forge has no project open.')
+        return
+      }
+      const chosen = remoteTarget(paneId, target)
+      if ('error' in chosen) {
+        answer(chosen.error)
+        return
+      }
+      actions.setNotice(`Handing off — asked from ${deviceName}`)
+      handOff(paneId, chosen.target).then(
+        () => answer(''),
+        (err: unknown) => answer(err instanceof Error ? err.message : 'That handoff could not be started.')
+      )
+    })
+  }, [actions, handOff, projectId, remoteTarget])
 
   const reveal = useCallback(
     (id: string | null): void => {

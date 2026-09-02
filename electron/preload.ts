@@ -297,7 +297,12 @@ const api: ForgeApi = {
     watch: (projectId) => ipcRenderer.invoke(IPC.handoffWatch, projectId),
     unwatch: (projectId) => ipcRenderer.send(IPC.handoffUnwatch, projectId),
     reveal: (projectId, id) => ipcRenderer.send(IPC.handoffReveal, projectId, id),
-    onChanged: (cb) => subscribe2(IPC.handoffChanged, cb)
+    onChanged: (cb) => subscribe2(IPC.handoffChanged, cb),
+    // The other direction: a browser or a phone asking this window to hand a
+    // pane over, and the window's verdict going back. One channel pair for both
+    // links — see IPC.handoffStartRemote.
+    onStartRemote: (cb) => subscribe(IPC.handoffStartRemote, cb),
+    startResult: (requestId, error) => ipcRenderer.send(IPC.handoffStartResult, { requestId, error: error ?? '' })
   },
 
   tools: {

@@ -216,7 +216,8 @@ async function main() {
     IPC_MAX_SESSIONS,
     AUTH_MAX_FAILURES,
     AUTH_LOCKOUT_MS,
-    FOREMAN_SEED_MAX
+    FOREMAN_SEED_MAX,
+    readHandoffTarget
   } = await import(pathToFileURL(join(scratch, 'web.mjs')).href)
 
   const google = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -382,6 +383,16 @@ async function main() {
   const foremanStarts = []
   const foremanStops = []
   const foremanStates = []
+  /*
+   * Handoff's hooks, as a recording host: every start the server hands over,
+   * and the per-project lists a snapshot will carry. The flow itself is the
+   * *renderer's* — there is none in this process, which is the point of the
+   * hook — so what is provable here is exactly what this server owns: the
+   * boundary rules, and that a parsed target reaches the host verbatim.
+   */
+  const handoffStarts = []
+  const handoffSnapshot = []
+  let handoffAnswer = null
   const inboxDir = join(scratch, 'inbox')
   mkdirSync(inboxDir, { recursive: true })
   /**
@@ -446,7 +457,13 @@ async function main() {
       },
       resize: (id, cols, rows, viewer) => owners.noteWish(id, viewer, cols, rows),
       release: (viewer, id) => owners.release(viewer, id),
-      snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: WORKSPACES, foreman: [...foremanStates] }),
+      snapshot: () => ({
+        projects: PROJECTS,
+        profiles: PROFILES,
+        workspaces: WORKSPACES,
+        foreman: [...foremanStates],
+        handoff: handoffSnapshot.map((entry) => ({ ...entry }))
+      }),
       layout: async (op, deviceName) => {
         ops.push({ op, deviceName })
         if (!engine) return layoutAnswer
@@ -464,6 +481,10 @@ async function main() {
       foremanStop: async (paneId) => {
         foremanStops.push(paneId)
         return { ok: true }
+      },
+      handoffStart: async (request, deviceName) => {
+        handoffStarts.push({ ...request, deviceName })
+        return handoffAnswer
       },
       gitStatus: async (projectId) => (projectId === 'p1' ? SNAPSHOT : null),
       // Deliberately deferred, so two requests can be in flight at once and
@@ -1271,6 +1292,130 @@ async function main() {
     browser.result('r-fm-stop').body.kind === 'ok' && foremanStops[0] === 'w1',
     'while foreman-stop for a live pane reaches the host and answers ok'
   )
+
+  /* ----------------------------------------- 6d. handoff, from a browser
+   *
+   * The Handoff menu in a pane header, seen from this side of the socket. The
+   * division of labour is the thing to keep: main *forwards* a handoff and
+   * never performs one, because the flow spans two panes, a file on disk and a
+   * paste, and lives in one piece in the desktop's renderer. So what is
+   * asserted here is the wire — the packs reach a browser, a connecting one
+   * gets them in the snapshot — and the boundary: a live pane, and a target out
+   * of the closed list in shared/handoffview.ts.
+   */
+
+  const PACK = {
+    id: '20260902-141233-9f0a',
+    title: 'The sync endpoint',
+    status: 'ready',
+    from: 'w1',
+    fromAgent: 'Claude',
+    fromTitle: 'main',
+    to: '',
+    toAgent: 'Codex',
+    toTitle: '',
+    origin: '',
+    createdAt: 1,
+    updatedAt: 2,
+    transcript: '',
+    bytes: 120,
+    filled: true
+  }
+
+  log(
+    readHandoffTarget({ kind: 'pane', paneId: 'w1' })?.paneId === 'w1' &&
+      readHandoffTarget({ kind: 'new', profileId: 'shell' })?.profileId === 'shell' &&
+      readHandoffTarget({ kind: 'back' })?.kind === 'back',
+    'the three handoff target kinds are read off the wire, and nothing else is'
+  )
+  log(
+    readHandoffTarget({ kind: 'nowhere' }) === null &&
+      readHandoffTarget({ kind: 'pane' }) === null &&
+      readHandoffTarget('back') === null,
+    'a kind this desktop does not know, and a pane target naming no pane, are refused rather than guessed at'
+  )
+
+  server.pushHandoff('p1', [PACK])
+  await waitFor(() => browser.first('handoff'), 5000, 'the handoff frame')
+  log(
+    browser.first('handoff').projectId === 'p1' && browser.first('handoff').records[0]?.id === PACK.id,
+    'a handoff list pushed on the desktop reaches a connected browser as a handoff frame'
+  )
+
+  // The snapshot half, and it covers every project rather than the one the desk
+  // is watching — a browser may be reading any of them.
+  handoffSnapshot.push({ projectId: 'p1', records: [PACK] })
+  const handoffTab = await connect()
+  handoffTab.send({
+    type: 'hello',
+    proto: WEB_PROTO,
+    idToken: mint(),
+    client: '0.0.0-smoke',
+    deviceId: 'browser-handoff',
+    deviceName: 'Chrome on Windows'
+  })
+  await waitFor(() => handoffTab.first('hello-ok'), 8000, "the handoff browser's hello-ok")
+  log(
+    handoffTab.first('hello-ok').handoff?.[0]?.projectId === 'p1' &&
+      handoffTab.first('hello-ok').handoff[0].records[0]?.id === PACK.id,
+    'and hello-ok carries the packs project by project, so a reconnecting browser draws the chips from the snapshot'
+  )
+
+  // The pane-liveness rule, the same authorisation `foreman-start` gets.
+  browser.send({
+    type: 'request',
+    rid: 'r-ho-gone',
+    body: { kind: 'handoff-start', paneId: 'never-existed', target: { kind: 'back' } }
+  })
+  await waitFor(() => browser.result('r-ho-gone'), 5000, 'the unknown-session handoff-start')
+  log(
+    browser.result('r-ho-gone').body.code === 'unknown-session' && handoffStarts.length === 0,
+    'handoff-start for a pane the client cannot see is refused as unknown-session, and the host was never asked'
+  )
+
+  // A target is a choice out of a closed list. Refused, never coerced: guessing
+  // which of the three was meant is worse than saying it was not understood.
+  browser.send({
+    type: 'request',
+    rid: 'r-ho-bad',
+    body: { kind: 'handoff-start', paneId: 'w1', target: { kind: 'somewhere-else' } }
+  })
+  await waitFor(() => browser.result('r-ho-bad'), 5000, 'the bad-frame handoff-start')
+  log(
+    browser.result('r-ho-bad').body.code === 'bad-frame' && handoffStarts.length === 0,
+    'a target kind this desktop does not know is bad-frame, and the host was never asked'
+  )
+
+  browser.send({
+    type: 'request',
+    rid: 'r-ho-ok',
+    body: { kind: 'handoff-start', paneId: 'w1', target: { kind: 'new', profileId: 'shell' } }
+  })
+  await waitFor(() => browser.result('r-ho-ok'), 5000, 'the healthy handoff-start')
+  log(
+    browser.result('r-ho-ok').body.kind === 'ok' &&
+      handoffStarts[0]?.paneId === 'w1' &&
+      handoffStarts[0]?.target.kind === 'new' &&
+      handoffStarts[0]?.target.profileId === 'shell',
+    'while handoff-start for a live pane reaches the host with the parsed target, and answers ok'
+  )
+
+  // And the renderer's refusal is carried through rather than swallowed — this
+  // is the one that matters, because every real failure of a handoff (no window,
+  // nothing to hand back) is a sentence the window wrote.
+  handoffAnswer = 'Nothing to hand back'
+  browser.send({
+    type: 'request',
+    rid: 'r-ho-refused',
+    body: { kind: 'handoff-start', paneId: 'w1', target: { kind: 'back' } }
+  })
+  await waitFor(() => browser.result('r-ho-refused'), 5000, 'the refused handoff-start')
+  log(
+    browser.result('r-ho-refused').body.kind === 'failed' &&
+      browser.result('r-ho-refused').body.message === 'Nothing to hand back',
+    "and the desktop window's own refusal reaches the browser as a sentence, not as a silence"
+  )
+  handoffAnswer = null
 
   /* ------------------------------------------------------ the auth refresh */
 

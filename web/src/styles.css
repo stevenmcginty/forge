@@ -4571,3 +4571,100 @@ button.astatus__mode:not(:disabled):hover {
     backdrop-filter: none;
   }
 }
+
+/* ---------------------------------------------------------------- handoff
+ *
+ * The pane header's half of Handoff: the chip that says a pack is in flight,
+ * and the button that starts one. Tokens only, and the same shapes the desk
+ * wears in src/components/TerminalPane.css — a chip a person recognises at the
+ * desk must not be a different object in a browser.
+ */
+
+.pane__handoff-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  max-width: 190px;
+  padding: 0 var(--s-3);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sent and took are settled facts and wear the accent; "Handing off…" is still
+   waiting on an agent, so it stays quiet. */
+.pane .pane__handoff-chip[data-state='sent'],
+.pane .pane__handoff-chip[data-state='took'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.pane__handoff-btn[data-open='true'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-softer);
+}
+
+.pane__handoff-btn[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The menu's three spans — the row itself is Popover's. Same rules as
+   src/components/HandoffMenu.css, restated here because that stylesheet
+   belongs to the desktop component this client does not import. */
+
+.hdmenu__name {
+  flex: 1;
+  min-width: 0;
+}
+
+.hdmenu__agent {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--t-eyebrow);
+}
+
+/* 'hand back' and 'tab default' — the two rows that are shortcuts rather than
+   choices. Tinted so the eye lands on them before it starts reading names. */
+.hdmenu__note {
+  flex: none;
+  color: var(--accent);
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.04em;
+}
+
+/* The desktop's refusal, in the menu that offered the row it refused. */
+.hdmenu__error {
+  color: var(--danger);
+}
+
+/*
+ * A phone. The menu is portalled to <body>, so `[data-mobile]` on the app
+ * cannot reach it and the popover's own label has to — the same route
+ * `.popover[aria-label='Agent settings']` takes. `!important` because Popover
+ * positions itself with an inline style: at 390px a 296px panel anchored to a
+ * button at the right edge is a menu with its rows against the bezel, so it
+ * becomes the full width of the screen with rows a thumb can hit.
+ */
+@media (max-width: 480px) {
+  .popover[aria-label='Hand off to'] {
+    left: var(--s-4) !important;
+    width: calc(100vw - 2 * var(--s-4)) !important;
+    max-width: none;
+    border-radius: 20px;
+  }
+
+  .popover[aria-label='Hand off to'] .popover__row {
+    min-height: 44px;
+    border-radius: var(--r-lg);
+  }
+}

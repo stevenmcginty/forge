@@ -50,6 +50,14 @@ import type { ChatUpdate } from '@shared/chat'
  * server's restatement of it.
  */
 import { FOREMAN_SEED_MAX, type ForemanStartRequest, type ForemanState } from '@shared/foreman'
+/*
+ * The Handoff vocabulary and its one boundary rule, from the file that owns
+ * them — the same arrangement this file has with shared/foreman.ts above. A
+ * target is switched on by the desktop rather than displayed, so the closed
+ * kind list is checked here, at the edge, by the reader both links share.
+ */
+import { readHandoffTarget, type HandoffTargetWire } from '@shared/handoffview'
+import type { HandoffRecord } from '@shared/types'
 import type {
   AgentPresence,
   CommandPresence,
@@ -258,7 +266,10 @@ export interface WebServerHost {
   claim?: (id: string, viewer: string) => void
 
   /** The opening picture: whatever the browser needs to draw the workspace. */
-  snapshot: () => Pick<WebHelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman'>
+  snapshot: () => Pick<
+    WebHelloOkFrame,
+    'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman' | 'handoff'
+  >
 
   /**
    * Perform one layout operation. Implemented by web-host against
@@ -404,6 +415,22 @@ export interface WebServerHost {
   foremanStop?: (paneId: string) => Promise<{ ok: true } | { ok: false; error: string }>
   /** A word in Foreman's ear. `ok: false` when nobody is driving that pane. */
   foremanSay?: (paneId: string, text: string) => Promise<{ ok: true } | { ok: false; error: string }>
+
+  /* --------------------------------------------------------------- handoff
+   *
+   * The opposite arrangement to Foreman's above, and deliberately so. Foreman
+   * lives in main and is answered there; a handoff is performed by the desktop's
+   * *renderer*, which owns the flow end to end — the pack, the ask into the
+   * source pane, the watch on the file, the take-over prompt into the target.
+   * This hook forwards, exactly as `layout` used to for every verb, and a
+   * desktop with no window open answers in a sentence rather than acting.
+   */
+
+  /** Hand one pane's work on. Resolves to an error sentence, or null when it started. */
+  handoffStart?: (
+    request: { paneId: string; target: HandoffTargetWire },
+    deviceName: string
+  ) => Promise<string | null>
 
   /**
    * Put a pasted image on this machine's clipboard so an agent that reads
@@ -886,6 +913,17 @@ export class WebServer {
    */
   pushForeman(state: ForemanState): void {
     this.broadcast({ type: 'foreman', state })
+  }
+
+  /**
+   * One project's handoff packs changed, to every authenticated browser.
+   *
+   * Broadcast rather than filtered by which project a tab is looking at: a tab
+   * may switch projects without saying so, and a list of a handful of records is
+   * nothing an xterm has to parse. See `WebHandoffFrame` in shared/web.ts.
+   */
+  pushHandoff(projectId: string, records: HandoffRecord[]): void {
+    this.broadcast({ type: 'handoff', projectId, records })
   }
 
   /**
@@ -1641,7 +1679,11 @@ export class WebServer {
       // An empty array is sent as an empty array, unlike the two above: "no
       // panes are driven" is a real answer about this desktop, not an absent
       // one, and only undefined — a host with no Foreman at all — is left out.
-      ...(snapshot.foreman ? { foreman: snapshot.foreman } : {})
+      ...(snapshot.foreman ? { foreman: snapshot.foreman } : {}),
+      // The same rule as `foreman`: an empty list per project is a real answer
+      // — that project has no packs — and only a host with no handoffs at all
+      // is left out.
+      ...(snapshot.handoff ? { handoff: snapshot.handoff } : {})
     })
     this.host.onPresence?.(this.connectedCount)
   }
@@ -2154,6 +2196,44 @@ export class WebServer {
             failed('failed', said.error)
             return
           }
+          answer({ kind: 'ok' })
+          return
+        }
+
+        /* ---------------------------------------------------------- handoff
+         *
+         * "Hand this pane's work to that agent." Held to the same
+         * authorisation as `foreman-start` — an authenticated browser naming a
+         * pane that is live right now — and then *forwarded*: what happens next
+         * is the renderer's, because that is where the whole flow lives.
+         */
+
+        case 'handoff-start': {
+          if (!this.host.handoffStart) {
+            failed('unsupported', 'This Forge cannot hand a pane over for a browser.')
+            return
+          }
+          const paneId = wireString(request.paneId, 128)
+          if (!paneId || !this.host.sessions().some((s) => s.id === paneId)) {
+            failed('unknown-session', 'That pane is gone.')
+            return
+          }
+          // Refused rather than coerced, unlike a seed: a target is a choice
+          // out of a closed list, and the honest answer to one this desktop
+          // does not know is not to guess which of the three was meant.
+          const target = readHandoffTarget(request.target)
+          if (!target) {
+            failed('bad-frame', 'That is not a handoff target this desktop understands.')
+            return
+          }
+          const error = await this.host.handoffStart({ paneId, target }, client.device?.name ?? 'Browser')
+          if (error) {
+            failed('failed', error)
+            return
+          }
+          // `ok` means the pack is written and the ask is in the source pane.
+          // The handoff itself finishes minutes later and says so in `handoff`
+          // frames, which every browser gets whether or not it asked.
           answer({ kind: 'ok' })
           return
         }

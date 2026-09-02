@@ -678,6 +678,29 @@ export const IPC = {
   /** send — show a pack, or the folder, in Explorer. */
   handoffReveal: 'handoff:reveal',
   handoffChanged: 'handoff:changed',
+  /**
+   * A browser's or a phone's "Hand off…", on its way to the window. Main →
+   * renderer, and the only handoff channel that travels that direction.
+   *
+   * It is here rather than folded into `webCommand` because the flow belongs to
+   * the renderer whichever link asked for it: one channel, one subscriber (the
+   * HandoffProvider), and both link hosts sending down it. That is the same
+   * judgement `webProjectAdd` made about its payload — a `WebLayoutOp` this is
+   * not — carried one step further, because a second copy of this event for the
+   * phone would be two descriptions of one act.
+   *
+   * The renderer performs it and nothing in main does: writing the pack, asking
+   * the source agent to fill it, watching the file and pasting the take-over
+   * prompt is one flow living in src/hooks/useHandoffFlow.tsx, and a second
+   * implementation beside it in main is the thing this channel exists to avoid.
+   */
+  handoffStartRemote: 'handoff:start-remote',
+  /**
+   * The renderer's verdict on a `handoffStartRemote` — an error sentence, or
+   * nothing. Both link hosts listen; each settles the request id it is holding
+   * and ignores the one it is not, exactly as `webCommandResult` already does.
+   */
+  handoffStartResult: 'handoff:start-result',
 
   // updates & tools (M10) — what is installed, what is available
   toolsProbe: 'tools:probe',

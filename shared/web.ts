@@ -85,6 +85,7 @@ import type {
   CommandPresence,
   GitActionKind,
   GitSnapshot,
+  HandoffRecord,
   Project,
   SplitDirection,
   Workspace
@@ -100,6 +101,14 @@ import type { CommandsFeed } from './commands'
  * shared/foreman.ts directly — this file carries the shape, not the rule.
  */
 import type { ForemanState } from './foreman'
+/*
+ * How a client names the pane or profile a handoff should go to, imported from
+ * the file that owns the whole Handoff vocabulary rather than restated here —
+ * the same bargain this file strikes with `ForemanState`. `readHandoffTarget`
+ * lives beside it and is imported by the servers directly, so this file carries
+ * the shape and shared/handoffview.ts carries the rule.
+ */
+import type { HandoffTargetWire } from './handoffview'
 /*
  * The chat transcript's own vocabulary, kept in a file of its own rather than
  * spelled out here. It is read by the desktop's transcript reader and by the
@@ -1129,6 +1138,23 @@ export type WebRequest =
    * instead. Capped at FOREMAN_SEED_MAX like a seed.
    */
   | { kind: 'foreman-say'; paneId: string; text: string }
+  /**
+   * Hand one pane's work to another agent — the browser's half of the Handoff
+   * menu in a pane header, and the same act the desktop's own menu performs.
+   *
+   * The one request on this link that is neither performed in main nor a layout
+   * op: it is forwarded to the desktop's renderer, because the flow it starts
+   * (write the pack, ask this pane's agent to fill it, watch the file, paste the
+   * take-over prompt into the target) lives there in one piece and a second copy
+   * of it in main would be a second thing to be wrong about what a handoff is.
+   *
+   * `paneId` is the pane doing the handing off, exactly as `attach` names it.
+   * `target` is one of the three kinds in `HandoffTargetWire`; anything else is
+   * `bad-frame`. Answered `{ kind: 'ok' }` once the pack is written and the ask
+   * is in the source pane — not once the handoff completes, which is minutes
+   * later and arrives as `handoff` frames.
+   */
+  | { kind: 'handoff-start'; paneId: string; target: HandoffTargetWire }
 
 /**
  * What `PushSubscription.toJSON()` yields, narrowed to the fields the desktop
@@ -1211,6 +1237,21 @@ export interface WebHelloOkFrame {
    * gives, and the only safe one.
    */
   foreman?: ForemanState[]
+  /**
+   * Every project's handoff packs as they stand right now, project by project.
+   *
+   * The snapshot half of the `handoff` push, and it covers every project on the
+   * rail rather than the one the desk happens to be looking at: the desktop
+   * watches one project's folder at a time (electron/handoff-watcher.ts), but a
+   * browser may be reading any of them, and a client that saw chips only for the
+   * desk's current project would be a client whose Handoff menu emptied because
+   * somebody at the desk clicked elsewhere.
+   *
+   * An empty `records` is a real answer — that project has no packs. Absent from
+   * an older desktop, which a client reads as "no handoffs anywhere", the only
+   * safe reading.
+   */
+  handoff?: { projectId: string; records: HandoffRecord[] }[]
 }
 
 /**
@@ -1434,6 +1475,23 @@ export interface WebForemanFrame {
  * reason `foreman` is: it is one small object, and a tab coming back from the
  * lock screen should read a banner that is true.
  */
+/**
+ * One project's handoff packs changed — the whole list for that project, every
+ * time, for the same reason `sessions` is the whole list: a delta the receiver
+ * reassembles is a delta that can be missed, and a project has a handful of
+ * packs, not thousands.
+ *
+ * Broadcast rather than addressed, and sent to hidden tabs as well as visible
+ * ones, exactly as `foreman` is: a handoff is started on one surface and its
+ * chip belongs on all of them, and a phone coming back from the lock screen
+ * should read a header that is true.
+ */
+export interface WebHandoffFrame {
+  type: 'handoff'
+  projectId: string
+  records: HandoffRecord[]
+}
+
 export interface WebDesktopFrame {
   type: 'desktop'
   state: 'recovering' | 'ready'
@@ -1639,6 +1697,7 @@ export type WebServerFrame =
   | WebSessionStartedFrame
   | WebAttentionFrame
   | WebForemanFrame
+  | WebHandoffFrame
   | WebDesktopFrame
   | WebProjectsFrame
   | WebWorkspaceFrame

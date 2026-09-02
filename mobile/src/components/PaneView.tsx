@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import type { MobileSession } from '@shared/mobile'
 import { FOREMAN_SEED_MAX, type ForemanState } from '@shared/foreman'
+import type { HandoffChip, HandoffTarget } from '@shared/handoffview'
 import type { Link } from '../lib/link'
 import { mountTerm, onViewportSettled, type TermHost } from '../lib/term'
 import { KeyBar } from './KeyBar'
@@ -55,6 +56,21 @@ export interface PaneViewProps {
   canTakeOver: boolean
   /** Switch Foreman on (with the seed) or off. Resolved by App, which knows the project. */
   onForeman: (on: boolean, seed: string) => void
+  /**
+   * Handoff. Every one of these is resolved by App against the picture, for the
+   * same reason Foreman's are: the pane screen knows a session, and all four
+   * facts below are per-project.
+   */
+  /** Can this pane hand its work over? A shell has no agent to write a pack. */
+  handoffAble: boolean
+  /** The menu, already in the order shared/handoffview.ts fixes for every surface. */
+  handoffTargets: HandoffTarget[]
+  /** Does this pane's tab let Forge press Enter? Only changes what the hint says. */
+  handoffAutoSend: boolean
+  /** The one line this pane says about its own handoffs, or null. */
+  handoffChip: HandoffChip | null
+  /** Hand this pane's work to the row that was tapped. */
+  onHandoff: (target: HandoffTarget) => void
 }
 
 /**
@@ -91,7 +107,12 @@ export function PaneView({
   foreman,
   drivable,
   canTakeOver,
-  onForeman
+  onForeman,
+  handoffAble,
+  handoffTargets,
+  handoffAutoSend,
+  handoffChip,
+  onHandoff
 }: PaneViewProps): React.JSX.Element {
   const holder = useRef<HTMLDivElement | null>(null)
   const host = useRef<TermHost | null>(null)
@@ -110,6 +131,22 @@ export function PaneView({
   const [seedDraft, setSeedDraft] = useState('')
   const [logOpen, setLogOpen] = useState(false)
   const seedField = useRef<HTMLTextAreaElement | null>(null)
+
+  /* -------------------------------------------------------------- handoff
+   *
+   * The desk's popover, as a bottom sheet — same rows, same order, same
+   * words. The tap is optimistic and the sheet closes on it: `handoffStart`
+   * is fire-and-forget like every other op this phone sends, so what comes
+   * back is either a chip (the desktop took it on) or a refusal in the toast
+   * (see the `err` handler in lib/link.ts). A spinner on the row would be a
+   * promise this link never made.
+   */
+  const [handingOff, setHandingOff] = useState(false)
+
+  /** A pane that stops being able to hand off must not leave its sheet up. */
+  useEffect(() => {
+    if (!handoffAble) setHandingOff(false)
+  }, [handoffAble])
 
   /** The sheet closes itself the moment Foreman is on, whichever surface flipped it. */
   useEffect(() => {
@@ -241,6 +278,19 @@ export function PaneView({
           <strong>{title}</strong>
           <span className="bar-sub">
             {session.cols}×{session.rows}
+            {/*
+              A handoff in flight, in the bar's sub-line rather than beside the
+              buttons: the words run long ("Handed off → Claude Code") and the
+              right of this bar is already three controls wide on a 390px
+              phone. It is a standing fact about the pane, not a control —
+              revealing the pack itself is the desk's job, so there is nothing
+              here to tap.
+            */}
+            {handoffChip ? (
+              <span className="handoff-chip" data-state={handoffChip.state} title={handoffChip.title}>
+                {handoffChip.label}
+              </span>
+            ) : null}
           </span>
         </div>
         {/*
@@ -265,6 +315,23 @@ export function PaneView({
             }}
           >
             FOREMAN
+          </button>
+        ) : null}
+        {/*
+          Hand off — every pane but a shell. Words rather than a glyph, like
+          "Send to TV" on the project bar: there is no icon for "ask this agent
+          to write a pack for another one".
+        */}
+        {handoffAble ? (
+          <button
+            type="button"
+            className="bar-handoff"
+            data-on={handingOff ? 'true' : undefined}
+            aria-expanded={handingOff}
+            title="Ask this agent to write a handoff pack for another one."
+            onClick={() => setHandingOff((open) => !open)}
+          >
+            Hand off
           </button>
         ) : null}
         <button
@@ -367,6 +434,59 @@ export function PaneView({
               </div>
             ))}
           </div>
+        </div>
+      ) : null}
+
+      {/*
+        Who takes this pane's work over. The same two groups the desk's popover
+        has, and the split is the same point: above the rule are agents that
+        already exist, below it are ones Forge would have to start. The order
+        inside each group is `handoffTargets`', never this component's.
+      */}
+      {handingOff && handoffAble ? (
+        <div className="handoff-sheet" role="dialog" aria-label="Hand off to">
+          <div className="handoff-sheet-head">
+            <span className="handoff-sheet-title">Hand off to</span>
+            <button
+              type="button"
+              className="handoff-sheet-close"
+              aria-label="Close"
+              onClick={() => setHandingOff(false)}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="handoff-sheet-list">
+            {handoffTargets.filter((t) => t.kind !== 'new').length === 0 ? (
+              <p className="handoff-sheet-empty">No other agent is running in this project.</p>
+            ) : null}
+            {handoffTargets.map((target, at) => (
+              <Fragment key={target.key}>
+                {/* The one rule in the list, where the running agents end and
+                    the ones that cost a pane and a boot begin. */}
+                {target.kind === 'new' && handoffTargets[at - 1]?.kind !== 'new' ? (
+                  <p className="handoff-sheet-group">Or start one</p>
+                ) : null}
+                <button
+                  type="button"
+                  className="handoff-row"
+                  data-kind={target.kind}
+                  onClick={() => {
+                    setHandingOff(false)
+                    onHandoff(target)
+                  }}
+                >
+                  <span className="handoff-row-name">{target.label}</span>
+                  <span className="handoff-row-note">{target.note || target.agent}</span>
+                </button>
+              </Fragment>
+            ))}
+          </div>
+          <p className="handoff-sheet-hint">
+            {handoffAutoSend
+              ? 'This agent is asked to write a handoff pack, and Forge presses Enter — this tab has auto-send on.'
+              : 'This agent is asked to write a handoff pack. The prompt is typed here, never submitted — you press Enter.'}
+          </p>
         </div>
       ) : null}
 

@@ -109,6 +109,64 @@ function push(w: HandoffWatch, records: HandoffRecord[]): void {
   if (hash === w.hash) return
   w.hash = hash
   if (!w.target.isDestroyed()) w.target.send(IPC.handoffChanged, w.projectId, records)
+  fanOut(w.projectId, records)
+}
+
+/* ------------------------------------------------------------- the remotes
+ *
+ * The same news, for the links that have no `WebContents` to send it to.
+ *
+ * Shaped after `onForemanState` in electron/foreman/ipc.ts, and subscribed to
+ * by electron/web-host.ts and electron/mobile-host.ts for as long as each link
+ * is up. It rides the *same* `push` the window's frame does rather than a
+ * second read of the folder, so a browser and the desk cannot end up disagreeing
+ * about what is in `.forge/handoff` — including about the promotion, which is a
+ * write, and must be seen once.
+ */
+
+type HandoffListener = (projectId: string, records: HandoffRecord[]) => void
+
+const listeners = new Set<HandoffListener>()
+
+export function onHandoffChanged(cb: HandoffListener): () => void {
+  listeners.add(cb)
+  return () => {
+    listeners.delete(cb)
+  }
+}
+
+function fanOut(projectId: string, records: HandoffRecord[]): void {
+  for (const listener of listeners) {
+    try {
+      listener(projectId, records)
+    } catch (err) {
+      // A link that throws must not be the reason the window's own list stops
+      // moving — the pane in front of somebody outranks the browser.
+      console.error('[handoff] a listener failed:', err)
+    }
+  }
+}
+
+/**
+ * One project's packs, read now.
+ *
+ * The snapshot half of `onHandoffChanged`, and the reason a client connecting
+ * to a project the desktop is not watching still sees its chips: the watcher is
+ * singular — one project at a time, whichever the desk's window asked for — but
+ * a browser may be reading any of them, so the opening picture reads every
+ * project's folder rather than reporting on the one the desk happens to have
+ * open. Empty for a project id main does not know, and empty rather than
+ * throwing for a folder that cannot be read.
+ */
+export function listHandoffsFor(projectId: string): HandoffRecord[] {
+  const cwd = pathFor(projectId)
+  if (!cwd) return []
+  try {
+    return collect(cwd)
+  } catch (err) {
+    console.error('[handoff] list failed:', err)
+    return []
+  }
 }
 
 function read(w: HandoffWatch): void {

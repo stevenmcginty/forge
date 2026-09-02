@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PaneLeaf } from '@shared/types'
+import { handoffTargets, handoffTargetWire, paneHandoffChip, type HandoffTarget } from '@shared/handoffview'
 import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { collectLeaves } from '@/lib/splitTree'
 import { AgentBadge } from '@/components/AgentBadge'
+import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
 import { applyChatUpdate, EMPTY_CHAT, type ChatFeed } from '../lib/chat-turns'
 import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines } from '@/lib/feed'
@@ -12,9 +15,10 @@ import type { Transcript } from '@/lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
 import { screenTurns } from '../lib/screen-turns'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
-import { useForge, useProfiles } from '../state'
+import { useForge, useProfiles, useWorkspace } from '../state'
 import { ChatView } from './ChatView'
 import { Feed } from './Feed'
+import { HandoffMenu } from './HandoffMenu'
 
 /**
  * How long a burst of output may hold the conversation view still.
@@ -113,7 +117,9 @@ export function PaneView({
   onScreen: boolean
 }): ReactNode {
   const { state, actions } = useForge()
-  const profile = resolveProfile(useProfiles(), leaf.profileId)
+  const profiles = useProfiles()
+  const workspace = useWorkspace()
+  const profile = resolveProfile(profiles, leaf.profileId)
   /**
    * A phone. Two things change and nothing else: the type is set larger, because
    * 12px at arm's length on a 6-inch screen is not reading; and a pane that is
@@ -131,7 +137,8 @@ export function PaneView({
   const prompt = state.prompts[leaf.id] ?? ''
   const agent = !isShellProfile(profile)
   /** The desktop's own row for this pane, which is where its real grid is. */
-  const session = (state.picture?.sessions ?? []).find((s) => s.id === leaf.id)
+  const sessions = state.picture?.sessions ?? []
+  const session = sessions.find((s) => s.id === leaf.id)
   const alive = session !== undefined
 
   /* ------------------------------------------------------------ foreman
@@ -149,6 +156,64 @@ export function PaneView({
    */
   const foreman = state.picture?.foreman[leaf.id]
   const [logOpen, setLogOpen] = useState(false)
+
+  /* ------------------------------------------------------------ handoff
+   *
+   * The browser's half of Handoff: a button that asks, and a chip that says
+   * what came of it. The desktop does the work — it writes the pack, opens the
+   * pane and marks the record — so everything here is a request going out and a
+   * `handoff` push coming back.
+   *
+   * The rows are `handoffTargets`, which is in shared/ precisely so this menu
+   * and the desk's are the same menu in the same order. What this end must not
+   * do is *decide* anything with them: the desktop rebuilds the list before it
+   * acts, so a row offered from a picture that has since moved on is answered
+   * with a sentence rather than acted on against the wrong pane. That sentence
+   * is what `handoffError` holds, and it is shown in the menu that offered the
+   * row.
+   */
+  const handoffBtnRef = useRef<HTMLButtonElement | null>(null)
+  const [handoffOpen, setHandoffOpen] = useState(false)
+  const [handoffBusy, setHandoffBusy] = useState(false)
+  const [handoffError, setHandoffError] = useState('')
+  /**
+   * This project's packs. Keyed by project because the desktop watches one
+   * folder at a time and hands over every project it knows about; the pane on
+   * screen belongs to the one this browser is looking at.
+   */
+  const handoffRecords = (state.projectId ? state.picture?.handoff[state.projectId] : undefined) ?? []
+  const handoffChip = paneHandoffChip(leaf.id, handoffRecords)
+  /**
+   * The pane's *own* tab, not the active one — auto-send and the default target
+   * belong to the tab the pane lives in, which on a split-heavy workspace is
+   * not necessarily the one on screen.
+   */
+  const paneTab = workspace.tabs.find((t) => collectLeaves(t.root).some((l) => l.id === leaf.id)) ?? null
+  // Only while the menu is open: this walks every pane in the project, and a
+  // wall of panes would walk it once each on every push otherwise.
+  const targets = handoffOpen
+    ? handoffTargets({
+        paneId: leaf.id,
+        tab: paneTab,
+        workspace,
+        profiles,
+        records: handoffRecords,
+        isLive: (id) => sessions.some((s) => s.id === id)
+      })
+    : []
+
+  const pickHandoff = useCallback(
+    (target: HandoffTarget) => {
+      setHandoffBusy(true)
+      setHandoffError('')
+      void actions.handoffStart(leaf.id, handoffTargetWire(target)).then((error) => {
+        setHandoffBusy(false)
+        if (error) setHandoffError(error)
+        else setHandoffOpen(false)
+      })
+    },
+    [actions, leaf.id]
+  )
 
   /**
    * Whether this pane has a live shell, readable from inside the mount effect
@@ -814,8 +879,53 @@ export function PaneView({
               RECONNECTING
             </span>
           ) : null}
+          {/*
+            A handoff in flight. The desktop's chip is a button that reveals the
+            pack; there is nothing to reveal here — the pack is a file on the
+            desk — so this says the same three things and does not pretend to be
+            clickable.
+          */}
+          {handoffChip ? (
+            <span className="pane__handoff-chip" data-state={handoffChip.state} title={handoffChip.title}>
+              {handoffChip.label}
+            </span>
+          ) : null}
+          {agent ? (
+            <button
+              ref={handoffBtnRef}
+              type="button"
+              className="ghost-btn pane__action pane__handoff-btn"
+              data-open={handoffOpen ? 'true' : undefined}
+              title={
+                live
+                  ? 'Hand off… — ask this agent to write a handoff pack for another one'
+                  : 'Hand off… — needs the desktop, and this browser is not connected to it'
+              }
+              aria-label="Hand off"
+              aria-expanded={handoffOpen}
+              disabled={!live}
+              onClick={() => {
+                setHandoffError('')
+                setHandoffOpen((v) => !v)
+              }}
+            >
+              <Icon name="send" size={13} />
+            </button>
+          ) : null}
         </div>
       </header>
+
+      <HandoffMenu
+        anchor={handoffBtnRef.current}
+        open={handoffOpen}
+        onClose={() => setHandoffOpen(false)}
+        targets={targets}
+        profiles={profiles}
+        autoSend={paneTab?.settings?.handoffAutoSend === true}
+        busy={handoffBusy}
+        error={handoffError}
+        onPick={pickHandoff}
+      />
 
       {/*
         A tap takes the caret; a swipe does not.

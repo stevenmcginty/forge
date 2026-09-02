@@ -349,6 +349,26 @@ export function isShellProfile(profile: Pick<AgentProfile, 'command' | 'kind'>):
   return inferKind(profile) === 'shell'
 }
 
+/**
+ * Never return undefined for a pane: fall back to the plain shell.
+ *
+ * Here rather than in src/lib/agents.ts — where it lived until the remote links
+ * needed it — because shared/handoffview.ts asks it what a pane's agent is
+ * called, and that file is read by main, by the renderer, by the browser and by
+ * the phone. Nothing about it was ever of the renderer: it is a lookup over a
+ * list of plain objects. src/lib/agents.ts re-exports it, so no caller moved.
+ */
+export function resolveProfile(profiles: AgentProfile[], id: string | null | undefined): AgentProfile {
+  const found = profiles.find((p) => p.id === id)
+  if (found) return found
+  return profiles.find((p) => p.id === DEFAULT_PROFILE_ID) ?? profiles[0] ?? BUILTIN_AGENT_PROFILES[0]!
+}
+
+/** What the pane header shows when the user hasn't renamed it. Moved here with `resolveProfile`, for the same reason. */
+export function paneDisplayTitle(profile: AgentProfile, title: string): string {
+  return title.trim() || profile.name
+}
+
 /* ------------------------------------------------------- permission modes */
 
 /** The first word of a command line, stripped of quotes and any path. */

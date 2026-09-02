@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { MOBILE_PORT, MOBILE_PROTO, type MobileSession } from '@shared/mobile'
-import { isClaudeCommand } from '@shared/agents'
+import { isClaudeCommand, isShellProfile, resolveProfile } from '@shared/agents'
+import { collectLeaves } from '@shared/splitTree'
+import type { TerminalTab } from '@shared/types'
+import { handoffTargetWire, handoffTargets, paneHandoffChip, type HandoffTarget } from '@shared/handoffview'
 import { Link, deviceId, type LinkPicture, type LinkState } from './lib/link'
 import {
   forgetToken,
@@ -469,6 +472,18 @@ export function App(): React.JSX.Element {
     return <TvDashboard link={link} picture={picture} state={state} detail={detail} notice={notice} />
   }
 
+  /**
+   * The pane screen's project and its tab, resolved once.
+   *
+   * Handoff is per-project three times over — the packs are the project's, the
+   * menu is drawn from the project's panes, and the op names it — and the tab
+   * carries the two settings the menu reads. Foreman's verbs already look the
+   * project up the same way; this only does it where a pane is on screen.
+   */
+  const paneSessionId = screen.at === 'pane' ? screen.session.id : ''
+  const paneProject = paneSessionId ? projectOfSession(picture, paneSessionId) : null
+  const paneTab = paneProject ? tabOfSession(picture, paneProject, paneSessionId) : null
+
   return (
     <div className="app">
       <StatusStrip
@@ -528,6 +543,22 @@ export function App(): React.JSX.Element {
             if (!projectId) return
             if (on) link.foremanStart(projectId, screen.session.id, seed)
             else link.foremanStop(projectId, screen.session.id)
+          }}
+          /*
+           * Handoff, resolved the same way and for the same reason. The menu
+           * and the chip are shared/handoffview.ts's answers, not this
+           * client's: three surfaces draw this list and its *order* is the
+           * feature. The phone's only contribution is what "live" means here —
+           * a pane the desktop still lists a session for, which is the fact the
+           * project list already greys a dead pane out on.
+           */
+          handoffAble={sessionCanHandoff(picture, screen.session.id)}
+          handoffTargets={paneProject ? handoffMenu(picture, paneProject, screen.session.id, paneTab) : []}
+          handoffAutoSend={paneTab?.settings?.handoffAutoSend === true}
+          handoffChip={paneHandoffChip(screen.session.id, paneProject ? picture.handoff[paneProject] ?? [] : [])}
+          onHandoff={(target: HandoffTarget) => {
+            if (!paneProject) return
+            link.handoffStart(paneProject, screen.session.id, handoffTargetWire(target))
           }}
         />
       ) : (
@@ -884,6 +915,57 @@ function sessionIsClaude(picture: LinkPicture, sessionId: string): boolean {
   if (!leaf) return false
   const profile = picture.profiles.find((p) => p.id === leaf.profileId)
   return isClaudeCommand(profile?.command ?? '')
+}
+
+/**
+ * Whether this pane can hand its work over.
+ *
+ * The desk's rule, unchanged: everything but a shell. A handoff pack is a page
+ * of prose one agent writes and another reads; at a PowerShell prompt it is a
+ * very long command that does not exist.
+ */
+function sessionCanHandoff(picture: LinkPicture, sessionId: string): boolean {
+  const leaf = sessionLeafOf(picture, sessionId)
+  if (!leaf) return false
+  return !isShellProfile(resolveProfile(picture.profiles, leaf.profileId))
+}
+
+/**
+ * The tab a pane lives in — its own, never the active one.
+ *
+ * Both of Handoff's tab settings belong to the tab holding the pane: the
+ * standing target the menu offers first, and whether Forge presses Enter.
+ */
+function tabOfSession(picture: LinkPicture, projectId: string, sessionId: string): TerminalTab | null {
+  const workspace = picture.workspaces[projectId]
+  if (!workspace) return null
+  return workspace.tabs.find((tab) => collectLeaves(tab.root).some((leaf) => leaf.id === sessionId)) ?? null
+}
+
+/**
+ * The Handoff menu for one pane, in the order shared/handoffview.ts fixes.
+ *
+ * The phone decides nothing here but the meaning of "live": a pane the desktop
+ * still lists a session for. That is the same fact the project list greys a
+ * dead pane out on, and it is what keeps a closed pane out of the menu.
+ */
+function handoffMenu(
+  picture: LinkPicture,
+  projectId: string,
+  sessionId: string,
+  tab: TerminalTab | null
+): HandoffTarget[] {
+  const workspace = picture.workspaces[projectId]
+  if (!workspace) return []
+  const live = new Set(picture.sessions.map((s) => s.id))
+  return handoffTargets({
+    paneId: sessionId,
+    tab,
+    workspace,
+    profiles: picture.profiles,
+    records: picture.handoff[projectId] ?? [],
+    isLive: (id) => live.has(id)
+  })
 }
 
 function projectOfSession(picture: LinkPicture, sessionId: string): string | null {

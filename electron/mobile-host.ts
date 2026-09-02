@@ -39,6 +39,8 @@ import { DiscoveryResponder } from './mobile/discovery'
 import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
 import { MobileServer, TV_APK_PATH, type MobileApprovalAsk } from './mobile/server'
 import { foremanList, foremanStart, foremanSay, foremanStop, onForemanState } from './foreman/ipc'
+import { listHandoffsFor, onHandoffChanged } from './handoff-watcher'
+import type { HandoffStartRemoteEvent } from '@shared/handoffview'
 import { NgrokTunnel, ensureNgrokExe, pairEndpoint, resolveNgrokExe } from './mobile-tunnel'
 import {
   disposeTvBuild,
@@ -95,6 +97,13 @@ let unsubscribePty: (() => void) | null = null
  * server that has gone.
  */
 let unsubscribeForeman: (() => void) | null = null
+
+/**
+ * The handoff packs' changes, fanned out to every connected phone for as long as
+ * the link is up. Unsubscribed on `stop()` beside Foreman's, and for the same
+ * reason: the watcher outlives this link.
+ */
+let unsubscribeHandoff: (() => void) | null = null
 let lastDetail = ''
 let starting = false
 /**
@@ -351,6 +360,40 @@ async function dispatchOp(op: OpFrame, deviceName: string): Promise<string | nul
     }, OP_TIMEOUT_MS)
     pendingOps.set(requestId, { resolve, timer })
     windows[0].webContents.send(IPC.mobileCommand, { requestId, op, deviceName })
+  })
+}
+
+/**
+ * A phone's "Hand off…", asked of the desktop's window.
+ *
+ * `dispatchOp`'s sibling and deliberately not part of it: a layout op is
+ * performed in main against the authoritative layout and only falls back to the
+ * window, while this one has nowhere else to go — writing the pack, asking the
+ * source agent to fill it, watching the file and pasting the take-over prompt
+ * is one flow that lives in src/hooks/useHandoffFlow.tsx. A desktop with no
+ * window open therefore says so rather than acting.
+ */
+function dispatchHandoffStart(
+  request: { paneId: string; target: HandoffStartRemoteEvent['target'] },
+  deviceName: string
+): Promise<string | null> {
+  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+  if (windows.length === 0) {
+    return Promise.resolve('Forge has no window open on the desktop, so it cannot hand a pane over.')
+  }
+  const requestId = randomUUID()
+  return new Promise<string | null>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingOps.delete(requestId)
+      resolve('The desktop did not answer in time.')
+    }, OP_TIMEOUT_MS)
+    pendingOps.set(requestId, { resolve, timer })
+    windows[0].webContents.send(IPC.handoffStartRemote, {
+      requestId,
+      deviceName,
+      paneId: request.paneId,
+      target: request.target
+    } satisfies HandoffStartRemoteEvent)
   })
 }
 
@@ -627,6 +670,9 @@ async function start(): Promise<void> {
       foremanStop(paneId)
       return { ok: true }
     },
+    // Forwarded to the window, unlike the two verbs above it: the handoff flow
+    // spans two panes and minutes, and lives in one piece in the renderer.
+    handoffStart: (request, deviceName) => dispatchHandoffStart(request, deviceName),
     foremanSay: async (paneId, text) => {
       const state = foremanSay({ paneId, text })
       const driving = state.status === 'starting' || state.status === 'driving' || state.status === 'waiting'
@@ -697,6 +743,10 @@ async function start(): Promise<void> {
   // `snapshotForPhone` carries the current states to a phone that connects
   // mid-job; this is everything that moves after that.
   unsubscribeForeman = onForemanState((state) => instance.pushForeman(state))
+
+  // And the handoff packs, on the same terms — including the watcher's own
+  // `open → ready` promotion, which is what lights a take-over row up.
+  unsubscribeHandoff = onHandoffChanged((projectId, records) => instance.pushHandoff(projectId, records))
 
   // The phone sees what the window sees, from the same coalesced flush.
   unsubscribePty = addPtySink({
@@ -801,6 +851,8 @@ async function stop(): Promise<void> {
   unsubscribePty = null
   unsubscribeForeman?.()
   unsubscribeForeman = null
+  unsubscribeHandoff?.()
+  unsubscribeHandoff = null
   // A pending push would fire into a server that has stopped, which is the
   // ordinary shape of switching the link off a beat after moving a pane.
   if (geometryPush) clearTimeout(geometryPush)
@@ -887,7 +939,7 @@ function stopTunnel(): void {
   tunnelStatus = TUNNEL_OFF
 }
 
-function snapshotForPhone(): Pick<HelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'foreman'> {
+function snapshotForPhone(): Pick<HelloOkFrame, 'projects' | 'profiles' | 'workspaces' | 'foreman' | 'handoff'> {
   const projects = getProjects()
   const workspaces: Record<string, import('@shared/types').Workspace> = {}
   for (const project of projects) {
@@ -900,7 +952,10 @@ function snapshotForPhone(): Pick<HelloOkFrame, 'projects' | 'profiles' | 'works
     workspaces,
     // Always, even empty: a phone reconnecting mid-job learns the switch is on
     // from here, and "nothing is being driven" is a real answer too.
-    foreman: foremanList()
+    foreman: foremanList(),
+    // Every project, not just the one the desk's window is watching: the handoff
+    // watcher is singular and a phone may be reading any project on the rail.
+    handoff: projects.map((project) => ({ projectId: project.id, records: listHandoffsFor(project.id) }))
   }
 }
 
@@ -1187,6 +1242,19 @@ export function registerMobileHandlers(): void {
    */
   ipcMain.on(IPC.mobileApprovalResult, (_e, payload: { requestId?: string; allow?: boolean }) => {
     settleApproval(String(payload?.requestId ?? ''), payload?.allow === true)
+  })
+
+  /**
+   * The renderer's verdict on a `handoffStartRemote`. Its own channel rather
+   * than `mobileCommandResult`, because the browser's host listens on the same
+   * one: the request ids are UUIDs, so each host settles the one it is holding.
+   */
+  ipcMain.on(IPC.handoffStartResult, (_e, payload: { requestId?: string; error?: string }) => {
+    const pending = pendingOps.get(String(payload?.requestId ?? ''))
+    if (!pending) return
+    pendingOps.delete(String(payload?.requestId ?? ''))
+    clearTimeout(pending.timer)
+    pending.resolve(payload?.error ? String(payload.error) : null)
   })
 
   /** The renderer's verdict on a `mobileCommand`. */

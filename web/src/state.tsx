@@ -20,7 +20,8 @@ import {
 } from '@shared/web'
 import type { ChatUpdate } from '@shared/chat'
 import type { ForemanState } from '@shared/foreman'
-import type { AgentProfile, GitSnapshot, Project, Workspace } from '@shared/types'
+import type { AgentProfile, GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
+import type { HandoffTargetWire } from '@shared/handoffview'
 import { collectLeaves } from '@/lib/splitTree'
 import { ALLOW_LOOPBACK, devLoopbackHost, loadConfig, type WebClientConfig } from './config'
 import { Auth, isSignedOutError, type Session } from './lib/auth'
@@ -71,6 +72,17 @@ export interface Picture {
    * been driven simply has no entry, which reads the same as `off`.
    */
   foreman: Record<string, ForemanState>
+  /**
+   * Every project's handoff packs, keyed by project id. From `hello-ok` on
+   * connect and kept current by the `handoff` push — a project with no packs
+   * has an empty array, and one this desktop has never mentioned has no entry,
+   * which reads the same.
+   *
+   * Every project rather than the one on screen, because the desktop watches one
+   * folder at a time and this tab may be reading any of them; see the field of
+   * the same name on `WebHelloOkFrame`.
+   */
+  handoff: Record<string, HandoffRecord[]>
 }
 
 /** What the whole page is doing, before any of the connection detail. */
@@ -194,6 +206,17 @@ export interface ForgeActions {
   foremanStop: (paneId: string) => Promise<string | null>
   /** A word in Foreman's ear mid-job. Null on success, the sentence to show otherwise. */
   foremanSay: (paneId: string, text: string) => Promise<string | null>
+  /**
+   * Hand one pane's work to another agent — the browser's half of the Handoff
+   * menu. Resolves null when the desktop started it, or with the sentence to
+   * show. `target` is one of the three kinds in `HandoffTargetWire`; build it
+   * from a menu row with `handoffTargetWire`, so the browser and the desk are
+   * offering the same list.
+   *
+   * `null` means the pack is written and the ask is in the source pane, not
+   * that the handoff is finished — that lands minutes later as `handoff` pushes.
+   */
+  handoffStart: (paneId: string, target: HandoffTargetWire) => Promise<string | null>
   setNotice: (message: string) => void
   /** Clear the notice on screen now; the next in the queue, if any, takes its turn. */
   dismissNotice: () => void
@@ -510,7 +533,10 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           projectsRoot: frame.projectsRoot ?? '',
           // The snapshot half: a browser that reconnects mid-job learns the
           // switch is on from here. Absent (an older desktop) reads as empty.
-          foreman: Object.fromEntries((frame.foreman ?? []).map((s) => [s.paneId, s]))
+          foreman: Object.fromEntries((frame.foreman ?? []).map((s) => [s.paneId, s])),
+          // The same snapshot rule: absent (an older desktop) reads as no
+          // handoffs anywhere, which is the only safe reading.
+          handoff: Object.fromEntries((frame.handoff ?? []).map((h) => [h.projectId, h.records]))
         })
         // Written down and held, from the one object rather than by reading back
         // what was just written: `rememberPicture` hands over what it stored.
@@ -553,6 +579,13 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // switch wants its true shape from the desktop, not a guess.
         setPicture((current) =>
           current ? { ...current, foreman: { ...current.foreman, [state.paneId]: state } } : current
+        )
+      },
+      onHandoff: (projectId, records) => {
+        // The whole list replaces that project's entry — there is no delta to
+        // merge, and the desktop's list is the one the files say is true.
+        setPicture((current) =>
+          current ? { ...current, handoff: { ...current.handoff, [projectId]: records } } : current
         )
       },
       onDesktop: (state, reason) => {
@@ -1119,6 +1152,18 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           pushNotice(result.message)
           return result.message
         }
+        return null
+      },
+      handoffStart: async (paneId, target) => {
+        const result = await client.request({ kind: 'handoff-start', paneId, target })
+        if (result.kind === 'failed') {
+          pushNotice(result.message)
+          return result.message
+        }
+        // Said after the round trip, unlike Foreman's: the desktop answers as
+        // soon as the pack is written, which is fast, and a notice before it
+        // would be a promise made before anything had been asked of the agent.
+        pushNotice('Asked this pane to write a handoff pack')
         return null
       },
       onTranscript: (sessionId, listener) => {

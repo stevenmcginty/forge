@@ -31,7 +31,7 @@
  * desktop publishes where it can be reached right now, the phone reads it. The
  * no-NAT property is kept; the lag is not. See docs/MOBILE.md.
  */
-import type { AgentProfile, Project, Workspace } from './types'
+import type { AgentProfile, HandoffRecord, Project, Workspace } from './types'
 /*
  * Foreman's state, type-only and imported whole — the same rule shared/web.ts
  * follows for the same reason: `ForemanState` is plain JSON built for a wire
@@ -39,6 +39,14 @@ import type { AgentProfile, Project, Workspace } from './types'
  * of one driven pane that drift.
  */
 import type { ForemanState } from './foreman'
+/*
+ * The Handoff vocabulary, imported whole for the same reason Foreman's is: how
+ * a client names the agent a pane's work should go to is one rule, held in
+ * shared/handoffview.ts, and read at this boundary by `readHandoffTarget` —
+ * which electron/mobile/server.ts imports from there directly, as it imports
+ * FOREMAN_SEED_MAX from shared/foreman.ts.
+ */
+import type { HandoffTargetWire } from './handoffview'
 
 /**
  * A live pane, as the phone sees it.
@@ -344,7 +352,14 @@ export interface OpFrame {
    * pane — and because a second frame type for two verbs is a second thing to
    * hold to the same rules.
    */
-  op: 'create-tab' | 'create-pane' | 'close-pane' | 'select-tab' | 'foreman-start' | 'foreman-stop'
+  op:
+    | 'create-tab'
+    | 'create-pane'
+    | 'close-pane'
+    | 'select-tab'
+    | 'foreman-start'
+    | 'foreman-stop'
+    | 'handoff-start'
   projectId: string
   profileId?: string
   /**
@@ -364,6 +379,18 @@ export interface OpFrame {
    * that has one.
    */
   seed?: string
+  /**
+   * `handoff-start` only: which agent the pane's work should go to.
+   *
+   * Unlike the two Foreman verbs beside it, this one is neither answered in
+   * main nor performed against the layout: it is forwarded to the desktop's
+   * *renderer*, which owns the whole handoff flow (write the pack, ask the
+   * agent to fill it, watch the file, paste the take-over prompt). A second
+   * copy of that in main would be a second thing to be wrong about what a
+   * handoff is. Read at the boundary by `readHandoffTarget`; a kind this
+   * desktop does not know is refused rather than guessed at.
+   */
+  target?: HandoffTargetWire
 }
 
 export interface PingFrame {
@@ -745,6 +772,14 @@ export interface HelloOkFrame {
    * reads the same as an empty array: nothing is being driven.
    */
   foreman?: ForemanState[]
+  /**
+   * Every project's handoff packs as they stand right now, project by project —
+   * the snapshot half of the `handoff` push, and the phone's twin of the field
+   * of the same name on `WebHelloOkFrame`. Every project on the rail, not just
+   * the one the desk is looking at: the desktop watches one folder at a time,
+   * and a phone may be reading any of them.
+   */
+  handoff?: { projectId: string; records: HandoffRecord[] }[]
 }
 
 /**
@@ -807,6 +842,18 @@ export interface PongFrame {
 export interface ForemanFrame {
   t: 'foreman'
   state: ForemanState
+}
+
+/**
+ * One project's handoff packs changed — the whole list for that project, every
+ * time, the same rule `ForemanFrame` states: a delta the receiver reassembles
+ * is a delta that can be missed. Broadcast to every authenticated device, as
+ * the browser link's twin frame is; see `WebHandoffFrame` in shared/web.ts.
+ */
+export interface HandoffFrame {
+  t: 'handoff'
+  projectId: string
+  records: HandoffRecord[]
 }
 
 /**
@@ -875,6 +922,7 @@ export type ServerFrame =
   | StateFrame
   | PongFrame
   | ForemanFrame
+  | HandoffFrame
   | DesktopFrame
   | ErrFrame
   | TvPlayFrame
