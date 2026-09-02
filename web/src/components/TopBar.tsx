@@ -274,13 +274,20 @@ export function TopBar({
           {drivable && !offline ? (
             <button
               type="button"
-              className="titlebar__foreman mono"
+              className={mobile ? 'ghost-btn titlebar__btn titlebar__foreman' : 'titlebar__foreman mono'}
               style={paneTint}
               data-on={foremanOn ? 'true' : undefined}
               data-status={foreman?.status ?? 'off'}
               data-open={seeding ? 'true' : undefined}
               aria-pressed={foremanOn}
               aria-expanded={seeding}
+              aria-label={
+                foremanOn
+                  ? foreman?.line
+                    ? `Foreman: ${foreman.line} — tap to switch it off`
+                    : 'Foreman is driving this pane. Switch it off to take the keyboard back.'
+                  : 'Let Foreman drive this pane end to end from one line.'
+              }
               disabled={!live || !alive}
               title={
                 foremanOn
@@ -291,7 +298,7 @@ export function TopBar({
               }
               onClick={switchForeman}
             >
-              FOREMAN
+              {mobile ? <Icon name="foreman" size={15} /> : 'FOREMAN'}
             </button>
           ) : null}
 
@@ -315,11 +322,18 @@ export function TopBar({
             <button
               ref={handoffBtnRef}
               type="button"
-              className="titlebar__handoff mono"
+              className={mobile ? 'ghost-btn titlebar__btn titlebar__handoff' : 'titlebar__handoff mono'}
               style={paneTint}
               data-open={handoffOpen ? 'true' : undefined}
               data-state={handoffChip?.state}
               aria-expanded={handoffOpen}
+              aria-label={
+                handoffChip
+                  ? `${handoffChip.label} — ${handoffChip.title}`
+                  : live && alive
+                    ? 'Hand off… — ask this agent to write a handoff pack for another one'
+                    : 'Hand off… — needs a live agent session'
+              }
               disabled={!live || !alive}
               title={
                 handoffChip
@@ -333,11 +347,15 @@ export function TopBar({
                 setHandoffOpen((v) => !v)
               }}
             >
-              {handoffChip?.state === 'waiting'
-                ? 'HANDING OFF…'
-                : handoffChip?.state === 'sent' || handoffChip?.state === 'took'
-                  ? 'HANDED OFF'
-                  : 'HAND OFF'}
+              {mobile ? (
+                <Icon name="send" size={15} />
+              ) : (
+                handoffChip?.state === 'waiting'
+                  ? 'HANDING OFF…'
+                  : handoffChip?.state === 'sent' || handoffChip?.state === 'took'
+                    ? 'HANDED OFF'
+                    : 'HAND OFF'
+              )}
             </button>
           ) : null}
 
