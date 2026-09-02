@@ -31,7 +31,7 @@ const api: ForgeApi = {
 
   pty: {
     create: (req) => ipcRenderer.invoke(IPC.ptyCreate, req),
-    write: (id, data) => ipcRenderer.send(IPC.ptyWrite, id, data),
+    write: (id, data, claim) => ipcRenderer.send(IPC.ptyWrite, id, data, claim),
     resize: (id, cols, rows) => ipcRenderer.send(IPC.ptyResize, id, cols, rows),
     rename: (id, title) => ipcRenderer.send(IPC.ptyRename, id, title),
     kill: (id) => ipcRenderer.invoke(IPC.ptyKill, id),

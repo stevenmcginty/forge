@@ -179,7 +179,8 @@ export interface ForgeActions {
   attach: (sessionId: string, size: { cols: number; rows: number } | null) => void
   detach: (sessionId: string) => void
   write: (sessionId: string, data: string) => void
-  resize: (sessionId: string, cols: number, rows: number) => void
+  /** `again` re-sends a wish the desktop was already told. See `PaneView`. */
+  resize: (sessionId: string, cols: number, rows: number, again?: boolean) => void
   /** Take a pane's grid for this browser without typing. The phone layout's. */
   claim: (sessionId: string) => void
   /** Subscribe to a pane's bytes. Returns the unsubscribe. */
@@ -1112,7 +1113,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       attach: (sessionId, size) => client.attach(sessionId, size),
       detach: (sessionId) => client.detach(sessionId),
       write: (sessionId, data) => client.write(sessionId, data),
-      resize: (sessionId, cols, rows) => client.resize(sessionId, cols, rows),
+      resize: (sessionId, cols, rows, again) => client.resize(sessionId, cols, rows, again),
       claim: (sessionId) => void client.request({ kind: 'claim', sessionId }),
       onData: (sessionId, listener) => {
         const map = dataListeners.current

@@ -167,7 +167,12 @@ export interface ForgeApi {
 
   pty: {
     create(req: CreateSessionRequest): Promise<CreateSessionResult>
-    write(id: string, data: string): void
+    /**
+     * `claim` false means nobody at this desk pressed this — Forge typed it on
+     * somebody else's behalf (a handoff brief) — so the pane's grid stays
+     * with whoever holds it. See GridOwners.noteWrite. Default true.
+     */
+    write(id: string, data: string, claim?: boolean): void
     resize(id: string, cols: number, rows: number): void
     /** The pane was renamed in the UI. See `IPC.ptyRename`. */
     rename(id: string, title: string): void

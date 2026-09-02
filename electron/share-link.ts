@@ -92,9 +92,9 @@ interface StoredPane extends ShareLinkPane {
 /** What the link needs from the PTY host, and nothing more. */
 export interface ShareLinkDeps {
   /**
-   * Put bytes on a pane's PTY. The PTY host routes this through the same
-   * `owners.noteWrite` + `manager.write` pair `IPC.ptyWrite` uses, so a send
-   * moves the pane's grid ownership exactly as typing at the desk does.
+   * Put bytes on a pane's PTY. `manager.write` only — never `owners.noteWrite`:
+   * an agent sending to a pane is not a person sitting down at the desk, and
+   * the pane's grid stays with whoever was reading it (see GridOwners).
    */
   write: (id: string, data: string) => boolean
   /** electron/pty-host.ts `getReplay` — the catch-up buffer for one session. */

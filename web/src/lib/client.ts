@@ -1154,10 +1154,12 @@ export class ForgeClient {
    * being made at all — but it is the floor every path has to cross, which is
    * why it is here rather than only there.
    */
-  resize(sessionId: string, cols: number, rows: number): void {
+  resize(sessionId: string, cols: number, rows: number, again = false): void {
     if (this.subs.has(sessionId)) this.subs.set(sessionId, { cols, rows })
     const told = this.told.get(sessionId)
-    if (told && told.cols === cols && told.rows === rows) return
+    // `again` is the caller saying the desktop's answer disagrees with what it
+    // was told, so "already told" is exactly the frame that has to go out.
+    if (!again && told && told.cols === cols && told.rows === rows) return
     // Recorded only if it actually went out. A `send` on a socket that is not
     // open is dropped in silence, and remembering that as something the desktop
     // knows would silence the frame that has to be sent when it comes back.

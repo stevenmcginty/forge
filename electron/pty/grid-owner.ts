@@ -192,6 +192,23 @@ export class GridOwners {
   }
 
   /**
+   * The PTY really moved. From the session manager's own resize hook, which
+   * fires only after ConPTY has taken a grid — so this, and not the memory of
+   * what was asked for, is what a later wish is compared against.
+   *
+   * `applied` used to be that memory, and a request can be granted on paper
+   * and land later: a wish held back while a pane's shell is still coming up,
+   * or the first half of a redraw jiggle. When what landed was not what was
+   * asked for, a wish that matched the memory but not the PTY was dropped as
+   * already done, and the pane stayed the wrong size until something else
+   * moved it — a phone whose keyboard had closed, reading Grok in a ten-row box
+   * at the top of a tall screen.
+   */
+  noteApplied(id: string, cols: number, rows: number): void {
+    this.paneFor(id).applied = { cols, rows }
+  }
+
+  /**
    * A viewer stopped reading — one pane when `id` is given (a detach), all of
    * them when it is not (a hang-up, or this desktop's window being destroyed).
    *

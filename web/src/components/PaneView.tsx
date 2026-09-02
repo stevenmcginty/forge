@@ -667,7 +667,23 @@ export function PaneView({
   const cols = session?.cols ?? 0
   const rows = session?.rows ?? 0
   useLayoutEffect(() => {
-    hostRef.current?.follow(cols > 0 && rows > 0 ? { cols, rows } : null)
+    const host = hostRef.current
+    if (!host) return
+    host.follow(cols > 0 && rows > 0 ? { cols, rows } : null)
+    // The desktop's answer is not this browser's wish. Usually that is the
+    // rule working — somebody typed at the desk and the desk's grid won — and
+    // the wish is stored, not granted, so re-sending it costs one frame and
+    // moves nothing. But it is also the one symptom a lost wish has: a grid
+    // queued while the pane's shell was coming up landing *after* a newer one,
+    // which left Grok drawn in a ten-row box at the top of a tall phone. Sent
+    // through `again` because the client has already told the desktop this
+    // size once and would otherwise drop it as known. Once per answer, never
+    // in a loop: a wish the desktop clamps comes back as the same answer, and
+    // the same answer does not run this effect again.
+    const mine = host.size()
+    if (cols > 0 && rows > 0 && mine && (mine.cols !== cols || mine.rows !== rows)) {
+      actionsRef.current.resize(leaf.id, mine.cols, mine.rows, true)
+    }
   }, [cols, rows, cached, leaf.id])
 
   /**

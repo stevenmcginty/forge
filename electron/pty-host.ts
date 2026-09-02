@@ -302,14 +302,11 @@ let link: ShareLink | null = null
 function getLink(): ShareLink {
   if (!link) {
     link = new ShareLink({
-      // Deliberately the same two calls IPC.ptyWrite makes below: a message from
-      // another agent arrives at the PTY exactly as the person's own typing does,
-      // grid ownership and all. A second write path would be a second answer to
-      // "who owns this pane's width".
-      write: (id, data) => {
-        owners.noteWrite(id, DESK_VIEWER, data)
-        return getManager().write(id, data)
-      },
+      // Not `owners.noteWrite`: a message from another agent is not a person
+      // sitting down at this desk, and it used to take the pane's grid off a
+      // phone that was reading it. The grid follows the *person* who typed —
+      // an agent typing into a pane leaves the grid where it was.
+      write: (id, data) => getManager().write(id, data),
       replay: getReplay
     })
   }
@@ -610,6 +607,9 @@ export function getManager(): PtySessionManager {
       maxSessions: MAX_SESSIONS,
       onData: queue,
       onResize: (id, cols, rows) => {
+        // The registry's memory of the grid is corrected by the grid that
+        // actually took — see GridOwners.noteApplied.
+        owners.noteApplied(id, cols, rows)
         // First, and before anybody is told: the replay buffer stops being
         // replayable the instant the width moves, and a sink that reacts to this
         // by asking for one must get the clean screen rather than a screenful of
@@ -919,12 +919,13 @@ export function registerPtyHandlers(): void {
     return result
   })
 
-  ipcMain.on(IPC.ptyWrite, (_e, id: string, data: string) => {
+  ipcMain.on(IPC.ptyWrite, (_e, id: string, data: string, claim?: boolean) => {
     // Typing at the desk takes the pane back, instantly and with no ceremony —
     // that is the whole of "sit down and it is native again". Everything xterm
     // sends that nobody pressed is filtered out by `noteWrite`; see
-    // shared/typing.ts.
-    owners.noteWrite(String(id), DESK_VIEWER, String(data))
+    // shared/typing.ts. `claim: false` is the renderer saying nobody pressed
+    // this either — a handoff brief Forge pasted on somebody else's behalf.
+    if (claim !== false) owners.noteWrite(String(id), DESK_VIEWER, String(data))
     // The person is at this pane. That counts as the pane being busy, so an
     // agent elsewhere cannot type into the middle of somebody's sentence.
     link?.noteWrite(String(id))

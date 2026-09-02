@@ -142,8 +142,10 @@ export function HandoffProvider({ children }: { children: ReactNode }): ReactNod
     live.current.actions.revealPane(paneId)
     terminalHost.focus(paneId)
     requestAnimationFrame(() => {
-      terminalHost.paste(paneId, text)
-      if (submit) requestAnimationFrame(() => terminalHost.submit(paneId))
+      // Typed on somebody else's behalf: a brief handed off from a phone must
+      // not take the pane's grid off that phone. See TerminalHost.paste.
+      terminalHost.paste(paneId, text, { claim: false })
+      if (submit) requestAnimationFrame(() => terminalHost.submit(paneId, { claim: false }))
     })
   }, [])
 

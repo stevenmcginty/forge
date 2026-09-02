@@ -276,6 +276,12 @@ interface Entry {
    * an empty prompt is a no-op in every shell and agent we launch.
    */
   typed: string
+  /**
+   * True while Forge itself is typing into this pane on somebody else's
+   * behalf — a handoff brief being pasted — so the write goes down without
+   * claiming the pane's grid for this desk. See `paste` and shared/api.ts.
+   */
+  quiet: boolean
   lastActivityNotify: number
   activityTimer: number | null
   /** True while this pane counts as working — see the BUSY_* constants. */
@@ -1001,6 +1007,7 @@ class TerminalHost {
       devScanTail: '',
       devUrl: null,
       typed: '',
+      quiet: false,
       lastActivityNotify: 0,
       activityTimer: null,
       busy: false,
@@ -1030,7 +1037,7 @@ class TerminalHost {
       // main process consults on this same stream to decide whether the person
       // at this desk has just taken the pane's grid back.
       if (isTypedInput(data)) entry.typed = advanceDraft(entry.typed, data)
-      window.forge.pty.write(paneId, data)
+      window.forge.pty.write(paneId, data, !entry.quiet)
     })
     entry.disposers.push(() => dataSub.dispose())
 
@@ -1664,10 +1671,22 @@ class TerminalHost {
     this.entries.get(paneId)?.term.selectAll()
   }
 
-  paste(paneId: string, text: string): void {
+  /**
+   * `claim: false` is for text Forge types on somebody else's behalf — a
+   * handoff brief. xterm's paste reaches the PTY through `onData` like a
+   * keystroke, and a keystroke at this desk takes the pane's grid off a phone;
+   * a brief the phone asked for must not. Synchronous, so the flag is down
+   * again before anything a person presses can ride under it.
+   */
+  paste(paneId: string, text: string, opts?: { claim?: boolean }): void {
     const entry = this.entries.get(paneId)
     if (!entry) return
-    entry.term.paste(text)
+    entry.quiet = opts?.claim === false
+    try {
+      entry.term.paste(text)
+    } finally {
+      entry.quiet = false
+    }
     entry.term.scrollToBottom()
   }
 
@@ -1727,11 +1746,11 @@ class TerminalHost {
    * beat the user can interrupt. Keeping the carriage return in its own method
    * means "who can submit for me?" is one search away.
    */
-  submit(paneId: string): boolean {
+  submit(paneId: string, opts?: { claim?: boolean }): boolean {
     const entry = this.entries.get(paneId)
     if (!entry || entry.runtime.status === 'exited') return false
     entry.typed = '' // The Enter below sends the draft on its way.
-    window.forge.pty.write(paneId, '\r')
+    window.forge.pty.write(paneId, '\r', opts?.claim !== false)
     entry.term.scrollToBottom()
     return true
   }

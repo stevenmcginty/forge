@@ -239,7 +239,7 @@ export class PtySessionManager {
     const c = clampDim(cols, s.info.cols, MIN_PTY_COLS)
     const r = clampDim(rows, s.info.rows)
     if (c === s.info.cols && r === s.info.rows) {
-      s.pendingResize = undefined
+      this.dropPendingResize(s)
       return true
     }
     // A browser or phone attaching to a brand-new pane fits the PTY to its own
@@ -251,6 +251,12 @@ export class PtySessionManager {
       s.pendingResize = { cols: c, rows: r }
       return true
     }
+    // The shell is up, so this wish is applied now — and a wish still waiting
+    // from before must not land on top of it. It used to: a phone that made a
+    // pane with its keyboard open queued a ten-row grid, closed the keyboard,
+    // asked for forty, got forty at once, and then the queued ten arrived a beat
+    // later and put Grok back in a ten-row box at the top of a tall pane.
+    this.dropPendingResize(s)
     return this.applyResize(s, c, r)
   }
 
@@ -307,6 +313,12 @@ export class PtySessionManager {
     if (session.pendingResize) {
       session.pendingResizeTimer = setTimeout(() => this.flushPendingResize(session), BOOTSTRAP_QUIET_MS)
     }
+  }
+
+  private dropPendingResize(session: Session): void {
+    if (session.pendingResizeTimer) clearTimeout(session.pendingResizeTimer)
+    session.pendingResizeTimer = undefined
+    session.pendingResize = undefined
   }
 
   private flushPendingResize(session: Session): void {
