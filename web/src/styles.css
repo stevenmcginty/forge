@@ -3721,6 +3721,10 @@ button.astatus__mode:not(:disabled):hover {
   box-shadow: var(--shadow-key);
 }
 
+[data-mobile] .pane[data-kind='agent'] .pane__trailing:empty {
+  display: none;
+}
+
 [data-mobile] .pane[data-view='feed'] .feed__scroll,
 [data-mobile] .pane[data-view='chat'] .chatview__scroll {
   padding-top: 52px;
@@ -4281,6 +4285,108 @@ button.astatus__mode:not(:disabled):hover {
   min-height: 30px;
   padding: 8px 7px;
   font-size: 9px;
+}
+
+/* -------------------------------------------------------- topbar handoff
+ *
+ * Handoff in the titlebar, beside Foreman. Same monospace pill tokens,
+ * tinted with the active agent's profile accent so the control belongs to
+ * the pane on screen.
+ */
+.titlebar__handoff {
+  flex: none;
+  font: 600 10px / 1 var(--font-mono);
+  letter-spacing: 0.08em;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.titlebar__handoff:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--pane-accent, var(--accent));
+}
+
+.titlebar__handoff:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.titlebar__handoff[data-open='true'] {
+  color: var(--text-primary);
+  border-color: var(--pane-accent, var(--accent));
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 10%, transparent);
+}
+
+.titlebar__handoff[data-state='sent'],
+.titlebar__handoff[data-state='took'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.titlebar__handoff[data-state='waiting'] {
+  color: var(--warn, #f59e0b);
+  border-color: color-mix(in srgb, var(--warn, #f59e0b) 55%, transparent);
+  background: color-mix(in srgb, var(--warn, #f59e0b) 12%, transparent);
+  animation: titlebar-handoff-pulse 1.6s var(--ease-out) infinite;
+}
+
+@keyframes titlebar-handoff-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.titlebar__handoff-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  max-width: 170px;
+  padding: 0 var(--s-2);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+  background: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titlebar__handoff-chip[data-state='sent'],
+.titlebar__handoff-chip[data-state='took'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.titlebar__handoff-chip[data-state='waiting'] {
+  color: var(--warn, #f59e0b);
+  border-color: color-mix(in srgb, var(--warn, #f59e0b) 40%, transparent);
+}
+
+.app[data-mobile] .titlebar__handoff {
+  min-height: 30px;
+  padding: 8px 7px;
+  font-size: 9px;
+}
+
+.app[data-mobile] .titlebar__handoff-chip {
+  display: none;
 }
 
 /*

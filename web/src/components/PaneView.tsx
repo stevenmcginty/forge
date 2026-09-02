@@ -838,94 +838,98 @@ export function PaneView({
 
         {/*
           Chips travel as one trailing cluster. On a phone the
-          title hides in cards view.
+          title hides in cards view, and handoff lives in the top bar.
         */}
-        <div className="pane__trailing">
-          {asking ? (
-            <span className="pane__perm mono" title="This pane has settled on a question and is waiting on an answer">
-              WAITING
-            </span>
-          ) : null}
-          {/*
-            On a phone the trim is marked where it happened — a seam at the top
-            of the feed (`cut` on <Feed/>) — instead of spending thumb-width
-            chrome on an internal flag. The chip stays on the wide layout.
-          */}
-          {truncated && !mobile ? (
-            <span
-              className="pane__perm mono"
-              title="The catch-up buffer was cut at its ceiling, so this transcript begins mid-sentence"
-            >
-              CUT
-            </span>
-          ) : null}
-          {cached ? (
-            <span className="pane__perm mono" data-frozen="true" title="The last transcript this browser was sent">
-              FROZEN
-            </span>
-          ) : null}
-          {/*
-            Not the same chip and not the same news. FROZEN says there is no
-            desktop; this says there is one and the link to it dropped, so what is
-            on screen is where the pane had got to and the catch-up buffer will
-            repaint it the moment the socket is back.
-          */}
-          {!cached && !live ? (
-            <span
-              className="pane__perm mono"
-              data-reconnecting="true"
-              title="The link dropped — this is where the pane had got to, and it repaints when it comes back"
-            >
-              RECONNECTING
-            </span>
-          ) : null}
-          {/*
-            A handoff in flight. The desktop's chip is a button that reveals the
-            pack; there is nothing to reveal here — the pack is a file on the
-            desk — so this says the same three things and does not pretend to be
-            clickable.
-          */}
-          {handoffChip ? (
-            <span className="pane__handoff-chip" data-state={handoffChip.state} title={handoffChip.title}>
-              {handoffChip.label}
-            </span>
-          ) : null}
-          {agent ? (
-            <button
-              ref={handoffBtnRef}
-              type="button"
-              className="ghost-btn pane__action pane__handoff-btn"
-              data-open={handoffOpen ? 'true' : undefined}
-              title={
-                live
-                  ? 'Hand off… — ask this agent to write a handoff pack for another one'
-                  : 'Hand off… — needs the desktop, and this browser is not connected to it'
-              }
-              aria-label="Hand off"
-              aria-expanded={handoffOpen}
-              disabled={!live}
-              onClick={() => {
-                setHandoffError('')
-                setHandoffOpen((v) => !v)
-              }}
-            >
-              <Icon name="send" size={13} />
-            </button>
-          ) : null}
-        </div>
+        {asking || (truncated && !mobile) || cached || (!cached && !live) || (!mobile && (handoffChip || agent)) ? (
+          <div className="pane__trailing">
+            {asking ? (
+              <span className="pane__perm mono" title="This pane has settled on a question and is waiting on an answer">
+                WAITING
+              </span>
+            ) : null}
+            {/*
+              On a phone the trim is marked where it happened — a seam at the top
+              of the feed (`cut` on <Feed/>) — instead of spending thumb-width
+              chrome on an internal flag. The chip stays on the wide layout.
+            */}
+            {truncated && !mobile ? (
+              <span
+                className="pane__perm mono"
+                title="The catch-up buffer was cut at its ceiling, so this transcript begins mid-sentence"
+              >
+                CUT
+              </span>
+            ) : null}
+            {cached ? (
+              <span className="pane__perm mono" data-frozen="true" title="The last transcript this browser was sent">
+                FROZEN
+              </span>
+            ) : null}
+            {/*
+              Not the same chip and not the same news. FROZEN says there is no
+              desktop; this says there is one and the link to it dropped, so what is
+              on screen is where the pane had got to and the catch-up buffer will
+              repaint it the moment the socket is back.
+            */}
+            {!cached && !live ? (
+              <span
+                className="pane__perm mono"
+                data-reconnecting="true"
+                title="The link dropped — this is where the pane had got to, and it repaints when it comes back"
+              >
+                RECONNECTING
+              </span>
+            ) : null}
+            {/*
+              A handoff in flight. The desktop's chip is a button that reveals the
+              pack; there is nothing to reveal here — the pack is a file on the
+              desk — so this says the same three things and does not pretend to be
+              clickable.
+            */}
+            {handoffChip && !mobile ? (
+              <span className="pane__handoff-chip" data-state={handoffChip.state} title={handoffChip.title}>
+                {handoffChip.label}
+              </span>
+            ) : null}
+            {agent && !mobile ? (
+              <button
+                ref={handoffBtnRef}
+                type="button"
+                className="ghost-btn pane__action pane__handoff-btn"
+                data-open={handoffOpen ? 'true' : undefined}
+                title={
+                  live
+                    ? 'Hand off… — ask this agent to write a handoff pack for another one'
+                    : 'Hand off… — needs the desktop, and this browser is not connected to it'
+                }
+                aria-label="Hand off"
+                aria-expanded={handoffOpen}
+                disabled={!live}
+                onClick={() => {
+                  setHandoffError('')
+                  setHandoffOpen((v) => !v)
+                }}
+              >
+                <Icon name="send" size={13} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
-      <HandoffMenu
-        anchor={handoffBtnRef.current}
-        open={handoffOpen}
-        onClose={() => setHandoffOpen(false)}
-        targets={targets}
-        profiles={profiles}
-        autoSend={paneTab?.settings?.handoffAutoSend === true}
-        busy={handoffBusy}
-        error={handoffError}
-        onPick={pickHandoff}
-      />
+      {!mobile ? (
+        <HandoffMenu
+          anchor={handoffBtnRef.current}
+          open={handoffOpen}
+          onClose={() => setHandoffOpen(false)}
+          targets={targets}
+          profiles={profiles}
+          autoSend={paneTab?.settings?.handoffAutoSend === true}
+          busy={handoffBusy}
+          error={handoffError}
+          onPick={pickHandoff}
+        />
+      ) : null}
 
       {/*
         A tap takes the caret; a swipe does not.

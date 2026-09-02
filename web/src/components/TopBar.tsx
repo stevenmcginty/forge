@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import { isClaudeCommand } from '@shared/agents'
 import { FOREMAN_SEED_MAX } from '@shared/foreman'
 import { Icon } from '@/components/Icon'
-import { resolveProfile } from '@/lib/agents'
+import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
+import { handoffTargets, handoffTargetWire, paneHandoffChip, type HandoffTarget } from '@shared/handoffview'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
+import { HandoffMenu } from './HandoffMenu'
 
 /**
  * How tall the seed box grows before it scrolls instead — about four lines of
@@ -132,6 +134,51 @@ export function TopBar({
     void actions.foremanStart(paneId, seed)
   }, [paneId, seedDraft, canTakeOver, actions])
 
+  /* ------------------------------------------------------------ handoff
+   *
+   * Handoff for whichever pane is active. Any agent pane (Claude, Antigravity,
+   * Grok, Codex, etc.) can write a pack; shells cannot.
+   */
+  const isAgent = !!paneProfile && !isShellProfile(paneProfile)
+  const handoffRecords = (state.projectId ? state.picture?.handoff[state.projectId] : undefined) ?? []
+  const handoffChip = paneId ? paneHandoffChip(paneId, handoffRecords) : null
+  const handoffBtnRef = useRef<HTMLButtonElement | null>(null)
+  const [handoffOpen, setHandoffOpen] = useState(false)
+  const [handoffBusy, setHandoffBusy] = useState(false)
+  const [handoffError, setHandoffError] = useState('')
+
+  const sessions = state.picture?.sessions ?? []
+  const targets =
+    handoffOpen && paneId
+      ? handoffTargets({
+          paneId,
+          tab: tab ?? null,
+          workspace,
+          profiles,
+          records: handoffRecords,
+          isLive: (id) => sessions.some((s) => s.id === id)
+        })
+      : []
+
+  const pickHandoff = useCallback(
+    (target: HandoffTarget) => {
+      if (!paneId) return
+      setHandoffBusy(true)
+      setHandoffError('')
+      void actions.handoffStart(paneId, handoffTargetWire(target)).then((error) => {
+        setHandoffBusy(false)
+        if (error) setHandoffError(error)
+        else setHandoffOpen(false)
+      })
+    },
+    [actions, paneId]
+  )
+
+  useEffect(() => {
+    setHandoffOpen(false)
+    setHandoffError('')
+  }, [paneId])
+
   const tint = project ? ({ '--dot': project.color } as CSSProperties) : undefined
   /**
    * The pane's own accent, so the lit switch says *which* pane is being driven
@@ -245,6 +292,52 @@ export function TopBar({
               onClick={switchForeman}
             >
               FOREMAN
+            </button>
+          ) : null}
+
+          {/*
+            Handoff — ask this agent to write a handoff pack for another one.
+            Lives in the top bar beside Foreman, so remote agent actions live
+            together cleanly without taking vertical pane space or floating
+            cryptic arrows over the content.
+          */}
+          {handoffChip && !mobile ? (
+            <span
+              className="titlebar__handoff-chip mono"
+              data-state={handoffChip.state}
+              title={handoffChip.title}
+            >
+              {handoffChip.label}
+            </span>
+          ) : null}
+
+          {isAgent && !offline ? (
+            <button
+              ref={handoffBtnRef}
+              type="button"
+              className="titlebar__handoff mono"
+              style={paneTint}
+              data-open={handoffOpen ? 'true' : undefined}
+              data-state={handoffChip?.state}
+              aria-expanded={handoffOpen}
+              disabled={!live || !alive}
+              title={
+                handoffChip
+                  ? `${handoffChip.label} — ${handoffChip.title}`
+                  : live && alive
+                    ? 'Hand off… — ask this agent to write a handoff pack for another one'
+                    : 'Hand off… — needs a live agent session'
+              }
+              onClick={() => {
+                setHandoffError('')
+                setHandoffOpen((v) => !v)
+              }}
+            >
+              {handoffChip?.state === 'waiting'
+                ? 'HANDING OFF…'
+                : handoffChip?.state === 'sent' || handoffChip?.state === 'took'
+                  ? 'HANDED OFF'
+                  : 'HAND OFF'}
             </button>
           ) : null}
 
@@ -376,6 +469,18 @@ export function TopBar({
           </button>
         </div>
       ) : null}
+
+      <HandoffMenu
+        anchor={handoffBtnRef.current}
+        open={handoffOpen}
+        onClose={() => setHandoffOpen(false)}
+        targets={targets}
+        profiles={profiles}
+        autoSend={tab?.settings?.handoffAutoSend === true}
+        busy={handoffBusy}
+        error={handoffError}
+        onPick={pickHandoff}
+      />
     </>
   )
 }
