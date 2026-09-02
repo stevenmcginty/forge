@@ -23,6 +23,7 @@ import { Card, KeyField, Row, Section, StateChip, TextField } from './parts'
 const RECOMMENDED_GEMINI_MODEL = 'gemini-3.6-flash'
 
 const GEMINI_MODELS = [
+  { id: 'gemini-3.8-flash', label: 'Flash 3.8 — newest Flash' },
   { id: RECOMMENDED_GEMINI_MODEL, label: 'Flash 3.6 — fastest, recommended' },
   { id: DEFAULT_GEMINI_MODEL, label: 'Flash 2.5 — fast, cheap, the old default' },
   { id: 'gemini-2.5-pro', label: 'Pro — slower, better at long reasoning' }
