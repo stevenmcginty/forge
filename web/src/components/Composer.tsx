@@ -15,6 +15,7 @@ import type { ClaudePermissionMode } from '@shared/types'
 import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
 import { imageFilesFromDataTransfer, isImageFile } from '../lib/image'
 import { useMobile } from '../lib/mobile'
+import { joinSpoken, useSpeech } from '../lib/speech'
 
 /**
  * The web app's input. A real `<textarea>`, so the OS cut/copy/paste, Gboard
@@ -27,6 +28,15 @@ import { useMobile } from '../lib/mobile'
  * phone has no room for three of them, so it wears one chip — the pane's model
  * name, coloured by its permission mode — opening all three lists in one sheet.
  *
+ * The microphone is the browser's own recogniser (lib/speech.ts), not the
+ * desktop's. Tap it, or press Right Ctrl — the desktop's dictation hotkey —
+ * and what you say lands in this box: the recogniser's running guess painted
+ * in place, then rewritten as each phrase settles. Send is still yours to
+ * press, unless Auto-send is on, in which case a pause after a settled phrase
+ * is the Send — that is the hands-free mode for somebody who is not at a
+ * keyboard at all. Both survive a reload: the one from the recogniser's own
+ * state, the other from localStorage.
+ *
  * Spellcheck and autocapitalize stay on. The hidden xterm helper turns them
  * off because an IME double-fires into a TUI; this field is a normal box.
  */
@@ -34,6 +44,34 @@ import { useMobile } from '../lib/mobile'
 export const BACK_TAB = '\x1b[Z'
 
 const MAX_GROW_PX = 196
+
+/**
+ * With Auto-send on, how long after the last settled phrase the message goes.
+ * A settled phrase already means the recogniser heard a pause; this is the
+ * second one, so a breath between two sentences is not read as the end.
+ */
+const AUTO_SEND_PAUSE_MS = 1500
+
+/** The desktop's default `sttHotkey`, so the same key does the same thing in a browser. */
+const VOICE_HOTKEY = 'ControlRight'
+
+const AUTO_SEND_KEY = 'forge-web:voice-auto-send'
+
+function readAutoSend(): boolean {
+  try {
+    return localStorage.getItem(AUTO_SEND_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeAutoSend(on: boolean): void {
+  try {
+    localStorage.setItem(AUTO_SEND_KEY, on ? '1' : '0')
+  } catch {
+    /* private mode; the toggle still works for this page */
+  }
+}
 
 export function Composer({
   draft,
@@ -112,6 +150,78 @@ export function Composer({
   const allRef = useRef<HTMLButtonElement | null>(null)
   const [pickedEffort, setPickedEffort] = useState<EffortLevel | null>(null)
   const [pickedModel, setPickedModel] = useState<string | null>(null)
+
+  /*
+   * Voice. `committed` is the box's text with no guess in it — what the
+   * recogniser's interim words are painted after, and what a settled phrase
+   * is joined onto. Typing rewrites it; a Send, or anything else that empties
+   * the box, resets it.
+   */
+  const committed = useRef(draft)
+  const draftRef = useRef(onDraft)
+  draftRef.current = onDraft
+  const autoSendTimer = useRef(0)
+  const submitRef = useRef<() => void>(() => undefined)
+  const [autoSend, setAutoSend] = useState(readAutoSend)
+  const autoSendRef = useRef(autoSend)
+  autoSendRef.current = autoSend
+  const speech = useSpeech({
+    onInterim: (text) => {
+      // A fresh guess means the person is still talking: whatever pause the
+      // last settled phrase started, this is not it. An empty guess is only
+      // the recogniser tidying up after a final, and says nothing about pauses.
+      if (text) window.clearTimeout(autoSendTimer.current)
+      draftRef.current(joinSpoken(committed.current, text))
+    },
+    onFinal: (text) => {
+      const next = joinSpoken(committed.current, text)
+      committed.current = next
+      draftRef.current(next)
+      window.clearTimeout(autoSendTimer.current)
+      if (autoSendRef.current && next.trim()) {
+        autoSendTimer.current = window.setTimeout(() => submitRef.current(), AUTO_SEND_PAUSE_MS)
+      }
+    }
+  })
+  const { listening, stop: stopListening } = speech
+
+  useEffect(() => {
+    if (draft === '') committed.current = ''
+  }, [draft])
+
+  // A box that cannot send has no business holding a microphone open.
+  useEffect(() => {
+    if (disabled) stopListening()
+  }, [disabled, stopListening])
+
+  useEffect(() => () => window.clearTimeout(autoSendTimer.current), [])
+
+  const onMic = (): void => {
+    if (!listening) committed.current = draft
+    speech.toggle()
+  }
+  const micRef = useRef(onMic)
+  micRef.current = onMic
+
+  // Right Ctrl, as on the desktop. A phone has no such key; a laptop does, and
+  // it is a key nothing else in a browser has a use for.
+  useEffect(() => {
+    if (mobile || disabled) return
+    const onDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.code !== VOICE_HOTKEY || event.repeat) return
+      event.preventDefault()
+      micRef.current()
+    }
+    window.addEventListener('keydown', onDown)
+    return () => window.removeEventListener('keydown', onDown)
+  }, [mobile, disabled])
+
+  const toggleAutoSend = (): void => {
+    const next = !autoSend
+    setAutoSend(next)
+    writeAutoSend(next)
+    if (!next) window.clearTimeout(autoSendTimer.current)
+  }
 
   const modelList = models ?? []
   const effortList = effortLevels ?? []
@@ -248,6 +358,7 @@ export function Composer({
   // in a menu or a permission prompt — so the bar needs no separate Enter.
   const submit = (event?: FormEvent): void => {
     event?.preventDefault()
+    window.clearTimeout(autoSendTimer.current)
     if (!ready) return
     if (!hasDraft) {
       onRaw('\r')
@@ -255,8 +366,10 @@ export function Composer({
     }
     const pending = files
     setFiles([])
+    committed.current = ''
     onSend(pending)
   }
+  submitRef.current = submit
 
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -424,6 +537,36 @@ export function Composer({
             onRemove={(index) => setFiles((current) => current.filter((_, i) => i !== index))}
           />
         ) : null}
+        {listening || speech.error ? (
+          <div className="composer__voice" role="status" data-state={speech.error ? 'error' : 'listening'}>
+            <span className="composer__voice-dot" aria-hidden />
+            <span className="composer__voice-text">
+              {speech.error ?? (autoSend ? 'Listening — a pause sends it' : 'Listening — press Send when you are done')}
+            </span>
+            {speech.error ? (
+              <button
+                type="button"
+                className="composer__voice-auto"
+                onClick={stopListening}
+                aria-label="Dismiss"
+                title="Dismiss"
+              >
+                <Icon name="close" size={11} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="composer__voice-auto"
+                data-on={autoSend ? 'true' : undefined}
+                aria-pressed={autoSend}
+                onClick={toggleAutoSend}
+                title="Auto-send — with this on, a pause after you finish speaking presses Send for you"
+              >
+                Auto-send {autoSend ? 'on' : 'off'}
+              </button>
+            )}
+          </div>
+        ) : null}
         <textarea
           ref={field}
           className="composer__input"
@@ -437,7 +580,10 @@ export function Composer({
           autoComplete="on"
           spellCheck
           onFocus={onFocus}
-          onChange={(event) => onDraft(event.target.value)}
+          onChange={(event) => {
+            committed.current = event.target.value
+            onDraft(event.target.value)
+          }}
           onKeyDown={onKey}
         />
         <div className="composer__tools">
@@ -453,6 +599,24 @@ export function Composer({
           <FilePick label="Add an image" disabled={disabled} onFiles={addFiles}>
             {mobile ? <GalleryGlyph /> : <Icon name="camera" size={16} />}
           </FilePick>
+          <button
+            type="button"
+            className="composer__icon composer__mic"
+            data-listening={listening ? 'true' : undefined}
+            aria-pressed={listening}
+            aria-label={listening ? 'Stop dictating' : 'Dictate'}
+            disabled={disabled}
+            onClick={onMic}
+            title={
+              listening
+                ? 'Listening — tap to stop'
+                : mobile
+                  ? 'Dictate — tap, then talk'
+                  : 'Dictate — tap or press Right Ctrl, then talk'
+            }
+          >
+            <Icon name="mic" size={16} />
+          </button>
           <div className="composer__keys" role="toolbar" aria-label="Terminal keys">
             <Key label="←" onClick={() => onRaw('\x1b[D')} disabled={disabled} title="Left" />
             <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
