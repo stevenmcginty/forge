@@ -4,11 +4,17 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Button
 import android.widget.CheckBox
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
+/** Settings, more or less: the voice screen, the account, and the LTE warm-up. */
 class MainActivity : ComponentActivity() {
 
     private val requestPermissions =
@@ -25,6 +31,24 @@ class MainActivity : ComponentActivity() {
 
         findViewById<Button>(R.id.dictate).setOnClickListener {
             startActivity(Intent(this, DictationActivity::class.java))
+        }
+
+        val account = findViewById<Button>(R.id.account)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                ForgeAuth.email.collectLatest { mail ->
+                    account.text = if (mail == null) getString(R.string.sign_in) else getString(R.string.sign_out_as, mail)
+                }
+            }
+        }
+        account.setOnClickListener {
+            if (ForgeAuth.email.value == null) {
+                // The voice screen owns the sign-in flow; it asks on open.
+                startActivity(Intent(this, DictationActivity::class.java))
+            } else {
+                ForgeAuth.signOut(this)
+                ForgeLink.kick()
+            }
         }
 
         val warmup = findViewById<Button>(R.id.warmup)

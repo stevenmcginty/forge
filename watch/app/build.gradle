@@ -3,6 +3,14 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// The Forge Web Firebase project the watch signs in to. The same two values
+// web/public/config.json carries, read from local.properties (git-ignored) so
+// the repo never holds them. An empty value makes the app say "not configured"
+// rather than dial nothing.
+def localProps = new Properties()
+def localFile = rootProject.file('local.properties')
+if (localFile.exists()) localFile.withInputStream { localProps.load(it) }
+
 android {
     namespace 'com.forge.watch'
     compileSdk 35
@@ -11,8 +19,15 @@ android {
         applicationId 'com.forge.watch'
         minSdk 30
         targetSdk 35
-        versionCode 1
-        versionName '0.1.0'
+        versionCode 2
+        versionName '0.2.0'
+
+        buildConfigField 'String', 'FORGE_API_KEY', "\"${localProps.getProperty('forge.web.apiKey', '')}\""
+        buildConfigField 'String', 'FORGE_DB_URL', "\"${localProps.getProperty('forge.web.databaseUrl', '')}\""
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {
@@ -34,4 +49,12 @@ android {
 dependencies {
     implementation 'androidx.core:core-ktx:1.15.0'
     implementation 'androidx.activity:activity-ktx:1.9.2'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    // The socket to the desktop and the two REST calls to Firebase.
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    // Wear's substitute for a keyboard: the full-screen text entry the
+    // sign-in and the PIN box use.
+    implementation 'androidx.wear:wear-input:1.1.0'
+    testImplementation 'junit:junit:4.13.2'
 }

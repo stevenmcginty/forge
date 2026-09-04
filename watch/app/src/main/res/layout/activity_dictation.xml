@@ -1,17 +1,71 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Round screen: everything sits inside a generous inset. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="#000000"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:paddingTop="22dp"
+    android:paddingBottom="18dp"
+    android:paddingStart="26dp"
+    android:paddingEnd="26dp">
+
+    <!-- Desktop / project / tab. Tap: sign in, retry, or open settings. -->
+    <TextView
+        android:id="@+id/status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:maxLines="2"
+        android:text="@string/state_off"
+        android:textColor="#9AA0A6"
+        android:textSize="11sp" />
 
     <TextView
         android:id="@+id/transcript"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="6dp"
         android:gravity="center"
-        android:padding="32dp"
-        android:text="@string/listening"
+        android:maxLines="5"
+        android:ellipsize="start"
+        android:text="@string/tap_to_talk"
         android:textColor="#FFFFFF"
-        android:textSize="16sp" />
-</FrameLayout>
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/notice"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:maxLines="2"
+        android:textColor="#C6FF3D"
+        android:textSize="11sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <Button
+            android:id="@+id/mic"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/talk" />
+
+        <!-- Tap to send, long-press to clear. Shown only when there is a draft. -->
+        <Button
+            android:id="@+id/send"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="@string/send"
+            android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>

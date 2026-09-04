@@ -9,10 +9,14 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
+        android:name=".ForgeWatchApp"
         android:label="@string/app_name"
         android:icon="@drawable/ic_launcher"
         android:theme="@android:style/Theme.DeviceDefault">
@@ -35,12 +39,20 @@
             </intent-filter>
         </activity>
 
-        <!-- Exported so the watch face's Launch tap action can start it directly. -->
+        <!-- The voice screen. Exported so the watch face's Launch tap action
+             can start it directly. The class name is on the face's XML, so it
+             keeps its old name even though it is now the whole Forge remote. -->
         <activity
             android:name=".DictationActivity"
             android:exported="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
+
+        <!-- The microphone, kept open with the screen off. -->
+        <service
+            android:name=".ForgeDictationService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <service
             android:name=".CellularWarmupService"
