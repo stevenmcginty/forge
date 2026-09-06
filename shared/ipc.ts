@@ -326,6 +326,42 @@ export const IPC = {
   mobileTvBuild: 'mobile:tv-build',
   mobileTvFetch: 'mobile:tv-fetch',
 
+  /* ------------------------------------------------------------ remote yes
+   *
+   * The one thing a phone cannot do to this PC: press Yes on a Windows admin
+   * prompt. It is drawn on the secure desktop, where nothing in Steve's own
+   * session can see it — but a RustDesk installed as a *service* can, because
+   * its SYSTEM helper runs in session 0. These five channels install that,
+   * configure it onto the tailnet, and watch for the prompt. See
+   * electron/remote-yes-host.ts. */
+
+  /** The whole panel's state, freshly probed — file, service, tailnet, phone. */
+  remoteYesStatus: 'remoteYes:status',
+  /** The same object, broadcast on every change, including each UAC rise and fall. */
+  remoteYesStatusEvent: 'remoteYes:statusEvent',
+  /**
+   * Download, install and configure RustDesk, then switch Remote Yes on and
+   * start the watcher. Raises **exactly one** UAC prompt — the only elevated
+   * thing Forge has ever done — and is idempotent: run against an install that
+   * is already there, it re-applies the same options behind the same one
+   * prompt. Progress rides `remoteYesStatusEvent`; the resolved status is the
+   * ending.
+   */
+  remoteYesSetup: 'remoteYes:setup',
+  /**
+   * Switch it off: `remoteYesEnabled: false`, watcher stopped, the phone told
+   * the prompt card is gone. RustDesk is deliberately left installed — an
+   * uninstall would want admin again, and switching a notification off is not
+   * a reason to ask for it.
+   */
+  remoteYesDisable: 'remoteYes:disable',
+  /**
+   * Raise a harmless admin prompt (`cmd /c exit 0`) so the whole path can be
+   * proved from the sofa: the phone gets the card, RustDesk shows the secure
+   * desktop, Yes gets pressed. `ok` is whether Windows actually got one.
+   */
+  remoteYesTest: 'remoteYes:test',
+
   /* ------------------------------------------------------ forge tv mirror
    *
    * The television watching this desktop's actual screen, over WebRTC. The

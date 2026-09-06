@@ -1460,6 +1460,36 @@ async function main() {
     'and hello-ok carries the packs project by project, so a reconnecting browser draws the chips from the snapshot'
   )
 
+  /* ----------------------------------------- 6e. remote yes, to a browser
+   *
+   * The desktop's UAC watcher says "a prompt is up" and every browser must
+   * hear it — including the one that connects a moment later, because the
+   * prompt itself drops whatever was watching the screen. So: the push, and
+   * then the replay straight after a fresh hello-ok.
+   */
+  server.pushRemoteYes({ enabled: true, uac: true, address: '100.64.0.9', port: 21118 })
+  await waitFor(() => browser.first('remote-yes'), 5000, 'the remote-yes frame')
+  log(
+    browser.first('remote-yes').uac === true && browser.first('remote-yes').address === '100.64.0.9',
+    'a UAC prompt published on the desktop reaches a connected browser as a remote-yes frame'
+  )
+  const ryTab = await connect()
+  ryTab.send({
+    type: 'hello',
+    proto: WEB_PROTO,
+    idToken: mint(),
+    client: '0.0.0-smoke',
+    deviceId: 'browser-remote-yes',
+    deviceName: 'Chrome on Android'
+  })
+  await waitFor(() => ryTab.first('remote-yes'), 8000, "the late browser's remote-yes replay")
+  log(
+    ryTab.frames.findIndex((f) => f.type === 'hello-ok') < ryTab.frames.findIndex((f) => f.type === 'remote-yes') &&
+      ryTab.first('remote-yes').uac === true,
+    'and a browser that connects while the prompt is up is told straight after its hello-ok, so a reconnect still shows the card'
+  )
+  ryTab.socket.close()
+
   // The pane-liveness rule, the same authorisation `foreman-start` gets.
   browser.send({
     type: 'request',

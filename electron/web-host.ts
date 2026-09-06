@@ -4,7 +4,7 @@ import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { app, BrowserWindow, clipboard, ipcMain, nativeImage, Notification, powerSaveBlocker, screen } from 'electron'
 import { IPC } from '@shared/ipc'
-import { type MirrorInput } from '@shared/mobile'
+import { type MirrorInput, type RemoteYesInfo } from '@shared/mobile'
 import { remoteControlName } from '@shared/remote'
 import {
   normaliseHost,
@@ -1308,6 +1308,17 @@ function probeForBrowser(commands: string[]): { agents: AgentPresence[]; command
 export function publishDesktopState(state: 'recovering' | 'ready', reason?: string): void {
   if (!server) return
   server.pushDesktop(state, reason)
+}
+
+/**
+ * Tell every connected browser what Remote Yes is doing — and remember it for
+ * the browsers that are not connected yet. The web half of
+ * `publishRemoteYes` in electron/mobile-host.ts; electron/remote-yes-host.ts
+ * calls both. A no-op with Forge Web switched off, like every publisher here.
+ */
+export function publishRemoteYes(info: RemoteYesInfo): void {
+  if (!server) return
+  server.pushRemoteYes(info)
 }
 
 export function publishWebState(projectId?: string): void {

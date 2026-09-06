@@ -21,6 +21,7 @@ import {
   type WebSession,
   type WebShutdownReason
 } from '@shared/web'
+import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ForemanState } from '@shared/foreman'
 import type { GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
@@ -308,6 +309,12 @@ export interface ForgeHandlers {
    * `WebDesktopFrame` in shared/web.ts.
    */
   onDesktop: (state: 'recovering' | 'ready', reason: string) => void
+  /**
+   * Remote Yes moved: switched on or off at the desk, or a Windows admin (UAC)
+   * prompt rose or went away. Replayed after every `hello-ok`, so a reconnect
+   * lands on the current picture. See `WebRemoteYesFrame` in shared/web.ts.
+   */
+  onRemoteYes: (info: RemoteYesInfo) => void
   onProjects: (projects: Project[]) => void
   onWorkspace: (projectId: string, workspace: Workspace) => void
   onGit: (snapshot: GitSnapshot) => void
@@ -1553,6 +1560,22 @@ export class ForgeClient {
         if (frame.state === 'recovering' || frame.state === 'ready') {
           this.handlers.onDesktop(frame.state, typeof frame.reason === 'string' ? frame.reason : '')
         }
+        return
+
+      case 'remote-yes':
+        // Coerced, not trusted, like every handler here — and this one draws a
+        // card that tells somebody to unlock their PC, so a frame that is not
+        // exactly what it claims is dropped rather than half-read. The address
+        // is clamped to a length no address exceeds; it goes into a deep link.
+        if (typeof frame.enabled !== 'boolean' || typeof frame.uac !== 'boolean') return
+        if (typeof frame.address !== 'string' || frame.address.length > 64) return
+        if (typeof frame.port !== 'number' || !Number.isFinite(frame.port)) return
+        this.handlers.onRemoteYes({
+          enabled: frame.enabled,
+          uac: frame.uac,
+          address: frame.address,
+          port: frame.port
+        })
         return
 
       case 'projects':

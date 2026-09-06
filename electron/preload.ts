@@ -199,6 +199,14 @@ const api: ForgeApi = {
     disable: () => ipcRenderer.invoke(IPC.watchdogDisable)
   },
 
+  remoteYes: {
+    status: () => ipcRenderer.invoke(IPC.remoteYesStatus),
+    onStatus: (cb) => subscribe(IPC.remoteYesStatusEvent, cb),
+    setup: () => ipcRenderer.invoke(IPC.remoteYesSetup),
+    disable: () => ipcRenderer.invoke(IPC.remoteYesDisable),
+    test: () => ipcRenderer.invoke(IPC.remoteYesTest)
+  },
+
   web: {
     status: () => ipcRenderer.invoke(IPC.webStatus),
     start: () => ipcRenderer.invoke(IPC.webStart),

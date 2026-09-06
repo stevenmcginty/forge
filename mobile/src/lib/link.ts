@@ -8,6 +8,7 @@ import {
   type HelloOkFrame,
   type MirrorInputFrame,
   type MobileSession,
+  type RemoteYesInfo,
   type ServerFrame
 } from '@shared/mobile'
 import type { AgentProfile, HandoffRecord, Project, Workspace } from '@shared/types'
@@ -99,6 +100,17 @@ export interface LinkPicture {
    * shared/mobile.ts.
    */
   desktop: string
+  /**
+   * Remote Yes, as this desktop last described it.
+   *
+   * `enabled: false` is the resting state and also what an older desktop says
+   * by saying nothing, which is the same thing from here: no card. The desktop
+   * repeats itself after every `hello-ok`, so a reconnect — including the one
+   * the UAC prompt itself causes, by dropping the RustDesk session — lands on
+   * the current picture rather than on this default. See `RemoteYesInfo` in
+   * shared/mobile.ts.
+   */
+  remoteYes: RemoteYesInfo
 }
 
 export interface LinkHandlers {
@@ -778,6 +790,28 @@ export class Link {
         return
       }
 
+      case 'remote-yes': {
+        // Coerced, not trusted, like every handler here — and this one draws a
+        // card that tells somebody to unlock their PC, so a frame that is not
+        // exactly what it claims is dropped rather than half-read. The address
+        // is clamped to a length no address exceeds; it goes into a deep link.
+        if (!this.picture) return
+        if (typeof frame.enabled !== 'boolean' || typeof frame.uac !== 'boolean') return
+        if (typeof frame.address !== 'string' || frame.address.length > 64) return
+        if (typeof frame.port !== 'number' || !Number.isFinite(frame.port)) return
+        this.picture = {
+          ...this.picture,
+          remoteYes: {
+            enabled: frame.enabled,
+            uac: frame.uac,
+            address: frame.address,
+            port: frame.port
+          }
+        }
+        this.handlers.onPicture(this.picture)
+        return
+      }
+
       case 'err':
         // The credential itself was rejected. Said here rather than left to the
         // close that follows, because only the `err` frame distinguishes "this
@@ -857,9 +891,18 @@ function pictureOf(frame: HelloOkFrame): LinkPicture {
     // A fresh `hello-ok` is a renderer that got far enough to answer, so any
     // recovery this phone was told about is over — including the case the
     // `ready` frame cannot cover, where the socket dropped during the reload.
-    desktop: ''
+    desktop: '',
+    // Off until the desktop says otherwise, which it does immediately after
+    // this frame when it has anything to say. Clearing it here rather than
+    // carrying the old picture over is deliberate: a `uac: true` remembered
+    // across a reconnect to a desktop that has since been answered is a card
+    // pointing at a prompt that is no longer there.
+    remoteYes: REMOTE_YES_OFF
   }
 }
+
+/** No Remote Yes: what a desktop that has not mentioned it is taken to mean. */
+const REMOTE_YES_OFF: RemoteYesInfo = { enabled: false, uac: false, address: '', port: 21118 }
 
 /**
  * A stable per-install id.

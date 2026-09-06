@@ -21,7 +21,8 @@ import {
   pairLink,
   type HelloOkFrame,
   type MirrorInput,
-  type OpFrame
+  type OpFrame,
+  type RemoteYesInfo
 } from '@shared/mobile'
 import type {
   ForgeTvStatus,
@@ -1035,6 +1036,22 @@ function releaseBlocker(): void {
 export function publishDesktopState(state: 'recovering' | 'ready', reason?: string): void {
   if (!server) return
   server.pushDesktop(state, reason)
+}
+
+/**
+ * Tell every connected phone what Remote Yes is doing — and remember it for
+ * the phones that are not connected yet.
+ *
+ * Called by the Remote Yes engine whenever its picture changes: switched on or
+ * off at the desk, and every rise and fall of a UAC prompt. The remembering is
+ * the server's, and it is the part that matters: the prompt itself drops the
+ * phone's RustDesk session, so the phone that has to answer is very often
+ * reconnecting at the moment it is told. See `RemoteYesInfo` in
+ * shared/mobile.ts.
+ */
+export function publishRemoteYes(info: RemoteYesInfo): void {
+  if (!server) return
+  server.pushRemoteYes(info)
 }
 
 export function publishMobileState(projectId?: string): void {

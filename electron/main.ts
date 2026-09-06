@@ -72,6 +72,7 @@ import {
   publishMobileState,
   registerMobileHandlers
 } from './mobile-host'
+import { applyRemoteYesSettings, disposeRemoteYes, registerRemoteYesHandlers } from './remote-yes-host'
 import {
   applyWebSettings,
   disposeWeb,
@@ -823,7 +824,18 @@ const MAIN_OWNED_SETTINGS = [
   // Flipped only by `watchdog:enable` / `watchdog:disable`, which register or
   // remove the scheduled task in the same act. A renderer copy posted back
   // would say "on" with no task behind it, or "off" with one still running.
-  'keepRunning'
+  'keepRunning',
+  // All four written by `remoteYes:setup` / `remoteYes:disable`, in main, and
+  // never pushed back into renderer state. The switch is the `keepRunning` case
+  // — "on" with no watcher behind it, or "off" with one still polling — and the
+  // other three are the `webRefreshToken` case with a sharper edge: a stale
+  // renderer copy posted back over `remoteYesPassword` would leave the RustDesk
+  // service holding a password Forge no longer knows, so the phone's card would
+  // hand out an address nothing there can unlock.
+  'remoteYesEnabled',
+  'remoteYesPassword',
+  'remoteYesAddress',
+  'remoteYesRustdeskId'
 ] as const
 
 function rendererOwned(patch: Partial<Settings>): Partial<Settings> {
@@ -1433,6 +1445,12 @@ void app
       // port or minting a credential. See docs/MOBILE.md.
       registerMobileHandlers()
       applyMobileSettings()
+      // Remote Yes — the phone's answer to a Windows admin prompt. Same posture
+      // again: this reads settings, sees `remoteYesEnabled: false`, and returns
+      // without polling anything, downloading anything or asking for admin. The
+      // one elevated act in this app happens when somebody presses Set up.
+      registerRemoteYesHandlers()
+      applyRemoteYesSettings()
       /*
        * The tray, and with it the rule that closing the window is not the same
        * act as quitting — the thing docs/forge-web.md's "honest limitation"
@@ -1577,6 +1595,9 @@ app.on('before-quit', () => {
   safely('disposeForeman', disposeForeman)
   safely('disposeCompanion', disposeCompanion)
   safely('disposeMobile', disposeMobile)
+  // A tasklist poll every 1.5 seconds outliving the app would keep starting a
+  // process for ever with nobody left to tell about the prompt it found.
+  safely('disposeRemoteYes', disposeRemoteYes)
   // Retracts the rendezvous record and tells every browser why before the
   // sockets close — without it, a quit reads as a network fault and the page
   // spends the next minute retrying a machine that is off.

@@ -755,6 +755,35 @@ async function main() {
   engine = null
   opAnswer = null
 
+  /* --------------------------------------------------- 10e. remote yes
+   *
+   * The push that has to survive its own event. A UAC prompt drops the phone's
+   * RustDesk session, so the phone that must answer it is very often
+   * reconnecting at the moment it is told — which makes "broadcast to whoever
+   * is connected" the one delivery rule that does not work here. The server
+   * remembers the last info and replays it after `hello-ok`, and both halves
+   * are asserted: the live broadcast, and the phone that arrives afterwards.
+   */
+
+  const REMOTE_YES = { enabled: true, uac: true, address: '100.1.2.3', port: 21118 }
+
+  server.pushRemoteYes(REMOTE_YES)
+  await waitFor(() => phone.first('remote-yes'), 5000, 'the remote-yes frame')
+  log(
+    phone.first('remote-yes').enabled === true &&
+      phone.first('remote-yes').uac === true &&
+      phone.first('remote-yes').address === '100.1.2.3' &&
+      phone.first('remote-yes').port === 21118,
+    'a UAC prompt published on the desktop reaches a connected phone as a remote-yes frame'
+  )
+
+  const remoteYesPhone = await authenticatedClient(auth, 'phone-remote-yes', 'Pixel')
+  await waitFor(() => remoteYesPhone.first('remote-yes'), 5000, 'the replayed remote-yes frame')
+  log(
+    remoteYesPhone.first('remote-yes').uac === true && remoteYesPhone.first('remote-yes').address === '100.1.2.3',
+    'and a phone connecting while the prompt is still up is told after its hello-ok — the card survives the reconnect the prompt itself causes'
+  )
+
   const page = await fetch(`http://127.0.0.1:${PORT}/`)
   log(page.status === 404, 'static hosting answers 404 when no bundle is configured')
 

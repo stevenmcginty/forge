@@ -44,7 +44,7 @@ import {
  * reads a `MirrorInputFrame` — which is the whole reason shared/web.ts imports
  * the input vocabulary instead of restating it. See the note there.
  */
-import { readMirrorInput, type MirrorInput } from '@shared/mobile'
+import { readMirrorInput, type MirrorInput, type RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 /*
  * Foreman's boundary constants and shapes, from the file that owns them — the
@@ -682,6 +682,12 @@ export class WebServer {
   /** The last set handed to `onWatch`, so an unchanged set says nothing. */
   private announcedWatch = ''
   /**
+   * The last thing said about Remote Yes, kept so it can be said again after
+   * every `hello-ok`. The only remembered push here — see `WebRemoteYesFrame`
+   * in shared/web.ts for why this one is.
+   */
+  private lastRemoteYes: RemoteYesInfo | null = null
+  /**
    * The one socket watching this desktop's screen, if any.
    *
    * At most one, ever, and for a sharper reason than Forge Mobile's: there the
@@ -967,6 +973,16 @@ export class WebServer {
    */
   pushDesktop(state: 'recovering' | 'ready', reason?: string): void {
     this.broadcast({ type: 'desktop', state, ...(reason ? { reason } : {}) })
+  }
+
+  /**
+   * Remote Yes moved — switched on or off at the desk, or a UAC prompt rose or
+   * went away. To every authenticated browser, and remembered for the ones
+   * that are not connected yet. See `WebRemoteYesFrame` in shared/web.ts.
+   */
+  pushRemoteYes(info: RemoteYesInfo): void {
+    this.lastRemoteYes = info
+    this.broadcast({ type: 'remote-yes', ...info })
   }
 
   pushProjects(projects: Project[]): void {
@@ -1720,6 +1736,11 @@ export class WebServer {
       // is left out.
       ...(snapshot.handoff ? { handoff: snapshot.handoff } : {})
     })
+    // Straight after the hello, never inside it: a browser that connects while
+    // a UAC prompt is already up must see the card, and the commonest way to
+    // connect during a prompt is to have been dropped by it. Nothing is sent
+    // when nothing has been said, so a desktop with Remote Yes off is silent.
+    if (this.lastRemoteYes) this.send(client, { type: 'remote-yes', ...this.lastRemoteYes })
     this.host.onPresence?.(this.connectedCount)
   }
 

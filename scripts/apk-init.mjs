@@ -124,6 +124,24 @@ patch(MANIFEST, '<queries> for the speech recogniser', (text) => {
   )
 })
 
+// Remote Yes. The card tapped on the phone opens `rustdesk://connection/new/…`
+// so a UAC prompt on the desktop can be answered with a finger — and from
+// Android 11 an app cannot see another app's package at all unless it declares
+// that it wants to look. Fire OS 8 and every phone Steve owns are past that
+// line, so this is declared rather than discovered on the one evening it
+// matters. Named alongside the speech recogniser above for the same reason and
+// under the same rule: a declaration to *look*, not a permission to use —
+// nothing here can start RustDesk that the person does not tap.
+//
+// See openRustDesk in mobile/src/lib/update.ts, which is the only caller.
+patch(MANIFEST, '<package> visibility for RustDesk', (text) => {
+  if (text.includes('com.carriez.flutter_hbb')) return text
+  return text.replace(
+    /(\s*)(<\/queries>)/,
+    `$1  <package android:name="com.carriez.flutter_hbb" />$1$2`
+  )
+})
+
 patch(MANIFEST, 'REQUEST_INSTALL_PACKAGES permission', (text) => {
   if (text.includes('android.permission.REQUEST_INSTALL_PACKAGES')) return text
   return text.replace(

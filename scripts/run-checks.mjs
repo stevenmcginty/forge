@@ -93,6 +93,7 @@ const CHECKS = [
   { name: 'viewtoggle:check', lane: 'fast', note: 'a Vite dev server and a real Chrome; self-skips the browser half without one' },
   { name: 'viewport:check', lane: 'fast', note: 'phone-face + visual-viewport pin, no browser' },
   { name: 'tunnel:check', lane: 'fast' },
+  { name: 'remote-yes:check', lane: 'fast', ci: true, note: 'the real UAC watcher on an injected clock, and the elevated script read closely' },
   { name: 'web:auth', lane: 'fast' },
   { name: 'cf:tunnel', lane: 'fast' },
 

@@ -3,6 +3,7 @@ import { useApp, type SettingsSection } from '@/state/AppState'
 import { Icon, type IconName } from '../Icon'
 import { AccountSection } from './AccountSection'
 import { AlwaysOnSection } from './AlwaysOnSection'
+import { RemoteYesSection } from './RemoteYesSection'
 import { AdvancedSection } from './AdvancedSection'
 import { AgentsSection } from './AgentsSection'
 import { AppearanceSection } from './AppearanceSection'
@@ -40,6 +41,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName; blur
   { id: 'mobile', label: 'Forge Mobile', icon: 'phone', blurb: 'your terminals, on your phone' },
   { id: 'web', label: 'Forge Web', icon: 'globe', blurb: 'your terminals, in a browser' },
   { id: 'alwaysOn', label: 'Always on', icon: 'restart', blurb: 'keep Forge running' },
+  { id: 'remoteYes', label: 'Remote Yes', icon: 'phone', blurb: 'press the admin box from your phone' },
   { id: 'updates', label: 'Updates & tools', icon: 'restart', blurb: 'CLIs, and Forge itself' },
   { id: 'advanced', label: 'Advanced', icon: 'gear', blurb: 'paths and versions' }
 ]
@@ -130,6 +132,7 @@ export function SettingsPage(): ReactNode {
             {section === 'mobile' ? <MobileSection /> : null}
             {section === 'web' ? <WebSection /> : null}
             {section === 'alwaysOn' ? <AlwaysOnSection /> : null}
+            {section === 'remoteYes' ? <RemoteYesSection /> : null}
             {section === 'updates' ? <UpdatesSection /> : null}
             {section === 'advanced' ? <AdvancedSection /> : null}
           </div>

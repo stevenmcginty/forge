@@ -115,6 +115,12 @@ export function Workspace(): ReactNode {
         onWatchScreen={live ? () => setWatching(true) : null}
         mobile={mobile}
       />
+      {/*
+        Above everything, including the reconnect strip: a UAC prompt is a
+        two-minute window on a machine that is doing nothing until somebody
+        answers it, and the person holding this phone may be on a bus.
+      */}
+      <RemoteYesBanner />
       <OfflineBanner />
       <ReconnectingBanner />
       {/*
@@ -278,6 +284,43 @@ function ReconnectingBanner(): ReactNode {
  * than invented: same shape of news (what is on screen is real, this is why it
  * is not answering, it is coming back), same colour as the other wait.
  */
+/**
+ * "Windows is asking for admin. Open RustDesk and press Yes."
+ *
+ * The browser's copy of the card Forge Mobile draws (mobile/src/App.tsx). The
+ * button is a real link to `rustdesk://`, not a script: Android Chrome hands a
+ * custom scheme in an anchor to the app that owns it, and a phone with no
+ * RustDesk simply does nothing — so the sentence beside it says where to get
+ * it. Warn amber, the strip's own waiting colour, and every bit of the meaning
+ * is in the words. See `WebRemoteYesFrame` in shared/web.ts.
+ */
+function RemoteYesBanner(): ReactNode {
+  const { state } = useForge()
+  const ry = state.remoteYes
+  if (state.stage.kind !== 'connected' || !ry.enabled || !ry.uac) return null
+
+  return (
+    <div className="offline remote-yes" data-link="remote-yes" role="alert" data-testid="remote-yes-banner">
+      <Icon name="key" size={13} />
+      <span className="offline__text truncate">
+        <strong>{state.picture?.desktopName || 'The desktop'} is asking for admin.</strong> Open RustDesk and press
+        Yes. It waits about two minutes.
+      </span>
+      <a className="ghost-btn offline__look remote-yes__open" href={rustDeskLink(ry.address)} rel="noopener">
+        Open RustDesk
+      </a>
+    </div>
+  )
+}
+
+/**
+ * The deep link RustDesk's Android app answers to: straight into a session
+ * with this PC. No password in it — the app remembers one.
+ */
+export function rustDeskLink(address: string): string {
+  return address ? `rustdesk://connection/new/${address}` : 'https://github.com/rustdesk/rustdesk/releases/latest'
+}
+
 function RecoveringBanner(): ReactNode {
   const { state } = useForge()
   if (state.stage.kind !== 'connected' || !state.desktopRecovering) return null

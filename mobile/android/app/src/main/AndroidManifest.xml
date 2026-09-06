@@ -61,6 +61,8 @@
 
       </intent>
 
+      <package android:name="com.carriez.flutter_hbb" />
+
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />

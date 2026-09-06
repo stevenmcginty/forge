@@ -7,6 +7,7 @@ import { collectLeaves } from '@/lib/splitTree'
 import { handoffTargets, handoffTargetWire, paneHandoffChip, type HandoffTarget } from '@shared/handoffview'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
 import { HandoffMenu } from './HandoffMenu'
+import { rustDeskLink } from './Workspace'
 
 /**
  * How tall the seed box grows before it scrolls instead — about four lines of
@@ -367,6 +368,25 @@ export function TopBar({
             the setting, the second factor, the escalation guard — so this button
             asks and the answer arrives in the overlay.
           */}
+          {/*
+            The calm half of Remote Yes, only while it is on and nothing is
+            being asked: the loud half is the strip Workspace draws over every
+            screen when a prompt is actually up. This is for the day before —
+            proving the link opens RustDesk at all, at a moment when getting it
+            wrong costs nothing.
+          */}
+          {state.remoteYes.enabled && !state.remoteYes.uac ? (
+            <a
+              className="ghost-btn titlebar__btn"
+              title="Remote Yes is ready. Open RustDesk on this desktop."
+              aria-label="Open RustDesk on this desktop"
+              href={rustDeskLink(state.remoteYes.address)}
+              rel="noopener"
+            >
+              <Icon name="key" size={15} />
+            </a>
+          ) : null}
+
           {onWatchScreen ? (
             <button
               type="button"

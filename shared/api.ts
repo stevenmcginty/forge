@@ -27,6 +27,7 @@ import type {
   MobilePreviewOffer,
   MobileStatus,
   MobileWatchEvent,
+  RemoteYesStatus,
   WebCommandEvent,
   WebMirrorEvent,
   WebProjectAddEvent,
@@ -669,6 +670,36 @@ export interface ForgeApi {
     enable(): Promise<WatchdogStatus>
     /** Remove the task and stop the watchdog. Persists `keepRunning: false`. */
     disable(): Promise<WatchdogStatus>
+  }
+
+  /**
+   * Remote Yes — pressing the Windows admin prompt from the phone.
+   *
+   * A UAC prompt is drawn on the secure desktop, so nothing in this session can
+   * click it; a RustDesk installed as a *service* can. Windows only, off until
+   * `setup()` is pressed, and every method here is safe to call in that state.
+   * See electron/remote-yes-host.ts.
+   */
+  remoteYes: {
+    /** Freshly probed: is it installed, is the service up, is there a tailnet. */
+    status(): Promise<RemoteYesStatus>
+    /** Every change, including each UAC rise and fall. Returns the unsubscribe. */
+    onStatus(cb: (s: RemoteYesStatus) => void): () => void
+    /**
+     * Install and configure RustDesk, then switch Remote Yes on. Raises exactly
+     * one UAC prompt — the only elevated act in this app — and is idempotent, so
+     * pressing it again against an existing install just re-applies the options.
+     * Progress arrives on `onStatus`; the resolved status is the ending.
+     */
+    setup(): Promise<RemoteYesStatus>
+    /** Switch it off and stop the watcher. Leaves RustDesk installed. */
+    disable(): Promise<RemoteYesStatus>
+    /**
+     * Raise a harmless admin prompt so the path can be proved from the sofa.
+     * `ok` is whether Windows actually got a Yes; a cancel or a timeout is not
+     * an error, it is `ok: false` with a sentence.
+     */
+    test(): Promise<{ ok: boolean; detail: string }>
   }
 
   web: {

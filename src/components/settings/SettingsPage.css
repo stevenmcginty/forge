@@ -1747,3 +1747,30 @@
   border-color: var(--accent-line);
   outline: none;
 }
+
+
+/* -------------------------------------------------------------- remote yes
+ *
+ * Its own two rules rather than a reuse of `.mobile-pair__qr`, because the two
+ * codes are read in different situations: pairing is a code you scan once at
+ * this desk, this one is a shortcut you may photograph from the far side of a
+ * room while a prompt is counting down. Same white ring for the same reason —
+ * the encoder's quiet zone has to survive a dark card.
+ */
+
+.ryes-scan {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+}
+
+.ryes-qr {
+  display: block;
+  width: 220px;
+  height: 220px;
+  padding: var(--s-2);
+  background: #fff;
+  border-radius: var(--r-md);
+}

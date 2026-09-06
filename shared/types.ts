@@ -2226,6 +2226,57 @@ export interface Settings {
    */
   webNgrokDomain: string
 
+  /* --------------------------------------------------------- remote yes
+   *
+   * The one thing a phone driving this PC cannot do: press Yes on a Windows
+   * admin (UAC) prompt. That prompt is drawn on the *secure desktop*, which no
+   * process in Steve's own session can see, screenshot or click — so a remote
+   * session watching the desk goes black for two minutes and then times out.
+   *
+   * RustDesk installed **as a Windows service** can, because the service's
+   * SYSTEM helper runs in session 0 and is allowed onto the secure desktop.
+   * Remote Yes is that install, done once from a button, plus a poll that
+   * notices `consent.exe` and tells the phone to open RustDesk.
+   *
+   * Same posture as every block above it: inert until `remoteYesEnabled` is
+   * true. Nothing here polls, notifies or publishes on its own, and the one
+   * elevated action Forge has ever taken happens at setup, on purpose, once.
+   * See electron/remote-yes.ts and electron/remote-yes-host.ts.
+   */
+
+  /**
+   * Master switch. False = no watcher, no notification, nothing published to a
+   * phone. Only a literal `true` written by the Settings button turns it on —
+   * an absent key, an older settings.json and a hand-typed "true" all mean no,
+   * the same rule `mobileControlEnabled` earns for the same reason: this is the
+   * switch behind a feature that clicks an administrator prompt.
+   */
+  remoteYesEnabled: boolean
+  /**
+   * The RustDesk permanent password Forge generated at setup.
+   *
+   * A secret, encrypted at rest exactly like `companionRefreshToken` — it is
+   * what anyone on the tailnet would need to take this desktop's screen. Forge
+   * generates it rather than asking for one, so it is never a password Steve
+   * uses anywhere else, and it is redacted out of every log line and status
+   * detail this app emits. '' means setup has not run.
+   */
+  remoteYesPassword: string
+  /**
+   * The Tailscale IPv4 of this PC, captured at setup — e.g. `100.82.234.123`.
+   * '' means it was never captured, which is also the only state in which
+   * setup refuses to run: RustDesk here is configured to accept 100.64.0.0/10
+   * and nothing else, so without a tailnet there is no address to hand a
+   * phone and no network the whitelist would admit.
+   */
+  remoteYesAddress: string
+  /**
+   * The RustDesk numeric ID this machine reports (`rustdesk.exe --get-id`).
+   * Shown in Settings so the ID on the phone can be compared with the ID on
+   * the desk; the phone dials the address above, not this.
+   */
+  remoteYesRustdeskId: string
+
   /* ------------------------------------------------ updates & tools (M10) */
   /**
    * What the Update button does with the command it puts in a pane.
@@ -2546,6 +2597,48 @@ export interface WatchdogStatus {
   /** ISO timestamp of the last relaunch the watchdog log records, or ''. */
   lastRestart: string
   taskName: string
+}
+
+/**
+ * What the "Remote Yes" panel shows — see electron/remote-yes-host.ts.
+ *
+ * Every field is an observation rather than a stored belief: `installed` is a
+ * file that is there, `serviceRunning` is a service Windows says is Running,
+ * `tailscale` is an address `tailscale ip -4` actually printed. A panel that
+ * reported settings back to itself would say "on" for a RustDesk somebody
+ * uninstalled last week, which is the one lie this feature cannot afford —
+ * the whole promise is that the admin prompt gets pressed.
+ */
+export interface RemoteYesStatus {
+  /**
+   * False on anything that is not win32, and the section renders a "Windows
+   * only" card instead of a button. There is no UAC anywhere else, and no
+   * RustDesk service install this module knows how to perform.
+   */
+  supported: boolean
+  enabled: boolean
+  /** `C:\Program Files\RustDesk\rustdesk.exe` exists. */
+  installed: boolean
+  /** The Windows service named `RustDesk` is Running — the half that can reach
+   *  the secure desktop. Installed without it is a RustDesk that cannot help. */
+  serviceRunning: boolean
+  /** Password, address and ID were all captured, so the phone has what it needs. */
+  configured: boolean
+  /** `tailscale ip -4` answered with a 100.64.0.0/10 address. */
+  tailscale: boolean
+  /** `remoteYesAddress` — the address a phone dials. '' when never captured. */
+  address: string
+  rustdeskId: string
+  /** Always 21118: RustDesk's direct-access port, the one the whitelist admits. */
+  port: number
+  /** What setup is doing right now, or where it stopped. */
+  phase: 'idle' | 'downloading' | 'installing' | 'configuring' | 'error'
+  /** One human line for the current phase or the last error. Never the password. */
+  detail: string
+  /** A `consent.exe` is on screen at this moment. */
+  uacActive: boolean
+  /** ISO time of the last UAC rise, '' if this session has never seen one. */
+  lastUacAt: string
 }
 
 export interface WebStatus {

@@ -41,6 +41,7 @@
     "bridge:register": "node scripts/bridge-register-check.mjs",
     "bridge:build": "node scripts/build-bridge.mjs",
     "remote:check": "node scripts/remote-check.mjs",
+    "remote-yes:check": "node scripts/remote-yes-check.mjs",
     "watchdog": "node scripts/watchdog.mjs",
     "watchdog:status": "node scripts/watchdog.mjs --status",
     "watchdog:pause": "node scripts/watchdog.mjs --pause",

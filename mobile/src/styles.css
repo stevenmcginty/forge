@@ -211,6 +211,18 @@ body {
   font: 600 13px/1 system-ui, sans-serif;
 }
 
+/* The right end of the project bar, once there was more than one thing at it.
+   The group takes the `margin-left: auto` push; inside it there is no free
+   space for the buttons' own auto margins to absorb, so they resolve to zero
+   and the bar's 10px gap is what separates them. */
+.bar-actions {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 /* ------------------------------------------------------------------ lists */
 
 .screen {
@@ -921,6 +933,36 @@ body {
 
 .desktop-banner strong {
   font-weight: 600;
+}
+
+/* ------------------------------------------------------------- remote yes
+ *
+ * The UAC card, above everything including the banner over it. The desktop
+ * banner is a condition to read and is sized like one; this is a two-minute
+ * job to do, so it gets the full-width `.primary` button the New tab footer
+ * uses — the largest tap target in the app, aimed at a thumb that is probably
+ * moving. Warn amber, the strip's own waiting colour, and every bit of the
+ * meaning is in the words: an accent Steve cannot distinguish by hue carries
+ * nothing on its own.
+ */
+.remote-yes {
+  padding: 12px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 34%, transparent);
+  flex: 0 0 auto;
+}
+
+.remote-yes-head {
+  display: block;
+  color: var(--warn);
+  font: 600 15px/1.3 system-ui, sans-serif;
+}
+
+.remote-yes-body {
+  margin: 4px 0 10px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 /* ------------------------------------------------------- foreman in a pane

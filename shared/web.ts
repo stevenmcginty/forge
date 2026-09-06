@@ -127,7 +127,7 @@ import type { ChatUpdate } from './chat'
  * one link ends up able to press a key the other cannot, in a frame that ends
  * at the operating system. Type-only, so nothing is bundled by it.
  */
-import type { MirrorButton, MirrorInputAction, MirrorKey } from './mobile'
+import type { MirrorButton, MirrorInputAction, MirrorKey, RemoteYesInfo } from './mobile'
 
 /* --------------------------------------------------------- protocol identity */
 
@@ -1563,6 +1563,23 @@ export interface WebDesktopFrame {
   reason?: string
 }
 
+/**
+ * "Windows is asking for admin, and nobody is at the desk."
+ *
+ * The browser's copy of the phone's `RemoteYesFrame` — the same four fields,
+ * because it is the same fact: the PC's UAC prompt is on the secure desktop,
+ * where nothing this link carries can press it, and the one thing that can is
+ * RustDesk, opened by a finger on the phone. Steve's phone is more often a
+ * Chrome tab than the APK, so the tab is told too.
+ *
+ * Remembered by the server and replayed after every `hello-ok`, for the reason
+ * shared/mobile.ts gives: the prompt drops whatever was watching the screen,
+ * so the browser that has to answer is very often reconnecting as it is told.
+ */
+export interface WebRemoteYesFrame extends RemoteYesInfo {
+  type: 'remote-yes'
+}
+
 /** The project list changed — renamed, reordered, added, removed. */
 export interface WebProjectsFrame {
   type: 'projects'
@@ -1766,6 +1783,7 @@ export type WebServerFrame =
   | WebForemanFrame
   | WebHandoffFrame
   | WebDesktopFrame
+  | WebRemoteYesFrame
   | WebProjectsFrame
   | WebWorkspaceFrame
   | WebGitFrame

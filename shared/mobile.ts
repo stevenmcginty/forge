@@ -892,6 +892,47 @@ export interface DesktopFrame {
   reason?: string
 }
 
+/**
+ * "Windows is asking for admin, and nobody is at the desk."
+ *
+ * Remote Yes, from the phone's side. RustDesk runs on the PC as a service, so
+ * the one prompt Forge can never answer for itself — UAC is drawn on the
+ * secure desktop, where no synthetic click lands — is answered by a finger on
+ * a phone instead. The desktop watches for `consent.exe`; this frame carries
+ * the news; the phone shows a card whose one button deep-links into the
+ * RustDesk Android app, where the Yes is pressed for real.
+ *
+ * The card exists because of a specific behaviour rather than for decoration:
+ * when the prompt opens, RustDesk drops the phone's session for a few seconds.
+ * So the phone is looking at a dead screen at the exact moment it is needed,
+ * with nothing on it to say why, and the prompt behind it waits about two
+ * minutes. A phone left to work that out for itself does not make it in time.
+ *
+ * Unlike every other push here, this one is also *remembered*: the server
+ * keeps the last info and replays it to each phone right after `hello-ok`, so
+ * a phone that connects — or reconnects, which is what the dropped session
+ * makes it do — while the prompt is already up still sees the card.
+ */
+export interface RemoteYesInfo {
+  /** Remote Yes is switched on at the desktop. False shows no card at all. */
+  enabled: boolean
+  /** A Windows admin (UAC) prompt is on screen right now. */
+  uac: boolean
+  /**
+   * The PC's Tailscale IPv4, and '' from a desktop that has not captured one.
+   *
+   * Tailscale rather than the LAN address every other part of this protocol
+   * uses, because the phone that has to answer is usually not in the house.
+   */
+  address: string
+  /** RustDesk's direct-access port on that address. Always 21118. */
+  port: number
+}
+
+export interface RemoteYesFrame extends RemoteYesInfo {
+  t: 'remote-yes'
+}
+
 export type MobileErrorCode =
   | 'proto'
   | 'auth'
@@ -939,6 +980,7 @@ export type ServerFrame =
   | ForemanFrame
   | HandoffFrame
   | DesktopFrame
+  | RemoteYesFrame
   | ErrFrame
   | TvPlayFrame
   | MirrorSignalFrame

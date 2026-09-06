@@ -416,6 +416,13 @@ function defaultSettings(): Settings {
     webTunnel: 'cloudflared',
     webNgrokAuthtoken: '',
     webNgrokDomain: '',
+    // Remote Yes: off, and holding nothing. Nothing is downloaded, nothing is
+    // installed and no admin prompt is ever raised until Steve presses the
+    // button in Settings — see electron/remote-yes-host.ts.
+    remoteYesEnabled: false,
+    remoteYesPassword: '',
+    remoteYesAddress: '',
+    remoteYesRustdeskId: '',
     // The Update button types the command and stops. Turning this on is opting
     // in to a settings page that can start an installer with one click.
     updatesAutoRun: false,
@@ -539,7 +546,11 @@ const SECRET_FIELDS = [
   'companionRefreshToken',
   'mobileNgrokAuthtoken',
   'webRefreshToken',
-  'webNgrokAuthtoken'
+  'webNgrokAuthtoken',
+  // The RustDesk permanent password. Not pasted by anybody: Forge generates it
+  // at setup and it is the only thing between a tailnet neighbour and this
+  // desktop's screen, so it gets the same treatment as a refresh token.
+  'remoteYesPassword'
 ] as const satisfies readonly (keyof Settings)[]
 
 /** The injected codec, or the headless pass-through. Never throws. */
@@ -966,6 +977,17 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     webTunnel: s.webTunnel === 'ngrok' ? 'ngrok' : s.webTunnel === 'off' ? 'off' : 'cloudflared',
     webNgrokAuthtoken: str(s.webNgrokAuthtoken),
     webNgrokDomain: normaliseNgrokDomain(s.webNgrokDomain),
+    // Remote Yes. `=== true` — the strictest form in this file, and earned for
+    // the reason `webControlEnabled` earns it: this is the switch behind a
+    // feature that presses an administrator prompt. An absent key (every
+    // settings.json written before it existed), an older file and a hand-typed
+    // "true" all mean no. Only the Settings button turns it on.
+    remoteYesEnabled: s.remoteYesEnabled === true,
+    // Generated, never pasted, so there is nothing to trim off a paste — but
+    // str() anyway, because a hand-edited file is still a file this reads.
+    remoteYesPassword: str(s.remoteYesPassword),
+    remoteYesAddress: str(s.remoteYesAddress),
+    remoteYesRustdeskId: str(s.remoteYesRustdeskId),
     // Coerced rather than defaulted, like companionEnabled above: a settings.json
     // written before M10 has no key, and the answer for that file is "no".
     updatesAutoRun: Boolean(s.updatesAutoRun),

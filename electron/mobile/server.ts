@@ -22,6 +22,7 @@ import {
   type MirrorInput,
   type MobileSession,
   type OpFrame,
+  type RemoteYesInfo,
   type ServerFrame
 } from '@shared/mobile'
 import { FOREMAN_SEED_MAX, type ForemanStartRequest, type ForemanState } from '@shared/foreman'
@@ -388,6 +389,17 @@ export class MobileServer {
   private inputCount = 0
   /** The last set handed to `onWatch`, so an unchanged set says nothing. */
   private announcedWatch = ''
+  /**
+   * The last thing said about Remote Yes, kept so it can be said again.
+   *
+   * The only push here that is remembered rather than merely broadcast, and
+   * for a reason particular to this one: the UAC prompt *drops the phone's
+   * RustDesk session*, so the phone reconnects mid-prompt, and a broadcast it
+   * missed by two seconds is a card that never appears while the prompt it
+   * describes sits on the screen waiting. `welcome` replays this, so
+   * connecting late is the same as being connected all along.
+   */
+  private lastRemoteYes: RemoteYesInfo | null = null
 
   constructor(host: MobileServerHost) {
     this.host = host
@@ -576,6 +588,18 @@ export class MobileServer {
   pushDesktop(state: 'recovering' | 'ready', reason?: string): void {
     for (const client of this.clients) {
       if (client.device) this.send(client, { t: 'desktop', state, ...(reason ? { reason } : {}) })
+    }
+  }
+
+  /**
+   * Remote Yes moved — switched on or off at the desk, or a UAC prompt rose or
+   * went away. To every authenticated phone, and remembered for the ones that
+   * are not connected yet. See `RemoteYesInfo` in shared/mobile.ts.
+   */
+  pushRemoteYes(info: RemoteYesInfo): void {
+    this.lastRemoteYes = info
+    for (const client of this.clients) {
+      if (client.device) this.send(client, { t: 'remote-yes', ...info })
     }
   }
 
@@ -1092,6 +1116,11 @@ export class MobileServer {
       // Present exactly once, on the connection that paired.
       ...(issuedToken ? { deviceToken: issuedToken } : {})
     })
+    // Straight after the hello, never inside it: a phone that connects while a
+    // UAC prompt is already up must see the card, and the commonest way to
+    // connect during a prompt is to have been dropped by it. Nothing is sent
+    // when nothing has been said, so a desktop with Remote Yes off is silent.
+    if (this.lastRemoteYes) this.send(client, { t: 'remote-yes', ...this.lastRemoteYes })
     this.host.onPresence?.(this.connectedCount)
   }
 

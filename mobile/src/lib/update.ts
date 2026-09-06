@@ -374,3 +374,54 @@ function describe(error: unknown, fallback: string): string {
   }
   return fallback
 }
+
+/* --------------------------------------------------------------- remote yes
+ *
+ * Not self-update, and here anyway: `native` is this file's binding to
+ * ForgeUpdaterPlugin, and `openExternal` is the only plugin method Remote Yes
+ * needs. A second `registerPlugin('ForgeUpdater')` in a file of its own would
+ * be a second name for one thing, which is how the two drift.
+ */
+
+/** Where the phone is sent when it has no RustDesk to open. */
+const RUSTDESK_RELEASES = 'https://github.com/rustdesk/rustdesk/releases/latest'
+
+/**
+ * Open RustDesk on the PC that is asking for admin.
+ *
+ * One tap, straight into a session, because of what the card is competing
+ * with: a UAC prompt that waits about two minutes, on a desktop whose RustDesk
+ * session this very prompt has just dropped. "Open RustDesk, find the PC in
+ * the list, connect, type the password" does not fit in that window; a deep
+ * link does. No password rides in the URL — the RustDesk app remembers it.
+ *
+ * Returns the sentence to show, and '' when there is nothing to say. The one
+ * failure worth naming is a phone with no RustDesk on it: Android answers that
+ * by having nothing at all that can open `rustdesk://`, which arrives here as
+ * `no-browser`, and the honest response is the install page plus an
+ * instruction to come back and tap again.
+ */
+export async function openRustDesk(address: string): Promise<string> {
+  if (!address) return 'The desktop has not said where it can be reached yet.'
+  const url = `rustdesk://connection/new/${address}`
+
+  if (!isNativeApp()) {
+    // Browser debug route: no intents, so hand the scheme to the tab and let
+    // the desktop OS decide, exactly as `download` does with the APK.
+    window.open(url, '_blank', 'noopener')
+    return ''
+  }
+
+  try {
+    await native.openExternal({ url })
+    return ''
+  } catch (error) {
+    if (codeOf(error) !== 'no-browser') return describe(error, 'Could not open RustDesk.')
+    try {
+      await native.openExternal({ url: RUSTDESK_RELEASES })
+    } catch {
+      /* no browser either; the sentence below is still the right instruction */
+    }
+    return 'Install RustDesk first, then tap again.'
+  }
+}

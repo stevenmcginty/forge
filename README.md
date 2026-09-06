@@ -77,6 +77,15 @@ opens no network connection.
 There is an Android companion that pairs with your desktop and updates itself
 the same way. See **[docs/MOBILE-SETUP.md](docs/MOBILE-SETUP.md)**.
 
+## Remote Yes
+
+Windows draws its administrator prompt on a desktop nothing running as you can
+reach — not Forge, not a screen share, not this PC's own remote-control tool —
+so when one appears the screen just goes dark. **Settings → Remote Yes** fixes
+that: it installs RustDesk as a Windows service (the one component that can
+reach that prompt), and from then on a card appears on your phone the moment
+Windows asks for admin. See **[docs/REMOTE-YES.md](docs/REMOTE-YES.md)**.
+
 ## Running from source
 
 ```

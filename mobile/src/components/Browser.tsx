@@ -32,6 +32,14 @@ export interface BrowserProps {
   /** A YouTube id, already extracted, bound for whatever television is paired. */
   onSendToTv: (video: string) => void
   onBack: () => void
+  /**
+   * Open RustDesk on the desktop. Offered here only while Remote Yes is on and
+   * nothing is actually asking — the prompt itself is answered from the card
+   * App.tsx puts above every screen, which is where it belongs when two
+   * minutes are running out. This row is the calm half: a way to check the
+   * link works before the day it matters.
+   */
+  onRemoteYes: () => void
 }
 
 export function Browser({
@@ -41,7 +49,8 @@ export function Browser({
   onOpenPane,
   onNewTab,
   onSendToTv,
-  onBack
+  onBack,
+  onRemoteYes
 }: BrowserProps): React.JSX.Element {
   // Declared above the project-list branch below, because a hook cannot live
   // after an early return.
@@ -57,12 +66,28 @@ export function Browser({
             <strong>Forge</strong>
             <span className="bar-sub">{picture.projects.length} projects</span>
           </div>
-          {/* The top of the app, where the phone is not yet inside anything.
-              Sending a video has nothing to do with which project is open, and
-              hanging it off a project's bar would imply that it did. */}
-          <button type="button" className="bar-tv" onClick={() => setFlinging(true)}>
-            Send to TV
-          </button>
+          {/* Two of them now, so they travel together: `.bar-tv` pushes itself
+              right with `margin-left: auto`, and a second one of those would
+              split the bar's free space between them rather than sit
+              alongside. */}
+          <div className="bar-actions">
+            {/* Quiet on purpose, and only while nothing is being asked: the
+                loud version is the card App.tsx draws over every screen when a
+                prompt is actually up. What this row is for is the day before —
+                proving the deep link opens RustDesk at all, at a moment when
+                getting it wrong costs nothing. */}
+            {picture.remoteYes.enabled && !picture.remoteYes.uac && (
+              <button type="button" className="bar-tv" onClick={onRemoteYes}>
+                Remote Yes · ready
+              </button>
+            )}
+            {/* The top of the app, where the phone is not yet inside anything.
+                Sending a video has nothing to do with which project is open,
+                and hanging it off a project's bar would imply that it did. */}
+            <button type="button" className="bar-tv" onClick={() => setFlinging(true)}>
+              Send to TV
+            </button>
+          </div>
         </header>
         <ul className="list">
           {picture.projects.map((p) => (

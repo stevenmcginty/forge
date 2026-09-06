@@ -395,6 +395,35 @@ body {
 }
 
 /*
+ * Remote Yes — see RemoteYesBanner. The one strip with a job on it, so it keeps
+ * the warn palette the band was drawn in and grows to fit the button; the link
+ * is styled as the same ghost button "Try now" uses, because it is the same
+ * kind of thing: the one act the reader can do about the sentence.
+ */
+.offline[data-link='remote-yes'] {
+  height: auto;
+  min-height: 30px;
+  padding-top: var(--s-2);
+  padding-bottom: var(--s-2);
+}
+
+.offline[data-link='remote-yes'] .offline__text {
+  white-space: normal;
+}
+
+.remote-yes__open {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 var(--s-4);
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid var(--warn-line);
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+/*
  * ------------------------------------------------------- the update strip
  *
  * The desktop's UpdateBanner, in the browser: the same 30px band, in the same

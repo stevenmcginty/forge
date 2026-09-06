@@ -28,7 +28,7 @@ import { simDevice } from './lib/sim'
 import { tvBridge } from './lib/tv-bridge'
 import { mirrorListeners } from './lib/mirror'
 import { UpdateSheet } from './components/Update'
-import { CURRENT_VERSION_NAME, startAutoUpdate, updateStore } from './lib/update'
+import { CURRENT_VERSION_NAME, openRustDesk, startAutoUpdate, updateStore } from './lib/update'
 
 /**
  * Forge Mobile.
@@ -484,6 +484,20 @@ export function App(): React.JSX.Element {
   const paneProject = paneSessionId ? projectOfSession(picture, paneSessionId) : null
   const paneTab = paneProject ? tabOfSession(picture, paneProject, paneSessionId) : null
 
+  /**
+   * Remote Yes, tapped — from the card below or from the quiet row in Browser.
+   *
+   * Fire-and-report: the deep link either lands in RustDesk or it does not,
+   * and the only thing this side learns is which. A phone with no RustDesk on
+   * it is the answer worth showing, and it comes back as a sentence through
+   * the same toast every other "that didn't work" uses.
+   */
+  const answerRemoteYes = (): void => {
+    void openRustDesk(picture.remoteYes.address).then((problem) => {
+      if (problem) setNotice(problem)
+    })
+  }
+
   return (
     <div className="app">
       <StatusStrip
@@ -495,6 +509,27 @@ export function App(): React.JSX.Element {
         onForget={forget}
         onUpdate={() => setShowUpdate(true)}
       />
+
+      {/*
+        Above everything, including the desktop's own banner, and the only
+        thing in this app that is allowed to be: a UAC prompt is a two-minute
+        window on a machine that is doing nothing until somebody answers it,
+        and the person holding this phone may be on a bus. Everything else on
+        the screen can wait for that.
+
+        It is deliberately a whole card rather than a line. The desktop banner
+        below is a condition to read; this is a thing to do, and the button has
+        to be findable without reading anything at all.
+      */}
+      {picture.remoteYes.enabled && picture.remoteYes.uac && (
+        <section className="remote-yes" role="alert">
+          <strong className="remote-yes-head">Windows is asking for admin</strong>
+          <p className="remote-yes-body">Open RustDesk and press Yes.</p>
+          <button type="button" className="primary" onClick={answerRemoteYes}>
+            Open RustDesk
+          </button>
+        </section>
+      )}
 
       {/*
         A line, not a toast. Notices self-dismiss after four seconds because
@@ -580,6 +615,7 @@ export function App(): React.JSX.Element {
             setNotice('Sent to the TV.')
           }}
           onBack={() => setScreen({ at: 'browse', projectId: null })}
+          onRemoteYes={answerRemoteYes}
         />
       )}
 

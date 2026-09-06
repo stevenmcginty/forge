@@ -18,6 +18,7 @@ import {
   type WebResult,
   type WebSession
 } from '@shared/web'
+import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ForemanState } from '@shared/foreman'
 import type { AgentProfile, GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
@@ -41,6 +42,9 @@ import {
 import { deviceId, deviceName } from './lib/device'
 import { registerWorker, subscribe as subscribePush, unsubscribe as unsubscribePush } from './lib/push'
 import { readHost } from './lib/rendezvous'
+
+/** No Remote Yes: what a desktop that has not mentioned it is taken to mean. */
+const REMOTE_YES_OFF: RemoteYesInfo = { enabled: false, uac: false, address: '', port: 21118 }
 
 /**
  * Everything the page knows, in one place, and the one seam every screen reads
@@ -145,6 +149,12 @@ export interface ForgeState {
    * this is for. See `WebDesktopFrame` in shared/web.ts.
    */
   desktopRecovering: string
+  /**
+   * Remote Yes, as this desktop last described it. `enabled: false` is the
+   * resting state and also what an older desktop says by saying nothing. See
+   * `WebRemoteYesFrame` in shared/web.ts.
+   */
+  remoteYes: RemoteYesInfo
   /** Is the link answering right now? Only the badge reads this. */
   warm: boolean
   /** Frozen terminals, or the repository from GitHub. Only read while offline. */
@@ -396,6 +406,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   /** Notice queue. The head is what the page shows; the rest wait their turn. */
   const [notices, setNotices] = useState<QueuedNotice[]>([])
   const [desktopRecovering, setDesktopRecovering] = useState('')
+  const [remoteYes, setRemoteYes] = useState<RemoteYesInfo>(REMOTE_YES_OFF)
   const [warm, setWarm] = useState(false)
   const [pageVisible, setPageVisible] = useState(() => !document.hidden)
   const [notifyPermission, setNotifyPermission] = useState<NotifySupport>(notifySupport)
@@ -524,6 +535,11 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // the reload, and the `ready` that would have cleared it was sent to a
         // connection that no longer existed.
         setDesktopRecovering('')
+        // Off until the desktop says otherwise, which it does immediately after
+        // this frame when it has anything to say. A `uac: true` carried across
+        // a reconnect to a desktop that has since been answered would be a
+        // card pointing at a prompt that is no longer there.
+        setRemoteYes(REMOTE_YES_OFF)
         setPicture({
           desktopName: frame.desktopName,
           appVersion: frame.appVersion,
@@ -594,6 +610,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // state alone, so a desktop that sends 'recovering' with nothing to say
         // still gets a banner rather than a blank one.
         setDesktopRecovering(state === 'recovering' ? reason || 'The desktop is rebuilding its window.' : '')
+      },
+      onRemoteYes: (info) => {
+        setRemoteYes(info)
       },
       onSessions: (sessions) => {
         setPicture((current) => (current ? { ...current, sessions } : current))
@@ -1218,6 +1237,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       prompts,
       notice,
       desktopRecovering,
+      remoteYes,
       warm,
       offlineMode,
       notifyPermission,
@@ -1236,6 +1256,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       prompts,
       notice,
       desktopRecovering,
+      remoteYes,
       warm,
       offlineMode,
       notifyPermission,

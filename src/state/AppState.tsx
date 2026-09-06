@@ -94,6 +94,7 @@ export type SettingsSection =
   | 'mobile'
   | 'web'
   | 'alwaysOn'
+  | 'remoteYes'
   | 'updates'
   | 'advanced'
 
@@ -340,6 +341,14 @@ const FALLBACK_SETTINGS: Settings = {
   webTunnel: 'off',
   webNgrokAuthtoken: '',
   webNgrokDomain: '',
+  // Remote Yes — off, and holding nothing: no address, no ID, no password.
+  // Mirrors defaultSettings() in electron/store.ts, and the conservative
+  // guess is the only safe one, because the section keyed off this would
+  // otherwise draw itself as set up for the instant before main answers.
+  remoteYesEnabled: false,
+  remoteYesPassword: '',
+  remoteYesAddress: '',
+  remoteYesRustdeskId: '',
   customTools: [],
   updatesAutoRun: false,
   // Blank until the real settings arrive. The card checks `state.ready`, so it
