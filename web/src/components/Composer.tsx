@@ -16,7 +16,6 @@ import type { ClaudePermissionMode } from '@shared/types'
 import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
 import { allFilesFromDataTransfer, formatFileSize, isImageFile } from '../lib/file'
 import { useMobile } from '../lib/mobile'
-import { useSpeechDictation } from '../lib/speech'
 
 /**
  * The web app's input. A real `<textarea>`, so the OS cut/copy/paste, Gboard
@@ -57,7 +56,7 @@ export function Composer({
   autoFocus,
   onNotice,
   onVoice,
-  voiceRecording = false
+  voicePhase = 'idle'
 }: {
   draft: string
   disabled: boolean
@@ -97,13 +96,13 @@ export function Composer({
   autoFocus: boolean
   onNotice?: (message: string) => void
   /**
-   * Toggle the pane's own dictation — the CLI's `/voice`, driven by keystrokes
-   * and heard on the desktop's microphone. When present it replaces the
-   * browser's speech recognition, which only ever typed into this box.
+   * The mic button. First press records on this device's microphone, second
+   * press sends the recording to the desktop for words, which then go to the
+   * pane as a typed message. Absent when this browser cannot record.
    */
   onVoice?: () => void
-  /** The pane's CLI is recording — the button and placeholder say so. */
-  voiceRecording?: boolean
+  /** Where that round trip is — the button and placeholder say so. */
+  voicePhase?: 'idle' | 'recording' | 'transcribing'
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
@@ -130,11 +129,6 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [pickedEffort, setPickedEffort] = useState<EffortLevel | null>(null)
   const [pickedModel, setPickedModel] = useState<string | null>(null)
-
-  const speech = useSpeechDictation({
-    onTranscript: (spoken) => onDraft(spoken),
-    onError: (err) => onNotice?.(err)
-  })
 
   const modelList = models ?? []
   const effortList = effortLevels ?? []
@@ -277,23 +271,12 @@ export function Composer({
   const submit = (event?: FormEvent): void => {
     event?.preventDefault()
     if (!ready) return
-    if (speech.listening) {
-      speech.stop()
-    }
     const trimmed = draft.trim().toLowerCase()
     if (trimmed === '/voice' || trimmed === '/talk' || trimmed === '/dictate' || trimmed === '/record' || trimmed === '/dictation') {
       onDraft('')
-      if (onVoice) {
-        onVoice()
-        return
-      }
-      if (speech.supported) {
-        speech.start('')
-        return
-      } else {
-        onNotice?.('Voice dictation is not supported in this browser.')
-        return
-      }
+      if (onVoice) onVoice()
+      else onNotice?.('This browser cannot record from a microphone.')
+      return
     }
     if (!hasDraft) {
       onRaw('\r')
@@ -329,13 +312,13 @@ export function Composer({
 
   const placeholder = disabled
     ? disabledReason
-    : voiceRecording
-      ? 'Listening on the desktop mic… press the mic to send'
-      : speech.listening
-        ? 'Listening… speak now'
-      : to
-        ? `Message ${to}`
-        : 'Write a message'
+    : voicePhase === 'recording'
+      ? 'Listening… press the mic again to send'
+      : voicePhase === 'transcribing'
+        ? 'Working out the words…'
+        : to
+          ? `Message ${to}`
+          : 'Write a message'
 
   return (
     <form
@@ -577,27 +560,21 @@ export function Composer({
             <button
               type="button"
               className="composer__icon composer__mic-btn"
-              data-listening={voiceRecording ? 'true' : undefined}
-              disabled={disabled}
+              data-listening={voicePhase === 'recording' ? 'true' : undefined}
+              data-busy={voicePhase === 'transcribing' ? 'true' : undefined}
+              disabled={disabled || voicePhase === 'transcribing'}
               onClick={onVoice}
-              title={voiceRecording ? 'Stop recording and send' : `Dictate through ${to ?? 'the pane'} (/voice)`}
-              aria-label={voiceRecording ? 'Stop dictation' : 'Voice dictation'}
-              aria-pressed={voiceRecording}
+              title={
+                voicePhase === 'recording'
+                  ? 'Stop and send'
+                  : voicePhase === 'transcribing'
+                    ? 'Working out the words…'
+                    : 'Dictate (/voice)'
+              }
+              aria-label={voicePhase === 'recording' ? 'Stop dictation and send' : 'Dictate'}
+              aria-pressed={voicePhase === 'recording'}
             >
-              <Icon name={voiceRecording ? 'voice' : 'mic'} size={16} />
-            </button>
-          ) : speech.supported ? (
-            <button
-              type="button"
-              className="composer__icon composer__mic-btn"
-              data-listening={speech.listening ? 'true' : undefined}
-              disabled={disabled}
-              onClick={() => speech.toggle(draft)}
-              title={speech.listening ? 'Stop listening (or press Enter to send)' : 'Voice dictation (/voice)'}
-              aria-label={speech.listening ? 'Stop voice dictation' : 'Voice dictation'}
-              aria-pressed={speech.listening}
-            >
-              <Icon name={speech.listening ? 'voice' : 'mic'} size={16} />
+              <Icon name={voicePhase === 'idle' ? 'mic' : 'voice'} size={16} />
             </button>
           ) : null}
           <div className="composer__keys" role="toolbar" aria-label="Terminal keys">

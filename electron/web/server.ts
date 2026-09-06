@@ -5,6 +5,7 @@ import {
   HEARTBEAT_GRACE_MS,
   HEARTBEAT_MS,
   MAX_FILE_BYTES,
+  MAX_DICTATION_BYTES,
   MAX_FILE_CHUNK_BASE64,
   MAX_FRAME_BYTES,
   MAX_IMAGE_BASE64,
@@ -369,6 +370,12 @@ export interface WebServerHost {
     bytes: Uint8Array,
     originalName: string
   ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>
+  /**
+   * Turn a browser's recording into words, with whichever speech-to-text
+   * provider this desktop has a key for. Optional for the same reason the
+   * inbox savers are: a host without it answers `unsupported`.
+   */
+  transcribeAudio?: (bytes: Uint8Array, mime: string) => Promise<{ ok: true; text: string } | { ok: false; error: string }>
 
   /* ---------------------------------------------------- the chat transcript
    *
@@ -701,6 +708,11 @@ export class WebServer {
       updatedAt: number
     }
   >()
+  /** In-flight `dictate` recordings, keyed by uploadId — the same shape as an upload, minus the name. */
+  private pendingDictations = new Map<
+    string,
+    { sessionId: string; mime: string; totalChunks: number; chunks: Buffer[]; totalBytes: number; updatedAt: number }
+  >()
 
   constructor(host: WebServerHost) {
     this.host = host
@@ -838,6 +850,7 @@ export class WebServer {
     for (const client of [...this.clients]) this.drop(client, CLOSE_GOING_AWAY, 'Server stopping')
     this.clients.clear()
     this.pendingUploads.clear()
+    this.pendingDictations.clear()
     // Whoever was watching is not watching any more. Said explicitly rather
     // than left to the drops above, because a screen capture that outlives the
     // server relaying it is a desktop being encoded for nobody — and on this
@@ -2105,6 +2118,87 @@ export class WebServer {
           }
 
           answer({ kind: 'ok' })
+          return
+        }
+
+        case 'dictate': {
+          if (!this.host.transcribeAudio) {
+            failed('unsupported', 'This Forge cannot turn speech into words for a browser.')
+            return
+          }
+          const id = wireString(request.sessionId, 128)
+          if (!id || !this.host.sessions().some((s) => s.id === id)) {
+            failed('unknown-session', 'That pane is gone.')
+            return
+          }
+          const uploadId = wireString(request.uploadId, 64)
+          if (!uploadId) {
+            failed('bad-frame', 'That recording had no id.')
+            return
+          }
+          const mime = wireString(request.mime, 64)
+          if (!/^audio\/[a-z0-9.+-]+(;\s*codecs=[a-z0-9.,-]+)?$/i.test(mime)) {
+            failed('bad-frame', 'That is not a recording this desktop will take.')
+            return
+          }
+          const index = typeof request.index === 'number' && Number.isInteger(request.index) ? request.index : -1
+          const totalChunks =
+            typeof request.totalChunks === 'number' && Number.isInteger(request.totalChunks) ? request.totalChunks : 0
+          if (totalChunks < 1 || totalChunks > 200 || index < 0 || index >= totalChunks) {
+            failed('bad-frame', 'Invalid chunk index or total.')
+            return
+          }
+          const data = typeof request.data === 'string' ? request.data.trim() : ''
+          if (data.length > MAX_FILE_CHUNK_BASE64) {
+            failed('limit', 'That chunk was too large.')
+            return
+          }
+          if (data && !/^[A-Za-z0-9+/]+=*$/.test(data)) {
+            failed('bad-frame', 'That chunk could not be read.')
+            return
+          }
+
+          const now = Date.now()
+          for (const [k, v] of this.pendingDictations) {
+            if (now - v.updatedAt > 60_000) this.pendingDictations.delete(k)
+          }
+          let pending = this.pendingDictations.get(uploadId)
+          if (!pending) {
+            pending = { sessionId: id, mime, totalChunks, chunks: new Array<Buffer>(totalChunks), totalBytes: 0, updatedAt: now }
+            this.pendingDictations.set(uploadId, pending)
+          }
+          const chunkBytes = Buffer.from(data, 'base64')
+          pending.totalBytes += chunkBytes.length
+          if (pending.totalBytes > MAX_DICTATION_BYTES) {
+            this.pendingDictations.delete(uploadId)
+            failed('limit', 'That recording is too long to send.')
+            return
+          }
+          pending.chunks[index] = chunkBytes
+          pending.updatedAt = now
+          if (index < totalChunks - 1) {
+            answer({ kind: 'ok' })
+            return
+          }
+          for (let i = 0; i < totalChunks; i++) {
+            if (!pending.chunks[i]) {
+              this.pendingDictations.delete(uploadId)
+              failed('bad-frame', `Missing chunk ${i} of ${totalChunks}.`)
+              return
+            }
+          }
+          const audio = Buffer.concat(pending.chunks)
+          this.pendingDictations.delete(uploadId)
+          if (!audio.length) {
+            failed('bad-frame', 'That recording was empty.')
+            return
+          }
+          const heard = await this.host.transcribeAudio(audio, pending.mime)
+          if (!heard.ok) {
+            failed('failed', heard.error)
+            return
+          }
+          answer({ kind: 'dictation', text: heard.text })
           return
         }
 

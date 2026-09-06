@@ -38,6 +38,7 @@ import type {
 import { WebAuth, googleJwksFetcher } from './web/auth'
 import { checkFolder, listFolder } from './web/fs-browse'
 import { saveInboxFile, saveInboxImage } from './web/inbox'
+import { transcribeAudio } from './voice-bridge'
 import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
 import { WebServer, type WebServerHost } from './web/server'
@@ -1371,6 +1372,7 @@ async function start(): Promise<void> {
     projectCreate: (name, parentDir, deviceName) => dispatchProjectCreate(name, parentDir, deviceName),
     saveInboxImage: (bytes, ext) => Promise.resolve(saveInboxImage(join(getDataDir(), 'web-inbox'), bytes, ext)),
     saveInboxFile: (bytes, name) => Promise.resolve(saveInboxFile(join(getDataDir(), 'web-inbox'), bytes, name)),
+    transcribeAudio: (bytes, mime) => transcribeAudio(bytes, mime),
     // Resolved here and tailed there: this file is the half that knows what a
     // pane is, electron/web/transcript-watcher.ts is the half that knows what a
     // transcript is, and the server between them knows neither.

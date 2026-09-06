@@ -460,6 +460,14 @@ export const MAX_FILE_CHUNK_BYTES = 64 * 1024
  */
 export const MAX_FILE_CHUNK_BASE64 = 96 * 1024
 
+/**
+ * The most audio one `dictate` recording may carry, reassembled. Opus at
+ * MediaRecorder's default bitrate is ~4 KB/s, so this is a quarter of an hour
+ * of talking — far past what anyone dictates into one prompt, and small next
+ * to MAX_FILE_BYTES.
+ */
+export const MAX_DICTATION_BYTES = 4 * 1024 * 1024
+
 /** Image types a `paste-image` request may name. Anything else is `bad-frame`. */
 export const WEB_IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
 
@@ -1092,6 +1100,29 @@ export type WebRequest =
       data: string
     }
   /**
+   * A chunk of speech recorded on the browser's microphone, for the desktop
+   * to turn into words. The phone is miles from the desk, so the CLI's own
+   * dictation (which hears the desktop's microphone) cannot help; the
+   * browser records with MediaRecorder (`mime` is whatever it produced —
+   * `audio/webm;codecs=opus` on Chrome, `audio/mp4` on Safari) and the
+   * desktop asks its speech-to-text provider, the same key the voice agent
+   * uses, sent to that provider and nowhere else.
+   *
+   * Chunked exactly as `upload-file` is, for the same MAX_FRAME_BYTES reason.
+   * On the final chunk the desktop transcribes and answers `dictation`; the
+   * browser then types the words into the pane itself, so what was heard is
+   * seen before it is sent and the pane's typing path is the one path.
+   */
+  | {
+      kind: 'dictate'
+      uploadId: string
+      sessionId: string
+      mime: string
+      index: number
+      totalChunks: number
+      data: string
+    }
+  /**
    * "Notify this browser when a pane needs me." The subscription is the object
    * `PushSubscription.toJSON()` returns; the desktop stores it beside its VAPID
    * keys and posts to `endpoint` on the next attention transition that no
@@ -1638,6 +1669,8 @@ export type WebResult =
    * answered with `git`.
    */
   | { kind: 'folder'; folder: WebFolder }
+  /** The words the desktop heard in a `dictate` recording — empty when it heard nothing. */
+  | { kind: 'dictation'; text: string }
   /**
    * `project-create` asked for a name that is already a folder in that parent.
    *

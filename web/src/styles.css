@@ -3452,6 +3452,11 @@ button.astatus__mode:not(:disabled):hover {
   opacity: 0.35;
 }
 
+.composer__mic-btn[data-busy='true'] {
+  opacity: 0.7;
+  animation: composer-mic-pulse 1s ease-in-out infinite;
+}
+
 .composer__mic-btn[data-listening='true'] {
   background: color-mix(in srgb, #ef4444 18%, transparent);
   border-color: color-mix(in srgb, #ef4444 55%, transparent);

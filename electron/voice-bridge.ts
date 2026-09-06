@@ -385,6 +385,126 @@ function finishMedia(result: MediaResult): MediaCallResult {
  */
 const speaking = new Map<string, AbortController>()
 
+/* ------------------------------------------------------------ transcribe */
+
+const GROQ_STT_MODEL = 'whisper-large-v3-turbo'
+const STT_TIMEOUT_MS = 60_000
+
+/**
+ * A browser's recording, turned into words on this desktop.
+ *
+ * Groq's Whisper first, because it is the fastest and the key is already here
+ * for the voice brain; Gemini second, because it hears audio inline and most
+ * Forges have that key. Either way the bytes go to that provider and nowhere
+ * else, and neither key ever reaches the answer. No key at all is an honest
+ * refusal that names where to put one.
+ */
+export async function transcribeAudio(
+  bytes: Uint8Array,
+  mime: string
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const settings = getSettings()
+  const groq = (settings.groqKey ?? '').trim()
+  const gemini = (settings.geminiKey ?? '').trim()
+  if (!bytes.length) return { ok: false, error: 'The recording was empty.' }
+  if (groq) return transcribeWithGroq(bytes, mime, groq)
+  if (gemini) return transcribeWithGemini(bytes, mime, gemini, settings.geminiModel)
+  return { ok: false, error: 'No speech-to-text key. Add a Groq or Gemini key in Settings → Voice on the desktop.' }
+}
+
+/** `audio/webm;codecs=opus` → `webm`: the suffix the provider wants on the upload's name. */
+function audioExt(mime: string): string {
+  const base = mime.split(';')[0]?.trim().toLowerCase() ?? ''
+  if (base === 'audio/mp4' || base === 'audio/x-m4a' || base === 'audio/m4a') return 'm4a'
+  if (base === 'audio/mpeg') return 'mp3'
+  if (base === 'audio/ogg') return 'ogg'
+  if (base === 'audio/wav' || base === 'audio/x-wav') return 'wav'
+  return 'webm'
+}
+
+async function transcribeWithGroq(
+  bytes: Uint8Array,
+  mime: string,
+  key: string
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const form = new FormData()
+  form.append('file', new Blob([Buffer.from(bytes)], { type: mime.split(';')[0] ?? mime }), `speech.${audioExt(mime)}`)
+  form.append('model', GROQ_STT_MODEL)
+  form.append('response_format', 'json')
+  form.append('temperature', '0')
+  try {
+    const res = await fetch(`${GROQ_HOST}/audio/transcriptions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${key}` },
+      body: form,
+      signal: AbortSignal.timeout(STT_TIMEOUT_MS)
+    })
+    const raw = await res.text()
+    let parsed: { text?: string; error?: { message?: string } } | null = null
+    try {
+      parsed = JSON.parse(raw) as { text?: string; error?: { message?: string } }
+    } catch {
+      /* keep raw */
+    }
+    if (!res.ok) {
+      const message = parsed?.error?.message ?? raw.slice(0, 300)
+      return { ok: false, error: `Groq ${res.status}: ${scrub(message, key)}` }
+    }
+    return { ok: true, text: (parsed?.text ?? '').trim() }
+  } catch (err) {
+    return { ok: false, error: scrub(`Groq: ${(err as Error).message}`, key) }
+  }
+}
+
+async function transcribeWithGemini(
+  bytes: Uint8Array,
+  mime: string,
+  key: string,
+  model: string
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const name = isSafeModel(model) ? model : 'gemini-2.5-flash'
+  const body = {
+    contents: [
+      {
+        parts: [
+          { inlineData: { mimeType: mime.split(';')[0] ?? mime, data: Buffer.from(bytes).toString('base64') } },
+          {
+            text: 'Transcribe this recording word for word. Reply with only the words that were spoken, with ordinary punctuation. If nothing was said, reply with nothing.'
+          }
+        ]
+      }
+    ],
+    generationConfig: { temperature: 0 }
+  }
+  try {
+    const res = await fetch(`${HOST}/v1beta/models/${name}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(STT_TIMEOUT_MS)
+    })
+    const raw = await res.text()
+    type GeminiReply = {
+      error?: { message?: string }
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+    }
+    let parsed: GeminiReply | null = null
+    try {
+      parsed = JSON.parse(raw) as GeminiReply
+    } catch {
+      /* keep raw */
+    }
+    if (!res.ok) {
+      const message = parsed?.error?.message ?? raw.slice(0, 300)
+      return { ok: false, error: `Gemini ${res.status}: ${scrub(message, key)}` }
+    }
+    const text = (parsed?.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
+    return { ok: true, text }
+  } catch (err) {
+    return { ok: false, error: scrub(`Gemini: ${(err as Error).message}`, key) }
+  }
+}
+
 export function registerVoiceHandlers(): void {
   ipcMain.handle(IPC.voiceImportKey, (_e, which: KeySource): ImportedKeyResult =>
     importKey(which === 'openrouter' || which === 'groq' ? which : 'gemini')

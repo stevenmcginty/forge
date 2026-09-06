@@ -31,7 +31,7 @@ export function allFilesFromDataTransfer(data: DataTransfer | null): File[] {
   return files
 }
 
-function bufferToBase64(buffer: ArrayBuffer): string {
+export function bufferToBase64(buffer: ArrayBuffer): string {
   let binary = ''
   const bytes = new Uint8Array(buffer)
   const len = bytes.byteLength

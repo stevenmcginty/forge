@@ -1,9 +1,8 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ClaudePermissionMode, LayoutNode, PaneLeaf } from '@shared/types'
 import type { EffortLevel } from '@shared/agents'
 import {
   agentModels,
-  dictationDialect,
   effortLevels,
   effortRefusal,
   effortSlash,
@@ -17,6 +16,7 @@ import {
   tabsToPermissionMode
 } from '@shared/agents'
 import { isShellProfile, resolveProfile } from '@/lib/agents'
+import { isDictationSupported, startRecording, transcribeOnDesktop, type Recording } from '../lib/dictate'
 import { isImageFile, uploadFileChunks } from '../lib/file'
 import { packImage } from '../lib/image'
 import { requestPaneView, usePaneStatus, usePaneView, type PaneFace } from '../lib/pane-status'
@@ -51,13 +51,8 @@ function liveRung(mode: PermissionMode | undefined): ClaudePermissionMode | 'aut
 
 const pause = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms))
 
-/**
- * Panes whose CLI has already been told `/voice tap` from this browser. The
- * setting is Claude's own and persists on the desktop, so typing it again is
- * only noise in the transcript — but a pane opened after this tab loaded may
- * still be in hold mode, so it is per pane, not per browser.
- */
-const armedPanes = new Set<string>()
+/** Where the mic button is in its round trip: quiet, taking the words down, or waiting for them. */
+type VoicePhase = 'idle' | 'recording' | 'transcribing'
 
 function findLeaf(node: LayoutNode, id: string): PaneLeaf | null {
   if (node.type === 'leaf') return node.id === id ? node : null
@@ -70,9 +65,8 @@ export function SessionComposer(): ReactNode {
   const profiles = useProfiles()
   const [draft, setDraft] = useState('')
   const sendingFiles = useRef(false)
-  /** The pane whose CLI is recording right now, or null. */
-  const [recordingPane, setRecordingPane] = useState<string | null>(null)
-  const armingVoice = useRef(false)
+  const [voice, setVoice] = useState<VoicePhase>('idle')
+  const recording = useRef<Recording | null>(null)
 
   const offline = state.stage.kind === 'offline'
   const live = !offline && state.connection.state === 'live'
@@ -124,10 +118,10 @@ export function SessionComposer(): ReactNode {
     if (paneId && canType) actions.claim(paneId)
   }, [actions, canType, paneId])
 
-  const sendDraft = useCallback(
-    async (files: File[]) => {
+  const sendText = useCallback(
+    async (raw: string, files: File[]) => {
       if (!canType || !paneId) return
-      const text = draft.replace(/\s+$/, '')
+      const text = raw.replace(/\s+$/, '')
       if (!text && !files.length) return
       // Attachments first: the TUI takes each as a paste into its own box, and the
       // words after it become the message that refers to them.
@@ -153,8 +147,75 @@ export function SessionComposer(): ReactNode {
       }
       takePane()
     },
-    [actions, canType, draft, paneId, sendFiles, takePane]
+    [actions, canType, paneId, sendFiles, takePane]
   )
+
+  const sendDraft = useCallback((files: File[]) => sendText(draft, files), [draft, sendText])
+
+  /**
+   * The mic button: this browser's microphone, the desktop's ears.
+   *
+   * First press records; second press stops, ships the audio to the desktop
+   * as `dictate` chunks, and the words come back and go down the same path a
+   * typed message takes — words, a beat, Enter. Nothing is recognised in the
+   * browser (the Web Speech API was, and went silent on Android as often as
+   * it worked) and nothing needs the desktop's own microphone, which is the
+   * one the CLIs' `/voice` listens to and is miles from a phone.
+   */
+  const finishVoice = useCallback(async () => {
+    const current = recording.current
+    recording.current = null
+    if (!current || !paneId) {
+      setVoice('idle')
+      return
+    }
+    setVoice('transcribing')
+    try {
+      const audio = await current.stop()
+      if (audio.size === 0) {
+        actions.setNotice('Nothing was recorded.')
+        return
+      }
+      const text = await transcribeOnDesktop(audio, paneId, actions.request)
+      if (!text) {
+        actions.setNotice('The desktop heard nothing in that.')
+        return
+      }
+      setDraft('')
+      await sendText(text, [])
+    } catch (err) {
+      actions.setNotice(err instanceof Error ? err.message : 'Dictation failed.')
+    } finally {
+      setVoice('idle')
+    }
+  }, [actions, paneId, sendText])
+
+  const sendVoice = useCallback(async () => {
+    if (!canType || !paneId) return
+    if (recording.current) {
+      await finishVoice()
+      return
+    }
+    if (voice !== 'idle') return
+    try {
+      const started = await startRecording(() => {
+        actions.setNotice('Three minutes is the most one recording takes — sending what was said.')
+        void finishVoice()
+      })
+      recording.current = started
+      setVoice('recording')
+    } catch (err) {
+      actions.setNotice(err instanceof Error ? err.message : 'Could not open the microphone.')
+    }
+  }, [actions, canType, finishVoice, paneId, voice])
+
+  // A pane that goes, or a tab that is switched, does not keep a microphone open.
+  useEffect(() => {
+    return () => {
+      recording.current?.cancel()
+      recording.current = null
+    }
+  }, [paneId])
 
   const sendRaw = useCallback(
     (data: string) => {
@@ -257,50 +318,6 @@ export function SessionComposer(): ReactNode {
     [actions, canType, paneId, profile, status?.mode, takePane]
   )
 
-  /**
-   * The mic button, when this pane's CLI has dictation of its own.
-   *
-   * Nothing is recorded in the browser. The button types the CLI's own
-   * dictation keystroke (see `dictationDialect`), the CLI listens on the
-   * desktop's microphone, and the words land in its prompt as if the key had
-   * been pressed at the desk. Claude Code needs `/voice tap` once first, since
-   * its default hold-to-talk reads key-repeat that a PTY byte cannot carry.
-   */
-  const dialect = profile && !isShellProfile(profile) ? dictationDialect(profile.command) : null
-  const recording = recordingPane !== null && recordingPane === paneId
-
-  const sendVoice = useCallback(async () => {
-    if (!canType || !paneId || !dialect || armingVoice.current) return
-    if (recordingPane === paneId) {
-      actions.write(paneId, dialect.stop)
-      setRecordingPane(null)
-      if (!dialect.submits) actions.setNotice('Dictation stopped. Press send when the words look right.')
-      takePane()
-      return
-    }
-    if (dialect.arm && !armedPanes.has(paneId)) {
-      armingVoice.current = true
-      try {
-        actions.setNotice('Switching the pane to tap-to-talk…')
-        actions.write(paneId, dialect.arm)
-        await pause(SETTLE_BEFORE_ENTER_MS)
-        actions.write(paneId, '\r')
-        armedPanes.add(paneId)
-        await pause(dialect.armSettleMs)
-      } finally {
-        armingVoice.current = false
-      }
-    }
-    actions.write(paneId, dialect.start)
-    setRecordingPane(paneId)
-    actions.setNotice(
-      dialect.submits
-        ? 'Listening on the desktop mic. Press the mic again to send.'
-        : 'Listening on the desktop mic. Press the mic again to stop.'
-    )
-    takePane()
-  }, [actions, canType, dialect, paneId, recordingPane, takePane])
-
   if (offline && state.offlineMode === 'github') return null
   if (!tab) return null
 
@@ -359,8 +376,8 @@ export function SessionComposer(): ReactNode {
         onFocus={takePane}
         autoFocus={canType}
         onNotice={actions.setNotice}
-        onVoice={dialect ? () => void sendVoice() : undefined}
-        voiceRecording={recording}
+        onVoice={isDictationSupported() ? () => void sendVoice() : undefined}
+        voicePhase={voice}
       />
     </div>
   )
