@@ -3452,6 +3452,29 @@ button.astatus__mode:not(:disabled):hover {
   opacity: 0.35;
 }
 
+.composer__mic-btn[data-listening='true'] {
+  background: color-mix(in srgb, #ef4444 18%, transparent);
+  border-color: color-mix(in srgb, #ef4444 55%, transparent);
+  color: #ef4444;
+  box-shadow: 0 0 12px color-mix(in srgb, #ef4444 35%, transparent);
+  animation: composer-mic-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes composer-mic-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, #ef4444 45%, transparent);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 7px color-mix(in srgb, #ef4444 0%, transparent);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, #ef4444 45%, transparent);
+  }
+}
+
 .popover[aria-label='Attach options'] {
   padding: var(--s-2);
 }

@@ -302,6 +302,7 @@ export function SessionComposer(): ReactNode {
         onMode={ladder.length ? (mode) => void sendMode(mode) : undefined}
         onFocus={takePane}
         autoFocus={canType}
+        onNotice={actions.setNotice}
       />
     </div>
   )

@@ -16,6 +16,7 @@ import type { ClaudePermissionMode } from '@shared/types'
 import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
 import { allFilesFromDataTransfer, formatFileSize, isImageFile } from '../lib/file'
 import { useMobile } from '../lib/mobile'
+import { useSpeechDictation } from '../lib/speech'
 
 /**
  * The web app's input. A real `<textarea>`, so the OS cut/copy/paste, Gboard
@@ -53,7 +54,8 @@ export function Composer({
   currentModeId,
   onMode,
   onFocus,
-  autoFocus
+  autoFocus,
+  onNotice
 }: {
   draft: string
   disabled: boolean
@@ -91,6 +93,7 @@ export function Composer({
   onMode?: (id: ClaudePermissionMode) => void
   onFocus?: () => void
   autoFocus: boolean
+  onNotice?: (message: string) => void
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
@@ -117,6 +120,11 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [pickedEffort, setPickedEffort] = useState<EffortLevel | null>(null)
   const [pickedModel, setPickedModel] = useState<string | null>(null)
+
+  const speech = useSpeechDictation({
+    onTranscript: (spoken) => onDraft(spoken),
+    onError: (err) => onNotice?.(err)
+  })
 
   const modelList = models ?? []
   const effortList = effortLevels ?? []
@@ -259,6 +267,20 @@ export function Composer({
   const submit = (event?: FormEvent): void => {
     event?.preventDefault()
     if (!ready) return
+    if (speech.listening) {
+      speech.stop()
+    }
+    const trimmed = draft.trim().toLowerCase()
+    if (trimmed === '/voice' || trimmed === '/record' || trimmed === '/dictation') {
+      onDraft('')
+      if (speech.supported) {
+        speech.start('')
+        return
+      } else {
+        onNotice?.('Voice dictation is not supported in this browser.')
+        return
+      }
+    }
     if (!hasDraft) {
       onRaw('\r')
       return
@@ -291,7 +313,13 @@ export function Composer({
     addFiles(pasted)
   }
 
-  const placeholder = disabled ? disabledReason : to ? `Message ${to}` : 'Write a message'
+  const placeholder = disabled
+    ? disabledReason
+    : speech.listening
+      ? 'Listening… speak now'
+      : to
+        ? `Message ${to}`
+        : 'Write a message'
 
   return (
     <form
@@ -529,6 +557,20 @@ export function Composer({
               <span>Upload file</span>
             </PopoverRow>
           </Popover>
+          {speech.supported ? (
+            <button
+              type="button"
+              className="composer__icon composer__mic-btn"
+              data-listening={speech.listening ? 'true' : undefined}
+              disabled={disabled}
+              onClick={() => speech.toggle(draft)}
+              title={speech.listening ? 'Stop listening (or press Enter to send)' : 'Voice dictation (/voice)'}
+              aria-label={speech.listening ? 'Stop voice dictation' : 'Voice dictation'}
+              aria-pressed={speech.listening}
+            >
+              <Icon name={speech.listening ? 'voice' : 'mic'} size={16} />
+            </button>
+          ) : null}
           <div className="composer__keys" role="toolbar" aria-label="Terminal keys">
             <Key label="←" onClick={() => onRaw('\x1b[D')} disabled={disabled} title="Left" />
             <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
