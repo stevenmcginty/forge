@@ -20,7 +20,11 @@
 
 .mirror {
   position: fixed;
-  inset: 0;
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--app-height, 100dvh);
   /* The desktop's own full-page layer — the one the settings page occupies
      there. Over the panes, the tab bar and the rail, and under the popovers,
      which is the arrangement src/theme/tokens.css already sets for a surface
@@ -28,7 +32,8 @@
   z-index: var(--z-settings);
   display: flex;
   flex-direction: column;
-  background: var(--bg-base);
+  background: black;
+  overflow: hidden;
 }
 
 /* ------------------------------------------------------------- the toolbar
@@ -42,14 +47,19 @@
 .mirror__bar {
   display: flex;
   flex-shrink: 0;
-  gap: var(--s-4);
+  gap: var(--s-3);
   align-items: center;
   padding: var(--s-3) var(--s-5);
-  background: color-mix(in srgb, var(--bg-panel) 90%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--line-hairline);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+}
+
+.mirror__bar[data-collapsed='true'] {
+  display: none;
 }
 
 .mirror__mode {
@@ -137,6 +147,54 @@
   min-height: 0;
   padding: var(--s-4);
   background: black;
+  overflow: hidden;
+}
+
+.mirror__rotator {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  transition: transform var(--dur-med) var(--ease-out);
+}
+
+.mirror__rotator[data-rotated='true'] {
+  position: absolute;
+  width: var(--stage-h, 100%);
+  height: var(--stage-w, 100%);
+  left: calc(50% - var(--stage-h, 100%) / 2);
+  top: calc(50% - var(--stage-w, 100%) / 2);
+  transform: rotate(90deg);
+  transform-origin: center center;
+}
+
+.mirror__canvas-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 100%;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.mirror__canvas-wrap[data-fit='fill'],
+.mirror__canvas-wrap[data-fit='fill'] .mirror__picture {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mirror__canvas-wrap[data-fit='1.5x'] {
+  transform: scale(1.5);
+  transform-origin: center center;
+}
+
+.mirror__canvas-wrap[data-fit='2x'] {
+  transform: scale(2.0);
+  transform-origin: center center;
 }
 
 .mirror__picture {
@@ -351,3 +409,213 @@
   border-radius: var(--r-xl);
   box-shadow: var(--shadow-card);
 }
+
+/* -------------------------------------------------------- mobile and responsive */
+
+@media (max-width: 768px), (pointer: coarse) {
+  .mirror__bar {
+    padding: 6px var(--s-3);
+    gap: var(--s-2);
+  }
+
+  .mirror__name {
+    max-width: 100px;
+    font-size: var(--t-xs);
+  }
+
+  .mirror__limits {
+    display: none;
+  }
+
+  .mirror__stage {
+    padding: 0;
+  }
+
+  .mirror__btn {
+    padding: 4px 7px;
+    font-size: 11px;
+  }
+
+  .mirror__hint {
+    bottom: var(--s-3);
+    max-width: 90%;
+    font-size: 11px;
+    padding: 4px 10px;
+  }
+}
+
+@media (max-height: 500px) {
+  .mirror__bar {
+    padding: 4px var(--s-3);
+    gap: var(--s-2);
+  }
+
+  .mirror__limits {
+    display: none;
+  }
+
+  .mirror__stage {
+    padding: 0;
+  }
+
+  .mirror__btn {
+    padding: 3px 6px;
+    font-size: 11px;
+  }
+}
+
+/* ------------------------------------------------------- floating controls pill */
+
+.mirror__floating-pill {
+  position: absolute;
+  top: max(var(--s-3), env(safe-area-inset-top, 8px));
+  right: max(var(--s-3), env(safe-area-inset-right, 8px));
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 4px var(--s-2);
+  background: color-mix(in srgb, var(--bg-panel) 85%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+.mirror__pill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 2px var(--s-2);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
+
+.mirror__pill-badge[data-driving='true'] {
+  color: var(--accent);
+}
+
+.mirror__pill-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--text-secondary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+
+.mirror__pill-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-panel-hover);
+}
+
+.mirror__pill-close:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ----------------------------------------------------------- rotate helper hint */
+
+.mirror__rotate-hint {
+  position: absolute;
+  top: var(--s-3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px var(--s-3);
+  font-size: var(--t-xs);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-panel-raised) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-full);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+}
+
+.mirror__hint-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-softer);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
+
+.mirror__hint-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.mirror__hint-close:hover {
+  color: var(--text-primary);
+}
+
+/* --------------------------------------------------- modal / dialog backdrop */
+
+.mirror__modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-4);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.mirror__limits-card {
+  max-width: 380px;
+  gap: var(--s-3);
+}
+
+.mirror__card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-bottom: var(--s-2);
+  border-bottom: 1px solid var(--line-hairline);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.mirror__info-btn {
+  font-weight: 700;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+}
+

@@ -15,6 +15,7 @@ import { fractionFor, keyFor, notchesFor } from '../lib/mirror-input'
 import { startTouchpad, type TouchpadHandle, type TouchpadState } from '../lib/touchpad'
 import { canPaintScreen, startScreen, type ScreenPainter } from '../lib/screen'
 import { useForge } from '../state'
+import { useMobile } from '../lib/mobile'
 import './Mirror.css'
 
 /**
@@ -125,6 +126,21 @@ type Phase =
  */
 type InputMode = 'direct' | 'trackpad'
 
+type FitMode = 'fit' | 'fill' | '1.5x' | '2x'
+
+function fitLabel(mode: FitMode): string {
+  switch (mode) {
+    case 'fit':
+      return 'Fit'
+    case 'fill':
+      return 'Fill'
+    case '1.5x':
+      return '1.5×'
+    case '2x':
+      return '2×'
+  }
+}
+
 /**
  * One base64 field off the wire, as the bytes a decoder wants.
  *
@@ -168,6 +184,110 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
   )
   /** What the trackpad's ring should look like. Owned by `lib/touchpad.ts`. */
   const [padState, setPadState] = useState<TouchpadState>('idle')
+
+  const mobile = useMobile()
+  const [rotated, setRotated] = useState(false)
+  const [fitMode, setFitMode] = useState<FitMode>('fit')
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [toolbarCollapsed, setToolbarCollapsed] = useState(false)
+  const [showLimits, setShowLimits] = useState(false)
+  const [rotateHintDismissed, setRotateHintDismissed] = useState(false)
+  const [isPortrait, setIsPortrait] = useState(() =>
+    typeof window !== 'undefined' ? window.innerHeight > window.innerWidth : false
+  )
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 })
+  const [cursorPos, setCursorPos] = useState({ x: 0.5, y: 0.5 })
+
+  const effectiveRotated = rotated && (mobile ? isPortrait : true)
+  const effectiveRotatedRef = useRef(effectiveRotated)
+  effectiveRotatedRef.current = effectiveRotated
+
+  const fitModeRef = useRef(fitMode)
+  fitModeRef.current = fitMode
+
+  const stageSizeRef = useRef(stageSize)
+  stageSizeRef.current = stageSize
+
+  const cursorPosRef = useRef(cursorPos)
+  cursorPosRef.current = cursorPos
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement && !(document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement) {
+      const el = stageRef.current?.closest('.mirror') || stageRef.current || document.documentElement
+      if (el.requestFullscreen) {
+        el.requestFullscreen().catch(() => {})
+      } else if ((el as unknown as { webkitRequestFullscreen?: () => void }).webkitRequestFullscreen) {
+        ;(el as unknown as { webkitRequestFullscreen: () => void }).webkitRequestFullscreen()
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {})
+      } else if ((document as unknown as { webkitExitFullscreen?: () => void }).webkitExitFullscreen) {
+        ;(document as unknown as { webkitExitFullscreen: () => void }).webkitExitFullscreen()
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsFullscreen(
+        Boolean(document.fullscreenElement || (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement)
+      )
+    }
+    document.addEventListener('fullscreenchange', onFsChange)
+    document.addEventListener('webkitfullscreenchange', onFsChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange)
+      document.removeEventListener('webkitfullscreenchange', onFsChange)
+    }
+  }, [])
+
+  const cycleFitMode = useCallback(() => {
+    setFitMode((current) => {
+      switch (current) {
+        case 'fit':
+          return 'fill'
+        case 'fill':
+          return '1.5x'
+        case '1.5x':
+          return '2x'
+        case '2x':
+          return 'fit'
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    const update = (): void => {
+      const rect = stage.getBoundingClientRect()
+      setStageSize({ width: rect.width, height: rect.height })
+      const portrait = window.innerHeight > window.innerWidth
+      setIsPortrait(portrait)
+      if (mobile && !portrait) {
+        setRotated(false)
+      }
+    }
+    update()
+    let cleanupRo: (() => void) | undefined
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(update)
+      ro.observe(stage)
+      cleanupRo = () => ro.disconnect()
+    }
+    window.addEventListener('resize', update)
+    window.addEventListener('orientationchange', update)
+    return () => {
+      cleanupRo?.()
+      window.removeEventListener('resize', update)
+      window.removeEventListener('orientationchange', update)
+    }
+  }, [mobile])
+
+  useEffect(() => {
+    window.dispatchEvent(new Event('resize'))
+  }, [effectiveRotated, fitMode])
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const painterRef = useRef<ScreenPainter | null>(null)
@@ -243,10 +363,74 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
    * press on the taskbar every time anybody missed.
    */
   const fractionAt = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
-    const canvas = canvasRef.current
+    const stage = stageRef.current
     const size = painterRef.current?.size()
-    if (!canvas || !size) return null
-    const at = fractionFor(canvas.getBoundingClientRect(), size.width, size.height, clientX, clientY)
+    if (!stage || !size || size.width <= 0 || size.height <= 0) return null
+
+    const stageRect = stage.getBoundingClientRect()
+    if (stageRect.width <= 0 || stageRect.height <= 0) return null
+
+    const cx = stageRect.left + stageRect.width / 2
+    const cy = stageRect.top + stageRect.height / 2
+
+    let px = clientX
+    let py = clientY
+
+    if (effectiveRotatedRef.current) {
+      const relX = clientX - cx
+      const relY = clientY - cy
+      px = cx + relY
+      py = cy - relX
+    }
+
+    const rw = effectiveRotatedRef.current ? stageRect.height : stageRect.width
+    const rh = effectiveRotatedRef.current ? stageRect.width : stageRect.height
+
+    const fit = fitModeRef.current
+    let zoom = 1
+    let panRatio = 0
+    if (fit === '1.5x') {
+      zoom = 1.5
+      panRatio = 0.33
+    } else if (fit === '2x') {
+      zoom = 2
+      panRatio = 0.5
+    }
+
+    if (zoom !== 1) {
+      const relX = px - cx
+      const relY = py - cy
+      const scale =
+        fit === 'fill' ? Math.max(rw / size.width, rh / size.height) : Math.min(rw / size.width, rh / size.height)
+      const shotW = size.width * scale
+      const shotH = size.height * scale
+      const panX = -(cursorPosRef.current.x - 0.5) * shotW * panRatio
+      const panY = -(cursorPosRef.current.y - 0.5) * shotH * panRatio
+
+      px = cx + relX / zoom - panX
+      py = cy + relY / zoom - panY
+    }
+
+    const boxLeft = cx - rw / 2
+    const boxTop = cy - rh / 2
+    const boxRect = new DOMRect(boxLeft, boxTop, rw, rh)
+
+    let at: { x: number; y: number } | null = null
+    if (fit === 'fill') {
+      const scale = Math.max(rw / size.width, rh / size.height)
+      const pw = size.width * scale
+      const ph = size.height * scale
+      const pl = boxLeft + (rw - pw) / 2
+      const pt = boxTop + (rh - ph) / 2
+      const x = (px - pl) / pw
+      const y = (py - pt) / ph
+      if (x >= 0 && x <= 1 && y >= 0 && y <= 1) {
+        at = { x, y }
+      }
+    } else {
+      at = fractionFor(boxRect, size.width, size.height, px, py)
+    }
+
     if (at) lastAt.current = at
     return at
   }, [])
@@ -530,7 +714,39 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
         return size && size.width > 0 && size.height > 0 ? size : null
       },
       send: sendMirrorInput,
-      onChange: setPadState
+      onChange: setPadState,
+      transformDelta: (dx, dy) => {
+        if (!effectiveRotatedRef.current) return { dx, dy }
+        return { dx: dy, dy: -dx }
+      },
+      getShot: () => {
+        const size = painterRef.current?.size()
+        const isRot = effectiveRotatedRef.current
+        const fit = fitModeRef.current
+        const sw = stageSizeRef.current.width
+        const sh = stageSizeRef.current.height
+        const rw = isRot ? sh : sw
+        const rh = isRot ? sw : sh
+        if (!size || size.width <= 0 || size.height <= 0 || rw <= 0 || rh <= 0) {
+          return rw > 0 && rh > 0 ? { left: 0, top: 0, width: rw, height: rh } : null
+        }
+        if (fit === 'fill') {
+          return { left: 0, top: 0, width: rw, height: rh }
+        }
+        const scale = Math.min(rw / size.width, rh / size.height)
+        const width = size.width * scale
+        const height = size.height * scale
+        return {
+          left: (rw - width) / 2,
+          top: (rh - height) / 2,
+          width,
+          height
+        }
+      },
+      onCursorMove: (cx, cy) => {
+        cursorPosRef.current = { x: cx, y: cy }
+        setCursorPos({ x: cx, y: cy })
+      }
     })
     padRef.current = handle
     return () => {
@@ -695,9 +911,142 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
     sendMirrorInput({ a: 'up', button, x: at.x, y: at.y })
   }
 
+  const panTransform =
+    fitMode === '1.5x'
+      ? `scale(1.5) translate(${-(cursorPos.x - 0.5) * (effectiveRotated ? stageSize.height : stageSize.width) * 0.33}px, ${-(cursorPos.y - 0.5) * (effectiveRotated ? stageSize.width : stageSize.height) * 0.33}px)`
+      : fitMode === '2x'
+      ? `scale(2) translate(${-(cursorPos.x - 0.5) * (effectiveRotated ? stageSize.height : stageSize.width) * 0.5}px, ${-(cursorPos.y - 0.5) * (effectiveRotated ? stageSize.width : stageSize.height) * 0.5}px)`
+      : undefined
+
   return (
     <div className="mirror" role="dialog" aria-modal="true" aria-label={`The screen of ${desktopName}`}>
-      <div className="mirror__bar">
+      {toolbarCollapsed ? (
+        <div className="mirror__floating-pill" role="toolbar" aria-label="Mirror floating controls">
+          <button
+            type="button"
+            className="mirror__pill-badge"
+            data-driving={driving}
+            title={driving ? 'Driving mode active. Tap to stop driving.' : 'Watching mode'}
+            onClick={() => {
+              if (driving) release()
+            }}
+          >
+            <span className="mirror__dot" />
+            {driving ? 'Driving' : 'Watch'}
+          </button>
+          <button
+            type="button"
+            className="mirror__pill-btn"
+            title="Toggle 90° rotation"
+            aria-pressed={rotated}
+            onClick={() => setRotated((r) => !r)}
+          >
+            <Icon name="restart" size={14} />
+          </button>
+          <button
+            type="button"
+            className="mirror__pill-btn"
+            style={{ fontSize: 11, fontWeight: 600 }}
+            title={`Scale: ${fitLabel(fitMode)}. Tap to cycle.`}
+            onClick={cycleFitMode}
+          >
+            {fitLabel(fitMode)}
+          </button>
+          <button
+            type="button"
+            className="mirror__pill-btn"
+            title={isFullscreen ? 'Exit fullscreen' : 'Full screen'}
+            onClick={toggleFullscreen}
+          >
+            <Icon name="expand" size={14} />
+          </button>
+          <button
+            type="button"
+            className="mirror__pill-btn"
+            title="Expand toolbar"
+            aria-label="Expand toolbar"
+            onClick={() => setToolbarCollapsed(false)}
+          >
+            <Icon name="dots" size={14} />
+          </button>
+          <button
+            type="button"
+            className="mirror__pill-btn mirror__pill-close"
+            title="Close"
+            aria-label="Stop watching this screen"
+            onClick={onClose}
+          >
+            <Icon name="close" size={14} />
+          </button>
+        </div>
+      ) : null}
+
+      {mobile && isPortrait && !rotated && !rotateHintDismissed && phase.kind === 'live' ? (
+        <div className="mirror__rotate-hint">
+          <span>Rotate 90° to fill screen</span>
+          <button
+            type="button"
+            className="mirror__hint-btn"
+            onClick={() => {
+              setRotated(true)
+              setRotateHintDismissed(true)
+            }}
+          >
+            <Icon name="restart" size={12} />
+            Rotate
+          </button>
+          <button
+            type="button"
+            className="mirror__hint-close"
+            aria-label="Dismiss rotate hint"
+            onClick={() => setRotateHintDismissed(true)}
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
+
+      {showLimits ? (
+        <div
+          className="mirror__modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Remote input limitations"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowLimits(false)
+          }}
+        >
+          <div className="mirror__card mirror__limits-card">
+            <div className="mirror__card-header">
+              <strong>Remote limitations</strong>
+              <button
+                type="button"
+                className="ghost-btn"
+                style={{ padding: '2px 6px' }}
+                onClick={() => setShowLimits(false)}
+                aria-label="Close dialog"
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+            <p className="mirror__limits" style={{ display: 'block', fontSize: '12px' }}>
+              <strong>Ctrl+C, Ctrl+V, Alt+Tab and the F-keys cannot be sent</strong> — this link has no way to say a
+              modifier was held. Pasted text arrives as one line, only the primary monitor is shared, and a UAC prompt will
+              not accept anything typed from here.
+            </p>
+            <button
+              type="button"
+              className="cta-btn"
+              style={{ width: '100%', marginTop: 'var(--s-2)' }}
+              onClick={() => setShowLimits(false)}
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mirror__bar" data-collapsed={toolbarCollapsed}>
         <span className="mirror__mode" data-driving={driving}>
           <span className="mirror__dot" />
           {driving ? 'Driving' : 'Watching'}
@@ -717,6 +1066,48 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
           modifier was held. Pasted text arrives as one line, only the primary monitor is shared, and a UAC prompt will
           not accept anything typed from here.
         </p>
+
+        {mobile ? (
+          <button
+            type="button"
+            className="ghost-btn mirror__btn mirror__info-btn"
+            title="Remote screen limitations"
+            aria-label="Remote screen limitations"
+            onClick={() => setShowLimits(true)}
+          >
+            ?
+          </button>
+        ) : null}
+
+        <button
+          type="button"
+          className="ghost-btn mirror__btn"
+          aria-pressed={rotated}
+          title={rotated ? 'Return to normal rotation' : 'Rotate screen 90° for full landscape view'}
+          onClick={() => setRotated((r) => !r)}
+        >
+          <Icon name="restart" size={14} />
+          <span>{rotated ? '90° on' : '90°'}</span>
+        </button>
+
+        <button
+          type="button"
+          className="ghost-btn mirror__btn"
+          title={`Scale: ${fitLabel(fitMode)}. Tap to cycle: Fit, Fill, 1.5x, 2x.`}
+          onClick={cycleFitMode}
+        >
+          {fitLabel(fitMode)}
+        </button>
+
+        <button
+          type="button"
+          className="ghost-btn mirror__btn"
+          aria-pressed={isFullscreen}
+          title={isFullscreen ? 'Exit fullscreen' : 'Full screen'}
+          onClick={toggleFullscreen}
+        >
+          <Icon name="expand" size={14} />
+        </button>
 
         {/*
           The input mode, both ways out of it always one press. Auto-selected
@@ -749,6 +1140,17 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
             Stop driving
           </button>
         ) : null}
+
+        <button
+          type="button"
+          className="ghost-btn mirror__btn"
+          title="Collapse toolbar"
+          aria-label="Collapse toolbar into floating pill"
+          onClick={() => setToolbarCollapsed(true)}
+        >
+          <Icon name="chevronDown" size={14} />
+        </button>
+
         <button
           type="button"
           className="ghost-btn mirror__btn"
@@ -765,35 +1167,51 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
         data-driving={driving}
         data-input={input}
         ref={stageRef}
+        style={
+          stageSize.width > 0
+            ? ({
+                '--stage-w': `${stageSize.width}px`,
+                '--stage-h': `${stageSize.height}px`
+              } as React.CSSProperties)
+            : undefined
+        }
         onPointerDown={onStageDown}
         onPointerMove={onStageMove}
         onPointerUp={onStageUp}
         onPointerCancel={onStageCancel}
         onContextMenu={onStageMenu}
       >
-        <canvas
-          ref={canvasRef}
-          className="mirror__picture"
-          data-live={phase.kind === 'live'}
-          onPointerMove={onPointerMove}
-          onPointerDown={onPointerDown}
-          onPointerUp={onPointerUp}
-          // Or a right-click never arrives: the browser's own menu opens over
-          // the picture and the press underneath it is never delivered.
-          onContextMenu={(event) => event.preventDefault()}
-        />
+        <div className="mirror__rotator" data-rotated={effectiveRotated}>
+          <div
+            className="mirror__canvas-wrap"
+            data-fit={fitMode}
+            style={panTransform ? { transform: panTransform } : undefined}
+          >
+            <canvas
+              ref={canvasRef}
+              className="mirror__picture"
+              data-live={phase.kind === 'live'}
+              onPointerMove={onPointerMove}
+              onPointerDown={onPointerDown}
+              onPointerUp={onPointerUp}
+              // Or a right-click never arrives: the browser's own menu opens over
+              // the picture and the press underneath it is never delivered.
+              onContextMenu={(event) => event.preventDefault()}
+            />
 
-        {/*
-          The trackpad's cursor, over the picture and outside React entirely:
-          lib/touchpad.ts moves it by writing one transform, because a cursor
-          that re-rendered the component sixty times a second would re-render a
-          decoding canvas with it. Placed by the same picture-box arithmetic
-          the clicks are measured with, so the ring and the click cannot
-          disagree about where the desk is being pointed.
-        */}
-        {driving && input === 'trackpad' ? (
-          <div ref={padCursorRef} className="mirror__pad" data-state={padState} aria-hidden="true" />
-        ) : null}
+            {/*
+              The trackpad's cursor, over the picture and outside React entirely:
+              lib/touchpad.ts moves it by writing one transform, because a cursor
+              that re-rendered the component sixty times a second would re-render a
+              decoding canvas with it. Placed by the same picture-box arithmetic
+              the clicks are measured with, so the ring and the click cannot
+              disagree about where the desk is being pointed.
+            */}
+            {driving && input === 'trackpad' ? (
+              <div ref={padCursorRef} className="mirror__pad" data-state={padState} aria-hidden="true" />
+            ) : null}
+          </div>
+        </div>
 
         {phase.kind === 'live' && !driving && canControl ? (
           input === 'trackpad' ? (

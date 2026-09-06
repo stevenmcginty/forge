@@ -232,6 +232,20 @@ export interface TouchpadOptions {
    * only, never per movement, so a React `setState` here is fine.
    */
   onChange?: (state: TouchpadState) => void
+  /**
+   * Delta transformation function when the stage is rotated.
+   * Converts physical finger movement on screen (dx, dy) into effective movement on the desktop.
+   */
+  transformDelta?: (dx: number, dy: number) => { dx: number; dy: number }
+  /**
+   * Custom shot calculator when rotated or zoomed.
+   * If provided, returns the picture box relative to the stage origin.
+   */
+  getShot?: () => { left: number; top: number; width: number; height: number } | null
+  /**
+   * Called whenever the cursor position changes, useful for panning a zoomed viewport.
+   */
+  onCursorMove?: (x: number, y: number) => void
 }
 
 /**
@@ -241,7 +255,7 @@ export interface TouchpadOptions {
  * click somewhere nobody chose.
  */
 export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
-  const { cursor, stage, picture, frameSize, send, onChange } = options
+  const { cursor, stage, picture, frameSize, send, onChange, transformDelta, getShot, onCursorMove } = options
 
   /** Where the pointer is, in fractions of the picture. */
   let x = 0.5
@@ -318,6 +332,7 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
 
   const paint = (): void => {
     cursor.style.transform = `translate3d(${shot.left + x * shot.width}px, ${shot.top + y * shot.height}px, 0)`
+    onCursorMove?.(x, y)
   }
 
   /**
@@ -334,9 +349,14 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
       sourceW = size.width
       sourceH = size.height
     }
-    const box = pictureBox(picture.getBoundingClientRect(), sourceW, sourceH)
-    const origin = stage.getBoundingClientRect()
-    shot = { left: box.left - origin.left, top: box.top - origin.top, width: box.width, height: box.height }
+    const customShot = getShot?.()
+    if (customShot) {
+      shot = customShot
+    } else {
+      const box = pictureBox(picture.getBoundingClientRect(), sourceW, sourceH)
+      const origin = stage.getBoundingClientRect()
+      shot = { left: box.left - origin.left, top: box.top - origin.top, width: box.width, height: box.height }
+    }
     paint()
   }
 
@@ -485,12 +505,18 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
   const move = (id: number, px: number, py: number): void => {
     const finger = fingers.get(id)
     if (!finger) return
-    const dx = px - finger.x
-    const dy = py - finger.y
+    let dx = px - finger.x
+    let dy = py - finger.y
     finger.x = px
     finger.y = py
     const at = now()
     measure(false)
+
+    if (transformDelta) {
+      const eff = transformDelta(dx, dy)
+      dx = eff.dx
+      dy = eff.dy
+    }
 
     if (scrolling) {
       /**
@@ -631,7 +657,13 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
     become('idle')
   }
 
+  const onResize = (): void => measure(true)
+  window.addEventListener('resize', onResize)
+  window.addEventListener('orientationchange', onResize)
+
   const stop = (): void => {
+    window.removeEventListener('resize', onResize)
+    window.removeEventListener('orientationchange', onResize)
     clearHold()
     if (flushTimer) {
       clearTimeout(flushTimer)
