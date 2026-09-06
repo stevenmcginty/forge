@@ -16,11 +16,23 @@
     <string name="talk">Talk</string>
     <string name="stop">Stop</string>
     <string name="send">Send</string>
+    <string name="send_n">Send (%1$d)</string>
     <string name="mic_needed">Microphone needed</string>
+
+    <string name="close_other_tabs">Close other tabs</string>
+    <string name="close_tab">Close tab</string>
 
     <string name="ask_email">Forge email</string>
     <string name="ask_password">Password</string>
     <string name="ask_pin">Desktop PIN</string>
+
+    <string name="picker_projects">Projects</string>
+    <string name="picker_new_tab">+ New tab</string>
+    <string name="picker_all_projects">◀ All projects</string>
+    <string name="picker_agent_for">New tab in %1$s — which agent?</string>
+    <string name="picker_back">◀ Back</string>
+    <string name="picker_not_connected">Not connected</string>
+    <string name="pick_project">Tap here to pick a project</string>
 
     <string name="state_off">Forge</string>
     <string name="state_signed_out">Tap to sign in</string>

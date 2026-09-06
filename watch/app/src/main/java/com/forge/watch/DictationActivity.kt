@@ -34,6 +34,8 @@ class DictationActivity : ComponentActivity() {
     private lateinit var status: TextView
     private lateinit var transcript: TextView
     private lateinit var notice: TextView
+    private lateinit var partial: TextView
+    private lateinit var level: android.widget.ProgressBar
     private lateinit var mic: Button
     private lateinit var send: Button
 
@@ -74,10 +76,13 @@ class DictationActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_dictation)
         status = findViewById(R.id.status)
         transcript = findViewById(R.id.transcript)
         notice = findViewById(R.id.notice)
+        partial = findViewById(R.id.partial)
+        level = findViewById(R.id.level)
         mic = findViewById(R.id.mic)
         send = findViewById(R.id.send)
 
@@ -87,18 +92,15 @@ class DictationActivity : ComponentActivity() {
         send.setOnClickListener { VoiceController.sendDraft() }
         send.setOnLongClickListener { VoiceController.cancelDraft(); true }
         status.setOnClickListener { onStatusTap() }
+        status.setOnLongClickListener { startActivity(Intent(this, MainActivity::class.java)); true }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch { renderStatus() }
                 launch { renderWords() }
                 launch { VoiceController.notice.collectLatest { notice.text = it } }
+                launch { DictationState.level.collectLatest { level.progress = (it * 100).toInt() } }
                 launch { DictationState.problem.collectLatest { if (!it.isNullOrBlank()) notice.text = it } }
-                launch {
-                    DictationState.running.collectLatest { running ->
-                        mic.setText(if (running) R.string.stop else R.string.talk)
-                    }
-                }
                 launch {
                     ForgeLink.pinNeeded.collectLatest { needed -> if (needed && asking == null) ask(ASK_PIN) }
                 }
@@ -108,19 +110,26 @@ class DictationActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         ForgeLink.setWanted("screen", true)
         if (!ForgeAuth.signedIn(this)) {
             if (asking == null) ask(ASK_EMAIL)
-        } else if (autoStart && !DictationState.running.value) {
+        } else if (!DictationState.running.value) {
             startListening()
         }
         autoStart = false
     }
 
     override fun onStop() {
-        // The service keeps the link while it is listening; otherwise let it drop.
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        ForgeDictationService.stop(this)
         ForgeLink.setWanted("screen", false)
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        ForgeDictationService.stop(this)
+        super.onDestroy()
     }
 
     private fun startListening() {
@@ -134,7 +143,9 @@ class DictationActivity : ComponentActivity() {
             ForgeLink.State.SIGNED_OUT -> ask(ASK_EMAIL)
             ForgeLink.State.PIN -> ask(ASK_PIN)
             ForgeLink.State.REFUSED, ForgeLink.State.ABSENT, ForgeLink.State.OFF -> ForgeLink.kick()
-            else -> startActivity(Intent(this, MainActivity::class.java))
+            ForgeLink.State.LIVE -> startActivity(
+                Intent(this, PickerActivity::class.java).putExtra(PickerActivity.EXTRA_PROJECT, ForgeLink.currentProjectId.value))
+            else -> {}
         }
     }
 
@@ -167,30 +178,38 @@ class DictationActivity : ComponentActivity() {
                 ForgeLink.State.PIN -> detail.ifBlank { getString(R.string.state_pin) }
                 ForgeLink.State.REFUSED -> detail.ifBlank { getString(R.string.state_refused) }
                 ForgeLink.State.LIVE -> {
-                    val project = ForgeLink.currentProject()?.name ?: "no project"
+                    val project = ForgeLink.currentProject()?.name ?: return@combine getString(R.string.pick_project)
                     val tab = ForgeLink.currentTab()
                     val ws = ForgeLink.workspaces.value[ForgeLink.currentProjectId.value]
+                    val tabIndex = if (tab != null && ws != null) ws.tabs.indexOfFirst { it.id == tab.id }.takeIf { it >= 0 }?.plus(1) ?: 1 else 1
                     val tabLabel = when {
                         tab == null -> "no tab"
-                        else -> "tab ${ws!!.tabs.indexOf(tab) + 1}"
+                        tab.title.isNotBlank() -> "tab $tabIndex ${tab.title}"
+                        else -> "tab $tabIndex"
                     }
-                    "$project · $tabLabel"
+                    "$project · $tabLabel ▾"
                 }
             }
         }.collectLatest { status.text = it }
     }
 
     private suspend fun renderWords() {
-        combine(VoiceController.draft, DictationState.partial, DictationState.running) { draft, partial, running ->
-            val words = listOf(draft, partial).filter { it.isNotBlank() }.joinToString(" ")
-            Triple(words, running, draft.isNotBlank())
-        }.collectLatest { (words, running, hasDraft) ->
+        combine(VoiceController.draft, DictationState.partial, DictationState.running) { draft, spoken, running ->
+            Triple(draft, spoken, running)
+        }.collectLatest { (draft, spoken, running) ->
+            // Two lines, two colours: white is caught and in the draft, grey
+            // italic is still being spoken. When the grey turns white, it landed.
             transcript.text = when {
-                words.isNotBlank() -> words
+                draft.isNotBlank() -> draft
                 running -> getString(R.string.listening)
                 else -> getString(R.string.tap_to_talk)
             }
-            send.visibility = if (hasDraft) View.VISIBLE else View.GONE
+            partial.text = spoken
+            partial.visibility = if (spoken.isBlank()) View.GONE else View.VISIBLE
+            val words = Regex("""\S+""").findAll(draft).count()
+            send.text = if (words > 0) getString(R.string.send_n, words) else getString(R.string.send)
+            send.visibility = if (draft.isNotBlank()) View.VISIBLE else View.GONE
+            mic.setText(if (running) R.string.stop else R.string.talk)
         }
     }
 

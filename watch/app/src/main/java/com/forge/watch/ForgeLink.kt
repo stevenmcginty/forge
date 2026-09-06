@@ -10,6 +10,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -100,6 +101,14 @@ object ForgeLink {
 
     fun init(ctx: Context) {
         app = ctx.applicationContext
+        currentProjectId.value = app.getSharedPreferences("forge-link", Context.MODE_PRIVATE)
+            .getString("projectId", null)
+        scope.launch {
+            currentProjectId.collect { id ->
+                app.getSharedPreferences("forge-link", Context.MODE_PRIVATE).edit()
+                    .putString("projectId", id).apply()
+            }
+        }
     }
 
     private fun deviceId(): String {
@@ -244,6 +253,7 @@ object ForgeLink {
             .build()
         val ws = http.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                Log.i(TAG, "socket open to $host, pin=${if (pin != null) "yes" else "no"}")
                 val hello = JSONObject()
                     .put("type", "hello")
                     .put("proto", PROTO)
@@ -307,12 +317,14 @@ object ForgeLink {
                 profiles.value = parseProfiles(f.optJSONArray("profiles"))
                 workspaces.value = parseWorkspaces(f.optJSONObject("workspaces"))
                 sessions.value = parseSessions(f.optJSONArray("sessions"))
-                if (currentProjectId.value == null || projects.value.none { it.id == currentProjectId.value }) {
-                    currentProjectId.value = projects.value.firstOrNull()?.id
-                }
+                // A project that has gone is forgotten; none is never guessed.
+                // Landing the wrist in the first project on the rail meant
+                // talking to an agent nobody chose.
+                if (projects.value.none { it.id == currentProjectId.value }) currentProjectId.value = null
                 pinNeeded.value = false
                 detail.value = ""
                 state.value = State.LIVE
+                Log.i(TAG, "live on ${desktopName.value}: projects=${projects.value.map { it.name }} profiles=${profiles.value.map { it.name }} sessions=${sessions.value.size}")
                 // A socket that never says is treated as hidden and gets no
                 // `data`, and quiet-after-banner is how the watch tells a pane
                 // is ready to be typed into.
@@ -339,9 +351,7 @@ object ForgeLink {
             }
             "projects" -> {
                 projects.value = parseProjects(f.optJSONArray("projects"))
-                if (projects.value.none { it.id == currentProjectId.value }) {
-                    currentProjectId.value = projects.value.firstOrNull()?.id
-                }
+                if (projects.value.none { it.id == currentProjectId.value }) currentProjectId.value = null
             }
             "workspace" -> {
                 val id = f.optString("projectId")
@@ -532,6 +542,12 @@ object ForgeLink {
     suspend fun selectTab(projectId: String, tabId: String) {
         val body = JSONObject().put("kind", "layout")
             .put("op", JSONObject().put("op", "select-tab").put("projectId", projectId).put("tabId", tabId))
+        request(body).let { if (it.optString("kind") == "failed") throw IllegalStateException(it.optString("message")) }
+    }
+
+    suspend fun closeTab(projectId: String, tabId: String) {
+        val body = JSONObject().put("kind", "layout")
+            .put("op", JSONObject().put("op", "close-tab").put("projectId", projectId).put("tabId", tabId))
         request(body).let { if (it.optString("kind") == "failed") throw IllegalStateException(it.optString("message")) }
     }
 

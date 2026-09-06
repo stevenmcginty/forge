@@ -31,6 +31,25 @@
             </TimeText>
         </DigitalClock>
 
+        <!-- Steps on the left -->
+        <PartText x="40" y="330" width="130" height="34">
+            <Text align="CENTER">
+                <Font family="SYNC_TO_DEVICE" size="24" weight="MEDIUM" color="#ffffffff">
+                    <Template>%s
+                        <Parameter expression="[STEP_COUNT]" />
+                    </Template>
+                </Font>
+            </Text>
+        </PartText>
+        <PartText x="40" y="364" width="130" height="20">
+            <Text align="CENTER">
+                <Font family="SYNC_TO_DEVICE" size="12" weight="BOLD" color="#ff7a829e">
+                    <Template>STEPS</Template>
+                </Font>
+            </Text>
+        </PartText>
+
+        <!-- Dictation in the middle -->
         <Group x="185" y="320" width="80" height="80" name="dictate">
             <Launch target="com.forge.watch/com.forge.watch.DictationActivity" />
             <PartDraw x="0" y="0" width="80" height="80">
@@ -53,5 +72,23 @@
                 </Line>
             </PartDraw>
         </Group>
+
+        <!-- Heart rate on the right -->
+        <PartText x="280" y="330" width="130" height="34">
+            <Text align="CENTER">
+                <Font family="SYNC_TO_DEVICE" size="24" weight="MEDIUM" color="#ffffffff">
+                    <Template>%s
+                        <Parameter expression="[HEART_RATE]" />
+                    </Template>
+                </Font>
+            </Text>
+        </PartText>
+        <PartText x="280" y="364" width="130" height="20">
+            <Text align="CENTER">
+                <Font family="SYNC_TO_DEVICE" size="12" weight="BOLD" color="#ffff5c77">
+                    <Template>BPM</Template>
+                </Font>
+            </Text>
+        </PartText>
     </Scene>
 </WatchFace>

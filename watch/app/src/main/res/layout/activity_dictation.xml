@@ -6,39 +6,72 @@
     android:background="#000000"
     android:orientation="vertical"
     android:gravity="center_horizontal"
-    android:paddingTop="22dp"
-    android:paddingBottom="18dp"
+    android:keepScreenOn="true"
+    android:paddingTop="20dp"
+    android:paddingBottom="16dp"
     android:paddingStart="26dp"
     android:paddingEnd="26dp">
 
-    <!-- Desktop / project / tab. Tap: sign in, retry, or open settings. -->
+    <!-- Desktop / project / tab. Tap: pick a project or tab. -->
     <TextView
         android:id="@+id/status"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:maxLines="2"
+        android:maxLines="1"
+        android:ellipsize="middle"
+        android:background="@drawable/bg_chip"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
         android:text="@string/state_off"
-        android:textColor="#9AA0A6"
+        android:textColor="#C6FF3D"
         android:textSize="11sp" />
 
+    <!-- The words caught so far. White: these are in the draft. -->
     <TextView
         android:id="@+id/transcript"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="4dp"
         android:gravity="center"
-        android:maxLines="5"
+        android:maxLines="4"
         android:ellipsize="start"
         android:text="@string/tap_to_talk"
         android:textColor="#FFFFFF"
         android:textSize="14sp" />
 
+    <!-- The phrase being spoken right now. Grey: not caught yet. -->
+    <TextView
+        android:id="@+id/partial"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:maxLines="2"
+        android:ellipsize="start"
+        android:textColor="#9AA0A6"
+        android:textStyle="italic"
+        android:textSize="12sp" />
+
+    <!-- Mic level. Moving while you talk means it is hearing you. -->
+    <ProgressBar
+        android:id="@+id/level"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_marginTop="4dp"
+        android:max="100"
+        android:progress="0"
+        android:progressTint="#C6FF3D"
+        android:progressBackgroundTint="#333333" />
+
     <TextView
         android:id="@+id/notice"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
         android:gravity="center"
         android:maxLines="2"
         android:textColor="#C6FF3D"
@@ -47,7 +80,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="4dp"
         android:orientation="horizontal"
         android:gravity="center">
 
@@ -58,13 +91,15 @@
             android:layout_weight="1"
             android:text="@string/talk" />
 
-        <!-- Tap to send, long-press to clear. Shown only when there is a draft. -->
+        <!-- Tap to send, long-press to clear. Green when there is a draft. -->
         <Button
             android:id="@+id/send"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="6dp"
+            android:backgroundTint="#C6FF3D"
+            android:textColor="#000000"
             android:text="@string/send"
             android:visibility="gone" />
     </LinearLayout>

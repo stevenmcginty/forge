@@ -63,7 +63,7 @@ class ForgeDictationService : Service() {
         /** Nothing said for this long: stop on our own. Long, because thinking is silence. */
         private const val SILENCE_STOP_MS = 120_000L
         /** How long the finaliser gets after a terminal word is heard in a partial. */
-        private const val STOP_GRACE_MS = 900L
+        private const val STOP_GRACE_MS = 400L
 
         fun start(ctx: Context) {
             ctx.startForegroundService(Intent(ctx, ForgeDictationService::class.java).setAction(ACTION_START))
@@ -129,6 +129,7 @@ class ForgeDictationService : Service() {
         lastVoiceAt = System.currentTimeMillis()
         ForgeLink.setWanted("listen", true)
 
+        Log.i(LOG, "listening session started")
         main.post {
             recognizer = SpeechRecognizer.createSpeechRecognizer(this).also { it.setRecognitionListener(listener) }
             listen()
@@ -141,6 +142,10 @@ class ForgeDictationService : Service() {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+            // Natural human speech cadence: 1600ms complete silence, 1200ms possible silence.
+            // Gives time for "um", pauses, and breathing without chopping speech into fragments.
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1600L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
         }
 
     private fun listen() {
@@ -201,6 +206,7 @@ class ForgeDictationService : Service() {
             DictationState.partial.value = ""
             listening = false
             pendingTerminal = false
+            Log.i(LOG, "final: \"${text.orEmpty()}\"")
             if (!text.isNullOrBlank()) {
                 lastVoiceAt = System.currentTimeMillis()
                 DictationState.phrases.tryEmit(text)
@@ -258,6 +264,7 @@ class ForgeDictationService : Service() {
 
     private fun stopSession() {
         if (!recording) { stopSelf(); return }
+        Log.i(LOG, "listening session stopped")
         recording = false
         pendingTerminal = false
         main.removeCallbacks(stopGrace)

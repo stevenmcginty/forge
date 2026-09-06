@@ -1,6 +1,7 @@
 package com.forge.watch
 
 import android.content.Context
+import android.content.Intent
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -38,6 +39,58 @@ object VoiceController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Mutex()
 
+    /** The first half of a split command, waiting for its name. See VoiceCommands.DANGLING. */
+    private var dangling: String? = null
+    private var danglingAt = 0L
+    private const val DANGLING_MAX_MS = 6_000L
+
+    /** Run socket work from a screen that may be finishing. */
+    fun launchWork(action: suspend () -> Unit) {
+        scope.launch { lock.withLock { runCatching { action() }.onFailure { notice.value = it.message ?: "That did not work" } } }
+    }
+
+    suspend fun newTabFromPicker(projectId: String, profileId: String) {
+        val name = ForgeLink.projects.value.firstOrNull { it.id == projectId }?.name ?: return
+        val profile = ForgeLink.profiles.value.firstOrNull { it.id == profileId }?.name ?: return
+        newTab(profile, name)
+    }
+
+    /** "New tab" with no agent named: put the agent list on screen rather than guess one. */
+    private fun askWhichAgent(projectId: String) {
+        notice.value = "Which agent?"
+        app.startActivity(
+            Intent(app, PickerActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(PickerActivity.EXTRA_PROJECT, projectId)
+                .putExtra(PickerActivity.EXTRA_AGENTS, true))
+    }
+
+    suspend fun goToTabFromPicker(projectId: String, tabId: String) {
+        if (!requireLive()) return
+        ForgeLink.currentProjectId.value = projectId
+        ForgeLink.selectProject(projectId)
+        ForgeLink.selectTab(projectId, tabId)
+        delay(150)
+        notice.value = paneLabel()
+        buzz(long = false)
+    }
+
+    suspend fun closeTabFromPicker(projectId: String, tabId: String) {
+        if (!requireLive()) return
+        ForgeLink.closeTab(projectId, tabId)
+        buzz(long = false)
+    }
+
+    suspend fun closeOtherTabsFromPicker(projectId: String, keepTabId: String) {
+        if (!requireLive()) return
+        val ws = ForgeLink.workspaces.value[projectId] ?: return
+        val toClose = ws.tabs.filter { it.id != keepTabId }
+        for (t in toClose) {
+            runCatching { ForgeLink.closeTab(projectId, t.id) }
+        }
+        buzz(long = false)
+    }
+
     fun init(ctx: Context) {
         app = ctx.applicationContext
         scope.launch {
@@ -55,9 +108,24 @@ object VoiceController {
         scope.launch { lock.withLock { performSend() } }
     }
 
-    private suspend fun handle(phrase: String) {
+    private suspend fun handle(heard: String) {
         val projects = ForgeLink.projects.value.map { it.name }
         val profiles = ForgeLink.profiles.value.map { it.name }
+        // "go to project" on its own is half a command. Hold it for the name.
+        var phrase = heard
+        val held = dangling
+        if (held != null) {
+            if (System.currentTimeMillis() - danglingAt < DANGLING_MAX_MS) phrase = "$held $heard"
+            else draft.value = (draft.value + " " + held).trim()
+        }
+        dangling = null
+        if (VoiceCommands.isDangling(heard) && held == null) {
+            dangling = VoiceCommands.clean(heard)
+            danglingAt = System.currentTimeMillis()
+            notice.value = "$dangling…"
+            Log.i(TAG, "holding: \"$heard\"")
+            return
+        }
         val command = VoiceCommands.parse(phrase, draft.value.isBlank(), projects, profiles)
         Log.i(TAG, "heard: \"$phrase\" -> $command")
         lock.withLock {
@@ -68,7 +136,11 @@ object VoiceController {
                         // A phrase ended by "send it" in the same breath carries it.
                         val body = VoiceCommands.stripTerminal(command.text)
                         val ended = body != VoiceCommands.clean(command.text)
-                        if (body.isNotBlank()) draft.value = (draft.value + " " + body).trim()
+                        if (body.isNotBlank()) {
+                            draft.value = (draft.value + " " + body).trim()
+                            val words = Regex("""\S+""").findAll(draft.value).count()
+                            notice.value = "Ready ($words words) · Say \"send it\""
+                        }
                         if (ended) performSend()
                     }
                     VoiceCommands.Command.Send -> performSend()
@@ -78,10 +150,11 @@ object VoiceController {
                         notice.value = "Stopped"
                     }
                     VoiceCommands.Command.Enter -> typeRaw("\r", "Enter")
-                    VoiceCommands.Command.Escape -> typeRaw("", "Escape")
+                    VoiceCommands.Command.Escape -> typeRaw(" ", "Escape")
                     is VoiceCommands.Command.OpenProject -> openProject(command.name)
-                    is VoiceCommands.Command.NewTab -> newTab(command.profile)
+                    is VoiceCommands.Command.NewTab -> newTab(command.profile, command.project)
                     is VoiceCommands.Command.SelectTab -> selectTab(command)
+                    is VoiceCommands.Command.CloseTab -> closeTab(command)
                 }
             } catch (e: Exception) {
                 Log.i(TAG, "command failed: ${e.message}")
@@ -156,14 +229,19 @@ object VoiceController {
         buzz(long = false)
     }
 
-    private suspend fun newTab(profileName: String?) {
+    private suspend fun newTab(profileName: String?, projectName: String?) {
         if (!requireLive()) return
+        if (projectName != null) openProject(projectName)
         val project = ForgeLink.currentProject() ?: run {
             notice.value = "Say \"open <project>\" first"
             return
         }
         val profile = profileName?.let { n -> ForgeLink.profiles.value.firstOrNull { it.name == n } }
-        notice.value = "Opening a tab…"
+        if (profile == null) {
+            askWhichAgent(project.id)
+            return
+        }
+        notice.value = "Opening a ${profile.name} tab…"
         val pane = ForgeLink.createTab(project.id, profile?.id)
         if (pane == null) {
             notice.value = "The desktop did not open the tab"
@@ -181,6 +259,7 @@ object VoiceController {
 
     private suspend fun selectTab(cmd: VoiceCommands.Command.SelectTab) {
         if (!requireLive()) return
+        cmd.project?.let { openProject(it) }
         val project = ForgeLink.currentProject() ?: run { notice.value = "Say \"open <project>\" first"; return }
         val ws = ForgeLink.workspaces.value[project.id]
         val tabs = ws?.tabs.orEmpty()
@@ -199,6 +278,53 @@ object VoiceController {
         // The workspace frame that confirms it is a beat behind the reply.
         delay(150)
         notice.value = "Tab ${tabs.indexOf(target) + 1}${if (target.title.isNotBlank()) ": ${target.title}" else ""}"
+        buzz(long = false)
+    }
+
+    private suspend fun closeTab(cmd: VoiceCommands.Command.CloseTab) {
+        if (!requireLive()) return
+        cmd.project?.let { openProject(it) }
+        val project = ForgeLink.currentProject() ?: run { notice.value = "Say \"open <project>\" first"; return }
+        val ws = ForgeLink.workspaces.value[project.id]
+        val tabs = ws?.tabs.orEmpty()
+        if (tabs.isEmpty()) {
+            notice.value = "No tabs open"
+            return
+        }
+        if (cmd.others) {
+            val activeId = ws?.activeTabId ?: tabs.first().id
+            val toClose = tabs.filter { it.id != activeId }
+            if (toClose.isEmpty()) {
+                notice.value = "Only one tab open"
+                return
+            }
+            for (t in toClose) {
+                runCatching { ForgeLink.closeTab(project.id, t.id) }
+            }
+            delay(150)
+            notice.value = "Closed ${toClose.size} other tab${if (toClose.size == 1) "" else "s"}"
+            buzz(long = false)
+            return
+        }
+        val current = tabs.indexOfFirst { it.id == ws?.activeTabId }.coerceAtLeast(0)
+        val target = when {
+            cmd.index != null -> tabs.getOrNull(cmd.index - 1) ?: run {
+                notice.value = "Only ${tabs.size} tab${if (tabs.size == 1) "" else "s"}"
+                return
+            }
+            cmd.name != null -> {
+                val hit = VoiceCommands.bestMatch(cmd.name, tabs.map { it.title }) ?: run {
+                    notice.value = "No tab called ${cmd.name}"
+                    return
+                }
+                tabs.first { it.title == hit }
+            }
+            else -> tabs.getOrNull(current) ?: tabs.first()
+        }
+        val label = if (target.title.isNotBlank()) target.title else "tab ${tabs.indexOf(target) + 1}"
+        ForgeLink.closeTab(project.id, target.id)
+        delay(150)
+        notice.value = "Closed $label"
         buzz(long = false)
     }
 

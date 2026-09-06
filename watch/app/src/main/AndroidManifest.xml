@@ -40,13 +40,24 @@
         </activity>
 
         <!-- The voice screen. Exported so the watch face's Launch tap action
-             can start it directly. The class name is on the face's XML, so it
-             keeps its old name even though it is now the whole Forge remote. -->
+             can start it directly, and exposed as a launcher activity so it can
+             be placed into any complication slot (e.g. app shortcut) on any watch face. -->
         <activity
             android:name=".DictationActivity"
             android:exported="true"
+            android:label="Forge Dictation"
             android:showWhenLocked="true"
-            android:turnScreenOn="true" />
+            android:turnScreenOn="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Tap navigation: projects, then tabs. -->
+        <activity
+            android:name=".PickerActivity"
+            android:exported="false" />
 
         <!-- The microphone, kept open with the screen off. -->
         <service

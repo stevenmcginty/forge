@@ -35,6 +35,7 @@ that is not a command is prompt text.
 | `open forge` / `switch to car harness` | Picks the project. Fuzzy match on the name. |
 | `new tab` / `new tab with codex` | Opens a tab in that project, waits for the agent's banner, then says "Ready. Talk." |
 | `tab two` / `next tab` / `tab login fix` | Brings a tab to the front. |
+| `close tab` / `close tab two` / `close other tabs` | Closes the active tab, a specific tab, or all other tabs in the project. |
 | *(anything else)* | Adds to the draft prompt. |
 | `send it` / `go ahead` | Types the draft into the pane and presses Enter. Also works at the end of a sentence: "fix the login bug, send it". |
 | `cancel` / `scrap that` | Throws the draft away. |
