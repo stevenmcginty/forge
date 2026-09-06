@@ -536,7 +536,7 @@ export const MAX_SIGNAL_CHARS = 65536
  */
 
 /** What one input frame does. */
-export type MirrorInputAction = 'move' | 'down' | 'up' | 'wheel' | 'key' | 'text'
+export type MirrorInputAction = 'move' | 'down' | 'up' | 'dblclick' | 'wheel' | 'key' | 'text'
 
 export type MirrorButton = 'left' | 'right' | 'middle'
 
@@ -618,6 +618,20 @@ export type MirrorInput =
   | { a: 'move'; x: number; y: number }
   | { a: 'down'; button: MirrorButton; x: number; y: number }
   | { a: 'up'; button: MirrorButton; x: number; y: number }
+  /**
+   * The second click of a double-click, and the desktop makes it land as one.
+   *
+   * A double-tap on a phone is two clicks, and the first of them has already
+   * been sent as a plain `down`/`up` by the time the second finger lands — so
+   * the phone cannot send "a double-click" whole without holding every single
+   * click back for a beat, which is the 300ms lag nobody forgave mobile
+   * browsers for. Instead the second tap is sent as *this*, and the desktop
+   * — which owns the only clock that matters, Windows' own double-click
+   * timer — decides whether a single press will still pair with the click
+   * it just performed, or whether the link's jitter has spent the window and
+   * a whole fresh pair is needed. See `linesFor` in electron/mobile/input.ts.
+   */
+  | { a: 'dblclick'; button: MirrorButton; x: number; y: number }
   | { a: 'wheel'; wheel: number; x: number; y: number }
   | { a: 'key'; key: MirrorKey; down: boolean }
   | { a: 'text'; text: string }
@@ -664,7 +678,8 @@ export function readMirrorInput(value: unknown): MirrorInput | null {
       return at ? { a: 'move', ...at } : null
     }
     case 'down':
-    case 'up': {
+    case 'up':
+    case 'dblclick': {
       const at = point()
       const which = button()
       return at && which ? { a: frame.a, button: which, ...at } : null

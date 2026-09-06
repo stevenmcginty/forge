@@ -86,6 +86,18 @@ import './Mirror.css'
  */
 const MIRROR_SEND_MS = 33
 
+/**
+ * Direct mode's double-click: how soon after one click's release the next
+ * press must land, and how close on the glass, to be the second half of one.
+ *
+ * The same 350ms the trackpad uses (DOUBLE_TAP_MS in lib/touchpad.ts). The
+ * distance is in this screen's pixels and generous for a fingertip — a
+ * mouse double-clicks inside four pixels without being asked, and a finger
+ * that lands twice within a couple of dozen means the same spot.
+ */
+const DIRECT_DOUBLE_MS = 350
+const DIRECT_DOUBLE_PX = 24
+
 /** How close together two presses of Escape must be to mean "let go". */
 const DOUBLE_ESC_MS = 500
 
@@ -347,6 +359,19 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
   const heldButtons = useRef(new Set<MirrorButton>())
   /** The last fraction actually worked out, for a release with no event to read. */
   const lastAt = useRef({ x: 0.5, y: 0.5 })
+  /**
+   * Direct mode's last click: when it was released, where on the glass, and
+   * where on the desk. A press landing within DIRECT_DOUBLE_MS and
+   * DIRECT_DOUBLE_PX of it is the second half of a double-click — and it is
+   * sent at the *first* click's desktop point, because a fingertip does not
+   * land twice on the same pixel of a 1920-wide desk squeezed into a phone,
+   * and Windows wants both clicks inside four of them.
+   */
+  const lastClick = useRef<{ at: number; clientX: number; clientY: number; x: number; y: number; button: MirrorButton } | null>(
+    null
+  )
+  /** Pointers whose press was spent as a `dblclick`, so their release sends nothing. */
+  const doubled = useRef(new Set<number>())
   /** The pending pointer move: where it is, and when one was last sent. */
   const move = useRef({ x: 0, y: 0, frame: 0, sentAt: 0 })
   const lastEscape = useRef(0)
@@ -454,6 +479,8 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
     // own effect tears down after this and calls `stop()` again — harmlessly,
     // because the first call already let go.
     padRef.current?.stop()
+    lastClick.current = null
+    doubled.current.clear()
     for (const key of heldKeys.current) sendMirrorInput({ a: 'key', key, down: false })
     heldKeys.current.clear()
     for (const button of heldButtons.current) {
@@ -888,6 +915,21 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
     const at = fractionAt(event.clientX, event.clientY)
     if (!button || !at) return
     event.preventDefault()
+    const previous = lastClick.current
+    if (
+      previous &&
+      previous.button === button &&
+      performance.now() - previous.at <= DIRECT_DOUBLE_MS &&
+      Math.hypot(event.clientX - previous.clientX, event.clientY - previous.clientY) <= DIRECT_DOUBLE_PX
+    ) {
+      // The second half of a double-click, snapped to where the first landed.
+      // The desk decides whether one press still pairs with the click it just
+      // made or a whole pair is owed — see `dblclick` in shared/mobile.ts.
+      lastClick.current = null
+      doubled.current.add(event.pointerId)
+      sendMirrorInput({ a: 'dblclick', button, x: previous.x, y: previous.y })
+      return
+    }
     // Its own position rather than the last one transmitted, which is the rule
     // shared/mobile.ts sets for every pointer frame: a dropped move must not be
     // able to make the click after it land somewhere else.
@@ -900,6 +942,8 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
     // The stage's, by bubbling — including the release of the press that armed
     // driving, which the pad never saw land and so ignores.
     if (inputRef.current === 'trackpad') return
+    // A press spent as a `dblclick` was released by the desk already.
+    if (doubled.current.delete(event.pointerId)) return
     const button = buttonOf(event.button)
     const at = fractionAt(event.clientX, event.clientY)
     if (!button || !at) return
@@ -909,6 +953,7 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
     // was under the cursor on that desk.
     if (!heldButtons.current.delete(button)) return
     sendMirrorInput({ a: 'up', button, x: at.x, y: at.y })
+    lastClick.current = { at: performance.now(), clientX: event.clientX, clientY: event.clientY, x: at.x, y: at.y, button }
   }
 
   const panTransform =
@@ -1124,8 +1169,8 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
           aria-pressed={input === 'trackpad'}
           title={
             input === 'trackpad'
-              ? 'Trackpad: slide to move the pointer, tap to click, hold still to right-click, two fingers to scroll'
-              : 'Direct: the pointer goes where you press'
+              ? 'Trackpad: slide to move the pointer, tap to click, double-tap to double-click, hold still to right-click, two fingers to scroll'
+              : 'Direct: the pointer goes where you press; tap twice for a double-click'
           }
           onClick={() => {
             choseInput.current = true

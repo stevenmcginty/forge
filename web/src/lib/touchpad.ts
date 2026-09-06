@@ -20,6 +20,10 @@
  *   slide, moving from the moment it lands   the pointer moves; nothing is
  *                                           pressed on anybody's desk
  *   tap — short, and still within the slop  a click, emitted on release
+ *   a second tap, within DOUBLE_TAP_MS and  a double-click: the second tap is
+ *   with the cursor where it was            sent as `dblclick`, and the desk
+ *                                           makes it pair with the first — see
+ *                                           the type in shared/mobile.ts
  *   still for LATCH_MS, then slide          a drag: the button goes down at
  *                                           the first movement, not at the
  *                                           touchdown
@@ -103,6 +107,20 @@ const GLIDE_GAP_MS = 120
  * verdict as one move of ten.
  */
 const TAP_SLOP_PX = 9
+
+/**
+ * How soon after one tap a second must land to be the other half of a
+ * double-click.
+ *
+ * Measured from the first finger's *release* to the second's *touchdown* —
+ * the gap a person actually makes, which for a double-tap is somewhere under
+ * 200ms. 350 leaves room for a slow thumb without turning two deliberate
+ * clicks on the same spot into one double-click; and two clicks on the same
+ * spot inside a third of a second are a double-click by any desktop's rules
+ * anyway. The cursor must not have moved between them: a slide is a slide,
+ * and it clears the tap before it.
+ */
+const DOUBLE_TAP_MS = 350
 
 /**
  * How long a landed finger must stay still to latch — the touch-side stand-in
@@ -310,6 +328,21 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
   let state: TouchpadState = 'idle'
 
   /**
+   * The last tap that was sent as a click: when its finger left, and where the
+   * cursor was. Cleared by anything that is not another tap on the same spot —
+   * a slide, a drag, a hold, a scroll — so only a tap-tap can be a double.
+   */
+  let lastTap: { at: number; x: number; y: number } | null = null
+  /**
+   * Whether the finger down now has moved the cursor without latching first —
+   * a slide. Its release is the end of a movement, not a tap: the header's
+   * "a slide is not a tap", made into the one bit `up` needs to honour it.
+   */
+  let slid = false
+  /** When the current finger landed, for the gap `lastTap` is measured against. */
+  let heldAt = 0
+
+  /**
    * Where the picture actually is inside the stage, in the stage's own
    * pixels. `pictureBox` works in the viewport's coordinates; the cursor is
    * positioned inside the stage, so its answer is restated in the stage's
@@ -460,6 +493,7 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
         clearHold()
         held = null
         latched = false
+        lastTap = null
         scrolling = true
         wheelPx = 0
         wheelSent = 0
@@ -474,6 +508,8 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
     // does with it is point at something.
     measure(true)
     held = { id, x: px, y: py }
+    heldAt = now()
+    slid = false
     latched = false
     dragging = false
     spent = false
@@ -496,6 +532,7 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
       // Still held, still still. The press has decided what it is.
       if (!held || dragging || spent || scrolling || fingers.size !== 1) return
       spent = true
+      lastTap = null
       send({ a: 'down', button: 'right', x, y })
       send({ a: 'up', button: 'right', x, y })
       become('idle')
@@ -556,6 +593,8 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
        * this mode that is exactly what keeps aiming from clicking.
        */
       clearHold()
+      lastTap = null
+      slid = true
       become('press')
       applyDeltas(dx, dy, at)
       paint()
@@ -572,6 +611,7 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
        */
       dragging = true
       clearHold()
+      lastTap = null
       become('drag')
       send({ a: 'down', button: 'left', x, y })
       applyDeltas(dx, dy, at)
@@ -607,10 +647,18 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
     held = null
     const wasDragging = dragging
     const wasSpent = spent
+    const wasSlide = slid
     dragging = false
     spent = false
     latched = false
+    slid = false
     glide = 0
+    if (wasSlide) {
+      // A slide is not a tap. The finger aimed, and lifting is how aiming
+      // ends — sending a click here is what makes aiming click.
+      become('idle')
+      return
+    }
     if (wasSpent) {
       // The hold already fired as a right-click; this release is the end of
       // the first event, not the start of a second.
@@ -626,9 +674,23 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
      * A tap: the button goes down and up where the pointer is, in that order
      * and in one moment. Deliberately on release — the press could not commit
      * earlier without guessing whether it was this, a drag, or a right-click.
+     *
+     * Or the second tap of a double: the one before it was a click on this
+     * very spot and this finger landed inside DOUBLE_TAP_MS of it leaving.
+     * That goes out as `dblclick`, and the desk — which owns the clock that
+     * decides such things — makes it land as the second half of a pair. Then
+     * the slate is clean: a third tap starts over, so tap-tap-tap is a
+     * double-click and a click, never a triple.
      */
+    if (lastTap && heldAt - lastTap.at <= DOUBLE_TAP_MS && lastTap.x === x && lastTap.y === y) {
+      lastTap = null
+      send({ a: 'dblclick', button: 'left', x, y })
+      become('idle')
+      return
+    }
     send({ a: 'down', button: 'left', x, y })
     send({ a: 'up', button: 'left', x, y })
+    lastTap = { at: now(), x, y }
     become('idle')
   }
 
@@ -653,6 +715,8 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
     dragging = false
     spent = false
     latched = false
+    slid = false
+    lastTap = null
     glide = 0
     become('idle')
   }
@@ -681,6 +745,8 @@ export function startTouchpad(options: TouchpadOptions): TouchpadHandle {
     dragging = false
     spent = false
     latched = false
+    slid = false
+    lastTap = null
     become('idle')
   }
 

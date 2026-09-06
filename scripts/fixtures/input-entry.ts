@@ -6,7 +6,16 @@
  * copy of them, because a copy is a thing that can agree with the test while
  * disagreeing with the app. Nothing here is part of Forge.
  */
-export { canDriveDesktop, lineFor, linesFor, probeDesktopInput } from '../../electron/mobile/input'
+export {
+  canDriveDesktop,
+  lineFor,
+  linesFor,
+  pairsWith,
+  probeDesktopInput,
+  DEFAULT_DOUBLE_CLICK_MS,
+  DOUBLE_CLICK_MARGIN_MS,
+  DOUBLE_CLICK_PX
+} from '../../electron/mobile/input'
 export { readMirrorInput, MAX_TEXT_CHARS, MAX_WHEEL_NOTCHES, MIRROR_KEYS } from '../../shared/mobile'
 // The television's half of the same feature. Bundled beside the desktop's
 // because the two only mean anything together: what the sofa's grammar emits

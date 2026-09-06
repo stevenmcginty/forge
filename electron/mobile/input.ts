@@ -29,7 +29,9 @@
  * Press and release one of a short list of named keys (`MIRROR_KEYS` in
  * shared/mobile.ts). Type one character. There is no way to name a scancode and
  * nothing that runs a command — the child is a loop over five verbs, and an
- * unrecognised line is discarded by it.
+ * unrecognised line is discarded by it. A double-click is not a sixth verb: it
+ * is the press-and-release verb written two or four times, and the only thing
+ * this side adds is the judgement of which — see `linesFor`.
  *
  * ## Typing, and what it costs
  *
@@ -184,13 +186,18 @@ Add-Type -Namespace Forge -Name Input -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(System.IntPtr value);
 [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern short VkKeyScanW(char ch);
+[DllImport("user32.dll")] public static extern uint GetDoubleClickTime();
 '@
 try {
   if (-not [Forge.Input]::SetProcessDpiAwarenessContext([System.IntPtr](-4))) { [void][Forge.Input]::SetProcessDPIAware() }
 } catch {
   try { [void][Forge.Input]::SetProcessDPIAware() } catch { }
 }
-[Console]::Out.WriteLine('ready')
+# The one setting read back rather than assumed: how close two clicks must be
+# for this Windows to call them a double-click. See DOUBLE_CLICK_MS below.
+$dct = 500
+try { $dct = [int][Forge.Input]::GetDoubleClickTime() } catch { }
+[Console]::Out.WriteLine("ready $dct")
 while ($null -ne ($line = [Console]::In.ReadLine())) {
   try {
     $p = $line.Split(' ')
@@ -260,9 +267,75 @@ export function lineFor(input: MirrorInput, at: ScreenPoint): string {
       return `k ${key.vk} ${flags}`
     }
     default:
-      // Typing is many strokes and this returns one line. See `linesFor`.
+      // Typing is many strokes and a double-click is several, and this returns
+      // one line. See `linesFor`.
       return ''
   }
+}
+
+/**
+ * The click the desktop most recently performed: which button, where, when.
+ *
+ * `at` is the moment the release was *written to the helper*, in the same
+ * clock `linesFor` is handed — the moment Windows saw it, near enough. It is
+ * the whole of what a `dblclick` needs to know: see `pairsWith`.
+ */
+export interface RecentClick {
+  button: MirrorButton
+  x: number
+  y: number
+  at: number
+}
+
+/**
+ * Windows' own double-click time, until the helper reports the real one.
+ *
+ * 500ms is the default every Windows ships with; a person who has changed
+ * theirs in the mouse control panel is answered by the number the helper
+ * reads back with `GetDoubleClickTime` when it starts.
+ */
+export const DEFAULT_DOUBLE_CLICK_MS = 500
+
+/**
+ * How much of the double-click window a `dblclick` is allowed to spend.
+ *
+ * The decision below is made when the line is *written*, and the click lands
+ * a pipe, a `ReadLine` and a P/Invoke later. A second press written at 499ms
+ * would arrive at 505 and be two single clicks — the exact failure the verb
+ * exists to remove — so the margin is taken off here, not hoped for there.
+ */
+export const DOUBLE_CLICK_MARGIN_MS = 120
+
+/**
+ * How far apart two clicks may land and still be one double-click.
+ *
+ * `SM_CXDOUBLECLK` and `SM_CYDOUBLECLK` are 4 by default: a rectangle four
+ * pixels wide centred on the first click. Two pixels either way is that
+ * rectangle; a phone sends the same fraction for both presses anyway, so this
+ * is a bound on rounding, not on aim.
+ */
+export const DOUBLE_CLICK_PX = 2
+
+/**
+ * Will one more press pair with the click this desktop just made?
+ *
+ * Pure, so scripts/input-check.mjs can prove the boundary: the same button, the
+ * same place to within `DOUBLE_CLICK_PX`, and inside the window Windows is
+ * using less the margin the pipe needs. `windowMs` is that window — the number
+ * the helper read back, or the default until it has.
+ */
+export function pairsWith(
+  recent: RecentClick | null,
+  button: MirrorButton,
+  at: ScreenPoint,
+  now: number,
+  windowMs = DEFAULT_DOUBLE_CLICK_MS
+): boolean {
+  if (!recent || recent.button !== button) return false
+  if (Math.abs(Math.round(at.x) - recent.x) > DOUBLE_CLICK_PX) return false
+  if (Math.abs(Math.round(at.y) - recent.y) > DOUBLE_CLICK_PX) return false
+  const elapsed = now - recent.at
+  return elapsed >= 0 && elapsed <= Math.max(0, windowMs - DOUBLE_CLICK_MARGIN_MS)
 }
 
 /**
@@ -279,7 +352,27 @@ export function lineFor(input: MirrorInput, at: ScreenPoint): string {
  * whatever key happens to match a lone surrogate. Dropping the whole character
  * is the only reading that cannot type something nobody said.
  */
-export function linesFor(input: MirrorInput, at: ScreenPoint): string[] {
+export function linesFor(
+  input: MirrorInput,
+  at: ScreenPoint,
+  recent: RecentClick | null = null,
+  now = 0,
+  windowMs = DEFAULT_DOUBLE_CLICK_MS
+): string[] {
+  if (input.a === 'dblclick') {
+    /**
+     * The second half of a double-click — see the type in shared/mobile.ts.
+     * If the click this desk just performed is still inside Windows' window,
+     * one more press is all it takes and Windows pairs them itself. If it is
+     * not — the link stalled between the phone's two taps, or there never was
+     * a first click here — the pair is performed whole, and the first click
+     * that already landed is at worst a single click a beat earlier, which on
+     * an icon selected what the double-click then opens.
+     */
+    const press = lineFor({ a: 'down', button: input.button, x: input.x, y: input.y }, at)
+    const lift = lineFor({ a: 'up', button: input.button, x: input.x, y: input.y }, at)
+    return pairsWith(recent, input.button, at, now, windowMs) ? [press, lift] : [press, lift, press, lift]
+  }
   if (input.a !== 'text') {
     const line = lineFor(input, at)
     return line ? [line] : []
@@ -335,6 +428,8 @@ interface Pending {
   line: string
   /** Droppable: a pointer or a key, superseded by whatever comes next. */
   stale: boolean
+  /** The click this line completes, if it is a release: see `recentClick`. */
+  click?: Omit<RecentClick, 'at'>
 }
 
 /**
@@ -358,6 +453,14 @@ let ready = false
 let pending: Pending[] = []
 let idleTimer: NodeJS.Timeout | null = null
 let lastFailedAt = 0
+/**
+ * The last release written to a *ready* helper, stamped when it was written.
+ * A release queued while the helper was cold is stamped at the flush instead,
+ * because that is when Windows sees it. What a `dblclick` is judged against.
+ */
+let recentClick: RecentClick | null = null
+/** Windows' double-click time, as the helper read it back. */
+let doubleClickMs = DEFAULT_DOUBLE_CLICK_MS
 
 function armIdle(): void {
   if (idleTimer) clearTimeout(idleTimer)
@@ -394,11 +497,19 @@ function spawnHelper(): void {
   // it is what makes the queue above finite: before it, a write would go into a
   // pipe the child is not reading yet.
   started.stdout?.on('data', (chunk: Buffer) => {
-    if (ready || !chunk.toString().includes('ready')) return
+    const text = chunk.toString()
+    if (ready || !text.includes('ready')) return
     ready = true
+    const reported = /ready\s+(\d+)/.exec(text)
+    const read = reported ? Number(reported[1]) : Number.NaN
+    doubleClickMs = Number.isFinite(read) && read > 0 ? read : DEFAULT_DOUBLE_CLICK_MS
     const queued = pending
     pending = []
-    for (const held of queued) writeLine(held.line)
+    const at = Date.now()
+    for (const held of queued) {
+      writeLine(held.line)
+      if (held.click) recentClick = { ...held.click, at }
+    }
   })
 
   const gone = (): void => {
@@ -406,6 +517,7 @@ function spawnHelper(): void {
     child = null
     ready = false
     pending = []
+    recentClick = null
     lastFailedAt = Date.now()
   }
   started.on('error', gone)
@@ -430,13 +542,26 @@ function writeLine(line: string): void {
  */
 export function driveDesktop(input: MirrorInput, at: ScreenPoint): void {
   if (!canDriveDesktop()) return
-  const lines = linesFor(input, at)
+  const now = Date.now()
+  /**
+   * What a `dblclick` is judged against. While the helper is cold the click
+   * before it is still in the queue, and the two will be flushed together a
+   * few milliseconds apart — so a queued release counts as one made just now.
+   */
+  const queuedClick = pending.find((held) => held.click)?.click
+  const recent = ready ? recentClick : queuedClick ? { ...queuedClick, at: now } : null
+  const lines = linesFor(input, at, recent, now, doubleClickMs)
   if (lines.length === 0) return
+  const click: Omit<RecentClick, 'at'> | undefined =
+    input.a === 'up' || input.a === 'dblclick'
+      ? { button: input.button, x: Math.round(at.x), y: Math.round(at.y) }
+      : undefined
   spawnHelper()
   if (!child) return
   armIdle()
   if (ready) {
     for (const line of lines) writeLine(line)
+    if (click) recentClick = { ...click, at: now }
     return
   }
   // A phrase is all of it or none of it, and it waits in the roomy half of the
@@ -459,7 +584,14 @@ export function driveDesktop(input: MirrorInput, at: ScreenPoint): void {
     const oldest = pending.findIndex((line) => line.stale)
     if (oldest >= 0) pending.splice(oldest, 1)
   }
-  for (const line of lines) pending.push({ line, stale: true })
+  // A button line is never stale: dropping the `down` of a pair is a click
+  // that never happened, and dropping its `up` is a mouse button left held
+  // on somebody's desk until the next one. Both halves wait, whole, beside
+  // the text.
+  const whole = input.a === 'down' || input.a === 'up' || input.a === 'dblclick'
+  lines.forEach((line, index) => {
+    pending.push({ line, stale: !whole, ...(click && index === lines.length - 1 ? { click } : {}) })
+  })
 }
 
 /**
@@ -543,6 +675,7 @@ export function stopDesktopInput(): void {
   child = null
   ready = false
   pending = []
+  recentClick = null
   if (!running) return
   // stdin's end is the loop's end: `ReadLine` returns null at EOF and the
   // script falls off the bottom. `kill` is the belt to that brace, for a child

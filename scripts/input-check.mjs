@@ -77,17 +77,36 @@ await build({
   absWorkingDir: ROOT
 })
 const { pictureBox, fractionFor, keyFor, notchesFor } = await import(pathToFileURL(webBundle).href)
+// And the phone's trackpad — the grammar that turns a finger into the wire —
+// which is a browser module for the same reason and bundled the same way.
+const padBundle = join(scratch, 'touchpad.mjs')
+await build({
+  entryPoints: [join(ROOT, 'web', 'src', 'lib', 'touchpad.ts')],
+  outfile: padBundle,
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  alias: { '@shared': join(ROOT, 'shared') },
+  logLevel: 'silent',
+  absWorkingDir: ROOT
+})
+const { startTouchpad } = await import(pathToFileURL(padBundle).href)
 
 const {
   readMirrorInput,
   lineFor,
   linesFor,
+  pairsWith,
   canDriveDesktop,
   probeDesktopInput,
   startPointer,
   MIRROR_KEYS,
   MAX_WHEEL_NOTCHES,
-  MAX_TEXT_CHARS
+  MAX_TEXT_CHARS,
+  DEFAULT_DOUBLE_CLICK_MS,
+  DOUBLE_CLICK_MARGIN_MS,
+  DOUBLE_CLICK_PX
 } = await import(
   pathToFileURL(bundle).href
 )
@@ -150,6 +169,14 @@ log(
   'a frame carrying extra fields loses them: what comes out is rebuilt, never passed through'
 )
 
+const doubled = readMirrorInput({ a: 'dblclick', button: 'left', x: 0.25, y: 0.75 })
+log(
+  doubled?.a === 'dblclick' && doubled.button === 'left' && doubled.x === 0.25 && doubled.y === 0.75,
+  'a double-click survives the door with its button and its place'
+)
+log(readMirrorInput({ a: 'dblclick', x: 0.5, y: 0.5 }) === null, 'but not without a button')
+log(readMirrorInput({ a: 'dblclick', button: 'left' }) === null, 'nor without a place')
+
 /* --------------------------------------------- 2. what each of those becomes */
 
 const at = { x: 1280, y: 720 }
@@ -176,6 +203,58 @@ log(lineFor({ a: 'key', key: 'enter', down: false }, at) === 'k 13 2', 'and come
 log(lineFor({ a: 'key', key: 'left', down: true }, at) === 'k 37 1', 'Left carries the extended bit')
 log(lineFor({ a: 'key', key: 'left', down: false }, at) === 'k 37 3', 'and carries it on the way up as well')
 log(lineFor({ a: 'key', key: 'win', down: true }, at) === 'k 91 1', 'the Windows key is 0x5B, extended')
+
+/* ------------------------------------------------------- the double-click
+
+   Not a sixth verb at the helper: a `dblclick` is the press-and-release pair
+   written once more if the click the desk just made is still inside Windows'
+   double-click window, and written twice if it is not. The judgement is the
+   whole feature, so its boundary is walked here in the desk's own clock. */
+
+const dct = DEFAULT_DOUBLE_CLICK_MS
+const inside = dct - DOUBLE_CLICK_MARGIN_MS
+const justClicked = { button: 'left', x: at.x, y: at.y, at: 10_000 }
+const press = `b 2 ${at.x} ${at.y}`
+const lift = `b 4 ${at.x} ${at.y}`
+const second = { a: 'dblclick', button: 'left', x: 0.5, y: 0.5 }
+
+log(
+  linesFor(second, at, justClicked, 10_000 + 150, dct).join(' ') === `${press} ${lift}`,
+  'a double-click 150ms after a click on the same spot is one more press: Windows pairs them'
+)
+log(
+  linesFor(second, at, justClicked, 10_000 + inside, dct).join(' ') === `${press} ${lift}`,
+  `and so is one at the edge of the window less the pipe's margin (${inside}ms)`
+)
+log(
+  linesFor(second, at, justClicked, 10_000 + inside + 1, dct).join(' ') === `${press} ${lift} ${press} ${lift}`,
+  'one millisecond later the window is spent and the whole pair is performed'
+)
+log(
+  linesFor(second, at, null, 10_000, dct).join(' ') === `${press} ${lift} ${press} ${lift}`,
+  'with no click before it at all, the whole pair is performed'
+)
+log(
+  linesFor(second, at, { ...justClicked, button: 'right' }, 10_000 + 100, dct).length === 4,
+  'a recent click of the other button does not pair'
+)
+log(
+  linesFor(second, at, { ...justClicked, x: at.x + DOUBLE_CLICK_PX + 1 }, 10_000 + 100, dct).length === 4,
+  'nor does one further away than the double-click rectangle'
+)
+log(
+  linesFor(second, at, { ...justClicked, x: at.x + DOUBLE_CLICK_PX }, 10_000 + 100, dct).length === 2,
+  'but one inside it does'
+)
+log(
+  pairsWith(justClicked, 'left', at, 10_000 + 150, 300) === true && pairsWith(justClicked, 'left', at, 10_000 + 150, 250) === false,
+  "a Windows whose double-click time was turned down is judged by the number it reported, not the default"
+)
+log(pairsWith(justClicked, 'left', at, 9_000, dct) === false, 'a click from the future never pairs')
+log(
+  linesFor(second, at, justClicked, 10_000 + 100, dct).every((line) => /^b (2|4) \d+ \d+$/.test(line)),
+  'and every line of it is a button line the helper already had'
+)
 
 /* -------------------------------------------------------- typing a phrase
 
@@ -475,6 +554,153 @@ log(
   everything.length > 0 && everything.every((frame) => frame.t === 'mirror-input' && readMirrorInput(frame) !== null),
   `all ${everything.length} frames the remote produced are ones the desktop's own validator accepts`
 )
+
+/* ------------------------------------------- 3d. the phone's trackpad grammar
+
+   Forge Web on a phone has no D-pad and no mouse: a finger on the glass is a
+   trackpad, and lib/touchpad.ts is the grammar that reads it. Only the part
+   that changed is walked here — the double-tap — against the same fake clock,
+   with timers this script fires by hand. The rest of the grammar (tap, drag,
+   hold, scroll) is the television's, ported, and proved above. */
+
+const realSetTimeout = globalThis.setTimeout
+const realClearTimeout = globalThis.clearTimeout
+const timers = []
+globalThis.setTimeout = (fn, ms) => {
+  const timer = { fn, due: clock + (ms ?? 0), id: timers.length + 1 }
+  timers.push(timer)
+  return timer.id
+}
+globalThis.clearTimeout = (id) => {
+  const index = timers.findIndex((timer) => timer.id === id)
+  if (index >= 0) timers.splice(index, 1)
+}
+/** Advance the fake clock, firing every timer that comes due on the way. */
+const wait = (ms) => {
+  const until = clock + ms
+  for (;;) {
+    const next = timers.filter((timer) => timer.due <= until).sort((a, b) => a.due - b.due)[0]
+    if (!next) break
+    timers.splice(timers.indexOf(next), 1)
+    clock = next.due
+    next.fn()
+  }
+  clock = until
+}
+globalThis.addEventListener = () => {}
+globalThis.removeEventListener = () => {}
+
+function padHarness() {
+  const sent = []
+  const box = { left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080 }
+  const handle = startTouchpad({
+    cursor: { style: {} },
+    stage: { getBoundingClientRect: () => box },
+    picture: { getBoundingClientRect: () => box },
+    frameSize: () => ({ width: 1920, height: 1080 }),
+    getShot: () => ({ left: 0, top: 0, width: 1920, height: 1080 }),
+    send: (frame) => sent.push(frame),
+    onChange: () => {}
+  })
+  /** One tap: a finger lands, stays inside the slop, and leaves `holdMs` later. */
+  const tap = (id, holdMs = 60) => {
+    handle.down(id, 500, 500)
+    wait(holdMs)
+    handle.up(id)
+  }
+  return { handle, sent, tap, wait, of: (a) => sent.filter((f) => f.a === a) }
+}
+
+const aimed = padHarness()
+aimed.handle.down(1, 500, 500)
+aimed.wait(20)
+aimed.handle.move(1, 700, 620)
+// Past SEND_MS, so the trailing flush timer has told the desk where it went.
+aimed.wait(40)
+aimed.handle.up(1)
+log(
+  aimed.of('move').length >= 2 && aimed.of('down').length === 0 && aimed.of('up').length === 0,
+  'a slide moves the cursor and its release sends no click — aiming does not click'
+)
+aimed.handle.stop()
+
+const single = padHarness()
+single.tap(1)
+log(
+  single.of('down').length === 1 && single.of('up').length === 1 && single.of('dblclick').length === 0,
+  'one tap is one click — a down and an up, and no double'
+)
+single.handle.stop()
+
+const twice = padHarness()
+twice.tap(1)
+twice.wait(120)
+twice.tap(2)
+const twiceButtons = twice.sent.filter((f) => f.a !== 'move').map((f) => f.a)
+log(
+  twiceButtons.join(' ') === 'down up dblclick',
+  `a second tap 120ms later is sent as a dblclick after the first click (${twiceButtons.join(' ')})`
+)
+const dbl = twice.of('dblclick')[0]
+const first = twice.of('up')[0]
+log(dbl?.button === 'left' && dbl.x === first.x && dbl.y === first.y, 'at exactly the place the first click landed')
+twice.handle.stop()
+
+const slow = padHarness()
+slow.tap(1)
+slow.wait(600)
+slow.tap(2)
+log(
+  slow.of('dblclick').length === 0 && slow.of('down').length === 2,
+  'two taps 600ms apart are two single clicks'
+)
+slow.handle.stop()
+
+const wandered = padHarness()
+wandered.tap(1)
+wandered.wait(50)
+wandered.handle.down(2, 500, 500)
+wandered.handle.move(2, 560, 500)
+wandered.handle.up(2)
+wandered.wait(50)
+wandered.tap(3)
+log(
+  wandered.of('dblclick').length === 0,
+  'a slide between two taps moves the cursor, and a tap somewhere else is not the second half of anything'
+)
+wandered.handle.stop()
+
+const thrice = padHarness()
+thrice.tap(1)
+thrice.wait(100)
+thrice.tap(2)
+thrice.wait(100)
+thrice.tap(3)
+const thriceButtons = thrice.sent.filter((f) => f.a !== 'move').map((f) => f.a)
+log(
+  thriceButtons.join(' ') === 'down up dblclick down up',
+  `tap-tap-tap is a double-click and then a click, never a triple (${thriceButtons.join(' ')})`
+)
+thrice.handle.stop()
+
+const heldLong = padHarness()
+heldLong.tap(1)
+heldLong.wait(100)
+heldLong.tap(2, 900)
+log(
+  heldLong.of('dblclick').length === 0 && heldLong.of('down').some((f) => f.button === 'right'),
+  'a second finger that stays down is the hold it always was: a right-click, not a double'
+)
+heldLong.handle.stop()
+
+const padFrames = [...aimed.sent, ...single.sent, ...twice.sent, ...slow.sent, ...wandered.sent, ...thrice.sent, ...heldLong.sent]
+log(
+  padFrames.length > 0 && padFrames.every((frame) => readMirrorInput(frame) !== null),
+  `all ${padFrames.length} frames the trackpad produced are ones the desktop's own validator accepts`
+)
+
+globalThis.setTimeout = realSetTimeout
+globalThis.clearTimeout = realClearTimeout
 
 /* ------------------------------------- 3c. the browser's half of the mapping
 
