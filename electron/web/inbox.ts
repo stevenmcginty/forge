@@ -18,7 +18,7 @@ import { commandExe } from '@shared/agents'
  */
 
 /** Newest this-many files stay. A working day of pastes, not a photo library. */
-export const INBOX_KEEP = 20
+export const INBOX_KEEP = 30
 
 /**
  * What a pane is typed after an image has been saved.
@@ -42,7 +42,28 @@ export function imagePasteIntoPane(
   return { data: `"${path}" `, wantClipboard: false }
 }
 
-const OK_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
+const OK_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
+
+/** Dangerous executable extensions on Windows that should not be dropped into the inbox. */
+export const BLOCKED_FILE_EXTS = new Set([
+  '.exe',
+  '.bat',
+  '.cmd',
+  '.com',
+  '.msi',
+  '.vbs',
+  '.vbe',
+  '.ps1',
+  '.scr',
+  '.pif',
+  '.dll',
+  '.wsf',
+  '.wsh',
+  '.reg',
+  '.hta',
+  '.cpl',
+  '.jar'
+])
 
 export type InboxSave = { ok: true; path: string } | { ok: false; error: string }
 
@@ -56,17 +77,60 @@ export type InboxSave = { ok: true; path: string } | { ok: false; error: string 
 export function saveInboxImage(dir: string, bytes: Uint8Array, ext: string, now = new Date()): InboxSave {
   if (!dir) return { ok: false, error: 'That image could not be saved on the desktop.' }
   if (!bytes.length) return { ok: false, error: 'That image was empty.' }
-  const suffix = sanitiseExt(ext)
+  const suffix = sanitiseImageExt(ext)
   if (!suffix) return { ok: false, error: 'That is not an image this desktop will take.' }
 
   try {
     mkdirSync(dir, { recursive: true })
-    const target = freshPath(dir, stamp(now), suffix)
+    const target = freshImagePath(dir, stamp(now), suffix)
     writeFileSync(target, bytes)
     prune(dir)
     return { ok: true, path: target }
   } catch {
     return { ok: false, error: 'Could not save that image on the desktop.' }
+  }
+}
+
+export function isSafeFileExt(ext: string): boolean {
+  const suffix = ext.startsWith('.') ? ext.toLowerCase() : `.${ext.toLowerCase()}`
+  return suffix.length > 1 && !BLOCKED_FILE_EXTS.has(suffix)
+}
+
+function sanitizeFileName(rawName: string): { base: string; ext: string } {
+  const leaf = rawName.split(/[/\\]/).pop() ?? ''
+  const ext = extname(leaf).toLowerCase()
+  const baseOnly = leaf.slice(0, leaf.length - ext.length)
+  const cleanBase = baseOnly.replace(/[^a-zA-Z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '')
+  return { base: cleanBase || 'file', ext }
+}
+
+/**
+ * Save an uploaded file (PDF, code, doc, data, etc.) to the desktop's inbox.
+ * Preserves a sanitized version of the original name and extension.
+ */
+export function saveInboxFile(
+  dir: string,
+  bytes: Uint8Array,
+  originalName: string,
+  now = new Date()
+): InboxSave {
+  if (!dir) return { ok: false, error: 'That file could not be saved on the desktop.' }
+  if (!bytes.length) return { ok: false, error: 'That file was empty.' }
+
+  const { base, ext } = sanitizeFileName(originalName)
+  if (!ext || !isSafeFileExt(ext)) {
+    return { ok: false, error: 'That file type cannot be saved on the desktop.' }
+  }
+
+  try {
+    mkdirSync(dir, { recursive: true })
+    const stamped = stamp(now)
+    const target = freshFilePath(dir, stamped, base, ext)
+    writeFileSync(target, bytes)
+    prune(dir)
+    return { ok: true, path: target }
+  } catch {
+    return { ok: false, error: 'Could not save that file on the desktop.' }
   }
 }
 
@@ -86,9 +150,9 @@ export function extForMime(mime: string): string {
   }
 }
 
-function sanitiseExt(ext: string): string {
+function sanitiseImageExt(ext: string): string {
   const suffix = ext.startsWith('.') ? ext.toLowerCase() : `.${ext.toLowerCase()}`
-  return OK_EXTS.has(suffix) ? suffix : ''
+  return OK_IMAGE_EXTS.has(suffix) ? suffix : ''
 }
 
 function stamp(date: Date): string {
@@ -99,7 +163,7 @@ function stamp(date: Date): string {
   )
 }
 
-function freshPath(dir: string, stamped: string, ext: string): string {
+function freshImagePath(dir: string, stamped: string, ext: string): string {
   const first = join(dir, `paste-${stamped}${ext}`)
   if (!existsSync(first)) return first
   for (let i = 2; i < 50; i++) {
@@ -107,6 +171,16 @@ function freshPath(dir: string, stamped: string, ext: string): string {
     if (!existsSync(next)) return next
   }
   return join(dir, `paste-${stamped}-${Date.now()}${ext}`)
+}
+
+function freshFilePath(dir: string, stamped: string, base: string, ext: string): string {
+  const first = join(dir, `upload-${stamped}-${base}${ext}`)
+  if (!existsSync(first)) return first
+  for (let i = 2; i < 50; i++) {
+    const next = join(dir, `upload-${stamped}-${base}-${i}${ext}`)
+    if (!existsSync(next)) return next
+  }
+  return join(dir, `upload-${stamped}-${base}-${Date.now()}${ext}`)
 }
 
 function prune(dir: string): void {
@@ -117,7 +191,7 @@ function prune(dir: string): void {
     return
   }
   const files = names
-    .filter((name) => name.startsWith('paste-') && OK_EXTS.has(extname(name).toLowerCase()))
+    .filter((name) => name.startsWith('paste-') || name.startsWith('upload-'))
     .map((name) => join(dir, name))
     .sort()
   const extra = files.length - INBOX_KEEP

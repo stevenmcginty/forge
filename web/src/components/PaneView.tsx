@@ -8,7 +8,8 @@ import { Icon } from '@/components/Icon'
 import { transcriptFor } from '../lib/cache'
 import { applyChatUpdate, EMPTY_CHAT, type ChatFeed } from '../lib/chat-turns'
 import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines } from '@/lib/feed'
-import { imageFilesFromDataTransfer, packImage } from '../lib/image'
+import { allFilesFromDataTransfer, isImageFile, uploadFileChunks } from '../lib/file'
+import { packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 import { publishPaneStatus, publishPaneView, registerPaneViewSetter, type PaneFace } from '../lib/pane-status'
 import type { Transcript } from '@/lib/rich'
@@ -754,23 +755,31 @@ export function PaneView({
    * the desk. xterm only pastes text, which is why Claude Code was answering
    * that it could not take an image: the picture never left this tab.
    */
-  const sendImages = useCallback(
+  const sendFiles = useCallback(
     async (files: File[]) => {
       if (!files.length || !live || !alive || sendingImage.current) return
       sendingImage.current = true
       try {
         for (const file of files) {
           try {
-            const packed = await packImage(file)
-            const result = await actions.request({
-              kind: 'paste-image',
-              sessionId: leaf.id,
-              mime: packed.mime,
-              data: packed.data
-            })
-            if (result.kind === 'failed') actions.setNotice(result.message)
+            if (isImageFile(file)) {
+              try {
+                const packed = await packImage(file)
+                const result = await actions.request({
+                  kind: 'paste-image',
+                  sessionId: leaf.id,
+                  mime: packed.mime,
+                  data: packed.data
+                })
+                if (result.kind === 'failed') actions.setNotice(result.message)
+                continue
+              } catch {
+                // If downscaling failed, fall back to chunked file upload
+              }
+            }
+            await uploadFileChunks(file, leaf.id, actions.request)
           } catch (err) {
-            actions.setNotice(err instanceof Error ? err.message : 'That image could not be sent.')
+            actions.setNotice(err instanceof Error ? err.message : `Could not send "${file.name}".`)
           }
         }
       } finally {
@@ -802,11 +811,11 @@ export function PaneView({
     if (!holder || cached || !live) return
 
     const onPaste = (event: ClipboardEvent): void => {
-      const files = imageFilesFromDataTransfer(event.clipboardData)
+      const files = allFilesFromDataTransfer(event.clipboardData)
       if (!files.length) return
       event.preventDefault()
       event.stopPropagation()
-      void sendImages(files)
+      void sendFiles(files)
     }
     const onDragOver = (event: DragEvent): void => {
       const types = event.dataTransfer ? [...event.dataTransfer.types] : []
@@ -815,11 +824,11 @@ export function PaneView({
       event.dataTransfer!.dropEffect = 'copy'
     }
     const onDrop = (event: DragEvent): void => {
-      const files = imageFilesFromDataTransfer(event.dataTransfer)
+      const files = allFilesFromDataTransfer(event.dataTransfer)
       if (!files.length) return
       event.preventDefault()
       event.stopPropagation()
-      void sendImages(files)
+      void sendFiles(files)
     }
 
     holder.addEventListener('paste', onPaste, true)
@@ -830,7 +839,7 @@ export function PaneView({
       holder.removeEventListener('dragover', onDragOver)
       holder.removeEventListener('drop', onDrop)
     }
-  }, [cached, live, sendImages])
+  }, [cached, live, sendFiles])
 
   return (
     <section

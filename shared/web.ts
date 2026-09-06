@@ -444,6 +444,22 @@ export const MAX_FRAME_BYTES = 192 * 1024
  */
 export const MAX_IMAGE_BASE64 = 48 * 1024
 
+/**
+ * Maximum total bytes for a file uploaded from the browser (50 MB).
+ */
+export const MAX_FILE_BYTES = 50 * 1024 * 1024
+
+/**
+ * Raw byte size of each file upload chunk (64 KB).
+ * In base64 this is ~86 KB, which fits comfortably inside MAX_FRAME_BYTES (192 KB).
+ */
+export const MAX_FILE_CHUNK_BYTES = 64 * 1024
+
+/**
+ * Maximum base64 payload length of a single file chunk frame (~96 KB).
+ */
+export const MAX_FILE_CHUNK_BASE64 = 96 * 1024
+
 /** Image types a `paste-image` request may name. Anything else is `bad-frame`. */
 export const WEB_IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
 
@@ -1057,6 +1073,24 @@ export type WebRequest =
    * file off this disk, the way it already does for a dropped shot.
    */
   | { kind: 'paste-image'; sessionId: string; mime: string; data: string }
+  /**
+   * A chunk of a file uploaded from the browser (e.g. PDF, doc, source code, data).
+   * Files are sent in chunks up to MAX_FILE_CHUNK_BYTES so any file up to
+   * MAX_FILE_BYTES fits across MAX_FRAME_BYTES without WebSocket payload errors.
+   *
+   * On the final chunk (index === totalChunks - 1), the desktop reassembles the file,
+   * saves it to the web-inbox folder, and types the quoted path into the pane.
+   */
+  | {
+      kind: 'upload-file'
+      uploadId: string
+      sessionId: string
+      name: string
+      mime?: string
+      index: number
+      totalChunks: number
+      data: string
+    }
   /**
    * "Notify this browser when a pane needs me." The subscription is the object
    * `PushSubscription.toJSON()` returns; the desktop stores it beside its VAPID

@@ -13,7 +13,7 @@ import { Icon } from '@/components/Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from '@/components/Popover'
 import type { ClaudePermissionMode } from '@shared/types'
 import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
-import { imageFilesFromDataTransfer, isImageFile } from '../lib/image'
+import { allFilesFromDataTransfer, formatFileSize, isImageFile } from '../lib/file'
 import { useMobile } from '../lib/mobile'
 
 /**
@@ -236,8 +236,7 @@ export function Composer({
   }, [draft])
 
   const addFiles = useCallback((incoming: File[]) => {
-    const images = incoming.filter(isImageFile)
-    if (images.length) setFiles((current) => [...current, ...images])
+    if (incoming.length) setFiles((current) => [...current, ...incoming])
   }, [])
 
   const hasDraft = draft.trim().length > 0 || files.length > 0
@@ -275,10 +274,10 @@ export function Composer({
   }
 
   const onPaste = (event: ClipboardEvent<HTMLFormElement>): void => {
-    const images = imageFilesFromDataTransfer(event.clipboardData)
-    if (!images.length) return
+    const pasted = allFilesFromDataTransfer(event.clipboardData)
+    if (!pasted.length) return
     event.preventDefault()
-    addFiles(images)
+    addFiles(pasted)
   }
 
   const placeholder = disabled ? disabledReason : to ? `Message ${to}` : 'Write a message'
@@ -450,8 +449,11 @@ export function Composer({
               <Icon name="camera" size={16} />
             </FilePick>
           ) : null}
-          <FilePick label="Add an image" disabled={disabled} onFiles={addFiles}>
-            {mobile ? <GalleryGlyph /> : <Icon name="camera" size={16} />}
+          <FilePick label="Add an image" disabled={disabled} onFiles={addFiles} accept="image/*">
+            <GalleryGlyph />
+          </FilePick>
+          <FilePick label="Add a file" disabled={disabled} onFiles={addFiles} accept="*/*">
+            <Icon name="file" size={16} />
           </FilePick>
           <div className="composer__keys" role="toolbar" aria-label="Terminal keys">
             <Key label="←" onClick={() => onRaw('\x1b[D')} disabled={disabled} title="Left" />
@@ -487,23 +489,35 @@ export function Composer({
 /* ------------------------------------------------------------- attachments */
 
 function Attachments({ files, onRemove }: { files: File[]; onRemove: (index: number) => void }): ReactNode {
-  const urls = useMemo(() => files.map((file) => URL.createObjectURL(file)), [files])
-  useEffect(() => () => urls.forEach((url) => URL.revokeObjectURL(url)), [urls])
+  const urls = useMemo(() => files.map((file) => (isImageFile(file) ? URL.createObjectURL(file) : '')), [files])
+  useEffect(() => () => urls.forEach((url) => (url ? URL.revokeObjectURL(url) : undefined)), [urls])
   return (
-    <div className="composer__attach" role="list" aria-label="Images to send">
-      {files.map((file, i) => (
-        <div className="composer__thumb" role="listitem" key={`${file.name}-${file.lastModified}-${i}`}>
-          <img src={urls[i]} alt={file.name} />
-          <button
-            type="button"
-            className="composer__thumb-x"
-            aria-label={`Remove ${file.name}`}
-            onClick={() => onRemove(i)}
-          >
-            <Icon name="close" size={11} />
-          </button>
-        </div>
-      ))}
+    <div className="composer__attach" role="list" aria-label="Attachments to send">
+      {files.map((file, i) => {
+        const isImg = isImageFile(file)
+        const ext = file.name.split('.').pop()?.toUpperCase() ?? 'FILE'
+        return (
+          <div className="composer__thumb" role="listitem" key={`${file.name}-${file.lastModified}-${i}`}>
+            {isImg && urls[i] ? (
+              <img src={urls[i]} alt={file.name} />
+            ) : (
+              <div className="composer__thumb-doc" title={`${file.name} (${formatFileSize(file.size)})`}>
+                <Icon name="file" size={20} />
+                <span className="composer__thumb-ext">{ext}</span>
+                <span className="composer__thumb-name">{file.name}</span>
+              </div>
+            )}
+            <button
+              type="button"
+              className="composer__thumb-x"
+              aria-label={`Remove ${file.name}`}
+              onClick={() => onRemove(i)}
+            >
+              <Icon name="close" size={11} />
+            </button>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -512,12 +526,14 @@ function FilePick({
   label,
   disabled,
   capture,
+  accept = 'image/*',
   onFiles,
   children
 }: {
   label: string
   disabled: boolean
   capture?: boolean
+  accept?: string
   onFiles: (files: File[]) => void
   children: ReactNode
 }): ReactNode {
@@ -534,7 +550,7 @@ function FilePick({
       <input
         className="composer__file"
         type="file"
-        accept="image/*"
+        accept={accept}
         multiple={!capture}
         capture={capture ? 'environment' : undefined}
         disabled={disabled}

@@ -4,6 +4,8 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import {
   HEARTBEAT_GRACE_MS,
   HEARTBEAT_MS,
+  MAX_FILE_BYTES,
+  MAX_FILE_CHUNK_BASE64,
   MAX_FRAME_BYTES,
   MAX_IMAGE_BASE64,
   MAX_INPUT_PER_SECOND,
@@ -359,6 +361,14 @@ export interface WebServerHost {
     bytes: Uint8Array,
     ext: string
   ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>
+  /**
+   * Save an uploaded file (PDF, code, doc, data, etc.) onto this machine so a pane
+   * can be handed its path.
+   */
+  saveInboxFile?: (
+    bytes: Uint8Array,
+    originalName: string
+  ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>
 
   /* ---------------------------------------------------- the chat transcript
    *
@@ -680,6 +690,17 @@ export class WebServer {
    * gets an honest answer rather than the last watch's silence.
    */
   private refusedControl = false
+  private pendingUploads = new Map<
+    string,
+    {
+      name: string
+      sessionId: string
+      totalChunks: number
+      chunks: Buffer[]
+      totalBytes: number
+      updatedAt: number
+    }
+  >()
 
   constructor(host: WebServerHost) {
     this.host = host
@@ -816,6 +837,7 @@ export class WebServer {
     if (notice) this.pushShutdown(notice)
     for (const client of [...this.clients]) this.drop(client, CLOSE_GOING_AWAY, 'Server stopping')
     this.clients.clear()
+    this.pendingUploads.clear()
     // Whoever was watching is not watching any more. Said explicitly rather
     // than left to the drops above, because a screen capture that outlives the
     // server relaying it is a desktop being encoded for nobody — and on this
@@ -1980,6 +2002,108 @@ export class WebServer {
             failed('unknown-session', 'That pane is gone — the image was saved but nothing was typed.')
             return
           }
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'upload-file': {
+          if (!this.host.saveInboxFile) {
+            failed('unsupported', 'This Forge cannot take a file from a browser.')
+            return
+          }
+          const id = wireString(request.sessionId, 128)
+          if (!id || !this.host.sessions().some((s) => s.id === id)) {
+            failed('unknown-session', 'That pane is gone.')
+            return
+          }
+          const uploadId = wireString(request.uploadId, 64)
+          if (!uploadId) {
+            failed('bad-frame', 'That upload had no id.')
+            return
+          }
+          const name = wireString(request.name, 256)
+          if (!name) {
+            failed('bad-frame', 'That file had no name.')
+            return
+          }
+          const index = typeof request.index === 'number' && Number.isInteger(request.index) ? request.index : -1
+          const totalChunks =
+            typeof request.totalChunks === 'number' && Number.isInteger(request.totalChunks) ? request.totalChunks : 0
+          if (totalChunks < 1 || totalChunks > 2000 || index < 0 || index >= totalChunks) {
+            failed('bad-frame', 'Invalid chunk index or total.')
+            return
+          }
+          const data = typeof request.data === 'string' ? request.data.trim() : ''
+          if (data.length > MAX_FILE_CHUNK_BASE64) {
+            failed('limit', 'That chunk was too large.')
+            return
+          }
+          if (data && !/^[A-Za-z0-9+/]+=*$/.test(data)) {
+            failed('bad-frame', 'That chunk could not be read.')
+            return
+          }
+
+          const now = Date.now()
+          for (const [k, v] of this.pendingUploads) {
+            if (now - v.updatedAt > 60_000) this.pendingUploads.delete(k)
+          }
+
+          let pending = this.pendingUploads.get(uploadId)
+          if (!pending) {
+            pending = {
+              name,
+              sessionId: id,
+              totalChunks,
+              chunks: new Array<Buffer>(totalChunks),
+              totalBytes: 0,
+              updatedAt: now
+            }
+            this.pendingUploads.set(uploadId, pending)
+          }
+
+          const chunkBytes = Buffer.from(data, 'base64')
+          pending.totalBytes += chunkBytes.length
+          if (pending.totalBytes > MAX_FILE_BYTES) {
+            this.pendingUploads.delete(uploadId)
+            failed('limit', 'That file is too large to send.')
+            return
+          }
+          pending.chunks[index] = chunkBytes
+          pending.updatedAt = Date.now()
+
+          if (index < totalChunks - 1) {
+            answer({ kind: 'ok' })
+            return
+          }
+
+          for (let i = 0; i < totalChunks; i++) {
+            if (!pending.chunks[i]) {
+              this.pendingUploads.delete(uploadId)
+              failed('bad-frame', `Missing chunk ${i} of ${totalChunks}.`)
+              return
+            }
+          }
+
+          const allBytes = Buffer.concat(pending.chunks)
+          this.pendingUploads.delete(uploadId)
+
+          if (!allBytes.length) {
+            failed('bad-frame', 'That file was empty.')
+            return
+          }
+
+          const saved = await this.host.saveInboxFile(allBytes, name)
+          if (!saved.ok) {
+            failed('failed', saved.error)
+            return
+          }
+
+          const typed = `"${saved.path}" `
+          if (!this.host.write(id, typed, client.viewer)) {
+            failed('unknown-session', 'That pane is gone — the file was saved but nothing was typed.')
+            return
+          }
+
           answer({ kind: 'ok' })
           return
         }

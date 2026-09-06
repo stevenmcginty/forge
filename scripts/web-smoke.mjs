@@ -190,6 +190,9 @@ async function main() {
     DESK_VIEWER,
     hashPin,
     saveInboxImage,
+    saveInboxFile,
+    BLOCKED_FILE_EXTS,
+    isSafeFileExt,
     imagePasteIntoPane,
     GROK_IMAGE_PASTE,
     INBOX_KEEP,
@@ -202,6 +205,9 @@ async function main() {
     webSocketUrl,
     HEARTBEAT_GRACE_MS,
     HEARTBEAT_MS,
+    MAX_FILE_BYTES,
+    MAX_FILE_CHUNK_BASE64,
+    MAX_FILE_CHUNK_BYTES,
     MAX_FRAME_BYTES,
     MAX_IMAGE_BASE64,
     MAX_INPUT_PER_SECOND,
@@ -451,6 +457,7 @@ async function main() {
         return manager.write(id, data)
       },
       saveInboxImage: async (bytes, ext) => saveInboxImage(inboxDir, bytes, ext),
+      saveInboxFile: async (bytes, name) => saveInboxFile(inboxDir, bytes, name),
       offerClipboardImage: (bytes) => {
         clipboardOffers.push(Buffer.from(bytes))
         return true
@@ -618,8 +625,22 @@ async function main() {
     const at = new Date(Date.UTC(2026, 0, 1, 0, 0, i))
     saveInboxImage(inboxProbe, pixelBytes, '.png', at)
   }
-  const kept = readdirSync(inboxProbe).filter((n) => n.startsWith('paste-'))
+  const kept = readdirSync(inboxProbe).filter((n) => n.startsWith('paste-') || n.startsWith('upload-'))
   log(kept.length === INBOX_KEEP, `the inbox prunes back to INBOX_KEEP (${INBOX_KEEP}), so a working day of pastes is not a photo library`)
+
+  const samplePdfBytes = Buffer.from('%PDF-1.4 sample pdf content')
+  const fileSave = saveInboxFile(inboxProbe, samplePdfBytes, 'harness_spec.pdf', new Date(2026, 7, 20, 15, 30, 12))
+  log(
+    fileSave.ok && existsSync(fileSave.path) && fileSave.path.endsWith('upload-20260820-153012-harness_spec.pdf'),
+    'an uploaded pdf lands as a stamped file with its sanitized name and extension in the inbox'
+  )
+  log(
+    fileSave.ok && readFileSync(fileSave.path).equals(samplePdfBytes),
+    'and the pdf bytes on disk match the bytes that were uploaded'
+  )
+  log(!saveInboxFile(inboxProbe, new Uint8Array(), 'test.pdf').ok, 'an empty file is refused rather than written')
+  log(!saveInboxFile(inboxProbe, samplePdfBytes, 'malicious.exe').ok, 'an executable file is refused rather than written')
+  log(!saveInboxFile(inboxProbe, samplePdfBytes, 'script.bat').ok, 'a batch file is refused rather than written')
 
   /* ------------------------------------- 15. the address the browser dials */
 
@@ -1202,6 +1223,84 @@ async function main() {
     `a payload over MAX_IMAGE_BASE64 (${MAX_IMAGE_BASE64}) is limit, and the socket stays up`
   )
   log(browser.closed === null, 'and the oversize image did not hang up the socket')
+
+  /* ------------------------------------------ an uploaded file becomes a path */
+
+  const pdfBase64 = Buffer.from('%PDF-1.4 report payload').toString('base64')
+  browser.send({
+    type: 'request',
+    rid: 'r-file-1',
+    body: {
+      kind: 'upload-file',
+      uploadId: 'up-test-1',
+      sessionId: 'w1',
+      name: 'harness_report.pdf',
+      mime: 'application/pdf',
+      index: 0,
+      totalChunks: 2,
+      data: pdfBase64.slice(0, 10)
+    }
+  })
+  await waitFor(() => browser.result('r-file-1'), 5000, 'the upload-file chunk 1 result')
+  log(browser.result('r-file-1').body.kind === 'ok', 'chunk 1 of 2 is accepted')
+
+  browser.send({
+    type: 'request',
+    rid: 'r-file-2',
+    body: {
+      kind: 'upload-file',
+      uploadId: 'up-test-1',
+      sessionId: 'w1',
+      name: 'harness_report.pdf',
+      mime: 'application/pdf',
+      index: 1,
+      totalChunks: 2,
+      data: pdfBase64.slice(10)
+    }
+  })
+  await waitFor(() => browser.result('r-file-2'), 5000, 'the upload-file chunk 2 result')
+  log(browser.result('r-file-2').body.kind === 'ok', 'chunk 2 of 2 finishes upload and is answered ok')
+  const filePasted = writes.at(-1)
+  log(
+    filePasted?.id === 'w1' &&
+      typeof filePasted?.data === 'string' &&
+      filePasted.data.startsWith('"') &&
+      filePasted.data.includes('upload-') &&
+      filePasted.data.endsWith('harness_report.pdf" '),
+    'and the quoted path to the uploaded pdf is typed into the pane'
+  )
+
+  browser.send({
+    type: 'request',
+    rid: 'r-file-exe',
+    body: {
+      kind: 'upload-file',
+      uploadId: 'up-bad-exe',
+      sessionId: 'w1',
+      name: 'malicious.exe',
+      index: 0,
+      totalChunks: 1,
+      data: Buffer.from('binary').toString('base64')
+    }
+  })
+  await waitFor(() => browser.result('r-file-exe'), 5000, 'the blocked exe upload')
+  log(browser.result('r-file-exe').body.code === 'failed', 'an executable file upload is refused with failed')
+
+  browser.send({
+    type: 'request',
+    rid: 'r-file-gone',
+    body: {
+      kind: 'upload-file',
+      uploadId: 'up-gone',
+      sessionId: 'never-existed',
+      name: 'doc.pdf',
+      index: 0,
+      totalChunks: 1,
+      data: pdfBase64
+    }
+  })
+  await waitFor(() => browser.result('r-file-gone'), 5000, 'the unknown-session upload')
+  log(browser.result('r-file-gone').body.code === 'unknown-session', 'an upload aimed at a gone pane is unknown-session')
 
   /* ------------------------------------------ 6c. foreman, from a browser
    *

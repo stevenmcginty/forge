@@ -3221,6 +3221,52 @@ button.astatus__mode:not(:disabled):hover {
   border-radius: inherit;
 }
 
+.composer__thumb-doc {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: var(--s-1);
+  border-radius: inherit;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  text-align: center;
+  user-select: none;
+}
+
+.composer__thumb-doc svg {
+  flex: none;
+  color: var(--accent-text);
+  margin-bottom: 2px;
+}
+
+.composer__thumb-ext {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-primary);
+  line-height: 1;
+  text-transform: uppercase;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer__thumb-name {
+  font-size: 8px;
+  color: var(--text-muted);
+  line-height: 1.1;
+  max-width: 54px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
 .composer__thumb-x {
   position: absolute;
   top: -7px;

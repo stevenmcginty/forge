@@ -16,6 +16,7 @@ import {
   tabsToPermissionMode
 } from '@shared/agents'
 import { isShellProfile, resolveProfile } from '@/lib/agents'
+import { isImageFile, uploadFileChunks } from '../lib/file'
 import { packImage } from '../lib/image'
 import { requestPaneView, usePaneStatus, usePaneView, type PaneFace } from '../lib/pane-status'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
@@ -59,7 +60,7 @@ export function SessionComposer(): ReactNode {
   const workspace = useWorkspace()
   const profiles = useProfiles()
   const [draft, setDraft] = useState('')
-  const sendingImage = useRef(false)
+  const sendingFiles = useRef(false)
 
   const offline = state.stage.kind === 'offline'
   const live = !offline && state.connection.state === 'live'
@@ -73,27 +74,35 @@ export function SessionComposer(): ReactNode {
   const view = usePaneView(paneId)
   const project = state.picture?.projects?.find((p) => p.id === state.projectId)?.name ?? ''
 
-  const sendImages = useCallback(
+  const sendFiles = useCallback(
     async (files: File[]) => {
-      if (!files.length || !canType || !paneId || sendingImage.current) return
-      sendingImage.current = true
+      if (!files.length || !canType || !paneId || sendingFiles.current) return
+      sendingFiles.current = true
       try {
         for (const file of files) {
           try {
-            const packed = await packImage(file)
-            const result = await actions.request({
-              kind: 'paste-image',
-              sessionId: paneId,
-              mime: packed.mime,
-              data: packed.data
-            })
-            if (result.kind === 'failed') actions.setNotice(result.message)
+            if (isImageFile(file)) {
+              try {
+                const packed = await packImage(file)
+                const result = await actions.request({
+                  kind: 'paste-image',
+                  sessionId: paneId,
+                  mime: packed.mime,
+                  data: packed.data
+                })
+                if (result.kind === 'failed') actions.setNotice(result.message)
+                continue
+              } catch {
+                // If downscaling failed, fall back to chunked file upload
+              }
+            }
+            await uploadFileChunks(file, paneId, actions.request)
           } catch (err) {
-            actions.setNotice(err instanceof Error ? err.message : 'That image could not be sent.')
+            actions.setNotice(err instanceof Error ? err.message : `Could not send "${file.name}".`)
           }
         }
       } finally {
-        sendingImage.current = false
+        sendingFiles.current = false
       }
     },
     [actions, canType, paneId]
@@ -104,14 +113,14 @@ export function SessionComposer(): ReactNode {
   }, [actions, canType, paneId])
 
   const sendDraft = useCallback(
-    async (images: File[]) => {
+    async (files: File[]) => {
       if (!canType || !paneId) return
       const text = draft.replace(/\s+$/, '')
-      if (!text && !images.length) return
-      // Images first: the TUI takes each as a paste into its own box, and the
+      if (!text && !files.length) return
+      // Attachments first: the TUI takes each as a paste into its own box, and the
       // words after it become the message that refers to them.
-      if (images.length) {
-        await sendImages(images)
+      if (files.length) {
+        await sendFiles(files)
         // The TUI is still taking the pasted path into its box; words landing
         // in the same instant get folded into that paste.
         await pause(SETTLE_AFTER_IMAGE_MS)
@@ -132,7 +141,7 @@ export function SessionComposer(): ReactNode {
       }
       takePane()
     },
-    [actions, canType, draft, paneId, sendImages, takePane]
+    [actions, canType, draft, paneId, sendFiles, takePane]
   )
 
   const sendRaw = useCallback(
@@ -281,7 +290,7 @@ export function SessionComposer(): ReactNode {
         disabledReason={reason}
         to={to}
         onDraft={setDraft}
-        onSend={(images) => void sendDraft(images)}
+        onSend={(files) => void sendDraft(files)}
         onRaw={sendRaw}
         models={roster}
         currentModelId={currentModelId}

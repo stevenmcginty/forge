@@ -25,7 +25,7 @@ export { DESK_VIEWER, GridOwners } from '../../electron/pty/grid-owner'
 // with exactly what `web:pin-set` would write rather than with a fixture that
 // could keep passing after the stored form moved.
 export { hashPin } from '../../electron/web/pin'
-export { GROK_IMAGE_PASTE, INBOX_KEEP, imagePasteIntoPane, saveInboxImage } from '../../electron/web/inbox'
+export { GROK_IMAGE_PASTE, INBOX_KEEP, imagePasteIntoPane, saveInboxImage, saveInboxFile, BLOCKED_FILE_EXTS, isSafeFileExt } from '../../electron/web/inbox'
 export {
   planPointerDelta,
   planTouchScroll,
@@ -38,6 +38,9 @@ export {
 export {
   HEARTBEAT_GRACE_MS,
   HEARTBEAT_MS,
+  MAX_FILE_BYTES,
+  MAX_FILE_CHUNK_BASE64,
+  MAX_FILE_CHUNK_BYTES,
   MAX_FRAME_BYTES,
   MAX_IMAGE_BASE64,
   MAX_INPUT_PER_SECOND,
