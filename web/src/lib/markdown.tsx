@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 
 /**
  * Markdown, hand-rolled, for the chat transcript.
@@ -80,18 +80,7 @@ function parseBlocks(lines: string[]): ReactNode[] {
         body.push(lines[i]!)
         i += 1
       }
-      out.push(
-        <div key={key++} className="md__codeblock">
-          {lang ? (
-            <span className="md__lang" aria-hidden>
-              {lang}
-            </span>
-          ) : null}
-          <pre className="md__code">
-            <code>{body.join('\n')}</code>
-          </pre>
-        </div>
-      )
+      out.push(<CodeBlock key={key++} lang={lang} code={body.join('\n')} />)
       continue
     }
 
@@ -293,3 +282,39 @@ function parseInline(text: string, depth = 0): ReactNode {
   if (last < text.length) out.push(text.slice(last))
   return out.length === 1 ? out[0] : <Fragment>{out}</Fragment>
 }
+
+function CodeBlock({ lang, code }: { lang: string; code: string }): ReactNode {
+  const [copied, setCopied] = useState(false)
+  const onCopy = () => {
+    void navigator.clipboard?.writeText(code).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <div className="md__codeblock">
+      <div className="md__code-header">
+        {lang ? (
+          <span className="md__lang" aria-hidden>
+            {lang}
+          </span>
+        ) : (
+          <span />
+        )}
+        <button
+          type="button"
+          className="md__copy-btn"
+          title="Copy code"
+          aria-label="Copy code"
+          onClick={onCopy}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <pre className="md__code">
+        <code>{code}</code>
+      </pre>
+    </div>
+  )
+}
+

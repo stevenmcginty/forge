@@ -522,6 +522,15 @@ export function PaneView({
     if (chatFeed.turns.length > 0) return chatFeed.turns
     return screenTurns(transcript.blocks)
   }, [chatFeed.turns, transcript.blocks])
+
+  const lastTurn = effectiveTurns.length > 0 ? effectiveTurns[effectiveTurns.length - 1] : null
+  const lastTurnIsUser = lastTurn?.role === 'user'
+  const lastTurnIsThinkingOnly =
+    lastTurn?.role === 'assistant' && !lastTurn.blocks.some((b) => b.kind === 'text')
+  const isAwaiting = Boolean(live && alive && (lastTurnIsUser || lastTurnIsThinkingOnly))
+  const isChatBusy = Boolean(live && (transcript.status.busy || isAwaiting))
+  const chatActivity = transcript.status.activity || (isAwaiting ? 'Thinking' : undefined)
+
   /**
    * Screen-read turns have no file to say what the agent is doing or how much
    * of its plan is left, so the chat is told what the parser lifted off the
@@ -992,8 +1001,8 @@ export function PaneView({
             <ChatView
               turns={effectiveTurns}
               truncated={chatFeed.truncated}
-              busy={live && transcript.status.busy}
-              activity={transcript.status.activity}
+              busy={isChatBusy}
+              activity={chatActivity}
               quota={screenRead ? transcript.status.quota : undefined}
               agentName={profile?.name}
             />

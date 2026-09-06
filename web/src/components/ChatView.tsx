@@ -200,6 +200,8 @@ export function ChatView({
 // Turns are immutable by id — the transcript only ever appends or resets — so
 // a memo on the object is all 500 turns need to stay cheap.
 const Turn = memo(function Turn({ turn, agentName }: { turn: ChatTurn; agentName?: string }): ReactNode {
+  const [copied, setCopied] = useState(false)
+
   if (turn.role === 'user') {
     return (
       <li className="chatview__turn" data-role="user">
@@ -221,9 +223,21 @@ const Turn = memo(function Turn({ turn, agentName }: { turn: ChatTurn; agentName
     )
   }
 
-  // Assistant turn: omit thinking blocks so the view feels like a clean messenger chat.
-  const visibleBlocks = turn.blocks.filter((b) => b.kind !== 'thinking')
-  if (visibleBlocks.length === 0) return null
+  // Assistant turn: only render if there are text or tool blocks (if it is only thinking, it is handled by the Working indicator)
+  const hasContent = turn.blocks.some((b) => b.kind === 'text' || b.kind === 'tool')
+  if (!hasContent) return null
+
+  const onCopy = () => {
+    const text = turn.blocks
+      .filter((b): b is Extract<ChatBlock, { kind: 'text' }> => b.kind === 'text')
+      .map((b) => b.text)
+      .join('\n\n')
+    if (!text) return
+    void navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
 
   return (
     <li className="chatview__turn" data-role="assistant">
@@ -234,9 +248,19 @@ const Turn = memo(function Turn({ turn, agentName }: { turn: ChatTurn; agentName
           </span>
           <span className="chatview__agent-name">{agentName ?? 'Assistant'}</span>
           {turn.clock ? <span className="chatview__agent-clock">{turn.clock}</span> : null}
+          <button
+            type="button"
+            className="chatview__copy-btn"
+            title="Copy message"
+            aria-label="Copy message"
+            onClick={onCopy}
+          >
+            <Icon name={copied ? 'check' : 'clipboard'} size={11} />
+            <span>{copied ? 'Copied' : 'Copy'}</span>
+          </button>
         </div>
         <div className="chatview__agent-bubble">
-          {visibleBlocks.map((block, i) => (
+          {turn.blocks.map((block, i) => (
             <Piece key={i} block={block} />
           ))}
         </div>
@@ -250,11 +274,44 @@ function Piece({ block }: { block: ChatBlock }): ReactNode {
     case 'text':
       return <div className="chatview__prose">{renderMarkdown(block.text)}</div>
     case 'thinking':
-      // "You don't have to have all the thinking" — omitted
-      return null
+      return block.text ? <ThoughtChip text={block.text} /> : null
     case 'tool':
       return <ToolChip name={block.name} gist={block.gist} note={block.note} failed={block.failed} />
   }
+}
+
+function ThoughtChip({ text }: { text: string }): ReactNode {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="chatview__thought" data-open={open ? 'true' : 'false'}>
+      <button
+        type="button"
+        className="chatview__thought-head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="chatview__thought-caret" aria-hidden>
+          <svg
+            width="9"
+            height="9"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M6 3.5L10.5 8 6 12.5" />
+          </svg>
+        </span>
+        <span className="chatview__thought-icon" aria-hidden="true">
+          <Icon name="sparkle" size={11} />
+        </span>
+        <span className="chatview__thought-label">{open ? 'Thinking process' : 'Thought for a moment'}</span>
+      </button>
+      {open ? <div className="chatview__thought-body">{text}</div> : null}
+    </div>
+  )
 }
 
 /* -------------------------------------------------------------- tool chips */
