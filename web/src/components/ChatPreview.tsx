@@ -73,7 +73,7 @@ export function ChatPreview(): ReactNode {
         </div>
       </div>
       <div className="chatpreview__stage">
-        <ChatView turns={turns} truncated busy={busy} />
+        <ChatView turns={turns} truncated busy={busy} agentName={CLAUDE.name} />
       </div>
     </div>
   )

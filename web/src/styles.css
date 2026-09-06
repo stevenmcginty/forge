@@ -1747,9 +1747,9 @@ body {
 }
 
 .app[data-shell='app']:not([data-mobile]) .composer__card {
-  max-width: 920px;
+  max-width: 900px;
   margin: 0 auto;
-  padding: var(--s-4) var(--s-5);
+  padding: 12px 16px 10px;
 }
 
 .app[data-shell='app']:not([data-mobile]) .composer__input {
@@ -3093,40 +3093,38 @@ button.astatus__mode:not(:disabled):hover {
   width: 100%;
   max-width: 900px;
   margin: 0 auto;
-  padding: var(--s-4) var(--s-6) calc(var(--s-6) + env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px));
+  padding: var(--s-3) var(--s-6) calc(var(--s-5) + env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px));
 }
 
 .composer__card {
   display: flex;
   flex-direction: column;
-  gap: var(--s-2);
-  padding: var(--s-4) var(--s-4) var(--s-4);
-  background: color-mix(in srgb, var(--bg-panel-raised) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--line-strong) 85%, var(--line-hairline));
-  border-radius: 22px;
+  gap: 6px;
+  padding: 12px 14px 10px;
+  background: color-mix(in srgb, var(--bg-panel-raised) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 70%, var(--line-hairline));
+  border-radius: 26px;
   box-shadow:
-    var(--shadow-card),
-    0 8px 32px rgba(0, 0, 0, 0.28),
-    var(--shadow-inset-top);
-  backdrop-filter: blur(24px) saturate(1.6);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    0 4px 20px rgba(0, 0, 0, 0.16),
+    0 1px 3px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(28px) saturate(1.8);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
   transition:
     border-color var(--dur-med) var(--ease-out),
     box-shadow var(--dur-med) var(--ease-out),
     background var(--dur-med) var(--ease-out);
 }
 
-/* The lit edge: the accent rises into the border, and a 1px ring outside it
- * doubles the line without the halo a web form wears. */
+/* The lit edge: the accent rises into the border, and a luminous ring outside it */
 .composer__card:focus-within {
-  border-color: color-mix(in srgb, var(--feed-accent) 62%, var(--line-strong));
-  background: color-mix(in srgb, var(--bg-panel-raised) 94%, transparent);
+  border-color: color-mix(in srgb, var(--feed-accent) 60%, var(--line-strong));
+  background: color-mix(in srgb, var(--bg-panel-raised) 96%, transparent);
   box-shadow:
-    var(--shadow-card),
-    0 12px 36px rgba(0, 0, 0, 0.34),
-    0 0 0 1px color-mix(in srgb, var(--feed-accent) 28%, transparent),
-    0 0 24px color-mix(in srgb, var(--feed-accent) 12%, transparent),
-    var(--shadow-inset-top);
+    0 10px 36px rgba(0, 0, 0, 0.28),
+    0 0 0 1px color-mix(in srgb, var(--feed-accent) 32%, transparent),
+    0 0 24px color-mix(in srgb, var(--feed-accent) 14%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .composer[data-disabled='true'] .composer__card {
@@ -3138,21 +3136,17 @@ button.astatus__mode:not(:disabled):hover {
 .composer__input {
   width: 100%;
   min-height: 44px;
-  padding: 9px var(--s-4) 5px;
+  padding: 8px 12px 4px;
   resize: none;
   overflow-y: hidden;
   font: inherit;
   font-size: 15px;
-  line-height: 1.45;
+  line-height: 1.5;
   letter-spacing: var(--tracking-tight);
   color: var(--text-primary);
   background: transparent;
   border: 0;
   caret-color: var(--feed-accent);
-  /* The box follows the words: Composer.tsx sets the height per keystroke.
-   * No transition on it: the feed above reflows for every frame of one, and
-   * on a phone that is a hitch under the thumb. */
-  /* Native selection / long-press paste. Do not inherit xterm's user-select. */
   user-select: text;
   -webkit-user-select: text;
 }
@@ -3174,8 +3168,8 @@ button.astatus__mode:not(:disabled):hover {
 
 .composer__attach {
   display: flex;
-  gap: var(--s-4);
-  padding: var(--s-3) var(--s-3) var(--s-1);
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3) var(--s-1);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -3189,7 +3183,7 @@ button.astatus__mode:not(:disabled):hover {
   flex: none;
   width: 64px;
   height: 64px;
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   border: 1px solid var(--line-strong);
   overflow: visible;
   background: var(--bg-sunken);
@@ -3302,22 +3296,22 @@ button.astatus__mode:not(:disabled):hover {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--s-2);
-  padding: 0;
+  gap: 6px;
+  padding: 2px 4px 0;
 }
 
 .composer__pick {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   flex: none;
-  height: 28px;
-  padding: 0 8px 0 11px;
+  height: 26px;
+  padding: 0 10px 0 11px;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--bg-hover) 80%, transparent);
-  border: 1px solid var(--line-hairline);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent);
   color: var(--text-secondary);
-  font: 600 var(--t-sm) / 1 var(--font-ui);
+  font: 500 12px / 1 var(--font-ui);
   letter-spacing: 0.01em;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -3331,8 +3325,8 @@ button.astatus__mode:not(:disabled):hover {
 
 .composer__pick:hover:not(:disabled) {
   color: var(--text-primary);
-  background: var(--bg-active);
-  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--text-primary) 11%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 20%, transparent);
 }
 
 .composer__pick:active:not(:disabled) {
@@ -3340,7 +3334,7 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 .composer__pick:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: default;
 }
 
@@ -3348,6 +3342,7 @@ button.astatus__mode:not(:disabled):hover {
   color: var(--accent);
   background: var(--accent-soft);
   border-color: var(--accent-line);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .composer__pick svg {
@@ -3361,8 +3356,7 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 /* The permission mode, worn as colour: bypass is red, plan is blue, accept
- * edits is green — on whichever chip carries the mode. The colour is the ink
- * and the edge; the fill stays a wash so the word is what reads. */
+ * edits is green — on whichever chip carries the mode. */
 .composer__pick[data-mode='bypass'] {
   color: var(--danger);
   background: var(--danger-soft);
@@ -3402,7 +3396,8 @@ button.astatus__mode:not(:disabled):hover {
 .composer__tools {
   display: flex;
   align-items: center;
-  gap: var(--s-3);
+  gap: 8px;
+  padding-top: 2px;
 }
 
 .composer__file {
@@ -3419,14 +3414,14 @@ button.astatus__mode:not(:disabled):hover {
 .composer__icon {
   position: relative;
   flex: none;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--bg-hover) 85%, transparent);
-  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent);
   color: var(--text-secondary);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -3439,22 +3434,22 @@ button.astatus__mode:not(:disabled):hover {
 
 .composer__icon:hover:not([aria-disabled='true']):not(:disabled) {
   color: var(--text-primary);
-  background: var(--bg-active);
-  border-color: var(--line-hairline);
+  background: color-mix(in srgb, var(--text-primary) 11%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 20%, transparent);
 }
 
 .composer__icon:active:not([aria-disabled='true']):not(:disabled),
 .composer__icon[data-active='true'] {
-  transform: scale(0.92);
-  background: var(--bg-active);
-  color: var(--text-primary);
-  border-color: var(--line-hairline);
+  transform: scale(0.94);
+  background: color-mix(in srgb, var(--feed-accent) 15%, transparent);
+  color: var(--feed-accent);
+  border-color: color-mix(in srgb, var(--feed-accent) 30%, transparent);
 }
 
 .composer__icon[aria-disabled='true'],
 .composer__icon:disabled {
   pointer-events: none;
-  opacity: 0.4;
+  opacity: 0.35;
 }
 
 .popover[aria-label='Attach options'] {
@@ -3474,22 +3469,19 @@ button.astatus__mode:not(:disabled):hover {
   padding: var(--s-2) var(--s-4);
 }
 
-/* The key row: keycaps, not pills. A hairline foot under each one is the
- * whole illusion of a key — pressed, the foot goes and the cap drops 1px. */
+/* The key row: sleek micro-capsules */
 .composer__keys {
-  --keys-fade: 28px;
+  --keys-fade: 24px;
   display: flex;
   flex: 1;
   min-width: 0;
-  gap: var(--s-2);
+  gap: 5px;
   padding: 2px 0;
   overflow-x: auto;
   scrollbar-width: none;
   mask-image: linear-gradient(to right, black calc(100% - var(--keys-fade)), transparent);
 }
 
-/* A spacer as wide as the fade at the end of the strip, so Esc scrolls clear
- * of it and no key is ever read through the gradient or under Send. */
 .composer__keys::after {
   content: '';
   flex: none;
@@ -3502,23 +3494,22 @@ button.astatus__mode:not(:disabled):hover {
 
 .composer__key {
   flex: none;
-  height: 32px;
-  min-width: 38px;
-  padding: 0 var(--s-4);
-  border-radius: var(--r-md);
+  height: 28px;
+  min-width: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
-  border: 1px solid var(--line-hairline);
-  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--line-strong) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line-hairline) 90%, transparent);
   color: var(--text-secondary);
-  font: 600 var(--t-xs) / 1 var(--font-mono);
+  font: 600 11px / 1 var(--font-mono);
   letter-spacing: 0.02em;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
   transition:
     background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-instant) var(--ease-out),
     transform var(--dur-instant) var(--ease-out);
 }
 
@@ -3530,41 +3521,38 @@ button.astatus__mode:not(:disabled):hover {
 
 .composer__key:active:not(:disabled) {
   background: var(--bg-active);
-  box-shadow: inset 0 0 0 transparent;
-  transform: translateY(1px);
+  transform: scale(0.95);
 }
 
 .composer__key:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: default;
 }
 
-/* Armed Ctrl — the same lit language an active chip or tab uses, held down.
- * Stated for hover too, or the mouse that armed it paints it plain again. */
+/* Armed Ctrl */
 .composer__key[data-active='true'],
 .composer__key[data-active='true']:hover:not(:disabled) {
   color: var(--accent);
   background: var(--accent-soft);
   border-color: var(--accent-line);
-  box-shadow: inset 0 0 0 transparent;
-  transform: translateY(1px);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* ------------------------------------------------------------------- send */
 
 .composer__send {
   flex: none;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--r-full);
-  background: var(--feed-accent);
-  border: 1.5px solid var(--feed-accent);
+  background: linear-gradient(135deg, var(--feed-accent), color-mix(in srgb, var(--feed-accent) 80%, #ffffff 20%));
+  border: 1px solid color-mix(in srgb, var(--feed-accent) 85%, transparent);
   color: var(--text-on-accent);
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--feed-accent) 35%, transparent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--feed-accent) 40%, transparent);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition:
@@ -3575,14 +3563,11 @@ button.astatus__mode:not(:disabled):hover {
     transform var(--dur-instant) var(--ease-out);
 }
 
-/* Empty box: the button is the Enter key, and looks like one — a hollow ring
- * in the accent. The first character fills it, with a small pop to say so. */
+/* Empty box: Enter key */
 .composer__send[data-draft='false']:not(:disabled) {
-  background: color-mix(in srgb, var(--feed-accent) 9%, transparent);
-  border-color: color-mix(in srgb, var(--feed-accent) 70%, transparent);
-  /* Ink, not accent, for the glyph: Paper's pale lime on paper is a ring you
-   * can see and an arrow you cannot. */
-  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  border-color: color-mix(in srgb, var(--line-soft) 80%, transparent);
+  color: var(--text-secondary);
   box-shadow: none;
 }
 
@@ -3604,26 +3589,30 @@ button.astatus__mode:not(:disabled):hover {
 
 .composer__send:not(:disabled):hover {
   box-shadow:
-    0 4px 14px color-mix(in srgb, var(--feed-accent) 45%, transparent),
-    0 0 0 3px color-mix(in srgb, var(--feed-accent) 18%, transparent);
-  transform: scale(1.04);
+    0 4px 16px color-mix(in srgb, var(--feed-accent) 50%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--feed-accent) 22%, transparent);
+  transform: scale(1.06);
 }
 
 .composer__send[data-draft='false']:not(:disabled):hover {
-  background: color-mix(in srgb, var(--feed-accent) 16%, transparent);
-  border-color: var(--feed-accent);
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  border-color: var(--line-strong);
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transform: scale(1.04);
 }
 
 .composer__send:disabled {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
   border-color: transparent;
   color: var(--text-dim);
   box-shadow: none;
+  opacity: 0.4;
   cursor: default;
 }
 
 .composer__send:active:not(:disabled) {
-  transform: scale(0.92);
+  transform: scale(0.94);
 }
 
 /* Keyboard focus, on every control the slab carries. The textarea has the

@@ -48,6 +48,7 @@ export type IconName =
   | 'foreman'
   | 'paperclip'
   | 'image'
+  | 'sparkle'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -309,6 +310,14 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="6" cy="6.5" r="1.1" />
       <path d="M2.8 11.6l3.2-3.1 2.3 2.1 2.2-2.6 2.7 3.4" />
     </>
+  ),
+  // A four-pointed star: the Gemini sparkle mark.
+  sparkle: (
+    <path
+      d="M8 1.5 Q8 8 1.5 8 Q8 8 8 14.5 Q8 8 14.5 8 Q8 8 8 1.5 Z"
+      fill="currentColor"
+      stroke="none"
+    />
   )
 }
 

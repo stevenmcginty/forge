@@ -396,7 +396,14 @@ function PreviewPane({
           {view === 'feed' ? (
             <Feed blocks={blocks} status={status} asking={asking} prompt={prompt} cut={cut} empty="Waiting for the desktop…" />
           ) : view === 'chat' ? (
-            <ChatView turns={turns} truncated={cut} busy={status.busy} activity={status.activity} quota={status.quota} />
+            <ChatView
+              turns={turns}
+              truncated={cut}
+              busy={status.busy}
+              activity={status.activity}
+              quota={status.quota}
+              agentName={profile?.name}
+            />
           ) : (
             <pre className="pane__terminal preview__term">{blocks.map((b) => b.text).join('\n\n')}</pre>
           )}

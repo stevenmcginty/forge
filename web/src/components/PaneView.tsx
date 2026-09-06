@@ -995,6 +995,7 @@ export function PaneView({
               busy={live && transcript.status.busy}
               activity={transcript.status.activity}
               quota={screenRead ? transcript.status.quota : undefined}
+              agentName={profile?.name}
             />
             {chatRefusal && effectiveTurns.length === 0 ? (
               <div className="pane__chat-note" role="note">

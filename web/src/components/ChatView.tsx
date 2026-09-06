@@ -8,24 +8,19 @@ import {
   type ReactNode
 } from 'react'
 import type { ChatBlock, ChatTurn } from '@shared/chat'
+import { Icon } from '@/components/Icon'
 import { renderMarkdown } from '../lib/markdown'
 import './ChatView.css'
 
 /**
- * The chat transcript — a Claude session read as a conversation.
+ * The chat transcript — a Claude / agent session read as a conversation.
  *
- * The Feed is a lens over the terminal's screen; this is the real thing: turns
- * parsed from the session's own JSONL by the desktop (shared/chat.ts is the
- * contract) and rendered the way the official Claude Code app reads. The
- * assistant's words are the page — full-width prose in the UI font, markdown
- * rendered — and everything else recedes: the person's prompts sit in compact
- * accent-washed bubbles on the right, a tool call is a one-line chip a thumb
- * can expand or ignore, thinking is folded shut until asked for.
- *
- * This component knows nothing about sockets or panes. It takes `turns`,
- * `truncated` and `busy`, and the wiring job feeds it. Scroll behaviour is the
- * Feed's, because the Feed's is right: follow the bottom while the reader is
- * there, never yank the page while they are reading history, offer the pill.
+ * Styled with the modern Gemini-inspired messenger layout:
+ * - Two-sided conversation: user prompts in compact accent bubbles on the right,
+ *   agent replies in soft left-aligned cards with the Gemini sparkle badge.
+ * - Thinking traces are omitted so the conversation reads cleanly as text.
+ * - Tool calls appear as compact, collapsible extension chips.
+ * - Working / busy indicator sits on the left with an animated sparkle.
  */
 
 /** How close to the end counts as "reading the latest". */
@@ -38,14 +33,15 @@ export function ChatView({
   truncated,
   busy,
   activity,
-  quota
+  quota,
+  agentName
 }: {
   turns: ChatTurn[]
   truncated: boolean
   busy?: boolean
   /**
    * What the agent says it is doing, off its own status line — "Thinking",
-   * "Waiting for response". Labels the working indicator; "Working" without.
+   * "Waiting for response". Labels the working indicator; "Thinking" without.
    */
   activity?: string
   /**
@@ -55,6 +51,8 @@ export function ChatView({
    * the conversation rather than as a card in it.
    */
   quota?: string
+  /** The name of the agent or model for reply headers (e.g. "Claude", "Gemini"). */
+  agentName?: string
 }): ReactNode {
   const scroller = useRef<HTMLDivElement | null>(null)
   const stick = useRef(true)
@@ -151,17 +149,22 @@ export function ChatView({
           ) : null}
           {turns.length === 0 ? (
             <div className="chatview__empty">
-              <span className="chatview__empty-dot" />
-              <p>The conversation will appear here.</p>
+              <div className="chatview__empty-sparkle" aria-hidden="true">
+                <Icon name="sparkle" size={26} />
+              </div>
+              <h3 className="chatview__empty-title">Ready when you are</h3>
+              <p className="chatview__empty-sub">
+                Ask a question, run commands, or describe what you want {agentName ? agentName : 'your agent'} to build.
+              </p>
             </div>
           ) : (
             <ol className="chatview__turns">
               {turns.map((turn) => (
-                <Turn key={turn.id} turn={turn} />
+                <Turn key={turn.id} turn={turn} agentName={agentName} />
               ))}
             </ol>
           )}
-          {busy ? <Working activity={activity} /> : null}
+          {busy ? <Working activity={activity} agentName={agentName} /> : null}
           {quota ? <Quota text={quota} /> : null}
         </div>
       </div>
@@ -196,10 +199,10 @@ export function ChatView({
 
 // Turns are immutable by id — the transcript only ever appends or resets — so
 // a memo on the object is all 500 turns need to stay cheap.
-const Turn = memo(function Turn({ turn }: { turn: ChatTurn }): ReactNode {
-  return (
-    <li className="chatview__turn" data-role={turn.role}>
-      {turn.role === 'user' ? (
+const Turn = memo(function Turn({ turn, agentName }: { turn: ChatTurn; agentName?: string }): ReactNode {
+  if (turn.role === 'user') {
+    return (
+      <li className="chatview__turn" data-role="user">
         <div className="chatview__mine">
           <div className="chatview__bubble">
             {turn.blocks.map((block, i) =>
@@ -214,13 +217,30 @@ const Turn = memo(function Turn({ turn }: { turn: ChatTurn }): ReactNode {
           </div>
           {turn.clock ? <span className="chatview__clock">{turn.clock}</span> : null}
         </div>
-      ) : (
-        <div className="chatview__reply">
-          {turn.blocks.map((block, i) => (
+      </li>
+    )
+  }
+
+  // Assistant turn: omit thinking blocks so the view feels like a clean messenger chat.
+  const visibleBlocks = turn.blocks.filter((b) => b.kind !== 'thinking')
+  if (visibleBlocks.length === 0) return null
+
+  return (
+    <li className="chatview__turn" data-role="assistant">
+      <div className="chatview__reply">
+        <div className="chatview__agent-header">
+          <span className="chatview__sparkle-icon" aria-hidden="true">
+            <Icon name="sparkle" size={13} />
+          </span>
+          <span className="chatview__agent-name">{agentName ?? 'Assistant'}</span>
+          {turn.clock ? <span className="chatview__agent-clock">{turn.clock}</span> : null}
+        </div>
+        <div className="chatview__agent-bubble">
+          {visibleBlocks.map((block, i) => (
             <Piece key={i} block={block} />
           ))}
         </div>
-      )}
+      </div>
     </li>
   )
 })
@@ -230,7 +250,8 @@ function Piece({ block }: { block: ChatBlock }): ReactNode {
     case 'text':
       return <div className="chatview__prose">{renderMarkdown(block.text)}</div>
     case 'thinking':
-      return <ThinkingFold text={block.text} />
+      // "You don't have to have all the thinking" — omitted
+      return null
     case 'tool':
       return <ToolChip name={block.name} gist={block.gist} note={block.note} failed={block.failed} />
   }
@@ -290,12 +311,11 @@ function ToolChip({
 
 /* ---------------------------------------------------------------- working
  *
- * The agent mid-turn: its own word for what it is doing, and how long it has
- * been at it, counted here rather than read off the screen — a counter that
- * ticked on the TUI's line was what re-cut every frame into a new card.
+ * The agent mid-turn: Gemini-styled sparkle header with shimmering label and
+ * elapsed counter.
  */
 
-function Working({ activity }: { activity?: string }): ReactNode {
+function Working({ activity, agentName }: { activity?: string; agentName?: string }): ReactNode {
   const started = useRef(Date.now())
   const [seconds, setSeconds] = useState(0)
   useEffect(() => {
@@ -304,12 +324,24 @@ function Working({ activity }: { activity?: string }): ReactNode {
     const id = window.setInterval(() => setSeconds(Math.floor((Date.now() - started.current) / 1000)), 1000)
     return () => window.clearInterval(id)
   }, [])
-  const label = (activity ?? 'Working').replace(/[…:.]+$/, '')
+  const label = (activity ?? 'Thinking').replace(/[…:.]+$/, '')
   return (
-    <div className="chatview__busy" role="status" aria-live="polite">
-      <span className="chatview__busy-dot" aria-hidden />
-      <span className="chatview__busy-text">{label}</span>
-      {seconds >= 1 ? <span className="chatview__busy-time">{formatElapsed(seconds)}</span> : null}
+    <div className="chatview__busy-turn" role="status" aria-live="polite">
+      <div className="chatview__agent-header">
+        <span className="chatview__sparkle-icon chatview__sparkle-icon--pulse" aria-hidden="true">
+          <Icon name="sparkle" size={13} />
+        </span>
+        <span className="chatview__agent-name">{agentName ?? 'Assistant'}</span>
+      </div>
+      <div className="chatview__busy-bubble">
+        <span className="chatview__busy-label">{label}</span>
+        <span className="chatview__busy-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+        {seconds >= 1 ? <span className="chatview__busy-time">{formatElapsed(seconds)}</span> : null}
+      </div>
     </div>
   )
 }
@@ -325,34 +357,6 @@ function Quota({ text }: { text: string }): ReactNode {
   return (
     <div className="chatview__quota" role="note">
       <span className="chatview__quota-text">{text}</span>
-    </div>
-  )
-}
-
-/* --------------------------------------------------------------- thinking */
-
-function ThinkingFold({ text }: { text: string }): ReactNode {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="chatview__think" data-open={open ? 'true' : 'false'}>
-      <button type="button" className="chatview__think-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <span className="chatview__tool-caret" aria-hidden>
-          <svg
-            width="9"
-            height="9"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M6 3.5L10.5 8 6 12.5" />
-          </svg>
-        </span>
-        Thought for a moment
-      </button>
-      {open ? <div className="chatview__think-body">{text}</div> : null}
     </div>
   )
 }
