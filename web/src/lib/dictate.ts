@@ -18,6 +18,9 @@ import { bufferToBase64 } from './file'
 /** A recording longer than this is stopped and sent anyway. */
 export const MAX_RECORDING_MS = 3 * 60 * 1000
 
+/** How long `stop` waits for the browser's last chunk before taking what it has. */
+const STOP_GRACE_MS = 2500
+
 const CONTAINERS = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/ogg']
 
 export function isDictationSupported(): boolean {
@@ -76,16 +79,29 @@ export async function startRecording(onAutoStop?: () => void): Promise<Recording
   const finish = (): Promise<Blob> => {
     if (done) return done
     done = new Promise<Blob>((resolve) => {
-      recorder.onstop = () => {
+      let settled = false
+      const settle = (): void => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(fallback)
         release()
         resolve(new Blob(parts, { type: recorder.mimeType || container || 'audio/webm' }))
       }
+      // A browser that never fires `stop` (Safari has been seen to, with an
+      // empty recording) would leave the button lit for ever: settle with
+      // whatever arrived instead.
+      const fallback = window.setTimeout(settle, STOP_GRACE_MS)
+      recorder.onstop = settle
+      recorder.onerror = settle
       if (recorder.state === 'inactive') {
-        release()
-        resolve(new Blob(parts, { type: recorder.mimeType || container || 'audio/webm' }))
+        settle()
         return
       }
-      recorder.stop()
+      try {
+        recorder.stop()
+      } catch {
+        settle()
+      }
     })
     return done
   }

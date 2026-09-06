@@ -562,7 +562,7 @@ export function Composer({
               className="composer__icon composer__mic-btn"
               data-listening={voicePhase === 'recording' ? 'true' : undefined}
               data-busy={voicePhase === 'transcribing' ? 'true' : undefined}
-              disabled={disabled || voicePhase === 'transcribing'}
+              disabled={disabled}
               onClick={onVoice}
               title={
                 voicePhase === 'recording'

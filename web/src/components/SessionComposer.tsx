@@ -51,6 +51,9 @@ function liveRung(mode: PermissionMode | undefined): ClaudePermissionMode | 'aut
 
 const pause = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms))
 
+/** The most a round trip to the desktop's ears may take before the button gives up. */
+const TRANSCRIBE_TIMEOUT_MS = 75_000
+
 /** Where the mic button is in its round trip: quiet, taking the words down, or waiting for them. */
 type VoicePhase = 'idle' | 'recording' | 'transcribing'
 
@@ -67,6 +70,8 @@ export function SessionComposer(): ReactNode {
   const sendingFiles = useRef(false)
   const [voice, setVoice] = useState<VoicePhase>('idle')
   const recording = useRef<Recording | null>(null)
+  /** Bumped whenever a round trip is abandoned, so a late answer cannot repaint the button. */
+  const voiceRun = useRef(0)
 
   const offline = state.stage.kind === 'offline'
   const live = !offline && state.connection.state === 'live'
@@ -169,14 +174,23 @@ export function SessionComposer(): ReactNode {
       setVoice('idle')
       return
     }
+    const run = ++voiceRun.current
+    const stillMine = (): boolean => voiceRun.current === run
     setVoice('transcribing')
     try {
       const audio = await current.stop()
+      if (!stillMine()) return
       if (audio.size === 0) {
         actions.setNotice('Nothing was recorded.')
         return
       }
-      const text = await transcribeOnDesktop(audio, paneId, actions.request)
+      const text = await Promise.race([
+        transcribeOnDesktop(audio, paneId, actions.request),
+        new Promise<never>((_, reject) =>
+          window.setTimeout(() => reject(new Error('The desktop took too long to answer.')), TRANSCRIBE_TIMEOUT_MS)
+        )
+      ])
+      if (!stillMine()) return
       if (!text) {
         actions.setNotice('The desktop heard nothing in that.')
         return
@@ -184,9 +198,9 @@ export function SessionComposer(): ReactNode {
       setDraft('')
       await sendText(text, [])
     } catch (err) {
-      actions.setNotice(err instanceof Error ? err.message : 'Dictation failed.')
+      if (stillMine()) actions.setNotice(err instanceof Error ? err.message : 'Dictation failed.')
     } finally {
-      setVoice('idle')
+      if (stillMine()) setVoice('idle')
     }
   }, [actions, paneId, sendText])
 
@@ -196,7 +210,14 @@ export function SessionComposer(): ReactNode {
       await finishVoice()
       return
     }
-    if (voice !== 'idle') return
+    if (voice !== 'idle') {
+      // A press while the button is lit and nothing is recording is a stuck
+      // light — a stop that never came back, a desktop that never answered.
+      // The press is the way out: abandon that round trip and go quiet.
+      voiceRun.current++
+      setVoice('idle')
+      return
+    }
     try {
       const started = await startRecording(() => {
         actions.setNotice('Three minutes is the most one recording takes — sending what was said.')
@@ -209,11 +230,14 @@ export function SessionComposer(): ReactNode {
     }
   }, [actions, canType, finishVoice, paneId, voice])
 
-  // A pane that goes, or a tab that is switched, does not keep a microphone open.
+  // A pane that goes, or a tab that is switched, does not keep a microphone
+  // open — and does not keep the button lit for a recording that is gone.
   useEffect(() => {
     return () => {
       recording.current?.cancel()
       recording.current = null
+      voiceRun.current++
+      setVoice('idle')
     }
   }, [paneId])
 
