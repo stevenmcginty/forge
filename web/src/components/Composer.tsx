@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
@@ -105,11 +106,15 @@ export function Composer({
    * Which of the chips above the box is open. One at a time — and on a phone
    * there is only one chip, `'all'`, whose sheet holds all three sections.
    */
-  const [openPick, setOpenPick] = useState<'model' | 'effort' | 'mode' | 'all' | null>(null)
+  const [openPick, setOpenPick] = useState<'model' | 'effort' | 'mode' | 'all' | 'attach' | null>(null)
   const modelRef = useRef<HTMLButtonElement | null>(null)
   const effortRef = useRef<HTMLButtonElement | null>(null)
   const modeRef = useRef<HTMLButtonElement | null>(null)
   const allRef = useRef<HTMLButtonElement | null>(null)
+  const attachRef = useRef<HTMLButtonElement | null>(null)
+  const cameraInputRef = useRef<HTMLInputElement | null>(null)
+  const imageInputRef = useRef<HTMLInputElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [pickedEffort, setPickedEffort] = useState<EffortLevel | null>(null)
   const [pickedModel, setPickedModel] = useState<string | null>(null)
 
@@ -239,6 +244,12 @@ export function Composer({
     if (incoming.length) setFiles((current) => [...current, ...incoming])
   }, [])
 
+  const onFileInputChange = (event: ChangeEvent<HTMLInputElement>): void => {
+    const picked = [...(event.target.files ?? [])]
+    event.target.value = ''
+    if (picked.length) addFiles(picked)
+  }
+
   const hasDraft = draft.trim().length > 0 || files.length > 0
   const ready = !disabled
 
@@ -290,6 +301,33 @@ export function Composer({
       onSubmit={submit}
       onPaste={onPaste}
     >
+      <input
+        ref={cameraInputRef}
+        className="composer__file"
+        type="file"
+        accept="image/*"
+        capture="environment"
+        disabled={disabled}
+        onChange={onFileInputChange}
+      />
+      <input
+        ref={imageInputRef}
+        className="composer__file"
+        type="file"
+        accept="image/*"
+        multiple
+        disabled={disabled}
+        onChange={onFileInputChange}
+      />
+      <input
+        ref={fileInputRef}
+        className="composer__file"
+        type="file"
+        accept="*/*"
+        multiple
+        disabled={disabled}
+        onChange={onFileInputChange}
+      />
       <div className="composer__card">
         {showPicks ? (
           <div className="composer__picks" role="toolbar" aria-label="Agent settings">
@@ -440,21 +478,57 @@ export function Composer({
           onKeyDown={onKey}
         />
         <div className="composer__tools">
-          {/*
-            Labels, not buttons that click a hidden input. iOS Safari refuses a
-            programmatic `.click()` on `input[hidden]`.
-          */}
-          {mobile ? (
-            <FilePick label="Take a photo" disabled={disabled} capture onFiles={addFiles}>
-              <Icon name="camera" size={16} />
-            </FilePick>
-          ) : null}
-          <FilePick label="Add an image" disabled={disabled} onFiles={addFiles} accept="image/*">
-            <GalleryGlyph />
-          </FilePick>
-          <FilePick label="Add a file" disabled={disabled} onFiles={addFiles} accept="*/*">
-            <Icon name="file" size={16} />
-          </FilePick>
+          <button
+            ref={attachRef}
+            type="button"
+            className="composer__icon"
+            data-active={openPick === 'attach' ? 'true' : undefined}
+            disabled={disabled}
+            aria-haspopup="menu"
+            aria-expanded={openPick === 'attach'}
+            onClick={() => setOpenPick((v) => (v === 'attach' ? null : 'attach'))}
+            title="Attach a photo, image or file"
+            aria-label="Attach"
+          >
+            <Icon name="paperclip" size={16} />
+          </button>
+          <Popover
+            anchor={attachRef.current}
+            open={openPick === 'attach'}
+            onClose={() => setOpenPick(null)}
+            align="start"
+            side="top"
+            width={168}
+            label="Attach options"
+          >
+            <PopoverRow
+              onClick={() => {
+                setOpenPick(null)
+                cameraInputRef.current?.click()
+              }}
+            >
+              <Icon name="camera" size={15} />
+              <span>Take photo</span>
+            </PopoverRow>
+            <PopoverRow
+              onClick={() => {
+                setOpenPick(null)
+                imageInputRef.current?.click()
+              }}
+            >
+              <Icon name="image" size={15} />
+              <span>Upload image</span>
+            </PopoverRow>
+            <PopoverRow
+              onClick={() => {
+                setOpenPick(null)
+                fileInputRef.current?.click()
+              }}
+            >
+              <Icon name="file" size={15} />
+              <span>Upload file</span>
+            </PopoverRow>
+          </Popover>
           <div className="composer__keys" role="toolbar" aria-label="Terminal keys">
             <Key label="←" onClick={() => onRaw('\x1b[D')} disabled={disabled} title="Left" />
             <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
@@ -519,70 +593,6 @@ function Attachments({ files, onRemove }: { files: File[]; onRemove: (index: num
         )
       })}
     </div>
-  )
-}
-
-function FilePick({
-  label,
-  disabled,
-  capture,
-  accept = 'image/*',
-  onFiles,
-  children
-}: {
-  label: string
-  disabled: boolean
-  capture?: boolean
-  accept?: string
-  onFiles: (files: File[]) => void
-  children: ReactNode
-}): ReactNode {
-  return (
-    <label
-      className="composer__icon"
-      title={label}
-      aria-label={label}
-      aria-disabled={disabled ? 'true' : undefined}
-      onClick={(event) => {
-        if (disabled) event.preventDefault()
-      }}
-    >
-      <input
-        className="composer__file"
-        type="file"
-        accept={accept}
-        multiple={!capture}
-        capture={capture ? 'environment' : undefined}
-        disabled={disabled}
-        onChange={(event) => {
-          const picked = [...(event.target.files ?? [])]
-          event.target.value = ''
-          if (picked.length) onFiles(picked)
-        }}
-      />
-      {children}
-    </label>
-  )
-}
-
-/** A picture frame, drawn on the Icon set's 16×16 / 1.4px grid. */
-function GalleryGlyph(): ReactNode {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="2.5" y="3" width="11" height="10" rx="1.6" />
-      <circle cx="6" cy="6.5" r="1.1" />
-      <path d="M2.8 11.6l3.2-3.1 2.3 2.1 2.2-2.6 2.7 3.4" />
-    </svg>
   )
 }
 

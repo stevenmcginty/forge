@@ -46,6 +46,8 @@ export type IconName =
   | 'note'
   | 'pin'
   | 'foreman'
+  | 'paperclip'
+  | 'image'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -294,6 +296,18 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M2.3 11.4h11.4" />
       <path d="M4.6 11.4V8.6a3.4 3.4 0 0 1 6.8 0v2.8" />
       <path d="M6.9 5.6V3.4h2.2v2.2" />
+    </>
+  ),
+  // A paperclip, tilted at 45°: attach a photo, image or file.
+  paperclip: (
+    <path d="M14.3 7.4L8.2 13.5a4 4 0 0 1-5.7-5.7L8.2 2.1a2.7 2.7 0 0 1 3.8 3.8L6.3 11.6a1.35 1.35 0 0 1-1.9-1.9L10 4.1" />
+  ),
+  // A framed picture with sun and hills: photo or gallery image.
+  image: (
+    <>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.6" />
+      <circle cx="6" cy="6.5" r="1.1" />
+      <path d="M2.8 11.6l3.2-3.1 2.3 2.1 2.2-2.6 2.7 3.4" />
     </>
   )
 }

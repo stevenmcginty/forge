@@ -3437,20 +3437,41 @@ button.astatus__mode:not(:disabled):hover {
     border-color var(--dur-fast) var(--ease-out);
 }
 
-.composer__icon:hover:not([aria-disabled='true']) {
+.composer__icon:hover:not([aria-disabled='true']):not(:disabled) {
   color: var(--text-primary);
   background: var(--bg-active);
   border-color: var(--line-hairline);
 }
 
-.composer__icon:active:not([aria-disabled='true']) {
+.composer__icon:active:not([aria-disabled='true']):not(:disabled),
+.composer__icon[data-active='true'] {
   transform: scale(0.92);
   background: var(--bg-active);
+  color: var(--text-primary);
+  border-color: var(--line-hairline);
 }
 
-.composer__icon[aria-disabled='true'] {
+.composer__icon[aria-disabled='true'],
+.composer__icon:disabled {
   pointer-events: none;
   opacity: 0.4;
+}
+
+.popover[aria-label='Attach options'] {
+  padding: var(--s-2);
+}
+
+.popover[aria-label='Attach options'] .popover__row {
+  gap: var(--s-3);
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+
+[data-mobile] .popover[aria-label='Attach options'] .popover__row {
+  min-height: 42px;
+  font-size: 14px;
+  gap: var(--s-4);
+  padding: var(--s-2) var(--s-4);
 }
 
 /* The key row: keycaps, not pills. A hairline foot under each one is the
