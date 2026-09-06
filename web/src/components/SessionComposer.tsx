@@ -3,6 +3,7 @@ import type { ClaudePermissionMode, LayoutNode, PaneLeaf } from '@shared/types'
 import type { EffortLevel } from '@shared/agents'
 import {
   agentModels,
+  dictationDialect,
   effortLevels,
   effortRefusal,
   effortSlash,
@@ -50,6 +51,14 @@ function liveRung(mode: PermissionMode | undefined): ClaudePermissionMode | 'aut
 
 const pause = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms))
 
+/**
+ * Panes whose CLI has already been told `/voice tap` from this browser. The
+ * setting is Claude's own and persists on the desktop, so typing it again is
+ * only noise in the transcript — but a pane opened after this tab loaded may
+ * still be in hold mode, so it is per pane, not per browser.
+ */
+const armedPanes = new Set<string>()
+
 function findLeaf(node: LayoutNode, id: string): PaneLeaf | null {
   if (node.type === 'leaf') return node.id === id ? node : null
   return findLeaf(node.a, id) ?? findLeaf(node.b, id)
@@ -61,6 +70,9 @@ export function SessionComposer(): ReactNode {
   const profiles = useProfiles()
   const [draft, setDraft] = useState('')
   const sendingFiles = useRef(false)
+  /** The pane whose CLI is recording right now, or null. */
+  const [recordingPane, setRecordingPane] = useState<string | null>(null)
+  const armingVoice = useRef(false)
 
   const offline = state.stage.kind === 'offline'
   const live = !offline && state.connection.state === 'live'
@@ -245,6 +257,50 @@ export function SessionComposer(): ReactNode {
     [actions, canType, paneId, profile, status?.mode, takePane]
   )
 
+  /**
+   * The mic button, when this pane's CLI has dictation of its own.
+   *
+   * Nothing is recorded in the browser. The button types the CLI's own
+   * dictation keystroke (see `dictationDialect`), the CLI listens on the
+   * desktop's microphone, and the words land in its prompt as if the key had
+   * been pressed at the desk. Claude Code needs `/voice tap` once first, since
+   * its default hold-to-talk reads key-repeat that a PTY byte cannot carry.
+   */
+  const dialect = profile && !isShellProfile(profile) ? dictationDialect(profile.command) : null
+  const recording = recordingPane !== null && recordingPane === paneId
+
+  const sendVoice = useCallback(async () => {
+    if (!canType || !paneId || !dialect || armingVoice.current) return
+    if (recordingPane === paneId) {
+      actions.write(paneId, dialect.stop)
+      setRecordingPane(null)
+      if (!dialect.submits) actions.setNotice('Dictation stopped. Press send when the words look right.')
+      takePane()
+      return
+    }
+    if (dialect.arm && !armedPanes.has(paneId)) {
+      armingVoice.current = true
+      try {
+        actions.setNotice('Switching the pane to tap-to-talk…')
+        actions.write(paneId, dialect.arm)
+        await pause(SETTLE_BEFORE_ENTER_MS)
+        actions.write(paneId, '\r')
+        armedPanes.add(paneId)
+        await pause(dialect.armSettleMs)
+      } finally {
+        armingVoice.current = false
+      }
+    }
+    actions.write(paneId, dialect.start)
+    setRecordingPane(paneId)
+    actions.setNotice(
+      dialect.submits
+        ? 'Listening on the desktop mic. Press the mic again to send.'
+        : 'Listening on the desktop mic. Press the mic again to stop.'
+    )
+    takePane()
+  }, [actions, canType, dialect, paneId, recordingPane, takePane])
+
   if (offline && state.offlineMode === 'github') return null
   if (!tab) return null
 
@@ -303,6 +359,8 @@ export function SessionComposer(): ReactNode {
         onFocus={takePane}
         autoFocus={canType}
         onNotice={actions.setNotice}
+        onVoice={dialect ? () => void sendVoice() : undefined}
+        voiceRecording={recording}
       />
     </div>
   )

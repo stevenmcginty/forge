@@ -55,7 +55,9 @@ export function Composer({
   onMode,
   onFocus,
   autoFocus,
-  onNotice
+  onNotice,
+  onVoice,
+  voiceRecording = false
 }: {
   draft: string
   disabled: boolean
@@ -94,6 +96,14 @@ export function Composer({
   onFocus?: () => void
   autoFocus: boolean
   onNotice?: (message: string) => void
+  /**
+   * Toggle the pane's own dictation — the CLI's `/voice`, driven by keystrokes
+   * and heard on the desktop's microphone. When present it replaces the
+   * browser's speech recognition, which only ever typed into this box.
+   */
+  onVoice?: () => void
+  /** The pane's CLI is recording — the button and placeholder say so. */
+  voiceRecording?: boolean
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
@@ -271,8 +281,12 @@ export function Composer({
       speech.stop()
     }
     const trimmed = draft.trim().toLowerCase()
-    if (trimmed === '/voice' || trimmed === '/record' || trimmed === '/dictation') {
+    if (trimmed === '/voice' || trimmed === '/talk' || trimmed === '/dictate' || trimmed === '/record' || trimmed === '/dictation') {
       onDraft('')
+      if (onVoice) {
+        onVoice()
+        return
+      }
       if (speech.supported) {
         speech.start('')
         return
@@ -315,8 +329,10 @@ export function Composer({
 
   const placeholder = disabled
     ? disabledReason
-    : speech.listening
-      ? 'Listening… speak now'
+    : voiceRecording
+      ? 'Listening on the desktop mic… press the mic to send'
+      : speech.listening
+        ? 'Listening… speak now'
       : to
         ? `Message ${to}`
         : 'Write a message'
@@ -557,7 +573,20 @@ export function Composer({
               <span>Upload file</span>
             </PopoverRow>
           </Popover>
-          {speech.supported ? (
+          {onVoice ? (
+            <button
+              type="button"
+              className="composer__icon composer__mic-btn"
+              data-listening={voiceRecording ? 'true' : undefined}
+              disabled={disabled}
+              onClick={onVoice}
+              title={voiceRecording ? 'Stop recording and send' : `Dictate through ${to ?? 'the pane'} (/voice)`}
+              aria-label={voiceRecording ? 'Stop dictation' : 'Voice dictation'}
+              aria-pressed={voiceRecording}
+            >
+              <Icon name={voiceRecording ? 'voice' : 'mic'} size={16} />
+            </button>
+          ) : speech.supported ? (
             <button
               type="button"
               className="composer__icon composer__mic-btn"
