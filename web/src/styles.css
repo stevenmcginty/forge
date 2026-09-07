@@ -3326,7 +3326,8 @@ button.astatus__mode:not(:disabled):hover {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 2px 4px 0;
+  padding: 0;
+  min-height: 36px;
 }
 
 .composer__pick {
@@ -3481,33 +3482,22 @@ button.astatus__mode:not(:disabled):hover {
   opacity: 0.35;
 }
 
-/* ------------------------------------------------------------- action buttons
- *
- * Bottom right of the slab, alongside the keys. Holds the mic and Send
- * married together as the primary inputs.
- */
-
-.composer__actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  margin-left: auto;
-}
-
 /* ---------------------------------------------------------------- the mic
  *
- * Sits right beside Send at the bottom right.
- * Three faces. Idle: marries up directly to the Send button in height (36px /
- * 42px on mobile), round shape, subtle background and border. Listening: pops
- * out into a red pill that draws the voice — a blinking dot and five bars that
- * jump with every syllable. Sent: fills with the accent gradient, a ring runs
- * round it while the desktop works out the words, and it pops on the press so
- * the press is seen. */
+ * Top right of the slab, sharing its right edge symmetrically with Send below it.
+ * Three faces. Idle: matches the Send button in size (36px desktop / 42px
+ * mobile), circular shape, subtle background and border, creating clean vertical
+ * symmetry on the card's right boundary. Listening: pops out into a red pill
+ * expanding to the left that draws the voice — a blinking dot and five bars
+ * that jump with every syllable. Sent: fills with the accent gradient, a ring
+ * runs round it while the desktop works out the words, and it pops on the press
+ * so the press is seen.
+ */
 
 .composer__mic {
   position: relative;
   flex: none;
+  margin-left: auto;
   height: 36px;
   width: 36px;
   min-width: 36px;
@@ -3763,6 +3753,7 @@ button.astatus__mode:not(:disabled):hover {
   flex: none;
   width: 36px;
   height: 36px;
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4181,11 +4172,8 @@ button.astatus__mode:not(:disabled):hover {
 
 [data-mobile] .composer__picks {
   flex-wrap: nowrap;
-  padding: 0 var(--s-1);
-}
-
-[data-mobile] .composer__actions {
-  gap: var(--s-2);
+  padding: 0;
+  min-height: 42px;
 }
 
 [data-mobile] .composer__mic {
