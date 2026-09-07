@@ -3321,12 +3321,13 @@ button.astatus__mode:not(:disabled):hover {
 
 /* ------------------------------------------------------------------ chips */
 
+/* No right inset: the mic on this row shares its right edge with Send below. */
 .composer__picks {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 2px 4px 0;
+  padding: 2px 0 0 4px;
 }
 
 .composer__pick {
@@ -3481,32 +3482,172 @@ button.astatus__mode:not(:disabled):hover {
   opacity: 0.35;
 }
 
-.composer__mic-btn[data-busy='true'] {
-  opacity: 0.7;
-  animation: composer-mic-pulse 1s ease-in-out infinite;
+/* ---------------------------------------------------------------- the mic
+ *
+ * Top right of the slab, on the picker row, in line with Send below it.
+ * Three faces. Idle: a chip like the pickers, with a microphone. Listening:
+ * a red pill that draws the voice — a blinking dot and five bars that jump
+ * with every syllable, so "is it hearing me" is answered by looking.
+ * Sent: the pill fills with the accent, a ring runs round it while the
+ * desktop works out the words, and it pops on the press so the press is
+ * seen. */
+
+.composer__mic {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+  height: 26px;
+  min-width: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    min-width var(--dur-med) var(--ease-out),
+    padding var(--dur-med) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
 }
 
-.composer__mic-btn[data-listening='true'] {
-  background: color-mix(in srgb, #ef4444 18%, transparent);
-  border-color: color-mix(in srgb, #ef4444 55%, transparent);
+.composer__mic:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 11%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 20%, transparent);
+}
+
+.composer__mic:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.composer__mic:disabled {
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+/* Listening */
+.composer__mic[data-phase='recording'] {
+  min-width: 68px;
+  padding: 0 11px 0 10px;
+  background: color-mix(in srgb, #ef4444 16%, transparent);
+  border-color: color-mix(in srgb, #ef4444 60%, transparent);
   color: #ef4444;
-  box-shadow: 0 0 12px color-mix(in srgb, #ef4444 35%, transparent);
-  animation: composer-mic-pulse 1.5s ease-in-out infinite;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ef4444 14%, transparent);
+  animation: composer-mic-halo 1.8s ease-in-out infinite;
 }
 
-@keyframes composer-mic-pulse {
-  0% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 color-mix(in srgb, #ef4444 45%, transparent);
+.composer__mic[data-phase='recording']:hover:not(:disabled) {
+  background: color-mix(in srgb, #ef4444 24%, transparent);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.composer__mic-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: composer-mic-blink 1.1s steps(1, end) infinite;
+}
+
+.voicemeter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+
+.voicemeter__bar {
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: scaleY(0.16);
+  transform-origin: center;
+  will-change: transform;
+}
+
+/* Sent — the desktop is listening to the recording */
+.composer__mic[data-phase='transcribing'] {
+  background: linear-gradient(135deg, var(--feed-accent), color-mix(in srgb, var(--feed-accent) 80%, #ffffff 20%));
+  border-color: transparent;
+  color: var(--text-on-accent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--feed-accent) 40%, transparent);
+  animation: composer-mic-sent calc(var(--dur-med) * 1.5) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.composer__mic-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid transparent;
+  border-top-color: var(--feed-accent);
+  border-right-color: color-mix(in srgb, var(--feed-accent) 35%, transparent);
+  animation: composer-mic-spin 0.8s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes composer-mic-halo {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, #ef4444 14%, transparent);
   }
   50% {
-    transform: scale(1.08);
-    box-shadow: 0 0 0 7px color-mix(in srgb, #ef4444 0%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in srgb, #ef4444 6%, transparent);
   }
+}
+
+@keyframes composer-mic-blink {
+  0%,
   100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 color-mix(in srgb, #ef4444 45%, transparent);
+    opacity: 1;
   }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes composer-mic-sent {
+  from {
+    transform: scale(0.8);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes composer-mic-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Motion off: the bars still move (they are the information), the dressing does not. */
+@media (prefers-reduced-motion: reduce) {
+  .composer__mic[data-phase='recording'],
+  .composer__mic-dot,
+  .composer__mic-ring {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .composer__mic[data-phase='recording'],
+:root[data-reduced-motion='true'] .composer__mic-dot,
+:root[data-reduced-motion='true'] .composer__mic-ring {
+  animation: none;
 }
 
 .popover[aria-label='Attach options'] {
@@ -3675,6 +3816,7 @@ button.astatus__mode:not(:disabled):hover {
 /* Keyboard focus, on every control the slab carries. The textarea has the
  * card's own lit edge for this and needs no ring of its own. */
 .composer__pick:focus-visible,
+.composer__mic:focus-visible,
 .composer__icon:focus-within:has(.composer__file:focus-visible),
 .composer__key:focus-visible,
 .composer__send:focus-visible,
@@ -4018,7 +4160,26 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 [data-mobile] .composer__picks {
-  padding: 0 var(--s-1);
+  flex-wrap: nowrap;
+  padding: 0 0 0 var(--s-1);
+}
+
+[data-mobile] .composer__mic {
+  height: 32px;
+  min-width: 32px;
+}
+
+[data-mobile] .composer__mic[data-phase='recording'] {
+  min-width: 78px;
+  padding: 0 13px 0 12px;
+}
+
+[data-mobile] .voicemeter {
+  height: 16px;
+}
+
+[data-mobile] .voicemeter__bar {
+  height: 16px;
 }
 
 /* One chip, not three: a phone opens Model, Effort and Mode in a single sheet,
@@ -4028,6 +4189,7 @@ button.astatus__mode:not(:disabled):hover {
  * and which mode a tap is about to reach. */
 [data-mobile] .composer__pick {
   height: 32px;
+  flex: 0 1 auto;
   max-width: 100%;
   min-width: 0;
   gap: 5px;

@@ -70,6 +70,8 @@ export function SessionComposer(): ReactNode {
   const sendingFiles = useRef(false)
   const [voice, setVoice] = useState<VoicePhase>('idle')
   const recording = useRef<Recording | null>(null)
+  /** The microphone while it records, so the button can draw what it hears. */
+  const [voiceStream, setVoiceStream] = useState<MediaStream | null>(null)
   /** Bumped whenever a round trip is abandoned, so a late answer cannot repaint the button. */
   const voiceRun = useRef(0)
 
@@ -170,6 +172,7 @@ export function SessionComposer(): ReactNode {
   const finishVoice = useCallback(async () => {
     const current = recording.current
     recording.current = null
+    setVoiceStream(null)
     if (!current || !paneId) {
       setVoice('idle')
       return
@@ -224,6 +227,7 @@ export function SessionComposer(): ReactNode {
         void finishVoice()
       })
       recording.current = started
+      setVoiceStream(started.stream)
       setVoice('recording')
     } catch (err) {
       actions.setNotice(err instanceof Error ? err.message : 'Could not open the microphone.')
@@ -236,6 +240,7 @@ export function SessionComposer(): ReactNode {
     return () => {
       recording.current?.cancel()
       recording.current = null
+      setVoiceStream(null)
       voiceRun.current++
       setVoice('idle')
     }
@@ -402,6 +407,7 @@ export function SessionComposer(): ReactNode {
         onNotice={actions.setNotice}
         onVoice={isDictationSupported() ? () => void sendVoice() : undefined}
         voicePhase={voice}
+        voiceStream={voiceStream}
       />
     </div>
   )

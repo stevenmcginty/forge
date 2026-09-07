@@ -43,6 +43,8 @@ function pickContainer(): string {
 }
 
 export interface Recording {
+  /** The open microphone, for a meter to listen to while it records. */
+  stream: MediaStream
   /** Stop the microphone and hand back what it heard. Empty when nothing was said. */
   stop: () => Promise<Blob>
   /** Throw the recording away without transcribing it. */
@@ -113,6 +115,7 @@ export async function startRecording(onAutoStop?: () => void): Promise<Recording
   }, MAX_RECORDING_MS)
   recorder.start(1000)
   return {
+    stream,
     stop: () => {
       window.clearTimeout(limiter)
       return finish()

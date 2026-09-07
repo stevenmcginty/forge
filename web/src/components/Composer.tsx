@@ -12,6 +12,7 @@ import {
 } from 'react'
 import { Icon } from '@/components/Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from '@/components/Popover'
+import { VoiceMeter } from './VoiceMeter'
 import type { ClaudePermissionMode } from '@shared/types'
 import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
 import { allFilesFromDataTransfer, formatFileSize, isImageFile } from '../lib/file'
@@ -56,7 +57,8 @@ export function Composer({
   autoFocus,
   onNotice,
   onVoice,
-  voicePhase = 'idle'
+  voicePhase = 'idle',
+  voiceStream = null
 }: {
   draft: string
   disabled: boolean
@@ -103,6 +105,8 @@ export function Composer({
   onVoice?: () => void
   /** Where that round trip is — the button and placeholder say so. */
   voicePhase?: 'idle' | 'recording' | 'transcribing'
+  /** The open microphone while `voicePhase` is `'recording'`; the button draws its sound. */
+  voiceStream?: MediaStream | null
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
@@ -310,6 +314,7 @@ export function Composer({
     addFiles(pasted)
   }
 
+  const phase = voicePhase ?? 'idle'
   const placeholder = disabled
     ? disabledReason
     : voicePhase === 'recording'
@@ -356,7 +361,7 @@ export function Composer({
         onChange={onFileInputChange}
       />
       <div className="composer__card">
-        {showPicks ? (
+        {showPicks || onVoice ? (
           <div className="composer__picks" role="toolbar" aria-label="Agent settings">
             {mobile ? (
               <>
@@ -480,6 +485,38 @@ export function Composer({
                 {modeSection}
               </Popover>
             ) : null}
+            {onVoice ? (
+              <button
+                type="button"
+                className="composer__mic"
+                data-phase={phase}
+                disabled={disabled}
+                onClick={onVoice}
+                title={
+                  phase === 'recording'
+                    ? 'Stop and send'
+                    : phase === 'transcribing'
+                      ? 'Working out the words…'
+                      : 'Dictate (/voice)'
+                }
+                aria-label={phase === 'recording' ? 'Stop dictation and send' : 'Dictate'}
+                aria-pressed={phase === 'recording'}
+              >
+                {phase === 'recording' ? (
+                  <>
+                    <span className="composer__mic-dot" />
+                    <VoiceMeter stream={voiceStream ?? null} />
+                  </>
+                ) : phase === 'transcribing' ? (
+                  <>
+                    <span className="composer__mic-ring" />
+                    <Icon name="send" size={13} />
+                  </>
+                ) : (
+                  <Icon name="mic" size={13} />
+                )}
+              </button>
+            ) : null}
           </div>
         ) : null}
         {files.length ? (
@@ -556,27 +593,6 @@ export function Composer({
               <span>Upload file</span>
             </PopoverRow>
           </Popover>
-          {onVoice ? (
-            <button
-              type="button"
-              className="composer__icon composer__mic-btn"
-              data-listening={voicePhase === 'recording' ? 'true' : undefined}
-              data-busy={voicePhase === 'transcribing' ? 'true' : undefined}
-              disabled={disabled}
-              onClick={onVoice}
-              title={
-                voicePhase === 'recording'
-                  ? 'Stop and send'
-                  : voicePhase === 'transcribing'
-                    ? 'Working out the words…'
-                    : 'Dictate (/voice)'
-              }
-              aria-label={voicePhase === 'recording' ? 'Stop dictation and send' : 'Dictate'}
-              aria-pressed={voicePhase === 'recording'}
-            >
-              <Icon name={voicePhase === 'idle' ? 'mic' : 'voice'} size={16} />
-            </button>
-          ) : null}
           <div className="composer__keys" role="toolbar" aria-label="Terminal keys">
             <Key label="←" onClick={() => onRaw('\x1b[D')} disabled={disabled} title="Left" />
             <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
