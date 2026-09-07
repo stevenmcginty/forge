@@ -361,7 +361,7 @@ export function Composer({
         onChange={onFileInputChange}
       />
       <div className="composer__card">
-        {showPicks || onVoice ? (
+        {showPicks ? (
           <div className="composer__picks" role="toolbar" aria-label="Agent settings">
             {mobile ? (
               <>
@@ -485,38 +485,6 @@ export function Composer({
                 {modeSection}
               </Popover>
             ) : null}
-            {onVoice ? (
-              <button
-                type="button"
-                className="composer__mic"
-                data-phase={phase}
-                disabled={disabled}
-                onClick={onVoice}
-                title={
-                  phase === 'recording'
-                    ? 'Stop and send'
-                    : phase === 'transcribing'
-                      ? 'Working out the words…'
-                      : 'Dictate (/voice)'
-                }
-                aria-label={phase === 'recording' ? 'Stop dictation and send' : 'Dictate'}
-                aria-pressed={phase === 'recording'}
-              >
-                {phase === 'recording' ? (
-                  <>
-                    <span className="composer__mic-dot" />
-                    <VoiceMeter stream={voiceStream ?? null} />
-                  </>
-                ) : phase === 'transcribing' ? (
-                  <>
-                    <span className="composer__mic-ring" />
-                    <Icon name="send" size={13} />
-                  </>
-                ) : (
-                  <Icon name="mic" size={13} />
-                )}
-              </button>
-            ) : null}
           </div>
         ) : null}
         {files.length ? (
@@ -608,16 +576,50 @@ export function Composer({
             />
             <Key label="Esc" onClick={() => onRaw('\x1b')} disabled={disabled} />
           </div>
-          <button
-            type="submit"
-            className="composer__send"
-            data-draft={hasDraft ? 'true' : 'false'}
-            disabled={!ready}
-            aria-label={hasDraft ? 'Send' : 'Enter'}
-            title={hasDraft ? 'Send' : 'Enter'}
-          >
-            <Icon name="send" size={16} />
-          </button>
+          <div className="composer__actions">
+            {onVoice ? (
+              <button
+                type="button"
+                className="composer__mic"
+                data-phase={phase}
+                disabled={disabled}
+                onClick={onVoice}
+                title={
+                  phase === 'recording'
+                    ? 'Stop and send'
+                    : phase === 'transcribing'
+                      ? 'Working out the words…'
+                      : 'Dictate (/voice)'
+                }
+                aria-label={phase === 'recording' ? 'Stop dictation and send' : 'Dictate'}
+                aria-pressed={phase === 'recording'}
+              >
+                {phase === 'recording' ? (
+                  <>
+                    <span className="composer__mic-dot" />
+                    <VoiceMeter stream={voiceStream ?? null} />
+                  </>
+                ) : phase === 'transcribing' ? (
+                  <>
+                    <span className="composer__mic-ring" />
+                    <Icon name="send" size={15} />
+                  </>
+                ) : (
+                  <Icon name="mic" size={16} />
+                )}
+              </button>
+            ) : null}
+            <button
+              type="submit"
+              className="composer__send"
+              data-draft={hasDraft ? 'true' : 'false'}
+              disabled={!ready}
+              aria-label={hasDraft ? 'Send' : 'Enter'}
+              title={hasDraft ? 'Send' : 'Enter'}
+            >
+              <Icon name="send" size={16} />
+            </button>
+          </div>
         </div>
       </div>
     </form>

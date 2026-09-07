@@ -3321,13 +3321,12 @@ button.astatus__mode:not(:disabled):hover {
 
 /* ------------------------------------------------------------------ chips */
 
-/* No right inset: the mic on this row shares its right edge with Send below. */
 .composer__picks {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 2px 0 0 4px;
+  padding: 2px 4px 0;
 }
 
 .composer__pick {
@@ -3482,30 +3481,44 @@ button.astatus__mode:not(:disabled):hover {
   opacity: 0.35;
 }
 
+/* ------------------------------------------------------------- action buttons
+ *
+ * Bottom right of the slab, alongside the keys. Holds the mic and Send
+ * married together as the primary inputs.
+ */
+
+.composer__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  margin-left: auto;
+}
+
 /* ---------------------------------------------------------------- the mic
  *
- * Top right of the slab, on the picker row, in line with Send below it.
- * Three faces. Idle: a chip like the pickers, with a microphone. Listening:
- * a red pill that draws the voice — a blinking dot and five bars that jump
- * with every syllable, so "is it hearing me" is answered by looking.
- * Sent: the pill fills with the accent, a ring runs round it while the
- * desktop works out the words, and it pops on the press so the press is
- * seen. */
+ * Sits right beside Send at the bottom right.
+ * Three faces. Idle: marries up directly to the Send button in height (36px /
+ * 42px on mobile), round shape, subtle background and border. Listening: pops
+ * out into a red pill that draws the voice — a blinking dot and five bars that
+ * jump with every syllable. Sent: fills with the accent gradient, a ring runs
+ * round it while the desktop works out the words, and it pops on the press so
+ * the press is seen. */
 
 .composer__mic {
   position: relative;
   flex: none;
-  margin-left: auto;
-  height: 26px;
-  min-width: 26px;
+  height: 36px;
+  width: 36px;
+  min-width: 36px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
-  border: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line-soft) 80%, transparent);
   color: var(--text-secondary);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -3514,6 +3527,7 @@ button.astatus__mode:not(:disabled):hover {
     color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out),
+    width var(--dur-med) var(--ease-out),
     min-width var(--dur-med) var(--ease-out),
     padding var(--dur-med) var(--ease-out),
     transform var(--dur-instant) var(--ease-out);
@@ -3521,12 +3535,14 @@ button.astatus__mode:not(:disabled):hover {
 
 .composer__mic:hover:not(:disabled) {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 11%, transparent);
-  border-color: color-mix(in srgb, var(--text-primary) 20%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  border-color: var(--line-strong);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transform: scale(1.04);
 }
 
 .composer__mic:active:not(:disabled) {
-  transform: scale(0.92);
+  transform: scale(0.94);
 }
 
 .composer__mic:disabled {
@@ -3536,8 +3552,9 @@ button.astatus__mode:not(:disabled):hover {
 
 /* Listening */
 .composer__mic[data-phase='recording'] {
-  min-width: 68px;
-  padding: 0 11px 0 10px;
+  width: auto;
+  min-width: 76px;
+  padding: 0 12px 0 11px;
   background: color-mix(in srgb, #ef4444 16%, transparent);
   border-color: color-mix(in srgb, #ef4444 60%, transparent);
   color: #ef4444;
@@ -3549,6 +3566,7 @@ button.astatus__mode:not(:disabled):hover {
   background: color-mix(in srgb, #ef4444 24%, transparent);
   border-color: #ef4444;
   color: #ef4444;
+  transform: none;
 }
 
 .composer__mic-dot {
@@ -3564,12 +3582,12 @@ button.astatus__mode:not(:disabled):hover {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  height: 14px;
+  height: 16px;
 }
 
 .voicemeter__bar {
   width: 3px;
-  height: 14px;
+  height: 16px;
   border-radius: 2px;
   background: currentColor;
   transform: scaleY(0.16);
@@ -3579,6 +3597,9 @@ button.astatus__mode:not(:disabled):hover {
 
 /* Sent — the desktop is listening to the recording */
 .composer__mic[data-phase='transcribing'] {
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
   background: linear-gradient(135deg, var(--feed-accent), color-mix(in srgb, var(--feed-accent) 80%, #ffffff 20%));
   border-color: transparent;
   color: var(--text-on-accent);
@@ -3742,7 +3763,6 @@ button.astatus__mode:not(:disabled):hover {
   flex: none;
   width: 36px;
   height: 36px;
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4161,25 +4181,36 @@ button.astatus__mode:not(:disabled):hover {
 
 [data-mobile] .composer__picks {
   flex-wrap: nowrap;
-  padding: 0 0 0 var(--s-1);
+  padding: 0 var(--s-1);
+}
+
+[data-mobile] .composer__actions {
+  gap: var(--s-2);
 }
 
 [data-mobile] .composer__mic {
-  height: 32px;
-  min-width: 32px;
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
 }
 
 [data-mobile] .composer__mic[data-phase='recording'] {
-  min-width: 78px;
-  padding: 0 13px 0 12px;
+  width: auto;
+  min-width: 86px;
+  padding: 0 14px 0 13px;
+}
+
+[data-mobile] .composer__mic[data-phase='transcribing'] {
+  width: 42px;
+  min-width: 42px;
 }
 
 [data-mobile] .voicemeter {
-  height: 16px;
+  height: 18px;
 }
 
 [data-mobile] .voicemeter__bar {
-  height: 16px;
+  height: 18px;
 }
 
 /* One chip, not three: a phone opens Model, Effort and Mode in a single sheet,
