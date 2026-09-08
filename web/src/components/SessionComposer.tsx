@@ -223,7 +223,7 @@ export function SessionComposer(): ReactNode {
     }
     try {
       const started = await startRecording(() => {
-        actions.setNotice('Three minutes is the most one recording takes — sending what was said.')
+        actions.setNotice('Ten minutes is the most one recording takes — sending what was said.')
         void finishVoice()
       })
       recording.current = started

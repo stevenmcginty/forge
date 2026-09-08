@@ -16,7 +16,7 @@ import { bufferToBase64 } from './file'
  */
 
 /** A recording longer than this is stopped and sent anyway. */
-export const MAX_RECORDING_MS = 3 * 60 * 1000
+export const MAX_RECORDING_MS = 10 * 60 * 1000
 
 /** How long `stop` waits for the browser's last chunk before taking what it has. */
 const STOP_GRACE_MS = 2500
