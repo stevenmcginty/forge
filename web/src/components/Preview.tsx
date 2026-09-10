@@ -345,6 +345,14 @@ function PreviewPane({
   prompt: string
 }): ReactNode {
   const [draft, setDraft] = useState('')
+  /*
+   * Every raw byte the composer would have put down the PTY, newest last, as
+   * escaped text. The preview has no pane to send to, and a harness that drops
+   * what it is handed cannot be asserted against — scripts/web-keys-check.mjs
+   * reads this node to prove the empty-box terminal keys send what they claim
+   * and that a draft hands the same keys back to the textarea.
+   */
+  const [raw, setRaw] = useState<string[]>([])
   const [live, setLive] = useState(true)
   // The three faces an agent pane has, in the order a tap cycles them; the
   // chat here is the screen-read one (lib/screen-turns.ts), since the preview
@@ -417,7 +425,7 @@ function PreviewPane({
           to={`${profile.name} · forge`}
           onDraft={setDraft}
           onSend={() => setDraft('')}
-          onRaw={() => undefined}
+          onRaw={(data) => setRaw((seen) => [...seen, JSON.stringify(data)])}
           models={roster}
           currentModelId={matchAgentModel(roster, status.model)?.id ?? null}
           onModel={roster.length ? () => undefined : undefined}
@@ -428,6 +436,9 @@ function PreviewPane({
           onMode={ladder.length ? () => undefined : undefined}
           autoFocus={false}
         />
+        <pre data-testid="preview-raw" hidden>
+          {raw.join(' ')}
+        </pre>
       </div>
     </div>
   )

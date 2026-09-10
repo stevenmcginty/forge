@@ -29,6 +29,11 @@ import { useMobile } from '../lib/mobile'
  * phone has no room for three of them, so it wears one chip — the pane's model
  * name, coloured by its permission mode — opening all three lists in one sheet.
  *
+ * The ←↑↓→ / Tab / Esc row is for a thumb. On a keyboard those keys work as
+ * themselves whenever the box is empty — the same empty-box rule that makes
+ * Enter the Enter key rather than a Send — so answering a menu from a laptop
+ * is arrows and Enter, not six trips to the mouse. See RAW_KEYS.
+ *
  * Spellcheck and autocapitalize stay on. The hidden xterm helper turns them
  * off because an IME double-fires into a TUI; this field is a normal box.
  */
@@ -36,6 +41,37 @@ import { useMobile } from '../lib/mobile'
 export const BACK_TAB = '\x1b[Z'
 
 const MAX_GROW_PX = 196
+
+/**
+ * What an empty box forwards to the pane, and why only an empty one.
+ *
+ * The row of ←↑↓→ / Tab / Esc buttons below the textarea exists for a thumb,
+ * and a thumb is the only input that ever needed it. On a real keyboard those
+ * keys are already under the fingers — but pressed in a textarea they mean
+ * something else entirely: the arrows walk the caret, Tab leaves the field,
+ * Escape is the browser's own way out. So the question is not which keys to
+ * take, it is *when* taking them is unambiguous.
+ *
+ * An empty box answers it. With nothing typed there is no caret to walk and no
+ * text to leave behind, so the pane is the only thing these keys could
+ * sensibly mean — which is exactly the reasoning that already lets an empty
+ * box send Enter rather than a message (see `submit`). The moment there is a
+ * draft every one of them goes straight back to the textarea, because a
+ * composer you cannot edit with the arrow keys is not a composer.
+ *
+ * Shift+Tab is the one modified key with a meaning of its own here, and it is
+ * the same back-tab `SessionComposer` walks the mode rungs with. Ctrl, Alt and
+ * Meta are left alone throughout: those chords belong to the browser and the
+ * OS, and a terminal client that swallowed Ctrl+W would be a bad neighbour.
+ */
+const RAW_KEYS: Record<string, string> = {
+  ArrowUp: '\x1b[A',
+  ArrowDown: '\x1b[B',
+  ArrowRight: '\x1b[C',
+  ArrowLeft: '\x1b[D',
+  Tab: '\t',
+  Escape: '\x1b'
+}
 
 export function Composer({
   draft,
@@ -296,6 +332,15 @@ export function Composer({
       event.preventDefault()
       submit()
       return
+    }
+    // The terminal keys, but only while the box is empty — see RAW_KEYS.
+    if (!hasDraft && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      const raw = event.shiftKey ? (event.key === 'Tab' ? BACK_TAB : undefined) : RAW_KEYS[event.key]
+      if (raw !== undefined) {
+        event.preventDefault()
+        onRaw(raw)
+        return
+      }
     }
     // The chord itself. One letter, armed Ctrl, one code down the PTY — and
     // the arm clears whether or not the letter was one anybody meant, because
@@ -594,11 +639,11 @@ export function Composer({
             </PopoverRow>
           </Popover>
           <div className="composer__keys" role="toolbar" aria-label="Terminal keys">
-            <Key label="←" onClick={() => onRaw('\x1b[D')} disabled={disabled} title="Left" />
-            <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
-            <Key label="↓" onClick={() => onRaw('\x1b[B')} disabled={disabled} title="Down" />
-            <Key label="→" onClick={() => onRaw('\x1b[C')} disabled={disabled} title="Right" />
-            <Key label="Tab" onClick={() => onRaw('\t')} disabled={disabled} />
+            <Key label="←" onClick={() => onRaw('\x1b[D')} disabled={disabled} title="Left — or ← with the box empty" />
+            <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up — or ↑ with the box empty" />
+            <Key label="↓" onClick={() => onRaw('\x1b[B')} disabled={disabled} title="Down — or ↓ with the box empty" />
+            <Key label="→" onClick={() => onRaw('\x1b[C')} disabled={disabled} title="Right — or → with the box empty" />
+            <Key label="Tab" onClick={() => onRaw('\t')} disabled={disabled} title="Tab — or Tab with the box empty" />
             <Key
               label="Ctrl"
               onClick={() => setCtrl((v) => !v)}
@@ -606,7 +651,7 @@ export function Composer({
               active={ctrl}
               title={ctrl ? 'Ctrl armed — next letter sends its control code' : 'Ctrl — tap, then a letter (C, D, L, U…)'}
             />
-            <Key label="Esc" onClick={() => onRaw('\x1b')} disabled={disabled} />
+            <Key label="Esc" onClick={() => onRaw('\x1b')} disabled={disabled} title="Esc — or Esc with the box empty" />
           </div>
           <button
             type="submit"
