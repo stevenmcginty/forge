@@ -755,6 +755,8 @@ const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
     { id: 'glm-4.7', label: 'GLM 4.7', note: 'the older Coding Plan model' }
   ],
   codex: [
+    { id: 'gpt-6-sol', label: 'GPT-6 Sol', note: 'newest — interactive and agentic coding' },
+    { id: 'gpt-6-luna', label: 'GPT-6 Luna', note: 'newest — the fastest, cheapest GPT-6' },
     { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'flagship — complex coding and research' },
     { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'everyday workhorse' },
     { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'fast and cheap, clear repeatable work' },
