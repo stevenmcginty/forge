@@ -32,6 +32,8 @@
     "voice:check": "node scripts/voice-check.mjs",
     "launch-guard:check": "node scripts/launch-guard-check.mjs",
     "agent-bar:check": "node scripts/agent-bar-check.mjs",
+    "brain-adapters:check": "node scripts/brain-adapters-check.mjs",
+    "voice-hotkey:check": "node scripts/voice-hotkey-check.mjs",
     "realtime:check": "node scripts/realtime-check.mjs",
     "canvas:check": "node scripts/canvas-check.mjs",
     "artifact:check": "node scripts/artifact-check.mjs",

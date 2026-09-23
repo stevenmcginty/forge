@@ -10,7 +10,7 @@ import {
   RETIRED_BUILTIN_PROFILE_IDS
 } from '@shared/agents'
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
-import { isAgentBrainId, migrateAgentBrain } from '@shared/agent-brain'
+import { isAgentBrainId, migrateAgentBrain, migrateCodexClaudeModel } from '@shared/agent-brain'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
@@ -705,7 +705,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
 
   const win = s.window ?? DEFAULT_SETTINGS.window
   const brain = s.voiceBrain
-  return {
+  const out: Settings = {
     agentProfiles: profiles,
     lastProjectId: s.lastProjectId ?? null,
     railCollapsed: s.railCollapsed ?? false,
@@ -1039,6 +1039,14 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // silently drops is worse than one that refuses it.
     customTools: sanitiseCustomTools(s.customTools)
   }
+  // "Claude" running a GPT model through Codex, with no Forge tools, is the
+  // codex-cli brain now (B8). One-time by construction: see the shared helper.
+  const codex = migrateCodexClaudeModel(out.agentBrain, out.voiceClaudeModel, DEFAULT_SETTINGS.voiceClaudeModel)
+  if (codex) {
+    out.agentBrain = codex.agentBrain
+    out.voiceClaudeModel = codex.voiceClaudeModel
+  }
+  return out
 }
 
 function str(v: unknown): string {

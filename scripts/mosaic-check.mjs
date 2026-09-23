@@ -248,12 +248,13 @@ console.log('\npersistence')
     tiles: {
       a: { x: 16, y: 24, w: 320, h: 240, fit: true },
       b: { x: 352, y: 24, w: 320, h: 240 },
+      c: { x: 688, y: 24, w: 320, h: 240, fit: false },
       gone: { x: 0, y: 0, w: 320, h: 240 },
       junk: { x: Number.NaN, y: 0, w: 320, h: 240 }
     },
     wallTabs: ['tab1', 'tab-that-closed']
   }
-  const panes = new Set(['a', 'b', 'junk'])
+  const panes = new Set(['a', 'b', 'c', 'junk'])
   const tabs = new Set(['tab1'])
   const back = M.sanitiseMosaic(JSON.parse(JSON.stringify(saved)), panes, tabs)
 
@@ -261,6 +262,7 @@ console.log('\npersistence')
   ok(same(back.tiles.a, { x: 16, y: 24, w: 320, h: 240 }), 'boxes survive the round trip exactly', show(back.tiles.a))
   ok(back.tiles.a.fit === true, 'and so does a refitted tile')
   ok(back.tiles.b.fit === undefined, 'a tile nobody refitted stays a scale model')
+  ok(back.tiles.c && back.tiles.c.fit === false, 'an explicit scale-model tile (fit:false) survives the round trip')
   ok(!back.tiles.gone, 'a box for a pane that no longer exists is dropped')
   ok(!back.tiles.junk, 'a box with a NaN in it is dropped')
   ok(back.wallTabs.length === 1 && back.wallTabs[0] === 'tab1', 'so is a marker for a tab that closed')

@@ -28,7 +28,9 @@ import { join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const OUT_DIR = join(ROOT, 'bridge-dist')
-const ENTRIES = ['gemini-bridge.mjs', 'share-bridge.mjs']
+// brain-mcp.mjs: the main agent's Forge tools for the Codex / Gemini CLI brains
+// (electron/voice-agent/cli-brains.ts). No key, no state; it only relays.
+const ENTRIES = ['gemini-bridge.mjs', 'share-bridge.mjs', 'brain-mcp.mjs']
 
 mkdirSync(OUT_DIR, { recursive: true })
 

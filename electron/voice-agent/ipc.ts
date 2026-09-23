@@ -9,8 +9,13 @@ import type {
   VoiceAgentToolResult
 } from '@shared/types'
 import { getDataDir, getSettings } from '../store'
-import { bridgeConfigPath } from '../bridge/mcp-config'
+import { bridgeConfigPath, resolveBridgeScript } from '../bridge/mcp-config'
+import type { BrowserLink } from '../browser-panes/link'
+import { createBrainLink } from './brain-link'
+import { findWindowsLaunchable } from '../cli-launch'
+import { whichCommand } from '../which'
 import { DEFAULT_VOICE_CLAUDE_MODEL, VoiceAgentHost, type VoiceAgentShot } from './host'
+import type { CliBrainSetup } from './cli-brains'
 
 /**
  * The Electron half of the voice brain — and deliberately all of it.
@@ -25,6 +30,9 @@ import { DEFAULT_VOICE_CLAUDE_MODEL, VoiceAgentHost, type VoiceAgentShot } from 
 
 let target: BrowserWindow | null = null
 let host: VoiceAgentHost | null = null
+/** The brain link: how a CLI brain's bridge/brain-mcp.mjs reaches the host's tools. */
+let brainLink: BrowserLink | null = null
+let brainLinkReady: Promise<string> | null = null
 
 function send(channel: string, payload: unknown): void {
   if (!target || target.isDestroyed()) return
@@ -78,12 +86,37 @@ export async function captureScreen(): Promise<VoiceAgentShot | null> {
   return { base64: source.thumbnail.toPNG().toString('base64'), mime: 'image/png' }
 }
 
+/**
+ * What a CLI brain needs to have Forge's tools: the relay script, a node to run
+ * it, and the brain link — the browser link's authenticated pipe class, with a
+ * token of its own under `<data dir>\brain`. Started on the first CLI turn.
+ */
+async function cliBrainSetup(): Promise<CliBrainSetup | null> {
+  const script = resolveBridgeScript('brain-mcp.mjs')
+  if (!script) return null
+  const node = (process.platform === 'win32' ? findWindowsLaunchable('node') : whichCommand('node')) ?? 'node'
+  brainLink ??= createBrainLink(join(getDataDir(), 'brain'), ensureHost)
+  brainLinkReady ??= brainLink.listen()
+  try {
+    await brainLinkReady
+  } catch (err) {
+    console.error('[voice-agent] the brain link did not start:', err)
+    brainLinkReady = null
+    return null
+  }
+  const settings = getSettings()
+  const key = settings.geminiKey.trim() && !settings.geminiKey.trim().startsWith('enc:') ? settings.geminiKey.trim() : String(process.env['GEMINI_API_KEY'] ?? '').trim()
+  return { node, mcpScript: script, linkFile: brainLink.linkFile, workDir: join(getDataDir(), 'brains'), geminiKey: key }
+}
+
 function ensureHost(): VoiceAgentHost {
   if (host) return host
   host = new VoiceAgentHost({
     sendEvent: (event) => send(IPC.voiceAgentEvent, event),
     sendToolRequest: (request) => send(IPC.voiceAgentToolRequest, request),
     getModel: () => getSettings().voiceClaudeModel || DEFAULT_VOICE_CLAUDE_MODEL,
+    getBrain: () => getSettings().agentBrain,
+    getCliSetup: cliBrainSetup,
     getBridgeServer: bridgeServer,
     captureScreen,
     // The same `<data dir>\bridge-out` the bridge subprocess is told to write
@@ -140,5 +173,8 @@ export function askRendererTool(name: string, args: unknown): Promise<string> {
 export function disposeVoiceAgent(): void {
   host?.dispose()
   host = null
+  brainLink?.close()
+  brainLink = null
+  brainLinkReady = null
   target = null
 }

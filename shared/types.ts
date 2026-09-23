@@ -232,9 +232,9 @@ export interface MosaicRect {
 /** A tile's placement, plus how its terminal is shown inside it. */
 export interface MosaicTile extends MosaicRect {
   /**
-   * True once the user double-clicked the header: the PTY is refitted to the
-   * box (real cols/rows, life-size type) instead of being scaled into it, and
-   * follows the box from then on. Opt-in per tile — see MosaicView.
+   * How the terminal fills the box: true = refit (the PTY takes the box's real
+   * cols/rows, life-size type), false = scale model (the terminal is scaled
+   * into the box), absent = follow the wall's mosaicText. See MosaicView.
    */
   fit?: boolean
 }
@@ -882,6 +882,8 @@ export type AgentBrainId =
   | 'gemini-flash'
   | 'groq'
   | 'openrouter'
+  | 'gemini-cli'
+  | 'codex-cli'
 
 /** One realtime voice per vendor — the two GPT models share OpenAI's voices. */
 export interface VoiceHubVoices {

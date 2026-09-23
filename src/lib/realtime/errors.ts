@@ -8,12 +8,14 @@
  * so nothing had to change at the source to get them.
  */
 
-export type ErrorSource = 'gemini' | 'openai' | 'claude' | 'parakeet' | 'groq' | 'openrouter' | 'brain'
+export type ErrorSource = 'gemini' | 'openai' | 'claude' | 'codex' | 'gemini-cli' | 'parakeet' | 'groq' | 'openrouter' | 'brain'
 
 const VENDOR: Record<ErrorSource, string> = {
   gemini: 'Gemini',
   openai: 'OpenAI',
   claude: 'Claude',
+  codex: 'Codex',
+  'gemini-cli': 'Gemini CLI',
   parakeet: 'Parakeet',
   groq: 'Groq',
   openrouter: 'OpenRouter',
@@ -25,7 +27,9 @@ export function errorReasonOf(source: ErrorSource, text: string | null | undefin
   if (!t) return null
   const who = VENDOR[source]
   const l = t.toLowerCase()
-  if (/\b429\b|resource.?exhausted|quota|rate.?limit|too many requests/.test(l)) {
+  // A CLI brain that is not there (electron/voice-agent/cli-brains.ts words it).
+  if (/not installed|not found on path|codex not found|gemini not found|claude cli not found|\benoent\b/.test(l)) return `${who}: not installed`
+  if (/\b429\b|resource.?exhausted|quota|rate.?limit|usage.?limit|too many requests/.test(l)) {
     return /free/.test(l) || source === 'gemini' ? `${who}: free-tier limit (429)` : `${who}: rate limit (429)`
   }
   if (/no (gemini|openai|groq|openrouter) key|key is set|needs? (a|this) key/.test(l)) return `${who}: no key`

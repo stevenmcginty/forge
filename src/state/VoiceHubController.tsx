@@ -697,7 +697,11 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
           ? 'groq'
           : pickedBrain.brain === 'openrouter'
             ? 'openrouter'
-            : 'claude'
+            : pickedBrain.brain === 'codex-cli'
+              ? 'codex'
+              : pickedBrain.brain === 'gemini-cli'
+                ? 'gemini-cli'
+                : 'claude'
     errorText = sttErr ?? turnError
   }
   const errorReason = errorReasonOf(errorSource, errorText)

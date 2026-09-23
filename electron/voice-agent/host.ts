@@ -1,6 +1,5 @@
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import {
   createSdkMcpServer,
   query,
@@ -11,8 +10,10 @@ import {
   type PermissionResult,
   type Query,
   type SDKMessage,
-  type SDKUserMessage
+  type SDKUserMessage,
+  type SdkMcpToolDefinition
 } from '@anthropic-ai/claude-agent-sdk'
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import type {
   VoiceAgentEvent,
@@ -22,6 +23,8 @@ import type {
 } from '@shared/types'
 import { RestartBudget, MAX_RAPID_RESTARTS } from '../stt-protocol'
 import { whichCommand } from '../which'
+import { isCodexClaudeModel } from '@shared/agent-brain'
+import { CLI_BRAIN_NAME, CliBrainRunner, isCliBrain, type CliBrainId, type CliBrainSetup } from './cli-brains'
 import { claudeSdkExecutable } from '../claude-exe'
 import {
   closeDesktopWindow,
@@ -99,7 +102,11 @@ const MAX_TURNS = 50
  */
 export const DEFAULT_VOICE_CLAUDE_MODEL = 'opus'
 
-/** Models served by the installed Codex CLI rather than Claude Code. */
+/**
+ * Models the Claude brain used to hand to the Codex CLI with no Forge tools.
+ * A turn on one of these now runs on the codex-cli adapter (./cli-brains.ts),
+ * with every Forge tool; settings migrate off it (shared/agent-brain.ts).
+ */
 export const CODEX_VOICE_MODELS = new Set(['gpt-5.6-luna'])
 
 /* ------------------------------------------------------------------- deps */
@@ -126,6 +133,17 @@ export interface VoiceAgentDeps {
   sendToolRequest(request: { id: string; name: string; args: unknown }): void
   /** `settings.voiceClaudeModel`. Read per session start, so it can change. */
   getModel(): string
+  /**
+   * `settings.agentBrain`. 'codex-cli' and 'gemini-cli' run on a hidden CLI
+   * (./cli-brains.ts); anything else is this Claude session. Absent = Claude.
+   */
+  getBrain?(): string
+  /**
+   * How a CLI brain reaches the same Forge tools: the brain link
+   * (bridge/brain-mcp.mjs relays to `callLinkTool`). Null = no tools, so no
+   * CLI brain turn runs.
+   */
+  getCliSetup?(): Promise<CliBrainSetup | null>
   /**
    * The forge-bridge MCP server, so the voice agent gets make_image,
    * ask_gemini and friends — the same server Forge injects into Claude panes.
@@ -183,8 +201,10 @@ export class VoiceAgentHost {
   /** The live session. Null whenever there is not one. */
   private session: Query | null = null
 
-  /** One-shot Codex turn used by OpenAI voice models. */
-  private codexProcess: ChildProcessWithoutNullStreams | null = null
+  /** The Codex / Gemini CLI brains: one headless run per turn, resumed. */
+  private readonly cli: CliBrainRunner
+  /** The last live-app block a turn carried, for a CLI conversation that starts later. */
+  private lastContext = ''
 
   /** Utterances waiting to be pulled by the input generator. */
   private readonly inbox: SDKUserMessage[] = []
@@ -212,12 +232,34 @@ export class VoiceAgentHost {
 
   constructor(deps: VoiceAgentDeps) {
     this.deps = deps
+    this.cli = new CliBrainRunner({
+      sendEvent: (event) => {
+        if (event.type === 'error') this.lastError = event.message
+        if (event.type === 'result') this.lastError = null
+        this.deps.sendEvent(event)
+      },
+      setup: async () => (this.deps.getCliSetup ? await this.deps.getCliSetup() : null),
+      persona: VOICE_PERSONA
+    })
+  }
+
+  /**
+   * Who answers this turn: this Claude session, or a CLI brain. A Codex model
+   * under the Claude brain (the old "GPT-5.6 Luna via Codex") is the codex-cli
+   * adapter with that model, so it gets the Forge tools too.
+   */
+  private route(): { kind: 'claude'; model: string } | { kind: 'cli'; brain: CliBrainId; model: string | null } {
+    const brain = this.deps.getBrain?.() ?? 'claude'
+    if (isCliBrain(brain)) return { kind: 'cli', brain, model: null }
+    const model = this.deps.getModel().trim() || DEFAULT_VOICE_CLAUDE_MODEL
+    if (CODEX_VOICE_MODELS.has(model) || isCodexClaudeModel(model)) return { kind: 'cli', brain: 'codex-cli', model }
+    return { kind: 'claude', model }
   }
 
   /* ------------------------------------------------------------- lifecycle */
 
   status(): VoiceAgentStatus {
-    return { running: this.session !== null || this.codexProcess !== null, model: this.model, error: this.lastError }
+    return { running: this.session !== null || this.cli.running, model: this.model, error: this.lastError }
   }
 
   /**
@@ -253,11 +295,7 @@ export class VoiceAgentHost {
    * model had finished.
    */
   async interrupt(): Promise<boolean> {
-    if (this.codexProcess) {
-      this.codexProcess.kill()
-      this.codexProcess = null
-      return true
-    }
+    if (this.cli.interrupt()) return true
     const q = this.session
     if (!q) return false
     try {
@@ -284,22 +322,31 @@ export class VoiceAgentHost {
 
     // The setting moved under a live session. Take the new model at the turn
     // boundary — the only safe place — rather than ignoring it until restart.
-    if (this.codexProcess) {
-      this.codexProcess.kill()
-      this.codexProcess = null
+    const route = this.route()
+    // The live-app block the renderer prepends when the app changed. Kept, so a
+    // CLI conversation that starts after it was sent still hears it once.
+    const block = /^\[[\s\S]*?\]\n\n/.exec(say)?.[0]
+    if (block) this.lastContext = block
+
+    if (route.kind === 'cli') {
+      // A brain switch away from Claude: close that session at the boundary.
+      if (this.session) this.teardown()
+      this.closing = false
+      this.lastError = null
+      const cwd = this.wantedCwd || homedir()
+      this.model = route.model ?? CLI_BRAIN_NAME[route.brain]
+      this.cwd = cwd
+      const text = !block && this.lastContext && !this.cli.hasSession(route.brain, cwd) ? `${this.lastContext}${say}` : say
+      void this.cli.run({ brain: route.brain, text, cwd, model: route.model })
+      return this.status()
     }
-    if (this.session && this.deps.getModel().trim() !== this.model) {
+
+    this.cli.interrupt()
+    if (this.session && route.model !== this.model) {
       this.teardown()
     }
 
     this.closing = false
-    const model = this.deps.getModel().trim() || DEFAULT_VOICE_CLAUDE_MODEL
-    if (CODEX_VOICE_MODELS.has(model)) {
-      this.model = model
-      this.lastError = null
-      void this.sendCodexUtterance(say, model, this.wantedCwd || homedir())
-      return this.status()
-    }
     this.ensure()
     if (!this.session) return this.status()
 
@@ -358,10 +405,7 @@ export class VoiceAgentHost {
     this.inbox.length = 0
     this.model = ''
 
-    if (this.codexProcess) {
-      this.codexProcess.kill()
-      this.codexProcess = null
-    }
+    this.cli.reset()
 
     // Unblock the generator so it can return and let the SDK close the
     // subprocess down cleanly.
@@ -416,11 +460,13 @@ export class VoiceAgentHost {
   private ensure(): void {
     if (this.session || this.givenUp) return
 
-    const model = this.deps.getModel().trim() || DEFAULT_VOICE_CLAUDE_MODEL
-    if (CODEX_VOICE_MODELS.has(model)) {
-      this.model = model
+    const route = this.route()
+    // A CLI brain has no session to open: each turn is its own resumed run.
+    if (route.kind === 'cli') {
+      this.model = route.model ?? CLI_BRAIN_NAME[route.brain]
       return
     }
+    const model = route.model
     const cwd = this.wantedCwd || homedir()
 
     let q: Query
@@ -437,75 +483,6 @@ export class VoiceAgentHost {
     this.lastError = null
 
     void this.consume(q)
-  }
-
-  /** Run one streamed Codex turn for an OpenAI model selected in Settings. */
-  private async sendCodexUtterance(text: string, model: string, cwd: string): Promise<void> {
-    if (this.closing) return
-    // The model id comes from settings.json, which a hand can edit. It is an
-    // identifier, never shell syntax, and this is the point of use.
-    if (!/^[A-Za-z0-9._-]+$/.test(model)) {
-      this.fail(`The Luna voice brain could not start: "${model}" is not a model id`)
-      return
-    }
-    const codexArgs = ['exec', '--model', model, '--sandbox', 'read-only', '--skip-git-repo-check', '--ephemeral', '--json', '-']
-    // Spawn the shim the PATH walk found, as an argv entry, rather than joining
-    // a command string for cmd.exe to re-parse — the same shape system.ts uses
-    // for `claude --version`. On Windows the CLI is an npm .cmd shim that
-    // CreateProcess will not load directly, so it goes through the interpreter
-    // as an argument and nothing from settings is ever interpolated into a
-    // command line. Elsewhere `codex` is an executable name like any other.
-    const exe = process.platform === 'win32' ? whichCommand('codex') : 'codex'
-    if (!exe) {
-      this.fail('The Luna voice brain could not start: codex not found on PATH')
-      return
-    }
-    const viaCmd = /\.(cmd|bat)$/i.test(exe)
-    const child = viaCmd
-      ? spawn(process.env['ComSpec'] ?? 'cmd.exe', ['/d', '/s', '/c', exe, ...codexArgs], { cwd, windowsHide: true })
-      : spawn(exe, codexArgs, { cwd, windowsHide: true })
-    this.codexProcess = child
-    child.stdin.end(text)
-    let buffer = ''
-    let answer = ''
-    const consume = (chunk: Buffer): void => {
-      buffer += chunk.toString('utf8')
-      const lines = buffer.split(/\r?\n/)
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        try {
-          const event = JSON.parse(line) as { type?: string; item?: { type?: string; text?: string } }
-          if (event.type === 'item.completed' && event.item?.type === 'agent_message' && event.item.text) {
-            answer = event.item.text
-            this.deps.sendEvent({ type: 'assistant', text: event.item.text })
-          }
-        } catch {
-          // Codex may print a non-JSON diagnostic; the final close/error below
-          // is the useful signal for the voice surface.
-        }
-      }
-    }
-    child.stdout.on('data', consume)
-    child.stderr.on('data', (data: Buffer) => {
-      const line = data.toString('utf8').trim()
-      if (line) console.error(`[voice-agent:codex] ${line}`)
-    })
-    await new Promise<void>((resolve) => {
-      child.once('error', (err) => {
-        if (this.codexProcess === child) this.codexProcess = null
-        this.fail(`The Luna voice brain could not start: ${errText(err)}`)
-        resolve()
-      })
-      child.once('close', (code) => {
-        if (this.codexProcess === child) this.codexProcess = null
-        if (code === 0 && answer.trim()) {
-          this.deps.sendEvent({ type: 'result', ok: true, text: answer, turns: 1, costUsd: 0, durationMs: 0 })
-        } else if (!this.closing) {
-          this.fail(`The Luna voice brain ended without a reply${code === null ? '' : ` (exit ${code})`}`)
-        }
-        resolve()
-      })
-    })
   }
 
   /**
@@ -668,17 +645,60 @@ export class VoiceAgentHost {
    * be a section of that prompt.
    */
   private forgeServer(): McpServerConfig {
-    const text = (body: string): { content: Array<{ type: 'text'; text: string }> } => ({
-      content: [{ type: 'text', text: body }]
-    })
-
     return createSdkMcpServer({
       name: 'forge',
       version: '1.0.0',
       // These are the app's eyes and hands. Deferring them behind tool search
       // would mean the agent occasionally answers about Forge without them.
       alwaysLoad: true,
-      tools: [
+      tools: this.forgeToolDefs()
+    })
+  }
+
+  /* --------------------------------------------- the same tools, for CLIs */
+
+  private linkTools: ForgeToolDef[] | null = null
+
+  /**
+   * Every Forge tool as MCP `tools/list` entries, for a CLI brain's
+   * bridge/brain-mcp.mjs — the same definitions the Claude session gets, with
+   * the zod shapes written out as JSON Schema.
+   */
+  listLinkTools(): Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> {
+    this.linkTools ??= this.forgeToolDefs()
+    return this.linkTools.map((def) => ({
+      name: def.name,
+      description: def.description,
+      inputSchema: cleanSchema(z.toJSONSchema(z.object(def.inputSchema))) as Record<string, unknown>
+    }))
+  }
+
+  /**
+   * Run one Forge tool for a CLI brain, validated by the same zod shape the
+   * Claude session's SDK checks. Answers in an MCP result; never rejects.
+   */
+  async callLinkTool(name: string, args: unknown): Promise<CallToolResult> {
+    this.linkTools ??= this.forgeToolDefs()
+    const def = this.linkTools.find((t) => t.name === name)
+    if (!def) return { content: [{ type: 'text', text: `There is no Forge tool called ${name}.` }], isError: true }
+    const parsed = z.object(def.inputSchema).safeParse(args ?? {})
+    if (!parsed.success) {
+      return { content: [{ type: 'text', text: `${name} was given the wrong arguments: ${parsed.error.message.slice(0, 400)}` }], isError: true }
+    }
+    try {
+      return await def.handler(parsed.data as never, {})
+    } catch (err) {
+      return { content: [{ type: 'text', text: `${name} failed: ${errText(err)}` }], isError: true }
+    }
+  }
+
+  /** The tool definitions themselves. One list, served in-process and over the brain link. */
+  private forgeToolDefs(): ForgeToolDef[] {
+    const text = (body: string): { content: Array<{ type: 'text'; text: string }> } => ({
+      content: [{ type: 'text', text: body }]
+    })
+
+    return [
         tool(
           'get_app_state',
           'Read what is actually open in Forge right now: every project, the tabs and terminal panes in the active one, which pane is focused, and what each terminal is running. Call this before answering any question about the app, and again after run_app_action if you need to confirm what changed. Takes no arguments.',
@@ -994,8 +1014,7 @@ export class VoiceAgentHost {
         // from shared/brain-tools.ts, the same specs every brain gets.
         ...brainSpecTools((n, a) => this.askRenderer(n, a)).map((t) => tool(t.name, t.description, t.shape, t.handler)),
         ...brainHubTools((n, a) => this.askRenderer(n, a)).map((t) => tool(t.name, t.description, t.shape, t.handler))
-      ]
-    })
+    ] as ForgeToolDef[]
   }
 
   /**
@@ -1016,12 +1035,17 @@ export class VoiceAgentHost {
   }
 
   private selfDescription(): string {
-    const model = this.model || this.deps.getModel().trim() || DEFAULT_VOICE_CLAUDE_MODEL
+    const route = this.route()
+    const model = this.model || (route.kind === 'claude' ? route.model : route.model ?? CLI_BRAIN_NAME[route.brain])
     const cwd = this.cwd || this.wantedCwd || homedir()
+    const engine =
+      route.kind === 'claude'
+        ? `one persistent Claude session running the ${model} model, living inside Forge's own main process rather than in a terminal, and authenticated by the claude login already on this machine — there is no API key anywhere in this`
+        : route.brain === 'codex-cli'
+          ? `one continuing Codex session${route.model ? ` on the ${route.model} model` : ''}, run hidden by Forge's main process rather than in a terminal, and signed in with the ChatGPT login Codex already has on this machine`
+          : `one continuing Gemini CLI session, run hidden by Forge's main process rather than in a terminal, signed in with the Gemini CLI's own Google login, or with Forge's Gemini key when it has none`
     return [
-      `You are Jarvis, the voice of Forge. You are one persistent Claude session running the ${model} model, ` +
-        `living inside Forge's own main process rather than in a terminal, and authenticated by the claude login ` +
-        `already on this machine — there is no API key anywhere in this. The conversation is continuous: the same ` +
+      `You are Jarvis, the voice of Forge. You are ${engine}. The conversation is continuous: the same ` +
         `session hears every utterance until Forge closes. Your working directory is ${cwd}, and generated images ` +
         `and videos are saved to ${this.assetsDir()}.`,
       `Your tools, in groups. Forge itself: read the app's live state, act on tabs, panes, projects and prompts, ` +
@@ -1202,6 +1226,26 @@ export class VoiceAgentHost {
   get sessionCwd(): string {
     return this.cwd
   }
+}
+
+/* ------------------------------------------------------------ link tools */
+
+/** One tool as `tool()` makes it. The shapes differ per tool, so the list is loosely typed. */
+type ForgeToolDef = SdkMcpToolDefinition<any> // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/**
+ * A zod-made JSON Schema, trimmed to what every CLI accepts: no `$schema`, and
+ * no `propertyNames` (Gemini's function declarations reject it).
+ */
+function cleanSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cleanSchema)
+  if (!value || typeof value !== 'object') return value
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (k === '$schema' || k === 'propertyNames') continue
+    out[k] = cleanSchema(v)
+  }
+  return out
 }
 
 /* ------------------------------------------------------------- narrowing */

@@ -27,7 +27,7 @@
 
 import type { AgentBrainId } from './types'
 
-/** The union itself lives in shared/types.ts (dependency-free); B8 adds 'gemini-cli' | 'codex-cli' there. */
+/** The union itself lives in shared/types.ts (dependency-free). */
 export type { AgentBrainId }
 
 export type AgentBrainKind = 'realtime' | 'session' | 'json'
@@ -55,6 +55,22 @@ export const AGENT_BRAINS: readonly AgentBrainSpec[] = [
     key: null,
     auth: 'your claude login',
     note: 'Free with your subscription — Parakeet hears, a hidden Claude session thinks, Edge speaks'
+  },
+  {
+    id: 'codex-cli',
+    label: 'Codex',
+    kind: 'session',
+    key: null,
+    auth: 'your ChatGPT login (codex login)',
+    note: 'Free with your ChatGPT plan — Parakeet hears, a hidden Codex session thinks, Edge speaks'
+  },
+  {
+    id: 'gemini-cli',
+    label: 'Gemini CLI',
+    kind: 'session',
+    key: null,
+    auth: 'your Google login (gemini)',
+    note: 'Parakeet hears, a hidden Gemini CLI session thinks, Edge speaks — Google login, or your Gemini key if the CLI has none'
   },
   { id: 'gemini-live', label: 'Gemini Live', kind: 'realtime', key: 'geminiKey', auth: 'Gemini key', note: 'Live two-way talk — about $3–4 for a heavy day' },
   { id: 'gpt-realtime-mini', label: 'GPT Realtime mini', kind: 'realtime', key: 'openaiKey', auth: 'OpenAI key', note: 'Live two-way talk — about $3–8 for a heavy day' },
@@ -98,6 +114,34 @@ export function migrateAgentBrain(voiceHubProvider: unknown, voiceBrain: unknown
   }
   if (voiceBrain === 'groq' || voiceBrain === 'openrouter') return voiceBrain
   return DEFAULT_AGENT_BRAIN
+}
+
+/**
+ * Models the Claude brain used to hand to the Codex CLI ("GPT-5.6 Luna via
+ * Codex"), with no Forge tools. That brain is the `codex-cli` adapter now.
+ */
+export const CODEX_CLAUDE_MODELS: readonly string[] = ['gpt-5.6-luna']
+
+export function isCodexClaudeModel(model: unknown): boolean {
+  return typeof model === 'string' && (CODEX_CLAUDE_MODELS.includes(model.trim()) || /^gpt-/i.test(model.trim()))
+}
+
+/**
+ * One-time move off "Claude running a GPT model through Codex" (B8).
+ *
+ * A Codex model in `voiceClaudeModel` meant the Claude brain was really Codex
+ * with no Forge tools. Now: the brain becomes `codex-cli` (Codex, with every
+ * Forge tool) when Claude was the pick, and `voiceClaudeModel` goes back to the
+ * Claude default either way, so choosing Claude later means Claude. It runs
+ * once by construction: after it, the model is no longer a Codex one.
+ */
+export function migrateCodexClaudeModel(
+  agentBrain: AgentBrainId,
+  voiceClaudeModel: unknown,
+  claudeDefault: string
+): { agentBrain: AgentBrainId; voiceClaudeModel: string } | null {
+  if (!isCodexClaudeModel(voiceClaudeModel)) return null
+  return { agentBrain: agentBrain === 'claude' ? 'codex-cli' : agentBrain, voiceClaudeModel: claudeDefault }
 }
 
 /* ------------------------------------------------------------------- tests */
