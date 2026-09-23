@@ -46,6 +46,11 @@ import { dirname, join, resolve } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { BROWSER_HANDLERS, BROWSER_INSTRUCTIONS, BROWSER_TOOLS } from './browser-tools.mjs'
+
+// Forge's built-in browser rides along for the CLIs whose only MCP server is
+// this one. Claude gets it from forge-bridge, so its copy is started with it off.
+const WITH_BROWSER = process.env['FORGE_BROWSER_TOOLS'] !== 'off'
 
 const SERVER_NAME = 'forge-share'
 const SERVER_VERSION = '1.0.0'
@@ -774,12 +779,16 @@ const HANDLERS = {
   share_clear: shareClear,
   share_panes: sharePanes,
   pane_send: paneSend,
-  pane_read: paneRead
+  pane_read: paneRead,
+  ...(WITH_BROWSER ? BROWSER_HANDLERS : {})
 }
 
-const server = new Server({ name: SERVER_NAME, version: SERVER_VERSION }, { capabilities: { tools: {} } })
+const server = new Server(
+  { name: SERVER_NAME, version: SERVER_VERSION },
+  { capabilities: { tools: {} }, ...(WITH_BROWSER ? { instructions: BROWSER_INSTRUCTIONS } : {}) }
+)
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: WITH_BROWSER ? [...TOOLS, ...BROWSER_TOOLS] : TOOLS }))
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params

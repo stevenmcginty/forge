@@ -139,7 +139,7 @@ export function writeBridgeConfig(): string | null {
         args: [script],
         env
       },
-      ...(shareScript ? { [SHARE_KEY]: { command: 'node', args: [shareScript] } } : {})
+      ...(shareScript ? { [SHARE_KEY]: { command: 'node', args: [shareScript], env: { FORGE_BROWSER_TOOLS: 'off' } } } : {})
     }
   }
 

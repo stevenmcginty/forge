@@ -10,6 +10,7 @@ import { ACTION_SPECS } from '../appmanifest'
 import { toolLabel } from '../toolLabels'
 import type { RealtimeToolAnswer } from './session'
 import { HUB_REALTIME_TOOLS, runHubTool } from './tools-hub'
+import { BROWSER_REALTIME_TOOLS, runBrowserHubTool } from './tools-browser'
 
 /**
  * The realtime brains' tools: ONE list, handed to both Gemini Live and GPT
@@ -128,7 +129,8 @@ export const REALTIME_TOOLS: RealtimeToolSpec[] = [
       'Look at the primary display. For something visible that is not app structure — a rendered page, an error, a design. For tabs and panes use get_app_state.',
     parameters: NO_ARGS
   },
-  ...HUB_REALTIME_TOOLS
+  ...HUB_REALTIME_TOOLS,
+  ...BROWSER_REALTIME_TOOLS
 ]
 
 /* ---------------------------------------------------------------- answers */
@@ -197,6 +199,8 @@ export async function runRealtimeTool(
   try {
     const hub = await runHubTool(name, args)
     if (hub) return hub
+    const browser = await runBrowserHubTool(name, args)
+    if (browser) return browser
     switch (name) {
       case 'get_app_state':
       case 'get_project_memory':

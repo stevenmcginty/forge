@@ -64,7 +64,14 @@ import {
   setVoiceAgentTarget
 } from './voice-agent/ipc'
 import { registerRealtimeHandlers } from './realtime/ipc'
-import { disposeHub, registerHubHandlers } from './hub-ipc'
+import { callSignFor, disposeHub, postToBoard, registerHubHandlers } from './hub-ipc'
+import {
+  disposeBrowserPanes,
+  registerBrowserPanes,
+  setBrowserCallerNamer,
+  setBrowserShotHook,
+  setBrowserWindow
+} from './browser-panes/ipc'
 import { disposeForeman, registerForemanHandlers, setForemanTarget } from './foreman/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import {
@@ -454,6 +461,7 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+    setBrowserWindow(null)
     // Before anything else: its sweep asks a destroyed window whether it is
     // visible, and a watchdog outliving the thing it watches is a timer that
     // can only ever be wrong.
@@ -518,6 +526,7 @@ function createWindow(): void {
   watchFocusForSourceUpdate(mainWindow)
   setVoiceAgentTarget(mainWindow)
   setForemanTarget(mainWindow)
+  setBrowserWindow(mainWindow)
   // The main window is the overlay's *host*: it holds the one voice agent, so
   // it is the end the relay pushes state from and delivers callbacks to.
   setOverlayHost(mainWindow)
@@ -1428,6 +1437,14 @@ void app
       })
       registerShotsHandlers()
       registerHubHandlers()
+      registerBrowserPanes()
+      // The browser's screenshots land on the canvas board, and a tab's owner
+      // is labelled by its pane's call-sign.
+      setBrowserShotHook((path, _owner, id, project) => postToBoard(project || null, path, `Browser ${id}`))
+      setBrowserCallerNamer((owner, projectId, paneId) => {
+        const sign = projectId ? callSignFor(projectId, paneId) : undefined
+        return sign ? { ...owner, label: sign } : owner
+      })
       registerSttHandlers()
       registerSttModelHandlers()
       registerAgentProbeHandlers()
@@ -1600,6 +1617,7 @@ app.on('before-quit', () => {
   // app would hold a `claude` process open with a terminal to type into and
   // nobody watching it.
   safely('disposeForeman', disposeForeman)
+  safely('disposeBrowserPanes', disposeBrowserPanes)
   safely('disposeCompanion', disposeCompanion)
   safely('disposeMobile', disposeMobile)
   // A tasklist poll every 1.5 seconds outliving the app would keep starting a

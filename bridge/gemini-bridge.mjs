@@ -33,6 +33,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { autoPost, SHOW_ON_CANVAS_TOOL, showOnCanvasHandler } from './canvas-tools.mjs'
+import { BROWSER_HANDLERS, BROWSER_INSTRUCTIONS, BROWSER_TOOLS } from './browser-tools.mjs'
 
 const SERVER_NAME = 'forge-bridge'
 const SERVER_VERSION = '1.0.0'
@@ -376,7 +377,8 @@ const TOOLS = [
       required: ['description']
     }
   },
-  SHOW_ON_CANVAS_TOOL
+  SHOW_ON_CANVAS_TOOL,
+  ...BROWSER_TOOLS
 ]
 
 /* ------------------------------------------------------------- text (REST)
@@ -1398,12 +1400,13 @@ const HANDLERS = {
   make_image: makeImage,
   edit_image: editImage,
   make_video: makeVideo,
-  show_on_canvas: showOnCanvasHandler(ok, fail)
+  show_on_canvas: showOnCanvasHandler(ok, fail),
+  ...BROWSER_HANDLERS
 }
 
 const server = new Server(
   { name: SERVER_NAME, version: SERVER_VERSION },
-  { capabilities: { tools: {} } }
+  { capabilities: { tools: {} }, instructions: BROWSER_INSTRUCTIONS }
 )
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))

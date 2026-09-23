@@ -165,14 +165,14 @@ async function handshake(session, label) {
   return init
 }
 
-const TOOL_NAMES = ['ask_gemini', 'edit_image', 'make_image', 'make_video', 'show_on_canvas', 'summarize_video']
+const TOOL_NAMES = ['ask_gemini', 'browser_click', 'browser_close', 'browser_list', 'browser_open', 'browser_read', 'browser_screenshot', 'browser_type', 'edit_image', 'make_image', 'make_video', 'show_on_canvas', 'summarize_video']
 
 async function listTools(session, label) {
   const res = await session.request('tools/list', {})
   const tools = res.result?.tools ?? []
   const names = tools.map((t) => t.name).sort()
   check(
-    `${label}: tools/list returns exactly the six bridge tools`,
+    `${label}: tools/list returns exactly the thirteen bridge tools`,
     JSON.stringify(names) === JSON.stringify(TOOL_NAMES),
     JSON.stringify(names)
   )
@@ -189,7 +189,14 @@ async function listTools(session, label) {
     make_image: ['description'],
     edit_image: ['path', 'instruction'],
     make_video: ['description'],
-    show_on_canvas: ['path']
+    show_on_canvas: ['path'],
+    browser_open: ['url'],
+    browser_list: [],
+    browser_read: [],
+    browser_click: ['ref'],
+    browser_type: ['text'],
+    browser_screenshot: [],
+    browser_close: []
   }
   for (const t of tools) {
     check(

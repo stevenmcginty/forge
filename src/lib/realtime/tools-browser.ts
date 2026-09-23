@@ -1,6 +1,6 @@
 import type { RealtimeToolSpec } from '@shared/realtime'
 import { BROWSER_TOOL_DESCRIPTIONS, BROWSER_TOOL_NAMES, BROWSER_TOOL_PARAMS, type BrowserToolName } from '@shared/browser'
-import { browserBridge } from '@/components/browser/bridge'
+import { browserBridge } from '../../components/browser/bridge'
 
 /**
  * The seven browser tools for the voice hub's realtime brains (Gemini Live and

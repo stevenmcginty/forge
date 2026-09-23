@@ -299,8 +299,11 @@ async function main() {
         JSON.stringify(on?.['forge_share']?.args)
       )
       check(
-        'and carries no env at all — no key follows it to the other vendors',
-        !!on?.['forge_share'] && !('env' in on['forge_share']),
+        // One non-secret switch only: Claude already has the browser tools from
+        // forge-bridge, so its copy of the share server runs without them.
+        'and carries no key in its env — only the browser-tools switch',
+        !!on?.['forge_share'] &&
+          JSON.stringify(on['forge_share'].env ?? {}) === JSON.stringify({ FORGE_BROWSER_TOOLS: 'off' }),
         JSON.stringify(on?.['forge_share'])
       )
     } catch (err) {

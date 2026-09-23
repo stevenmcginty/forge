@@ -614,8 +614,23 @@ console.log('\nthe MCP server')
     const names = (list?.result?.tools ?? []).map((t) => t.name).sort()
     ok(
       JSON.stringify(names) ===
-        JSON.stringify(['pane_read', 'pane_send', 'share_clear', 'share_list', 'share_panes', 'share_read', 'share_write']),
-      'exactly the five share tools and the two pane tools, and nothing else',
+        JSON.stringify([
+          'browser_click',
+          'browser_close',
+          'browser_list',
+          'browser_open',
+          'browser_read',
+          'browser_screenshot',
+          'browser_type',
+          'pane_read',
+          'pane_send',
+          'share_clear',
+          'share_list',
+          'share_panes',
+          'share_read',
+          'share_write'
+        ]),
+      'exactly the five share tools, the two pane tools and the seven browser tools, and nothing else',
       JSON.stringify(names)
     )
     ok(
@@ -772,8 +787,8 @@ console.log('\nno key, no network')
   const envReads = [...src.matchAll(/process\.env\['([^']+)'\]/g)].map((m) => m[1]).sort()
   ok(
     JSON.stringify([...new Set(envReads)]) ===
-      JSON.stringify(['FORGE_SHARE_AGENT', 'FORGE_SHARE_DIR', 'FORGE_SHARE_LINK', 'FORGE_SHARE_ROOT']),
-    'and reads exactly four environment variables, none of them a credential',
+      JSON.stringify(['FORGE_BROWSER_TOOLS', 'FORGE_SHARE_AGENT', 'FORGE_SHARE_DIR', 'FORGE_SHARE_LINK', 'FORGE_SHARE_ROOT']),
+    'and reads exactly five environment variables (four share, one browser-tools switch), none of them a credential',
     JSON.stringify(envReads)
   )
 }

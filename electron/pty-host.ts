@@ -19,6 +19,7 @@ import { applyClaudeSession } from './bridge/claude-session'
 import { presenceFile } from './presence'
 import { gitRemoteOrigin, stripRemoteCredentials } from './git-remote'
 import { canvasEnvFor } from './hub-ipc'
+import { browserPaneEnv } from './browser-panes/env'
 
 /**
  * The PTY host: owns one PtySessionManager and bridges it to the renderer.
@@ -845,7 +846,8 @@ export function registerPtyHandlers(): void {
       ...shareEnv,
       ...(linkPath ? { [SHARE_LINK_ENV]: linkPath } : {}),
       ...(shareDir ? { [SHARE_DIR_ENV]: shareDir } : {}),
-      ...canvasEnv
+      ...canvasEnv,
+      ...browserPaneEnv(String(req?.id ?? ''), bootstrapCommand)
     }
 
     const blocked = notice ?? glmNotice

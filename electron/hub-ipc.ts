@@ -116,6 +116,21 @@ export function registerHubHandlers(): void {
   ipcMain.handle(HUB_IPC.keymapSet, (_e, file: KeymapFile) => getStore().setKeymap(file))
 }
 
+/**
+ * Post a file to a project's board — the renderer's active project when none
+ * is named. For main-side features (the built-in browser's screenshots); wired
+ * in main.ts so this module never imports them.
+ */
+export function postToBoard(projectId: string | null, path: string, title: string): void {
+  const target = projectId || activeProjectId
+  if (target) void getBoard().post(target, path, title)
+}
+
+/** A pane's call-sign in a project, if it has one. */
+export function callSignFor(projectId: string, paneId: string): string | undefined {
+  return getStore().getCallSigns(projectId)[paneId]
+}
+
 export function disposeHub(): void {
   feed?.close()
   feed = null
