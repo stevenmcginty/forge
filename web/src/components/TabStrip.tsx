@@ -393,6 +393,35 @@ function Tab({
             !
           </span>
         ) : null}
+        {/*
+         * The same sheet as the long-press, in plain sight on the tab you are
+         * on. A hidden gesture alone was not found: Steve asked where closing
+         * a tab had gone. It opens a sheet (Close tab still asks first), so a
+         * stray tap never closes anything.
+         */}
+        {active ? (
+          <span
+            className="tab__menu"
+            role="button"
+            tabIndex={0}
+            aria-label={`Options for ${tab.title}: close, hand off, new agent`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onLongPress()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onLongPress()
+              }
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 10l5 5 5-5" />
+            </svg>
+          </span>
+        ) : null}
       </div>
     )
   }

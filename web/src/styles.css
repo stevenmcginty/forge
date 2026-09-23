@@ -2290,6 +2290,43 @@ body {
   line-height: 1.2;
 }
 
+/* The active tab's options chevron: the long-press sheet, findable. A neutral
+   glyph, not a red ×, because it opens a sheet rather than closing anything. */
+.app[data-mobile] .tab__menu {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: calc(var(--p-2) * -1);
+  border-radius: var(--p-r-pill);
+  color: var(--p-ink-2);
+  background: var(--p-hover);
+}
+
+/* 44px of finger for a 24px glyph. */
+.app[data-mobile] .tab__menu::before {
+  content: '';
+  position: absolute;
+  inset: -10px;
+}
+
+.app[data-mobile] .tab__menu svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app[data-mobile] .tab__menu:active {
+  color: var(--p-ink);
+  background: var(--p-line-strong);
+}
+
 .app[data-mobile] .tab__suffix {
   font-weight: 500;
   color: var(--p-ink-3);
