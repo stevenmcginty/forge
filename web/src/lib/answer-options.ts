@@ -145,6 +145,24 @@ export function isYesNo(question: string): boolean {
   return YES_NO.test(question)
 }
 
+/** The words that open a question no Yes or No can answer. */
+const OPEN_QUESTION = /^(?:what|which|where|when|why|how|who|whom|whose)\b/i
+/** "Keep it or drop it?" — a choice between two things, unless it is "… or not?". */
+const EITHER_OR = /\bor\b(?!\s+not\b)/i
+
+/**
+ * Whether Yes and No answer this question. "Do you want me to commit?" takes
+ * them; "What should Claude do instead?" and "Keep it or drop it?" do not,
+ * and two buttons under them are noise — the reply goes in words, typed or
+ * said. Read off the last clause, since a question often follows a line of
+ * context ("Tests pass, shall I push?").
+ */
+export function offersYesNo(question: string): boolean {
+  if (isYesNo(question)) return true
+  const last = (question.split(/[.!:;,]\s+|\s+[·—–]\s+/).pop() ?? '').replace(/^[^\p{L}]+/u, '')
+  return !OPEN_QUESTION.test(last) && !EITHER_OR.test(last)
+}
+
 /**
  * The prompt's reading, unless the screen has a fuller one — the flattened
  * line is capped and the screen is not.

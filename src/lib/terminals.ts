@@ -213,6 +213,18 @@ const SUBMITTED_LINE = /^[>❯]\s+(?!\(?\d+[.)]\s)\S/
 const INPUT_TAIL_LINES = 3
 
 /**
+ * Claude Code's note after Esc stops a turn: "⎿ Interrupted · What should
+ * Claude do instead?". It ends in a question mark but asks nothing — the
+ * input box is simply back, as after any finished turn — so it never counts
+ * as asking. It used to raise a Yes/No card on the phone, and the card's No
+ * went through as a message.
+ */
+const INTERRUPT_NOTE = /\bInterrupted\b.*\bWhat should \S+ do instead\?\s*$/i
+
+/** A line that ends in a question mark and is not the interrupt note. */
+const isQuestionLine = (line: string): boolean => /[?？]\s*$/.test(line) && !INTERRUPT_NOTE.test(line)
+
+/**
  * Drop the border a TUI draws around a prompt, so the text inside reads as
  * ordinary lines. A row that was nothing but border comes back empty and is
  * skipped by the caller.
@@ -690,7 +702,7 @@ class TerminalHost {
     const tail = this.settledTail(entry)
     if (tail.length === 0) return false
 
-    if (tail.some((line) => /[?？]\s*$/.test(line))) return true
+    if (tail.some(isQuestionLine)) return true
     if (
       tail.some((line) => CURSOR_CHOICE_LINE.test(line)) &&
       tail.filter((line) => CHOICE_LINE.test(line)).length >= 2
@@ -720,7 +732,7 @@ class TerminalHost {
     const tail = this.settledTail(entry)
     if (tail.length === 0) return ''
 
-    const asked = [...tail].reverse().find((line) => /[?？]\s*$/.test(line))
+    const asked = [...tail].reverse().find(isQuestionLine)
     if (asked) return asked.trim().slice(0, PROMPT_MAX_CHARS)
 
     const firstChoice = tail.findIndex((line) => CHOICE_LINE.test(line))

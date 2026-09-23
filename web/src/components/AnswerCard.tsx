@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { isYesNo, readAsk, type ParsedAsk } from '../lib/answer-options'
+import { isYesNo, offersYesNo, readAsk, type ParsedAsk } from '../lib/answer-options'
 import './AnswerCard.css'
 
 /**
@@ -173,6 +173,9 @@ export function AnswerCard({
   const disabled = sent || !live
   /** Prose wants a reply in words, so the hint offers typing one as well. */
   const prose = !ask.options.length && !isYesNo(question)
+  /** "What should I do instead?" gets no buttons: only words answer it. */
+  const replies = ask.options.length || !offersYesNo(question) ? [] : plainReplies(question)
+  const buttons = ask.options.length > 0 || replies.length > 0
 
   return (
     <section className="answer" aria-label={`${agentName} is asking`} data-sent={sent ? 'true' : undefined}>
@@ -183,36 +186,36 @@ export function AnswerCard({
         <span>{agentName} is asking</span>
       </div>
       <p className="answer__question">{question}</p>
-      <div className="answer__options" role="group" aria-label="Answers">
-        {ask.options.length ? (
-          ask.options.map((option, index) => (
-            <button
-              key={option.n}
-              type="button"
-              className="answer__option"
-              disabled={disabled}
-              onClick={() => void choose(keysFor(index))}
-            >
-              <span className="answer__digit" aria-hidden="true">
-                {option.n}
-              </span>
-              <span className="answer__label">{option.label}</span>
-            </button>
-          ))
-        ) : (
-          plainReplies(question).map((reply) => (
-            <button
-              key={reply.label}
-              type="button"
-              className="answer__option"
-              disabled={disabled}
-              onClick={() => void choose(reply.keys)}
-            >
-              <span className="answer__label">{reply.label}</span>
-            </button>
-          ))
-        )}
-      </div>
+      {buttons ? (
+        <div className="answer__options" role="group" aria-label="Answers">
+          {ask.options.length
+            ? ask.options.map((option, index) => (
+                <button
+                  key={option.n}
+                  type="button"
+                  className="answer__option"
+                  disabled={disabled}
+                  onClick={() => void choose(keysFor(index))}
+                >
+                  <span className="answer__digit" aria-hidden="true">
+                    {option.n}
+                  </span>
+                  <span className="answer__label">{option.label}</span>
+                </button>
+              ))
+            : replies.map((reply) => (
+                <button
+                  key={reply.label}
+                  type="button"
+                  className="answer__option"
+                  disabled={disabled}
+                  onClick={() => void choose(reply.keys)}
+                >
+                  <span className="answer__label">{reply.label}</span>
+                </button>
+              ))}
+        </div>
+      ) : null}
       {sent ? (
         <p className="answer__sent" role="status">
           Sent — waiting for {agentName}
@@ -224,7 +227,9 @@ export function AnswerCard({
             Show terminal
           </button>
         ) : null}
-        <span className="answer__hint">{prose ? 'or type / say your reply' : 'or say your answer'}</span>
+        <span className="answer__hint">
+          {!buttons ? 'Type or say your reply' : prose ? 'or type / say your reply' : 'or say your answer'}
+        </span>
       </div>
     </section>
   )
