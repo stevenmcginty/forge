@@ -767,9 +767,15 @@ export function registerPtyHandlers(): void {
     // Gemini CLI's individual-account OAuth route now returns UNSUPPORTED_CLIENT.
     // If Forge has a Gemini API key, pass it only to Gemini panes and select the
     // current stable Flash model. Other panes never receive the key.
+    // A still-encoded key (no secrets codec in this process) is left out, like
+    // no key, rather than handing the pane ciphertext — see bridge/mcp-config.ts.
+    const geminiKey = settings.geminiKey.trim()
+    if (exe?.toLowerCase() === 'gemini' && geminiKey.startsWith('enc:')) {
+      console.error('[pty] the Gemini key is still encrypted (no secrets codec in this process); GEMINI_API_KEY left out')
+    }
     const geminiEnv =
-      exe?.toLowerCase() === 'gemini' && settings.geminiKey.trim()
-        ? { GEMINI_API_KEY: settings.geminiKey.trim(), GEMINI_MODEL: GEMINI_CLI_MODEL }
+      exe?.toLowerCase() === 'gemini' && geminiKey && !geminiKey.startsWith('enc:')
+        ? { GEMINI_API_KEY: geminiKey, GEMINI_MODEL: GEMINI_CLI_MODEL }
         : undefined
 
     // GLM 5.3 is Claude Code on Z.ai's Coding Plan gateway. Injected after
