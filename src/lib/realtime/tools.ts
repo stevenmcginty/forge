@@ -9,6 +9,7 @@ import {
 import { ACTION_SPECS } from '../appmanifest'
 import { toolLabel } from '../toolLabels'
 import type { RealtimeToolAnswer } from './session'
+import { HUB_REALTIME_TOOLS, runHubTool } from './tools-hub'
 
 /**
  * The realtime brains' tools: ONE list, handed to both Gemini Live and GPT
@@ -83,7 +84,7 @@ function runAppActionSpec(): RealtimeToolSpec {
 const NO_ARGS = { type: 'object', properties: {} }
 
 /** Tools B2 fills in. Declared now so both providers already know the names. */
-export const STUB_TOOL_NAMES: readonly string[] = ['focus_pane_by_name', 'show_on_canvas']
+export const STUB_TOOL_NAMES: readonly string[] = []
 
 export const REALTIME_TOOLS: RealtimeToolSpec[] = [
   {
@@ -127,24 +128,7 @@ export const REALTIME_TOOLS: RealtimeToolSpec[] = [
       'Look at the primary display. For something visible that is not app structure — a rendered page, an error, a design. For tabs and panes use get_app_state.',
     parameters: NO_ARGS
   },
-  {
-    name: 'focus_pane_by_name',
-    description: 'Bring a pane forward by its name or call sign, e.g. "the reviewer". Not available yet — say so if asked.',
-    parameters: {
-      type: 'object',
-      properties: { name: { type: 'string', description: 'The pane’s name or call sign' } },
-      required: ['name']
-    }
-  },
-  {
-    name: 'show_on_canvas',
-    description: 'Show something on Forge’s canvas — an image, a file, a pane. Not available yet — say so if asked.',
-    parameters: {
-      type: 'object',
-      properties: { what: { type: 'string', description: 'What to show, in words' } },
-      required: ['what']
-    }
-  }
+  ...HUB_REALTIME_TOOLS
 ]
 
 /* ---------------------------------------------------------------- answers */
@@ -211,6 +195,8 @@ export async function runRealtimeTool(
 ): Promise<RealtimeToolAnswer> {
   const deps = env.deps === undefined ? currentVoiceAgentToolDeps() : env.deps
   try {
+    const hub = await runHubTool(name, args)
+    if (hub) return hub
     switch (name) {
       case 'get_app_state':
       case 'get_project_memory':
@@ -239,13 +225,6 @@ export async function runRealtimeTool(
         if (!shot) return { ok: false, text: 'FAILED: screen capture is not available in this build.' }
         return { ok: true, text: 'OK: the screenshot follows as an image.', image: shot }
       }
-
-      // TODO(B2): focus a pane by its name / call sign. Replace this answer
-      // with the real handler; the declaration above stays as it is.
-      case 'focus_pane_by_name':
-      // TODO(B2): put something on the canvas. Same deal.
-      case 'show_on_canvas':
-        return { ok: false, text: `FAILED: ${name.replace(/_/g, ' ')} is not available yet.` }
 
       default:
         return { ok: false, text: `FAILED: Forge has no tool called ${name}.` }

@@ -43,6 +43,7 @@ import {
 } from './chrome-control'
 import { defaultAssetsDir, listFiles, runCommand, saveAsset, writeTextFile } from './file-tools'
 import { VOICE_PERSONA } from './persona'
+import { brainHubTools } from '../hub-brain-tools'
 
 /**
  * The voice brain: one persistent Claude Agent SDK session, living for as long
@@ -1051,7 +1052,8 @@ export class VoiceAgentHost {
               return text(`The browser window could not be photographed: ${errText(err)}`)
             }
           }
-        )
+        ),
+        ...brainHubTools((n, a) => this.askRenderer(n, a)).map((t) => tool(t.name, t.description, t.shape, t.handler))
       ]
     })
   }
@@ -1160,6 +1162,10 @@ export class VoiceAgentHost {
       'mcp__forge__get_project_memory',
       'mcp__forge__remember',
       'mcp__forge__take_screenshot',
+      'mcp__forge__focus_pane_by_name',
+      'mcp__forge__list_panes_with_names',
+      'mcp__forge__run_saved_prompt',
+      'mcp__forge__show_on_canvas',
       'mcp__forge__list_desktop_apps',
       'mcp__forge__open_desktop_app',
       'mcp__forge__list_windows',

@@ -64,6 +64,7 @@ import {
   setVoiceAgentTarget
 } from './voice-agent/ipc'
 import { registerRealtimeHandlers } from './realtime/ipc'
+import { disposeHub, registerHubHandlers } from './hub-ipc'
 import { disposeForeman, registerForemanHandlers, setForemanTarget } from './foreman/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import {
@@ -1426,6 +1427,7 @@ void app
         projects: getProjects
       })
       registerShotsHandlers()
+      registerHubHandlers()
       registerSttHandlers()
       registerSttModelHandlers()
       registerAgentProbeHandlers()
@@ -1583,6 +1585,7 @@ app.on('before-quit', () => {
   safely('disposePresence', disposePresence)
   safely('disposePtyHost', disposePtyHost)
   safely('disposeShotsWatcher', disposeShotsWatcher)
+  safely('disposeHub', disposeHub)
   safely('disposePlannerWatchers', disposePlannerWatchers)
   safely('disposeGitWatchers', disposeGitWatchers)
   safely('disposeActivityWatchers', disposeActivityWatchers)

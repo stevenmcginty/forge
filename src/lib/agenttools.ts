@@ -1,6 +1,7 @@
 import type { VoiceAgentToolRequest, VoiceAgentToolResult } from '@shared/types'
 import { paneLabel, resolvePaneTarget, type ActionContext, type ActionOutcome, type AppAction } from './appactions'
 import { ACTION_SPECS, buildStateSection, type ManifestSnapshot } from './appmanifest'
+import { runHubTool } from './realtime/tools-hub'
 
 /**
  * The renderer's answer to the voice brain's questions.
@@ -186,8 +187,11 @@ export async function answerVoiceAgentTool(
           : { ok: false, error: 'no project is open, so there is nowhere to keep that' }
       }
 
-      default:
+      default: {
+        const hub = await runHubTool(name, (args ?? {}) as Record<string, unknown>)
+        if (hub) return { ok: true, result: hub.text }
         return { ok: false, error: `Forge has no tool called ${name}` }
+      }
     }
   } catch (err) {
     // The model gets the reason, not a hang. Whatever broke in the executor

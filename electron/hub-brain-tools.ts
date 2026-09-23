@@ -17,7 +17,14 @@ function spec(name: HubToolName): { description: string; param: (key: string) =>
   return { description: s.description, param: (key) => s.parameters.properties[key]?.description ?? key }
 }
 
-export function brainHubTools(ask: Ask) {
+export interface BrainHubTool {
+  name: HubToolName
+  description: string
+  shape: z.ZodRawShape
+  handler: (args: Record<string, unknown>) => Promise<ToolResult>
+}
+
+export function brainHubTools(ask: Ask): BrainHubTool[] {
   const call = async (name: HubToolName, args: unknown): Promise<ToolResult> => ({
     content: [{ type: 'text', text: await ask(name, args ?? {}) }]
   })

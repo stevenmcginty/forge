@@ -2,6 +2,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { ForgeApi } from '@shared/api'
+import { hubPreloadApi } from './hub-preload'
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: Electron.IpcRendererEvent, payload: T): void => cb(payload)
@@ -406,6 +407,7 @@ const api: ForgeApi = {
 }
 
 contextBridge.exposeInMainWorld('forge', api)
+contextBridge.exposeInMainWorld('forgeHub', hubPreloadApi(ipcRenderer))
 
 /**
  * Anything that blows up in the renderer is reported to the main process, which
