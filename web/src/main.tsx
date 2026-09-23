@@ -37,6 +37,7 @@ import './styles.css'
 
 import { App } from './App'
 import { ChatPreview } from './components/ChatPreview'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { Preview } from './components/Preview'
 import { RepoProvider } from './lib/repo'
 import { ForgeProvider } from './state'
@@ -72,16 +73,22 @@ watchAppViewport()
  */
 const preview = __DEV_SERVER__ ? new URLSearchParams(location.search).get('preview') : null
 
+/*
+ * `ErrorBoundary` outermost: Forge Web once went fully blank on a phone because
+ * a render error had nothing to land on, and React unmounts the whole tree.
+ */
 createRoot(host).render(
-  preview === 'feed' ? (
-    <Preview />
-  ) : preview === 'chat' ? (
-    <ChatPreview />
-  ) : (
-    <ForgeProvider>
-      <RepoProvider>
-        <App />
-      </RepoProvider>
-    </ForgeProvider>
-  )
+  <ErrorBoundary>
+    {preview === 'feed' ? (
+      <Preview />
+    ) : preview === 'chat' ? (
+      <ChatPreview />
+    ) : (
+      <ForgeProvider>
+        <RepoProvider>
+          <App />
+        </RepoProvider>
+      </ForgeProvider>
+    )}
+  </ErrorBoundary>
 )

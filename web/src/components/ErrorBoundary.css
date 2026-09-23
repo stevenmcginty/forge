@@ -1,0 +1,41 @@
+/*
+ * The crash screen (ErrorBoundary.tsx) is the connection doorway with one
+ * addition: a second, quieter button under "Reload". Everything else is the
+ * gate's own styling.
+ */
+
+/* An error message can be one long unbroken line or a page of text. */
+.gate__card[data-reason='crash'] .gate__error {
+  max-height: 40vh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.gate__copy {
+  justify-content: center;
+  width: 100%;
+  height: 36px;
+  border-radius: var(--r-md);
+}
+
+/* On a phone: the same pill as .gate__go, outlined, so "Reload" stays the one act. */
+.app[data-shell='gate'] .gate__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 52px;
+  padding: 0 var(--p-5);
+  font: 600 var(--p-t-body) / 1 var(--p-font);
+  color: var(--p-ink);
+  background: none;
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app[data-shell='gate'] .gate__copy:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 2px;
+}

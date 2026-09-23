@@ -34,6 +34,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # React's rules of hooks and nothing else (eslint.config.mjs says why): a
+      # hook below an early return once blanked Forge Web on the phone.
+      - name: Lint hook order
+        run: npm run lint:hooks
+
       # The fast lane plus the three heavy checks a hosted runner can actually
       # satisfy — real pwsh through node-pty, and two real WebSocket servers.
       # See the `ci` flag in scripts/run-checks.mjs for where the line is drawn
