@@ -432,4 +432,28 @@ await check('after go the model is told what already ran, so it does not repeat 
   assert.match(discussion.DISCUSSION_REFUSAL, /^NOT DONE/)
 })
 
+await check('the Gemini capture worklet keeps posting mic chunks after it transfers one', async () => {
+  // A real MessagePort detaches a transferred buffer, and the typed array over
+  // it drops to length 0. The fake port does the same (structuredClone with a
+  // transfer list), or a worklet that sizes its next chunk from the one it just
+  // sent passes here while posting exactly one chunk, ever, in Forge.
+  const { default: vm } = await import('node:vm')
+  const src = readFileSync(join(ROOT, 'src/lib/realtime/pcm-worklet.js'), 'utf8')
+  const processors = {}
+  const posted = []
+  class AudioWorkletProcessor {
+    constructor() {
+      this.port = { postMessage: (msg, transfer) => posted.push(structuredClone(msg, { transfer: transfer ?? [] })) }
+    }
+  }
+  const scope = { sampleRate: 48000, AudioWorkletProcessor, registerProcessor: (name, cls) => (processors[name] = cls) }
+  vm.runInNewContext(src, scope)
+  const capture = new processors['forge-pcm-capture']({ processorOptions: { targetRate: 16000 } })
+  const frame = new Float32Array(128)
+  for (let i = 0; i < frame.length; i++) frame[i] = 0.3 * Math.sin(i / 7)
+  for (let n = 0; n < 375; n++) capture.process([[frame]]) // one second at 48 kHz
+  assert.ok(posted.length >= 9, `one second of mic should post ~10 chunks, got ${posted.length}`)
+  for (const m of posted) assert.equal(m.pcm.byteLength, 3200, 'every chunk is 100 ms of 16 kHz Int16')
+})
+
 console.log(process.exitCode ? `\nrealtime:check FAILED (${passed} passed)` : `\nrealtime:check passed (${passed} checks)`)

@@ -41,8 +41,12 @@ class ForgePcmCapture extends AudioWorkletProcessor {
       this.count++
       if (this.fill === this.chunk.length) {
         const out = this.chunk
+        // Sized before the post: transferring the buffer detaches it, and `out`
+        // reads length 0 after — the next chunk would never fill, so the mic
+        // would send one chunk, ever, and Gemini would hear nothing.
+        const size = out.length
         this.port.postMessage({ pcm: out.buffer, level: Math.sqrt(this.sumSq / Math.max(1, this.count)) }, [out.buffer])
-        this.chunk = new Int16Array(out.length)
+        this.chunk = new Int16Array(size)
         this.fill = 0
         this.sumSq = 0
         this.count = 0
