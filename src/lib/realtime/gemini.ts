@@ -1,0 +1,369 @@
+import { GEMINI_LIVE_WS_URL } from '@shared/realtime'
+import workletUrl from './pcm-worklet.js?url&no-inline'
+import type {
+  RealtimeCaption,
+  RealtimeSession,
+  RealtimeSessionOptions,
+  RealtimeState,
+  RealtimeToolCall
+} from './session'
+import { toGeminiTools } from './tools'
+
+/**
+ * Gemini Live over its WebSocket, straight from the renderer.
+ *
+ * Main mints a single-use ephemeral token (electron/realtime/tokens.ts); the
+ * renderer opens the socket with it — the CSP allows `wss:` — and streams the
+ * microphone as 16 kHz PCM through an AudioWorklet, playing the 24 kHz PCM
+ * that comes back through another. Gemini does its own voice activity
+ * detection, so talking over it is barge-in with no button (hands-free).
+ *
+ * A day-long session is two settings and one habit:
+ *  - `contextWindowCompression` (sliding window), without which an audio
+ *    session ends at 15 minutes;
+ *  - `sessionResumption`, whose handle lets a new socket pick the same
+ *    conversation back up — which is needed about every ten minutes, when the
+ *    server sends `goAway` before recycling the connection.
+ * Each reconnect mints a fresh token, so an expired thirty-minute token never
+ * strands a long session. Only when a resume fails does the controller get
+ * `onExpiring` and roll over with a text summary.
+ *
+ * Wire shapes are from https://ai.google.dev/api/live (checked 2026-09-23).
+ */
+
+const MAX_RECONNECTS = 3
+
+function b64FromBuffer(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(bin)
+}
+
+function bufferFromB64(b64: string): ArrayBuffer {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes.buffer
+}
+
+/** The setup message. Exported for scripts/realtime-check.mjs. */
+export function buildGeminiSetup(
+  opts: Pick<RealtimeSessionOptions, 'model' | 'voice' | 'instructions' | 'tools'>,
+  resumeHandle: string | null
+): Record<string, unknown> {
+  return {
+    setup: {
+      model: `models/${opts.model}`,
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } } }
+      },
+      systemInstruction: { parts: [{ text: opts.instructions }] },
+      tools: toGeminiTools(opts.tools),
+      // Server-side VAD stays on (the default): hands-free, no push-to-talk.
+      realtimeInputConfig: { automaticActivityDetection: { disabled: false } },
+      sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
+      contextWindowCompression: { slidingWindow: {} },
+      inputAudioTranscription: {},
+      outputAudioTranscription: {}
+    }
+  }
+}
+
+interface GeminiServerMessage {
+  setupComplete?: unknown
+  serverContent?: {
+    modelTurn?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string }; text?: string }> }
+    turnComplete?: boolean
+    interrupted?: boolean
+    generationComplete?: boolean
+    inputTranscription?: { text?: string }
+    outputTranscription?: { text?: string }
+  }
+  toolCall?: { functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }> }
+  toolCallCancellation?: { ids?: string[] }
+  goAway?: { timeLeft?: string }
+  sessionResumptionUpdate?: { newHandle?: string; resumable?: boolean }
+}
+
+export class GeminiLiveSession implements RealtimeSession {
+  readonly provider = 'gemini-live' as const
+  private readonly opts: RealtimeSessionOptions
+  private ws: WebSocket | null = null
+  private ctx: AudioContext | null = null
+  private stream: MediaStream | null = null
+  private capture: AudioWorkletNode | null = null
+  private player: AudioWorkletNode | null = null
+  private handle: string | null = null
+  private ready = false
+  private stopped = false
+  private muted = false
+  private reconnects = 0
+  private micLevel = 0
+  private outLevel = 0
+  /** Set by a manual interrupt: drop the rest of this turn's audio. */
+  private dropping = false
+  private userCaption: RealtimeCaption | null = null
+  private botCaption: RealtimeCaption | null = null
+  private seq = 0
+
+  constructor(opts: RealtimeSessionOptions) {
+    this.opts = opts
+  }
+
+  private state(s: RealtimeState, detail?: string): void {
+    if (!this.stopped || s === 'closed') this.opts.events.onState(s, detail)
+  }
+
+  async start(): Promise<void> {
+    this.state('connecting')
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+    })
+    this.ctx = new AudioContext()
+    await this.ctx.audioWorklet.addModule(workletUrl)
+    const source = this.ctx.createMediaStreamSource(this.stream)
+    this.capture = new AudioWorkletNode(this.ctx, 'forge-pcm-capture', { processorOptions: { targetRate: 16000 } })
+    this.capture.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; level: number }>) => this.onMicChunk(e.data)
+    source.connect(this.capture)
+    this.player = new AudioWorkletNode(this.ctx, 'forge-pcm-player', {
+      numberOfInputs: 0,
+      outputChannelCount: [2],
+      processorOptions: { sourceRate: 24000 }
+    })
+    this.player.port.onmessage = (e: MessageEvent<{ level?: number; drained?: boolean; started?: boolean }>) => {
+      if (typeof e.data.level === 'number') this.outLevel = Math.min(1, e.data.level * 3)
+      if (e.data.started) this.state('speaking')
+      if (e.data.drained) {
+        this.outLevel = 0
+        this.state('listening')
+      }
+    }
+    this.player.connect(this.ctx.destination)
+    await this.connect()
+  }
+
+  /** Open (or re-open) the socket and wait for setupComplete. */
+  private async connect(): Promise<void> {
+    const res = await window.forge.realtime?.geminiToken()
+    if (!res) throw new Error('This Forge build has no realtime bridge — restart Forge')
+    if (!res.ok) throw new Error(res.error)
+    const ws = new WebSocket(`${GEMINI_LIVE_WS_URL}?access_token=${encodeURIComponent(res.token)}`)
+    ws.binaryType = 'arraybuffer'
+    this.ws = ws
+    this.ready = false
+    await new Promise<void>((resolve, reject) => {
+      let settled = false
+      ws.onopen = () => ws.send(JSON.stringify(buildGeminiSetup(this.opts, this.handle)))
+      ws.onmessage = (e: MessageEvent<string | ArrayBuffer>) => {
+        const text = typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data)
+        let msg: GeminiServerMessage
+        try {
+          msg = JSON.parse(text) as GeminiServerMessage
+        } catch {
+          return
+        }
+        if (msg.setupComplete !== undefined && !settled) {
+          settled = true
+          this.ready = true
+          this.reconnects = 0
+          this.state('listening')
+          resolve()
+        }
+        this.onMessage(msg)
+      }
+      ws.onerror = () => {
+        if (!settled) {
+          settled = true
+          reject(new Error('Could not open the Gemini Live connection'))
+        }
+      }
+      ws.onclose = (e) => {
+        if (!settled) {
+          settled = true
+          reject(new Error(`Gemini Live closed the connection${e.reason ? ` — ${e.reason}` : ` (${e.code})`}`))
+          return
+        }
+        if (this.ws === ws) void this.onDropped(e.reason || `code ${e.code}`)
+      }
+    })
+  }
+
+  /** The socket went away mid-session: resume on a new one if we can. */
+  private async onDropped(reason: string): Promise<void> {
+    this.ready = false
+    if (this.stopped) return
+    if (!this.handle || this.reconnects >= MAX_RECONNECTS) {
+      this.opts.events.onExpiring(`Gemini Live disconnected (${reason})`)
+      return
+    }
+    this.reconnects++
+    this.state('connecting', 'Reconnecting…')
+    try {
+      await this.connect()
+    } catch (err) {
+      if (this.stopped) return
+      this.opts.events.onExpiring(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  private onMicChunk(data: { pcm: ArrayBuffer; level: number }): void {
+    this.micLevel = this.muted ? 0 : Math.min(1, data.level * 4)
+    if (!this.ready || this.muted || !this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    this.ws.send(
+      JSON.stringify({ realtimeInput: { audio: { mimeType: 'audio/pcm;rate=16000', data: b64FromBuffer(data.pcm) } } })
+    )
+  }
+
+  private caption(role: 'user' | 'assistant', chunk: string, final: boolean): void {
+    const slot = role === 'user' ? 'userCaption' : 'botCaption'
+    let c = this[slot]
+    if (!c && !chunk) return
+    if (!c) c = { id: `g${Date.now().toString(36)}-${++this.seq}`, role, text: '', final: false }
+    c = { ...c, text: c.text + chunk, final }
+    this.opts.events.onCaption(c)
+    this[slot] = final ? null : c
+  }
+
+  private onMessage(msg: GeminiServerMessage): void {
+    const sc = msg.serverContent
+    if (sc) {
+      if (sc.inputTranscription?.text) this.caption('user', sc.inputTranscription.text, false)
+      if (sc.modelTurn || sc.outputTranscription?.text) {
+        // The model has started answering, so his turn is over.
+        if (this.userCaption) this.caption('user', '', true)
+      }
+      if (sc.outputTranscription?.text) this.caption('assistant', sc.outputTranscription.text, false)
+      for (const part of sc.modelTurn?.parts ?? []) {
+        const data = part.inlineData?.data
+        if (data && !this.dropping && (part.inlineData?.mimeType ?? '').startsWith('audio/pcm')) {
+          const pcm = bufferFromB64(data)
+          this.player?.port.postMessage({ pcm }, [pcm])
+        }
+      }
+      if (sc.interrupted) {
+        this.player?.port.postMessage({ flush: true })
+        this.dropping = false
+        if (this.botCaption) this.caption('assistant', '', true)
+        this.state('listening')
+      }
+      if (sc.turnComplete) {
+        this.dropping = false
+        if (this.userCaption) this.caption('user', '', true)
+        if (this.botCaption) this.caption('assistant', '', true)
+      }
+    }
+    if (msg.toolCall?.functionCalls?.length) {
+      this.state('thinking')
+      for (const fc of msg.toolCall.functionCalls) {
+        void this.answerTool({ id: String(fc.id ?? ''), name: String(fc.name ?? ''), args: fc.args ?? {} })
+      }
+    }
+    for (const id of msg.toolCallCancellation?.ids ?? []) this.opts.events.onToolCancelled?.(id)
+    if (msg.sessionResumptionUpdate?.resumable && msg.sessionResumptionUpdate.newHandle) {
+      this.handle = msg.sessionResumptionUpdate.newHandle
+    }
+    if (msg.goAway) {
+      // The server is about to recycle this connection. Move to a new one now,
+      // on the latest resume handle, rather than waiting to be cut off.
+      const old = this.ws
+      this.ws = null
+      old?.close()
+      void this.onDropped('connection recycled')
+    }
+  }
+
+  private async answerTool(call: RealtimeToolCall): Promise<void> {
+    const answer = await this.opts.events.onToolCall(call)
+    const ws = this.ws
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(
+      JSON.stringify({
+        toolResponse: {
+          functionResponses: [{ id: call.id, name: call.name, response: { result: answer.text, ok: answer.ok } }]
+        }
+      })
+    )
+    if (answer.image) {
+      ws.send(
+        JSON.stringify({
+          clientContent: {
+            turns: [
+              {
+                role: 'user',
+                parts: [
+                  { text: 'The screenshot you asked for:' },
+                  { inlineData: { mimeType: answer.image.mime, data: answer.image.base64 } }
+                ]
+              }
+            ],
+            turnComplete: true
+          }
+        })
+      )
+    }
+  }
+
+  sendText(text: string): void {
+    const body = text.trim()
+    if (!body || !this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    this.opts.events.onCaption({ id: `g${Date.now().toString(36)}-${++this.seq}`, role: 'user', text: body, final: true })
+    this.ws.send(JSON.stringify({ realtimeInput: { text: body } }))
+  }
+
+  sendContext(text: string, respond = false): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    this.ws.send(
+      JSON.stringify({
+        clientContent: { turns: [{ role: 'user', parts: [{ text: `[Forge note] ${text}` }] }], turnComplete: respond }
+      })
+    )
+  }
+
+  setMuted(muted: boolean): void {
+    this.muted = muted
+    for (const t of this.stream?.getAudioTracks() ?? []) t.enabled = !muted
+    if (muted && this.ws?.readyState === WebSocket.OPEN) {
+      // Tells the server's VAD the stream paused, so it does not wait on silence.
+      this.ws.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }))
+    }
+  }
+
+  interrupt(): void {
+    // The Live API has no client-side cancel: barge-in is speech. A button
+    // press flushes what is queued and drops the rest of this turn's audio.
+    this.dropping = true
+    this.player?.port.postMessage({ flush: true })
+    this.outLevel = 0
+    if (this.botCaption) this.caption('assistant', '', true)
+    this.state('listening')
+  }
+
+  levels(): { mic: number; out: number } {
+    return { mic: this.micLevel, out: this.outLevel }
+  }
+
+  stop(): void {
+    if (this.stopped) return
+    this.stopped = true
+    const ws = this.ws
+    this.ws = null
+    try {
+      ws?.close()
+    } catch {
+      /* already gone */
+    }
+    for (const t of this.stream?.getTracks() ?? []) t.stop()
+    this.capture?.disconnect()
+    this.player?.disconnect()
+    void this.ctx?.close().catch(() => undefined)
+    this.stream = null
+    this.ctx = null
+    this.micLevel = 0
+    this.outLevel = 0
+    this.opts.events.onState('closed')
+  }
+}

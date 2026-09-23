@@ -1,5 +1,5 @@
 import type { VoiceAgentToolRequest, VoiceAgentToolResult } from '@shared/types'
-import type { ActionOutcome, AppAction } from './appactions'
+import { paneLabel, resolvePaneTarget, type ActionContext, type ActionOutcome, type AppAction } from './appactions'
 import { ACTION_SPECS, buildStateSection, type ManifestSnapshot } from './appmanifest'
 
 /**
@@ -56,6 +56,13 @@ export interface VoiceAgentToolDeps {
    * throws and is reported as itself.
    */
   remember(note: string): boolean | Promise<boolean>
+  /**
+   * A pane's recent screen text, by spoken target ("terminal 2", "the claude
+   * one", "this"). Answers a sentence either way — an ambiguous or missing
+   * target is said so rather than guessed. Optional: only the realtime brains
+   * ask for it (src/lib/realtime/tools.ts).
+   */
+  readPane?(target: string, lines: number): string | Promise<string>
 }
 
 /** Undo the registration. Safe to call twice. */
@@ -143,6 +150,95 @@ function asAction(args: unknown): AppAction | null {
   return args as AppAction
 }
 
+/**
+ * One tool call, answered. The Claude brain's IPC bridge below and the
+ * realtime brains (src/lib/realtime/tools.ts) both come through here, so a
+ * tool means the same thing whichever brain called it.
+ *
+ * Never rejects: a tool that throws is answered with `ok: false` and why.
+ */
+export async function answerVoiceAgentTool(
+  name: string,
+  args: unknown,
+  deps: VoiceAgentToolDeps
+): Promise<{ ok: true; result: string } | { ok: false; error: string }> {
+  try {
+    switch (name) {
+      case 'get_app_state':
+        return { ok: true, result: await appState(deps) }
+
+      case 'run_app_action': {
+        const action = asAction(args)
+        if (!action) return { ok: false, error: 'that action had no "kind" — see the tool description' }
+        return { ok: true, result: describeOutcome(await deps.runAction(action)) }
+      }
+
+      case 'get_project_memory': {
+        const memory = (await deps.getProjectMemory()).trim()
+        return { ok: true, result: memory || 'Nothing remembered about this project yet.' }
+      }
+
+      case 'remember': {
+        const note = String((args as { note?: unknown })?.note ?? '').trim()
+        if (!note) return { ok: false, error: 'that note was empty — there was nothing to remember' }
+        return (await deps.remember(note))
+          ? { ok: true, result: 'Noted — that is in this project’s memory now.' }
+          : { ok: false, error: 'no project is open, so there is nowhere to keep that' }
+      }
+
+      default:
+        return { ok: false, error: `Forge has no tool called ${name}` }
+    }
+  } catch (err) {
+    // The model gets the reason, not a hang. Whatever broke in the executor
+    // is something it can tell Steve about and carry on from.
+    return { ok: false, error: errText(err) }
+  }
+}
+
+/** Lines a pane read returns when the model does not say. */
+export const PANE_READ_DEFAULT_LINES = 40
+export const PANE_READ_MAX_LINES = 200
+
+/**
+ * A pane's recent screen, as the sentence-plus-text the model reads.
+ *
+ * Resolved exactly the way send_prompt resolves its target, so "terminal 2"
+ * reads the pane "terminal 2" would type into — and an ambiguous target is
+ * asked about, never guessed. `read` is the terminal host's snapshotText,
+ * passed in so this stays importable without xterm.
+ */
+export function describePaneText(
+  ctx: Pick<ActionContext, 'panes' | 'focusedPaneId'> | null,
+  target: string,
+  lines: number,
+  read: (paneId: string, lines: number) => string | null
+): string {
+  const panes = ctx?.panes ?? []
+  const want = Math.max(1, Math.min(PANE_READ_MAX_LINES, Math.floor(Number(lines) || PANE_READ_DEFAULT_LINES)))
+  const found = resolvePaneTarget(String(target ?? ''), panes, ctx?.focusedPaneId ?? null)
+  if (found.kind === 'ambiguous') {
+    return `FAILED: more than one pane matches — ${found.candidates.map(paneLabel).join(', ')}. Ask which one.`
+  }
+  if (found.kind === 'none') {
+    return panes.length ? `FAILED: no pane matches "${target}". Open panes: ${panes.map(paneLabel).join(', ')}.` : 'FAILED: no panes are open.'
+  }
+  const text = read(found.pane.paneId, want)
+  if (text === null) return `${paneLabel(found.pane)} is not on screen yet, so there is nothing to read — focus its tab first.`
+  return `${paneLabel(found.pane)}, last ${want} lines:
+${text.trim() || '(empty)'}`
+}
+
+/**
+ * The deps the voice agent registered last, for the realtime brains. Null
+ * before the VoiceAgentProvider mounts, and after it unmounts.
+ */
+let liveDeps: VoiceAgentToolDeps | null = null
+
+export function currentVoiceAgentToolDeps(): VoiceAgentToolDeps | null {
+  return liveDeps
+}
+
 /* ---------------------------------------------------------------- registry */
 
 /**
@@ -157,68 +253,27 @@ function asAction(args: unknown): AppAction | null {
  * free either.
  */
 export function registerVoiceAgentTools(deps: VoiceAgentToolDeps): Unregister {
+  // Kept before the bridge check: the realtime brains answer through these
+  // same deps in the renderer and need no IPC at all.
+  liveDeps = deps
+  const forget = (): void => {
+    if (liveDeps === deps) liveDeps = null
+  }
   const api = bridge()
   if (!api) {
     // A stale preload rather than broken wiring — see src/lib/agentbrain.ts.
     console.error('[voice-agent] window.forge.voiceAgent is missing; tools are not wired up.')
-    return () => undefined
+    return forget
   }
 
   const answer = async (request: VoiceAgentToolRequest): Promise<void> => {
     const id = String(request?.id ?? '')
     if (!id) return
 
-    let result: VoiceAgentToolResult
-    try {
-      switch (request.name) {
-        case 'get_app_state':
-          result = { id, ok: true, result: await appState(deps) }
-          break
-
-        case 'run_app_action': {
-          const action = asAction(request.args)
-          if (!action) {
-            result = { id, ok: false, error: 'that action had no "kind" — see the tool description' }
-            break
-          }
-          result = { id, ok: true, result: describeOutcome(await deps.runAction(action)) }
-          break
-        }
-
-        case 'get_project_memory': {
-          const memory = (await deps.getProjectMemory()).trim()
-          result = {
-            id,
-            ok: true,
-            result: memory || 'Nothing remembered about this project yet.'
-          }
-          break
-        }
-
-        case 'remember': {
-          const note = String((request.args as { note?: unknown })?.note ?? '').trim()
-          if (!note) {
-            result = { id, ok: false, error: 'that note was empty — there was nothing to remember' }
-            break
-          }
-          result = (await deps.remember(note))
-            ? { id, ok: true, result: 'Noted — that is in this project’s memory now.' }
-            : {
-                id,
-                ok: false,
-                error: 'no project is open, so there is nowhere to keep that'
-              }
-          break
-        }
-
-        default:
-          result = { id, ok: false, error: `Forge has no tool called ${request.name}` }
-      }
-    } catch (err) {
-      // The model gets the reason, not a hang. Whatever broke in the executor
-      // is something it can tell Steve about and carry on from.
-      result = { id, ok: false, error: errText(err) }
-    }
+    const outcome = await answerVoiceAgentTool(String(request.name ?? ''), request.args, deps)
+    const result: VoiceAgentToolResult = outcome.ok
+      ? { id, ok: true, result: outcome.result }
+      : { id, ok: false, error: outcome.error }
 
     try {
       await api.toolResult(result)
@@ -227,7 +282,11 @@ export function registerVoiceAgentTools(deps: VoiceAgentToolDeps): Unregister {
     }
   }
 
-  return api.onToolRequest((request) => {
+  const off = api.onToolRequest((request) => {
     void answer(request)
   })
+  return () => {
+    off()
+    forget()
+  }
 }

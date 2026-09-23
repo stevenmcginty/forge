@@ -61,7 +61,7 @@ function bridgeServer(): McpServerConfig | null {
  * screen does not come back upscaled; capped, because a 4K screenshot is
  * megabytes of base64 the model has to read.
  */
-async function captureScreen(): Promise<VoiceAgentShot | null> {
+export async function captureScreen(): Promise<VoiceAgentShot | null> {
   const primary = screen.getPrimaryDisplay()
   const width = Math.min(1920, Math.round(primary.size.width * primary.scaleFactor))
   const height = Math.round(width * (primary.size.height / primary.size.width))

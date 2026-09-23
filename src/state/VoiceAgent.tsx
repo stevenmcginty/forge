@@ -27,7 +27,7 @@ import {
   startAgentBrain,
   stopAgentBrain
 } from '@/lib/agentbrain'
-import { registerVoiceAgentTools } from '@/lib/agenttools'
+import { describePaneText, registerVoiceAgentTools } from '@/lib/agenttools'
 import { agentMemory } from '@/lib/agentmemory'
 import { bargeIn } from '@/lib/bargein'
 import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
@@ -1494,7 +1494,10 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         await window.forge.memory.append(projectId, 'preferences', note)
         await agentMemory.prime(projectId)
         return true
-      }
+      },
+      // Only the realtime brains ask for this one (src/lib/realtime/tools.ts).
+      readPane: (target, lines) =>
+        describePaneText(ctxRef.current, target, lines, (paneId, n) => terminalHost.snapshotText(paneId, n))
     })
   }, [runActions])
 

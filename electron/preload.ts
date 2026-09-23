@@ -114,6 +114,12 @@ const api: ForgeApi = {
     toolResult: (result) => ipcRenderer.invoke(IPC.voiceAgentToolResult, result)
   },
 
+  realtime: {
+    openaiConnect: (req) => ipcRenderer.invoke(IPC.realtimeOpenAIConnect, req),
+    geminiToken: () => ipcRenderer.invoke(IPC.realtimeGeminiToken),
+    screenshot: () => ipcRenderer.invoke(IPC.realtimeScreenshot)
+  },
+
   foreman: {
     start: (req) => ipcRenderer.invoke(IPC.foremanStart, req),
     stop: (paneId) => ipcRenderer.invoke(IPC.foremanStop, String(paneId ?? '')),

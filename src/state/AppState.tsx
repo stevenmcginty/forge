@@ -271,6 +271,11 @@ const FALLBACK_SETTINGS: Settings = {
   openrouterModel: 'google/gemini-2.5-flash-lite',
   groqKey: '',
   groqModel: 'llama-3.3-70b-versatile',
+  // Mirrors electron/store.ts — the free Claude path until a key is set and
+  // a realtime provider is picked on purpose.
+  openaiKey: '',
+  voiceHubProvider: 'claude',
+  voiceHubVoice: { gemini: '', openai: '' },
   memoryLlmSummarize: false,
   // Filled in by the store on hydrate — main knows the real data root.
   skillsLibraryDir: '',

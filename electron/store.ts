@@ -298,6 +298,11 @@ function defaultSettings(): Settings {
     // alone is ~3k tokens a turn, and 8b-instant's 6k TPM leaves room for barely
     // one exchange a minute. 70b-versatile gets 12k.
     groqModel: 'llama-3.3-70b-versatile',
+    openaiKey: '',
+    // Claude: free, and it needs no key. A realtime provider is a deliberate
+    // choice made in Settings once a key is there to pay for it.
+    voiceHubProvider: 'claude',
+    voiceHubVoice: { gemini: '', openai: '' },
     // Heuristic memory is free and predictable; letting a model rewrite the
     // project summary is neither, so it is opt-in.
     memoryLlmSummarize: false,
@@ -542,6 +547,7 @@ const SECRET_FIELDS = [
   'zaiKey',
   'openrouterKey',
   'groqKey',
+  'openaiKey',
   'companionApiKey',
   'companionRefreshToken',
   'mobileNgrokAuthtoken',
@@ -849,6 +855,15 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     groqKey: typeof s.groqKey === 'string' ? s.groqKey.trim() : '',
     groqModel:
       typeof s.groqModel === 'string' && s.groqModel.trim() ? s.groqModel.trim() : DEFAULT_SETTINGS.groqModel,
+    openaiKey: typeof s.openaiKey === 'string' ? s.openaiKey.trim() : '',
+    voiceHubProvider:
+      s.voiceHubProvider === 'gemini-live' || s.voiceHubProvider === 'gpt-realtime' || s.voiceHubProvider === 'gpt-realtime-mini'
+        ? s.voiceHubProvider
+        : DEFAULT_SETTINGS.voiceHubProvider,
+    voiceHubVoice: {
+      gemini: typeof s.voiceHubVoice?.gemini === 'string' ? s.voiceHubVoice.gemini.trim().slice(0, 40) : '',
+      openai: typeof s.voiceHubVoice?.openai === 'string' ? s.voiceHubVoice.openai.trim().slice(0, 40) : ''
+    },
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
     skillsLibraryDir:
       typeof s.skillsLibraryDir === 'string' && s.skillsLibraryDir.trim()

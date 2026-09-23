@@ -63,6 +63,7 @@ import {
   registerVoiceAgentHandlers,
   setVoiceAgentTarget
 } from './voice-agent/ipc'
+import { registerRealtimeHandlers } from './realtime/ipc'
 import { disposeForeman, registerForemanHandlers, setForemanTarget } from './foreman/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import {
@@ -1433,6 +1434,9 @@ void app
       // login is touched until the renderer actually starts the brain — see
       // electron/voice-agent/host.ts.
       registerVoiceAgentHandlers()
+      // Handlers only, again: no key is read and nothing is minted until the
+      // voice hub starts a realtime session. See electron/realtime/.
+      registerRealtimeHandlers()
       // Same posture: handlers only. Foreman opens no session and touches no
       // `claude` login until a pane is actually toggled on — see
       // electron/foreman/host.ts.

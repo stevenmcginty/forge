@@ -105,6 +105,12 @@ import type { HandoffStartRemoteEvent } from './handoffview'
 import type { SkillSource, SkillsList } from './skills'
 import type { PackPlugin, SkillPack } from './skillpack'
 import type { CommandsFeed } from './commands'
+import type {
+  RealtimeGeminiTokenResult,
+  RealtimeOpenAIConnectRequest,
+  RealtimeOpenAIConnectResult,
+  RealtimeScreenshotResult
+} from './realtime'
 
 /** What every skills mutation hands back: the outcome, and the fresh list. */
 export interface SkillMutation extends SkillsList {
@@ -368,6 +374,20 @@ export interface ForgeApi {
     onEvent(cb: (event: VoiceAgentEvent) => void): () => void
     onToolRequest(cb: (request: VoiceAgentToolRequest) => void): () => void
     toolResult(result: VoiceAgentToolResult): Promise<boolean>
+  }
+
+  /**
+   * The realtime voice brains (Gemini Live, GPT Realtime). Credentials only —
+   * the keys stay in main. `openaiConnect` posts the renderer's SDP offer with
+   * a freshly minted client secret and answers with OpenAI's SDP; `geminiToken`
+   * is a single-use ephemeral token for the Live WebSocket. See
+   * electron/realtime/tokens.ts. Callers must optional-chain this: a stale
+   * preload will not have it.
+   */
+  realtime: {
+    openaiConnect(req: RealtimeOpenAIConnectRequest): Promise<RealtimeOpenAIConnectResult>
+    geminiToken(): Promise<RealtimeGeminiTokenResult>
+    screenshot(): Promise<RealtimeScreenshotResult>
   }
 
   /**

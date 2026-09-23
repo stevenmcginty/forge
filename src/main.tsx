@@ -9,6 +9,7 @@ import { AppStateProvider } from './state/AppState'
 import { DictationProvider } from './state/Dictation'
 import { ForemanProvider } from './state/Foreman'
 import { VoiceAgentProvider } from './state/VoiceAgent'
+import { VoiceHubControllerProvider } from './state/VoiceHubController'
 
 const host = document.getElementById('root')
 if (!host) throw new Error('#root missing from index.html')
@@ -165,6 +166,10 @@ if (window.forge.overlay.isOverlay()) {
         <AppStateProvider>
           <DictationProvider>
             <VoiceAgentProvider>
+              {/* The voice hub's engine sits directly inside the agent it
+                  falls back to: one realtime session at most, and it drives
+                  the one VoiceAgent rather than being a second one. */}
+              <VoiceHubControllerProvider>
               {/* Foreman is mounted here for the same reason the two above it are:
                   it holds one map of driven panes and answers main's hiring
                   requests exactly once. Two copies would answer every request
@@ -177,6 +182,7 @@ if (window.forge.overlay.isOverlay()) {
                   <App />
                 </HandoffProvider>
               </ForemanProvider>
+              </VoiceHubControllerProvider>
             </VoiceAgentProvider>
           </DictationProvider>
         </AppStateProvider>

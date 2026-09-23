@@ -867,6 +867,15 @@ export interface WindowBounds {
  */
 export type VoiceBrainId = 'stub' | 'gemini' | 'openrouter' | 'groq' | 'claude' | 'openai'
 
+/** The voice hub's brain: the Claude fallback, or one of the realtime providers. */
+export type VoiceHubProvider = 'claude' | 'gemini-live' | 'gpt-realtime' | 'gpt-realtime-mini'
+
+/** One realtime voice per vendor — the two GPT models share OpenAI's voices. */
+export interface VoiceHubVoices {
+  gemini: string
+  openai: string
+}
+
 /**
  * How the voice agent answers.
  *
@@ -1754,6 +1763,23 @@ export interface Settings {
    */
   groqKey: string
   groqModel: string
+  /**
+   * OpenAI API key for the realtime voice brains (GPT Realtime and its mini).
+   * Never sent to the renderer's network layer: main mints a short-lived
+   * client secret with it and posts the WebRTC offer itself. Only ever sent to
+   * api.openai.com, only while a GPT Realtime session is starting.
+   */
+  openaiKey: string
+  /**
+   * Which brain the voice hub talks through. `claude` is the free default —
+   * Parakeet hears, the Claude Agent SDK session thinks, Edge speaks. The other
+   * three are live two-way audio sessions that need a key (geminiKey or
+   * openaiKey); without one the hub falls back to `claude`. See
+   * src/state/VoiceHubController.tsx and shared/realtime.ts.
+   */
+  voiceHubProvider: VoiceHubProvider
+  /** The realtime voice per vendor. Empty = that vendor's default (shared/realtime.ts). */
+  voiceHubVoice: VoiceHubVoices
 
   /* -------------------------------------------------------- agent memory */
   /**

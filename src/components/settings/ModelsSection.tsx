@@ -163,6 +163,22 @@ export function ModelsSection(): ReactNode {
         </Row>
       </Card>
 
+      <Card title="OpenAI">
+        <KeyField
+          label="API key"
+          value={s.openaiKey}
+          onCommit={(key) => actions.patchSettings({ openaiKey: key.trim() })}
+          placeholder="sk-…"
+          note={
+            <>
+              For live talk with GPT Realtime (Settings → Voice). An API platform key with billing — a ChatGPT
+              subscription does not cover it. The key stays in Forge&apos;s main process: each session gets a
+              short-lived secret from <span className="mono">api.openai.com</span>, and nothing else is sent anywhere.
+            </>
+          }
+        />
+      </Card>
+
       <Card title="Z.AI">
         <KeyField
           label="Coding Plan key"

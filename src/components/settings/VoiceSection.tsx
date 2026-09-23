@@ -8,7 +8,9 @@ import {
   TTS_SAMPLE_LINE,
   TTS_VOICES
 } from '@shared/tts'
-import type { Settings, VoiceEngine, VoiceReplyMode } from '@shared/types'
+import type { Settings, VoiceEngine, VoiceHubProvider, VoiceReplyMode } from '@shared/types'
+import { GEMINI_VOICES, OPENAI_VOICES, providerSpec, REALTIME_PROVIDERS, resolveVoice } from '@shared/realtime'
+import { hasKeyFor } from '@/lib/realtime/provider'
 import { chooseVoice, speaker } from '@/lib/speech'
 import { earconListening } from '@/lib/earcon'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENROUTER_MODEL } from '@/lib/voicebrain'
@@ -157,8 +159,78 @@ export function VoiceSection(): ReactNode {
         </Row>
       </Card>
 
+      <LiveTalkCard />
+
       <SpokenRepliesCard />
     </Section>
+  )
+}
+
+/**
+ * Live talk: which brain the voice hub uses, and its voice.
+ *
+ * Claude is the free default. The realtime providers are two-way audio with
+ * their own voice, so the spoken-replies settings below do not apply to them;
+ * each needs its vendor's key (Models & APIs), and without one the hub falls
+ * back to Claude and says so.
+ */
+function LiveTalkCard(): ReactNode {
+  const { state, actions } = useApp()
+  const s = state.settings
+  const spec = providerSpec(s.voiceHubProvider)
+  const vendor = spec.vendor
+  const keyed = hasKeyFor(s.voiceHubProvider, s)
+  const voices = vendor === 'gemini' ? GEMINI_VOICES : OPENAI_VOICES
+
+  return (
+    <Card
+      title="Live talk"
+      hint="Two-way voice with a realtime model: it listens the whole time, you can talk over it, and it answers in its own voice. Claude with Parakeet stays the free default."
+    >
+      <Row label="Brain" hint={spec.costNote} htmlFor="voice-hub-provider">
+        <select
+          id="voice-hub-provider"
+          className="select"
+          value={s.voiceHubProvider}
+          onKeyDown={(e) => e.stopPropagation()}
+          onChange={(e) => actions.patchSettings({ voiceHubProvider: e.target.value as VoiceHubProvider })}
+        >
+          {REALTIME_PROVIDERS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+              {hasKeyFor(p.id, s) ? '' : ' — needs a key'}
+            </option>
+          ))}
+        </select>
+      </Row>
+
+      {vendor && !keyed ? (
+        <p className="scard__hint">
+          No {vendor === 'gemini' ? 'Gemini' : 'OpenAI'} key yet, so the hub uses Claude until one is added.{' '}
+          <button type="button" className="ghost-btn" onClick={() => actions.setSettingsSection('models')}>
+            Add a key
+          </button>
+        </p>
+      ) : null}
+
+      {vendor ? (
+        <Row label="Voice" hint={vendor === 'openai' ? 'marin and cedar sound best' : 'Shared by Gemini Live and Gemini TTS'} htmlFor="voice-hub-voice">
+          <select
+            id="voice-hub-voice"
+            className="select"
+            value={resolveVoice(vendor, s.voiceHubVoice[vendor])}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={(e) => actions.patchSettings({ voiceHubVoice: { ...s.voiceHubVoice, [vendor]: e.target.value } })}
+          >
+            {voices.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </Row>
+      ) : null}
+    </Card>
   )
 }
 

@@ -30,6 +30,7 @@
     "dictation:check": "node scripts/dictation-check.mjs",
     "stt:download": "node scripts/stt-download-test.mjs",
     "voice:check": "node scripts/voice-check.mjs",
+    "realtime:check": "node scripts/realtime-check.mjs",
     "voice:brain": "node scripts/voice-brain-smoke.mjs",
     "voice:luna": "node scripts/voice-luna-smoke.mjs",
     "foreman:check": "node scripts/foreman-check.mjs",

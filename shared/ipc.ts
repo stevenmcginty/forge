@@ -203,6 +203,16 @@ export const IPC = {
   voiceAgentToolRequest: 'voice-agent:tool-request',
   voiceAgentToolResult: 'voice-agent:tool-result',
 
+  /* ------------------------------------------------ realtime voice brains
+   *
+   * Gemini Live and GPT Realtime. Main only mints credentials (and, for
+   * OpenAI, posts the SDP offer); the audio is the renderer's. See
+   * electron/realtime/ and src/lib/realtime/.
+   */
+  realtimeOpenAIConnect: 'realtime:openai-connect',
+  realtimeGeminiToken: 'realtime:gemini-token',
+  realtimeScreenshot: 'realtime:screenshot',
+
   /* ------------------------------------------------------------------ foreman
    *
    * The other Agent SDK session in the main process, and a very different
