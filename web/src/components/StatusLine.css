@@ -108,6 +108,10 @@
  * row in every face (styles.css keeps `.pkeys-toggle` up in a landscape
  * Terminal). Reading is a shape: the speaker becomes a stop square. With no
  * reply yet it is faded and does nothing.
+ *
+ * Unlike the keys toggle it carries a light wash of the agent's own colour, so
+ * the eye finds it in a grey row. The colour only draws the eye; the state is
+ * still the shape, and reading deepens the wash as a second cue.
  */
 .pread:disabled {
   opacity: 0.4;
@@ -116,6 +120,20 @@
 
 .pkeys-toggle.pread:disabled .pkeys-toggle__face {
   background: none;
+}
+
+.pkeys-toggle.pread:not(:disabled) {
+  color: var(--pane-accent, var(--accent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pane-accent, var(--accent)) 35%, var(--p-line));
+}
+
+.pkeys-toggle.pread:not(:disabled) .pkeys-toggle__face {
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 12%, transparent);
+}
+
+.pkeys-toggle.pread[aria-pressed='true'] .pkeys-toggle__face {
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 24%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pane-accent, var(--accent)) 55%, transparent);
 }
 
 /* -------------------------------------------------------- view switch
