@@ -22,6 +22,7 @@ export type PaneFace = 'chat' | 'feed' | 'term'
 
 const statuses = new Map<string, PaneStatus>()
 const views = new Map<string, PaneFace>()
+const replies = new Map<string, string>()
 const listeners = new Set<() => void>()
 
 function emit(): void {
@@ -42,6 +43,19 @@ export function publishPaneView(paneId: string, view: PaneFace | undefined): voi
   if (previous === view) return
   if (view === undefined) views.delete(paneId)
   else views.set(paneId, view)
+  emit()
+}
+
+/**
+ * The latest reply's words, as markdown (lib/speak.ts `replyText`), for the
+ * strip's "Read aloud" button. Raw rather than cleaned for speech: the tap
+ * does that, so a reply still streaming costs nothing per frame.
+ */
+export function publishPaneReply(paneId: string, text: string | undefined): void {
+  const previous = replies.get(paneId)
+  if (previous === text) return
+  if (text === undefined) replies.delete(paneId)
+  else replies.set(paneId, text)
   emit()
 }
 
@@ -66,6 +80,15 @@ export function usePaneView(paneId: string | null): PaneFace | undefined {
   return useSyncExternalStore(
     subscribe,
     () => (paneId ? views.get(paneId) : undefined),
+    () => undefined
+  )
+}
+
+/** The focused pane's latest reply, or undefined while it has none. */
+export function usePaneReply(paneId: string | null): string | undefined {
+  return useSyncExternalStore(
+    subscribe,
+    () => (paneId ? replies.get(paneId) : undefined),
     () => undefined
   )
 }

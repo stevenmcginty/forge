@@ -12,10 +12,11 @@ import { allFilesFromDataTransfer, isImageFile, uploadFileChunks } from '../lib/
 import { packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 import { publishScreenPane, useComposerFocus, withdrawScreenPane, type ScreenPane } from '../lib/pane-screen'
-import { publishPaneStatus, publishPaneView, registerPaneViewSetter, type PaneFace } from '../lib/pane-status'
+import { publishPaneReply, publishPaneStatus, publishPaneView, registerPaneViewSetter, type PaneFace } from '../lib/pane-status'
 import type { Transcript } from '@/lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
 import { screenTurns } from '../lib/screen-turns'
+import { replyText } from '../lib/speak'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { registerAnswerScreen, SCREEN_TAIL_LINES } from './AnswerCard'
@@ -479,6 +480,7 @@ export function PaneView({
     () => () => {
       publishPaneStatus(leaf.id, undefined)
       publishPaneView(leaf.id, undefined)
+      publishPaneReply(leaf.id, undefined)
     },
     [leaf.id]
   )
@@ -588,6 +590,16 @@ export function PaneView({
     if (chatFeed.turns.length > 0) return chatFeed.turns
     return screenTurns(transcript.blocks)
   }, [chatFeed.turns, transcript.blocks])
+
+  /**
+   * The latest reply, for the status strip's "Read aloud" button — the same
+   * route as the status above, published here because the turns only exist
+   * from this point down. Cleared by the unmount cleanup with the others.
+   */
+  const reply = useMemo(() => replyText(effectiveTurns), [effectiveTurns])
+  useEffect(() => {
+    publishPaneReply(leaf.id, reply || undefined)
+  }, [leaf.id, reply])
 
   const lastTurn = effectiveTurns.length > 0 ? effectiveTurns[effectiveTurns.length - 1] : null
   const lastTurnIsUser = lastTurn?.role === 'user'

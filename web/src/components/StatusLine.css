@@ -102,6 +102,22 @@
   outline-offset: 1px;
 }
 
+/*
+ * "Read aloud" wears the keys toggle's classes too — same track, same face,
+ * raised the same way while it reads — so it is one look, and it stays in the
+ * row in every face (styles.css keeps `.pkeys-toggle` up in a landscape
+ * Terminal). Reading is a shape: the speaker becomes a stop square. With no
+ * reply yet it is faded and does nothing.
+ */
+.pread:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pkeys-toggle.pread:disabled .pkeys-toggle__face {
+  background: none;
+}
+
 /* -------------------------------------------------------- view switch
  *
  * Three icon segments in a quiet track, each named for screen readers.

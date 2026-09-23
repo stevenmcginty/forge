@@ -5,7 +5,8 @@ import { Icon } from '@/components/Icon'
 import { badgeColor, isShellProfile } from '@/lib/agents'
 import type { PaneStatus } from '@/lib/rich'
 import { useScreenPane, type ScreenPane } from '../lib/pane-screen'
-import type { PaneFace } from '../lib/pane-status'
+import { usePaneReply, type PaneFace } from '../lib/pane-status'
+import { speakReply, speechSupported, stopSpeaking, useSpeakingPane } from '../lib/speak'
 import { fmtReset, fmtTokens, usageLevel, usePaneUsage, type PaneUsage, type UsageLimit } from '../lib/usage'
 import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
 import './StatusLine.css'
@@ -98,6 +99,9 @@ export function StatusLine({
   const condition = screen?.condition ?? null
   const context = usage.context
   const place = placeOf(status)
+  const canRead = !shell && paneId !== null && speechSupported()
+  const reply = usePaneReply(canRead ? paneId : null)
+  const reading = useSpeakingPane() === paneId && paneId !== null
 
   /* ------------------------------------------------------------ the swipe */
   const swipe = useRef<{ id: number; x: number; y: number; moving: boolean } | null>(null)
@@ -205,6 +209,34 @@ export function StatusLine({
                   <path d="M6 8.25h.01M8.67 8.25h.01M11.33 8.25h.01M14 8.25h.01M7 12h6" />
                 </g>
                 <path className="pkeys-toggle__slash" d="M3.5 3.5l13 13" pathLength={1} />
+              </svg>
+            </span>
+          </button>
+        ) : null}
+        {canRead ? (
+          <button
+            type="button"
+            className="pkeys-toggle pread"
+            aria-pressed={reading}
+            aria-label={reading ? 'Stop reading' : 'Read the reply aloud'}
+            title={reading ? 'Stop reading' : 'Read the reply aloud'}
+            disabled={!reading && !reply}
+            // Straight into speech, no await: a phone only lets a page talk
+            // inside the tap that asked it to.
+            onClick={() => (reading ? stopSpeaking() : reply && speakReply(paneId, reply))}
+          >
+            {/* Reading is a shape, not a colour: the speaker's sound waves
+                give way to a solid stop square. */}
+            <span className="pkeys-toggle__face">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                {reading ? (
+                  <rect x="5.5" y="5.5" width="9" height="9" rx="1.5" fill="currentColor" />
+                ) : (
+                  <>
+                    <path d="M3.5 8v4h2.75L10 15.25V4.75L6.25 8z" />
+                    <path d="M13 7.5a3.5 3.5 0 0 1 0 5M15.25 5.25a6.75 6.75 0 0 1 0 9.5" />
+                  </>
+                )}
               </svg>
             </span>
           </button>
