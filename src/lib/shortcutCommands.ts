@@ -12,11 +12,14 @@ import type { KeyCommandDef } from './keymap'
 
 const digits = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
+/** The two voice keys' command ids. */
+export const TALK_DICTATE_ID = 'voice.talk.dictate'
+export const TALK_AGENT_ID = 'voice.talk.agent'
+
 export const BUILTIN_COMMANDS: KeyCommandDef[] = [
   /* ------------------------------------------------------------ app */
   { id: 'voice.hubCard', title: 'Ask Forge (go to the bar)', group: 'Voice', defaultKeys: ['Ctrl+Shift+G'], scope: 'global' },
   { id: 'app.settings', title: 'Settings', group: 'App', defaultKeys: ['Ctrl+,'], scope: 'global' },
-  { id: 'app.devices', title: 'Devices preview', group: 'App', defaultKeys: ['Ctrl+Shift+D'], scope: 'global' },
   {
     id: 'app.cheatSheet',
     title: 'Keyboard cheat sheet',
@@ -89,7 +92,33 @@ export const BUILTIN_COMMANDS: KeyCommandDef[] = [
   { id: 'voice.live.toggle', title: 'Start / stop live talk', group: 'Voice', defaultKeys: ['Ctrl+Shift+Space'], scope: 'global' },
   { id: 'voice.mute', title: 'Mute / unmute the mic', group: 'Voice', defaultKeys: ['Ctrl+Shift+M'], scope: 'global' },
   { id: 'voice.interrupt', title: 'Interrupt the assistant', group: 'Voice', defaultKeys: ['Ctrl+Shift+.'], scope: 'global' },
-  { id: 'voice.mode.toggle', title: 'Mic: Dictate ⇄ Agent', group: 'Voice', defaultKeys: ['Ctrl+Shift+L'], scope: 'global' }
+  { id: 'voice.mode.toggle', title: 'Mic: Dictate ⇄ Agent', group: 'Voice', defaultKeys: ['Ctrl+Shift+L'], scope: 'global' },
+
+  /* ------------------------------------------------------- voice keys
+   * One key on its own each, fired by useDictation's gesture engine: tap to
+   * start or stop, hold to talk. A lone modifier only counts when nothing else
+   * is pressed with it, so Shift+A still types a capital. The Dictate key's
+   * keys live in settings.sttHotkey (bindCommandKeys), the Agent key's in
+   * keymap.json like any other override.
+   */
+  {
+    id: TALK_DICTATE_ID,
+    title: 'Dictate key',
+    group: 'Voice',
+    defaultKeys: ['ControlRight'],
+    scope: 'global',
+    kind: 'talk',
+    description: 'Tap to start or stop, hold to talk. Your words are typed into the pane you are in.'
+  },
+  {
+    id: TALK_AGENT_ID,
+    title: 'Agent key',
+    group: 'Voice',
+    defaultKeys: ['ShiftRight'],
+    scope: 'global',
+    kind: 'talk',
+    description: 'Tap to start or stop, hold to talk. The main agent listens, whichever way the Dictate ⇄ Agent switch is set.'
+  }
 ]
 
 /** Command id for a saved prompt's hotkey. */

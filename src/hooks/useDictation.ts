@@ -1,21 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { isSttSetupError, type SttStatus } from '@shared/types'
-import { agentVoiceNow } from '@/components/hub/barMode'
+import { agentVoiceAlways, agentVoiceNow } from '@/components/hub/barMode'
 import { insertPhrase, resolveInsertTarget, type InsertTarget } from '@/lib/dictation'
 import { earconDictationOff, earconDictationOn } from '@/lib/earcon'
-import {
-  directDown,
-  directUp,
-  idleGesture,
-  isModifierHotkey,
-  MODIFIER_TAP_MS,
-  modifierDown,
-  modifierHeld,
-  modifierOther,
-  modifierUp,
-  type GestureIntent,
-  type GestureState
-} from '@/lib/stt-gesture'
+import { formatCombo } from '@/lib/keymap'
+import { bindCommandKeys, getKeymapView, keyForCommand, setCommandHandler, subscribeKeymap } from '@/lib/keymapRegistry'
+import { TALK_AGENT_ID, TALK_DICTATE_ID } from '@/lib/shortcutCommands'
+import { attachTalkKey, type GestureIntent } from '@/lib/stt-gesture'
+import { terminalHost } from '@/lib/terminals'
 import { dictationTranscript, transcriptBus } from '@/lib/transcriptSource'
 import { useActiveTab, useApp } from '@/state/AppState'
 
@@ -33,6 +25,15 @@ import { useActiveTab, useApp } from '@/state/AppState'
  * never fire. When Jarvis is armed the same key talks to him (capture / release)
  * instead of opening a second dictation session on top of his.
  *
+ * There are two such keys, both captured here the same way (a window listener
+ * in the capture phase, so they work with focus inside an xterm pane):
+ *
+ *   Dictate key  settings.sttHotkey, default Right Ctrl — everything above.
+ *   Agent key    keymap.json's `voice.talk.agent`, default Right Shift — the
+ *                main agent listens (hub.start / hub.stop through the handlers
+ *                HubLayer registers), whichever way the Dictate ⇄ Agent switch
+ *                is set, and without flipping it.
+ *
  * This is the *engine*, and it must run exactly once: it holds a phrase
  * subscription and a hotkey listener, so a second copy would insert every
  * dictated sentence into the terminal twice and make each press of Right Ctrl
@@ -41,6 +42,7 @@ import { useActiveTab, useApp } from '@/state/AppState'
  */
 
 const OFF: SttStatus = { phase: 'off', level: 0, error: null, ready: false }
+const TALK_KEYS_MIGRATED = 'forge.talkKeys.migrated'
 
 export interface Dictation {
   status: SttStatus
@@ -70,6 +72,11 @@ export function useDictationEngine(): Dictation {
 
   const noticeRef = useRef(actions.setNotice)
   noticeRef.current = actions.setNotice
+  const patchRef = useRef(actions.patchSettings)
+  patchRef.current = actions.patchSettings
+  /** Dictate mode's "press Enter after each phrase". Off means exactly the old typing. */
+  const autoSendRef = useRef(state.settings.dictateAutoSend)
+  autoSendRef.current = state.settings.dictateAutoSend
 
   /* ------------------------------------------------------------- routing
    *
@@ -135,6 +142,7 @@ export function useDictationEngine(): Dictation {
       if (target.kind === 'none') target = remembered.current
       const outcome = insertPhrase(text, target)
       if (outcome === 'clipboard') noticeRef.current('Dictated text copied to the clipboard')
+      if (outcome === 'terminal' && target.kind === 'terminal' && autoSendRef.current) terminalHost.submit(target.paneId)
     })
   }, [])
 
@@ -270,83 +278,86 @@ export function useDictationEngine(): Dictation {
     void window.forge.stt.reload(force).then(setStatus)
   }, [])
 
-  /* --------------------------------------------------------------- hotkey */
+  /**
+   * The Agent key. Reuses the Agent-mode route HubLayer registers (its `key`
+   * starts the hub when off and stops it on a tap when on), but reads it
+   * whatever the bar's mode is, and never changes the mode.
+   *
+   * Hold-to-talk's release on a Parakeet brain (the agent is armed) ends the
+   * capture at once, so the phrase goes to the brain without waiting for the
+   * silence timer. A dictation still open is closed first: one microphone at
+   * a time.
+   */
+  const applyAgentIntent = useCallback((intent: GestureIntent): void => {
+    const voice = agentVoiceAlways()
+    if (intent === 'ptt-end') {
+      if (toAgentRef.current) void window.forge.stt.release()
+      voice?.key(intent)
+      return
+    }
+    if (!voice) {
+      noticeRef.current('The main agent is not ready yet')
+      return
+    }
+    if (!toAgentRef.current && phaseRef.current === 'listening') void window.forge.stt.stop()
+    voice.key(intent)
+  }, [])
+
+  /** A hold on the Agent key that became Shift+letter: take back the start it made. */
+  const cancelAgentHold = useCallback((): void => {
+    agentVoiceAlways()?.key('toggle')
+  }, [])
+
+  /* -------------------------------------------------------------- hotkeys */
 
   const hotkey = state.settings.sttHotkey
+  const agentKey = useSyncExternalStore(subscribeKeymap, () => keyForCommand(TALK_AGENT_ID))
 
+  // The Dictate key lives in settings.sttHotkey; the keymap registry lists it,
+  // checks it for clashes and rebinds it through here.
+  useEffect(
+    () => bindCommandKeys(TALK_DICTATE_ID, hotkey ? [hotkey] : [], (keys) => patchRef.current({ sttHotkey: keys[0] ?? '' })),
+    [hotkey]
+  )
+
+  /**
+   * One-time move for the old single talk key. Right Shift was that key in
+   * older Forge profiles, and it is now the Agent key's default: keep Right
+   * Shift for the agent (what it did while Jarvis was armed) and give Dictate
+   * its own default, Right Ctrl. Runs once per profile; a later choice stands.
+   */
+  const ready = state.ready
   useEffect(() => {
-    if (!hotkey) return
-    const modifier = isModifierHotkey(hotkey)
-    let gesture: GestureState = idleGesture()
-    let holdTimer = 0
-
-    const listening = (): boolean => phaseRef.current === 'listening'
-
-    const clearHold = (): void => {
-      if (holdTimer) {
-        window.clearTimeout(holdTimer)
-        holdTimer = 0
-      }
+    if (!ready) return
+    try {
+      if (localStorage.getItem(TALK_KEYS_MIGRATED)) return
+      localStorage.setItem(TALK_KEYS_MIGRATED, '1')
+    } catch {
+      /* no storage: the check below is still safe to repeat */
     }
-
-    const onKeyDown = (e: KeyboardEvent): void => {
-      if (!modifier) {
-        if (e.code !== hotkey) return
-        if (e.repeat) return
-        e.preventDefault()
-        e.stopPropagation()
-        const next = directDown(gesture, performance.now(), listening())
-        gesture = next.state
-        if (next.intent) applyIntent(next.intent)
-        return
-      }
-      if (e.code !== hotkey) {
-        if (gesture.down) gesture = modifierOther(gesture)
-        return
-      }
-      if (e.repeat) return
-      gesture = modifierDown(gesture, performance.now())
-      clearHold()
-      holdTimer = window.setTimeout(() => {
-        holdTimer = 0
-        const next = modifierHeld(gesture, gesture.t0 + MODIFIER_TAP_MS, listening())
-        gesture = next.state
-        if (next.intent) applyIntent(next.intent)
-      }, MODIFIER_TAP_MS)
+    const agent = getKeymapView().commands.find((c) => c.id === TALK_AGENT_ID)
+    if (hotkey === 'ShiftRight' && agent && !agent.customised && agent.defaultKeys[0] === 'ShiftRight') {
+      patchRef.current({ sttHotkey: 'ControlRight' })
     }
+    // Only the first ready settings decide this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready])
 
-    const onKeyUp = (e: KeyboardEvent): void => {
-      if (!modifier) {
-        if (e.code !== hotkey) return
-        const next = directUp(gesture, performance.now(), listening())
-        gesture = next.state
-        if (next.intent) applyIntent(next.intent)
-        return
-      }
-      if (e.code !== hotkey) return
-      clearHold()
-      const next = modifierUp(gesture, performance.now(), listening())
-      gesture = next.state
-      if (next.intent) applyIntent(next.intent)
-    }
+  useEffect(() => attachTalkKey(window, hotkey, () => phaseRef.current === 'listening', applyIntent), [hotkey, applyIntent])
+  useEffect(
+    () => (agentKey ? attachTalkKey(window, agentKey, () => toAgentRef.current, applyAgentIntent, cancelAgentHold) : undefined),
+    [agentKey, applyAgentIntent, cancelAgentHold]
+  )
 
-    const disarm = (): void => {
-      clearHold()
-      gesture = idleGesture()
-    }
-
-    window.addEventListener('keydown', onKeyDown, true)
-    window.addEventListener('keyup', onKeyUp, true)
-    window.addEventListener('pointerdown', disarm, true)
-    window.addEventListener('blur', disarm)
+  // The palette (and anything else that runs commands by id) can press either key.
+  useEffect(() => {
+    const offDictate = setCommandHandler(TALK_DICTATE_ID, () => applyIntent('toggle'))
+    const offAgent = setCommandHandler(TALK_AGENT_ID, () => applyAgentIntent('toggle'))
     return () => {
-      clearHold()
-      window.removeEventListener('keydown', onKeyDown, true)
-      window.removeEventListener('keyup', onKeyUp, true)
-      window.removeEventListener('pointerdown', disarm, true)
-      window.removeEventListener('blur', disarm)
+      offDictate()
+      offAgent()
     }
-  }, [hotkey, applyIntent])
+  }, [applyIntent, applyAgentIntent])
 
   return useMemo<Dictation>(
     () => ({
@@ -362,15 +373,5 @@ export function useDictationEngine(): Dictation {
 
 /** Human label for a hotkey code, for the pill's tooltip and the settings row. */
 export function hotkeyLabel(code: string): string {
-  const named: Record<string, string> = {
-    ControlRight: 'Right Ctrl',
-    ControlLeft: 'Left Ctrl',
-    AltRight: 'Right Alt',
-    AltLeft: 'Left Alt',
-    ShiftRight: 'Right Shift',
-    ShiftLeft: 'Left Shift',
-    ScrollLock: 'Scroll Lock',
-    Pause: 'Pause'
-  }
-  return named[code] ?? code
+  return formatCombo(code)
 }

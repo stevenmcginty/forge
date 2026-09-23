@@ -106,6 +106,7 @@ export function ShortcutsSection(): ReactNode {
                 <div className="kmrow__keys">
                   {editing === c.id ? (
                     <KeyRecorder
+                      talk={c.kind === 'talk'}
                       value={c.keys[0] ?? null}
                       onRecord={(combo) => record(c.id, combo)}
                       onCancel={() => setEditing(null)}

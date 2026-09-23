@@ -39,6 +39,13 @@ export interface KeyCommandDef {
   scope: CommandScope
   /** Shown on the settings page and the cheat sheet. */
   description?: string
+  /**
+   * 'talk': a voice key (Dictate, Agent). Its keys are ONE key on its own — a
+   * lone modifier such as Right Shift, or F1–F24 / Scroll Lock / Pause — stored
+   * as the KeyboardEvent.code ('ShiftRight'). useDictation's gesture engine
+   * fires it (tap toggles, hold talks); useShortcuts never does.
+   */
+  kind?: 'talk'
 }
 
 export interface KeymapConflict {
@@ -116,6 +123,66 @@ export interface KeyEventLike {
   altKey: boolean
   shiftKey: boolean
   metaKey: boolean
+}
+
+/* ------------------------------------------------------------ talk keys
+ *
+ * The two voice keys are gestures on one physical key, not combos: Right Ctrl
+ * pressed and let go on its own. A lone modifier is therefore a legal key for
+ * them — and only for them. Anywhere else it would fire on every capital
+ * letter, so an ordinary command still refuses it (see `lonerReason`).
+ */
+
+const LONE_MODIFIER = /^(Control|Shift|Alt|Meta)(Left|Right)$/
+const TALK_LABELS: Record<string, string> = {
+  ControlRight: 'Right Ctrl',
+  ControlLeft: 'Left Ctrl',
+  ShiftRight: 'Right Shift',
+  ShiftLeft: 'Left Shift',
+  AltRight: 'Right Alt',
+  AltLeft: 'Left Alt',
+  MetaRight: 'Right Win',
+  MetaLeft: 'Left Win',
+  ScrollLock: 'Scroll Lock',
+  Pause: 'Pause'
+}
+
+/** 'ShiftRight' and friends: a modifier key on its own. Left and right are different keys. */
+export function isLoneModifier(code: string): boolean {
+  return LONE_MODIFIER.test(code)
+}
+
+/** A KeyboardEvent.code that can be a talk key, as itself; null otherwise. */
+export function talkKeyFromCode(code: string): KeyCombo | null {
+  if (!code) return null
+  if (TALK_LABELS[code]) return code
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code
+  return null
+}
+
+/** Canonical talk key from a stored value — the code ('ShiftRight') or its label ('Right Shift'). */
+export function normaliseTalkKey(input: string): KeyCombo | null {
+  const raw = String(input ?? '').trim()
+  if (!raw) return null
+  const byCode = talkKeyFromCode(raw) ?? talkKeyFromCode(raw.toUpperCase())
+  if (byCode) return byCode
+  const lower = raw.toLowerCase().replace(/\s+/g, ' ')
+  const hit = Object.entries(TALK_LABELS).find(([, label]) => label.toLowerCase() === lower)
+  return hit ? hit[0] : null
+}
+
+export const TALK_KEY_RULE = 'A voice key is one key on its own: a Ctrl, Shift, Alt or Win key (left and right are different), F1–F24, Scroll Lock or Pause.'
+
+/** Why this can never be a talk key, or null when it can. */
+export function talkKeyReason(combo: KeyCombo): string | null {
+  return talkKeyFromCode(combo) ? null : TALK_KEY_RULE
+}
+
+/** The refusal an ordinary command gives a lone modifier, or null when `raw` is not one. */
+export function lonerReason(raw: string): string | null {
+  const code = normaliseTalkKey(raw)
+  if (!code || !isLoneModifier(code)) return null
+  return `${TALK_LABELS[code]} on its own only works for the Dictate and Agent voice keys; a shortcut needs Ctrl, Alt or Win with another key.`
 }
 
 export function comboFromEvent(e: KeyEventLike): KeyCombo | null {
@@ -231,12 +298,12 @@ export function resolveKeymap(
     const source = Object.prototype.hasOwnProperty.call(overrides, cmd.id) ? overrides[cmd.id]! : cmd.defaultKeys
     const keys: KeyCombo[] = []
     for (const raw of source) {
-      const combo = normaliseCombo(raw)
+      const combo = cmd.kind === 'talk' ? normaliseTalkKey(raw) : normaliseCombo(raw)
       if (!combo) {
-        rejected.push({ commandId: cmd.id, combo: raw, reason: 'Not a key combination Forge can read.' })
+        rejected.push({ commandId: cmd.id, combo: raw, reason: cmd.kind === 'talk' ? TALK_KEY_RULE : (lonerReason(raw) ?? 'Not a key combination Forge can read.') })
         continue
       }
-      const reason = reservedReason(combo)
+      const reason = cmd.kind === 'talk' ? talkKeyReason(combo) : reservedReason(combo)
       if (reason) {
         rejected.push({ commandId: cmd.id, combo, reason })
         continue
@@ -281,12 +348,14 @@ export function setBinding(
   keys: readonly string[],
   opts: { takeOver?: boolean } = {}
 ): SetBindingResult {
-  if (!commands.some((c) => c.id === commandId)) return { ok: false, error: `There is no command called ${commandId}.` }
+  const cmd = commands.find((c) => c.id === commandId)
+  if (!cmd) return { ok: false, error: `There is no command called ${commandId}.` }
+  const talk = cmd.kind === 'talk'
   const combos: KeyCombo[] = []
   for (const raw of keys) {
-    const combo = normaliseCombo(raw)
-    if (!combo) return { ok: false, error: `"${raw}" is not a key combination Forge can read.` }
-    const reason = reservedReason(combo)
+    const combo = talk ? normaliseTalkKey(raw) : normaliseCombo(raw)
+    if (!combo) return { ok: false, error: talk ? TALK_KEY_RULE : (lonerReason(raw) ?? `"${raw}" is not a key combination Forge can read.`) }
+    const reason = talk ? talkKeyReason(combo) : reservedReason(combo)
     if (reason) return { ok: false, error: reason }
     if (!combos.includes(combo)) combos.push(combo)
   }
@@ -313,7 +382,7 @@ export function resetBinding(overrides: Record<string, KeyCombo[]>, commandId?: 
   return next
 }
 
-/** "Ctrl+Shift+G" for display. Already canonical; kept as a seam for platform glyphs later. */
+/** "Ctrl+Shift+G" for display, and a talk key by name ('ShiftRight' → "Right Shift"). */
 export function formatCombo(combo: KeyCombo): string {
-  return combo
+  return TALK_LABELS[combo] ?? combo
 }

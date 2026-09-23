@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useKeymap } from '@/hooks/useHub'
-import { comboFromEvent, formatCombo, reservedReason } from '@/lib/keymap'
+import {
+  comboFromEvent,
+  formatCombo,
+  isLoneModifier,
+  lonerReason,
+  reservedReason,
+  talkKeyFromCode,
+  TALK_KEY_RULE
+} from '@/lib/keymap'
 import { suspendShortcuts } from '@/lib/keymapRegistry'
 
 /**
@@ -10,23 +18,34 @@ import { suspendShortcuts } from '@/lib/keymapRegistry'
  * instead of closing a pane. A combo a terminal needs (a bare letter, Ctrl+C,
  * an arrow…) is refused on the spot with the reason, before anything is saved;
  * Esc gives up, Backspace clears.
+ *
+ * `talk` records a voice key instead (Dictate, Agent): ONE key on its own. A
+ * lone modifier counts when it goes down and comes back up with nothing else
+ * pressed, so Right Shift records as "Right Shift" (the code 'ShiftRight')
+ * while Shift+A is refused. An ordinary command refuses a lone modifier with
+ * the reason, instead of silently waiting for a second key.
  */
 export function KeyRecorder({
   value,
   onRecord,
   onCancel,
   onClear,
-  autoFocus = true
+  autoFocus = true,
+  talk = false
 }: {
   value?: string | null
   onRecord: (combo: string) => void
   onCancel: () => void
   onClear?: () => void
   autoFocus?: boolean
+  /** Record a voice key (one key on its own, lone modifiers allowed) rather than a combo. */
+  talk?: boolean
 }): ReactNode {
   const ref = useRef<HTMLButtonElement | null>(null)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [held, setHeld] = useState<string>('')
+  /** The lone modifier that is down right now, and whether another key joined it. */
+  const lone = useRef<{ code: string; other: boolean } | null>(null)
 
   useEffect(() => {
     const release = suspendShortcuts()
@@ -45,6 +64,25 @@ export function KeyRecorder({
       onClear()
       return
     }
+    if (e.repeat) return
+    if (isLoneModifier(e.code)) {
+      if (!lone.current) lone.current = { code: e.code, other: false }
+      else lone.current.other = true
+    } else if (lone.current) lone.current.other = true
+    if (talk) {
+      if (isLoneModifier(e.code)) {
+        setHeld(formatCombo(e.code))
+        return
+      }
+      const key = !lone.current && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey ? talkKeyFromCode(e.code) : null
+      if (!key) {
+        setRefusal(TALK_KEY_RULE)
+        return
+      }
+      setRefusal(null)
+      onRecord(key)
+      return
+    }
     const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta'].filter(Boolean)
     setHeld(mods.join('+'))
     const combo = comboFromEvent(e.nativeEvent)
@@ -58,6 +96,21 @@ export function KeyRecorder({
     onRecord(combo)
   }
 
+  /** A lone modifier coming back up with nothing pressed alongside it. */
+  const onKeyUp = (e: React.KeyboardEvent): void => {
+    setHeld('')
+    const down = lone.current
+    if (!down || down.code !== e.code) return
+    lone.current = null
+    if (down.other) return
+    if (talk) {
+      setRefusal(null)
+      onRecord(down.code)
+      return
+    }
+    setRefusal(lonerReason(down.code))
+  }
+
   return (
     <span className="krec">
       <button
@@ -66,11 +119,15 @@ export function KeyRecorder({
         className="krec__field"
         data-refused={refusal ? 'true' : undefined}
         onKeyDown={onKeyDown}
-        onKeyUp={() => setHeld('')}
+        onKeyUp={onKeyUp}
         onBlur={onCancel}
       >
-        {held ? <span className="kbd kbd--live">{held}+…</span> : <span className="krec__prompt">Press the new keys…</span>}
-        {value && !held ? <span className="krec__was">was {value}</span> : null}
+        {held ? (
+          <span className="kbd kbd--live">{talk ? held : `${held}+…`}</span>
+        ) : (
+          <span className="krec__prompt">{talk ? 'Press the new key…' : 'Press the new keys…'}</span>
+        )}
+        {value && !held ? <span className="krec__was">was {formatCombo(value)}</span> : null}
       </button>
       {refusal ? (
         <span className="krec__refusal" role="alert">

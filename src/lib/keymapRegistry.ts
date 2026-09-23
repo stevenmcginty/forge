@@ -36,6 +36,12 @@ const sources = new Map<string, KeyCommandDef[]>([['builtin', BUILTIN_COMMANDS]]
 const handlers = new Map<string, CommandHandler>()
 const listeners = new Set<() => void>()
 let overrides: Record<string, KeyCombo[]> = {}
+/**
+ * Commands whose keys are stored somewhere other than keymap.json — the
+ * Dictate key lives in settings.sttHotkey. They resolve, clash and rebind
+ * like any other command; only the write goes back to its own store.
+ */
+const external = new Map<string, { keys: KeyCombo[]; write: (keys: KeyCombo[]) => void }>()
 let suspended = 0
 let resolved: ResolvedKeymap | null = null
 let view: KeymapView | null = null
@@ -79,9 +85,17 @@ function invalidate(): void {
   }
 }
 
+/** keymap.json's overrides plus the externally stored keys. */
+function effectiveOverrides(): Record<string, KeyCombo[]> {
+  if (external.size === 0) return overrides
+  const out = { ...overrides }
+  for (const [id, e] of external) out[id] = e.keys
+  return out
+}
+
 function current(): ResolvedKeymap {
   if (!resolved) {
-    resolved = resolveKeymap(allCommands(), overrides)
+    resolved = resolveKeymap(allCommands(), effectiveOverrides())
     for (const c of resolved.conflicts) {
       console.warn(`[keymap] ${c.combo} is wanted by ${c.commandIds.join(', ')} — ${c.commandIds[0]} keeps it`)
     }
@@ -125,12 +139,39 @@ export function runCommand(id: string): boolean {
   }
 }
 
-/** The command a combo fires right now, or null. Null too while a rebind is capturing keys. */
+/**
+ * The command a combo fires right now, or null. Null too while a rebind is
+ * capturing keys, and for a talk key: those are gestures useDictation fires.
+ */
 export function commandForCombo(combo: KeyCombo): KeyCommandDef | null {
   if (suspended > 0) return null
   const id = current().bindings.get(combo)
   if (!id) return null
-  return allCommands().find((c) => c.id === id) ?? null
+  const def = allCommands().find((c) => c.id === id) ?? null
+  return def?.kind === 'talk' ? null : def
+}
+
+/** A command's effective first key (after overrides and clashes), or null when it has none. */
+export function keyForCommand(id: string): KeyCombo | null {
+  return current().keysFor[id]?.[0] ?? null
+}
+
+/**
+ * Say where a command's keys are really stored. `keys` is what that store
+ * holds now; `write` is called when the settings page rebinds or resets it.
+ * Call again whenever the store changes. Returns the unbind.
+ */
+export function bindCommandKeys(id: string, keys: KeyCombo[], write: (keys: KeyCombo[]) => void): () => void {
+  const entry = { keys: [...keys], write }
+  const before = external.get(id)
+  external.set(id, entry)
+  if (!before || before.keys.join('\n') !== entry.keys.join('\n')) invalidate()
+  return () => {
+    if (external.get(id) === entry) {
+      external.delete(id)
+      invalidate()
+    }
+  }
 }
 
 export function hasHandler(id: string): boolean {
@@ -158,7 +199,9 @@ export function getKeymapView(): KeymapView {
       commands: allCommands().map((c) => ({
         ...c,
         keys: r.keysFor[c.id] ?? [],
-        customised: Object.prototype.hasOwnProperty.call(overrides, c.id),
+        customised: external.has(c.id)
+          ? external.get(c.id)!.keys.join('\n') !== c.defaultKeys.join('\n')
+          : Object.prototype.hasOwnProperty.call(overrides, c.id),
         available: handlers.has(c.id)
       })),
       conflicts: r.conflicts,
@@ -182,9 +225,20 @@ function persist(): void {
 
 /** Rebind a command. Refuses reserved keys and, unless `takeOver`, keys another command has. */
 export function setCommandKeys(id: string, keys: string[], opts: { takeOver?: boolean } = {}): SetBindingResult {
-  const result = setBinding(allCommands(), overrides, id, keys, opts)
+  const result = setBinding(allCommands(), effectiveOverrides(), id, keys, opts)
   if (result.ok) {
-    overrides = result.overrides
+    // An externally stored command's keys go back to their own store; only
+    // the rest is keymap.json's.
+    const next = { ...result.overrides }
+    for (const [extId, e] of external) {
+      const want = next[extId]
+      delete next[extId]
+      if (want && want.join('\n') !== e.keys.join('\n')) {
+        e.keys = [...want]
+        e.write(want)
+      }
+    }
+    overrides = next
     persist()
     invalidate()
   }
@@ -193,6 +247,14 @@ export function setCommandKeys(id: string, keys: string[], opts: { takeOver?: bo
 
 /** Back to the default keys for one command, or for all of them. */
 export function resetCommandKeys(id?: string): void {
+  for (const [extId, e] of external) {
+    if (id !== undefined && id !== extId) continue
+    const def = allCommands().find((c) => c.id === extId)
+    if (def && def.defaultKeys.join('\n') !== e.keys.join('\n')) {
+      e.keys = [...def.defaultKeys]
+      e.write(def.defaultKeys)
+    }
+  }
   overrides = resetBinding(overrides, id)
   persist()
   invalidate()

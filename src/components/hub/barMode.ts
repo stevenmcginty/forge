@@ -107,3 +107,8 @@ export function setAgentVoice(next: AgentVoice | null): void {
 export function agentVoiceNow(): AgentVoice | null {
   return mode === 'agent' ? agentVoice : null
 }
+
+/** The registered handlers whatever the mode — the Agent talk key uses these, so it works in Dictate mode too. */
+export function agentVoiceAlways(): AgentVoice | null {
+  return agentVoice
+}
