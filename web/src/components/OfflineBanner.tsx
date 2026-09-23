@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
+import { useMobile } from '../lib/mobile'
 import { useForge } from '../state'
 import { SwitchAccount } from './Connection'
 
@@ -26,12 +27,19 @@ import { SwitchAccount } from './Connection'
  * place somebody is standing at the moment they decide they would rather have
  * the files.
  *
+ * ## On a phone
+ *
+ * Two lines, not one: the sentence first, whole, then the actions on their
+ * own row at a thumb's size. The account line is not here — it lives in the
+ * connection sheet the live dot opens, beside the desktop it belongs to.
+ *
  * The switch is a switch and not a link away: the rail, the titlebar and the
  * theme do not change, the terminals stay exactly as frozen as they were, and
  * `Workspace` swaps what is inside the grid. GitHub mode is a mode.
  */
 export function OfflineBanner(): ReactNode {
   const { state, actions } = useForge()
+  const mobile = useMobile()
   if (state.stage.kind !== 'offline') return null
 
   const when = state.cached?.at ?? 0
@@ -39,8 +47,16 @@ export function OfflineBanner(): ReactNode {
   const github = state.offlineMode === 'github'
 
   return (
-    <div className="offline" role="status" data-testid="offline-banner">
-      <Icon name={github ? 'branch' : 'restart'} size={13} />
+    <div className="offline" data-link="asleep" role="status" data-testid="offline-banner">
+      <Icon name={github ? 'branch' : 'restart'} size={mobile ? 16 : 13} />
+      {mobile ? (
+        <span className="offline__text">
+          <strong>{name} is asleep.</strong>{' '}
+          {github
+            ? 'No terminals without it, but the repository is still here.'
+            : `This is the picture it last sent${when ? `, ${ago(when)}` : ''}.`}
+        </span>
+      ) : (
       <span className="offline__text truncate">
         {github ? (
           <>
@@ -54,18 +70,21 @@ export function OfflineBanner(): ReactNode {
           </>
         )}
       </span>
-      <button
-        type="button"
-        className="ghost-btn offline__look"
-        data-testid="offline-mode-switch"
-        onClick={() => actions.setOfflineMode(github ? 'frozen' : 'github')}
-      >
-        {github ? 'Show the frozen terminals' : 'Open the repo from GitHub'}
-      </button>
-      <button type="button" className="ghost-btn offline__look" onClick={() => actions.refind()}>
-        Look again
-      </button>
-      <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} compact />
+      )}
+      <span className="offline__actions">
+        <button type="button" className="ghost-btn offline__look" onClick={() => actions.refind()}>
+          Look again
+        </button>
+        <button
+          type="button"
+          className="ghost-btn offline__look"
+          data-testid="offline-mode-switch"
+          onClick={() => actions.setOfflineMode(github ? 'frozen' : 'github')}
+        >
+          {github ? (mobile ? 'Frozen terminals' : 'Show the frozen terminals') : mobile ? 'Repo from GitHub' : 'Open the repo from GitHub'}
+        </button>
+        {mobile ? null : <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} compact />}
+      </span>
     </div>
   )
 }

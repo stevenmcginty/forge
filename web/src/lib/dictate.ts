@@ -42,6 +42,26 @@ function pickContainer(): string {
   return ''
 }
 
+/** How a recording is being held: toggled by a tap, or held down like a walkie-talkie. */
+export type VoiceMode = 'tap' | 'hold'
+
+/**
+ * Where one dictation is, for whoever draws it. Times are `Date.now()` values.
+ *
+ * idle → recording → transcribing → review → (sent) idle. A spoken command
+ * ("stop", "yes") goes transcribing → idle, skipping review. Cancel leaves
+ * recording or transcribing for idle with nothing sent; Undo leaves review for
+ * idle with the words kept in the box.
+ */
+export type VoiceState =
+  | { phase: 'idle' }
+  /** The microphone is open. `mode` flips to `'hold'` once a press outlasts a tap. */
+  | { phase: 'recording'; mode: VoiceMode; startedAt: number }
+  /** The audio is on its way to the desktop, and the words on their way back. */
+  | { phase: 'transcribing'; startedAt: number }
+  /** The words are in the box and send at `endsAt` unless undone. */
+  | { phase: 'review'; text: string; endsAt: number }
+
 export interface Recording {
   /** The open microphone, for a meter to listen to while it records. */
   stream: MediaStream

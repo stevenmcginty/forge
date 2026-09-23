@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode
@@ -15,12 +16,13 @@ import './ChatView.css'
 /**
  * The chat transcript — a Claude / agent session read as a conversation.
  *
- * Styled with the modern Gemini-inspired messenger layout:
- * - Two-sided conversation: user prompts in compact accent bubbles on the right,
- *   agent replies in soft left-aligned cards with the Gemini sparkle badge.
- * - Thinking traces are omitted so the conversation reads cleanly as text.
- * - Tool calls appear as compact, collapsible extension chips.
- * - Working / busy indicator sits on the left with an animated sparkle.
+ * Read like a conversation, not a stack of boxes:
+ * - The person's prompts are bubbles on the right; the agent's replies are
+ *   plain text on the page, on the same gutters.
+ * - The agent is named only when the speaker changes (see `toRows`).
+ * - Each run of tool calls folds into one quiet row that opens in place.
+ * - Copy is a real button under every prompt and every reply.
+ * - Working / waiting sits under the last reply as one line.
  */
 
 /** How close to the end counts as "reading the latest". */
@@ -68,6 +70,8 @@ export function ChatView({
   const [unseen, setUnseen] = useState(false)
 
   const lastId = turns.length ? turns[turns.length - 1]!.id : ''
+  const rows = useMemo(() => toRows(turns), [turns])
+  const replying = rows.length > 0 && rows[rows.length - 1]!.kind === 'reply'
 
   // Follow the bottom while the reader is there; otherwise leave them be and
   // raise the pill. Layout effect so the scroll lands before paint.
@@ -166,15 +170,19 @@ export function ChatView({
             </div>
           ) : (
             <ol className="chatview__turns">
-              {turns.map((turn) => (
-                <Turn key={turn.id} turn={turn} agentName={agentName} />
-              ))}
+              {rows.map((row) =>
+                row.kind === 'user' ? (
+                  <UserRow key={row.key} turn={row.turn} />
+                ) : (
+                  <ReplyRow key={row.key} row={row} agentName={agentName} />
+                )
+              )}
             </ol>
           )}
           {asking ? (
-            <Waiting agentName={agentName} />
+            <Waiting agentName={agentName} named={!replying} />
           ) : busy ? (
-            <Working activity={activity} agentName={agentName} />
+            <Working activity={activity} agentName={agentName} named={!replying} />
           ) : null}
           {quota ? <Quota text={quota} /> : null}
         </div>
@@ -206,142 +214,255 @@ export function ChatView({
   )
 }
 
-/* ------------------------------------------------------------------- turns */
+/* -------------------------------------------------------------------- rows
+ *
+ * The transcript arrives as one turn per JSONL record, and a single reply is
+ * usually many records: a line of text, a tool call, another tool call, more
+ * text. Read one-to-one that is a stack of boxes each wearing the agent's
+ * name. So the view folds the turns into rows before it draws anything: a
+ * person's prompt is one row, and everything the agent says until the person
+ * speaks again is one reply row — named once, copied as one — whose pieces are
+ * its paragraphs, its thinking and, between them, each run of tool calls
+ * folded into a single quiet line.
+ */
 
-// Turns are immutable by id — the transcript only ever appends or resets — so
-// a memo on the object is all 500 turns need to stay cheap.
-const Turn = memo(function Turn({ turn, agentName }: { turn: ChatTurn; agentName?: string }): ReactNode {
-  const [copied, setCopied] = useState(false)
+type TextBlock = Extract<ChatBlock, { kind: 'text' }>
+type ToolBlock = Extract<ChatBlock, { kind: 'tool' }>
 
-  if (turn.role === 'user') {
-    return (
-      <li className="chatview__turn" data-role="user">
-        <div className="chatview__mine">
-          <div className="chatview__bubble">
-            {turn.blocks.map((block, i) =>
-              block.kind === 'text' ? (
-                <p key={i} className="chatview__prompt">
-                  {block.text}
-                </p>
-              ) : (
-                <Piece key={i} block={block} />
-              )
-            )}
-          </div>
-          {turn.clock ? <span className="chatview__clock">{turn.clock}</span> : null}
-        </div>
-      </li>
-    )
-  }
+type Segment =
+  | { kind: 'text'; key: string; block: TextBlock }
+  | { kind: 'thinking'; key: string; text: string }
+  | { kind: 'tools'; key: string; tools: ToolBlock[] }
 
-  // Assistant turn: only render if there are text or tool blocks (if it is only thinking, it is handled by the Working indicator)
-  const hasContent = turn.blocks.some((b) => b.kind === 'text' || b.kind === 'tool')
-  if (!hasContent) return null
+type Row =
+  | { kind: 'user'; key: string; turn: ChatTurn }
+  | { kind: 'reply'; key: string; clock?: string; segments: Segment[] }
 
-  const onCopy = () => {
-    const text = turn.blocks
-      .filter((b): b is Extract<ChatBlock, { kind: 'text' }> => b.kind === 'text')
-      .map((b) => b.text)
-      .join('\n\n')
-    if (!text) return
-    void navigator.clipboard?.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+function toRows(turns: ChatTurn[]): Row[] {
+  const rows: Row[] = []
+  for (const turn of turns) {
+    if (turn.role === 'user') {
+      rows.push({ kind: 'user', key: turn.id, turn })
+      continue
+    }
+    // A record with only thinking in it is the working indicator's business.
+    if (!turn.blocks.some((b) => b.kind === 'text' || b.kind === 'tool')) continue
+    let reply = rows[rows.length - 1]
+    if (!reply || reply.kind !== 'reply') {
+      reply = { kind: 'reply', key: turn.id, clock: turn.clock, segments: [] }
+      rows.push(reply)
+    }
+    const segments = reply.segments
+    turn.blocks.forEach((block, i) => {
+      const key = `${turn.id}:${i}`
+      if (block.kind === 'text') segments.push({ kind: 'text', key, block })
+      else if (block.kind === 'thinking') {
+        if (block.text) segments.push({ kind: 'thinking', key, text: block.text })
+      } else {
+        const last = segments[segments.length - 1]
+        if (last && last.kind === 'tools') last.tools.push(block)
+        else segments.push({ kind: 'tools', key, tools: [block] })
+      }
     })
   }
+  return rows
+}
 
+// Turns are immutable by id — the transcript only ever appends or resets — so
+// a memo on the turn is all a prompt needs to stay cheap.
+const UserRow = memo(function UserRow({ turn }: { turn: ChatTurn }): ReactNode {
+  const text = turn.blocks
+    .filter((b): b is TextBlock => b.kind === 'text')
+    .map((b) => b.text)
+    .join('\n\n')
   return (
-    <li className="chatview__turn" data-role="assistant">
-      <div className="chatview__reply">
-        <div className="chatview__agent-header">
-          <span className="chatview__sparkle-icon" aria-hidden="true">
-            <Icon name="sparkle" size={13} />
-          </span>
-          <span className="chatview__agent-name">{agentName ?? 'Assistant'}</span>
-          {turn.clock ? <span className="chatview__agent-clock">{turn.clock}</span> : null}
-          <button
-            type="button"
-            className="chatview__copy-btn"
-            title="Copy message"
-            aria-label="Copy message"
-            onClick={onCopy}
-          >
-            <Icon name={copied ? 'check' : 'clipboard'} size={11} />
-            <span>{copied ? 'Copied' : 'Copy'}</span>
-          </button>
+    <li className="chatview__turn" data-role="user">
+      <div className="chatview__mine">
+        <div className="chatview__bubble">
+          {turn.blocks.map((block, i) =>
+            block.kind === 'text' ? (
+              <p key={i} className="chatview__prompt">
+                {block.text}
+              </p>
+            ) : (
+              <UserPiece key={i} block={block} />
+            )
+          )}
         </div>
-        <div className="chatview__agent-bubble">
-          {turn.blocks.map((block, i) => (
-            <Piece key={i} block={block} />
-          ))}
+        <div className="chatview__under">
+          {turn.clock ? <span className="chatview__clock">{turn.clock}</span> : null}
+          {text ? <CopyButton text={text} label="Copy your message" /> : null}
         </div>
       </div>
     </li>
   )
 })
 
-function Piece({ block }: { block: ChatBlock }): ReactNode {
-  switch (block.kind) {
-    case 'text':
-      return <div className="chatview__prose">{renderMarkdown(block.text)}</div>
-    case 'thinking':
-      return block.text ? <ThoughtChip text={block.text} /> : null
-    case 'tool':
-      return <ToolChip name={block.name} gist={block.gist} note={block.note} failed={block.failed} />
-  }
+function UserPiece({ block }: { block: ChatBlock }): ReactNode {
+  if (block.kind === 'thinking') return block.text ? <ThoughtFold text={block.text} /> : null
+  if (block.kind === 'tool') return <ToolGroup tools={[block]} />
+  return null
 }
 
-function ThoughtChip({ text }: { text: string }): ReactNode {
+/**
+ * Everything the agent said between two prompts. Consecutive replies are one
+ * row by construction, so a reply row always follows a change of speaker and
+ * always carries the name.
+ */
+function ReplyRow({ row, agentName }: { row: Extract<Row, { kind: 'reply' }>; agentName?: string }): ReactNode {
+  const text = row.segments
+    .filter((s): s is Extract<Segment, { kind: 'text' }> => s.kind === 'text')
+    .map((s) => s.block.text)
+    .join('\n\n')
+  return (
+    <li className="chatview__turn" data-role="assistant">
+      <div className="chatview__reply">
+        <Speaker agentName={agentName} clock={row.clock} />
+        {row.segments.map((segment) =>
+          segment.kind === 'text' ? (
+            <Prose key={segment.key} block={segment.block} />
+          ) : segment.kind === 'thinking' ? (
+            <ThoughtFold key={segment.key} text={segment.text} />
+          ) : (
+            <ToolGroup key={segment.key} tools={segment.tools} />
+          )
+        )}
+        {text ? <CopyButton text={text} label="Copy reply" /> : null}
+      </div>
+    </li>
+  )
+}
+
+/** Who is talking: the agent's dot and name, once per change of speaker. */
+function Speaker({ agentName, clock }: { agentName?: string; clock?: string }): ReactNode {
+  return (
+    <div className="chatview__speaker">
+      <span className="chatview__speaker-dot" aria-hidden="true" />
+      <span className="chatview__speaker-name">{agentName ?? 'Assistant'}</span>
+      {clock ? <span className="chatview__speaker-clock">{clock}</span> : null}
+    </div>
+  )
+}
+
+// The block object is stable for the life of its turn, so the markdown parse
+// runs once per paragraph however many times the reply around it grows.
+const Prose = memo(function Prose({ block }: { block: TextBlock }): ReactNode {
+  return <div className="chatview__prose">{renderMarkdown(block.text)}</div>
+})
+
+function CopyButton({ text, label }: { text: string; label: string }): ReactNode {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (timer.current) window.clearTimeout(timer.current)
+    },
+    []
+  )
+  const onCopy = (): void => {
+    void navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true)
+      if (timer.current) window.clearTimeout(timer.current)
+      timer.current = window.setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <button
+      type="button"
+      className="chatview__copy"
+      data-done={copied ? 'true' : undefined}
+      aria-label={copied ? 'Copied' : label}
+      onClick={onCopy}
+    >
+      <Icon name={copied ? 'check' : 'clipboard'} size={16} />
+      <span>{copied ? 'Copied' : 'Copy'}</span>
+    </button>
+  )
+}
+
+function Chevron(): ReactNode {
+  return (
+    <span className="chatview__chev" aria-hidden="true">
+      <Icon name="chevronRight" size={16} />
+    </span>
+  )
+}
+
+function ThoughtFold({ text }: { text: string }): ReactNode {
   const [open, setOpen] = useState(false)
   return (
-    <div className="chatview__thought" data-open={open ? 'true' : 'false'}>
+    <div className="chatview__fold" data-kind="thought" data-open={open ? 'true' : 'false'}>
       <button
         type="button"
-        className="chatview__thought-head"
+        className="chatview__fold-head"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
-        <span className="chatview__thought-caret" aria-hidden>
-          <svg
-            width="9"
-            height="9"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M6 3.5L10.5 8 6 12.5" />
-          </svg>
-        </span>
-        <span className="chatview__thought-icon" aria-hidden="true">
-          <Icon name="sparkle" size={11} />
-        </span>
-        <span className="chatview__thought-label">{open ? 'Thinking process' : 'Thought for a moment'}</span>
+        <span className="chatview__fold-label">{open ? 'Thinking' : 'Thought for a moment'}</span>
+        <span className="chatview__fold-gist" />
+        <Chevron />
       </button>
       {open ? <div className="chatview__thought-body">{text}</div> : null}
     </div>
   )
 }
 
-/* -------------------------------------------------------------- tool chips */
+/* ------------------------------------------------------------- tool calls */
 
-function ToolChip({
-  name,
-  gist,
-  note,
-  failed
-}: {
-  name: string
-  gist: string
-  note?: string
-  failed?: boolean
-}): ReactNode {
+/**
+ * One run of tool calls as one line: "4 tool calls" and the tools by name, or,
+ * for a lone call, its name and what it was asked. Opens in place to a list,
+ * where each call opens once more to its full input and its result.
+ */
+function ToolGroup({ tools }: { tools: ToolBlock[] }): ReactNode {
   const [open, setOpen] = useState(false)
-  const expandable = Boolean(note) || gist.length > GIST_FOLD
+  const lone = tools.length === 1 ? tools[0]! : null
+  const failed = tools.filter((t) => t.failed).length
+  const names = [...new Set(tools.map((t) => t.name))].join(' · ')
+  const expandable = lone ? Boolean(lone.note) || lone.gist.length > GIST_FOLD : true
   return (
-    <div className="chatview__tool" data-open={open ? 'true' : 'false'} data-failed={failed ? 'true' : undefined}>
+    <div
+      className="chatview__fold"
+      data-kind="tools"
+      data-open={open ? 'true' : 'false'}
+      data-failed={failed ? 'true' : undefined}
+    >
+      <button
+        type="button"
+        className="chatview__fold-head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={expandable ? open : undefined}
+        disabled={!expandable}
+      >
+        <span className="chatview__fold-label" data-mono={lone ? 'true' : undefined}>
+          {lone ? lone.name : `${tools.length} tool calls`}
+        </span>
+        <span className="chatview__fold-gist">{lone ? lone.gist : names}</span>
+        {failed ? (
+          <span className="chatview__tool-flag">{lone || failed === tools.length ? 'failed' : `${failed} failed`}</span>
+        ) : null}
+        <Chevron />
+      </button>
+      {open ? (
+        lone ? (
+          <ToolDetail tool={lone} />
+        ) : (
+          <ul className="chatview__tool-list">
+            {tools.map((tool, i) => (
+              <ToolRow key={i} tool={tool} />
+            ))}
+          </ul>
+        )
+      ) : null}
+    </div>
+  )
+}
+
+function ToolRow({ tool }: { tool: ToolBlock }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const expandable = Boolean(tool.note) || tool.gist.length > GIST_FOLD
+  return (
+    <li className="chatview__tool" data-open={open ? 'true' : 'false'} data-failed={tool.failed ? 'true' : undefined}>
       <button
         type="button"
         className="chatview__tool-head"
@@ -349,41 +470,41 @@ function ToolChip({
         aria-expanded={expandable ? open : undefined}
         disabled={!expandable}
       >
-        <span className="chatview__tool-caret" aria-hidden>
-          <svg
-            width="9"
-            height="9"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M6 3.5L10.5 8 6 12.5" />
-          </svg>
-        </span>
-        <span className="chatview__tool-name">{name}</span>
-        <span className="chatview__tool-gist">{gist}</span>
-        {failed ? <span className="chatview__tool-flag">failed</span> : null}
+        <span className="chatview__tool-name">{tool.name}</span>
+        <span className="chatview__tool-gist">{tool.gist}</span>
+        {tool.failed ? <span className="chatview__tool-flag">failed</span> : null}
+        <Chevron />
       </button>
-      {open ? (
-        <div className="chatview__tool-body">
-          <div className="chatview__tool-gist-full">{gist}</div>
-          {note ? <div className="chatview__tool-note">{note}</div> : null}
-        </div>
-      ) : null}
+      {open ? <ToolDetail tool={tool} /> : null}
+    </li>
+  )
+}
+
+function ToolDetail({ tool }: { tool: ToolBlock }): ReactNode {
+  return (
+    <div className="chatview__tool-body">
+      <div className="chatview__tool-gist-full">{tool.gist}</div>
+      {tool.note ? <div className="chatview__tool-note">{tool.note}</div> : null}
     </div>
   )
 }
 
 /* ---------------------------------------------------------------- working
  *
- * The agent mid-turn: Gemini-styled sparkle header with shimmering label and
- * elapsed counter.
+ * The agent mid-turn: one quiet line — what it says it is doing, three dots
+ * breathing in turn, and how long it has been at it.
  */
 
-function Working({ activity, agentName }: { activity?: string; agentName?: string }): ReactNode {
+function Working({
+  activity,
+  agentName,
+  named
+}: {
+  activity?: string
+  agentName?: string
+  /** Nothing of this reply is on the page yet, so say who is working. */
+  named: boolean
+}): ReactNode {
   const started = useRef(Date.now())
   const [seconds, setSeconds] = useState(0)
   useEffect(() => {
@@ -395,12 +516,7 @@ function Working({ activity, agentName }: { activity?: string; agentName?: strin
   const label = (activity ?? 'Thinking').replace(/[…:.]+$/, '')
   return (
     <div className="chatview__busy-turn" role="status" aria-live="polite">
-      <div className="chatview__agent-header">
-        <span className="chatview__sparkle-icon chatview__sparkle-icon--pulse" aria-hidden="true">
-          <Icon name="sparkle" size={13} />
-        </span>
-        <span className="chatview__agent-name">{agentName ?? 'Assistant'}</span>
-      </div>
+      {named ? <Speaker agentName={agentName} /> : null}
       <div className="chatview__busy-bubble">
         <span className="chatview__busy-label">{label}</span>
         <span className="chatview__busy-dots" aria-hidden="true">
@@ -419,15 +535,10 @@ function Working({ activity, agentName }: { activity?: string; agentName?: strin
  * them, never by colour alone; the answer card over the composer holds the
  * question and its choices.
  */
-function Waiting({ agentName }: { agentName?: string }): ReactNode {
+function Waiting({ agentName, named }: { agentName?: string; named: boolean }): ReactNode {
   return (
     <div className="chatview__busy-turn" role="status" aria-live="polite">
-      <div className="chatview__agent-header">
-        <span className="chatview__sparkle-icon" aria-hidden="true">
-          <Icon name="sparkle" size={13} />
-        </span>
-        <span className="chatview__agent-name">{agentName ?? 'Assistant'}</span>
-      </div>
+      {named ? <Speaker agentName={agentName} /> : null}
       <div className="chatview__busy-bubble" data-asking="true">
         <span className="chatview__wait-bang" aria-hidden="true">
           !

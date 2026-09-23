@@ -1,9 +1,11 @@
 /*
  * The waiting pill, the ☰ badge, and the "!" in an asking tab.
  *
- * Amber is the colour this page already uses for "asking" (the tab glow, the
- * pane chip's dot), but none of these three relies on it: each carries a "!"
- * or a number, so it reads the same to red-green colourblind eyes.
+ * Amber is the colour this page uses for "waiting on you", but none of these
+ * three relies on it: each carries a "!" or a number, so it reads the same to
+ * red-green colourblind eyes. Flat — no glow; the shape and the words do the
+ * work. Tokens from phone-tokens.css, falling back to the theme's own for the
+ * desktop-width strip, which draws the "!" too.
  */
 
 /* The button is the 44px hit area; the face inside it is what is drawn. */
@@ -12,8 +14,8 @@
   display: inline-flex;
   align-items: center;
   min-height: 44px;
-  padding: 0 2px;
-  margin: 0 0 0 2px;
+  padding: 0 var(--p-1, 4px);
+  margin: 0;
   background: transparent;
   border: 0;
   color: inherit;
@@ -27,21 +29,20 @@
   align-items: center;
   gap: 6px;
   height: 32px;
-  padding: 0 11px 0 5px;
+  padding: 0 12px 0 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--warn) 16%, var(--bg-base));
-  border: 1px solid var(--warn-line);
-  color: var(--warn);
-  font-size: 13px;
-  font-weight: 700;
+  background: var(--p-attn-soft, color-mix(in srgb, var(--warn) 13%, var(--bg-base)));
+  border: 1px solid var(--p-attn-line, var(--warn-line-strong));
+  color: var(--p-attn, var(--warn));
+  font-size: var(--p-t-label, 14px);
+  font-weight: 650;
   line-height: 1;
   white-space: nowrap;
-  box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 30%, transparent);
-  transition: transform var(--dur-fast, 120ms) ease-out;
+  transition: background var(--p-dur-fast, 120ms) ease-out;
 }
 
 .waitpill:active .waitpill__face {
-  transform: scale(0.95);
+  background: color-mix(in srgb, var(--warn) 24%, var(--bg-base));
 }
 
 .waitpill:focus-visible {
@@ -58,13 +59,24 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: var(--warn);
   color: var(--bg-base);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 800;
+}
+
+/* Narrow phones keep "! 2" and give the project name the room. */
+@media (max-width: 374px) {
+  .waitpill__word {
+    display: none;
+  }
+
+  .waitpill__face {
+    padding-right: 10px;
+  }
 }
 
 /* The count on the ☰ button. */
@@ -74,12 +86,12 @@
 
 .waitbadge {
   position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 18px;
-  height: 18px;
+  top: 5px;
+  right: 3px;
+  min-width: 17px;
+  height: 17px;
   padding: 0 4px;
-  border-radius: 9px;
+  border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -92,18 +104,18 @@
   pointer-events: none;
 }
 
-/* The "!" inside an asking tab's pill, beside the glow it already has. */
+/* The "!" inside an asking tab's pill. */
 .tab__ask {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--warn);
   color: var(--bg-base);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   line-height: 1;
 }

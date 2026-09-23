@@ -5,8 +5,11 @@ import { Icon } from '@/components/Icon'
 import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
 import { handoffTargets, handoffTargetWire, paneHandoffChip, type HandoffTarget } from '@shared/handoffview'
+import type { TerminalTab } from '@shared/types'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
+import { ConnectionSheet, LinkDot, linkStateOf, linkWord, useTrackLastHeard } from './ConnectionSheet'
 import { HandoffMenu } from './HandoffMenu'
+import { MoreSheet } from './MoreSheet'
 import { WaitingBadge, WaitingPill } from './WaitingPill'
 import { rustDeskLink } from './Workspace'
 
@@ -24,7 +27,17 @@ const SEED_MAX_GROW_PX = 92
 /**
  * The app bar. Same tokens as the desktop, different job: identity, the
  * project, and whether the link is live. No window controls, no voice
- * (decision 7). On a phone it is the project, one row.
+ * (decision 7).
+ *
+ * ## On a phone
+ *
+ * One calm 52px row whose furniture never changes with the pane: the menu and
+ * the project (one button, which opens the drawer), then the "N waiting" pill
+ * when something is, the live dot (a real button, which opens the connection
+ * sheet), and "⋯". Everything the desktop bar says in glyphs (Foreman, hand
+ * off, the screen, alerts, sign out) is a labelled row in the ⋯ sheet instead,
+ * so no icon appears, vanishes or moves when the pane changes. A 2px line under
+ * the bar repeats the link's state edge to edge (`.ptop[data-link]`).
  *
  * It also carries Foreman's switch, which is the one control here that acts on
  * something other than the whole page: the active pane. A pane header on a
@@ -139,47 +152,27 @@ export function TopBar({
   /* ------------------------------------------------------------ handoff
    *
    * Handoff for whichever pane is active. Any agent pane (Claude, Antigravity,
-   * Grok, Codex, etc.) can write a pack; shells cannot.
+   * Grok, Codex, etc.) can write a pack; shells cannot. The menu itself is
+   * `PaneHandoffMenu`, shared with the tab strip's long-press sheet.
    */
   const isAgent = !!paneProfile && !isShellProfile(paneProfile)
   const handoffRecords = (state.projectId ? state.picture?.handoff[state.projectId] : undefined) ?? []
   const handoffChip = paneId ? paneHandoffChip(paneId, handoffRecords) : null
   const handoffBtnRef = useRef<HTMLButtonElement | null>(null)
   const [handoffOpen, setHandoffOpen] = useState(false)
-  const [handoffBusy, setHandoffBusy] = useState(false)
-  const [handoffError, setHandoffError] = useState('')
-
-  const sessions = state.picture?.sessions ?? []
-  const targets =
-    handoffOpen && paneId
-      ? handoffTargets({
-          paneId,
-          tab: tab ?? null,
-          workspace,
-          profiles,
-          records: handoffRecords,
-          isLive: (id) => sessions.some((s) => s.id === id)
-        })
-      : []
-
-  const pickHandoff = useCallback(
-    (target: HandoffTarget) => {
-      if (!paneId) return
-      setHandoffBusy(true)
-      setHandoffError('')
-      void actions.handoffStart(paneId, handoffTargetWire(target)).then((error) => {
-        setHandoffBusy(false)
-        if (error) setHandoffError(error)
-        else setHandoffOpen(false)
-      })
-    },
-    [actions, paneId]
-  )
 
   useEffect(() => {
     setHandoffOpen(false)
-    setHandoffError('')
   }, [paneId])
+
+  /* ------------------------------------------------------------ the phone */
+  const moreBtnRef = useRef<HTMLButtonElement | null>(null)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [linkOpen, setLinkOpen] = useState(false)
+  const link = linkStateOf(state)
+  useTrackLastHeard(link === 'live')
+  const name = desktopName || 'the desktop'
+  const waitingCount = offline ? 0 : state.waiting.length
 
   const tint = project ? ({ '--dot': project.color } as CSSProperties) : undefined
   /**
@@ -192,55 +185,83 @@ export function TopBar({
 
   return (
     <>
+      {mobile ? (
+        <header className="ptop" data-link={link}>
+          <button
+            type="button"
+            className="ptop__projects"
+            aria-label={
+              waitingCount > 0
+                ? `Projects: ${project?.name ?? 'none selected'}. ${waitingCount} waiting`
+                : `Projects: ${project?.name ?? 'none selected'}`
+            }
+            aria-expanded={!collapsed}
+            onClick={onToggleRail}
+            data-testid="phone-projects"
+          >
+            <span className="ptop__menu waitbadge-host">
+              <Icon name="panel" size={20} />
+              {offline ? null : <WaitingBadge />}
+            </span>
+            {project ? <span className="ptop__dot" style={{ background: project.color }} aria-hidden="true" /> : null}
+            <span className="ptop__name">{project?.name ?? 'Forge'}</span>
+          </button>
+
+          <div className="ptop__right">
+            {offline ? null : <WaitingPill />}
+            <button
+              type="button"
+              className="ptop__btn ptop__link"
+              data-state={link}
+              aria-label={`Connection: ${linkWord(link)}. Show details`}
+              aria-haspopup="dialog"
+              aria-expanded={linkOpen}
+              onClick={() => setLinkOpen(true)}
+              data-testid="phone-link"
+            >
+              <LinkDot link={link} />
+            </button>
+            <button
+              ref={moreBtnRef}
+              type="button"
+              className="ptop__btn ptop__more"
+              aria-label="More: Foreman, hand off, screen, alerts, text size, sign out"
+              aria-haspopup="dialog"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen(true)}
+              data-testid="phone-more"
+            >
+              <Icon name="dots" size={24} />
+            </button>
+          </div>
+        </header>
+      ) : (
       <header className="titlebar" data-focused="true" style={tint}>
         <div className="titlebar__left">
           <button
             type="button"
-            className={mobile ? 'ghost-btn titlebar__btn waitbadge-host' : 'ghost-btn titlebar__btn'}
+            className="ghost-btn titlebar__btn"
             title={collapsed ? 'Show projects' : 'Hide projects'}
-            aria-label={
-              mobile && !offline && state.waiting.length > 0
-                ? `Projects rail, ${state.waiting.length} waiting`
-                : 'Projects rail'
-            }
+            aria-label="Projects rail"
             aria-pressed={!collapsed}
             onClick={onToggleRail}
           >
-            <Icon name="panel" size={mobile ? 18 : 15} />
-            {mobile && !offline ? <WaitingBadge /> : null}
+            <Icon name="panel" size={15} />
           </button>
 
-          {mobile ? (
+          <span className="titlebar__mark">
+            <Icon name="forge" size={15} />
+          </span>
+          <span className="titlebar__wordmark">Forge</span>
+          {project ? (
             <>
-              <h1 className="titlebar__project">
-                {project ? (
-                  <>
-                    <span className="titlebar__dot" />
-                    <span className="truncate">{project.name}</span>
-                  </>
-                ) : (
-                  'Forge'
-                )}
-              </h1>
-              {offline ? null : <WaitingPill />}
-            </>
-          ) : (
-            <>
-              <span className="titlebar__mark">
-                <Icon name="forge" size={15} />
+              <span className="titlebar__sep" />
+              <span className="titlebar__project truncate">
+                <span className="titlebar__dot" />
+                {project.name}
               </span>
-              <span className="titlebar__wordmark">Forge</span>
-              {project ? (
-                <>
-                  <span className="titlebar__sep" />
-                  <span className="titlebar__project truncate">
-                    <span className="titlebar__dot" />
-                    {project.name}
-                  </span>
-                </>
-              ) : null}
             </>
-          )}
+          ) : null}
         </div>
 
         <div className="titlebar__right">
@@ -284,7 +305,7 @@ export function TopBar({
           {drivable && !offline ? (
             <button
               type="button"
-              className={mobile ? 'ghost-btn titlebar__btn titlebar__foreman' : 'titlebar__foreman mono'}
+              className="titlebar__foreman mono"
               style={paneTint}
               data-on={foremanOn ? 'true' : undefined}
               data-status={foreman?.status ?? 'off'}
@@ -308,7 +329,7 @@ export function TopBar({
               }
               onClick={switchForeman}
             >
-              {mobile ? <Icon name="foreman" size={15} /> : 'FOREMAN'}
+              FOREMAN
             </button>
           ) : null}
 
@@ -318,7 +339,7 @@ export function TopBar({
             together cleanly without taking vertical pane space or floating
             cryptic arrows over the content.
           */}
-          {handoffChip && !mobile ? (
+          {handoffChip ? (
             <span
               className="titlebar__handoff-chip mono"
               data-state={handoffChip.state}
@@ -332,7 +353,7 @@ export function TopBar({
             <button
               ref={handoffBtnRef}
               type="button"
-              className={mobile ? 'ghost-btn titlebar__btn titlebar__handoff' : 'titlebar__handoff mono'}
+              className="titlebar__handoff mono"
               style={paneTint}
               data-open={handoffOpen ? 'true' : undefined}
               data-state={handoffChip?.state}
@@ -352,20 +373,13 @@ export function TopBar({
                     ? 'Hand off… — ask this agent to write a handoff pack for another one'
                     : 'Hand off… — needs a live agent session'
               }
-              onClick={() => {
-                setHandoffError('')
-                setHandoffOpen((v) => !v)
-              }}
+              onClick={() => setHandoffOpen((v) => !v)}
             >
-              {mobile ? (
-                <Icon name="send" size={15} />
-              ) : (
-                handoffChip?.state === 'waiting'
-                  ? 'HANDING OFF…'
-                  : handoffChip?.state === 'sent' || handoffChip?.state === 'took'
-                    ? 'HANDED OFF'
-                    : 'HAND OFF'
-              )}
+              {handoffChip?.state === 'waiting'
+                ? 'HANDING OFF…'
+                : handoffChip?.state === 'sent' || handoffChip?.state === 'took'
+                  ? 'HANDED OFF'
+                  : 'HAND OFF'}
             </button>
           ) : null}
 
@@ -451,6 +465,7 @@ export function TopBar({
           </button>
         </div>
       </header>
+      )}
 
       {/*
         The seed box — Foreman's one question before it starts, dropped into the
@@ -517,17 +532,145 @@ export function TopBar({
         </div>
       ) : null}
 
-      <HandoffMenu
-        anchor={handoffBtnRef.current}
+      <PaneHandoffMenu
+        paneId={paneId}
+        tab={tab ?? null}
+        anchor={mobile ? moreBtnRef.current : handoffBtnRef.current}
         open={handoffOpen}
         onClose={() => setHandoffOpen(false)}
-        targets={targets}
-        profiles={profiles}
-        autoSend={tab?.settings?.handoffAutoSend === true}
-        busy={handoffBusy}
-        error={handoffError}
-        onPick={pickHandoff}
       />
+
+      {mobile ? (
+        <>
+          <MoreSheet
+            open={moreOpen}
+            onClose={() => setMoreOpen(false)}
+            pane={paneProfile ? { label: paneProfile.name, accent: paneProfile.accent } : null}
+            foremanOn={foremanOn}
+            foreman={{
+              available: drivable && !offline && live && alive,
+              reason: !pane
+                ? 'No pane open'
+                : !drivable
+                  ? 'Claude panes only'
+                  : offline
+                    ? `${name} is asleep`
+                    : !live
+                      ? `Needs a live link to ${name}`
+                      : 'This pane has no session running',
+              detail: foremanOn
+                ? foreman?.line
+                  ? `Driving: ${foreman.line}`
+                  : 'Driving this pane. Tap to take the keyboard back.'
+                : 'Let Foreman drive this pane from one line',
+              onPress: () => {
+                setMoreOpen(false)
+                if (foremanOn) switchForeman()
+                else setSeeding(true)
+              }
+            }}
+            handoff={{
+              available: isAgent && !offline && live && alive,
+              reason: !pane
+                ? 'No pane open'
+                : !isAgent
+                  ? 'Shells cannot hand off'
+                  : offline
+                    ? `${name} is asleep`
+                    : !live
+                      ? `Needs a live link to ${name}`
+                      : 'This pane has no session running',
+              detail: handoffChip ? handoffChip.label : 'Ask this agent to write a handoff pack for another',
+              onPress: () => {
+                setMoreOpen(false)
+                setHandoffOpen(true)
+              }
+            }}
+            screen={{
+              available: !!onWatchScreen,
+              reason: offline ? `${name} is asleep` : `Needs a live link to ${name}`,
+              detail: `Watch ${name}’s screen`,
+              onPress: () => {
+                setMoreOpen(false)
+                onWatchScreen?.()
+              }
+            }}
+          />
+          <ConnectionSheet open={linkOpen} onClose={() => setLinkOpen(false)} />
+        </>
+      ) : null}
     </>
+  )
+}
+
+/**
+ * The handoff menu for one pane: the rows, the request, the in-flight state
+ * and the desktop's refusal. The top bar opens it for the active pane (under
+ * its HAND OFF pill at the desk, under "⋯" on a phone); the tab strip's
+ * long-press sheet opens it for the pane of the tab that was pressed.
+ */
+export function PaneHandoffMenu({
+  paneId,
+  tab,
+  anchor,
+  open,
+  onClose
+}: {
+  paneId: string | null
+  tab: TerminalTab | null
+  anchor: HTMLElement | null
+  open: boolean
+  onClose: () => void
+}): ReactNode {
+  const { state, actions } = useForge()
+  const workspace = useWorkspace()
+  const profiles = useProfiles()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (open) setError('')
+  }, [open])
+
+  const records = (state.projectId ? state.picture?.handoff[state.projectId] : undefined) ?? []
+  const sessions = state.picture?.sessions ?? []
+  const targets =
+    open && paneId
+      ? handoffTargets({
+          paneId,
+          tab,
+          workspace,
+          profiles,
+          records,
+          isLive: (id) => sessions.some((s) => s.id === id)
+        })
+      : []
+
+  const pick = useCallback(
+    (target: HandoffTarget) => {
+      if (!paneId) return
+      setBusy(true)
+      setError('')
+      void actions.handoffStart(paneId, handoffTargetWire(target)).then((refusal) => {
+        setBusy(false)
+        if (refusal) setError(refusal)
+        else onClose()
+      })
+    },
+    [actions, paneId, onClose]
+  )
+
+  return (
+    <HandoffMenu
+      anchor={anchor}
+      open={open}
+      onClose={onClose}
+      targets={targets}
+      profiles={profiles}
+      autoSend={tab?.settings?.handoffAutoSend === true}
+      busy={busy}
+      error={error}
+      onPick={pick}
+    />
   )
 }

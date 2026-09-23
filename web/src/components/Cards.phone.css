@@ -1,0 +1,119 @@
+/* ------------------------------------------------------ Cards view, phone
+ *
+ * The desktop's Feed (src/components/Feed.tsx + Feed.css) is Forge Web's Cards
+ * view. It is imported, not copied, so it is calmed here — every rule scoped
+ * to `.app[data-mobile]` so the desktop app and desktop-width Forge Web keep
+ * the Feed exactly as it is. Loaded after the Feed's own sheet (main.tsx).
+ *
+ * - One marker per paragraph. The CLI prints its own ⏺ at the head of every
+ *   reply and every tool call, so the timeline's dot and rail beside it were a
+ *   second bullet for the same paragraph. The CLI's stays; the rail goes.
+ * - Tool cards: one hairline box, no thick side edge, a 44px head, and the
+ *   "N lines" meta gone — it squeezed the tool name onto two lines, and the
+ *   open card shows the lines themselves. Result lines fade out at the right
+ *   edge instead of stopping mid-word.
+ * - The Feed's own "Waiting on you" card is hidden: on the phone the answer
+ *   card over the composer (AnswerCard.tsx) asks the question with buttons,
+ *   and "use Tab / Esc below" points at keys this face does not show.
+ */
+
+/* The first card clears whatever floats over the top of the pane. */
+.app[data-mobile] .feed__column {
+  gap: var(--s-7);
+  padding: var(--s-6) var(--s-7) var(--s-8);
+}
+
+/* ------------------------------------------------------------ the agent */
+
+.app[data-mobile] .feed__block[data-role='agent'] {
+  padding-left: 0;
+}
+
+.app[data-mobile] .feed__block[data-role='agent']::before,
+.app[data-mobile] .feed__block[data-role='agent']::after {
+  content: none;
+}
+
+.app[data-mobile] .feed__block[data-role='agent'] .feed__text {
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+/* ------------------------------------------------------------ tool cards */
+
+.app[data-mobile] .feed__tool {
+  margin-left: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--line-hairline);
+  border-radius: 12px;
+}
+
+.app[data-mobile] .feed__tool-head {
+  min-height: 44px;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5) var(--s-4) var(--s-5);
+}
+
+.app[data-mobile] .feed__tool-title {
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.app[data-mobile] .feed__tool-count {
+  display: none;
+}
+
+.app[data-mobile] .feed__tool-body {
+  border-top-color: var(--line-soft);
+}
+
+.app[data-mobile] .feed__tool-lines {
+  padding: var(--s-4) var(--s-5) var(--s-5) var(--s-7);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent calc(100% - 6px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent calc(100% - 6px));
+}
+
+.app[data-mobile] .feed__tool-more {
+  min-height: 44px;
+  padding: 0 var(--s-7);
+  color: var(--text-secondary);
+  background: none;
+  border-top-color: var(--line-soft);
+}
+
+/* ------------------------------------------------------------- thinking */
+
+.app[data-mobile] .feed__think {
+  padding-left: 0;
+}
+
+.app[data-mobile] .feed__think-head {
+  min-height: 44px;
+  margin-left: calc(-1 * var(--s-5));
+  padding: 0 var(--s-5);
+  font-size: 14px;
+}
+
+/* ------------------------------------------------------------- busy, ask */
+
+.app[data-mobile] .feed__busy {
+  padding-left: 0;
+  font-size: 14.5px;
+}
+
+.app[data-mobile] .feed__ask {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ jump */
+
+.app[data-mobile] .feed__jump {
+  height: 44px;
+  padding: 0 var(--s-7) 0 var(--s-6);
+  font-size: 14px;
+  border-color: var(--line-strong);
+}
+
+.app[data-mobile] .feed__jump svg {
+  color: var(--text-secondary);
+}

@@ -1,0 +1,80 @@
+/*
+ * The link dot and the connection sheet.
+ *
+ * The dot is drawn in four shapes, not four colours: filled with a halo (live),
+ * a hollow ring (live, but quiet), a pulsing ring (reconnecting), a small grey
+ * disc (asleep). The words sit next to it in the sheet and in the banners.
+ */
+
+.linkdot {
+  position: relative;
+  flex: none;
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.linkdot[data-state='live'] {
+  background: var(--p-act);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+.linkdot[data-state='quiet'] {
+  background: transparent;
+  border: 2px solid var(--p-act);
+}
+
+.linkdot[data-state='reconnecting'] {
+  background: transparent;
+  border: 2px solid var(--p-attn);
+  animation: linkdot-pulse 1.4s var(--p-ease) infinite alternate;
+}
+
+.linkdot[data-state='asleep'] {
+  width: 8px;
+  height: 8px;
+  background: var(--p-ink-3);
+}
+
+@keyframes linkdot-pulse {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .linkdot[data-state='reconnecting'] {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .linkdot[data-state='reconnecting'] {
+  animation: none;
+}
+
+/* ------------------------------------------------------------------ sheet */
+
+.connsheet__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--p-3);
+}
+
+.connsheet__title .linkdot {
+  width: 12px;
+  height: 12px;
+}
+
+.connsheet__title .linkdot[data-state='asleep'] {
+  width: 10px;
+  height: 10px;
+}
+
+.connsheet__actions {
+  padding: var(--p-3) var(--p-3) var(--p-1);
+}

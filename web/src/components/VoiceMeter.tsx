@@ -6,41 +6,32 @@ import { useEffect, useRef, type ReactNode } from 'react'
  * fanning out either side, so a word moves the whole row and a pause lets it
  * settle. It is what says "I can hear you" — a pulse alone said only "on".
  *
- * Drawn straight onto the bars' transforms from an AnalyserNode, one
- * animation frame at a time, so React never re-renders for sound.
+ * Drawn straight onto the bars' transforms from the recording's AnalyserNode,
+ * one animation frame at a time, so React never re-renders for sound.
  */
 
 const BARS = 5
 /** Where each band is shown: low in the middle, then out to both edges. */
 const ORDER = [3, 1, 0, 2, 4]
-/** Bins above this are hiss; speech lives in the bottom few kilohertz. */
-const TOP_BIN = 24
+/** Above this is hiss; speech lives in the bottom few kilohertz. */
+const TOP_HZ = 4500
 
-export function VoiceMeter({ stream }: { stream: MediaStream | null }): ReactNode {
+/**
+ * `analyser` is the recording's own (lib/voice-level.ts), so the bars, the
+ * silence check and the auto-stop all hear the one microphone the same way.
+ */
+export function VoiceMeter({ analyser }: { analyser: AnalyserNode | null }): ReactNode {
   const bars = useRef<(HTMLSpanElement | null)[]>([])
 
   useEffect(() => {
-    if (!stream) return
-    const Ctx =
-      window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!Ctx) return
-    let ctx: AudioContext
-    try {
-      ctx = new Ctx()
-    } catch {
-      return
-    }
-    const source = ctx.createMediaStreamSource(stream)
-    const analyser = ctx.createAnalyser()
-    analyser.fftSize = 256
-    analyser.smoothingTimeConstant = 0.55
-    source.connect(analyser)
+    if (!analyser) return
     const data = new Uint8Array(analyser.frequencyBinCount)
+    const binHz = analyser.context.sampleRate / analyser.fftSize
+    const usable = Math.max(BARS, Math.min(data.length, Math.round(TOP_HZ / binHz)))
     const shown = new Float32Array(BARS)
     let frame = 0
     const draw = (): void => {
       analyser.getByteFrequencyData(data)
-      const usable = Math.min(data.length, TOP_BIN)
       const per = usable / BARS
       for (let band = 0; band < BARS; band++) {
         const from = Math.floor(band * per)
@@ -56,13 +47,8 @@ export function VoiceMeter({ stream }: { stream: MediaStream | null }): ReactNod
       frame = window.requestAnimationFrame(draw)
     }
     frame = window.requestAnimationFrame(draw)
-    if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined)
-    return () => {
-      window.cancelAnimationFrame(frame)
-      source.disconnect()
-      void ctx.close().catch(() => undefined)
-    }
-  }, [stream])
+    return () => window.cancelAnimationFrame(frame)
+  }, [analyser])
 
   return (
     <span className="voicemeter" aria-hidden="true">

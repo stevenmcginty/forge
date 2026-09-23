@@ -1,0 +1,101 @@
+/*
+ * Phone tokens — the one vocabulary for Forge Web on a phone (`.app[data-mobile]`).
+ *
+ *  1. Lime (--p-act) means "act here": Send, the mic, Start, the live dot. Nothing else is lime.
+ *  2. Amber (--p-attn) means "something is waiting on you"; red (--p-danger) means "this destroys".
+ *  3. Never colour alone: every state also carries a shape ("!", a ring, a dash) or words.
+ *  4. Three radii: --p-r-pill (999), --p-r-sheet (20, sheets and cards), --p-r-row (12, rows and inputs).
+ *  5. Every tap target is at least --p-hit (44px). Draw it smaller if you like; hit it bigger.
+ *  6. Spacing sits on a 4px grid (--p-1 … --p-8). Screen gutters are --p-4 (16px).
+ *  7. Type: 16 body, 13–15 chrome, one 13px mono for paths and code. Sentence case, no tracked caps.
+ *  8. Two surfaces (--p-bg, --p-surface) plus --p-raised, one hairline (--p-line). No glows, no
+ *     gradients on chrome, no cards inside cards, no thick one-side borders on rounded shapes.
+ *  9. Motion eases out and never overshoots; --p-dur-* collapse to 0 under reduced motion.
+ * 10. Every value maps onto a theme token, so Volt and Paper both hold. No literal colours here.
+ */
+
+.app[data-mobile],
+.bsheet-layer {
+  /* surfaces */
+  --p-bg: var(--bg-base);
+  --p-surface: var(--bg-panel);
+  --p-raised: var(--bg-panel-raised);
+  --p-press: var(--bg-active);
+  --p-hover: var(--bg-hover);
+  --p-scrim: var(--bg-scrim);
+
+  /* lines */
+  --p-line: var(--line-hairline);
+  --p-line-strong: var(--line-strong);
+
+  /* ink */
+  --p-ink: var(--text-primary);
+  --p-ink-2: var(--text-secondary);
+  --p-ink-3: var(--text-dim);
+
+  /* meaning */
+  --p-act: var(--accent);
+  --p-act-ink: var(--text-on-accent);
+  --p-act-soft: var(--accent-soft);
+  --p-attn: var(--warn);
+  --p-attn-soft: color-mix(in srgb, var(--warn) 13%, var(--bg-base));
+  --p-attn-line: var(--warn-line-strong);
+  --p-attn-ink: var(--bg-base);
+  --p-danger: var(--danger);
+  --p-danger-soft: var(--danger-soft);
+
+  /* shape */
+  --p-r-pill: 999px;
+  --p-r-sheet: 20px;
+  --p-r-row: 12px;
+
+  /* size */
+  --p-hit: 44px;
+  --p-row: 56px;
+  --p-bar: 52px;
+  --p-signal: 2px;
+
+  /* space: a 4px grid */
+  --p-1: 4px;
+  --p-2: 8px;
+  --p-3: 12px;
+  --p-4: 16px;
+  --p-5: 20px;
+  --p-6: 24px;
+  --p-8: 32px;
+
+  /* type */
+  --p-font: var(--font-ui);
+  --p-mono: var(--font-mono);
+  --p-t-body: 16px;
+  --p-t-title: 17px;
+  --p-t-chrome: 15px;
+  --p-t-label: 14px;
+  --p-t-small: 13px;
+  --p-t-mono: 13px;
+  /* A− / A+ in the ⋯ sheet. Set on `.app` by Workspace; a later wave applies it. */
+  --p-text-scale: var(--phone-text-scale, 1);
+
+  /* motion: ease out, no overshoot */
+  --p-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --p-ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --p-dur-fast: 120ms;
+  --p-dur: 180ms;
+  --p-dur-sheet: 280ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-mobile],
+  .bsheet-layer {
+    --p-dur-fast: 0ms;
+    --p-dur: 0ms;
+    --p-dur-sheet: 0ms;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile],
+:root[data-reduced-motion='true'] .bsheet-layer {
+  --p-dur-fast: 0ms;
+  --p-dur: 0ms;
+  --p-dur-sheet: 0ms;
+}

@@ -30,7 +30,7 @@ const SETTLE_BETWEEN_KEYS_MS = 80
 /** The gap between the last arrow and the Enter that picks the row. */
 const SETTLE_BEFORE_ENTER_MS = 120
 /** A reply to a question with no menu. See `plainReplies`. */
-interface PlainReply {
+export interface PlainReply {
   label: string
   keys: string[]
 }
@@ -44,7 +44,7 @@ interface PlainReply {
  * later, which is how `sendAnswerKeys` spaces a final `\r` and how the
  * composer sends one. Enter or Esc on their own answered nothing there.
  */
-function plainReplies(question: string): PlainReply[] {
+export function plainReplies(question: string): PlainReply[] {
   const [yes, no] = isYesNo(question) ? ['y', 'n'] : ['yes', 'no']
   return [
     { label: 'Yes', keys: [yes, '\r'] },

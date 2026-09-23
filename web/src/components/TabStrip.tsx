@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import type { TerminalTab } from '@shared/types'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import type { AgentProfile, TerminalTab } from '@shared/types'
 import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
 import { AgentBadge } from '@/components/AgentBadge'
@@ -7,7 +7,9 @@ import { Icon } from '@/components/Icon'
 import { Popover } from '@/components/Popover'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentChooser } from './AgentChooser'
+import { BottomSheet, SheetConfirm, SheetGlyph, SheetRow, SheetSection } from './BottomSheet'
 import { CommandsButton, SkillsButton } from './Flyouts'
+import { PaneHandoffMenu } from './TopBar'
 import './WaitingPill.css'
 
 /**
@@ -38,14 +40,25 @@ import './WaitingPill.css'
  * toggle. `WEB_LAYOUT_OPS` has seven verbs and none of them is any of those —
  * the browser can create, close, select, split, focus and switch project, and a
  * strip that offered more would be offering something the wire cannot carry.
+ *
+ * ## On a phone
+ *
+ * Neutral pills: an agent dot, the title, and — when it asks — the "!". The
+ * active pill is lifted (raised surface, heavier weight), not coloured, so
+ * "which tab am I in" and "which agent is this" stop being the same signal.
+ * There is no × in the pill; a long-press opens a sheet with Close tab (behind
+ * the same confirm), Hand off and New agent here. `+` sits outside the scroller
+ * so it never scrolls away, and the scroller fades at whichever edge has more.
+ * Two tabs with the same title say which folder each is in.
  */
-export function TabStrip(): ReactNode {
+export function TabStrip({ mobile = false }: { mobile?: boolean }): ReactNode {
   const { state, actions } = useForge()
   const workspace = useWorkspace()
   const newTabRef = useRef<HTMLButtonElement | null>(null)
   const [chooserOpen, setChooserOpen] = useState(false)
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
   const project = (state.picture?.projects ?? state.cached?.projects ?? []).find((p) => p.id === state.projectId)
+  const profiles = useProfiles()
 
   /**
    * The tab this browser has asked for, and where the strip stood when it asked.
@@ -90,6 +103,61 @@ export function TabStrip(): ReactNode {
     activeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
   }, [workspace.activeTabId])
 
+  /** Every pill's element, so the long-press sheet's Hand off can anchor to the pill it came from. */
+  const tabEls = useRef(new Map<string, HTMLDivElement>())
+
+  /*
+   * The phone's scroller fades at the edge that has more pills past it, and
+   * only there — a fade at an edge with nothing beyond it would be a pill
+   * dissolving for no reason. Written to the element rather than to state:
+   * a scroll is sixty of these a second and none of them needs a render.
+   */
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    const el = scrollerRef.current
+    if (!mobile || !el) return
+    const update = (): void => {
+      const start = el.scrollLeft > 2
+      const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+      el.dataset.fade = start && end ? 'both' : start ? 'start' : end ? 'end' : 'none'
+    }
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => {
+      el.removeEventListener('scroll', update)
+      observer.disconnect()
+    }
+  }, [mobile, workspace.tabs.length])
+
+  /*
+   * Two pills called "Claude Code" are two pills nobody can tell apart, and the
+   * wire has no rename. So a repeated title carries the leaf of its pane's
+   * folder, and where even that repeats, its place among the twins.
+   */
+  const suffixes = tabSuffixes(workspace.tabs, state.picture?.sessions ?? [])
+
+  /* ------------------------------------------------------ the long-press sheet */
+  const [sheetTabId, setSheetTabId] = useState<string | null>(null)
+  const [sheetStep, setSheetStep] = useState<'list' | 'close'>('list')
+  const [handoffTabId, setHandoffTabId] = useState<string | null>(null)
+  const sheetTab = workspace.tabs.find((t) => t.id === sheetTabId) ?? null
+  const handoffTab = workspace.tabs.find((t) => t.id === handoffTabId) ?? null
+  const handoffPaneId = handoffTab ? activeLeafId(handoffTab) : null
+  const sessions = state.picture?.sessions ?? []
+
+  // A tab that goes away while its sheet is open takes the sheet with it.
+  useEffect(() => {
+    if (sheetTabId && !sheetTab) setSheetTabId(null)
+    if (handoffTabId && !handoffTab) setHandoffTabId(null)
+  }, [sheetTabId, sheetTab, handoffTabId, handoffTab])
+
+  const openSheet = (tabId: string): void => {
+    setSheetStep('list')
+    setSheetTabId(tabId)
+  }
+
   const select = async (tabId: string): Promise<void> => {
     setAsk({ tabId, from: workspace.activeTabId })
     // `layout` resolves with the desktop's refusal sentence rather than throwing
@@ -98,9 +166,23 @@ export function TabStrip(): ReactNode {
     if (await actions.layout({ op: 'select-tab', tabId })) setAsk(null)
   }
 
+  const newTab = (
+    <button
+      ref={newTabRef}
+      type="button"
+      className="ghost-btn tabstrip__new"
+      title={live ? 'New terminal tab' : 'The desktop is not answering, so it cannot open a tab'}
+      aria-label="New tab"
+      disabled={!live}
+      onClick={() => setChooserOpen(true)}
+    >
+      <Icon name="plus" size={mobile ? 20 : 14} />
+    </button>
+  )
+
   return (
     <div className="tabstrip" role="tablist" aria-label="Terminal tabs">
-      <div className="tabstrip__tabs">
+      <div className="tabstrip__tabs" ref={scrollerRef}>
         {workspace.tabs.map((tab) => (
           <Tab
             key={tab.id}
@@ -108,33 +190,66 @@ export function TabStrip(): ReactNode {
             active={tab.id === workspace.activeTabId}
             pending={tab.id === pending}
             live={live}
+            mobile={mobile}
+            suffix={suffixes.get(tab.id) ?? ''}
             onSelect={() => void select(tab.id)}
-            ref={
-              tab.id === workspace.activeTabId
-                ? (el) => {
-                    activeRef.current = el
-                  }
-                : undefined
-            }
+            onLongPress={() => openSheet(tab.id)}
+            ref={(el) => {
+              if (el) tabEls.current.set(tab.id, el)
+              else tabEls.current.delete(tab.id)
+              if (tab.id === workspace.activeTabId) activeRef.current = el
+            }}
           />
         ))}
 
-        <button
-          ref={newTabRef}
-          type="button"
-          className="ghost-btn tabstrip__new"
-          title={live ? 'New terminal tab' : 'The desktop is not answering, so it cannot open a tab'}
-          disabled={!live}
-          onClick={() => setChooserOpen(true)}
-        >
-          <Icon name="plus" size={14} />
-        </button>
+        {mobile ? null : newTab}
       </div>
 
-      <div className="tabstrip__spacer" />
+      {mobile ? (
+        newTab
+      ) : (
+        <>
+          <div className="tabstrip__spacer" />
+          <SkillsButton />
+          <CommandsButton />
+        </>
+      )}
 
-      <SkillsButton />
-      <CommandsButton />
+      {mobile ? (
+        <TabSheet
+          tab={sheetTab}
+          title={sheetTab ? sheetTab.title + (suffixes.get(sheetTab.id) ? ` · ${suffixes.get(sheetTab.id)}` : '') : ''}
+          profiles={profiles}
+          step={sheetStep}
+          live={live}
+          alive={(id) => sessions.some((s) => s.id === id)}
+          projectName={project?.name ?? 'this project'}
+          onStep={setSheetStep}
+          onClose={() => setSheetTabId(null)}
+          onNewAgent={() => {
+            setSheetTabId(null)
+            setChooserOpen(true)
+          }}
+          onHandoff={(tabId) => {
+            setSheetTabId(null)
+            setHandoffTabId(tabId)
+          }}
+          onCloseTab={(tabId) => {
+            setSheetTabId(null)
+            void actions.layout({ op: 'close-tab', tabId })
+          }}
+        />
+      ) : null}
+
+      {mobile ? (
+        <PaneHandoffMenu
+          paneId={handoffPaneId}
+          tab={handoffTab}
+          anchor={handoffTabId ? (tabEls.current.get(handoffTabId) ?? null) : null}
+          open={!!handoffTab && !!handoffPaneId}
+          onClose={() => setHandoffTabId(null)}
+        />
+      ) : null}
 
       <AgentChooser
         anchor={newTabRef.current}
@@ -147,12 +262,20 @@ export function TabStrip(): ReactNode {
   )
 }
 
+/** How long a finger rests on a pill before it opens the tab's sheet. */
+const LONG_PRESS_MS = 450
+/** A finger that moves further than this is scrolling the strip, not pressing a pill. */
+const LONG_PRESS_SLOP_PX = 10
+
 function Tab({
   tab,
   active,
   pending,
   live,
+  mobile,
+  suffix,
   onSelect,
+  onLongPress,
   ref
 }: {
   tab: TerminalTab
@@ -160,8 +283,13 @@ function Tab({
   /** Asked for, not yet granted. See the header. */
   pending: boolean
   live: boolean
+  mobile: boolean
+  /** The folder leaf (or ordinal) that tells this tab from a twin of the same title. */
+  suffix: string
   onSelect: () => void
-  /** The active tab hands its element up so the strip can walk it into view. */
+  /** Phone only: the finger rested. Opens the tab's sheet. */
+  onLongPress: () => void
+  /** Every pill hands its element up: the strip walks the active one into view and anchors menus to any. */
   ref?: (el: HTMLDivElement | null) => void
 }): ReactNode {
   const { state, actions } = useForge()
@@ -178,6 +306,96 @@ function Tab({
   const [confirmOpen, setConfirmOpen] = useState(false)
   /** What pressed the pill last. A finger selects on `click`; see below. */
   const pointerType = useRef('')
+
+  /*
+   * The long-press. A timer from the finger landing; moving past the slop
+   * (a scroll), lifting, or the browser cancelling the pointer (a pan) all
+   * stop it. When it fires, the click that follows the lift is swallowed, so
+   * opening the sheet never also selects the tab underneath.
+   */
+  const press = useRef<{ timer: number; x: number; y: number } | null>(null)
+  const longFired = useRef(false)
+  const endPress = (): void => {
+    if (press.current) window.clearTimeout(press.current.timer)
+    press.current = null
+  }
+  useEffect(() => endPress, [])
+
+  if (mobile) {
+    const dots = uniqueProfiles(badges)
+    return (
+      <div
+        ref={ref}
+        className="tab"
+        role="tab"
+        aria-selected={active}
+        aria-busy={pending || undefined}
+        aria-haspopup="dialog"
+        aria-label={`${tab.title}${suffix ? `, ${suffix}` : ''}${asking ? ', waiting on you' : ''}. Press and hold for more`}
+        data-active={active}
+        data-pending={pending ? 'true' : undefined}
+        data-working={asking ? 'true' : undefined}
+        onPointerDown={(e) => {
+          pointerType.current = e.pointerType
+          longFired.current = false
+          endPress()
+          if (e.pointerType === 'mouse' && e.button !== 0) return
+          press.current = {
+            x: e.clientX,
+            y: e.clientY,
+            timer: window.setTimeout(() => {
+              press.current = null
+              longFired.current = true
+              navigator.vibrate?.(12)
+              onLongPress()
+            }, LONG_PRESS_MS)
+          }
+          if (e.pointerType !== 'touch' && !active && !pending && live) onSelect()
+        }}
+        onPointerMove={(e) => {
+          const p = press.current
+          if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > LONG_PRESS_SLOP_PX) endPress()
+        }}
+        onPointerUp={endPress}
+        onPointerCancel={endPress}
+        onPointerLeave={endPress}
+        // Android raises the context menu on a long-press, and a right-click or
+        // the menu key raises it everywhere: all three mean "this tab's sheet".
+        onContextMenu={(e) => {
+          e.preventDefault()
+          endPress()
+          if (!longFired.current) {
+            longFired.current = true
+            onLongPress()
+          }
+        }}
+        onClick={() => {
+          const touched = pointerType.current === 'touch'
+          pointerType.current = ''
+          if (longFired.current) {
+            longFired.current = false
+            return
+          }
+          if (touched && !active && !pending && live) onSelect()
+        }}
+      >
+        <span className="tab__dots" aria-hidden="true">
+          {dots.map((profile) => (
+            <span key={profile.id} className="tab__dot" style={{ background: profile.accent }} />
+          ))}
+        </span>
+        <span className="tab__title truncate">
+          {tab.title}
+          {suffix ? <span className="tab__suffix"> · {suffix}</span> : null}
+        </span>
+        {asking ? (
+          <span className="tab__ask" aria-hidden="true">
+            !
+          </span>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div
@@ -307,5 +525,168 @@ function Tab({
         </Popover>
       ) : null}
     </div>
+  )
+}
+
+/* ------------------------------------------------------------------ helpers */
+
+function activeLeafId(tab: TerminalTab): string | null {
+  const leaves = collectLeaves(tab.root)
+  return (leaves.find((leaf) => leaf.id === tab.activePaneId) ?? leaves[0])?.id ?? null
+}
+
+/** Distinct profiles, in pane order, at most three — a split of two shells is one grey dot, not two. */
+function uniqueProfiles(profiles: AgentProfile[]): AgentProfile[] {
+  const seen = new Set<string>()
+  const out: AgentProfile[] = []
+  for (const profile of profiles) {
+    if (seen.has(profile.id)) continue
+    seen.add(profile.id)
+    out.push(profile)
+  }
+  return out.slice(0, 3)
+}
+
+function folderLeaf(cwd: string): string {
+  return cwd.split(/[\\/]/).filter(Boolean).pop() ?? ''
+}
+
+/**
+ * The words that tell twins apart: tab id → suffix, for tabs whose title is
+ * shared with another. The folder leaf of the tab's active pane first; where
+ * two twins share that too, their place among the twins ("2", "3").
+ */
+export function tabSuffixes(tabs: TerminalTab[], sessions: { id: string; cwd: string }[]): Map<string, string> {
+  const byTitle = new Map<string, TerminalTab[]>()
+  for (const tab of tabs) byTitle.set(tab.title, [...(byTitle.get(tab.title) ?? []), tab])
+  const out = new Map<string, string>()
+  for (const twins of byTitle.values()) {
+    if (twins.length < 2) continue
+    const leaves = twins.map((tab) => {
+      const paneId = activeLeafId(tab)
+      return folderLeaf(sessions.find((s) => s.id === paneId)?.cwd ?? '')
+    })
+    twins.forEach((tab, index) => {
+      const leaf = leaves[index]
+      const shared = !leaf || leaves.filter((other) => other === leaf).length > 1
+      out.set(tab.id, shared ? (leaf ? `${leaf} ${index + 1}` : String(index + 1)) : leaf)
+    })
+  }
+  return out
+}
+
+/**
+ * What a long-press on a pill opens: the three things you might want to do to
+ * a tab you are not necessarily in. Close tab asks first, in place, with the
+ * safe answer focused — the same question the desktop-width strip asks.
+ */
+function TabSheet({
+  tab,
+  title,
+  profiles,
+  step,
+  live,
+  alive,
+  projectName,
+  onStep,
+  onClose,
+  onNewAgent,
+  onHandoff,
+  onCloseTab
+}: {
+  tab: TerminalTab | null
+  title: string
+  profiles: AgentProfile[]
+  step: 'list' | 'close'
+  live: boolean
+  alive: (paneId: string) => boolean
+  projectName: string
+  onStep: (step: 'list' | 'close') => void
+  onClose: () => void
+  onNewAgent: () => void
+  onHandoff: (tabId: string) => void
+  onCloseTab: (tabId: string) => void
+}): ReactNode {
+  // Held while the sheet animates out, so the rows do not blank mid-exit.
+  const last = useRef<{ tab: TerminalTab; title: string } | null>(null)
+  if (tab) last.current = { tab, title }
+  const shown = last.current
+  if (!shown) return null
+
+  const leaves = collectLeaves(shown.tab.root)
+  const paneId = activeLeafId(shown.tab)
+  const pane = leaves.find((leaf) => leaf.id === paneId) ?? null
+  const profile = pane ? resolveProfile(profiles, pane.profileId) : null
+  const isAgent = !!profile && !isShellProfile(profile)
+  const canHandoff = isAgent && live && !!paneId && alive(paneId)
+  const names = uniqueProfiles(leaves.map((leaf) => resolveProfile(profiles, leaf.profileId)))
+
+  return (
+    <BottomSheet
+      open={!!tab}
+      onClose={onClose}
+      onBack={step === 'close' ? () => onStep('list') : undefined}
+      label={step === 'close' ? `Close tab ${shown.title}` : `Tab ${shown.title}`}
+      title={
+        step === 'close' ? null : (
+          <span className="tabsheet__title">
+            <span className="tab__dots" aria-hidden="true">
+              {names.map((p) => (
+                <span key={p.id} className="tab__dot" style={{ background: p.accent }} />
+              ))}
+            </span>
+            <span className="truncate">{shown.title}</span>
+          </span>
+        )
+      }
+      subtitle={step === 'close' ? undefined : names.map((p) => p.name).join(' + ')}
+      testId="tab-sheet"
+    >
+      {step === 'close' ? (
+        <SheetConfirm
+          question={`Close “${shown.title}”?`}
+          detail="Terminal processes in this tab will be terminated."
+          confirmLabel="Close tab"
+          onCancel={() => onStep('list')}
+          onConfirm={() => onCloseTab(shown.tab.id)}
+          testId="tab-close-confirm"
+        />
+      ) : (
+        <SheetSection>
+          <SheetRow
+            icon={<Icon name="plus" size={20} />}
+            label="New agent here"
+            secondary={live ? `Open another agent in ${projectName}` : 'Needs a live link to the desktop'}
+            disabled={!live}
+            onClick={onNewAgent}
+            testId="tab-sheet-new"
+          />
+          <SheetRow
+            icon={<SheetGlyph name="handoff" />}
+            label="Hand off"
+            secondary={
+              canHandoff
+                ? 'Ask this agent to write a handoff pack for another'
+                : !isAgent
+                  ? 'Shells cannot hand off'
+                  : !live
+                    ? 'Needs a live link to the desktop'
+                    : 'This pane has no session running'
+            }
+            disabled={!canHandoff}
+            onClick={() => onHandoff(shown.tab.id)}
+            testId="tab-sheet-handoff"
+          />
+          <SheetRow
+            icon={<Icon name="close" size={20} />}
+            label="Close tab"
+            secondary="Ends the terminals in it. Asks first."
+            tone="danger"
+            onClick={() => onStep('close')}
+            testId="tab-sheet-close"
+          />
+        </SheetSection>
+      )}
+    </BottomSheet>
   )
 }

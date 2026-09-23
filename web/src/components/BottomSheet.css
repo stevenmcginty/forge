@@ -1,0 +1,372 @@
+/*
+ * The phone sheet. Tokens from web/src/phone-tokens.css — the layer re-declares
+ * them (`.bsheet-layer`), so the desktop-width panel reads the same values.
+ *
+ * Motion: the sheet rises on --p-ease-sheet (fast out, long settle, no
+ * overshoot) and the scrim fades with it. A drag follows the finger with no
+ * transition; letting go settles back on the same curve.
+ */
+
+.bsheet-layer {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-popover) + 5);
+  font-family: var(--p-font);
+  color: var(--p-ink);
+}
+
+.bsheet-layer[data-state='closed'] {
+  pointer-events: none;
+}
+
+.bsheet__scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--p-scrim);
+  opacity: 0;
+  transition: opacity var(--p-dur-sheet) var(--p-ease);
+}
+
+.bsheet-layer[data-state='open'] .bsheet__scrim {
+  opacity: 1;
+}
+
+.bsheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - 48px - env(safe-area-inset-top, 0px));
+  padding-bottom: calc(var(--p-2) + env(safe-area-inset-bottom, 0px));
+  background: var(--p-raised);
+  border: 1px solid var(--p-line);
+  border-bottom: 0;
+  border-radius: var(--p-r-sheet) var(--p-r-sheet) 0 0;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.35);
+  transform: translateY(100%);
+  transition: transform var(--p-dur-sheet) var(--p-ease-sheet);
+  outline: none;
+  overflow: hidden;
+}
+
+.bsheet-layer[data-state='open'] .bsheet {
+  transform: translateY(0);
+}
+
+.bsheet-layer[data-dragging='true'] .bsheet {
+  transition: none;
+}
+
+/* The grab zone: the handle and the heading. Dragging anywhere in it moves the sheet. */
+.bsheet__grab {
+  flex: none;
+  padding: var(--p-2) var(--p-5) 0;
+  touch-action: none;
+  cursor: grab;
+}
+
+.bsheet__handle {
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: 0 auto var(--p-2);
+  border-radius: var(--p-r-pill);
+  background: var(--p-line-strong);
+}
+
+.bsheet__head {
+  padding: var(--p-1) 0 var(--p-3);
+}
+
+.bsheet__title {
+  margin: 0;
+  font-size: var(--p-t-title);
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--p-ink);
+  display: flex;
+  align-items: center;
+  gap: var(--p-2);
+  min-width: 0;
+}
+
+.bsheet__sub {
+  margin: 2px 0 0;
+  font-size: var(--p-t-small);
+  line-height: 1.4;
+  color: var(--p-ink-2);
+}
+
+.bsheet__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--p-2);
+}
+
+/* ------------------------------------------------------------------ rows */
+
+.bssec + .bssec {
+  margin-top: var(--p-1);
+  padding-top: var(--p-1);
+  border-top: 1px solid var(--p-line);
+}
+
+.bssec__title {
+  padding: var(--p-3) var(--p-3) var(--p-1);
+  font-size: var(--p-t-small);
+  font-weight: 600;
+  color: var(--p-ink-2);
+}
+
+.bsrow {
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  width: 100%;
+  min-height: var(--p-row);
+  padding: var(--p-2) var(--p-3);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  color: var(--p-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-row);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.bsrow[data-static='true'] {
+  cursor: default;
+}
+
+button.bsrow:active:not(:disabled),
+a.bsrow:active {
+  background: var(--p-press);
+}
+
+@media (hover: hover) {
+  button.bsrow:hover:not(:disabled),
+  a.bsrow:hover {
+    background: var(--p-hover);
+  }
+}
+
+.bsrow:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+.bsrow:disabled {
+  cursor: default;
+}
+
+.bsrow:disabled .bsrow__icon,
+.bsrow:disabled .bsrow__label {
+  color: var(--p-ink-3);
+}
+
+.bsrow__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: var(--p-ink-2);
+}
+
+.bsrow__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bsrow__label {
+  font-size: var(--p-t-body);
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--p-ink);
+  overflow-wrap: anywhere;
+}
+
+.bsrow__sub {
+  font-size: var(--p-t-small);
+  line-height: 1.35;
+  color: var(--p-ink-2);
+  overflow-wrap: anywhere;
+}
+
+.bsrow[data-tone='danger'] .bsrow__label,
+.bsrow[data-tone='danger'] .bsrow__icon {
+  color: var(--p-danger);
+}
+
+.bsrow__trail {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--p-1);
+  color: var(--p-ink-2);
+  font-size: var(--p-t-label);
+}
+
+/* ---------------------------------------------------------------- switch */
+
+.bsswitch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 26px;
+  border-radius: var(--p-r-pill);
+  border: 1.5px solid var(--p-line-strong);
+  background: transparent;
+  transition:
+    background var(--p-dur) var(--p-ease),
+    border-color var(--p-dur) var(--p-ease);
+}
+
+.bsswitch__knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--p-ink-3);
+  transition:
+    transform var(--p-dur) var(--p-ease),
+    background var(--p-dur) var(--p-ease);
+}
+
+/* On: filled in ink with the knob to the right — position and fill, not hue. */
+.bsswitch[data-on='true'] {
+  background: var(--p-ink);
+  border-color: var(--p-ink);
+}
+
+.bsswitch[data-on='true'] .bsswitch__knob {
+  transform: translateX(18px);
+  background: var(--p-raised);
+}
+
+/* --------------------------------------------------------------- confirm */
+
+.bsconfirm {
+  display: grid;
+  gap: var(--p-2);
+  padding: var(--p-1) var(--p-3) var(--p-2);
+}
+
+.bsconfirm__q {
+  margin: 0;
+  font-size: var(--p-t-title);
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--p-ink);
+  overflow-wrap: anywhere;
+}
+
+.bsconfirm__detail {
+  margin: 0;
+  font-size: var(--p-t-label);
+  line-height: 1.45;
+  color: var(--p-ink-2);
+}
+
+.bsconfirm__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--p-2);
+  margin-top: var(--p-3);
+}
+
+.bsbtn {
+  min-height: 52px;
+  padding: 0 var(--p-4);
+  font: 600 var(--p-t-body) / 1.2 var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.bsbtn:active {
+  background: var(--p-press);
+}
+
+.bsbtn:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 2px;
+}
+
+.bsbtn[data-tone='danger'] {
+  color: var(--p-danger);
+  background: var(--p-danger-soft);
+  border-color: color-mix(in srgb, var(--p-danger) 45%, transparent);
+}
+
+.bsbtn[data-tone='danger']:active {
+  background: color-mix(in srgb, var(--p-danger) 24%, transparent);
+}
+
+/* A full-width quiet action under a sheet's rows ("Reconnect now"). */
+.bsbtn[data-wide='true'] {
+  width: 100%;
+}
+
+/* The one act in a sheet, when there is one: lime, because that is what lime means. */
+.bsbtn[data-tone='act'] {
+  color: var(--p-act-ink);
+  background: var(--p-act);
+  border-color: var(--p-act);
+}
+
+.bsbtn[data-tone='act']:active {
+  background: color-mix(in srgb, var(--p-act) 85%, var(--p-ink));
+}
+
+/* ------------------------------------------------------ desktop-width panel */
+
+.app:not([data-mobile]) .bsheet {
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  top: 50%;
+  width: min(440px, calc(100% - 32px));
+  max-height: min(640px, calc(100% - 64px));
+  padding-bottom: var(--p-2);
+  border-bottom: 1px solid var(--p-line);
+  border-radius: var(--p-r-sheet);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translate(-50%, -48%);
+  transition:
+    transform var(--p-dur) var(--p-ease),
+    opacity var(--p-dur) var(--p-ease);
+}
+
+.app:not([data-mobile]) .bsheet-layer[data-state='open'] .bsheet {
+  opacity: 1;
+  transform: translate(-50%, -50%);
+}
+
+.app:not([data-mobile]) .bsheet__handle {
+  display: none;
+}
+
+.app:not([data-mobile]) .bsheet__grab {
+  padding-top: var(--p-4);
+  touch-action: auto;
+  cursor: default;
+}

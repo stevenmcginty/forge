@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 
 /**
  * Markdown, hand-rolled, for the chat transcript.
@@ -285,6 +285,23 @@ function parseInline(text: string, depth = 0): ReactNode {
 
 function CodeBlock({ lang, code }: { lang: string; code: string }): ReactNode {
   const [copied, setCopied] = useState(false)
+  // More code off the right edge than the well shows: the edge fades, so a
+  // cut line reads as "scroll me" rather than as the end of the line.
+  const pre = useRef<HTMLPreElement | null>(null)
+  const [more, setMore] = useState(false)
+  useEffect(() => {
+    const el = pre.current
+    if (!el) return
+    const check = (): void => setMore(el.scrollWidth - el.clientWidth - el.scrollLeft > 2)
+    check()
+    el.addEventListener('scroll', check, { passive: true })
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(check)
+    ro?.observe(el)
+    return () => {
+      el.removeEventListener('scroll', check)
+      ro?.disconnect()
+    }
+  }, [code])
   const onCopy = () => {
     void navigator.clipboard?.writeText(code).then(() => {
       setCopied(true)
@@ -311,7 +328,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }): ReactNode {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="md__code">
+      <pre ref={pre} className="md__code" data-more={more ? 'true' : undefined}>
         <code>{code}</code>
       </pre>
     </div>

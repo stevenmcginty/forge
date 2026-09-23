@@ -41,6 +41,7 @@ import { Preview } from './components/Preview'
 import { RepoProvider } from './lib/repo'
 import { ForgeProvider } from './state'
 import { watchAppViewport } from './lib/viewport'
+import './components/Cards.phone.css'
 
 const host = document.getElementById('root')
 if (!host) throw new Error('index.html has no #root')

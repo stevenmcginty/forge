@@ -13,6 +13,9 @@
  * theme.
  */
 
+/* The phone's own vocabulary, scoped to `.app[data-mobile]`. Read its header first. */
+@import './phone-tokens.css';
+
 /*
  * The visible window, not the layout viewport.
  *
@@ -347,6 +350,14 @@ body {
   flex: none;
   height: 20px;
   color: var(--warn);
+}
+
+/* The strip's buttons, together — one flex item at the desk, their own line on a phone. */
+.offline__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  flex: none;
 }
 
 /*
@@ -1838,251 +1849,498 @@ body {
 }
 
 /*
- * The title bar is the project, on the desktop's own flex row: menu, name,
- * tools. A second row was a second titlebar. `--dot` paints the wash, the
- * name and the seam.
+ * ------------------------------------------------------ the phone's top bar
+ *
+ * `.ptop` (TopBar.tsx). One 52px row that never changes with the pane: the
+ * menu and the project on the left, the waiting pill, the live dot and "⋯" on
+ * the right. Flat — no per-project wash, no glow; the project's colour is the
+ * 8px dot and nothing more. Its bottom edge is the connection signal: a 2px
+ * line that is solid lime when live, dashed when quiet, pulsing amber while
+ * reconnecting and grey when asleep, so the state has a shape as well as a hue.
  */
-.app[data-mobile] .titlebar {
+.ptop {
+  position: relative;
   display: flex;
-  flex-wrap: nowrap;
   align-items: center;
-  /* The notch is the phone's, not this bar's: the inset lifts the whole row
-   * and the height carries it, so the seam stays at 48px of chrome. */
-  height: calc(48px + env(safe-area-inset-top, 0px));
-  padding: env(safe-area-inset-top, 0px) var(--s-3) 0;
+  gap: var(--p-1);
+  flex: none;
+  height: calc(var(--p-bar) + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) var(--p-1) var(--p-signal);
+  background: var(--p-bg);
+  color: var(--p-ink);
+  font-family: var(--p-font);
+}
+
+.ptop::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: var(--p-signal);
+  background: var(--p-line);
+  pointer-events: none;
+}
+
+.ptop[data-link='live']::after {
   background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--dot, var(--accent)) 14%, var(--bg-panel-raised)) 0%,
-    color-mix(in srgb, var(--dot, var(--accent)) 6%, var(--bg-base)) 100%
+    90deg,
+    color-mix(in srgb, var(--p-act) 70%, transparent),
+    color-mix(in srgb, var(--p-act) 16%, transparent)
   );
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border-bottom: 1px solid color-mix(in srgb, var(--dot, var(--accent)) 32%, var(--line-hairline));
-  box-shadow: 0 3px 18px color-mix(in srgb, var(--dot, var(--accent)) 10%, transparent);
 }
 
-.app[data-mobile] .titlebar__project {
+.ptop[data-link='quiet']::after {
+  background: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--p-act) 55%, transparent) 0 8px,
+    transparent 8px 14px
+  );
+}
+
+.ptop[data-link='reconnecting']::after {
+  background: var(--p-attn);
+  animation: ptop-signal 1.4s var(--p-ease) infinite alternate;
+}
+
+.ptop[data-link='asleep']::after {
+  background: var(--p-line-strong);
+}
+
+@keyframes ptop-signal {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptop[data-link='reconnecting']::after {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .ptop[data-link='reconnecting']::after {
+  animation: none;
+}
+
+/* The menu and the project: one button, because both open the drawer. */
+.ptop__projects {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  flex: 1;
-  max-width: none;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
+  gap: var(--p-2);
+  height: var(--p-hit);
+  padding: 0 var(--p-3) 0 0;
+  font: inherit;
+  color: var(--p-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-row);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
 }
 
-.app[data-mobile] .titlebar__project .truncate {
-  min-width: 0;
-  flex: 1;
+.ptop__menu {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--p-hit);
+  height: var(--p-hit);
+  color: var(--p-ink);
 }
 
-.app[data-mobile] .titlebar__dot {
+.ptop__dot {
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--dot, var(--accent));
-  box-shadow: 0 0 10px var(--dot, var(--accent)), 0 0 3px var(--dot, var(--accent));
+}
+
+.ptop__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--p-t-title);
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.ptop__right {
   flex: none;
-}
-
-.app[data-mobile] .titlebar__right {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding-right: 0;
 }
 
-.app[data-mobile] .titlebar__left .titlebar__btn {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--dot, var(--accent)) 10%, rgba(255, 255, 255, 0.04));
-  border: 1px solid color-mix(in srgb, var(--dot, var(--accent)) 25%, var(--line-strong));
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--dur-fast) var(--ease-out);
-}
-
-.app[data-mobile] .titlebar__left .titlebar__btn:active {
-  transform: scale(0.95);
-  background: color-mix(in srgb, var(--dot, var(--accent)) 20%, var(--bg-panel));
-}
-
-.app[data-mobile] .titlebar__path,
-.app[data-mobile] .titlebar__sep,
-.app[data-mobile] .titlebar__wordmark,
-.app[data-mobile] .titlebar__mark,
-.app[data-mobile] .linkbadge__text {
-  display: none;
-}
-
-.app[data-mobile] .titlebar__btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  color: var(--text-secondary);
+.ptop__btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--p-hit);
+  height: var(--p-hit);
+  padding: 0;
+  color: var(--p-ink);
   background: transparent;
-  border: 1px solid transparent;
+  border: 0;
+  border-radius: var(--p-r-row);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.ptop__projects:active,
+.ptop__btn:active,
+.ptop__btn[aria-expanded='true'] {
+  background: var(--p-press);
+}
+
+.ptop__projects:focus-visible,
+.ptop__btn:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+/* The asleep dot sits a touch smaller; the other three are drawn in ConnectionSheet.css. */
+.ptop__link .linkdot {
+  width: 11px;
+  height: 11px;
+}
+
+.ptop__link .linkdot[data-state='asleep'] {
+  width: 9px;
+  height: 9px;
+}
+
+/*
+ * ------------------------------------------------------ strips, on a phone
+ *
+ * Asleep, reconnecting, restarting, Remote Yes and the deploy strip: the
+ * sentence first and whole, the actions on their own line at a thumb's size.
+ * Neutral surfaces with the state in words and a glyph; only Remote Yes — the
+ * one strip that is waiting on you, against a clock — wears amber, and its
+ * one act wears lime.
+ */
+.app[data-mobile] .offline {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  column-gap: var(--p-3);
+  row-gap: var(--p-2);
+  height: auto;
+  min-height: 0;
+  padding: var(--p-3) var(--p-4);
+  font-size: var(--p-t-label);
+  line-height: 1.45;
+  color: var(--p-ink-2);
+  background: var(--p-surface);
+  border-bottom: 1px solid var(--p-line);
+}
+
+.app[data-mobile] .offline > svg {
+  margin-top: 2px;
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .offline[data-link='reconnecting'] > svg {
+  color: var(--p-attn);
+}
+
+.app[data-mobile] .offline .offline__text {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .offline .offline__text strong {
+  color: var(--p-ink);
+  font-weight: 650;
+}
+
+.app[data-mobile] .offline__actions {
+  grid-column: 2;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--dur-fast);
+  flex-wrap: wrap;
+  gap: var(--p-2);
 }
 
-.app[data-mobile] .titlebar__btn:active {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-}
-
-.app[data-mobile] .linkbadge {
-  height: 30px;
-  padding: 0 9px;
-  border-radius: var(--r-full);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--line-hairline);
+.app[data-mobile] .offline .offline__look {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  height: var(--p-hit);
+  padding: 0 var(--p-4);
+  font-size: var(--p-t-label);
+  font-weight: 600;
+  color: var(--p-ink);
+  text-decoration: none;
+  background: var(--p-bg);
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-pill);
 }
 
-.app[data-mobile] .linkbadge__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  box-shadow: 0 0 8px currentColor;
-  flex: none;
+.app[data-mobile] .offline .offline__look:active {
+  background: var(--p-press);
 }
 
-/* Tabs as pills. */
+.app[data-mobile] .offline[data-link='remote-yes'] {
+  background: var(--p-attn-soft);
+  border-bottom-color: var(--p-attn-line);
+}
+
+.app[data-mobile] .offline[data-link='remote-yes'] > svg {
+  color: var(--p-attn);
+}
+
+.app[data-mobile] .offline .remote-yes__open {
+  color: var(--p-act-ink);
+  background: var(--p-act);
+  border-color: var(--p-act);
+}
+
+.app[data-mobile] .ubanner {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  height: auto;
+  gap: var(--p-2) var(--p-3);
+  padding: var(--p-3) var(--p-4);
+  font-size: var(--p-t-label);
+  line-height: 1.45;
+  background: var(--p-surface);
+  border-bottom: 1px solid var(--p-line);
+}
+
+.app[data-mobile] .ubanner__mark {
+  margin-top: 2px;
+}
+
+.app[data-mobile] .ubanner__text {
+  flex: 1 1 calc(100% - 32px);
+  white-space: normal;
+  overflow: visible;
+}
+
+.app[data-mobile] .ubanner__actions {
+  flex-basis: 100%;
+  padding-left: 28px;
+  gap: var(--p-2);
+}
+
+.app[data-mobile] .ubanner__btn {
+  height: var(--p-hit);
+  padding: 0 var(--p-5);
+  font-size: var(--p-t-label);
+  border-radius: var(--p-r-pill);
+}
+
+.app[data-mobile] .ubanner__close {
+  width: var(--p-hit);
+  height: var(--p-hit);
+}
+
+/*
+ * The toast, on a phone: in the display, just above whatever is docked under
+ * it (the answer card, the composer), full width less the gutters, and a tap
+ * puts it away.
+ */
+.app[data-mobile] .app__display {
+  position: relative;
+}
+
+.app[data-mobile] .app__display > .notice {
+  position: absolute;
+  right: var(--p-3);
+  bottom: var(--p-3);
+  left: var(--p-3);
+  z-index: 5;
+  max-width: none;
+  padding: var(--p-3) var(--p-4);
+  font-size: var(--p-t-label);
+  line-height: 1.4;
+  color: var(--p-ink);
+  background: var(--p-raised);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-sheet);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  transform: none;
+  cursor: pointer;
+  animation: notice-rise var(--p-dur) var(--p-ease);
+}
+
+@keyframes notice-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/*
+ * ------------------------------------------------------ tabs, on a phone
+ *
+ * Neutral pills. The agent is a dot; the active tab is lifted (raised
+ * surface, heavier weight), not coloured, so "which tab am I in" and "which
+ * agent is this" are two signals again. An asking tab keeps Part 1's "!" and
+ * gains an amber edge. No × in the pill — a long-press opens the tab's sheet.
+ * The pill is drawn 40px tall and hit 48px tall (`::before`).
+ */
 .app[data-mobile] .tabstrip {
   align-items: center;
-  height: 52px;
-  padding: 0 var(--s-3);
-  gap: var(--s-2);
-  background: var(--bg-base);
-  border-bottom: 1px solid var(--line-hairline);
+  height: 56px;
+  padding: 0 var(--p-2) 0 var(--p-3);
+  gap: var(--p-2);
+  background: var(--p-bg);
+  border-bottom: 1px solid var(--p-line);
 }
 
 .app[data-mobile] .tabstrip__tabs {
+  flex: 1 1 auto;
+  min-width: 0;
   align-items: center;
-  gap: 8px;
+  gap: var(--p-2);
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  padding: 2px 0;
-  /* The strip scrolls past both ends of itself, so a snap point — and the
-   * scroll-into-view walk that centres the active pill — leaves one row of
-   * breathing room either side instead of pinning a pill to the glass. */
-  scroll-padding-inline: var(--s-3);
+  padding: var(--p-1) 0;
+  /* The walk that centres the active pill leaves a gutter at either end. */
+  scroll-padding-inline: var(--p-3);
 }
 
 .app[data-mobile] .tabstrip__tabs::-webkit-scrollbar {
   display: none;
 }
 
+/* A fade only at an edge that has more past it. */
+.app[data-mobile] .tabstrip__tabs[data-fade='end'] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
+
+.app[data-mobile] .tabstrip__tabs[data-fade='start'] {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+}
+
+.app[data-mobile] .tabstrip__tabs[data-fade='both'] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+
 .app[data-mobile] .tab {
-  height: 38px;
-  min-height: 38px;
-  padding: 0 12px 0 6px;
-  gap: 7px;
+  position: relative;
+  flex: none;
   display: inline-flex;
   align-items: center;
-  flex: none;
-  border-radius: var(--r-full);
-  border: 1px solid var(--line-soft);
-  background: var(--bg-panel);
-  transition: all var(--dur-fast) var(--ease-out);
+  gap: var(--p-2);
+  max-width: 220px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 var(--p-4) 0 var(--p-3);
+  font-size: var(--p-t-chrome);
+  font-weight: 500;
+  color: var(--p-ink-2);
+  background: transparent;
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-pill);
+  box-shadow: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+    background var(--p-dur-fast) var(--p-ease),
+    border-color var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .tab::before {
+  content: '';
+  position: absolute;
+  inset: -4px -2px;
+}
+
+.app[data-mobile] .tab:active {
+  background: var(--p-hover);
 }
 
 .app[data-mobile] .tab[data-active='true'] {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
-/*
- * Agent tabs keep their own colour on the phone. The rules above would
- * otherwise paint every live pill in volt, and volt is already the project
- * bar's language — two green seams stacked is "the app is on", not "this is
- * Grok". `--tab-tint` is the profile accent; the seam is the same 2px the
- * titlebar uses.
- */
-.app[data-mobile] .tab[data-tint='true'] {
-  border-color: color-mix(in srgb, var(--tab-tint) 30%, var(--line-strong));
-  background: color-mix(in srgb, var(--tab-tint) 10%, #131418);
-  color: color-mix(in srgb, var(--tab-tint) 35%, var(--text-secondary));
-}
-
-.app[data-mobile] .tab[data-tint='true'] .tab__title {
-  color: color-mix(in srgb, var(--tab-tint) 35%, var(--text-secondary));
-  font-size: 13.5px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-
-.app[data-mobile] .tab[data-tint='true'] .agent-badge {
-  height: 20px;
-  min-width: 24px;
-  padding: 0 5px;
-  border-radius: var(--r-full);
-  font-size: 10px;
-  font-weight: 700;
-  background: color-mix(in srgb, var(--tab-tint) 16%, transparent);
-  color: var(--tab-tint);
-  border: 1px solid color-mix(in srgb, var(--tab-tint) 45%, transparent);
-}
-
-.app[data-mobile] .tab[data-tint='true'][data-active='true'] {
-  border-color: var(--tab-tint);
-  border-width: 1.5px;
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--tab-tint) 32%, #1e2027) 0%,
-    color-mix(in srgb, var(--tab-tint) 20%, #121317) 100%
-  );
-  color: #ffffff;
-  box-shadow:
-    0 2px 14px color-mix(in srgb, var(--tab-tint) 35%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22);
-}
-
-.app[data-mobile] .tab[data-tint='true'][data-active='true'] .tab__title {
-  color: #ffffff;
-  font-size: 13.5px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-}
-
-.app[data-mobile] .tab[data-tint='true'][data-active='true'] .agent-badge {
-  height: 20px;
-  min-width: 24px;
-  padding: 0 5px;
-  border-radius: var(--r-full);
-  font-size: 10px;
-  font-weight: 800;
-  background: var(--tab-tint);
-  color: var(--text-on-accent);
-  border: 1px solid transparent;
-  box-shadow: 0 0 10px color-mix(in srgb, var(--tab-tint) 65%, transparent);
+  color: var(--p-ink);
+  font-weight: 650;
+  background: var(--p-press);
+  border-color: var(--p-line-strong);
 }
 
 .app[data-mobile] .tab[data-working='true'] {
-  box-shadow: 0 0 10px var(--warn);
+  border-color: var(--p-attn-line);
 }
 
 .app[data-mobile] .tab__title {
-  font-size: 13.5px;
+  min-width: 0;
+  font-size: inherit;
+  line-height: 1.2;
+}
+
+.app[data-mobile] .tab__suffix {
+  font-weight: 500;
+  color: var(--p-ink-3);
+}
+
+/* The agent dot. A split of two agents shows two, overlapped; never more than three. */
+.tab__dots {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.tab__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--p-bg, var(--bg-base));
+}
+
+.tab__dot + .tab__dot {
+  margin-left: -2px;
+}
+
+.app[data-mobile] .tab[data-active='true'] .tab__dot {
+  box-shadow: 0 0 0 2px var(--p-press);
+}
+
+/* Asked for, not yet granted: the pill takes the press surface and a hairline pulses inside it. */
+.app[data-mobile] .tab[data-pending='true'] {
+  color: var(--p-ink);
+  background: var(--p-hover);
+}
+
+.app[data-mobile] .tab[data-pending='true']::after {
+  right: var(--p-4);
+  bottom: 5px;
+  left: var(--p-4);
+}
+
+/* The long-press sheet's heading: the tab's dots and its title. */
+.tabsheet__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--p-3);
+  min-width: 0;
+}
+
+.tabsheet__title .tab__dot {
+  width: 10px;
+  height: 10px;
+  box-shadow: 0 0 0 2px var(--p-raised);
 }
 
 /* Tab close button: subtle red accent styling */
@@ -2115,74 +2373,34 @@ body {
   background: var(--danger, #ef4444);
 }
 
-/*
- * A row of ×s is still noise on a phone, so only the pill you are standing in
- * wears one — and it wears it because nothing else on this layout will.
- *
- * The strip is the one part of this page that always knows a tab is there.
- */
-.app[data-mobile] .tab:not([data-active='true']) .tab__close {
-  display: none;
-}
-
-/* Sized for a thumb rather than a cursor, and the pill gives back the padding. */
-.app[data-mobile] .tab[data-active='true'] {
-  padding-right: 5px;
-}
-
-.app[data-mobile] .tab[data-active='true'] .tab__close {
-  width: 24px;
-  height: 24px;
-  border-radius: var(--r-full);
-  color: var(--danger-bright, #f87171);
-  background: color-mix(in srgb, var(--danger, #ef4444) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 28%, transparent);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 1;
-  margin-left: 2px;
-  flex: none;
-}
-
-.app[data-mobile] .tab[data-active='true'] .tab__close:hover {
-  color: #ff9999;
-  background: color-mix(in srgb, var(--danger, #ef4444) 22%, transparent);
-}
-
-.app[data-mobile] .tab[data-active='true'] .tab__close:active {
-  background: var(--danger, #ef4444);
-  color: #ffffff;
-}
-
+/* `+` sits outside the scroller on a phone, so it never scrolls off. */
 .app[data-mobile] .tabstrip__new {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--r-full);
-  background: #131418;
-  border: 1px dashed var(--line-strong);
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   flex: none;
-  transition: all var(--dur-fast);
+  display: grid;
+  place-items: center;
+  width: var(--p-hit);
+  height: var(--p-hit);
+  padding: 0;
+  color: var(--p-ink);
+  background: transparent;
+  border: 1px solid var(--p-line-strong);
+  border-radius: 50%;
+  transition: background var(--p-dur-fast) var(--p-ease);
 }
 
-.app[data-mobile] .tabstrip__new:active {
-  border-style: solid;
-  border-color: var(--accent-line);
-  color: var(--accent);
-  background: var(--accent-soft);
+.app[data-mobile] .tabstrip__new:active:not(:disabled) {
+  background: var(--p-press);
 }
 
-/*
- * The tab strip's own skills and commands buttons stay hidden — a popover
- * anchored to a pill in a scrolling strip is poor thumb UI — but the lists
- * themselves are not gone: the drawer carries them as sections, below.
- */
-.app[data-mobile] .tabstrip__spacer ~ button {
-  display: none;
+.app[data-mobile] .tabstrip__new:disabled {
+  color: var(--p-ink-3);
+  border-color: var(--p-line);
+}
+
+.app[data-mobile] .tabstrip__new:focus-visible,
+.app[data-mobile] .tab:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 2px;
 }
 
 /* The terminal is the screen. */
@@ -2331,38 +2549,6 @@ body {
   flex: 1;
 }
 
-/* View flip button on the left: gentle luminous white */
-.pane__action--flip,
-.pane[data-kind='agent'] .pane__action--flip,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--flip,
-[data-mobile] .pane[data-kind='agent'] .pane__action--flip {
-  color: rgba(255, 255, 255, 0.9);
-  background: color-mix(in srgb, #ffffff 10%, rgba(255, 255, 255, 0.04));
-  border: 1px solid color-mix(in srgb, #ffffff 28%, var(--line-hairline));
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.1);
-  transition: all var(--dur-fast) var(--ease-out);
-}
-
-.pane__action--flip:hover,
-.pane[data-kind='agent'] .pane__action--flip:hover,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--flip:hover,
-[data-mobile] .pane[data-kind='agent'] .pane__action--flip:hover {
-  color: #ffffff;
-  background: color-mix(in srgb, #ffffff 20%, rgba(255, 255, 255, 0.08));
-  border-color: rgba(255, 255, 255, 0.55);
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.22);
-}
-
-.pane__action--flip:active,
-.pane[data-kind='agent'] .pane__action--flip:active,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--flip:active,
-[data-mobile] .pane[data-kind='agent'] .pane__action--flip:active {
-  color: #ffffff;
-  background: color-mix(in srgb, #ffffff 28%, rgba(255, 255, 255, 0.12));
-  border-color: rgba(255, 255, 255, 0.75);
-  box-shadow: 0 0 14px rgba(255, 255, 255, 0.32), inset 0 0 4px rgba(255, 255, 255, 0.15);
-}
-
 /* Close/delete button on the right: slightly red tone */
 .pane__action--close,
 .pane__action[data-danger='true'],
@@ -2405,32 +2591,6 @@ body {
   background: color-mix(in srgb, var(--danger, #ef4444) 38%, rgba(255, 255, 255, 0.1));
   border-color: var(--danger, #ef4444);
   box-shadow: 0 0 14px color-mix(in srgb, var(--danger, #ef4444) 50%, transparent), inset 0 0 4px rgba(255, 255, 255, 0.15);
-}
-
-/* TopBar view flip button: gentle luminous white */
-.titlebar__btn--flip,
-.app[data-mobile] .titlebar__btn--flip {
-  color: rgba(255, 255, 255, 0.9);
-  background: color-mix(in srgb, #ffffff 10%, rgba(255, 255, 255, 0.04));
-  border: 1px solid color-mix(in srgb, #ffffff 28%, var(--line-hairline));
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.1);
-  transition: all var(--dur-fast) var(--ease-out);
-}
-
-.titlebar__btn--flip:hover,
-.app[data-mobile] .titlebar__btn--flip:hover {
-  color: #ffffff;
-  background: color-mix(in srgb, #ffffff 20%, rgba(255, 255, 255, 0.08));
-  border-color: rgba(255, 255, 255, 0.55);
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.22);
-}
-
-.titlebar__btn--flip:active,
-.app[data-mobile] .titlebar__btn--flip:active {
-  color: #ffffff;
-  background: color-mix(in srgb, #ffffff 28%, rgba(255, 255, 255, 0.12));
-  border-color: rgba(255, 255, 255, 0.75);
-  box-shadow: 0 0 14px rgba(255, 255, 255, 0.32), inset 0 0 4px rgba(255, 255, 255, 0.15);
 }
 
 /* Tab close confirmation popover */
@@ -4371,12 +4531,12 @@ button.astatus__mode:not(:disabled):hover {
     display: none;
   }
 
-  .app[data-mobile] .titlebar {
-    height: calc(40px + env(safe-area-inset-top, 0px));
+  .app[data-mobile] .ptop {
+    height: calc(var(--p-hit) + env(safe-area-inset-top, 0px));
   }
 
   .app[data-mobile] .tabstrip {
-    height: 40px;
+    height: 48px;
   }
 
   .app[data-mobile] .tab,
@@ -4611,42 +4771,6 @@ button.astatus__mode:not(:disabled):hover {
   box-shadow: none;
 }
 
-/* On a phone, Foreman is a 36px icon button matching the styling
- * of the other icons in the top bar (.titlebar__btn), rather than a wide text pill. */
-.app[data-mobile] .titlebar__foreman {
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
-  padding: 0;
-  border-radius: 9px;
-  font: inherit;
-  letter-spacing: normal;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.app[data-mobile] .titlebar__foreman:not([data-on='true']):not([data-open='true']):not([data-status='done']):not([data-status='error']) {
-  color: var(--text-secondary);
-  background: transparent;
-  border: 1px solid transparent;
-}
-
-.app[data-mobile] .titlebar__foreman:not([data-on='true']):not([data-open='true']):not([data-status='done']):not([data-status='error']):hover:not(:disabled) {
-  color: var(--text-primary);
-  border-color: transparent;
-}
-
-.app[data-mobile] .titlebar__foreman:not([data-on='true']):not([data-open='true']):not([data-status='done']):not([data-status='error']):active {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-}
-
-.app[data-mobile] .titlebar__foreman:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
 /* -------------------------------------------------------- topbar handoff
  *
  * Handoff in the titlebar, beside Foreman. Same monospace pill tokens,
@@ -4737,46 +4861,6 @@ button.astatus__mode:not(:disabled):hover {
 .titlebar__handoff-chip[data-state='waiting'] {
   color: var(--warn, #f59e0b);
   border-color: color-mix(in srgb, var(--warn, #f59e0b) 40%, transparent);
-}
-
-/* On a phone, Handoff is a 36px icon button matching the styling
- * of the other icons in the top bar (.titlebar__btn), rather than a wide text pill. */
-.app[data-mobile] .titlebar__handoff {
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
-  padding: 0;
-  border-radius: 9px;
-  font: inherit;
-  letter-spacing: normal;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.app[data-mobile] .titlebar__handoff:not([data-open='true']):not([data-state='sent']):not([data-state='took']):not([data-state='waiting']) {
-  color: var(--text-secondary);
-  background: transparent;
-  border: 1px solid transparent;
-}
-
-.app[data-mobile] .titlebar__handoff:not([data-open='true']):not([data-state='sent']):not([data-state='took']):not([data-state='waiting']):hover:not(:disabled) {
-  color: var(--text-primary);
-  border-color: transparent;
-}
-
-.app[data-mobile] .titlebar__handoff:not([data-open='true']):not([data-state='sent']):not([data-state='took']):not([data-state='waiting']):active {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-}
-
-.app[data-mobile] .titlebar__handoff:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.app[data-mobile] .titlebar__handoff-chip {
-  display: none;
 }
 
 /*
@@ -4882,7 +4966,26 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 .app[data-mobile] .foreman-drop__start {
-  min-height: 32px;
+  min-height: var(--p-hit);
+  padding: 0 var(--p-5);
+  font-size: var(--p-t-label);
+  color: var(--p-act-ink);
+  background: var(--p-act);
+  border-color: var(--p-act);
+  border-radius: var(--p-r-pill);
+}
+
+.app[data-mobile] .foreman-drop__cancel {
+  width: var(--p-hit);
+  height: var(--p-hit);
+  border-radius: var(--p-r-pill);
+}
+
+.app[data-mobile] .foreman-drop__input {
+  min-height: var(--p-hit);
+  padding: 10px var(--p-3);
+  font-size: var(--p-t-body);
+  border-radius: var(--p-r-row);
 }
 
 /*

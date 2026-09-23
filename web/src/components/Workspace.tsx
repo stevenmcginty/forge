@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { EmptyState } from '@/components/EmptyState'
 import { Icon } from '@/components/Icon'
 import { useMobile } from '../lib/mobile'
@@ -9,6 +9,7 @@ import { AgentChooser } from './AgentChooser'
 import { GitHubMode } from './GitHubMode'
 import { MobilePanes } from './MobilePanes'
 import { Mirror } from './Mirror'
+import { useTextScale } from './MoreSheet'
 import { OfflineBanner } from './OfflineBanner'
 import { Rail } from './Rail'
 import { SessionComposer } from './SessionComposer'
@@ -102,13 +103,35 @@ export function Workspace(): ReactNode {
   const drawn = useRef(new Set<string>())
   if (activeTabId) drawn.current.add(activeTabId)
 
+  /** A− / A+ from the ⋯ sheet, as `--phone-text-scale`. A later change applies it. */
+  const [textScale] = useTextScale()
+
+  /**
+   * The toast. At the desk it floats at the foot of the window as it always
+   * has; on a phone it sits in the display, just above the answer card and the
+   * composer — whatever height they are — so it never lands on Send. A tap
+   * puts it away, on either.
+   */
+  const notice = state.notice ? (
+    <div className="notice" role="status" title="Tap to dismiss" onClick={actions.dismissNotice}>
+      {state.notice}
+    </div>
+  ) : null
+  const gridShown = !(offline && state.offlineMode === 'github')
+
   // Nothing here listens for a window resize, on purpose: a window resize
   // changes every pane container's box, and each terminal's own ResizeObserver
   // (see lib/term.ts) already fits and reports on exactly that. A second
   // refit-everything path would send a duplicate `resize` per pane per drag.
 
   return (
-    <div className="app" data-ready="true" data-shell="app" data-mobile={mobile ? 'true' : undefined}>
+    <div
+      className="app"
+      data-ready="true"
+      data-shell="app"
+      data-mobile={mobile ? 'true' : undefined}
+      style={mobile ? ({ '--phone-text-scale': textScale } as CSSProperties) : undefined}
+    >
       <TopBar
         collapsed={mobile ? !drawerOpen : collapsed}
         onToggleRail={() => (mobile ? setDrawerOpen((v) => !v) : setRailCollapsed((v) => !v))}
@@ -170,7 +193,7 @@ export function Workspace(): ReactNode {
             <GitHubMode />
           ) : (
           <div className="grid">
-            <TabStrip />
+            <TabStrip mobile={mobile} />
             <div className="app__display grid__body" data-region="display">
               {!project ? (
                 <EmptyState
@@ -216,6 +239,7 @@ export function Workspace(): ReactNode {
                   }
                 />
               )}
+              {mobile ? notice : null}
             </div>
             <SessionComposer />
           </div>
@@ -223,11 +247,7 @@ export function Workspace(): ReactNode {
         </main>
       </div>
 
-      {state.notice ? (
-        <div className="notice" role="status">
-          {state.notice}
-        </div>
-      ) : null}
+      {mobile && gridShown ? null : notice}
 
       {watching ? <Mirror onClose={() => setWatching(false)} /> : null}
 
@@ -261,18 +281,28 @@ export function Workspace(): ReactNode {
  */
 function ReconnectingBanner(): ReactNode {
   const { state, actions } = useForge()
+  const mobile = useMobile()
   if (state.stage.kind !== 'connected' || state.connection.state === 'live') return null
+  const name = state.picture?.desktopName || 'the desktop'
 
   return (
     <div className="offline" data-link="reconnecting" role="status" data-testid="reconnecting-banner">
-      <Icon name="restart" size={13} />
-      <span className="offline__text truncate">
-        <strong>The link to {state.picture?.desktopName || 'the desktop'} dropped.</strong> This is where the terminals
-        had got to; they repaint themselves when it comes back, and nothing can be typed into them until it does.
+      <Icon name="restart" size={mobile ? 16 : 13} />
+      {mobile ? (
+        <span className="offline__text">
+          <strong>The link to {name} dropped.</strong> Reconnecting. Nothing you type gets through until it is back.
+        </span>
+      ) : (
+        <span className="offline__text truncate">
+          <strong>The link to {name} dropped.</strong> This is where the terminals had got to; they repaint themselves
+          when it comes back, and nothing can be typed into them until it does.
+        </span>
+      )}
+      <span className="offline__actions">
+        <button type="button" className="ghost-btn offline__look" onClick={() => actions.retry()}>
+          Try now
+        </button>
       </span>
-      <button type="button" className="ghost-btn offline__look" onClick={() => actions.retry()}>
-        Try now
-      </button>
     </div>
   )
 }
@@ -320,9 +350,11 @@ function RemoteYesBanner(): ReactNode {
         <strong>{state.picture?.desktopName || 'The desktop'} is asking for admin.</strong> Open RustDesk and press
         Yes. It waits about two minutes.
       </span>
-      <a className="ghost-btn offline__look remote-yes__open" href={rustDeskLink(ry.address)} rel="noopener">
-        Open RustDesk
-      </a>
+      <span className="offline__actions">
+        <a className="ghost-btn offline__look remote-yes__open" href={rustDeskLink(ry.address)} rel="noopener">
+          Open RustDesk
+        </a>
+      </span>
     </div>
   )
 }

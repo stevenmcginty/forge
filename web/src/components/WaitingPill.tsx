@@ -15,6 +15,8 @@ import './WaitingPill.css'
  * say it on their own, for a reader who cannot tell amber from green.
  *
  * Standalone so the top bar can be rearranged around it without touching it.
+ * On a phone narrower than 375px the word drops and "! 2" stays, so the
+ * project name beside it keeps room to be read; the label still says it all.
  */
 export function WaitingPill(): ReactNode {
   const { state, actions } = useForge()
@@ -33,7 +35,10 @@ export function WaitingPill(): ReactNode {
         <span className="waitpill__bang" aria-hidden="true">
           !
         </span>
-        <span className="waitpill__text">{count} waiting</span>
+        <span className="waitpill__text">
+          {count}
+          <span className="waitpill__word"> waiting</span>
+        </span>
       </span>
     </button>
   )
