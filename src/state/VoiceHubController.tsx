@@ -485,6 +485,9 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       stopRealtime()
       return
     }
+    // A realtime start that failed leaves no session to stop, only its error.
+    // Clear it, or "back to dictation" is a dead click and the dock stays live.
+    setRtPhase('off')
     const a = agentRef.current
     if (!a.armed) return
     if (a.phase === 'speaking') a.toggleAgent()
