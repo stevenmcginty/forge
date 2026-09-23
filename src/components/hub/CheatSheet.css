@@ -1,0 +1,162 @@
+/* The cheat sheet: opaque, over a dimmed stage, three to four columns of keys. */
+
+.cheat {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-popover);
+  display: grid;
+  place-items: center;
+  padding: 48px 40px calc(var(--dock-clear) + 8px);
+  background: var(--stage-scrim);
+  animation: cheat-fade 180ms var(--ease-out) both;
+}
+
+.cheat[data-state='closing'] {
+  animation: cheat-fade-out 160ms var(--ease-in-out) both;
+}
+
+@keyframes cheat-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes cheat-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.cheat__panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1240px, 100%);
+  max-height: 100%;
+  border-radius: 18px;
+  background: var(--sheet-bg);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
+  overflow: hidden;
+  animation: cheat-in var(--dur-pop) var(--spring-pop) both;
+}
+
+@keyframes cheat-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.97);
+  }
+}
+
+.cheat__head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: none;
+  height: 56px;
+  padding: 0 18px 0 22px;
+  border-bottom: 1px solid var(--glass-line);
+}
+
+.cheat__eyebrow {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.cheat__filter {
+  width: 260px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--glass-line-strong);
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.cheat__filter:focus {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+.cheat__link {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.cheat__link:hover {
+  text-decoration: underline;
+}
+
+.cheat__cols {
+  columns: 280px 4;
+  column-gap: 34px;
+  padding: 18px 24px 22px;
+  overflow-y: auto;
+}
+
+.cheat__group {
+  break-inside: avoid;
+  margin-bottom: 20px;
+}
+
+.cheat__group-title {
+  margin: 0 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--glass-line);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.cheat__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.cheat__title {
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.cheat__row[data-custom='true'] .cheat__title::after {
+  content: ' · yours';
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.cheat__keys {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+
+.cheat__empty {
+  color: var(--text-dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cheat,
+  .cheat[data-state='closing'],
+  .cheat__panel {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] :is(.cheat, .cheat__panel) {
+  animation: none !important;
+}

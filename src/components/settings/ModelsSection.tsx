@@ -1,8 +1,10 @@
 import { useState, type ReactNode } from 'react'
 import type { ImportedKeyResult, VoiceBrainId } from '@shared/types'
+import { REALTIME_PROVIDERS } from '@shared/realtime'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENROUTER_MODEL } from '@/lib/voicebrain'
 import { useApp } from '@/state/AppState'
 import { Card, KeyField, Row, Section, StateChip, TextField } from './parts'
+import '../hub/VoiceSettings.css'
 
 /**
  * Keys and models.
@@ -161,6 +163,7 @@ export function ModelsSection(): ReactNode {
             mono
           />
         </Row>
+        <LiveTalkUnlocks vendor="gemini" hasKey={Boolean(s.geminiKey.trim())} />
       </Card>
 
       <Card title="OpenAI">
@@ -171,12 +174,13 @@ export function ModelsSection(): ReactNode {
           placeholder="sk-…"
           note={
             <>
-              For live talk with GPT Realtime (Settings → Voice). An API platform key with billing — a ChatGPT
-              subscription does not cover it. The key stays in Forge&apos;s main process: each session gets a
-              short-lived secret from <span className="mono">api.openai.com</span>, and nothing else is sent anywhere.
+              An API platform key with billing — a ChatGPT subscription does not cover it. The key stays in
+              Forge&apos;s main process: each session gets a short-lived secret from{' '}
+              <span className="mono">api.openai.com</span>, and nothing else is sent anywhere.
             </>
           }
         />
+        <LiveTalkUnlocks vendor="openai" hasKey={Boolean(s.openaiKey.trim())} />
       </Card>
 
       <Card title="Z.AI">
@@ -344,6 +348,34 @@ export function ModelsSection(): ReactNode {
         same place your shell keeps its own credentials, and it is worth knowing rather than being reassured about.
       </p>
     </Section>
+  )
+}
+
+/* ------------------------------------------------------------ live talk */
+
+/**
+ * What a key unlocks for live talk, with the cost of a heavy day, and the way
+ * to the Voice page where the brain is picked.
+ */
+function LiveTalkUnlocks({ vendor, hasKey }: { vendor: 'gemini' | 'openai'; hasKey: boolean }): ReactNode {
+  const { state, actions } = useApp()
+  const providers = REALTIME_PROVIDERS.filter((p) => p.vendor === vendor)
+  return (
+    <div className="lt-unlocks">
+      <span className="lt-unlocks__label">Live talk</span>
+      {providers.map((p) => (
+        <span key={p.id} className="lt-unlocks__item" data-on={state.settings.voiceHubProvider === p.id ? 'true' : undefined}>
+          <span className="lt-unlocks__name">{p.label}</span>
+          <span className="lt-unlocks__cost">{p.costNote}</span>
+          <span className="lt-unlocks__state" data-tone={hasKey ? 'ok' : 'need'}>
+            {state.settings.voiceHubProvider === p.id ? (hasKey ? 'In use' : 'Picked · needs this key') : hasKey ? 'Ready' : 'Needs this key'}
+          </span>
+        </span>
+      ))}
+      <button type="button" className="ghost-btn lt-unlocks__go" onClick={() => actions.setSettingsSection('voice')}>
+        Choose in Voice
+      </button>
+    </div>
   )
 }
 

@@ -9,14 +9,13 @@ import { DevicePreview } from '@/components/DevicePreview'
 import { TitleBar, useDeckMode, useDeckModes } from '@/components/TitleBar'
 import { StaleBanner } from '@/components/StaleBanner'
 import { UpdateBanner } from '@/components/UpdateBanner'
-import { VoiceHub } from '@/components/VoiceHub'
 import { WebProjectRemoveBridge } from '@/components/WebProjectRemoveBridge'
+import { HubLayer } from '@/components/hub/HubLayer'
 import { Backdrop } from '@/components/shell/Backdrop'
 import { DeckToast } from '@/components/shell/DeckToast'
 import { Dock } from '@/components/shell/Dock'
 import { SettingsPopup } from '@/components/shell/SettingsPopup'
 import { useBranchReader } from '@/components/shell/useBranch'
-import { OverlayHost } from '@/state/OverlayHost'
 import { useShortcuts } from '@/hooks/useShortcuts'
 import { HUB_FOCUS_EVENT, type HubFocusDetail } from '@/lib/hubnav'
 import { fadeIn, useFlipChildren } from '@/lib/motion'
@@ -199,13 +198,12 @@ export function App(): ReactNode {
       <DeckToast />
       <SettingsPopup />
       {/*
-        The voice hub floats over everything and renders nothing while docked —
-        the dock's voice socket is then the hub. The live hub replaces both.
-        The agent itself is headless, in <VoiceAgentProvider> at the root.
+        The voice hub's UI: the dock's voice pill, the Board and Talk surfaces,
+        the arrival beacon and the cheat sheet. It replaces the old floating
+        VoiceHub card and the always-on-top overlay orb, which are no longer
+        mounted. The engine itself is headless, in the providers at the root.
       */}
-      <VoiceHub />
-      {/* Opens and mirrors the always-on-top hub window; renders nothing here. */}
-      <OverlayHost />
+      <HubLayer />
       <Onboarding />
       <AccountPrompt />
       <WhatsNew />

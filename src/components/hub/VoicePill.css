@@ -1,0 +1,225 @@
+/*
+ * The dock's voice capsule. Same glass, rim and height as every other dock
+ * pill (Dock.css), so it reads as part of the one instrument; the waveform is
+ * the only thing in the dock that moves.
+ */
+
+.vpill {
+  --wave: var(--text-dim);
+  --wave-dim: color-mix(in srgb, var(--text-primary) 22%, transparent);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--dock-h);
+  padding: 0 7px 0 4px;
+  border-radius: var(--r-full);
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
+  transition:
+    border-color var(--dur-med) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out);
+}
+
+.vpill[data-look='listening'] {
+  --wave: var(--accent);
+  --wave-dim: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.vpill[data-look='speaking'] {
+  --wave: var(--text-primary);
+  --wave-dim: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.vpill[data-look='thinking'] {
+  --wave: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
+}
+.vpill[data-look='connecting'] {
+  --wave: var(--text-secondary);
+}
+.vpill[data-look='error'] {
+  --wave: var(--warn);
+}
+
+/* Live: the rim lights, the way the composer's does while it listens. */
+.vpill[data-mode='live'] {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--glass-line-strong));
+  box-shadow:
+    var(--glass-shadow),
+    0 0 30px -10px var(--accent-glow),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+.vpill[data-mode='live'][data-look='listening'] {
+  border-color: var(--accent-line);
+  box-shadow:
+    var(--glass-shadow),
+    0 0 0 3px var(--accent-softer),
+    0 0 28px -4px var(--accent-glow),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+.vpill[data-look='error'] {
+  border-color: var(--warn-line);
+}
+
+.vpill__main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px 0 8px;
+  border-radius: var(--r-full);
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.vpill__main:hover {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
+}
+
+.vpill__wave {
+  display: inline-flex;
+  flex: none;
+  width: 46px;
+  height: 22px;
+  color: var(--wave);
+}
+
+.vpill__text {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 74px;
+}
+
+.vpill__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  line-height: 11px;
+}
+
+.vpill__seg[data-on='true'] {
+  color: var(--accent);
+}
+
+.vpill__swap {
+  font-size: 9px;
+  letter-spacing: 0;
+  opacity: 0.8;
+}
+
+.vpill__word {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 16px;
+  color: var(--text-primary);
+}
+
+.vpill__glyph {
+  display: inline-block;
+  width: 9px;
+  font-size: 9px;
+  text-align: center;
+  color: var(--wave);
+}
+
+.vpill[data-look='offline'] .vpill__word,
+.vpill[data-look='muted'] .vpill__word {
+  color: var(--text-secondary);
+}
+
+.vpill__chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  animation: vpill-chips-in var(--dur-pop) var(--spring-pop) both;
+}
+
+@keyframes vpill-chips-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-6px, 0, 0) scale(0.94);
+  }
+}
+
+.vpill__chip,
+.vpill__go {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--glass-line);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  white-space: nowrap;
+}
+
+.vpill__chip:hover {
+  color: var(--text-primary);
+  border-color: var(--glass-line-strong);
+}
+
+.vpill__chip[data-on='true'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.vpill__chip[data-unavailable='true'] {
+  cursor: default;
+  color: var(--text-dim);
+  border-style: dashed;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.vpill__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 9.5px;
+  letter-spacing: 0;
+}
+
+.vpill__go {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vpill__chips {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .vpill__chips {
+  animation: none;
+}

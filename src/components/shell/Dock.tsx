@@ -1,21 +1,19 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { PaneLeaf, TerminalTab } from '@shared/types'
-import { useCallSign, useCallSigns } from '@/hooks/useHub'
+import { useCallSigns } from '@/hooks/useHub'
 import { usePaneRuntime } from '@/hooks/usePaneRuntime'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
-import { HUB_COMPOSER_EVENT, type HubComposerDetail } from '@/lib/hubnav'
-import { fireComet } from '@/lib/motion'
 import { usePaneActivity } from '@/lib/paneActivity'
-import { composerRouteNow, shellSheet, toolsHost, useDockVoice, useShellSheet } from '@/lib/shellSlots'
-import { collectLeaves, findLeaf } from '@/lib/splitTree'
+import { shellSheet, toolsHost, useDockVoice, useShellSheet } from '@/lib/shellSlots'
+import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
 import { useUiCommand } from '@/lib/uiCommands'
-import { useDictation } from '@/state/Dictation'
-import { useActiveProject, useActiveTab, useActiveWorkspace, useApp, usePaneCount, useViewMode } from '@/state/AppState'
+import { useActiveProject, useActiveWorkspace, useApp, usePaneCount, useViewMode } from '@/state/AppState'
 import { AgentBadge } from '../AgentBadge'
 import { AgentButton } from '../AgentButton'
 import { DictationPill } from '../DictationPill'
+import { Composer } from '../hub/Composer'
 import { Icon } from '../Icon'
 import { RailStack } from '../rail/RailStack'
 import { Sheet, toggleSheet } from './Sheet'
@@ -105,184 +103,6 @@ function ProjectSheet(): ReactNode {
         <RailStack />
       </div>
     </Sheet>
-  )
-}
-
-/* ---------------------------------------------------------------- composer */
-
-/** Fire the keys a hand at the prompt would: the text, a beat, then Enter. */
-function sendToPane(paneId: string, text: string): boolean {
-  if (!terminalHost.has(paneId)) return false
-  const ok = text.includes('\n') ? (terminalHost.paste(paneId, text), true) : terminalHost.type(paneId, text)
-  if (!ok) return false
-  // A beat between the text and the Enter: a TUI that has just taken a paste
-  // needs a frame to settle before a carriage return means "send" to it.
-  window.setTimeout(() => terminalHost.submit(paneId), 70)
-  return true
-}
-
-function Composer(): ReactNode {
-  const { state, actions } = useApp()
-  const tab = useActiveTab()
-  const dictation = useDictation()
-  const [text, setText] = useState('')
-  const fieldRef = useRef<HTMLTextAreaElement | null>(null)
-  const shellRef = useRef<HTMLDivElement | null>(null)
-
-  const paneId = tab?.activePaneId ?? null
-  const leaf = tab && paneId ? findLeaf(tab.root, paneId) : null
-  const profile = leaf ? resolveProfile(state.settings.agentProfiles, leaf.profileId) : null
-  const callSign = useCallSign(paneId ?? '')
-  const targetName = leaf && profile ? (callSign ?? paneDisplayTitle(profile, leaf.title)) : null
-
-  const listening = dictation.listening
-  const level = listening ? Math.min(1, Math.max(0, dictation.status.level)) : 0
-
-  // Grow upward with the text, one line at a time, to five; then scroll.
-  useLayoutEffect(() => {
-    const el = fieldRef.current
-    if (!el) return
-    // Border-box, so scrollHeight (content + padding) is the height to take.
-    el.style.height = '0px'
-    el.style.height = `${Math.min(Math.max(34, el.scrollHeight), 5 * 20 + 14)}px`
-  }, [text])
-
-  const focusField = (): void => fieldRef.current?.focus()
-  useUiCommand('focus-composer', focusField)
-  useUiCommand('blur-composer', () => {
-    fieldRef.current?.blur()
-    if (paneId) terminalHost.focus(paneId)
-  })
-  useUiCommand('toggle-composer', () => {
-    if (document.activeElement === fieldRef.current) {
-      fieldRef.current?.blur()
-      if (paneId) terminalHost.focus(paneId)
-    } else focusField()
-  })
-
-  const send = (raw: string): void => {
-    const message = raw.replace(/\s+$/, '')
-    if (!message.trim()) return
-    const route = composerRouteNow()
-    if (route?.({ text: message, paneId })) {
-      setText('')
-      return
-    }
-    if (!paneId) {
-      actions.setNotice('Open a pane first — the composer types into the pane you are in')
-      return
-    }
-    if (!sendToPane(paneId, message)) {
-      actions.setNotice('That pane has no live shell to send to')
-      return
-    }
-    setText('')
-    const target = document.querySelector(`.pane[data-pane-id="${paneId}"], .mtile[data-pane-id="${paneId}"]`)
-    if (target && shellRef.current) fireComet(shellRef.current, target, profile?.accent ?? '#c6ff4a')
-  }
-
-  // A saved prompt aimed at the composer lands here (B2's saved prompts).
-  const sendRef = useRef(send)
-  sendRef.current = send
-  useEffect(() => {
-    const on = (e: Event): void => {
-      const detail = (e as CustomEvent<HubComposerDetail>).detail
-      if (!detail || typeof detail.text !== 'string') return
-      if (detail.submit) {
-        sendRef.current(detail.text)
-        return
-      }
-      setText(detail.text)
-      requestAnimationFrame(() => fieldRef.current?.focus())
-    }
-    window.addEventListener(HUB_COMPOSER_EVENT, on)
-    return () => window.removeEventListener(HUB_COMPOSER_EVENT, on)
-  }, [])
-
-  const placeholder = listening
-    ? 'Listening…'
-    : targetName
-      ? `Type or speak to ${targetName}`
-      : 'Type or speak'
-
-  return (
-    <div
-      ref={shellRef}
-      className="dock__composer"
-      data-listening={listening ? 'true' : undefined}
-      data-empty={text ? undefined : 'true'}
-      style={{ '--pane-accent': profile?.accent ?? 'var(--accent)', '--lvl': level } as React.CSSProperties}
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget) {
-          e.preventDefault()
-          focusField()
-        }
-      }}
-    >
-      {/*
-        The mic. It never takes focus: pressing it leaves the keyboard wherever
-        it was, so dictation lands in the pane you were typing in — or in this
-        box, if that is where you were. Same engine, same Right Ctrl.
-      */}
-      <button
-        type="button"
-        className="dock__mic"
-        data-on={listening ? 'true' : undefined}
-        aria-pressed={listening}
-        title={listening ? 'Stop dictation' : 'Dictate (Right Ctrl)'}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => dictation.toggle()}
-      >
-        <span className="dock__bars" aria-hidden="true">
-          {[0.55, 0.85, 1, 0.75, 0.5].map((w, i) => (
-            <span key={i} style={{ '--w': w } as React.CSSProperties} />
-          ))}
-        </span>
-        {listening ? <span className="dock__mic-word">Listening</span> : null}
-      </button>
-
-      <textarea
-        ref={fieldRef}
-        className="dock__field"
-        rows={1}
-        value={text}
-        spellCheck
-        placeholder={placeholder}
-        aria-label={placeholder}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault()
-            send(text)
-            return
-          }
-          if (e.key === 'Escape') {
-            e.preventDefault()
-            fieldRef.current?.blur()
-            if (paneId) terminalHost.focus(paneId)
-          }
-        }}
-      />
-
-      {targetName ? (
-        <button
-          type="button"
-          className="dock__target"
-          title="Sending to this pane — click to pick another"
-          data-sheet-toggle="panes"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => toggleSheet('panes')}
-        >
-          <span className="dock__target-arrow" aria-hidden="true">
-            →
-          </span>
-          <span className="truncate">{targetName}</span>
-        </button>
-      ) : null}
-      <span className="dock__enter" aria-hidden="true">
-        ⏎
-      </span>
-    </div>
   )
 }
 

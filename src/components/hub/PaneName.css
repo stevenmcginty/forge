@@ -1,0 +1,56 @@
+/*
+ * The pane header's name slot: the call-sign is the one thing in the header
+ * that must always be readable, because it is what you say to reach the pane.
+ *
+ * So it never shrinks. The work title beside it takes only the space that is
+ * left over (width 0, flex 1: it adds nothing to the header's minimum), the
+ * branch chip gives way first and faster, down to its glyph, and a narrow
+ * header drops the work title and the branch name altogether.
+ */
+
+.deck .pane .pane__header {
+  container-type: inline-size;
+  container-name: pane-head;
+}
+
+.deck .pane .pane__ident {
+  flex: 1 1 auto;
+  min-width: auto;
+}
+
+.deck .pane .pane__title[data-callsign='true'] {
+  flex: none;
+  overflow: visible;
+}
+
+/* A plain title (no call-sign yet) may still truncate, from a sensible width. */
+.deck .pane .pane__title:not([data-callsign]) {
+  max-width: 22ch;
+}
+
+.deck .pane .pane__kind {
+  flex: 1 1 0;
+  width: 0;
+}
+
+.deck .pane .pane__branch {
+  flex-shrink: 6;
+  min-width: 26px;
+}
+
+@container pane-head (max-width: 420px) {
+  .deck .pane .pane__kind {
+    display: none;
+  }
+}
+
+@container pane-head (max-width: 340px) {
+  .deck .pane .pane__branch > .truncate {
+    display: none;
+  }
+
+  .deck .pane .pane__branch {
+    flex: none;
+    padding: 0 5px;
+  }
+}

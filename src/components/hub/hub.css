@@ -1,0 +1,115 @@
+/*
+ * The hub's shared furniture: key caps, the key recorder, waveform canvases.
+ * Desktop only (imported from the hub layer), deck tokens throughout.
+ */
+
+/* Waveform canvases read their faint strand colour from this (see Waveform.tsx). */
+canvas.wave {
+  display: block;
+  border: 0 solid var(--wave-dim, rgba(255, 255, 255, 0.25));
+}
+
+/* ----------------------------------------------------------------- keys */
+
+.keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+
+.kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid var(--glass-line-strong);
+  border-bottom-width: 2px;
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-sunken));
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.keys[data-size='sm'] .kbd {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-size: 10px;
+}
+
+.kbd--live {
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+
+/* ------------------------------------------------------------ key recorder */
+
+.krec {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.krec__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px dashed var(--accent-line);
+  background: var(--accent-softer);
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  outline: none;
+  animation: krec-breathe 1.6s ease-in-out infinite;
+}
+
+.krec__field[data-refused='true'] {
+  border-color: var(--warn-line);
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+@keyframes krec-breathe {
+  50% {
+    box-shadow: 0 0 0 3px var(--accent-softer);
+  }
+}
+
+.krec__was {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.krec__hint {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.krec__refusal {
+  font-size: var(--t-xs);
+  color: var(--warn);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .krec__field {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .krec__field {
+  animation: none;
+}

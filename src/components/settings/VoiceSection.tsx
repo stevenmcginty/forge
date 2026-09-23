@@ -17,7 +17,8 @@ import { DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENROUTER_MODEL } fr
 import { voiceSpeaker, type VoiceConfig } from '@/lib/tts'
 import { useApp } from '@/state/AppState'
 import { DictationSetup } from '../DictationSetup'
-import { Card, Row, Section, Stepper, TextField, Toggle } from './parts'
+import { Card, KeyField, Row, Section, Stepper, TextField, Toggle } from './parts'
+import '../hub/VoiceSettings.css'
 import { SpeechEngineCard } from './SpeechEngineCard'
 
 /**
@@ -44,6 +45,8 @@ export function VoiceSection(): ReactNode {
       title="Voice"
       blurb="Hearing you happens on this machine — the model, the microphone and the transcription never leave it. Thinking and talking back are set separately."
     >
+      <LiveTalkCard />
+
       <SpeechEngineCard />
 
       <Card title="Dictation" hint="Tap the talk key to start or stop. Hold it to push-to-talk. Words land in the focused pane.">
@@ -72,7 +75,7 @@ export function VoiceSection(): ReactNode {
 
       <Card
         title="Voice agent"
-        hint="The hub itself is Ctrl+Shift+G. Relay hands a finished agent turn back to the voice agent without you having to ask."
+        hint="The Talk view is Ctrl+Shift+G. Relay hands a finished agent turn back to the voice agent without you having to ask."
       >
         <Row
           label="Thinking model"
@@ -91,17 +94,6 @@ export function VoiceSection(): ReactNode {
               Change
             </button>
           </div>
-        </Row>
-
-        <Row
-          label="Float over other apps when undocked"
-          hint="Undocking opens a real always-on-top window, so the hub stays visible over Chrome and while Forge is minimised. Off keeps it inside Forge."
-        >
-          <Toggle
-            checked={s.voiceOverlayWindow}
-            onChange={(on) => actions.patchSettings({ voiceOverlayWindow: on })}
-            label="Float over other apps when undocked"
-          />
         </Row>
 
         <Row
@@ -159,20 +151,20 @@ export function VoiceSection(): ReactNode {
         </Row>
       </Card>
 
-      <LiveTalkCard />
-
       <SpokenRepliesCard />
     </Section>
   )
 }
 
 /**
- * Live talk: which brain the voice hub uses, and its voice.
+ * Live talk: which brain the voice hub uses, what it costs, its key and its
+ * voice — all on one card, so picking a provider never means a trip to
+ * another page and back.
  *
- * Claude is the free default. The realtime providers are two-way audio with
- * their own voice, so the spoken-replies settings below do not apply to them;
- * each needs its vendor's key (Models & APIs), and without one the hub falls
- * back to Claude and says so.
+ * Claude is the free default and the fallback: a provider without its key
+ * simply runs on Claude + Parakeet until one is added, and the tile says so
+ * in words. The realtime providers speak in their own voice, so the Spoken
+ * replies card below only applies to Claude.
  */
 function LiveTalkCard(): ReactNode {
   const { state, actions } = useApp()
@@ -181,54 +173,100 @@ function LiveTalkCard(): ReactNode {
   const vendor = spec.vendor
   const keyed = hasKeyFor(s.voiceHubProvider, s)
   const voices = vendor === 'gemini' ? GEMINI_VOICES : OPENAI_VOICES
+  const voice = vendor ? resolveVoice(vendor, s.voiceHubVoice[vendor]) : null
 
   return (
     <Card
       title="Live talk"
-      hint="Two-way voice with a realtime model: it listens the whole time, you can talk over it, and it answers in its own voice. Claude with Parakeet stays the free default."
+      hint="Live talk listens the whole time, lets you talk over it and answers in its own voice. Start it from the dock's voice pill, Ctrl+Shift+Space, or the Talk view (Ctrl+Shift+G)."
     >
-      <Row label="Brain" hint={spec.costNote} htmlFor="voice-hub-provider">
-        <select
-          id="voice-hub-provider"
-          className="select"
-          value={s.voiceHubProvider}
-          onKeyDown={(e) => e.stopPropagation()}
-          onChange={(e) => actions.patchSettings({ voiceHubProvider: e.target.value as VoiceHubProvider })}
-        >
-          {REALTIME_PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-              {hasKeyFor(p.id, s) ? '' : ' — needs a key'}
-            </option>
-          ))}
-        </select>
-      </Row>
+      <div className="lt-grid" role="radiogroup" aria-label="Live talk brain">
+        {REALTIME_PROVIDERS.map((p) => {
+          const on = s.voiceHubProvider === p.id
+          const has = hasKeyFor(p.id, s)
+          const word = p.vendor === null ? 'Free' : has ? 'Key set' : 'Needs a key'
+          return (
+            <button
+              key={p.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              className="lt-tile"
+              data-on={on ? 'true' : undefined}
+              data-ready={has ? 'true' : undefined}
+              onClick={() => actions.patchSettings({ voiceHubProvider: p.id as VoiceHubProvider })}
+            >
+              <span className="lt-tile__top">
+                <span className="lt-tile__radio" aria-hidden="true">
+                  {on ? '●' : '○'}
+                </span>
+                <span className="lt-tile__name">{p.vendor === null ? 'Claude + Parakeet' : p.label}</span>
+                <span className="lt-tile__state" data-tone={p.vendor === null ? 'free' : has ? 'ok' : 'need'}>
+                  {word}
+                </span>
+              </span>
+              <span className="lt-tile__model mono">{p.vendor === null ? 'claude login · Parakeet · Edge voice' : p.model}</span>
+              <span className="lt-tile__cost">{p.vendor === null ? 'Free — no key, nothing to pay' : p.costNote}</span>
+              <span className="lt-tile__note">
+                {p.vendor === null
+                  ? 'The default, and what every other choice falls back to without its key.'
+                  : p.vendor === 'gemini'
+                    ? 'Gemini key · sessions resume on their own, no time limit'
+                    : 'OpenAI API key with billing · rolls over every 55 min'}
+              </span>
+            </button>
+          )
+        })}
+      </div>
 
       {vendor && !keyed ? (
-        <p className="scard__hint">
-          No {vendor === 'gemini' ? 'Gemini' : 'OpenAI'} key yet, so the hub uses Claude until one is added.{' '}
-          <button type="button" className="ghost-btn" onClick={() => actions.setSettingsSection('models')}>
-            Add a key
-          </button>
+        <p className="lt-fallback" role="status">
+          <span aria-hidden="true">◆</span> No {vendor === 'gemini' ? 'Gemini' : 'OpenAI'} key yet — live talk uses Claude +
+          Parakeet (free) until you add one below.
         </p>
       ) : null}
 
-      {vendor ? (
-        <Row label="Voice" hint={vendor === 'openai' ? 'marin and cedar sound best' : 'Shared by Gemini Live and Gemini TTS'} htmlFor="voice-hub-voice">
-          <select
-            id="voice-hub-voice"
-            className="select"
-            value={resolveVoice(vendor, s.voiceHubVoice[vendor])}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => actions.patchSettings({ voiceHubVoice: { ...s.voiceHubVoice, [vendor]: e.target.value } })}
-          >
+      {vendor === 'gemini' ? (
+        <KeyField
+          label="Gemini API key"
+          value={s.geminiKey}
+          onCommit={actions.setGeminiKey}
+          placeholder="AIza…"
+          note="The same key the rest of Forge's Gemini features use. Forge's main process mints a short-lived token for each session; the key never reaches the page."
+        />
+      ) : null}
+      {vendor === 'openai' ? (
+        <KeyField
+          label="OpenAI API key"
+          value={s.openaiKey}
+          onCommit={(key) => actions.patchSettings({ openaiKey: key.trim() })}
+          placeholder="sk-…"
+          note="An API platform key with billing — a ChatGPT subscription does not cover it. It stays in Forge's main process; each session gets a short-lived secret."
+        />
+      ) : null}
+
+      {vendor && voice ? (
+        <div className="lt-voices">
+          <span className="lt-voices__label">
+            Voice <span className="lt-voices__now">{voice}</span>
+            <span className="lt-voices__hint">{vendor === 'openai' ? 'marin and cedar sound best' : 'shared with Gemini TTS'}</span>
+          </span>
+          <div className="lt-voices__list" role="radiogroup" aria-label="Voice">
             {voices.map((v) => (
-              <option key={v} value={v}>
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={v === voice}
+                className="lt-voice"
+                data-on={v === voice ? 'true' : undefined}
+                onClick={() => actions.patchSettings({ voiceHubVoice: { ...s.voiceHubVoice, [vendor]: v } })}
+              >
                 {v}
-              </option>
+              </button>
             ))}
-          </select>
-        </Row>
+          </div>
+        </div>
       ) : null}
     </Card>
   )

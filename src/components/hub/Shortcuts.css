@@ -1,0 +1,128 @@
+/* Settings › Shortcuts. Rows in the settings cards' own rhythm; keys as caps. */
+
+.kmap__bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.kmap__search {
+  flex: 1;
+  max-width: 380px;
+}
+
+.kmap__count {
+  margin-left: auto;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.kmap__warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0;
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+}
+
+.kmap__list {
+  display: flex;
+  flex-direction: column;
+}
+
+.kmrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 16px;
+  min-height: 44px;
+  padding: 6px 0;
+}
+
+.kmrow + .kmrow {
+  border-top: 1px solid var(--line-soft);
+}
+
+.kmrow__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kmrow__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.kmrow__desc {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.kmrow__tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+}
+
+.kmrow__tag--idle {
+  color: var(--text-dim);
+  border-color: var(--line-soft);
+}
+
+.kmrow__keys {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.kmrow__none {
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.kmrow__acts {
+  display: inline-flex;
+  gap: 6px;
+  min-width: 128px;
+  justify-content: flex-end;
+}
+
+.kmrow__btn {
+  height: 28px;
+  padding: 0 11px;
+}
+
+.kmrow__clash {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.kmrow__clash > span[aria-hidden] {
+  color: var(--warn);
+}

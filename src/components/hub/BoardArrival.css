@@ -1,0 +1,128 @@
+/* The arrival tile — the toast's chrome, with a picture in it. */
+
+.barrive {
+  position: fixed;
+  right: 18px;
+  bottom: calc(var(--dock-clear) + 54px);
+  z-index: var(--z-toast);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(360px, calc(100vw - 36px));
+  padding: 8px 8px 8px 8px;
+  border-radius: 16px;
+  background: var(--sheet-bg);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--glass-shadow), 0 0 30px -12px var(--accent-glow), inset 0 1px 0 var(--glass-hi);
+  animation: barrive-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.barrive[data-state='closing'] {
+  animation: barrive-out 200ms var(--ease-in-out) both;
+}
+
+@keyframes barrive-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.95);
+  }
+}
+
+@keyframes barrive-out {
+  to {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.98);
+  }
+}
+
+.barrive__thumb {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 72px;
+  height: 54px;
+  border-radius: 10px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.barrive__thumb {
+  position: relative;
+}
+
+.barrive__thumb .bprev--img {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: none;
+}
+
+.barrive__thumb .bprev--text {
+  padding: 5px 6px;
+  gap: 2px;
+}
+
+.barrive__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.barrive__eyebrow {
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.barrive__title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.barrive__show {
+  flex: none;
+  height: 28px;
+  padding: 0 13px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+.barrive__x {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-full);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-dim);
+}
+
+.barrive__x:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barrive,
+  .barrive[data-state='closing'] {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .barrive {
+  animation: none !important;
+}

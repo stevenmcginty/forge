@@ -463,6 +463,7 @@ export function TerminalPane({
             <button
               type="button"
               className="pane__title truncate"
+              data-callsign={callSign ? 'true' : undefined}
               title="Click to rename"
               onClick={() => {
                 setDraft(leaf.title)
