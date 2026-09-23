@@ -8,6 +8,7 @@ import type {
   RealtimeToolCall
 } from './session'
 import { toGeminiTools } from './tools'
+import { LiveTraceCounters, liveTrace, serverMessageTypes } from './live-trace'
 
 /**
  * Gemini Live over its WebSocket, straight from the renderer.
@@ -109,9 +110,18 @@ export class GeminiLiveSession implements RealtimeSession {
   private userCaption: RealtimeCaption | null = null
   private botCaption: RealtimeCaption | null = null
   private seq = 0
+  /** Dev-only [realtime] evidence in dev.log (./live-trace.ts). */
+  private readonly trace = new LiveTraceCounters(() => this.traceState())
+  private openedAt = 0
 
   constructor(opts: RealtimeSessionOptions) {
     this.opts = opts
+  }
+
+  private traceState(): string {
+    const track = this.stream?.getAudioTracks()[0]
+    const t = track ? `track enabled=${track.enabled} muted=${track.muted} ${track.readyState}` : 'no track'
+    return `ctx=${this.ctx?.state ?? 'none'}@${this.ctx?.sampleRate ?? 0}Hz ${t} ws=${this.ws?.readyState ?? 'none'} ready=${this.ready} muted=${this.muted}`
   }
 
   private state(s: RealtimeState, detail?: string): void {
@@ -124,6 +134,9 @@ export class GeminiLiveSession implements RealtimeSession {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
     })
     this.ctx = new AudioContext()
+    const ctx = this.ctx
+    ctx.onstatechange = () => liveTrace(`audio context ${ctx.state}`)
+    liveTrace(`audio context created state=${ctx.state} rate=${ctx.sampleRate}Hz; mic sent as 16000Hz audio/pcm`)
     await this.ctx.audioWorklet.addModule(workletUrl)
     const source = this.ctx.createMediaStreamSource(this.stream)
     this.capture = new AudioWorkletNode(this.ctx, 'forge-pcm-capture', { processorOptions: { targetRate: 16000 } })
@@ -136,13 +149,18 @@ export class GeminiLiveSession implements RealtimeSession {
     })
     this.player.port.onmessage = (e: MessageEvent<{ level?: number; drained?: boolean; started?: boolean }>) => {
       if (typeof e.data.level === 'number') this.outLevel = Math.min(1, e.data.level * 3)
-      if (e.data.started) this.state('speaking')
+      if (e.data.started) {
+        liveTrace(`playback started; audio context ${this.ctx?.state ?? 'none'}`)
+        this.state('speaking')
+      }
       if (e.data.drained) {
         this.outLevel = 0
         this.state('listening')
       }
     }
     this.player.connect(this.ctx.destination)
+    liveTrace(`worklets connected; ${this.traceState()}`)
+    this.trace.start()
     await this.connect()
   }
 
@@ -157,16 +175,28 @@ export class GeminiLiveSession implements RealtimeSession {
     this.ready = false
     await new Promise<void>((resolve, reject) => {
       let settled = false
-      ws.onopen = () => ws.send(JSON.stringify(buildGeminiSetup(this.opts, this.handle)))
+      ws.onopen = () => {
+        this.openedAt = Date.now()
+        const setup = buildGeminiSetup(this.opts, this.handle)
+        const body = setup.setup as { tools?: Array<{ functionDeclarations?: unknown[] }> }
+        const nTools = (body.tools ?? []).reduce((n, t) => n + (t.functionDeclarations?.length ?? 0), 0)
+        liveTrace(
+          `ws open; setup sent model=${this.opts.model} voice=${this.opts.voice} tools=${nTools} resume=${this.handle ? 'yes' : 'no'}`
+        )
+        ws.send(JSON.stringify(setup))
+      }
       ws.onmessage = (e: MessageEvent<string | ArrayBuffer>) => {
         const text = typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data)
         let msg: GeminiServerMessage
         try {
           msg = JSON.parse(text) as GeminiServerMessage
         } catch {
+          liveTrace(`server frame not JSON (${typeof e.data === 'string' ? 'text' : 'binary'}, ${text.length} chars)`)
           return
         }
+        this.trace.server(serverMessageTypes(msg as Record<string, unknown>))
         if (msg.setupComplete !== undefined && !settled) {
+          liveTrace(`setupComplete after ${Date.now() - this.openedAt} ms`)
           settled = true
           this.ready = true
           this.reconnects = 0
@@ -176,12 +206,14 @@ export class GeminiLiveSession implements RealtimeSession {
         this.onMessage(msg)
       }
       ws.onerror = () => {
+        liveTrace('ws error')
         if (!settled) {
           settled = true
           reject(new Error('Could not open the Gemini Live connection'))
         }
       }
       ws.onclose = (e) => {
+        liveTrace(`ws close code=${e.code} reason=${e.reason ? e.reason.slice(0, 160) : '-'} clean=${e.wasClean} settled=${settled}`)
         if (!settled) {
           settled = true
           reject(new Error(`Gemini Live closed the connection${e.reason ? ` — ${e.reason}` : ` (${e.code})`}`))
@@ -212,8 +244,11 @@ export class GeminiLiveSession implements RealtimeSession {
 
   private onMicChunk(data: { pcm: ArrayBuffer; level: number }): void {
     this.micLevel = this.muted ? 0 : Math.min(1, data.level * 4)
-    if (!this.ready || this.muted || !this.ws || this.ws.readyState !== WebSocket.OPEN) return
-    this.ws.send(
+    const ws = this.ws
+    const why = !this.ready ? 'not-ready' : this.muted ? 'muted' : !ws || ws.readyState !== WebSocket.OPEN ? 'ws-closed' : null
+    this.trace.mic(data.level, data.pcm.byteLength, why === null, why ?? undefined)
+    if (why || !ws) return
+    ws.send(
       JSON.stringify({ realtimeInput: { audio: { mimeType: 'audio/pcm;rate=16000', data: b64FromBuffer(data.pcm) } } })
     )
   }
@@ -241,6 +276,7 @@ export class GeminiLiveSession implements RealtimeSession {
         const data = part.inlineData?.data
         if (data && !this.dropping && (part.inlineData?.mimeType ?? '').startsWith('audio/pcm')) {
           const pcm = bufferFromB64(data)
+          this.trace.audioChunk(pcm.byteLength)
           this.player?.port.postMessage({ pcm }, [pcm])
         }
       }
@@ -311,11 +347,13 @@ export class GeminiLiveSession implements RealtimeSession {
     const body = text.trim()
     if (!body || !this.ws || this.ws.readyState !== WebSocket.OPEN) return
     this.opts.events.onCaption({ id: `g${Date.now().toString(36)}-${++this.seq}`, role: 'user', text: body, final: true })
+    liveTrace(`sent realtimeInput.text (${body.length} chars)`)
     this.ws.send(JSON.stringify({ realtimeInput: { text: body } }))
   }
 
   sendContext(text: string, respond = false): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    liveTrace(`sent clientContent note (${text.length} chars) turnComplete=${respond}`)
     this.ws.send(
       JSON.stringify({
         clientContent: { turns: [{ role: 'user', parts: [{ text: `[Forge note] ${text}` }] }], turnComplete: respond }
@@ -349,6 +387,8 @@ export class GeminiLiveSession implements RealtimeSession {
   stop(): void {
     if (this.stopped) return
     this.stopped = true
+    this.trace.stop()
+    liveTrace('session stopped')
     const ws = this.ws
     this.ws = null
     try {
