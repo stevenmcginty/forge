@@ -433,8 +433,13 @@ export type ChallengeTake = { ok: true; entry: PendingChallenge } | { ok: false;
  */
 export class PasskeyChallenges {
   private pending = new Map<string, PendingChallenge>()
+  // Plain fields, not parameter properties: scripts/web-check.mjs loads this
+  // file through Node's type stripping, which refuses `constructor(private …)`.
+  private readonly now: () => number
 
-  constructor(private readonly now: () => number) {}
+  constructor(now: () => number) {
+    this.now = now
+  }
 
   issue(uid: string, purpose: ChallengePurpose, origin: string, rpId: string): string {
     // Expired ones first, so a cap below only ever costs a live challenge
@@ -593,7 +598,11 @@ function readStoredPasskey(raw: unknown): StoredPasskey | null {
  * sign-in, and a cache is one more thing to be stale about the PIN.
  */
 export class PasskeyStore {
-  constructor(private readonly storage: PasskeyStorage) {}
+  private readonly storage: PasskeyStorage
+
+  constructor(storage: PasskeyStorage) {
+    this.storage = storage
+  }
 
   private load(pinHash: string): PasskeyFile {
     const digest = pinDigest(pinHash)
