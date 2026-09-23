@@ -182,7 +182,17 @@ const DONE_MIN_BUSY_MS = 8000
 const PROMPT_MAX_CHARS = 200
 
 /** "1. Yes", "❯ 2. No", "(3) Skip" — one option in a prompt's list of them. */
-const CHOICE_LINE = /^[❯>▶●•*\s]*\(?\d+[.)]\s+\S/
+const CHOICE_LINE = /^[❯›>▶►●•*\s]*\(?\d+[.)]\s+\S/
+
+/**
+ * The option a live menu's cursor sits on — "❯ 1. Yes", "› 2. No". A menu
+ * the CLI is waiting on always marks one row; a numbered list in the agent's
+ * own prose ("What you do now: 1. Reload…") marks none, and without this
+ * test every reply that ended in steps was flagged as asking, with a Yes/No
+ * card under a line that was never a question. Same cursor set as Forge
+ * Web's `parseScreen`, which already passed prose lists over.
+ */
+const CURSOR_CHOICE_LINE = /^\s*[❯›▶►●>]\s*\(?\d+[.)]\s+\S/
 
 /**
  * A line the user already submitted, as an agent echoes it into its own
@@ -647,7 +657,7 @@ class TerminalHost {
    *
    * Three shapes cover what agents actually leave on screen when they stop for
    * an answer: a line that ends in a question mark, a menu of numbered choices
-   * (Claude Code's permission box, which draws its question inside a border and
+   * with a cursor on one of them (Claude Code's permission box, which draws its question inside a border and
    * then lists options, so the *last* line is never the question), and the
    * classic y/n prompt. Box-drawing characters are stripped first so a bordered
    * prompt reads the same as an unbordered one.
@@ -681,7 +691,11 @@ class TerminalHost {
     if (tail.length === 0) return false
 
     if (tail.some((line) => /[?？]\s*$/.test(line))) return true
-    if (tail.filter((line) => CHOICE_LINE.test(line)).length >= 2) return true
+    if (
+      tail.some((line) => CURSOR_CHOICE_LINE.test(line)) &&
+      tail.filter((line) => CHOICE_LINE.test(line)).length >= 2
+    )
+      return true
     return tail.some((line) =>
       /\b(?:yes\/no|y\/n|allow|deny|approve|confirm|continue|proceed|overwrite)\b\s*[:?]?\s*$/i.test(
         line
