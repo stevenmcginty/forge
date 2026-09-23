@@ -1,6 +1,7 @@
 import {
   HEARTBEAT_MS,
   MAX_WRITE_CHARS,
+  PASSKEY_RESUME_MS,
   PIN_GRACE_MS,
   TOKEN_REFRESH_MS,
   WEB_PROTO,
@@ -765,6 +766,16 @@ export class ForgeClient {
   private passkeyAnswer: WebPasskeyAssertion | null = null
   /** The hello in flight carried a passkey (and no PIN). Read by `hello-ok` and the refusal. */
   private sentPasskey = false
+  /**
+   * The desktop's single-use resume ticket from the last `hello-ok`, so a
+   * reconnect soon after a passkey unlock needs no second fingerprint. RAM
+   * only — never localStorage, sessionStorage or IndexedDB; spent by the next
+   * hello that carries it, dropped after PASSKEY_RESUME_MS hidden, and
+   * forgotten wherever the PIN is. See PASSKEY_RESUME_MS in shared/web.ts.
+   */
+  private resume = ''
+  /** The hello in flight carried the ticket. Read by `hello-ok`, as `sentPasskey` is. */
+  private sentResume = false
 
   constructor(handlers: ForgeHandlers) {
     this.handlers = handlers
@@ -872,6 +883,21 @@ export class ForgeClient {
     this.rememberedPin = ''
     this.sentPin = ''
     this.pin = ''
+    this.resume = ''
+  }
+
+  /**
+   * The resume ticket this `hello` should carry, spent either way: the desktop
+   * burns it on sight, and the `hello-ok` it earns brings the next one. None
+   * once the tab has been hidden past PASSKEY_RESUME_MS — the desktop would
+   * refuse it, and a refusal is the fingerprint prompt anyway.
+   */
+  private resumeForHello(): string {
+    const ticket = this.resume
+    this.resume = ''
+    if (!ticket) return ''
+    if (this.pinHiddenAt && Date.now() - this.pinHiddenAt > PASSKEY_RESUME_MS) return ''
+    return ticket
   }
 
   private watchPinGrace(): void {
@@ -881,6 +907,7 @@ export class ForgeClient {
         return
       }
       if (this.pinHiddenAt && Date.now() - this.pinHiddenAt > PIN_GRACE_MS) this.forgetPin()
+      if (this.pinHiddenAt && Date.now() - this.pinHiddenAt > PASSKEY_RESUME_MS) this.resume = ''
       this.pinHiddenAt = 0
     })
   }
@@ -1468,6 +1495,7 @@ export class ForgeClient {
       const passkey = pin ? null : this.passkeyAnswer
       this.passkeyAnswer = null
       this.sentPasskey = passkey !== null
+      this.sentResume = false
 
       socket.onopen = () => {
         if (superseded()) return
@@ -1476,6 +1504,13 @@ export class ForgeClient {
         if (this.connectTimer !== null) clearTimeout(this.connectTimer)
         this.connectTimer = null
         this.lastFrameAt = Date.now()
+        // The ticket is taken here, on a socket that reached the desktop, rather
+        // than with the PIN above: a wrong ticket is never struck, so there is no
+        // stale replay to guard against, and a dial that never connected should
+        // not cost a fingerprint. Only when nothing else answers the question —
+        // the desktop ignores it beside a PIN or a passkey.
+        const resume = pin || passkey ? '' : this.resumeForHello()
+        this.sentResume = resume !== ''
         // No ping until `hello-ok`. The desktop honours *nothing* but `hello`
         // before a browser has been let in — it answers anything else with an
         // `error` frame and closes the socket (see `handle` in
@@ -1498,7 +1533,8 @@ export class ForgeClient {
           // and a desktop with none set should see a frame that looks exactly like
           // it always did.
           ...(pin ? { pin } : {}),
-          ...(passkey ? { passkey } : {})
+          ...(passkey ? { passkey } : {}),
+          ...(resume ? { resume } : {})
         })
       }
 
@@ -1582,12 +1618,18 @@ export class ForgeClient {
         this.reauthed = false
         this.reAsked.clear()
         if (this.sentPin) this.rememberedPin = this.sentPin
+        // Replaced, not kept: a PIN's hello-ok (or an older desktop's) brings
+        // none, and the PIN replay above covers that page instead.
+        this.resume = typeof frame.resume === 'string' ? frame.resume : ''
         setDeskFacts({
           features: Array.isArray(frame.features) ? frame.features.filter((f): f is string => typeof f === 'string') : [],
-          unlockedWith: this.sentPin ? 'pin' : this.sentPasskey ? 'passkey' : 'none'
+          // A ticket carries a passkey's rights, so the page offers what it
+          // would after a fingerprint.
+          unlockedWith: this.sentPin ? 'pin' : this.sentPasskey || this.sentResume ? 'passkey' : 'none'
         })
         this.sentPin = ''
         this.sentPasskey = false
+        this.sentResume = false
         this.handlers.onPicture(frame)
         this.handlers.onConnection({ state: 'live', desktopName: frame.desktopName, appVersion: frame.appVersion })
         // Both timers start here rather than at `onopen`, because this frame is
@@ -1844,6 +1886,9 @@ export class ForgeClient {
   ): void {
     const afterPasskey = this.sentPasskey
     this.sentPasskey = false
+    // A refused ticket is not a failed fingerprint: the gate asks exactly as it
+    // would have with no ticket, so `afterPasskey` stays false.
+    this.sentResume = false
     if (!isWebRefusal(rawReason)) {
       this.stopped = true
       this.handlers.onConnection({

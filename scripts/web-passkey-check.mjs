@@ -289,6 +289,8 @@ async function main() {
     log: (line) => logLines.push(line)
   })
   const mirrorEdges = []
+  /** The server's own log, read only to know it has noticed a socket close. */
+  const serverLines = []
   const server = new WebServer({
     auth,
     appVersion: '0.0.0-passkey',
@@ -310,7 +312,7 @@ async function main() {
       return null
     },
     onMirror: (watching) => mirrorEdges.push(watching),
-    log: () => {}
+    log: (line) => serverLines.push(line)
   })
   await server.start({ host: '127.0.0.1', port: PORT })
 
@@ -349,6 +351,16 @@ async function main() {
     return browser.frames.find((f) => f.type === 'result' && f.rid === id).body
   }
 
+  /**
+   * Hang an admitted browser up and wait until the desktop has noticed — the
+   * moment a resume ticket's PASSKEY_RESUME_MS starts. Named, because other
+   * sockets may be closing at the same time.
+   */
+  async function hangUp(browser, name) {
+    browser.socket.close()
+    await waitFor(() => serverLines.some((l) => l.includes(`${name} disconnected`)), 5000, `${name} to be noticed gone`)
+  }
+
   /** A fresh set of request options, off the `pin-required` refusal a PIN-less hello gets. */
   async function unlockOptions() {
     const { frame } = await hello()
@@ -357,6 +369,8 @@ async function main() {
 
   /** Why the desktop said no to the last passkey — the log line the browser never sees. */
   const why = () => logLines.filter((l) => l.startsWith('web auth: passkey refused')).at(-1) ?? ''
+  /** Why the desktop said no to the last resume ticket — also the log's alone. */
+  const whyResume = () => logLines.filter((l) => l.startsWith('web auth: resume ticket refused')).at(-1) ?? ''
   /** Log lines saying a correct answer over a stale challenge was asked again. */
   const retries = () => logLines.filter((l) => l.includes('correctly — asking again')).length
 
@@ -512,6 +526,73 @@ async function main() {
         `a passkey-unlocked socket is refused forgetting one (${forget.kind}, ${still.passkeys.length} left)`
       )
       browser.socket.close()
+    }
+
+    /* ------------------------------------------------------ resume tickets */
+    {
+      const isTicket = (t) => typeof t === 'string' && Buffer.from(t, 'base64url').length === 32
+      const asked = (frame) => frame.type === 'refused' && frame.reason === 'pin-required'
+      const first = await hello({ passkey: phoneA.get((await unlockOptions()).passkey), deviceName: 'Resume-1' })
+      log(first.frame.type === 'hello-ok' && isTicket(first.frame.resume), 'a passkey hello-ok carries a 32-byte resume ticket')
+      const byPin = await hello({ pin: PIN })
+      log(byPin.frame.type === 'hello-ok' && !('resume' in byPin.frame), 'a PIN hello-ok carries no ticket')
+      byPin.browser.socket.close()
+
+      // The desktop has not noticed the phone's old socket die yet: still good.
+      const whileOpen = await hello({ resume: first.frame.resume, deviceName: 'Resume-2' })
+      log(
+        whileOpen.frame.type === 'hello-ok' && isTicket(whileOpen.frame.resume) && whileOpen.frame.resume !== first.frame.resume,
+        'a ticket whose socket is still open is admitted, and handed a new ticket'
+      )
+      await hangUp(first.browser, 'Resume-1')
+      await hangUp(whileOpen.browser, 'Resume-2')
+
+      skew += 29_000
+      const resumed = await hello({ resume: whileOpen.frame.resume, deviceName: 'Resume-3' })
+      log(
+        resumed.frame.type === 'hello-ok' && isTicket(resumed.frame.resume) && resumed.frame.resume !== whileOpen.frame.resume,
+        `a ticket 29 s after its socket closed is admitted with no PIN and no passkey, and handed a new, different one (${resumed.frame.type})`
+      )
+      log(logLines.some((l) => l.includes('"Resume-3" admitted') && l.includes('with a resume ticket')), 'and the desk log says it came in on a ticket')
+      const listed = await request(resumed.browser, { kind: 'passkey-list' })
+      const begun = await request(resumed.browser, { kind: 'passkey-register-begin' })
+      log(
+        listed.kind === 'passkeys' && listed.canRegister === false && begun.kind === 'failed' && begun.code === 'unsupported',
+        `a ticket-admitted socket may not enrol a passkey, exactly as a passkey-admitted one (${begun.kind})`
+      )
+
+      const twice = await hello({ resume: whileOpen.frame.resume })
+      log(
+        asked(twice.frame) && twice.frame.passkey?.allowCredentials?.length === 2 && whyResume().includes('already spent'),
+        `the same ticket twice: the second is asked for the PIN, passkey options and all (${whyResume()})`
+      )
+
+      await hangUp(resumed.browser, 'Resume-3')
+      skew += 31_000
+      const late = await hello({ resume: resumed.frame.resume })
+      log(asked(late.frame) && whyResume().endsWith('expired'), `a ticket 31 s after its socket closed is asked for the PIN (${whyResume()})`)
+
+      const fresh = await hello({ passkey: phoneA.get((await unlockOptions()).passkey) })
+      const otherDevice = await hello({ resume: fresh.frame.resume, deviceId: 'dev-2' })
+      log(asked(otherDevice.frame) && whyResume().endsWith('another browser'), `a ticket from another browser is asked for the PIN (${whyResume()})`)
+      const spent = await hello({ resume: fresh.frame.resume })
+      log(asked(spent.frame) && whyResume().includes('already spent'), `and that attempt spent it: its own browser is asked too (${whyResume()})`)
+      fresh.browser.socket.close()
+
+      const fresh2 = await hello({ passkey: phoneA.get((await unlockOptions()).passkey) })
+      const otherPage = await hello({ resume: fresh2.frame.resume }, ORIGIN2)
+      log(asked(otherPage.frame) && whyResume().endsWith('another page'), `a ticket presented from another page is asked for the PIN (${whyResume()})`)
+      fresh2.browser.socket.close()
+
+      let neverStruck = true
+      for (let i = 0; i < AUTH_MAX_FAILURES + 2; i++) {
+        const junk = await hello({ resume: i % 2 ? b64url(randomBytes(32)) : 'not a ticket at all' })
+        if (!asked(junk.frame)) neverStruck = false
+      }
+      log(neverStruck, `${AUTH_MAX_FAILURES + 2} garbage and unknown tickets are each asked for the PIN, none pin-invalid`)
+      const pinAfter = await hello({ pin: PIN })
+      log(pinAfter.frame.type === 'hello-ok', `and struck nothing: the correct PIN still gets in (${pinAfter.frame.type})`)
+      pinAfter.browser.socket.close()
     }
 
     /* -------------------------------------------- failures are wrong PINs */
@@ -763,8 +844,16 @@ async function main() {
 
     /* --------------------------------------------------------- PIN change */
     {
+      const ticketed = await hello({ passkey: phoneB.get((await unlockOptions()).passkey) })
+      log(ticketed.frame.type === 'hello-ok' && typeof ticketed.frame.resume === 'string', 'a passkey unlock under the old PIN is handed a ticket')
       const optionsBefore = (await unlockOptions()).passkey
       pinHash = hashPin(PIN2)
+      const oldTicket = await hello({ resume: ticketed.frame.resume })
+      log(
+        oldTicket.frame.type === 'refused' && oldTicket.frame.reason === 'pin-required' && whyResume().endsWith('the PIN has changed'),
+        `after the PIN changes a ticket issued under the old one is asked for the PIN (${whyResume()})`
+      )
+      ticketed.browser.socket.close()
       const old = await hello({ passkey: phoneB.get(optionsBefore) })
       log(
         old.frame.reason === 'pin-invalid' && why().includes('unknown credential'),

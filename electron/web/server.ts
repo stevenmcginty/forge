@@ -686,6 +686,12 @@ interface Client {
    */
   origin: string
   device: WebDevice | null
+  /**
+   * The resume ticket this socket's `hello-ok` carried, or null. Handed back to
+   * `auth.resumeClosed` when the socket goes, which starts its
+   * PASSKEY_RESUME_MS. See `WebHelloOkFrame.resume`.
+   */
+  resume: string | null
   /** This socket's identity for the grid-ownership rule. See `viewerSeq`. */
   viewer: string
   /** Sessions this browser is reading. */
@@ -1356,6 +1362,7 @@ export class WebServer {
       source,
       origin,
       device: null,
+      resume: null,
       viewer: `web-${++viewerSeq}`,
       subs: new Set(),
       chats: new Map(),
@@ -1431,6 +1438,12 @@ export class WebServer {
       // socket that never said hello never owned anything and this costs a walk
       // of an empty map.
       this.host.release?.(client.viewer)
+      // The page behind a passkey unlock has PASSKEY_RESUME_MS from now to come
+      // back on its ticket without a second fingerprint.
+      if (client.resume) {
+        this.host.auth.resumeClosed(client.resume)
+        client.resume = null
+      }
       if (client.device) {
         this.log(`${client.device.name} disconnected`)
         this.host.onPresence?.(this.connectedCount)
@@ -1856,7 +1869,9 @@ export class WebServer {
       // sent one instead of digits. Read into bounded base64url strings here;
       // what they mean is electron/web/passkey.ts's business.
       origin: client.origin,
-      passkey: readPasskeyAssertion(frame.passkey) ?? undefined
+      passkey: readPasskeyAssertion(frame.passkey) ?? undefined,
+      // A 32-byte base64url ticket is 43 characters; anything longer is not one.
+      resume: wireString(frame.resume, 64) || undefined
     })
 
     if (!outcome.ok) {
@@ -1865,6 +1880,18 @@ export class WebServer {
     }
 
     client.device = outcome.device
+    if (outcome.resume) {
+      // Two hellos raced on this socket: the earlier ticket's socket is this
+      // one, so its clock starts now rather than never.
+      if (client.resume) this.host.auth.resumeClosed(client.resume)
+      client.resume = outcome.resume
+      // Hung up while the door was deciding: the close handler has already run
+      // and will not run again, so the ticket's clock starts here instead.
+      if (!this.clients.has(client)) {
+        this.host.auth.resumeClosed(client.resume)
+        client.resume = null
+      }
+    }
     if (client.helloTimer) {
       clearTimeout(client.helloTimer)
       client.helloTimer = null
@@ -1908,7 +1935,10 @@ export class WebServer {
       // offers a biometric, a streamed recording or a file browser to a
       // desktop that would not understand the ask. No field at all when there
       // is nothing to announce, exactly as before these existed.
-      ...(features.length ? { features } : {})
+      ...(features.length ? { features } : {}),
+      // The next hello's way past the fingerprint, for PASSKEY_RESUME_MS after
+      // this socket closes. Only a passkey's (or a ticket's) socket gets one.
+      ...(client.resume ? { resume: client.resume } : {})
     })
     // Straight after the hello, never inside it: a browser that connects while
     // a UAC prompt is already up must see the card, and the commonest way to

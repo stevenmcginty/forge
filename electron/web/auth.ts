@@ -1,7 +1,8 @@
-import { X509Certificate, createVerify, timingSafeEqual } from 'node:crypto'
+import { X509Certificate, createHash, createVerify, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
 import { AUTH_LOCKOUT_MS, AUTH_MAX_FAILURES } from '@shared/mobile'
 import {
+  PASSKEY_RESUME_MS,
   PIN_MAX_DIGITS,
   PIN_MIN_DIGITS,
   type WebPasskeyAssertion,
@@ -82,7 +83,8 @@ import { verifyPin } from './pin'
  *  - the uid must match, and a token for another account is refused;
  *  - the PIN, which is the one thing a stolen Firebase password does not come
  *    with, and which is asked afresh of every browser on every connection —
- *    there is no list to be on and nothing that excuses it;
+ *    there is no list to be on, and nothing excuses it bar a passkey unlock
+ *    seconds ago on this same browser (`takeResume`);
  *  - the per-bucket lockout below, which is what makes a short PIN defensible.
  *
  * With no PIN set the account alone gets in, which is the state this desktop
@@ -380,7 +382,17 @@ export type WebTokenOutcome =
     }
 
 export type WebAuthOutcome =
-  | { ok: true; device: WebDevice; claims: WebTokenClaims }
+  | {
+      ok: true
+      device: WebDevice
+      claims: WebTokenClaims
+      /**
+       * A fresh resume ticket for `hello-ok`, when this socket was admitted by
+       * a passkey or by a ticket. The caller hands it back to `resumeClosed`
+       * when the socket goes. See PASSKEY_RESUME_MS in shared/web.ts.
+       */
+      resume?: string
+    }
   | {
       ok: false
       reason: WebRefusal
@@ -415,6 +427,11 @@ export interface WebAuthInput {
   origin?: string
   /** A passkey answer instead of `pin`. See `WebHelloFrame.passkey`. */
   passkey?: WebPasskeyAssertion
+  /**
+   * A resume ticket instead of either, read only when both are absent. See
+   * `WebHelloFrame.resume` and `takeResume`.
+   */
+  resume?: string
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -486,12 +503,36 @@ interface Strike {
   until: number
 }
 
+/**
+ * One outstanding resume ticket, keyed by the SHA-256 of the ticket — the
+ * ticket itself is never kept. What it may be spent from: the same account,
+ * browser, page and PIN it was issued under. See `takeResume`.
+ */
+interface ResumeTicket {
+  uid: string
+  deviceId: string
+  origin: string
+  pinDigest: string
+  /** When the socket holding it closed, or 0 while that socket is open. */
+  closedAt: number
+}
+
+/** Blunt backstop on the ticket map — see `pruneResumes`. One person's phones, many times over. */
+const MAX_RESUME_TICKETS = 256
+
+/** The map key for a ticket: its SHA-256, so the map never holds one it could hand out. */
+function resumeKey(ticket: string): string {
+  return createHash('sha256').update(ticket, 'utf8').digest('base64url')
+}
+
 /* -------------------------------------------------------------------- class */
 
 export class WebAuth {
   private readonly host: WebAuthHost
   private readonly now: () => number
   private strikes = new Map<string, Strike>()
+  /** Outstanding resume tickets, in memory only. See PASSKEY_RESUME_MS in shared/web.ts. */
+  private resumes = new Map<string, ResumeTicket>()
   /** Null when the host gave no storage — see `WebAuthHost.passkeys`. */
   private readonly passkeys: PasskeyStore | null
   private readonly challenges: PasskeyChallenges
@@ -531,10 +572,12 @@ export class WebAuth {
    *     whose storage is unavailable, and telling it so is the only way it ever
    *     finds out. See `not-approved` in shared/web.ts.
    *  4. **The PIN**, when one is set. Asked of every browser on every
-   *     connection, with nothing that excuses it. A passkey enrolled under
-   *     that PIN may answer instead (electron/web/passkey.ts): a yes is a
-   *     correct PIN and every kind of no is a wrong one, in the same bucket —
-   *     bar a correct answer over a stale challenge, which is asked again.
+   *     connection. A passkey enrolled under that PIN may answer instead
+   *     (electron/web/passkey.ts): a yes is a correct PIN and every kind of no
+   *     is a wrong one, in the same bucket — bar a correct answer over a stale
+   *     challenge, which is asked again. The one thing that excuses the
+   *     question is a resume ticket from a passkey unlock moments ago
+   *     (`takeResume`); a bad one is simply asked, never struck.
    *
    * ## Which failures count against which bucket
    *
@@ -586,8 +629,25 @@ export class WebAuth {
     if (pinLocked) return pinLocked
     const uid = verified.claims.uid
     const stored = this.host.pinHash?.() ?? ''
+    const origin = input.origin ?? ''
     let unlock: WebDevice['unlock']
-    if (stored && !String(input.pin ?? '').trim() && input.passkey) {
+    let resumed = false
+    if (
+      stored &&
+      !String(input.pin ?? '').trim() &&
+      !input.passkey &&
+      input.resume &&
+      this.takeResume(input.resume, uid, deviceId, origin, stored)
+    ) {
+      // A ticket this desktop handed a passkey-unlocked socket moments ago —
+      // PASSKEY_RESUME_MS in shared/web.ts. The rights of the passkey that
+      // earned it and never more, so a ticket can no more enrol a passkey than
+      // the passkey could. Any other ticket falls through to the branch below
+      // with no PIN in hand, which is `pin-required` and no strike, exactly as
+      // a hello that carried nothing at all.
+      unlock = { by: 'passkey', pinDigest: pinDigest(stored) }
+      resumed = true
+    } else if (stored && !String(input.pin ?? '').trim() && input.passkey) {
       // A passkey instead of the PIN. Judged exactly as the PIN would be: a
       // yes is a correct PIN, and every kind of no is a wrong one, struck
       // against the same bucket — see electron/web/passkey.ts. The one
@@ -618,12 +678,78 @@ export class WebAuth {
       if (stored) unlock = { by: 'pin', pinDigest: pinDigest(stored) }
     }
 
-    this.host.log?.(`"${deviceName}" admitted from ${input.source}${unlock?.by === 'passkey' ? ' with a passkey' : ''}`)
+    const how = resumed ? ' with a resume ticket' : unlock?.by === 'passkey' ? ' with a passkey' : ''
+    this.host.log?.(`"${deviceName}" admitted from ${input.source}${how}`)
+    // Only a passkey's socket (or a ticket's, which is the same rights) is
+    // handed the next ticket. A PIN's has the page's own replay instead.
+    const resume = unlock?.by === 'passkey' && origin ? this.issueResume(uid, deviceId, origin, unlock.pinDigest) : undefined
     return {
       ok: true,
       device: { id: deviceId, name: deviceName, uid, ...(unlock ? { unlock } : {}) },
-      claims: verified.claims
+      claims: verified.claims,
+      ...(resume ? { resume } : {})
     }
+  }
+
+  /* ------------------------------------------------------------ resume tickets */
+
+  /**
+   * The socket holding this ticket has closed: from now it has
+   * PASSKEY_RESUME_MS left. Until this is called a ticket is live however
+   * long ago it was issued, because a phone's dead socket is often still open
+   * as far as this desktop knows when the phone dials again.
+   */
+  resumeClosed(ticket: string): void {
+    const entry = this.resumes.get(resumeKey(ticket))
+    if (entry && !entry.closedAt) entry.closedAt = this.now()
+  }
+
+  /** A fresh ticket for an admitted socket. Only its digest is kept. */
+  private issueResume(uid: string, deviceId: string, origin: string, digest: string): string {
+    this.pruneResumes()
+    const ticket = randomBytes(32).toString('base64url')
+    this.resumes.set(resumeKey(ticket), { uid, deviceId, origin, pinDigest: digest, closedAt: 0 })
+    return ticket
+  }
+
+  /**
+   * Spend a ticket: true only when it is known, still live, and was issued to
+   * this account, browser and page under the PIN set now. Spent whatever the
+   * answer, so a ticket is presented once.
+   *
+   * A no here is never struck — 256 random bits are not something anybody
+   * guesses, so repeated wrong tickets are noise, as bad tokens are — and the
+   * caller answers it as a hello with no credential. Why is for the log only.
+   */
+  private takeResume(ticket: string, uid: string, deviceId: string, origin: string, stored: string): boolean {
+    const key = resumeKey(ticket)
+    const entry = this.resumes.get(key)
+    this.resumes.delete(key)
+    const no = (why: string): false => {
+      this.host.log?.(`web auth: resume ticket refused — ${why}`)
+      return false
+    }
+    if (!entry) return no('unknown or already spent')
+    if (entry.closedAt && this.now() - entry.closedAt > PASSKEY_RESUME_MS) return no('expired')
+    if (!sameString(entry.uid, uid)) return no('another account')
+    if (!sameString(entry.deviceId, deviceId)) return no('another browser')
+    if (!origin || !sameString(entry.origin, origin)) return no('another page')
+    if (!sameString(entry.pinDigest, pinDigest(stored))) return no('the PIN has changed')
+    return true
+  }
+
+  /**
+   * Drop tickets whose window has lapsed, and clear the map outright past a
+   * blunt backstop — the `pruneStrikes` rule. Dropping a ticket only ever
+   * means one more fingerprint, never a way in, so erring towards empty errs
+   * safely.
+   */
+  private pruneResumes(): void {
+    const now = this.now()
+    for (const [key, entry] of this.resumes) {
+      if (entry.closedAt && now - entry.closedAt > PASSKEY_RESUME_MS) this.resumes.delete(key)
+    }
+    if (this.resumes.size >= MAX_RESUME_TICKETS) this.resumes.clear()
   }
 
   /**
