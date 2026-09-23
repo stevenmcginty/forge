@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { readAsk } from '../lib/answer-options'
+import { isYesNo, readAsk, type ParsedAsk } from '../lib/answer-options'
 import './AnswerCard.css'
 
 /**
@@ -10,8 +10,10 @@ import './AnswerCard.css'
  * terminal and a hunt for ↑/↓. The words come off the `attention` push, which
  * the desktop flattens and caps at 200 characters; the pane's own screen is
  * read as well (see `registerAnswerScreen`) because it still has the menu
- * whole. A question with no menu to find gets Yes and No, which are Enter and
- * Esc on every TUI Forge runs.
+ * whole. A question with no menu to find gets Yes and No: a bare `y` or `n` for
+ * a shell's `[y/N]`, and otherwise the word itself, typed and sent the way the
+ * composer sends a message — the question is the agent's own prose, and its
+ * input box is where the answer goes.
  *
  * A choice is the digit key where the CLI takes one — Claude Code's and Gemini
  * CLI's select lists pick the numbered row on its digit — and arrows from the
@@ -27,6 +29,29 @@ const SENT_RETRY_MS = 4000
 const SETTLE_BETWEEN_KEYS_MS = 80
 /** The gap between the last arrow and the Enter that picks the row. */
 const SETTLE_BEFORE_ENTER_MS = 120
+/** A reply to a question with no menu. See `plainReplies`. */
+interface PlainReply {
+  label: string
+  keys: string[]
+}
+
+/**
+ * Yes and No for a question with no menu.
+ *
+ * A `[y/N]` is a shell's line prompt, which takes the letter. Anything else is
+ * an agent asking in prose — "Do you want me to commit the DeepSeek work?" —
+ * whose answer is a message: the word, then Enter as its own keystroke a beat
+ * later, which is how `sendAnswerKeys` spaces a final `\r` and how the
+ * composer sends one. Enter or Esc on their own answered nothing there.
+ */
+function plainReplies(question: string): PlainReply[] {
+  const [yes, no] = isYesNo(question) ? ['y', 'n'] : ['yes', 'no']
+  return [
+    { label: 'Yes', keys: [yes, '\r'] },
+    { label: 'No', keys: [no, '\r'] }
+  ]
+}
+
 /** How much of the screen's bottom is worth reading for a menu. */
 export const SCREEN_TAIL_LINES = 60
 
@@ -59,6 +84,31 @@ function readScreen(paneId: string): string[] {
     return screens.get(paneId)?.() ?? []
   } catch {
     return []
+  }
+}
+
+/**
+ * The question `paneId` is asking, read the way the card reads it: the pushed
+ * prompt and the pane's own screen, the fuller of the two. For a spoken
+ * answer ("option two"), which has to find the same rows the buttons show.
+ */
+export function readPaneAsk(paneId: string, prompt: string): ParsedAsk {
+  return readAsk(prompt, readScreen(paneId))
+}
+
+/** The keys that land on option `index` (0-based) of `ask`'s menu. */
+export function answerKeys(ask: ParsedAsk, index: number, digits: boolean): string[] {
+  if (digits) return [String(ask.options[index]!.n)]
+  const moves = index - ask.cursor
+  const arrow = moves < 0 ? UP : DOWN
+  return [...Array.from({ length: Math.abs(moves) }, () => arrow), '\r']
+}
+
+/** Write an answer's keys a beat apart — arrows, then Enter a longer beat after. */
+export async function sendAnswerKeys(keys: string[], write: (data: string) => void): Promise<void> {
+  for (let i = 0; i < keys.length; i++) {
+    if (i > 0) await pause(i === keys.length - 1 && keys[i] === '\r' ? SETTLE_BEFORE_ENTER_MS : SETTLE_BETWEEN_KEYS_MS)
+    write(keys[i]!)
   }
 }
 
@@ -113,22 +163,16 @@ export function AnswerCard({
     // Still asking after this long means the keys did not land where they were
     // meant to — give the buttons back rather than leave a dead card.
     retry.current = window.setTimeout(() => setSent(false), SENT_RETRY_MS)
-    for (let i = 0; i < keys.length; i++) {
-      if (i > 0) await pause(i === keys.length - 1 && keys[i] === '\r' ? SETTLE_BEFORE_ENTER_MS : SETTLE_BETWEEN_KEYS_MS)
-      onWrite(keys[i]!)
-    }
+    await sendAnswerKeys(keys, onWrite)
   }
 
   /** The keys that land on option `index` (0-based) of the parsed menu. */
-  const keysFor = (index: number): string[] => {
-    if (digits) return [String(ask.options[index]!.n)]
-    const moves = index - ask.cursor
-    const arrow = moves < 0 ? UP : DOWN
-    return [...Array.from({ length: Math.abs(moves) }, () => arrow), '\r']
-  }
+  const keysFor = (index: number): string[] => answerKeys(ask, index, digits)
 
   const question = ask.question || prompt.trim() || `${agentName} needs an answer.`
   const disabled = sent || !live
+  /** Prose wants a reply in words, so the hint offers typing one as well. */
+  const prose = !ask.options.length && !isYesNo(question)
 
   return (
     <section className="answer" aria-label={`${agentName} is asking`} data-sent={sent ? 'true' : undefined}>
@@ -156,14 +200,17 @@ export function AnswerCard({
             </button>
           ))
         ) : (
-          <>
-            <button type="button" className="answer__option" disabled={disabled} onClick={() => void choose(['\r'])}>
-              <span className="answer__label">Yes (Enter)</span>
+          plainReplies(question).map((reply) => (
+            <button
+              key={reply.label}
+              type="button"
+              className="answer__option"
+              disabled={disabled}
+              onClick={() => void choose(reply.keys)}
+            >
+              <span className="answer__label">{reply.label}</span>
             </button>
-            <button type="button" className="answer__option" disabled={disabled} onClick={() => void choose(['\x1b'])}>
-              <span className="answer__label">No (Esc)</span>
-            </button>
-          </>
+          ))
         )}
       </div>
       {sent ? (
@@ -177,7 +224,7 @@ export function AnswerCard({
             Show terminal
           </button>
         ) : null}
-        <span className="answer__hint">or say your answer</span>
+        <span className="answer__hint">{prose ? 'or type / say your reply' : 'or say your answer'}</span>
       </div>
     </section>
   )

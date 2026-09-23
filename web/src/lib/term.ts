@@ -90,6 +90,25 @@ export interface TermHost {
    * back to drawing this browser's own fit. See the geometry note in the header.
    */
   follow: (size: { cols: number; rows: number } | null) => void
+  /**
+   * Keep the grid this pane has now while its box gets shorter, or let it go.
+   *
+   * For the phone's answer card, which docks above the composer and so takes
+   * height off this pane. Fitting to that shorter box resized the real PTY, the
+   * agent repainted for the SIGWINCH, the desktop read the repaint as "no longer
+   * asking" and took the card away — which gave the height back, resized the PTY
+   * again, and asked again once the screen settled: the card flashed on and off
+   * and the phone buzzed on every lap.
+   *
+   * So while held, a box that changes height and keeps its width neither redraws
+   * nor reaches the wire. The terminal stays at its grid and is drawn against the
+   * *bottom* of its box, where the question is, with its top rows cut. A change
+   * of width — a rotation — is a real change of layout and refits as usual.
+   * Letting go waits `HOLD_RELEASE_MS` for the card's exit to settle, then fits
+   * once; if the box came back to the height it was held at, that fit sends
+   * nothing at all.
+   */
+  hold: (on: boolean) => void
   write: (data: string, after?: () => void) => void
   /**
    * Wipe the screen and scrollback and paint a catch-up buffer over it, ordered
@@ -261,6 +280,13 @@ const MIN_FONT_PX = 7
 const MIN_COLS = 20
 const MIN_ROWS = 4
 const MAX_DIM = 1000
+
+/**
+ * How long a released hold waits before it refits: long enough for the answer
+ * card's exit to land in the layout, so the one fit it takes sees the box the
+ * pane is going to keep. See `hold` on TermHost.
+ */
+const HOLD_RELEASE_MS = 300
 
 function settleMs(): number {
   if (settleCache !== null) return settleCache
@@ -567,6 +593,38 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
 
   let lastCols = 0
   let lastRows = 0
+  /** Whether the grid is being held. See `hold` on TermHost. */
+  let holding = false
+  /** The grid held, once there has been one to hold. Width is what may still move it. */
+  let held: { cols: number; rows: number } | null = null
+  /** The timer that lets go of a hold once the box has settled. */
+  let releasing = 0
+  /** How far `anchor` has lifted the terminal, so the next measure can undo it. */
+  let lifted = 0
+
+  /**
+   * Draw a held terminal against the bottom of its box.
+   *
+   * A held grid can be taller than the box it is in, and the rows that matter —
+   * a question, a prompt, the line being typed — are the bottom ones. `.xterm`
+   * itself is as tall as the box, so the overflow is the rows element's, and it
+   * is measured off that: the bottom of the screen plus `.xterm`'s own bottom
+   * padding, against the bottom of the box, with the current lift added back.
+   * A transform, not a layout change, because a layout change is a new box for
+   * the ResizeObserver below to see.
+   */
+  const anchor = (): void => {
+    const el = term.element
+    if (!el || (!holding && !lifted)) return
+    let over = 0
+    const screen = el.querySelector<HTMLElement>('.xterm-screen')
+    if (holding && screen) {
+      const pad = parseFloat(getComputedStyle(el).paddingBottom) || 0
+      over = Math.ceil(screen.getBoundingClientRect().bottom + lifted + pad - container.getBoundingClientRect().bottom)
+    }
+    lifted = over > 0 ? over : 0
+    el.style.transform = lifted ? `translateY(${-lifted}px)` : ''
+  }
   /** The grid this browser's own box would hold at this browser's own font. */
   let natural: { cols: number; rows: number } | null = null
   /** The grid the desktop says this session actually has. Null while unknown. */
@@ -681,13 +739,21 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
       if (borrowed) apply()
       return
     }
+    // Held, and only the height moved: the grid stays as it is. See `hold`.
+    if (holding && held && grid.cols === held.cols) {
+      if (borrowed) apply()
+      anchor()
+      return
+    }
     const moved = !natural || natural.cols !== grid.cols || natural.rows !== grid.rows
     natural = grid
+    if (holding) held = grid
     // Nothing moved and nothing was borrowed, so there is nothing to redraw —
     // and `apply` is not free: with no desk grid to follow it calls
     // `FitAddon.fit`, which measures the box all over again to reach the same
     // answer this function already has.
     if (moved || borrowed) apply()
+    anchor()
   }
 
   /**
@@ -755,6 +821,9 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
   let frame = 0
   let settling = 0
   const observer = new ResizeObserver(() => {
+    // Before the paint, not a frame later: a held terminal whose box has just
+    // shrunk would otherwise show its top rows for one frame, not the question.
+    anchor()
     if (frame) return
     frame = requestAnimationFrame(() => {
       frame = 0
@@ -843,6 +912,27 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
       if (next?.cols === desired?.cols && next?.rows === desired?.rows) return
       desired = next
       apply()
+      anchor()
+    },
+    hold: (on) => {
+      if (on) {
+        window.clearTimeout(releasing)
+        releasing = 0
+        if (holding) return
+        holding = true
+        // Null until this browser has measured a box; the first grid it adopts
+        // is then the one held (see `measure`).
+        held = natural
+        return
+      }
+      if (!holding || releasing) return
+      releasing = window.setTimeout(() => {
+        releasing = 0
+        holding = false
+        held = null
+        anchor()
+        fit()
+      }, HOLD_RELEASE_MS)
     },
     write: (data, after) => {
       if (after) term.write(data, after)
@@ -912,6 +1002,7 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     dispose: () => {
       if (frame) cancelAnimationFrame(frame)
       if (settling) clearTimeout(settling)
+      if (releasing) clearTimeout(releasing)
       observer.disconnect()
       releaseTouch()
       term.dispose()

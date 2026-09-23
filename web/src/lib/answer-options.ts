@@ -133,6 +133,18 @@ export function parseScreen(lines: string[]): ParsedAsk | null {
   }
 }
 
+/** A shell-style yes/no: `[y/N]`, `(y/n)`, `[Y/n]`, `yes/no`, in any case. */
+const YES_NO = /[[(]\s*y\s*\/\s*n\s*[\])]|\byes\s*\/\s*no\b/i
+
+/**
+ * Whether a question with no menu is asked the way a shell asks — `[y/N]` and
+ * the like — which takes a bare `y` or `n`. Anything else is prose, which an
+ * agent answers from its own input box, in words.
+ */
+export function isYesNo(question: string): boolean {
+  return YES_NO.test(question)
+}
+
 /**
  * The prompt's reading, unless the screen has a fuller one — the flattened
  * line is capped and the screen is not.

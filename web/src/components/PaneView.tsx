@@ -711,6 +711,25 @@ export function PaneView({
   }, [cols, rows, cached, leaf.id])
 
   /**
+   * The answer card must not move this pane's grid.
+   *
+   * On the phone the card docks above the composer and takes its height off
+   * this pane. A fit to that shorter box was a real PTY resize, the agent's
+   * repaint for it read on the desktop as "not asking any more", and the card
+   * went — so the box grew, the PTY was resized back, the screen settled, and
+   * the card came again, buzzing each time. The grid is held for as long as
+   * the pane on screen is asking; see `hold` in lib/term.ts. A layout effect,
+   * so the hold is in place before the card's first layout reaches the
+   * ResizeObserver. One terminal serves every face — Chat and Cards only lay
+   * themselves over it — so this one hold covers all three.
+   */
+  const holdGrid = mobile && asking && focused
+  useLayoutEffect(() => {
+    hostRef.current?.hold(holdGrid)
+    // `leaf.id` and `cached` rebuild the host, and a new host starts unheld.
+  }, [holdGrid, cached, leaf.id])
+
+  /**
    * A pane whose shell started *after* this component mounted has to attach a
    * second time.
    *
