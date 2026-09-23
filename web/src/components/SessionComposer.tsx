@@ -713,6 +713,10 @@ export function SessionComposer(): ReactNode {
     setStopping(true)
   }
 
+  // Above the early returns: a hook below them is skipped for a project with no
+  // tabs, and React unmounts the whole page ("Rendered fewer hooks").
+  const [keysShown, setKeysShown] = useState(savedKeysShown)
+
   if (offline && state.offlineMode === 'github') return null
   if (!tab) return null
 
@@ -732,7 +736,6 @@ export function SessionComposer(): ReactNode {
   const currentModelId = matchAgentModel(roster, status?.model)?.id ?? null
 
   const activeView: PaneFace = view ?? (isAgent ? getClaudeView() : 'term')
-  const [keysShown, setKeysShown] = useState(savedKeysShown)
   const nextView: PaneFace = isAgent ? (activeView === 'chat' ? 'feed' : activeView === 'feed' ? 'term' : 'chat') : 'term'
 
   /*
