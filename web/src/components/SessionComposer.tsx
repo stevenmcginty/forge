@@ -256,6 +256,12 @@ export function SessionComposer(): ReactNode {
           // `\r` as a paste and turns the `\r` into a newline, so the message sat
           // in its box unsent. The desktop's own `submit()` keeps the carriage
           // return separate for the same reason.
+          // A beat on the phone is not a beat at the desktop: a tunnel stall
+          // holds the words and lets the Enter catch up, and the two land in
+          // one burst. So the Enter waits for the desktop's answer to a claim
+          // sent after the words — frames are handled in order, so an answer
+          // means the words are already in the pane — and only then its beat.
+          await actions.request({ kind: 'claim', sessionId: paneId })
           await pause(SETTLE_BEFORE_ENTER_MS)
           actions.write(paneId, '\r')
         }
