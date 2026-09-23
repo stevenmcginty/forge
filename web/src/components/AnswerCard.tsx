@@ -98,6 +98,8 @@ export function readPaneAsk(paneId: string, prompt: string): ParsedAsk {
 
 /** The keys that land on option `index` (0-based) of `ask`'s menu. */
 export function answerKeys(ask: ParsedAsk, index: number, digits: boolean): string[] {
+  // A pick from the agent's own prose is a message: the number, then Enter.
+  if (ask.typed) return [String(ask.options[index]!.n), '\r']
   if (digits) return [String(ask.options[index]!.n)]
   const moves = index - ask.cursor
   const arrow = moves < 0 ? UP : DOWN
@@ -172,7 +174,7 @@ export function AnswerCard({
   const question = ask.question || prompt.trim() || `${agentName} needs an answer.`
   const disabled = sent || !live
   /** Prose wants a reply in words, so the hint offers typing one as well. */
-  const prose = !ask.options.length && !isYesNo(question)
+  const prose = ask.typed || (!ask.options.length && !isYesNo(question))
   /** "What should I do instead?" gets no buttons: only words answer it. */
   const replies = ask.options.length || !offersYesNo(question) ? [] : plainReplies(question)
   const buttons = ask.options.length > 0 || replies.length > 0

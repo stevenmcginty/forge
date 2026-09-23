@@ -26,6 +26,12 @@ export interface ParsedAsk {
   options: AnswerOption[]
   /** Which option the menu's cursor sits on, 0-based. 0 when none is marked. */
   cursor: number
+  /**
+   * True when the options are a numbered list in the agent's own prose ("Pick
+   * one: 1. … 2. …") rather than a live menu: the answer is the number sent as
+   * a message, not a keystroke into a select list.
+   */
+  typed?: boolean
 }
 
 /** The row markers the CLIs draw beside the selected option. */
@@ -163,9 +169,108 @@ export function offersYesNo(question: string): boolean {
   return !OPEN_QUESTION.test(last) && !EITHER_OR.test(last)
 }
 
+/** The longest question the card shows. The end is kept, since that is the ask. */
+const QUESTION_MAX_CHARS = 280
+/** How far above the question a prose pick list is looked for. */
+const REPLY_MAX_ROWS = 40
+/** "> no", "❯ no": a line the user sent, as the agent echoes it. Not a menu cursor. */
+const ECHO_ROW = /^\s*[>❯]\s+(?!\(?\d+[.)]\s)\S/
+/** A row that opens a block of its own: a list item, a bullet, or a message marker. */
+const BLOCK_START = /^\s*(?:[-*•⏺●]\s|\(?\d{1,2}[.)]\s)/
+/** A prose list item: "1. You log in. Go to…", with no cursor beside it. */
+const PROSE_ITEM = /^\s*\(?(\d{1,2})[.)]\s+(.+)$/
+/** The lead-in that makes a numbered list a choice rather than steps. */
+const PICK_LEAD = /\b(?:pick|choose|select|which|options?|reply with|tell me)\b|[?？]\s*$/i
+
+/** Keep the end of a long question, cut at a word, with an ellipsis in front. */
+function keepEnd(text: string): string {
+  if (text.length <= QUESTION_MAX_CHARS) return text
+  const cut = text.slice(-QUESTION_MAX_CHARS)
+  return `…${cut.slice(cut.indexOf(' ') + 1)}`
+}
+
+/**
+ * The screen row the question sits on: the last one that ends with the words
+ * the desktop pushed, or failing that the last one that ends in "?".
+ */
+function questionRow(rows: string[], prompt: string): number {
+  const want = tidy(prompt)
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = tidy(rows[i]!)
+    if (want ? row && (row.endsWith(want) || want.endsWith(row)) : /[?？]$/.test(row)) return i
+  }
+  return -1
+}
+
+/**
+ * The whole paragraph a row belongs to, joined into one line. Agents wrap their
+ * own prose at the pane's width, so the row the question ends on is often only
+ * its tail: "cars. Is that right?". A blank row, an echoed reply or the start
+ * of a list item or message ends the walk up.
+ */
+function paragraphAt(rows: string[], at: number): string {
+  const parts: string[] = []
+  for (let i = at; i >= 0 && i > at - 12; i--) {
+    const row = rows[i]!
+    if (!row.trim() || ECHO_ROW.test(row)) break
+    parts.unshift(row)
+    if (BLOCK_START.test(row)) break
+  }
+  return tidy(parts.join(' ').replace(/^\s*[⏺●]\s+/, ''))
+}
+
+/** A list item's short label: its first sentence, when the item runs on. */
+function shortLabel(text: string): string {
+  const first = /^(.{3,80}?[.!?])(?:\s|$)/.exec(text)
+  return first ? first[1]! : text.length > 80 ? `${text.slice(0, 79)}…` : text
+}
+
+/**
+ * A numbered list in the agent's reply that offers a choice — "Pick one:
+ * 1. You log in. … 2. I wait. …". Looked for above the question, back to the
+ * user's last message; a list whose lead-in does not ask for a pick is steps,
+ * not choices, and is passed over.
+ */
+function parseProsePick(rows: string[], below: number): ParsedAsk | null {
+  let end = below
+  for (let i = below; i >= 0 && i > below - REPLY_MAX_ROWS; i--) {
+    if (ECHO_ROW.test(rows[i]!)) break
+    end = i
+  }
+  // The last run of items numbered 1..N, reading up from the question.
+  for (let i = below; i >= end; i--) {
+    const m = PROSE_ITEM.exec(rows[i]!)
+    if (!m || m[1] !== '1') continue
+    const items: AnswerOption[] = [{ n: 1, label: tidy(m[2]!) }]
+    for (let j = i + 1; j <= below; j++) {
+      const next = PROSE_ITEM.exec(rows[j]!)
+      if (next && Number(next[1]) === items.length + 1) items.push({ n: items.length + 1, label: tidy(next[2]!) })
+      else if (next || (!rows[j]!.trim() && !rows[j + 1]?.trim())) break
+    }
+    if (items.length < 2) continue
+    let lead = ''
+    for (let k = i - 1; k >= end && k >= i - 3; k--) {
+      if ((lead = tidy(rows[k]!))) break
+    }
+    if (!PICK_LEAD.test(lead)) return null
+    return {
+      question: lead,
+      options: items.map((item) => ({ n: item.n, label: shortLabel(item.label) })),
+      cursor: 0,
+      typed: true
+    }
+  }
+  return null
+}
+
 /**
  * The prompt's reading, unless the screen has a fuller one — the flattened
  * line is capped and the screen is not.
+ *
+ * With no live menu, the screen still says more than the pushed line: the
+ * question's whole paragraph, not the one wrapped row it ends on, and any
+ * "Pick one: 1. … 2. …" the agent offered above it, whose numbers are then
+ * the buttons.
  */
 export function readAsk(prompt: string, screen: string[]): ParsedAsk {
   const fromPrompt = parsePrompt(prompt)
@@ -173,5 +278,11 @@ export function readAsk(prompt: string, screen: string[]): ParsedAsk {
   if (fromScreen && fromScreen.options.length > fromPrompt.options.length) {
     return { ...fromScreen, question: fromPrompt.options.length ? fromPrompt.question : fromScreen.question || fromPrompt.question }
   }
-  return fromPrompt
+  if (fromPrompt.options.length || isYesNo(prompt)) return fromPrompt
+  const at = questionRow(screen, prompt)
+  if (at < 0) return fromPrompt
+  const pick = parseProsePick(screen, at)
+  if (pick) return pick
+  const whole = paragraphAt(screen, at)
+  return whole.length > fromPrompt.question.length ? { ...fromPrompt, question: keepEnd(whole) } : fromPrompt
 }
