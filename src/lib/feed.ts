@@ -151,7 +151,7 @@ const MODE_LINE =
 const HINT_LINE = /^(?:\?|⏎|↑|shift\+tab|ctrl\+|esc\b|tab\b|for shortcuts)/i
 
 /** Context budget, however the CLI phrases it. */
-const CONTEXT_LINE = /(?:context left|context remaining|auto-compact|% context|context:)/i
+const CONTEXT_LINE = /(?:context left|context remaining|auto-compact|% context|context:|%\s*ctx\b)/i
 
 /** Codex writes its whole footer as `key: value` lines. */
 const CODEX_FOOTER = /^(?:model|approval|sandbox|reasoning|workdir|directory|cwd)\s*:\s*\S/i
@@ -426,7 +426,9 @@ const CONTEXT_PATTERNS: RegExp[] = [
   /context(?: left| remaining| used)?\s*:\s*(\d+%)/i,
   /(\d+(?:\.\d+)?k)\s*(?:tokens\s*)?left/i,
   // Grok's bar prints used over budget: `7.8K / 500K`.
-  /(\d+(?:\.\d+)?[KM]\s*\/\s*\d+(?:\.\d+)?[KM])\b/
+  /(\d+(?:\.\d+)?[KM]\s*\/\s*\d+(?:\.\d+)?[KM])\b/,
+  // Grok's default status line: `12% ctx` — context-window usage, used.
+  /(\d+%)\s*ctx\b/i
 ]
 
 /** A cwd as any of the three shells Forge launches prints one. */

@@ -100,7 +100,9 @@ export function forgetUsage(paneId: string): void {
  * Only phrasings whose direction is certain are read: Claude Code's "Context
  * left until auto-compact: 12%", Codex's "72% context left", and an explicit
  * "context used: 40%". Grok's `7.8K / 500K` is used-over-budget, so it is a
- * division. Anything else — "128k tokens left", a bare "context: 30%" — has no
+ * division. Grok's default status line prints `N% ctx`, which per
+ * docs.x.ai/build/features/status-line is "context-window usage" — already
+ * used. Anything else — "128k tokens left", a bare "context: 30%" — has no
  * direction or no window, and is not guessed at.
  */
 export function contextFromFooter(footer: readonly string[] | undefined): number | null {
@@ -111,7 +113,10 @@ export function contextFromFooter(footer: readonly string[] | undefined): number
       /(\d{1,3})\s*%\s*context (?:left|remaining)/i.exec(line) ??
       /context (?:left|remaining)\s*:\s*(\d{1,3})\s*%/i.exec(line)
     if (left) return pct(100 - Number(left[1]))
-    const used = /context used\s*:\s*(\d{1,3})\s*%/i.exec(line) ?? /(\d{1,3})\s*%\s*context used/i.exec(line)
+    const used =
+      /context used\s*:\s*(\d{1,3})\s*%/i.exec(line) ??
+      /(\d{1,3})\s*%\s*context used/i.exec(line) ??
+      /(\d{1,3})\s*%\s*ctx\b/i.exec(line)
     if (used) return pct(Number(used[1]))
     const ratio = /(\d+(?:\.\d+)?)\s*([KM])\s*\/\s*(\d+(?:\.\d+)?)\s*([KM])\b/.exec(line)
     if (ratio) {
