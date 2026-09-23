@@ -7,9 +7,7 @@
 }
 
 .mosaic--empty {
-  background: var(--bg-sunken);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--r-md);
+  background: transparent;
 }
 
 /*
@@ -22,14 +20,16 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding-right: var(--s-1);
+  /* Room for the focus halo, which lives outside each tile's box. */
+  padding: 8px;
+  margin: -8px;
 }
 
 .mosaic__wall .mosaic__canvas {
   display: grid;
   grid-template-columns: repeat(var(--mosaic-cols, 3), minmax(var(--mosaic-tile-min-w), 1fr));
   grid-auto-rows: minmax(var(--mosaic-tile-min-h), 1fr);
-  gap: var(--s-3);
+  gap: var(--stage-gap, 20px);
   min-height: 100%;
 }
 
@@ -89,24 +89,46 @@
 /* -------------------------------------------------------------------- tile */
 
 .mtile {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 24%, var(--line-hairline));
   position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   background: var(--bg-terminal);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--r-md);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-pane);
   overflow: hidden;
+  box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.8);
   transition:
-    border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+    border-color var(--dur-med) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out);
+}
+
+/* The same edge language as a pane in tab view — see TerminalPane.css. */
+.mtile[data-state='working'] {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 64%, transparent);
+}
+
+.mtile[data-state='attention'] {
+  --edge: color-mix(in srgb, var(--warn) 78%, transparent);
+}
+
+.mtile[data-state='done'] {
+  --edge: color-mix(in srgb, var(--text-primary) 62%, transparent);
+}
+
+.mtile[data-hit='true'] {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 90%, white);
+  transition-duration: 60ms;
 }
 
 .mtile[data-zoomed='true'] {
   flex: 1;
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 1px var(--accent-softer);
+  box-shadow:
+    0 0 0 1px var(--accent-line),
+    0 0 0 4px var(--accent-softer),
+    0 14px 44px -16px var(--accent-glow);
 }
 
 /* -------------------------------------------------------- freeform tiles */
@@ -268,22 +290,20 @@
 
 /* The volt ring is the keyboard's ring: where Enter would zoom. */
 .mtile[data-selected='true'] {
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 1px var(--accent-softer);
+  box-shadow:
+    0 0 0 1.5px var(--accent),
+    0 0 0 6px var(--accent-soft),
+    0 0 42px 2px var(--accent-glow);
 }
 
 .mtile:hover {
-  border-color: var(--line-strong);
-}
-
-.mtile[data-selected='true']:hover {
-  border-color: var(--accent);
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 48%, var(--line-strong));
 }
 
 /* A dead shell is still worth showing — just visibly finished with. */
 .mtile[data-status='exited'],
 .mtile[data-status='error'] {
-  border-color: var(--line-soft);
+  --edge: var(--danger-line);
 }
 
 .mtile[data-status='exited'] .mtile__stage,
@@ -301,10 +321,10 @@
   align-items: center;
   gap: var(--s-3);
   flex: none;
-  height: var(--pane-header-h);
+  height: var(--pane-head-h);
   padding: 0 var(--s-2) 0 var(--s-3);
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 5%, var(--bg-terminal));
+  border-bottom: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 10%, var(--line-soft));
 }
 
 /*
@@ -323,8 +343,7 @@
 
 .mtile[data-zoomed='true'] .mtile__head,
 .mtile[data-selected='true'] .mtile__head {
-  background: var(--bg-header-live);
-  border-bottom-color: var(--line-hairline);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 8%, var(--bg-header-live));
 }
 
 .mtile__back {
@@ -343,7 +362,10 @@
 
 .mtile__title {
   min-width: 0;
-  font-size: var(--t-sm);
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.015em;
   color: var(--text-secondary);
 }
 
@@ -450,8 +472,11 @@
  * specificity overrides win.
  */
 .mtile[data-interactive='true'] {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-softer);
+  --edge: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent-line),
+    0 0 0 4px var(--accent-softer),
+    0 14px 44px -16px var(--accent-glow);
 }
 
 .mtile[data-interactive='true'] .mtile__head {
@@ -478,12 +503,12 @@
 
 .mtile__hit {
   position: absolute;
-  top: var(--pane-header-h);
+  top: var(--pane-head-h);
   right: 0;
   bottom: 0;
   left: 0;
   z-index: var(--z-pane);
-  border-radius: 0 0 var(--r-md) var(--r-md);
+  border-radius: 0 0 var(--r-pane) var(--r-pane);
   transition: background var(--dur-fast) var(--ease-out);
 }
 

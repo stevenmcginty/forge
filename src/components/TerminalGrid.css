@@ -303,6 +303,15 @@
   font-size: var(--t-md);
 }
 
+/* A switch and its sentence on one line, padded to the same gutter the fields
+   and rows above it use, so the settings section reads as one column. */
+.tab__menu-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-3) var(--s-4) var(--s-2);
+}
+
 .tab__badges {
   display: flex;
   align-items: center;

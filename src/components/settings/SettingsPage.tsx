@@ -18,15 +18,14 @@ import { VoiceSection } from './VoiceSection'
 import './SettingsPage.css'
 
 /**
- * Settings, as a place rather than a popover.
+ * Settings, as a pop-up over the deck (shell/SettingsPopup.tsx).
  *
- * It takes over the terminal area — the rail, the shelf and the floating voice hub stay
- * exactly where they were, because you are still in the same project and often
- * come here *because* of something a pane just did. The terminals themselves
- * keep running: terminalHost owns them, not React, so unmounting the grid costs
- * nothing and coming back is instant.
+ * The panes stay on screen and live behind it — you often come here *because*
+ * of something a pane just did, and seeing it while you change the setting is
+ * the point. The terminals keep running either way: terminalHost owns them.
  *
- * Escape or the back arrow returns you to what you were looking at.
+ * Escape, the close button or a click outside returns you to what you were
+ * looking at.
  */
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName; blurb: string }> = [
@@ -86,17 +85,20 @@ export function SettingsPage(): ReactNode {
   return (
     <div className="spage">
       <header className="spage__head">
-        <button
-          type="button"
-          className="ghost-btn spage__back"
-          title="Back to terminals (Esc)"
-          onClick={() => actions.closeSettings()}
-        >
-          <Icon name="chevronLeft" size={14} />
-          Back
-        </button>
+        <span className="spage__mark" aria-hidden="true">
+          <Icon name="gear" size={14} />
+        </span>
         <h1 className="spage__title">Settings</h1>
         <span className="spage__hint eyebrow">esc to close</span>
+        <button
+          type="button"
+          className="ghost-btn spage__close"
+          title="Close settings (Esc)"
+          aria-label="Close settings"
+          onClick={() => actions.closeSettings()}
+        >
+          <Icon name="close" size={14} />
+        </button>
       </header>
 
       <div className="spage__body">

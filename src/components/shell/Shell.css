@@ -1,0 +1,294 @@
+/*
+ * The desktop deck's frame: root, stage, the settings pop-up, the notice tile,
+ * and the Appearance section's backdrop picker. Desktop only — Forge Web never
+ * imports this file.
+ */
+
+/* Its own stacking context, so the backdrop (z-index -1) paints above the
+   root's background and below everything else the deck draws, positioned or
+   not. */
+.deck {
+  position: relative;
+  isolation: isolate;
+  background: var(--bg-base);
+}
+
+.deck__stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--stage-pad-top) var(--stage-pad-x) 0;
+  margin-bottom: var(--dock-clear);
+}
+
+.deck__stage > * {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The views that used to take the whole main area (devices, the delegation
+   desk) are framed like a pane on the deck, so the backdrop stays the room. */
+.deck__stage > .devices,
+.deck__stage > .tasks-ws,
+.deck__full {
+  border-radius: var(--r-pane);
+  overflow: hidden;
+}
+
+.deck__split {
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+}
+
+.deck__agents {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * A surface beside the agents: it takes the wide left column and the agents
+ * stack into a narrower one on the right — CNVS's browser layout, in Forge's
+ * geometry.
+ */
+.deck__split[data-beside='true'] .deck__agents {
+  flex: 0 0 clamp(360px, 36%, 720px);
+}
+
+.deck__surface {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border-radius: var(--r-pane);
+  overflow: hidden;
+}
+
+.deck__surface > *,
+.deck__full > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.deck__full {
+  display: flex;
+}
+
+/* =============================================================== settings */
+
+.spop {
+  position: fixed;
+  inset: 0;
+  z-index: 48;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--titlebar-h) + 8px) 24px calc(var(--dock-clear) + 4px);
+  background: var(--stage-scrim);
+  animation: spop-fade var(--dur-med) var(--ease-out) both;
+}
+
+.spop[data-state='closing'] {
+  animation: spop-fade-out var(--dur-exit) var(--ease-in-out) both;
+  pointer-events: none;
+}
+
+.spop__panel {
+  display: flex;
+  width: min(1120px, 100%);
+  height: min(780px, 100%);
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--sheet-bg);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow:
+    0 40px 120px -30px rgba(0, 0, 0, 0.75),
+    0 0 0 1px color-mix(in srgb, var(--accent) 6%, transparent),
+    inset 0 1px 0 var(--glass-hi);
+  animation: spop-rise var(--dur-pop) var(--spring-pop) both;
+  transform-origin: 50% 60%;
+}
+
+.spop[data-state='closing'] .spop__panel {
+  animation: spop-sink var(--dur-exit) var(--ease-in-out) both;
+}
+
+.spop__panel > .spage {
+  flex: 1;
+  min-width: 0;
+}
+
+@keyframes spop-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes spop-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes spop-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.965);
+  }
+}
+
+@keyframes spop-sink {
+  to {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.98);
+  }
+}
+
+/* ================================================================= notice */
+
+.dtoast {
+  position: fixed;
+  right: 18px;
+  bottom: calc(var(--dock-clear) + 2px);
+  z-index: var(--z-toast);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 36px));
+  min-height: 40px;
+  padding: 9px 16px 9px 14px;
+  border-radius: 14px;
+  background: var(--sheet-bg);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
+  font-size: var(--t-md);
+  line-height: 1.4;
+  color: var(--text-primary);
+  animation: dtoast-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.dtoast[data-state='closing'] {
+  animation: dtoast-out 200ms var(--ease-in-out) both;
+}
+
+/* A diamond, not a dot: a notice is a thing to read, whatever colour it is. */
+.dtoast__mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+@keyframes dtoast-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.97);
+  }
+}
+
+@keyframes dtoast-out {
+  to {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spop,
+  .spop__panel,
+  .dtoast {
+    animation: none !important;
+  }
+}
+
+:root[data-reduced-motion='true'] .spop,
+:root[data-reduced-motion='true'] .spop__panel,
+:root[data-reduced-motion='true'] .dtoast {
+  animation: none !important;
+}
+
+/* ================================================== appearance: backdrops */
+
+.sbackdrops {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.sbackdrop {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.sbackdrop__swatch {
+  position: relative;
+  display: block;
+  height: 72px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line-hairline);
+  background-size: cover;
+  background-position: center;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.sbackdrop:hover .sbackdrop__swatch {
+  border-color: var(--line-strong);
+}
+
+.sbackdrop[data-selected='true'] .sbackdrop__swatch {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+.sbackdrop__check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+.sbackdrop__name {
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+}
+
+.sbackdrop[data-selected='true'] .sbackdrop__name {
+  color: var(--text-primary);
+}
+
+.srange {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.srange input[type='range'] {
+  width: 160px;
+  accent-color: var(--accent);
+}
+
+.srange__value {
+  min-width: 38px;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+  text-align: right;
+}

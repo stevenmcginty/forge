@@ -1,0 +1,99 @@
+/*
+ * The backdrop: a fixed layer under everything, painted once.
+ *
+ * Nothing here animates unless drift is on, and drift is one transform on the
+ * star canvas — no filter, no layout, paused whenever the window is hidden.
+ */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-backdrop);
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+
+.backdrop__art {
+  position: absolute;
+  inset: 0;
+}
+
+.backdrop__layer {
+  position: absolute;
+  inset: 0;
+}
+
+.backdrop__stars {
+  position: absolute;
+  top: -32px;
+  left: -32px;
+}
+
+.backdrop[data-drift='true'] .backdrop__stars,
+.backdrop[data-drift='true'] .backdrop__clouds {
+  animation: backdrop-drift 140s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.backdrop[data-hidden='true'] .backdrop__stars,
+.backdrop[data-hidden='true'] .backdrop__clouds {
+  animation-play-state: paused;
+}
+
+@keyframes backdrop-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-28px, 14px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop .backdrop__stars,
+  .backdrop .backdrop__clouds {
+    animation: none;
+  }
+}
+
+.backdrop__clouds {
+  inset: -10%;
+  filter: blur(40px);
+}
+
+.backdrop__moon {
+  position: absolute;
+  top: 10%;
+  right: 13%;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+}
+
+.backdrop__ridges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.backdrop__image {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.backdrop__dim {
+  position: absolute;
+  inset: 0;
+}
+
+.backdrop__top {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 64px;
+}

@@ -142,6 +142,45 @@ const VOLT: ThemeCore = {
   ]
 }
 
+/**
+ * Night deck: volt on a deep blue-black, made for the space and ridgeline
+ * backdrops — the panes read as windows lit from inside a dark room rather than
+ * as grey slabs on a desk. Volt's ink and terminal palette, cooler surfaces.
+ */
+const ORBIT: ThemeCore = {
+  id: 'orbit',
+  name: 'Orbit',
+  appearance: 'dark',
+  bg: '#07090e',
+  panel: '#0c1018',
+  text: '#e6ebf2',
+  accent: '#c6ff4a',
+  danger: '#ff6b5a',
+  warn: '#ffb547',
+  info: '#7fc4ff',
+  ok: '#5ee6a8',
+  termBg: '#090c13',
+  termFg: '#e6ebf2',
+  ansi: [
+    '#15171b',
+    '#ff6e6e',
+    '#b8f04a',
+    '#f2e56b',
+    '#7fb6ff',
+    '#c08bff',
+    '#6fe3d2',
+    '#d6d9de',
+    '#828992',
+    '#ff8f8f',
+    '#ceff6e',
+    '#ffef8f',
+    '#a3ccff',
+    '#d5aeff',
+    '#9bf0e4',
+    '#f4f6f8'
+  ]
+}
+
 /** Graphite. Hues survive, saturation does not — a workshop, not a nightclub. */
 const CARBON: ThemeCore = {
   id: 'carbon',
@@ -292,7 +331,7 @@ const PAPER: ThemeCore = {
   ]
 }
 
-export const BUILTIN_THEMES: ThemeCore[] = [VOLT, CARBON, EMBER, ICE, PAPER]
+export const BUILTIN_THEMES: ThemeCore[] = [VOLT, ORBIT, CARBON, EMBER, ICE, PAPER]
 
 export const DEFAULT_THEME_ID = 'volt'
 
@@ -335,8 +374,11 @@ const AMOUNTS = {
     lineSoft: 0.035,
     lineStrong: 0.128,
     secondary: 0.42, // text toward panel
-    muted: 0.6,
-    dim: 0.79,
+    // Muted is eyebrows, paths, hints — 9.5px labels, so it has to clear the
+    // body floor (4.5:1), not the large-text one. 0.6 mixed to ~3.4:1 and the
+    // rail paths vanished. Dim is chevrons and disabled chrome; 3:1 is enough.
+    muted: 0.48,
+    dim: 0.62,
     accentBright: 0.28, // accent toward white
     scrollbar: 0.14,
     scrollbarHover: 0.23,
@@ -354,8 +396,8 @@ const AMOUNTS = {
     lineSoft: 0.07,
     lineStrong: 0.26,
     secondary: 0.33,
-    muted: 0.5,
-    dim: 0.68,
+    muted: 0.36,
+    dim: 0.5,
     accentBright: 0.22, // accent toward black
     scrollbar: 0.24,
     scrollbarHover: 0.36,
@@ -441,6 +483,7 @@ export function resolveTheme(core: ThemeCore): ResolvedTheme {
     'shadow-key': `0 2px 3px ${alpha('#000000', a.shadowKey)}`,
     'shadow-ambient': `0 8px 22px ${alpha('#000000', a.shadowAmbient)}`,
     'shadow-inset-top': `inset 0 1px 0 ${alpha(light ? '#ffffff' : '#ffffff', a.insetTop)}`,
+
 
     /* terminal */
     'term-bg': core.termBg,
@@ -541,9 +584,10 @@ export function auditTheme(core: ThemeCore, min = 4.5): ContrastFinding[] {
   const tokens = resolveTheme(core)
   check('text-primary', tokens['text-primary']!, core.bg)
   check('text-secondary', tokens['text-secondary']!, core.panel, Math.min(min, 4.5))
-  // Muted ink is eyebrows and hints — deliberately quiet, so it answers to the
-  // large-text threshold rather than the body one.
-  check('text-muted', tokens['text-muted']!, core.panel, 3)
+  // Muted is eyebrows, paths and hints — 9.5px, so the body floor. Dim is
+  // chevrons, counts and disabled chrome, so the large-text floor is enough.
+  check('text-muted', tokens['text-muted']!, core.panel, 4.5)
+  check('text-dim', tokens['text-dim']!, core.panel, 3)
   check('accent', core.accent, core.panel, 3)
   check('danger', core.danger, core.panel, 3)
   check('warn', core.warn, core.panel, 3)

@@ -1,124 +1,215 @@
-import { useEffect, type ReactNode } from 'react'
-import { AccountChip } from '@/components/AccountChip'
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { AccountPrompt } from '@/components/AccountPrompt'
 import { Onboarding } from '@/components/Onboarding'
 import { WhatsNew } from '@/components/WhatsNew'
-import { RailStack } from '@/components/rail/RailStack'
-import { ScreenshotTray } from '@/components/ScreenshotTray'
 import { TasksWorkspace } from '@/components/tasks/TasksWorkspace'
-import { StatusBar } from '@/components/StatusBar'
 import { TerminalGrid } from '@/components/TerminalGrid'
-import { SettingsPage } from '@/components/settings/SettingsPage'
 import { DevicePreview } from '@/components/DevicePreview'
-import { TitleBar } from '@/components/TitleBar'
+import { TitleBar, useDeckMode, useDeckModes } from '@/components/TitleBar'
 import { StaleBanner } from '@/components/StaleBanner'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { VoiceHub } from '@/components/VoiceHub'
 import { WebProjectRemoveBridge } from '@/components/WebProjectRemoveBridge'
+import { Backdrop } from '@/components/shell/Backdrop'
+import { DeckToast } from '@/components/shell/DeckToast'
+import { Dock } from '@/components/shell/Dock'
+import { SettingsPopup } from '@/components/shell/SettingsPopup'
+import { useBranchReader } from '@/components/shell/useBranch'
 import { OverlayHost } from '@/state/OverlayHost'
 import { useShortcuts } from '@/hooks/useShortcuts'
+import { HUB_FOCUS_EVENT, type HubFocusDetail } from '@/lib/hubnav'
+import { fadeIn, useFlipChildren } from '@/lib/motion'
+import { shellMode, shellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
-import { useApp } from '@/state/AppState'
+import { useUiCommand } from '@/lib/uiCommands'
+import { useActiveProject, useApp, type SettingsSection } from '@/state/AppState'
+import '@/components/shell/deck-tokens.css'
+import '@/components/shell/Shell.css'
+import '@/components/shell/deck.css'
 import './App.css'
 
+/**
+ * The desktop shell: a command deck.
+ *
+ * One backdrop (the room), a slim top bar (the mark, the mode switcher, the
+ * tools), the stage (whatever mode is on — the agents' panes, a registered
+ * surface such as the browser beside them, the delegation desk, the device
+ * preview), and the dock along the bottom (project, type-or-speak, panes, the
+ * voice socket). Settings is a pop-up over all of it: the panes stay live
+ * behind it and Esc puts you back.
+ *
+ * The terminals never notice any of this. terminalHost owns every xterm, so a
+ * mode switch that unmounts the grid costs nothing and coming back is instant —
+ * the only thing the shell owes them is a refit once a layout has settled.
+ */
 export function App(): ReactNode {
-  const { state } = useApp()
+  const { state, actions } = useApp()
   useShortcuts()
+  const project = useActiveProject()
+  useBranchReader(project?.id ?? null)
 
-  // The rail animating open or closed changes every pane's width — and so does
-  // coming back from settings, where the grid was unmounted while the window
-  // carried on being resized. The voice hub is not in this list and never will
-  // be: it floats *over* the terminals rather than taking width from them,
-  // which is the whole reason the right-hand panel was deleted.
+  const surfaces = useSurfaces()
+  const surfaceId = useShellMode()
+  const surface = surfaces.find((s) => s.id === surfaceId) ?? null
+  const modes = useDeckModes()
+  const mode = useDeckMode()
+
+  // Every layout change that moves pane edges gets a refit once it settles —
+  // the same 200ms beat the app has always used, now also after a mode glide.
   useEffect(() => {
-    const t = setTimeout(() => terminalHost.fitAll(), 200)
+    const t = setTimeout(() => terminalHost.fitAll(), 380)
     return () => clearTimeout(t)
-  }, [state.settings.railCollapsed, state.view, state.tasksMaximized])
+  }, [state.view, state.tasksMaximized, surfaceId])
+
+  /* ------------------------------------------------------------ modes */
+
+  const setMode = (id: string | undefined): void => {
+    if (!id) return
+    shellSheet.set(null)
+    if (id === 'devices') {
+      shellMode.set(null)
+      actions.openDevices()
+      return
+    }
+    if (state.view === 'devices') actions.closeDevices()
+    if (id === 'tasks') {
+      shellMode.set(null)
+      actions.setTasksMaximized(true)
+      return
+    }
+    if (state.tasksMaximized) actions.setTasksMaximized(false)
+    shellMode.set(id === 'agents' || !surfaces.some((s) => s.id === id) ? null : id)
+  }
+
+  const stepMode = (step: number): void => {
+    const i = modes.findIndex((m) => m.id === mode)
+    const next = modes[(i + step + modes.length) % modes.length]
+    if (next) setMode(next.id)
+  }
+
+  useUiCommand('set-mode', setMode)
+  useUiCommand('next-mode', () => stepMode(1))
+  useUiCommand('previous-mode', () => stepMode(-1))
+  useUiCommand('open-settings', (section) => actions.openSettings(section as SettingsSection | undefined))
+  useUiCommand('close-settings', () => {
+    if (state.view === 'settings') actions.closeSettings()
+  })
+  useUiCommand('toggle-settings', () => (state.view === 'settings' ? actions.closeSettings() : actions.openSettings()))
+  useUiCommand('toggle-canvas-view', () => actions.toggleViewMode())
+  useUiCommand('close-overlays', () => {
+    shellSheet.set(null)
+    if (state.view === 'settings') actions.closeSettings()
+  })
+
+  // "Go to the canvas" (voice, Ctrl+Shift+K): the image board, once a surface
+  // called `board` has registered. Until then it is only a pane-focus event.
+  // A pane picked by name while the agents are off screen brings them back; a
+  // surface that shares the stage with them (the browser) stays put.
+  const setModeRef = useRef(setMode)
+  setModeRef.current = setMode
+  const agentsVisible = mode === 'agents' || surface?.placement === 'beside'
+  const agentsVisibleRef = useRef(agentsVisible)
+  agentsVisibleRef.current = agentsVisible
+  useEffect(() => {
+    const on = (e: Event): void => {
+      const detail = (e as CustomEvent<HubFocusDetail>).detail
+      if (detail?.kind === 'canvas') setModeRef.current('board')
+      else if (detail?.kind === 'pane' && !agentsVisibleRef.current) setModeRef.current('agents')
+    }
+    window.addEventListener(HUB_FOCUS_EVENT, on)
+    return () => window.removeEventListener(HUB_FOCUS_EVENT, on)
+  }, [])
+
+  /*
+   * The rail is gone; its shortcut is not. Ctrl+Shift+B (and the voice agent's
+   * "toggle the rail") flip `railCollapsed`, and every flip now opens or closes
+   * the project sheet instead. The flag is put straight back to false so the
+   * rail's own components — reseated in the sheet — always draw their full
+   * form, and so a flip is always the same edge.
+   */
+  const railCollapsed = state.settings.railCollapsed
+  const railSeen = useRef(false)
+  useEffect(() => {
+    if (!state.ready) return
+    if (!railSeen.current) {
+      railSeen.current = true
+      if (railCollapsed) actions.patchSettings({ railCollapsed: false })
+      return
+    }
+    if (!railCollapsed) return
+    shellSheet.set(shellSheet.get() === 'projects' ? null : 'projects')
+    actions.patchSettings({ railCollapsed: false })
+  }, [actions, railCollapsed, state.ready])
+
+  /* ------------------------------------------------------------ glides */
+
+  const stageRef = useRef<HTMLElement | null>(null)
+  // A surface arriving beside the agents: the agents' column slides and narrows
+  // into place rather than jumping.
+  useFlipChildren(stageRef, surface?.placement === 'beside' ? surface.id : mode, 'flipStage')
+  const lastMode = useRef(mode)
+  useLayoutEffect(() => {
+    if (lastMode.current === mode) return
+    const was = lastMode.current
+    lastMode.current = mode
+    // Beside-surfaces glide (above); everything else crossfades in.
+    const beside = (id: string): boolean => surfaces.some((s) => s.id === id && s.placement === 'beside')
+    if ((was === 'agents' || beside(was)) && (mode === 'agents' || beside(mode))) return
+    const first = stageRef.current?.firstElementChild
+    if (first instanceof HTMLElement) fadeIn(first, { duration: 260, from: 0.985 })
+  }, [mode, surfaces])
+
+  const Surface = surface?.render ?? null
 
   return (
-    <div className="app" data-ready={state.ready}>
+    <div className="app deck" data-ready={state.ready} data-mode={mode}>
+      <Backdrop />
       <TitleBar />
       {/*
-        Directly under the titlebar and above everything else, so it pushes the
-        whole app down by 30px rather than covering any of it. It renders
-        nothing at all unless there is an update — which, in a dev run, is
-        never. See src/components/UpdateBanner.tsx.
+        Directly under the title bar, pushing the stage down rather than
+        covering it. They render nothing unless there is an update (a packaged
+        build) or the checkout is stale (a dev run) — see each component.
       */}
       <UpdateBanner />
-      {/*
-        Its dev-run twin, and mutually exclusive with it in practice: a packaged
-        build can offer an update and can never be stale, a checkout is the
-        reverse. Same 30px strip, so the two can never both push the app down.
-        See src/components/StaleBanner.tsx.
-      */}
       <StaleBanner />
-      <div className="app__body">
-        <aside className="app__left" data-collapsed={state.settings.railCollapsed}>
-          {/*
-            The rail's four sections — projects, tasks, git, activity — stacked,
-            each collapsible, each switchable off in Appearance. The shelf and
-            the account chip stay outside it: neither is scoped to a project,
-            and the stack's whole premise is that everything in it is talking
-            about the project you have selected.
-            See src/components/rail/RailStack.tsx.
-          */}
-          <RailStack />
-          <ScreenshotTray />
-          <AccountChip />
-        </aside>
-        <main className="app__main">
-          {/*
-            Settings wins outright; under it, the delegation desk (the Tasks
-            panel maximized) swaps in for the grid the same way mosaicZoom
-            swaps a tile to full bleed — a React flag, and the terminals keep
-            running unmounted because terminalHost owns them.
-          */}
-          {state.view === 'settings' ? (
-            <SettingsPage />
-          ) : state.view === 'devices' ? (
-            <DevicePreview />
-          ) : state.tasksMaximized ? (
-            <TasksWorkspace />
-          ) : (
-            <TerminalGrid />
-          )}
-        </main>
-      </div>
-      <StatusBar />
+      <main className="deck__stage" ref={stageRef}>
+        {state.view === 'devices' ? (
+          <DevicePreview />
+        ) : state.tasksMaximized ? (
+          <TasksWorkspace />
+        ) : Surface && surface?.placement === 'full' ? (
+          <div className="deck__full">
+            <Surface active />
+          </div>
+        ) : (
+          <div className="deck__split" data-beside={Surface ? 'true' : undefined}>
+            {Surface ? (
+              <section className="deck__surface" data-flip-stage="surface" aria-label={surface?.title}>
+                <Surface active />
+              </section>
+            ) : null}
+            <div className="deck__agents" data-flip-stage="agents">
+              <TerminalGrid />
+            </div>
+          </div>
+        )}
+      </main>
+      <Dock />
+      <DeckToast />
+      <SettingsPopup />
       {/*
-        The voice hub — the agent's only chrome now that the right-hand panel
-        is gone. Last in the tree and `position: fixed`, so it hovers over
-        everything the app draws while occupying no layout of its own, and it
-        renders nothing at all while docked, when the status-bar pill *is* the
-        hub. The agent itself does not live here: it is headless, in
-        <VoiceAgentProvider> at the root, and answers the phone whether any of
-        this is on screen or not. See src/components/VoiceHub.tsx.
+        The voice hub floats over everything and renders nothing while docked —
+        the dock's voice socket is then the hub. The live hub replaces both.
+        The agent itself is headless, in <VoiceAgentProvider> at the root.
       */}
       <VoiceHub />
-      {/*
-        The other half of the same hub: while it is undocked, the thing you
-        actually see is an always-on-top Windows window that floats over Chrome
-        and stays up when Forge is minimised. This component renders nothing —
-        it opens and closes that window and mirrors the one agent into it. The
-        agent stays here, in this window, for the reason above.
-        See src/state/OverlayHost.tsx.
-      */}
+      {/* Opens and mirrors the always-on-top hub window; renders nothing here. */}
       <OverlayHost />
       <Onboarding />
       <AccountPrompt />
-      {/*
-        What changed in the version that just installed itself. After the welcome,
-        because a fresh install has nothing to catch up on and its settings are
-        seeded so that this stays quiet on a first run.
-      */}
       <WhatsNew />
-      {/*
-        The Forge Mobile pairing prompt — "a phone calling itself X wants to
-        connect". Mounted at the root and last, so an authorisation question is
-        asked over whatever else is on screen, settings page included. It
-        renders nothing until main raises one.
-      */}
+      {/* The Forge Mobile pairing prompt — asked over whatever else is up. */}
       <ApprovalPrompt />
       <WebProjectRemoveBridge />
     </div>

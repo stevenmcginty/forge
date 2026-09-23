@@ -1,0 +1,85 @@
+/*
+ * The desktop deck's own tokens.
+ *
+ * Desktop only: App.tsx imports this and Forge Web never does, so nothing here
+ * can change the phone or the browser client, and src/theme/tokens.css and the
+ * shared theme resolver stay exactly as Forge Web knows them. Everything that
+ * varies by theme is derived from the theme's own tokens with color-mix, so a
+ * custom theme gets a matching deck for free.
+ */
+
+:root {
+  /*
+   * The instrument face: call-signs, the wordmark, state words, the dock's
+   * labels. Bahnschrift is Windows' own DIN — every Windows 10/11 box has it,
+   * so it costs no bundle and never flashes in.
+   */
+  --font-display: 'Bahnschrift', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+
+  /*
+   * Springs, as CSS easings: a damped spring sampled into linear() — k 420 /
+   * c 30 (3% overshoot, settles in ~370ms) for things that pop into place, and
+   * k 520 / c 44 (critically damped, ~330ms) for things that glide. They only
+   * ever drive transform and opacity. src/lib/motion.ts carries the same two.
+   */
+  --spring-pop: linear(0, 0.0321, 0.1119, 0.2191, 0.3381, 0.4581, 0.5714, 0.6734, 0.7617, 0.8354, 0.8949, 0.9412, 0.976, 1.0008, 1.0174, 1.0276, 1.0327, 1.0342, 1.0332, 1.0305, 1.0268, 1.0228, 1.0187, 1.0148, 1.0113, 1.0082, 1.0057, 1.0036, 1);
+  --spring-glide: linear(0, 0.056, 0.1775, 0.3183, 0.4545, 0.5748, 0.6753, 0.7564, 0.8198, 0.8685, 0.9051, 0.9323, 0.9522, 0.9666, 0.9769, 0.9841, 0.9892, 0.9928, 0.9952, 0.9969, 1);
+  --dur-pop: 370ms;
+  --dur-glide: 330ms;
+  --dur-exit: 160ms;
+
+  /* Geometry: windows floating on a scene, with room around them. */
+  --stage-pad-x: 34px;
+  --stage-pad-top: 18px;
+  --stage-gap: 20px;
+  --dock-h: 50px;
+  --dock-bottom: 18px;
+  --dock-clear: calc(var(--dock-h) + var(--dock-bottom) + 20px);
+  --r-pane: 12px;
+  --r-chrome: 14px;
+  --pane-head-h: 32px;
+
+  --z-backdrop: -1;
+  --z-dock: 45;
+  --z-sheet: 58;
+
+  /*
+   * Glass. Translucent only where chrome floats over the backdrop (the dock,
+   * the mode pill); anything that can cover a live terminal — sheets, the
+   * settings pop-up, the toast — is the opaque `--sheet-bg`, so no blur is ever
+   * recomputed under streaming output and no terminal text ghosts through.
+   */
+  --glass-bg: color-mix(in srgb, color-mix(in srgb, var(--bg-panel) 65%, var(--bg-base)) 60%, transparent);
+  --glass-bg-strong: color-mix(in srgb, color-mix(in srgb, var(--bg-panel) 80%, var(--bg-base)) 82%, transparent);
+  --glass-line: color-mix(in srgb, var(--text-primary) 11%, transparent);
+  --glass-line-strong: color-mix(in srgb, var(--text-primary) 19%, transparent);
+  --glass-hi: rgba(255, 255, 255, 0.07);
+  --sheet-bg: color-mix(in srgb, var(--bg-panel) 75%, var(--bg-base));
+  --glass-shadow: 0 18px 48px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --stage-scrim: rgba(3, 4, 6, 0.5);
+}
+
+:root[data-appearance='light'] {
+  --glass-bg: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  --glass-bg-strong: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  --glass-line: color-mix(in srgb, var(--text-primary) 15%, transparent);
+  --glass-line-strong: color-mix(in srgb, var(--text-primary) 25%, transparent);
+  --glass-hi: rgba(255, 255, 255, 0.7);
+  --sheet-bg: var(--bg-panel);
+  --glass-shadow: 0 18px 48px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --stage-scrim: rgba(40, 42, 44, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-pop: 0ms;
+    --dur-glide: 0ms;
+    --dur-exit: 0ms;
+  }
+}
+
+:root[data-reduced-motion='true'] {
+  --dur-pop: 0ms;
+  --dur-glide: 0ms;
+  --dur-exit: 0ms;
+}

@@ -1,5 +1,14 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import type { ThemeCore } from '@shared/types'
+import {
+  BACKDROPS,
+  clearBackdropImage,
+  setBackdrop,
+  setBackdropImage,
+  useBackdrop,
+  useBackdropImage,
+  type BackdropId
+} from '@/lib/backdrop'
 import { useApp } from '@/state/AppState'
 import { BUILTIN_THEMES, allThemes, findTheme, resolveTheme } from '@/theme/themes'
 import { Icon } from '../Icon'
@@ -7,7 +16,7 @@ import { Card, Row, Section, Stepper, Toggle } from './parts'
 import { ThemeEditor } from './ThemeEditor'
 
 /**
- * Themes, type size and motion.
+ * Backdrop, themes, type size and motion.
  *
  * Picking a theme applies it immediately — including to every open terminal —
  * because a theme you have to restart to see is a theme you will never try.
@@ -20,7 +29,12 @@ export function AppearanceSection(): ReactNode {
   const [editing, setEditing] = useState<{ base: ThemeCore; existing: ThemeCore | null } | null>(null)
 
   return (
-    <Section title="Appearance" blurb="One theme drives the whole app, terminals included.">
+    <Section
+      title="Appearance"
+      blurb="One theme drives the whole app, terminals included; the backdrop is the room the panes sit in."
+    >
+      <BackdropCard />
+
       <Card
         title="Theme"
         actions={
@@ -87,13 +101,13 @@ export function AppearanceSection(): ReactNode {
           />
         </Row>
         <Row
-          label="Show working projects in the rail"
+          label="Show working projects in the project sheet"
           hint="A thin dotted line appears beneath a project’s folder while any of its terminals is still producing output. It ignores your own typing, and settles about a second after the work stops."
         >
           <Toggle
             checked={s.railBusyRing}
             onChange={(on) => actions.patchSettings({ railBusyRing: on })}
-            label="Show working projects in the rail"
+            label="Show working projects in the project sheet"
           />
         </Row>
         <Row label="Reduce motion" hint="Windows already asks for this; here it can be forced on">
@@ -107,7 +121,10 @@ export function AppearanceSection(): ReactNode {
         cannot change project from is a rail where none of the rest can be
         pointed at anything. It is the one section with no switch.
       */}
-      <Card title="Left rail" hint="Which sections the rail carries. Each one still collapses in place.">
+      <Card
+        title="Project sheet"
+        hint="Which sections the dock’s project sheet carries under the project list (they were the left rail). Each one still collapses in place."
+      >
         <Row
           label="Tasks"
           hint="The delegation dock: state a goal, get cards back, drag them onto agents. Turning it off hides the panel — it does not touch the planner session, which belongs to the project."
@@ -221,5 +238,156 @@ function ThemeTile({
         ) : null}
       </div>
     </div>
+  )
+}
+
+/* --------------------------------------------------------------- backdrop */
+
+/** Small painted previews — the real scenes are drawn from the live theme. */
+const PREVIEW: Record<Exclude<BackdropId, 'image'>, string> = {
+  deepfield: [
+    'radial-gradient(1px 1px at 18% 30%, #fff, transparent)',
+    'radial-gradient(1px 1px at 64% 22%, #fff, transparent)',
+    'radial-gradient(1.5px 1.5px at 82% 58%, #cfe0ff, transparent)',
+    'radial-gradient(1px 1px at 40% 70%, #fff, transparent)',
+    'radial-gradient(1px 1px at 90% 12%, #ffe8c8, transparent)',
+    'radial-gradient(120% 90% at 15% 110%, rgba(198,255,74,0.22), transparent 60%)',
+    'linear-gradient(180deg, #05070c, #0b0e16)'
+  ].join(', '),
+  nebula: [
+    'radial-gradient(40% 50% at 28% 40%, rgba(120,170,255,0.45), transparent 70%)',
+    'radial-gradient(38% 46% at 74% 34%, rgba(192,139,255,0.4), transparent 70%)',
+    'radial-gradient(50% 44% at 60% 82%, rgba(127,196,255,0.35), transparent 72%)',
+    'linear-gradient(160deg, #06080d, #0b0d14)'
+  ].join(', '),
+  ridgeline: [
+    'linear-gradient(172deg, transparent 58%, #0d1422 58.5%)',
+    'linear-gradient(188deg, transparent 64%, #111b2c 64.5%)',
+    'linear-gradient(176deg, transparent 72%, #070a10 72.5%)',
+    'radial-gradient(60% 30% at 30% 62%, rgba(255,179,71,0.22), transparent 70%)',
+    'linear-gradient(180deg, #06080d 0%, #10192a 45%, #1d2c44 64%)'
+  ].join(', '),
+  calm: 'radial-gradient(80% 60% at 50% -10%, rgba(198,255,74,0.12), transparent 70%), linear-gradient(180deg, #0b0c0e, #111418)'
+}
+
+const EMPTY_IMAGE =
+  'repeating-linear-gradient(135deg, var(--bg-panel), var(--bg-panel) 6px, var(--bg-hover) 6px, var(--bg-hover) 12px)'
+
+function BackdropCard(): ReactNode {
+  const backdrop = useBackdrop()
+  const image = useBackdropImage()
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const pickImage = (): void => fileRef.current?.click()
+
+  return (
+    <Card
+      title="Backdrop"
+      hint="Painted once and left still. Drift adds a slow pan of the stars, paused whenever Forge is hidden and never under Reduce motion. Your own image stays on this PC."
+    >
+      <div className="sbackdrops" role="radiogroup" aria-label="Backdrop">
+        {BACKDROPS.map((b) => {
+          const selected = backdrop.id === b.id && (b.id !== 'image' || Boolean(image))
+          const style: React.CSSProperties =
+            b.id === 'image'
+              ? image
+                ? { backgroundImage: `url("${image}")` }
+                : { background: EMPTY_IMAGE }
+              : { background: PREVIEW[b.id] }
+          return (
+            <button
+              key={b.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              className="sbackdrop"
+              data-selected={selected ? 'true' : undefined}
+              title={b.blurb}
+              onClick={() => {
+                if (b.id === 'image' && !image) pickImage()
+                else setBackdrop({ id: b.id })
+              }}
+            >
+              <span className="sbackdrop__swatch" style={style}>
+                {selected ? (
+                  <span className="sbackdrop__check">
+                    <Icon name="check" size={11} />
+                  </span>
+                ) : null}
+              </span>
+              <span className="sbackdrop__name">{b.name}</span>
+            </button>
+          )
+        })}
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (!file) return
+          setError(null)
+          void setBackdropImage(file).catch(() => setError('That file could not be read as an image.'))
+        }}
+      />
+
+      <Row
+        label="Your image"
+        hint={
+          error ??
+          (image ? 'Kept in this window’s storage, downscaled to 2560px.' : 'Pick any picture — a photo, a render, a screenshot.')
+        }
+      >
+        <div className="srange">
+          <button type="button" className="ghost-btn sbtn" onClick={pickImage}>
+            <Icon name="image" size={12} />
+            {image ? 'Change…' : 'Choose…'}
+          </button>
+          {image ? (
+            <button type="button" className="ghost-btn sbtn" data-danger="true" onClick={clearBackdropImage}>
+              Remove
+            </button>
+          ) : null}
+        </div>
+      </Row>
+
+      <Row label="Dim" hint="Washes the backdrop toward the theme’s background.">
+        <div className="srange">
+          <input
+            type="range"
+            min={0}
+            max={80}
+            step={5}
+            value={Math.round(backdrop.dim * 100)}
+            aria-label="Dim the backdrop"
+            onChange={(e) => setBackdrop({ dim: Number(e.target.value) / 100 })}
+          />
+          <span className="srange__value">{Math.round(backdrop.dim * 100)}%</span>
+        </div>
+      </Row>
+
+      <Row label="Blur" hint="Softens the picture behind the panes. Drawn once, so it costs nothing while you work.">
+        <div className="srange">
+          <input
+            type="range"
+            min={0}
+            max={24}
+            step={1}
+            value={backdrop.blur}
+            aria-label="Blur the backdrop"
+            onChange={(e) => setBackdrop({ blur: Number(e.target.value) })}
+          />
+          <span className="srange__value">{backdrop.blur}px</span>
+        </div>
+      </Row>
+
+      <Row label="Drift" hint="A very slow pan of the stars and haze. Off keeps the room perfectly still.">
+        <Toggle checked={backdrop.drift} onChange={(on) => setBackdrop({ drift: on })} label="Drift" />
+      </Row>
+    </Card>
   )
 }

@@ -38,12 +38,23 @@ import {
 import { collectLeaves } from '@/lib/splitTree'
 import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { terminalHost, type PaneGeometry, type TerminalSpec } from '@/lib/terminals'
+import { boxOf, enterOnce, glideFrom, reducedMotion, useFlipChildren, type Box } from '@/lib/motion'
+import { usePaneActivity } from '@/lib/paneActivity'
+import { useCallSign } from '@/hooks/useHub'
 import { useActiveWorkspace, useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
+import { StateChip } from './shell/StateChip'
 import './MosaicView.css'
+
+/**
+ * Where a tile was on the wall when it was zoomed, and where the zoomed tile
+ * was when it was dropped back — so each view can glide the one tile in from
+ * where the other left it: the camera pushing in on a pane, and pulling out.
+ */
+const zoomFrom: { id: string | null; box: Box | null } = { id: null, box: null }
 
 /**
  * The mosaic: every pane in the project, from every tab, as a small live tile.
@@ -193,10 +204,22 @@ export function MosaicView({
   const columns = columnsFor(cells.length)
 
   const wallRef = useRef<HTMLDivElement | null>(null)
+  const canvasRef = useRef<HTMLDivElement | null>(null)
+  // Tiles re-flow when one arrives or leaves; the survivors glide to their new
+  // cells rather than jumping. Keyed on membership, never on a drag.
+  useFlipChildren(canvasRef, cells.map((c) => c.leaf.id).join(','))
   const ghostRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<DragSession | null>(null)
   const [area, setArea] = useState({ width: 960, height: 600 })
   const [dropHint, setDropHint] = useState(false)
+
+  // The camera follows the selection: a pane picked from the switcher, or by
+  // voice, that is off the edge of a freeform wall glides into view.
+  useEffect(() => {
+    if (!selectedId || !custom) return
+    const tile = wallRef.current?.querySelector<HTMLElement>(`.mtile[data-pane-id="${selectedId}"]`)
+    tile?.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'nearest', inline: 'nearest' })
+  }, [custom, selectedId])
 
   /* The wall's viewport, which is what a fresh tile is sized against. */
   useEffect(() => {
@@ -555,6 +578,9 @@ export function MosaicView({
       // was being typed into — hand the caret back so the keyboard follows.
       if (interactiveId) terminalHost.blur(interactiveId)
       setInteractiveId(null)
+      const tile = wallRef.current?.querySelector<HTMLElement>(`.mtile[data-pane-id="${paneId}"]`)
+      zoomFrom.id = paneId
+      zoomFrom.box = tile ? boxOf(tile) : null
       // Zooming *is* selecting: the pane becomes the app's current pane, so
       // Ctrl+W and friends act on the thing you are looking at.
       actions.revealPane(paneId)
@@ -601,8 +627,11 @@ export function MosaicView({
     // While a tile is being typed into, the keys belong to it — arrows must
     // reach the shell, not move the selection ring.
     if (interactiveId) return
+    // Settings, a sheet or the composer on top: the arrows belong to them.
+    if (state.view !== 'terminals') return
     const onKey = (e: KeyboardEvent): void => {
       if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return
+      if (document.activeElement?.closest('[data-shell-overlay]')) return
       if (
         document.activeElement instanceof HTMLInputElement ||
         document.activeElement instanceof HTMLTextAreaElement ||
@@ -646,7 +675,7 @@ export function MosaicView({
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cells, columns, custom, interactiveId, selectedId, tiles, zoom, zoomCell])
+  }, [cells, columns, custom, interactiveId, selectedId, state.view, tiles, zoom, zoomCell])
 
   /* ---------------------------------------------------- keyboard: interact */
 
@@ -684,6 +713,9 @@ export function MosaicView({
       if (terminalHost.isAltBuffer(paneId)) return
       e.preventDefault()
       e.stopPropagation()
+      const tile = document.querySelector<HTMLElement>(`.mtile[data-pane-id="${paneId}"]`)
+      zoomFrom.id = paneId
+      zoomFrom.box = tile ? boxOf(tile) : null
       actions.setMosaicZoom(null)
     }
     window.addEventListener('keydown', onKey, true)
@@ -726,7 +758,12 @@ export function MosaicView({
           interactive={false}
           onZoom={zoom}
           onOpenInTab={openInTab}
-          onBack={() => actions.setMosaicZoom(null)}
+          onBack={() => {
+            const tile = document.querySelector<HTMLElement>(`.mtile[data-pane-id="${zoomCell.leaf.id}"]`)
+            zoomFrom.id = zoomCell.leaf.id
+            zoomFrom.box = tile ? boxOf(tile) : null
+            actions.setMosaicZoom(null)
+          }}
           onSelect={setPicked}
           onBeginDrag={beginDrag}
           onToggleFit={toggleFit}
@@ -756,6 +793,7 @@ export function MosaicView({
         onDrop={onDrop}
       >
         <div
+          ref={canvasRef}
           className="mosaic__canvas"
           style={custom ? { width: `${canvas.width}px`, height: `${canvas.height}px` } : undefined}
         >
@@ -846,12 +884,28 @@ function MosaicTile({
   const paneId = cell.leaf.id
   const profile = resolveProfile(state.settings.agentProfiles, cell.leaf.profileId)
   const runtime = usePaneRuntime(paneId)
+  const activity = usePaneActivity(paneId, runtime)
+  const callSign = useCallSign(paneId)
   const dead = isPaneDead(runtime)
   const permChip = permissionChip(profile, leafPermissionMode(cell.leaf))
   const [dropping, setDropping] = useState(false)
 
   const stageRef = useRef<HTMLDivElement | null>(null)
   const naturalRef = useRef<HTMLDivElement | null>(null)
+  const tileRef = useRef<HTMLElement | null>(null)
+
+  // Arrive: from where the other view last had this pane (the push-in and the
+  // pull-out of a zoom), or with the one-time pop of a brand-new pane.
+  useLayoutEffect(() => {
+    const el = tileRef.current
+    if (!el) return
+    if (zoomFrom.id === paneId && zoomFrom.box) {
+      glideFrom(el, zoomFrom.box)
+      zoomFrom.id = null
+      zoomFrom.box = null
+    }
+    enterOnce(paneId, el)
+  }, [paneId, zoomed])
 
   const specRef = useRef<TerminalSpec>({
     cwd: project.path,
@@ -1121,8 +1175,11 @@ function MosaicTile({
 
   return (
     <section
+      ref={tileRef}
       className="mtile"
       data-pane-id={paneId}
+      data-flip={zoomed ? undefined : paneId}
+      data-state={activity.state}
       data-zoomed={zoomed}
       data-selected={selected}
       data-interactive={interactive ? 'true' : undefined}
@@ -1175,7 +1232,7 @@ function MosaicTile({
           <AgentBadge profile={profile} size="sm" />
         )}
 
-        <span className="mtile__title truncate">{paneDisplayTitle(profile, cell.leaf.title)}</span>
+        <span className="mtile__title truncate">{callSign ?? paneDisplayTitle(profile, cell.leaf.title)}</span>
         {permChip ? (
           <span className="mtile__perm mono" data-danger={permChip.danger ? 'true' : undefined}>
             {permChip.label}
@@ -1183,9 +1240,15 @@ function MosaicTile({
         ) : null}
         {/* Only ever says how this tile differs from the wall — see toggleFit. */}
         {override ? <span className="mtile__refit mono">{refit ? 'full size' : 'scaled'}</span> : null}
-        <span className="mtile__tab truncate">{cell.tab.title}</span>
+        <span className="mtile__tab truncate" title={statusLabel || undefined}>
+          {callSign ? `${paneDisplayTitle(profile, cell.leaf.title)} · ${cell.tab.title}` : cell.tab.title}
+        </span>
+        {/* The halo's word: which tile the keyboard is on, and how. */}
+        {interactive || zoomed || selected ? (
+          <span className="pane__active">{interactive ? 'Typing' : zoomed ? 'Active' : 'Selected'}</span>
+        ) : null}
+        <StateChip activity={activity} compact={!zoomed} />
         <ActivityDot paneId={paneId} status={runtime.status} />
-        {statusLabel ? <span className="mtile__status mono">{statusLabel}</span> : null}
 
         <div className="mtile__actions">
           {dead ? (

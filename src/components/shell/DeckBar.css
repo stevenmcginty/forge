@@ -1,0 +1,233 @@
+/*
+ * The deck's top bar. No slab: it is a strip of the backdrop you can drag the
+ * window by, with three things on it — the mark, the mode switcher (the one
+ * glass object, centred), and a small cluster of tools beside the native window
+ * buttons.
+ */
+
+.deckbar {
+  position: relative;
+  z-index: var(--z-dock);
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: var(--titlebar-h);
+  padding-left: 16px;
+  -webkit-app-region: drag;
+  transition: opacity var(--dur-med) var(--ease-out);
+}
+
+.deckbar[data-focused='false'] .deckbar__left,
+.deckbar[data-focused='false'] .deckbar__right {
+  opacity: 0.6;
+}
+
+.deckbar__left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  /* Stop short of the centred mode switcher. */
+  max-width: calc(50% - 200px);
+}
+
+/* The agents' tabs, portalled in from TerminalGrid. */
+.deckbar__tabs {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  margin-left: 14px;
+  overflow: hidden;
+}
+
+.deckbar__tabs .tabstrip {
+  flex: 1;
+  min-width: 0;
+}
+
+.deckbar__tabs .tabstrip__tabs {
+  min-width: 0;
+  /* More tabs than room: they scroll, and the edge fades rather than cuts. */
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+
+.deckbar__view {
+  display: flex;
+  align-items: center;
+}
+
+.deckbar__mark {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.deckbar__mark[data-channel='dev'] {
+  color: var(--warn);
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+.deckbar__wordmark {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.deckbar__channel {
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--warn);
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+/* ------------------------------------------------------------------ modes */
+
+.deckbar__modes {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: var(--r-full);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
+  border: 1px solid var(--glass-line);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 var(--glass-hi);
+  -webkit-app-region: no-drag;
+}
+
+/* The lit capsule: one element that glides from mode to mode. */
+.deckbar__lamp {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  height: 22px;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    0 0 16px -4px var(--accent-glow);
+  pointer-events: none;
+}
+
+.deckbar__lamp[data-ready='true'] {
+  transition:
+    transform var(--dur-glide) var(--spring-glide),
+    width var(--dur-glide) var(--spring-glide);
+}
+
+.deckbar__mode {
+  position: relative;
+  height: 22px;
+  padding: 0 13px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.deckbar__mode:hover {
+  color: var(--text-primary);
+}
+
+.deckbar__mode[data-active='true'] {
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ tools */
+
+.deckbar__right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  justify-content: flex-end;
+  -webkit-app-region: no-drag;
+}
+
+/* The right cluster only claims the space it needs. */
+.deckbar__left + .deckbar__modes + .deckbar__right {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.deckbar__btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  border-radius: 9px;
+  color: var(--text-muted);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.deckbar__btn:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.deckbar__btn[data-on='true'] {
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.deckbar__badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+.deckbar__controls-gap {
+  flex: none;
+  width: 146px;
+}
+
+/* The shelf drawer: the tray and the account chip, one above the other. */
+.deckbar__shelf {
+  display: flex;
+  flex-direction: column;
+  margin: calc(var(--s-3) * -1);
+}
+
+.deckbar__shelf .tray {
+  border-top: 0;
+}

@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import type { TerminalTab, WorkspaceViewMode } from '@shared/types'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { ACCENT_PALETTE, TAB_TEXT_PALETTE, isShellProfile, resolveProfile, splitProfiles } from '@/lib/agents'
 import { TAB_DRAG_TYPE } from '@/lib/mosaicLayout'
+import { fadeIn, useFlipChildren } from '@/lib/motion'
+import { tabsHost as tabsHostStore, toolsHost as toolsHostStore, useHost, viewHost as viewHostStore } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
 import { useAnyBusy } from '@/hooks/usePaneRuntime'
 import {
@@ -24,6 +27,7 @@ import { Icon } from './Icon'
 import { MosaicView } from './MosaicView'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
 import { SkillsButton } from './SkillsFlyout'
+import { FocusReticle } from './shell/FocusReticle'
 import { SplitView } from './SplitView'
 import { Toggle } from './settings/parts'
 import './TerminalGrid.css'
@@ -42,6 +46,10 @@ export function TerminalGrid(): ReactNode {
   const { used, max } = usePaneCount()
 
   const newTabRef = useRef<HTMLButtonElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  const tabsHost = useHost(tabsHostStore)
+  const viewHost = useHost(viewHostStore)
+  const toolsHost = useHost(toolsHostStore)
   const [chooserOpen, setChooserOpen] = useState(false)
   const [dragFrom, setDragFrom] = useState<number | null>(null)
 
@@ -79,6 +87,22 @@ export function TerminalGrid(): ReactNode {
     }
   }, [tabs, tinted])
 
+  /*
+   * The glides. A pane that survives a re-layout — a sibling closed, a split
+   * opened — slides and stretches into its new box (keyed on which panes the
+   * tab holds, so dragging a divider is never animated against). A tab switch
+   * or a flip between tabs and canvas crossfades the whole body instead.
+   */
+  const leafKey = `${viewMode}:${tab ? collectLeaves(tab.root).map((l) => l.id).join(',') : ''}`
+  useFlipChildren(bodyRef, leafKey)
+  const switchKey = `${project?.id ?? ''}:${viewMode}:${viewMode === 'tabs' ? (workspace.activeTabId ?? '') : ''}`
+  const lastSwitch = useRef(switchKey)
+  useLayoutEffect(() => {
+    if (lastSwitch.current === switchKey) return
+    lastSwitch.current = switchKey
+    if (bodyRef.current) fadeIn(bodyRef.current)
+  }, [switchKey])
+
   if (!state.ready) return <div className="grid grid--booting" />
 
   if (!project) {
@@ -87,8 +111,8 @@ export function TerminalGrid(): ReactNode {
         <EmptyState
           icon="folder"
           eyebrow="Forge"
-          title="No projects yet"
-          body="Add a folder and Forge gives it its own terminal workspace — shells, Claude Code, Kimi, side by side."
+          title="Bring a project aboard"
+          body="Add a folder and Forge gives it its own deck — Claude Code, Codex, Gemini and shells, side by side, all listening."
           action={
             <button type="button" className="cta-btn" onClick={() => void actions.addProject()}>
               <Icon name="plus" size={14} />
@@ -102,84 +126,110 @@ export function TerminalGrid(): ReactNode {
 
   const atLimit = used >= max
 
-  return (
-    <div className="grid">
-      <div className="tabstrip" role="tablist" aria-label="Terminal tabs">
-        <div className="tabstrip__tabs">
-          {workspace.tabs.map((t, index) => (
-            <Tab
-              key={t.id}
-              tab={t}
-              index={index}
-              active={t.id === workspace.activeTabId}
-              onWall={mosaic.wallTabs.includes(t.id)}
-              dragFrom={dragFrom}
-              setDragFrom={setDragFrom}
-            />
-          ))}
-        </div>
-
-        <button
-          ref={newTabRef}
-          type="button"
-          className="ghost-btn tabstrip__new"
-          title={
-            atLimit
-              ? `Session limit reached (${max})`
-              : atTabLimit
-                ? `A project holds at most ${MAX_TABS_PER_PROJECT} tabs`
-                : 'New terminal tab (Ctrl+T)'
-          }
-          disabled={atLimit}
-          onClick={() => {
-            // Still clickable at the tab cap: the press is how you find out
-            // there is one, rather than a button that quietly went dead.
-            if (atTabLimit) {
-              actions.setNotice(`A project holds at most ${MAX_TABS_PER_PROJECT} tabs`)
-              return
-            }
-            setChooserOpen(true)
-          }}
-        >
-          <Icon name="plus" size={14} />
-        </button>
-
-        <div className="tabstrip__spacer" />
-
-        {/* The wall's legibility switch, next to the toggle that gets you there. */}
-        {viewMode === 'mosaic' ? <MosaicTextToggle /> : null}
-
-        {/*
-          The freeform wall's one control, parked here rather than over the
-          tiles: the mosaic must not gain a toolbar the moment you drag
-          something, or every tile shifts down by the height of it.
-        */}
-        {viewMode === 'mosaic' && mosaic.mode === 'custom' ? (
-          <button
-            type="button"
-            className="ghost-btn tabstrip__reset"
-            title="Freeform wall — drag a header to move it, an edge to resize it, double-click a header to refit its terminal. Click here to put every tile back in the grid."
-            onClick={() => actions.resetMosaicLayout()}
-          >
-            <Icon name="restart" size={11} />
-            Reset to grid
-          </button>
-        ) : null}
-
-        {/* The two references, next to the switches rather than in Settings:
-            what `claude` understands changes weekly, what it *knows* is a
-            folder you curate, and the moment you want either is the moment you
-            are looking at a pane. Skills first — it is the one you feed. */}
-        <SkillsButton />
-
-        <CommandsButton />
-
-        <TabTintToggle />
-
-        <ViewToggle mode={viewMode} />
+  const tabStripParts = (
+    <>
+      <div className="tabstrip__tabs">
+        {workspace.tabs.map((t, index) => (
+          <Tab
+            key={t.id}
+            tab={t}
+            index={index}
+            active={t.id === workspace.activeTabId}
+            onWall={mosaic.wallTabs.includes(t.id)}
+            dragFrom={dragFrom}
+            setDragFrom={setDragFrom}
+          />
+        ))}
       </div>
 
-      <div className="grid__body">
+      <button
+        ref={newTabRef}
+        type="button"
+        className="ghost-btn tabstrip__new"
+        title={
+          atLimit
+            ? `Session limit reached (${max})`
+            : atTabLimit
+              ? `A project holds at most ${MAX_TABS_PER_PROJECT} tabs`
+              : 'New terminal tab (Ctrl+T)'
+        }
+        disabled={atLimit}
+        onClick={() => {
+          // Still clickable at the tab cap: the press is how you find out
+          // there is one, rather than a button that quietly went dead.
+          if (atTabLimit) {
+            actions.setNotice(`A project holds at most ${MAX_TABS_PER_PROJECT} tabs`)
+            return
+          }
+          setChooserOpen(true)
+        }}
+      >
+        <Icon name="plus" size={14} />
+      </button>
+    </>
+  )
+  const tabStrip = (
+    <div className="tabstrip" role="tablist" aria-label="Terminal tabs">
+      {tabStripParts}
+    </div>
+  )
+  const toolParts = (
+    <>
+      {/* The wall's legibility switch, next to the toggle that gets you there. */}
+      {viewMode === 'mosaic' ? <MosaicTextToggle /> : null}
+
+      {/*
+        The freeform wall's one control, parked here rather than over the
+        tiles: the mosaic must not gain a toolbar the moment you drag
+        something, or every tile shifts down by the height of it.
+      */}
+      {viewMode === 'mosaic' && mosaic.mode === 'custom' ? (
+        <button
+          type="button"
+          className="ghost-btn tabstrip__reset"
+          title="Freeform wall — drag a header to move it, an edge to resize it, double-click a header to refit its terminal. Click here to put every tile back in the grid."
+          onClick={() => actions.resetMosaicLayout()}
+        >
+          <Icon name="restart" size={11} />
+          Reset to grid
+        </button>
+      ) : null}
+
+      {/* The two references, next to the switches rather than in Settings:
+          what `claude` understands changes weekly, what it *knows* is a
+          folder you curate, and the moment you want either is the moment you
+          are looking at a pane. Skills first — it is the one you feed. */}
+      <SkillsButton />
+
+      <CommandsButton />
+
+      <TabTintToggle />
+    </>
+  )
+  const viewToggle = <ViewToggle mode={viewMode} />
+
+  return (
+    <div className="grid">
+      {/*
+        One slim top layer: on the deck the tabs live in the top bar, the
+        Tabs/Canvas switch beside the window tools, and the references in the
+        dock's Tools sheet — each portalled into a host the shell registers
+        (see tabsHost in lib/shellSlots). Without the hosts, the old strip.
+      */}
+      {tabsHost ? (
+        createPortal(tabStrip, tabsHost)
+      ) : (
+        <div className="tabstrip" role="tablist" aria-label="Terminal tabs">
+          {tabStripParts}
+          <div className="tabstrip__spacer" />
+          {toolParts}
+          {viewToggle}
+        </div>
+      )}
+      {tabsHost && viewHost ? createPortal(viewToggle, viewHost) : null}
+      {tabsHost && toolsHost ? createPortal(<div className="deck-tools">{toolParts}</div>, toolsHost) : null}
+
+      <div className="grid__body" ref={bodyRef}>
         {viewMode === 'mosaic' ? (
           <MosaicView
             project={project}
@@ -193,27 +243,35 @@ export function TerminalGrid(): ReactNode {
             }}
           />
         ) : tab ? (
-          <SplitView
-            node={tab.root}
-            project={project}
-            activePaneId={tab.activePaneId}
-            onlyPane={countLeaves(tab.root) === 1}
-          />
+          <>
+            <SplitView
+              node={tab.root}
+              project={project}
+              activePaneId={tab.activePaneId}
+              onlyPane={countLeaves(tab.root) === 1}
+            />
+            <FocusReticle
+              rootRef={bodyRef}
+              selector=".pane[data-focused='true']"
+              targetKey={tab.activePaneId}
+              enabled={countLeaves(tab.root) > 1}
+            />
+          </>
         ) : (
           <EmptyState
             icon="terminal"
             eyebrow={project.name}
-            title="No terminals open"
+            title="The deck is clear"
             body={
               <>
-                Open one in <span className="mono">{project.path}</span>. Panes split, and every agent runs in a
-                real PowerShell.
+                Open an agent in <span className="mono">{project.path}</span>. Panes split, glide and keep running
+                whatever you look at.
               </>
             }
             action={
               <button type="button" className="cta-btn" disabled={atLimit} onClick={() => setChooserOpen(true)}>
                 <Icon name="plus" size={14} />
-                Open a terminal
+                Open an agent
               </button>
             }
             hint="Ctrl + T"
@@ -328,9 +386,9 @@ function ViewToggle({ mode }: { mode: WorkspaceViewMode }): ReactNode {
 
   useEffect(() => cancelFlip, [])
 
-  const options: Array<{ value: WorkspaceViewMode; icon: 'viewTabs' | 'viewMosaic'; label: string }> = [
-    { value: 'tabs', icon: 'viewTabs', label: 'Tab view' },
-    { value: 'mosaic', icon: 'viewMosaic', label: 'Mosaic — every session as a live tile' }
+  const options: Array<{ value: WorkspaceViewMode; icon: 'viewTabs' | 'viewMosaic'; label: string; word: string }> = [
+    { value: 'tabs', icon: 'viewTabs', label: 'Tab view', word: 'Tabs' },
+    { value: 'mosaic', icon: 'viewMosaic', label: 'Canvas — every session as a live tile', word: 'Canvas' }
   ]
 
   return (
@@ -361,7 +419,8 @@ function ViewToggle({ mode }: { mode: WorkspaceViewMode }): ReactNode {
           onDragLeave={cancelFlip}
           onDrop={cancelFlip}
         >
-          <Icon name={option.icon} size={13} />
+          <Icon name={option.icon} size={12} />
+          <span className="viewtoggle__word">{option.word}</span>
         </button>
       ))}
     </div>

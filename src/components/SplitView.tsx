@@ -86,7 +86,7 @@ function Split({
 
   return (
     <div className="split" data-direction={node.direction} data-dragging={dragging} ref={hostRef}>
-      <div className="split__side" style={{ flexBasis: `calc(${pct}% - 3px)` }}>
+      <div className="split__side" style={{ flexBasis: `calc(${pct}% - 10px)` }}>
         <SplitView node={node.a} project={project} activePaneId={activePaneId} onlyPane={false} />
       </div>
       <div
@@ -99,7 +99,7 @@ function Split({
       >
         <span className="split__grip" />
       </div>
-      <div className="split__side" style={{ flexBasis: `calc(${100 - pct}% - 3px)` }}>
+      <div className="split__side" style={{ flexBasis: `calc(${100 - pct}% - 10px)` }}>
         <SplitView node={node.b} project={project} activePaneId={activePaneId} onlyPane={false} />
       </div>
     </div>

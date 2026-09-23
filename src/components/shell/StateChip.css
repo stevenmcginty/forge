@@ -1,0 +1,58 @@
+.statechip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 18px;
+  padding: 0 7px 0 6px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+
+.statechip__glyph {
+  flex: none;
+}
+
+.statechip__clock {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+/* Working speaks in the agent's own colour — it is that agent's output. */
+.statechip[data-state='working'] {
+  color: color-mix(in srgb, var(--pane-accent, var(--accent)) 80%, var(--text-primary));
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 12%, transparent);
+}
+
+.statechip[data-state='working'] .statechip__clock {
+  color: color-mix(in srgb, var(--pane-accent, var(--accent)) 55%, var(--text-muted));
+}
+
+.statechip[data-state='attention'] {
+  color: var(--warn);
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+.statechip[data-state='done'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.statechip[data-state='exited'],
+.statechip[data-state='failed'] {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.statechip[data-state='starting'],
+.statechip[data-state='dormant'] {
+  color: var(--text-dim);
+}

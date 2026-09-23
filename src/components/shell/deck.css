@@ -1,0 +1,413 @@
+/*
+ * The desktop deck's pane, tab and split chrome.
+ *
+ * Every rule here is scoped under `.deck` — the class only the desktop shell's
+ * root carries — because Forge Web imports TerminalPane.css, TerminalGrid.css,
+ * SplitView.css and EmptyState.css directly (web/src/main.tsx, decision 4) and
+ * must not change shape because the desktop did. The base stylesheets stay as
+ * they were; this file only overrides, and only on the desktop.
+ */
+
+/* ================================================================ panes
+ *
+ * A pane on the deck: an opaque terminal (the WebGL canvas never composites
+ * over anything) with a 1px edge that *is* the pane's state, lit in light
+ * rather than drawn in chrome.
+ *
+ *   edge   the agent's colour: dim at rest, bright while it works, amber when
+ *          it waits on you, a cream flash when it finishes.
+ *   halo   focus — the theme accent as a soft outer glow, so "which pane has
+ *          the keyboard" never shares a colour with "which agent is this".
+ *
+ * The header says the same state as a word and a shape (StateChip), because an
+ * edge that only changes hue tells a colourblind eye nothing.
+ */
+
+.deck .pane {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 24%, var(--line-hairline));
+  border: 1px solid var(--edge);
+  border-radius: var(--r-pane);
+  box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.8);
+  transition:
+    border-color var(--dur-med) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out);
+}
+
+.deck .pane[data-state='working'] {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 64%, transparent);
+}
+
+.deck .pane[data-state='attention'] {
+  --edge: color-mix(in srgb, var(--warn) 78%, transparent);
+}
+
+/* Finished: a moment of bright edge that eases back to rest by itself when the
+   state moves on — the border transition above does the easing. */
+.deck .pane[data-state='done'] {
+  --edge: color-mix(in srgb, var(--text-primary) 62%, transparent);
+}
+
+.deck .pane[data-state='exited'],
+.deck .pane[data-state='failed'] {
+  --edge: var(--danger-line);
+}
+
+.deck .pane[data-focused='true'] {
+  border-color: var(--edge);
+  box-shadow:
+    0 0 0 1.5px var(--accent),
+    0 0 0 6px var(--accent-soft),
+    0 0 42px 2px var(--accent-glow),
+    0 20px 50px -20px rgba(0, 0, 0, 0.9);
+}
+
+/* The word for it: the pane with the keyboard says so in its header. */
+.deck .pane__active {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 18px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+/* A dispatch comet landing: the edge answers for a beat. */
+.deck .pane[data-hit='true'] {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 90%, white);
+  transition-duration: 60ms;
+}
+
+.deck .pane[data-dropping='true'] {
+  border-color: var(--accent-line);
+}
+
+.deck .pane[data-dropping='true']::after {
+  border-radius: var(--r-pane);
+}
+
+.deck .pane__header {
+  height: var(--pane-head-h);
+  padding: 0 var(--s-2) 0 var(--s-4);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 5%, var(--bg-terminal));
+  border-bottom: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 10%, var(--line-soft));
+}
+
+.deck .pane[data-focused='true'] .pane__header {
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 8%, var(--bg-header-live));
+  border-bottom-color: color-mix(in srgb, var(--pane-accent, var(--accent)) 14%, var(--line-hairline));
+}
+
+.deck .pane__ident {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  flex: 1;
+  min-width: 0;
+}
+
+.deck .pane__title {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 1px var(--s-2);
+  margin-left: calc(var(--s-2) * -1);
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+}
+
+.deck .pane__kind {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+}
+
+.deck .pane__branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 150px;
+  height: 18px;
+  padding: 0 7px 0 6px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.deck .pane__branch svg {
+  flex: none;
+}
+
+/* ================================================================ splits
+ *
+ * Panes float apart like windows on a scene: a 20px gutter (SplitView.tsx
+ * takes 10px off each side's basis to match), so the backdrop reads between
+ * them.
+ */
+
+.deck .split[data-direction='row'] > .split__divider {
+  width: 20px;
+}
+
+.deck .split[data-direction='column'] > .split__divider {
+  height: 20px;
+}
+
+.deck .split__divider:hover .split__grip {
+  background: var(--glass-line-strong);
+}
+
+/* ================================================================ the grid */
+
+.deck .grid {
+  gap: var(--stage-gap);
+}
+
+.deck .grid--booting {
+  background: transparent;
+}
+
+/* Positioned so the focus reticle can place itself from pane offsets. */
+.deck .grid__body {
+  position: relative;
+  padding: 0;
+}
+
+/* ------------------------------------------------------------ tab strip
+ *
+ * The deck has one top layer. The tabs are portalled into the top bar (see
+ * tabsHost), so the strip is no longer a bar of its own — just a row of chips
+ * on the window's draggable edge, each of which is not draggable itself.
+ */
+
+.deck .tabstrip {
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  -webkit-app-region: no-drag;
+}
+
+.deck .tabstrip__tabs {
+  align-items: center;
+  gap: 3px;
+}
+
+.deck .tabstrip__new {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 0;
+  border-radius: var(--r-full);
+}
+
+/* The reference tools, reseated as rows in the dock's Tools sheet. */
+.deck .deck-tools {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.deck .deck-tools > .ghost-btn,
+.deck .deck-tools .tabstrip__skills,
+.deck .deck-tools .tabstrip__cmds {
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  margin: 0;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: var(--t-md);
+  color: var(--text-secondary);
+}
+
+.deck .deck-tools .tabstrip__tint {
+  display: flex;
+  align-items: center;
+}
+
+.deck .deck-tools .tabstrip__tint::after {
+  content: 'Tab text colours';
+  font-size: var(--t-md);
+}
+
+.deck .deck-tools .tabstrip__tint[data-on='true']::after {
+  content: 'Tab text colours: on';
+}
+
+.deck .viewtoggle {
+  margin-bottom: 0;
+  margin-right: 6px;
+  gap: 2px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-full);
+}
+
+.deck .viewtoggle__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  height: 24px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.deck .viewtoggle__btn[data-active='true'] {
+  background: var(--accent-soft);
+}
+
+.deck .tab {
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+}
+
+.deck .tab:hover {
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.deck .tab[data-active='true'] {
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-panel));
+  border-color: var(--accent-line);
+  box-shadow: 0 0 18px -6px var(--accent-glow);
+}
+
+.deck .tab[data-tint='true'] {
+  background: color-mix(in srgb, var(--tab-tint) 10%, transparent);
+}
+
+.deck .tab[data-tint='true']:hover {
+  background: color-mix(in srgb, var(--tab-tint) 14%, transparent);
+}
+
+.deck .tab[data-tint='true'][data-active='true'] {
+  background: color-mix(in srgb, var(--tab-tint) 18%, var(--bg-panel));
+  border-color: color-mix(in srgb, var(--tab-tint) 48%, transparent);
+  box-shadow: 0 0 18px -6px color-mix(in srgb, var(--tab-tint) 45%, transparent);
+}
+
+.deck .tab__title {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* Only the desktop's view toggle has words in it. */
+.viewtoggle__word {
+  line-height: 1;
+}
+
+/* ============================================================ empty states
+ *
+ * The full-size empty state sits straight on the backdrop, so it is set like a
+ * title card: an instrument ring for the glyph, the display face at size, and
+ * the call to action as the one lit thing in the room.
+ */
+
+.deck .empty[data-size='md'] {
+  gap: var(--s-5);
+}
+
+.deck .empty[data-size='md'] .empty__plate {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  margin-bottom: var(--s-4);
+  border-radius: 50%;
+  color: var(--accent);
+  background: radial-gradient(circle at 50% 38%, var(--glass-bg-strong), var(--glass-bg));
+  border: 1px solid var(--glass-line-strong);
+  box-shadow:
+    0 0 0 8px color-mix(in srgb, var(--accent) 5%, transparent),
+    0 0 48px -6px var(--accent-glow);
+}
+
+.deck .empty[data-size='md'] .empty__plate::after {
+  content: '';
+  position: absolute;
+  inset: -17px;
+  border-radius: 50%;
+  border: 1px dashed color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.deck .empty[data-size='md'] .empty__eyebrow {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  color: var(--text-muted);
+}
+
+.deck .empty[data-size='md'] .empty__title {
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.1vw, 34px);
+  font-weight: 300;
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+}
+
+.deck .empty[data-size='md'] .empty__body {
+  max-width: 44ch;
+  font-size: var(--t-lg);
+  color: var(--text-secondary);
+}
+
+.deck .empty[data-size='md'] .empty__hint {
+  font-family: var(--font-display);
+  letter-spacing: 0.22em;
+}
+
+/* ================================================================== comet */
+
+.comet {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-toast);
+  width: 110px;
+  height: 4px;
+  margin: -2px 0 0 -104px;
+  border-radius: 4px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--comet) 85%, transparent) 72%, white);
+  box-shadow:
+    0 0 14px 2px color-mix(in srgb, var(--comet) 75%, transparent),
+    104px 0 18px 5px color-mix(in srgb, var(--comet) 70%, transparent);
+  transform-origin: 104px 50%;
+  will-change: transform, opacity;
+}
+
+/* ============================================================ voice socket
+ *
+ * The agent switch and the dictation pill were drawn for a 26px status bar;
+ * in the dock they stand a little taller so they read as the controls they are.
+ */
+.dock__voice .agentbtn,
+.dock__voice .dpill {
+  height: 24px;
+}

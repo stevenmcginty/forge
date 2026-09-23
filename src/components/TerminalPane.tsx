@@ -17,6 +17,9 @@ import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost, type TerminalSpec } from '@/lib/terminals'
 import { remoteControlName, REMOTE_CONTROL_URL } from '@shared/remote'
+import { enterOnce } from '@/lib/motion'
+import { usePaneActivity } from '@/lib/paneActivity'
+import { useCallSign } from '@/hooks/useHub'
 import { useActiveWorkspace, useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
@@ -25,6 +28,8 @@ import { ForemanFooter, ForemanSeed, ForemanToggle } from './ForemanBar'
 import { HandoffMenu } from './HandoffMenu'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow } from './Popover'
+import { StateChip } from './shell/StateChip'
+import { useBranch } from './shell/useBranch'
 import './TerminalPane.css'
 
 /**
@@ -84,6 +89,7 @@ export function TerminalPane({
   const chip = permissionChip(profile, override)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const sectionRef = useRef<HTMLElement | null>(null)
   const splitBtnRef = useRef<HTMLButtonElement | null>(null)
   const handoffBtnRef = useRef<HTMLButtonElement | null>(null)
   const phoneBtnRef = useRef<HTMLButtonElement | null>(null)
@@ -94,6 +100,9 @@ export function TerminalPane({
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean; draft: number } | null>(null)
   const [dropping, setDropping] = useState(false)
   const runtime = usePaneRuntime(leaf.id)
+  const activity = usePaneActivity(leaf.id, runtime)
+  const callSign = useCallSign(leaf.id)
+  const branch = useBranch(project.id)
   const watcher = watcherChip(runtime)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(leaf.title)
@@ -176,6 +185,12 @@ export function TerminalPane({
     if (!el) return
     terminalHost.attach(leaf.id, el, specRef.current)
     return () => terminalHost.detach(leaf.id)
+  }, [leaf.id])
+
+  // A pane that has never been on screen before springs in; one coming back
+  // from another tab or view does not — see enterOnce.
+  useLayoutEffect(() => {
+    if (sectionRef.current) enterOnce(leaf.id, sectionRef.current)
   }, [leaf.id])
 
   useEffect(() => {
@@ -393,10 +408,13 @@ export function TerminalPane({
 
   return (
     <section
+      ref={sectionRef}
       className="pane"
       data-pane-id={leaf.id}
+      data-flip={leaf.id}
       data-focused={focused}
       data-status={runtime.status}
+      data-state={activity.state}
       data-dropping={dropping ? 'true' : undefined}
       // The actions strip only appears on hover, and the handoff menu is opened
       // from it — moving the pointer to the menu would otherwise take the
@@ -417,37 +435,69 @@ export function TerminalPane({
       <header className="pane__header">
         <AgentBadge profile={profile} size="sm" />
 
-        {editing ? (
-          <input
-            className="pane__title-input"
-            value={draft}
-            autoFocus
-            spellCheck={false}
-            placeholder={profile.name}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commitTitle}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Enter') commitTitle()
-              if (e.key === 'Escape') {
+        {/*
+          Who this is, in two weights: the call-sign when the pane has one (its
+          short spoken name) and the pane's title beside it, muted; without one,
+          the title leads and the agent's name follows.
+        */}
+        <div className="pane__ident">
+          {editing ? (
+            <input
+              className="pane__title-input"
+              value={draft}
+              autoFocus
+              spellCheck={false}
+              placeholder={profile.name}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={(e) => {
+                e.stopPropagation()
+                if (e.key === 'Enter') commitTitle()
+                if (e.key === 'Escape') {
+                  setDraft(leaf.title)
+                  setEditing(false)
+                }
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              className="pane__title truncate"
+              title="Click to rename"
+              onClick={() => {
                 setDraft(leaf.title)
-                setEditing(false)
-              }
-            }}
-          />
-        ) : (
-          <button
-            type="button"
-            className="pane__title truncate"
-            title="Click to rename"
-            onClick={() => {
-              setDraft(leaf.title)
-              setEditing(true)
-            }}
-          >
-            {paneDisplayTitle(profile, leaf.title)}
-          </button>
-        )}
+                setEditing(true)
+              }}
+            >
+              {callSign ?? paneDisplayTitle(profile, leaf.title)}
+            </button>
+          )}
+          {editing ? null : (
+            <span className="pane__kind truncate" title={statusLabel ? `${profile.name} · ${statusLabel}` : profile.name}>
+              {callSign
+                ? paneDisplayTitle(profile, leaf.title)
+                : paneDisplayTitle(profile, leaf.title) === profile.name
+                  ? ''
+                  : profile.name}
+            </span>
+          )}
+        </div>
+
+        {branch ? (
+          <span className="pane__branch" title={`On branch ${branch}`}>
+            <Icon name="branch" size={10} />
+            <span className="truncate">{branch}</span>
+          </span>
+        ) : null}
+
+        {/* Which pane has the keyboard, in a word as well as the halo. */}
+        {focused ? (
+          <span className="pane__active" title="This pane has the keyboard — typing and the composer go here">
+            Active
+          </span>
+        ) : null}
+
+        <StateChip activity={activity} />
 
         {/* A pane that never asks permission says so, always. */}
         {chip ? (
@@ -492,8 +542,6 @@ export function TerminalPane({
         ) : null}
 
         <ActivityDot paneId={leaf.id} status={runtime.status} />
-
-        {statusLabel ? <span className="pane__status mono">{statusLabel}</span> : null}
 
         {/* Outside .pane__actions: the actions strip only appears on hover, and
             "you can pick this up on your phone" is a property of the pane worth
