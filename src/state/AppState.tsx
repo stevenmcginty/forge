@@ -281,6 +281,7 @@ const FALLBACK_SETTINGS: Settings = {
   // and the pane agents' browser rule.
   agentBrain: 'claude',
   agentSilenceMs: 800,
+  agentIdleTimeoutMs: 120_000,
   dictateAutoSend: false,
   agentsForgeBrowserOnly: true,
   memoryLlmSummarize: false,

@@ -31,6 +31,9 @@ import { describePaneText, registerVoiceAgentTools } from '@/lib/agenttools'
 import { migrateAgentBrain } from '@shared/agent-brain'
 import { getHubRuntime } from '@/lib/hubRuntime'
 import { buildAppContext, ContextTracker, projectBranch, type PaneStateWord } from '@/lib/realtime/context'
+import { endedNote, parseVoiceDictation, stopPhraseOf, type ConversationEnd, type VoiceDictation } from '@/lib/realtime/conversation'
+import { dictateToPane, paneWords, resolveSpokenPane } from '@/lib/realtime/dictate'
+import { HUB_COMPOSER_EVENT, type HubComposerDetail } from '@/lib/hubnav'
 import { isCapturing, listenStep } from '@/lib/realtime/micstate'
 import { resolveAgentBrain } from '@/lib/realtime/provider'
 import { agentMemory } from '@/lib/agentmemory'
@@ -385,6 +388,14 @@ export interface VoiceAgentCtx {
     /** A capture was asked for and has not started yet. */
     wanted: boolean
   }
+  /**
+   * Why the last conversation ended — "Conversation ended — you said "that's
+   * all"" — until the next one opens (B11). Null while one is open or none has
+   * ended yet.
+   */
+  ended?: string | null
+  /** Close the conversation and say why: a stop phrase, the idle clock, a press. */
+  endConversation?(end: ConversationEnd): void
 }
 
 /**
@@ -489,6 +500,14 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   const handsFreeRef = useRef(false)
   const silenceMsRef = useRef(state.settings.agentSilenceMs)
   silenceMsRef.current = state.settings.agentSilenceMs
+
+  /**
+   * How the last conversation ended, in words, until the next one opens (B11).
+   * `endConversationRef` is how `runPhrase` — declared long before the
+   * function it needs — closes it on "that's all".
+   */
+  const [ended, setEnded] = useState<string | null>(null)
+  const endConversationRef = useRef<(end: ConversationEnd) => void>(() => undefined)
 
   /* ------------------------------------------------------------ dictation
    *
@@ -754,7 +773,13 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         // Keyed by turn (and by chunk within it): a re-render — or a second
         // surface showing the same conversation — cannot make it say the same
         // thing twice.
-        await voiceSpeaker.speakOnce(next.key, next.text, voiceConfigRef.current, (msg) => noticeRef.current(msg))
+        // Dev evidence (B11): each spoken chunk's start and end, in dev.log.
+        const saidAt = Date.now()
+        if (import.meta.env.DEV) console.info(`[hub] event=tts-start key=${next.key} chars=${next.text.length}`)
+        const said = await voiceSpeaker.speakOnce(next.key, next.text, voiceConfigRef.current, (msg) => noticeRef.current(msg))
+        if (import.meta.env.DEV) {
+          console.info(`[hub] event=tts-end key=${next.key} spoke=${said.spoke} engine=${said.engine} ms=${Date.now() - saidAt}`)
+        }
       }
     } finally {
       bargeIn.disarm()
@@ -960,7 +985,11 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     }
     const next = !armedRef.current
     actions.setAgentListening(next)
+    // Now, not on the next render: a "goodbye" spoken straight after the
+    // conversation ends must not paint the ended conversation as speaking.
+    armedRef.current = next
     if (next) {
+      setEnded(null)
       // The engine is warm-started with the app. Only show "waking" when it
       // is genuinely still loading — otherwise the orb goes straight to
       // listening and the first word is not eaten by a 3–6 s spinner.
@@ -1792,6 +1821,36 @@ ${said}` : said)
     [closeMouth, pushSpeech, buildContextNow]
   )
 
+  /**
+   * "Type this into Everest: echo hi" (B11): his words, raw, into that pane —
+   * no brain, no rewrite, Enter only when he said "and send". "Put this in the
+   * bar …" puts them in the composer instead, to be read and fixed first. The
+   * outcome is its own answer, spoken like a command's.
+   */
+  const runVoiceDictation = useCallback(
+    async (id: string, said: string, d: VoiceDictation, speak: (key: string, text: string) => Promise<void>): Promise<string> => {
+      let outcome: ActionOutcome
+      if (d.kind === 'bar') {
+        const detail: HubComposerDetail = { text: d.text, submit: false }
+        window.dispatchEvent(new CustomEvent(HUB_COMPOSER_EVENT, { detail }))
+        outcome = { ok: true, summary: 'Put it in the bar, to check before you send it.', requested: 1, done: 1 }
+      } else if (!d.paneId) {
+        outcome = { ok: false, summary: `There is no pane called ${d.target}, so nothing was typed.`, requested: 1, done: 0 }
+      } else {
+        const r = await dictateToPane(d.paneId, d.text, { submit: d.submit })
+        outcome = { ok: r.ok, summary: r.summary, requested: 1, done: r.ok ? 1 : 0 }
+      }
+      if (import.meta.env.DEV) {
+        const where = d.kind === 'bar' ? 'bar' : d.paneId ? paneWords(d.paneId) : `none(${d.target})`
+        console.info(`[hub] event=dictated target=${where} chars=${d.text.length} submit=${d.kind === 'pane' && d.submit} ok=${outcome.ok}`)
+      }
+      setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'command', actions: [], outcomes: [outcome] }])
+      await speak(id, outcome.summary)
+      return outcome.summary
+    },
+    []
+  )
+
   /* ---------------------------------------------------- transcript intake */
 
   /**
@@ -1821,8 +1880,29 @@ ${said}` : said)
       // still the agent. The sidecar cuts on silence, so its words land once the
       // room is quiet, by which time the guard above has lifted. Anything Steve
       // typed is exempt: it came from the keyboard, whatever it says.
-      if (!opts?.silent && said !== lastTypedRef.current && speaker.heardItself(said)) return ''
-      if (said === lastTypedRef.current) lastTypedRef.current = null
+      const typed = said === lastTypedRef.current
+      if (!opts?.silent && !typed && speaker.heardItself(said)) return ''
+      if (typed) lastTypedRef.current = null
+      if (import.meta.env.DEV) {
+        console.info(`[hub] event=turn-sent via=${opts?.silent ? 'phone' : typed ? 'typed' : 'voice'} chars=${said.length}`)
+      }
+
+      // 0d — the conversation's own words (B11), spoken only: never the phone,
+      // never the keyboard. They are about the conversation, so no brain and
+      // no grammar ever sees them. "That's all" / "stop listening" ends it;
+      // "type this into Everest: …" types his words, raw, into that pane.
+      const spokenHere = !opts?.silent && !typed
+      if (spokenHere && armedRef.current) {
+        const stop = stopPhraseOf(said)
+        if (stop) {
+          const end: ConversationEnd = { kind: 'phrase', phrase: stop }
+          const outcome: ActionOutcome = { ok: true, summary: endedNote(end), requested: 1, done: 1 }
+          setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'command', actions: [], outcomes: [outcome] }])
+          endConversationRef.current(end)
+          void speak(`${id}:bye`, 'Okay. I have stopped listening.')
+          return ''
+        }
+      }
 
       // 0c — dictation. While it is on, nothing is acted on: every phrase is
       // held verbatim, and only "stop dictation" (or leaving the agent) lets
@@ -1861,6 +1941,13 @@ ${said}` : said)
           setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'note', tone: 'warn' }])
           return 'Not in dictation.'
         }
+      }
+
+      // 0e — "type this into Everest: …" (B11), spoken, outside buffer mode:
+      // his words go into that pane as they are, and no brain rewrites them.
+      if (spokenHere) {
+        const dictation = parseVoiceDictation(said, resolveSpokenPane)
+        if (dictation) return runVoiceDictation(id, said, dictation, speak)
       }
 
       // 0 — the brake. While a prompt is counting down into a terminal, "wait"
@@ -2021,6 +2108,7 @@ ${said}` : said)
       resetToolActivity,
       runActions,
       runClaudeTurn,
+      runVoiceDictation,
       sayAloud,
       speaksAloud
     ]
@@ -2256,6 +2344,24 @@ ${said}` : said)
     else if (step === 'capture') void window.forge.stt.capture()
   }, [armed, speaking, stt.phase, stt.mode, stt.capturing, setWant])
 
+  /**
+   * The conversation closes (B11): a stop phrase, the idle clock, or a second
+   * press. The words for why stay on `ended` until the next one opens. A reply
+   * still being said is cut first — the same move as talking over it — or the
+   * disarm below would be taken as a barge-in and leave it armed.
+   */
+  const endConversation = useCallback(
+    (end: ConversationEnd): void => {
+      setEnded(endedNote(end))
+      if (import.meta.env.DEV) console.info(`[hub] event=ended why=${end.kind}${end.kind === 'phrase' ? ` phrase="${end.phrase}"` : ''}`)
+      if (!armedRef.current) return
+      if (speakingRef.current) bargeInForTyping()
+      toggleAgent()
+    },
+    [bargeInForTyping, toggleAgent]
+  )
+  endConversationRef.current = endConversation
+
   const submitPhrase = useCallback((): void => {
     const text = draftPhrase.trim()
     if (!text) return
@@ -2333,6 +2439,8 @@ ${said}` : said)
       dictationBuffer,
       ask,
       listenNow,
+      ended,
+      endConversation,
       recogniser: {
         phase: stt.phase,
         ready: stt.ready,
@@ -2372,6 +2480,8 @@ ${said}` : said)
       dictationBuffer,
       ask,
       listenNow,
+      ended,
+      endConversation,
       captureWanted
     ]
   )

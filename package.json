@@ -35,6 +35,7 @@
     "brain-adapters:check": "node scripts/brain-adapters-check.mjs",
     "voice-hotkey:check": "node scripts/voice-hotkey-check.mjs",
     "realtime:check": "node scripts/realtime-check.mjs",
+    "gemini-live:check": "node scripts/gemini-live-check.mjs",
     "canvas:check": "node scripts/canvas-check.mjs",
     "artifact:check": "node scripts/artifact-check.mjs",
     "browser:check": "node scripts/browser-check.mjs",

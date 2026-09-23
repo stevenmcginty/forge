@@ -186,5 +186,133 @@ await check('the manifest names call-sign, panel, agent, state and focus; unchan
   assert.ok(text.length < 1200, `compact: ${text.length} chars for two panes`)
 })
 
+/* ------------------------------------------------ the conversation (B11) */
+
+const V = await import('../src/lib/realtime/conversation.ts')
+const hubSrc = readFileSync(new URL('../src/state/VoiceHubController.tsx', import.meta.url), 'utf8')
+const barSrc = readFileSync(new URL('../src/components/hub/VoicePill.tsx', import.meta.url), 'utf8')
+const layerSrc = readFileSync(new URL('../src/components/hub/HubLayer.tsx', import.meta.url), 'utf8')
+
+console.log('the conversation: stop phrases')
+await check('"that\'s all" / "stop listening" and close variants end it, in canonical words', () => {
+  for (const said of ["That's all.", 'That is all.', 'Okay, that’s all, thanks.', "That's all for now.", 'That will be all.', "That's everything."]) {
+    assert.equal(V.stopPhraseOf(said), "that's all", said)
+  }
+  for (const said of ['Stop listening.', 'You can stop listening now.', 'OK stop listening, thanks.', 'End the conversation.']) {
+    assert.equal(V.stopPhraseOf(said), 'stop listening', said)
+  }
+  assert.equal(V.stopPhraseOf('Goodbye.'), 'goodbye')
+})
+await check('a sentence that only contains the words is a sentence, not a goodbye', () => {
+  for (const said of ["That's all the files in there.", 'Stop listening to that pane.', 'Is that all?', 'Tell me when that is all done.', 'all right', '']) {
+    assert.equal(V.stopPhraseOf(said), null, said)
+  }
+})
+await check('Parakeet: the stop phrase is matched before the grammar and the brain, spoken only, and ends the conversation', () => {
+  const at = agent.indexOf('const stop = stopPhraseOf(said)')
+  assert.ok(at > 0, 'runPhrase checks stop phrases')
+  assert.ok(at < agent.indexOf('const hit = ctx ? parseUtterance(said, ctx) : null'), 'before the grammar')
+  assert.ok(at < agent.indexOf('if (usingClaudeRef.current) {'), 'before the brain')
+  assert.ok(/const spokenHere = !opts\?\.silent && !typed/.test(agent), 'never a typed line or a phone message')
+  assert.ok(/endConversationRef\.current\(end\)[\s\S]{0,120}return ''/.test(agent), 'it ends the conversation and gives the brain no turn')
+})
+await check('realtime: a user caption that is a stop phrase ends the live session', () => {
+  assert.ok(/if \(c\.role === 'user'\) onUserCaption\(c\)/.test(hubSrc))
+  assert.ok(/const stop = typed \? null : stopPhraseOf\(c\.text\)/.test(hubSrc), 'typed text is never taken for a spoken goodbye')
+})
+
+console.log('the conversation: idle timeout')
+await check('agentIdleTimeoutMs: default 2 min, 30 s – 10 min, 0 = never', () => {
+  assert.equal(V.IDLE_TIMEOUT_DEFAULT_MS, 120000)
+  assert.equal(V.normaliseIdleTimeout(undefined), 120000)
+  assert.equal(V.normaliseIdleTimeout(0), 0)
+  assert.equal(V.normaliseIdleTimeout(-5), 0)
+  assert.equal(V.normaliseIdleTimeout(5000), 30000)
+  assert.equal(V.normaliseIdleTimeout(60_400), 60000)
+  assert.equal(V.normaliseIdleTimeout(99e9), 600000)
+  const store = readFileSync(new URL('../electron/store.ts', import.meta.url), 'utf8')
+  assert.ok(/agentIdleTimeoutMs: 120_000/.test(store), 'store default')
+  assert.ok(/clamp\(Math\.round\(s\.agentIdleTimeoutMs \/ 1000\) \* 1000, 30_000, 600_000\)/.test(store), 'store clamps the same way')
+})
+await check('the clock runs only while open and listening, and counts from the last thing that was not quiet', () => {
+  const base = { open: true, listening: true, timeoutMs: 120000, lastActivityAt: 1000 }
+  assert.equal(V.idleRemainingMs({ ...base, now: 1000 }), 120000)
+  assert.equal(V.idleRemainingMs({ ...base, now: 61000 }), 60000)
+  assert.equal(V.idleRemainingMs({ ...base, now: 999999 }), 0, 'overdue ends it now')
+  assert.equal(V.idleRemainingMs({ ...base, listening: false, now: 61000 }), null, 'thinking or speaking is not quiet')
+  assert.equal(V.idleRemainingMs({ ...base, open: false, now: 61000 }), null)
+  assert.equal(V.idleRemainingMs({ ...base, timeoutMs: 0, now: 61000 }), null, 'Never')
+  assert.ok(/endConversationRef\.current\(\{ kind: 'idle', ms: idleMs \}\)/.test(hubSrc), 'the hub ends it on the clock')
+})
+await check('why it ended, in words', () => {
+  assert.equal(V.endedNote({ kind: 'phrase', phrase: "that's all" }), 'Conversation ended — you said "that\'s all"')
+  assert.equal(V.endedNote({ kind: 'idle', ms: 120000 }), 'Conversation ended — 2 min quiet')
+  assert.equal(V.endedNote({ kind: 'idle', ms: 30000 }), 'Conversation ended — 30 s quiet')
+  assert.equal(V.endedNote({ kind: 'press' }), 'Conversation ended — you turned it off')
+})
+
+console.log('the conversation: honest words')
+const recOn = { phase: 'listening', ready: true, capturing: true, wake: false, wanted: false }
+await check('Thinking… and Speaking win over an open mic; "Listening again" after a reply', () => {
+  const mic = (o) => M.micState({ realtime: false, muted: false, armed: true, recogniser: recOn, errorReason: null, ...o }).listenNote
+  assert.equal(mic({ phase: 'thinking' }), 'Thinking…', 'Steve\'s trace showed "Listening" while the brain worked')
+  assert.equal(mic({ phase: 'speaking' }), 'Speaking')
+  assert.equal(mic({ phase: 'listening', again: true }), 'Listening again')
+  assert.equal(mic({ phase: 'listening', again: false }), 'Listening')
+  const rt = (o) => M.micState({ realtime: true, muted: false, armed: false, errorReason: null, ...o }).listenNote
+  assert.equal(rt({ phase: 'listening', again: true }), 'Listening again')
+  assert.equal(rt({ phase: 'thinking' }), 'Thinking…')
+  assert.equal(rt({ phase: 'speaking' }), 'Speaking')
+})
+await check('off after an ending says why; an error still wins', () => {
+  const ended = 'Conversation ended — you said "that\'s all"'
+  assert.equal(M.micState({ realtime: false, phase: 'off', muted: false, armed: false, errorReason: null, ended }).listenNote, ended)
+  assert.equal(M.micState({ realtime: true, phase: 'off', muted: false, armed: false, errorReason: null, ended }).listenNote, ended)
+  assert.equal(M.micState({ realtime: true, phase: 'error', muted: false, armed: false, errorReason: 'Gemini: key refused', ended }).listenNote, 'Gemini: key refused')
+})
+
+console.log('the conversation: dictation by voice')
+const panes = { everest: 'p1', skylar: 'p2', codex: 'p2', 'the codex': 'p2', this: 'p1' }
+const resolve = (s) => panes[s.toLowerCase()] ?? null
+await check('"type this into <call-sign>: …" with and without the colon', () => {
+  assert.deepEqual(V.parseVoiceDictation('Type this into Everest: echo hi.', resolve), { kind: 'pane', target: 'Everest', paneId: 'p1', text: 'echo hi', submit: false })
+  assert.deepEqual(V.parseVoiceDictation('Type this into Everest echo hi.', resolve), { kind: 'pane', target: 'Everest', paneId: 'p1', text: 'echo hi', submit: false })
+  assert.deepEqual(V.parseVoiceDictation('okay, type into Skylar, git status', resolve), { kind: 'pane', target: 'Skylar', paneId: 'p2', text: 'git status', submit: false })
+})
+await check('by agent type and "this pane"; "and send it" / "press enter" is the only Enter', () => {
+  assert.deepEqual(V.parseVoiceDictation('Dictate into the Codex pane fix the login bug.', resolve), { kind: 'pane', target: 'the Codex pane', paneId: 'p2', text: 'fix the login bug', submit: false })
+  assert.deepEqual(V.parseVoiceDictation('Type this into this pane ls, and send it.', resolve), { kind: 'pane', target: 'this pane', paneId: 'p1', text: 'ls', submit: true })
+  assert.equal(V.parseVoiceDictation('Type into Everest npm test then press enter', resolve).submit, true)
+  assert.equal(V.parseVoiceDictation('Type this into Everest echo send', resolve).submit, false, '"send" inside the text is text')
+})
+await check('"put this in the bar …" lands in the composer; unknown panes say so; other sentences are left alone', () => {
+  assert.deepEqual(V.parseVoiceDictation('Put this in the bar, refactor the parser.', resolve), { kind: 'bar', text: 'refactor the parser' })
+  assert.deepEqual(V.parseVoiceDictation('Type this into Zebra: echo hi', resolve), { kind: 'pane', target: 'Zebra', paneId: null, text: 'echo hi', submit: false })
+  assert.equal(V.parseVoiceDictation('Write to the log file that we are done.', resolve), null, '"write to" is not dictation without a pane')
+  assert.equal(V.parseVoiceDictation('What is typed into Everest?', resolve), null)
+  assert.equal(V.parseVoiceDictation('Open a new Codex pane.', resolve), null)
+})
+await check('Parakeet: dictation by voice types raw words (no brain) through the one dictate helper', () => {
+  assert.ok(/const dictation = parseVoiceDictation\(said, resolveSpokenPane\)/.test(agent))
+  assert.ok(agent.indexOf('parseVoiceDictation(said') < agent.indexOf('if (usingClaudeRef.current) {'), 'before the brain')
+  assert.ok(/await dictateToPane\(d\.paneId, d\.text, \{ submit: d\.submit \}\)/.test(agent))
+  assert.ok(/dictateToPane\(paneId, text, opts\)/.test(hubSrc), 'hub.dictateTo is the same helper')
+  assert.ok(/window\.dispatchEvent\(new CustomEvent\(HUB_COMPOSER_EVENT/.test(agent), '"put this in the bar" uses the composer event')
+})
+
+console.log('the conversation: one press, one switch')
+await check('the Listen switch and the Agent key call hub.start / hub.stop, and start always opens the conversation on the Agent brain', () => {
+  assert.ok(/onClick=\{\(\) => \(ls\.on \? hub\.stop\(\) : hub\.start\(\)\)\}/.test(barSrc), 'the bar switch')
+  assert.ok(/if \(h\.phase === 'off' \|\| h\.phase === 'error'\) h\.start\(\)/.test(layerSrc), 'the Agent key')
+  assert.ok(/if \(!pick\.realtime\) \{[\s\S]{0,300}a\.listenNow\(\)/.test(hubSrc), 'Parakeet brains: listenNow (a hands-free conversation, never dictate-into-bar)')
+  assert.ok(/void startRealtime\(pick\.realtime, null\)/.test(hubSrc), 'realtime brains: the live session')
+})
+await check('the switch tracks the conversation: a failed turn keeps it on, ending the live session does not re-arm a hidden brain', () => {
+  assert.ok(/case 'error':[\s\S]{0,400}return armed \? 'listening' : 'off'/.test(hubSrc))
+  assert.ok(!/resumeAgent/.test(hubSrc), 'no hidden Parakeet re-arm after a live session')
+  assert.ok(/const stop = useCallback\(\(\): void => endConversation\(\{ kind: 'press' \}\)/.test(hubSrc), 'a second press ends it, with why')
+  assert.ok(/realtimeLive \|\| \(resolved\.provider !== 'claude' && !agent\.armed\)/.test(hubSrc), 'an open Parakeet conversation stays the one shown')
+})
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed) process.exit(1)

@@ -112,7 +112,7 @@ const PAUSES: ChoiceOption[] = [
   { value: 2000, label: 'Slow · 2 s' }
 ]
 
-/** Planned: `agentIdleTimeoutMs`, added by a later engine job. Shown now, disabled, so the row's place is settled. */
+/** `agentIdleTimeoutMs`: quiet that ends the conversation. 0 = never. */
 const IDLE_TIMEOUTS: ChoiceOption[] = [
   { value: 60_000, label: '1 min' },
   { value: 120_000, label: '2 min' },
@@ -127,9 +127,6 @@ const IDLE_TIMEOUTS: ChoiceOption[] = [
 function ConversationCard(): ReactNode {
   const { state, actions } = useApp()
   const s = state.settings
-  // TODO(agentIdleTimeoutMs): read and write the real field once the engine
-  // job adds it to Settings; until then the row is shown and disabled.
-  const idleTimeout = 120_000
 
   return (
     <Card title="Conversation" hint="With Listen on, the mic stays open between turns: you talk, it answers, it listens again.">
@@ -143,14 +140,13 @@ function ConversationCard(): ReactNode {
         />
       </Row>
 
-      <Row label="Stop listening after" hint="Minutes of silence before it goes back to sleep — coming next">
+      <Row label="Stop listening after" hint={`This much quiet ends the conversation. Saying "that's all" or "stop listening" ends it at once.`}>
         <Choice
           label="Stop listening after"
-          value={idleTimeout}
+          value={s.agentIdleTimeoutMs}
           options={IDLE_TIMEOUTS}
-          custom={(v) => `${Math.round(v / 60_000)} min`}
-          onChange={() => undefined}
-          disabled
+          custom={(v) => (v < 60_000 ? `${Math.round(v / 1000)} s` : `${Math.round((v / 60_000) * 10) / 10} min`)}
+          onChange={(v) => actions.patchSettings({ agentIdleTimeoutMs: v })}
         />
       </Row>
 

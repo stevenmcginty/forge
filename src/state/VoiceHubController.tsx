@@ -11,8 +11,15 @@ import {
 import { OPENAI_SESSION_LIMIT_MS, providerSpec, resolveVoice } from '@shared/realtime'
 import { agentBrainSpec, isRealtimeBrain as isRealtimeBrainId, migrateAgentBrain, type AgentBrainId } from '@shared/agent-brain'
 import type { VoiceHubProvider } from '@shared/types'
-import { getHubRuntime } from '@/lib/hubRuntime'
 import { CONTEXT_MIN_GAP_MS, ContextTracker } from '@/lib/realtime/context'
+import {
+  endedNote,
+  idleRemainingMs,
+  normaliseIdleTimeout,
+  stopPhraseOf,
+  type ConversationEnd
+} from '@/lib/realtime/conversation'
+import { dictateToPane } from '@/lib/realtime/dictate'
 import { errorReasonOf, type ErrorSource } from '@/lib/realtime/errors'
 import { micState } from '@/lib/realtime/micstate'
 import { currentVoiceAgentToolDeps } from '@/lib/agenttools'
@@ -61,9 +68,17 @@ import { useVoiceAgent, type AgentPhase } from './VoiceAgent'
  * phase, captions, recent actions, levels, and start/stop/mute/interrupt/ask.
  *
  * While a realtime session is live the VoiceAgent is disarmed, so Parakeet's
- * "hey Jarvis" wake mode cannot fire a second brain at the same sentence; it
- * is re-armed on stop if it was armed before. The dictation hotkey is not
+ * "hey Jarvis" wake mode cannot fire a second brain at the same sentence. It
+ * is NOT re-armed when the live session ends (B11): one Listen switch, one
+ * conversation, and "off" means the microphone is off — not quietly handed to
+ * a different brain the switch no longer shows. The dictation hotkey is not
  * touched — it never went through the agent.
+ *
+ * The conversation (B11) is the same on every brain: one press opens it, end
+ * of speech sends, the reply is spoken, the mic re-opens by itself, and it
+ * closes on "that's all" / "stop listening", a second press, or
+ * `agentIdleTimeoutMs` of quiet (src/lib/realtime/conversation.ts). The words
+ * for all of it — "Listening again", "Conversation ended — …" — are listenNote.
  */
 
 export type HubPhase = 'off' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error'
@@ -142,7 +157,12 @@ export interface VoiceHubController {
   capturing: boolean
   /** Asked to listen, not recording yet — show "Starting…". Capture follows by itself. */
   starting: boolean
-  /** The mic state in words: Listening, Starting…, Waiting for "Hey Jarvis", Mic on · not recording, Muted, Off, or the error reason. */
+  /**
+   * The mic state in words: Listening, Listening again (the first listen after
+   * a reply, B11), Starting…, Thinking…, Speaking, Waiting for "Hey Jarvis",
+   * Mic on · not recording, Muted, Off, "Conversation ended — <why>", or the
+   * error reason.
+   */
   listenNote: string
   /** Short words for the pill: "Gemini: key refused". Full text is `error`. */
   errorReason: string | null
@@ -159,7 +179,7 @@ function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-function fromAgentPhase(phase: AgentPhase): HubPhase {
+function fromAgentPhase(phase: AgentPhase, armed: boolean): HubPhase {
   switch (phase) {
     case 'off':
       return 'off'
@@ -167,6 +187,12 @@ function fromAgentPhase(phase: AgentPhase): HubPhase {
       return 'connecting'
     case 'replied':
       return 'listening'
+    case 'error':
+      // A failed turn is an amber blip inside a conversation that is still
+      // open (VoiceAgent says the failure out loud and keeps listening), so
+      // the Listen switch must not flick off for it. The reason still shows:
+      // errorReason / listenNote carry the turn's error.
+      return armed ? 'listening' : 'off'
     default:
       return phase
   }
@@ -223,8 +249,15 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   const [discussionMode, setDiscussionState] = useState(false)
   const discussionRef = useRef(false)
   const planRef = useRef<Array<PlannedCall & { actionId: string }>>([])
-  const pausedAgentRef = useRef(false)
   const rollingRef = useRef(false)
+  /** Why the last live conversation ended, until the next one opens (B11). */
+  const [rtEnded, setRtEnded] = useState<string | null>(null)
+  /** A stop phrase heard in a caption that is still growing: ends it if it stays one. */
+  const stopTimerRef = useRef<number | null>(null)
+  /** The last thing typed into the live session, so it is never taken for a spoken "that's all". */
+  const typedRtRef = useRef<string | null>(null)
+  /** Assigned below, once the conversation's end exists; read at call time. */
+  const endConversationRef = useRef<(end: ConversationEnd) => void>(() => undefined)
   const pendingTextRef = useRef<string | null>(null)
   /** What the live session was last told about the app. */
   const contextRef = useRef(new ContextTracker())
@@ -236,6 +269,8 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   settingsRef.current = s
   const agentRef = useRef(agent)
   agentRef.current = agent
+  const liveProviderRef = useRef(liveProvider)
+  liveProviderRef.current = liveProvider
 
   const setNotice = useCallback((text: string | null): void => {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
@@ -313,19 +348,38 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     sessionRef.current?.sendContext(planRanNote(results), true)
   }, [runTracked])
 
-  const resumeAgent = useCallback((): void => {
-    if (!pausedAgentRef.current) return
-    pausedAgentRef.current = false
-    if (!agentRef.current.armed) agentRef.current.toggleAgent()
-  }, [])
-
+  /** A Parakeet conversation still open ends before a live one opens: one microphone, one brain. */
   const pauseAgent = useCallback((): void => {
     const a = agentRef.current
     if (!a.armed) return
-    pausedAgentRef.current = true
     // While it is talking the first press only silences it (barge-in).
     if (a.phase === 'speaking') a.toggleAgent()
     a.toggleAgent()
+  }, [])
+
+  /**
+   * A user caption from the live session: his turn, for the trace, and — when
+   * it is "that's all" / "stop listening" — the end of the conversation. The
+   * audio already went to the model (it streams), so this is as early as the
+   * words can be known; a caption still growing waits a beat so "that's all
+   * the files" is not taken for a goodbye.
+   */
+  const onUserCaption = useCallback((c: RealtimeCaption): void => {
+    if (stopTimerRef.current !== null) window.clearTimeout(stopTimerRef.current)
+    stopTimerRef.current = null
+    const typed = c.final && typedRtRef.current !== null && c.text.trim() === typedRtRef.current
+    if (typed) typedRtRef.current = null
+    if (c.final && import.meta.env.DEV) console.info(`[hub] event=turn-sent via=${typed ? 'typed' : 'voice'} chars=${c.text.trim().length}`)
+    const stop = typed ? null : stopPhraseOf(c.text)
+    if (!stop) return
+    if (c.final) {
+      endConversationRef.current({ kind: 'phrase', phrase: stop })
+      return
+    }
+    stopTimerRef.current = window.setTimeout(() => {
+      stopTimerRef.current = null
+      endConversationRef.current({ kind: 'phrase', phrase: stop })
+    }, 700)
   }, [])
 
   const startRealtime = useCallback(
@@ -354,6 +408,7 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
           onCaption: (c) => {
             if (sessionRef.current !== session) return
             upsertCaption(c)
+            if (c.role === 'user') onUserCaption(c)
             if (c.final && c.role === 'user' && discussionRef.current && isGoCommand(c.text)) void runGo()
           },
           onToolCall,
@@ -393,10 +448,9 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
         setRtPhase('error')
         setRtError(errText(err))
         pendingTextRef.current = null
-        resumeAgent()
       }
     },
-    [onToolCall, pauseAgent, resumeAgent, runGo, upsertAction, upsertCaption]
+    [onToolCall, onUserCaption, pauseAgent, runGo, upsertAction, upsertCaption]
   )
 
   /** A new session carrying a summary of the old one — the 60-minute cap. */
@@ -431,8 +485,9 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     setRtPhase('off')
     setSessionStartedAt(null)
     pendingTextRef.current = null
-    resumeAgent()
-  }, [resumeAgent])
+    if (stopTimerRef.current !== null) window.clearTimeout(stopTimerRef.current)
+    stopTimerRef.current = null
+  }, [])
 
   // Nothing outlives the provider: a session left open is a microphone left open.
   useEffect(
@@ -441,6 +496,7 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       sessionRef.current = null
       session?.stop()
       if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
+      if (stopTimerRef.current !== null) window.clearTimeout(stopTimerRef.current)
     },
     []
   )
@@ -448,7 +504,9 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   /* ---------------------------------------------------------- claude path */
 
   const realtimeLive = liveProvider !== null
-  const usingRealtime = realtimeLive || resolved.provider !== 'claude'
+  // A Parakeet conversation still open when the brain setting moves to a live
+  // one is still the conversation the switch shows, until it ends (B11).
+  const usingRealtime = realtimeLive || (resolved.provider !== 'claude' && !agent.armed)
   const pendingSubmitRef = useRef<string | null>(null)
 
   // The composer's submit reads its own draft, so set it and submit on the
@@ -510,6 +568,9 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     if (sessionRef.current) return
     const cfg = settingsRef.current
     const pick = resolveAgentBrain(cfg.agentBrain ?? migrateAgentBrain(cfg.voiceHubProvider, cfg.voiceBrain), cfg)
+    // A new conversation: the last one's "ended because" is history now.
+    setRtEnded(null)
+    if (import.meta.env.DEV) console.info(`[hub] event=open brain=${pick.brain}`)
     if (!pick.realtime) {
       // A Parakeet brain: arm AND capture now. Arming alone, with the wake
       // word on, only monitors for "hey Jarvis" — the Listening-but-deaf bug.
@@ -523,21 +584,37 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     void startRealtime(pick.realtime, null)
   }, [startRealtime])
 
-  const stop = useCallback((): void => {
-    if (sessionRef.current || realtimeLive) {
-      stopRealtime()
-      return
-    }
-    // A realtime start that failed leaves no session to stop, only its error.
-    // Clear it, or "back to dictation" is a dead click and the dock stays live.
-    setRtPhase('off')
-    const a = agentRef.current
-    if (!a.armed) return
-    if (a.phase === 'speaking') a.toggleAgent()
-    a.toggleAgent()
-  }, [realtimeLive, stopRealtime])
+  /**
+   * The conversation closes (B11), whichever brain it is on: a stop phrase,
+   * the idle clock, or a second press. Why is kept, in words, for listenNote.
+   */
+  const endConversation = useCallback(
+    (end: ConversationEnd): void => {
+      if (sessionRef.current || liveProviderRef.current) {
+        setRtEnded(endedNote(end))
+        if (import.meta.env.DEV) console.info(`[hub] event=ended why=${end.kind}${end.kind === 'phrase' ? ` phrase="${end.phrase}"` : ''}`)
+        stopRealtime()
+        return
+      }
+      // A realtime start that failed leaves no session to stop, only its error.
+      // Clear it, or "back to dictation" is a dead click and the dock stays live.
+      setRtPhase('off')
+      const a = agentRef.current
+      if (!a.armed) return
+      if (a.endConversation) {
+        a.endConversation(end)
+        return
+      }
+      if (a.phase === 'speaking') a.toggleAgent()
+      a.toggleAgent()
+    },
+    [stopRealtime]
+  )
+  endConversationRef.current = endConversation
 
-  const phase: HubPhase = usingRealtime ? rtPhase : fromAgentPhase(agent.phase)
+  const stop = useCallback((): void => endConversation({ kind: 'press' }), [endConversation])
+
+  const phase: HubPhase = usingRealtime ? rtPhase : fromAgentPhase(agent.phase, agent.armed)
 
   const toggle = useCallback((): void => {
     if (phase === 'off' || phase === 'error') start()
@@ -580,11 +657,13 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
           void runGo()
           return
         }
+        if (opts?.via !== 'voice') typedRtRef.current = body
         sessionRef.current.sendText(body)
         return
       }
       if (resolved.provider !== 'claude') {
         // Typed while off: open the session and send it once audio is up.
+        if (opts?.via !== 'voice') typedRtRef.current = body
         pendingTextRef.current = body
         start()
         return
@@ -604,25 +683,13 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
 
   const askText = useCallback((text: string): void => ask(text, { via: 'typed' }), [ask])
 
-  /** Raw text into a pane — Dictate mode and the "→ Everest" target. No brain. */
+  /**
+   * Raw text into a pane — Dictate mode and the "→ Everest" target. No brain.
+   * The same helper types "type this into Everest: …" said in a conversation.
+   */
   const dictateTo = useCallback(
-    async (paneId: string, text: string, opts?: { submit?: boolean }): Promise<{ ok: boolean; summary: string }> => {
-      const rt = getHubRuntime()
-      if (!rt) return { ok: false, summary: 'Forge is still starting up.' }
-      const pane = rt.panes().find((p) => p.paneId === paneId)
-      const name = pane ? (pane.callSign ?? `panel ${pane.number}`) : 'that pane'
-      if (!text && !opts?.submit) return { ok: false, summary: 'Nothing to type.' }
-      rt.revealPane(paneId)
-      // A background tab's pane mounts after the reveal; a few short retries
-      // cover that without ever typing twice.
-      for (let i = 0; i < 15; i++) {
-        if (rt.typeIntoPane(paneId, text, opts?.submit === true)) {
-          return { ok: true, summary: `Typed into ${name}${opts?.submit ? ' and sent it' : ''}.` }
-        }
-        await new Promise((r) => window.setTimeout(r, 200))
-      }
-      return { ok: false, summary: `${name} has no live terminal, so nothing was typed.` }
-    },
+    (paneId: string, text: string, opts?: { submit?: boolean }): Promise<{ ok: boolean; summary: string }> =>
+      dictateToPane(paneId, text, opts),
     []
   )
 
@@ -678,6 +745,71 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
 
   const provider: VoiceHubProvider = liveProvider ?? resolved.provider
 
+  /* --------------------------------------------- the conversation (B11)
+   *
+   * Open: a live session that has not ended, or an armed Parakeet agent. The
+   * clock that closes it runs only while it is listening — a reply being
+   * thought about or spoken is not quiet — and restarts on everything that is
+   * not quiet: his phrase landing, a caption of his, a reply starting or ending.
+   * "Listening again" is the first listen after a reply, until he speaks. */
+  const open = usingRealtime ? realtimeLive && rtPhase !== 'off' && rtPhase !== 'error' : agent.armed
+  const busy = phase === 'thinking' || phase === 'speaking'
+  const idleMs = normaliseIdleTimeout(s.agentIdleTimeoutMs)
+  // A ref, written in the same commit the clock effect below reads it in: the
+  // clock must never count from a moment before the conversation opened.
+  const lastActivityRef = useRef(Date.now())
+  const [activityTick, setActivityTick] = useState(0)
+  const markActivity = useCallback((): void => {
+    lastActivityRef.current = Date.now()
+    setActivityTick((n) => n + 1)
+  }, [])
+  const [again, setAgain] = useState(false)
+  const prevPhaseRef = useRef<HubPhase>('off')
+  const prevOpenRef = useRef(false)
+
+  useEffect(() => {
+    const prev = prevPhaseRef.current
+    prevPhaseRef.current = phase
+    const opened = open && !prevOpenRef.current
+    prevOpenRef.current = open
+    if (!open) {
+      setAgain(false)
+      return
+    }
+    const wasBusy = prev === 'thinking' || prev === 'speaking'
+    if (opened || busy !== wasBusy || prev === 'off') markActivity()
+    if (busy) setAgain(false)
+    const trace = (event: string): void => {
+      if (import.meta.env.DEV) console.info(`[hub] event=${event}`)
+    }
+    if (phase === 'speaking' && prev !== 'speaking') trace('reply-start')
+    if (prev === 'speaking' && phase !== 'speaking') trace('reply-end')
+    if (wasBusy && phase === 'listening') {
+      setAgain(true)
+      trace('listening-again')
+    }
+  }, [phase, open, busy, markActivity])
+
+  // His words landing count as not-quiet, and end "Listening again".
+  const lastUser = usingRealtime ? [...captions].reverse().find((c) => c.role === 'user') : undefined
+  const userSig = usingRealtime ? (lastUser ? `${lastUser.id}:${lastUser.text.length}` : '') : String(agent.turns.length)
+  const prevUserSig = useRef(userSig)
+  useEffect(() => {
+    if (prevUserSig.current === userSig) return
+    prevUserSig.current = userSig
+    if (!open) return
+    markActivity()
+    setAgain(false)
+  }, [userSig, open, markActivity])
+
+  useEffect(() => {
+    const lastActivityAt = lastActivityRef.current
+    const left = idleRemainingMs({ open, listening: phase === 'listening', timeoutMs: idleMs, lastActivityAt, now: Date.now() })
+    if (left === null) return undefined
+    const timer = window.setTimeout(() => endConversationRef.current({ kind: 'idle', ms: idleMs }), left)
+    return () => window.clearTimeout(timer)
+  }, [open, phase, idleMs, activityTick])
+
   /* ------------------------------------------- honest mic state (B7) */
   let errorSource: ErrorSource = 'brain'
   let errorText: string | null = null
@@ -711,7 +843,9 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     muted,
     armed: agent.armed,
     recogniser: agent.recogniser ?? null,
-    errorReason
+    errorReason,
+    again: open && again,
+    ended: open ? null : usingRealtime ? rtEnded : (agent.ended ?? null)
   })
   const brainLabel = agentBrainSpec(pickedBrain.brain).label
 

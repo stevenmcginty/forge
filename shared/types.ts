@@ -1806,6 +1806,13 @@ export interface Settings {
    * and the mic stays open for the next turn. 500–2000 ms, default 800.
    */
   agentSilenceMs: number
+  /**
+   * The conversation closes by itself after this much quiet from him (B11):
+   * no phrase, no reply being thought about or spoken. 30 s – 10 min, default
+   * 2 min; 0 = never. "That's all" / "stop listening" and a second press close
+   * it sooner (src/lib/realtime/conversation.ts).
+   */
+  agentIdleTimeoutMs: number
   /** Dictate mode: press Enter in the target pane after each phrase. Off by default. */
   dictateAutoSend: boolean
   /**

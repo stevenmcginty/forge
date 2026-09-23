@@ -379,12 +379,22 @@ class WavRecorder(LiveRecorder):
     Exists so the sidecar can be proved end to end — model load, chunking,
     transcription, auto-stop — on a machine (or in an agent session) with no
     microphone access. Enabled with --fake-mic.
+
+    With --fake-mic-tape the WAV is a tape rather than a loop: each session
+    carries on where the last one stopped, so a multi-turn recording (turn,
+    pause, turn, pause, "that's all") is heard once, turn by turn, across the
+    stop/start the agent makes around every spoken reply. The tape pauses
+    while the mic is closed, so no turn is lost to a reply that runs long.
     """
 
-    def __init__(self, out_queue, path: str, realtime: bool = True, conversation: bool = False):
+    # path -> the next sample to feed, shared by every recorder on that tape.
+    _tape: dict[str, int] = {}
+
+    def __init__(self, out_queue, path: str, realtime: bool = True, conversation: bool = False, tape: bool = False):
         super().__init__(out_queue, conversation=conversation)
         self.path = path
         self.realtime = realtime
+        self.tape = tape
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -417,9 +427,12 @@ class WavRecorder(LiveRecorder):
     def _pump(self, samples: np.ndarray) -> None:
         period = BLOCK / SAMPLE_RATE
         next_at = time.time()
-        for i in range(0, len(samples), BLOCK):
+        start = WavRecorder._tape.get(self.path, 0) if self.tape else 0
+        for i in range(start, len(samples), BLOCK):
             if self._stop.is_set():
                 return
+            if self.tape:
+                WavRecorder._tape[self.path] = i + BLOCK
             block = samples[i : i + BLOCK]
             if len(block) < BLOCK:
                 block = np.pad(block, (0, BLOCK - len(block)))
@@ -872,7 +885,10 @@ class SttService:
         self.mode = WAKE_MODE if mode == WAKE_MODE else PHRASE_MODE
         if self.opts.fake_mic:
             rec: LiveRecorder = WavRecorder(
-                self.audio_q, self.opts.fake_mic, conversation=self.opts.conversation
+                self.audio_q,
+                self.opts.fake_mic,
+                conversation=self.opts.conversation,
+                tape=bool(getattr(self.opts, "fake_mic_tape", False)),
             )
         else:
             rec = LiveRecorder(
@@ -1336,6 +1352,11 @@ def parse_args(argv=None):
         default=None,
         metavar="WAV",
         help="feed a 16-bit PCM WAV instead of the microphone (testing)",
+    )
+    p.add_argument(
+        "--fake-mic-tape",
+        action="store_true",
+        help="with --fake-mic: each session resumes the WAV where the last stopped (multi-turn tests)",
     )
     p.add_argument(
         "--stub-engine",

@@ -52,6 +52,10 @@ export interface MicInput {
   armed: boolean
   recogniser?: { phase: string; ready: boolean; capturing: boolean; wake: boolean; wanted: boolean } | null
   errorReason: string | null
+  /** A reply has just finished and he has not spoken since (B11): "Listening again". */
+  again?: boolean
+  /** Why the last conversation ended, shown while it is off (src/lib/realtime/conversation.ts). */
+  ended?: string | null
 }
 
 export interface MicState {
@@ -64,28 +68,46 @@ export function micState(i: MicInput): MicState {
   let capturing = false
   let starting = false
   let listenNote = 'Off'
+  // Heard, then answered: the brain's turn is named for what it is doing even
+  // while the mic stays open under it (barge-in), and the first listen after a
+  // reply says so.
+  const heard = i.again ? 'Listening again' : 'Listening'
   if (i.realtime) {
     starting = i.phase === 'connecting'
     capturing = !i.muted && (i.phase === 'listening' || i.phase === 'thinking' || i.phase === 'speaking')
-    listenNote = starting ? 'Starting…' : i.phase === 'off' ? 'Off' : i.muted ? 'Muted' : capturing ? 'Listening' : 'Off'
+    listenNote = starting
+      ? 'Starting…'
+      : i.phase === 'off'
+        ? 'Off'
+        : i.muted
+          ? 'Muted'
+          : i.phase === 'speaking'
+            ? 'Speaking'
+            : i.phase === 'thinking'
+              ? 'Thinking…'
+              : capturing
+                ? heard
+                : 'Off'
   } else if (i.armed && i.recogniser) {
     const rec = i.recogniser
     capturing = rec.capturing
     starting = !capturing && (rec.wanted || rec.phase === 'starting' || !rec.ready)
-    listenNote = capturing
-      ? 'Listening'
-      : starting
-        ? 'Starting…'
+    listenNote =
+      i.phase === 'speaking'
+        ? 'Speaking'
         : i.phase === 'thinking'
           ? 'Thinking…'
-          : i.phase === 'speaking'
-            ? 'Speaking'
-            : rec.wake && rec.phase === 'listening'
-              ? 'Waiting for "Hey Jarvis"'
-              : 'Mic on · not recording'
+          : capturing
+            ? heard
+            : starting
+              ? 'Starting…'
+              : rec.wake && rec.phase === 'listening'
+                ? 'Waiting for "Hey Jarvis"'
+                : 'Mic on · not recording'
   } else if (i.armed) {
     listenNote = 'Mic on · not recording'
   }
+  if (listenNote === 'Off' && i.ended) listenNote = i.ended
   if (i.errorReason && !capturing) listenNote = i.errorReason
   return { capturing, starting, listenNote }
 }

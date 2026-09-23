@@ -308,6 +308,8 @@ function defaultSettings(): Settings {
     agentBrain: 'claude',
     // Hands-free Agent mode: 0.8 s of silence sends the phrase.
     agentSilenceMs: 800,
+    // The conversation closes after 2 min of quiet; 0 = never.
+    agentIdleTimeoutMs: 120_000,
     dictateAutoSend: false,
     // Forge-launched Claude panes cannot reach Claude-in-Chrome / Playwright.
     agentsForgeBrowserOnly: true,
@@ -879,6 +881,14 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       typeof s.agentSilenceMs === 'number' && Number.isFinite(s.agentSilenceMs)
         ? clamp(Math.round(s.agentSilenceMs / 100) * 100, 500, 2000)
         : DEFAULT_SETTINGS.agentSilenceMs,
+    // 0 = never; otherwise 30 s – 10 min in whole seconds (mirrors
+    // normaliseIdleTimeout in src/lib/realtime/conversation.ts).
+    agentIdleTimeoutMs:
+      typeof s.agentIdleTimeoutMs === 'number' && Number.isFinite(s.agentIdleTimeoutMs)
+        ? s.agentIdleTimeoutMs <= 0
+          ? 0
+          : clamp(Math.round(s.agentIdleTimeoutMs / 1000) * 1000, 30_000, 600_000)
+        : DEFAULT_SETTINGS.agentIdleTimeoutMs,
     dictateAutoSend: s.dictateAutoSend === true,
     agentsForgeBrowserOnly: s.agentsForgeBrowserOnly === undefined ? DEFAULT_SETTINGS.agentsForgeBrowserOnly : Boolean(s.agentsForgeBrowserOnly),
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
