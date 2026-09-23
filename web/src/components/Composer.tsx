@@ -13,8 +13,9 @@ import {
   type ReactNode
 } from 'react'
 import { Icon } from '@/components/Icon'
-import { Popover, PopoverDivider, PopoverRow, PopoverSection } from '@/components/Popover'
-import { VoiceMeter } from './VoiceMeter'
+import { Popover, PopoverRow, PopoverSection } from '@/components/Popover'
+import { BottomSheet, SheetRow } from './BottomSheet'
+import { VoiceMeter, VoiceWave } from './VoiceMeter'
 import type { ClaudePermissionMode } from '@shared/types'
 import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
 import type { VoiceMode, VoiceState } from '../lib/dictate'
@@ -29,10 +30,10 @@ import './Composer.css'
  * pasted wait as thumbnails above the box until Send, which sends them first
  * and the words after — one gesture, one turn.
  *
- * Model, Effort and Mode sit just above the textarea — not in the arrow row —
- * and each opens a dropdown of *this* pane's own rungs. A shell has none. A
- * phone has no room for three of them, so it wears one chip — the pane's model
- * name, coloured by its permission mode — opening all three lists in one sheet.
+ * At a desk, Model, Effort and Mode sit just above the textarea — not in the
+ * arrow row — and each opens a dropdown of *this* pane's own rungs. A shell
+ * has none. A phone has no room for them on the box: its one chip, in words,
+ * lives in the status strip instead (ModelChip.tsx).
  *
  * Spellcheck and autocapitalize stay on. The hidden xterm helper turns them
  * off because an IME double-fires into a TUI; this field is a normal box.
@@ -48,6 +49,8 @@ export const BACK_TAB = '\x1b[Z'
 const IDLE_VOICE: VoiceState = { phase: 'idle' }
 
 const MAX_GROW_PX = 196
+/** The phone's one-line box: 24px of line and 15px above and below it. */
+const PHONE_ONE_LINE_PX = 58
 
 /** A press on the mic shorter than this is a tap (toggle); longer is hold-to-talk. */
 export const HOLD_MS = 300
@@ -119,7 +122,8 @@ export function Composer({
   onNotice,
   voice: voiceControls,
   voiceState = IDLE_VOICE,
-  voiceLevel = null
+  voiceLevel = null,
+  onShowChat
 }: {
   draft: string
   disabled: boolean
@@ -190,6 +194,12 @@ export function Composer({
   voiceState?: VoiceState
   /** The open microphone's loudness while recording; the meter draws from it. */
   voiceLevel?: LevelMonitor | null
+  /**
+   * Back to the conversation, from the phone's Terminal view. There the key
+   * row takes the status strip's place (and its height), so the strip's own
+   * Chat button rides at the front of the box instead.
+   */
+  onShowChat?: () => void
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
@@ -201,15 +211,11 @@ export function Composer({
    * is `String.fromCharCode(letter − 64)` and nothing more.
    */
   const [ctrl, setCtrl] = useState(false)
-  /**
-   * Which of the chips above the box is open. One at a time — and on a phone
-   * there is only one chip, `'all'`, whose sheet holds all three sections.
-   */
-  const [openPick, setOpenPick] = useState<'model' | 'effort' | 'mode' | 'all' | 'attach' | null>(null)
+  /** Which of the chips above the box is open, or the attach menu. One at a time. */
+  const [openPick, setOpenPick] = useState<'model' | 'effort' | 'mode' | 'attach' | null>(null)
   const modelRef = useRef<HTMLButtonElement | null>(null)
   const effortRef = useRef<HTMLButtonElement | null>(null)
   const modeRef = useRef<HTMLButtonElement | null>(null)
-  const allRef = useRef<HTMLButtonElement | null>(null)
   const attachRef = useRef<HTMLButtonElement | null>(null)
   const cameraInputRef = useRef<HTMLInputElement | null>(null)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
@@ -308,17 +314,6 @@ export function Composer({
         ))}
       </PopoverSection>
     ) : null
-  /*
-   * What the phone's one chip says. The model is the most identifying thing a
-   * pane has, so it goes first; a pane with no model roster falls back to its
-   * mode, then its effort — the same words the three desktop chips wear.
-   */
-  const allLabel = modelSection
-    ? (currentModel?.label ?? 'Model')
-    : modeSection
-      ? (currentMode?.label ?? 'Mode')
-      : (effortLabel ?? 'Effort')
-
   useEffect(() => {
     if (autoFocus) field.current?.focus()
   }, [autoFocus])
@@ -375,7 +370,11 @@ export function Composer({
     const next = Math.min(Math.max(el.scrollHeight, 44), MAX_GROW_PX)
     el.style.height = `${next}px`
     el.style.overflowY = el.scrollHeight > MAX_GROW_PX ? 'auto' : 'hidden'
-  }, [draft])
+    // The phone's box is a pill on one line and a rounded sheet past it: a
+    // pill's ends on a box eight lines tall are two half-moons.
+    const box = el.parentElement
+    if (box?.classList.contains('composer__field')) box.dataset.tall = next > PHONE_ONE_LINE_PX ? 'true' : 'false'
+  }, [draft, mobile])
 
   const addFiles = useCallback((incoming: File[]) => {
     if (incoming.length) setFiles((current) => [...current, ...incoming])
@@ -524,17 +523,8 @@ export function Composer({
     />
   ) : null
 
-  return (
-    <form
-      className="composer"
-      data-region="compose"
-      data-disabled={disabled ? 'true' : undefined}
-      data-voice={phase}
-      data-voice-mode={phase === 'recording' ? voiceState.mode : undefined}
-      data-cancel-armed={cancelArmed ? 'true' : undefined}
-      onSubmit={submit}
-      onPaste={onPaste}
-    >
+  const fileInputs = (
+    <>
       <input
         ref={cameraInputRef}
         className="composer__file"
@@ -562,43 +552,236 @@ export function Composer({
         disabled={disabled}
         onChange={onFileInputChange}
       />
+    </>
+  )
+
+  /*
+   * The phone: one row — the box with "+" at its front, and the 56px disc at
+   * the bottom right, under the thumb. The disc is the mic while there is
+   * nothing to send and Send the moment there is; Stop joins it, never
+   * replaces it, while an agent works. A dictation takes the box over in place
+   * (Cancel, what it hears, the clock) and never makes it taller, because a
+   * taller dock is a shorter terminal and a real PTY resize. The key row sits
+   * above, and only the Terminal view shows it — in the status strip's place.
+   */
+  if (mobile) {
+    const live = voiceControls !== undefined && (phase === 'recording' || phase === 'transcribing')
+    const pick = (input: HTMLInputElement | null): void => {
+      setOpenPick(null)
+      input?.click()
+    }
+    return (
+      <form
+        className="composer"
+        data-region="compose"
+        data-disabled={disabled ? 'true' : undefined}
+        data-voice={phase}
+        data-voice-mode={phase === 'recording' ? voiceState.mode : undefined}
+        data-cancel-armed={cancelArmed ? 'true' : undefined}
+        onSubmit={submit}
+        onPaste={onPaste}
+      >
+        {fileInputs}
+        {/* Esc first: it is the key a phone needs most. Enter is here because
+            the empty box's disc is the mic, not Enter. Every key is on screen
+            at once — nothing scrolls off the end. */}
+        <div className="composer__keys" role="toolbar" aria-label="Terminal keys">
+          <Key label="Esc" onClick={() => onRaw('\x1b')} disabled={disabled} title="Esc" />
+          <Key label="Tab" onClick={() => onRaw('\t')} disabled={disabled} title="Tab" />
+          <Key
+            label={
+              ctrl ? (
+                <span className="composer__cap-stack">
+                  Ctrl<small>on</small>
+                </span>
+              ) : (
+                'Ctrl'
+              )
+            }
+            onClick={armCtrl}
+            disabled={disabled}
+            active={ctrl}
+            ariaLabel={ctrl ? 'Ctrl on' : 'Ctrl'}
+            title={ctrl ? 'Ctrl on — the next letter sends its control code' : 'Ctrl — tap, then a letter (C, D, L, U…)'}
+          />
+          <Key label={<Glyph name="left" />} ariaLabel="Left" cap="start" onClick={() => onRaw('\x1b[D')} disabled={disabled} title="Left" />
+          <Key label={<Glyph name="up" />} ariaLabel="Up" cap="mid" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
+          <Key label={<Glyph name="down" />} ariaLabel="Down" cap="mid" onClick={() => onRaw('\x1b[B')} disabled={disabled} title="Down" />
+          <Key label={<Glyph name="right" />} ariaLabel="Right" cap="end" onClick={() => onRaw('\x1b[C')} disabled={disabled} title="Right" />
+          {voiceControls ? <Key label="Enter" onClick={() => onRaw('\r')} disabled={disabled} title="Enter" /> : null}
+        </div>
+        {files.length ? (
+          <Attachments
+            files={files}
+            onRemove={(index) => setFiles((current) => current.filter((_, i) => i !== index))}
+          />
+        ) : null}
+        <div className="composer__row">
+          {onShowChat ? (
+            <button
+              type="button"
+              className="composer__face"
+              onClick={onShowChat}
+              title="Show the conversation (Chat)"
+              aria-label="Show the conversation (Chat)"
+            >
+              <Glyph name="chat" size={18} />
+              <span>Chat</span>
+            </button>
+          ) : null}
+          <div className="composer__field" data-phase={phase}>
+            {live ? (
+              <button
+                type="button"
+                className="composer__lead"
+                data-kind="cancel"
+                onClick={voiceControls.cancel}
+                aria-label={phase === 'recording' ? 'Cancel — throw this recording away' : 'Cancel — do not send'}
+                title="Cancel"
+              >
+                <Icon name="close" size={18} />
+              </button>
+            ) : reviewing && voiceControls ? (
+              <button
+                type="button"
+                className="composer__lead"
+                data-kind="undo"
+                onClick={voiceControls.undo}
+                aria-label="Undo — keep the words to edit"
+              >
+                Undo
+                {voiceState.phase === 'review' ? (
+                  // The countdown lives on the way out of it: it drains, then the words send.
+                  <span
+                    key={voiceState.endsAt}
+                    className="composer__drain"
+                    aria-hidden="true"
+                    style={{ animationDuration: `${Math.max(0, voiceState.endsAt - Date.now())}ms` }}
+                  />
+                ) : null}
+              </button>
+            ) : (
+              <button
+                ref={attachRef}
+                type="button"
+                className="composer__lead"
+                data-kind="attach"
+                disabled={disabled}
+                aria-haspopup="dialog"
+                aria-expanded={openPick === 'attach'}
+                onClick={() => setOpenPick((v) => (v === 'attach' ? null : 'attach'))}
+                title="Attach a photo, image or file"
+                aria-label="Attach"
+              >
+                <Icon name="plus" size={20} />
+              </button>
+            )}
+            {live ? (
+              <VoiceStrip state={voiceState} analyser={voiceLevel?.analyser ?? null} cancelArmed={cancelArmed} />
+            ) : null}
+            <textarea
+              ref={field}
+              className="composer__input"
+              rows={1}
+              value={draft}
+              disabled={disabled}
+              placeholder={placeholder}
+              enterKeyHint="enter"
+              autoCapitalize="sentences"
+              autoCorrect="on"
+              autoComplete="on"
+              spellCheck
+              onFocus={() => {
+                // Tapping into the words while they wait to send is Undo.
+                if (reviewing) voiceControls?.undo()
+                onFocus?.()
+              }}
+              onPointerDown={reviewing ? () => voiceControls?.undo() : undefined}
+              onChange={onChange}
+              onKeyDown={onKey}
+            />
+            {voiceState.phase === 'review' ? (
+              <span className="composer__sr" role="status">
+                Sending in a moment. Undo keeps the words.
+              </span>
+            ) : null}
+          </div>
+          {micPrimary && phase !== 'idle' ? null : stopMode ? (
+            <button
+              type="button"
+              className="composer__send"
+              data-draft="false"
+              data-stop={stopping ? 'stopping' : 'true'}
+              disabled={!ready}
+              onClick={onStop}
+              aria-label={stopping ? 'Stopping' : 'Stop'}
+              title={stopping ? 'Stopping… — tap to send Esc again' : 'Stop — interrupt the agent (Esc)'}
+            >
+              <span className="composer__stop-square" aria-hidden="true" />
+              <span>{stopping ? 'Stopping…' : 'Stop'}</span>
+            </button>
+          ) : micPrimary ? null : (
+            <button
+              type="submit"
+              className="composer__send"
+              data-draft={hasDraft ? 'true' : 'false'}
+              data-sending={busySending ? 'true' : undefined}
+              disabled={!ready || busySending}
+              aria-label={busySending ? 'Sending' : hasDraft ? 'Send' : 'Enter'}
+              title={busySending ? 'Sending…' : hasDraft ? 'Send' : 'Enter'}
+            >
+              {sending && sending.total > 0 ? (
+                <span className="composer__send-progress">
+                  Sending {sending.done}/{sending.total}…
+                </span>
+              ) : (
+                <Glyph name={hasDraft || busySending ? 'send' : 'enter'} size={24} weight={2} />
+              )}
+            </button>
+          )}
+          {/* Its own slot, always last: the element survives every state a
+              dictation passes through, so a hold keeps its pointer. */}
+          {micPrimary ? mic : null}
+        </div>
+        <BottomSheet open={openPick === 'attach'} onClose={() => setOpenPick(null)} label="Attach" testId="attach-sheet">
+          <SheetRow
+            icon={<Icon name="camera" size={20} />}
+            label="Take a photo"
+            secondary="Opens the camera"
+            onClick={() => pick(cameraInputRef.current)}
+          />
+          <SheetRow
+            icon={<Icon name="image" size={20} />}
+            label="Choose an image"
+            secondary="From your photos"
+            onClick={() => pick(imageInputRef.current)}
+          />
+          <SheetRow
+            icon={<Icon name="file" size={20} />}
+            label="Choose a file"
+            secondary="Any file on this phone"
+            onClick={() => pick(fileInputRef.current)}
+          />
+        </BottomSheet>
+      </form>
+    )
+  }
+
+  return (
+    <form
+      className="composer"
+      data-region="compose"
+      data-disabled={disabled ? 'true' : undefined}
+      data-voice={phase}
+      data-voice-mode={phase === 'recording' ? voiceState.mode : undefined}
+      data-cancel-armed={cancelArmed ? 'true' : undefined}
+      onSubmit={submit}
+      onPaste={onPaste}
+    >
+      {fileInputs}
       <div className="composer__card">
         {showPicks || micInPicks ? (
           <div className="composer__picks" role="toolbar" aria-label="Agent settings">
-            {mobile && showPicks ? (
-              <>
-                <button
-                  ref={allRef}
-                  type="button"
-                  className="composer__pick"
-                  data-active={openPick === 'all' ? 'true' : undefined}
-                  data-mode={modeTone}
-                  aria-haspopup="menu"
-                  aria-expanded={openPick === 'all'}
-                  onClick={() => setOpenPick((v) => (v === 'all' ? null : 'all'))}
-                  disabled={disabled}
-                  title="Model, effort and permissions for this pane"
-                >
-                  <span className="composer__pick-label">{allLabel}</span>
-                  <Icon name="chevronDown" size={10} />
-                </button>
-                <Popover
-                  anchor={allRef.current}
-                  open={openPick === 'all'}
-                  onClose={() => setOpenPick(null)}
-                  align="start"
-                  side="top"
-                  width={272}
-                  label="Agent settings"
-                >
-                  {modelSection}
-                  {modelSection && (effortSection || modeSection) ? <PopoverDivider /> : null}
-                  {effortSection}
-                  {effortSection && modeSection ? <PopoverDivider /> : null}
-                  {modeSection}
-                </Popover>
-              </>
-            ) : null}
             {!mobile && onModel && modelList.length ? (
               <button
                 ref={modelRef}
@@ -962,7 +1145,7 @@ function MicButton({
   return (
     <button
       type="button"
-      className="composer__mic"
+      className={primary ? 'composer__mic composer__disc' : 'composer__mic'}
       data-phase={phase}
       data-mode={mode ?? undefined}
       data-primary={primary ? 'true' : undefined}
@@ -987,22 +1170,32 @@ function MicButton({
       aria-label={phase === 'recording' ? label : phase === 'transcribing' ? 'Working out the words' : 'Dictate'}
       aria-pressed={phase === 'recording'}
     >
-      {phase === 'recording' ? (
-        primary ? (
-          <>
-            <span className="composer__mic-dot" />
-            <span className="composer__mic-label">{label}</span>
-          </>
+      {primary ? (
+        // The phone's disc says what a press does next by its shape — the
+        // arrow sends, the mic under a holding finger sends on release, the
+        // cross throws away — and the box beside it says it in words.
+        phase === 'recording' ? (
+          cancelArmed ? (
+            <Icon name="close" size={24} />
+          ) : mode === 'hold' ? (
+            <Glyph name="mic" size={26} weight={1.8} />
+          ) : (
+            <Glyph name="send" size={26} weight={2} />
+          )
+        ) : phase === 'transcribing' ? (
+          <span className="composer__mic-ring" />
         ) : (
-          <>
-            <span className="composer__mic-dot" />
-            <VoiceMeter analyser={analyser} />
-          </>
+          <Glyph name="mic" size={26} weight={1.8} />
         )
+      ) : phase === 'recording' ? (
+        <>
+          <span className="composer__mic-dot" />
+          <VoiceMeter analyser={analyser} />
+        </>
       ) : phase === 'transcribing' ? (
         <span className="composer__mic-ring" />
       ) : (
-        <Icon name="mic" size={primary ? 20 : 16} />
+        <Icon name="mic" size={16} />
       )}
     </button>
   )
@@ -1066,6 +1259,99 @@ function VoicePanel({
   )
 }
 
+/**
+ * The phone's dictation, inside the box it took over: what is happening in
+ * words, the clock, and under them the picture — the live waveform while it
+ * listens, a quiet shimmer along the same track while the desktop works out
+ * the words. Cancel is the box's front button; the disc is the way on.
+ */
+function VoiceStrip({
+  state,
+  analyser,
+  cancelArmed
+}: {
+  state: VoiceState
+  analyser: AnalyserNode | null
+  cancelArmed: boolean
+}): ReactNode {
+  if (state.phase !== 'recording' && state.phase !== 'transcribing') return null
+  const hold = state.phase === 'recording' && state.mode === 'hold'
+  const words =
+    state.phase === 'recording'
+      ? hold
+        ? cancelArmed
+          ? 'Release to cancel'
+          : 'Slide left to cancel'
+        : 'Listening'
+      : 'Working out the words…'
+  return (
+    <div className="composer__strip" data-phase={state.phase} data-cancel-armed={cancelArmed ? 'true' : undefined}>
+      <div className="composer__strip-top">
+        <span className="composer__strip-label" role="status">
+          {state.phase === 'recording' && !cancelArmed ? (
+            hold ? (
+              <Glyph name="chevronLeft" size={14} weight={2} />
+            ) : (
+              <span className="composer__strip-dot" aria-hidden="true" />
+            )
+          ) : null}
+          {words}
+        </span>
+        <Ticker since={state.startedAt} />
+      </div>
+      {state.phase === 'recording' ? (
+        <VoiceWave analyser={analyser} />
+      ) : (
+        <span className="composer__shimmer" aria-hidden="true" />
+      )}
+    </div>
+  )
+}
+
+/* ----------------------------------------------------------------- glyphs */
+
+type GlyphName = 'send' | 'enter' | 'mic' | 'left' | 'up' | 'down' | 'right' | 'chat' | 'chevronLeft'
+
+/**
+ * The phone composer's own marks, on the icon set's 16px grid but drawn a
+ * touch heavier: they sit on a lime disc and on keycaps read at arm's length.
+ */
+const GLYPHS: Record<GlyphName, ReactNode> = {
+  send: <path d="M8 13V3.4M3.9 7.5 8 3.4l4.1 4.1" />,
+  enter: <path d="M12.6 3.4v4.4a1.6 1.6 0 0 1-1.6 1.6H3.6M6.6 6.4 3.6 9.4l3 3" />,
+  mic: (
+    <>
+      <rect x="6" y="2.2" width="4" height="7.2" rx="2" />
+      <path d="M3.8 7.6a4.2 4.2 0 0 0 8.4 0M8 11.8v1.9" />
+    </>
+  ),
+  left: <path d="M12.8 8H3.4M7.2 4.2 3.4 8l3.8 3.8" />,
+  right: <path d="M3.2 8h9.4M8.8 4.2 12.6 8l-3.8 3.8" />,
+  up: <path d="M8 12.8V3.4M4.2 7.2 8 3.4l3.8 3.8" />,
+  down: <path d="M8 3.2v9.4M4.2 8.8 8 12.6l3.8-3.8" />,
+  chat: <path d="M13.4 9.2a1.4 1.4 0 0 1-1.4 1.4H6.2L3.4 13V4.2a1.4 1.4 0 0 1 1.4-1.4h7.2a1.4 1.4 0 0 1 1.4 1.4z" />,
+  chevronLeft: <path d="M10 3.6 5.6 8l4.4 4.4" />
+}
+
+function Glyph({ name, size = 20, weight = 1.7 }: { name: GlyphName; size?: number; weight?: number }): ReactNode {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={weight}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {GLYPHS[name]}
+    </svg>
+  )
+}
+
 /* ------------------------------------------------------------- attachments */
 
 function Attachments({ files, onRemove }: { files: File[]; onRemove: (index: number) => void }): ReactNode {
@@ -1107,20 +1393,28 @@ function Key({
   onClick,
   disabled,
   active,
-  title
+  title,
+  ariaLabel,
+  cap
 }: {
-  label: string
+  label: ReactNode
   onClick: () => void
   disabled: boolean
   /** A latched key — armed Ctrl — rather than one that fires and is done. */
   active?: boolean
   title?: string
+  /** The key's name, when its face is a glyph or more than one word. */
+  ariaLabel?: string
+  /** Where the key sits in a joined group (the phone's four arrows are one pad). */
+  cap?: 'start' | 'mid' | 'end'
 }): ReactNode {
   return (
     <button
       type="button"
       className="composer__key"
       data-active={active ? 'true' : undefined}
+      data-cap={cap}
+      aria-label={ariaLabel}
       aria-pressed={active === undefined ? undefined : active}
       // Keep the box's focus, and with it the phone's keyboard: an armed Ctrl
       // waits for a letter typed on that keyboard.
@@ -1128,9 +1422,9 @@ function Key({
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
       disabled={disabled}
-      title={title ?? label}
+      title={title ?? (typeof label === 'string' ? label : ariaLabel)}
     >
-      {label}
+      <span className="composer__cap">{label}</span>
     </button>
   )
 }

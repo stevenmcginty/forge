@@ -1,0 +1,827 @@
+/*
+ * The phone's remaining menus as sheets, and the doorway (sign-in, connecting,
+ * the PIN, every refusal) brought up to the same standard.
+ *
+ * Tokens from web/src/phone-tokens.css: the sheets read them through
+ * `.bsheet-layer`, the doorway through the phone-faced `.app[data-shell='gate']`
+ * that `GateFrame` wraps it in. Rows, buttons and the sheet itself come from
+ * BottomSheet.css; this file adds only what those menus need beyond them.
+ *
+ * A few rules at the top are not phone-only, because the markup they style is
+ * shared with the desk: the progress bar, the error line's glyph, the hidden
+ * username the PIN box pairs with, and the pass-through heading block.
+ */
+
+/* ------------------------------------------------------------ everywhere */
+
+/*
+ * The progress bar: a hairline track and a short segment that travels along
+ * it. Indeterminate, because nothing on the wire says how far along a connect
+ * is — but it moves, which a 44px dash that breathes did not say clearly.
+ * Ink, not lime: lime means "act here", and there is nothing to press.
+ */
+.pbar {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line-hairline);
+  opacity: 0;
+  transition: opacity 180ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.pbar[data-on='true'] {
+  opacity: 1;
+}
+
+.pbar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 38%;
+  border-radius: inherit;
+  background: var(--text-secondary);
+  animation: pbar-travel 1.3s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes pbar-travel {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(265%);
+  }
+}
+
+/* Still: the segment parks in the middle and the words beside it carry the wait. */
+@media (prefers-reduced-motion: reduce) {
+  .pbar::after {
+    left: 31%;
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .pbar::after {
+  left: 31%;
+  animation: none;
+}
+
+/* The heading block is a phone layout device; at a desk it steps aside. */
+.gate__lead {
+  display: contents;
+}
+
+/* The username half of the PIN's password-manager pair. In the form, never seen. */
+.gate__username {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Where "Use fingerprint" will go. No room taken until it does. */
+.gate__slot:empty {
+  display: none;
+}
+
+/* An error line is a shape and a sentence, never a colour on its own. */
+.gate__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  text-align: left;
+}
+
+.gate__error .alert-glyph {
+  flex: none;
+  margin-top: 1px;
+}
+
+/* ----------------------------------------------------------- the doorway
+ *
+ * One column for a thumb. The heading block sits in the calm upper part of the
+ * screen; the fields and the one button sit at the bottom, where the thumb
+ * already is. No card, no glow, no gradient: the page is the surface.
+ */
+
+.app[data-shell='gate'] .gate {
+  display: block;
+  height: 100%;
+  padding: calc(var(--p-4) + env(safe-area-inset-top, 0px)) var(--p-5)
+    calc(var(--p-4) + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--p-bg);
+}
+
+.app[data-shell='gate'] .gate__card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--p-3);
+  width: 100%;
+  max-width: 440px;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 0;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  animation: gate-rise var(--p-dur-sheet) var(--p-ease-sheet) both;
+}
+
+@keyframes gate-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.app[data-shell='gate'] .gate__lead {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--p-3);
+  padding: var(--p-8) 0 var(--p-6);
+}
+
+.app[data-shell='gate'] .gate__mark {
+  width: 52px;
+  height: 52px;
+  margin-bottom: var(--p-2);
+  color: var(--p-ink);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-row);
+  box-shadow: none;
+}
+
+.app[data-shell='gate'] .gate__title {
+  margin: 0;
+  font: 650 28px / 1.15 var(--p-font);
+  letter-spacing: -0.02em;
+  color: var(--p-ink);
+  overflow-wrap: anywhere;
+}
+
+.app[data-shell='gate'] .gate__body {
+  margin: 0;
+  font-size: var(--p-t-body);
+  line-height: 1.45;
+  color: var(--p-ink-2);
+  overflow-wrap: anywhere;
+}
+
+.app[data-shell='gate'] .gate__hint {
+  margin: 0;
+  font-size: var(--p-t-small);
+  line-height: 1.45;
+  color: var(--p-ink-3);
+}
+
+.app[data-shell='gate'] .gate__progress {
+  max-width: 240px;
+  margin-top: var(--p-2);
+}
+
+/* Fields: the label in the body face, a 52px box, 16px text (iOS zooms below it). */
+.app[data-shell='gate'] .gate__field {
+  gap: var(--p-2);
+}
+
+.app[data-shell='gate'] .gate__label {
+  font: 500 var(--p-t-label) / 1.3 var(--p-font);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--p-ink-2);
+}
+
+.app[data-shell='gate'] .gate__input {
+  height: 52px;
+  padding: 0 var(--p-4);
+  font-family: var(--p-font);
+  font-size: var(--p-t-body);
+  color: var(--p-ink);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-row);
+  box-shadow: none;
+  transition:
+    border-color var(--p-dur-fast) var(--p-ease),
+    box-shadow var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-shell='gate'] .gate__input:focus {
+  outline: none;
+  border-color: var(--p-ink-2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-ink) 12%, transparent);
+}
+
+.app[data-shell='gate'] .gate__input:disabled {
+  color: var(--p-ink-3);
+}
+
+/* A filled-in field keeps this page's surface, not the browser's yellow. */
+.app[data-shell='gate'] .gate__input:-webkit-autofill {
+  -webkit-text-fill-color: var(--p-ink);
+  box-shadow: 0 0 0 100px var(--p-surface) inset;
+  caret-color: var(--p-ink);
+}
+
+.app[data-shell='gate'] .gate__input--pin {
+  font-family: var(--p-mono);
+  font-size: 22px;
+  letter-spacing: 0.3em;
+}
+
+/* The one button: solid lime, because signing in is the act on this screen.
+   Disabled, it stays a lime pill at 40% — still plainly a button, plainly not ready. */
+.app[data-shell='gate'] .gate__go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 52px;
+  margin-top: var(--p-2);
+  padding: 0 var(--p-5);
+  font: 600 var(--p-t-body) / 1 var(--p-font);
+  color: var(--p-act-ink);
+  background: var(--p-act);
+  border: 1px solid var(--p-act);
+  border-radius: var(--p-r-pill);
+  box-shadow: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    opacity var(--p-dur) var(--p-ease),
+    background var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-shell='gate'] .gate__go:hover:not(:disabled) {
+  background: var(--p-act);
+  box-shadow: none;
+}
+
+.app[data-shell='gate'] .gate__go:active:not(:disabled) {
+  background: color-mix(in srgb, var(--p-act) 85%, var(--p-ink));
+}
+
+.app[data-shell='gate'] .gate__go:disabled {
+  opacity: 0.4;
+  color: var(--p-act-ink);
+  background: var(--p-act);
+  border-color: var(--p-act);
+  cursor: default;
+}
+
+.app[data-shell='gate'] .gate__go:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 2px;
+}
+
+.app[data-shell='gate'] .gate__error {
+  width: 100%;
+  margin: 0;
+  padding: var(--p-3) var(--p-4);
+  font-size: var(--p-t-label);
+  line-height: 1.45;
+  color: var(--p-ink);
+  background: var(--p-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--p-danger) 40%, transparent);
+  border-radius: var(--p-r-row);
+  box-shadow: none;
+}
+
+.app[data-shell='gate'] .gate__error .alert-glyph {
+  color: var(--p-danger);
+}
+
+/* "Signed in as …" and the way out, on a line of their own. */
+.app[data-shell='gate'] .gate__account {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding-top: var(--p-2);
+  font-size: var(--p-t-small);
+  line-height: 1.4;
+  color: var(--p-ink-3);
+}
+
+.app[data-shell='gate'] .gate__account-email {
+  color: var(--p-ink-2);
+  overflow-wrap: anywhere;
+}
+
+.app[data-shell='gate'] .gate__switch {
+  min-height: var(--p-hit);
+  padding: 0;
+  font: 500 var(--p-t-chrome) / 1.2 var(--p-font);
+  color: var(--p-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--p-line-strong);
+  text-underline-offset: 4px;
+}
+
+/* ---------------------------------------------------------------- sheets */
+
+/* The desk's agent badge, grown into a tile that fills the row's icon slot. */
+.bsheet-layer .bsrow__icon .agent-badge {
+  height: 32px;
+  min-width: 36px;
+  padding: 0 6px;
+  font-size: 11px;
+  border-radius: var(--p-r-row);
+}
+
+/* A step back inside a sheet (the mode ladder, a picker's inner view). */
+.psheet__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--p-hit);
+  margin: 0 0 var(--p-1);
+  padding: 0 var(--p-3) 0 var(--p-2);
+  font: 500 var(--p-t-chrome) / 1 var(--p-font);
+  color: var(--p-ink-2);
+  background: none;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.psheet__back:active {
+  background: var(--p-press);
+}
+
+.psheet__back:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+/* An agent row with its mode pill beside it — two buttons, never one inside the other. */
+.psheet__line {
+  display: flex;
+  align-items: center;
+}
+
+.psheet__line > .bsrow {
+  flex: 1;
+  min-width: 0;
+}
+
+.psheet__mode {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--p-1);
+  height: 36px;
+  margin: 0 var(--p-2) 0 var(--p-1);
+  padding: 0 var(--p-2) 0 var(--p-3);
+  font: 500 var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink);
+  background: transparent;
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+/* Drawn at 36, hit at 44. */
+.psheet__mode::before {
+  content: '';
+  position: absolute;
+  inset: -4px -4px;
+}
+
+.psheet__mode svg:last-child {
+  color: var(--p-ink-3);
+}
+
+.psheet__mode:active {
+  background: var(--p-press);
+}
+
+.psheet__mode:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 2px;
+}
+
+/* The ladder's tick: an empty ring, or a filled disc with a check in it. */
+.psheet__tick {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid var(--p-line-strong);
+  border-radius: 50%;
+}
+
+.psheet__tick[data-on='true'] {
+  color: var(--p-raised);
+  background: var(--p-ink);
+  border-color: var(--p-ink);
+}
+
+/* "No guard" beside a rung that asks nothing: a shape and words, not a red row.
+   A tag ("hand back", "tab default") is the same outline without the shape. */
+.psheet__warn,
+.psheet__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--p-1);
+  padding: 4px 10px 4px 8px;
+  font-size: var(--p-t-small);
+  font-weight: 500;
+  color: var(--p-ink-2);
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-pill);
+  white-space: nowrap;
+}
+
+.psheet__note {
+  margin: 0;
+  padding: var(--p-3);
+  font-size: var(--p-t-label);
+  line-height: 1.45;
+  color: var(--p-ink-2);
+}
+
+.psheet__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--p-3);
+  flex: none;
+  margin: var(--p-2) var(--p-3);
+  padding: var(--p-3) var(--p-4);
+  font-size: var(--p-t-label);
+  line-height: 1.45;
+  color: var(--p-ink);
+  background: var(--p-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--p-danger) 40%, transparent);
+  border-radius: var(--p-r-row);
+  overflow-wrap: anywhere;
+}
+
+.psheet__error .alert-glyph {
+  flex: none;
+  color: var(--p-danger);
+}
+
+.psheet__busy {
+  display: grid;
+  gap: var(--p-2);
+  padding: var(--p-3);
+  font-size: var(--p-t-label);
+  color: var(--p-ink-2);
+}
+
+.bsheet-layer .bsbtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* A labelled field inside a sheet: the same box as the doorway's. */
+.pfield {
+  display: grid;
+  gap: var(--p-2);
+  padding: var(--p-2) var(--p-3);
+}
+
+.pfield__label {
+  font: 500 var(--p-t-label) / 1.3 var(--p-font);
+  color: var(--p-ink-2);
+}
+
+.pfield__input {
+  width: 100%;
+  height: 52px;
+  padding: 0 var(--p-4);
+  font: 400 var(--p-t-body) / 1.2 var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-row);
+  user-select: text;
+  transition:
+    border-color var(--p-dur-fast) var(--p-ease),
+    box-shadow var(--p-dur-fast) var(--p-ease);
+}
+
+.pfield__input::placeholder {
+  color: var(--p-ink-3);
+}
+
+.pfield__input:focus {
+  outline: none;
+  border-color: var(--p-ink-2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-ink) 12%, transparent);
+}
+
+/* ------------------------------------------------------- add a project */
+
+.fpk__form {
+  display: grid;
+  gap: var(--p-1);
+}
+
+.fpk__form > .psheet__back {
+  justify-self: start;
+}
+
+/* Create in: three radio rows. Chosen is a ring with a disc in it — a shape, not a hue. */
+.fpk__parents {
+  display: grid;
+}
+
+.fpk__parent {
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  width: calc(100% + 2 * var(--p-2));
+  min-height: 52px;
+  padding: var(--p-1) var(--p-2);
+  margin: 0 calc(-1 * var(--p-2));
+  font: 400 var(--p-t-body) / 1.3 var(--p-font);
+  text-align: left;
+  color: var(--p-ink);
+  background: none;
+  border: 0;
+  border-radius: var(--p-r-row);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.fpk__parent:active:not(:disabled) {
+  background: var(--p-press);
+}
+
+.fpk__parent:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+.fpk__radio {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--p-line-strong);
+  border-radius: 50%;
+  transition: border-color var(--p-dur-fast) var(--p-ease);
+}
+
+.fpk__parent[aria-checked='true'] .fpk__radio {
+  border-color: var(--p-ink);
+}
+
+.fpk__parent[aria-checked='true'] .fpk__radio::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: var(--p-ink);
+}
+
+.fpk__parent-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fpk__parent-sub {
+  font-size: var(--p-t-mono);
+  color: var(--p-ink-3);
+  overflow-wrap: anywhere;
+}
+
+.fpk__actions {
+  display: grid;
+  gap: var(--p-2);
+  padding: var(--p-3) var(--p-3) var(--p-1);
+}
+
+/* Browse: a tall sheet, the list scrolling inside it, "Use this folder" pinned at the foot. */
+.bsheet-layer:has(.fpk[data-view='browse']) .bsheet {
+  height: 90%;
+}
+
+.bsheet-layer:has(.fpk[data-view='browse']) .bsheet__body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fpk[data-view='browse'] {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.fpk__top {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.fpk__top > .psheet__back {
+  margin: 0;
+}
+
+.fpk__top > .pbar {
+  grid-column: 1 / -1;
+  height: 2px;
+  margin: var(--p-1) var(--p-3) 0;
+  width: auto;
+}
+
+/* Scrolled to its end so "where am I" is in view; the left edge fades where
+   the path carries on out of sight. A mask, not a colour. */
+.fpk__crumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-left: var(--p-3);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--p-4));
+  mask-image: linear-gradient(to right, transparent 0, #000 var(--p-4));
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-left: 1px solid var(--p-line);
+}
+
+.fpk__crumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.fpk__crumb-step {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--p-ink-3);
+}
+
+.fpk__crumb {
+  flex: none;
+  max-width: 180px;
+  min-height: var(--p-hit);
+  padding: 0 var(--p-2);
+  overflow: hidden;
+  font: 500 var(--p-t-chrome) / 1 var(--p-font);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--p-ink-2);
+  background: none;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fpk__crumb[aria-current='location'] {
+  font-weight: 650;
+  color: var(--p-ink);
+}
+
+.fpk__crumb:active:not(:disabled) {
+  background: var(--p-press);
+}
+
+.fpk__crumb:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+.fpk__list {
+  flex: 1;
+  min-height: 0;
+  margin-top: var(--p-1);
+  padding: var(--p-1) 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--p-line);
+}
+
+.fpk__row {
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  width: 100%;
+  min-height: var(--p-row);
+  padding: 0 var(--p-3);
+  font: 500 var(--p-t-body) / 1.3 var(--p-font);
+  text-align: left;
+  color: var(--p-ink);
+  background: none;
+  border: 0;
+  border-radius: var(--p-r-row);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.fpk__row > svg {
+  flex: none;
+  color: var(--p-ink-2);
+}
+
+.fpk__row:not([data-file]) > svg:last-child {
+  color: var(--p-ink-3);
+}
+
+.fpk__row:active:not(:disabled):not([data-file]) {
+  background: var(--p-press);
+}
+
+.fpk__row:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+.fpk__row:disabled {
+  cursor: progress;
+}
+
+/* Files are shown so a folder full of source does not look empty, and cannot be pressed. */
+.fpk__row[data-file='true'] {
+  min-height: var(--p-hit);
+  font-size: var(--p-t-label);
+  font-weight: 400;
+  color: var(--p-ink-3);
+  cursor: default;
+}
+
+.fpk__row[data-file='true'] > svg {
+  color: var(--p-ink-3);
+}
+
+.fpk__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* "This is probably the one": a git mark and a word, not a coloured dot. */
+.fpk__repo {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--p-1);
+  padding: 3px var(--p-2);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--p-ink-2);
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-pill);
+}
+
+.fpk__foot {
+  flex: none;
+  display: grid;
+  gap: var(--p-2);
+  padding: var(--p-3) var(--p-3) var(--p-1);
+  border-top: 1px solid var(--p-line);
+}
+
+.fpk__here {
+  overflow: hidden;
+  font-size: var(--p-t-small);
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--p-ink-2);
+}
+
+/* On Paper, a light agent colour (Claude's lime) is unreadable as text on its
+   own pale wash; darken the letters toward the ink, keep the tile's colour. */
+:root[data-appearance='light'] .bsheet-layer .bsrow__icon .agent-badge {
+  color: color-mix(in srgb, var(--badge-accent, var(--accent)) 45%, var(--p-ink));
+}

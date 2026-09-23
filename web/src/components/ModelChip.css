@@ -1,0 +1,180 @@
+/*
+ * The model chip in the phone's status strip, and the strip it lives in.
+ *
+ * The strip is held at one exact height on a phone (52px, --p-row less the
+ * 4px of the grid it gives the chip to breathe) because the Terminal view
+ * swaps it for the key row, which is the same 52px — see Composer.css. The
+ * two trading places is what keeps the dock, and so the terminal's grid above
+ * it, the same size in every view (scripts/viewtoggle-check.mjs).
+ */
+
+.app[data-mobile] .astatus__row {
+  box-sizing: border-box;
+  height: 52px;
+  min-height: 52px;
+  gap: var(--p-2);
+  padding: var(--p-1) var(--p-3) var(--p-1) var(--p-4);
+}
+
+/*
+ * The chip says the mode in words, so it stands in for the strip's mode pill.
+ * A 44px target around a 32px face: the strip stays quiet, the thumb lands.
+ */
+.mchip {
+  flex: none;
+  max-width: 62%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  height: var(--p-hit);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--p-ink);
+  font: 500 var(--p-t-label) / 1 var(--p-font);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mchip__face {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--p-1);
+  min-width: 0;
+  height: 32px;
+  padding: 0 var(--p-2) 0 var(--p-3);
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-row);
+  transition:
+    background var(--p-dur-fast) var(--p-ease),
+    border-color var(--p-dur-fast) var(--p-ease);
+}
+
+.mchip svg {
+  flex: none;
+  color: var(--p-ink-2);
+}
+
+.mchip__words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mchip:active:not(:disabled) .mchip__face,
+.mchip[data-open='true'] .mchip__face {
+  background: var(--p-press);
+}
+
+.mchip:focus-visible {
+  outline: none;
+}
+
+.mchip:focus-visible .mchip__face {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 2px;
+}
+
+.mchip:disabled {
+  color: var(--p-ink-3);
+  cursor: default;
+}
+
+/* With the chip there, the badge names the agent; the path keeps the room. */
+.app[data-mobile] .astatus__row:has(.mchip) .astatus__name {
+  display: none;
+}
+
+.mchip__sheet {
+  display: contents;
+}
+
+/* The strip's view button beside it: the same quiet 32px face, in ink, so it
+   holds in Paper too (its desk styling is white-on-glass). */
+.app[data-mobile] .astatus__view {
+  height: 32px;
+  padding: 0 var(--p-3);
+  border-radius: var(--p-r-row);
+  border: 1px solid var(--p-line-strong);
+  background: transparent;
+  box-shadow: none;
+  color: var(--p-ink);
+  font: 500 var(--p-t-small) / 1 var(--p-font);
+}
+
+/* The bypass warning: a shape and the word beside it, the red only a third signal. */
+.mchip__warn {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 5px;
+  vertical-align: -3px;
+  border: 1.5px solid var(--p-danger);
+  border-radius: var(--p-r-pill);
+  color: var(--p-danger);
+  font: 800 11px / 1 var(--p-font);
+}
+
+/* ----------------------------------------------------------- the sheet rows */
+
+.mpick[data-current='true'] .bsrow__label {
+  font-weight: 650;
+}
+
+.mpick__tick {
+  width: 24px;
+  justify-content: center;
+  color: var(--p-ink);
+}
+
+/* Effort: one segmented row. The one in force is filled with ink — a shape
+   and a contrast, and `aria-checked` — never a hue. */
+.mseg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 2px;
+  margin: var(--p-1) var(--p-3) 0;
+  padding: 2px;
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-row);
+}
+
+.mseg__opt {
+  min-width: 0;
+  height: var(--p-hit);
+  padding: 0 2px;
+  border: 0;
+  border-radius: calc(var(--p-r-row) - 2px);
+  background: transparent;
+  color: var(--p-ink);
+  font: 500 var(--p-t-label) / 1 var(--p-font);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.mseg__opt:active {
+  background: var(--p-press);
+}
+
+.mseg__opt[aria-checked='true'] {
+  background: var(--p-ink);
+  color: var(--p-bg);
+  font-weight: 650;
+}
+
+.mseg__opt:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 2px;
+}
+
+.mseg__note {
+  margin: var(--p-2) var(--p-3) var(--p-2);
+  font-size: var(--p-t-small);
+  line-height: 1.35;
+  color: var(--p-ink-2);
+}

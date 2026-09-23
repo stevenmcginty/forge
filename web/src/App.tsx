@@ -80,6 +80,8 @@ export function App(): ReactNode {
           reason={state.connection.reason}
           message={state.connection.message}
           retryAfterMs={state.connection.retryAfterMs}
+          desktopProto={state.connection.proto}
+          desktopVersion={state.connection.appVersion}
         />
       )
     case 'offline':

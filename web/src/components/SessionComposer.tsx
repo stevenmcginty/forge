@@ -39,6 +39,7 @@ import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStatus } from './AgentStatus'
 import { AnswerCard } from './AnswerCard'
 import { BACK_TAB, Composer, type VoiceControls } from './Composer'
+import { ModelChip } from './ModelChip'
 
 /**
  * The one text box for this browser, with the agent's status strip over it.
@@ -742,8 +743,35 @@ export function SessionComposer(): ReactNode {
     if (isAgent) setClaudeView(nextView)
   }
 
+  /*
+   * The phone's model chip, in the status strip rather than on the box: words
+   * for the model, the effort picked here and the mode in force. Agents only —
+   * a shell has none of the three.
+   */
+  const chip =
+    mobile && isAgent && paneId && (roster.length || levels.length || ladder.length) ? (
+      <ModelChip
+        paneId={paneId}
+        agentName={profile?.name ?? 'This pane'}
+        models={roster}
+        currentModelId={currentModelId}
+        modelText={status?.model}
+        onModel={roster.length ? (id) => void sendModel(id) : undefined}
+        effortLevels={levels}
+        onEffort={levels.length ? (level) => void sendEffort(level) : undefined}
+        modes={ladder}
+        currentModeId={currentModeId}
+        modeText={rung === 'auto' ? 'Auto' : undefined}
+        onMode={ladder.length ? (mode) => void sendMode(mode) : undefined}
+        disabled={!canType}
+      />
+    ) : undefined
+
   return (
-    <div className="session-composer" data-view={view}>
+    // `data-view` is the face on screen, defaulted the way the pane defaults
+    // it, so the phone's key row and status strip trade places on the same face
+    // the pane shows — never on a guess.
+    <div className="session-composer" data-view={activeView}>
       {profile ? (
         <AgentStatus
           profile={profile}
@@ -751,6 +779,7 @@ export function SessionComposer(): ReactNode {
           live={canType}
           view={activeView}
           onFlipView={isAgent ? onFlipView : undefined}
+          chip={chip}
         />
       ) : null}
       {mobile && asking && paneId ? (
@@ -802,12 +831,21 @@ export function SessionComposer(): ReactNode {
         onFocus={takePane}
         autoFocus={false}
         focusSignal={focusSignal}
-        placeholder={foremanOn ? 'Tell Foreman…' : undefined}
+        placeholder={
+          foremanOn
+            ? 'Tell Foreman…'
+            : mobile && profile
+              ? isAgent
+                ? `Talk to ${profile.name.split(' ')[0]}…`
+                : 'Type a command…'
+              : undefined
+        }
         sending={sending}
         onNotice={actions.setNotice}
         voice={voiceControls}
         voiceState={voice}
         voiceLevel={voiceLevel}
+        onShowChat={isAgent && activeView === 'term' ? onFlipView : undefined}
       />
     </div>
   )

@@ -271,7 +271,7 @@ export type Connection =
    */
   | { state: Extract<WebConnectionState, 'pin'>; message: string; invalid: boolean; retryAfterMs?: number }
   | { state: Extract<WebConnectionState, 'live'>; desktopName: string; appVersion: string }
-  | { state: Extract<WebConnectionState, 'refused'>; reason: WebRefusal; message: string; retryAfterMs?: number }
+  | { state: Extract<WebConnectionState, 'refused'>; reason: WebRefusal; message: string; retryAfterMs?: number; proto?: number; appVersion?: string }
   | { state: Extract<WebConnectionState, 'offline'>; message: string; reason?: WebShutdownReason; retryAfterMs?: number }
 
 export interface ForgeHandlers {
@@ -1490,7 +1490,10 @@ export class ForgeClient {
       }
 
       case 'refused':
-        this.onRefused(frame.reason, typeof frame.message === 'string' ? frame.message : '', frame.retryAfterMs)
+        this.onRefused(frame.reason, typeof frame.message === 'string' ? frame.message : '', frame.retryAfterMs, {
+          ...(typeof frame.proto === 'number' ? { proto: frame.proto } : {}),
+          ...(typeof frame.appVersion === 'string' ? { appVersion: frame.appVersion } : {})
+        })
         return
 
       case 'replay':
@@ -1692,7 +1695,7 @@ export class ForgeClient {
    * A value a newer desktop invented falls out here, at the edge, through
    * `isWebRefusal` — which is exactly the job shared/web.ts gives that guard.
    */
-  private onRefused(rawReason: unknown, message: string, retryAfterMs?: number): void {
+  private onRefused(rawReason: unknown, message: string, retryAfterMs?: number, desk: { proto?: number; appVersion?: string } = {}): void {
     if (!isWebRefusal(rawReason)) {
       this.stopped = true
       this.handlers.onConnection({
@@ -1757,7 +1760,7 @@ export class ForgeClient {
     }
 
     this.stopped = true
-    this.handlers.onConnection({ state: 'refused', reason, message, ...(retryAfterMs ? { retryAfterMs } : {}) })
+    this.handlers.onConnection({ state: 'refused', reason, message, ...(retryAfterMs ? { retryAfterMs } : {}), ...desk })
   }
 
   /**

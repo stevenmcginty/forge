@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Icon } from '@/components/Icon'
 import { useForge } from '../state'
+import { GateError, GateFrame, GateLead } from './Connection'
 
 /**
  * Email is the key to one PC. It must match Settings → Account (or Forge Web)
@@ -26,46 +26,47 @@ export function SignIn({ error }: { error: string }): ReactNode {
   }
 
   return (
-    <div className="gate">
-      <form className="gate__card" onSubmit={submit}>
-        <div className="gate__mark">
-          <Icon name="forge" size={22} />
-        </div>
-        <h1 className="gate__title">Forge</h1>
-        <p className="gate__body">
-          Sign in with <em>your</em> Forge email — the same one saved on the PC you want. A different email is a
-          different machine.
-        </p>
+    <GateFrame reason="sign-in" onSubmit={submit}>
+      <GateLead icon="forge" title="Forge">
+        {/* One line. The account *is* the machine — a different email finds a
+            different PC — and that is the only thing worth saying before the
+            fields. */}
+        <p className="gate__body">Sign in with the email saved on your PC.</p>
+      </GateLead>
 
-        <label className="gate__field">
-          <span className="eyebrow">Email</span>
-          <input
-            className="gate__input"
-            type="email"
-            autoComplete="username"
-            autoFocus
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </label>
+      <label className="gate__field">
+        <span className="eyebrow gate__label">Email</span>
+        <input
+          className="gate__input"
+          type="email"
+          name="email"
+          autoComplete="username"
+          inputMode="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          autoFocus
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </label>
 
-        <label className="gate__field">
-          <span className="eyebrow">Password</span>
-          <input
-            className="gate__input"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
+      <label className="gate__field">
+        <span className="eyebrow gate__label">Password</span>
+        <input
+          className="gate__input"
+          type="password"
+          name="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      </label>
 
-        {failure || error ? <p className="gate__error">{failure || error}</p> : null}
+      {failure || error ? <GateError>{failure || error}</GateError> : null}
 
-        <button type="submit" className="cta-btn gate__go" disabled={busy || !email || !password}>
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
-    </div>
+      <button type="submit" className="cta-btn gate__go" disabled={busy || !email || !password}>
+        {busy ? 'Signing in…' : 'Sign in'}
+      </button>
+    </GateFrame>
   )
 }

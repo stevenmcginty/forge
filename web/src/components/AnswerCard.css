@@ -201,3 +201,9 @@
     transform: none;
   }
 }
+
+/* On a phone the card lines up with the dock under it: the same 16px gutters. */
+.app[data-mobile] .answer {
+  margin-left: 16px;
+  margin-right: 16px;
+}

@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { PIN_MAX_DIGITS, PIN_MIN_DIGITS, type WebRefusal } from '@shared/web'
+import { PIN_MAX_DIGITS, PIN_MIN_DIGITS, WEB_PROTO, type WebRefusal } from '@shared/web'
 import { Icon, type IconName } from '@/components/Icon'
+import { useMobile } from '../lib/mobile'
 import { useForge } from '../state'
+import './Sheets.phone.css'
 
 /**
  * The connection screens — the part of this client that is not a spinner.
@@ -28,7 +30,13 @@ interface Recovery {
   action?: 'retry' | 'sign-out' | 'reload'
 }
 
-function recovery(reason: WebRefusal, email: string): Recovery {
+/** What a `proto` refusal says about the desktop, when the desktop is new enough to say it. */
+interface DesktopSide {
+  proto?: number
+  appVersion?: string
+}
+
+function recovery(reason: WebRefusal, email: string, desktop: DesktopSide = {}): Recovery {
   // Every hint below has one job, and it is *not* to restate the desktop's
   // sentence — that is already on screen, verbatim, directly above it. The hint
   // says the thing the desktop cannot know: which account this page is holding,
@@ -63,13 +71,36 @@ function recovery(reason: WebRefusal, email: string): Recovery {
         hint: 'Reloading mints a fresh id for this browser. If it says the same thing afterwards, this browser is refusing the page any storage to keep one in — private browsing, or blocked site data.',
         action: 'reload'
       }
-    case 'proto':
+    case 'proto': {
+      // A desktop new enough to say which protocol it speaks settles which half
+      // is old, and the two halves have different cures: a reload fixes this
+      // page, and only a restart at the desk fixes the desktop — a Reload button
+      // there would fetch the same page and be refused the same way.
+      const theirs = desktop.proto
+      const version = desktop.appVersion ? ` (it is on Forge ${desktop.appVersion})` : ''
+      if (typeof theirs === 'number' && theirs < WEB_PROTO) {
+        return {
+          title: 'The desktop is older than this page',
+          icon: 'restart',
+          hint: `Restart Forge on the desktop${version} so it updates, then try again.`,
+          action: 'retry'
+        }
+      }
+      if (typeof theirs === 'number' && theirs > WEB_PROTO) {
+        return {
+          title: 'This page is older than the desktop',
+          icon: 'restart',
+          hint: 'Reload to pick up the current page.',
+          action: 'reload'
+        }
+      }
       return {
         title: 'This page and that Forge speak different protocols',
         icon: 'restart',
         hint: 'Reload to pick up the current bundle. If it says the same thing afterwards, the desktop is the older half and needs updating.',
         action: 'reload'
       }
+    }
     case 'busy':
       return {
         title: 'The desktop cannot take this connection yet',
@@ -86,7 +117,7 @@ function recovery(reason: WebRefusal, email: string): Recovery {
     case 'pin-invalid':
       return {
         title: 'This desktop wants its unlock PIN',
-        icon: 'gear',
+        icon: 'key',
         hint: `The ${PIN_MIN_DIGITS}-to-${PIN_MAX_DIGITS} digit PIN set in Forge's settings on that PC. Try again to be asked for it.`,
         action: 'retry'
       }
@@ -95,43 +126,127 @@ function recovery(reason: WebRefusal, email: string): Recovery {
 
 /* ------------------------------------------------------------------ shell */
 
-function Screen({
+/**
+ * The doorway every pre-workspace screen stands in: sign-in, connecting, the
+ * PIN, every refusal.
+ *
+ * At a desk it is the centred card it always was. On a phone it is the same
+ * markup inside a phone-faced `.app` (so the phone tokens reach it), and
+ * Sheets.phone.css lays it out for a thumb: the heading block in the calm upper
+ * part of the screen, and the fields and the one button at the bottom, where
+ * the thumb already is.
+ */
+export function GateFrame({
   reason,
-  title,
-  icon,
+  onSubmit,
   children
 }: {
   /** Stamped on the element so a screen is identifiable as itself, not as "an error". */
   reason: string
-  title: string
-  icon: IconName
+  /** Makes the card a form. */
+  onSubmit?: (event: FormEvent) => void
   children: ReactNode
 }): ReactNode {
-  return (
-    <div className="gate">
-      <div className="gate__card" data-reason={reason}>
-        <div className="gate__mark">
-          <Icon name={icon} size={22} />
-        </div>
-        <h1 className="gate__title">{title}</h1>
-        {children}
-      </div>
+  const mobile = useMobile()
+  const card = onSubmit ? (
+    <form className="gate__card" data-reason={reason} onSubmit={onSubmit}>
+      {children}
+    </form>
+  ) : (
+    <div className="gate__card" data-reason={reason}>
+      {children}
     </div>
+  )
+  const gate = <div className="gate">{card}</div>
+  if (!mobile) return gate
+  return (
+    <div className="app" data-shell="gate" data-mobile="true" data-ready="true">
+      {gate}
+    </div>
+  )
+}
+
+/**
+ * The heading block: mark, title, and the lines under it. A pass-through at a
+ * desk (`display: contents`), the upper half of the screen on a phone.
+ */
+export function GateLead({ icon, title, children }: { icon: IconName; title: string; children?: ReactNode }): ReactNode {
+  return (
+    <div className="gate__lead">
+      <div className="gate__mark">
+        <Icon name={icon} size={22} />
+      </div>
+      <h1 className="gate__title">{title}</h1>
+      {children}
+    </div>
+  )
+}
+
+/** A circled "!" — the shape that goes with every error line, so red is never the only thing saying it. */
+export function AlertGlyph(): ReactNode {
+  return (
+    <svg
+      className="alert-glyph"
+      width={18}
+      height={18}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+      strokeLinecap="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="8" cy="8" r="6.4" />
+      <path d="M8 4.8v3.8M8 11.1v.1" />
+    </svg>
+  )
+}
+
+/** An error line: the glyph and the sentence. */
+export function GateError({ children }: { children: ReactNode }): ReactNode {
+  return (
+    <p className="gate__error" role="alert">
+      <AlertGlyph />
+      <span>{children}</span>
+    </p>
   )
 }
 
 /* -------------------------------------------------------------- the screens */
 
-export function Connecting({ attempt, note }: { attempt: number; note?: string }): ReactNode {
+/** How long a connect may take before the screen says it is still trying, and why it might be. */
+const SLOW_MS = 5000
+
+export function Connecting({ note }: { attempt: number; note?: string }): ReactNode {
   const { state, actions } = useForge()
+  const desktop = state.picture?.desktopName || state.cached?.desktopName || ''
+  const [slow, setSlow] = useState(false)
+
+  // Counted from the moment this page started reaching for the socket — not
+  // per attempt, because "attempt 5" is the retry loop's business and "it has
+  // been a while" is the person's.
+  useEffect(() => {
+    setSlow(false)
+    if (note) return
+    const timer = window.setTimeout(() => setSlow(true), SLOW_MS)
+    return () => window.clearTimeout(timer)
+  }, [note])
+
+  // No attempt counter and no "reconnecting": a dead port fails its first dial
+  // inside half a second, so the retry number says nothing a person can use.
+  const line = note ?? (slow ? `Still trying… ${desktop || 'The desktop'} may be asleep.` : `Reaching ${desktop || 'the desktop'}…`)
+
   return (
-    <Screen reason="connecting" title="Connecting" icon="forge">
-      <p className="gate__body">
-        {note ?? (attempt > 0 ? `Reconnecting to the desktop (attempt ${attempt + 1})…` : 'Looking for the desktop…')}
-      </p>
-      <div className="gate__pulse" aria-hidden="true" />
+    <GateFrame reason="connecting">
+      <GateLead icon="forge" title="Connecting">
+        <p className="gate__body" aria-live="polite">
+          {line}
+        </p>
+        <span className="pbar gate__progress" data-on="true" role="progressbar" aria-label="Connecting" />
+      </GateLead>
       <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
-    </Screen>
+    </GateFrame>
   )
 }
 
@@ -154,7 +269,22 @@ export function SwitchAccount({
   onSignOut: () => void
   compact?: boolean
 }): ReactNode {
+  const mobile = useMobile()
   if (!email) return null
+  if (mobile && !compact) {
+    // Its own line on a phone, with a button a thumb can hit, rather than a
+    // link buried mid-sentence in small print.
+    return (
+      <div className="gate__account">
+        <span className="gate__account-who">
+          Signed in as <span className="gate__account-email">{email}</span>
+        </span>
+        <button type="button" className="gate__switch" onClick={onSignOut}>
+          Use a different account
+        </button>
+      </div>
+    )
+  }
   const inner = (
     <>
       Signed in as <span className="mono">{email}</span> —{' '}
@@ -169,24 +299,32 @@ export function SwitchAccount({
 export function Refused({
   reason,
   message,
-  retryAfterMs
+  retryAfterMs,
+  desktopProto,
+  desktopVersion
 }: {
   reason: WebRefusal
   message: string
   retryAfterMs?: number
+  /** `proto` only: the protocol the desktop speaks, when it said (`WebRefusedFrame.proto`). */
+  desktopProto?: number
+  /** `proto` only: the desktop's Forge version, when it said (`WebRefusedFrame.appVersion`). */
+  desktopVersion?: string
 }): ReactNode {
   const { state, actions } = useForge()
-  const plan = recovery(reason, state.session?.email ?? '')
+  const plan = recovery(reason, state.session?.email ?? '', { proto: desktopProto, appVersion: desktopVersion })
 
   return (
-    <Screen reason={reason} title={plan.title} icon={plan.icon}>
-      {/* The desktop's own sentence, first and verbatim. It knows which of the
-          eight refusals this is and why; this page only knows what to do next. */}
-      {message ? <p className="gate__body">{message}</p> : null}
-      <p className="gate__hint">{plan.hint}</p>
-      {retryAfterMs ? (
-        <p className="gate__hint mono">Worth trying again in about {Math.ceil(retryAfterMs / 1000)}s.</p>
-      ) : null}
+    <GateFrame reason={reason}>
+      <GateLead icon={plan.icon} title={plan.title}>
+        {/* The desktop's own sentence, first and verbatim. It knows which of the
+            eight refusals this is and why; this page only knows what to do next. */}
+        {message ? <p className="gate__body">{message}</p> : null}
+        <p className="gate__hint">{plan.hint}</p>
+        {retryAfterMs ? (
+          <p className="gate__hint">Worth trying again in about {Math.ceil(retryAfterMs / 1000)}s.</p>
+        ) : null}
+      </GateLead>
       {plan.action === 'retry' ? (
         <button type="button" className="cta-btn gate__go" onClick={() => actions.retry()}>
           Try again
@@ -202,7 +340,7 @@ export function Refused({
           Reload the page
         </button>
       ) : null}
-    </Screen>
+    </GateFrame>
   )
 }
 
@@ -259,68 +397,82 @@ export function PinPrompt({
   }
 
   return (
-    <div className="gate">
-      <form className="gate__card" data-reason="pin" onSubmit={submit}>
-        <div className="gate__mark">
-          <Icon name="gear" size={22} />
-        </div>
-        <h1 className="gate__title">Enter the desktop’s PIN</h1>
+    <GateFrame reason="pin" onSubmit={submit}>
+      <GateLead icon="key" title="Enter the desktop’s PIN">
         {/* The desktop's own sentence, verbatim, exactly as `Refused` shows it:
             it is the half that knows whether this is the first ask or a wrong
             answer, and this page only knows what the box is for. */}
-        <p className={invalid ? 'gate__error' : 'gate__body'}>
-          {message || `The ${PIN_MIN_DIGITS}-to-${PIN_MAX_DIGITS} digit PIN set on the desktop.`}
-        </p>
+        {invalid ? (
+          <GateError>{message || 'That PIN did not open the door.'}</GateError>
+        ) : (
+          <p className="gate__body">{message || `The ${PIN_MIN_DIGITS}-to-${PIN_MAX_DIGITS} digit PIN set on the desktop.`}</p>
+        )}
+      </GateLead>
 
-        <label className="gate__field">
-          <span className="eyebrow">Unlock PIN</span>
-          <input
-            className="gate__input mono"
-            /* Masked, because this one is typed in a coffee shop as often as at
-               a desk, and unlike a rotating code it is the same digits tomorrow. */
-            type="password"
-            /* `one-time-code` is what makes a phone offer to fill it rather than
-               offering the password for this site, and `numeric` is what gives
-               it a number pad. Neither is decoration on a screen somebody is
-               using one-handed. */
-            autoComplete="one-time-code"
-            inputMode="numeric"
-            maxLength={PIN_MAX_DIGITS}
-            autoFocus
-            data-testid="pin-input"
-            value={pin}
-            disabled={waiting}
-            /* Digits only, and never more than the protocol allows, because
-               that is the whole of what `isValidPin` on the desktop accepts —
-               a box that took a stray space would spend a lockout strike on a
-               keystroke rather than on a wrong PIN. */
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, PIN_MAX_DIGITS))}
-          />
-        </label>
+      {/* The username half of the pair a password manager saves, so the phone
+          can offer the PIN in one tap. Not the email: the account's own password
+          is saved under that, and a PIN saved under the same name would
+          overwrite it. One fixed name, so the entry saved on the first visit is
+          the one offered on every later one. */}
+      <input
+        className="gate__username"
+        type="text"
+        name="username"
+        autoComplete="username"
+        value="Forge desktop PIN"
+        readOnly
+        tabIndex={-1}
+        aria-hidden="true"
+      />
 
-        {/* The lockout the desktop itself imposed — every strike against it was
-            a wrong PIN sent from here, so this page closes the till while it
-            runs rather than posting digits it knows will be refused. */}
-        {waiting ? (
-          <p className="gate__hint mono">
-            Too many tries — the desktop has locked the door for another {wait}s.
-          </p>
-        ) : null}
+      <label className="gate__field">
+        <span className="eyebrow gate__label">Unlock PIN</span>
+        <input
+          className="gate__input gate__input--pin mono"
+          /* Masked, because this one is typed in a coffee shop as often as at
+             a desk, and unlike a rotating code it is the same digits tomorrow. */
+          type="password"
+          name="password"
+          /* `current-password`, with the username field above, is what lets the
+             phone's password manager save the PIN and fill it next time; `numeric`
+             is what gives it a number pad. Neither is decoration on a screen
+             somebody is using one-handed. */
+          autoComplete="current-password"
+          inputMode="numeric"
+          maxLength={PIN_MAX_DIGITS}
+          autoFocus
+          data-testid="pin-input"
+          value={pin}
+          disabled={waiting}
+          /* Digits only, and never more than the protocol allows, because
+             that is the whole of what `isValidPin` on the desktop accepts —
+             a box that took a stray space would spend a lockout strike on a
+             keystroke rather than on a wrong PIN. */
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, PIN_MAX_DIGITS))}
+        />
+      </label>
 
-        <button type="submit" className="cta-btn gate__go" disabled={waiting || pin.length < PIN_MIN_DIGITS}>
-          Unlock
-        </button>
-        <p className="gate__hint">
-          This is the PIN set in Forge’s settings on that PC, and it is asked for on every connection — being asked
-          again after you were already in usually just means the phone closed the tab and forgot the digits it was
-          holding.
-        </p>
-        {/* The one screen a wrong account is guaranteed to reach and cannot get
-            past: the PIN being asked for is the *desktop's* PIN, so no digits
-            this person knows will open a desktop that is not theirs. */}
-        <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
-      </form>
-    </div>
+      {/* Reserved for the "Use fingerprint" button a later change adds. Empty,
+          it takes no room. */}
+      <div className="gate__slot" data-slot="passkey" />
+
+      {/* The lockout the desktop itself imposed — every strike against it was
+          a wrong PIN sent from here, so this page closes the till while it
+          runs rather than posting digits it knows will be refused. */}
+      {waiting ? <p className="gate__hint">Too many tries — the desktop has locked the door for another {wait}s.</p> : null}
+
+      <button type="submit" className="cta-btn gate__go" disabled={waiting || pin.length < PIN_MIN_DIGITS}>
+        Unlock
+      </button>
+      <p className="gate__hint">
+        The PIN set in Forge’s settings on that PC. It is asked for on every connection, so a phone that closed the tab
+        asks again.
+      </p>
+      {/* The one screen a wrong account is guaranteed to reach and cannot get
+          past: the PIN being asked for is the *desktop's* PIN, so no digits
+          this person knows will open a desktop that is not theirs. */}
+      <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
+    </GateFrame>
   )
 }
 
@@ -328,28 +480,32 @@ export function PinPrompt({
 export function Unreachable({ error }: { error: string }): ReactNode {
   const { state, actions } = useForge()
   return (
-    <Screen reason="unreachable" title="Could not look up the desktop" icon="gear">
-      <p className="gate__body">{error}</p>
-      <p className="gate__hint">
-        Nothing here says the desktop is off — only that this page could not find out either way.
-      </p>
+    <GateFrame reason="unreachable">
+      <GateLead icon="gear" title="Could not look up the desktop">
+        <p className="gate__body">{error}</p>
+        <p className="gate__hint">
+          Nothing here says the desktop is off — only that this page could not find out either way.
+        </p>
+      </GateLead>
       <button type="button" className="cta-btn gate__go" onClick={() => actions.refind()}>
         Look again
       </button>
       <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
-    </Screen>
+    </GateFrame>
   )
 }
 
 /** No `/config.json`, so there is no Firebase project and nothing to try. */
 export function Unconfigured({ error }: { error: string }): ReactNode {
   return (
-    <Screen reason="unconfigured" title="This deployment is not configured" icon="gear">
-      <p className="gate__body">{error}</p>
-      <p className="gate__hint">
-        Forge Web reads its Firebase project from <span className="mono">/config.json</span> beside this bundle. Deploy
-        one and reload.
-      </p>
-    </Screen>
+    <GateFrame reason="unconfigured">
+      <GateLead icon="gear" title="This deployment is not configured">
+        <p className="gate__body">{error}</p>
+        <p className="gate__hint">
+          Forge Web reads its Firebase project from <span className="mono">/config.json</span> beside this bundle.
+          Deploy one and reload.
+        </p>
+      </GateLead>
+    </GateFrame>
   )
 }

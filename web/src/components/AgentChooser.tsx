@@ -10,7 +10,10 @@ import {
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { Popover, PopoverRow, PopoverSection } from '@/components/Popover'
+import { useMobile } from '../lib/mobile'
 import { useForge, useProfiles } from '../state'
+import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
+import './Sheets.phone.css'
 
 /**
  * "Open a terminal with…", drawn with the desktop chooser's own `.agent-chooser`
@@ -45,7 +48,7 @@ export function AgentChooser({
   open,
   onClose,
   onPick,
-  title = 'Open terminal with',
+  title,
   align = 'start',
   selectedId
 }: {
@@ -54,11 +57,13 @@ export function AgentChooser({
   onClose: () => void
   /** One click here opens the pane; the mode, when given, is that open only. */
   onPick: (profileId: string, permissionMode?: ClaudePermissionMode) => void
+  /** The heading. Defaults to "Open terminal with" at a desk and "New tab" on a phone. */
   title?: string
   align?: 'start' | 'end' | 'center'
   selectedId?: string
 }): ReactNode {
-  const { actions } = useForge()
+  const { state, actions } = useForge()
+  const mobile = useMobile()
   const { shells, agents } = splitProfiles(useProfiles())
   const [presence, setPresence] = useState<CommandPresence[]>([])
   /** Profile id whose permission submenu is showing. */
@@ -166,10 +171,191 @@ export function AgentChooser({
     )
   }
 
+  if (mobile) {
+    const desktop = state.picture?.desktopName || 'the desktop'
+    const project = state.picture?.projects.find((p) => p.id === state.projectId)
+    return (
+      <ChooserSheet
+        open={open}
+        onClose={onClose}
+        title={title ?? 'New tab'}
+        subtitle={project ? `In ${project.name}` : undefined}
+        agents={agents}
+        shells={shells}
+        selectedId={selectedId}
+        modeFor={modeFor}
+        setModeFor={setModeFor}
+        missing={missing}
+        desktop={desktop}
+        pick={pick}
+      />
+    )
+  }
+
+  const heading = title ?? 'Open terminal with'
   return (
-    <Popover anchor={anchor} open={open} onClose={onClose} align={align} width={286} label={title}>
-      <PopoverSection title={title}>{shells.map(row)}</PopoverSection>
+    <Popover anchor={anchor} open={open} onClose={onClose} align={align} width={286} label={heading}>
+      <PopoverSection title={heading}>{shells.map(row)}</PopoverSection>
       {agents.length > 0 ? <PopoverSection title="Agents">{agents.map(row)}</PopoverSection> : null}
     </Popover>
+  )
+}
+
+/* ------------------------------------------------------------ the phone sheet */
+
+/** "claude asks before it acts" → "Claude asks before it acts". The ladder's notes are mid-sentence. */
+function sentence(text: string): string {
+  return text ? text[0].toUpperCase() + text.slice(1) : text
+}
+
+/**
+ * The chooser as a phone sheet: agents first (on a phone the person almost
+ * always wants one), shells last, 56px rows.
+ *
+ * The permission mode is a second step, not a 20px chevron: an agent that has a
+ * ladder carries a pill on its row naming the mode a plain tap opens it in, and
+ * the pill opens the ladder in the same sheet — every rung in words, the one it
+ * would launch on ticked. Esc and Back step out of the ladder before they close
+ * the sheet, the same as the ⋯ sheet's confirm step.
+ */
+function ChooserSheet({
+  open,
+  onClose,
+  title,
+  subtitle,
+  agents,
+  shells,
+  selectedId,
+  modeFor,
+  setModeFor,
+  missing,
+  desktop,
+  pick
+}: {
+  open: boolean
+  onClose: () => void
+  title: string
+  subtitle?: string
+  agents: AgentProfile[]
+  shells: AgentProfile[]
+  selectedId?: string
+  modeFor: string | null
+  setModeFor: (id: string | null) => void
+  missing: (command: string) => boolean
+  desktop: string
+  pick: (profile: AgentProfile, mode?: ClaudePermissionMode) => void
+}): ReactNode {
+  const ladderFor = modeFor ? (agents.find((p) => p.id === modeFor) ?? null) : null
+
+  if (ladderFor) {
+    const current = effectivePermissionMode(ladderFor)
+    return (
+      <BottomSheet
+        open={open}
+        onClose={onClose}
+        onBack={() => setModeFor(null)}
+        label={`Open ${ladderFor.name} in`}
+        subtitle="The ticked one is what a plain tap opens. Your pick is for this tab only."
+        testId="agent-chooser-sheet"
+      >
+        <button type="button" className="psheet__back" onClick={() => setModeFor(null)}>
+          <Icon name="chevronLeft" size={16} />
+          All agents
+        </button>
+        <SheetSection title="Permission mode">
+          {profilePermissionModes(ladderFor).map((m) => (
+            <SheetRow
+              key={m.id}
+              icon={
+                <span className="psheet__tick" data-on={m.id === current ? 'true' : undefined} aria-hidden="true">
+                  {m.id === current ? <Icon name="check" size={16} /> : null}
+                </span>
+              }
+              label={m.label}
+              secondary={sentence(m.note)}
+              trailing={
+                m.danger ? (
+                  <span className="psheet__warn">
+                    <WarnGlyph />
+                    No guard
+                  </span>
+                ) : undefined
+              }
+              onClick={() => pick(ladderFor, m.id)}
+              testId={`agent-mode-${m.id}`}
+            />
+          ))}
+        </SheetSection>
+      </BottomSheet>
+    )
+  }
+
+  const row = (profile: AgentProfile): ReactNode => {
+    const ladder = supportsPermissionModes(profile)
+    const mode = effectivePermissionMode(profile)
+    const spec = ladder ? permissionSpec(profile.command, mode) : null
+    const absent = missing(profile.command)
+    // The mode is the pill's to say; the second line says where the row comes
+    // from — the command it runs, and whether it is this project's default.
+    const detail = absent ? `Not installed on ${desktop} — opens as a shell` : profile.command || 'The default shell'
+    const secondary = profile.id === selectedId ? `Project default · ${detail}` : detail
+    return (
+      <div className="psheet__line" key={profile.id}>
+        <SheetRow
+          icon={<AgentBadge profile={profile} />}
+          label={profile.name}
+          secondary={secondary}
+          onClick={() => pick(profile)}
+          testId={`agent-row-${profile.id}`}
+        />
+        {ladder && spec && !absent ? (
+          <button
+            type="button"
+            className="psheet__mode"
+            aria-label={`Permission mode for ${profile.name}: ${spec.label}. Change it`}
+            onClick={() => setModeFor(profile.id)}
+            data-testid={`agent-mode-open-${profile.id}`}
+          >
+            {spec.danger ? <WarnGlyph /> : null}
+            <span>{spec.label}</span>
+            <Icon name="chevronRight" size={14} />
+          </button>
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <BottomSheet
+      open={open}
+      onClose={onClose}
+      label={title}
+      subtitle={subtitle}
+      testId="agent-chooser-sheet"
+    >
+      {agents.length > 0 ? <SheetSection title="Agents">{agents.map(row)}</SheetSection> : null}
+      {shells.length > 0 ? <SheetSection title="Shells">{shells.map(row)}</SheetSection> : null}
+    </BottomSheet>
+  )
+}
+
+/** A small outlined triangle with "!" — the shape that says "no guard" beside the words that say it. */
+function WarnGlyph(): ReactNode {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M8 2.2 14.2 13H1.8z" />
+      <path d="M8 6.4v3.2M8 11.4v.1" />
+    </svg>
   )
 }

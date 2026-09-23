@@ -59,7 +59,8 @@ export function AgentStatus({
   live,
   view,
   onCycleMode,
-  onFlipView
+  onFlipView,
+  chip
 }: {
   profile: AgentProfile
   status?: PaneStatus
@@ -68,6 +69,11 @@ export function AgentStatus({
   view?: PaneFace
   onCycleMode?: () => void
   onFlipView?: () => void
+  /**
+   * The phone's model chip ("Opus · High · Plan ▾"). It names the mode in
+   * words, so where it is given it stands in for the mode readout.
+   */
+  chip?: ReactNode
 }): ReactNode {
   const [open, setOpen] = useState(false)
   const shell = isShellProfile(profile)
@@ -115,7 +121,9 @@ export function AgentStatus({
           {status?.model ? <span className="astatus__model">{status.model}</span> : null}
         </span>
 
-        {!shell ? (
+        {chip ? (
+          chip
+        ) : !shell ? (
           canCycle ? (
             <button
               type="button"

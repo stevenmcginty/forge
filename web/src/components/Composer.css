@@ -1,8 +1,12 @@
 /*
- * The composer's voice and send states — plain and usable on purpose. The
- * look belongs to the composer restyle that follows; these rules only make
- * each state readable, reachable (44px hit areas) and legible in both themes.
- * State hooks for that restyle: `.composer[data-voice]` (idle | recording |
+ * The composer's voice and send states, and the whole of the phone's dock.
+ *
+ * At a desk the slab's look lives in styles.css ("Machined Dock"); the rules
+ * here only make its voice panel and Send states readable. On a phone
+ * (`.app[data-mobile]`) this file is the composer: "Quiet Instrument" — a
+ * matte box on the page, one lime disc under the thumb that is the only lit
+ * thing in the dock, and nothing that moves unless it is telling you
+ * something. State hooks: `.composer[data-voice]` (idle | recording |
  * transcribing | review), `[data-voice-mode]` (tap | hold) and
  * `[data-cancel-armed]` on the form and the mic.
  */
@@ -15,38 +19,6 @@
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-}
-
-/* The phone's bottom-right button: the mic, which says "Send" while it records. */
-[data-mobile] .composer__mic[data-primary='true'] {
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-}
-
-[data-mobile] .composer__mic[data-primary='true'][data-phase='recording'] {
-  width: auto;
-  min-width: 96px;
-  padding: 0 16px 0 14px;
-}
-
-[data-mobile] .composer__mic[data-primary='true'][data-cancel-armed='true'] {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
-  border-color: var(--line-strong);
-  box-shadow: none;
-  animation: none;
-}
-
-.composer__mic-label {
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-/* Stop, then the mic beside it: the pair sits at the right edge together. */
-.composer__send + .composer__mic {
-  margin-left: 0;
 }
 
 /* ------------------------------------------------------- the voice panel */
@@ -107,12 +79,6 @@
 .composer__voice-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-/* The phone's recording state fills the box: the words field steps aside. */
-[data-mobile] .composer[data-voice='recording'] .composer__input,
-[data-mobile] .composer[data-voice='transcribing'] .composer__input {
-  display: none;
 }
 
 /* ------------------------------------------------------------------- send */
@@ -177,10 +143,614 @@
   outline-offset: 2px;
 }
 
-/* ------------------------------------------------------------ the key row */
+/* ======================================================= the phone's dock
+ *
+ * One row, 72px with nothing typed: the box (a pill, "+" at its front) and
+ * the 56px disc at the bottom right. Everything in it sits on the phone
+ * tokens, so Volt and Paper both hold.
+ *
+ * Geometry is the design here, not a detail. The dock is the terminal's
+ * neighbour in the same column, and every pixel it gains or loses is a real
+ * PTY resize (lib/term.ts, scripts/viewtoggle-check.mjs). So a dictation
+ * never changes the dock's height — it takes the box over in place — and the
+ * Terminal view's key row is exactly the status strip's 52px, shown in its
+ * place (ModelChip.css holds the strip to that height).
+ */
 
-/* Every key keeps a thumb's 44px on a phone; the row scrolls sideways. */
-[data-mobile] .composer__key {
-  min-height: 44px;
-  min-width: 44px;
+.app[data-mobile] .session-composer {
+  background: var(--p-bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  border-top: 1px solid var(--p-line);
+}
+
+.app[data-mobile] .composer {
+  max-width: none;
+  padding: 0 0 env(safe-area-inset-bottom, 0px);
+}
+
+/* The keyboard is up: it covers the home bar, so the inset is the keyboard's. */
+.app[data-mobile] .composer:has(.composer__input:focus) {
+  padding-bottom: 0;
+}
+
+.app[data-mobile] .composer__row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--p-2);
+  padding: var(--p-2) var(--p-4);
+}
+
+/* ------------------------------------------------------------- the box */
+
+.app[data-mobile] .composer__field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  box-sizing: border-box;
+  min-height: 56px;
+  background: var(--p-raised);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-pill);
+  overflow: hidden;
+  transition: border-color var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .composer__field[data-tall='true'] {
+  border-radius: var(--p-r-sheet);
+}
+
+.app[data-mobile] .composer__field:focus-within {
+  border-color: color-mix(in srgb, var(--p-act) 55%, var(--p-line-strong));
+}
+
+.app[data-mobile] .composer[data-disabled='true'] .composer__field {
+  background: transparent;
+  border-color: var(--p-line);
+}
+
+/* 16px or Safari zooms the page on focus. 15 + 24 + 15 and the border is the pill's 56. */
+.app[data-mobile] .composer .composer__input {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  padding: 15px var(--p-4) 15px var(--p-1);
+  font: 400 var(--p-t-body) / 24px var(--p-font);
+  letter-spacing: 0;
+  color: var(--p-ink);
+  caret-color: var(--p-act);
+  background: transparent;
+  border: 0;
+  scrollbar-width: none;
+}
+
+.app[data-mobile] .composer .composer__input::placeholder {
+  color: var(--p-ink-3);
+  font-style: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app[data-mobile] .composer[data-disabled='true'] .composer__input::placeholder {
+  color: var(--p-ink-2);
+}
+
+/* A dictation has the box: the words field steps aside, still mounted. */
+.app[data-mobile] .composer[data-voice='recording'] .composer__input,
+.app[data-mobile] .composer[data-voice='transcribing'] .composer__input {
+  display: none;
+}
+
+/* The box's front button: "+", or Cancel while it listens, or Undo. */
+.app[data-mobile] .composer__lead {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--p-hit);
+  height: var(--p-hit);
+  margin: 5px 0 5px 5px;
+  align-self: flex-end;
+  padding: 0;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  background: transparent;
+  color: var(--p-ink-2);
+  font: 600 var(--p-t-chrome) / 1 var(--p-font);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .composer__lead:active:not(:disabled),
+.app[data-mobile] .composer__lead[aria-expanded='true'] {
+  background: var(--p-press);
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .composer__lead:disabled {
+  color: var(--p-ink-3);
+  cursor: default;
+}
+
+.app[data-mobile] .composer__lead[data-kind='cancel'] {
+  background: var(--p-press);
+  color: var(--p-ink);
+}
+
+/* Undo is a word, and the most obvious thing in the box while the words wait. */
+.app[data-mobile] .composer__lead[data-kind='undo'] {
+  padding: 0 var(--p-4);
+  background: var(--p-ink);
+  color: var(--p-bg);
+}
+
+.app[data-mobile] .composer__lead:focus-visible,
+.app[data-mobile] .composer__face:focus-visible,
+.app[data-mobile] .composer .composer__key:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+/* The review's countdown: a hairline inside Undo that drains, then the words send. */
+.app[data-mobile] .composer__lead[data-kind='undo'] {
+  position: relative;
+}
+
+.app[data-mobile] .composer__drain {
+  position: absolute;
+  left: var(--p-4);
+  right: var(--p-4);
+  bottom: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.55;
+  transform-origin: left center;
+  animation: composer-drain linear forwards;
+  pointer-events: none;
+}
+
+@keyframes composer-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.composer__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------- the dictation strip */
+
+.app[data-mobile] .composer__strip {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  height: 54px;
+  padding: 0 var(--p-4) 0 var(--p-3);
+}
+
+.app[data-mobile] .composer__strip-top {
+  display: flex;
+  align-items: center;
+  gap: var(--p-2);
+  height: 20px;
+}
+
+.app[data-mobile] .composer__strip-label {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 600 var(--p-t-label) / 20px var(--p-font);
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .composer__strip-label svg {
+  flex: none;
+  color: var(--p-ink-2);
+}
+
+/* The live dot: lime means the mic is live — the one other thing lime may say. */
+.app[data-mobile] .composer__strip-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--p-r-pill);
+  background: var(--p-act);
+}
+
+.app[data-mobile] .composer__strip .composer__voice-clock {
+  flex: none;
+  font: 500 var(--p-t-mono) / 20px var(--p-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .voicewave {
+  display: block;
+  width: 100%;
+  height: 20px;
+  color: var(--p-ink);
+}
+
+/* Armed to cancel: the words say it, the picture greys, the disc turns to a cross. */
+.app[data-mobile] .composer__strip[data-cancel-armed='true'] .voicewave {
+  color: var(--p-ink-3);
+}
+
+/* Working out the words: the same track, dotted, with a light passing along it. */
+.app[data-mobile] .composer__shimmer {
+  display: block;
+  height: 20px;
+  background: linear-gradient(
+      90deg,
+      var(--p-ink-3) 0%,
+      var(--p-ink-3) 35%,
+      var(--p-ink) 50%,
+      var(--p-ink-3) 65%,
+      var(--p-ink-3) 100%
+    )
+    0 50% / 300% 3px no-repeat;
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 6px);
+  mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 6px);
+  animation: composer-shimmer 1.6s linear infinite;
+}
+
+@keyframes composer-shimmer {
+  from {
+    background-position: 100% 50%;
+  }
+  to {
+    background-position: 0% 50%;
+  }
+}
+
+/* ------------------------------------------------------------ the disc */
+
+.app[data-mobile] .composer .composer__disc,
+.app[data-mobile] .composer .composer__send {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--p-2);
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  background: var(--p-act);
+  color: var(--p-act-ink);
+  box-shadow: none;
+  animation: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .composer .composer__disc:hover:not(:disabled),
+.app[data-mobile] .composer .composer__send:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+.app[data-mobile] .composer .composer__disc:active:not(:disabled),
+.app[data-mobile] .composer .composer__send:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.app[data-mobile] .composer .composer__disc:focus-visible,
+.app[data-mobile] .composer .composer__send:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 3px;
+}
+
+/* Listening: a ring goes out from the disc and fades, and never overshoots. */
+.app[data-mobile] .composer .composer__disc[data-phase='recording']::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 2px solid var(--p-act);
+  opacity: 0;
+  animation: composer-listen 1.8s var(--p-ease) infinite;
+  pointer-events: none;
+}
+
+@keyframes composer-listen {
+  from {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
+/* Armed to cancel: the disc stops being the way on. Grey, and a cross. */
+.app[data-mobile] .composer .composer__disc[data-cancel-armed='true'] {
+  background: var(--p-raised);
+  color: var(--p-ink);
+  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+}
+
+.app[data-mobile] .composer .composer__disc[data-cancel-armed='true']::after {
+  display: none;
+}
+
+/* Working out the words: nothing to press, so nothing lime — a slow arc. */
+.app[data-mobile] .composer .composer__disc[data-phase='transcribing'] {
+  background: var(--p-raised);
+  color: var(--p-ink-2);
+  box-shadow: inset 0 0 0 1px var(--p-line);
+  cursor: default;
+}
+
+.app[data-mobile] .composer .composer__disc .composer__mic-ring {
+  position: absolute;
+  inset: 16px;
+  border-radius: var(--p-r-pill);
+  border: 2px solid var(--p-line-strong);
+  border-top-color: var(--p-ink);
+  animation: composer-mic-spin 1.1s linear infinite;
+}
+
+.app[data-mobile] .composer .composer__disc:disabled,
+.app[data-mobile] .composer .composer__send:disabled {
+  background: var(--p-raised);
+  color: var(--p-ink-3);
+  box-shadow: inset 0 0 0 1px var(--p-line);
+  opacity: 1;
+  cursor: default;
+}
+
+/* No mic in this browser and nothing typed: the disc is the Enter key, unlit. */
+.app[data-mobile] .composer .composer__send[data-draft='false']:not([data-stop]):not(:disabled) {
+  background: var(--p-raised);
+  color: var(--p-ink);
+  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+}
+
+.app[data-mobile] .composer .composer__send[data-sending='true'] {
+  width: auto;
+  padding: 0 var(--p-4);
+}
+
+.app[data-mobile] .composer .composer__send-progress {
+  padding: 0;
+  font: 600 var(--p-t-label) / 1 var(--p-font);
+}
+
+/* Stop: beside the mic, never instead of it. A square and the word. */
+.app[data-mobile] .composer .composer__send[data-stop] {
+  width: auto;
+  padding: 0 var(--p-5) 0 var(--p-4);
+  background: var(--p-raised);
+  color: var(--p-ink);
+  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+  font: 600 var(--p-t-body) / 1 var(--p-font);
+}
+
+.app[data-mobile] .composer .composer__send[data-stop='stopping'] {
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .composer .composer__stop-square {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: currentColor;
+}
+
+/* Terminal view: back to the conversation, at the front of the row. */
+.app[data-mobile] .composer__face {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 56px;
+  padding: 0 var(--p-3);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  background: transparent;
+  color: var(--p-ink-2);
+  font: 600 var(--p-t-label) / 1 var(--p-font);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app[data-mobile] .composer__face:active {
+  background: var(--p-press);
+  color: var(--p-ink);
+}
+
+/* --------------------------------------------------------- attachments */
+
+.app[data-mobile] .composer .composer__attach {
+  padding: var(--p-2) var(--p-4) 0;
+}
+
+/* ------------------------------------------------------------ the keys
+ *
+ * The Terminal view's keys: all of them on screen at once, Esc first, each a
+ * full 44px under the thumb. The row is the status strip's 52px and takes its
+ * place, so flipping to Terminal moves nothing else. The hit areas touch; the
+ * caps drawn inside them leave the gaps. The arrows are one pad.
+ */
+
+.app[data-mobile] .composer__keys {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  align-items: center;
+  box-sizing: border-box;
+  height: 52px;
+  gap: 0;
+  margin: 0;
+  padding: var(--p-1) clamp(4px, calc((100% - 352px) / 2), 16px);
+  overflow: visible;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
+.app[data-mobile] .composer__keys::after {
+  content: none;
+}
+
+.app[data-mobile] .session-composer:not([data-view='term']) .composer__keys {
+  display: none;
+}
+
+.app[data-mobile] .session-composer[data-view='term'] .astatus {
+  display: none;
+}
+
+.app[data-mobile] .composer .composer__key {
+  height: var(--p-hit);
+  min-width: 0;
+  min-height: var(--p-hit);
+  padding: 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--p-ink);
+  font: 600 var(--p-t-small) / 1 var(--p-font);
+  letter-spacing: 0;
+  transform: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app[data-mobile] .composer .composer__key:hover:not(:disabled),
+.app[data-mobile] .composer .composer__key:active:not(:disabled),
+.app[data-mobile] .composer .composer__key[data-active='true'] {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  transform: none;
+}
+
+.app[data-mobile] .composer__cap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--p-r-row);
+  background: var(--p-raised);
+  box-shadow: inset 0 0 0 1px var(--p-line);
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .composer__key:active:not(:disabled) .composer__cap {
+  background: var(--p-press);
+}
+
+/* The arrow pad: four caps joined into one, split by hairlines. */
+.app[data-mobile] .composer__key[data-cap] {
+  padding-inline: 0;
+}
+
+.app[data-mobile] .composer__key[data-cap='start'] {
+  padding-left: 2px;
+}
+
+.app[data-mobile] .composer__key[data-cap='end'] {
+  padding-right: 2px;
+}
+
+.app[data-mobile] .composer__key[data-cap] .composer__cap {
+  border-radius: 0;
+  box-shadow:
+    inset 0 1px 0 var(--p-line),
+    inset 0 -1px 0 var(--p-line),
+    inset -1px 0 0 var(--p-line);
+}
+
+.app[data-mobile] .composer__key[data-cap='start'] .composer__cap {
+  border-radius: var(--p-r-row) 0 0 var(--p-r-row);
+  box-shadow:
+    inset 0 0 0 1px var(--p-line);
+}
+
+.app[data-mobile] .composer__key[data-cap='end'] .composer__cap {
+  border-radius: 0 var(--p-r-row) var(--p-r-row) 0;
+  box-shadow:
+    inset 0 1px 0 var(--p-line),
+    inset 0 -1px 0 var(--p-line),
+    inset -1px 0 0 var(--p-line);
+}
+
+/* Ctrl, armed: filled with ink and saying "on" — a shape and a word, no tint. */
+.app[data-mobile] .composer__key[data-active='true'] .composer__cap {
+  background: var(--p-ink);
+  color: var(--p-bg);
+  box-shadow: none;
+}
+
+.app[data-mobile] .composer__cap-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  line-height: 1;
+}
+
+.app[data-mobile] .composer__cap-stack small {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.app[data-mobile] .composer .composer__key:disabled {
+  opacity: 1;
+  color: var(--p-ink-3);
+}
+
+/* --------------------------------------------------------------- motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-mobile] .composer .composer__disc[data-phase='recording']::after,
+  .app[data-mobile] .composer__shimmer {
+    animation: none;
+  }
+
+  .app[data-mobile] .composer .composer__disc .composer__mic-ring {
+    animation-duration: 3s;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .composer .composer__disc[data-phase='recording']::after,
+:root[data-reduced-motion='true'] .app[data-mobile] .composer__shimmer {
+  animation: none;
 }

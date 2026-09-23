@@ -4,6 +4,10 @@ import type { HandoffTarget } from '@shared/handoffview'
 import { resolveProfile } from '@/lib/agents'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from '@/components/Popover'
+import { useMobile } from '../lib/mobile'
+import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
+import { AlertGlyph } from './Connection'
+import './Sheets.phone.css'
 
 /**
  * Who takes this pane's work over, in a browser.
@@ -47,8 +51,62 @@ export function HandoffMenu({
   error: string
   onPick: (target: HandoffTarget) => void
 }): ReactNode {
+  const mobile = useMobile()
   const existing = targets.filter((t) => t.kind !== 'new')
   const fresh = targets.filter((t) => t.kind === 'new')
+
+  if (mobile) {
+    // The same rows, the same order, the same three sentences — as a sheet, with
+    // the "what happens" line under the heading where it is read before a tap
+    // rather than after one.
+    const sheetRow = (target: HandoffTarget): ReactNode => (
+      <SheetRow
+        key={target.key}
+        icon={<AgentBadge profile={resolveProfile(profiles, target.profileId)} />}
+        label={target.label}
+        // The agent's name is the second line, unless the label already says it
+        // ("New Codex" / "Codex"); the desk's right-hand note becomes a word tag.
+        secondary={target.label.includes(target.agent) ? undefined : target.agent}
+        trailing={target.note ? <span className="psheet__tag">{target.note}</span> : undefined}
+        disabled={busy}
+        onClick={() => onPick(target)}
+        testId={`handoff-${target.key}`}
+      />
+    )
+    return (
+      <BottomSheet
+        open={open}
+        onClose={onClose}
+        label="Hand off to"
+        subtitle={
+          autoSend
+            ? 'This agent writes a handoff pack, then Forge presses Enter — auto-send is on for this tab.'
+            : 'This agent writes a handoff pack. The prompt is typed, never sent — you press Enter.'
+        }
+        testId="handoff-sheet"
+      >
+        <SheetSection title="Already running">
+          {existing.length === 0 ? (
+            <p className="psheet__note">No other agent is running in this project.</p>
+          ) : (
+            existing.map(sheetRow)
+          )}
+        </SheetSection>
+        {fresh.length > 0 ? <SheetSection title="Or start one">{fresh.map(sheetRow)}</SheetSection> : null}
+        {error ? (
+          <p className="psheet__error" role="alert">
+            <AlertGlyph />
+            <span>{error}</span>
+          </p>
+        ) : busy ? (
+          <div className="psheet__busy" role="status">
+            <span>Asking the desktop…</span>
+            <span className="pbar" aria-hidden="true" />
+          </div>
+        ) : null}
+      </BottomSheet>
+    )
+  }
 
   const row = (target: HandoffTarget): ReactNode => (
     <PopoverRow key={target.key} selected={target.kind === 'back'} disabled={busy} onClick={() => onPick(target)}>

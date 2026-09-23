@@ -2,8 +2,12 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { WebFolder } from '@shared/web'
 import { Icon } from '@/components/Icon'
 import { Popover } from '@/components/Popover'
+import { useMobile } from '../lib/mobile'
 import { shortPath } from '../lib/paths'
 import { useForge } from '../state'
+import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
+import { AlertGlyph } from './Connection'
+import './Sheets.phone.css'
 
 /**
  * "Add project", for somebody who is not at the desk.
@@ -60,6 +64,7 @@ export function FolderPicker({
   onClose: () => void
 }): ReactNode {
   const { state, actions } = useForge()
+  const mobile = useMobile()
   const [view, setView] = useState<View>('choose')
   const [folder, setFolder] = useState<WebFolder | null>(null)
   const [error, setError] = useState('')
@@ -244,6 +249,242 @@ export function FolderPicker({
       <span className="eyebrow">{title}</span>
     </div>
   )
+
+  if (mobile) {
+    const desktop = state.picture?.desktopName || ''
+    const toChoice = (): void => {
+      // Leaving a road abandons whatever it was waiting for: a reply that lands
+      // later is no longer the current trip, so it paints nothing.
+      trip.current += 1
+      setBusy(false)
+      setError('')
+      setView('choose')
+    }
+    const parents: Array<{ key: ParentKey; label: string; detail?: string }> = [
+      ...(projectsRoot
+        ? [{ key: 'projectsroot' as const, label: 'Projects folder', detail: shortPath(projectsRoot, 2) }]
+        : []),
+      { key: 'desktop', label: 'Desktop' },
+      { key: 'documents', label: 'Documents' }
+    ]
+    const alert = error ? (
+      <p className="psheet__error" role="alert">
+        <AlertGlyph />
+        <span>{error}</span>
+      </p>
+    ) : null
+
+    return (
+      <BottomSheet
+        open={open}
+        onClose={onClose}
+        onBack={view === 'choose' ? undefined : toChoice}
+        label={view === 'create' ? 'New project' : view === 'browse' ? 'Choose a folder' : 'Add a project'}
+        subtitle={view === 'choose' && desktop ? `On ${desktop}` : undefined}
+        testId="folder-picker-sheet"
+      >
+        <div className="fpk" data-view={view} data-testid="folder-picker">
+          {view === 'choose' ? (
+            <SheetSection>
+              <SheetRow
+                icon={<Icon name="folderPlus" size={20} />}
+                label="Create a new folder"
+                secondary="An empty folder, added straight to the rail"
+                onClick={compose}
+                testId="add-project-new"
+              />
+              <SheetRow
+                icon={<Icon name="folder" size={20} />}
+                label="Use an existing folder"
+                secondary={`Browse the folders on ${desktop || 'the desktop'}`}
+                onClick={browse}
+                testId="add-project-existing"
+              />
+            </SheetSection>
+          ) : null}
+
+          {view === 'create' ? (
+            <form
+              className="fpk__form"
+              onSubmit={(e) => {
+                e.preventDefault()
+                create()
+              }}
+            >
+              <button type="button" className="psheet__back" onClick={toChoice}>
+                <Icon name="chevronLeft" size={16} />
+                Back
+              </button>
+              <label className="pfield">
+                <span className="pfield__label">Name</span>
+                <input
+                  ref={nameRef}
+                  className="pfield__input"
+                  value={name}
+                  spellCheck={false}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  enterKeyHint="go"
+                  disabled={busy}
+                  placeholder="my-project"
+                  onChange={(e) => {
+                    setName(e.target.value)
+                    if (error) setError('')
+                    if (existing) setExisting('')
+                  }}
+                />
+              </label>
+              <div className="pfield" role="radiogroup" aria-label="Create in">
+                <span className="pfield__label" aria-hidden="true">
+                  Create in
+                </span>
+                <div className="fpk__parents">
+                  {parents.map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      role="radio"
+                      aria-checked={parentDir === p.key}
+                      className="fpk__parent"
+                      disabled={busy}
+                      onClick={() => setParentDir(p.key)}
+                    >
+                      <span className="fpk__radio" aria-hidden="true" />
+                      <span className="fpk__parent-text">
+                        <span>{p.label}</span>
+                        {p.detail ? <span className="fpk__parent-sub mono">{p.detail}</span> : null}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {alert}
+              <div className="fpk__actions">
+                {existing ? (
+                  <button
+                    type="button"
+                    className="bsbtn"
+                    data-wide="true"
+                    disabled={busy}
+                    onClick={() => addPath(existing)}
+                  >
+                    Open it instead
+                  </button>
+                ) : null}
+                <button
+                  type="submit"
+                  className="bsbtn"
+                  data-tone="act"
+                  data-wide="true"
+                  data-testid="create-project"
+                  disabled={!name.trim() || busy}
+                >
+                  {busy ? 'Creating…' : 'Create project'}
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {view === 'browse' ? (
+            <>
+              <div className="fpk__top">
+                <button type="button" className="psheet__back" onClick={toChoice}>
+                  <Icon name="chevronLeft" size={16} />
+                  Back
+                </button>
+                <nav className="fpk__crumbs" aria-label="Folders above this one" ref={crumbBar}>
+                  <button
+                    type="button"
+                    className="fpk__crumb"
+                    aria-current={folder && folder.crumbs.length === 0 ? 'location' : undefined}
+                    onClick={() => go('')}
+                    disabled={busy}
+                  >
+                    {desktop || 'This desktop'}
+                  </button>
+                  {(folder?.crumbs ?? []).map((crumb, i, all) => (
+                    <span className="fpk__crumb-step" key={crumb.path}>
+                      <Icon name="chevronRight" size={12} />
+                      <button
+                        type="button"
+                        className="fpk__crumb"
+                        aria-current={i === all.length - 1 ? 'location' : undefined}
+                        onClick={() => go(crumb.path)}
+                        disabled={busy}
+                      >
+                        {crumb.name}
+                      </button>
+                    </span>
+                  ))}
+                </nav>
+                <span className="pbar" data-on={busy ? 'true' : undefined} aria-hidden="true" />
+              </div>
+
+              <div className="fpk__list" data-testid="folder-picker-list">
+                {rows.map((entry) =>
+                  entry.dir ? (
+                    <button
+                      type="button"
+                      className="fpk__row"
+                      key={entry.name}
+                      disabled={busy}
+                      onClick={() => go(folder?.path ?? '', entry.name)}
+                    >
+                      <Icon name="folder" size={20} />
+                      <span className="fpk__name">{entry.name}</span>
+                      {entry.repo ? (
+                        <span className="fpk__repo">
+                          <Icon name="branch" size={12} />
+                          repo
+                        </span>
+                      ) : null}
+                      <Icon name="chevronRight" size={14} />
+                    </button>
+                  ) : (
+                    <div className="fpk__row" data-file="true" key={entry.name}>
+                      <Icon name="file" size={16} />
+                      <span className="fpk__name">{entry.name}</span>
+                    </div>
+                  )
+                )}
+                {!busy && folder && rows.length === 0 ? <p className="psheet__note">This folder is empty.</p> : null}
+                {busy && !folder ? <p className="psheet__note">Reading {desktop || 'the desktop'}…</p> : null}
+                {folder?.truncated ? (
+                  <p className="psheet__note">
+                    This folder holds more than one answer can carry — these are the first {rows.length}, folders
+                    first.
+                  </p>
+                ) : null}
+              </div>
+
+              {alert}
+
+              <div className="fpk__foot">
+                {folder?.path ? (
+                  <span className="fpk__here mono" title={folder.path}>
+                    {shortPath(folder.path, 3)}
+                  </span>
+                ) : (
+                  <span className="fpk__here">Open a drive, then choose a folder in it</span>
+                )}
+                <button
+                  type="button"
+                  className="bsbtn"
+                  data-tone="act"
+                  data-wide="true"
+                  data-testid="use-folder"
+                  disabled={!folder?.path || busy}
+                  onClick={() => addPath(folder?.path ?? '')}
+                >
+                  Use this folder
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </BottomSheet>
+    )
+  }
 
   return (
     <Popover anchor={anchor} open={open} onClose={onClose} align="start" width={340} label="Add project">

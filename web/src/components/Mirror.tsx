@@ -17,6 +17,7 @@ import { canPaintScreen, startScreen, type ScreenPainter } from '../lib/screen'
 import { useForge } from '../state'
 import { useMobile } from '../lib/mobile'
 import './Mirror.css'
+import './Sheets.phone.css'
 
 /**
  * The desktop's own screen, in the tab.
@@ -1046,7 +1047,7 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
             aria-label="Dismiss rotate hint"
             onClick={() => setRotateHintDismissed(true)}
           >
-            ✕
+            <Icon name="close" size={14} />
           </button>
         </div>
       ) : null}
@@ -1091,6 +1092,104 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
         </div>
       ) : null}
 
+      {/*
+        The phone's bar: two rows, because nine controls at a thumb's 44px do
+        not fit in 390. The top row says whose screen and which mode, and holds
+        the ways out; the second holds the four view tools, all drawn one way —
+        an icon over a word — so nothing in it has to be learned twice. Driving
+        is the status itself, and pressing it lets go, as the floating pill's
+        badge already does.
+      */}
+      {mobile ? (
+        <div className="mirror__bar mirror__bar--phone" data-collapsed={toolbarCollapsed}>
+          <div className="mirror__row">
+            {driving ? (
+              <button
+                type="button"
+                className="mirror__status"
+                data-driving="true"
+                onClick={() => release()}
+                aria-label="Driving. Stop driving"
+              >
+                <span className="mirror__dot" />
+                <span className="mirror__status-text">
+                  <span className="mirror__status-mode">Driving</span>
+                  <span className="mirror__status-name">Tap to stop</span>
+                </span>
+              </button>
+            ) : (
+              <span className="mirror__status">
+                <span className="mirror__dot" />
+                <span className="mirror__status-text">
+                  <span className="mirror__status-mode">Watching</span>
+                  <span className="mirror__status-name">{desktopName}</span>
+                </span>
+              </span>
+            )}
+            <button
+              type="button"
+              className="mirror__icon-btn"
+              aria-label="What this cannot send"
+              onClick={() => setShowLimits(true)}
+            >
+              <span className="mirror__qmark" aria-hidden="true">
+                ?
+              </span>
+            </button>
+            <button
+              type="button"
+              className="mirror__icon-btn"
+              aria-label="Hide the toolbar"
+              onClick={() => setToolbarCollapsed(true)}
+            >
+              <Icon name="chevronDown" size={18} />
+            </button>
+            <button type="button" className="mirror__icon-btn" aria-label="Stop watching this screen" onClick={onClose}>
+              <Icon name="close" size={18} />
+            </button>
+          </div>
+          <div className="mirror__tools" role="toolbar" aria-label="View">
+            <button
+              type="button"
+              className="mirror__tool"
+              aria-pressed={rotated}
+              onClick={() => setRotated((r) => !r)}
+            >
+              <Icon name="restart" size={16} />
+              <span>{rotated ? 'Rotated' : 'Rotate'}</span>
+            </button>
+            <button
+              type="button"
+              className="mirror__tool"
+              aria-label={`Size: ${fitLabel(fitMode)}. Change it`}
+              onClick={cycleFitMode}
+            >
+              <span className="mirror__tool-glyph" aria-hidden="true">
+                {fitLabel(fitMode)}
+              </span>
+              <span>Size</span>
+            </button>
+            <button type="button" className="mirror__tool" aria-pressed={isFullscreen} onClick={toggleFullscreen}>
+              <Icon name="expand" size={16} />
+              <span>{isFullscreen ? 'Exit full' : 'Full screen'}</span>
+            </button>
+            <button
+              type="button"
+              className="mirror__tool"
+              aria-label={`Input: ${input === 'trackpad' ? 'trackpad' : 'direct'}. Change it`}
+              onClick={() => {
+                choseInput.current = true
+                setInput(input === 'trackpad' ? 'direct' : 'trackpad')
+              }}
+            >
+              <Icon name={input === 'trackpad' ? 'phone' : 'screen'} size={16} />
+              <span>{input === 'trackpad' ? 'Trackpad' : 'Direct'}</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {!mobile ? (
       <div className="mirror__bar" data-collapsed={toolbarCollapsed}>
         <span className="mirror__mode" data-driving={driving}>
           <span className="mirror__dot" />
@@ -1111,18 +1210,6 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
           modifier was held. Pasted text arrives as one line, only the primary monitor is shared, and a UAC prompt will
           not accept anything typed from here.
         </p>
-
-        {mobile ? (
-          <button
-            type="button"
-            className="ghost-btn mirror__btn mirror__info-btn"
-            title="Remote screen limitations"
-            aria-label="Remote screen limitations"
-            onClick={() => setShowLimits(true)}
-          >
-            ?
-          </button>
-        ) : null}
 
         <button
           type="button"
@@ -1206,6 +1293,7 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
           <Icon name="close" size={14} />
         </button>
       </div>
+      ) : null}
 
       <div
         className="mirror__stage"
@@ -1272,8 +1360,22 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
           <p className="mirror__hint">Watching only — this desktop is not letting a browser drive it.</p>
         ) : null}
 
-        {phase.kind === 'asking' ? <p className="mirror__note">Asking {desktopName} for its screen…</p> : null}
-        {phase.kind === 'live' && trouble ? <p className="mirror__note">{trouble}</p> : null}
+        {/*
+          Over the picture, centred in the stage, in a column of its own width —
+          not a flex sibling of the rotator, which is the full width of the stage
+          and used to squeeze the sentence into a sliver at the right edge.
+        */}
+        {phase.kind === 'asking' ? (
+          <div className="mirror__status-note" role="status">
+            <p className="mirror__note">Asking {desktopName} for its screen…</p>
+            <span className="pbar" data-on="true" aria-hidden="true" />
+          </div>
+        ) : null}
+        {phase.kind === 'live' && trouble ? (
+          <div className="mirror__status-note" role="status">
+            <p className="mirror__note">{trouble}</p>
+          </div>
+        ) : null}
 
         {phase.kind === 'pin' ? (
           <form

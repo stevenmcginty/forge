@@ -625,3 +625,240 @@
   border-radius: var(--r-full);
 }
 
+
+/* ------------------------------------------------------ the waiting note
+ *
+ * Centred over the stage in a column of its own. It used to be a flex sibling
+ * of the full-width rotator, which squeezed "Asking … for its screen" into a
+ * sliver against the right edge.
+ */
+
+.mirror__status-note {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  display: grid;
+  gap: var(--s-4);
+  justify-items: center;
+  width: min(300px, calc(100% - 48px));
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.mirror__status-note .pbar {
+  max-width: 160px;
+}
+
+/* ----------------------------------------------------------- the phone bar
+ *
+ * Two rows (Mirror.tsx says why). Every control hits at 44px or more, and they
+ * come in two shapes only: round icon buttons on the top row, and four equal
+ * tiles — an icon over a word — on the second. Tokens from phone-tokens.css,
+ * which reach this overlay because it renders inside `.app[data-mobile]`.
+ */
+
+.app[data-mobile] .mirror__bar--phone {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: env(safe-area-inset-top, 0px) var(--p-2) var(--p-2);
+  background: var(--p-surface);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-bottom: 1px solid var(--p-line);
+  box-shadow: none;
+}
+
+.app[data-mobile] .mirror__bar--phone[data-collapsed='true'] {
+  display: none;
+}
+
+.mirror__row {
+  display: flex;
+  align-items: center;
+  gap: var(--p-1);
+  min-height: var(--p-bar, 52px);
+}
+
+.mirror__status {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--p-3);
+  min-width: 0;
+  min-height: var(--p-hit, 44px);
+  padding: 0 var(--p-3) 0 var(--p-2);
+  font: inherit;
+  text-align: left;
+  color: var(--p-ink);
+  background: none;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  -webkit-tap-highlight-color: transparent;
+}
+
+button.mirror__status {
+  flex: 0 1 auto;
+  cursor: pointer;
+  border: 1px solid var(--p-line-strong);
+}
+
+button.mirror__status:active {
+  background: var(--p-press);
+}
+
+/* Watching is a hollow ring; driving is a filled disc — the shape says it before the colour does. */
+.mirror__status .mirror__dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  background: transparent;
+  border: 1.5px solid var(--p-ink-2);
+}
+
+.mirror__status[data-driving='true'] .mirror__dot {
+  background: var(--p-act);
+  border-color: var(--p-act);
+}
+
+.mirror__status-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mirror__status-mode {
+  font: 600 var(--p-t-chrome) / 1.2 var(--p-font);
+  color: var(--p-ink);
+}
+
+.mirror__status-name {
+  overflow: hidden;
+  font-size: var(--p-t-small);
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--p-ink-2);
+}
+
+.mirror__icon-btn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--p-hit, 44px);
+  height: var(--p-hit, 44px);
+  padding: 0;
+  color: var(--p-ink-2);
+  background: none;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.mirror__icon-btn:active {
+  background: var(--p-press);
+}
+
+.mirror__qmark {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  font: 700 12px / 1 var(--p-font);
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.mirror__tools {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--p-2);
+}
+
+.mirror__tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 52px;
+  padding: var(--p-1) 2px;
+  font: 500 12px / 1.15 var(--p-font);
+  white-space: nowrap;
+  color: var(--p-ink-2);
+  background: transparent;
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-row);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--p-dur-fast) var(--p-ease),
+    border-color var(--p-dur-fast) var(--p-ease);
+}
+
+.mirror__tool > svg,
+.mirror__tool-glyph {
+  color: var(--p-ink);
+}
+
+.mirror__tool-glyph {
+  height: 16px;
+  font: 650 14px / 16px var(--p-font);
+}
+
+.mirror__tool:active {
+  background: var(--p-press);
+}
+
+/* On is filled; off is outlined. */
+.mirror__tool[aria-pressed='true'] {
+  color: var(--p-ink);
+  background: var(--p-press);
+  border-color: var(--p-line-strong);
+}
+
+.mirror__icon-btn:focus-visible,
+.mirror__tool:focus-visible,
+button.mirror__status:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+/* The collapsed pill and the rotate hint, at a thumb's size. */
+.app[data-mobile] .mirror__floating-pill {
+  gap: 2px;
+  padding: 3px;
+}
+
+.app[data-mobile] .mirror__pill-btn {
+  width: var(--p-hit);
+  height: var(--p-hit);
+}
+
+.app[data-mobile] .mirror__pill-badge {
+  min-height: var(--p-hit);
+  padding: 0 var(--p-3);
+  font-size: var(--p-t-small);
+}
+
+.app[data-mobile] .mirror__rotate-hint {
+  padding: 4px 4px 4px var(--p-4);
+  font-size: var(--p-t-small);
+  border-color: var(--p-line-strong);
+}
+
+.app[data-mobile] .mirror__hint-btn {
+  min-height: var(--p-hit);
+  padding: 0 var(--p-3);
+  font-size: var(--p-t-small);
+}
+
+.app[data-mobile] .mirror__hint-close {
+  width: var(--p-hit);
+  height: var(--p-hit);
+}
