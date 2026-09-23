@@ -19,6 +19,11 @@
 /*
  * The chip says the mode in words, so it stands in for the strip's mode pill.
  * A 44px target around a 32px face: the strip stays quiet, the thumb lands.
+ *
+ * No outline: the strip already has its boxed switch, and a label with a
+ * chevron reads as a control on its own. The face fills only under the thumb.
+ * Two lines in the face — the model leads on top, the mode sits under it —
+ * so each can truncate without taking the other with it.
  */
 .mchip {
   flex: none;
@@ -32,6 +37,7 @@
   background: transparent;
   color: var(--p-ink);
   font: 500 var(--p-t-label) / 1 var(--p-font);
+  text-align: left;
   white-space: nowrap;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -40,26 +46,85 @@
 .mchip__face {
   display: inline-flex;
   align-items: center;
-  gap: var(--p-1);
+  /* The chevron's glyph carries its own side bearing, so no gap before it:
+     at 360px the strip leaves the chip under 80px and every pixel is words. */
+  gap: 0;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   height: 32px;
-  padding: 0 var(--p-2) 0 var(--p-3);
-  border: 1px solid var(--p-line-strong);
+  padding: 0 2px 0 6px;
   border-radius: var(--p-r-row);
-  transition:
-    background var(--p-dur-fast) var(--p-ease),
-    border-color var(--p-dur-fast) var(--p-ease);
+  transition: background var(--p-dur-fast) var(--p-ease);
 }
 
-.mchip svg {
+.mchip__face > svg {
   flex: none;
   color: var(--p-ink-2);
 }
 
-.mchip__words {
+.mchip__text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+/* Top line: the model in weight and ink, the effort after it in a quieter
+   voice. It truncates from the end, so the effort goes before the model. */
+.mchip__lead {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: var(--p-t-label);
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--p-ink);
+}
+
+.mchip__effort {
+  font-weight: 500;
+  color: var(--p-ink-2);
+}
+
+.mchip__model + .mchip__effort::before {
+  content: '\00a0·\00a0';
+  color: var(--p-ink-3);
+}
+
+/* Under it, the mode: its own line, a size down, never pushed off by the model. */
+.mchip__mode {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--p-t-small);
+  font-weight: 500;
+  line-height: 15px;
+  color: var(--p-ink-2);
+}
+
+/* Alone (no model to read), the mode is the whole label and takes its voice. */
+.mchip__text > .mchip__mode:only-child {
+  font-size: var(--p-t-label);
+  line-height: 16px;
+  color: var(--p-ink);
+}
+
+.mchip__mode-word {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Bypass in force: the triangle and the word, and the red as a third signal. */
+.mchip__mode[data-warn='true'] {
+  font-weight: 600;
+  color: var(--p-danger);
+}
+
+.mchip__mode .mchip__warn {
+  flex: none;
 }
 
 .mchip:active:not(:disabled) .mchip__face,
@@ -79,6 +144,13 @@
 .mchip:disabled {
   color: var(--p-ink-3);
   cursor: default;
+}
+
+/* Out of reach, the words dim; a Bypass warning keeps its shape and colour. */
+.mchip:disabled .mchip__lead,
+.mchip:disabled .mchip__effort,
+.mchip:disabled .mchip__mode:not([data-warn='true']) {
+  color: var(--p-ink-3);
 }
 
 /* With the chip there, the badge names the agent; the path keeps the room. */
@@ -103,24 +175,23 @@
   font: 500 var(--p-t-small) / 1 var(--p-font);
 }
 
-/* The bypass warning: a shape and the word beside it, the red only a third signal. */
-.mchip__warn {
-  display: inline-grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  margin-right: 5px;
-  vertical-align: -3px;
-  border: 1.5px solid var(--p-danger);
-  border-radius: var(--p-r-pill);
-  color: var(--p-danger);
-  font: 800 11px / 1 var(--p-font);
-}
-
 /* ----------------------------------------------------------- the sheet rows */
 
 .mpick[data-current='true'] .bsrow__label {
   font-weight: 650;
+}
+
+/* Bypass in force: the word stays on the column with the others, the triangle
+   after it, the red a third signal. The tick still says "current". */
+.mpick[data-warn='true'] .bsrow__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--p-danger);
+}
+
+.mpick[data-warn='true'] .mchip__warn {
+  flex: none;
 }
 
 .mpick__tick {

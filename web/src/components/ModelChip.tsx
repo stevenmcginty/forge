@@ -6,7 +6,7 @@ import { BottomSheet, SheetSection } from './BottomSheet'
 import './ModelChip.css'
 
 /**
- * The phone's one line about how this agent is set up — "Opus · High · Plan" —
+ * The phone's short readout of how this agent is set up — "Opus · High / Plan" —
  * sitting in the status strip, and the sheet it opens to change any of the
  * three. Words, never a colour: the mode used to be a tint on the composer's
  * chip, which said nothing to a red-green colourblind eye and hid the model
@@ -18,7 +18,14 @@ import './ModelChip.css'
  * pane's reading when that changes.
  *
  * Bypass is an ordinary row at rest. Only when it is the mode in force does it
- * carry its warning — a "!" mark beside the word, in the chip and in the sheet.
+ * carry its warning — a warning triangle beside the word, in the chip and in
+ * the sheet; the red is only a third signal.
+ *
+ * The chip stacks two short lines in its 32px face: the model (and effort) on
+ * top, the mode under it. The strip gives the chip well under half a phone's
+ * width, so on one line the mode — the part that matters most when it is
+ * Bypass — was the first thing an ellipsis ate. Stacked, each line truncates on
+ * its own: effort gives way before the model, and the mode keeps a line.
  */
 export function ModelChip({
   paneId,
@@ -74,8 +81,9 @@ export function ModelChip({
   const bypass = currentModeId === 'bypass'
 
   const modelWord = model?.label ?? modelText ?? null
+  const effortWord = effort?.label ?? null
   const modeWord = mode?.label ?? modeText ?? null
-  const words = [modelWord, effort?.label ?? null].filter((w): w is string => Boolean(w))
+  const words = [modelWord, effortWord].filter((w): w is string => Boolean(w))
 
   const hasModels = Boolean(onModel && models.length)
   const hasEffort = Boolean(onEffort && effortLevels.length)
@@ -100,25 +108,20 @@ export function ModelChip({
         onKeyDown={stop}
       >
         <span className="mchip__face">
-          <span className="mchip__words">
-            {words.length || modeWord ? (
-              <>
-                {words.join(' · ')}
-                {modeWord ? (
-                  <>
-                    {words.length ? ' · ' : ''}
-                    {bypass ? (
-                      <span className="mchip__warn" aria-hidden="true">
-                        !
-                      </span>
-                    ) : null}
-                    {modeWord}
-                  </>
-                ) : null}
-              </>
-            ) : (
-              'Model'
-            )}
+          <span className="mchip__text">
+            {words.length ? (
+              <span className="mchip__lead">
+                {modelWord ? <span className="mchip__model">{modelWord}</span> : null}
+                {effortWord ? <span className="mchip__effort">{effortWord}</span> : null}
+              </span>
+            ) : null}
+            {modeWord ? (
+              <span className="mchip__mode" data-warn={bypass ? 'true' : undefined}>
+                {bypass ? <WarnMark size={12} /> : null}
+                <span className="mchip__mode-word">{modeWord}</span>
+              </span>
+            ) : null}
+            {!words.length && !modeWord ? <span className="mchip__lead">Model</span> : null}
           </span>
           <Icon name="chevronDown" size={12} />
         </span>
@@ -218,7 +221,7 @@ function PickRow({
   label: string
   note?: string
   current: boolean
-  /** The dangerous rung, while it is the one in force: a "!" beside the tick. */
+  /** The dangerous rung, while it is the one in force: a warning triangle after the word. */
   warn?: boolean
   onPick: () => void
 }): ReactNode {
@@ -229,16 +232,13 @@ function PickRow({
       role="radio"
       aria-checked={current}
       data-current={current ? 'true' : undefined}
+      data-warn={warn ? 'true' : undefined}
       onClick={onPick}
     >
       <span className="bsrow__text">
         <span className="bsrow__label">
-          {warn ? (
-            <span className="mchip__warn" aria-hidden="true">
-              !
-            </span>
-          ) : null}
           {label}
+          {warn ? <WarnMark size={16} /> : null}
         </span>
         {note ? <span className="bsrow__sub">{note}</span> : null}
       </span>
@@ -246,5 +246,31 @@ function PickRow({
         {current ? <Icon name="check" size={20} /> : null}
       </span>
     </button>
+  )
+}
+
+/**
+ * The warning mark: a triangle with a "!" in it, drawn in the current colour.
+ * The shape is the signal (Icon has no warning glyph); the word sits beside it.
+ */
+function WarnMark({ size }: { size: number }): ReactNode {
+  return (
+    <svg
+      className="mchip__warn"
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M8 2.1 14.7 13.7H1.3Z" />
+      <path d="M8 6.4v3.4" />
+      <circle cx="8" cy="11.75" r="0.35" fill="currentColor" />
+    </svg>
   )
 }

@@ -600,6 +600,8 @@ export function SessionComposer(): ReactNode {
         return
       }
       actions.write(paneId, type(level))
+      // The same wait `sendText` makes: the desktop has the command before its Enter.
+      await actions.request({ kind: 'claim', sessionId: paneId })
       await pause(SETTLE_BEFORE_ENTER_MS)
       actions.write(paneId, '\r')
       takePane()
