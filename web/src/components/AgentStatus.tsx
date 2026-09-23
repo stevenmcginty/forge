@@ -62,6 +62,8 @@ export function AgentStatus({
   view,
   onCycleMode,
   onFlipView,
+  keysShown,
+  onToggleKeys,
   chip
 }: {
   profile: AgentProfile
@@ -71,6 +73,8 @@ export function AgentStatus({
   view?: PaneFace
   onCycleMode?: () => void
   onFlipView?: () => void
+  keysShown?: boolean
+  onToggleKeys?: () => void
   /**
    * The phone's model chip ("Opus · High · Plan ▾"). It names the mode in
    * words, so where it is given it stands in for the mode readout.
@@ -82,7 +86,18 @@ export function AgentStatus({
   // The phone draws its own line: a view switch, the pane's condition in words
   // and its context ring, and a sheet for the rest. See StatusLine.
   if (mobile) {
-    return <StatusLine profile={profile} status={status} live={live} view={view} onFlipView={onFlipView} chip={chip} />
+    return (
+      <StatusLine
+        profile={profile}
+        status={status}
+        live={live}
+        view={view}
+        onFlipView={onFlipView}
+        keysShown={keysShown}
+        onToggleKeys={onToggleKeys}
+        chip={chip}
+      />
+    )
   }
   const shell = isShellProfile(profile)
   const accent = badgeColor(profile)

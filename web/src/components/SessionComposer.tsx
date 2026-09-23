@@ -16,7 +16,7 @@ import {
   permissionSpec,
   tabsToPermissionMode
 } from '@shared/agents'
-import { isShellProfile, resolveProfile } from '@/lib/agents'
+import { badgeColor, isShellProfile, resolveProfile } from '@/lib/agents'
 import { noKeys, optionKeys, readPaneAsk, sendAnswerKeys } from '../lib/answer-send'
 import {
   isDictationSupported,
@@ -77,6 +77,16 @@ const TRANSCRIBE_TIMEOUT_MS = 75_000
 const REVIEW_MS = 1500
 
 const IDLE: VoiceState = { phase: 'idle' }
+const KEYS_PREF = 'forge.phone.terminal-keys'
+
+function savedKeysShown(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(KEYS_PREF) === 'shown'
+  } catch {
+    return false
+  }
+}
 
 /** Foreman states in which it is driving the pane and takes words in its ear. */
 const FOREMAN_DRIVING = new Set(['starting', 'driving', 'waiting'])
@@ -722,6 +732,7 @@ export function SessionComposer(): ReactNode {
   const currentModelId = matchAgentModel(roster, status?.model)?.id ?? null
 
   const activeView: PaneFace = view ?? (isAgent ? getClaudeView() : 'term')
+  const [keysShown, setKeysShown] = useState(savedKeysShown)
   const nextView: PaneFace = isAgent ? (activeView === 'chat' ? 'feed' : activeView === 'feed' ? 'term' : 'chat') : 'term'
 
   /*
@@ -770,6 +781,17 @@ export function SessionComposer(): ReactNode {
     if (isAgent) setClaudeView(nextView)
   }
 
+  const toggleKeys = () => {
+    const next = !keysShown
+    setKeysShown(next)
+    try {
+      window.localStorage.setItem(KEYS_PREF, next ? 'shown' : 'hidden')
+    } catch {
+      // Storage can be unavailable in private browsing; this tap still works.
+    }
+    window.requestAnimationFrame(() => window.dispatchEvent(new Event('forge:fit-terminals')))
+  }
+
   /*
    * The phone's model chip, in the status strip rather than on the box: words
    * for the model, the effort picked here and the mode in force. Agents only —
@@ -798,7 +820,7 @@ export function SessionComposer(): ReactNode {
     // `data-view` is the face on screen, defaulted the way the pane defaults
     // it, so the phone's key row and status strip trade places on the same face
     // the pane shows — never on a guess.
-    <div className="session-composer" data-view={activeView}>
+    <div className="session-composer" data-view={activeView} data-keys={keysShown ? 'shown' : 'hidden'}>
       {profile ? (
         <AgentStatus
           profile={profile}
@@ -806,6 +828,8 @@ export function SessionComposer(): ReactNode {
           live={canType}
           view={activeView}
           onFlipView={isAgent ? onFlipView : undefined}
+          keysShown={keysShown}
+          onToggleKeys={toggleKeys}
           chip={chip}
         />
       ) : null}
@@ -867,6 +891,8 @@ export function SessionComposer(): ReactNode {
                 : 'Type a command…'
               : undefined
         }
+        tintedPlaceholder={mobile && !foremanOn && isAgent && profile ? profile.name.split(' ')[0] : undefined}
+        placeholderTint={profile ? badgeColor(profile) : undefined}
         sending={sending}
         onNotice={actions.setNotice}
         voice={voiceControls}

@@ -236,6 +236,24 @@
   text-overflow: ellipsis;
 }
 
+.app[data-mobile] .composer__hint {
+  position: absolute;
+  left: calc(var(--p-hit) + 10px);
+  right: 12px;
+  top: 50%;
+  overflow: hidden;
+  transform: translateY(-50%);
+  color: var(--p-ink-3);
+  font: 400 var(--p-t-body) / 24px var(--p-font);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.app[data-mobile] .composer__hint span {
+  color: color-mix(in srgb, var(--hint-accent) 55%, var(--p-ink-3));
+}
+
 .app[data-mobile] .composer[data-disabled='true'] .composer__input::placeholder {
   color: var(--p-ink-2);
 }

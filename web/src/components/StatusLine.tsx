@@ -62,6 +62,8 @@ export function StatusLine({
   live,
   view,
   onFlipView,
+  keysShown = false,
+  onToggleKeys,
   chip
 }: {
   profile: AgentProfile
@@ -69,6 +71,8 @@ export function StatusLine({
   live: boolean
   view?: PaneFace
   onFlipView?: () => void
+  keysShown?: boolean
+  onToggleKeys?: () => void
   chip?: ReactNode
 }): ReactNode {
   const screen = useScreenPane()
@@ -164,6 +168,22 @@ export function StatusLine({
         }}
       >
         {!shell && onFlipView && screen ? <Segments view={view ?? 'chat'} onPick={screen.showView} /> : null}
+        {onToggleKeys && (view ?? 'term') === 'term' ? (
+          <button
+            type="button"
+            className="pkeys-toggle"
+            aria-pressed={keysShown}
+            aria-label={keysShown ? 'Hide terminal keys' : 'Show terminal keys'}
+            title={keysShown ? 'Hide terminal keys' : 'Show terminal keys'}
+            onClick={onToggleKeys}
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <rect x="2" y="3" width="14" height="12" rx="2" />
+              <path d="M5 6h1M8.5 6h1M12 6h1M5 9h1M8.5 9h1M12 9h1M5 12h8" />
+            </svg>
+            <span className="pkeys-toggle__mark" aria-hidden="true">{keysShown ? 'On' : 'Off'}</span>
+          </button>
+        ) : null}
         {shell ? lead : null}
         <span className="pstat__gap" />
         {/* A condition is the news, so while there is one it is the whole of the
@@ -234,19 +254,28 @@ function Segments({ view, onPick }: { view: PaneFace; onPick: (face: PaneFace) =
  */
 function Ring({ pct, size, stroke = 2.5 }: { pct: number; size: number; stroke?: number }): ReactNode {
   const r = (size - stroke) / 2
+  const fill = Math.max(0, Math.min(100, pct))
   return (
     <svg className="pring" width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true" focusable="false">
       <circle className="pring__track" cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} />
-      <circle
-        className="pring__arc"
-        cx={size / 2}
-        cy={size / 2}
-        r={r}
-        strokeWidth={stroke}
-        pathLength={100}
-        strokeDasharray={`${Math.max(0, Math.min(100, pct))} 100`}
-        transform={`rotate(-90 ${size / 2} ${size / 2})`}
-      />
+      {[0, 1, 2, 3].map((quarter) => {
+        const start = quarter * 25
+        const length = Math.max(0, Math.min(25, fill - start))
+        return length > 0 ? (
+          <circle
+            key={quarter}
+            className={`pring__arc pring__arc--q${quarter + 1}`}
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            strokeWidth={stroke}
+            pathLength={100}
+            strokeDasharray={`${length} 100`}
+            strokeDashoffset={-start}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          />
+        ) : null
+      })}
     </svg>
   )
 }

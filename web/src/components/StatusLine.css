@@ -36,6 +36,46 @@
   min-width: 0;
 }
 
+.pkeys-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-sizing: border-box;
+  width: var(--p-hit);
+  height: var(--p-hit);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--p-r-row);
+  background: transparent;
+  color: var(--p-ink-2);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pkeys-toggle[aria-pressed='true'] {
+  background: var(--p-press);
+  border-color: var(--p-line-strong);
+  color: var(--p-ink);
+}
+
+.pkeys-toggle:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 1px;
+}
+
+.pkeys-toggle__mark {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  padding: 1px 2px;
+  border-radius: 3px;
+  background: var(--p-bg);
+  color: var(--p-ink-2);
+  font: 700 8px / 1 var(--p-font);
+}
+
 /* -------------------------------------------------------- view switch
  *
  * Three labelled segments in a quiet track. Each segment is a full 44px hit;
@@ -193,10 +233,21 @@
 
 .pring__arc {
   fill: none;
-  stroke: currentColor;
+  stroke: var(--p-ring-sky);
   stroke-linecap: round;
   transition: stroke-dasharray var(--p-dur) var(--p-ease);
 }
+
+.pstat {
+  --p-ring-sky: #63b8ff;
+  --p-ring-blue: #547bd8;
+  --p-ring-amber: #e6a23c;
+  --p-ring-red: #f06a57;
+}
+
+.pring__arc--q2 { stroke: var(--p-ring-blue); }
+.pring__arc--q3 { stroke: var(--p-ring-amber); }
+.pring__arc--q4 { stroke: var(--p-ring-red); }
 
 /* Before there is a reading, the agent's badge holds the ring's place. */
 .pstat__badge {

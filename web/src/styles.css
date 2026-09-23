@@ -4270,6 +4270,10 @@ button.astatus__mode:not(:disabled):hover {
   padding-bottom: calc(52px + var(--s-2));
 }
 
+.app[data-mobile] .app__main:has(.session-composer[data-keys='hidden']) .pane .pane__terminal .xterm {
+  padding-bottom: var(--s-2);
+}
+
 /*
  * The keys float: out of the dock's flow, pinned to its top edge, drawn over
  * the band above. So the dock is the status line plus the box in every view —
@@ -4309,6 +4313,10 @@ button.astatus__mode:not(:disabled):hover {
 [data-mobile] .session-composer[data-view='feed'] .composer__keys,
 [data-mobile] .session-composer[data-view='chat'] .composer__keys {
   visibility: hidden;
+}
+
+[data-mobile] .session-composer[data-keys='hidden'] .composer__keys {
+  display: none;
 }
 
 [data-mobile] .feed__tool-lines {
@@ -5414,6 +5422,18 @@ button.astatus__mode:not(:disabled):hover {
 
   .app[data-mobile] .session-composer[data-view='term'] .pstat .pstat__row {
     padding-right: calc(352px + var(--p-3) * 2);
+  }
+
+  .app[data-mobile] .session-composer[data-view='term'] .astatus.pstat {
+    display: block;
+  }
+
+  .app[data-mobile] .session-composer[data-view='term'] .pstat__row > :not(.pkeys-toggle) {
+    visibility: hidden;
+  }
+
+  .app[data-mobile] .session-composer[data-view='term'] .pkeys-toggle {
+    visibility: visible;
   }
 
   /* Typing mode keeps this row in Terminal view: a command typed in the box

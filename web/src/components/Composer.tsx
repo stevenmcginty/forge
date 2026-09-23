@@ -6,6 +6,7 @@ import {
   useState,
   type ChangeEvent,
   type ClipboardEvent,
+  type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent,
@@ -118,6 +119,8 @@ export function Composer({
   autoFocus,
   focusSignal = 0,
   placeholder: placeholderOverride,
+  tintedPlaceholder,
+  placeholderTint,
   sending = null,
   onNotice,
   voice: voiceControls,
@@ -178,6 +181,9 @@ export function Composer({
   focusSignal?: number
   /** The box's words when it can send and no dictation is running — "Tell Foreman…". */
   placeholder?: string
+  /** First agent name in the empty phone hint, kept readable by its soft tint. */
+  tintedPlaceholder?: string
+  placeholderTint?: string
   /**
    * A send is in flight: Send stays disabled until the upload and the write
    * are done. `total` counts attachments; with any, the button reads
@@ -685,7 +691,8 @@ export function Composer({
               rows={1}
               value={draft}
               disabled={disabled}
-              placeholder={placeholder}
+              placeholder={tintedPlaceholder ? '' : placeholder}
+              aria-label={tintedPlaceholder ? placeholder : undefined}
               enterKeyHint="enter"
               autoCapitalize="sentences"
               autoCorrect="on"
@@ -700,6 +707,11 @@ export function Composer({
               onChange={onChange}
               onKeyDown={onKey}
             />
+            {tintedPlaceholder && !draft && !disabled && phase === 'idle' ? (
+              <span className="composer__hint" aria-hidden="true" style={{ '--hint-accent': placeholderTint } as CSSProperties}>
+                Talk to <span>{tintedPlaceholder}</span>…
+              </span>
+            ) : null}
             {voiceState.phase === 'review' ? (
               <span className="composer__sr" role="status">
                 Sending in a moment. Undo keeps the words.

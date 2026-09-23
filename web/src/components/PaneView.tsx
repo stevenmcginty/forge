@@ -286,6 +286,13 @@ export function PaneView({
 
   const holderRef = useRef<HTMLDivElement | null>(null)
   const hostRef = useRef<TermHost | null>(null)
+  useEffect(() => {
+    const refit = (): void => {
+      window.requestAnimationFrame(() => hostRef.current?.fit())
+    }
+    window.addEventListener('forge:fit-terminals', refit)
+    return () => window.removeEventListener('forge:fit-terminals', refit)
+  }, [])
 
   const sendingImage = useRef(false)
   const [truncated, setTruncated] = useState(false)
