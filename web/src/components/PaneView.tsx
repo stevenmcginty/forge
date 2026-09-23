@@ -17,6 +17,7 @@ import { mountTerm, type TermHost } from '../lib/term'
 import { screenTurns } from '../lib/screen-turns'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
 import { useForge, useProfiles, useWorkspace } from '../state'
+import { registerAnswerScreen, SCREEN_TAIL_LINES } from './AnswerCard'
 import { ChatView } from './ChatView'
 import { Feed } from './Feed'
 import { HandoffMenu } from './HandoffMenu'
@@ -427,6 +428,19 @@ export function PaneView({
       publishPaneStatus(leaf.id, undefined)
       publishPaneView(leaf.id, undefined)
     },
+    [leaf.id]
+  )
+
+  /**
+   * This pane's screen, for the answer card over the composer to find a menu
+   * in when the question's flattened words were cut short. Read on demand
+   * through the ref, so it follows the terminal across a rebuild.
+   */
+  useEffect(
+    () =>
+      registerAnswerScreen(leaf.id, () =>
+        (hostRef.current?.captureRichTail(SCREEN_TAIL_LINES) ?? []).map((line) => line.text)
+      ),
     [leaf.id]
   )
 
@@ -1005,6 +1019,7 @@ export function PaneView({
               activity={chatActivity}
               quota={screenRead ? transcript.status.quota : undefined}
               agentName={profile?.name}
+              asking={asking && live}
             />
             {chatRefusal && effectiveTurns.length === 0 ? (
               <div className="pane__chat-note" role="note">

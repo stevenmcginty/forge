@@ -768,6 +768,27 @@
   margin-left: 4px;
 }
 
+/* The pane is asking: the same bubble, holding still, with a "!" disc. */
+.chatview__busy-bubble[data-asking='true'] {
+  border-color: var(--warn-line-strong);
+  background: color-mix(in srgb, var(--warn) 6%, var(--bg-panel-raised));
+}
+
+.chatview__wait-bang {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-full);
+  background: var(--warn);
+  color: var(--bg-base);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 /* ------------------------------------------------------------------ quota */
 
 .chatview__quota {

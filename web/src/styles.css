@@ -3824,6 +3824,43 @@ button.astatus__mode:not(:disabled):hover {
   transform: scale(0.94);
 }
 
+/* Busy agent, empty box: Stop. A filled square and the word — the shape and
+ * the label carry it, never the colour. Wider than Send, never taller, so the
+ * dock and the terminal above it keep their heights. */
+.composer__send[data-stop]:not(:disabled) {
+  width: auto;
+  min-width: 36px;
+  gap: 7px;
+  padding: 0 14px 0 12px;
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  border-color: var(--line-strong);
+  color: var(--text-primary);
+  box-shadow: none;
+  font-family: var(--font-ui);
+  font-size: var(--t-lg);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.composer__send[data-stop]:not(:disabled):hover {
+  background: color-mix(in srgb, var(--text-primary) 16%, transparent);
+  border-color: var(--text-secondary);
+  box-shadow: none;
+  transform: none;
+}
+
+.composer__send[data-stop='stopping']:not(:disabled) {
+  color: var(--text-secondary);
+}
+
+.composer__stop-square {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
 /* Keyboard focus, on every control the slab carries. The textarea has the
  * card's own lit edge for this and needs no ring of its own. */
 .composer__pick:focus-visible,

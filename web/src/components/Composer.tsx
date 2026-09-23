@@ -45,6 +45,8 @@ export function Composer({
   onDraft,
   onSend,
   onRaw,
+  onStop,
+  stopping = false,
   models,
   currentModelId,
   onModel,
@@ -70,6 +72,14 @@ export function Composer({
   /** Send: the pending images first, then the draft. Either may be empty. */
   onSend: (images: File[]) => void
   onRaw: (data: string) => void
+  /**
+   * Interrupt the agent. Present only while there is something to stop; with
+   * the box and the attachments empty, Send wears it instead — a draft still
+   * sends, so a message can be queued while the agent works.
+   */
+  onStop?: () => void
+  /** Stop was pressed and the agent has not gone idle yet. */
+  stopping?: boolean
   /**
    * The models this pane's CLI lists, in that CLI's own words. Empty / absent
    * means the Model chip stays off — Grok's "Grok 4.6" and Claude's "Opus"
@@ -268,6 +278,11 @@ export function Composer({
 
   const hasDraft = draft.trim().length > 0 || files.length > 0
   const ready = !disabled
+  /**
+   * The button, not the keyboard: a keyboard Enter on an empty box stays the
+   * Enter key, and only a tap on the button interrupts.
+   */
+  const stopMode = onStop !== undefined && !hasDraft
 
   // One button for Enter. With words in the box it sends them; with the box
   // empty it is the Enter key itself — what confirms the option ↑/↓ landed on
@@ -608,16 +623,32 @@ export function Composer({
             />
             <Key label="Esc" onClick={() => onRaw('\x1b')} disabled={disabled} />
           </div>
-          <button
-            type="submit"
-            className="composer__send"
-            data-draft={hasDraft ? 'true' : 'false'}
-            disabled={!ready}
-            aria-label={hasDraft ? 'Send' : 'Enter'}
-            title={hasDraft ? 'Send' : 'Enter'}
-          >
-            <Icon name="send" size={16} />
-          </button>
+          {stopMode ? (
+            <button
+              type="button"
+              className="composer__send"
+              data-draft="false"
+              data-stop={stopping ? 'stopping' : 'true'}
+              disabled={!ready}
+              onClick={onStop}
+              aria-label={stopping ? 'Stopping' : 'Stop'}
+              title={stopping ? 'Stopping… — tap to send Esc again' : 'Stop — interrupt the agent (Esc)'}
+            >
+              <span className="composer__stop-square" aria-hidden="true" />
+              <span>{stopping ? 'Stopping…' : 'Stop'}</span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="composer__send"
+              data-draft={hasDraft ? 'true' : 'false'}
+              disabled={!ready}
+              aria-label={hasDraft ? 'Send' : 'Enter'}
+              title={hasDraft ? 'Send' : 'Enter'}
+            >
+              <Icon name="send" size={16} />
+            </button>
+          )}
         </div>
       </div>
     </form>

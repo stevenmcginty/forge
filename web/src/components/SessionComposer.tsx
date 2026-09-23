@@ -3,6 +3,7 @@ import type { ClaudePermissionMode, LayoutNode, PaneLeaf } from '@shared/types'
 import type { EffortLevel } from '@shared/agents'
 import {
   agentModels,
+  commandExe,
   effortLevels,
   effortRefusal,
   effortSlash,
@@ -19,11 +20,13 @@ import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { isDictationSupported, startRecording, transcribeOnDesktop, type Recording } from '../lib/dictate'
 import { isImageFile, uploadFileChunks } from '../lib/file'
 import { packImage } from '../lib/image'
+import { useMobile } from '../lib/mobile'
 import { requestPaneView, usePaneStatus, usePaneView, type PaneFace } from '../lib/pane-status'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
 import type { PermissionMode } from '@/lib/rich'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStatus } from './AgentStatus'
+import { AnswerCard } from './AnswerCard'
 import { BACK_TAB, Composer } from './Composer'
 
 /**
@@ -50,6 +53,9 @@ function liveRung(mode: PermissionMode | undefined): ClaudePermissionMode | 'aut
 }
 
 const pause = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+/** Interrupt: what `esc to interrupt` asks for, on every agent the strip reads busy. */
+const ESC = '\x1b'
 
 /** The most a round trip to the desktop's ears may take before the button gives up. */
 const TRANSCRIBE_TIMEOUT_MS = 75_000
@@ -86,6 +92,19 @@ export function SessionComposer(): ReactNode {
   const status = usePaneStatus(paneId)
   const view = usePaneView(paneId)
   const project = state.picture?.projects?.find((p) => p.id === state.projectId)?.name ?? ''
+  const mobile = useMobile()
+  const asking = paneId !== null && state.asking.has(paneId)
+  const prompt = paneId ? (state.prompts[paneId] ?? '') : ''
+  const busy = Boolean(status?.busy)
+  /**
+   * Stop was pressed and the agent has not stopped yet. Cleared by the strip
+   * reading idle — the only proof an interrupt landed — or by a pane change.
+   */
+  const [stopping, setStopping] = useState(false)
+  useEffect(() => {
+    if (!busy) setStopping(false)
+  }, [busy])
+  useEffect(() => setStopping(false), [paneId])
 
   const sendFiles = useCallback(
     async (files: File[]) => {
@@ -347,6 +366,15 @@ export function SessionComposer(): ReactNode {
     [actions, canType, paneId, profile, status?.mode, takePane]
   )
 
+  /**
+   * Stop: Esc down the PTY, the key every agent's own footer names for this
+   * (`esc to interrupt`). Pressing it again while "Stopping…" sends it again.
+   */
+  const sendStop = () => {
+    sendRaw(ESC)
+    setStopping(true)
+  }
+
   if (offline && state.offlineMode === 'github') return null
   if (!tab) return null
 
@@ -369,6 +397,17 @@ export function SessionComposer(): ReactNode {
   const activeView: PaneFace = view ?? (isAgent ? getClaudeView() : 'term')
   const nextView: PaneFace = isAgent ? (activeView === 'chat' ? 'feed' : activeView === 'feed' ? 'term' : 'chat') : 'term'
 
+  /*
+   * The phone's Send becomes Stop while an agent works — a shell has no busy
+   * signal to read, so it keeps the key row's Ctrl and Esc instead. Not while
+   * the pane is asking: the answer card is how that gets answered, and Esc
+   * there is "No".
+   */
+  const canStop = mobile && Boolean(isAgent) && canType && busy && !asking
+  /** Claude Code and Gemini CLI pick a numbered row on its digit; the rest walk to it. */
+  const exe = profile ? commandExe(profile.command) : ''
+  const digits = exe === 'claude' || exe === 'gemini'
+
   const onFlipView = () => {
     if (!paneId) return
     requestPaneView(paneId, nextView)
@@ -386,6 +425,19 @@ export function SessionComposer(): ReactNode {
           onFlipView={isAgent ? onFlipView : undefined}
         />
       ) : null}
+      {mobile && asking && paneId ? (
+        <AnswerCard
+          // A new question is a new card: the sent state belongs to the old one.
+          key={`${paneId}\n${prompt}`}
+          paneId={paneId}
+          agentName={profile?.name ?? 'This pane'}
+          prompt={prompt}
+          digits={digits}
+          live={canType}
+          onWrite={sendRaw}
+          onShowTerminal={activeView !== 'term' ? () => requestPaneView(paneId, 'term') : undefined}
+        />
+      ) : null}
       <Composer
         draft={draft}
         disabled={!canType}
@@ -394,6 +446,8 @@ export function SessionComposer(): ReactNode {
         onDraft={setDraft}
         onSend={(files) => void sendDraft(files)}
         onRaw={sendRaw}
+        onStop={canStop ? sendStop : undefined}
+        stopping={stopping}
         models={roster}
         currentModelId={currentModelId}
         onModel={roster.length ? (id) => void sendModel(id) : undefined}

@@ -34,11 +34,18 @@ export function ChatView({
   busy,
   activity,
   quota,
-  agentName
+  agentName,
+  asking
 }: {
   turns: ChatTurn[]
   truncated: boolean
   busy?: boolean
+  /**
+   * The pane has settled on a question. The last turn is then usually a tool
+   * call with no text, which reads as "Thinking" — it is not thinking, it is
+   * waiting on the person, so the indicator says that instead.
+   */
+  asking?: boolean
   /**
    * What the agent says it is doing, off its own status line — "Thinking",
    * "Waiting for response". Labels the working indicator; "Thinking" without.
@@ -73,7 +80,7 @@ export function ChatView({
     } else if (turns.length) {
       setUnseen(true)
     }
-  }, [turns, lastId, busy])
+  }, [turns, lastId, busy, asking])
 
   // Heights settle after the turns do — fonts land, a chip opens, the box
   // above grows. While the reader is at the bottom, the bottom follows.
@@ -164,7 +171,11 @@ export function ChatView({
               ))}
             </ol>
           )}
-          {busy ? <Working activity={activity} agentName={agentName} /> : null}
+          {asking ? (
+            <Waiting agentName={agentName} />
+          ) : busy ? (
+            <Working activity={activity} agentName={agentName} />
+          ) : null}
           {quota ? <Quota text={quota} /> : null}
         </div>
       </div>
@@ -398,6 +409,30 @@ function Working({ activity, agentName }: { activity?: string; agentName?: strin
           <span />
         </span>
         {seconds >= 1 ? <span className="chatview__busy-time">{formatElapsed(seconds)}</span> : null}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The pane asked and is waiting on the person. Said in words with a "!" beside
+ * them, never by colour alone; the answer card over the composer holds the
+ * question and its choices.
+ */
+function Waiting({ agentName }: { agentName?: string }): ReactNode {
+  return (
+    <div className="chatview__busy-turn" role="status" aria-live="polite">
+      <div className="chatview__agent-header">
+        <span className="chatview__sparkle-icon" aria-hidden="true">
+          <Icon name="sparkle" size={13} />
+        </span>
+        <span className="chatview__agent-name">{agentName ?? 'Assistant'}</span>
+      </div>
+      <div className="chatview__busy-bubble" data-asking="true">
+        <span className="chatview__wait-bang" aria-hidden="true">
+          !
+        </span>
+        <span className="chatview__busy-label">Waiting on you</span>
       </div>
     </div>
   )

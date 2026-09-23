@@ -141,7 +141,21 @@ export function Workspace(): ReactNode {
         {mobile && drawerOpen ? (
           <div className="mdrawer__scrim" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
         ) : null}
-        <aside className="app__left" data-collapsed={collapsed} data-drawer={mobile ? (drawerOpen ? 'open' : 'closed') : undefined}>
+        <aside
+          className="app__left"
+          data-collapsed={collapsed}
+          data-drawer={mobile ? (drawerOpen ? 'open' : 'closed') : undefined}
+          // Any project row closes the drawer, the current one included: the
+          // effect above only hears a *change*, and a tap on the project already
+          // on screen left the drawer standing over it.
+          onClick={
+            mobile
+              ? (e) => {
+                  if (e.target instanceof Element && e.target.closest('.prow')) setDrawerOpen(false)
+                }
+              : undefined
+          }
+        >
           <Rail collapsed={collapsed} />
         </aside>
         <main className="app__main">

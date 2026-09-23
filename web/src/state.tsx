@@ -137,6 +137,11 @@ export interface ForgeState {
   asking: Set<string>
   /** The line the desktop extracted for an asking pane, keyed by session id. */
   prompts: Record<string, string>
+  /**
+   * Every asking pane in every project, in drawing order (see `waitingPanes`).
+   * Its length is the "N waiting" count; `nextWaiting` walks it.
+   */
+  waiting: string[]
   /** The sentence currently on screen — the head of the notice queue. */
   notice: string
   /**
@@ -183,6 +188,12 @@ export interface ForgeActions {
   /** Look for the desktop again — the offline screen's button, and its poll. */
   refind: () => void
   selectProject: (projectId: string) => void
+  /**
+   * Go to the next pane waiting on an answer, in any project — the waiting
+   * pill's tap. The same jump a notification tap makes, so the desk follows.
+   * Repeated taps cycle through `waiting`.
+   */
+  nextWaiting: () => void
   /** One layout gesture. Resolves with the desktop's refusal sentence, or null. */
   layout: (op: Omit<WebLayoutOp, 'projectId'> & { projectId?: string }) => Promise<string | null>
   request: (body: WebRequest) => Promise<WebResult>
@@ -391,6 +402,87 @@ function takeSessionParam(): string {
   return id
 }
 
+/* ---------------------------------------------------------------- landing */
+
+/**
+ * The project this browser was last looking at, so a reload or a cold open
+ * comes back to it instead of to whichever project happens to be first.
+ *
+ * Guarded like `deviceId` in lib/device.ts: a private window throws on the
+ * first `localStorage` access, and a convenience must not take the page down.
+ * Only an id — no name, no path — and it is forgotten on sign-out with the rest.
+ */
+const LAST_PROJECT_KEY = 'forge-web-last-project'
+
+function readLastProject(): string {
+  try {
+    return localStorage.getItem(LAST_PROJECT_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function rememberLastProject(id: string): void {
+  try {
+    localStorage.setItem(LAST_PROJECT_KEY, id)
+  } catch {
+    /* the selection still stands for this page's lifetime */
+  }
+}
+
+function forgetLastProject(): void {
+  try {
+    localStorage.removeItem(LAST_PROJECT_KEY)
+  } catch {
+    /* nothing was written, so nothing to forget */
+  }
+}
+
+/**
+ * Every asking pane, in the order the page draws them: project by project,
+ * tab by tab, leaf by leaf. A session that is in no workspace (closed since it
+ * asked) is not counted — there is nowhere to take anybody to.
+ */
+function waitingPanes(projects: Project[], workspaces: Record<string, Workspace>, asking: ReadonlySet<string>): string[] {
+  const out: string[] = []
+  if (asking.size === 0) return out
+  for (const project of projects) {
+    for (const tab of workspaces[project.id]?.tabs ?? []) {
+      for (const leaf of collectLeaves(tab.root)) if (asking.has(leaf.id)) out.push(leaf.id)
+    }
+  }
+  return out
+}
+
+/**
+ * Which project a browser opens on: one with a pane waiting on an answer, then
+ * the one it was last looking at, then the first. A *project* and nothing
+ * finer, on purpose — selecting it is local to this page, whereas bringing a
+ * tab forward is a `select-tab` the desk follows (decision 5), and opening the
+ * phone is no reason to move the desk. The tap on the waiting pill is.
+ */
+function landingProject(projects: Project[], workspaces: Record<string, Workspace>, asking: ReadonlySet<string>): string | null {
+  const first = waitingPanes(projects, workspaces, asking)[0]
+  if (first) {
+    const home = projects.find((p) =>
+      (workspaces[p.id]?.tabs ?? []).some((t) => collectLeaves(t.root).some((leaf) => leaf.id === first))
+    )
+    if (home) return home.id
+  }
+  const held = readLastProject()
+  if (held && projects.some((p) => p.id === held)) return held
+  return projects[0]?.id ?? null
+}
+
+/** One short buzz, where the platform has one. iOS has no Vibration API at all. */
+function buzz(): void {
+  try {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(30)
+  } catch {
+    /* a browser may refuse without a user gesture; the pill still says it */
+  }
+}
+
 /* -------------------------------------------------------------- provider */
 
 export function ForgeProvider({ children }: { children: ReactNode }): ReactNode {
@@ -433,6 +525,20 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    * and there is no workspace to find the pane in until that lands.
    */
   const [pendingSession, setPendingSession] = useState<string>(() => takeSessionParam())
+  /**
+   * The asking set as the client handlers see it, kept in step with `asking`
+   * frame by frame. A ref because those handlers are built once, and because
+   * the buzz below needs "was it already asking" before React has rendered.
+   */
+  const askingNow = useRef(new Set<string>())
+  /**
+   * Where the waiting pill last jumped, and which pane was on screen when it
+   * did. Until the desk's push moves the screen, a second tap cycles on from
+   * the jump rather than from the pane the screen still shows.
+   */
+  const lastJump = useRef<{ pane: string; from: string | null } | null>(null)
+  const waitingRef = useRef<string[]>([])
+  const viewPaneRef = useRef<string | null>(null)
 
   /**
    * What the client handlers (built once, below) read for the permission
@@ -560,7 +666,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // Stamped with whose picture it is, so a later sign-in as somebody else
         // cannot inherit it — see SNAPSHOT_VERSION 4 in lib/cache.ts.
         setCached(rememberPicture(frame, authRef.current?.current()?.uid ?? ''))
-        setProjectId((current) => current ?? frame.projects[0]?.id ?? null)
+        // Only the first picture chooses; a reconnect keeps what is on screen.
+        // See `landingProject` for why this lands on a project and not a tab.
+        setProjectId((current) => current ?? landingProject(frame.projects, frame.workspaces, askingNow.current))
         // Absent means this desktop cannot push — an older build, or one whose
         // keys would not generate. The bell stays either way, because it is
         // still the switch for the tab-local notification; only the sentence
@@ -626,6 +734,13 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         )
       },
       onAttention: (sessionId, isAsking, prompt) => {
+        const was = askingNow.current.has(sessionId)
+        if (isAsking) askingNow.current.add(sessionId)
+        else askingNow.current.delete(sessionId)
+        // The in-tab half of the notification below: somebody looking at the
+        // page gets one short buzz on the edge into asking — not on a prompt
+        // line that merely changed — and the pill says the rest.
+        if (isAsking && !was && !document.hidden) buzz()
         setAsking((current) => {
           const next = new Set(current)
           if (isAsking) next.add(sessionId)
@@ -862,8 +977,17 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    */
   useEffect(() => {
     if (stage.kind !== 'offline') return
-    setProjectId((current) => current ?? cached?.projects[0]?.id ?? null)
+    setProjectId((current) => {
+      if (current || !cached) return current
+      const held = readLastProject()
+      return cached.projects.some((p) => p.id === held) ? held : (cached.projects[0]?.id ?? null)
+    })
   }, [stage.kind, cached])
+
+  /** Written down on every change, so the next open lands here. See `readLastProject`. */
+  useEffect(() => {
+    if (projectId) rememberLastProject(projectId)
+  }, [projectId])
 
   /**
    * A desktop that came back takes the page with it.
@@ -1061,6 +1185,27 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
     setPendingSession('')
   }, [client, connection.state, picture, pendingSession])
 
+  /**
+   * The waiting list across every project, and the pane on screen now — the
+   * two things the pill's tap reads. Live picture only: a frozen desktop has
+   * nobody to answer, and a jump needs a desk to follow it.
+   */
+  const waiting = useMemo(
+    () => (picture ? waitingPanes(picture.projects, picture.workspaces, asking) : []),
+    [picture, asking]
+  )
+  const viewPane = useMemo(() => {
+    const ws = projectId ? picture?.workspaces[projectId] : undefined
+    const tab = ws?.tabs.find((t) => t.id === ws.activeTabId) ?? ws?.tabs[0]
+    if (!tab) return null
+    const leaves = collectLeaves(tab.root)
+    return (leaves.find((leaf) => leaf.id === tab.activePaneId) ?? leaves[0])?.id ?? null
+  }, [picture, projectId])
+  useEffect(() => {
+    waitingRef.current = waiting
+    viewPaneRef.current = viewPane
+  }, [waiting, viewPane])
+
   /* --------------------------------------------------------------- actions */
 
   const actions = useMemo<ForgeActions>(
@@ -1078,6 +1223,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           setCached(null)
           setPicture(null)
           setProjectId(null)
+          forgetLastProject()
           setGit({})
         }
         setSession(next)
@@ -1106,6 +1252,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         setSession(null)
         setPicture(null)
         setProjectId(null)
+        forgetLastProject()
         setGit({})
         setStage({ kind: 'signed-out', error: '' })
       },
@@ -1120,6 +1267,19 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // the browser brings it up on the desktop too, which is decision 5.
         setProjectId(id)
         void client.layout({ op: 'select-project', projectId: id })
+      },
+      nextWaiting: () => {
+        const list = waitingRef.current
+        if (list.length === 0) return
+        const view = viewPaneRef.current
+        const jump = lastJump.current
+        // Cycle on from the last jump while the screen has not caught up with
+        // it yet, and from what is on screen once it has.
+        const cursor = jump && jump.from === view && list.includes(jump.pane) ? jump.pane : view
+        const next = list[(list.indexOf(cursor ?? '') + 1) % list.length]
+        if (!next) return
+        lastJump.current = { pane: next, from: view }
+        setPendingSession(next)
       },
       layout: async (op) => {
         const id = op.projectId ?? projectId
@@ -1235,6 +1395,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       git,
       asking,
       prompts,
+      waiting,
       notice,
       desktopRecovering,
       remoteYes,
@@ -1254,6 +1415,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       git,
       asking,
       prompts,
+      waiting,
       notice,
       desktopRecovering,
       remoteYes,

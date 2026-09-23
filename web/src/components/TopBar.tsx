@@ -7,6 +7,7 @@ import { collectLeaves } from '@/lib/splitTree'
 import { handoffTargets, handoffTargetWire, paneHandoffChip, type HandoffTarget } from '@shared/handoffview'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
 import { HandoffMenu } from './HandoffMenu'
+import { WaitingBadge, WaitingPill } from './WaitingPill'
 import { rustDeskLink } from './Workspace'
 
 /**
@@ -195,26 +196,34 @@ export function TopBar({
         <div className="titlebar__left">
           <button
             type="button"
-            className="ghost-btn titlebar__btn"
+            className={mobile ? 'ghost-btn titlebar__btn waitbadge-host' : 'ghost-btn titlebar__btn'}
             title={collapsed ? 'Show projects' : 'Hide projects'}
-            aria-label="Projects rail"
+            aria-label={
+              mobile && !offline && state.waiting.length > 0
+                ? `Projects rail, ${state.waiting.length} waiting`
+                : 'Projects rail'
+            }
             aria-pressed={!collapsed}
             onClick={onToggleRail}
           >
             <Icon name="panel" size={mobile ? 18 : 15} />
+            {mobile && !offline ? <WaitingBadge /> : null}
           </button>
 
           {mobile ? (
-            <h1 className="titlebar__project">
-              {project ? (
-                <>
-                  <span className="titlebar__dot" />
-                  <span className="truncate">{project.name}</span>
-                </>
-              ) : (
-                'Forge'
-              )}
-            </h1>
+            <>
+              <h1 className="titlebar__project">
+                {project ? (
+                  <>
+                    <span className="titlebar__dot" />
+                    <span className="truncate">{project.name}</span>
+                  </>
+                ) : (
+                  'Forge'
+                )}
+              </h1>
+              {offline ? null : <WaitingPill />}
+            </>
           ) : (
             <>
               <span className="titlebar__mark">

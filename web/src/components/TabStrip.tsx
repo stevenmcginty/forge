@@ -8,6 +8,7 @@ import { Popover } from '@/components/Popover'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentChooser } from './AgentChooser'
 import { CommandsButton, SkillsButton } from './Flyouts'
+import './WaitingPill.css'
 
 /**
  * The tab strip, in the desktop's own `.tabstrip` / `.tab` classes.
@@ -175,6 +176,8 @@ function Tab({
   const asking = leaves.some((leaf) => state.asking.has(leaf.id))
   const closeBtnRef = useRef<HTMLButtonElement | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  /** What pressed the pill last. A finger selects on `click`; see below. */
+  const pointerType = useRef('')
 
   return (
     <div
@@ -202,11 +205,25 @@ function Tab({
           ...(tab.textColor ? { '--tab-text-tint': tab.textColor } : {})
         } as CSSProperties
       }
-      onPointerDown={() => {
-        // Nothing at all on a link that cannot carry the request, exactly as the
-        // header says: a strip that moved on a dropped socket would be claiming
-        // the desk had agreed to something it has not been told about.
-        if (!active && !pending && live) onSelect()
+      // A tap selects; a swipe does not. A mouse still selects on the press,
+      // as it always has — but a finger's `pointerdown` arrives at the *start*
+      // of every gesture, including the sideways drag that scrolls this strip,
+      // so selecting there picked whichever pill the thumb landed on, and moved
+      // the desk's tab with it. `click` is the event a scroll does not produce
+      // (the browser cancels the pointer once it pans), so a finger selects on
+      // that — the same split `PaneView` makes for focus.
+      //
+      // Nothing at all on a link that cannot carry the request, exactly as the
+      // header says: a strip that moved on a dropped socket would be claiming
+      // the desk had agreed to something it has not been told about.
+      onPointerDown={(e) => {
+        pointerType.current = e.pointerType
+        if (e.pointerType !== 'touch' && !active && !pending && live) onSelect()
+      }}
+      onClick={() => {
+        const touched = pointerType.current === 'touch'
+        pointerType.current = ''
+        if (touched && !active && !pending && live) onSelect()
       }}
     >
       <div className="tab__badges">
@@ -216,6 +233,11 @@ function Tab({
         {leaves.length > 3 ? <span className="tab__more mono">+{leaves.length - 3}</span> : null}
       </div>
 
+      {asking ? (
+        <span className="tab__ask" aria-hidden="true">
+          !
+        </span>
+      ) : null}
       <span className="tab__title truncate">{tab.title}</span>
 
       <button

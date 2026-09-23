@@ -688,6 +688,14 @@ export class WebServer {
    */
   private lastRemoteYes: RemoteYesInfo | null = null
   /**
+   * Every pane asking right now, with its question, so it can be said again
+   * after every `hello-ok`. Without it a phone that reconnects (screen lock,
+   * a tap on the push notification) sees no question until the pane changes,
+   * and the answer card it opened for never appears. Same idea as
+   * `lastRemoteYes`; pruned against the live pane list when it is replayed.
+   */
+  private askingNow = new Map<string, string>()
+  /**
    * The one socket watching this desktop's screen, if any.
    *
    * At most one, ever, and for a sharper reason than Forge Mobile's: there the
@@ -941,6 +949,8 @@ export class WebServer {
 
   /** A pane has settled on a question, or stopped waiting on one. */
   pushAttention(sessionId: string, asking: boolean, prompt?: string): void {
+    if (asking) this.askingNow.set(sessionId, prompt ?? '')
+    else this.askingNow.delete(sessionId)
     this.broadcast({ type: 'attention', sessionId, asking, ...(prompt ? { prompt } : {}) })
   }
 
@@ -1741,6 +1751,16 @@ export class WebServer {
     // connect during a prompt is to have been dropped by it. Nothing is sent
     // when nothing has been said, so a desktop with Remote Yes off is silent.
     if (this.lastRemoteYes) this.send(client, { type: 'remote-yes', ...this.lastRemoteYes })
+    // The same reasoning for a pane that is already asking: the commonest way
+    // to arrive during a question is a tap on the push that announced it.
+    const live = new Set(this.wireSessions().map((s) => s.id))
+    for (const [sessionId, prompt] of this.askingNow) {
+      if (!live.has(sessionId)) {
+        this.askingNow.delete(sessionId)
+        continue
+      }
+      this.send(client, { type: 'attention', sessionId, asking: true, ...(prompt ? { prompt } : {}) })
+    }
     this.host.onPresence?.(this.connectedCount)
   }
 

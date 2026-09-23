@@ -1,0 +1,203 @@
+/* --------------------------------------------------------- the answer card
+ *
+ * An asking pane's question, docked over the composer in every face. Amber is
+ * the attention colour, but nothing here leans on it alone: the eyebrow says
+ * who is asking in words, the "!" is a shape, and the card has its own border.
+ * Every answer is a full-width row with its digit in a badge, so the choices
+ * read by position and by words, never by colour.
+ *
+ * In normal flow above the composer, never fixed over the conversation: the
+ * dock grows by the card's height and the pane above gives it up, keyboard
+ * and safe area included, the same way it does for the composer's own box.
+ */
+
+.answer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  margin: var(--s-4) var(--s-4) 0;
+  padding: var(--s-5) var(--s-5) var(--s-4);
+  max-height: 55dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--warn-line-strong);
+  border-radius: var(--r-xl);
+  background: color-mix(in srgb, var(--warn) 6%, var(--bg-panel-raised));
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+  animation: answer-in var(--dur-med) var(--ease-out);
+}
+
+@keyframes answer-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.answer__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+
+/* A filled disc with the "!" knocked out: a shape that says "needs you". */
+.answer__bang {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-full);
+  background: var(--warn);
+  color: var(--bg-base);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.answer__question {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.answer__options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.answer__option {
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  width: 100%;
+  min-height: 48px;
+  padding: 10px var(--s-5);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+/* Hover only where there is a pointer that hovers: a finger's last tap would
+ * otherwise leave its row lit, which reads as the row that was picked. */
+@media (hover: hover) {
+  .answer__option:not(:disabled):hover {
+    background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+    border-color: var(--warn-line-strong);
+  }
+}
+
+.answer__option:not(:disabled):active {
+  transform: scale(0.98);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border-color: var(--warn);
+}
+
+.answer__option:focus-visible,
+.answer__terminal:focus-visible {
+  outline: 2px solid var(--warn);
+  outline-offset: 2px;
+}
+
+.answer__option:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.answer__digit {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-base);
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.answer__label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.answer__sent {
+  margin: 0;
+  font-size: var(--t-lg);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.answer__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  min-height: 32px;
+}
+
+.answer__terminal {
+  min-height: 32px;
+  padding: 0 var(--s-2);
+  margin-left: calc(var(--s-2) * -1);
+  border: 0;
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--t-lg);
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--line-strong);
+  cursor: pointer;
+}
+
+.answer__hint {
+  margin-left: auto;
+  font-size: var(--t-md);
+  color: var(--text-dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .answer {
+    animation: none;
+  }
+
+  .answer__option:not(:disabled):active {
+    transform: none;
+  }
+}

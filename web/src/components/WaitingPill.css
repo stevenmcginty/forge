@@ -1,0 +1,109 @@
+/*
+ * The waiting pill, the ☰ badge, and the "!" in an asking tab.
+ *
+ * Amber is the colour this page already uses for "asking" (the tab glow, the
+ * pane chip's dot), but none of these three relies on it: each carries a "!"
+ * or a number, so it reads the same to red-green colourblind eyes.
+ */
+
+/* The button is the 44px hit area; the face inside it is what is drawn. */
+.waitpill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 2px;
+  margin: 0 0 0 2px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.waitpill__face {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 16%, var(--bg-base));
+  border: 1px solid var(--warn-line);
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 30%, transparent);
+  transition: transform var(--dur-fast, 120ms) ease-out;
+}
+
+.waitpill:active .waitpill__face {
+  transform: scale(0.95);
+}
+
+.waitpill:focus-visible {
+  outline: none;
+}
+
+.waitpill:focus-visible .waitpill__face {
+  outline: 2px solid var(--warn);
+  outline-offset: 2px;
+}
+
+/* The "!" in a small filled circle — the shape that says it without colour. */
+.waitpill__bang {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--warn);
+  color: var(--bg-base);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+/* The count on the ☰ button. */
+.waitbadge-host {
+  position: relative;
+}
+
+.waitbadge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--warn);
+  color: var(--bg-base);
+  border: 1.5px solid var(--bg-base);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* The "!" inside an asking tab's pill, beside the glow it already has. */
+.tab__ask {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--warn);
+  color: var(--bg-base);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
