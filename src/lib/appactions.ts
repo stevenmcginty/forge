@@ -934,7 +934,7 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       run.setViewMode(action.mode)
       return {
         ok: true,
-        summary: action.mode === 'mosaic' ? 'Showing every terminal at once' : 'Back to tabs',
+        summary: action.mode === 'mosaic' ? 'Showing the Wall — every terminal at once' : 'Back to tabs',
         requested: 1,
         done: 1
       }

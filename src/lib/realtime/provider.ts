@@ -52,7 +52,7 @@ export function resolveHubProvider(requested: VoiceHubProvider | undefined, keys
   const vendor = providerSpec(wanted).vendor === 'gemini' ? 'Gemini' : 'OpenAI'
   return {
     provider: 'claude',
-    fallbackReason: `No ${vendor} key — using Claude. Add one in Settings → Models & APIs for ${providerSpec(wanted).label}.`
+    fallbackReason: `No ${vendor} key — using Claude. Add one in Settings → Voice & Agent for ${providerSpec(wanted).label}.`
   }
 }
 
@@ -85,7 +85,7 @@ export function resolveAgentBrain(requested: AgentBrainId | undefined, keys: Par
     return {
       brain: DEFAULT_AGENT_BRAIN,
       realtime: null,
-      fallbackReason: `No ${vendor} key — using Claude. Add one in Settings → Models & APIs for ${spec.label}.`
+      fallbackReason: `No ${vendor} key — using Claude. Add one in Settings → Voice & Agent for ${spec.label}.`
     }
   }
   return { brain: wanted, realtime: isRealtimeBrain(wanted) ? wanted : null, fallbackReason: null }

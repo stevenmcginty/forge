@@ -226,7 +226,7 @@ export function BrowserSurface({ surface, profiles, scale = 1, hidden = false, o
         </span>
         <label className="browser-surface__address">
           <span className="browser-surface__scheme" aria-hidden="true">
-            {surface.url.startsWith('https:') ? 'https' : surface.url.startsWith('http:') ? 'http' : isArtifactUrl(surface.url) ? 'canvas' : ''}
+            {surface.url.startsWith('https:') ? 'https' : surface.url.startsWith('http:') ? 'http' : isArtifactUrl(surface.url) ? 'board' : ''}
           </span>
           <input
             className="browser-surface__url"

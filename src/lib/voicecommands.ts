@@ -1,5 +1,6 @@
 import type { SplitDirection } from '@shared/types'
 import { matchProfile, matchProject, type ActionContext, type AppAction } from './appactions'
+import { resolveNavTarget } from './hubnav'
 import type { BrainConfidence } from './voicebrain'
 
 /**
@@ -318,6 +319,15 @@ export function parseCommand(transcript: string, ctx: CommandContext): CommandHi
     return { action: { kind: 'close_pane', which: 'focused' }, confidence: 'medium' }
   }
 
+  /* --- the Wall, the Board, "canvas" ------------------------------------
+   * Ahead of switching project, deliberately: "go to the wall" used to be a
+   * switch to a project called "wall". The Wall is set here; the Board and the
+   * word "canvas" are handed to the brain whole (null), which goes to the Board
+   * or asks "the Wall or the Board?" — never a project called "canvas". */
+  const view = parseViewNav(text)
+  if (view === 'brain') return null
+  if (view) return view
+
   /* --- focus a tab by position: "go to tab 2", "second tab", "tab 3" -----
    * After closing, deliberately: "close tab one" names a tab and a number, and
    * the only difference between the two readings is the verb. */
@@ -622,6 +632,24 @@ function parseFocusTab(text: string, tokens: string[]): CommandHit | null {
     if (n >= 1) return { action: { kind: 'focus_tab', index: n - 1 }, confidence: 'high' }
   }
 
+  return null
+}
+
+/** A spoken move somewhere: "go to", "show me", "take me to", "bring up". */
+const VIEW_VERB = /^(?:(?:go|jump|switch|move|take me|bring me|flick|head)(?:\s+(?:over|back))?\s+to|show(?:\s+me)?|bring up|open(?:\s+up)?)\s+/
+
+/**
+ * "Go to the wall" / "show all terminals" → the Wall (view mode `mosaic`).
+ * "Go to the board" / anything with "canvas" → 'brain': not ours to answer.
+ * The words themselves are hubnav's, so voice and the brain's
+ * focus_pane_by_name mean the same place by them.
+ */
+function parseViewNav(text: string): CommandHit | 'brain' | null {
+  const said = text.replace(/[.!?]+$/, '').trim()
+  if (!VIEW_VERB.test(said)) return null
+  const target = resolveNavTarget(said, [], null)
+  if (target.kind === 'wall') return { action: { kind: 'set_view', mode: 'mosaic' }, confidence: 'high' }
+  if (target.kind === 'canvas' || target.kind === 'which_view') return 'brain'
   return null
 }
 

@@ -13,8 +13,8 @@ import {
 } from './hubnav'
 
 /**
- * The hub's verbs — go to a pane or the canvas, run a saved prompt, put a file
- * on the board — callable from anywhere: the keymap, the voice tools
+ * The hub's verbs — go to a pane, the Wall or the Board, run a saved prompt,
+ * put a file on the Board — callable from anywhere: the keymap, the voice tools
  * (src/lib/realtime/tools-hub.ts), a button.
  *
  * They need the live app (panes, focus, the terminal host), which lives in
@@ -51,13 +51,37 @@ function emitFocus(detail: HubFocusDetail): void {
   window.dispatchEvent(new CustomEvent<HubFocusDetail>(HUB_FOCUS_EVENT, { detail }))
 }
 
+/**
+ * How to switch the terminals between tabs and the Wall. The voice tools pass
+ * one built on the voice agent's own `set_view` action (tools-hub.ts), so a
+ * spoken "go to the wall" lands exactly where the Tabs | Wall switch would.
+ */
+export interface NavViews {
+  setViewMode(mode: 'tabs' | 'mosaic'): void
+}
+
+/** What "canvas" is answered with. The brain asks it; nothing is guessed. */
+export const WALL_OR_BOARD =
+  '"Canvas" could mean the Wall (every terminal at once) or the Board (agent images and artifacts). Ask him: the Wall or the Board?'
+
 /** Perform a resolved target. Answers one sentence saying what happened. */
-export function focusNavTarget(target: NavTarget, source: HubFocusSource): { ok: boolean; summary: string } {
+export function focusNavTarget(
+  target: NavTarget,
+  source: HubFocusSource,
+  views?: NavViews
+): { ok: boolean; summary: string } {
   const rt = runtime
   if (target.kind === 'canvas') {
     emitFocus({ kind: 'canvas', source })
-    return { ok: true, summary: 'Showing the canvas.' }
+    return { ok: true, summary: 'Showing the Board.' }
   }
+  if (target.kind === 'wall') {
+    if (!views) return { ok: false, summary: 'The Wall cannot be opened from here — use the Tabs | Wall switch.' }
+    views.setViewMode('mosaic')
+    emitFocus({ kind: 'wall', source })
+    return { ok: true, summary: 'Showing the Wall — every terminal at once.' }
+  }
+  if (target.kind === 'which_view') return { ok: false, summary: WALL_OR_BOARD }
   if (target.kind === 'ambiguous') {
     return { ok: false, summary: `More than one pane matches: ${target.candidates.map(describeNavPane).join('; ')}. Which one?` }
   }
@@ -81,11 +105,11 @@ export function focusNavTarget(target: NavTarget, source: HubFocusSource): { ok:
   return { ok: true, summary: `Went to ${pane.callSign ? `${pane.callSign} (panel ${pane.number})` : `panel ${pane.number}`}.` }
 }
 
-/** "Everest", "panel 4", "the canvas" → go there. */
-export function goTo(spoken: string, source: HubFocusSource): { ok: boolean; summary: string } {
+/** "Everest", "panel 4", "the wall", "the board" → go there. */
+export function goTo(spoken: string, source: HubFocusSource, views?: NavViews): { ok: boolean; summary: string } {
   const rt = runtime
   if (!rt) return { ok: false, summary: 'Forge is still starting up.' }
-  return focusNavTarget(resolveNavTarget(spoken, rt.panes(), rt.focusedPaneId()), source)
+  return focusNavTarget(resolveNavTarget(spoken, rt.panes(), rt.focusedPaneId()), source, views)
 }
 
 export function listPanesWithNames(): string {
@@ -139,17 +163,17 @@ export function runSavedPrompt(
 }
 
 /** Copy a file onto the active project's board and show the board. */
-export async function showOnCanvas(
+export async function showOnBoard(
   path: string,
   title: string | undefined,
   source: HubFocusSource
 ): Promise<{ ok: true; item: CanvasItem; summary: string } | { ok: false; summary: string }> {
   const hub = hubApi()
   const projectId = runtime?.activeProjectId() ?? null
-  if (!hub) return { ok: false, summary: 'The canvas is not available in this build — restart Forge.' }
+  if (!hub) return { ok: false, summary: 'The Board is not available in this build — restart Forge.' }
   if (!projectId) return { ok: false, summary: 'No project is open, so there is no board to put it on.' }
   const result = await hub.canvas.post(projectId, path, title)
   if (!result.ok) return { ok: false, summary: result.error }
   emitFocus({ kind: 'canvas', source })
-  return { ok: true, item: result.item, summary: `"${result.item.title}" is on the canvas.` }
+  return { ok: true, item: result.item, summary: `"${result.item.title}" is on the Board.` }
 }

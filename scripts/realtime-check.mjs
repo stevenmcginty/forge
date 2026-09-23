@@ -232,7 +232,7 @@ await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four
     'focus_pane_by_name',
     'list_panes_with_names',
     'run_saved_prompt',
-    'show_on_canvas',
+    'show_on_board',
     'browser_open',
     'browser_list',
     'browser_read',
@@ -402,7 +402,7 @@ await check('voices fall back to the vendor default', () => {
 console.log('discussion mode')
 
 await check('holds anything that changes Forge, lets looking through', () => {
-  for (const name of ['run_app_action', 'remember', 'focus_pane_by_name', 'show_on_canvas', 'some_future_tool']) {
+  for (const name of ['run_app_action', 'remember', 'focus_pane_by_name', 'show_on_board', 'show_on_canvas', 'some_future_tool']) {
     assert.equal(discussion.discussionGate(true, name), 'plan', name)
     assert.equal(discussion.discussionGate(false, name), 'run', name)
   }

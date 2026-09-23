@@ -1,13 +1,16 @@
 /**
- * The canvas board, as the forge-bridge sees it.
+ * The Board (agent images and artifacts), as the forge-bridge sees it. The
+ * files and the env var keep their old "canvas" names; the word Steve and the
+ * agents see is "Board" ("canvas" got confused with the Wall when spoken).
  *
  * Forge gives every pane `FORGE_CANVAS_DIR` — its project's board folder under
  * the data dir — and the bridge a CLI spawns inherits the pane's environment.
  * So posting to the board is just copying a file into that folder; Forge's own
  * watcher (electron/canvas-board.ts) does the rest. Nothing here talks to Forge.
  *
- * Two things use it: `show_on_canvas`, for an agent that wants to put an
- * existing file on the board by name, and `postToCanvas`, which make_image,
+ * Two things use it: `show_on_board` (still answered as `show_on_canvas`, its
+ * old name, but only `show_on_board` is listed), for an agent that wants to put
+ * an existing file on the board by name, and `postToCanvas`, which make_image,
  * edit_image and make_video call on every file they write so generated media
  * appears on the board without anyone asking.
  */
@@ -21,10 +24,10 @@ export const CANVAS_DIR_ENV = 'FORGE_CANVAS_DIR'
 const CANVAS_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.mp4', '.webm', '.md', '.txt', '.html']
 const MAX_BYTES = 512 * 1024 * 1024
 
-export const SHOW_ON_CANVAS_TOOL = {
-  name: 'show_on_canvas',
+export const SHOW_ON_BOARD_TOOL = {
+  name: 'show_on_board',
   description:
-    'Put a file on the Forge canvas board — the shared board in the Forge app where Steve sees every image, clip ' +
+    'Put a file on the Forge Board — the shared board in the Forge app where Steve sees every image, clip ' +
     'and note the agents make. Pass an absolute path to a png/jpg/webp/gif/svg image, an mp4/webm video, an ' +
     '.html / .md artifact (Forge renders it live), or a txt note; it is copied onto the board (the original is left ' +
     'where it is) and appears at once. To have an artifact refresh live as you edit it, write it straight into ' +
@@ -121,20 +124,20 @@ export function autoPost(paths) {
     const r = postToCanvas(p)
     if (r.skipped) return ''
     if (r.ok) posted.push(r.path)
-    else process.stderr.write(`[forge-bridge] could not post ${p} to the canvas: ${r.error}\n`)
+    else process.stderr.write(`[forge-bridge] could not post ${p} to the Board: ${r.error}\n`)
   }
-  return posted.length ? `Also posted to the Forge canvas board (${posted.length} file${posted.length === 1 ? '' : 's'}).` : ''
+  return posted.length ? `Also posted to the Forge Board (${posted.length} file${posted.length === 1 ? '' : 's'}).` : ''
 }
 
-/** The `show_on_canvas` tool. `ok`/`fail` are the bridge's own result builders. */
-export function showOnCanvasHandler(ok, fail) {
-  return async function showOnCanvas(args) {
+/** The `show_on_board` tool (and its hidden alias). `ok`/`fail` are the bridge's own result builders. */
+export function showOnBoardHandler(ok, fail) {
+  return async function showOnBoard(args) {
     const path = typeof args?.['path'] === 'string' ? args['path'].trim() : ''
     if (!path) throw new Error('`path` is required — an absolute path to the file to show')
     if (!isAbsolute(path)) throw new Error('`path` must be absolute')
     const title = typeof args?.['title'] === 'string' ? args['title'].trim() : ''
     const r = postToCanvas(path, title)
-    if (!r.ok) return fail(`Nothing was put on the canvas: ${r.error}`)
-    return ok(`On the Forge canvas board now: ${r.path}${title ? ` ("${title}")` : ''}.`)
+    if (!r.ok) return fail(`Nothing was put on the Board: ${r.error}`)
+    return ok(`On the Forge Board now: ${r.path}${title ? ` ("${title}")` : ''}.`)
   }
 }

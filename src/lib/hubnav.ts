@@ -2,10 +2,16 @@ import { callSignKey } from '@shared/hub'
 import { resolvePaneTarget, type ActionPane } from './appactions'
 
 /**
- * "Go to Everest", "go to panel four", "the claude one", "the canvas" — one
- * resolver for voice and keyboard alike.
+ * "Go to Everest", "go to panel four", "the claude one", "the board", "the
+ * wall" — one resolver for voice and keyboard alike.
  *
- * Order: the canvas, then an exact call-sign, then everything
+ * Two places that are not panes: the Wall (every terminal at once — the
+ * mosaic view) and the Board (agent images and artifacts). "Canvas" used to
+ * name the board and got confused with the Wall when spoken, so the word no
+ * longer goes anywhere: it comes back `which_view`, and the brain asks "the
+ * Wall or the Board?".
+ *
+ * Order: the Wall, the Board and "canvas", then an exact call-sign, then everything
  * `resolvePaneTarget` already understands (a number, a pane title, an agent),
  * then a near-miss call-sign ("Everist"). Numbers are the executor's own
  * spoken handles — tabs in order, panes in each tab in order — so "panel 4" is
@@ -21,7 +27,12 @@ export interface NavPane extends ActionPane {
 }
 
 export type NavTarget =
+  /** The Board (agent images and artifacts). Internal name kept: `canvas`. */
   | { kind: 'canvas' }
+  /** The Wall: every terminal at once (view mode `mosaic`). */
+  | { kind: 'wall' }
+  /** He said "canvas": the Wall or the Board? Never guessed. */
+  | { kind: 'which_view' }
   | { kind: 'pane'; pane: NavPane }
   | { kind: 'ambiguous'; candidates: NavPane[] }
   | { kind: 'none'; candidates: NavPane[] }
@@ -29,7 +40,10 @@ export type NavTarget =
 /** Leading verbs and fillers that carry no target: "go to", "switch over to", "show me". */
 const LEAD = /^(?:(?:please|ok(?:ay)?|hey|jarvis)[\s,]+)*(?:(?:go|jump|switch|move|take me|bring me|flick|head)(?:\s+(?:over|back))?\s+to|focus(?:\s+on)?|show(?:\s+me)?|open|select)\s+/i
 
-const CANVAS = /^(?:the\s+)?(?:canvas|board|canvas board)(?:\s+board)?$/i
+const BOARD = /^(?:the\s+)?(?:(?:image|images|artifact|artifacts|agent)\s+)?board$/i
+const WALL = /^(?:(?:the|my)\s+)?(?:(?:terminal|terminals)\s+)?wall$|^(?:all|every)\s+(?:of\s+)?(?:the\s+|my\s+)?(?:terminals?|panes?|panels?)(?:\s+at\s+once)?$/i
+/** Any mention of a canvas, alone or with "board" ("the canvas board"). */
+const CANVAS_WORD = /^(?:the\s+)?(?:canvas(?:\s+board)?|canvases)$/i
 
 function tidy(spoken: string): string {
   return String(spoken ?? '')
@@ -41,7 +55,9 @@ function tidy(spoken: string): string {
 
 export function resolveNavTarget(spoken: string, panes: readonly NavPane[], focusedPaneId: string | null): NavTarget {
   const text = tidy(spoken)
-  if (CANVAS.test(text)) return { kind: 'canvas' }
+  if (CANVAS_WORD.test(text)) return { kind: 'which_view' }
+  if (WALL.test(text)) return { kind: 'wall' }
+  if (BOARD.test(text)) return { kind: 'canvas' }
 
   const all = [...(panes ?? [])]
   const bare = text.replace(/^(?:the\s+)/i, '').replace(/\s+(?:pane|panel|terminal|one)$/i, '')
@@ -77,7 +93,7 @@ export function describeNavPane(p: NavPane): string {
 /**
  * Fired on `window` whenever the hub moves focus — by voice, keyboard or a
  * click that goes through `focusNavTarget`. D2 animates on it (a flash on the
- * pane, a fly-to on the canvas). The move has already happened when it fires.
+ * pane, a fly-to on the board). The move has already happened when it fires.
  */
 export const HUB_FOCUS_EVENT = 'forge:hub-focus'
 
@@ -86,6 +102,7 @@ export type HubFocusSource = 'voice' | 'keyboard' | 'ui'
 export type HubFocusDetail =
   | { kind: 'pane'; paneId: string; tabId: string; number: number; callSign: string | null; source: HubFocusSource }
   | { kind: 'canvas'; source: HubFocusSource }
+  | { kind: 'wall'; source: HubFocusSource }
 
 /**
  * Fired when a saved prompt targets the composer. Whoever owns the dock's

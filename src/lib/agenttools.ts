@@ -199,7 +199,7 @@ export async function answerVoiceAgentTool(
         // answers the realtime brains get (shared/brain-tools.ts).
         const main = await runMainAgentTool(name, (args ?? {}) as Record<string, unknown>, deps)
         if (main) return { ok: true, result: main.text }
-        const hub = await runHubTool(name, (args ?? {}) as Record<string, unknown>)
+        const hub = await runHubTool(name, (args ?? {}) as Record<string, unknown>, deps)
         if (hub) return { ok: true, result: hub.text }
         return { ok: false, error: `Forge has no tool called ${name}` }
       }

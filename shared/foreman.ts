@@ -226,7 +226,7 @@ House rules:
 - Commit small and often, with real messages. Never one commit at the end.
 - Verify by observation, never by assumption: read the output back before you believe it.
 
-Keys and credentials live in Forge's own Settings, under Models & APIs. Never put one in a file, a commit or a prompt.`
+Keys and credentials live in Forge's own Settings, under Agents & CLIs → Keys. Never put one in a file, a commit or a prompt.`
 
 /** The longest one log line may be. Screen tails and briefs are long. */
 export const FOREMAN_LOG_TEXT_MAX = 2000

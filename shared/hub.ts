@@ -135,7 +135,7 @@ export const CALL_SIGN_POOL: readonly string[] = [
 
 /** Words a call-sign may not be, because the resolver gives them another meaning. */
 const RESERVED_NAMES = new Set([
-  'canvas', 'board', 'panel', 'panels', 'pane', 'panes', 'terminal', 'terminals',
+  'canvas', 'board', 'wall', 'panel', 'panels', 'pane', 'panes', 'terminal', 'terminals',
   'tab', 'tabs', 'window', 'settings', 'this', 'here', 'that', 'it', 'current',
   'focused', 'next', 'previous', 'last', 'first'
 ])

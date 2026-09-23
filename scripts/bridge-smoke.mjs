@@ -175,7 +175,7 @@ async function handshake(session, label) {
   return init
 }
 
-const TOOL_NAMES = ['ask_gemini', 'browser_click', 'browser_close', 'browser_list', 'browser_open', 'browser_read', 'browser_screenshot', 'browser_type', 'edit_image', 'make_image', 'make_video', 'open_agent_pane', 'show_on_canvas', 'summarize_video']
+const TOOL_NAMES = ['ask_gemini', 'browser_click', 'browser_close', 'browser_list', 'browser_open', 'browser_read', 'browser_screenshot', 'browser_type', 'edit_image', 'make_image', 'make_video', 'open_agent_pane', 'show_on_board', 'summarize_video']
 
 async function listTools(session, label) {
   const res = await session.request('tools/list', {})
@@ -186,6 +186,7 @@ async function listTools(session, label) {
     JSON.stringify(names) === JSON.stringify(TOOL_NAMES),
     JSON.stringify(names)
   )
+  check(`${label}: show_on_board is listed, the old show_on_canvas is not`, names.includes('show_on_board') && !names.includes('show_on_canvas'), JSON.stringify(names))
   for (const t of tools) {
     check(
       `${label}: ${t.name} has a described object input schema`,
@@ -199,7 +200,7 @@ async function listTools(session, label) {
     make_image: ['description'],
     edit_image: ['path', 'instruction'],
     make_video: ['description'],
-    show_on_canvas: ['path'],
+    show_on_board: ['path'],
     browser_open: ['url'],
     browser_list: [],
     browser_read: [],
@@ -780,13 +781,14 @@ async function runLiveVideoSuite() {
 }
 
 /**
- * show_on_canvas needs no key: it copies a file into the folder Forge names in
+ * show_on_board needs no key: it copies a file into the folder Forge names in
  * FORGE_CANVAS_DIR. With the variable set the copy must land there (original
  * untouched, title used as the name); without it the tool must say so, not
- * pretend. Offline and free, so it always runs.
+ * pretend. Offline and free, so it always runs. Its old name, show_on_canvas,
+ * is unlisted but must still be callable, for agents that learned it.
  */
 async function runCanvasSuite() {
-  console.log('\n[1b] show_on_canvas (FORGE_CANVAS_DIR)')
+  console.log('\n[1b] show_on_board (FORGE_CANVAS_DIR)')
   const scratch = join(tmpdir(), `forge-bridge-canvas-${process.pid}`)
   const board = join(scratch, 'board')
   const src = join(scratch, 'hero.png')
@@ -800,7 +802,7 @@ async function runCanvasSuite() {
   try {
     await handshake(withBoard, 'canvas')
     const res = await withBoard.request('tools/call', {
-      name: 'show_on_canvas',
+      name: 'show_on_board',
       arguments: { path: src, title: 'Landing hero' }
     })
     const text = textOf(res.result)
@@ -809,13 +811,19 @@ async function runCanvasSuite() {
     check('canvas: the copy is on the board under its title', existsSync(copied), text)
     check('canvas: the bytes are the original bytes', existsSync(copied) && readFileSync(copied).equals(png))
     check('canvas: the original is left in place', existsSync(src))
-    const again = await withBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: src, title: 'Landing hero' } })
+    const again = await withBoard.request('tools/call', { name: 'show_on_board', arguments: { path: src, title: 'Landing hero' } })
     check('canvas: a second post never overwrites the first', existsSync(join(board, 'Landing hero -2.png')), textOf(again.result))
-    const wrongType = await withBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: join(scratch, 'notes.exe') } })
+    const alias = await withBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: src, title: 'Old name' } })
+    check(
+      'canvas: the unlisted alias show_on_canvas is still callable and posts',
+      alias.result && !alias.result.isError && existsSync(join(board, 'Old name.png')),
+      textOf(alias.result)
+    )
+    const wrongType = await withBoard.request('tools/call', { name: 'show_on_board', arguments: { path: join(scratch, 'notes.exe') } })
     check('canvas: a non-board file type is refused', wrongType.result?.isError === true, textOf(wrongType.result))
-    const relative = await withBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: 'hero.png' } })
+    const relative = await withBoard.request('tools/call', { name: 'show_on_board', arguments: { path: 'hero.png' } })
     check('canvas: a relative path is refused', relative.result?.isError === true, textOf(relative.result))
-    const missing = await withBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: join(scratch, 'gone.png') } })
+    const missing = await withBoard.request('tools/call', { name: 'show_on_board', arguments: { path: join(scratch, 'gone.png') } })
     check('canvas: a missing file is refused', missing.result?.isError === true && /no file/i.test(textOf(missing.result)), textOf(missing.result))
   } finally {
     withBoard.close()
@@ -826,7 +834,7 @@ async function runCanvasSuite() {
   const noBoard = openServer(env)
   try {
     await handshake(noBoard, 'canvas-absent')
-    const res = await noBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: src } })
+    const res = await noBoard.request('tools/call', { name: 'show_on_board', arguments: { path: src } })
     check(
       'canvas: outside a Forge pane it says there is no board',
       res.result?.isError === true && /FORGE_CANVAS_DIR/.test(textOf(res.result)),

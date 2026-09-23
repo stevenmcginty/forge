@@ -42,7 +42,7 @@ export const BRIDGE_KEY = 'forge-bridge'
 
 /** Marks an entry, or a line, as Forge's and safe to remove. Qwen's marker. */
 export const BRIDGE_MARKER = 'forge-managed'
-export const BRIDGE_DESCRIPTION = `Forge bridge: built-in browser, canvas board, Gemini — ${BRIDGE_MARKER}, safe to delete`
+export const BRIDGE_DESCRIPTION = `Forge bridge: built-in browser, the Board, Gemini — ${BRIDGE_MARKER}, safe to delete`
 
 /**
  * The pane variables forge-bridge reads (browser-tools.mjs, canvas-tools.mjs,
@@ -68,7 +68,7 @@ export const INSTRUCTION_MARKER = `<!-- ${BRIDGE_MARKER}:browser -->`
  * ownership claim.
  */
 export const BROWSER_INSTRUCTION_LINE =
-  "When you need a web browser, use Forge's built-in browser — the forge-bridge browser_open / browser_read / browser_click / browser_type tools — instead of any other browser tool or a desktop browser, and use show_on_canvas to put an image, video or .html/.md artifact on the Forge board. " +
+  "When you need a web browser, use Forge's built-in browser — the forge-bridge browser_open / browser_read / browser_click / browser_type tools — instead of any other browser tool or a desktop browser, and use show_on_board to put an image, video or .html/.md artifact on the Forge Board. " +
   'To start another agent, call open_agent_pane — never launch a CLI in a new window. ' +
   INSTRUCTION_MARKER
 

@@ -11,7 +11,7 @@
  * directly and needs GEMINI_API_KEY in the environment; Forge puts it there via
  * the mcp.json it generates under %APPDATA%\Forge\bridge\. Nothing is written to
  * disk by this file except the images and videos themselves — and, in a Forge
- * pane, a copy of each on the pane's canvas board (see ./canvas-tools.mjs).
+ * pane, a copy of each on the pane's Board (see ./canvas-tools.mjs).
  *
  * `ask_gemini` and `summarize_video` used to shell out to the `gemini` CLI. They
  * no longer can: Google retired the free individual-account tier behind it, and
@@ -32,7 +32,7 @@ import { homedir } from 'node:os'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import { autoPost, SHOW_ON_CANVAS_TOOL, showOnCanvasHandler } from './canvas-tools.mjs'
+import { autoPost, SHOW_ON_BOARD_TOOL, showOnBoardHandler } from './canvas-tools.mjs'
 import { BROWSER_HANDLERS, BROWSER_INSTRUCTIONS, BROWSER_TOOLS } from './browser-tools.mjs'
 import { APP_HANDLERS, APP_INSTRUCTION_LINE, APP_TOOLS } from './forge-app-tools.mjs'
 
@@ -378,7 +378,7 @@ const TOOLS = [
       required: ['description']
     }
   },
-  SHOW_ON_CANVAS_TOOL,
+  SHOW_ON_BOARD_TOOL,
   ...BROWSER_TOOLS,
   ...APP_TOOLS
 ]
@@ -1402,9 +1402,18 @@ const HANDLERS = {
   make_image: makeImage,
   edit_image: editImage,
   make_video: makeVideo,
-  show_on_canvas: showOnCanvasHandler(ok, fail),
+  show_on_board: showOnBoardHandler(ok, fail),
   ...BROWSER_HANDLERS,
   ...APP_HANDLERS
+}
+
+/**
+ * Old names still answered, never in tools/list: an agent in a pane that was
+ * open before the Board's tool was renamed keeps calling what it learned.
+ */
+const CALLABLE = {
+  ...HANDLERS,
+  show_on_canvas: HANDLERS.show_on_board
 }
 
 const server = new Server(
@@ -1417,7 +1426,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params
-  const handler = HANDLERS[name]
+  const handler = CALLABLE[name]
   if (!handler) return fail(`Unknown tool: ${name}. This server offers: ${Object.keys(HANDLERS).join(', ')}.`)
   try {
     return await handler(args ?? {})

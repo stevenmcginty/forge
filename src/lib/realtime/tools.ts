@@ -186,7 +186,7 @@ export async function runRealtimeTool(
   try {
     const main = await runMainAgentTool(name, args, deps)
     if (main) return main
-    const hub = await runHubTool(name, args)
+    const hub = await runHubTool(name, args, deps)
     if (hub) return hub
     const browser = await runBrowserHubTool(name, args)
     if (browser) return browser

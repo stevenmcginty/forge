@@ -141,7 +141,10 @@ export const ACTION_SPECS: ActionSpec[] = [
   {
     kind: 'set_view',
     args: '{"kind":"set_view","mode":"tabs"|"mosaic"}',
-    what: 'Switch between one tab at a time and the mosaic wall showing every terminal at once.'
+    what:
+      'Switch between one tab at a time ("tabs") and the Wall ("mosaic"): every terminal at once. "Go to the wall" and ' +
+      '"show all terminals" mean mosaic. The Board (agent images) is not a view you can set, and "canvas" names ' +
+      'nothing: if he says it, ask "the Wall or the Board?" in say and return no action.'
   },
   {
     kind: 'open_settings',

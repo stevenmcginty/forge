@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { HUB_TOOL_SPECS, type HubToolName } from '@shared/hub-tools'
+import { HUB_TOOL_NAMES, HUB_TOOL_SPECS, type HubToolName } from '@shared/hub-tools'
 
 /**
  * The hub's four tools for the Claude brain (electron/voice-agent/host.ts), as
@@ -31,7 +31,7 @@ export function brainHubTools(ask: Ask): BrainHubTool[] {
   const focus = spec('focus_pane_by_name')
   const list = spec('list_panes_with_names')
   const run = spec('run_saved_prompt')
-  const show = spec('show_on_canvas')
+  const show = spec('show_on_board')
   return [
     {
       name: 'focus_pane_by_name' as const,
@@ -56,13 +56,18 @@ export function brainHubTools(ask: Ask): BrainHubTool[] {
       handler: (args: Record<string, unknown>) => call('run_saved_prompt', args)
     },
     {
-      name: 'show_on_canvas' as const,
+      name: 'show_on_board' as const,
       description: show.description,
       shape: {
         path: z.string().optional().describe(show.param('path')),
         title: z.string().optional().describe(show.param('title'))
       },
-      handler: (args: Record<string, unknown>) => call('show_on_canvas', args)
+      handler: (args: Record<string, unknown>) => call('show_on_board', args)
     }
   ]
+}
+
+/** The hub tools' pre-approval entries, for the Claude session's allowlist. */
+export function brainHubAllowed(): string[] {
+  return HUB_TOOL_NAMES.map((name) => `mcp__forge__${name}`)
 }

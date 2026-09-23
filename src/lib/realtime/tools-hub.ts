@@ -1,5 +1,6 @@
 import type { SavedPromptTarget } from '@shared/hub'
-import { HUB_TOOL_SPECS, isHubTool } from '@shared/hub-tools'
+import { HUB_TOOL_SPECS, hubToolName, isHubTool } from '@shared/hub-tools'
+import type { VoiceAgentToolDeps } from '../agenttools'
 import {
   findSavedPrompt,
   focusNavTarget,
@@ -7,7 +8,8 @@ import {
   goTo,
   listPanesWithNames,
   runSavedPrompt,
-  showOnCanvas
+  showOnBoard,
+  type NavViews
 } from '../hubRuntime'
 
 /**
@@ -16,6 +18,10 @@ import {
  * which `isHubTool` is true to `runHubTool` — the Claude brain's renderer
  * bridge (src/lib/agenttools.ts) does the same, so a tool means the same thing
  * whichever brain called it. Never rejects; a failure is an answer.
+ *
+ * `show_on_canvas` (the Board tool's old name) is answered as `show_on_board`
+ * but never listed. `deps` is the voice agent's: "go to the wall" switches the
+ * view through its `set_view` action, the same one the Tabs | Wall switch uses.
  */
 
 export const HUB_REALTIME_TOOLS = HUB_TOOL_SPECS.map((spec) => ({
@@ -26,12 +32,26 @@ export const HUB_REALTIME_TOOLS = HUB_TOOL_SPECS.map((spec) => ({
 
 export { isHubTool }
 
-export async function runHubTool(name: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string } | null> {
-  if (!isHubTool(name)) return null
+function viewsFrom(deps: VoiceAgentToolDeps | null | undefined): NavViews | undefined {
+  if (!deps) return undefined
+  return {
+    setViewMode: (mode) => {
+      void Promise.resolve(deps.runAction({ kind: 'set_view', mode })).catch(() => {})
+    }
+  }
+}
+
+export async function runHubTool(
+  name: string,
+  args: Record<string, unknown>,
+  deps?: VoiceAgentToolDeps | null
+): Promise<{ ok: boolean; text: string } | null> {
+  const tool = hubToolName(name)
+  if (!tool) return null
   try {
-    switch (name) {
+    switch (tool) {
       case 'focus_pane_by_name': {
-        const r = goTo(String(args?.['name'] ?? ''), 'voice')
+        const r = goTo(String(args?.['name'] ?? ''), 'voice', viewsFrom(deps))
         return { ok: r.ok, text: r.ok ? `OK: ${r.summary}` : `FAILED: ${r.summary}` }
       }
       case 'list_panes_with_names':
@@ -50,15 +70,15 @@ export async function runHubTool(name: string, args: Record<string, unknown>): P
         const r = runSavedPrompt(prompt, { source: 'voice', ...(target ? { target } : {}), ...(pane ? { paneTarget: pane } : {}) })
         return { ok: r.ok, text: r.ok ? `OK: ${r.summary}` : `FAILED: ${r.summary}` }
       }
-      case 'show_on_canvas': {
+      case 'show_on_board': {
         // B1's stub took `what`; a path in it is honoured too.
         const raw = String(args?.['path'] ?? args?.['what'] ?? '').trim()
         const title = typeof args?.['title'] === 'string' && args['title'].trim() ? args['title'].trim() : undefined
         if (!raw || !/^(?:[a-zA-Z]:[\\/]|[\\/]{2}|\/)/.test(raw)) {
           focusNavTarget({ kind: 'canvas' }, 'voice')
-          return { ok: true, text: raw ? `OK: showing the canvas. (To post a file, pass its absolute path — "${raw}" is not one.)` : 'OK: showing the canvas.' }
+          return { ok: true, text: raw ? `OK: showing the Board. (To post a file, pass its absolute path — "${raw}" is not one.)` : 'OK: showing the Board.' }
         }
-        const r = await showOnCanvas(raw, title, 'voice')
+        const r = await showOnBoard(raw, title, 'voice')
         return { ok: r.ok, text: r.ok ? `OK: ${r.summary}` : `FAILED: ${r.summary}` }
       }
     }

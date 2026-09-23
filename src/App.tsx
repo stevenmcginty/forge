@@ -107,7 +107,7 @@ export function App(): ReactNode {
     const on = (e: Event): void => {
       const detail = (e as CustomEvent<HubFocusDetail>).detail
       if (detail?.kind === 'canvas') setModeRef.current('board')
-      else if (detail?.kind === 'pane' && !agentsVisibleRef.current) setModeRef.current('agents')
+      else if ((detail?.kind === 'pane' || detail?.kind === 'wall') && !agentsVisibleRef.current) setModeRef.current('agents')
     }
     window.addEventListener(HUB_FOCUS_EVENT, on)
     return () => window.removeEventListener(HUB_FOCUS_EVENT, on)

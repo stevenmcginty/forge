@@ -217,8 +217,16 @@ try {
   ok(hitId(r('everest')) === 'p1', '"everest" → Everest')
   ok(hitId(r('Go to Skylar.')) === 'p2', '"Go to Skylar." → Skylar')
   ok(hitId(r('switch over to the Vega pane')) === 'p3', '"switch over to the Vega pane" → Vega')
-  ok(r('the canvas').kind === 'canvas', '"the canvas" → the canvas')
-  ok(r('go to the canvas').kind === 'canvas', '"go to the canvas" → the canvas')
+  // The Wall is every terminal at once, the Board is agent images; "canvas" is neither — it asks.
+  ok(r('go to the wall').kind === 'wall', '"go to the wall" → the Wall', JSON.stringify(r('go to the wall')))
+  ok(r('show all terminals').kind === 'wall', '"show all terminals" → the Wall')
+  ok(r('show me all the terminals').kind === 'wall', '"show me all the terminals" → the Wall')
+  ok(r('the wall').kind === 'wall', '"the wall" → the Wall')
+  ok(r('go to the board').kind === 'canvas', '"go to the board" → the Board')
+  ok(r('show me the image board').kind === 'canvas', '"show me the image board" → the Board')
+  ok(r('go to the canvas').kind === 'which_view', '"go to the canvas" → asks: the Wall or the Board?', JSON.stringify(r('go to the canvas')))
+  ok(r('the canvas').kind === 'which_view', '"the canvas" → asks, never a guess')
+  ok(r('show me the canvas board').kind === 'which_view', '"the canvas board" → still asks')
   ok(hitId(r('Everist')) === 'p1', 'a near-miss call-sign still lands ("Everist")')
   ok(hitId(r('the codex one')) === 'p2', '"the codex one" → by agent')
   ok(r('panel 9').kind === 'none', '"panel 9" with four panes → none, not a guess')
@@ -227,12 +235,29 @@ try {
   ok(twoClaude.kind === 'ambiguous' && twoClaude.candidates.length === 2, 'two Claude panes, neither focused: asks which, never guesses', twoClaude.kind)
   ok(hitId(nav.resolveNavTarget('the claude one', panes, 'p1')) === 'p1', 'two Claude panes, sitting in one: that one')
 
+  /* ------------------------------------------------ voice grammar (fast path) */
+
+  console.log('\nvoice grammar: the Wall, the Board, "canvas"')
+  const vc = await import('../src/lib/voicecommands.ts')
+  const gctx = { profiles: [{ id: 'claude', name: 'Claude Code', command: 'claude', accent: '#C6FF4A', badge: 'CC', builtin: true }], projects: [{ id: 'pr1', name: 'forge' }], defaultProfileId: 'claude' }
+  const said = (t) => vc.parseUtterance(t, gctx)
+  for (const t of ['go to the wall', 'show all terminals', 'Show me all the terminals.', 'switch to the wall']) {
+    const hit = said(t)
+    ok(JSON.stringify(hit?.actions) === JSON.stringify([{ kind: 'set_view', mode: 'mosaic' }]), `"${t}" → set_view mosaic, no model`, JSON.stringify(hit))
+  }
+  for (const t of ['go to the board', 'show me the board', 'go to the canvas', 'show me the canvas']) {
+    ok(said(t) === null, `"${t}" → left to the brain (never a project switch)`, JSON.stringify(said(t)))
+  }
+  ok(said('switch to forge')?.actions[0]?.kind === 'switch_project', 'a real project switch still parses')
+
   /* -------------------------------------------------------- voice tools */
 
   console.log('\nvoice tools')
   const tools = await import('../src/lib/realtime/tools-hub.ts')
   const toolNames = tools.HUB_REALTIME_TOOLS.map((t) => t.name).sort().join()
-  ok(toolNames === 'focus_pane_by_name,list_panes_with_names,run_saved_prompt,show_on_canvas', 'the four hub tools are declared', toolNames)
+  ok(toolNames === 'focus_pane_by_name,list_panes_with_names,run_saved_prompt,show_on_board', 'the four hub tools are declared, show_on_board by that name', toolNames)
+  ok(!toolNames.includes('show_on_canvas'), 'the old show_on_canvas is not listed')
+  ok(tools.isHubTool('show_on_canvas') && tools.isHubTool('show_on_board'), 'but show_on_canvas is still a hub tool (hidden alias)')
   ok((await tools.runHubTool('get_app_state', {})) === null, 'a non-hub tool is left to the caller')
   const early = await tools.runHubTool('focus_pane_by_name', { name: 'Everest' })
   ok(early && !early.ok && /starting up/.test(early.text), 'before the app is up it answers in words, never throws', JSON.stringify(early))
@@ -259,8 +284,18 @@ try {
   await sleep(20)
   ok(went.ok && seen.revealed.at(-1) === 'p3' && seen.focused.at(-1) === 'p3', 'focus_pane_by_name "panel 3" reveals and focuses it', JSON.stringify(went))
   ok(seen.events.some((d) => d.kind === 'pane' && d.paneId === 'p3' && d.callSign === 'Vega' && d.source === 'voice'), 'and fires the focus event D2 animates')
-  const toCanvas = await tools.runHubTool('focus_pane_by_name', { name: 'the canvas' })
-  ok(toCanvas.ok && seen.events.some((d) => d.kind === 'canvas'), '"the canvas" fires the canvas focus event')
+  const toBoard = await tools.runHubTool('focus_pane_by_name', { name: 'the board' })
+  ok(toBoard.ok && /Board/.test(toBoard.text) && seen.events.some((d) => d.kind === 'canvas'), '"the board" fires the Board focus event', JSON.stringify(toBoard))
+  const before = seen.events.length
+  const toCanvas = await tools.runHubTool('focus_pane_by_name', { name: 'go to the canvas' })
+  ok(!toCanvas.ok && /the Wall or the Board\?/.test(toCanvas.text) && seen.events.length === before, '"the canvas" goes nowhere and asks "the Wall or the Board?"', JSON.stringify(toCanvas))
+  const actions = []
+  const deps = { runAction: (a) => (actions.push(a), { ok: true, summary: 'ok', requested: 1, done: 1 }) }
+  const toWall = await tools.runHubTool('focus_pane_by_name', { name: 'go to the wall' }, deps)
+  ok(toWall.ok && JSON.stringify(actions) === JSON.stringify([{ kind: 'set_view', mode: 'mosaic' }]), '"go to the wall" sets the view to the Wall through set_view', JSON.stringify({ toWall, actions }))
+  ok(seen.events.some((d) => d.kind === 'wall' && d.source === 'voice'), 'and fires the Wall focus event')
+  const noDeps = await tools.runHubTool('focus_pane_by_name', { name: 'show all terminals' })
+  ok(!noDeps.ok && /Wall/.test(noDeps.text), 'without the voice agent it says so rather than pretending', JSON.stringify(noDeps))
   const listed = await tools.runHubTool('list_panes_with_names', {})
   ok(/Everest \(panel 1\)/.test(listed.text) && /Orion \(panel 4\)/.test(listed.text), 'list_panes_with_names shows call-signs and panel numbers', listed.text)
   const ran = await tools.runHubTool('run_saved_prompt', { prompt: 'code review', pane: 'Skylar' })
@@ -270,7 +305,11 @@ try {
   const unknown = await tools.runHubTool('run_saved_prompt', { prompt: 'nope' })
   ok(!unknown.ok && /Code review/.test(unknown.text), 'an unknown prompt lists the real ones', unknown.text)
   const noHub = await tools.runHubTool('show_on_canvas', { path: 'C:\\x.png' })
-  ok(!noHub.ok && /not available/.test(noHub.text), 'show_on_canvas without the preload says so')
+  ok(!noHub.ok && /not available/.test(noHub.text), 'the old name show_on_canvas is still answered, the same way', JSON.stringify(noHub))
+  const onBoard = await tools.runHubTool('show_on_board', { path: 'C:\\x.png' })
+  ok(onBoard && !onBoard.ok && /not available/.test(onBoard.text), 'show_on_board without the preload says so', JSON.stringify(onBoard))
+  const justShow = await tools.runHubTool('show_on_canvas', {})
+  ok(justShow?.ok && /Board/.test(justShow.text), 'show_on_canvas with no path shows the Board', JSON.stringify(justShow))
   rt.setHubRuntime(null)
   delete globalThis.window
 

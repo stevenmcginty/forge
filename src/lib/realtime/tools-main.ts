@@ -36,7 +36,9 @@ function resolvePane(target: string): Resolved {
   if (hit.kind === 'ambiguous') {
     return { ok: false, text: `FAILED: more than one pane matches — ${hit.candidates.map(describeNavPane).join('; ')}. Ask which one.` }
   }
-  if (hit.kind === 'canvas') return { ok: false, text: 'FAILED: the canvas is not a pane — name a pane.' }
+  if (hit.kind === 'canvas') return { ok: false, text: 'FAILED: the Board is not a pane — name a pane.' }
+  if (hit.kind === 'wall') return { ok: false, text: 'FAILED: the Wall is every pane at once, not one pane — name a pane.' }
+  if (hit.kind === 'which_view') return { ok: false, text: 'FAILED: "canvas" is not a pane — name a pane.' }
   const list = hit.candidates.map(describeNavPane).join('; ')
   return { ok: false, text: list ? `FAILED: no pane matches "${said}". Open panes: ${list}.` : 'FAILED: no panes are open.' }
 }
