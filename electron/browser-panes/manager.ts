@@ -2,8 +2,10 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { session as electronSession, WebContentsView, type BaseWindow, type Session, type WebContents } from 'electron'
 import {
+  ARTIFACT_PARTITION,
   BROWSER_DEFAULT_RECT,
   BROWSER_PARTITION,
+  isArtifactUrl,
   normaliseBrowserUrl,
   type BrowserHistoryAction,
   type BrowserOwner,
@@ -12,6 +14,7 @@ import {
   type BrowserSurfaceRecord,
   type BrowserViewBounds
 } from '@shared/browser'
+import { installArtifactScheme } from '../artifact-scheme'
 import type { BrowserDriver } from './agent-ops'
 import { BrowserSurfaceStore } from './store'
 import {
@@ -44,6 +47,12 @@ import {
  * own capture, which works while the window is shown (not minimised). That is
  * what lets an agent browse while Steve is looking at something else.
  *
+ * A canvas artifact (forge-artifact://…, see ../artifact-scheme.ts) opens as a
+ * read-only view in a session of its own — ARTIFACT_PARTITION, in memory, with
+ * the scheme handler and nothing else — so an agent's page never sees the
+ * cookies of the shared one. A tab's session is fixed when its view is made, so
+ * sending a tab from one kind of address to the other gives it a fresh view.
+ *
  * Nothing here decides who may act on what — that is ./agent-ops.ts. This file
  * is the hands.
  */
@@ -64,6 +73,10 @@ interface Tab {
   view: WebContentsView | null
   visible: boolean
   bounds: { x: number; y: number; width: number; height: number }
+  /** The view lives in ARTIFACT_PARTITION (it was made for a forge-artifact: address). */
+  artifact: boolean
+  /** Why the last main-frame load failed; '' once a page commits. */
+  error: string
 }
 
 export interface BrowserManagerDeps {
@@ -79,11 +92,19 @@ export interface BrowserManagerDeps {
   onShot?: (path: string, owner: BrowserOwner, id: string, project: string) => void
   /** The renderer's zoom factor, so CSS-px bounds become window DIPs. */
   hostZoom?: () => number
+  /** `<data dir>\canvas` — what artifact tabs may show. Without it they show nothing. */
+  artifactRoot?: string
 }
 
 function errText(err: unknown): string {
   const text = err instanceof Error ? err.message : String(err)
   return text.replace(/\s+/g, ' ').trim().slice(0, 300)
+}
+
+/** "ERR_CONNECTION_REFUSED" → "Connection refused". */
+function netReason(desc: string, code: number): string {
+  const words = String(desc || '').replace(/^(net::)?ERR_/i, '').replace(/_/g, ' ').trim().toLowerCase()
+  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : `Error ${code}`
 }
 
 function sleep(ms: number): Promise<void> {
@@ -140,6 +161,22 @@ function prepareSession(ses: Session, downloadsDir: string): void {
   })
 }
 
+let artifactSessionReady = false
+
+/**
+ * The artifact tabs' session: the canvas on forge-artifact:, and no to every
+ * permission and every download. Nothing an artifact does is kept — the
+ * partition has no `persist:` prefix.
+ */
+function prepareArtifactSession(ses: Session, canvasRoot: string | undefined): void {
+  if (artifactSessionReady) return
+  artifactSessionReady = true
+  if (canvasRoot) installArtifactScheme(ses.protocol, canvasRoot)
+  ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
+  ses.setPermissionCheckHandler(() => false)
+  ses.on('will-download', (event) => event.preventDefault())
+}
+
 export class BrowserManager implements BrowserDriver {
   private readonly deps: BrowserManagerDeps
   private readonly store: BrowserSurfaceStore
@@ -186,11 +223,13 @@ export class BrowserManager implements BrowserDriver {
     return this.store.all().map((r) => {
       const wc = this.tabs.get(r.id)?.view?.webContents
       const live = wc && !wc.isDestroyed()
+      const error = this.tabs.get(r.id)?.error
       return {
         ...r,
         loading: live ? wc.isLoading() : false,
         canGoBack: live ? wc.navigationHistory.canGoBack() : false,
-        canGoForward: live ? wc.navigationHistory.canGoForward() : false
+        canGoForward: live ? wc.navigationHistory.canGoForward() : false,
+        ...(error ? { error } : {})
       }
     })
   }
@@ -212,11 +251,14 @@ export class BrowserManager implements BrowserDriver {
     let tab = this.tabs.get(id)
     if (tab?.view && !tab.view.webContents.isDestroyed()) return tab.view
 
-    const ses = electronSession.fromPartition(BROWSER_PARTITION)
-    prepareSession(ses, this.deps.downloadsDir)
+    const artifact = isArtifactUrl(record.url)
+    const partition = artifact ? ARTIFACT_PARTITION : BROWSER_PARTITION
+    const ses = electronSession.fromPartition(partition)
+    if (artifact) prepareArtifactSession(ses, this.deps.artifactRoot)
+    else prepareSession(ses, this.deps.downloadsDir)
     const view = new WebContentsView({
       webPreferences: {
-        partition: BROWSER_PARTITION,
+        partition,
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
@@ -229,13 +271,26 @@ export class BrowserManager implements BrowserDriver {
 
     // A popup becomes a navigation of this same tab: agents get predictable
     // pages, and nothing opens a window Forge does not manage.
+    // An artifact view opens nothing and goes nowhere but other canvas files.
     wc.setWindowOpenHandler(({ url }) => {
       const { url: safe, error } = normaliseBrowserUrl(url)
-      if (!error && safe) void wc.loadURL(safe).catch(() => undefined)
+      if (!artifact && !error && safe) void wc.loadURL(safe).catch(() => undefined)
       return { action: 'deny' }
     })
     wc.on('will-navigate', (event, url) => {
-      if (!/^(https?:|about:blank)/i.test(url)) event.preventDefault()
+      if (artifact ? !isArtifactUrl(url) : !/^(https?:|about:blank)/i.test(url)) event.preventDefault()
+    })
+    // "Failed" on the surface: a main-frame load that did not happen, until a
+    // page does commit. ERR_ABORTED (-3) is a redirect or a download, not a failure.
+    wc.on('did-fail-load', (_e, code, desc, _url, isMainFrame) => {
+      if (!isMainFrame || code === -3) return
+      const tab = this.tabs.get(id)
+      if (tab) tab.error = netReason(desc, code)
+      this.changed()
+    })
+    wc.on('did-navigate', () => {
+      const tab = this.tabs.get(id)
+      if (tab) tab.error = ''
     })
     const sync = (): void => {
       if (wc.isDestroyed()) return
@@ -253,8 +308,10 @@ export class BrowserManager implements BrowserDriver {
     wc.on('did-start-loading', () => this.changed())
     wc.on('did-stop-loading', sync)
 
-    tab = tab ?? { view: null, visible: false, bounds: { x: 0, y: 0, ...HIDDEN_SIZE } }
+    tab = tab ?? { view: null, visible: false, bounds: { x: 0, y: 0, ...HIDDEN_SIZE }, artifact, error: '' }
     tab.view = view
+    tab.artifact = artifact
+    tab.error = ''
     this.tabs.set(id, tab)
     // Added first, then sized: bounds set on a view that is not yet in a window
     // are dropped, and the page lays out at zero width.
@@ -369,9 +426,20 @@ export class BrowserManager implements BrowserDriver {
     const view = this.ensureView(id)
     if (!view) return { id, text: `Tab ${id} could not be created.` }
     const wc = view.webContents
-    // ensureView started the load; wait for it the same way navigate does.
-    let failure = ''
     if (url === 'about:blank') return { id, text: `Opened tab ${id} (yours), blank. browser_open with id "${id}" and a url sends it somewhere.` }
+    const failure = await this.firstLoad(wc)
+    if (title) this.store.patch(id, { title })
+    this.changed()
+    if (failure) return { id, text: `Opened tab ${id}, but ${hostOf(url)} did not load: ${failure}. It is your tab; try browser_open again with id "${id}" or another address.` }
+    return {
+      id,
+      text: `Opened tab ${id} (yours): ${this.where(wc)}. browser_read is the next call — it lists what you can click, numbered.`
+    }
+  }
+
+  /** ensureView has started a load; wait for it, bounded. '' = it loaded. */
+  private async firstLoad(wc: WebContents): Promise<string> {
+    let failure = ''
     await Promise.race([
       new Promise<void>((res) => {
         const done = (): void => res()
@@ -384,16 +452,45 @@ export class BrowserManager implements BrowserDriver {
       sleep(NAV_TIMEOUT_MS)
     ])
     await settle(wc, 2_000)
-    if (title) this.store.patch(id, { title })
-    this.changed()
-    if (failure) return { id, text: `Opened tab ${id}, but ${hostOf(url)} did not load: ${failure}. It is your tab; try browser_open again with id "${id}" or another address.` }
-    return {
-      id,
-      text: `Opened tab ${id} (yours): ${this.where(wc)}. browser_read is the next call — it lists what you can click, numbered.`
+    return failure
+  }
+
+  /** Close a tab's view but keep the tab; the next ensureView makes a fresh one. */
+  private dropView(tab: Tab): void {
+    const view = tab.view
+    tab.view = null
+    if (!view) return
+    try {
+      if (this.window && !this.window.isDestroyed()) this.window.contentView.removeChildView(view)
+    } catch {
+      /* the window went first */
+    }
+    const wc = view.webContents
+    if (!wc.isDestroyed()) {
+      try {
+        if (wc.debugger.isAttached()) wc.debugger.detach()
+      } catch {
+        /* detached already */
+      }
+      wc.close()
     }
   }
 
   async navigate(id: string, url: string): Promise<string> {
+    const tab = this.tabs.get(id)
+    if (tab?.view && tab.artifact !== isArtifactUrl(url) && this.store.get(id)) {
+      // A web page and a canvas artifact never share a session: a fresh view,
+      // made in the right one, loading the new address.
+      this.dropView(tab)
+      this.store.patch(id, { url })
+      const fresh = this.wcFor(id)
+      if (!fresh) return `Tab ${id} is gone.`
+      this.changed()
+      const failure = await this.firstLoad(fresh)
+      this.changed()
+      if (failure) return `Tab ${id} could not load ${hostOf(url)}: ${failure}.`
+      return `Tab ${id} is now on ${this.where(fresh)}. Read it again to see what is there.`
+    }
     const wc = this.wcFor(id)
     if (!wc) return `Tab ${id} is gone.`
     const problem = await this.load(wc, url)

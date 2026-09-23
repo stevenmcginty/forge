@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { artifactUrl } from '@shared/browser'
 import type { CanvasItem } from '@shared/hub'
 import type { CanvasFeed } from '@/hooks/useHub'
 import { popIn } from '@/lib/motion'
@@ -15,9 +16,11 @@ import './Artifact.css'
  *              is all they may do: `sandbox="allow-scripts"` alone gives the
  *              page an opaque origin (no parent.document, no window.forge, no
  *              cookies or storage of Forge's), no top navigation, no forms,
- *              no pop-ups; and a CSP meta put first in the document shuts
- *              every network door (default-src 'none'), leaving inline
- *              script and style and data:/blob: images.
+ *              no pop-ups. The frame loads the file from main's
+ *              forge-artifact:// scheme (electron/artifact-scheme.ts), whose
+ *              response CSP shuts every network door (connect-src 'none')
+ *              and allows inline script and style — its own policy, not the
+ *              renderer's, which is why scripts run in a built Forge.
  *   Markdown   formatted by Forge Web's own renderer, which builds React
  *              elements and never injects HTML, so raw HTML in the source
  *              shows as text and cannot run. Links open outside Forge.
@@ -30,7 +33,7 @@ import './Artifact.css'
  * refreshes in front of you as it works.
  */
 
-/** The frame's own policy: nothing leaves, nothing loads, inline code runs. */
+/** The thumbnails' policy (srcdoc, scripts stripped): nothing leaves, nothing loads. */
 export const ARTIFACT_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:"
 
@@ -46,21 +49,43 @@ export function isMarkdown(item: CanvasItem): boolean {
   return item.kind === 'text' && (/markdown/i.test(item.mime) || /\.(md|markdown)$/i.test(item.name))
 }
 
-/** An item's whole text, re-read whenever the file changes on disk. */
-export function useArtifactText(item: CanvasItem, feed: CanvasFeed): string | null {
+/** An item's whole text, re-read whenever the file changes on disk; `failed` once a read comes back empty-handed. */
+function useArtifactRead(item: CanvasItem, feed: CanvasFeed): { text: string | null; failed: boolean } {
   const [text, setText] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
   const { readText } = feed
   useEffect(() => {
     if (item.kind !== 'text' && item.kind !== 'html') return undefined
     let live = true
-    void readText(item.id).then((t) => {
-      if (live) setText(t)
-    })
+    readText(item.id).then(
+      (t) => {
+        if (!live) return
+        setText(t)
+        setFailed(t === null)
+      },
+      () => {
+        if (live) setFailed(true)
+      }
+    )
     return () => {
       live = false
     }
   }, [item.id, item.kind, item.mtime, readText])
-  return text
+  return { text, failed }
+}
+
+/** An item's whole text, re-read whenever the file changes on disk. */
+export function useArtifactText(item: CanvasItem, feed: CanvasFeed): string | null {
+  return useArtifactRead(item, feed).text
+}
+
+/**
+ * An item's forge-artifact: address. Its folder is its project's:
+ * <dataDir>/canvas/<projectId>/<file>. The frame adds `?v=<mtime>`, so a
+ * rewrite is a new address and the page reloads as the agent works.
+ */
+function artifactAddress(item: CanvasItem): string {
+  return artifactUrl(item.path.split(/[\\/]/).slice(-2, -1)[0] ?? '', item.id)
 }
 
 /** Markdown, with its links sent to the system browser instead of this window. */
@@ -80,19 +105,6 @@ export function MarkdownBody({ source, className }: { source: string; className?
       {body}
     </div>
   )
-}
-
-/**
- * Can an artifact's inline script run here? A srcdoc frame inherits the
- * renderer's own CSP on top of its own, and the production build ships
- * `script-src 'self'` (electron.vite.config.ts tightens it), so in a built
- * Forge a page's scripts are refused before the sandbox is even asked. The
- * panel says so in words instead of showing a page that silently does nothing.
- */
-export function artifactScriptsAllowed(): boolean {
-  const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') ?? ''
-  const script = csp.split(';').find((d) => d.trim().startsWith('script-src')) ?? ''
-  return !csp || script.includes("'unsafe-inline'")
 }
 
 /** A still thumbnail of an HTML artifact: sandboxed with no permissions at all, scripts removed. */
@@ -154,11 +166,10 @@ export function ArtifactView({
 }): ReactNode {
   const { actions: app } = useApp()
   const ref = useRef<HTMLDivElement | null>(null)
-  const text = useArtifactText(item, feed)
+  const { text, failed } = useArtifactRead(item, feed)
   const md = isMarkdown(item)
   const hasSource = item.kind === 'html' || md
   const [mode, setMode] = useState<'preview' | 'code'>('preview')
-  const scriptsOk = useMemo(() => artifactScriptsAllowed(), [])
   const [updated, setUpdated] = useState(false)
   const lastMtime = useRef(item.mtime)
   const lastId = useRef(item.id)
@@ -197,17 +208,15 @@ export function ArtifactView({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose, onStep, count])
 
-  const doc = useMemo(() => (item.kind === 'html' && text !== null ? sandboxedDocument(text) : ''), [item.kind, text])
-
   const openInBrowser = async (): Promise<void> => {
     const api = browserBridge()
     if (!api) {
       app.setNotice('The built-in browser needs a restart of Forge')
       return
     }
-    const url = `file:///${item.path.replace(/\\/g, '/').replace(/^\/+/, '')}`
-    const reply = await api.open({ url })
-    if (!reply.ok) app.setNotice(`The built-in browser cannot open local files yet — ${reply.text}`)
+    // A read-only view, in a session of its own — never the signed-in one.
+    const reply = await api.open({ url: artifactAddress(item) })
+    if (!reply.ok) app.setNotice(`The built-in browser could not open it — ${reply.text}`)
   }
 
   const kindWord = item.kind === 'html' ? 'HTML' : md ? 'Markdown' : item.kind === 'text' ? 'Text' : item.kind === 'video' ? 'Video' : 'Image'
@@ -225,12 +234,9 @@ export function ArtifactView({
             {kindWord} · {index + 1} of {count}
           </span>
         </span>
-        {item.kind === 'html' && mode === 'preview' && !scriptsOk ? (
-          <span
-            className="artifact__note"
-            title="This build's security policy refuses inline script in pages drawn inside Forge, so the page shows its markup and styles only. Open it in its own app to run it."
-          >
-            Scripts off
+        {failed ? (
+          <span className="artifact__note" role="status" title="The file could not be read from the canvas folder. It may have been moved or deleted.">
+            Failed to load
           </span>
         ) : null}
         {updated ? (
@@ -276,7 +282,7 @@ export function ArtifactView({
         {item.kind === 'image' || item.kind === 'video' ? (
           <div className="artifact__media">{media}</div>
         ) : text === null ? (
-          <p className="artifact__wait">Reading…</p>
+          <p className="artifact__wait">{failed ? 'Failed — the file could not be read.' : 'Reading…'}</p>
         ) : mode === 'code' || (item.kind === 'text' && !md) ? (
           <CodeWell text={text} />
         ) : item.kind === 'html' ? (
@@ -285,7 +291,7 @@ export function ArtifactView({
             className="artifact__frame"
             title={item.title}
             sandbox="allow-scripts"
-            srcDoc={doc}
+            src={`${artifactAddress(item)}?v=${item.mtime}`}
             referrerPolicy="no-referrer"
           />
         ) : (

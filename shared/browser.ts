@@ -25,6 +25,28 @@
 export const BROWSER_PARTITION = 'persist:forge-browser'
 
 /**
+ * Canvas artifacts — the HTML pages agents put on the board — are served by
+ * main on their own scheme (electron/artifact-scheme.ts):
+ *
+ *   forge-artifact://<projectId>/<file name>   a file in <dataDir>/canvas/<projectId>/
+ *
+ * A browser tab showing one is a read-only view, and it lives in its own
+ * in-memory session, never in BROWSER_PARTITION: an agent's page must not see
+ * the cookies Steve signed in with. No `persist:` prefix = nothing on disk.
+ */
+export const ARTIFACT_SCHEME = 'forge-artifact'
+export const ARTIFACT_PARTITION = 'forge-artifact'
+
+/** The address of a canvas file. `projectId` is the canvas folder's name. */
+export function artifactUrl(projectId: string, name: string): string {
+  return `${ARTIFACT_SCHEME}://${projectId}/${name.split(/[\\/]/).map(encodeURIComponent).join('/')}`
+}
+
+export function isArtifactUrl(url: string): boolean {
+  return String(url ?? '').toLowerCase().startsWith(`${ARTIFACT_SCHEME}://`)
+}
+
+/**
  * Set on every pane's environment by the PTY host. `FORGE_PANE_ID` is the pane's
  * session id — a label for "whose tabs", not a credential (the token file is the
  * credential). `FORGE_PANE_AGENT` is the CLI's exe name, for the owner's logo.
@@ -118,6 +140,8 @@ export interface BrowserSurfaceInfo extends BrowserSurfaceRecord {
   loading: boolean
   canGoBack: boolean
   canGoForward: boolean
+  /** Why the last load failed ("Connection refused (-102)"). Absent once a page loads. */
+  error?: string
 }
 
 /** The on-disk file. */
@@ -282,6 +306,17 @@ export function normaliseBrowserUrl(raw: string): { url: string; error: string }
   }
   if (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(target)) return { url: `http://${target}`, error: '' }
   return { url: `https://${target}`, error: '' }
+}
+
+/**
+ * What Steve's own address bar and the board's "Browser" button may open: any
+ * web address normaliseBrowserUrl takes, plus a canvas artifact. The agents'
+ * tools stay on normaliseBrowserUrl — http and https only.
+ */
+export function normaliseSurfaceUrl(raw: string): { url: string; error: string } {
+  const target = String(raw ?? '').trim()
+  if (isArtifactUrl(target)) return { url: target, error: '' }
+  return normaliseBrowserUrl(target)
 }
 
 /** Is this a tab id the manager could have minted? */

@@ -4,7 +4,7 @@ import {
   BROWSER_IPC,
   USER_OWNER,
   VOICE_OWNER,
-  normaliseBrowserUrl,
+  normaliseSurfaceUrl,
   type BrowserAgentReply,
   type BrowserAgentRequest,
   type BrowserHistoryAction,
@@ -53,6 +53,7 @@ export class BrowserService {
       dir,
       shotsDir: join(dir, 'shots'),
       downloadsDir: deps.downloadsDir,
+      artifactRoot: join(deps.dataDir, 'canvas'),
       onChanged: (list) => {
         const win = this.window
         if (win && !win.isDestroyed()) win.webContents.send(BROWSER_IPC.changed, list)
@@ -99,8 +100,10 @@ export class BrowserService {
   /** The renderer's handlers. Call once. */
   registerIpc(ipc: IpcMain): void {
     ipc.handle(BROWSER_IPC.list, () => this.manager.infos())
+    // Steve's own address bar and the board's "Browser" button: web pages, and
+    // canvas artifacts (read-only views in their own session — see manager.ts).
     ipc.handle(BROWSER_IPC.open, async (_e, req: { url?: unknown; project?: unknown; rect?: BrowserRect }) => {
-      const { url, error } = normaliseBrowserUrl(String(req?.url ?? ''))
+      const { url, error } = normaliseSurfaceUrl(String(req?.url ?? ''))
       if (error) return { ok: false, text: error } satisfies BrowserAgentReply
       const project = typeof req?.project === 'string' ? req.project : this.activeProject
       const opened = await this.manager.open(USER_OWNER, url, '', project, req?.rect)
@@ -112,7 +115,7 @@ export class BrowserService {
       return await this.manager.close(key)
     })
     ipc.handle(BROWSER_IPC.navigate, async (_e, id: unknown, raw: unknown) => {
-      const { url, error } = normaliseBrowserUrl(String(raw ?? ''))
+      const { url, error } = normaliseSurfaceUrl(String(raw ?? ''))
       if (error) return { ok: false, text: error } satisfies BrowserAgentReply
       const text = await this.manager.navigate(String(id ?? ''), url)
       return { ok: true, text, id: String(id ?? '') } satisfies BrowserAgentReply

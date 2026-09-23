@@ -154,7 +154,8 @@ function TabChip({
 }): ReactNode {
   const ref = useRef<HTMLDivElement | null>(null)
   const who = ownerOf(surface, profiles)
-  const word = surface.loading ? 'Loading…' : who.mine ? 'Yours' : `${who.name} is driving`
+  const failed = Boolean(surface.error) && !surface.loading
+  const word = surface.loading ? 'Loading…' : failed ? 'Failed' : who.mine ? 'Yours' : `${who.name} is driving`
 
   useLayoutEffect(() => {
     if (fresh && ref.current) popIn(ref.current, { from: 0.9, lift: 6 })
@@ -168,9 +169,10 @@ function TabChip({
       aria-selected={active}
       data-active={active ? 'true' : undefined}
       data-loading={surface.loading ? 'true' : undefined}
+      data-failed={failed ? 'true' : undefined}
       data-mine={who.mine ? 'true' : undefined}
       data-fresh={fresh ? 'true' : undefined}
-      title={`${surface.title || surface.url}\n${word}`}
+      title={`${surface.title || surface.url}\n${failed ? `Failed — ${surface.error}` : word}`}
     >
       <button type="button" className="btab__main" onClick={onPick}>
         <span className="btab__who" aria-hidden="true">

@@ -470,6 +470,32 @@
   color: var(--text-dim);
 }
 
+/* A failed load: the word first, then where and why. Never colour alone. */
+.browser-surface__card-failed {
+  padding: 3px 10px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--danger-line);
+  background: var(--danger-soft);
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--danger);
+}
+
+.browser-surface__card[data-failed='true'] .browser-surface__card-title {
+  color: var(--text-secondary);
+}
+
+.browser-surface__state[data-state='failed'] {
+  color: var(--danger);
+}
+
+.btab[data-failed='true'] .btab__word {
+  color: var(--danger);
+}
+
 .browser-surface__missing {
   margin: var(--s-4);
   font-size: var(--t-sm);

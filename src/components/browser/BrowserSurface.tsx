@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentProfile } from '@shared/types'
-import type { BrowserSurfaceInfo, BrowserViewBounds } from '@shared/browser'
+import { isArtifactUrl, type BrowserSurfaceInfo, type BrowserViewBounds } from '@shared/browser'
 import { commandExe } from '@shared/agents'
 import { AgentBadge } from '../AgentBadge'
 import { Icon } from '../Icon'
@@ -26,6 +26,9 @@ import './browser.css'
  *              composer's palette and captions only trim the page's bottom
  *              edge up to where they start.
  *   hidden     the owner says so (another mode is on screen).
+ *   failed     the last load did not happen. The page would be blank, so the
+ *              card underneath says "Failed" and why, and the toolbar says it
+ *              too, until a page loads.
  *
  * The toolbar says who is driving in words, not colour alone: "Rex is driving"
  * with the agent's badge, or "Yours" for a tab Steve opened.
@@ -116,6 +119,7 @@ export function BrowserSurface({ surface, profiles, scale = 1, hidden = false, o
   const [draft, setDraft] = useState<string | null>(null)
   const [shown, setShown] = useState(false)
   const id = surface.id
+  const failed = Boolean(surface.error) && !surface.loading
 
   // Report the placeholder's box once it has settled, hide the page while it
   // moves or while a pop-up covers it. getBoundingClientRect includes the
@@ -135,7 +139,7 @@ export function BrowserSurface({ surface, profiles, scale = 1, hidden = false, o
     }
     const measure = (): BrowserViewBounds | null => {
       const el = viewRef.current
-      if (!el || hidden || document.visibilityState !== 'visible') return null
+      if (!el || hidden || failed || document.visibilityState !== 'visible') return null
       const r = el.getBoundingClientRect()
       const onScreen = r.width >= 2 && r.height >= 2 && r.right > 0 && r.bottom > 0 && r.left < window.innerWidth && r.top < window.innerHeight
       if (!onScreen) return null
@@ -172,7 +176,7 @@ export function BrowserSurface({ surface, profiles, scale = 1, hidden = false, o
       cancelAnimationFrame(frame)
       api.setBounds(id, null)
     }
-  }, [id, hidden, scale])
+  }, [id, hidden, failed, scale])
 
   const api = browserBridge()
   const go = (): void => {
@@ -185,6 +189,7 @@ export function BrowserSurface({ surface, profiles, scale = 1, hidden = false, o
     <section
       className="browser-surface"
       data-loading={surface.loading ? 'true' : undefined}
+      data-failed={failed ? 'true' : undefined}
       aria-label={`Browser tab ${surface.title || surface.url}`}
     >
       <header className="browser-surface__bar">
@@ -221,7 +226,7 @@ export function BrowserSurface({ surface, profiles, scale = 1, hidden = false, o
         </span>
         <label className="browser-surface__address">
           <span className="browser-surface__scheme" aria-hidden="true">
-            {surface.url.startsWith('https:') ? 'https' : surface.url.startsWith('http:') ? 'http' : ''}
+            {surface.url.startsWith('https:') ? 'https' : surface.url.startsWith('http:') ? 'http' : isArtifactUrl(surface.url) ? 'canvas' : ''}
           </span>
           <input
             className="browser-surface__url"
@@ -246,6 +251,11 @@ export function BrowserSurface({ surface, profiles, scale = 1, hidden = false, o
             }}
           />
           {surface.loading ? <span className="browser-surface__state">Loading…</span> : null}
+          {failed ? (
+            <span className="browser-surface__state" data-state="failed" role="status" title={surface.error}>
+              Failed
+            </span>
+          ) : null}
         </label>
         <OwnerChip surface={surface} profiles={profiles} />
         {onClose ? (
@@ -265,11 +275,13 @@ export function BrowserSurface({ surface, profiles, scale = 1, hidden = false, o
         {!api ? (
           <p className="browser-surface__missing">Restart Forge to use the built-in browser.</p>
         ) : (
-          // Only ever seen for the moment the page is off its frame — a calm
-          // card in the deck's colours instead of a white flash.
-          <div className="browser-surface__card" aria-hidden="true">
+          // Seen for the moment the page is off its frame — a calm card in the
+          // deck's colours instead of a white flash — and while a failed load
+          // keeps the (blank) page hidden, when it says "Failed" and why.
+          <div className="browser-surface__card" aria-hidden={failed ? undefined : 'true'} data-failed={failed ? 'true' : undefined}>
+            {failed ? <span className="browser-surface__card-failed">Failed</span> : null}
             <span className="browser-surface__card-host">{hostOf(surface.url)}</span>
-            <span className="browser-surface__card-title">{surface.title || (surface.loading ? 'Loading…' : '')}</span>
+            <span className="browser-surface__card-title">{failed ? surface.error : surface.title || (surface.loading ? 'Loading…' : '')}</span>
           </div>
         )}
       </div>

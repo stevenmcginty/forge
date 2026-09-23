@@ -32,6 +32,7 @@
     "voice:check": "node scripts/voice-check.mjs",
     "realtime:check": "node scripts/realtime-check.mjs",
     "canvas:check": "node scripts/canvas-check.mjs",
+    "artifact:check": "node scripts/artifact-check.mjs",
     "browser:check": "node scripts/browser-check.mjs",
     "voice:brain": "node scripts/voice-brain-smoke.mjs",
     "voice:luna": "node scripts/voice-luna-smoke.mjs",

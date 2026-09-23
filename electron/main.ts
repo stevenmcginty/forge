@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, screen, session, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, safeStorage, screen, session, shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -65,6 +65,7 @@ import {
 } from './voice-agent/ipc'
 import { registerRealtimeHandlers } from './realtime/ipc'
 import { callSignFor, disposeHub, postToBoard, registerHubHandlers } from './hub-ipc'
+import { installArtifactScheme } from './artifact-scheme'
 import {
   disposeBrowserPanes,
   registerBrowserPanes,
@@ -1392,6 +1393,18 @@ void app
         callback({ responseHeaders })
       },
     )
+
+    /*
+     * Canvas artifacts on `forge-artifact://<projectId>/<file>`, so the Board's
+     * sandboxed frame runs an HTML artifact's own script under the artifact's
+     * own CSP rather than inheriting the renderer's. See artifact-scheme.ts.
+     * Only this window may frame one: the built renderer is a file: page, and
+     * the dev server's origin is added when there is one.
+     */
+    const devRenderer = process.env['ELECTRON_RENDERER_URL']
+    installArtifactScheme(protocol, join(getDataDir(), 'canvas'), {
+      frameAncestors: ['file:', ...(devRenderer ? [new URL(devRenderer).origin] : [])]
+    })
 
     /*
      * Every subsystem, and then the window — but the window happens either way.
