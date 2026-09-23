@@ -1041,9 +1041,9 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       const pane = resolved.pane
       if (!pane.live) return fail(`${paneLabel(pane)}’s shell has exited — nothing to type it into`)
 
-      const use = run.useSkill ?? skillHandler()
-      if (!use) return fail('Skills are not available here')
-      return use({ name, pane })
+      const runSkill = run.useSkill ?? skillHandler()
+      if (!runSkill) return fail('Skills are not available here')
+      return runSkill({ name, pane })
     }
 
     case 'make_video': {
