@@ -173,7 +173,7 @@ export function VoicePill(): ReactNode {
             <span className="vcard__glyph" aria-hidden="true">
               {vs.glyph}
             </span>
-            {failed ? (hub.errorReason ?? errorReason(hub.provider, hub.error)) : vs.word}
+            {failed ? (hub.errorReason ?? errorReason(hub.provider, hub.error, hub.brainLabel)) : vs.word}
           </p>
           {fullError ? (
             <div className="vcard__error" role="alert">

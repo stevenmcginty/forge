@@ -81,10 +81,9 @@ export function useShortcuts(): void {
       // The voice hub, from anywhere — including its own text box, and
       // including the terminal you are typing in, which is the point of it.
       'voice.hubCard': () => L().actions.toggleVoiceHubCard(),
-      // Settings and Devices, the way every other app opens settings. Also
-      // from a text field: Ctrl+, and Ctrl+Shift+D are nobody's editing keys.
+      // Settings, the way every other app opens settings. Also from a text
+      // field: Ctrl+, is nobody's editing key.
       'app.settings': () => (L().state.view === 'settings' ? L().actions.closeSettings() : L().actions.openSettings()),
-      'app.devices': () => (L().state.view === 'devices' ? L().actions.closeDevices() : L().actions.openDevices()),
 
       'tab.new': () => {
         window.dispatchEvent(new CustomEvent(NEW_TAB_EVENT))
@@ -195,8 +194,8 @@ export function useShortcuts(): void {
           (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)
         )
           return
-        // The workspace is not on screen while settings or the Devices
-        // preview is. Ctrl+W in there would close a pane you cannot see.
+        // The workspace is not the thing in front of you while settings is.
+        // Ctrl+W in there would close a pane you are not looking at.
         if (live.current.state.view !== 'terminals') return
       }
 

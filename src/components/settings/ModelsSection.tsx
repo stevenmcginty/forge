@@ -1,77 +1,32 @@
 import { useState, type ReactNode } from 'react'
 import type { ImportedKeyResult } from '@shared/types'
-import { agentBrainSpec, migrateAgentBrain } from '@shared/agent-brain'
-import { REALTIME_PROVIDERS } from '@shared/realtime'
-import { DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENROUTER_MODEL } from '@/lib/voicebrain'
 import { useApp } from '@/state/AppState'
 import { Card, KeyField, Row, Section, StateChip, TextField } from './parts'
-import '../hub/VoiceSettings.css'
 import { BrainTestButton } from './BrainTest'
 
 /**
- * Keys and models.
+ * Keys — every API key Forge holds, in one list.
  *
- * Everything on this page is stored in plain JSON in %APPDATA%\Forge — which is
- * said out loud at the bottom, because a masked field implies a safe that is
- * not there. Only one of these keys is ever sent anywhere.
+ * Settings > Agents & CLIs. The Main agent's cards (Voice & Agent) show the
+ * key their engine needs inline; it is the same field, so a key typed in
+ * either place is the key. Which engine answers, and each engine's model, live
+ * on those cards — this page only holds keys, plus the one model that is not
+ * an agent's (images).
+ *
+ * Everything here is stored in plain JSON in %APPDATA%\Forge — which is said
+ * out loud at the bottom, because a masked field implies a safe that is not
+ * there.
  */
-
-/**
- * The recommended fast brain. Measured on this machine: a full voice turn back
- * in 1.9s with valid brain JSON every time, which is the bar the voice hub
- * actually cares about. It is *not* DEFAULT_GEMINI_MODEL — the default is what
- * a settings.json written before today already says, and silently rewriting a
- * stored model id is not this page's job. The hint below points at it; the
- * dropdown lets you take it.
- */
-const RECOMMENDED_GEMINI_MODEL = 'gemini-3.6-flash'
-
-const GEMINI_MODELS = [
-  { id: 'gemini-3.8-flash', label: 'Flash 3.8 — newest Flash' },
-  { id: RECOMMENDED_GEMINI_MODEL, label: 'Flash 3.6 — fastest, recommended' },
-  { id: DEFAULT_GEMINI_MODEL, label: 'Flash 2.5 — fast, cheap, the old default' },
-  { id: 'gemini-2.5-pro', label: 'Pro — slower, better at long reasoning' }
-]
 
 /** Empty means "whatever gemini-media.ts defaults to" — say so, do not guess. */
 const IMAGE_MODEL_PLACEHOLDER = 'gemini-2.5-flash-image'
 
-/**
- * Groq's own suggestions, newest verified 2026-07-31.
- *
- * Ordered by what Forge actually needs rather than by size. The free tier's
- * ceiling is tokens-per-minute and the capability manifest is ~3,000 tokens of
- * every turn, so the headline "30 requests a minute" is not the number that
- * matters — the TPM column is, and it is why the 8b model is last despite being
- * the quickest and cheapest.
- */
-const GROQ_MODELS = [
-  { id: DEFAULT_GROQ_MODEL, label: 'Llama 3.3 70B — 12k tokens/min free, best at JSON' },
-  { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B — the fastest thing here' },
-  { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B — slower, stronger' },
-  { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B — cheapest, but only 6k tokens/min free' }
-]
-
-/**
- * The Claude voice brain's model choices. Aliases, not pinned ids — see the
- * note on `voiceClaudeModel` in shared/types.ts.
- */
-const CLAUDE_MODELS = [
-  { id: 'opus', label: 'Opus — smartest, the default' },
-  { id: 'sonnet', label: 'Sonnet — faster, lighter on usage' },
-  { id: 'haiku', label: 'Haiku — lightest' },
-  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna — fastest OpenAI option' }
-]
-
 export function ModelsSection(): ReactNode {
   const { state, actions } = useApp()
   const s = state.settings
-  const custom = !GEMINI_MODELS.some((m) => m.id === s.geminiModel)
-  // Who answers is the ONE Agent brain (Voice → Agent brain); keys live here.
-  const brain = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
 
   return (
-    <Section title="Models &amp; APIs" blurb="The keys Forge holds, and which model the voice agent thinks with.">
+    <Section title="Keys" blurb="The API keys Forge holds. The Main agent’s cards show the key their engine needs — it is the same key.">
       <Card title="Google Gemini">
         <KeyField
           label="API key"
@@ -95,56 +50,12 @@ export function ModelsSection(): ReactNode {
           }
           note={
             <>
-              The only key Forge sends anywhere. When Gemini is the voice brain, what you say plus a summary of your
-              projects, tabs and panes goes to <span className="mono">generativelanguage.googleapis.com</span> and
-              nowhere else.
+              Gemini Live, Gemini Flash, images, the Gemini voice and phone transcription all use it. Sent only to{' '}
+              <span className="mono">generativelanguage.googleapis.com</span>.
             </>
           }
         />
-
-        <Row
-          label="Model"
-          hint={
-            <>
-              Flash is plenty for the voice agent. <span className="mono">{RECOMMENDED_GEMINI_MODEL}</span> is the one
-              to pick — a voice turn comes back in about 1.9s with brain JSON that parses every time. Your stored
-              choice is left alone until you change it here.
-            </>
-          }
-        >
-          {/*
-            Picking "Custom…" used to write the current model back with a
-            trailing space, and `setGeminiModel` trims — so the marker was
-            destroyed on the way in, `custom` never flipped, the text box never
-            appeared and the dropdown snapped straight back to what it already
-            said. Choosing Custom did visibly nothing.
-
-            There is no marker now. The model id box below is always there and
-            always wins, which is both un-breakable and one less thing to
-            explain: the list is a shortcut, the box is the truth.
-          */}
-          <select
-            className="select"
-            value={custom ? '__custom' : s.geminiModel}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => {
-              if (e.target.value !== '__custom') actions.setGeminiModel(e.target.value)
-            }}
-          >
-            {GEMINI_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-            <option value="__custom">Custom…</option>
-          </select>
-        </Row>
-
-        <Row
-          label="Image model"
-          hint="Used by make_image and edit_image, here and in the MCP bridge"
-          htmlFor="gemini-image-model"
-        >
+        <Row label="Image model" hint="Used by make_image and edit_image, here and in the MCP bridge" htmlFor="gemini-image-model">
           <TextField
             id="gemini-image-model"
             value={s.geminiImageModel}
@@ -153,17 +64,12 @@ export function ModelsSection(): ReactNode {
             mono
           />
         </Row>
-
-        <Row label="Model id" hint="Overrides the list above" htmlFor="gemini-model-id">
-          <TextField
-            id="gemini-model-id"
-            value={s.geminiModel}
-            onCommit={(v) => actions.setGeminiModel(v)}
-            placeholder={DEFAULT_GEMINI_MODEL}
-            mono
-          />
+        <Row label="Text model" hint="Gemini Flash, phone transcription and project memory. Set on the Gemini Flash card.">
+          <span className="srow__readout mono">{s.geminiModel}</span>
+          <button type="button" className="ghost-btn" onClick={() => actions.setSettingsSection('voice')}>
+            Change
+          </button>
         </Row>
-        <LiveTalkUnlocks vendor="gemini" hasKey={Boolean(s.geminiKey.trim())} />
       </Card>
 
       <Card title="OpenAI">
@@ -175,43 +81,12 @@ export function ModelsSection(): ReactNode {
           actions={<BrainTestButton target={{ kind: 'key', vendor: 'openai' }} />}
           note={
             <>
-              An API platform key with billing — a ChatGPT subscription does not cover it. The key stays in
-              Forge&apos;s main process: each session gets a short-lived secret from{' '}
-              <span className="mono">api.openai.com</span>, and nothing else is sent anywhere.
+              For GPT Realtime and its mini. An API platform key with billing — a ChatGPT subscription does not cover
+              it. The key stays in Forge&apos;s main process: each session gets a short-lived secret from{' '}
+              <span className="mono">api.openai.com</span>.
             </>
           }
         />
-        <LiveTalkUnlocks vendor="openai" hasKey={Boolean(s.openaiKey.trim())} />
-      </Card>
-
-      <Card title="Z.AI">
-        <KeyField
-          label="Coding Plan key"
-          value={s.zaiKey}
-          onCommit={(key) => actions.patchSettings({ zaiKey: key.trim() })}
-          placeholder="from z.ai/manage-apikey"
-          note={
-            <>
-              Only the <span className="mono">GLM 5.3</span> selector uses this. It is sent to{' '}
-              <span className="mono">api.z.ai</span> as Claude Code&apos;s gateway, and never to a regular Claude pane
-              — that one stays on your claude.ai login. Sign up at <span className="mono">z.ai/subscribe</span>, then
-              paste the key from <span className="mono">z.ai/manage-apikey/apikey-list</span>.
-            </>
-          }
-        />
-      </Card>
-
-      <Card title="Agent brain" hint="One setting picks who answers the bottom bar — it is on the Voice page. This page only holds the keys.">
-        <Row label="In use" hint="Gemini Flash, Groq and OpenRouter are text brains in the same list.">
-          <div className="seg" role="group" aria-label="Agent brain">
-            <span className="field__input" style={{ pointerEvents: 'none' }}>
-              {agentBrainSpec(brain).label}
-            </span>
-            <button type="button" className="ghost-btn" onClick={() => actions.setSettingsSection('voice')}>
-              Change
-            </button>
-          </div>
-        </Row>
       </Card>
 
       <Card title="Groq">
@@ -233,69 +108,10 @@ export function ModelsSection(): ReactNode {
           note={
             <>
               Free at <span className="mono">console.groq.com</span> — no card. Sent only to{' '}
-              <span className="mono">api.groq.com</span>, and only while Groq is the selected brain. The free tier is
-              capped on tokens per minute rather than requests, so the model below matters more than how often you
-              talk.
+              <span className="mono">api.groq.com</span>, and only while Groq answers.
             </>
           }
         />
-
-        <Row label="Model" hint="Any model id Groq serves" htmlFor="groq-model">
-          <select
-            id="groq-model"
-            className="select"
-            value={GROQ_MODELS.some((m) => m.id === s.groqModel) ? s.groqModel : '__custom'}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => {
-              if (e.target.value !== '__custom') actions.patchSettings({ groqModel: e.target.value })
-            }}
-          >
-            {GROQ_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-            <option value="__custom">Custom…</option>
-          </select>
-        </Row>
-
-        <Row label="Model id" hint="Overrides the list above" htmlFor="groq-model-id">
-          <TextField
-            id="groq-model-id"
-            value={s.groqModel}
-            onCommit={(v) => actions.patchSettings({ groqModel: v.trim() || DEFAULT_GROQ_MODEL })}
-            placeholder={DEFAULT_GROQ_MODEL}
-            mono
-          />
-        </Row>
-
-        {brain === 'groq' && !s.groqKey ? (
-          <p className="scard__hint">Groq is the Agent brain but no key is stored, so Claude answers until you add one.</p>
-        ) : null}
-      </Card>
-
-      <Card
-        title="Claude"
-        hint="No key to enter here — it signs in with the `claude` login already on this machine, the same subscription every Forge pane uses."
-      >
-        <Row
-          label="Model"
-          hint="Opus, Sonnet and Haiku use the Claude login. GPT-5.6 Luna uses the installed Codex login and is a faster OpenAI voice route; changing it takes effect on the next turn."
-        >
-          <select
-            className="select"
-            aria-label="Claude brain model"
-            value={s.voiceClaudeModel}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => actions.patchSettings({ voiceClaudeModel: e.target.value })}
-          >
-            {CLAUDE_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </Row>
       </Card>
 
       <Card title="OpenRouter">
@@ -316,26 +132,29 @@ export function ModelsSection(): ReactNode {
           }
           note={
             <>
-              Sent only to <span className="mono">openrouter.ai</span>, and only while OpenRouter is the selected
-              brain. If you already run <span className="mono">kimi</span> in a pane its key is in{' '}
-              <span className="mono">~/.kimi-key</span> and the button above will fetch it.
+              Sent only to <span className="mono">openrouter.ai</span>, and only while OpenRouter answers. If you run{' '}
+              <span className="mono">kimi</span> in a pane its key is in <span className="mono">~/.kimi-key</span> and
+              the button above fetches it.
             </>
           }
         />
+      </Card>
 
-        <Row label="Model" hint="Any model id OpenRouter serves" htmlFor="openrouter-model">
-          <TextField
-            id="openrouter-model"
-            value={s.openrouterModel}
-            onCommit={(v) => actions.patchSettings({ openrouterModel: v.trim() || DEFAULT_OPENROUTER_MODEL })}
-            placeholder={DEFAULT_OPENROUTER_MODEL}
-            mono
-          />
-        </Row>
-
-        {brain === 'openrouter' && !s.openrouterKey ? (
-          <p className="scard__hint">OpenRouter is the Agent brain but no key is stored, so Claude answers until you add one.</p>
-        ) : null}
+      <Card title="Z.AI">
+        <KeyField
+          label="Coding Plan key"
+          value={s.zaiKey}
+          onCommit={(key) => actions.patchSettings({ zaiKey: key.trim() })}
+          placeholder="from z.ai/manage-apikey"
+          note={
+            <>
+              Only the <span className="mono">GLM 5.3</span> pane uses this. It is sent to{' '}
+              <span className="mono">api.z.ai</span> as Claude Code&apos;s gateway, and never to a regular Claude pane
+              — that one stays on your claude.ai login. Sign up at <span className="mono">z.ai/subscribe</span>, then
+              paste the key from <span className="mono">z.ai/manage-apikey/apikey-list</span>.
+            </>
+          }
+        />
       </Card>
 
       <p className="sset__foot">
@@ -343,36 +162,6 @@ export function ModelsSection(): ReactNode {
         same place your shell keeps its own credentials, and it is worth knowing rather than being reassured about.
       </p>
     </Section>
-  )
-}
-
-/* ------------------------------------------------------------ live talk */
-
-/**
- * What a key unlocks for live talk, with the cost of a heavy day, and the way
- * to the Voice page where the brain is picked.
- */
-function LiveTalkUnlocks({ vendor, hasKey }: { vendor: 'gemini' | 'openai'; hasKey: boolean }): ReactNode {
-  const { state, actions } = useApp()
-  const providers = REALTIME_PROVIDERS.filter((p) => p.vendor === vendor)
-  const s = state.settings
-  const picked = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
-  return (
-    <div className="lt-unlocks">
-      <span className="lt-unlocks__label">Live talk</span>
-      {providers.map((p) => (
-        <span key={p.id} className="lt-unlocks__item" data-on={picked === p.id ? 'true' : undefined}>
-          <span className="lt-unlocks__name">{p.label}</span>
-          <span className="lt-unlocks__cost">{p.costNote}</span>
-          <span className="lt-unlocks__state" data-tone={hasKey ? 'ok' : 'need'}>
-            {picked === p.id ? (hasKey ? 'In use' : 'Picked · needs this key') : hasKey ? 'Ready' : 'Needs this key'}
-          </span>
-        </span>
-      ))}
-      <button type="button" className="ghost-btn lt-unlocks__go" onClick={() => actions.setSettingsSection('voice')}>
-        Choose in Voice
-      </button>
-    </div>
   )
 }
 

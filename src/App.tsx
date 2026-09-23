@@ -3,9 +3,7 @@ import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { AccountPrompt } from '@/components/AccountPrompt'
 import { Onboarding } from '@/components/Onboarding'
 import { WhatsNew } from '@/components/WhatsNew'
-import { TasksWorkspace } from '@/components/tasks/TasksWorkspace'
 import { TerminalGrid } from '@/components/TerminalGrid'
-import { DevicePreview } from '@/components/DevicePreview'
 import { TitleBar, useDeckMode, useDeckModes } from '@/components/TitleBar'
 import { StaleBanner } from '@/components/StaleBanner'
 import { UpdateBanner } from '@/components/UpdateBanner'
@@ -32,10 +30,9 @@ import './App.css'
  * The desktop shell: a command deck.
  *
  * One backdrop (the room), a slim top bar (the mark, the mode switcher, the
- * tools), the stage (whatever mode is on — the agents' panes, a registered
- * surface such as the browser beside them, the delegation desk, the device
- * preview), and the dock along the bottom (project, type-or-speak, panes, the
- * voice socket). Settings is a pop-up over all of it: the panes stay live
+ * tools), the stage (whatever mode is on — the agents' panes, or a registered
+ * surface such as the browser beside them), and the dock along the bottom
+ * (project, type-or-speak, panes, the voice socket). Settings is a pop-up over all of it: the panes stay live
  * behind it and Esc puts you back.
  *
  * The terminals never notice any of this. terminalHost owns every xterm, so a
@@ -59,7 +56,7 @@ export function App(): ReactNode {
   useEffect(() => {
     const t = setTimeout(() => terminalHost.fitAll(), 380)
     return () => clearTimeout(t)
-  }, [state.view, state.tasksMaximized, surfaceId])
+  }, [state.view, surfaceId])
 
   /* ------------------------------------------------------------ modes */
 
@@ -71,18 +68,9 @@ export function App(): ReactNode {
       return
     }
     shellSheet.set(null)
-    if (id === 'devices') {
-      shellMode.set(null)
-      actions.openDevices()
-      return
-    }
-    if (state.view === 'devices') actions.closeDevices()
-    if (id === 'tasks') {
-      shellMode.set(null)
-      actions.setTasksMaximized(true)
-      return
-    }
-    if (state.tasksMaximized) actions.setTasksMaximized(false)
+    // Tasks and Devices are gone (round 2): an old "tasks" or "devices" id —
+    // a voice command, a stale shortcut — lands on the agents, like any id
+    // with no surface behind it.
     shellMode.set(id === 'agents' || !surfaces.some((s) => s.id === id) ? null : id)
   }
 
@@ -178,11 +166,7 @@ export function App(): ReactNode {
       <UpdateBanner />
       <StaleBanner />
       <main className="deck__stage" ref={stageRef}>
-        {state.view === 'devices' ? (
-          <DevicePreview />
-        ) : state.tasksMaximized ? (
-          <TasksWorkspace />
-        ) : Surface && surface?.placement === 'full' ? (
+        {Surface && surface?.placement === 'full' ? (
           <div className="deck__full">
             <Surface active />
           </div>

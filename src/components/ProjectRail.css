@@ -383,17 +383,8 @@
  * is not already near.
  */
 .prow__menu,
-.prow__phone {
-  flex: none;
-  width: 22px;
-  height: 22px;
-  opacity: 0;
-}
-
 .prow:hover .prow__menu,
-.prow[data-active='true'] .prow__menu,
-.prow:hover .prow__phone,
-.prow[data-active='true'] .prow__phone {
+.prow[data-active='true'] .prow__menu {
   opacity: 1;
 }
 

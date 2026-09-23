@@ -29,34 +29,136 @@ import './SettingsPage.css'
  * looking at.
  */
 
-const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName; blurb: string }> = [
-  { id: 'account', label: 'Account', icon: 'user', blurb: 'Forge account, name, connections' },
-  { id: 'agents', label: 'Agents', icon: 'terminal', blurb: 'launch profiles' },
-  { id: 'terminal', label: 'Terminal', icon: 'panel', blurb: 'how panes behave' },
-  { id: 'models', label: 'Models & APIs', icon: 'key', blurb: 'keys and brains' },
-  { id: 'voice', label: 'Voice', icon: 'voice', blurb: 'dictation and live talk' },
-  { id: 'shortcuts', label: 'Shortcuts', icon: 'grip', blurb: 'every key, rebindable' },
-  { id: 'foreman', label: 'Foreman', icon: 'foreman', blurb: 'the agent that drives a pane' },
-  { id: 'appearance', label: 'Appearance', icon: 'palette', blurb: 'themes and type' },
-  { id: 'screenshots', label: 'Screenshots', icon: 'camera', blurb: 'the shelf' },
-  { id: 'mobile', label: 'Forge Mobile', icon: 'phone', blurb: 'your terminals, on your phone' },
-  { id: 'web', label: 'Forge Web', icon: 'globe', blurb: 'your terminals, in a browser' },
-  { id: 'alwaysOn', label: 'Always on', icon: 'restart', blurb: 'keep Forge running' },
-  { id: 'remoteYes', label: 'Remote Yes', icon: 'phone', blurb: 'press the admin box from your phone' },
-  { id: 'updates', label: 'Updates & tools', icon: 'restart', blurb: 'CLIs, and Forge itself' },
-  { id: 'advanced', label: 'Advanced', icon: 'gear', blurb: 'paths and versions' }
+/**
+ * Eight groups in the sidebar, in plain words, with Voice & Agent first. Each
+ * group is one scrolling page of one or more parts, and every old section id
+ * is a part — so `openSettings('models')` (the voice agent, the hub's "add a
+ * key" links, onboarding) still lands on the right card, the Keys part of
+ * Agents & CLIs, and nothing that deep-links into Settings had to change.
+ */
+interface Part {
+  id: SettingsSection
+  label: string
+  Body: () => ReactNode
+}
+
+interface Group {
+  id: SettingsSection
+  label: string
+  icon: IconName
+  blurb: string
+  /** The page's own line, when it holds more than one part. */
+  lede?: string
+  parts: Part[]
+}
+
+const GROUPS: Group[] = [
+  {
+    id: 'voice',
+    label: 'Voice & Agent',
+    icon: 'voice',
+    blurb: 'the main agent, dictation, its voice',
+    parts: [{ id: 'voice', label: 'Voice & Agent', Body: VoiceSection }]
+  },
+  {
+    id: 'agents',
+    label: 'Agents & CLIs',
+    icon: 'terminal',
+    blurb: 'profiles, keys, panes, Foreman',
+    lede: 'What runs in the panes: the agents Forge launches, the keys they use, how panes behave, and Foreman.',
+    parts: [
+      { id: 'agents', label: 'Profiles', Body: AgentsSection },
+      { id: 'models', label: 'Keys', Body: ModelsSection },
+      { id: 'terminal', label: 'Panes', Body: TerminalSection },
+      { id: 'foreman', label: 'Foreman', Body: ForemanSection }
+    ]
+  },
+  {
+    id: 'appearance',
+    label: 'Appearance',
+    icon: 'palette',
+    blurb: 'themes, type, the shelf',
+    lede: 'How Forge looks, and the screenshot shelf.',
+    parts: [
+      { id: 'appearance', label: 'Theme & backdrop', Body: AppearanceSection },
+      { id: 'screenshots', label: 'Screenshots', Body: ShotsSection }
+    ]
+  },
+  {
+    id: 'shortcuts',
+    label: 'Shortcuts',
+    icon: 'grip',
+    blurb: 'every key, rebindable',
+    parts: [{ id: 'shortcuts', label: 'Shortcuts', Body: ShortcutsSection }]
+  },
+  {
+    id: 'mobile',
+    label: 'Phone & Web',
+    icon: 'phone',
+    blurb: 'Forge Mobile, Forge Web, remote',
+    lede: 'Your terminals away from this desk: the phone app, the browser, pressing Yes from afar, and keeping Forge up for them.',
+    parts: [
+      { id: 'mobile', label: 'Forge Mobile', Body: MobileSection },
+      { id: 'web', label: 'Forge Web', Body: WebSection },
+      { id: 'remoteYes', label: 'Remote Yes', Body: RemoteYesSection },
+      { id: 'alwaysOn', label: 'Always on', Body: AlwaysOnSection }
+    ]
+  },
+  {
+    id: 'account',
+    label: 'Account',
+    icon: 'user',
+    blurb: 'name, Forge account, connections',
+    parts: [{ id: 'account', label: 'Account', Body: AccountSection }]
+  },
+  {
+    id: 'updates',
+    label: 'Updates',
+    icon: 'restart',
+    blurb: 'CLIs, and Forge itself',
+    parts: [{ id: 'updates', label: 'Updates', Body: UpdatesSection }]
+  },
+  {
+    id: 'advanced',
+    label: 'Advanced',
+    icon: 'gear',
+    blurb: 'paths and versions',
+    parts: [{ id: 'advanced', label: 'Advanced', Body: AdvancedSection }]
+  }
 ]
+
+/** The group a section id lives in. An id nobody knows opens Voice & Agent. */
+function groupOf(section: SettingsSection): Group {
+  return GROUPS.find((g) => g.parts.some((p) => p.id === section)) ?? GROUPS[0]!
+}
+
+const reducedMotion = (): boolean =>
+  document.documentElement.dataset.reducedMotion === 'true' || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+const two = (n: number): string => String(n).padStart(2, '0')
 
 export function SettingsPage(): ReactNode {
   const { state, actions } = useApp()
   const section = state.settingsSection
+  const group = groupOf(section)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const navRef = useRef<HTMLElement | null>(null)
 
-  // A new section starts at the top; nobody wants to arrive in Appearance
-  // scrolled halfway down because Agents was.
+  /** Bring one part to the top of the page; a group's first part is the page's top. */
+  const reveal = (id: SettingsSection, smooth: boolean): void => {
+    const box = scrollRef.current
+    if (!box) return
+    const g = groupOf(id)
+    const el = g.parts[0]?.id === id ? null : box.querySelector<HTMLElement>(`[data-part="${id}"]`)
+    const top = el ? box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - 16 : 0
+    box.scrollTo({ top: Math.max(0, top), behavior: smooth && !reducedMotion() ? 'smooth' : 'auto' })
+  }
+
+  // A new section starts at the top of its part; nobody wants to arrive in
+  // Appearance scrolled halfway down because Agents was.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: 0 })
+    reveal(section, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section])
 
   // Escape leaves — unless a popover or a native colour picker has it first,
@@ -77,12 +179,14 @@ export function SettingsPage(): ReactNode {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
     e.preventDefault()
     e.stopPropagation()
-    const i = SECTIONS.findIndex((s) => s.id === section)
-    const next = e.key === 'ArrowDown' ? (i + 1) % SECTIONS.length : (i - 1 + SECTIONS.length) % SECTIONS.length
-    actions.setSettingsSection(SECTIONS[next]!.id)
+    const i = GROUPS.indexOf(group)
+    const next = e.key === 'ArrowDown' ? (i + 1) % GROUPS.length : (i - 1 + GROUPS.length) % GROUPS.length
+    actions.setSettingsSection(GROUPS[next]!.id)
     const buttons = navRef.current?.querySelectorAll<HTMLButtonElement>('.spage__navbtn')
     buttons?.[next]?.focus()
   }
+
+  const many = group.parts.length > 1
 
   return (
     <div className="spage">
@@ -105,41 +209,61 @@ export function SettingsPage(): ReactNode {
 
       <div className="spage__body">
         <nav className="spage__nav" ref={navRef} aria-label="Settings sections" onKeyDown={onNavKey}>
-          {SECTIONS.map((s) => (
+          {GROUPS.map((g) => (
             <button
-              key={s.id}
+              key={g.id}
               type="button"
               className="spage__navbtn"
-              data-active={s.id === section ? 'true' : undefined}
-              aria-current={s.id === section ? 'page' : undefined}
-              onClick={() => actions.setSettingsSection(s.id)}
+              data-id={g.id}
+              data-active={g === group ? 'true' : undefined}
+              aria-current={g === group ? 'page' : undefined}
+              onClick={() => actions.setSettingsSection(g.id)}
             >
-              <Icon name={s.icon} size={14} className="spage__navicon" />
+              <Icon name={g.icon} size={14} className="spage__navicon" />
               <span className="spage__navtext">
-                <span className="spage__navlabel">{s.label}</span>
-                <span className="spage__navblurb">{s.blurb}</span>
+                <span className="spage__navlabel">{g.label}</span>
+                <span className="spage__navblurb">{g.blurb}</span>
               </span>
             </button>
           ))}
         </nav>
 
         <div className="spage__content" ref={scrollRef}>
-          <div className="spage__column">
-            {section === 'account' ? <AccountSection /> : null}
-            {section === 'agents' ? <AgentsSection /> : null}
-            {section === 'terminal' ? <TerminalSection /> : null}
-            {section === 'models' ? <ModelsSection /> : null}
-            {section === 'voice' ? <VoiceSection /> : null}
-            {section === 'shortcuts' ? <ShortcutsSection /> : null}
-            {section === 'foreman' ? <ForemanSection /> : null}
-            {section === 'appearance' ? <AppearanceSection /> : null}
-            {section === 'screenshots' ? <ShotsSection /> : null}
-            {section === 'mobile' ? <MobileSection /> : null}
-            {section === 'web' ? <WebSection /> : null}
-            {section === 'alwaysOn' ? <AlwaysOnSection /> : null}
-            {section === 'remoteYes' ? <RemoteYesSection /> : null}
-            {section === 'updates' ? <UpdatesSection /> : null}
-            {section === 'advanced' ? <AdvancedSection /> : null}
+          <div className="spage__column" key={group.id}>
+            {many ? (
+              <div className="sgroup">
+                <header className="sgroup__head">
+                  <h2 className="sgroup__title">{group.label}</h2>
+                  {group.lede ? <p className="sgroup__lede">{group.lede}</p> : null}
+                  <div className="sgroup__jump" role="group" aria-label={`Parts of ${group.label}`}>
+                    {group.parts.map((p, i) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="sgroup__chip"
+                        onClick={() => {
+                          if (p.id === section) reveal(p.id, true)
+                          else actions.setSettingsSection(p.id)
+                        }}
+                      >
+                        <span className="sgroup__chipnum mono">{two(i + 1)}</span>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </header>
+                {group.parts.map((p, i) => (
+                  <div key={p.id} className="sgroup__part" data-part={p.id}>
+                    <span className="sgroup__num mono" aria-hidden="true">
+                      {two(i + 1)} / {two(group.parts.length)}
+                    </span>
+                    <p.Body />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              group.parts.map((p) => <p.Body key={p.id} />)
+            )}
           </div>
         </div>
       </div>

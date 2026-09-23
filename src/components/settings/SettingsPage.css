@@ -165,9 +165,11 @@
 
 .sset__title {
   margin: 0 0 var(--s-2);
-  font-size: var(--t-display);
+  font-family: var(--font-display);
+  font-size: 26px;
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
 }
 
 .sset__blurb {
@@ -1780,16 +1782,7 @@
   border-radius: var(--r-md);
 }
 
-/* B7: the Agent brain tiles each carry a Test button; results are words first. */
-.lt-tilewrap {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-.lt-tilewrap > .lt-tile {
-  flex: 1;
-}
+/* B7: a key's Test button; results are words first. */
 .brain-test {
   display: inline-flex;
   align-items: center;
@@ -1805,4 +1798,102 @@
 }
 .brain-test__result[data-ok='false'] {
   font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ group
+ *
+ * A sidebar entry that holds several parts (Agents & CLIs, Phone & Web,
+ * Appearance) reads as one page: the group's name in the display face, one
+ * line on what it holds, and numbered chips that jump to each part. Each part
+ * keeps its own heading one step down, under a "02 / 04" register mark.
+ */
+
+.sgroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-10);
+}
+
+.sgroup__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding-bottom: var(--s-6);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.sgroup__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+}
+
+.sgroup__lede {
+  margin: 0;
+  max-width: 62ch;
+  font-size: var(--t-md);
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.sgroup__jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+}
+
+.sgroup__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-hairline);
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  font-size: var(--t-sm);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.sgroup__chip:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-line);
+  background: var(--accent-softer);
+}
+
+.sgroup__chipnum {
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+}
+
+.sgroup__chip:hover .sgroup__chipnum {
+  color: var(--accent);
+}
+
+.sgroup__part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  scroll-margin-top: var(--s-6);
+}
+
+.sgroup__num {
+  font-size: var(--t-xs);
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.sgroup__part .sset__title {
+  font-family: var(--font-display);
+  font-size: var(--t-xl);
+  letter-spacing: 0.01em;
 }

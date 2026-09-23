@@ -57,7 +57,7 @@ export function AgentsSection(): ReactNode {
 
   return (
     <Section
-      title="Agents"
+      title="Profiles"
       blurb="Every pane is a real PowerShell. A profile just decides what gets typed into it — which is why the prompt is still there when an agent exits."
     >
       <Card

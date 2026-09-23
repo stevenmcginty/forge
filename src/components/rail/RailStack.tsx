@@ -1,25 +1,20 @@
 import { useEffect, type ReactNode } from 'react'
-import { RAIL_SECTION_MIN_H } from '@shared/rail'
 import type { RailSectionId } from '@shared/types'
 import { isOpen, showsDiscoveryHint, toggleOpen, visibleSections } from '@/lib/railstack'
 import { useApp } from '@/state/AppState'
 import { Icon, type IconName } from '../Icon'
 import { ProjectRail } from '../ProjectRail'
-import { TasksPanel } from '../tasks/TasksPanel'
 import { RailSection } from './RailSection'
 import { GitSection } from './GitSection'
 import { ActivitySection } from './ActivitySection'
 import { ShareSection } from './ShareSection'
 import './RailStack.css'
 
-/** The tasks dock's old localStorage height, folded into settings once. */
-const LEGACY_DOCK_KEY = 'forge:tasksDockHeight'
-
 /**
  * The left rail, as a stack of sections.
  *
- * App.tsx used to hard-code the two things this replaces — `<ProjectRail/>` then
- * `<TasksPanel/>` — which was fine while there were two of them and stopped
+ * App.tsx used to hard-code the two things this replaced — the project list
+ * then the tasks dock (removed in round 2) — which was fine while there were two of them and stopped
  * being fine at four. Order, which sections exist, which are open and how tall
  * each one is are now all answers this component looks up rather than facts
  * spread across four files.
@@ -32,28 +27,10 @@ const LEGACY_DOCK_KEY = 'forge:tasksDockHeight'
 export function RailStack(): ReactNode {
   const { state, actions } = useApp()
   const collapsed = state.settings.railCollapsed
-  const sections = visibleSections(state.settings)
-
-  /*
-   * -------------------------------------------------------------- migration
-   *
-   * The dock's height used to live in localStorage under its own key, set by a
-   * drag handle TasksPanel owned. It lives in Settings now, with the other three
-   * sections' heights. Without this, everyone who has ever dragged the dock
-   * taller gets it silently reset to the default on the update that ships this —
-   * a small thing, but the kind of small thing that reads as the app forgetting.
-   *
-   * Runs once, only when Settings has no height of its own to contradict. The
-   * old key is left alone rather than deleted: it costs nothing, and removing it
-   * would make rolling back to a previous build lose the height a second time.
-   */
-  useEffect(() => {
-    if (!state.ready) return
-    if (state.settings.railHeights.tasks !== undefined) return
-    const raw = Number(localStorage.getItem(LEGACY_DOCK_KEY))
-    if (!Number.isFinite(raw) || raw < RAIL_SECTION_MIN_H) return
-    actions.setRailHeight('tasks', raw)
-  }, [state.ready])
+  // Tasks is gone from the desktop (round 2). Its id stays in the shared rail
+  // order and in settings.json (railTasks, railHeights.tasks), so an old
+  // profile loads unchanged; it just never draws.
+  const sections: RailSectionId[] = visibleSections(state.settings).filter((id) => id !== 'tasks')
 
   /*
    * A section that has just been switched off in Appearance cannot go on being
@@ -128,8 +105,6 @@ function StackedSection({ id }: { id: RailSectionId }): ReactNode {
   switch (id) {
     case 'projects':
       return <ProjectRail />
-    case 'tasks':
-      return <TasksPanel />
     case 'git':
       return <GitSection />
     case 'activity':
@@ -144,10 +119,9 @@ function StackedSection({ id }: { id: RailSectionId }): ReactNode {
 /* ------------------------------------------------------------- the 56px rail
  *
  * Collapsed, a section is one button: it opens the rail and opens itself. The
- * two original sections keep the marks they have always had — the project dots
- * with their working rings, the tasks pip with its count — because those are
- * already learned, and swapping them for a uniform icon strip would be tidier
- * and worse. The later ones get a glyph each and follow the same vocabulary.
+ * project list keeps the mark it has always had — the project dots with their
+ * working rings — because it is already learned, and swapping it for a uniform
+ * icon strip would be tidier and worse. The others get a glyph each.
  */
 
 /**
@@ -166,12 +140,11 @@ function CollapsedSection({ id }: { id: RailSectionId }): ReactNode {
   const { state, actions } = useApp()
 
   /*
-   * Projects and Tasks draw their own collapsed forms — ProjectRail's dot column
-   * is the rail when it is narrow, and it would be strange for it to become a
-   * button that reveals itself. They render as they always have.
+   * Projects draws its own collapsed form — ProjectRail's dot column is the
+   * rail when it is narrow, and it would be strange for it to become a button
+   * that reveals itself. It renders as it always has.
    */
   if (id === 'projects') return <ProjectRail />
-  if (id === 'tasks') return <TasksPanel />
 
   const pip = COLLAPSED[id]
   if (!pip) return null

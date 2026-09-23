@@ -4,18 +4,17 @@ import { useApp } from '@/state/AppState'
 import { Card, Row, Section, Toggle } from './parts'
 
 /**
- * How panes behave.
+ * How panes behave, and what the agents in them may reach.
  *
- * One setting today — whether a finished terminal says so. It has its own page
- * rather than a row on Voice's because this is not a voice thing: it is a
- * "did the thing you were waiting on end" thing, and that is about panes.
+ * Whether a finished terminal says so, and whether the agents Forge launches
+ * may drive a browser other than Forge's own. Both are about panes, not voice.
  */
 export function TerminalSection(): ReactNode {
   const { state, actions } = useApp()
   const s = state.settings
 
   return (
-    <Section title="Terminal" blurb="How panes behave.">
+    <Section title="Panes" blurb="How panes behave, and what the agents in them may reach.">
       <Card title="Completion sound">
         <Row
           label="Chime when a terminal finishes"
@@ -28,6 +27,18 @@ export function TerminalSection(): ReactNode {
               if (on) earconTaskDone()
             }}
             label="Chime when a terminal finishes"
+          />
+        </Row>
+      </Card>
+      <Card title="Browsing">
+        <Row
+          label="Agents use Forge’s browser only"
+          hint="Claude panes Forge opens cannot use Claude-in-Chrome, Playwright or other browser tools; web work goes to Forge’s built-in browser. Takes effect for new panes."
+        >
+          <Toggle
+            checked={s.agentsForgeBrowserOnly}
+            onChange={(on) => actions.patchSettings({ agentsForgeBrowserOnly: on })}
+            label="Agents use Forge’s browser only"
           />
         </Row>
       </Card>

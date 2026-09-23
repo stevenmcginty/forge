@@ -30,7 +30,7 @@ export function AppearanceSection(): ReactNode {
 
   return (
     <Section
-      title="Appearance"
+      title="Theme & backdrop"
       blurb="One theme drives the whole app, terminals included; the backdrop is the room the panes sit in."
     >
       <BackdropCard />
@@ -125,16 +125,6 @@ export function AppearanceSection(): ReactNode {
         title="Project sheet"
         hint="Which sections the dock’s project sheet carries under the project list (they were the left rail). Each one still collapses in place."
       >
-        <Row
-          label="Tasks"
-          hint="The delegation dock: state a goal, get cards back, drag them onto agents. Turning it off hides the panel — it does not touch the planner session, which belongs to the project."
-        >
-          <Toggle
-            checked={s.railTasks}
-            onChange={(on) => actions.patchSettings({ railTasks: on })}
-            label="Tasks"
-          />
-        </Row>
         <Row
           label="Git"
           hint="Branch, what has changed, and whether it is pushed. Reads only — the few buttons that change anything are named, and everything harder is handed to an agent. A folder with no repository simply says so."

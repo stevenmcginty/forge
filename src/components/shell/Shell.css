@@ -28,10 +28,8 @@
   min-width: 0;
 }
 
-/* The views that used to take the whole main area (devices, the delegation
-   desk) are framed like a pane on the deck, so the backdrop stays the room. */
-.deck__stage > .devices,
-.deck__stage > .tasks-ws,
+/* A surface that takes the whole stage is framed like a pane on the deck, so
+   the backdrop stays the room. */
 .deck__full {
   border-radius: var(--r-pane);
   overflow: hidden;

@@ -1,8 +1,9 @@
 /**
  * The Devices preview, in its testable half.
  *
- * The view itself (src/components/DevicePreview.tsx) is chrome and sequencing;
- * everything decidable without a DOM lives here, which is where the check
+ * The view itself was removed in round 2 (the built-in browser replaces it).
+ * This half stays: AppState still imports `confirmProjectServer`. Everything
+ * decidable without a DOM lived here, which is where the check
  * script looks (scripts/preview-check.mjs) and where the two load-bearing
  * invariants of the whole feature are written down.
  *

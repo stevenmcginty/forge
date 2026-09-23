@@ -200,11 +200,19 @@ export function elapsed(since: number | null, now: number): string {
 
 /**
  * A provider error in a few words — "Gemini: key refused", "Gemini: free-tier
- * limit (429)" — for the pill. The full text stays one click away.
+ * limit (429)", "Codex: not installed" — for the pill. The full text stays one
+ * click away. Only a fallback: the engine's own `hub.errorReason` wins.
+ *
+ * `brain` is the brain's own name (hub.brainLabel). A session brain such as
+ * Codex or the Gemini CLI reports through the Claude provider slot, so without
+ * it a Codex failure would be blamed on Claude.
  */
-export function errorReason(provider: VoiceHubProvider, raw: string | null | undefined): string {
+export function errorReason(provider: VoiceHubProvider, raw: string | null | undefined, brain?: string | null): string {
   const text = (raw ?? '').trim()
-  const who = /gemini/i.test(text)
+  const named = brain && !/^claude\b/i.test(brain) ? brain.replace(/\s*\(.*\)\s*$/, '') : null
+  const who = named
+    ? named
+    : /gemini/i.test(text)
     ? 'Gemini'
     : /openai|gpt/i.test(text)
       ? 'OpenAI'
@@ -219,7 +227,7 @@ export function errorReason(provider: VoiceHubProvider, raw: string | null | und
     : /\b40[13]\b|refused|api key not valid|invalid.{0,12}key|unauthori[sz]ed|permission denied/i.test(text)
       ? 'key refused'
       : /\b429\b|quota|rate.?limit|resource.?exhausted|too many requests/i.test(text)
-        ? who === 'Gemini'
+        ? /^gemini/i.test(who)
           ? 'free-tier limit (429)'
           : 'rate limit (429)'
         : /\b100[78]\b|setup|invalid argument|not supported|unsupported|model .{0,40}not found|\b400\b/i.test(text)
@@ -230,7 +238,11 @@ export function errorReason(provider: VoiceHubProvider, raw: string | null | und
               ? 'mic blocked'
               : /closed the connection|disconnected/i.test(text)
                 ? 'connection closed'
-                : text.replace(/^(gemini|openai)[^:]*:\s*/i, '').split(/[.—\n]/)[0]!.slice(0, 36).trim() || 'failed'
+                : /not logged in|not signed in|unauthenticated|\/login/i.test(text)
+                  ? 'not logged in'
+                  : /not found|not installed|enoent|no such file/i.test(text)
+                    ? 'not installed'
+                    : text.replace(/^[a-z][\w .-]{0,24}:\s*/i, '').split(/[.—\n]/)[0]!.slice(0, 36).trim() || 'failed'
   return `${who}: ${why}`
 }
 
@@ -294,7 +306,7 @@ export function voiceState(mode: 'dictate' | 'agent', hub: HubView, d: Dictation
   if (mode === 'dictate') return dictationState(d)
   const phase = hub.phase
   if (phase === 'error') {
-    return { look: 'error', glyph: '!', word: hub.errorReason ?? errorReason(hub.provider, hub.error), micOn: false, recording: false }
+    return { look: 'error', glyph: '!', word: hub.errorReason ?? errorReason(hub.provider, hub.error, hub.brainLabel), micOn: false, recording: false }
   }
   if (phase === 'thinking' || phase === 'speaking') {
     return { look: phase, glyph: LOOK_GLYPH[phase], word: LOOK_WORD[phase], micOn: phase === 'speaking' ? false : !hub.muted, recording: false }

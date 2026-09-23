@@ -74,30 +74,25 @@ export interface DeckMode {
   title: string
 }
 
-/** The modes, in switcher order: the three built in, then every registered surface. */
+/** The modes, in switcher order: Agents, then every registered surface. */
 export function useDeckModes(): DeckMode[] {
   const surfaces = useSurfaces()
   return [
     { id: 'agents', title: 'Agents' },
     ...[...surfaces]
       .sort((a, b) => (a.order ?? 50) - (b.order ?? 50))
-      .map((s) => ({ id: s.id, title: s.title })),
-    { id: 'tasks', title: 'Tasks' },
-    { id: 'devices', title: 'Devices' }
+      .map((s) => ({ id: s.id, title: s.title }))
   ]
 }
 
 /** Which mode is on screen. Settings is a pop-up over a mode, not a mode. */
 export function useDeckMode(): string {
-  const { state } = useApp()
   const surface = useShellMode()
-  if (state.view === 'devices') return 'devices'
-  if (state.tasksMaximized) return 'tasks'
   return surface ?? 'agents'
 }
 
 /**
- * Agents, the browser, the board, tasks, devices — one keystroke or one
+ * Agents, the browser, the board — one keystroke or one
  * click apart, with a lit capsule that glides between them. The capsule is a
  * single element moved by transform, measured off the button it lands on.
  */
