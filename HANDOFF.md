@@ -15,4 +15,10 @@
   - `RealtimeSession` (`src/lib/realtime/session.ts`) already fits.
   - The blockers are the per-id switches in `VoiceHubController.createSession` and `electron/agent-brain-test.ts`, the vendor facts centralised in `shared/realtime.ts`, and the vendor voice lists and copy in the Settings UI.
   - The `realtime:check` and `brain-adapters:check` scripts are not in `scripts/run-checks.mjs`.
-- **Blocked:** another session has many uncommitted edits in `src/lib/realtime/*`, the tools and `VoiceAgent.tsx`. Phase two waits until those land.
+- **Unblocked:** the other session committed its realtime and tool edits (372265c). Phase two can start.
+
+## Listen switch redesign (done, f4f6c7a)
+
+- `ListenToggle` in `src/components/hub/VoicePill.tsx/.css`: off is a hollow knob, on is a lit track, and the knob mark shows the phase. Steve chose to ship it as is.
+- **Known and accepted:** in the muted and starting states the knob edge is below 3:1 contrast.
+- **Check at restart:** the live Waveform, the animations, and the four themes that were not previewed.
