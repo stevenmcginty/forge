@@ -31,8 +31,10 @@ const SEED_MAX_GROW_PX = 92
  *
  * ## On a phone
  *
- * One calm 52px row whose furniture never changes with the pane: the menu and
- * the project (one button, which opens the drawer), then the "N waiting" pill
+ * One calm 52px row whose furniture never changes with the pane: the project
+ * switcher (one chip — folder, a small "Project" label over the name, and a ⌄ —
+ * that opens the drawer, shaped like a dropdown so it reads as tappable
+ * without a bare glyph to decode), then the "N waiting" pill
  * when something is, the live dot (a real button, which opens the connection
  * sheet), and "⋯". Everything the desktop bar says in glyphs (Foreman, hand
  * off, the screen, alerts, sign out) is a labelled row in the ⋯ sheet instead,
@@ -200,11 +202,19 @@ export function TopBar({
             data-testid="phone-projects"
           >
             <span className="ptop__menu waitbadge-host">
-              <Icon name="panel" size={20} />
+              <Icon name="folder" size={20} />
               {offline ? null : <WaitingBadge />}
             </span>
-            {project ? <span className="ptop__dot" style={{ background: project.color }} aria-hidden="true" /> : null}
-            <span className="ptop__name">{project?.name ?? 'Forge'}</span>
+            <span className="ptop__label" aria-hidden="true">
+              <span className="ptop__kicker">Project</span>
+              <span className="ptop__title">
+                {project ? <span className="ptop__dot" style={{ background: project.color }} /> : null}
+                <span className="ptop__name">{project?.name ?? 'Pick a project'}</span>
+              </span>
+            </span>
+            <span className="ptop__chev" aria-hidden="true">
+              <Icon name="chevronDown" size={16} />
+            </span>
           </button>
 
           <div className="ptop__right">
