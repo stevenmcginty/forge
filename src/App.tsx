@@ -21,7 +21,7 @@ import { HUB_FOCUS_EVENT, type HubFocusDetail } from '@/lib/hubnav'
 import { fadeIn, useFlipChildren } from '@/lib/motion'
 import { shellMode, shellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
-import { useUiCommand } from '@/lib/uiCommands'
+import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { useActiveProject, useApp, type SettingsSection } from '@/state/AppState'
 import '@/components/shell/deck-tokens.css'
 import '@/components/shell/Shell.css'
@@ -65,6 +65,11 @@ export function App(): ReactNode {
 
   const setMode = (id: string | undefined): void => {
     if (!id) return
+    // There is no Talk page: the bar is where you talk to Forge.
+    if (id === 'talk') {
+      uiCommands.run('focus-composer')
+      return
+    }
     shellSheet.set(null)
     if (id === 'devices') {
       shellMode.set(null)
@@ -198,7 +203,7 @@ export function App(): ReactNode {
       <DeckToast />
       <SettingsPopup />
       {/*
-        The voice hub's UI: the dock's voice pill, the Board and Talk surfaces,
+        The voice hub's UI: the dock's voice pill, the Board surface,
         the arrival beacon and the cheat sheet. It replaces the old floating
         VoiceHub card and the always-on-top overlay orb, which are no longer
         mounted. The engine itself is headless, in the providers at the root.

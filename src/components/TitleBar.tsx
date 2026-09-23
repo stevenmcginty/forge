@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { shellSheet, tabsHost, useShellSheet, useShellMode, useSurfaces, viewHost } from '@/lib/shellSlots'
+import { shellSheet, tabsHost, useHost, useShellSheet, useShellMode, useSurfaces, viewHost } from '@/lib/shellSlots'
+import { collectLeaves } from '@/lib/splitTree'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
-import { useApp } from '@/state/AppState'
+import { useActiveWorkspace, useApp } from '@/state/AppState'
 import { AccountChip } from './AccountChip'
 import { Icon } from './Icon'
 import { Popover } from './Popover'
@@ -11,10 +12,12 @@ import './shell/DeckBar.css'
 /**
  * The deck's one top layer: the mark and the agents' tabs on the left, the
  * mode switcher in the middle, the Tabs/Canvas switch, the tucked-away tools
- * and settings on the right. Transparent over the
- * backdrop — the window is draggable anywhere along it — with the native
- * minimise/maximise/close buttons drawn by Windows into the reserved gap on the
- * far right (titleBarOverlay), never re-implemented here.
+ * and settings on the right. Three grid columns, so the three can never
+ * collide: however many tabs there are, they scroll inside their own column
+ * (fading at the cut edge) and a "3 more" chip lists the ones out of sight.
+ * Transparent over the backdrop — the window is draggable anywhere along it —
+ * with the native minimise/maximise/close buttons drawn by Windows into the
+ * reserved gap on the far right (titleBarOverlay), never re-implemented here.
  *
  * (Forge Web keeps its own top bar and still reads TitleBar.css; this bar's
  * styles are its own, in shell/DeckBar.css.)
@@ -24,7 +27,6 @@ export function TitleBar(): ReactNode {
   const [focused, setFocused] = useState(true)
   const inSettings = state.view === 'settings'
   const isDevChannel = state.info?.channel === 'dev'
-  const hubOpen = state.settings.voiceHub.mode === 'expanded'
 
   useEffect(() => window.forge.window.onState((s) => setFocused(s.focused)), [])
 
@@ -38,6 +40,7 @@ export function TitleBar(): ReactNode {
         {isDevChannel ? <span className="deckbar__channel">DEV</span> : null}
         {/* The agents' tabs, portalled in by TerminalGrid (see tabsHost). */}
         <div className="deckbar__tabs" ref={tabsHost.set} />
+        <TabOverflow />
       </div>
 
       <ModePill />
@@ -49,17 +52,6 @@ export function TitleBar(): ReactNode {
         <button
           type="button"
           className="deckbar__btn"
-          title={hubOpen ? 'Close the voice hub (Ctrl+Shift+G)' : 'Open the voice hub (Ctrl+Shift+G)'}
-          aria-label="Voice hub"
-          aria-pressed={hubOpen}
-          data-on={hubOpen ? 'true' : undefined}
-          onClick={() => actions.toggleVoiceHubCard()}
-        >
-          <Icon name="expand" size={15} />
-        </button>
-        <button
-          type="button"
-          className="deckbar__btn"
           title={inSettings ? 'Close settings (Esc)' : 'Settings (Ctrl+,)'}
           aria-label="Settings"
           aria-pressed={inSettings}
@@ -68,10 +60,9 @@ export function TitleBar(): ReactNode {
         >
           <Icon name="gear" size={15} />
         </button>
+        {/* Reserved for the native window controls (3 × 46px on Windows 11). */}
+        <div className="deckbar__controls-gap" />
       </div>
-
-      {/* Reserved for the native window controls (3 × 46px on Windows 11). */}
-      <div className="deckbar__controls-gap" />
     </header>
   )
 }
@@ -106,7 +97,7 @@ export function useDeckMode(): string {
 }
 
 /**
- * Agents, the browser, the board, talk, tasks, devices — one keystroke or one
+ * Agents, the browser, the board, tasks, devices — one keystroke or one
  * click apart, with a lit capsule that glides between them. The capsule is a
  * single element moved by transform, measured off the button it lands on.
  */
@@ -148,6 +139,165 @@ function ModePill(): ReactNode {
         </button>
       ))}
     </nav>
+  )
+}
+
+/* ------------------------------------------------------------ tab overflow */
+
+/**
+ * More tabs than the left column holds: they scroll sideways (the wheel works
+ * too), each cut edge fades, the active tab is always scrolled into view, and
+ * a chip counts the ones out of sight — "3 more" — and lists every tab.
+ */
+function TabOverflow(): ReactNode {
+  const { actions } = useApp()
+  const workspace = useActiveWorkspace()
+  const host = useHost(tabsHost)
+  const chipRef = useRef<HTMLButtonElement | null>(null)
+  const [hidden, setHidden] = useState<number[]>([])
+  const [open, setOpen] = useState(false)
+  const tabs = workspace.tabs
+  const activeId = workspace.activeTabId
+  const activeRef = useRef(activeId)
+  activeRef.current = activeId
+  const remeasure = useRef<() => void>(() => undefined)
+
+  useEffect(() => {
+    if (!host) return undefined
+    let raf = 0
+    let scroller: HTMLElement | null = null
+    /** The tab id last scrolled into view. */
+    let shownFor: string | null = null
+    /** Layout moved (a resize, a tab added, a font landing): check the active tab again. */
+    let ensure = true
+    const FADE = 34
+    const measure = (): void => {
+      raf = 0
+      scroller = host.querySelector<HTMLElement>('.tabstrip__tabs')
+      if (!scroller) {
+        setHidden((prev) => (prev.length ? [] : prev))
+        return
+      }
+      // The tab you are on is never the one out of sight, nor under a fade.
+      const active = scroller.querySelector<HTMLElement>('.tab[data-active="true"]')
+      if (active && (ensure || shownFor !== activeRef.current)) {
+        const first = shownFor === null || shownFor === activeRef.current
+        shownFor = activeRef.current
+        const b = scroller.getBoundingClientRect()
+        const r = active.getBoundingClientRect()
+        let left = scroller.scrollLeft
+        if (r.left - b.left < FADE) left += r.left - b.left - FADE
+        else if (b.right - r.right < FADE) left += r.right - b.right + FADE
+        if (Math.round(left) !== Math.round(scroller.scrollLeft)) {
+          scroller.scrollTo({ left: Math.max(0, left), behavior: first ? 'auto' : 'smooth' })
+        }
+      }
+      ensure = false
+      const box = scroller.getBoundingClientRect()
+      const out: number[] = []
+      scroller.querySelectorAll<HTMLElement>('.tab').forEach((el, i) => {
+        resize.observe(el)
+        const r = el.getBoundingClientRect()
+        // Out of sight: less than half of it shows.
+        const seen = Math.min(r.right, box.right) - Math.max(r.left, box.left)
+        if (seen < r.width / 2) out.push(i)
+      })
+      setHidden((prev) => (prev.join() === out.join() ? prev : out))
+      host.toggleAttribute('data-fade-start', scroller.scrollLeft > 1)
+      host.toggleAttribute('data-fade-end', scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1)
+    }
+    const later = (relayout = true): void => {
+      if (relayout) ensure = true
+      if (!raf) raf = requestAnimationFrame(measure)
+    }
+    // Scrolling by hand is his: it re-measures without pulling the active tab back.
+    const onScroll = (): void => later(false)
+    // A mouse wheel over the tabs scrolls them sideways.
+    const onWheel = (e: WheelEvent): void => {
+      const el = (e.target as HTMLElement | null)?.closest<HTMLElement>('.tabstrip__tabs')
+      if (!el || Math.abs(e.deltaX) > Math.abs(e.deltaY) || el.scrollWidth <= el.clientWidth) return
+      el.scrollLeft += e.deltaY
+      e.preventDefault()
+    }
+    const resize = new ResizeObserver(() => later())
+    const mutate = new MutationObserver(() => {
+      const next = host.querySelector<HTMLElement>('.tabstrip__tabs')
+      if (next && next !== scroller) resize.observe(next)
+      later()
+    })
+    resize.observe(host)
+    mutate.observe(host, { childList: true, subtree: true })
+    host.addEventListener('scroll', onScroll, true)
+    host.addEventListener('wheel', onWheel, { passive: false })
+    const first = host.querySelector<HTMLElement>('.tabstrip__tabs')
+    if (first) resize.observe(first)
+    remeasure.current = later
+    later()
+    return () => {
+      remeasure.current = () => undefined
+      if (raf) cancelAnimationFrame(raf)
+      resize.disconnect()
+      mutate.disconnect()
+      host.removeEventListener('scroll', onScroll, true)
+      host.removeEventListener('wheel', onWheel)
+    }
+  }, [host])
+
+  useEffect(() => remeasure.current(), [activeId, tabs.length])
+
+  if (hidden.length === 0 && !open) return null
+
+  return (
+    <>
+      <button
+        ref={chipRef}
+        type="button"
+        className="deckbar__more"
+        data-open={open ? 'true' : undefined}
+        aria-expanded={open}
+        title={`${hidden.length} tab${hidden.length === 1 ? '' : 's'} out of sight — click for every tab`}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {hidden.length} more
+        <span aria-hidden="true" className="deckbar__more-chev">
+          ▾
+        </span>
+      </button>
+      <Popover anchor={chipRef.current} open={open} onClose={() => setOpen(false)} align="start" width={300} label="Every tab">
+        <div className="deckbar__tablist" data-shell-overlay="" role="listbox" aria-label="Tabs">
+          <div className="deckbar__tablist-head">
+            <span>Tabs</span>
+            <span className="mono">{tabs.length}</span>
+          </div>
+          {tabs.map((t, i) => {
+            const panes = collectLeaves(t.root).length
+            const here = t.id === activeId
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="option"
+                aria-selected={here}
+                className="deckbar__tabrow"
+                data-here={here ? 'true' : undefined}
+                data-hidden={hidden.includes(i) ? 'true' : undefined}
+                onClick={() => {
+                  setOpen(false)
+                  actions.selectTab(t.id)
+                }}
+              >
+                <span className="deckbar__tabrow-num mono">{i + 1}</span>
+                <span className="deckbar__tabrow-name truncate">{t.title}</span>
+                <span className="deckbar__tabrow-meta">
+                  {panes} {panes === 1 ? 'pane' : 'panes'}
+                </span>
+                {here ? <span className="deckbar__tabrow-here">here</span> : null}
+              </button>
+            )
+          })}
+        </div>
+      </Popover>
+    </>
   )
 }
 

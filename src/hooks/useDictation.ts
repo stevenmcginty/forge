@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isSttSetupError, type SttStatus } from '@shared/types'
+import { agentVoiceNow } from '@/components/hub/barMode'
 import { insertPhrase, resolveInsertTarget, type InsertTarget } from '@/lib/dictation'
 import { earconDictationOff, earconDictationOn } from '@/lib/earcon'
 import {
@@ -126,6 +127,8 @@ export function useDictationEngine(): Dictation {
         dictationTranscript.push(text)
         return
       }
+      // The bar's Agent mode: the main agent is asked, nothing is typed.
+      if (agentVoiceNow()?.phrase(text)) return
       // Prefer where focus is *now*; fall back to where it was when the user
       // started talking, because clicking the pill moved it.
       let target = resolveInsertTarget(activePaneRef.current)
@@ -239,6 +242,11 @@ export function useDictationEngine(): Dictation {
       }
       return
     }
+
+    // The bar's Agent mode: a live provider takes the key for its own session.
+    // A dictation already open still stops the ordinary way.
+    const busy = phaseRef.current === 'listening' || phaseRef.current === 'finishing'
+    if (!busy && agentVoiceNow()?.key(intent)) return
 
     if (intent === 'ptt-end') {
       if (phaseRef.current === 'listening') void window.forge.stt.stop()

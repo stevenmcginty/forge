@@ -6,7 +6,7 @@ import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { HUB_COMPOSER_EVENT, type HubComposerDetail } from '@/lib/hubnav'
 import { runSavedPrompt } from '@/lib/hubRuntime'
 import { fireComet, usePresence } from '@/lib/motion'
-import { composerRouteNow, useShellMode } from '@/lib/shellSlots'
+import { composerRouteNow } from '@/lib/shellSlots'
 import { findLeaf } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
 import { useUiCommand } from '@/lib/uiCommands'
@@ -16,25 +16,29 @@ import type { HubAction, HubCaption } from '@/state/VoiceHubController'
 import { DictationSetup } from '../DictationSetup'
 import { Icon } from '../Icon'
 import { Popover } from '../Popover'
-import { toggleSheet } from '../shell/Sheet'
-import { ACTION_GLYPH, isLive, PROVIDER_SHORT, setComposerAim, useComposerAim, useHubPreview, useHubView } from './hubView'
+import { setBarTarget, useBarMode, useBarTarget } from './barMode'
+import { ACTION_GLYPH, brainWord, hubAsk, isLive, useHubPreview, useHubView, voiceState, type DictationLike } from './hubView'
 import { KeyRecorder, Keys } from './KeyRecorder'
 import './Composer.css'
 
 /**
- * The composer: the one bar at the bottom that is both type and speak — and
- * the palette.
+ * The composer: the main agent's bar — type, speak, and the palette.
  *
- *   type        Enter sends to the pane you are in, the keystrokes a hand at
- *               that prompt would make (unchanged from the dock's first cut).
- *   dictate     the mic, or the talk key, opens Parakeet. Pressed here, the
- *               bar takes the words: each phrase lands in the field as it is
- *               transcribed, so you can read and fix it, then Send or Cancel.
- *               The talk key pressed in a pane still dictates into that pane.
- *   live        with live talk on, what you type goes to the voice brain (one
- *               click on the target chip points it back at the pane), its
- *               captions rise above the bar and fade, and a short trail says
- *               what it just did.
+ *   target      where Enter sends. Forge (the default, "Ask Forge…") is the
+ *               main agent, which knows the whole app and acts inside it. One
+ *               click on the chip aims at the pane you are in instead ("→
+ *               Everest"), typed as a hand at that prompt would; Esc in the
+ *               bar comes back to Forge.
+ *   mic mode    one mic, and beside it the Dictate / Agent switch
+ *               (Ctrl+Shift+L, remembered; the Right Ctrl talk key follows it).
+ *                 Dictate  Parakeet words, raw. Aimed at Forge they land in
+ *                          the bar to be read and fixed; aimed at a pane they
+ *                          go straight into it.
+ *                 Agent    the main agent hears it — Gemini Live or GPT on
+ *                          their live session, Claude through Parakeet.
+ *   replies     what Forge says rises above the bar with a trail of what it
+ *               did ("✓ Opened Codex pane · ✓ Typed into Everest"), which opens
+ *               into the full list.
  *   palette     "/" (or Ctrl+K) turns the bar into the palette: saved prompts
  *               and every command, each with its keys. Ctrl+S saves the text
  *               in the bar as a new prompt.
@@ -56,15 +60,16 @@ type PaletteItem =
   | { kind: 'prompt'; key: string; prompt: SavedPrompt }
   | { kind: 'command'; key: string; id: string; title: string; group: string; keys: string[] }
 
+const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
+
 export function Composer(): ReactNode {
   const { state, actions } = useApp()
   const tab = useActiveTab()
   const dictation = useDictation()
   const hub = useHubView()
   const preview = useHubPreview()
-  const aim = useComposerAim()
-  // The Talk view shows the whole conversation; the rail would only repeat it.
-  const onTalk = useShellMode() === 'talk'
+  const mode = useBarMode()
+  const target = useBarTarget()
   const [text, setText] = useState('')
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [cursor, setCursor] = useState(0)
@@ -81,15 +86,24 @@ export function Composer(): ReactNode {
   const callSign = useCallSign(paneId ?? '')
   const paneName = leaf && profile ? (callSign ?? paneDisplayTitle(profile, leaf.title)) : null
 
+  // No pane to aim at means Forge, whatever the chip last said.
+  const toForge = target === 'forge' || !paneId || !paneName
   const live = isLive(hub.phase)
-  const toHub = live && aim === 'hub'
-  const provider = PROVIDER_SHORT[hub.provider]
+  const brain = brainWord(hub)
   const listening = preview?.dictating ?? dictation.listening
-  // The mic's bars meter dictation; while live they rest at a steady mid height
-  // (the pill beside the bar carries the live meter).
+  const d: DictationLike = {
+    phase: preview?.dictating ? 'listening' : dictation.status.phase,
+    listening,
+    needsSetup: dictation.needsSetup,
+    wake: dictation.status.mode === 'wake',
+    capturing: dictation.status.capturing
+  }
+  const vs = voiceState(mode, hub, d)
+  // The mic's bars meter Parakeet; on a live session they rest at a steady
+  // mid height (the pill carries the live meter).
   const level = listening
     ? Math.min(1, Math.max(0, preview?.dictating ? (preview.dictationLevel ?? 0.5) : dictation.status.level))
-    : live && !hub.muted
+    : vs.micOn
       ? 0.4
       : 0
   const slash = text.startsWith('/')
@@ -126,23 +140,25 @@ export function Composer(): ReactNode {
     if (route?.({ text: message, paneId })) {
       setText('')
       if (listening) dictation.toggle()
+      return
+    }
+    if (toForge) {
+      hubAsk(hub, message, 'typed')
+      setText('')
+      if (listening) dictation.toggle()
       const pill = document.querySelector('.vpill')
       if (pill && shellRef.current) fireComet(shellRef.current, pill, 'var(--accent)')
       return
     }
-    if (!paneId) {
-      actions.setNotice('Open a pane first — the composer types into the pane you are in')
-      return
-    }
-    if (!sendToPane(paneId, message)) {
+    if (!paneId || !sendToPane(paneId, message)) {
       actions.setNotice('That pane has no live shell to send to')
       return
     }
     setText('')
     // Sent: the mic's job is done too. Dictation into the bar ends with the send.
     if (listening) dictation.toggle()
-    const target = document.querySelector(`.pane[data-pane-id="${paneId}"], .mtile[data-pane-id="${paneId}"]`)
-    if (target && shellRef.current) fireComet(shellRef.current, target, profile?.accent ?? '#c6ff4a')
+    const el = document.querySelector(`.pane[data-pane-id="${paneId}"], .mtile[data-pane-id="${paneId}"]`)
+    if (el && shellRef.current) fireComet(shellRef.current, el, profile?.accent ?? '#c6ff4a')
   }
 
   const cancel = (): void => {
@@ -236,48 +252,79 @@ export function Composer(): ReactNode {
 
   const hotkey = hotkeyLabel(state.settings.sttHotkey || 'ControlRight')
   const onMic = (): void => {
+    if (mode === 'agent') {
+      // The main agent's own listening, on every brain: a live provider opens
+      // its session; Claude arms and captures through Parakeet.
+      if (listening) dictation.toggle()
+      else hub.toggle()
+      return
+    }
     if (dictation.needsSetup) {
       setSetupOpen((v) => !v)
       return
     }
-    if (live) {
-      hub.setMuted(!hub.muted)
-      return
+    // One microphone at a time.
+    if (live) hub.stop()
+    if (!listening) {
+      // Aimed at Forge the words land in the bar, to be read and fixed first;
+      // aimed at a pane they go straight into it.
+      if (toForge) focusField()
+      else if (paneId) {
+        fieldRef.current?.blur()
+        terminalHost.focus(paneId)
+      }
     }
-    // Pressed here, the bar takes the words — focus it first so each phrase
-    // lands in the field, ready to edit, instead of straight into the pane.
-    if (!listening) focusField()
     dictation.toggle()
+  }
+
+  const flipMode = (next: 'dictate' | 'agent'): void => {
+    if (next === mode) return
+    keymap.run('voice.mode.toggle')
   }
 
   /* --------------------------------------------------------------- words */
 
-  const placeholder = listening
-    ? 'Listening — speak, then fix anything and send'
-    : toHub
-      ? `Talking with ${provider} — or type to it`
-      : paneName
-        ? `Type or speak to ${paneName}   ·   / for prompts`
-        : 'Type or speak   ·   / for prompts'
+  const placeholder =
+    mode === 'dictate' && listening && vs.recording
+      ? toForge
+        ? 'Listening — speak, then fix anything and send'
+        : `Listening — your words go straight into ${paneName}`
+      : !toForge
+        ? `Type straight into ${paneName}   ·   Esc for Forge`
+        : mode === 'agent' && vs.recording
+          ? 'Listening — talk, or type'
+          : 'Ask Forge…   ·   / for prompts'
 
-  const micTitle = dictation.needsSetup
-    ? 'Dictation needs setting up — click to fix it'
-    : live
-      ? hub.muted
-        ? 'Quiet — the mic is off. Click to listen again (Ctrl+Shift+M)'
-        : 'Mute the mic for a moment (Ctrl+Shift+M)'
-      : listening
-        ? 'Stop dictation'
-        : `Dictate into this bar (or ${hotkey} anywhere)`
+  const micTitle =
+    mode === 'agent'
+      ? live && hub.phase !== 'error'
+        ? `Stop — Forge stops listening (${brain})`
+        : hub.realtime
+          ? `Talk to Forge — opens a live session with ${brain} (or ${hotkey} anywhere)`
+          : `Talk to Forge — Parakeet hears you, ${brain} answers (or ${hotkey} anywhere)`
+      : dictation.needsSetup
+        ? 'Dictation needs setting up — click to fix it'
+        : listening
+          ? 'Stop dictation'
+          : toForge
+            ? `Dictate into this bar (or ${hotkey} anywhere)`
+            : `Dictate straight into ${paneName} (or ${hotkey} anywhere)`
 
-  const micOn = live ? !hub.muted : listening
+  const showSetup = dictation.needsSetup && mode === 'dictate'
+  // In the bar the mic says it short ("Listening", "Mic on"); the rest of the
+  // sentence ("· not recording") shows while there is room, and always in the pill.
+  const [micHead, ...micRest] = vs.word.split(' · ')
+  const micWord = vs.look === 'offline' || vs.look === 'error' ? null : cap(micHead ?? '')
+  const micMore = !vs.recording && micRest.length ? ` · ${micRest.join(' · ')}` : null
 
   return (
     <div
       ref={shellRef}
       className="dock__composer comp"
-      data-listening={listening || (live && hub.phase === 'listening' && !hub.muted) ? 'true' : undefined}
-      data-live={live ? 'true' : undefined}
+      data-listening={vs.recording ? 'true' : undefined}
+      data-live={mode === 'agent' && live ? 'true' : undefined}
+      data-mode={mode}
+      data-target={toForge ? 'forge' : 'pane'}
       data-empty={text ? undefined : 'true'}
       data-palette={showPalette ? 'true' : undefined}
       style={{ '--pane-accent': profile?.accent ?? 'var(--accent)', '--lvl': level } as React.CSSProperties}
@@ -288,7 +335,7 @@ export function Composer(): ReactNode {
         }
       }}
     >
-      {live && !onTalk && !showPalette && !saving ? <CaptionRail captions={hub.captions} actions={hub.actions} provider={provider} /> : null}
+      {!showPalette && !saving ? <CaptionRail captions={hub.captions} actions={hub.actions} /> : null}
 
       {showPalette && !saving ? (
         <Palette
@@ -314,31 +361,63 @@ export function Composer(): ReactNode {
         />
       ) : null}
 
-      <button
-        ref={micRef}
-        type="button"
-        className="dock__mic comp__mic"
-        data-on={micOn ? 'true' : undefined}
-        data-setup={dictation.needsSetup ? 'true' : undefined}
-        aria-pressed={micOn}
-        title={micTitle}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={onMic}
-      >
-        {dictation.needsSetup ? (
-          <span className="comp__mic-setup" aria-hidden="true">
-            !
-          </span>
-        ) : (
-          <span className="dock__bars" aria-hidden="true">
-            {[0.55, 0.85, 1, 0.75, 0.5].map((w, i) => (
-              <span key={i} style={{ '--w': w } as React.CSSProperties} />
-            ))}
-          </span>
-        )}
-        {listening ? <span className="dock__mic-word">Listening</span> : null}
-        {live && hub.muted ? <span className="dock__mic-word">Quiet</span> : null}
-      </button>
+      <span className="comp__voice" data-mode={mode}>
+        <button
+          ref={micRef}
+          type="button"
+          className="dock__mic comp__mic"
+          data-on={vs.micOn ? 'true' : undefined}
+          data-look={vs.look}
+          data-setup={showSetup ? 'true' : undefined}
+          aria-pressed={vs.micOn}
+          title={micTitle}
+          aria-label={micTitle}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onMic}
+        >
+          {showSetup ? (
+            <span className="comp__mic-setup" aria-hidden="true">
+              !
+            </span>
+          ) : (
+            <span className="dock__bars" aria-hidden="true">
+              {[0.55, 0.85, 1, 0.75, 0.5].map((w, i) => (
+                <span key={i} style={{ '--w': w } as React.CSSProperties} />
+              ))}
+            </span>
+          )}
+          {micWord ? (
+            <span className="dock__mic-word">
+              {micWord}
+              {micMore ? <span className="comp__mic-more">{micMore}</span> : null}
+            </span>
+          ) : null}
+        </button>
+        <span className="comp__mode" role="radiogroup" aria-label="What the mic does">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === 'dictate'}
+            data-on={mode === 'dictate' ? 'true' : undefined}
+            title="Dictate — Parakeet words straight into where the bar is aimed (Ctrl+Shift+L flips)"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => flipMode('dictate')}
+          >
+            Dictate
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === 'agent'}
+            data-on={mode === 'agent' ? 'true' : undefined}
+            title={`Agent — Forge hears you and acts: ${brain} (Ctrl+Shift+L flips)`}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => flipMode('agent')}
+          >
+            Agent
+          </button>
+        </span>
+      </span>
       <Popover
         anchor={micRef.current}
         open={setupOpen}
@@ -399,40 +478,33 @@ export function Composer(): ReactNode {
             else if (showPalette) {
               setPaletteOpen(false)
               if (slash) setText('')
-            } else backToPane()
+            } else if (!toForge) setBarTarget('forge')
+            else backToPane()
           }
         }}
       />
 
-      {live ? (
-        <button
-          type="button"
-          className="dock__target comp__aim"
-          data-aim={aim}
-          title={toHub ? `Typing to ${provider}. Click to type to ${paneName ?? 'the pane'} instead.` : `Typing to ${paneName ?? 'the pane'}. Click to type to ${provider}.`}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setComposerAim(toHub ? 'pane' : 'hub')}
-        >
-          <span className="dock__target-arrow" aria-hidden="true">
-            →
-          </span>
-          <span className="truncate">{toHub ? provider : (paneName ?? 'pane')}</span>
-        </button>
-      ) : paneName ? (
-        <button
-          type="button"
-          className="dock__target"
-          title="Sending to this pane — click to pick another"
-          data-sheet-toggle="panes"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => toggleSheet('panes')}
-        >
-          <span className="dock__target-arrow" aria-hidden="true">
-            →
-          </span>
-          <span className="truncate">{paneName}</span>
-        </button>
-      ) : null}
+      <button
+        type="button"
+        className="dock__target comp__target"
+        data-target={toForge ? 'forge' : 'pane'}
+        disabled={!paneName}
+        title={
+          toForge
+            ? paneName
+              ? `Asking Forge, the main agent (${brain}). Click to type straight into ${paneName} instead.`
+              : `Asking Forge, the main agent (${brain}).`
+            : `Typing straight into ${paneName}. Click (or Esc in the bar) to ask Forge instead.`
+        }
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setBarTarget(toForge ? 'pane' : 'forge')}
+      >
+        <span className="dock__target-arrow" aria-hidden="true">
+          →
+        </span>
+        {toForge ? <Icon name="forge" size={11} className="comp__target-mark" /> : null}
+        <span className="truncate">{toForge ? 'Forge' : paneName}</span>
+      </button>
 
       {text && !slash ? (
         <span className="comp__acts">
@@ -459,11 +531,11 @@ export function Composer(): ReactNode {
           <button
             type="button"
             className="comp__send"
-            title={toHub ? `Send to ${provider} (Enter)` : `Send to ${paneName ?? 'the pane'} (Enter)`}
+            title={toForge ? 'Ask Forge (Enter)' : `Send to ${paneName} (Enter)`}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => send(text)}
           >
-            Send
+            {toForge ? 'Ask' : 'Send'}
             <span aria-hidden="true">⏎</span>
           </button>
         </span>
@@ -472,7 +544,7 @@ export function Composer(): ReactNode {
           <button
             type="button"
             className="comp__act comp__act--word"
-            title="Stop dictation"
+            title="Stop listening"
             onMouseDown={(e) => e.preventDefault()}
             onClick={cancel}
           >
@@ -489,22 +561,28 @@ export function Composer(): ReactNode {
 const CAPTION_WINDOW_MS = 9000
 const TRAIL_WINDOW_MS = 30_000
 
+const STATUS_WORD: Record<HubAction['status'], string> = {
+  running: 'running',
+  ok: 'done',
+  failed: 'failed',
+  planned: 'planned'
+}
+
+function clock(at: number): string {
+  const d = new Date(at)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 /**
- * Above the bar while live talk is on: the last thing he said (italic) and the
- * last thing it said (upright), each fading a few seconds after it settles,
- * and the trail of what it did. Opaque and pointer-transparent: it never
- * blurs a terminal and never takes a click.
+ * Above the bar: the last thing he said (italic), the last thing Forge said
+ * (upright), each fading a few seconds after it settles, and the trail of what
+ * it did — which opens into the whole list. Opaque, and pointer-transparent
+ * except for the trail's own toggle and list, so it never blurs a terminal and
+ * never eats a click meant for one.
  */
-function CaptionRail({
-  captions,
-  actions,
-  provider
-}: {
-  captions: HubCaption[]
-  actions: HubAction[]
-  provider: string
-}): ReactNode {
+function CaptionRail({ captions, actions }: { captions: HubCaption[]; actions: HubAction[] }): ReactNode {
   const [now, setNow] = useState(() => Date.now())
+  const [expanded, setExpanded] = useState(false)
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(t)
@@ -514,33 +592,72 @@ function CaptionRail({
   const lastBot = [...captions].reverse().find((c) => c.role === 'assistant') ?? null
   const fresh = (c: HubCaption | null): c is HubCaption => !!c && (!c.final || now - c.at < CAPTION_WINDOW_MS)
   const lines = [lastUser, lastBot].filter(fresh).sort((a, b) => a.at - b.at)
-  const trail = actions.filter((a) => a.status === 'running' || a.status === 'planned' || now - a.at < TRAIL_WINDOW_MS).slice(-3)
-  const open = lines.length > 0 || trail.length > 0
+  const recent = actions.filter((a) => a.status === 'running' || a.status === 'planned' || now - a.at < TRAIL_WINDOW_MS)
+  const trail = recent.slice(-3)
+  const all = actions.slice(-12).reverse()
+  const open = lines.length > 0 || trail.length > 0 || (expanded && all.length > 0)
   const { mounted, closing } = usePresence(open, 220)
+  useEffect(() => {
+    if (!open) setExpanded(false)
+  }, [open])
   if (!mounted) return null
 
   return (
-    <div className="crail" data-state={closing ? 'closing' : 'open'} aria-live="polite">
+    <div className="crail" data-state={closing ? 'closing' : 'open'} data-expanded={expanded ? 'true' : undefined} aria-live="polite">
       {lines.map((c) => (
         <p key={c.id + (c.final ? ':f' : '')} className="crail__line" data-role={c.role} data-final={c.final ? 'true' : undefined}>
-          <span className="crail__who">{c.role === 'user' ? 'You' : provider}</span>
+          <span className="crail__who">{c.role === 'user' ? 'You' : 'Forge'}</span>
           <span className="crail__text">{c.text}</span>
         </p>
       ))}
-      {trail.length ? (
-        <p className="crail__trail">
-          {trail.map((a, i) => (
-            <span key={a.id} className="crail__act" data-status={a.status}>
-              {i > 0 ? <span className="crail__sep" aria-hidden="true">·</span> : null}
+      {trail.length || expanded ? (
+        <div className="crail__trail">
+          <button
+            type="button"
+            className="crail__toggle"
+            aria-expanded={expanded}
+            title={expanded ? 'Fold the list away' : 'Everything Forge did lately'}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            Did
+            <span className="crail__chev" aria-hidden="true">
+              {expanded ? '▾' : '▸'}
+            </span>
+          </button>
+          <span className="crail__acts">
+          {!expanded
+            ? trail.map((a, i) => (
+                <span key={a.id} className="crail__act" data-status={a.status}>
+                  {i > 0 ? <span className="crail__sep" aria-hidden="true">·</span> : null}
+                  <span className="crail__glyph" aria-hidden="true">
+                    {ACTION_GLYPH[a.status]}
+                  </span>
+                  {a.label}
+                  {a.status === 'planned' ? <span className="crail__tag">planned</span> : null}
+                  {a.status === 'failed' ? <span className="crail__tag">failed</span> : null}
+                </span>
+              ))
+            : <span className="crail__count">{all.length} lately — newest first</span>}
+          </span>
+        </div>
+      ) : null}
+      {expanded ? (
+        <ol className="crail__log">
+          {all.map((a) => (
+            <li key={a.id} className="crail__row" data-status={a.status}>
               <span className="crail__glyph" aria-hidden="true">
                 {ACTION_GLYPH[a.status]}
               </span>
-              {a.label}
-              {a.status === 'planned' ? <span className="crail__tag">planned</span> : null}
-              {a.status === 'failed' ? <span className="crail__tag">failed</span> : null}
-            </span>
+              <span className="crail__row-text">
+                <span className="crail__row-label">{a.label}</span>
+                {a.detail ? <span className="crail__row-detail">{a.detail}</span> : null}
+              </span>
+              <span className="crail__row-word">{STATUS_WORD[a.status]}</span>
+              <span className="crail__row-time mono">{clock(a.at)}</span>
+            </li>
           ))}
-        </p>
+        </ol>
       ) : null}
     </div>
   )

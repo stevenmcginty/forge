@@ -108,15 +108,6 @@
   line-height: 11px;
 }
 
-.vpill__seg[data-on='true'] {
-  color: var(--accent);
-}
-
-.vpill__swap {
-  font-size: 9px;
-  letter-spacing: 0;
-  opacity: 0.8;
-}
 
 .vpill__word {
   display: inline-flex;
@@ -141,6 +132,150 @@
 .vpill[data-look='offline'] .vpill__word,
 .vpill[data-look='muted'] .vpill__word {
   color: var(--text-secondary);
+}
+
+.vpill__word-text {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Agent mode wears the accent in its eyebrow; Dictate stays plain. */
+.vpill[data-mode='agent'] .vpill__eyebrow,
+.vpill[data-mode='live'] .vpill__eyebrow {
+  color: color-mix(in srgb, var(--accent) 70%, var(--text-dim));
+}
+
+/* A failure says why, in words, with the "!" in front of it. */
+.vpill[data-look='error'] .vpill__word {
+  color: var(--warn);
+  letter-spacing: 0.01em;
+}
+
+.vpill[data-look='error'] .vpill__glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  border-radius: var(--r-full);
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--bg-base);
+  background: var(--warn);
+}
+
+.vpill__main[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+/* ------------------------------------------------------------ the details */
+
+.vcard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.vcard__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.vcard__eyebrow {
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.vcard__brain {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.vcard__state {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.vcard[data-look='error'] .vcard__state {
+  color: var(--warn);
+}
+
+.vcard__glyph {
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.vcard[data-look='error'] .vcard__glyph {
+  color: var(--warn);
+}
+
+.vcard__error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vcard__raw {
+  max-height: 140px;
+  margin: 0;
+  padding: 9px 11px;
+  overflow: auto;
+  border-radius: 9px;
+  border: 1px solid var(--warn-line);
+  background: color-mix(in srgb, var(--warn) 7%, var(--bg-sunken));
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  user-select: text;
+}
+
+.vcard__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vcard__btn {
+  height: 28px;
+  padding: 0 12px;
+  font-size: var(--t-xs);
+}
+
+.vcard__note {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+}
+
+.vcard__note > span {
+  color: var(--accent);
+}
+
+.vcard__hint {
+  margin: 0;
+  font-size: var(--t-xs);
+  line-height: 1.55;
+  color: var(--text-dim);
 }
 
 .vpill__chips {

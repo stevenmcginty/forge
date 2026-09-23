@@ -272,7 +272,10 @@ for (const [name, src] of [
   )
 }
 ok(read('src/hooks/useShortcuts.ts').includes('toggleVoiceHubCard'), 'Ctrl+Shift+G opens the hub card instead')
-ok(read('src/components/TitleBar.tsx').includes('toggleVoiceHubCard'), 'and so does the titlebar button')
+// Round 2 (D3): the Talk page and its titlebar button are gone; the card's
+// "expanded" state now just puts you in the bar.
+ok(!read('src/components/TitleBar.tsx').includes('toggleVoiceHubCard'), 'the titlebar has no Talk button any more')
+ok(read('src/components/hub/HubLayer.tsx').includes('focus-composer'), 'and opening the hub card focuses the bar instead')
 
 // Everything the panel offered has to be reachable in the card. This is the
 // list of parts it used to render.
