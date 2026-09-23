@@ -185,6 +185,24 @@ const PROMPT_MAX_CHARS = 200
 const CHOICE_LINE = /^[❯>▶●•*\s]*\(?\d+[.)]\s+\S/
 
 /**
+ * A line the user already submitted, as an agent echoes it into its own
+ * transcript ("> no", "❯ no"). A question above the last one has been
+ * answered: without this cut, "What do you want to do?" stayed inside the
+ * ten-line window after Steve replied, and the pane was flagged as asking
+ * again the moment the reply settled. The cursor on a numbered menu
+ * ("❯ 1. Yes") is not an echo.
+ */
+const SUBMITTED_LINE = /^[>❯]\s+(?!\(?\d+[.)]\s)\S/
+
+/**
+ * How many lines at the bottom of the tail belong to the live input box and
+ * status bar rather than the transcript. An echo-shaped line there is the
+ * prompt being typed (or Gemini's "> Type your message" placeholder), not an
+ * answer, so it never cuts.
+ */
+const INPUT_TAIL_LINES = 3
+
+/**
  * Drop the border a TUI draws around a prompt, so the text inside reads as
  * ordinary lines. A row that was nothing but border comes back empty and is
  * skipped by the caller.
@@ -651,7 +669,11 @@ class TerminalHost {
       const text = stripBoxDrawing(buffer.getLine(y)?.translateToString(true) ?? '')
       if (text) lines.push(text)
     }
-    return lines.slice(-10)
+    const tail = lines.slice(-10)
+    for (let i = tail.length - 1 - INPUT_TAIL_LINES; i >= 0; i--) {
+      if (SUBMITTED_LINE.test(tail[i])) return tail.slice(i + 1)
+    }
+    return tail
   }
 
   private looksLikeWaiting(entry: Entry): boolean {
