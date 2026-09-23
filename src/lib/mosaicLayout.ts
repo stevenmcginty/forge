@@ -431,7 +431,9 @@ export function sanitiseMosaic(raw: unknown, livePaneIds: Set<string>, liveTabId
     for (const [id, value] of Object.entries(src.tiles)) {
       if (!livePaneIds.has(id) || !isRect(value)) continue
       const tile: MosaicTile = normalise(value)
-      if ((value as MosaicTile).fit === true) tile.fit = true
+      // Either answer is an override of the wall's text mode — see MosaicTile.
+      const fit = (value as MosaicTile).fit
+      if (typeof fit === 'boolean') tile.fit = fit
       out.tiles[id] = tile
     }
   }

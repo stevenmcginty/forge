@@ -1185,9 +1185,11 @@ function reducer(state: AppState, action: Action): AppState {
     case 'mosaicFit':
       return mapMosaic(state, (m) => {
         const tile = m.tiles[action.paneId]
-        if (!tile || (tile.fit ?? false) === action.fit) return null
-        const next: MosaicTile = { x: tile.x, y: tile.y, w: tile.w, h: tile.h }
-        if (action.fit) next.fit = true
+        // Stored either way, not only when true: on a life-size wall the
+        // override a double-click asks for *is* false, and dropping it would
+        // leave the tile following the wall — the double-click did nothing.
+        if (!tile || tile.fit === action.fit) return null
+        const next: MosaicTile = { x: tile.x, y: tile.y, w: tile.w, h: tile.h, fit: action.fit }
         return { ...m, tiles: { ...m.tiles, [action.paneId]: next } }
       })
 

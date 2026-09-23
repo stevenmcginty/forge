@@ -166,7 +166,8 @@ interface DragSession {
   /** Last box we were happy with; committed on release. */
   current: MosaicRect
   raf: number
-  fit: boolean
+  /** The tile's own text-mode override, carried through the move. */
+  fit: boolean | undefined
   /** The wall was still on the auto grid when this drag started. */
   seed: Record<string, MosaicTileRect> | null
   onMove: (e: PointerEvent) => void
@@ -451,7 +452,7 @@ export function MosaicView({
         others: othersOf(rects, paneId),
         current: start,
         raf: 0,
-        fit: tiles[paneId]?.fit ?? false,
+        fit: tiles[paneId]?.fit,
         seed: custom ? null : rects,
         onMove: () => {},
         onUp: () => {}
@@ -496,7 +497,7 @@ export function MosaicView({
         if (session.ghost) session.ghost.style.display = 'none'
 
         const tile: MosaicTileRect = { ...final }
-        if (session.fit) tile.fit = true
+        if (session.fit !== undefined) tile.fit = session.fit
         actions.setMosaicTiles({ [session.paneId]: tile })
       }
 
@@ -1042,6 +1043,55 @@ function MosaicTile({
     terminalHost.focus(paneId)
     return () => terminalHost.blur(paneId)
   }, [interactive, paneId])
+
+  /*
+   * The mouse, on a terminal drawn smaller or larger than it really is.
+   *
+   * A scale model is a CSS transform, and xterm does not know: it turns a
+   * pointer into a cell as (clientX − the screen's on-screen left) ÷ its
+   * unscaled cell width (getCoords, @xterm/xterm src/browser/input/Mouse.ts),
+   * so at half size a drag selects the cells at twice the distance from the
+   * corner. Rather than give up the transform — the only way a wall of
+   * terminals resizes at compositor speed and never reflows — every mouse event
+   * aimed at this terminal has its clientX/clientY moved to where the same spot
+   * would be at scale 1, before xterm reads it. Scale 1 means the screen's
+   * on-screen width equals its layout width, and then nothing is touched.
+   *
+   * Window, capture phase: the first listener anywhere, so xterm's own —
+   * including the document ones it adds for the duration of a selection drag,
+   * which is why a press that started in here keeps being translated after the
+   * pointer leaves the tile. Only coordinates change; the event, its target
+   * and its default action are left exactly as they were. Nothing here writes
+   * to the PTY, so selecting never claims the pane's grid.
+   */
+  useEffect(() => {
+    if (!zoomed && !interactive) return
+    const box = naturalRef.current
+    if (!box) return
+    let pressed = false
+    const translate = (e: MouseEvent): void => {
+      const inside = e.target instanceof Node && box.contains(e.target)
+      if (e.type === 'mousedown' && inside) pressed = true
+      const mine = inside || pressed
+      if (e.type === 'mouseup' || (e.type === 'mousemove' && e.buttons === 0)) pressed = false
+      if (!mine) return
+      const screen = box.querySelector<HTMLElement>('.xterm-screen')
+      if (!screen || screen.offsetWidth === 0 || screen.offsetHeight === 0) return
+      const r = screen.getBoundingClientRect()
+      const sx = r.width / screen.offsetWidth
+      const sy = r.height / screen.offsetHeight
+      if (Math.abs(sx - 1) < 0.001 && Math.abs(sy - 1) < 0.001) return
+      const x = r.left + (e.clientX - r.left) / sx
+      const y = r.top + (e.clientY - r.top) / sy
+      Object.defineProperty(e, 'clientX', { configurable: true, value: x })
+      Object.defineProperty(e, 'clientY', { configurable: true, value: y })
+    }
+    const types = ['mousedown', 'mousemove', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu', 'wheel'] as const
+    for (const t of types) window.addEventListener(t, translate, true)
+    return () => {
+      for (const t of types) window.removeEventListener(t, translate, true)
+    }
+  }, [interactive, zoomed])
 
   /*
    * Fit into whatever the tile ended up being.
