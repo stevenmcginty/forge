@@ -88,10 +88,11 @@ const zoomFrom: { id: string | null; box: Box | null } = { id: null, box: null }
  *           mode from exactly where the auto grid had put everything, so
  *           crossing over is invisible; "Reset to grid" crosses back.
  *
- * Tiles are read-only. Click one and it blows up to full size in place, where
- * the keyboard works; Esc drops you back to the wall. Double-click a tile's
- * header and its terminal stops being a scale model and refits to the box for
- * real — see MosaicTile.
+ * Click a tile and you are typing into it right there on the wall, at the
+ * pane's own cols and rows, however small the tile is; Esc or a click on the
+ * empty wall stops. Double-click it and it blows up to full size in place; Esc
+ * drops you back to the wall. Double-click a tile's header and its terminal
+ * stops being a scale model and refits to the box for real — see MosaicTile.
  */
 
 /** One tile: a pane plus the tab it came from, which the header names. */
@@ -133,6 +134,17 @@ const REFIT_SETTLE_MS = 120
  * thing that takes a project off the auto grid forever.
  */
 const DRAG_THRESHOLD = 3
+
+/**
+ * How soon after the click that started typing in a tile a second press on it
+ * still counts as a double-click — which zooms instead. Windows' default
+ * double-click time.
+ *
+ * Measured by hand rather than left to `dblclick`: the first click takes the
+ * hit sheet away, so the second lands on the live terminal, which would spend
+ * it selecting a word.
+ */
+const DOUBLE_CLICK_MS = 500
 
 /** One live drag or resize. Lives in a ref: none of it belongs in React state. */
 interface DragSession {
@@ -620,6 +632,27 @@ export function MosaicView({
     [actions, interactiveId]
   )
 
+  /**
+   * A press on the empty wall — between tiles, not on one — stops typing in the
+   * tile that was taking the keys, the pointer's version of Esc. The wall's own
+   * scrollbars are not "the wall": dragging one must not end the typing.
+   */
+  const leaveOnWall = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>): void => {
+      if (!interactiveId || e.button !== 0) return
+      const target = e.target as HTMLElement
+      if (target.closest('.mtile')) return
+      const wall = wallRef.current
+      if (wall && target === wall) {
+        const box = wall.getBoundingClientRect()
+        if (e.clientX - box.left >= wall.clientWidth || e.clientY - box.top >= wall.clientHeight) return
+      }
+      terminalHost.blur(interactiveId)
+      setInteractiveId(null)
+    },
+    [interactiveId]
+  )
+
   /* ------------------------------------------------------- keyboard: wall */
 
   useEffect(() => {
@@ -791,6 +824,7 @@ export function MosaicView({
         onDragOver={onDragOver}
         onDragLeave={() => setDropHint(false)}
         onDrop={onDrop}
+        onPointerDown={leaveOnWall}
       >
         <div
           ref={canvasRef}
@@ -893,6 +927,8 @@ function MosaicTile({
   const stageRef = useRef<HTMLDivElement | null>(null)
   const naturalRef = useRef<HTMLDivElement | null>(null)
   const tileRef = useRef<HTMLElement | null>(null)
+  /** When a click on the hit sheet started typing here — see DOUBLE_CLICK_MS. */
+  const typedFromClickAt = useRef(0)
 
   // Arrive: from where the other view last had this pane (the push-in and the
   // pull-out of a zoom), or with the one-time pop of a brand-new pane.
@@ -1287,26 +1323,48 @@ function MosaicTile({
         </div>
       </header>
 
-      <div className="mtile__stage" ref={stageRef}>
+      <div
+        className="mtile__stage"
+        ref={stageRef}
+        onMouseDownCapture={(e) => {
+          /*
+           * The second half of a double-click on a tile that the first half
+           * just started typing into: zoom. Taken in the capture phase and
+           * stopped here, so xterm never sees the press and does not select a
+           * word under it. Any later press is the terminal's own — a
+           * double-click to select a word in a tile you are already typing in
+           * still does exactly that.
+           */
+          if (zoomed || !interactive || e.button !== 0) return
+          if (performance.now() - typedFromClickAt.current > DOUBLE_CLICK_MS) return
+          typedFromClickAt.current = 0
+          e.preventDefault()
+          e.stopPropagation()
+          onZoom(paneId)
+        }}
+      >
         <div className="mtile__natural" ref={naturalRef} />
       </div>
 
       {/*
         On the wall the terminal is scenery: this sheet sits over it so a click
-        zooms in rather than dropping a cursor into somebody's shell. Zoomed, it
-        is gone and the terminal takes its own clicks again. Same for a tile
-        being typed into — the whole point of interactive mode is that the
-        terminal takes the clicks.
+        starts typing in the tile, in place, at the terminal's own cols and
+        rows, rather than dropping the press on whatever cell of the picture
+        was under it. A double-click zooms (see the stage above). Zoomed, or
+        typing, the sheet is gone and the terminal takes its own clicks again.
       */}
       {zoomed || interactive ? null : (
         <button
           type="button"
           className="mtile__hit"
-          title={`Zoom in — ${paneDisplayTitle(profile, cell.leaf.title)}`}
-          aria-label={`Zoom in on ${paneDisplayTitle(profile, cell.leaf.title)} in ${cell.tab.title}`}
+          title={`Click to type here, double-click to zoom in — ${paneDisplayTitle(profile, cell.leaf.title)}`}
+          aria-label={`Type in ${paneDisplayTitle(profile, cell.leaf.title)} in ${cell.tab.title}`}
           onPointerEnter={() => onSelect(paneId)}
           onFocus={() => onSelect(paneId)}
-          onClick={() => onZoom(paneId)}
+          onClick={() => {
+            typedFromClickAt.current = performance.now()
+            onToggleInteract(paneId)
+          }}
         />
       )}
 

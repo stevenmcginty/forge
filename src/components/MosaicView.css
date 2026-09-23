@@ -509,6 +509,8 @@
   left: 0;
   z-index: var(--z-pane);
   border-radius: 0 0 var(--r-pane) var(--r-pane);
+  /* A click here starts typing in the tile, so say so before it happens. */
+  cursor: text;
   transition: background var(--dur-fast) var(--ease-out);
 }
 
