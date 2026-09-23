@@ -278,14 +278,22 @@ export function listenState(hub: HubView): ListenState {
     const reason = hub.errorReason ?? errorReason(hub.provider, hub.error, hub.brainLabel)
     return { on: false, look: 'error', glyph: '!', word: reasonWord(reason), recording: false }
   }
-  if (phase === 'off') return { on: false, look: 'offline', glyph: LOOK_GLYPH.offline, word: 'not listening', recording: false }
+  if (phase === 'off') {
+    // B11: a conversation that just ended says why, e.g. "conversation ended — you said that's all".
+    const note = hub.listenNote ?? ''
+    const word = /^conversation ended/i.test(note) ? note.charAt(0).toLowerCase() + note.slice(1) : 'not listening'
+    return { on: false, look: 'offline', glyph: LOOK_GLYPH.offline, word, recording: false }
+  }
   if (phase === 'thinking') return { on: true, look: 'thinking', glyph: LOOK_GLYPH.thinking, word: 'thinking…', recording: false }
   if (phase === 'speaking') return { on: true, look: 'speaking', glyph: LOOK_GLYPH.speaking, word: 'speaking', recording: false }
   if (hub.starting || phase === 'connecting') {
     return { on: true, look: 'connecting', glyph: LOOK_GLYPH.connecting, word: 'starting…', recording: false }
   }
   if (hub.muted) return { on: true, look: 'muted', glyph: LOOK_GLYPH.muted, word: 'muted', recording: false }
-  if (hub.capturing === true) return { on: true, look: 'listening', glyph: LOOK_GLYPH.listening, word: 'listening', recording: true }
+  if (hub.capturing === true) {
+    const word = /^listening again/i.test(hub.listenNote ?? '') ? 'listening again' : 'listening'
+    return { on: true, look: 'listening', glyph: LOOK_GLYPH.listening, word, recording: true }
+  }
   const note = (hub.listenNote ?? '').trim()
   const word = note && !/^(listening|off|starting|thinking|speaking)/i.test(note) ? note.charAt(0).toLowerCase() + note.slice(1) : NOT_RECORDING
   return { on: true, look: 'muted', glyph: '◐', word, recording: false }
