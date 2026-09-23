@@ -224,7 +224,8 @@ const api: ForgeApi = {
     onStatus: (cb) => subscribe(IPC.webStatusEvent, cb),
     onCommand: (cb) => subscribe(IPC.webCommand, cb),
     onProjectAdd: (cb) => subscribe(IPC.webProjectAdd, cb),
-    // One result channel for both questions — see `IPC.webCommandResult`.
+    onProjectRemove: (cb) => subscribe(IPC.webProjectRemove, cb),
+    // One result channel for every question — see `IPC.webCommandResult`.
     commandResult: (requestId, error) => ipcRenderer.send(IPC.webCommandResult, { requestId, error: error ?? '' }),
     onWatched: (cb) => subscribe(IPC.webWatched, cb),
     // The attention detector's news, going the other way to everything else in

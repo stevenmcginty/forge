@@ -14,9 +14,13 @@ import {
   type WebHelloOkFrame,
   type WebLayoutOp,
   type WebMirrorChunk,
-  type WebMirrorConfig
+  type WebMirrorConfig,
+  type WebPasskeyAssertion,
+  type WebPasskeyRequestOptions,
+  type WebProjectRemoveEvent
 } from '@shared/web'
 import { isSessionId } from '@shared/session'
+import { collectLeaves } from '@shared/splitTree'
 import type {
   AgentPresence,
   CommandPresence,
@@ -39,10 +43,12 @@ import { WebAuth, googleJwksFetcher } from './web/auth'
 import { checkFolder, listFolder } from './web/fs-browse'
 import { saveInboxFile, saveInboxImage } from './web/inbox'
 import { transcribeAudio } from './voice-bridge'
+import { filePasskeyStorage } from './web/passkey'
 import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
 import { WebServer, type WebServerHost } from './web/server'
 import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
+import { defaultStatusDir, startAgentUsage, type AgentUsage } from './web/agent-usage'
 import { foremanList, foremanStart, foremanSay, foremanStop, onForemanState } from './foreman/ipc'
 import { listHandoffsFor, onHandoffChanged } from './handoff-watcher'
 import type { HandoffStartRemoteEvent } from '@shared/handoffview'
@@ -254,6 +260,12 @@ let unsubscribeForeman: (() => void) | null = null
  */
 let unsubscribeHandoff: (() => void) | null = null
 /**
+ * Each Claude pane's context and the account's limits, read from the files
+ * `~/.claude/statusline.js` leaves in `~/.claude/forge-status` — see
+ * electron/web/agent-usage.ts. Started with the link, stopped with it.
+ */
+let usageWatch: AgentUsage | null = null
+/**
  * How long a PTY resize waits before the session list is pushed again.
  *
  * Whoever owns a pane's grid, every browser that is not that owner is drawing a
@@ -391,6 +403,10 @@ function getAuth(): WebAuth {
       // on the next hello rather than the next launch. Blank is the shipped
       // state and the account-only path; see the header of electron/web/auth.ts.
       pinHash: () => getSettings().webPin,
+      // Passkeys enrolled from phones, beside the other web state in the data
+      // directory. Public keys only; voided whenever `webPin` changes — see
+      // electron/web/passkey.ts.
+      passkeys: filePasskeyStorage(join(getDataDir(), 'web-passkeys.json')),
       log: (line) => console.log(`[web] ${line}`)
     })
   }
@@ -771,6 +787,40 @@ function dispatchProjectAdd(path: string, deviceName: string): Promise<string | 
 }
 
 /**
+ * What a browser's "Remove project" would close, or null for an id main does
+ * not have. The panes are the ones `removeProject` kills in the renderer — every
+ * leaf of every tab, plus the planner pane `planner:<projectId>` (src/lib/
+ * planner.ts's `plannerPaneId`, restated because main cannot import src/) —
+ * counted only while running, since a saved leaf nobody opened closes nothing.
+ * The layout is the engine's when it holds one, the file's otherwise.
+ */
+function previewProjectRemove(projectId: string): { name: string; panes: number } | null {
+  const project = getProjects().find((p) => p.id === projectId)
+  if (!project) return null
+  const workspace = layoutEngine()?.workspace(projectId) ?? getWorkspace(projectId)
+  const ids = new Set((workspace?.tabs ?? []).flatMap((tab) => collectLeaves(tab.root).map((leaf) => leaf.id)))
+  ids.add(`planner:${projectId}`)
+  const panes = liveSessions().filter((s) => ids.has(s.id)).length
+  return { name: project.name, panes }
+}
+
+/**
+ * A project off the rail, asked for by a browser. Main checks the id against
+ * its own list and then hands it to the renderer, which owns the rail, to run
+ * `removeProject` — the same function the desk's "Remove project…" reaches, so
+ * the panes close and the layout goes exactly as they would from a click. The
+ * folder is never touched; nothing on this path so much as names it.
+ */
+function dispatchProjectRemove(projectId: string, deviceName: string): Promise<string | null> {
+  if (!getProjects().some((p) => p.id === projectId)) return Promise.resolve('No project by that id on this desktop.')
+  return askRenderer(
+    IPC.webProjectRemove,
+    { deviceName, projectId } satisfies Omit<WebProjectRemoveEvent, 'requestId'>,
+    'Forge has no window open on the desktop, so it cannot remove a project.'
+  )
+}
+
+/**
  * A browser's "New project": make the folder, then put it on the rail.
  *
  * The creation is the same fenced plan the desk's own form and the voice
@@ -883,16 +933,25 @@ function sendMirror(event: WebMirrorEvent): void {
  */
 function startMirror(
   pin: string,
-  who: { uid: string; source: string }
-): { error: string; needsPin?: boolean } | null {
+  who: { uid: string; source: string; origin?: string },
+  passkey?: WebPasskeyAssertion
+): { error: string; needsPin?: boolean; passkey?: WebPasskeyRequestOptions } | null {
   const settings = getSettings()
   if (!settings.webMirrorEnabled) {
     return { error: 'This desktop does not share its screen with browsers. Turn it on in Settings › Forge Web.' }
   }
   // `who` so a wrong PIN counts against the account that guessed it, exactly as
   // the same wrong PIN at hello does — see `checkFreshPin` in electron/web/auth.ts.
-  const fresh = getAuth().checkFreshPin(pin, who)
-  if (!fresh.ok) return { error: fresh.message, ...(fresh.needed ? { needsPin: true } : {}) }
+  // A passkey may answer instead of digits, over the challenge the `needed`
+  // refusal carried — see `checkFreshPin`.
+  const fresh = getAuth().checkFreshPin(pin, who, passkey)
+  if (!fresh.ok) {
+    return {
+      error: fresh.message,
+      ...(fresh.needed ? { needsPin: true } : {}),
+      ...(fresh.passkey ? { passkey: fresh.passkey } : {})
+    }
+  }
   const win = mirrorWindow()
   if (!win) return { error: 'Forge has no window open on the desktop, so it cannot share its screen.' }
   win.webContents.send(IPC.webMirror, { kind: 'start', audio: settings.webMirrorAudio } satisfies WebMirrorEvent)
@@ -1246,6 +1305,20 @@ function paneSessionId(paneId: string): string {
   return ''
 }
 
+/**
+ * Every live pane that owns a Claude session, by that session — the reverse of
+ * `paneSessionId`, for electron/web/agent-usage.ts. Same rule as
+ * `transcriptFor`: anything that is not a real UUID names no session.
+ */
+function paneSessions(): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const session of getManager().list()) {
+    const sessionId = paneSessionId(session.id)
+    if (isSessionId(sessionId)) out.set(sessionId, session.id)
+  }
+  return out
+}
+
 /** One pane in a split tree, by id. */
 function findLeaf(node: LayoutNode, paneId: string): Extract<LayoutNode, { type: 'leaf' }> | null {
   if (node.type === 'leaf') return node.id === paneId ? node : null
@@ -1346,6 +1419,8 @@ async function start(): Promise<void> {
 
   const host: WebServerHost = {
     auth: getAuth(),
+    // `usageWatch` below feeds `pushUsage`, so the feature is announced.
+    usage: true,
     appVersion: app.getVersion(),
     desktopName: () => hostname(),
     allowedOrigins: webAllowedOrigins,
@@ -1379,7 +1454,13 @@ async function start(): Promise<void> {
     // answered here rather than forwarded. Everything it will and will not do
     // is in electron/web/fs-browse.ts, including why a refusal is a value.
     fsList: async (path, name) => listFolder(path, name),
+    // Where a project lives, from main's own list — never a path from the
+    // browser. The read-only file browser is confined to this folder by
+    // electron/web/project-files.ts.
+    projectRoot: (projectId) => getProjects().find((p) => p.id === projectId)?.path ?? null,
     projectAdd: (path, deviceName) => dispatchProjectAdd(path, deviceName),
+    projectRemovePreview: (projectId) => previewProjectRemove(projectId),
+    projectRemove: (projectId, deviceName) => dispatchProjectRemove(projectId, deviceName),
     projectCreate: (name, parentDir, deviceName) => dispatchProjectCreate(name, parentDir, deviceName),
     saveInboxImage: (bytes, ext) => Promise.resolve(saveInboxImage(join(getDataDir(), 'web-inbox'), bytes, ext)),
     saveInboxFile: (bytes, name) => Promise.resolve(saveInboxFile(join(getDataDir(), 'web-inbox'), bytes, name)),
@@ -1510,6 +1591,15 @@ async function start(): Promise<void> {
   // what lights a take-over button up.
   unsubscribeHandoff = onHandoffChanged((projectId, records) => instance.pushHandoff(projectId, records))
 
+  // And each Claude pane's context ring and the account's limits. The pane a
+  // session belongs to is looked up on every pass rather than remembered,
+  // because panes open, close and change session under it.
+  usageWatch = startAgentUsage({
+    dir: defaultStatusDir(),
+    panes: paneSessions,
+    onUsage: (frame) => instance.pushUsage(frame)
+  })
+
   // The browser sees what the window sees, from the same coalesced flush.
   unsubscribePty = addPtySink({
     onData: (id, data) => {
@@ -1529,6 +1619,9 @@ async function start(): Promise<void> {
         .find((s) => s.id === id)
       if (session) instance.pushSessionStarted(session)
       instance.pushSessions()
+      // A resumed session's status file is already on disk; its ring need not
+      // wait for the next redraw or the poll.
+      usageWatch?.rescan(id)
       // Re-adoption after a renderer reload arrives here too, and a renderer
       // that has just reloaded has forgotten which of its panes a browser is
       // reading — the labels on them, and nothing else now, but a label that
@@ -1779,6 +1872,8 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   unsubscribeForeman = null
   unsubscribeHandoff?.()
   unsubscribeHandoff = null
+  usageWatch?.stop()
+  usageWatch = null
   // A pending push would fire into a server that has stopped, which is the
   // ordinary shape of switching the link off a beat after moving a pane.
   if (geometryPush) clearTimeout(geometryPush)

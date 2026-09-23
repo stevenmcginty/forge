@@ -468,6 +468,25 @@ export const MAX_FILE_CHUNK_BASE64 = 96 * 1024
  */
 export const MAX_DICTATION_BYTES = 4 * 1024 * 1024
 
+/**
+ * How long a streamed dictation (`dictate-stream`) may sit with nothing
+ * appended before the desktop forgets it. A phone that lost its signal
+ * mid-sentence, or a tab closed while recording, leaves a half-assembled
+ * recording behind; two minutes is far past any pause between MediaRecorder
+ * slices and short enough that four megabytes of somebody's voice does not
+ * linger. An `append` or `done` after that is answered `failed`, and the page
+ * should fall back to sending the recording it still holds as `dictate`.
+ */
+export const DICTATION_STREAM_IDLE_MS = 2 * 60 * 1000
+
+/**
+ * The most of one text file a `project-file` answer carries. Past it the
+ * answer is the first MAX_PROJECT_FILE_BYTES, cut on a character boundary,
+ * with `truncated` set — a phone reading a file wants the top of it, not a
+ * refusal, and not a megabyte of JSON down a tunnel.
+ */
+export const MAX_PROJECT_FILE_BYTES = 512 * 1024
+
 /** Image types a `paste-image` request may name. Anything else is `bad-frame`. */
 export const WEB_IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
 
@@ -582,6 +601,125 @@ export const PIN_MAX_DIGITS = 12
  */
 export const PIN_GRACE_MS = 10 * 60 * 1000
 
+/* ----------------------------------------------------------------- passkeys
+ *
+ * A phone's own fingerprint or face as an alternative answer to the PIN
+ * question — WebAuthn, with the key held in the phone's platform
+ * authenticator. The PIN stays the fallback and the root: every passkey is
+ * enrolled under the current PIN and changing or clearing the PIN voids them
+ * all. electron/web/passkey.ts holds the verifier and says why.
+ *
+ * Everything binary travels as base64url, because this wire is JSON. The
+ * options below are `PublicKeyCredentialCreationOptions` and
+ * `PublicKeyCredentialRequestOptions` with every BufferSource turned into
+ * that: the page decodes `challenge`, `user.id` and each credential `id` into
+ * bytes before handing them to `navigator.credentials`.
+ *
+ * Optional everywhere, and announced: a desktop that can do this puts
+ * WEB_FEATURE_PASSKEY in `hello-ok.features`, and a page uses none of it
+ * otherwise. Added without a WEB_PROTO bump on the rule at the top of this
+ * file — an older desktop ignores the fields and answers the requests
+ * `unsupported`.
+ */
+
+/** The `hello-ok.features` entry that says this desktop understands passkeys. */
+export const WEB_FEATURE_PASSKEY = 'passkey'
+
+/**
+ * The `hello-ok.features` entry that says this desktop takes `dictate-stream`:
+ * audio appended while Steve is still talking, so only the last slice is left
+ * to upload when he stops. Absent (an older desktop) → record, then send the
+ * whole recording as `dictate`, which every desktop still takes.
+ */
+export const WEB_FEATURE_DICTATE_STREAM = 'dictate-stream'
+
+/**
+ * The `hello-ok.features` entry that says this desktop answers `project-files`
+ * and `project-file` — a read-only look inside a project's folder. Absent → the
+ * page browses files in GitHub mode only, as it always has.
+ */
+export const WEB_FEATURE_FILES = 'files'
+
+/**
+ * The `hello-ok.features` entry that says this desktop answers
+ * `project-remove-preview` and `project-remove` — taking a project off the
+ * rail from a browser, the folder left alone. Absent (an older desktop) → the
+ * page shows the control disabled rather than sending a request it knows will
+ * come back `unsupported`.
+ */
+export const WEB_FEATURE_PROJECT_REMOVE = 'project-remove'
+
+/**
+ * The `hello-ok.features` entry that says this desktop sends `usage` frames — a
+ * pane's context window and the account's 5-hour and weekly limits. Absent (an
+ * older desktop) → the page draws no ring and no limits, and falls back to
+ * whatever the footer scrape in `status.context` says.
+ */
+export const WEB_FEATURE_USAGE = 'usage'
+
+/**
+ * A browser asking for a project to come off the rail, on its way from main to
+ * the renderer over `IPC.webProjectRemove`. An IPC event rather than a wire
+ * frame, declared here beside the request it carries so the two cannot drift.
+ * Main has already checked the project is on its list; the renderer checks
+ * again against its own and answers on `webCommandResult`.
+ */
+export interface WebProjectRemoveEvent {
+  requestId: string
+  /** The browser's own name, for a "removed from Chrome on Windows" toast. */
+  deviceName: string
+  projectId: string
+}
+
+/** `navigator.credentials.create({ publicKey })`, base64url where WebAuthn wants bytes. */
+export interface WebPasskeyCreationOptions {
+  challenge: string
+  rp: { name: string; id: string }
+  user: { id: string; name: string; displayName: string }
+  pubKeyCredParams: { type: 'public-key'; alg: number }[]
+  authenticatorSelection: {
+    authenticatorAttachment: 'platform'
+    userVerification: 'required'
+    residentKey: 'preferred'
+  }
+  attestation: 'none'
+  excludeCredentials: { type: 'public-key'; id: string }[]
+  /** Milliseconds. The challenge dies at the same moment. */
+  timeout: number
+}
+
+/** `navigator.credentials.get({ publicKey })`, base64url where WebAuthn wants bytes. */
+export interface WebPasskeyRequestOptions {
+  challenge: string
+  rpId: string
+  allowCredentials: { type: 'public-key'; id: string }[]
+  userVerification: 'required'
+  /** Milliseconds. The challenge dies at the same moment. */
+  timeout: number
+}
+
+/**
+ * A `PublicKeyCredential` from `navigator.credentials.get`, flattened: `rawId`
+ * and the four `AuthenticatorAssertionResponse` buffers, each base64url.
+ * `userHandle` is optional because an authenticator may return null.
+ */
+export interface WebPasskeyAssertion {
+  credentialId: string
+  authenticatorData: string
+  clientDataJSON: string
+  signature: string
+  userHandle?: string
+}
+
+/** One enrolled passkey as a list row. No key material. */
+export interface WebPasskeyInfo {
+  credentialId: string
+  /** What the enrolling browser called itself. Display text only. */
+  deviceName: string
+  createdAt: number
+  lastUsedAt: number
+}
+
 /* ------------------------------------------------------------------ records */
 
 /**
@@ -685,6 +823,14 @@ export interface WebHelloFrame {
    * down.
    */
   pin?: string
+  /**
+   * A passkey answer to the PIN question, instead of `pin` — sent only in
+   * reply to a `pin-required` refusal that carried `passkey` options, signed
+   * over that refusal's challenge. When both are present `pin` is judged and
+   * this is ignored. A failure is struck exactly like a wrong PIN, and is
+   * answered `pin-invalid`.
+   */
+  passkey?: WebPasskeyAssertion
 }
 
 /**
@@ -925,8 +1071,9 @@ export interface WebCrumb {
  * One thing inside a folder. A *name*, and two facts about it.
  *
  * Never a path, and never any content: this is `readdir` with the type bit that
- * came free with it, plus one `.git` probe. A file's bytes are not on this wire
- * and there is no frame that carries them.
+ * came free with it, plus one `.git` probe. A file's bytes never travel with a
+ * listing; the one request that reads contents is `project-file`, and it is
+ * confined to a project's own folder (electron/web/project-files.ts).
  */
 export interface WebDirEntry {
   name: string
@@ -938,6 +1085,21 @@ export interface WebDirEntry {
    * list of forty folders readable at a glance.
    */
   repo: boolean
+}
+
+/**
+ * One thing inside a project's folder — a row of the read-only file browser,
+ * the answer to `project-files`. A name and the facts a file list draws; the
+ * path to ask for next is the listed folder's `path` plus `/` plus `name`.
+ */
+export interface WebProjectEntry {
+  name: string
+  /** A folder, and therefore something to list rather than read. */
+  dir: boolean
+  /** Bytes. 0 for a folder. */
+  size: number
+  /** Last modified, ms epoch. */
+  mtime: number
 }
 
 /**
@@ -1123,6 +1285,73 @@ export type WebRequest =
       data: string
     }
   /**
+   * The same recording, streamed while it is still being made — only when
+   * `hello-ok.features` carries WEB_FEATURE_DICTATE_STREAM.
+   *
+   * `start` names the pane and the recorder's mime once. Each `append` is one
+   * MediaRecorder slice, base64, at most MAX_FILE_CHUNK_BYTES raw, numbered
+   * from 0 by `seq`; they may arrive out of order, and an `append` repeated
+   * with the same `seq` replaces the earlier one. `done` says how many slices
+   * there were (`chunks`, so seqs 0..chunks-1), and the desktop assembles them
+   * in order, transcribes once, and answers `dictation`. `cancel` throws the
+   * lot away.
+   *
+   * `start`, `append` and `cancel` are answered `{ kind: 'ok' }`. Over
+   * MAX_DICTATION_BYTES in total is `limit` and drops the recording; a missing
+   * slice at `done` is `bad-frame` and drops it; an `append` or `done` for an
+   * id the desktop does not hold (never started, cancelled, finished, or idle
+   * past DICTATION_STREAM_IDLE_MS) is `failed`.
+   */
+  | { kind: 'dictate-stream'; op: 'start'; dictationId: string; sessionId: string; mime: string }
+  | { kind: 'dictate-stream'; op: 'append'; dictationId: string; seq: number; data: string }
+  | { kind: 'dictate-stream'; op: 'done'; dictationId: string; chunks: number }
+  | { kind: 'dictate-stream'; op: 'cancel'; dictationId: string }
+  /**
+   * One folder inside a project, read-only — only when `hello-ok.features`
+   * carries WEB_FEATURE_FILES.
+   *
+   * `path` is relative to the project's folder, `/`-separated, '' (or absent)
+   * for the folder itself. It is never absolute and never climbs: an absolute
+   * path, a `..` segment, and anything whose real path (symlinks and junctions
+   * resolved) lands outside the project's folder are refused `failed` with a
+   * sentence. An unknown `projectId` is `unknown-project`. Answered
+   * `project-files`: folders first, then files, case-insensitively by name,
+   * cut at the desktop's cap with `truncated` set. An entry that is a link
+   * pointing outside the project is left out of the list.
+   */
+  | { kind: 'project-files'; projectId: string; path?: string }
+  /**
+   * One text file inside a project, read-only — the same feature flag and the
+   * same confinement as `project-files`. Answered `project-file` with the
+   * first MAX_PROJECT_FILE_BYTES as UTF-8 and `truncated` when there was more;
+   * a binary file is refused `failed` with a sentence.
+   *
+   * `git: true` means `path` is a changed file exactly as the git status list
+   * printed it (`GitFileChange.path`, relative to the repository root, which
+   * may sit above the project's folder). The desktop maps it onto the disk
+   * itself, and the file must still resolve inside the project's folder.
+   */
+  | { kind: 'project-file'; projectId: string; path: string; git?: boolean }
+  /**
+   * What removing a project would close — only when `hello-ok.features`
+   * carries WEB_FEATURE_PROJECT_REMOVE. Read-only; answered
+   * `project-remove-preview` so the page can say "3 open panes will close"
+   * before Steve confirms. An unknown `projectId` is `unknown-project`.
+   */
+  | { kind: 'project-remove-preview'; projectId: string }
+  /**
+   * Take a project off the rail — the browser's "Remove project…", under the
+   * same feature flag. Performed by the desktop renderer through
+   * `removeProject`, the function the rail's own menu item reaches: it closes
+   * the project's panes (its tabs' panes and its planner pane) and forgets its
+   * layout. The folder on disk is never touched.
+   *
+   * Answered `{ kind: 'ok' }`, after which a `projects` frame without it
+   * follows. An unknown `projectId` is `unknown-project`; a desktop with no
+   * window to perform it (or one that did not answer in time) is `no-window`.
+   */
+  | { kind: 'project-remove'; projectId: string }
+  /**
    * "Notify this browser when a pane needs me." The subscription is the object
    * `PushSubscription.toJSON()` returns; the desktop stores it beside its VAPID
    * keys and posts to `endpoint` on the next attention transition that no
@@ -1220,6 +1449,28 @@ export type WebRequest =
    * later and arrives as `handoff` frames.
    */
   | { kind: 'handoff-start'; paneId: string; target: HandoffTargetWire }
+  /**
+   * Begin enrolling this browser's passkey. Only on a socket that opened with
+   * the PIN (or a passkey) on a desktop that still has that same PIN set; any
+   * other socket is answered `failed` with code `unsupported`. Answered
+   * `{ kind: 'passkey-options' }`: hand `options` to
+   * `navigator.credentials.create`, then send `passkey-register-finish`
+   * within `options.timeout`.
+   */
+  | { kind: 'passkey-register-begin' }
+  /**
+   * The `AuthenticatorAttestationResponse`, base64url. `deviceName` labels
+   * the row. Answered `{ kind: 'passkeys' }` with the new list, or `failed`.
+   */
+  | { kind: 'passkey-register-finish'; clientDataJSON: string; attestationObject: string; deviceName?: string }
+  /** This account's passkeys, and whether this socket may enrol another. Answered `{ kind: 'passkeys' }`. */
+  | { kind: 'passkey-list' }
+  /**
+   * Forget one passkey; it stops unlocking at once. Same socket rule as
+   * `passkey-register-begin`. Answered `{ kind: 'passkeys' }` with what is
+   * left, whether or not the id was known.
+   */
+  | { kind: 'passkey-forget'; credentialId: string }
 
 /**
  * What `PushSubscription.toJSON()` yields, narrowed to the fields the desktop
@@ -1317,6 +1568,13 @@ export interface WebHelloOkFrame {
    * safe reading.
    */
   handoff?: { projectId: string; records: HandoffRecord[] }[]
+  /**
+   * Optional capabilities this desktop has, by name — WEB_FEATURE_PASSKEY,
+   * WEB_FEATURE_DICTATE_STREAM, WEB_FEATURE_FILES, WEB_FEATURE_PROJECT_REMOVE,
+   * WEB_FEATURE_USAGE. A page uses a feature only when its name is here; absent (an older
+   * desktop) means none.
+   */
+  features?: string[]
 }
 
 /**
@@ -1397,6 +1655,22 @@ export interface WebRefusedFrame {
   message: string
   /** `busy` only: roughly how long before asking again is worth it. */
   retryAfterMs?: number
+  /**
+   * `pin-required` only, and only when this account has passkeys enrolled
+   * under the current PIN: hand these to `navigator.credentials.get` and send
+   * the next `hello` with `passkey` instead of `pin`. A cancelled biometric
+   * sends nothing and falls back to the PIN box. The challenge is single-use
+   * and dies after `timeout`.
+   */
+  passkey?: WebPasskeyRequestOptions
+  /**
+   * `proto` only: the desktop's Forge version and the protocol it speaks, so
+   * the page can say which side is old — a desktop `proto` below the page's
+   * means "restart Forge on the desktop", above it means "reload this page".
+   * Absent from an older desktop.
+   */
+  appVersion?: string
+  proto?: number
 }
 
 /**
@@ -1498,6 +1772,39 @@ export interface WebAttentionFrame {
    * to a line; the pane itself is the real answer to "what is it asking".
    */
   prompt?: string
+}
+
+/**
+ * One agent pane's usage: how full its context window is, and how much of the
+ * account's 5-hour and weekly limits are gone.
+ *
+ * Read off disk rather than off the screen. The terminal footer prints the
+ * same numbers, but a phone owns a narrow grid and Claude Code truncates its
+ * status line to fit — so the desktop reads what Claude Code hands its
+ * statusLine command instead (electron/web/agent-usage.ts says how).
+ *
+ * Broadcast when a pane's numbers change, at most once per pane per two
+ * seconds, and to hidden tabs too, like `foreman`. The latest per live pane is
+ * said again after every `hello-ok`, like `attention`, so a phone back from the
+ * lock screen draws a true ring at once. Announced as WEB_FEATURE_USAGE.
+ *
+ * `limits` belong to the account, not the pane: every Claude pane carries the
+ * same newest pair. Either half may be absent — a pane that has not drawn its
+ * status line yet has no context, and an API-key session has no limits.
+ */
+export interface WebUsageFrame {
+  type: 'usage'
+  /** The pane id. */
+  sessionId: string
+  context?: { usedPct: number; usedTokens?: number; windowTokens?: number }
+  limits?: {
+    /** `resetsAt` is epoch seconds, as Claude Code reports it. */
+    fiveHour?: { usedPct: number; resetsAt?: number }
+    week?: { usedPct: number; resetsAt?: number }
+  }
+  source: 'claude-statusline' | 'codex-session'
+  /** When these numbers were true, epoch ms. */
+  at: number
 }
 
 /**
@@ -1688,6 +1995,23 @@ export type WebResult =
   | { kind: 'folder'; folder: WebFolder }
   /** The words the desktop heard in a `dictate` recording — empty when it heard nothing. */
   | { kind: 'dictation'; text: string }
+  /** One folder inside a project — the answer to `project-files`. `path` is the folder as listed, '' for the top. */
+  | { kind: 'project-files'; projectId: string; path: string; entries: WebProjectEntry[]; truncated: boolean }
+  /**
+   * One text file inside a project — the answer to `project-file`. `path` is
+   * relative to the project's folder, `/`-separated (a `git: true` ask is
+   * answered with the project-relative spelling). `size` is the whole file's
+   * size on disk; `content` stops short of it when `truncated`.
+   */
+  | {
+      kind: 'project-file'
+      projectId: string
+      path: string
+      content: string
+      size: number
+      mtime: number
+      truncated: boolean
+    }
   /**
    * `project-create` asked for a name that is already a folder in that parent.
    *
@@ -1699,6 +2023,22 @@ export type WebResult =
    * beside the offer.
    */
   | { kind: 'project-exists'; path: string; message: string }
+  /**
+   * The answer to `project-remove-preview`. `panes` is how many panes are
+   * running in that project right now and would close with it — its tabs'
+   * panes plus its planner pane, counting only the live ones. `name` is the
+   * project's name as the rail shows it.
+   */
+  | { kind: 'project-remove-preview'; projectId: string; name: string; panes: number }
+  /** The answer to `passkey-register-begin`: what to hand `navigator.credentials.create`. */
+  | { kind: 'passkey-options'; options: WebPasskeyCreationOptions }
+  /**
+   * The answer to `passkey-list`, `passkey-register-finish` and
+   * `passkey-forget`: this account's passkeys, and whether this socket may
+   * enrol or forget one (it opened with the PIN or a passkey, and that PIN is
+   * still the one set).
+   */
+  | { kind: 'passkeys'; passkeys: WebPasskeyInfo[]; canRegister: boolean }
 
 /**
  * "This desktop is going away."
@@ -1780,6 +2120,7 @@ export type WebServerFrame =
   | WebSessionsFrame
   | WebSessionStartedFrame
   | WebAttentionFrame
+  | WebUsageFrame
   | WebForemanFrame
   | WebHandoffFrame
   | WebDesktopFrame
@@ -1911,6 +2252,8 @@ export const MAX_MIRROR_INPUT_PER_SECOND = 120
 export interface WebMirrorStartFrame {
   type: 'mirror-start'
   pin?: string
+  /** A passkey answer instead of `pin`, over the challenge a `needsPin` stop carried. */
+  passkey?: WebPasskeyAssertion
 }
 
 /**
@@ -1933,6 +2276,12 @@ export interface WebMirrorStopFrame {
   reason?: string
   /** Ask for the PIN and send `mirror-start` again. Nothing has gone wrong. */
   needsPin?: boolean
+  /**
+   * With `needsPin`, when this account has passkeys: a fresh challenge the
+   * page may answer with a biometric instead, sent back as
+   * `mirror-start.passkey`.
+   */
+  passkey?: WebPasskeyRequestOptions
 }
 
 /**

@@ -15,6 +15,7 @@ import { TitleBar } from '@/components/TitleBar'
 import { StaleBanner } from '@/components/StaleBanner'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { VoiceHub } from '@/components/VoiceHub'
+import { WebProjectRemoveBridge } from '@/components/WebProjectRemoveBridge'
 import { OverlayHost } from '@/state/OverlayHost'
 import { useShortcuts } from '@/hooks/useShortcuts'
 import { terminalHost } from '@/lib/terminals'
@@ -119,6 +120,7 @@ export function App(): ReactNode {
         renders nothing until main raises one.
       */}
       <ApprovalPrompt />
+      <WebProjectRemoveBridge />
     </div>
   )
 }

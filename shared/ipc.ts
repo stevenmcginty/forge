@@ -494,6 +494,14 @@ export const IPC = {
    */
   webProjectAdd: 'web:project-add',
   /**
+   * A browser asking for a project to come off the rail — `webProjectAdd`'s
+   * opposite, main → renderer for the same reason, answered on
+   * `webCommandResult`. The renderer performs it with `removeProject`, the
+   * function the rail's own "Remove project…" reaches; the folder is never
+   * touched.
+   */
+  webProjectRemove: 'web:project-remove',
+  /**
    * The renderer's answer to a `webCommand` or a `webProjectAdd`.
    *
    * One channel for both, deliberately: `requestId` is what the main side

@@ -100,7 +100,7 @@ import type {
   ForemanToolRequest,
   ForemanToolResult
 } from './foreman'
-import type { WebMirrorChunk, WebMirrorConfig } from './web'
+import type { WebMirrorChunk, WebMirrorConfig, WebProjectRemoveEvent } from './web'
 import type { HandoffStartRemoteEvent } from './handoffview'
 import type { SkillSource, SkillsList } from './skills'
 import type { PackPlugin, SkillPack } from './skillpack'
@@ -766,7 +766,15 @@ export interface ForgeApi {
      * own Add project button reaches.
      */
     onProjectAdd(cb: (e: WebProjectAddEvent) => void): () => void
-    /** Answer an `onCommand` or an `onProjectAdd`. `error` empty means it worked. */
+    /**
+     * A browser wants a project off the rail. Main has already checked the
+     * project exists; the renderer removes it with `removeProject`, the same
+     * function the rail's "Remove project…" reaches, and never touches the
+     * folder. Optional because a preload built before it has no such member,
+     * and a renderer calling it unguarded would crash on one.
+     */
+    onProjectRemove?(cb: (e: WebProjectRemoveEvent) => void): () => void
+    /** Answer an `onCommand`, `onProjectAdd` or `onProjectRemove`. `error` empty means it worked. */
     commandResult(requestId: string, error?: string): void
     /**
      * Which panes a browser has open, under exactly the rule `mobile.onWatched`

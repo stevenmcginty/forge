@@ -1,7 +1,30 @@
 import { X509Certificate, createVerify, timingSafeEqual } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
 import { AUTH_LOCKOUT_MS, AUTH_MAX_FAILURES } from '@shared/mobile'
-import { PIN_MAX_DIGITS, PIN_MIN_DIGITS, type WebRefusal } from '@shared/web'
+import {
+  PIN_MAX_DIGITS,
+  PIN_MIN_DIGITS,
+  type WebPasskeyAssertion,
+  type WebPasskeyCreationOptions,
+  type WebPasskeyInfo,
+  type WebPasskeyRequestOptions,
+  type WebRefusal
+} from '@shared/web'
+import {
+  PasskeyChallenges,
+  PasskeyStore,
+  creationOptions,
+  passkeyInfo,
+  passkeyUserId,
+  pinDigest,
+  readClientData,
+  requestOptions,
+  rpIdFor,
+  verifyAssertion,
+  verifyRegistration,
+  type ChallengePurpose,
+  type PasskeyStorage
+} from './passkey'
 import { verifyPin } from './pin'
 
 /**
@@ -184,6 +207,13 @@ export interface WebDevice {
    * lockout on. See `uidKey`.
    */
   uid: string
+  /**
+   * How this socket answered the PIN question, and under which PIN — absent
+   * when no PIN was set, so nothing was asked. Not a credential; what it gates
+   * is enrolling or forgetting a passkey, which only a socket that answered
+   * the *current* PIN may do. See `passkeyMayEnrol`.
+   */
+  unlock?: { by: 'pin' | 'passkey'; pinDigest: string }
 }
 
 /**
@@ -197,6 +227,9 @@ const BAD_PIN = 'That PIN was not accepted.'
 
 /** The one sentence that *asks* for a PIN, so both doors word it identically. */
 const ASK_PIN = `Enter the ${PIN_MIN_DIGITS}-to-${PIN_MAX_DIGITS} digit PIN set on the desktop.`
+
+/** Why a socket may not enrol or forget a passkey. See `passkeyMayEnrol`. */
+const UNLOCK_FIRST = 'Unlock with the desktop PIN on this connection before changing passkeys.'
 
 /** One JWKS response, as the injected fetcher hands it over. */
 export interface JwksResponse {
@@ -299,6 +332,12 @@ export interface WebAuthHost {
    * test server safe to construct in one line.
    */
   pinHash?: () => string
+  /**
+   * Where enrolled passkeys live — electron/web/passkey.ts. Absent means this
+   * desktop offers no passkeys: the door is PIN-only, exactly as before, and
+   * `hello-ok` announces nothing.
+   */
+  passkeys?: PasskeyStorage
   /** Injected so a check script can drive expiry and lockout on a fake clock. */
   now?: () => number
   log?: (line: string) => void
@@ -342,7 +381,14 @@ export type WebTokenOutcome =
 
 export type WebAuthOutcome =
   | { ok: true; device: WebDevice; claims: WebTokenClaims }
-  | { ok: false; reason: WebRefusal; message: string; retryAfterMs?: number }
+  | {
+      ok: false
+      reason: WebRefusal
+      message: string
+      retryAfterMs?: number
+      /** `pin-required` only, when this account has passkeys. See `WebRefusedFrame.passkey`. */
+      passkey?: WebPasskeyRequestOptions
+    }
 
 export interface WebAuthInput {
   /**
@@ -362,6 +408,13 @@ export interface WebAuthInput {
    * sign-in — see `WebHelloFrame.pin`.
    */
   pin?: string
+  /**
+   * The socket's `Origin` header. What a passkey is scoped to and checked
+   * against; without one no passkey is offered or accepted.
+   */
+  origin?: string
+  /** A passkey answer instead of `pin`. See `WebHelloFrame.passkey`. */
+  passkey?: WebPasskeyAssertion
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -439,6 +492,9 @@ export class WebAuth {
   private readonly host: WebAuthHost
   private readonly now: () => number
   private strikes = new Map<string, Strike>()
+  /** Null when the host gave no storage — see `WebAuthHost.passkeys`. */
+  private readonly passkeys: PasskeyStore | null
+  private readonly challenges: PasskeyChallenges
 
   /** kid → public key, as last fetched. Null until the first fetch lands. */
   private keys: Record<string, KeyObject> | null = null
@@ -450,6 +506,8 @@ export class WebAuth {
   constructor(host: WebAuthHost) {
     this.host = host
     this.now = host.now ?? (() => Date.now())
+    this.passkeys = host.passkeys ? new PasskeyStore(host.passkeys) : null
+    this.challenges = new PasskeyChallenges(this.now)
   }
 
   /* ----------------------------------------------------------------- the door */
@@ -473,7 +531,10 @@ export class WebAuth {
    *     whose storage is unavailable, and telling it so is the only way it ever
    *     finds out. See `not-approved` in shared/web.ts.
    *  4. **The PIN**, when one is set. Asked of every browser on every
-   *     connection, with nothing that excuses it.
+   *     connection, with nothing that excuses it. A passkey enrolled under
+   *     that PIN may answer instead (electron/web/passkey.ts): a yes is a
+   *     correct PIN and every kind of no is a wrong one, in the same bucket —
+   *     bar a correct answer over a stale challenge, which is asked again.
    *
    * ## Which failures count against which bucket
    *
@@ -523,22 +584,44 @@ export class WebAuth {
     const account = this.uidKey(verified.claims.uid)
     const pinLocked = this.lockout(account)
     if (pinLocked) return pinLocked
-    const pin = this.checkPin(input.pin)
-    if (!pin.ok) {
-      // `pin-required` is the first half of every ordinary sign-in on a desktop
-      // with a PIN — not a failure, and striking for it would lock somebody out
-      // on their fifth login. A wrong PIN is the other kind, and counts.
-      if (pin.reason === 'pin-required') {
-        this.host.log?.(`web auth: asking "${deviceName}" at ${input.source} for the PIN`)
-        return pin
+    const uid = verified.claims.uid
+    const stored = this.host.pinHash?.() ?? ''
+    let unlock: WebDevice['unlock']
+    if (stored && !String(input.pin ?? '').trim() && input.passkey) {
+      // A passkey instead of the PIN. Judged exactly as the PIN would be: a
+      // yes is a correct PIN, and every kind of no is a wrong one, struck
+      // against the same bucket — see electron/web/passkey.ts. The one
+      // exception is a correct answer over a stale challenge (a retry after a
+      // lost `hello-ok`, a slow fingerprint): asked again with a fresh
+      // challenge, unstruck, and not admitted — the `expired: true` rule for
+      // tokens, applied to challenges.
+      const answer = this.passkeyAnswer(uid, input.origin ?? '', input.passkey, 'get')
+      if (answer === 'retry') {
+        const passkey = this.passkeyRequest(uid, input.origin ?? '', 'get')
+        return { ok: false, reason: 'pin-required', message: ASK_PIN, ...(passkey ? { passkey } : {}) }
       }
-      return this.fail(account, pin)
+      if (answer !== 'ok') return this.fail(account, { ok: false, reason: 'pin-invalid', message: BAD_PIN })
+      unlock = { by: 'passkey', pinDigest: pinDigest(stored) }
+    } else {
+      const pin = this.checkPin(input.pin)
+      if (!pin.ok) {
+        // `pin-required` is the first half of every ordinary sign-in on a desktop
+        // with a PIN — not a failure, and striking for it would lock somebody out
+        // on their fifth login. A wrong PIN is the other kind, and counts.
+        if (pin.reason === 'pin-required') {
+          this.host.log?.(`web auth: asking "${deviceName}" at ${input.source} for the PIN`)
+          const passkey = this.passkeyRequest(uid, input.origin ?? '', 'get')
+          return passkey ? { ...pin, passkey } : pin
+        }
+        return this.fail(account, pin)
+      }
+      if (stored) unlock = { by: 'pin', pinDigest: pinDigest(stored) }
     }
 
-    this.host.log?.(`"${deviceName}" admitted from ${input.source}`)
+    this.host.log?.(`"${deviceName}" admitted from ${input.source}${unlock?.by === 'passkey' ? ' with a passkey' : ''}`)
     return {
       ok: true,
-      device: { id: deviceId, name: deviceName, uid: verified.claims.uid },
+      device: { id: deviceId, name: deviceName, uid, ...(unlock ? { unlock } : {}) },
       claims: verified.claims
     }
   }
@@ -633,17 +716,34 @@ export class WebAuth {
    */
   checkFreshPin(
     pin: string,
-    who?: { uid: string; source: string }
-  ): { ok: true } | { ok: false; needed: boolean; message: string } {
+    who?: { uid: string; source: string; origin?: string },
+    passkey?: WebPasskeyAssertion
+  ): { ok: true } | { ok: false; needed: boolean; message: string; passkey?: WebPasskeyRequestOptions } {
     const account = who ? this.uidKey(who.uid) : null
     if (account) {
       const locked = this.lockout(account)
       if (locked) return { ok: false, needed: false, message: locked.message }
     }
+    // A passkey answers "is somebody still there" as well as digits do — with
+    // its own fresh challenge, issued on the `needed` refusal below, and only
+    // when the caller vouches for an identity to count a failure against. A
+    // correct answer over a stale challenge is asked again, unstruck, exactly
+    // as at `hello`.
+    if (who && account && passkey && !String(pin ?? '').trim() && (this.host.pinHash?.() ?? '')) {
+      const answer = this.passkeyAnswer(who.uid, who.origin ?? '', passkey, 'fresh')
+      if (answer === 'ok') return { ok: true }
+      if (answer === 'retry') {
+        const options = this.passkeyRequest(who.uid, who.origin ?? '', 'fresh')
+        return { ok: false, needed: true, message: ASK_PIN, ...(options ? { passkey: options } : {}) }
+      }
+      this.fail(account, { ok: false, reason: 'pin-invalid', message: BAD_PIN })
+      return { ok: false, needed: false, message: BAD_PIN }
+    }
     const outcome = this.checkPin(pin)
     if (outcome.ok) return { ok: true }
     if (outcome.reason === 'pin-required') {
-      return { ok: false, needed: true, message: outcome.message }
+      const options = who ? this.passkeyRequest(who.uid, who.origin ?? '', 'fresh') : undefined
+      return { ok: false, needed: true, message: outcome.message, ...(options ? { passkey: options } : {}) }
     }
     if (account) {
       this.fail<{ ok: false; reason: 'pin-invalid'; message: string }>(account, {
@@ -653,6 +753,180 @@ export class WebAuth {
       })
     }
     return { ok: false, needed: false, message: outcome.message }
+  }
+
+  /* ------------------------------------------------------------------ passkeys */
+
+  /** Whether this desktop offers passkeys at all — the `hello-ok.features` answer. */
+  passkeysSupported(): boolean {
+    return this.passkeys !== null
+  }
+
+  /**
+   * May this socket enrol or forget a passkey? Only one that typed the PIN
+   * itself on this connection, under the PIN that is set *now*. A socket
+   * admitted on the account alone (no PIN set) never may, nor may one that
+   * unlocked under a PIN since changed at the desk — and nor may one that
+   * unlocked with a passkey, so a passkey can never mint or remove another:
+   * every change to the set goes back to the PIN it hangs from.
+   */
+  passkeyMayEnrol(device: WebDevice): boolean {
+    const stored = this.host.pinHash?.() ?? ''
+    return (
+      !!this.passkeys &&
+      !!stored &&
+      !!device.unlock &&
+      device.unlock.by === 'pin' &&
+      device.unlock.pinDigest === pinDigest(stored)
+    )
+  }
+
+  /** This account's passkeys as list rows, and whether this socket may change them. */
+  passkeyList(device: WebDevice): { passkeys: WebPasskeyInfo[]; canRegister: boolean } {
+    const list = this.passkeys ? this.passkeys.list(device.uid, this.host.pinHash?.() ?? '') : []
+    return { passkeys: list.map(passkeyInfo), canRegister: this.passkeyMayEnrol(device) }
+  }
+
+  /** Enrolling, step one: creation options with a fresh challenge, or a sentence saying why not. */
+  passkeyRegisterBegin(
+    device: WebDevice,
+    origin: string
+  ): { ok: true; options: WebPasskeyCreationOptions } | { ok: false; message: string } {
+    if (!this.passkeys) return { ok: false, message: 'This desktop does not offer passkeys.' }
+    if (!this.passkeyMayEnrol(device)) return { ok: false, message: UNLOCK_FIRST }
+    const rpId = rpIdFor(origin)
+    if (!rpId) return { ok: false, message: 'This page has no origin a passkey can belong to.' }
+    const existing = this.passkeys.list(device.uid, this.host.pinHash?.() ?? '')
+    const challenge = this.challenges.issue(device.uid, 'create', origin, rpId)
+    return { ok: true, options: creationOptions(challenge, rpId, device.uid, existing) }
+  }
+
+  /**
+   * Enrolling, step two: verify what the authenticator made, and keep it.
+   * Never strikes — only an unlocked socket gets this far, and nothing here is
+   * a guess at a secret.
+   */
+  passkeyRegisterFinish(
+    device: WebDevice,
+    origin: string,
+    body: { clientDataJSON: string; attestationObject: string; deviceName: string }
+  ): { ok: true } | { ok: false; message: string } {
+    if (!this.passkeys || !this.passkeyMayEnrol(device)) return { ok: false, message: UNLOCK_FIRST }
+    const refused = { ok: false as const, message: 'That passkey could not be added. Try again.' }
+    const clientData = readClientData(body.clientDataJSON)
+    if (!clientData) return refused
+    const taken = this.challenges.take(clientData.challenge, device.uid, 'create')
+    if (!taken.ok || taken.entry.origin !== origin) {
+      this.host.log?.('web auth: passkey enrolment with an unknown, expired or foreign challenge')
+      return refused
+    }
+    const verdict = verifyRegistration({
+      clientData,
+      attestationObject: body.attestationObject,
+      origin,
+      rpId: taken.entry.rpId
+    })
+    if (!verdict.ok) {
+      this.host.log?.(`web auth: passkey enrolment refused — ${verdict.why}`)
+      return refused
+    }
+    const now = this.now()
+    const added = this.passkeys.add(device.uid, this.host.pinHash?.() ?? '', {
+      credentialId: verdict.credentialId,
+      alg: verdict.alg,
+      publicKey: verdict.publicKey,
+      signCount: verdict.signCount,
+      deviceName: printable(body.deviceName.slice(0, 64)) || device.name,
+      createdAt: now,
+      lastUsedAt: now
+    })
+    if (!added) return { ok: false, message: 'That passkey is already added, or this account has too many.' }
+    this.host.log?.(`web auth: "${device.name}" enrolled a passkey`)
+    return { ok: true }
+  }
+
+  /** Forget one of this account's passkeys. False when this socket may not. */
+  passkeyForget(device: WebDevice, credentialId: string): boolean {
+    if (!this.passkeys || !this.passkeyMayEnrol(device)) return false
+    if (this.passkeys.remove(device.uid, this.host.pinHash?.() ?? '', credentialId)) {
+      this.host.log?.(`web auth: "${device.name}" forgot a passkey`)
+    }
+    return true
+  }
+
+  /**
+   * Request options, with a fresh challenge, for an account that has passkeys;
+   * undefined when there is nothing to offer — no store, no PIN, no passkeys,
+   * or no origin to scope them to.
+   */
+  private passkeyRequest(uid: string, origin: string, purpose: ChallengePurpose): WebPasskeyRequestOptions | undefined {
+    const stored = this.host.pinHash?.() ?? ''
+    if (!this.passkeys || !stored) return undefined
+    const rpId = rpIdFor(origin)
+    if (!rpId) return undefined
+    const list = this.passkeys.list(uid, stored)
+    if (!list.length) return undefined
+    return requestOptions(this.challenges.issue(uid, purpose, origin, rpId), rpId, list)
+  }
+
+  /**
+   * Does this assertion answer one of our challenges, for this account, from
+   * this page, with one of this account's passkeys? Why a no is a no goes to
+   * the desk's log and nowhere else: the browser hears `pin-invalid`, for the
+   * reason BAD_PIN is one sentence.
+   *
+   * Three answers. `ok` admits. `no` is a wrong PIN and the caller strikes it.
+   * `retry` is a correct assertion over a challenge that is no longer pending
+   * — spent, expired or evicted — and the caller asks again with a fresh
+   * challenge, unstruck and unadmitted: see "Failures are wrong PINs" in
+   * electron/web/passkey.ts. A challenge that is pending but was issued for
+   * another account, purpose or page is not stale; it is `no`.
+   */
+  private passkeyAnswer(
+    uid: string,
+    origin: string,
+    assertion: WebPasskeyAssertion,
+    purpose: ChallengePurpose
+  ): 'ok' | 'retry' | 'no' {
+    const no = (why: string): 'no' => {
+      this.host.log?.(`web auth: passkey refused — ${why}`)
+      return 'no'
+    }
+    const stored = this.host.pinHash?.() ?? ''
+    if (!this.passkeys || !stored) return no('no passkeys on this desktop')
+    if (!origin) return no('no origin')
+    const clientData = readClientData(assertion.clientDataJSON)
+    if (!clientData) return no('clientDataJSON does not parse')
+    // Spent before anything else is judged, so a challenge is answerable once
+    // whatever the answer turns out to be.
+    const taken = this.challenges.take(clientData.challenge, uid, purpose)
+    if (!taken.ok && !taken.stale) return no(taken.why)
+    if (taken.ok && taken.entry.origin !== origin) return no(`challenge was issued to ${taken.entry.origin}, not ${origin}`)
+    // A stale challenge still gets every other check, against this page's own
+    // RP ID since there is no pending entry to say which one it was issued for.
+    const stale = taken.ok ? '' : `${taken.why}; `
+    const rpId = taken.ok ? taken.entry.rpId : rpIdFor(origin)
+    if (!rpId) return no(`${stale}no RP ID for ${origin}`)
+    const passkey = this.passkeys.list(uid, stored).find((p) => p.credentialId === assertion.credentialId)
+    if (!passkey) return no(`${stale}unknown credential`)
+    const verdict = verifyAssertion({
+      assertion,
+      clientData,
+      stored: passkey,
+      origin,
+      rpId,
+      userId: passkeyUserId(uid),
+      ignoreCounter: !taken.ok
+    })
+    if (!verdict.ok) return no(`${stale}${verdict.why}`)
+    if (!taken.ok) {
+      // Right key, right person, right page — and a challenge that is gone.
+      // Never admitted, never recorded, never struck.
+      this.host.log?.(`web auth: passkey answered an ${taken.why} correctly — asking again with a fresh one`)
+      return 'retry'
+    }
+    this.passkeys.touch(uid, stored, passkey.credentialId, verdict.signCount, this.now())
+    return 'ok'
   }
 
   /* ---------------------------------------------------------- token verification */

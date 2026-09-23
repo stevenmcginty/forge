@@ -5,6 +5,7 @@ import {
   HEARTBEAT_GRACE_MS,
   HEARTBEAT_MS,
   MAX_FILE_BYTES,
+  DICTATION_STREAM_IDLE_MS,
   MAX_DICTATION_BYTES,
   MAX_FILE_CHUNK_BASE64,
   MAX_FRAME_BYTES,
@@ -17,6 +18,11 @@ import {
   MAX_WRITE_CHARS,
   PIN_MAX_DIGITS,
   isWebImageMime,
+  WEB_FEATURE_DICTATE_STREAM,
+  WEB_FEATURE_FILES,
+  WEB_FEATURE_PASSKEY,
+  WEB_FEATURE_PROJECT_REMOVE,
+  WEB_FEATURE_USAGE,
   WEB_PROTO,
   WEB_SUBPROTOCOL,
   WEB_WS_PATH,
@@ -31,12 +37,15 @@ import {
   type WebLayoutOp,
   type WebMirrorChunk,
   type WebMirrorConfig,
+  type WebPasskeyAssertion,
+  type WebPasskeyRequestOptions,
   type WebPushSubscription,
   type WebRefusal,
   type WebResult,
   type WebServerFrame,
   type WebSession,
-  type WebShutdownReason
+  type WebShutdownReason,
+  type WebUsageFrame
 } from '@shared/web'
 /*
  * The one validator, shared with the phone link. `readMirrorInput` never looks
@@ -74,6 +83,8 @@ import type { SkillsList } from '@shared/skills'
 import type { CommandsFeed } from '@shared/commands'
 import type { WebAuth, WebDevice } from './auth'
 import { extForMime, imagePasteIntoPane } from './inbox'
+import { readPasskeyAssertion } from './passkey'
+import { listProjectFolder, readProjectFile } from './project-files'
 
 /**
  * The Forge Web link server — the socket a browser tab mirrors this desktop
@@ -159,6 +170,15 @@ const MAX_PROBE_COMMANDS = 64
 const MAX_PATH_CHARS = 2048
 const MAX_NAME_CHARS = 512
 
+/**
+ * Streamed dictations (`dictate-stream`) one desktop holds at once, and the
+ * highest slice number one may use. Four megabytes of audio in at most eight
+ * recordings bounds what a runaway page can make this desktop hold; a phone
+ * slicing every 250ms for ten minutes is 2400 slices, well under the second.
+ */
+const MAX_OPEN_DICTATIONS = 8
+const MAX_DICTATION_SLICES = 4096
+
 /** The five verbs `GitActionKind` enumerates, as something the wire can be checked against. */
 const GIT_ACTIONS: readonly GitActionKind[] = ['fetch', 'pull', 'push', 'switch', 'commit']
 
@@ -170,6 +190,14 @@ const GIT_ACTIONS: readonly GitActionKind[] = ['fetch', 'pull', 'push', 'switch'
  */
 const MAX_PUSH_ENDPOINT_CHARS = 2048
 const MAX_PUSH_KEY_CHARS = 256
+
+/**
+ * Fewest milliseconds between two `usage` frames for one pane. Claude Code
+ * redraws its status line on every message, which is several times a second
+ * while a reply streams; a ring on a phone needs none of that. Trailing, so the
+ * last numbers of a burst still go out once the window passes.
+ */
+const USAGE_THROTTLE_MS = 2000
 
 /**
  * Close codes, so a browser can tell one hang-up from another in its own
@@ -326,6 +354,15 @@ export interface WebServerHost {
   fsList?: (path: string, name: string) => Promise<{ ok: true; folder: WebFolder } | { ok: false; error: string }>
 
   /**
+   * A project's folder on this disk, by id — null when there is no such
+   * project. Behind `project-files` and `project-file`, the read-only file
+   * browser; the confinement to this folder is electron/web/project-files.ts's,
+   * so a host only has to say where the project is. Optional: a host without
+   * it does not announce WEB_FEATURE_FILES and answers both `unsupported`.
+   */
+  projectRoot?: (projectId: string) => string | null
+
+  /**
    * Add a folder to the project rail. Implemented by web-host by checking the
    * folder is really there and then asking the *renderer* to do it, so a
    * browser reaches `addProjectPath` — the same function the button at the desk
@@ -334,6 +371,24 @@ export interface WebServerHost {
    * the same contract as `layout`, for the same reason.
    */
   projectAdd?: (path: string, deviceName: string) => Promise<string | null>
+
+  /**
+   * What taking a project off the rail would close: its name and how many of
+   * its panes are running — null when there is no such project, which is also
+   * how `project-remove` tells an unknown id from a real one. Read from main's
+   * own lists, never from anything the browser said.
+   */
+  projectRemovePreview?: (projectId: string) => { name: string; panes: number } | null
+
+  /**
+   * Take a project off the rail, the folder left alone. Implemented by
+   * web-host by asking the *renderer*, which owns the rail, to run
+   * `removeProject` — the function the desk's "Remove project…" reaches.
+   * Resolves to an error sentence, or null when it worked, as `projectAdd`
+   * does. Offered together with `projectRemovePreview` or not at all: a host
+   * with only one of them does not announce WEB_FEATURE_PROJECT_REMOVE.
+   */
+  projectRemove?: (projectId: string, deviceName: string) => Promise<string | null>
 
   /**
    * Make a brand-new project folder from a name and put it on the rail — the
@@ -492,6 +547,13 @@ export interface WebServerHost {
   onPresence?: (connected: number) => void
 
   /**
+   * True when this host feeds `pushUsage` — electron/web/agent-usage.ts in the
+   * real one. Announces WEB_FEATURE_USAGE; a host without it (the smoke
+   * fixture) says nothing, so a page draws no ring it will never fill.
+   */
+  usage?: boolean
+
+  /**
    * Which sessions a browser currently has open, whenever that set changes.
    *
    * Nothing on the desktop changes shape because of this: watching is not
@@ -539,8 +601,10 @@ export interface WebServerHost {
    */
   mirrorStart?: (
     pin: string,
-    who: { uid: string; source: string }
-  ) => { error: string; needsPin?: boolean } | null
+    who: { uid: string; source: string; origin?: string },
+    /** A passkey answer instead of `pin` — see `WebMirrorStartFrame.passkey`. Unread here too. */
+    passkey?: WebPasskeyAssertion
+  ) => { error: string; needsPin?: boolean; passkey?: WebPasskeyRequestOptions } | null
 
   /**
    * A browser started or stopped watching this screen.
@@ -615,6 +679,12 @@ let viewerSeq = 0
 interface Client {
   socket: WebSocket
   source: string
+  /**
+   * The `Origin` header the upgrade carried, already checked by
+   * `originAllowed`. What a passkey is scoped to (its hostname is the RP ID)
+   * and what a passkey ceremony's `clientDataJSON.origin` must equal.
+   */
+  origin: string
   device: WebDevice | null
   /** This socket's identity for the grid-ownership rule. See `viewerSeq`. */
   viewer: string
@@ -696,6 +766,17 @@ export class WebServer {
    */
   private askingNow = new Map<string, string>()
   /**
+   * The newest `usage` frame per pane, so it can be said again after every
+   * `hello-ok` — the same idea as `askingNow`, pruned the same way. Also what a
+   * throttled send sends when its window passes, so a burst ends on its last
+   * numbers rather than its first.
+   */
+  private usageNow = new Map<string, WebUsageFrame>()
+  /** When each pane's last `usage` frame went out, for the throttle. */
+  private usageSentAt = new Map<string, number>()
+  /** A pane's trailing send, waiting out the rest of its throttle window. */
+  private usageTimers = new Map<string, NodeJS.Timeout>()
+  /**
    * The one socket watching this desktop's screen, if any.
    *
    * At most one, ever, and for a sharper reason than Forge Mobile's: there the
@@ -726,6 +807,16 @@ export class WebServer {
   private pendingDictations = new Map<
     string,
     { sessionId: string; mime: string; totalChunks: number; chunks: Buffer[]; totalBytes: number; updatedAt: number }
+  >()
+  /**
+   * In-flight `dictate-stream` recordings, keyed by dictationId. Not tied to a
+   * socket, on purpose: a phone whose signal blinks mid-sentence reconnects
+   * and keeps appending to the same recording. Abandoned ones are swept after
+   * DICTATION_STREAM_IDLE_MS by the next `dictate-stream` to arrive.
+   */
+  private streamDictations = new Map<
+    string,
+    { sessionId: string; mime: string; slices: Map<number, Buffer>; totalBytes: number; updatedAt: number }
   >()
 
   constructor(host: WebServerHost) {
@@ -821,7 +912,7 @@ export class WebServer {
         }
         wss.handleUpgrade(req, socket, head, (ws) => {
           try {
-            this.accept(ws, source)
+            this.accept(ws, source, typeof req.headers.origin === 'string' ? req.headers.origin : '')
           } catch (err) {
             this.log(`accepting a socket failed: ${err instanceof Error ? err.message : String(err)}`)
             try {
@@ -865,6 +956,9 @@ export class WebServer {
     this.clients.clear()
     this.pendingUploads.clear()
     this.pendingDictations.clear()
+    this.streamDictations.clear()
+    for (const timer of this.usageTimers.values()) clearTimeout(timer)
+    this.usageTimers.clear()
     // Whoever was watching is not watching any more. Said explicitly rather
     // than left to the drops above, because a screen capture that outlives the
     // server relaying it is a desktop being encoded for nobody — and on this
@@ -928,6 +1022,9 @@ export class WebServer {
         this.send(client, { type: 'exit', sessionId: id, exitCode })
       }
     }
+    // An ended pane's ring is not replayed, and a send waiting out its window
+    // would be news about a pane the browser has just been told is gone.
+    this.forgetUsage(id)
     this.announceWatch()
   }
 
@@ -952,6 +1049,48 @@ export class WebServer {
     if (asking) this.askingNow.set(sessionId, prompt ?? '')
     else this.askingNow.delete(sessionId)
     this.broadcast({ type: 'attention', sessionId, asking, ...(prompt ? { prompt } : {}) })
+  }
+
+  /**
+   * One pane's usage moved — see `WebUsageFrame`. The host says so only when
+   * the numbers changed; pacing them is this server's job.
+   *
+   * Broadcast rather than filtered by subscription, like `foreman`: a phone
+   * shows a ring on every tab, not only the one it has attached to. At most one
+   * frame per pane per USAGE_THROTTLE_MS; a frame inside the window is held,
+   * replaced by any newer one, and sent when the window passes.
+   */
+  pushUsage(frame: WebUsageFrame): void {
+    const id = frame.sessionId
+    this.usageNow.set(id, frame)
+    if (this.usageTimers.has(id)) return
+    const wait = (this.usageSentAt.get(id) ?? -Infinity) + USAGE_THROTTLE_MS - Date.now()
+    if (wait <= 0) {
+      this.sendUsage(id)
+      return
+    }
+    this.usageTimers.set(
+      id,
+      setTimeout(() => {
+        this.usageTimers.delete(id)
+        this.sendUsage(id)
+      }, wait)
+    )
+  }
+
+  private sendUsage(id: string): void {
+    const frame = this.usageNow.get(id)
+    if (!frame) return
+    this.usageSentAt.set(id, Date.now())
+    this.broadcast(frame)
+  }
+
+  private forgetUsage(id: string): void {
+    this.usageNow.delete(id)
+    this.usageSentAt.delete(id)
+    const timer = this.usageTimers.get(id)
+    if (timer) clearTimeout(timer)
+    this.usageTimers.delete(id)
   }
 
   /**
@@ -1211,10 +1350,11 @@ export class WebServer {
 
   /* --------------------------------------------------------------- inbound */
 
-  private accept(socket: WebSocket, source: string): void {
+  private accept(socket: WebSocket, source: string, origin: string): void {
     const client: Client = {
       socket,
       source,
+      origin,
       device: null,
       viewer: `web-${++viewerSeq}`,
       subs: new Set(),
@@ -1519,10 +1659,12 @@ export class WebServer {
         // belong beside that state. The identity travels with it, so the
         // counting a wrong PIN earns lands on the account that guessed rather
         // than on an address a tunnel lets everybody share.
-        const refusal = this.host.mirrorStart(wireString(frame.pin, PIN_MAX_DIGITS), {
-          uid: client.device.uid,
-          source: client.source
-        })
+        const passkey = readPasskeyAssertion(frame.passkey)
+        const refusal = this.host.mirrorStart(
+          wireString(frame.pin, PIN_MAX_DIGITS),
+          { uid: client.device.uid, source: client.source, origin: client.origin },
+          passkey ?? undefined
+        )
         if (refusal) {
           // Refused before it began, so this socket does not become the viewer
           // — it has to be able to ask again once the reason is fixed, and the
@@ -1532,7 +1674,8 @@ export class WebServer {
           this.send(client, {
             type: 'mirror-stop',
             reason: refusal.error,
-            ...(refusal.needsPin ? { needsPin: true } : {})
+            ...(refusal.needsPin ? { needsPin: true } : {}),
+            ...(refusal.needsPin && refusal.passkey ? { passkey: refusal.passkey } : {})
           })
           return
         }
@@ -1684,14 +1827,18 @@ export class WebServer {
     if (Number(frame.proto) !== WEB_PROTO) {
       // `proto` is the one refusal auth never returns: it is decided here,
       // before a credential is looked at, because a client that cannot read the
-      // answer should not have its token verified to find that out.
-      this.refuse(
-        client,
-        'proto',
-        `This Forge speaks protocol ${WEB_PROTO}; the page speaks ${String(frame.proto)}. Reload the page, or update Forge.`,
-        undefined,
-        CLOSE_PROTO
-      )
+      // answer should not have its token verified to find that out. It carries
+      // this desktop's version and protocol so the page can say which side is
+      // the old one, and the sentence says it too for a page too old to read
+      // the fields.
+      const theirs = Number(frame.proto)
+      const version = this.host.appVersion
+      const message = !Number.isFinite(theirs)
+        ? `This Forge (${version}) speaks protocol ${WEB_PROTO}; the page named none. Reload the page.`
+        : theirs < WEB_PROTO
+          ? `This page is older than Forge ${version} on the desktop (protocol ${theirs}, desktop ${WEB_PROTO}). Reload the page.`
+          : `The desktop is on Forge ${version}, older than this page (protocol ${WEB_PROTO}, page ${theirs}). Restart Forge on the desktop to update it.`
+      this.refuse(client, 'proto', message, undefined, CLOSE_PROTO, undefined, { appVersion: version, proto: WEB_PROTO })
       return
     }
 
@@ -1704,11 +1851,16 @@ export class WebServer {
       deviceName: wireString(frame.deviceName, 64) || 'Browser',
       // Clamped to the longest PIN there can be, so a megabyte of "PIN" is not
       // a megabyte fed to a key-derivation function once per hello.
-      pin: wireString(frame.pin, PIN_MAX_DIGITS)
+      pin: wireString(frame.pin, PIN_MAX_DIGITS),
+      // What a passkey is checked against, and the answer itself when the page
+      // sent one instead of digits. Read into bounded base64url strings here;
+      // what they mean is electron/web/passkey.ts's business.
+      origin: client.origin,
+      passkey: readPasskeyAssertion(frame.passkey) ?? undefined
     })
 
     if (!outcome.ok) {
-      this.refuse(client, outcome.reason, outcome.message, outcome.retryAfterMs)
+      this.refuse(client, outcome.reason, outcome.message, outcome.retryAfterMs, CLOSE_UNAUTHENTICATED, outcome.passkey)
       return
     }
 
@@ -1719,6 +1871,13 @@ export class WebServer {
     }
     const snapshot = this.host.snapshot()
     const pushKey = this.host.pushKey?.()
+    const features = [
+      ...(this.host.auth.passkeysSupported() ? [WEB_FEATURE_PASSKEY] : []),
+      ...(this.host.transcribeAudio ? [WEB_FEATURE_DICTATE_STREAM] : []),
+      ...(this.host.projectRoot ? [WEB_FEATURE_FILES] : []),
+      ...(this.host.projectRemove && this.host.projectRemovePreview ? [WEB_FEATURE_PROJECT_REMOVE] : []),
+      ...(this.host.usage ? [WEB_FEATURE_USAGE] : [])
+    ]
     this.log(`${outcome.device.name} connected from ${client.source} (client ${wireString(frame.client, 32) || '?'})`)
     this.send(client, {
       type: 'hello-ok',
@@ -1744,7 +1903,12 @@ export class WebServer {
       // The same rule as `foreman`: an empty list per project is a real answer
       // — that project has no packs — and only a host with no handoffs at all
       // is left out.
-      ...(snapshot.handoff ? { handoff: snapshot.handoff } : {})
+      ...(snapshot.handoff ? { handoff: snapshot.handoff } : {}),
+      // What this desktop can do beyond the base protocol, so a page never
+      // offers a biometric, a streamed recording or a file browser to a
+      // desktop that would not understand the ask. No field at all when there
+      // is nothing to announce, exactly as before these existed.
+      ...(features.length ? { features } : {})
     })
     // Straight after the hello, never inside it: a browser that connects while
     // a UAC prompt is already up must see the card, and the commonest way to
@@ -1760,6 +1924,16 @@ export class WebServer {
         continue
       }
       this.send(client, { type: 'attention', sessionId, asking: true, ...(prompt ? { prompt } : {}) })
+    }
+    // And every live pane's ring, so a phone back from the lock screen draws
+    // true numbers at once rather than after the next status-line redraw. The
+    // newest frame, not the last one sent: one held by the throttle is truer.
+    for (const [sessionId, frame] of this.usageNow) {
+      if (!live.has(sessionId)) {
+        this.forgetUsage(sessionId)
+        continue
+      }
+      this.send(client, frame)
     }
     this.host.onPresence?.(this.connectedCount)
   }
@@ -1803,14 +1977,20 @@ export class WebServer {
     reason: WebRefusal,
     message: string,
     retryAfterMs?: number,
-    code = CLOSE_UNAUTHENTICATED
+    code = CLOSE_UNAUTHENTICATED,
+    passkey?: WebPasskeyRequestOptions,
+    version?: { appVersion: string; proto: number }
   ): void {
     this.log(`refused ${client.source}: ${reason} — ${message}`)
     this.send(client, {
       type: 'refused',
       reason,
       message,
-      ...(retryAfterMs ? { retryAfterMs } : {})
+      ...(retryAfterMs ? { retryAfterMs } : {}),
+      // `pin-required` only: the page may answer with a biometric instead.
+      ...(passkey && reason === 'pin-required' ? { passkey } : {}),
+      // `proto` only: which Forge, speaking which protocol, said no.
+      ...(version && reason === 'proto' ? version : {})
     })
     this.drop(client, code, message)
   }
@@ -1995,6 +2175,41 @@ export class WebServer {
             // having no window. The sentence says which; the code would only
             // ever be guessing.
             failed('failed', error)
+            return
+          }
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'project-remove-preview':
+        case 'project-remove': {
+          if (!this.host.projectRemove || !this.host.projectRemovePreview) {
+            failed('unsupported', 'This Forge cannot remove a project for a browser.')
+            return
+          }
+          const projectId = wireString(request.projectId, 128)
+          if (!projectId) {
+            failed('bad-frame', 'That request named no project.')
+            return
+          }
+          // Checked here for both, so an id the rail has never held is
+          // `unknown-project` — the client's list is stale — rather than a
+          // sentence from the renderer that a client cannot tell from a crash.
+          const preview = this.host.projectRemovePreview(projectId)
+          if (!preview) {
+            failed('unknown-project', 'No project by that id on this desktop.')
+            return
+          }
+          if (request.kind === 'project-remove-preview') {
+            answer({ kind: 'project-remove-preview', projectId, name: preview.name, panes: preview.panes })
+            return
+          }
+          const error = await this.host.projectRemove(projectId, client.device?.name ?? 'Browser')
+          if (error) {
+            // `no-window`, as for a layout op: past the check above, the only
+            // ways this fails are a desktop with no renderer to perform it or
+            // one that did not answer in time.
+            failed('no-window', error)
             return
           }
           answer({ kind: 'ok' })
@@ -2240,6 +2455,238 @@ export class WebServer {
             return
           }
           answer({ kind: 'dictation', text: heard.text })
+          return
+        }
+
+        /*
+         * The same recording, streamed while it is being made. The upload
+         * happens during the talking, so when Steve stops only the last slice
+         * and the one whole-file transcription are left — the provider is
+         * still asked once, about the whole recording, exactly as `dictate`
+         * asks it. See `WebRequest`'s `dictate-stream`.
+         */
+        case 'dictate-stream': {
+          if (!this.host.transcribeAudio) {
+            failed('unsupported', 'This Forge cannot turn speech into words for a browser.')
+            return
+          }
+          const dictationId = wireString(request.dictationId, 64)
+          if (!dictationId) {
+            failed('bad-frame', 'That recording had no id.')
+            return
+          }
+          const now = this.now()
+          for (const [k, v] of this.streamDictations) {
+            if (now - v.updatedAt > DICTATION_STREAM_IDLE_MS) this.streamDictations.delete(k)
+          }
+          const gone = (): void =>
+            failed(
+              'failed',
+              'That recording is no longer on this desktop — it was finished, cancelled, or left idle too long.'
+            )
+
+          switch (request.op) {
+            case 'start': {
+              const id = wireString(request.sessionId, 128)
+              if (!id || !this.host.sessions().some((s) => s.id === id)) {
+                failed('unknown-session', 'That pane is gone.')
+                return
+              }
+              const mime = wireString(request.mime, 64)
+              if (!/^audio\/[a-z0-9.+-]+(;\s*codecs=[a-z0-9.,-]+)?$/i.test(mime)) {
+                failed('bad-frame', 'That is not a recording this desktop will take.')
+                return
+              }
+              const held = this.streamDictations.get(dictationId)
+              if (held) {
+                // A repeated start — a retry after a blip — is the same
+                // recording, not a fresh one: what was appended is kept.
+                held.updatedAt = now
+                answer({ kind: 'ok' })
+                return
+              }
+              if (this.streamDictations.size >= MAX_OPEN_DICTATIONS) {
+                failed('limit', 'Too many recordings are open on this desktop at once.')
+                return
+              }
+              this.streamDictations.set(dictationId, {
+                sessionId: id,
+                mime,
+                slices: new Map(),
+                totalBytes: 0,
+                updatedAt: now
+              })
+              answer({ kind: 'ok' })
+              return
+            }
+
+            case 'append': {
+              const held = this.streamDictations.get(dictationId)
+              if (!held) {
+                gone()
+                return
+              }
+              const seq = typeof request.seq === 'number' && Number.isInteger(request.seq) ? request.seq : -1
+              if (seq < 0 || seq >= MAX_DICTATION_SLICES) {
+                failed('bad-frame', 'That slice had no usable number.')
+                return
+              }
+              const data = typeof request.data === 'string' ? request.data.trim() : ''
+              if (data.length > MAX_FILE_CHUNK_BASE64) {
+                failed('limit', 'That slice was too large.')
+                return
+              }
+              if (data && !/^[A-Za-z0-9+/]+=*$/.test(data)) {
+                failed('bad-frame', 'That slice could not be read.')
+                return
+              }
+              const bytes = Buffer.from(data, 'base64')
+              // The same seq again replaces what it carried before: a retried
+              // append is the same slice, not an extra one.
+              held.totalBytes += bytes.length - (held.slices.get(seq)?.length ?? 0)
+              if (held.totalBytes > MAX_DICTATION_BYTES) {
+                this.streamDictations.delete(dictationId)
+                failed('limit', 'That recording is too long to send.')
+                return
+              }
+              held.slices.set(seq, bytes)
+              held.updatedAt = now
+              answer({ kind: 'ok' })
+              return
+            }
+
+            case 'done': {
+              const held = this.streamDictations.get(dictationId)
+              if (!held) {
+                gone()
+                return
+              }
+              // Forgotten before anything is awaited, so a `done` sent twice
+              // transcribes once and the second is told the recording is gone.
+              this.streamDictations.delete(dictationId)
+              const chunks =
+                typeof request.chunks === 'number' && Number.isInteger(request.chunks) ? request.chunks : -1
+              if (chunks < 0 || chunks > MAX_DICTATION_SLICES) {
+                failed('bad-frame', 'That recording did not say how many slices it had.')
+                return
+              }
+              if ([...held.slices.keys()].some((seq) => seq >= chunks)) {
+                failed('bad-frame', `More slices arrived than the ${chunks} that recording says it had.`)
+                return
+              }
+              const ordered: Buffer[] = []
+              for (let i = 0; i < chunks; i++) {
+                const slice = held.slices.get(i)
+                if (!slice) {
+                  failed('bad-frame', `Missing slice ${i} of ${chunks}.`)
+                  return
+                }
+                ordered.push(slice)
+              }
+              const audio = Buffer.concat(ordered)
+              if (!audio.length) {
+                failed('bad-frame', 'That recording was empty.')
+                return
+              }
+              const heard = await this.host.transcribeAudio(audio, held.mime)
+              if (!heard.ok) {
+                failed('failed', heard.error)
+                return
+              }
+              answer({ kind: 'dictation', text: heard.text })
+              return
+            }
+
+            case 'cancel': {
+              // Answered `ok` whether or not it was held, like
+              // `push-unsubscribe`: a page tidying up need not know what the
+              // desktop believes.
+              this.streamDictations.delete(dictationId)
+              answer({ kind: 'ok' })
+              return
+            }
+
+            default:
+              failed('bad-frame', 'That is not a step of a recording this desktop understands.')
+              return
+          }
+        }
+
+        /*
+         * The read-only file browser. The host says where a project is and
+         * electron/web/project-files.ts does everything else — including the
+         * confinement, which is decided on real paths there rather than on
+         * strings here.
+         */
+        case 'project-files':
+        case 'project-file': {
+          if (!this.host.projectRoot) {
+            failed('unsupported', 'This Forge cannot show the files in a project to a browser.')
+            return
+          }
+          const projectId = wireString(request.projectId, 128)
+          const root = projectId ? this.host.projectRoot(projectId) : null
+          if (!root) {
+            failed('unknown-project', 'No project by that id on this desktop.')
+            return
+          }
+          const path = typeof request.path === 'string' ? request.path : ''
+          if (path.length > MAX_PATH_CHARS) {
+            failed('bad-frame', 'That path is too long.')
+            return
+          }
+
+          if (request.kind === 'project-files') {
+            const listing = await listProjectFolder(root, path)
+            if (!listing.ok) {
+              failed('failed', listing.error)
+              return
+            }
+            answer({
+              kind: 'project-files',
+              projectId,
+              path: listing.path,
+              entries: listing.entries,
+              truncated: listing.truncated
+            })
+            return
+          }
+
+          // A changed file from the git status list names its path from the
+          // repository's root, which may sit above the project's folder. The
+          // desktop finds that root itself; the file must still be inside the
+          // project.
+          let base: string | undefined
+          if (request.git === true) {
+            if (!this.host.gitStatus) {
+              failed('unsupported', 'This Forge cannot read git for a browser.')
+              return
+            }
+            const snapshot = await this.host.gitStatus(projectId)
+            if (!snapshot) {
+              failed('unknown-project', 'No project by that id on this desktop.')
+              return
+            }
+            if (!snapshot.repoRoot) {
+              failed('failed', 'That project is not a git repository.')
+              return
+            }
+            base = snapshot.repoRoot
+          }
+          const file = await readProjectFile(root, path, base)
+          if (!file.ok) {
+            failed('failed', file.error)
+            return
+          }
+          answer({
+            kind: 'project-file',
+            projectId,
+            path: file.path,
+            content: file.content,
+            size: file.size,
+            mtime: file.mtime,
+            truncated: file.truncated
+          })
           return
         }
 
@@ -2522,6 +2969,13 @@ export class WebServer {
           return
         }
 
+        case 'passkey-register-begin':
+        case 'passkey-register-finish':
+        case 'passkey-list':
+        case 'passkey-forget':
+          this.onPasskeyRequest(client, request, answer, failed)
+          return
+
         default:
           // A newer client asking for something this build has never heard of.
           // `unsupported` is the honest answer and the one `WebErrorCode`
@@ -2532,6 +2986,51 @@ export class WebServer {
       }
     } catch (err) {
       failed('failed', describe(err))
+    }
+  }
+
+  /**
+   * The four passkey requests. Every rule about *who* may do which lives in
+   * electron/web/auth.ts beside the store; this reads the fields and hands
+   * over the socket's identity and origin. Listing needs only an admitted
+   * socket — `canRegister` on the answer says whether it may change anything.
+   */
+  private onPasskeyRequest(
+    client: Client,
+    request: Record<string, unknown>,
+    answer: (result: WebResult) => void,
+    failed: (code: WebErrorCode, message: string) => void
+  ): void {
+    const device = client.device
+    if (!device) {
+      failed('bad-frame', 'Nothing but hello is honoured before this browser has been let in.')
+      return
+    }
+    const auth = this.host.auth
+    const list = (): void => answer({ kind: 'passkeys', ...auth.passkeyList(device) })
+    switch (request.kind) {
+      case 'passkey-register-begin': {
+        const begun = auth.passkeyRegisterBegin(device, client.origin)
+        if (begun.ok) answer({ kind: 'passkey-options', options: begun.options })
+        else failed('unsupported', begun.message)
+        return
+      }
+      case 'passkey-register-finish': {
+        const done = auth.passkeyRegisterFinish(device, client.origin, {
+          clientDataJSON: wireString(request.clientDataJSON, 4096),
+          attestationObject: wireString(request.attestationObject, 16_384),
+          deviceName: wireString(request.deviceName, 64)
+        })
+        if (done.ok) list()
+        else failed('failed', done.message)
+        return
+      }
+      case 'passkey-forget':
+        if (auth.passkeyForget(device, wireString(request.credentialId, 1400))) list()
+        else failed('unsupported', 'Unlock with the desktop PIN on this connection before changing passkeys.')
+        return
+      default:
+        list()
     }
   }
 
@@ -2572,7 +3071,7 @@ export class WebServer {
     this.dropViewer(client)
     this.stopTranscripts(client)
     try {
-      client.socket.close(code, reason)
+      client.socket.close(code, closeReason(reason))
     } catch {
       /* already gone */
     }
@@ -2758,6 +3257,19 @@ function readPushSubscription(value: unknown): WebPushSubscription | null {
   // value and carrying it would say nothing.
   if (typeof raw.expirationTime === 'number') subscription.expirationTime = raw.expirationTime
   return subscription
+}
+
+/**
+ * A close reason the WebSocket spec will carry: at most 123 bytes of UTF-8.
+ * `ws` throws on a longer one, and `drop` swallows the throw — so a refusal
+ * sentence one byte too long would leave the socket open with nothing more to
+ * say. The full sentence still travels in the `refused` frame; this is only
+ * the copy on the close.
+ */
+function closeReason(text: string): string {
+  const bytes = Buffer.from(text, 'utf8')
+  if (bytes.length <= 123) return text
+  return bytes.subarray(0, 123).toString('utf8').replace(/�+$/, '')
 }
 
 /** Does this upgrade request ask for the one subprotocol this server speaks? */
