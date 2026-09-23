@@ -25,8 +25,12 @@
  * directory is shared by every checkout, so the last checkout to run this wins.
  *
  * For tests: `--home <dir>` plans against (and writes into) another home, and
- * runs agy with USERPROFILE/HOME pointed there; `--installed a,b` replaces
- * PATH detection.
+ * runs agy with USERPROFILE/HOME and APPDATA/LOCALAPPDATA pointed there;
+ * `--installed a,b` replaces PATH detection.
+ *
+ * Settings are never read here: the one Gemini entry names the key as
+ * `${GEMINI_API_KEY}` and the CLI expands it from the pane Forge starts, so no
+ * key — encrypted or not — is ever copied into a CLI's config.
  */
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
@@ -142,7 +146,16 @@ for (const item of pending) {
     } else if (item.kind === 'cli') {
       const exe = agyExe()
       if (!exe) throw new Error('agy is not on this machine')
-      const env = homeOverride ? { ...process.env, USERPROFILE: home, HOME: home } : process.env
+      // With --home, the app-data pair moves too, so agy has nowhere real to write.
+      const env = homeOverride
+        ? {
+            ...process.env,
+            USERPROFILE: home,
+            HOME: home,
+            APPDATA: join(home, 'AppData', 'Roaming'),
+            LOCALAPPDATA: join(home, 'AppData', 'Local')
+          }
+        : process.env
       const r = spawnSync(exe, item.args, { encoding: 'utf8', timeout: 30_000, windowsHide: true, env })
       if (r.error || r.status !== 0) throw new Error(`agy exited ${r.status}: ${`${r.stdout ?? ''}${r.stderr ?? ''}`.trim() || r.error}`)
       console.log(`  ran     agy ${item.args.join(' ')}`)

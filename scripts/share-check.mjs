@@ -830,6 +830,18 @@ console.log('\nthe bridge and shared/share.ts agree')
  * real CLIs are asked at the bottom of the file.
  */
 
+/*
+ * One sandbox for the rest of the file (scripts/safe-env.mjs). share-mcp.ts
+ * reaches the settings store, so this process's data dir is pointed into it
+ * before anything could resolve one, and the live CLI probes below run under
+ * its home — qwen's and agy's real configs both changed during a run
+ * that started them under the real one.
+ */
+const { makeSandbox, changedSince, snapshotReal } = await import('./safe-env.mjs')
+const box = makeSandbox('share-check')
+process.env['FORGE_DATA_DIR'] = box.dataDir
+const realBefore = snapshotReal()
+
 const M = await import('../electron/bridge/share-mcp.ts')
 const SCRIPT_PATH = fileURLToPath(new URL('../bridge/share-bridge.mjs', import.meta.url))
 
@@ -1012,6 +1024,10 @@ const skip = (label, why) => {
  * passing the fragment as an execFileSync argument would test a path Forge never
  * takes. It also means the agent CLIs' `.cmd` shims resolve the way they do in a
  * pane.
+ *
+ * Always under the sandbox's home, APPDATA and CODEX_HOME: a CLI that tidies
+ * or migrates its config on start then tidies a throwaway one. PATH is kept,
+ * so the CLIs still resolve from where they are installed.
  */
 const runCli = (command, env) => {
   try {
@@ -1021,7 +1037,7 @@ const runCli = (command, env) => {
         encoding: 'utf8',
         timeout: 90_000,
         windowsHide: true,
-        env: { ...process.env, ...(env ?? {}) },
+        env: box.env(env ?? {}),
         stdio: ['ignore', 'pipe', 'pipe']
       })
     }
@@ -1100,8 +1116,19 @@ if (!has('agy')) {
   ok(/stdio/.test(addHelp.out ?? ''), 'and still defaults to stdio, which is why Forge passes no --type')
   const mcpHelp = runCli('agy mcp --help 2>&1')
   ok(/\bremove\b/.test(mcpHelp.out ?? ''), 'and `agy mcp remove` still exists, so turning the setting off can undo it')
+  // The sandbox home starts with no servers, and an empty list is a sentence
+  // rather than the table, so it is given one entry of its own to list.
+  mkdirSync(join(box.home, '.gemini', 'config'), { recursive: true })
+  writeFileSync(join(box.home, '.gemini', 'config', 'mcp_config.json'), JSON.stringify({ mcpServers: { 'share-check-probe': { command: 'node', args: ['probe.mjs'] } } }, null, 2), 'utf8')
   const list = runCli('agy mcp list')
   ok(/NAME\s+TYPE\s+STATUS/.test(list.out ?? ''), 'the list is still the table planAgy reads a name out of', list.out?.slice(0, 120))
+}
+
+console.log('\nthe live probes stayed in the sandbox')
+{
+  const changed = changedSince(realBefore)
+  ok(changed.length === 0, 'no real data dir or home config file changed during the run', changed.join(', '))
+  box.cleanup()
 }
 
 /* --------------------------------------------------------- the release notes

@@ -21,8 +21,10 @@
  * every subsequent file in the list is wrong. It is the single most likely bug
  * in this file, so it is the one with a fixture built to catch it.
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { registerHooks } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join as joinPath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -58,6 +60,15 @@ registerHooks({
     return next(url, context)
   }
 })
+
+/*
+ * electron/store.ts resolves its data dir lazily, on first use. Point it at a
+ * temp path before anything could, so a store call nobody meant to make lands
+ * there rather than in the real %APPDATA%\Forge. Nothing is created unless one
+ * is made, and the path goes again on the way out.
+ */
+const STORE_DIR = joinPath(tmpdir(), `forge-git-check-${process.pid}`)
+process.env['FORGE_DATA_DIR'] = STORE_DIR
 
 const P = await import('../electron/git/porcelain.ts')
 const A = await import('../electron/git/git-actions.ts')
@@ -739,4 +750,5 @@ console.log('\nthe row cannot switch on its own')
 /* -------------------------------------------------------------------- end */
 
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass} passed, ${fail} failed\n`)
+rmSync(STORE_DIR, { recursive: true, force: true })
 process.exit(fail === 0 ? 0 : 1)

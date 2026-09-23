@@ -3,9 +3,10 @@
  *
  * Proves the *real* electron/bridge/mcp-config.ts (not a copy of its logic):
  *   1. bundles it with esbuild and runs it inside a real Electron process, so
- *      app.getAppPath()/app.getPath('appData') are the genuine article;
- *   2. asserts %APPDATA%\Forge\bridge\mcp.json is written with absolute paths
- *      that exist;
+ *      app.getAppPath() is the genuine article — against a throwaway data dir,
+ *      app-data dir and home (scripts/safe-env.mjs), never the real profile;
+ *   2. asserts <temp data dir>\bridge\mcp.json is written with absolute paths
+ *      that exist, and that an `enc:v1:` key never reaches its env;
  *   3. asserts applyMcpBridge() appends the flag for Claude and leaves every
  *      other profile alone;
  *   4. hands the generated file to the real `claude --mcp-config <path> --help`
@@ -15,6 +16,10 @@
  *      OpenCode's pane config, and scripts/bridge-install.mjs run against a
  *      temp home: entry shape, other entries untouched, backup before the first
  *      write, idempotence, not-installed skip. The real home is never touched.
+ *   6. guards all of the above: every path the probes resolved is checked
+ *      against the real data dirs and home configs, and those files' mtimes are
+ *      compared before and after. Either one failing fails the run — this probe
+ *      once rewrote the everyday Forge's mcp.json, and that must not be quiet.
  *
  * No interactive Claude session is started, and no Forge window is opened.
  *
@@ -23,16 +28,27 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { changedSince, makeSandbox, realHits, snapshotReal } from './safe-env.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 
 /** Temp files written into the repo root; removed however we exit. */
 const cleanup = []
+
+/** Every sandbox this run made, removed however we exit. */
+const boxes = []
+function sandbox(label) {
+  const box = makeSandbox(label)
+  boxes.push(box)
+  return box
+}
+
+/** Every path a probe resolved or a step wrote under, for the guard in [6]. */
+const touched = []
 
 let failures = 0
 let checks = 0
@@ -73,14 +89,30 @@ function run(file, args, opts = {}) {
 
 /* ------------------------------- 1. run the real module inside Electron ---- */
 
-async function probeInsideElectron(extraEnv = {}) {
+/**
+ * Run the real module in Electron against `box` — its data dir, and its
+ * app-data dir for Electron's own userData, so neither Forge's settings nor
+ * Chromium's files land in a real profile. `extraEnv` can ask for the real
+ * safeStorage codec (FORGE_CHECK_CODEC) and a key to seed through it.
+ */
+async function probeInsideElectron(box, extraEnv = {}) {
   // The probe files must live in the repo root: Electron derives getAppPath()
   // from the directory holding the entry script's nearest package.json, and the
   // module under test resolves the bridge relative to it. Anywhere else and we
   // would be testing a layout Forge never runs in.
   const bundle = join(root, '.bridge-check-config.cjs')
   await build({
-    entryPoints: [join(root, 'electron', 'bridge', 'mcp-config.ts')],
+    // The module under test, plus the two store seams main.ts wires at start,
+    // so a probe can run with the real safeStorage codec or without one.
+    stdin: {
+      contents: [
+        "export * from './electron/bridge/mcp-config'",
+        "export { getDataDir, setStoreHost } from './electron/store'",
+        "export { makeSafeStorageCodec } from './electron/secretbox'"
+      ].join('\n'),
+      resolveDir: root,
+      loader: 'ts'
+    },
     outfile: bundle,
     bundle: true,
     platform: 'node',
@@ -96,29 +128,63 @@ async function probeInsideElectron(extraEnv = {}) {
   cleanup.push(bundle, entry)
   writeFileSync(
     entry,
-    `const { app } = require('electron')
-const path = require(${JSON.stringify(bundle)})
-// Match Forge's own appData layout so we write the real mcp.json, not a stray one.
-app.setName('Forge')
-app.whenReady().then(() => {
-  const out = {
-    appPath: app.getAppPath(),
-    script: path.resolveBridgeScript(),
-    configPath: path.writeBridgeConfig(),
-    claude: path.applyMcpBridge('claude'),
-    claudeWithArgs: path.applyMcpBridge('claude --resume'),
-    kimi: path.applyMcpBridge('kimi'),
-    gemini: path.applyMcpBridge('gemini'),
-    plain: path.applyMcpBridge(''),
-    idempotent: path.applyMcpBridge(path.applyMcpBridge('claude')),
-    codex: path.applyMcpBridge('codex'),
-    codexIdempotent: path.applyMcpBridge(path.applyMcpBridge('codex')),
-    instructions: path.bridgeInstructionsPath(),
-    outDir: path.bridgeOutDir()
-  }
-  process.stdout.write('@@RESULT@@' + JSON.stringify(out) + '@@END@@')
-  app.exit(0)
+    `const { app, dialog, safeStorage } = require('electron')
+const fs = require('node:fs')
+const { join } = require('node:path')
+// No error dialog may ever sit on the desktop waiting for a click.
+dialog.showErrorBox = (title, body) => process.stderr.write(title + '\\n' + body + '\\n')
+process.on('uncaughtException', (err) => {
+  process.stderr.write(String((err && err.stack) || err) + '\\n')
+  app.exit(1)
 })
+// Refuse to run unsandboxed: this probe writes mcp.json wherever the store points.
+const appData = process.env.FORGE_CHECK_APPDATA
+if (!appData || !process.env.FORGE_DATA_DIR) {
+  process.stderr.write('probe refused: no sandbox (FORGE_CHECK_APPDATA and FORGE_DATA_DIR are required)\\n')
+  app.exit(3)
+} else {
+  const path = require(${JSON.stringify(bundle)})
+  app.setName('Forge')
+  // Before ready, so Chromium's own files go to the sandbox too.
+  app.setPath('appData', appData)
+  app.setPath('userData', join(appData, 'Forge'))
+  app.whenReady().then(() => {
+    let encAvailable = null
+    let stored = null
+    if (process.env.FORGE_CHECK_CODEC === 'safeStorage') {
+      // What electron/main.ts does beside setStoreHost, before any settings read.
+      const codec = path.makeSafeStorageCodec(safeStorage)
+      path.setStoreHost({ appDataDir: () => app.getPath('appData'), appVersion: () => '', secrets: codec })
+      encAvailable = safeStorage.isEncryptionAvailable()
+      const seed = process.env.FORGE_CHECK_SEED_KEY
+      if (seed) {
+        stored = codec.encrypt(seed)
+        fs.writeFileSync(join(process.env.FORGE_DATA_DIR, 'settings.json'), JSON.stringify({ geminiKey: stored }, null, 2), 'utf8')
+      }
+    }
+    const out = {
+      appPath: app.getAppPath(),
+      userData: app.getPath('userData'),
+      encAvailable,
+      stored,
+      script: path.resolveBridgeScript(),
+      configPath: path.writeBridgeConfig(),
+      dataDir: path.getDataDir(),
+      claude: path.applyMcpBridge('claude'),
+      claudeWithArgs: path.applyMcpBridge('claude --resume'),
+      kimi: path.applyMcpBridge('kimi'),
+      gemini: path.applyMcpBridge('gemini'),
+      plain: path.applyMcpBridge(''),
+      idempotent: path.applyMcpBridge(path.applyMcpBridge('claude')),
+      codex: path.applyMcpBridge('codex'),
+      codexIdempotent: path.applyMcpBridge(path.applyMcpBridge('codex')),
+      instructions: path.bridgeInstructionsPath(),
+      outDir: path.bridgeOutDir()
+    }
+    process.stdout.write('@@RESULT@@' + JSON.stringify(out) + '@@END@@')
+    app.exit(0)
+  })
+}
 `,
     'utf8'
   )
@@ -130,7 +196,7 @@ app.whenReady().then(() => {
   }
 
   // ELECTRON_RUN_AS_NODE must NOT be set: we need the real app module.
-  const env = { ...process.env, ...extraEnv }
+  const env = box.env({ FORGE_CHECK_APPDATA: box.appData, ...extraEnv })
   delete env['ELECTRON_RUN_AS_NODE']
   const r = await run(electronExe, [entry], { env })
   const m = r.stdout.match(/@@RESULT@@([\s\S]*?)@@END@@/)
@@ -138,8 +204,13 @@ app.whenReady().then(() => {
     check('Electron probe produced a result', false, `exit ${r.code}\n${r.stdout}\n${r.stderr}`)
     return null
   }
-  return JSON.parse(m[1])
+  const res = JSON.parse(m[1])
+  touched.push(res.userData, res.configPath, res.dataDir, res.instructions, res.outDir)
+  return res
 }
+
+/** Same path, compared the way Windows compares them. */
+const samePath = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
 
 /* ---------------------------------------------------------------- 2. claude */
 
@@ -212,13 +283,17 @@ async function otherClis(gate) {
   check('opencode: with both, the share copy drops its browser tools', both.mcp?.forge_share?.environment?.FORGE_BROWSER_TOOLS === 'off', JSON.stringify(both))
   check('opencode: nothing at all when there is no bridge and no share', R.openCodePaneConfig({ bridgeScript: null, outDir: null, instructionsPath: null, shareScript: null }) === null)
 
-  const codexOk = (await run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', 'codex --version'])).code === 0
+  // Every live CLI below runs under a throwaway home — HOME, USERPROFILE,
+  // APPDATA, CODEX_HOME, the XDG set — so none of them can rewrite a real
+  // config on start, even for `--version`.
+  const cliBox = sandbox('register-cli')
+  touched.push(cliBox.home)
+  const codexOk = (await run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', 'codex --version'], { env: cliBox.env() })).code === 0
   if (codexOk) {
-    const codexHome = join(tmpdir(), `forge-register-codex-${Date.now()}`)
-    cleanup.push(codexHome)
+    const codexHome = join(cliBox.home, '.codex')
     mkdirSync(codexHome, { recursive: true })
     const r = await run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `codex mcp get forge-bridge --json ${fragment}`], {
-      env: { ...process.env, CODEX_HOME: codexHome }
+      env: cliBox.env({ CODEX_HOME: codexHome })
     })
     let got = null
     try {
@@ -234,7 +309,7 @@ async function otherClis(gate) {
 
   // Reads the config and prints it; starts no session and writes nothing.
   const ocProbe = await run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', 'opencode debug config'], {
-    env: { ...process.env, OPENCODE_CONFIG_CONTENT: R.openCodePaneConfig({ bridgeScript: script, outDir: null, instructionsPath: join(root, 'README.md'), shareScript: null }) }
+    env: cliBox.env({ OPENCODE_CONFIG_CONTENT: R.openCodePaneConfig({ bridgeScript: script, outDir: null, instructionsPath: join(root, 'README.md'), shareScript: null }) })
   })
   if (ocProbe.code === 0) {
     check('live: opencode merges forge-bridge from the pane value', /"forge-bridge"/.test(ocProbe.stdout), ocProbe.stdout.slice(0, 400))
@@ -265,8 +340,11 @@ async function otherClis(gate) {
   check('instructions: a stale marked line is replaced in place', refreshed.action === 'write' && refreshed.text === `a\n${R.BROWSER_INSTRUCTION_LINE}\nb\n`, JSON.stringify(refreshed))
 
   console.log('\n[5c] bridge-install against a temp home')
-  const home = join(tmpdir(), `forge-register-home-${Date.now()}`)
-  cleanup.push(home)
+  // bridge-install runs under this sandbox's env too, --home pointing at the
+  // same home, so the agy it spawns and anything it reads see only the sandbox.
+  const installBox = sandbox('register-home')
+  const home = installBox.home
+  touched.push(home)
   const seed = {
     [join(home, '.gemini', 'settings.json')]: JSON.stringify({ security: { auth: { selectedType: 'gemini-api-key' } }, mcpServers: { other: { command: 'npx', args: ['x'] } } }, null, 2),
     [join(home, '.gemini', 'GEMINI.md')]: '# my rules\nBe brief.\n',
@@ -277,9 +355,9 @@ async function otherClis(gate) {
     mkdirSync(dirname(p), { recursive: true })
     writeFileSync(p, text, 'utf8')
   }
-  const agyOk = (await run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', 'Get-Command agy -ErrorAction Stop'])).code === 0
+  const agyOk = (await run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', 'Get-Command agy -ErrorAction Stop'], { env: cliBox.env() })).code === 0
   const installedList = ['codex', 'opencode', 'gemini', 'qwen', ...(agyOk ? ['antigravity'] : [])].join(',')
-  const install = (extra = []) => run(process.execPath, [join(root, 'scripts', 'bridge-install.mjs'), '--home', home, '--installed', installedList, ...extra])
+  const install = (extra = []) => run(process.execPath, [join(root, 'scripts', 'bridge-install.mjs'), '--home', home, '--installed', installedList, ...extra], { env: installBox.env() })
   const listAll = (dir) => {
     const out = []
     const walk = (d) => {
@@ -293,7 +371,7 @@ async function otherClis(gate) {
   check('dry run exits 0', dry.code === 0, dry.stderr || dry.stdout.slice(-400))
   check('dry run writes nothing', JSON.stringify(listAll(home)) === JSON.stringify(Object.keys(seed).sort()) && Object.entries(seed).every(([p, t]) => readFileSync(p, 'utf8') === t), listAll(home).join('\n'))
   check('dry run says codex and opencode are per-pane and kimi is skipped', /codex\s+mcp\s+per-pane/.test(dry.stdout) && /opencode\s+mcp\s+per-pane/.test(dry.stdout) && /kimi\s+mcp\s+skip/.test(dry.stdout), dry.stdout.slice(0, 600))
-  check('a CLI missing from --installed is skipped', /opencode\s+mcp\s+skip\s+not installed/.test((await run(process.execPath, [join(root, 'scripts', 'bridge-install.mjs'), '--home', home, '--installed', 'gemini', '--dry-run'])).stdout))
+  check('a CLI missing from --installed is skipped', /opencode\s+mcp\s+skip\s+not installed/.test((await run(process.execPath, [join(root, 'scripts', 'bridge-install.mjs'), '--home', home, '--installed', 'gemini', '--dry-run'], { env: installBox.env() })).stdout))
 
   const first = await install()
   check('install exits 0', first.code === 0, `${first.stdout}\n${first.stderr}`.slice(-800))
@@ -328,9 +406,12 @@ async function otherClis(gate) {
 
 async function main() {
   console.log('bridge-register-check')
+  // Taken before anything runs, compared in [6].
+  const realBefore = snapshotReal()
   try {
-    console.log('\n[1] Real mcp-config.ts inside a real Electron process')
-    const res = await probeInsideElectron()
+    console.log('\n[1] Real mcp-config.ts inside a real Electron process, against a throwaway profile')
+    const mainBox = sandbox('register')
+    const res = await probeInsideElectron(mainBox)
     if (!res) {
       console.log('\nFAIL — could not run the Electron probe')
       process.exitCode = 1
@@ -340,11 +421,13 @@ async function main() {
     check('resolveBridgeScript() found gemini-bridge.mjs', !!res.script && existsSync(res.script), res.script)
     check('writeBridgeConfig() returned a path', !!res.configPath, res.configPath)
     check('mcp.json exists on disk', !!res.configPath && existsSync(res.configPath), res.configPath)
+    check('the store resolved the temp data dir', samePath(res.dataDir, mainBox.dataDir), `${res.dataDir} (wanted ${mainBox.dataDir})`)
     check(
-      'mcp.json sits under %APPDATA%\\Forge\\bridge',
-      !!res.configPath && /[\\/]Forge[\\/]bridge[\\/]mcp\.json$/.test(res.configPath),
-      res.configPath
+      'mcp.json sits under <temp data dir>\\bridge',
+      samePath(res.configPath, join(mainBox.dataDir, 'bridge', 'mcp.json')),
+      `${res.configPath} (wanted under ${mainBox.dataDir})`
     )
+    check("and Electron's own userData is the sandbox's too", samePath(res.userData, join(mainBox.appData, 'Forge')), res.userData)
 
     let cfg = null
     if (res.configPath && existsSync(res.configPath)) {
@@ -369,16 +452,13 @@ async function main() {
     // be there when set, and *absent* (not empty) when not, so the bridge can
     // tell "no key" from "bad key".
     console.log('\n[1b] Key injection, against a throwaway data dir')
-    const sandbox = join(tmpdir(), `forge-register-check-${Date.now()}`)
-    cleanup.push(sandbox)
+    const keyBox = sandbox('register-key')
+    const envOf = (probe) =>
+      probe?.configPath && existsSync(probe.configPath)
+        ? JSON.parse(readFileSync(probe.configPath, 'utf8'))?.mcpServers?.['forge-bridge']?.env ?? {}
+        : null
     try {
-      mkdirSync(sandbox, { recursive: true })
-
-      const noKey = await probeInsideElectron({ FORGE_DATA_DIR: sandbox })
-      const envOf = (probe) =>
-        probe?.configPath && existsSync(probe.configPath)
-          ? JSON.parse(readFileSync(probe.configPath, 'utf8'))?.mcpServers?.['forge-bridge']?.env ?? {}
-          : null
+      const noKey = await probeInsideElectron(keyBox)
       const before = envOf(noKey)
       check('no key set → GEMINI_API_KEY is omitted entirely', !!before && !('GEMINI_API_KEY' in before), JSON.stringify(before))
       check(
@@ -390,13 +470,13 @@ async function main() {
       // A fake key, written the way Forge writes settings. Key-shaped on
       // purpose, and declared to the packaging gate: SECRETS-AUDIT: fixtures
       const fake = 'AIzaSyFAKEKEYFORTESTSONLY0000000000000000'
-      const settings = join(sandbox, 'settings.json')
+      const settings = join(keyBox.dataDir, 'settings.json')
       writeFileSync(
         settings,
         JSON.stringify({ geminiKey: fake, geminiImageModel: 'gemini-3.1-flash-image' }, null, 2),
         'utf8'
       )
-      const withKey = await probeInsideElectron({ FORGE_DATA_DIR: sandbox })
+      const withKey = await probeInsideElectron(keyBox)
       const after = envOf(withKey)
       check('key set → GEMINI_API_KEY is passed to the bridge', after?.GEMINI_API_KEY === fake, JSON.stringify(after))
       check(
@@ -414,6 +494,39 @@ async function main() {
     }
 
     /*
+     * settings.json holds keys as `enc:v1:<safeStorage blob>`, and only a host
+     * that injected the safeStorage codec reads them back as plaintext. The
+     * incident this guards against: a probe with no codec read the stored blob
+     * and wrote it into GEMINI_API_KEY, which the bridge then sent to Google.
+     * Both halves: with the real codec the env carries the decrypted key; with
+     * none the key is left out. Never, either way, a value starting "enc:".
+     */
+    console.log('\n[1d] An encrypted key is decrypted or left out, never passed through')
+    const hasEnc = (env) => Object.values(env ?? {}).some((v) => typeof v === 'string' && v.startsWith('enc:'))
+    try {
+      const rawBox = sandbox('register-enc')
+      // Marker plus base64, the shape settings.json holds. SECRETS-AUDIT: fixtures
+      writeFileSync(join(rawBox.dataDir, 'settings.json'), JSON.stringify({ geminiKey: 'enc:v1:RkFLRUJMT0JGT1JURVNUU09OTFk=' }, null, 2), 'utf8')
+      const raw = envOf(await probeInsideElectron(rawBox))
+      check('decrypt: no codec → the enc:v1: value never reaches the env', !!raw && !hasEnc(raw), JSON.stringify(raw))
+      check('decrypt: no codec → GEMINI_API_KEY is omitted, not passed raw', !!raw && !('GEMINI_API_KEY' in raw), JSON.stringify(raw))
+
+      const codecBox = sandbox('register-codec')
+      const fake = 'AIzaSyFAKEKEYFORTESTSONLY1111111111111111'
+      const probe = await probeInsideElectron(codecBox, { FORGE_CHECK_CODEC: 'safeStorage', FORGE_CHECK_SEED_KEY: fake })
+      const decoded = envOf(probe)
+      if (probe?.encAvailable) {
+        check('decrypt: the seeded key was stored encrypted', typeof probe.stored === 'string' && probe.stored.startsWith('enc:v1:'), String(probe.stored).slice(0, 20))
+        check('decrypt: real safeStorage codec → GEMINI_API_KEY is the plaintext key', decoded?.GEMINI_API_KEY === fake, JSON.stringify(decoded))
+      } else {
+        console.log('  --   safeStorage unavailable in the probe; the plaintext-key half is skipped')
+      }
+      check('decrypt: real safeStorage codec → no env value starts with enc:', !!decoded && !hasEnc(decoded), JSON.stringify(decoded))
+    } catch (err) {
+      check('decrypt probe ran', false, String(err))
+    }
+
+    /*
      * The share scratchpad's server rides in the same file, as a second entry.
      * One file rather than a repeated `--mcp-config`, because whether a repeated
      * variadic flag appends or replaces is a commander detail nobody should bet a
@@ -425,23 +538,21 @@ async function main() {
      * Codex, Qwen and OpenCode as well, and the key must not follow it there.
      */
     console.log('\n[1c] The share server, on and off')
-    const shareBox = join(tmpdir(), `forge-register-share-${Date.now()}`)
-    cleanup.push(shareBox)
+    const shareBox = sandbox('register-share')
     /** The two-server config, kept for [3] to hand to the real claude. */
     let twoServerConfig = null
     try {
-      mkdirSync(shareBox, { recursive: true })
       const serversOf = (probe) =>
         probe?.configPath && existsSync(probe.configPath)
           ? JSON.parse(readFileSync(probe.configPath, 'utf8'))?.mcpServers ?? {}
           : null
 
-      writeFileSync(join(shareBox, 'settings.json'), JSON.stringify({ shareTools: false }, null, 2), 'utf8')
-      const off = serversOf(await probeInsideElectron({ FORGE_DATA_DIR: shareBox }))
+      writeFileSync(join(shareBox.dataDir, 'settings.json'), JSON.stringify({ shareTools: false }, null, 2), 'utf8')
+      const off = serversOf(await probeInsideElectron(shareBox))
       check('tools off → only forge-bridge is registered', !!off && !('forge_share' in off), JSON.stringify(Object.keys(off ?? {})))
 
-      writeFileSync(join(shareBox, 'settings.json'), JSON.stringify({ shareTools: true }, null, 2), 'utf8')
-      const onProbe = await probeInsideElectron({ FORGE_DATA_DIR: shareBox })
+      writeFileSync(join(shareBox.dataDir, 'settings.json'), JSON.stringify({ shareTools: true }, null, 2), 'utf8')
+      const onProbe = await probeInsideElectron(shareBox)
       twoServerConfig = onProbe?.configPath ?? null
       const on = serversOf(onProbe)
       check('tools on → both servers are registered', !!on?.['forge-bridge'] && !!on?.['forge_share'], JSON.stringify(Object.keys(on ?? {})))
@@ -478,10 +589,7 @@ async function main() {
      * preferences.
      */
     console.log('\n[2] applyMcpBridge() gating, against seeded defaults')
-    const gateBox = join(tmpdir(), `forge-register-gate-${Date.now()}`)
-    cleanup.push(gateBox)
-    mkdirSync(gateBox, { recursive: true })
-    const gate = (await probeInsideElectron({ FORGE_DATA_DIR: gateBox })) ?? res
+    const gate = (await probeInsideElectron(sandbox('register-gate'))) ?? res
     check('claude gets the flag', /^claude --mcp-config "/.test(gate.claude), gate.claude)
     check('flag goes last, after existing args', /^claude --resume --mcp-config "/.test(gate.claudeWithArgs), gate.claudeWithArgs)
     check('kimi is untouched', gate.kimi === 'kimi', gate.kimi)
@@ -503,11 +611,14 @@ async function main() {
 
     console.log('\n[3] claude accepts the generated config')
     const claude = claudeLauncher()
+    // Under a throwaway home as well: `--help` should write nothing, and this
+    // makes sure of it rather than trusting it.
+    const claudeEnv = sandbox('register-claude').env()
     if (!claude) {
       check('claude CLI found on PATH', false, 'not found')
     } else {
       // --help exits immediately: no session starts and no model is called.
-      const r = await run(claude.file, [...claude.prefixArgs, '--mcp-config', res.configPath, '--help'])
+      const r = await run(claude.file, [...claude.prefixArgs, '--mcp-config', res.configPath, '--help'], { env: claudeEnv })
       const combined = `${r.stdout}\n${r.stderr}`
       const clean = r.code === 0
       check('claude --mcp-config <file> --help exits 0', clean, `exit ${r.code}\n${combined.slice(0, 800)}`)
@@ -525,7 +636,7 @@ async function main() {
        * servers in it, every Claude pane would die at launch.
        */
       if (twoServerConfig && existsSync(twoServerConfig)) {
-        const both = await run(claude.file, [...claude.prefixArgs, '--mcp-config', twoServerConfig, '--help'])
+        const both = await run(claude.file, [...claude.prefixArgs, '--mcp-config', twoServerConfig, '--help'], { env: claudeEnv })
         const bothOut = `${both.stdout}\n${both.stderr}`
         check(
           'claude accepts a config carrying forge-bridge AND forge_share',
@@ -558,12 +669,30 @@ async function main() {
 
     await otherClis(gate)
 
+    /*
+     * The guard. Two independent ways of catching a write to the real profile:
+     * every path the probes resolved must sit outside it, and the files Forge
+     * writes there must be exactly as they were before this run started.
+     */
+    console.log('\n[6] Guard: nothing resolved or written outside the sandboxes')
+    const realMcp = join(process.env['APPDATA'] ?? '', 'Forge', 'bridge', 'mcp.json')
+    check('guard: it recognises the real mcp.json as real (so the next line is not vacuous)', realHits([realMcp]).length === 1, realMcp)
+    const hits = realHits(touched)
+    check(
+      `guard: none of the ${touched.filter(Boolean).length} paths the probes resolved is under a real data dir or home config`,
+      hits.length === 0,
+      hits.join('\n')
+    )
+    const changed = changedSince(realBefore)
+    check('guard: no real data dir or home config file changed during the run', changed.length === 0, changed.join('\n'))
+
     console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`)
     // exitCode, not exit(): exit() inside the try skipped the finally below and
     // left every temp dir and probe file behind.
     process.exitCode = failures === 0 ? 0 : 1
   } finally {
     for (const f of cleanup) rmSync(f, { force: true, recursive: true })
+    for (const box of boxes) box.cleanup()
   }
 }
 

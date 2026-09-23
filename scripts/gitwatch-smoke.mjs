@@ -66,6 +66,15 @@ registerHooks({
   }
 })
 
+/*
+ * electron/store.ts resolves its data dir lazily, on first use. Point it at a
+ * temp path before anything could, so a store call nobody meant to make lands
+ * there rather than in the real %APPDATA%\Forge. Nothing is created unless one
+ * is made, and the path goes again on the way out.
+ */
+const STORE_DIR = join(tmpdir(), `forge-gitwatch-smoke-${process.pid}`)
+process.env['FORGE_DATA_DIR'] = STORE_DIR
+
 const { whichCommand } = await import('../electron/which.ts')
 
 if (whichCommand('git') === null) process.exit(0)
@@ -290,4 +299,5 @@ try {
 }
 
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass} passed, ${fail} failed\n`)
+rmSync(STORE_DIR, { recursive: true, force: true })
 process.exit(fail === 0 ? 0 : 1)

@@ -29,11 +29,20 @@ import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { makeSandbox } from './safe-env.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const SERVER = join(root, 'bridge', 'gemini-bridge.mjs')
 const MEDIA_TS = join(root, 'electron', 'gemini-media.ts')
+
+/**
+ * Every server this smoke starts runs under a throwaway home, APPDATA and data
+ * dir (scripts/safe-env.mjs), without the calling pane's share, canvas or
+ * browser variables: the bridge's default out dir is %APPDATA%\Forge\bridge-out,
+ * and a smoke has no business writing there.
+ */
+const box = makeSandbox('bridge-smoke')
 
 const forceAbsent = process.argv.includes('--force-absent')
 const liveImage = process.argv.includes('--live-image')
@@ -134,7 +143,7 @@ function openServer(env) {
 }
 
 /** No key in the environment: every tool's "cannot do this" path. */
-function envWithoutKey(base = process.env) {
+function envWithoutKey(base = box.env()) {
   const env = { ...base }
   delete env['GEMINI_API_KEY']
   delete env['GOOGLE_API_KEY']
@@ -370,7 +379,7 @@ async function runLiveTextSuite() {
   }
   console.log(`  --   key from ${found.source}`)
 
-  const session = openServer({ ...process.env, GEMINI_API_KEY: found.key })
+  const session = openServer({ ...box.env(), GEMINI_API_KEY: found.key })
   const scratch = join(tmpdir(), `forge-bridge-ask-${Date.now()}.txt`)
   try {
     await handshake(session, 'ask')
@@ -643,7 +652,7 @@ async function runLiveImageSuite() {
   console.log(`  --   key from ${found.source}`)
 
   const outDir = join(tmpdir(), `forge-bridge-smoke-${Date.now()}`)
-  const session = openServer({ ...process.env, GEMINI_API_KEY: found.key, FORGE_BRIDGE_OUT: outDir })
+  const session = openServer({ ...box.env(), GEMINI_API_KEY: found.key, FORGE_BRIDGE_OUT: outDir })
   try {
     await handshake(session, 'image')
 
@@ -719,7 +728,7 @@ async function runLiveVideoSuite() {
   console.log(`  --   key from ${found.source}`)
 
   const outDir = join(tmpdir(), `forge-bridge-smoke-video-${Date.now()}`)
-  const session = openServer({ ...process.env, GEMINI_API_KEY: found.key, FORGE_BRIDGE_OUT: outDir })
+  const session = openServer({ ...box.env(), GEMINI_API_KEY: found.key, FORGE_BRIDGE_OUT: outDir })
   try {
     await handshake(session, 'video')
 
@@ -838,10 +847,12 @@ async function main() {
   console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks passed`)
   if (!liveImage) console.log('(run with --live-image to also generate and edit a real image — spends quota)')
   if (!liveVideo) console.log('(run with --live-video to also generate a real ~4s Veo clip — spends more, takes ~1min)')
+  box.cleanup()
   process.exit(failures === 0 ? 0 : 1)
 }
 
 main().catch((err) => {
   console.error('bridge-smoke crashed:', err)
+  box.cleanup()
   process.exit(1)
 })

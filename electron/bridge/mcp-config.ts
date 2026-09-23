@@ -111,8 +111,16 @@ export function writeBridgeConfig(): string | null {
   }
   // The same key the voice agent uses. Absent key => absent variable => the
   // bridge returns "no key, here is how to set one" rather than a bare 401.
+  //
+  // getSettings() hands back plaintext only when the host injected a secrets
+  // codec (electron/main.ts does, beside setStoreHost). A process that did not —
+  // a check script, a probe — gets the `enc:v1:` ciphertext as stored, and
+  // passing that on is a bridge that fails every Gemini call with a key that
+  // looks set. So a still-encoded value is left out, exactly like no key.
   const key = (settings.geminiKey ?? '').trim()
-  if (key) env['GEMINI_API_KEY'] = key
+  if (key.startsWith('enc:')) {
+    console.error('[bridge] the Gemini key is still encrypted (no secrets codec in this process); GEMINI_API_KEY left out')
+  } else if (key) env['GEMINI_API_KEY'] = key
   // Only written when the user has deliberately overridden the model, so the
   // bridge's own default stays the single source of truth otherwise.
   const imageModel = (settings.geminiImageModel ?? '').trim()
