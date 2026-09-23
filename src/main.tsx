@@ -10,6 +10,10 @@ import { DictationProvider } from './state/Dictation'
 import { ForemanProvider } from './state/Foreman'
 import { VoiceAgentProvider } from './state/VoiceAgent'
 import { VoiceHubControllerProvider } from './state/VoiceHubController'
+import { registerBrowser } from './components/browser/registerBrowser'
+
+// The built-in browser's canvas surface and its open-browser command.
+registerBrowser()
 
 const host = document.getElementById('root')
 if (!host) throw new Error('#root missing from index.html')
