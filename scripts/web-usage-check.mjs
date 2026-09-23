@@ -5,6 +5,9 @@
  * inside two seconds is held and sent when the window passes; a browser that
  * reconnects is told the latest straight after `hello-ok`; an unmapped session
  * and a stale file say nothing; and only a host that feeds usage announces it.
+ * Then Codex: a rollout in `~/.codex/sessions` reaches the pane that launched
+ * it, follows `/new` and `codex resume`, ignores a half-written last line, and
+ * says nothing where two Codex panes in one folder make the owner a guess.
  *
  *   npm run web:usage
  *
@@ -12,9 +15,10 @@
  * electron/web/agent-usage.ts with esbuild and drives them over a real
  * WebSocket, the way scripts/web-project-remove-check.mjs does, with Google
  * stubbed the same way. The status folder is a temp folder — never the real
- * `~/.claude/forge-status` — and the pane ↔ session map is a fixed stub.
+ * `~/.claude/forge-status` — and the pane ↔ session map is a fixed stub. The
+ * Codex sessions folder is a temp folder too, never the real `~/.codex`.
  */
-import { mkdirSync, rmSync, utimesSync, writeFileSync, renameSync, existsSync } from 'node:fs'
+import { appendFileSync, mkdirSync, rmSync, utimesSync, writeFileSync, renameSync, existsSync } from 'node:fs'
 import { createSign, generateKeyPairSync } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -27,6 +31,7 @@ rmSync(scratch, { recursive: true, force: true })
 mkdirSync(scratch, { recursive: true })
 const STATUS_DIR = join(scratch, 'forge-status')
 mkdirSync(STATUS_DIR, { recursive: true })
+const CODEX_DIR = join(scratch, 'codex-sessions')
 
 const PORT = 8521
 const BARE_PORT = 8522
@@ -91,6 +96,53 @@ function writeStatus(sid, { pct, tokens, size = 1_000_000, limits }) {
   return file
 }
 
+/** A Codex `token_count` line, as 0.155.1 writes it after a turn. */
+function tokenCount(total) {
+  const usage = {
+    input_tokens: total - 500,
+    cached_input_tokens: 0,
+    output_tokens: 500,
+    reasoning_output_tokens: 0,
+    total_tokens: total
+  }
+  return {
+    timestamp: new Date().toISOString(),
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: { total_token_usage: usage, last_token_usage: usage, model_context_window: 258_400 },
+      rate_limits: null
+    }
+  }
+}
+
+/** A Codex rollout: the `session_meta` line alone, as Codex writes it before the first turn. */
+function writeRollout(day, name, { cwd, start }) {
+  const folder = join(CODEX_DIR, day)
+  mkdirSync(folder, { recursive: true })
+  const file = join(folder, `rollout-${name}.jsonl`)
+  const meta = {
+    timestamp: new Date().toISOString(),
+    type: 'session_meta',
+    payload: {
+      session_id: name,
+      timestamp: new Date(start).toISOString(),
+      cwd,
+      originator: 'codex-tui',
+      cli_version: '0.155.1'
+    }
+  }
+  writeFileSync(file, JSON.stringify(meta) + '\n')
+  return file
+}
+
+/** One finished turn. */
+function appendTurn(file, total) {
+  const message = { timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'agent_message' } }
+  appendFileSync(file, JSON.stringify(message) + '\n')
+  appendFileSync(file, JSON.stringify(tokenCount(total)) + '\n')
+}
+
 const b64url = (value) => Buffer.from(value).toString('base64url')
 
 /* ------------------------------------------- Google, as web-smoke stubs it */
@@ -143,6 +195,7 @@ async function main() {
         "export { WebServer } from './electron/web/server'",
         "export { WebAuth } from './electron/web/auth'",
         "export { startAgentUsage } from './electron/web/agent-usage'",
+        "export { startCodexUsage } from './electron/web/codex-usage'",
         'export { WEB_PROTO, WEB_SUBPROTOCOL, WEB_WS_PATH, WEB_FEATURE_USAGE } from "./shared/web"'
       ].join('\n'),
       resolveDir: ROOT,
@@ -160,7 +213,7 @@ async function main() {
     absWorkingDir: ROOT
   })
 
-  const { WebServer, WebAuth, startAgentUsage, WEB_PROTO, WEB_SUBPROTOCOL, WEB_WS_PATH, WEB_FEATURE_USAGE } =
+  const { WebServer, WebAuth, startAgentUsage, startCodexUsage, WEB_PROTO, WEB_SUBPROTOCOL, WEB_WS_PATH, WEB_FEATURE_USAGE } =
     await import(pathToFileURL(join(scratch, 'web.mjs')).href)
 
   const google = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -271,6 +324,7 @@ async function main() {
     seven_day: { used_percentage: 63, resets_at: 1790500000 }
   }
 
+  let stopCodex = () => {}
   try {
     /* ---------------------------------------------------- announcement */
     const { browser, frame } = await hello()
@@ -370,8 +424,127 @@ async function main() {
         !afterThird.some((f) => f.type === 'usage' && f.sessionId === 'pane-b'),
       'a pane that exited is not replayed'
     )
+
+    /* ------------------------------------------------------------ Codex */
+    const codexLive = []
+    const codexHanded = []
+    const codexUsage = startCodexUsage({
+      dir: CODEX_DIR,
+      panes: () => codexLive,
+      pollMs: 200,
+      onUsage: (frame) => {
+        codexHanded.push(frame)
+        server.pushUsage(frame)
+      }
+    })
+    stopCodex = () => codexUsage.stop()
+    const codexFor = (paneId) => codexHanded.filter((f) => f.sessionId === paneId)
+    const t0 = Date.now()
+    // Windows compares folders without case; elsewhere only the slashes differ.
+    const win = process.platform === 'win32'
+
+    // One pane, and the session it launched with two seconds later, under
+    // another spelling of the same folder.
+    codexLive.push({ id: 'codex-1', cwd: 'C:\\work\\solo', startedAt: t0 - 100_000 })
+    const solo = writeRollout('2026/09/23', 'solo-1', { cwd: win ? 'c:/Work/Solo/' : 'C:/work/solo/', start: t0 - 98_000 })
+    appendTurn(solo, 50_000)
+    appendTurn(writeRollout('2026/09/23', 'elsewhere', { cwd: 'C:\\work\\other', start: t0 - 98_000 }), 70_000)
+    await waitFor(() => codexFor('codex-1').length >= 1, 3000, 'a Codex frame for codex-1')
+    const c1 = codexFor('codex-1')[0]
+    log(
+      c1.source === 'codex-session' &&
+        c1.context?.usedTokens === 50_000 &&
+        c1.context?.windowTokens === 258_400 &&
+        Math.abs(c1.context?.usedPct - (38_000 / 246_400) * 100) < 1e-9,
+      `a lone Codex pane gets its rollout's last turn, less Codex's 12k baseline (${JSON.stringify(c1.context)})`
+    )
+    log(
+      codexHanded.every((f) => f.sessionId === 'codex-1'),
+      'a rollout from a folder no Codex pane is in says nothing'
+    )
+    await waitFor(() => browser.usage('codex-1').length >= 1, 3000, 'the Codex frame on the phone')
+    log(browser.usage('codex-1')[0].source === 'codex-session', 'and it reaches the phone as a usage frame')
+
+    // Half a line: Codex is still writing it.
+    const half = JSON.stringify(tokenCount(120_000))
+    appendFileSync(solo, half.slice(0, 60))
+    await sleep(900)
+    log(codexFor('codex-1').length === 1, `a half-written last line is skipped (${codexFor('codex-1').length} frame(s))`)
+    appendFileSync(solo, half.slice(60) + '\n')
+    await waitFor(() => codexFor('codex-1').length >= 2, 3000, 'the finished line')
+    log(codexFor('codex-1')[1].context?.usedTokens === 120_000, 'and read once it is finished')
+    await sleep(600)
+    log(codexFor('codex-1').length === 2, 'the same numbers are not handed on twice')
+
+    // `/new` in the same pane: a fresh rollout, long after the pane opened.
+    appendTurn(writeRollout('2026/09/23', 'solo-2', { cwd: 'C:/work/solo', start: Date.now() }), 20_000)
+    await waitFor(() => codexFor('codex-1').length >= 3, 3000, 'the /new rollout')
+    log(codexFor('codex-1')[2].context?.usedTokens === 20_000, 'after /new the pane follows the new rollout')
+
+    // `codex resume`: an old session, in an old day's folder, written again.
+    codexLive.push({ id: 'codex-2', cwd: 'C:/work/resumed', startedAt: Date.now() - 50_000 })
+    const resumed = writeRollout('2026/08/01', 'old', { cwd: 'C:/work/resumed', start: Date.parse('2026-08-01T09:00:00Z') })
+    appendTurn(resumed, 150_000)
+    await waitFor(() => codexFor('codex-2').length >= 1, 3000, 'the resumed rollout')
+    log(codexFor('codex-2')[0].context?.usedTokens === 150_000, 'a resumed session in an old folder maps to its lone pane')
+
+    // Two panes ten seconds apart in one folder: each launch session is its pane's.
+    const now = Date.now()
+    codexLive.push({ id: 'codex-3', cwd: 'C:/work/pair', startedAt: now - 30_000 })
+    codexLive.push({ id: 'codex-4', cwd: 'C:/work/pair', startedAt: now - 20_000 })
+    appendTurn(writeRollout('2026/09/23', 'pair-a', { cwd: 'C:/work/pair', start: now - 28_000 }), 30_000)
+    appendTurn(writeRollout('2026/09/23', 'pair-b', { cwd: 'C:/work/pair', start: now - 18_000 }), 40_000)
+    await waitFor(() => codexFor('codex-3').length >= 1 && codexFor('codex-4').length >= 1, 3000, 'both pair panes')
+    log(
+      codexFor('codex-3')[0].context?.usedTokens === 30_000 && codexFor('codex-4')[0].context?.usedTokens === 40_000,
+      'two panes ten seconds apart in one folder each get the session they launched with'
+    )
+    // Then a `/new` in one of them — either could have made it.
+    appendTurn(writeRollout('2026/09/23', 'pair-new', { cwd: 'C:/work/pair', start: Date.now() }), 99_000)
+    await sleep(900)
+    codexUsage.rescan('codex-3')
+    codexUsage.rescan('codex-4')
+    await sleep(400)
+    log(
+      codexFor('codex-3').length === 1 &&
+        codexFor('codex-4').length === 1 &&
+        !codexHanded.some((f) => f.context?.usedTokens === 99_000),
+      'a newer rollout either pane could own goes to neither, and neither is re-sent its older one'
+    )
+
+    // Two panes that opened together, as a restored workspace does: each launch
+    // session could be either's.
+    const together = Date.now() - 5_000
+    codexLive.push({ id: 'codex-5', cwd: 'C:/work/restore', startedAt: together })
+    codexLive.push({ id: 'codex-6', cwd: 'C:/work/restore', startedAt: together + 200 })
+    appendTurn(writeRollout('2026/09/23', 'restore-a', { cwd: 'C:/work/restore', start: together + 1500 }), 11_000)
+    appendTurn(writeRollout('2026/09/23', 'restore-b', { cwd: 'C:/work/restore', start: together + 1800 }), 22_000)
+    await sleep(900)
+    log(
+      codexFor('codex-5').length === 0 && codexFor('codex-6').length === 0,
+      'two Codex panes opened together in one folder get no ring at all'
+    )
+
+    // A sibling that closed: its session must not light up the pane left behind.
+    codexLive.push({ id: 'codex-7', cwd: 'C:/work/sibling', startedAt: Date.now() - 90_000 })
+    codexLive.push({ id: 'codex-8', cwd: 'C:/work/sibling', startedAt: Date.now() - 10_000 })
+    const sibling = writeRollout('2026/09/23', 'sibling', { cwd: 'C:/work/sibling', start: Date.now() - 9_000 })
+    appendTurn(sibling, 60_000)
+    await waitFor(() => codexFor('codex-8').length >= 1, 3000, 'the sibling pane')
+    codexLive.splice(
+      codexLive.findIndex((p) => p.id === 'codex-8'),
+      1
+    )
+    await sleep(400)
+    appendTurn(sibling, 61_000)
+    await sleep(900)
+    log(
+      codexFor('codex-8').length === 1 && codexFor('codex-7').length === 0,
+      "a closed pane's session is not handed to the idle pane it leaves behind"
+    )
   } finally {
     usage.stop()
+    stopCodex()
     for (const browser of open) {
       try {
         browser.socket.terminate()

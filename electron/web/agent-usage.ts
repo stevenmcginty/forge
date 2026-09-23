@@ -29,10 +29,11 @@ import type { WebUsageFrame } from '@shared/web'
  * pane — a pane that has been quiet for an hour would otherwise show the
  * numbers from an hour ago.
  *
- * **Codex is not here.** Codex writes the same kind of numbers into its rollout
- * JSONL, but Forge records no Codex session id, and matching a pane to a
- * rollout by folder and start time is a guess the moment two Codex panes share
- * a folder. A wrong ring is worse than none.
+ * **Codex is next door.** Codex writes the same kind of numbers into its
+ * rollout JSONL, but Forge records no Codex session id, so a pane is matched to
+ * a rollout by folder and start time — which is a guess the moment two Codex
+ * panes share a folder, and a wrong ring is worse than none. That matching, and
+ * the refusal to guess, is electron/web/codex-usage.ts.
  *
  * Nothing here throws. A file that is missing, half-written, or not JSON is
  * skipped until the next look.

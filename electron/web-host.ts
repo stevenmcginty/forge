@@ -19,6 +19,7 @@ import {
   type WebPasskeyRequestOptions,
   type WebProjectRemoveEvent
 } from '@shared/web'
+import { commandExe } from '@shared/agents'
 import { isSessionId } from '@shared/session'
 import { collectLeaves } from '@shared/splitTree'
 import type {
@@ -49,6 +50,7 @@ import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsub
 import { WebServer, type WebServerHost } from './web/server'
 import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
 import { defaultStatusDir, startAgentUsage, type AgentUsage } from './web/agent-usage'
+import { defaultCodexSessionsDir, startCodexUsage, type CodexPane, type CodexUsage } from './web/codex-usage'
 import { foremanList, foremanStart, foremanSay, foremanStop, onForemanState } from './foreman/ipc'
 import { listHandoffsFor, onHandoffChanged } from './handoff-watcher'
 import type { HandoffStartRemoteEvent } from '@shared/handoffview'
@@ -265,6 +267,12 @@ let unsubscribeHandoff: (() => void) | null = null
  * electron/web/agent-usage.ts. Started with the link, stopped with it.
  */
 let usageWatch: AgentUsage | null = null
+/**
+ * Each Codex pane's context, read from Codex's own rollout files in
+ * `~/.codex/sessions` — see electron/web/codex-usage.ts. Beside `usageWatch`,
+ * and started and stopped with it.
+ */
+let codexUsageWatch: CodexUsage | null = null
 /**
  * How long a PTY resize waits before the session list is pushed again.
  *
@@ -1319,6 +1327,17 @@ function paneSessions(): Map<string, string> {
   return out
 }
 
+/**
+ * Every live pane whose command is Codex, with the folder it launched in and
+ * when — all electron/web/codex-usage.ts has to match a pane to a rollout by.
+ */
+function codexPanes(): CodexPane[] {
+  return getManager()
+    .list()
+    .filter((s) => commandExe(s.bootstrapCommand) === 'codex')
+    .map((s) => ({ id: s.id, cwd: s.cwd, startedAt: s.startedAt }))
+}
+
 /** One pane in a split tree, by id. */
 function findLeaf(node: LayoutNode, paneId: string): Extract<LayoutNode, { type: 'leaf' }> | null {
   if (node.type === 'leaf') return node.id === paneId ? node : null
@@ -1599,6 +1618,12 @@ async function start(): Promise<void> {
     panes: paneSessions,
     onUsage: (frame) => instance.pushUsage(frame)
   })
+  // Codex's, from its session files rather than a status line.
+  codexUsageWatch = startCodexUsage({
+    dir: defaultCodexSessionsDir(),
+    panes: codexPanes,
+    onUsage: (frame) => instance.pushUsage(frame)
+  })
 
   // The browser sees what the window sees, from the same coalesced flush.
   unsubscribePty = addPtySink({
@@ -1622,6 +1647,7 @@ async function start(): Promise<void> {
       // A resumed session's status file is already on disk; its ring need not
       // wait for the next redraw or the poll.
       usageWatch?.rescan(id)
+      codexUsageWatch?.rescan(id)
       // Re-adoption after a renderer reload arrives here too, and a renderer
       // that has just reloaded has forgotten which of its panes a browser is
       // reading — the labels on them, and nothing else now, but a label that
@@ -1874,6 +1900,8 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   unsubscribeHandoff = null
   usageWatch?.stop()
   usageWatch = null
+  codexUsageWatch?.stop()
+  codexUsageWatch = null
   // A pending push would fire into a server that has stopped, which is the
   // ordinary shape of switching the link off a beat after moving a pane.
   if (geometryPush) clearTimeout(geometryPush)
