@@ -63,7 +63,7 @@ export const HUB_TOOL_SPECS: HubToolSpec[] = [
   {
     name: 'show_on_canvas',
     description: [
-      'Put a file on Forge’s canvas board and show the board: an image (png/jpg/webp/gif/svg), a clip (mp4/webm) or a note (md/txt/html), by absolute path. The file is copied; the original stays put.',
+      'Put a file on Forge’s canvas board and show the board: an image (png/jpg/webp/gif/svg), a video (mp4/webm), an .html / .md artifact (Forge renders it live) or a txt note, by absolute path. The file is copied; the original stays put, so to have an artifact refresh live as it changes, write it straight into the board folder (FORGE_CANVAS_DIR) instead.',
       'Images made with make_image/edit_image/make_video go on the board by themselves — no need to post those. With no path it just shows the board.'
     ].join(' '),
     parameters: {

@@ -43,6 +43,7 @@
     "foreman-kit:check": "node scripts/foreman-kit-check.mjs",
     "bridge:smoke": "node scripts/bridge-smoke.mjs",
     "bridge:register": "node scripts/bridge-register-check.mjs",
+    "bridge:install": "node scripts/bridge-install.mjs",
     "bridge:build": "node scripts/build-bridge.mjs",
     "remote:check": "node scripts/remote-check.mjs",
     "remote-yes:check": "node scripts/remote-yes-check.mjs",

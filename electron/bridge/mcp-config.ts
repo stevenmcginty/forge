@@ -1,7 +1,9 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { commandExe } from '@shared/agents'
 import { getDataDir, getSettings } from '../store'
+import { BROWSER_INSTRUCTION_LINE, codexBridgeFragment } from './cli-register'
 
 /**
  * The cross-agent bridge's Forge-side half.
@@ -49,6 +51,7 @@ const SCRIPT = 'gemini-bridge.mjs'
 const SHARE_KEY = 'forge_share'
 
 let configPath: string | null = null
+let instructionsPath: string | null = null
 const scripts = new Map<string, string | null>()
 
 /** Candidate locations for a bridge script, dev and packaged. */
@@ -98,7 +101,7 @@ export function writeBridgeConfig(): string | null {
   }
 
   const dir = join(getDataDir(), 'bridge')
-  const outDir = join(getDataDir(), 'bridge-out')
+  const outDir = bridgeOutDir()
   const target = join(dir, 'mcp.json')
 
   const settings = getSettings()
@@ -150,12 +153,35 @@ export function writeBridgeConfig(): string | null {
     writeFileSync(tmp, JSON.stringify(config, null, 2), 'utf8')
     renameSync(tmp, target)
     configPath = target
-    return target
   } catch (err) {
     console.error('[bridge] failed to write mcp.json:', err)
     configPath = null
     return null
   }
+
+  // The one-line "use Forge's browser" note, for the CLIs told about it through
+  // their pane config rather than a user-scope file (OpenCode). Beside mcp.json
+  // for the same reason mcp.json is here: it is this app's, rewritten per start.
+  try {
+    const notes = join(dir, 'agent-instructions.md')
+    writeFileSync(notes, `${BROWSER_INSTRUCTION_LINE}\n`, 'utf8')
+    instructionsPath = notes
+  } catch (err) {
+    console.error('[bridge] failed to write agent-instructions.md:', err)
+    instructionsPath = null
+  }
+  return configPath
+}
+
+/** Where make_image and friends drop their files: <data dir>\bridge-out. */
+export function bridgeOutDir(): string {
+  return join(getDataDir(), 'bridge-out')
+}
+
+/** The instructions file writeBridgeConfig wrote, writing it first if need be. */
+export function bridgeInstructionsPath(): string | null {
+  if (!configPath) writeBridgeConfig()
+  return instructionsPath
 }
 
 /** The generated config path, writing it on first use if need be. */
@@ -200,10 +226,30 @@ function wantsBridge(command: string): boolean {
 export function applyMcpBridge(bootstrapCommand: string): string {
   const cmd = bootstrapCommand.trim()
   if (!cmd) return bootstrapCommand
+  if (commandExe(cmd) === 'codex') return applyCodexBridge(cmd)
   if (/--mcp-config\b/.test(cmd)) return cmd
   if (!wantsBridge(cmd)) return cmd
 
   const path = bridgeConfigPath()
   if (!path) return cmd
   return `${cmd} --mcp-config "${path}"`
+}
+
+/**
+ * Codex gets forge-bridge from a `-c` override instead — it has no
+ * `--mcp-config`, and would refuse to start if handed one (which is also what
+ * a Codex profile with the bridge switch on used to get). Every Codex pane,
+ * like every pane gets FORGE_BROWSER_LINK_FILE: the browser is only any use if
+ * the agent can reach it. See ./cli-register.ts for the verification.
+ */
+function applyCodexBridge(cmd: string): string {
+  if (cmd.includes('mcp_servers.forge-bridge')) return cmd
+  const script = resolveBridgeScript()
+  if (!script) return cmd
+  const fragment = codexBridgeFragment(script, bridgeOutDir())
+  if (!fragment) {
+    console.error(`[bridge] cannot express ${script} as a Codex -c fragment; the pane launches without forge-bridge`)
+    return cmd
+  }
+  return `${cmd} ${fragment}`
 }

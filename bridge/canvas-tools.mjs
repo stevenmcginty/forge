@@ -25,8 +25,10 @@ export const SHOW_ON_CANVAS_TOOL = {
   name: 'show_on_canvas',
   description:
     'Put a file on the Forge canvas board — the shared board in the Forge app where Steve sees every image, clip ' +
-    'and note the agents make. Pass an absolute path to a png/jpg/webp/gif/svg image, an mp4/webm clip, or a ' +
-    'md/txt/html note; it is copied onto the board (the original is left where it is) and appears at once. ' +
+    'and note the agents make. Pass an absolute path to a png/jpg/webp/gif/svg image, an mp4/webm video, an ' +
+    '.html / .md artifact (Forge renders it live), or a txt note; it is copied onto the board (the original is left ' +
+    'where it is) and appears at once. To have an artifact refresh live as you edit it, write it straight into ' +
+    'the folder in $FORGE_CANVAS_DIR instead: the board watches that folder. ' +
     'Images from make_image/edit_image/make_video are posted automatically, so there is no need to call this for ' +
     'those. Alternatively, save a file straight into the folder named by the FORGE_CANVAS_DIR environment variable.',
   inputSchema: {

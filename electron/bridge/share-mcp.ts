@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { commandExe } from '@shared/agents'
 import { getSettings } from '../store'
 import { whichCommand } from '../which'
+import { bridgeInstructionsPath, bridgeOutDir, resolveBridgeScript } from './mcp-config'
+import { codexEnvVars, openCodePaneConfig } from './cli-register'
 
 /**
  * Five vendors, five different ways of being told about an MCP server, and one
@@ -58,7 +60,9 @@ import { whichCommand } from '../which'
  *
  * Everything here is a no-op while `settings.shareTools` is false, which is the
  * default. A wrong guess about a vendor's flag therefore cannot stop a pane
- * launching for anybody who has not asked for this.
+ * launching for anybody who has not asked for this. The one exception is
+ * OpenCode's `OPENCODE_CONFIG_CONTENT`, which also carries forge-bridge (every
+ * pane, not gated) because it is one variable — see ./cli-register.ts.
  */
 
 const SERVER_KEY = 'forge_share'
@@ -128,11 +132,28 @@ function wanted(): boolean {
  * apostrophe in its name. So that returns null, the caller logs it, and the pane
  * launches without the share tools rather than not launching at all.
  */
-export function codexFragment(script: string): string | null {
+export function codexFragment(script: string, opts: { browserOff?: boolean } = {}): string | null {
   if (!script) return null
   if (script.includes("'") || script.includes('"') || script.includes('$')) return null
-  return `-c "mcp_servers.${SERVER_KEY}={command='node',args=['${script}']}"`
+  const env = opts.browserOff ? `,env={FORGE_BROWSER_TOOLS='off'}` : ''
+  return `-c "mcp_servers.${SERVER_KEY}={command='node',args=['${script}']${env},${codexEnvVars(SHARE_PANE_ENV)}}"`
 }
+
+/**
+ * The pane variables share-bridge.mjs reads. Codex hands an MCP server only the
+ * Windows basics unless told to forward more by name (verified with a server
+ * that dumps its environment — see ./cli-register.ts), so without this list the
+ * server never learned its pane, its link or the browser.
+ */
+export const SHARE_PANE_ENV = [
+  'FORGE_PANE_ID',
+  'FORGE_PANE_AGENT',
+  'FORGE_SHARE_AGENT',
+  'FORGE_SHARE_LINK',
+  'FORGE_SHARE_DIR',
+  'FORGE_SHARE_ROOT',
+  'FORGE_BROWSER_LINK_FILE'
+] as const
 
 /* --------------------------------------------------------------- opencode */
 
@@ -171,7 +192,9 @@ export function applyShareBridge(bootstrapCommand: string): string {
 
   const script = shareBridgeScript()
   if (!script) return cmd
-  const fragment = codexFragment(script)
+  // forge-bridge already carries the browser tools on this pane (mcp-config.ts
+  // applyMcpBridge runs first), so this copy runs without them — as Claude's does.
+  const fragment = codexFragment(script, { browserOff: cmd.includes('mcp_servers.forge-bridge') })
   if (!fragment) {
     console.error(`[share] cannot express ${script} as a Codex -c fragment; the pane launches without the share tools`)
     return cmd
@@ -194,10 +217,19 @@ export function shareEnvFor(bootstrapCommand: string, paneName: string): Record<
 
   const env: Record<string, string> = {}
   if (paneName.trim()) env['FORGE_SHARE_AGENT'] = paneName.trim()
-  if (!wanted()) return env
+  if (commandExe(cmd) !== 'opencode') return env
 
-  const script = shareBridgeScript()
-  if (script && commandExe(cmd) === 'opencode') env['OPENCODE_CONFIG_CONTENT'] = openCodeConfig(script)
+  // OpenCode's one variable carries forge-bridge on every pane, the share server
+  // only while it is switched on, and the "use Forge's browser" line — see
+  // ./cli-register.ts openCodePaneConfig.
+  const bridgeScript = resolveBridgeScript()
+  const content = openCodePaneConfig({
+    bridgeScript,
+    outDir: bridgeScript ? bridgeOutDir() : null,
+    instructionsPath: bridgeScript ? bridgeInstructionsPath() : null,
+    shareScript: wanted() ? shareBridgeScript() : null
+  })
+  if (content) env['OPENCODE_CONFIG_CONTENT'] = content
   return env
 }
 
