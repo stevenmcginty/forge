@@ -398,7 +398,13 @@ export function ProjectSheet({
                                 <span className="pjs__sr">, a pane here is waiting for you</span>
                               </span>
                             ) : null}
-                            {isCurrent ? <span className="pjs__sr">, open now</span> : null}
+                            {isCurrent ? (
+                              <span className="pjrow__here">
+                                <Icon name="check" size={13} />
+                                <span>Open</span>
+                                <span className="pjs__sr"> now</span>
+                              </span>
+                            ) : null}
                           </button>
                           <button
                             type="button"

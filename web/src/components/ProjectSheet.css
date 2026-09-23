@@ -230,9 +230,15 @@
   margin-top: 2px;
 }
 
-/* The project on screen: a pressed row, a ringed dot, a heavier name. */
+/*
+ * The project on screen. Steve asked for it to stand out at a glance, in the
+ * app's lime: a lime-washed row inside a lime ring, a ringed dot, a heavier
+ * name, and a lime "✓ Open" tag. The tag carries a word and a tick, so the row
+ * never relies on the colour alone.
+ */
 .pjrow[data-current='true'] {
-  background: var(--p-press);
+  background: color-mix(in srgb, var(--p-act) 14%, var(--p-bg));
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--p-act) 70%, transparent);
 }
 
 .pjrow__main {
@@ -258,7 +264,7 @@
 }
 
 .pjrow[data-current='true']:has(> .pjrow__main:active) {
-  background: color-mix(in srgb, var(--p-press) 92%, var(--p-ink));
+  background: color-mix(in srgb, var(--p-act) 22%, var(--p-bg));
 }
 
 .pjrow__main:focus-visible,
@@ -277,7 +283,7 @@
 
 .pjrow[data-current='true'] .pjrow__dot {
   box-shadow:
-    0 0 0 3px var(--p-press),
+    0 0 0 3px color-mix(in srgb, var(--p-act) 14%, var(--p-bg)),
     0 0 0 4.5px var(--pj-color, var(--p-ink-3));
 }
 
@@ -320,6 +326,25 @@
   font-variant-numeric: tabular-nums;
 }
 
+.pjrow__here {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px 0 7px;
+  font-size: var(--p-t-small);
+  font-weight: 650;
+  color: var(--p-act-ink);
+  background: var(--p-act);
+  border-radius: var(--p-r-pill);
+  white-space: nowrap;
+}
+
+.pjrow__here svg {
+  stroke-width: 2;
+}
+
 /* A pane here is waiting: an amber disc with the mark in it. */
 .pjrow__ask {
   flex: none;
@@ -360,7 +385,7 @@
   }
 
   .pjrow[data-current='true']:hover {
-    background: var(--p-press);
+    background: color-mix(in srgb, var(--p-act) 18%, var(--p-bg));
   }
 }
 

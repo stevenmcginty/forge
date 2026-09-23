@@ -1,7 +1,8 @@
 /*
  * Phone tokens — the one vocabulary for Forge Web on a phone (`.app[data-mobile]`).
  *
- *  1. Lime (--p-act) means "act here": Send, the mic, Start, the live dot. Nothing else is lime.
+ *  1. Lime (--p-act) means "act here": Send, the mic, Start, the live dot —
+ *     plus "you are here" on the open project in the project sheet. Nothing else is lime.
  *  2. Amber (--p-attn) means "something is waiting on you"; red (--p-danger) means "this destroys".
  *  3. Never colour alone: every state also carries a shape ("!", a ring, a dash) or words.
  *  4. Three radii: --p-r-pill (999), --p-r-sheet (20, sheets and cards), --p-r-row (12, rows and inputs).
