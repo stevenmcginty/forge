@@ -1,5 +1,13 @@
+import {
+  agentBrainSpec,
+  DEFAULT_AGENT_BRAIN,
+  isAgentBrainId,
+  isRealtimeBrain,
+  type AgentBrainId
+} from '@shared/agent-brain'
 import { providerSpec } from '@shared/realtime'
 import type { Settings, VoiceHubProvider } from '@shared/types'
+import type { RealtimeProviderId } from './session'
 
 /**
  * Which brain the voice hub actually uses.
@@ -46,4 +54,39 @@ export function resolveHubProvider(requested: VoiceHubProvider | undefined, keys
     provider: 'claude',
     fallbackReason: `No ${vendor} key — using Claude. Add one in Settings → Models & APIs for ${providerSpec(wanted).label}.`
   }
+}
+
+/* ------------------------------------------------------------ Agent brain */
+
+export type BrainKeys = Pick<Settings, 'geminiKey' | 'openaiKey' | 'groqKey' | 'openrouterKey'>
+
+export interface ResolvedBrain {
+  /** The adapter actually in use: a keyed brain with no key falls back to Claude. */
+  brain: AgentBrainId
+  /** Set when `brain` is a realtime adapter — the provider to open a session on. */
+  realtime: RealtimeProviderId | null
+  fallbackReason: string | null
+}
+
+export function brainHasKey(id: AgentBrainId, keys: Partial<BrainKeys>): boolean {
+  const key = agentBrainSpec(id).key
+  return key === null || String(keys[key] ?? '').trim().length > 0
+}
+
+/**
+ * The ONE routing rule: `settings.agentBrain`, with a keyed adapter that has no
+ * key falling back to Claude (which needs none) and saying why.
+ */
+export function resolveAgentBrain(requested: AgentBrainId | undefined, keys: Partial<BrainKeys>): ResolvedBrain {
+  const wanted: AgentBrainId = isAgentBrainId(requested) ? requested : DEFAULT_AGENT_BRAIN
+  const spec = agentBrainSpec(wanted)
+  if (!brainHasKey(wanted, keys)) {
+    const vendor = spec.auth.replace(/ key$/, '')
+    return {
+      brain: DEFAULT_AGENT_BRAIN,
+      realtime: null,
+      fallbackReason: `No ${vendor} key — using Claude. Add one in Settings → Models & APIs for ${spec.label}.`
+    }
+  }
+  return { brain: wanted, realtime: isRealtimeBrain(wanted) ? wanted : null, fallbackReason: null }
 }

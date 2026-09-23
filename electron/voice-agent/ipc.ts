@@ -128,6 +128,15 @@ export function registerVoiceAgentHandlers(): void {
   })
 }
 
+/**
+ * Run one Forge tool in the renderer on someone else's behalf — a pane agent's
+ * open_agent_pane arrives here from the bridge link. Same answer path as the
+ * brain's own tool calls; resolves with the tool's sentence.
+ */
+export function askRendererTool(name: string, args: unknown): Promise<string> {
+  return ensureHost().askTool(name, args)
+}
+
 export function disposeVoiceAgent(): void {
   host?.dispose()
   host = null

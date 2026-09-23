@@ -2,8 +2,6 @@ import type { RealtimeToolSpec } from '@shared/realtime'
 import {
   answerVoiceAgentTool,
   currentVoiceAgentToolDeps,
-  PANE_READ_DEFAULT_LINES,
-  PANE_READ_MAX_LINES,
   type VoiceAgentToolDeps
 } from '../agenttools'
 import { ACTION_SPECS } from '../appmanifest'
@@ -11,6 +9,7 @@ import { toolLabel } from '../toolLabels'
 import type { RealtimeToolAnswer } from './session'
 import { HUB_REALTIME_TOOLS, runHubTool } from './tools-hub'
 import { BROWSER_REALTIME_TOOLS, runBrowserHubTool } from './tools-browser'
+import { MAIN_REALTIME_TOOLS, runMainAgentTool } from './tools-main'
 
 /**
  * The realtime brains' tools: ONE list, handed to both Gemini Live and GPT
@@ -111,24 +110,12 @@ export const REALTIME_TOOLS: RealtimeToolSpec[] = [
     }
   },
   {
-    name: 'read_pane',
-    description:
-      'Read the recent screen text of one terminal pane — what an agent has been saying or printing. target is spoken: "terminal 2", "the claude one", "this" for the focused pane.',
-    parameters: {
-      type: 'object',
-      properties: {
-        target: { type: 'string', description: 'Which pane, in words' },
-        lines: { type: 'integer', description: `How many lines, default ${PANE_READ_DEFAULT_LINES}, at most ${PANE_READ_MAX_LINES}` }
-      },
-      required: ['target']
-    }
-  },
-  {
     name: 'take_screenshot',
     description:
       'Look at the primary display. For something visible that is not app structure — a rendered page, an error, a design. For tabs and panes use get_app_state.',
     parameters: NO_ARGS
   },
+  ...MAIN_REALTIME_TOOLS,
   ...HUB_REALTIME_TOOLS,
   ...BROWSER_REALTIME_TOOLS
 ]
@@ -197,6 +184,8 @@ export async function runRealtimeTool(
 ): Promise<RealtimeToolAnswer> {
   const deps = env.deps === undefined ? currentVoiceAgentToolDeps() : env.deps
   try {
+    const main = await runMainAgentTool(name, args, deps)
+    if (main) return main
     const hub = await runHubTool(name, args)
     if (hub) return hub
     const browser = await runBrowserHubTool(name, args)
@@ -209,12 +198,6 @@ export async function runRealtimeTool(
         if (!deps) return { ok: false, text: 'FAILED: Forge’s app tools are not ready yet — try again in a moment.' }
         const out = await answerVoiceAgentTool(name, args, deps)
         return out.ok ? { ok: !out.result.startsWith('FAILED'), text: out.result } : { ok: false, text: `FAILED: ${out.error}` }
-      }
-
-      case 'read_pane': {
-        if (!deps?.readPane) return { ok: false, text: 'FAILED: reading panes is not available in this build.' }
-        const text = await deps.readPane(String(args.target ?? ''), Number(args.lines ?? PANE_READ_DEFAULT_LINES))
-        return { ok: !text.startsWith('FAILED'), text }
       }
 
       case 'take_screenshot': {

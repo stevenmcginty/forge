@@ -217,15 +217,18 @@ await check('every field an ACTION_SPECS example names is a typed parameter', ()
   assert.equal(props.submit.type, 'boolean')
 })
 
-await check('one list: the brief’s tools, B2’s four hub tools and B3’s seven browser tools, unique names', () => {
+await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four hub tools and B3’s seven browser tools, unique names', () => {
   const names = tools.REALTIME_TOOLS.map((t) => t.name)
   assert.deepEqual(names, [
     'get_app_state',
     'run_app_action',
     'get_project_memory',
     'remember',
-    'read_pane',
     'take_screenshot',
+    'open_agent_pane',
+    'type_into_pane',
+    'help_prompt',
+    'read_pane',
     'focus_pane_by_name',
     'list_panes_with_names',
     'run_saved_prompt',

@@ -69,6 +69,7 @@ export const INSTRUCTION_MARKER = `<!-- ${BRIDGE_MARKER}:browser -->`
  */
 export const BROWSER_INSTRUCTION_LINE =
   "When you need a web browser, use Forge's built-in browser — the forge-bridge browser_open / browser_read / browser_click / browser_type tools — instead of any other browser tool or a desktop browser, and use show_on_canvas to put an image, video or .html/.md artifact on the Forge board. " +
+  'To start another agent, call open_agent_pane — never launch a CLI in a new window. ' +
   INSTRUCTION_MARKER
 
 export type TextMerge = { action: 'write'; text: string } | { action: 'none' }

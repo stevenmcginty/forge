@@ -86,6 +86,13 @@ export type AppAction =
    * can say so. `submit` false means type it and leave the Enter to Steve.
    */
   | { kind: 'send_prompt'; target: string; text: string; flesh?: boolean; submit?: boolean }
+  /**
+   * A new agent pane INSIDE Forge — the main agent's open_agent_pane tool
+   * (shared/brain-tools.ts). `agent` is spoken ("codex", "the gemini one") and
+   * matched like every profile; `prompt` is typed in once the agent is up.
+   * Not in ACTION_SPECS: the JSON brains already have open_tabs.
+   */
+  | { kind: 'open_agent_pane'; agent: string; prompt?: string; name?: string; submit?: boolean }
 
 /** Image generation is the one thing here that cannot finish synchronously. */
 export const MAX_GENERATED_IMAGES = 4
@@ -244,6 +251,12 @@ export interface ActionRunner {
    * what is about to happen and "wait" stops it.
    */
   closeMany?(request: { tabIds: string[]; label: string }): Promise<ActionOutcome>
+  /**
+   * A new tab running `profileId`, titled `title`, with `prompt` pasted in once
+   * the agent is ready (AppState openAgentPane). Without it, open_agent_pane
+   * falls back to newTab and the prompt is dropped, and says so.
+   */
+  openAgentPane?(request: { profileId: string; title: string; prompt: string; submit: boolean }): void
   /** Create a folder and add it to the rail. Main process does the creating. */
   createProject?(request: { name: string; parentDir?: string }): Promise<ActionOutcome>
 }
@@ -1142,6 +1155,42 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
         requested: 1,
         done: 0,
         pending: run.sendPrompt(request)
+      }
+    }
+
+    case 'open_agent_pane': {
+      const said = String(action.agent ?? '').trim()
+      const profile =
+        ctx.profiles.find((p) => p.id === said.toLowerCase()) ?? (said ? matchProfile(ctx.profiles, said) : null)
+      if (!profile) {
+        const names = ctx.profiles.map((p) => p.name).join(', ')
+        return fail(`No agent called “${said || '(none given)'}”. Agents here: ${names || 'none configured'}`)
+      }
+      if (!ctx.activeProjectId) return fail('No project open — add a folder with + in the rail first')
+      if (ctx.tabs.length >= MAX_TABS_PER_PROJECT) {
+        return fail(`A project holds at most ${MAX_TABS_PER_PROJECT} tabs — close one first`)
+      }
+      if (ctx.paneCount >= ctx.maxSessions) return fail(`Session limit (${ctx.maxSessions}) reached — close a pane first`)
+      const prompt = String(action.prompt ?? '').trim()
+      const name = String(action.name ?? '').trim()
+      // Enter only for a real agent, and only when asked: a plain shell runs
+      // what it is given.
+      const submit = action.submit === true && profile.command.trim() !== ''
+      if (prompt && run.openAgentPane) {
+        run.openAgentPane({ profileId: profile.id, title: name || profile.name, prompt, submit })
+        return {
+          ok: true,
+          summary: `Opened a new ${profile.name} pane inside Forge${name ? ` “${name}”` : ''} — the prompt goes in when it is ready${submit ? ' and is sent' : ', unsent'}`,
+          requested: 1,
+          done: 1
+        }
+      }
+      run.newTab(profile.id)
+      return {
+        ok: true,
+        summary: `Opened a new ${profile.name} pane inside Forge${prompt ? ' (the prompt could not be typed here — send it with type_into_pane)' : ''}`,
+        requested: 1,
+        done: 1
       }
     }
 

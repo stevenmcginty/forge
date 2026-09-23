@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc'
+import { AGENT_BRAIN_TEST_CHANNEL } from '@shared/agent-brain'
 import type { ForgeApi } from '@shared/api'
 import { hubPreloadApi } from './hub-preload'
 import { browserApi } from './browser-panes/preload-api'
@@ -114,6 +115,10 @@ const api: ForgeApi = {
     onEvent: (cb) => subscribe(IPC.voiceAgentEvent, cb),
     onToolRequest: (cb) => subscribe(IPC.voiceAgentToolRequest, cb),
     toolResult: (result) => ipcRenderer.invoke(IPC.voiceAgentToolResult, result)
+  },
+
+  agentBrain: {
+    test: (target) => ipcRenderer.invoke(AGENT_BRAIN_TEST_CHANNEL, target)
   },
 
   realtime: {

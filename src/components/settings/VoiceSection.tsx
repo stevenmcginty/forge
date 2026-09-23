@@ -8,9 +8,10 @@ import {
   TTS_SAMPLE_LINE,
   TTS_VOICES
 } from '@shared/tts'
-import type { Settings, VoiceEngine, VoiceHubProvider, VoiceReplyMode } from '@shared/types'
-import { GEMINI_VOICES, OPENAI_VOICES, providerSpec, REALTIME_PROVIDERS, resolveVoice } from '@shared/realtime'
-import { hasKeyFor } from '@/lib/realtime/provider'
+import type { Settings, VoiceEngine, VoiceReplyMode } from '@shared/types'
+import { AGENT_BRAINS, agentBrainSpec, isRealtimeBrain, migrateAgentBrain } from '@shared/agent-brain'
+import { GEMINI_VOICES, OPENAI_VOICES, providerSpec, resolveVoice } from '@shared/realtime'
+import { brainHasKey } from '@/lib/realtime/provider'
 import { chooseVoice, speaker } from '@/lib/speech'
 import { earconListening } from '@/lib/earcon'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENROUTER_MODEL } from '@/lib/voicebrain'
@@ -20,6 +21,7 @@ import { DictationSetup } from '../DictationSetup'
 import { Card, KeyField, Row, Section, Stepper, TextField, Toggle } from './parts'
 import '../hub/VoiceSettings.css'
 import { SpeechEngineCard } from './SpeechEngineCard'
+import { BrainTestButton } from './BrainTest'
 
 /**
  * Dictation and the voice agent's own settings.
@@ -79,7 +81,7 @@ export function VoiceSection(): ReactNode {
       >
         <Row
           label="Thinking model"
-          hint="What actually answers you. Set in Models & APIs, because the same brains serve the rest of Forge — nothing on this page changes it."
+          hint="What actually answers you: the Agent brain at the top of this page. Its key and model live in Models & APIs."
         >
           <div className="seg" role="group" aria-label="Thinking model">
             <span className="field__input" style={{ pointerEvents: 'none' }}>
@@ -169,60 +171,57 @@ export function VoiceSection(): ReactNode {
 function LiveTalkCard(): ReactNode {
   const { state, actions } = useApp()
   const s = state.settings
-  const spec = providerSpec(s.voiceHubProvider)
-  const vendor = spec.vendor
-  const keyed = hasKeyFor(s.voiceHubProvider, s)
+  const brain = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
+  const brainSpec = agentBrainSpec(brain)
+  // A realtime brain speaks in its own voice; the key rows below are for it.
+  const vendor = isRealtimeBrain(brain) ? providerSpec(brain).vendor : null
+  const keyed = brainHasKey(brain, s)
   const voices = vendor === 'gemini' ? GEMINI_VOICES : OPENAI_VOICES
   const voice = vendor ? resolveVoice(vendor, s.voiceHubVoice[vendor]) : null
 
   return (
     <Card
-      title="Live talk"
-      hint="Live talk listens the whole time, lets you talk over it and answers in its own voice. Start it from the dock's voice pill, Ctrl+Shift+Space, or the Talk view (Ctrl+Shift+G)."
+      title="Agent brain"
+      hint="Who answers the bottom bar — in Agent mode it hears you hands-free, and it can open agent panes, type into them and browse inside Forge. One setting for every brain."
     >
-      <div className="lt-grid" role="radiogroup" aria-label="Live talk brain">
-        {REALTIME_PROVIDERS.map((p) => {
-          const on = s.voiceHubProvider === p.id
-          const has = hasKeyFor(p.id, s)
-          const word = p.vendor === null ? 'Free' : has ? 'Key set' : 'Needs a key'
+      <div className="lt-grid" role="radiogroup" aria-label="Agent brain">
+        {AGENT_BRAINS.map((b) => {
+          const on = brain === b.id
+          const has = brainHasKey(b.id, s)
+          const word = b.key === null ? 'Free' : has ? 'Key set' : 'Needs a key'
           return (
-            <button
-              key={p.id}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              className="lt-tile"
-              data-on={on ? 'true' : undefined}
-              data-ready={has ? 'true' : undefined}
-              onClick={() => actions.patchSettings({ voiceHubProvider: p.id as VoiceHubProvider })}
-            >
-              <span className="lt-tile__top">
-                <span className="lt-tile__radio" aria-hidden="true">
-                  {on ? '●' : '○'}
+            <div key={b.id} className="lt-tilewrap">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={on}
+                className="lt-tile"
+                data-on={on ? 'true' : undefined}
+                data-ready={has ? 'true' : undefined}
+                onClick={() => actions.patchSettings({ agentBrain: b.id })}
+              >
+                <span className="lt-tile__top">
+                  <span className="lt-tile__radio" aria-hidden="true">
+                    {on ? '●' : '○'}
+                  </span>
+                  <span className="lt-tile__name">{b.id === 'claude' ? 'Claude + Parakeet' : b.label}</span>
+                  <span className="lt-tile__state" data-tone={b.key === null ? 'free' : has ? 'ok' : 'need'}>
+                    {word}
+                  </span>
                 </span>
-                <span className="lt-tile__name">{p.vendor === null ? 'Claude + Parakeet' : p.label}</span>
-                <span className="lt-tile__state" data-tone={p.vendor === null ? 'free' : has ? 'ok' : 'need'}>
-                  {word}
-                </span>
-              </span>
-              <span className="lt-tile__model mono">{p.vendor === null ? 'claude login · Parakeet · Edge voice' : p.model}</span>
-              <span className="lt-tile__cost">{p.vendor === null ? 'Free — no key, nothing to pay' : p.costNote}</span>
-              <span className="lt-tile__note">
-                {p.vendor === null
-                  ? 'The default, and what every other choice falls back to without its key.'
-                  : p.vendor === 'gemini'
-                    ? 'Gemini key · sessions resume on their own, no time limit'
-                    : 'OpenAI API key with billing · rolls over every 55 min'}
-              </span>
-            </button>
+                <span className="lt-tile__model mono">{isRealtimeBrain(b.id) ? providerSpec(b.id).model : b.auth}</span>
+                <span className="lt-tile__cost">{b.note}</span>
+              </button>
+              <BrainTestButton target={{ kind: 'brain', id: b.id }} />
+            </div>
           )
         })}
       </div>
 
-      {vendor && !keyed ? (
+      {!keyed ? (
         <p className="lt-fallback" role="status">
-          <span aria-hidden="true">◆</span> No {vendor === 'gemini' ? 'Gemini' : 'OpenAI'} key yet — live talk uses Claude +
-          Parakeet (free) until you add one below.
+          <span aria-hidden="true">◆</span> No {brainSpec.auth} yet — {brainSpec.label} falls back to Claude + Parakeet
+          (free) until you add one{vendor ? ' below' : ' in Models & APIs'}.
         </p>
       ) : null}
 
@@ -268,6 +267,38 @@ function LiveTalkCard(): ReactNode {
           </div>
         </div>
       ) : null}
+
+      <Row
+        label="Silence that sends"
+        hint="Agent mode is hands-free: when you stop talking for this long, what you said goes to the agent by itself and the mic stays open for the next turn."
+      >
+        <Stepper
+          value={s.agentSilenceMs}
+          display={`${(s.agentSilenceMs / 1000).toFixed(1)} s`}
+          onChange={(v) => actions.patchSettings({ agentSilenceMs: v })}
+          min={500}
+          max={2000}
+          step={100}
+          label="Silence that sends"
+        />
+      </Row>
+      <Row label="Auto-send dictation" hint="Dictate mode: press Enter in the pane after each phrase. Off means you press Enter yourself.">
+        <Toggle
+          checked={s.dictateAutoSend}
+          onChange={(on) => actions.patchSettings({ dictateAutoSend: on })}
+          label="Auto-send dictation"
+        />
+      </Row>
+      <Row
+        label="Agents use Forge's browser only"
+        hint="Claude panes Forge opens cannot use Claude-in-Chrome or Playwright; web tasks go to Forge's built-in browser. Takes effect for new panes."
+      >
+        <Toggle
+          checked={s.agentsForgeBrowserOnly}
+          onChange={(on) => actions.patchSettings({ agentsForgeBrowserOnly: on })}
+          label="Agents use Forge's browser only"
+        />
+      </Row>
     </Card>
   )
 }
@@ -281,23 +312,20 @@ function LiveTalkCard(): ReactNode {
  * unconfigured.
  */
 function describeBrain(s: Settings): string {
-  switch (s.voiceBrain) {
+  const id = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
+  const label = agentBrainSpec(id).label
+  if (!brainHasKey(id, s)) return `${label} · no key yet — Claude answers`
+  switch (id) {
     case 'groq':
-      return (s.groqKey ?? '').trim()
-        ? `Groq · ${s.groqModel?.trim() || DEFAULT_GROQ_MODEL}`
-        : 'Groq · no key yet'
+      return `Groq · ${s.groqModel?.trim() || DEFAULT_GROQ_MODEL}`
     case 'openrouter':
-      return (s.openrouterKey ?? '').trim()
-        ? `OpenRouter · ${s.openrouterModel?.trim() || DEFAULT_OPENROUTER_MODEL}`
-        : 'OpenRouter · no key yet'
-    case 'gemini':
-      return (s.geminiKey ?? '').trim()
-        ? `Gemini · ${s.geminiModel?.trim() || DEFAULT_GEMINI_MODEL}`
-        : 'Gemini · no key yet'
-    case 'stub':
-      return 'Stub · offline, echoes you'
+      return `OpenRouter · ${s.openrouterModel?.trim() || DEFAULT_OPENROUTER_MODEL}`
+    case 'gemini-flash':
+      return `Gemini Flash · ${s.geminiModel?.trim() || DEFAULT_GEMINI_MODEL}`
+    case 'claude':
+      return `Claude · ${s.voiceClaudeModel || 'opus'}`
     default:
-      return String(s.voiceBrain)
+      return label
   }
 }
 

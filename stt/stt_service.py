@@ -35,7 +35,7 @@ client -> server
     {"cmd": "start"}                 begin listening
     {"cmd": "start", "autoStop": 10}  ...and set the silence timeout for it
     {"cmd": "start", "mode": "wake"}  ...always-listening instead (see below)
-    {"cmd": "start", "conversation": true}
+    {"cmd": "start", "conversation": true, "pauseCut": 0.8}
                                      ...a conversation, not dictation: wait out
                                      thinking pauses instead of cutting at 1 s
     {"cmd": "capture"}               wake mode: start capturing now, no wake word
@@ -841,7 +841,11 @@ class SttService:
         auto_stop: float | None = None,
         mode: str = PHRASE_MODE,
         conversation: bool = False,
+        pause_cut: float | None = None,
     ) -> None:
+        # The Agent bar's silence window (settings.agentSilenceMs): how long a
+        # pause ends a phrase in a conversation. Absent means the old 3 s.
+        self.opts.pause_cut = pause_cut if conversation else None
         if auto_stop is not None:
             # Forge sends the current silence timeout with every start, so
             # changing it in Settings takes effect without a respawn.
@@ -874,6 +878,8 @@ class SttService:
             rec = LiveRecorder(
                 self.audio_q, device=self.opts.device, conversation=self.opts.conversation
             )
+        if getattr(self.opts, "pause_cut", None):
+            rec.pause_cut_s = float(self.opts.pause_cut)
         if self.mode == WAKE_MODE:
             # Open the mic already monitoring: nothing is collected, and nothing
             # is transcribed, until "hey Jarvis" turns up.
@@ -1148,10 +1154,12 @@ class SttService:
         cmd = msg.get("cmd")
         if cmd == "start":
             raw = msg.get("autoStop")
+            cut = msg.get("pauseCut")
             self.start_listening(
                 float(raw) if isinstance(raw, (int, float)) and raw >= 0 else None,
                 mode=str(msg.get("mode") or PHRASE_MODE),
                 conversation=msg.get("conversation") is True,
+                pause_cut=float(cut) if isinstance(cut, (int, float)) and 0.3 <= cut <= 5 else None,
             )
         elif cmd == "capture":
             self.begin_capture()

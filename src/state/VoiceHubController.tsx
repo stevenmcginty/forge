@@ -9,7 +9,12 @@ import {
   type ReactNode
 } from 'react'
 import { OPENAI_SESSION_LIMIT_MS, providerSpec, resolveVoice } from '@shared/realtime'
+import { agentBrainSpec, isRealtimeBrain as isRealtimeBrainId, migrateAgentBrain, type AgentBrainId } from '@shared/agent-brain'
 import type { VoiceHubProvider } from '@shared/types'
+import { getHubRuntime } from '@/lib/hubRuntime'
+import { CONTEXT_MIN_GAP_MS, ContextTracker } from '@/lib/realtime/context'
+import { errorReasonOf, type ErrorSource } from '@/lib/realtime/errors'
+import { micState } from '@/lib/realtime/micstate'
 import { currentVoiceAgentToolDeps } from '@/lib/agenttools'
 import { buildStateSection } from '@/lib/appmanifest'
 import {
@@ -23,7 +28,7 @@ import {
 import { GeminiLiveSession } from '@/lib/realtime/gemini'
 import { OpenAIRealtimeSession } from '@/lib/realtime/openai'
 import { buildRealtimeInstructions } from '@/lib/realtime/persona'
-import { providerAvailability, resolveHubProvider } from '@/lib/realtime/provider'
+import { providerAvailability, resolveAgentBrain } from '@/lib/realtime/provider'
 import type {
   RealtimeCaption,
   RealtimeProviderId,
@@ -118,7 +123,29 @@ export interface VoiceHubController {
   toggle(): void
   setMuted(muted: boolean): void
   interrupt(): void
+  /** Alias of `ask(text, { via: 'typed' })`, kept for older callers. */
   askText(text: string): void
+
+  /* ------------------------------------------------ the main agent (B7) */
+  /** The ONE Agent brain setting, after the no-key fallback; and its name. */
+  brain: AgentBrainId
+  brainLabel: string
+  /**
+   * One turn for the main agent. Realtime: into the live session (opened if
+   * off). Parakeet brains: VoiceAgent's pipeline. `via: 'voice'` is a finished
+   * Parakeet phrase — do not also put it on the transcript bus.
+   */
+  ask(text: string, opts?: { via?: 'typed' | 'voice' }): void
+  /** Raw text into one pane, no brain. Multi-line is pasted; `submit` presses Enter. */
+  dictateTo(paneId: string, text: string, opts?: { submit?: boolean }): Promise<{ ok: boolean; summary: string }>
+  /** The recogniser (or the live session) is really recording right now. */
+  capturing: boolean
+  /** Asked to listen, not recording yet — show "Starting…". Capture follows by itself. */
+  starting: boolean
+  /** The mic state in words: Listening, Starting…, Waiting for "Hey Jarvis", Mic on · not recording, Muted, Off, or the error reason. */
+  listenNote: string
+  /** Short words for the pill: "Gemini: key refused". Full text is `error`. */
+  errorReason: string | null
 }
 
 const MAX_CAPTIONS = 40
@@ -165,7 +192,14 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   const agent = useVoiceAgent()
   const s = state.settings
 
-  const resolved = resolveHubProvider(s.voiceHubProvider, { geminiKey: s.geminiKey, openaiKey: s.openaiKey })
+  // The ONE setting. A settings.json from before it existed migrates the way
+  // main does (shared/agent-brain.ts), so the first render already agrees.
+  const requestedBrain: AgentBrainId = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
+  const pickedBrain = resolveAgentBrain(requestedBrain, s)
+  const resolved: { provider: VoiceHubProvider; fallbackReason: string | null } = {
+    provider: pickedBrain.realtime ?? 'claude',
+    fallbackReason: pickedBrain.fallbackReason
+  }
   const availability = useMemo(
     () => providerAvailability({ geminiKey: s.geminiKey, openaiKey: s.openaiKey }),
     [s.geminiKey, s.openaiKey]
@@ -192,6 +226,8 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   const pausedAgentRef = useRef(false)
   const rollingRef = useRef(false)
   const pendingTextRef = useRef<string | null>(null)
+  /** What the live session was last told about the app. */
+  const contextRef = useRef(new ContextTracker())
   /** Assigned below, once startRealtime exists; read at call time. */
   const rolloverRef = useRef<(reason: string) => Promise<void>>(async () => undefined)
 
@@ -341,6 +377,11 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
         if (sessionRef.current !== session) return
         session.setMuted(mutedRef.current)
         setSessionStartedAt(Date.now())
+        // What is open right now, before his first word. Changes follow,
+        // throttled, from the effect below.
+        contextRef.current.reset()
+        const ctxText = currentVoiceAgentToolDeps()?.getAppContext?.()
+        if (ctxText && contextRef.current.take(ctxText)) session.sendContext(ctxText, false)
         const pending = pendingTextRef.current
         pendingTextRef.current = null
         if (pending) session.sendText(pending)
@@ -467,17 +508,19 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
 
   const start = useCallback((): void => {
     if (sessionRef.current) return
-    const pick = resolveHubProvider(settingsRef.current.voiceHubProvider, {
-      geminiKey: settingsRef.current.geminiKey,
-      openaiKey: settingsRef.current.openaiKey
-    })
-    if (pick.provider === 'claude') {
-      if (!agentRef.current.armed) agentRef.current.toggleAgent()
+    const cfg = settingsRef.current
+    const pick = resolveAgentBrain(cfg.agentBrain ?? migrateAgentBrain(cfg.voiceHubProvider, cfg.voiceBrain), cfg)
+    if (!pick.realtime) {
+      // A Parakeet brain: arm AND capture now. Arming alone, with the wake
+      // word on, only monitors for "hey Jarvis" — the Listening-but-deaf bug.
+      const a = agentRef.current
+      if (a.listenNow) a.listenNow()
+      else if (!a.armed) a.toggleAgent()
       return
     }
     captionsRef.current = []
     setCaptions([])
-    void startRealtime(pick.provider as RealtimeProviderId, null)
+    void startRealtime(pick.realtime, null)
   }, [startRealtime])
 
   const stop = useCallback((): void => {
@@ -527,8 +570,8 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     if (agentRef.current.phase === 'speaking') agentRef.current.toggleAgent()
   }, [])
 
-  const askText = useCallback(
-    (text: string): void => {
+  const ask = useCallback(
+    (text: string, opts?: { via?: 'typed' | 'voice' }): void => {
       const body = text.trim()
       if (!body) return
       if (sessionRef.current) {
@@ -546,11 +589,57 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
         start()
         return
       }
+      // A Parakeet brain (Claude, or a JSON text brain): straight into the
+      // VoiceAgent pipeline. The composer route below is only for a stale ctx.
+      const a = agentRef.current
+      if (a.ask) {
+        void a.ask(body, { via: opts?.via ?? 'typed' })
+        return
+      }
       pendingSubmitRef.current = body
-      agentRef.current.setDraftPhrase(body)
+      a.setDraftPhrase(body)
     },
     [resolved.provider, runGo, start, upsertCaption]
   )
+
+  const askText = useCallback((text: string): void => ask(text, { via: 'typed' }), [ask])
+
+  /** Raw text into a pane — Dictate mode and the "→ Everest" target. No brain. */
+  const dictateTo = useCallback(
+    async (paneId: string, text: string, opts?: { submit?: boolean }): Promise<{ ok: boolean; summary: string }> => {
+      const rt = getHubRuntime()
+      if (!rt) return { ok: false, summary: 'Forge is still starting up.' }
+      const pane = rt.panes().find((p) => p.paneId === paneId)
+      const name = pane ? (pane.callSign ?? `panel ${pane.number}`) : 'that pane'
+      if (!text && !opts?.submit) return { ok: false, summary: 'Nothing to type.' }
+      rt.revealPane(paneId)
+      // A background tab's pane mounts after the reveal; a few short retries
+      // cover that without ever typing twice.
+      for (let i = 0; i < 15; i++) {
+        if (rt.typeIntoPane(paneId, text, opts?.submit === true)) {
+          return { ok: true, summary: `Typed into ${name}${opts?.submit ? ' and sent it' : ''}.` }
+        }
+        await new Promise((r) => window.setTimeout(r, 200))
+      }
+      return { ok: false, summary: `${name} has no live terminal, so nothing was typed.` }
+    },
+    []
+  )
+
+  /* -------------------------------------------- live context (realtime)
+   * At session start the manifest goes up with the session (startRealtime);
+   * after that, a changed app is told at most every CONTEXT_MIN_GAP_MS. */
+  useEffect(() => {
+    if (!liveProvider) return undefined
+    const timer = window.setInterval(() => {
+      const session = sessionRef.current
+      const text = currentVoiceAgentToolDeps()?.getAppContext?.()
+      if (!session || !text) return
+      const fresh = contextRef.current.take(text, Date.now(), CONTEXT_MIN_GAP_MS)
+      if (fresh) session.sendContext(fresh, false)
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [liveProvider])
 
   const setDiscussionMode = useCallback((on: boolean): void => {
     if (discussionRef.current === on) return
@@ -588,11 +677,45 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   }, [])
 
   const provider: VoiceHubProvider = liveProvider ?? resolved.provider
+
+  /* ------------------------------------------- honest mic state (B7) */
+  let errorSource: ErrorSource = 'brain'
+  let errorText: string | null = null
+  if (usingRealtime) {
+    errorSource = providerSpec(provider).vendor === 'gemini' ? 'gemini' : 'openai'
+    errorText = rtError && rtPhase === 'error' ? rtError : null
+  } else {
+    // The last brain turn's failure, when it is the newest thing that happened.
+    const last = agent.turns[agent.turns.length - 1]
+    const turnError = last && last.kind === 'brain' && last.phase === 'error' ? (last.error ?? null) : null
+    const sttErr = agent.recogniser?.error ?? agent.sttError
+    errorSource = sttErr
+      ? 'parakeet'
+      : pickedBrain.brain === 'gemini-flash'
+        ? 'gemini'
+        : pickedBrain.brain === 'groq'
+          ? 'groq'
+          : pickedBrain.brain === 'openrouter'
+            ? 'openrouter'
+            : 'claude'
+    errorText = sttErr ?? turnError
+  }
+  const errorReason = errorReasonOf(errorSource, errorText)
+  const { capturing, starting, listenNote } = micState({
+    realtime: usingRealtime,
+    phase: usingRealtime ? rtPhase : agent.phase,
+    muted,
+    armed: agent.armed,
+    recogniser: agent.recogniser ?? null,
+    errorReason
+  })
+  const brainLabel = agentBrainSpec(pickedBrain.brain).label
+
   const value = useMemo<VoiceHubController>(
     () => ({
       phase,
       provider,
-      requestedProvider: s.voiceHubProvider,
+      requestedProvider: isRealtimeBrainId(requestedBrain) ? requestedBrain : 'claude',
       fallbackReason: liveProvider ? null : resolved.fallbackReason,
       realtime: usingRealtime,
       availability,
@@ -615,12 +738,28 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       toggle,
       setMuted,
       interrupt,
-      askText
+      askText,
+      brain: pickedBrain.brain,
+      brainLabel,
+      ask,
+      dictateTo,
+      capturing,
+      starting,
+      listenNote,
+      errorReason
     }),
     [
+      pickedBrain.brain,
+      brainLabel,
+      ask,
+      dictateTo,
+      capturing,
+      starting,
+      listenNote,
+      errorReason,
       phase,
       provider,
-      s.voiceHubProvider,
+      requestedBrain,
       s.voiceWakeWord,
       liveProvider,
       resolved.fallbackReason,

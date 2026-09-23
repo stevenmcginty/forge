@@ -30,6 +30,8 @@
     "dictation:check": "node scripts/dictation-check.mjs",
     "stt:download": "node scripts/stt-download-test.mjs",
     "voice:check": "node scripts/voice-check.mjs",
+    "launch-guard:check": "node scripts/launch-guard-check.mjs",
+    "agent-bar:check": "node scripts/agent-bar-check.mjs",
     "realtime:check": "node scripts/realtime-check.mjs",
     "canvas:check": "node scripts/canvas-check.mjs",
     "artifact:check": "node scripts/artifact-check.mjs",

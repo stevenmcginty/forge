@@ -28,6 +28,11 @@ import {
   stopAgentBrain
 } from '@/lib/agentbrain'
 import { describePaneText, registerVoiceAgentTools } from '@/lib/agenttools'
+import { migrateAgentBrain } from '@shared/agent-brain'
+import { getHubRuntime } from '@/lib/hubRuntime'
+import { buildAppContext, ContextTracker, projectBranch, type PaneStateWord } from '@/lib/realtime/context'
+import { isCapturing, listenStep } from '@/lib/realtime/micstate'
+import { resolveAgentBrain } from '@/lib/realtime/provider'
 import { agentMemory } from '@/lib/agentmemory'
 import { bargeIn } from '@/lib/bargein'
 import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
@@ -355,6 +360,31 @@ export interface VoiceAgentCtx {
   dictating: boolean
   /** Everything held since dictation began, as one live string. */
   dictationBuffer: string
+
+  /* ------------------------------------------------ the main agent (B7)
+   * Optional because the overlay's relayed ctx (src/overlay/) has no engine. */
+  /**
+   * One main-agent turn — typed in the bar or a finished Parakeet phrase —
+   * through the same pipeline as everything else (grammar, then the Agent
+   * brain). Resolves with what it answered.
+   */
+  ask?(text: string, opts?: { via?: 'typed' | 'voice' }): Promise<string>
+  /**
+   * The bar's mic press on a Parakeet brain: arm if need be and start
+   * capturing now, wake word or not. Queued in main until the sidecar is up,
+   * so the first press after launch works.
+   */
+  listenNow?(): void
+  /** The recogniser as it really is, for an honest "Listening". */
+  recogniser?: {
+    phase: SttStatus['phase']
+    ready: boolean
+    capturing: boolean
+    wake: boolean
+    error: string | null
+    /** A capture was asked for and has not started yet. */
+    wanted: boolean
+  }
 }
 
 /**
@@ -454,6 +484,11 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   const wakeWord = state.settings.voiceWakeWord
   const wakeWordRef = useRef(wakeWord)
   wakeWordRef.current = wakeWord
+
+  /** Set by the bar's mic (listenNow): this conversation is hands-free. Cleared on disarm. */
+  const handsFreeRef = useRef(false)
+  const silenceMsRef = useRef(state.settings.agentSilenceMs)
+  silenceMsRef.current = state.settings.agentSilenceMs
 
   /* ------------------------------------------------------------ dictation
    *
@@ -574,8 +609,15 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    * dictation keeps its snappy cuts.
    */
   const startListening = useCallback((): void => {
+    // Hands-free (the Agent bar's mic, B7): a plain conversation session, so
+    // end of speech sends by itself and the mic stays open for the next turn —
+    // no wake word to say between turns. The pause that ends a phrase is the
+    // Agent silence window (settings.agentSilenceMs, 0.5–2 s).
+    const pauseCut = Math.min(2000, Math.max(500, silenceMsRef.current || 800)) / 1000
     void window.forge.stt.start(
-      wakeWordRef.current ? { mode: 'wake', conversation: true } : { conversation: true }
+      wakeWordRef.current && !handsFreeRef.current
+        ? { mode: 'wake', conversation: true, pauseCut }
+        : { conversation: true, pauseCut }
     )
   }, [])
 
@@ -994,10 +1036,21 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
 
   /* --------------------------------------------------------------- brain */
 
+  /**
+   * The ONE Agent brain setting (shared/agent-brain.ts). `agentBrain` absent
+   * means a settings.json from before it existed: the same migration main
+   * applies, so both sides agree on the first render too.
+   */
+  const agentBrain = resolveAgentBrain(
+    state.settings.agentBrain ?? migrateAgentBrain(state.settings.voiceHubProvider, state.settings.voiceBrain),
+    state.settings
+  ).brain
+  const jsonBrainId =
+    agentBrain === 'gemini-flash' ? 'gemini' : agentBrain === 'groq' ? 'groq' : agentBrain === 'openrouter' ? 'openrouter' : 'claude'
   const brain = useMemo(
     () =>
       getActiveBrain({
-        voiceBrain: state.settings.voiceBrain,
+        voiceBrain: jsonBrainId,
         anthropicKey: state.settings.anthropicKey,
         geminiKey: state.settings.geminiKey,
         geminiModel: state.settings.geminiModel,
@@ -1007,7 +1060,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         groqModel: state.settings.groqModel
       }),
     [
-      state.settings.voiceBrain,
+      jsonBrainId,
       state.settings.anthropicKey,
       state.settings.geminiKey,
       state.settings.geminiModel,
@@ -1203,6 +1256,9 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         paths: res.paths
       }
     },
+    // open_agent_pane: a new tab inside Forge, the prompt pasted once the
+    // agent's banner has landed (AppState's pendingTypes readiness gate).
+    openAgentPane: ({ profileId, title, prompt, submit }) => actions.openAgentPane(title, prompt, { profileId, submit }),
     recallMemory: () => agentMemory.recall(project?.id ?? null),
     forgetMemory: () => agentMemory.forget(project?.id ?? null),
 
@@ -1370,6 +1426,32 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   const manifestRef = useRef<string>('')
   manifestRef.current = useMemo(() => buildManifest(snapshot), [snapshot])
 
+  /**
+   * The compact live manifest (src/lib/realtime/context.ts): call-signs from the
+   * hub runtime, state words from the terminal host. Built on demand, never
+   * cached — it is cheap and it must be current.
+   */
+  const buildContextNow = useCallback((): string => {
+    const snap = snapshotRef.current
+    const rt = getHubRuntime()
+    const active = snap.projects.find((p) => p.active) ?? null
+    const stateOf = (paneId: string): PaneStateWord => {
+      const status = terminalHost.runtime(paneId).status
+      if (status === 'exited' || status === 'error') return 'exited'
+      if (terminalHost.isAttention(paneId)) return 'asking'
+      if (terminalHost.isBusy(paneId)) return 'working'
+      if (status === 'starting') return 'starting'
+      return status === 'live' ? 'ready' : 'idle'
+    }
+    return buildAppContext({
+      projectName: active?.name ?? null,
+      otherProjects: snap.projects.filter((p) => !p.active).map((p) => p.name),
+      branch: projectBranch(projectIdRef.current),
+      tabs: snap.tabs.map((t) => ({ number: t.number, title: t.title, active: t.active })),
+      panes: (rt?.panes() ?? []).map((p) => ({ ...p, state: stateOf(p.paneId) }))
+    })
+  }, [])
+
   // Conversation so far, for multi-turn context.
   const historyRef = useRef<BrainTurn[]>([])
   historyRef.current = turns.flatMap((turn): BrainTurn[] => {
@@ -1450,7 +1532,10 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    * Which fork step 2 takes. Read through a ref by the intake, so changing the
    * brain in Settings does not tear down the transcript subscription.
    */
-  const usingClaude = state.settings.voiceBrain === 'claude'
+  // The Claude session unless the Agent brain is one of the JSON text brains.
+  // A realtime brain never reaches here with a phrase (the hub sends those into
+  // its live session), but if one does, Claude is the right answer, not Gemini.
+  const usingClaude = jsonBrainId === 'claude'
   const usingClaudeRef = useRef(usingClaude)
   usingClaudeRef.current = usingClaude
 
@@ -1495,11 +1580,12 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         await agentMemory.prime(projectId)
         return true
       },
-      // Only the realtime brains ask for this one (src/lib/realtime/tools.ts).
+      getAppContext: () => buildContextNow(),
+      // Every brain can ask for this one now (read_pane, shared/brain-tools.ts).
       readPane: (target, lines) =>
         describePaneText(ctxRef.current, target, lines, (paneId, n) => terminalHost.snapshotText(paneId, n))
     })
-  }, [runActions])
+  }, [runActions, buildContextNow])
 
   /**
    * The brain, as it happens.
@@ -1586,6 +1672,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
 
   /** True once a session has been opened and not yet stopped. */
   const sessionOpen = useRef(false)
+  /** What the Claude session was last told about the app; only changes are sent. */
+  const contextSent = useRef(new ContextTracker())
 
   // Disarming ends the session. The next utterance opens a fresh one — a voice
   // agent nobody is talking to has no reason to hold a subprocess.
@@ -1668,12 +1756,24 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
             // never come is not how he should find out.
             const status = await startAgentBrain(projectPathRef.current ?? undefined)
             if (status.error) throw new Error(status.error)
+            contextSent.current.reset()
           } catch (err) {
             sessionOpen.current = false
             throw err
           }
         }
-        await sendUtterance(said)
+        // The live manifest rides along whenever the app changed since the
+        // session last saw it — every turn is app-aware, and an unchanged app
+        // costs nothing. A bracketed block the model reads, never speaks.
+        let fresh: string | null = null
+        try {
+          fresh = contextSent.current.take(buildContextNow())
+        } catch {
+          /* a turn without context is still a turn */
+        }
+        await sendUtterance(fresh ? `[${fresh}]
+
+${said}` : said)
         await done
       } finally {
         window.clearTimeout(watchdog)
@@ -1689,7 +1789,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       if (run.error) throw new Error(run.error)
       return run.said.join('\n').trim()
     },
-    [closeMouth, pushSpeech]
+    [closeMouth, pushSpeech, buildContextNow]
   )
 
   /* ---------------------------------------------------- transcript intake */
@@ -2073,6 +2173,89 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
 
   /* ---------------------------------------------------------------- send */
 
+  /**
+   * He typed over the agent: stop the sound, the TTS in flight and whatever is
+   * still being generated. Shared by the composer's submit and `ask`.
+   */
+  const bargeInForTyping = useCallback((): void => {
+    if (!speakingRef.current) return
+    voiceSpeaker.cancel()
+    const run = claudeRun.current
+    if (run) run.aborted = true
+    if (agentBrainAvailable()) void interruptAgentBrain().catch(() => undefined)
+    dropSpeech()
+    speakingRef.current = false
+    setSpeaking(false)
+  }, [dropSpeech])
+
+  /**
+   * One main-agent turn from the bar (B7). Typed text barges in and is exempt
+   * from the echo guard, exactly like the composer's submit; a Parakeet phrase
+   * goes through the same guards a heard phrase always has. Either way it is
+   * `runPhrase` — grammar first, then the Agent brain — so the bar, the wake
+   * word and the talk key all mean the same thing.
+   */
+  const ask = useCallback(
+    (text: string, opts?: { via?: 'typed' | 'voice' }): Promise<string> => {
+      const body = text.trim()
+      if (!body) return Promise.resolve('')
+      if (opts?.via !== 'voice') {
+        bargeInForTyping()
+        speaker.forgetLastSpoken()
+        lastTypedRef.current = body
+      }
+      return runPhrase(body)
+    },
+    [bargeInForTyping, runPhrase]
+  )
+
+  /* ------------------------------------------------ listen now (the mic)
+   *
+   * The bug this is for: with the wake word on, arming opened a session that
+   * only *monitors* for "hey Jarvis" — the hub said Listening, the waveform
+   * moved, and nothing was recorded. Pressing the mic means "hear me now", so
+   * it asks for a capture straight away. Main queues that capture until the
+   * sidecar is up and listening (stt-sidecar.ts pendingCapture), and the
+   * effect below repeats it once the wake session is really open — so the
+   * first press after launch, a restart or a provider switch works without a
+   * second one. `captureWanted` is what the bar shows as "Starting…".
+   */
+  const wantCapture = useRef(false)
+  const [captureWanted, setCaptureWanted] = useState(false)
+  const setWant = useCallback((on: boolean): void => {
+    wantCapture.current = on
+    setCaptureWanted(on)
+  }, [])
+
+  const listenNow = useCallback((): void => {
+    setWant(true)
+    handsFreeRef.current = true
+    if (!armedRef.current) {
+      // Never through toggleAgent while it is talking: that press is a barge-in.
+      if (speakingRef.current) bargeInForTyping()
+      toggleAgent()
+    } else if (sttRef.current.phase === 'off' || sttRef.current.phase === 'idle' || sttRef.current.phase === 'error') {
+      startListening()
+    }
+    // Already armed in a wake session: capture inside it rather than tearing it
+    // down. Main queues this until the session is listening.
+    if (armedRef.current && sttRef.current.mode === 'wake') void window.forge.stt.capture()
+  }, [bargeInForTyping, setWant, startListening, toggleAgent])
+
+  useEffect(() => {
+    if (!armed) handsFreeRef.current = false
+    const step = listenStep({
+      armed,
+      wanted: wantCapture.current,
+      speaking,
+      phase: stt.phase,
+      mode: stt.mode,
+      capturing: stt.capturing
+    })
+    if (step === 'clear' || step === 'done') setWant(false)
+    else if (step === 'capture') void window.forge.stt.capture()
+  }, [armed, speaking, stt.phase, stt.mode, stt.capturing, setWant])
+
   const submitPhrase = useCallback((): void => {
     const text = draftPhrase.trim()
     if (!text) return
@@ -2147,7 +2330,17 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       wakeMode: stt.mode === 'wake',
       capturing: stt.capturing ?? stt.phase === 'listening',
       dictating,
-      dictationBuffer
+      dictationBuffer,
+      ask,
+      listenNow,
+      recogniser: {
+        phase: stt.phase,
+        ready: stt.ready,
+        capturing: isCapturing(stt.phase, stt.mode, stt.capturing),
+        wake: stt.mode === 'wake',
+        error: stt.error?.msg ?? null,
+        wanted: captureWanted
+      }
     }),
     [
       phase,
@@ -2174,8 +2367,12 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       stt.mode,
       stt.capturing,
       stt.phase,
+      stt.ready,
       dictating,
-      dictationBuffer
+      dictationBuffer,
+      ask,
+      listenNow,
+      captureWanted
     ]
   )
 

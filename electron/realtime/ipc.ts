@@ -6,6 +6,8 @@ import type {
   RealtimeOpenAIConnectResult,
   RealtimeScreenshotResult
 } from '@shared/realtime'
+import { AGENT_BRAIN_TEST_CHANNEL, type BrainTestResult, type BrainTestTarget } from '@shared/agent-brain'
+import { testBrain } from '../agent-brain-test'
 import { getSettings } from '../store'
 import { captureScreen } from '../voice-agent/ipc'
 import { connectOpenAI, mintGeminiToken } from './tokens'
@@ -31,6 +33,14 @@ export function registerRealtimeHandlers(): void {
     IPC.realtimeGeminiToken,
     async (): Promise<RealtimeGeminiTokenResult> => mintGeminiToken(getSettings().geminiKey)
   )
+  // Settings' Test buttons: one sentence per key or Agent brain, read-only probes.
+  ipcMain.handle(AGENT_BRAIN_TEST_CHANNEL, async (_e, target: BrainTestTarget): Promise<BrainTestResult> => {
+    try {
+      return await testBrain(target, getSettings())
+    } catch (err) {
+      return { ok: false, reason: `The test could not run: ${errText(err)}` }
+    }
+  })
   // The same capture the Claude brain's take_screenshot uses. The renderer
   // shrinks it before it goes up a data channel with a 256 KB message limit.
   ipcMain.handle(IPC.realtimeScreenshot, async (): Promise<RealtimeScreenshotResult> => {

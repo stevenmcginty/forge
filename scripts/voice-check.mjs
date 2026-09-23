@@ -3465,10 +3465,10 @@ await test('barge-in stops the mouth AND the generation behind it', () => {
 
 await test('wake mode is what the agent asks the sidecar for', () => {
   assert.ok(
-    /stt\.start\(\s*wakeWordRef\.current \? \{ mode: 'wake', conversation: true \} : \{ conversation: true \}/.test(
+    /stt\.start\(\s*wakeWordRef\.current && !handsFreeRef\.current\s*\? \{ mode: 'wake', conversation: true, pauseCut \}\s*: \{ conversation: true, pauseCut \}/.test(
       agentCode
     ),
-    "the agent's start passes mode:'wake' (and conversation) when the setting is on"
+    "the agent's start passes mode:'wake' (and conversation) when the setting is on — except the bar's hands-free mic (B7)"
   )
   // Conversation, not dictation: every agent start — wake word or not — tells
   // the sidecar to wait out thinking pauses instead of cutting at the ~1 s

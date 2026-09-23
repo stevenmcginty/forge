@@ -105,6 +105,7 @@ import type { HandoffStartRemoteEvent } from './handoffview'
 import type { SkillSource, SkillsList } from './skills'
 import type { PackPlugin, SkillPack } from './skillpack'
 import type { CommandsFeed } from './commands'
+import type { BrainTestResult, BrainTestTarget } from './agent-brain'
 import type {
   RealtimeGeminiTokenResult,
   RealtimeOpenAIConnectRequest,
@@ -384,6 +385,14 @@ export interface ForgeApi {
    * electron/realtime/tokens.ts. Callers must optional-chain this: a stale
    * preload will not have it.
    */
+  /**
+   * Settings' Test buttons (B7): one read-only probe per key or Agent brain,
+   * answered in words. See electron/agent-brain-test.ts.
+   */
+  agentBrain: {
+    test(target: BrainTestTarget): Promise<BrainTestResult>
+  }
+
   realtime: {
     openaiConnect(req: RealtimeOpenAIConnectRequest): Promise<RealtimeOpenAIConnectResult>
     geminiToken(): Promise<RealtimeGeminiTokenResult>

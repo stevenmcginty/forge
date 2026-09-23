@@ -33,7 +33,16 @@ export interface BrowserServiceDeps {
   resolveCaller?: (caller: BrowserOwner) => { owner: BrowserOwner; project?: string }
   /** A screenshot was taken — the canvas board hook. `project` is the tab's project id ('' = none). */
   onShot?: (path: string, owner: BrowserOwner, id: string, project: string) => void
+  /**
+   * App ops that ride the same authenticated pipe but are not the browser's:
+   * a pane agent's open_agent_pane (bridge/forge-app-tools.mjs). Answered by
+   * the renderer. Absent = refused in words.
+   */
+  appOp?: (op: string, args: Record<string, unknown>, caller: BrowserOwner) => Promise<BrowserAgentReply>
 }
+
+/** Pipe ops that are the app's, not the browser's. */
+export const APP_LINK_OPS: ReadonlySet<string> = new Set(['open_agent_pane'])
 
 export class BrowserService {
   readonly manager: BrowserManager
@@ -84,6 +93,11 @@ export class BrowserService {
 
   /** One tool call from anyone. Pane callers are resolved to their name and project first. */
   run(op: string, args: Record<string, unknown>, caller: BrowserOwner): Promise<BrowserAgentReply> {
+    if (APP_LINK_OPS.has(op)) {
+      return this.deps.appOp
+        ? this.deps.appOp(op, args, caller)
+        : Promise.resolve({ ok: false, text: 'This Forge cannot open panes for agents yet.' })
+    }
     let owner = caller
     if (caller.id.startsWith('pane:') && this.deps.resolveCaller) {
       try {

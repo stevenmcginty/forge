@@ -13,6 +13,7 @@ import { getProjects, getSettings } from './store'
 import { ShareLink } from './share-link'
 import { ShareStore } from './share-store'
 import { applyMcpBridge } from './bridge/mcp-config'
+import { applyForgeBrowserOnly } from './bridge/browser-only'
 import { applyShareBridge, shareEnvFor, shareToolsEnabled } from './bridge/share-mcp'
 import { applyRemoteControl } from './bridge/remote-control'
 import { applyClaudeSession } from './bridge/claude-session'
@@ -749,7 +750,11 @@ export function registerPtyHandlers(): void {
     )
     // Two transforms, in this order: `--mcp-config` is variadic and has to stay
     // last on Claude's command line, and only Codex ever matches the second one.
-    const bootstrapCommand = applyShareBridge(applyMcpBridge(plan.command))
+    // "Agents use Forge's browser only" goes first: --disallowedTools is
+    // variadic too, and --mcp-config has to stay last.
+    const bootstrapCommand = applyShareBridge(
+      applyMcpBridge(applyForgeBrowserOnly(plan.command, getSettings().agentsForgeBrowserOnly !== false))
+    )
     const settings = getSettings()
 
     // The pane is about to type a command into a shell. If the program behind

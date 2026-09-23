@@ -1,10 +1,12 @@
 import { useState, type ReactNode } from 'react'
-import type { ImportedKeyResult, VoiceBrainId } from '@shared/types'
+import type { ImportedKeyResult } from '@shared/types'
+import { agentBrainSpec, migrateAgentBrain } from '@shared/agent-brain'
 import { REALTIME_PROVIDERS } from '@shared/realtime'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENROUTER_MODEL } from '@/lib/voicebrain'
 import { useApp } from '@/state/AppState'
 import { Card, KeyField, Row, Section, StateChip, TextField } from './parts'
 import '../hub/VoiceSettings.css'
+import { BrainTestButton } from './BrainTest'
 
 /**
  * Keys and models.
@@ -61,19 +63,12 @@ const CLAUDE_MODELS = [
   { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna — fastest OpenAI option' }
 ]
 
-const BRAINS: Array<{ id: VoiceBrainId; name: string; note: string; ready: boolean }> = [
-  { id: 'gemini', name: 'Gemini', note: 'live — needs a key', ready: true },
-  { id: 'groq', name: 'Groq', note: 'live — free tier, no card', ready: true },
-  { id: 'openrouter', name: 'OpenRouter', note: 'live — any model', ready: true },
-  { id: 'stub', name: 'Stub', note: 'offline, echoes you', ready: true },
-  { id: 'claude', name: 'Claude', note: 'live — no key needed', ready: true },
-  { id: 'openai', name: 'OpenAI', note: 'coming soon', ready: false }
-]
-
 export function ModelsSection(): ReactNode {
   const { state, actions } = useApp()
   const s = state.settings
   const custom = !GEMINI_MODELS.some((m) => m.id === s.geminiModel)
+  // Who answers is the ONE Agent brain (Voice → Agent brain); keys live here.
+  const brain = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
 
   return (
     <Section title="Models &amp; APIs" blurb="The keys Forge holds, and which model the voice agent thinks with.">
@@ -84,14 +79,19 @@ export function ModelsSection(): ReactNode {
           onCommit={actions.setGeminiKey}
           placeholder="AIza…"
           actions={
-            // Not "Import from DictationMic": on anyone else's machine that
-            // names an app they have never heard of. The main process looks in
-            // several places and the result says which one it found.
-            <ImportButton
-              label="Import a saved key"
-              onImport={() => window.forge.voice.importKey('gemini')}
-              onUse={actions.setGeminiKey}
-            />
+            <>
+              {/*
+                Not "Import from DictationMic": on anyone else's machine that
+                names an app they have never heard of. The main process looks in
+                several places and the result says which one it found.
+              */}
+              <ImportButton
+                label="Import a saved key"
+                onImport={() => window.forge.voice.importKey('gemini')}
+                onUse={actions.setGeminiKey}
+              />
+              <BrainTestButton target={{ kind: 'key', vendor: 'gemini' }} />
+            </>
           }
           note={
             <>
@@ -172,6 +172,7 @@ export function ModelsSection(): ReactNode {
           value={s.openaiKey}
           onCommit={(key) => actions.patchSettings({ openaiKey: key.trim() })}
           placeholder="sk-…"
+          actions={<BrainTestButton target={{ kind: 'key', vendor: 'openai' }} />}
           note={
             <>
               An API platform key with billing — a ChatGPT subscription does not cover it. The key stays in
@@ -200,28 +201,17 @@ export function ModelsSection(): ReactNode {
         />
       </Card>
 
-      <Card title="Voice brain" hint="The voice hub keeps a shortcut to this, but it lives here now.">
-        <div className="sbrains">
-          {BRAINS.map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              className="sbrain"
-              data-selected={s.voiceBrain === b.id ? 'true' : undefined}
-              disabled={!b.ready}
-              onClick={() => actions.setVoiceBrain(b.id)}
-            >
-              <span className="sbrain__name">{b.name}</span>
-              <span className="sbrain__note mono">{b.note}</span>
+      <Card title="Agent brain" hint="One setting picks who answers the bottom bar — it is on the Voice page. This page only holds the keys.">
+        <Row label="In use" hint="Gemini Flash, Groq and OpenRouter are text brains in the same list.">
+          <div className="seg" role="group" aria-label="Agent brain">
+            <span className="field__input" style={{ pointerEvents: 'none' }}>
+              {agentBrainSpec(brain).label}
+            </span>
+            <button type="button" className="ghost-btn" onClick={() => actions.setSettingsSection('voice')}>
+              Change
             </button>
-          ))}
-        </div>
-        {s.voiceBrain === 'gemini' && !s.geminiKey ? (
-          <p className="scard__hint">
-            Gemini is selected but no key is stored, so the panel is running the offline stub — commands still work,
-            conversation does not.
-          </p>
-        ) : null}
+          </div>
+        </Row>
       </Card>
 
       <Card title="Groq">
@@ -231,11 +221,14 @@ export function ModelsSection(): ReactNode {
           onCommit={(key) => actions.patchSettings({ groqKey: key.trim() })}
           placeholder="gsk_…"
           actions={
-            <ImportButton
-              label="Import a saved key"
-              onImport={() => window.forge.voice.importKey('groq')}
-              onUse={(key) => actions.patchSettings({ groqKey: key })}
-            />
+            <>
+              <ImportButton
+                label="Import a saved key"
+                onImport={() => window.forge.voice.importKey('groq')}
+                onUse={(key) => actions.patchSettings({ groqKey: key })}
+              />
+              <BrainTestButton target={{ kind: 'key', vendor: 'groq' }} />
+            </>
           }
           note={
             <>
@@ -276,8 +269,8 @@ export function ModelsSection(): ReactNode {
           />
         </Row>
 
-        {s.voiceBrain === 'groq' && !s.groqKey ? (
-          <p className="scard__hint">Groq is selected but no key is stored, so the panel is running the offline stub.</p>
+        {brain === 'groq' && !s.groqKey ? (
+          <p className="scard__hint">Groq is the Agent brain but no key is stored, so Claude answers until you add one.</p>
         ) : null}
       </Card>
 
@@ -291,6 +284,7 @@ export function ModelsSection(): ReactNode {
         >
           <select
             className="select"
+            aria-label="Claude brain model"
             value={s.voiceClaudeModel}
             onKeyDown={(e) => e.stopPropagation()}
             onChange={(e) => actions.patchSettings({ voiceClaudeModel: e.target.value })}
@@ -311,11 +305,14 @@ export function ModelsSection(): ReactNode {
           onCommit={(key) => actions.patchSettings({ openrouterKey: key.trim() })}
           placeholder="sk-or-…"
           actions={
-            <ImportButton
-              label="Import from ~/.kimi-key"
-              onImport={() => window.forge.voice.importKey('openrouter')}
-              onUse={(key) => actions.patchSettings({ openrouterKey: key })}
-            />
+            <>
+              <ImportButton
+                label="Import from ~/.kimi-key"
+                onImport={() => window.forge.voice.importKey('openrouter')}
+                onUse={(key) => actions.patchSettings({ openrouterKey: key })}
+              />
+              <BrainTestButton target={{ kind: 'key', vendor: 'openrouter' }} />
+            </>
           }
           note={
             <>
@@ -336,10 +333,8 @@ export function ModelsSection(): ReactNode {
           />
         </Row>
 
-        {s.voiceBrain === 'openrouter' && !s.openrouterKey ? (
-          <p className="scard__hint">
-            OpenRouter is selected but no key is stored, so the panel is running the offline stub.
-          </p>
+        {brain === 'openrouter' && !s.openrouterKey ? (
+          <p className="scard__hint">OpenRouter is the Agent brain but no key is stored, so Claude answers until you add one.</p>
         ) : null}
       </Card>
 
@@ -360,15 +355,17 @@ export function ModelsSection(): ReactNode {
 function LiveTalkUnlocks({ vendor, hasKey }: { vendor: 'gemini' | 'openai'; hasKey: boolean }): ReactNode {
   const { state, actions } = useApp()
   const providers = REALTIME_PROVIDERS.filter((p) => p.vendor === vendor)
+  const s = state.settings
+  const picked = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
   return (
     <div className="lt-unlocks">
       <span className="lt-unlocks__label">Live talk</span>
       {providers.map((p) => (
-        <span key={p.id} className="lt-unlocks__item" data-on={state.settings.voiceHubProvider === p.id ? 'true' : undefined}>
+        <span key={p.id} className="lt-unlocks__item" data-on={picked === p.id ? 'true' : undefined}>
           <span className="lt-unlocks__name">{p.label}</span>
           <span className="lt-unlocks__cost">{p.costNote}</span>
           <span className="lt-unlocks__state" data-tone={hasKey ? 'ok' : 'need'}>
-            {state.settings.voiceHubProvider === p.id ? (hasKey ? 'In use' : 'Picked · needs this key') : hasKey ? 'Ready' : 'Needs this key'}
+            {picked === p.id ? (hasKey ? 'In use' : 'Picked · needs this key') : hasKey ? 'Ready' : 'Needs this key'}
           </span>
         </span>
       ))}

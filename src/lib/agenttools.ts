@@ -2,6 +2,7 @@ import type { VoiceAgentToolRequest, VoiceAgentToolResult } from '@shared/types'
 import { paneLabel, resolvePaneTarget, type ActionContext, type ActionOutcome, type AppAction } from './appactions'
 import { ACTION_SPECS, buildStateSection, type ManifestSnapshot } from './appmanifest'
 import { runHubTool } from './realtime/tools-hub'
+import { runMainAgentTool } from './realtime/tools-main'
 
 /**
  * The renderer's answer to the voice brain's questions.
@@ -64,6 +65,12 @@ export interface VoiceAgentToolDeps {
    * ask for it (src/lib/realtime/tools.ts).
    */
   readPane?(target: string, lines: number): string | Promise<string>
+  /**
+   * The compact live manifest (src/lib/realtime/context.ts) — call-signs,
+   * agents, state words. Handed to the realtime brains at session start and
+   * when it changes; the Claude session gets it with a turn.
+   */
+  getAppContext?(): string
 }
 
 /** Undo the registration. Safe to call twice. */
@@ -188,6 +195,10 @@ export async function answerVoiceAgentTool(
       }
 
       default: {
+        // open_agent_pane, type_into_pane, help_prompt, read_pane — the same
+        // answers the realtime brains get (shared/brain-tools.ts).
+        const main = await runMainAgentTool(name, (args ?? {}) as Record<string, unknown>, deps)
+        if (main) return { ok: true, result: main.text }
         const hub = await runHubTool(name, (args ?? {}) as Record<string, unknown>)
         if (hub) return { ok: true, result: hub.text }
         return { ok: false, error: `Forge has no tool called ${name}` }

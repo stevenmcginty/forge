@@ -104,6 +104,8 @@ let wantedMode: SttMode = 'phrase'
  * what keeps the dictation hotkey's behaviour untouched.
  */
 let wantedConversation = false
+/** The Agent bar's silence window, seconds, sent with a conversation start. */
+let wantedPauseCut: number | null = null
 /** Set while we are deliberately tearing the sidecar down. */
 let disposing = false
 /** Set by disposeSttSidecar: the app is leaving, never respawn. */
@@ -542,6 +544,10 @@ function handleLine(line: string): void {
 function startListening(options?: SttStartOptions): SttStatus {
   wantedMode = options?.mode === 'wake' ? 'wake' : 'phrase'
   wantedConversation = options?.conversation === true
+  wantedPauseCut =
+    wantedConversation && typeof options?.pauseCut === 'number' && options.pauseCut >= 0.3 && options.pauseCut <= 5
+      ? options.pauseCut
+      : null
   if (status.phase === 'error' && status.error && !isTransientSttError(status.error.kind)) {
     // A setup problem. Don't spawn again until the user fixes the path, which
     // routes through reload().
@@ -573,6 +579,8 @@ function sendStart(): void {
   const msg: Json = { cmd: 'start', autoStop: getSettings().sttAutoStopSeconds }
   if (wantedMode === 'wake') msg['mode'] = 'wake'
   if (wantedConversation) msg['conversation'] = true
+  // Additive, like `mode`: an older sidecar ignores a key it does not read.
+  if (wantedConversation && wantedPauseCut !== null) msg['pauseCut'] = wantedPauseCut
   write(msg)
 }
 
@@ -581,6 +589,7 @@ function stopListening(): SttStatus {
   pendingCapture = false
   wantedMode = 'phrase'
   wantedConversation = false
+  wantedPauseCut = null
   if (child && status.ready) write({ cmd: 'stop' })
   return status
 }

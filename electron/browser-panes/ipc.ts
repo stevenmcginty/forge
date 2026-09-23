@@ -2,6 +2,7 @@ import { app, ipcMain, type BrowserWindow } from 'electron'
 import { VOICE_OWNER, type BrowserAgentReply, type BrowserOwner } from '@shared/browser'
 import { getDataDir, getProjects } from '../store'
 import { liveSessions } from '../pty-host'
+import { askRendererTool } from '../voice-agent/ipc'
 import { setBrainBrowserRunner } from './brain'
 import { setBrowserLinkFile } from './env'
 import { BrowserService, type BrowserServiceDeps } from './service'
@@ -41,7 +42,13 @@ export function registerBrowserPanes(): void {
     dataDir: getDataDir(),
     downloadsDir: app.getPath('downloads'),
     resolveCaller: resolveFromPanes,
-    onShot: (path, owner, id, project) => shotHook?.(path, owner, id, project)
+    onShot: (path, owner, id, project) => shotHook?.(path, owner, id, project),
+    // A pane agent's open_agent_pane: the renderer runs the same tool the
+    // main agent has, so the new agent opens as a Forge tab — never a window.
+    appOp: async (op, args) => {
+      const text = await askRendererTool(op, args)
+      return { ok: !/^(FAILED|That failed|Forge did not answer|Forge could not be reached)/.test(text), text }
+    }
   })
   service.registerIpc(ipcMain)
   setBrowserLinkFile(service.linkFile)

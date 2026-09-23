@@ -36,6 +36,8 @@ import { closeBrowser } from './chrome-control'
 import { defaultAssetsDir, listFiles, runCommand, saveAsset, writeTextFile } from './file-tools'
 import { VOICE_PERSONA } from './persona'
 import { brainHubTools } from '../hub-brain-tools'
+import { brainSpecAllowed, brainSpecTools } from '../brain-tools-mcp'
+import { refuseAppLaunch, refuseCommand, routeOpenTarget } from './launch-guard'
 import { BRAIN_BROWSER_ALLOWED, brainBrowserTools } from '../browser-panes/brain'
 
 /**
@@ -308,6 +310,15 @@ export class VoiceAgentHost {
     })
     this.flush()
     return this.status()
+  }
+
+  /**
+   * Ask the renderer to run one Forge tool, exactly as the model would — the
+   * route pane agents' open_agent_pane takes (electron/browser-panes/ipc.ts).
+   * Resolves with the tool's sentence; never rejects.
+   */
+  askTool(name: string, args: unknown): Promise<string> {
+    return this.askRenderer(name, args)
   }
 
   /** The renderer's answer to a `voice-agent:tool-request`. */
@@ -780,6 +791,9 @@ export class VoiceAgentHost {
           'Launch an installed application by name — "Spotify", "Google Chrome", "Notepad". Fuzzy: the spoken name is matched against what is installed, and the result says what actually launched, or lists the near-misses when nothing did. Report the result, not the request.',
           { name: z.string().describe('The app, as Steve said it') },
           async (args) => {
+            // The hard guard: agents and consoles open inside Forge, never here.
+            const refused = refuseAppLaunch(args.name)
+            if (refused) return text(refused)
             try {
               return text(await launchDesktopApp(args.name))
             } catch (err) {
@@ -840,9 +854,17 @@ export class VoiceAgentHost {
 
         tool(
           'open_file_or_link',
-          'Open a file, a folder or an http(s) link with whatever Windows uses for it — a folder opens in Explorer, a link in the default browser. Paths must exist; say so rather than inventing one.',
+          "Open a file or a folder with whatever Windows uses for it — a folder opens in Explorer. An http(s) link opens in Forge's built-in browser, never a desktop browser. Paths must exist; say so rather than inventing one.",
           { target: z.string().describe('An absolute path or an http(s) URL') },
           async (args) => {
+            // Web pages go to Forge's browser; an agent or console is refused.
+            const route = routeOpenTarget(args.target)
+            if (route && 'refuse' in route) return text(route.refuse)
+            if (route && 'web' in route) {
+              const open = brainBrowserTools().find((t) => t.name === 'browser_open')
+              if (!open) return text("Forge's browser is not available, so the link was not opened.")
+              return open.handler({ url: route.web })
+            }
             try {
               return text(await openDesktopTarget(args.target))
             } catch (err) {
@@ -948,6 +970,10 @@ export class VoiceAgentHost {
             cwd: z.string().optional().describe('Absolute folder to run it in. Must already exist.')
           },
           async (args) => {
+            // The hard guard, in code rather than in the persona: no agent CLI,
+            // no new console window, no web page in a desktop browser.
+            const refused = refuseCommand(args.command)
+            if (refused) return text(refused)
             try {
               return text(await runCommand(args.command, args.cwd))
             } catch (err) {
@@ -964,6 +990,9 @@ export class VoiceAgentHost {
         ),
 
         ...brainBrowserTools().map((t) => tool(t.name, t.description, t.shape, t.handler)),
+        // open_agent_pane, type_into_pane, help_prompt, read_pane — generated
+        // from shared/brain-tools.ts, the same specs every brain gets.
+        ...brainSpecTools((n, a) => this.askRenderer(n, a)).map((t) => tool(t.name, t.description, t.shape, t.handler)),
         ...brainHubTools((n, a) => this.askRenderer(n, a)).map((t) => tool(t.name, t.description, t.shape, t.handler))
       ]
     })
@@ -1005,7 +1034,8 @@ export class VoiceAgentHost {
         `machine: run one PowerShell command and read what it printed. Media, through Gemini: make an image, edit ` +
         `an image, make a video, ask Gemini a question, and summarise a video. The web: search it, and fetch a page.`,
       `What you do not have: you cannot edit code directly. Changing a project is work for a coding agent in one of ` +
-        `the terminals, which you brief with a prompt.`
+        `the terminals, which you brief with a prompt. New agents open inside Forge with open_agent_pane — never as a ` +
+        `command or a window of their own.`
     ].join('\n\n')
   }
 
@@ -1084,6 +1114,7 @@ export class VoiceAgentHost {
       'mcp__forge__write_file',
       'mcp__forge__run_command',
       'mcp__forge__describe_self',
+      ...brainSpecAllowed(),
       ...BRAIN_BROWSER_ALLOWED,
       ...(bridge
         ? [

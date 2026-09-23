@@ -10,6 +10,7 @@ import {
   RETIRED_BUILTIN_PROFILE_IDS
 } from '@shared/agents'
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
+import { isAgentBrainId, migrateAgentBrain } from '@shared/agent-brain'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
@@ -303,6 +304,13 @@ function defaultSettings(): Settings {
     // choice made in Settings once a key is there to pay for it.
     voiceHubProvider: 'claude',
     voiceHubVoice: { gemini: '', openai: '' },
+    // The ONE Agent brain (shared/agent-brain.ts). Claude: free, no key.
+    agentBrain: 'claude',
+    // Hands-free Agent mode: 0.8 s of silence sends the phrase.
+    agentSilenceMs: 800,
+    dictateAutoSend: false,
+    // Forge-launched Claude panes cannot reach Claude-in-Chrome / Playwright.
+    agentsForgeBrowserOnly: true,
     // Heuristic memory is free and predictable; letting a model rewrite the
     // project summary is neither, so it is opt-in.
     memoryLlmSummarize: false,
@@ -864,6 +872,15 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       gemini: typeof s.voiceHubVoice?.gemini === 'string' ? s.voiceHubVoice.gemini.trim().slice(0, 40) : '',
       openai: typeof s.voiceHubVoice?.openai === 'string' ? s.voiceHubVoice.openai.trim().slice(0, 40) : ''
     },
+    // Absent = a settings.json from before the one Agent brain: migrated once
+    // from the two old pickers, which stay on disk untouched.
+    agentBrain: isAgentBrainId(s.agentBrain) ? s.agentBrain : migrateAgentBrain(s.voiceHubProvider, s.voiceBrain),
+    agentSilenceMs:
+      typeof s.agentSilenceMs === 'number' && Number.isFinite(s.agentSilenceMs)
+        ? clamp(Math.round(s.agentSilenceMs / 100) * 100, 500, 2000)
+        : DEFAULT_SETTINGS.agentSilenceMs,
+    dictateAutoSend: s.dictateAutoSend === true,
+    agentsForgeBrowserOnly: s.agentsForgeBrowserOnly === undefined ? DEFAULT_SETTINGS.agentsForgeBrowserOnly : Boolean(s.agentsForgeBrowserOnly),
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
     skillsLibraryDir:
       typeof s.skillsLibraryDir === 'string' && s.skillsLibraryDir.trim()

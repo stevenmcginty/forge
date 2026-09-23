@@ -1779,3 +1779,30 @@
   background: #fff;
   border-radius: var(--r-md);
 }
+
+/* B7: the Agent brain tiles each carry a Test button; results are words first. */
+.lt-tilewrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.lt-tilewrap > .lt-tile {
+  flex: 1;
+}
+.brain-test {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.brain-test__result {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-dim, inherit);
+  overflow-wrap: anywhere;
+}
+.brain-test__result[data-ok='false'] {
+  font-weight: 600;
+}

@@ -870,6 +870,19 @@ export type VoiceBrainId = 'stub' | 'gemini' | 'openrouter' | 'groq' | 'claude' 
 /** The voice hub's brain: the Claude fallback, or one of the realtime providers. */
 export type VoiceHubProvider = 'claude' | 'gemini-live' | 'gpt-realtime' | 'gpt-realtime-mini'
 
+/**
+ * The Agent brain adapters — the one list that picks who answers the bottom
+ * bar. Specs, labels and the migration live in shared/agent-brain.ts.
+ */
+export type AgentBrainId =
+  | 'claude'
+  | 'gemini-live'
+  | 'gpt-realtime-mini'
+  | 'gpt-realtime'
+  | 'gemini-flash'
+  | 'groq'
+  | 'openrouter'
+
 /** One realtime voice per vendor — the two GPT models share OpenAI's voices. */
 export interface VoiceHubVoices {
   gemini: string
@@ -1780,6 +1793,25 @@ export interface Settings {
   voiceHubProvider: VoiceHubProvider
   /** The realtime voice per vendor. Empty = that vendor's default (shared/realtime.ts). */
   voiceHubVoice: VoiceHubVoices
+  /**
+   * THE Agent brain — the one setting that picks who answers the bottom bar
+   * (shared/agent-brain.ts). Replaces voiceHubProvider + voiceBrain for
+   * routing; both are migrated into it once and kept on disk untouched.
+   */
+  agentBrain: AgentBrainId
+  /**
+   * Agent mode is hands-free: this much silence ends a phrase and sends it,
+   * and the mic stays open for the next turn. 500–2000 ms, default 800.
+   */
+  agentSilenceMs: number
+  /** Dictate mode: press Enter in the target pane after each phrase. Off by default. */
+  dictateAutoSend: boolean
+  /**
+   * "Agents use Forge's browser only": Forge-launched Claude panes are started
+   * with the other browser MCP servers denied (electron/bridge/browser-only.ts).
+   * On by default.
+   */
+  agentsForgeBrowserOnly: boolean
 
   /* -------------------------------------------------------- agent memory */
   /**
@@ -3147,6 +3179,11 @@ export interface SttStartOptions {
    * fragments. The agent sets it; the dictation hotkey leaves it absent.
    */
   conversation?: boolean
+  /**
+   * With `conversation`: the silence, in seconds, that ends a phrase (the
+   * Agent bar's silence window). Absent = the sidecar's own 3 s.
+   */
+  pauseCut?: number
 }
 
 export interface SttStatus {
