@@ -33,10 +33,25 @@ import './StatusLine.css'
  * terminal keeps free in every face — see "the keys" in styles.css.
  */
 
-const FACES: { face: PaneFace; label: string }[] = [
-  { face: 'chat', label: 'Chat' },
-  { face: 'feed', label: 'Cards' },
-  { face: 'term', label: 'Terminal' }
+/* Each face is drawn as a shape (bubble, stacked cards, prompt) and named in
+   its label, so the switch stays narrow and never leans on colour. */
+const FACES: { face: PaneFace; label: string; icon: ReactNode }[] = [
+  {
+    face: 'chat',
+    label: 'Chat',
+    icon: <path d="M6.5 3.5h7A2.5 2.5 0 0 1 16 6v5a2.5 2.5 0 0 1-2.5 2.5H10l-3.5 3v-3A2.5 2.5 0 0 1 4 11V6a2.5 2.5 0 0 1 2.5-2.5z" />
+  },
+  {
+    face: 'feed',
+    label: 'Cards',
+    icon: (
+      <>
+        <rect x="3.5" y="3.5" width="13" height="5.5" rx="1.5" />
+        <rect x="3.5" y="11" width="13" height="5.5" rx="1.5" />
+      </>
+    )
+  },
+  { face: 'term', label: 'Terminal', icon: <path d="M4.5 6l4 4-4 4M10.5 14.5h5" /> }
 ]
 
 /** The pane's condition in one word, when it has one worth a word. */
@@ -177,11 +192,21 @@ export function StatusLine({
             title={keysShown ? 'Hide terminal keys' : 'Show terminal keys'}
             onClick={onToggleKeys}
           >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-              <rect x="2" y="3" width="14" height="12" rx="2" />
-              <path d="M5 6h1M8.5 6h1M12 6h1M5 9h1M8.5 9h1M12 9h1M5 12h8" />
-            </svg>
-            <span className="pkeys-toggle__mark" aria-hidden="true">{keysShown ? 'On' : 'Off'}</span>
+            {/* Off is a shape, not a colour: a slash draws across the keyboard,
+                cutting a clean gap through it, and draws back out when on. */}
+            <span className="pkeys-toggle__face">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                <mask id="pkeys-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="20">
+                  <rect width="20" height="20" fill="#fff" stroke="none" />
+                  <path className="pkeys-toggle__slash" d="M3.5 3.5l13 13" pathLength={1} stroke="#000" strokeWidth="4.5" />
+                </mask>
+                <g mask="url(#pkeys-cut)">
+                  <rect x="2.5" y="5" width="15" height="10" rx="2.5" />
+                  <path d="M6 8.25h.01M8.67 8.25h.01M11.33 8.25h.01M14 8.25h.01M7 12h6" />
+                </g>
+                <path className="pkeys-toggle__slash" d="M3.5 3.5l13 13" pathLength={1} />
+              </svg>
+            </span>
           </button>
         ) : null}
         {shell ? lead : null}
@@ -227,19 +252,25 @@ export function StatusLine({
 function Segments({ view, onPick }: { view: PaneFace; onPick: (face: PaneFace) => void }): ReactNode {
   return (
     <div className="pseg" role="radiogroup" aria-label="Show this pane as">
-      {FACES.map(({ face, label }) => (
+      {FACES.map(({ face, label, icon }) => (
         <button
           key={face}
           type="button"
           role="radio"
           aria-checked={view === face}
+          aria-label={label}
+          title={label}
           className="pseg__btn"
           data-on={view === face ? 'true' : 'false'}
           onClick={() => {
             if (view !== face) onPick(face)
           }}
         >
-          <span className="pseg__face">{label}</span>
+          <span className="pseg__face">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              {icon}
+            </svg>
+          </span>
         </button>
       ))}
     </div>

@@ -36,51 +36,78 @@
   min-width: 0;
 }
 
+/*
+ * The terminal-keys toggle: a one-segment cousin of the view switch below —
+ * same quiet track, same 36px face, raised the same way when the keys are
+ * shown. Hidden keys read as a slashed keyboard, so the state is a shape.
+ */
 .pkeys-toggle {
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  box-sizing: border-box;
+  display: grid;
+  place-items: center;
   width: var(--p-hit);
   height: var(--p-hit);
+  margin: 0;
   padding: 0;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--p-r-row);
-  background: transparent;
+  background: var(--p-surface);
+  box-shadow: inset 0 0 0 1px var(--p-line);
   color: var(--p-ink-2);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 
+.pkeys-toggle__face {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  transition:
+    background var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease),
+    box-shadow var(--p-dur-fast) var(--p-ease);
+}
+
 .pkeys-toggle[aria-pressed='true'] {
-  background: var(--p-press);
-  border-color: var(--p-line-strong);
   color: var(--p-ink);
 }
 
+.pkeys-toggle[aria-pressed='true'] .pkeys-toggle__face {
+  background: var(--p-press);
+  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+}
+
+.pkeys-toggle[aria-pressed='false']:active .pkeys-toggle__face {
+  background: var(--p-hover);
+}
+
+.pkeys-toggle__slash {
+  stroke-dasharray: 1 2;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset var(--p-dur) var(--p-ease);
+}
+
+.pkeys-toggle[aria-pressed='true'] .pkeys-toggle__slash {
+  stroke-dashoffset: -1.5;
+}
+
 .pkeys-toggle:focus-visible {
+  outline: none;
+}
+
+.pkeys-toggle:focus-visible .pkeys-toggle__face {
   outline: 2px solid var(--p-ink);
   outline-offset: 1px;
 }
 
-.pkeys-toggle__mark {
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  padding: 1px 2px;
-  border-radius: 3px;
-  background: var(--p-bg);
-  color: var(--p-ink-2);
-  font: 700 8px / 1 var(--p-font);
-}
-
 /* -------------------------------------------------------- view switch
  *
- * Three labelled segments in a quiet track. Each segment is a full 44px hit;
- * the face drawn inside it is 36px, and the face on screen is raised — a
- * surface and a line, never a colour — with its label in full ink.
+ * Three icon segments in a quiet track, each named for screen readers.
+ * Each segment is a full 44px hit; the face drawn inside it is a
+ * 36px square, and the face on screen is raised — a surface and a line, never
+ * a colour — with its icon in full ink.
  */
 
 .pseg {
@@ -119,10 +146,9 @@
 .pseg__face {
   display: grid;
   place-items: center;
+  width: 36px;
   height: 36px;
-  padding: 0 10px;
   border-radius: 9px;
-  white-space: nowrap;
   transition:
     background var(--p-dur-fast) var(--p-ease),
     color var(--p-dur-fast) var(--p-ease),
