@@ -1,218 +1,214 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { SplitDirection } from '@shared/types'
 import { XTERM_TEXTAREA } from '@/lib/dictation'
+import { focusNavTarget, getHubRuntime } from '@/lib/hubRuntime'
+import { comboFromEvent } from '@/lib/keymap'
+import { commandForCombo, hasHandler, runCommand, setCommandHandler, type CommandHandler } from '@/lib/keymapRegistry'
 import { terminalHost } from '@/lib/terminals'
 import { useActiveTab, useActiveWorkspace, useApp } from '@/state/AppState'
+import { useVoiceHubController } from '@/state/VoiceHubController'
+import { useHubRuntime } from './useHubRuntime'
 
 /** Broadcast so <TerminalGrid> can pop its agent chooser open. */
 export const NEW_TAB_EVENT = 'forge:new-tab'
 
 type Dir = 'left' | 'right' | 'up' | 'down'
 
-const ARROWS: Record<string, Dir> = {
-  ArrowLeft: 'left',
-  ArrowRight: 'right',
-  ArrowUp: 'up',
-  ArrowDown: 'down'
-}
-
 /**
  * Global keyboard map. Registered in the capture phase so it wins against
  * xterm's textarea handler, which would otherwise swallow Ctrl+W and friends.
+ *
+ * The keys themselves are no longer written here: every command is a row in
+ * the keymap registry (src/lib/shortcutCommands.ts for the built-ins, plus
+ * saved prompts, agent profiles and whatever else registers), and Steve can
+ * rebind any of them. This hook is the one keydown listener and the home of
+ * the built-in handlers. A handler that answers `false` did nothing, and the
+ * key carries on to the terminal as if Forge had never looked at it.
+ *
+ * It also mounts the hub runtime (call-signs, the voice tools' view of the
+ * panes), because this hook is mounted exactly once, for the life of the app.
  */
 export function useShortcuts(): void {
   const { state, actions } = useApp()
   const workspace = useActiveWorkspace()
   const tab = useActiveTab()
+  const voice = useVoiceHubController()
+
+  useHubRuntime()
+
+  // Handlers are registered once and read the app through this ref, so a
+  // re-render never re-registers forty handlers.
+  const live = useRef({ state, actions, workspace, tab, voice })
+  live.current = { state, actions, workspace, tab, voice }
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent): void => {
-      const ctrl = e.ctrlKey && !e.altKey
-      const shift = e.shiftKey
-      const alt = e.altKey && !e.ctrlKey
+    const L = (): typeof live.current => live.current
+    const activePaneId = (): string | null => L().tab?.activePaneId ?? null
 
-      const stop = (): void => {
-        e.preventDefault()
-        e.stopPropagation()
+    const split = (direction: SplitDirection): CommandHandler => () => {
+      const id = activePaneId()
+      if (id) L().actions.splitPane(id, direction)
+    }
+    const focusDir = (dir: Dir): CommandHandler => () => {
+      const id = activePaneId()
+      if (!id) return
+      const target = neighbour(id, dir)
+      if (target) {
+        L().actions.focusPane(target)
+        terminalHost.focus(target)
       }
+    }
+    const stepTab = (delta: number): CommandHandler => () => {
+      const tabs = L().workspace.tabs
+      if (tabs.length < 2) return
+      const i = tabs.findIndex((t) => t.id === L().workspace.activeTabId)
+      L().actions.selectTab(tabs[(i + delta + tabs.length) % tabs.length]!.id)
+    }
+    const stepPane = (delta: number): CommandHandler => () => {
+      const panes = getHubRuntime()?.panes() ?? []
+      if (panes.length < 2) return
+      const i = Math.max(0, panes.findIndex((p) => p.paneId === activePaneId()))
+      focusNavTarget({ kind: 'pane', pane: panes[(i + delta + panes.length) % panes.length]! }, 'keyboard')
+    }
+    const stepProject = (delta: number): CommandHandler => () => {
+      const { projects, activeProjectId } = L().state
+      if (projects.length < 2) return
+      const i = Math.max(0, projects.findIndex((p) => p.id === activeProjectId))
+      L().actions.selectProject(projects[(i + delta + projects.length) % projects.length]!.id)
+    }
 
+    const handlers: Record<string, CommandHandler> = {
       // The voice hub, from anywhere — including its own text box, and
       // including the terminal you are typing in, which is the point of it.
-      // Docked or floating it opens the card where the hub is; open, it puts it
-      // away again.
-      if (ctrl && shift && e.code === 'KeyG') {
-        stop()
-        actions.toggleVoiceHubCard()
-        return
-      }
+      'voice.hubCard': () => L().actions.toggleVoiceHubCard(),
+      // Settings and Devices, the way every other app opens settings. Also
+      // from a text field: Ctrl+, and Ctrl+Shift+D are nobody's editing keys.
+      'app.settings': () => (L().state.view === 'settings' ? L().actions.closeSettings() : L().actions.openSettings()),
+      'app.devices': () => (L().state.view === 'devices' ? L().actions.closeDevices() : L().actions.openDevices()),
 
-      // Settings, the way every other app on the machine opens settings. Also
-      // works from a text field, because Ctrl+, is nobody's editing key.
-      if (ctrl && !shift && e.code === 'Comma') {
-        stop()
-        if (state.view === 'settings') actions.closeSettings()
-        else actions.openSettings()
-        return
-      }
+      'tab.new': () => {
+        window.dispatchEvent(new CustomEvent(NEW_TAB_EVENT))
+      },
+      'pane.close': () => {
+        const id = activePaneId()
+        if (id) L().actions.closePane(id)
+      },
+      'tab.close': () => {
+        const t = L().tab
+        if (t) L().actions.closeTab(t.id)
+      },
+      'tab.next': stepTab(1),
+      'tab.prev': stepTab(-1),
+      'pane.next': stepPane(1),
+      'pane.prev': stepPane(-1),
+      'project.next': stepProject(1),
+      'project.prev': stepProject(-1),
 
-      // The Devices preview, from anywhere — the same register as the settings
-      // pair above. Ctrl+Shift+D is nobody's editing key.
-      if (ctrl && shift && e.code === 'KeyD') {
-        stop()
-        if (state.view === 'devices') actions.closeDevices()
-        else actions.openDevices()
-        return
-      }
+      'pane.split.left': split('row'),
+      'pane.split.right': split('row'),
+      'pane.split.up': split('column'),
+      'pane.split.down': split('column'),
+      'pane.focus.left': focusDir('left'),
+      'pane.focus.right': focusDir('right'),
+      'pane.focus.up': focusDir('up'),
+      'pane.focus.down': focusDir('down'),
 
-      // Text fields (renaming a pane/tab, popover forms, the voice composer)
-      // keep their keys.
-      //
-      // xterm is the exception: it takes keystrokes through a hidden textarea,
-      // which holds the focus the whole time you are typing in a pane. Letting
-      // that count as a text field would silence every shortcut below exactly
-      // when it is wanted — Ctrl+T, Ctrl+W, Alt+arrows, and the Ctrl+G that is
-      // the way back out of a zoomed mosaic tile.
-      const el = document.activeElement
-      const inTerminal = el instanceof HTMLTextAreaElement && el.classList.contains(XTERM_TEXTAREA)
-      if (
-        !inTerminal &&
-        (el instanceof HTMLInputElement ||
-          el instanceof HTMLTextAreaElement ||
-          el instanceof HTMLSelectElement)
-      )
-        return
-
-      const activePaneId = tab?.activePaneId ?? null
+      'canvas.show': () => {
+        focusNavTarget({ kind: 'canvas' }, 'keyboard')
+      },
 
       /*
-       * Everything below drives the terminal workspace, which is not on screen
-       * while settings or the Devices preview is. Ctrl+W in there would close a
-       * pane you cannot see.
-       */
-      if (state.view !== 'terminals') return
-
-      /* --------------------------------------------------- tabs & panes */
-
-      if (ctrl && !shift && e.code === 'KeyT') {
-        stop()
-        window.dispatchEvent(new CustomEvent(NEW_TAB_EVENT))
-        return
-      }
-
-      if (ctrl && !shift && e.code === 'KeyW') {
-        stop()
-        if (activePaneId) actions.closePane(activePaneId)
-        return
-      }
-
-      if (ctrl && shift && e.code === 'KeyW') {
-        stop()
-        if (tab) actions.closeTab(tab.id)
-        return
-      }
-
-      if (ctrl && e.code === 'Tab') {
-        stop()
-        const tabs = workspace.tabs
-        if (tabs.length < 2) return
-        const i = tabs.findIndex((t) => t.id === workspace.activeTabId)
-        const next = shift ? (i - 1 + tabs.length) % tabs.length : (i + 1) % tabs.length
-        actions.selectTab(tabs[next]!.id)
-        return
-      }
-
-      if (alt && /^Digit[1-9]$/.test(e.code)) {
-        const index = Number(e.code.slice(5)) - 1
-        const target = workspace.tabs[index]
-        if (target) {
-          stop()
-          actions.selectTab(target.id)
-        }
-        return
-      }
-
-      /* ------------------------------------------------------- splitting */
-
-      if (ctrl && shift && ARROWS[e.key]) {
-        stop()
-        if (!activePaneId) return
-        const dir = ARROWS[e.key]!
-        const direction: SplitDirection = dir === 'left' || dir === 'right' ? 'row' : 'column'
-        actions.splitPane(activePaneId, direction)
-        return
-      }
-
-      /* --------------------------------------------------- focus movement */
-
-      if (alt && ARROWS[e.key]) {
-        stop()
-        if (!activePaneId) return
-        const target = neighbour(activePaneId, ARROWS[e.key]!)
-        if (target) {
-          actions.focusPane(target)
-          terminalHost.focus(target)
-        }
-        return
-      }
-
-      /* ------------------------------------------------------ clipboard
-       *
        * Ctrl+C / Ctrl+V inside a terminal are handled per pane, in
        * terminalHost's xterm key handler, so that a plain Ctrl+C with nothing
        * selected still reaches the shell as ^C. These two are the app-wide
        * aliases: they work even when focus sits on some piece of chrome rather
-       * than in the terminal itself.
+       * than in the terminal itself. Copy with nothing selected lets the key go.
        */
+      'clipboard.copy': () => {
+        const id = activePaneId()
+        return id ? terminalHost.copySelectionToClipboard(id) : false
+      },
+      'clipboard.paste': () => {
+        const id = activePaneId()
+        if (id) void terminalHost.pasteFromClipboard(id)
+      },
 
-      if (ctrl && shift && e.code === 'KeyC') {
-        if (!activePaneId) return
-        if (terminalHost.copySelectionToClipboard(activePaneId)) stop()
-        return
-      }
-
-      if (ctrl && shift && e.code === 'KeyV') {
-        stop()
-        if (activePaneId) void terminalHost.pasteFromClipboard(activePaneId)
-        return
-      }
-
-      /* -------------------------------------------------------- chrome */
-
-      if (ctrl && shift && e.code === 'KeyB') {
-        stop()
-        actions.toggleRail()
-        return
-      }
-
+      'rail.toggle': () => L().actions.toggleRail(),
       // Tabs ⇄ mosaic. Grabbed even while a terminal has focus: it is the way
       // back out of a zoomed tile, so it has to work from inside one.
-      if (ctrl && !shift && e.code === 'KeyG') {
-        stop()
-        actions.toggleViewMode()
-        return
+      'view.toggle': () => L().actions.toggleViewMode(),
+      'font.bigger': () => L().actions.setFontSize(L().state.settings.terminalFontSize + 1),
+      'font.smaller': () => L().actions.setFontSize(L().state.settings.terminalFontSize - 1),
+      'font.reset': () => L().actions.setFontSize(13),
+
+      // Live talk (B1's VoiceHubController). 'voice.mode.toggle' and
+      // 'app.cheatSheet' get their handlers from the surfaces that own them.
+      'voice.live.toggle': () => L().voice.toggle(),
+      'voice.mute': () => {
+        if (L().voice.phase === 'off') return false
+        L().voice.setMuted(!L().voice.muted)
+      },
+      'voice.interrupt': () => {
+        if (L().voice.phase !== 'speaking') return false
+        L().voice.interrupt()
+      }
+    }
+    for (let n = 1; n <= 9; n++) {
+      // Only a tab that exists takes the key; Alt+7 with three tabs passes through.
+      handlers[`tab.goto.${n}`] = () => {
+        const target = L().workspace.tabs[n - 1]
+        if (!target) return false
+        L().actions.selectTab(target.id)
+      }
+      handlers[`pane.goto.${n}`] = () => {
+        const pane = getHubRuntime()?.panes().find((p) => p.number === n)
+        if (!pane) return false
+        focusNavTarget({ kind: 'pane', pane }, 'keyboard')
+      }
+    }
+
+    const offs = Object.entries(handlers).map(([id, fn]) => setCommandHandler(id, fn))
+    return () => offs.forEach((off) => off())
+  }, [])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      const combo = comboFromEvent(e)
+      if (!combo) return
+      const command = commandForCombo(combo)
+      if (!command || !hasHandler(command.id)) return
+
+      if (command.scope === 'workspace') {
+        // Text fields (renaming a pane/tab, popover forms, the voice composer)
+        // keep their keys.
+        //
+        // xterm is the exception: it takes keystrokes through a hidden
+        // textarea, which holds the focus the whole time you are typing in a
+        // pane. Letting that count as a text field would silence every
+        // workspace shortcut exactly when it is wanted — Ctrl+T, Ctrl+W,
+        // Alt+arrows, and the Ctrl+G that is the way back out of a zoomed
+        // mosaic tile.
+        const el = document.activeElement
+        const inTerminal = el instanceof HTMLTextAreaElement && el.classList.contains(XTERM_TEXTAREA)
+        if (
+          !inTerminal &&
+          (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)
+        )
+          return
+        // The workspace is not on screen while settings or the Devices
+        // preview is. Ctrl+W in there would close a pane you cannot see.
+        if (live.current.state.view !== 'terminals') return
       }
 
-      if (ctrl && !shift && (e.code === 'Equal' || e.code === 'NumpadAdd')) {
-        stop()
-        actions.setFontSize(state.settings.terminalFontSize + 1)
-        return
-      }
-
-      if (ctrl && !shift && (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
-        stop()
-        actions.setFontSize(state.settings.terminalFontSize - 1)
-        return
-      }
-
-      if (ctrl && !shift && e.code === 'Digit0') {
-        stop()
-        actions.setFontSize(13)
+      if (runCommand(command.id)) {
+        e.preventDefault()
+        e.stopPropagation()
       }
     }
 
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
-  }, [actions, state.settings.terminalFontSize, state.view, tab, workspace])
+  }, [])
 }
 
 /**

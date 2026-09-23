@@ -10,7 +10,8 @@
  * Auth model: one key, one road. Every tool here calls Google's REST API
  * directly and needs GEMINI_API_KEY in the environment; Forge puts it there via
  * the mcp.json it generates under %APPDATA%\Forge\bridge\. Nothing is written to
- * disk by this file except the images and videos themselves.
+ * disk by this file except the images and videos themselves — and, in a Forge
+ * pane, a copy of each on the pane's canvas board (see ./canvas-tools.mjs).
  *
  * `ask_gemini` and `summarize_video` used to shell out to the `gemini` CLI. They
  * no longer can: Google retired the free individual-account tier behind it, and
@@ -31,6 +32,7 @@ import { homedir } from 'node:os'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { autoPost, SHOW_ON_CANVAS_TOOL, showOnCanvasHandler } from './canvas-tools.mjs'
 
 const SERVER_NAME = 'forge-bridge'
 const SERVER_VERSION = '1.0.0'
@@ -373,7 +375,8 @@ const TOOLS = [
       },
       required: ['description']
     }
-  }
+  },
+  SHOW_ON_CANVAS_TOOL
 ]
 
 /* ------------------------------------------------------------- text (REST)
@@ -1073,6 +1076,8 @@ async function makeImage(args) {
   ]
   if (paths.length < count) lines.push(`Asked for ${count}, produced ${paths.length}.${lastError ? ` Then: ${lastError}` : ''}`)
   if (note) lines.push(`Gemini also said: ${note}`)
+  const posted = autoPost(paths)
+  if (posted) lines.push(posted)
   return ok(lines.join('\n'))
 }
 
@@ -1132,7 +1137,8 @@ async function editImage(args) {
       `Edited image saved to ${paths.join('\n')}`,
       '',
       `Model ${model}, ${secs}s. The original at ${path} was not modified.`,
-      r.text ? `Gemini also said: ${r.text}` : ''
+      r.text ? `Gemini also said: ${r.text}` : '',
+      autoPost(paths)
     ]
       .filter(Boolean)
       .join('\n')
@@ -1376,8 +1382,11 @@ async function makeVideo(args) {
       '',
       `Model ${model}, ${secs}s, ${(bytes.length / 1e6).toFixed(1)} MB` +
         `${duration ? `, ${duration}s` : ''}${aspect ? `, ${aspect}` : ''}. ` +
-        'The file above exists on disk — you may reference it by path.'
-    ].join('\n')
+        'The file above exists on disk — you may reference it by path.',
+      autoPost([target])
+    ]
+      .filter(Boolean)
+      .join('\n')
   )
 }
 
@@ -1388,7 +1397,8 @@ const HANDLERS = {
   summarize_video: summarizeVideo,
   make_image: makeImage,
   edit_image: editImage,
-  make_video: makeVideo
+  make_video: makeVideo,
+  show_on_canvas: showOnCanvasHandler(ok, fail)
 }
 
 const server = new Server(

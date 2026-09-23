@@ -24,7 +24,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -165,14 +165,14 @@ async function handshake(session, label) {
   return init
 }
 
-const TOOL_NAMES = ['ask_gemini', 'edit_image', 'make_image', 'make_video', 'summarize_video']
+const TOOL_NAMES = ['ask_gemini', 'edit_image', 'make_image', 'make_video', 'show_on_canvas', 'summarize_video']
 
 async function listTools(session, label) {
   const res = await session.request('tools/list', {})
   const tools = res.result?.tools ?? []
   const names = tools.map((t) => t.name).sort()
   check(
-    `${label}: tools/list returns exactly the five bridge tools`,
+    `${label}: tools/list returns exactly the six bridge tools`,
     JSON.stringify(names) === JSON.stringify(TOOL_NAMES),
     JSON.stringify(names)
   )
@@ -188,7 +188,8 @@ async function listTools(session, label) {
     summarize_video: ['url_or_path'],
     make_image: ['description'],
     edit_image: ['path', 'instruction'],
-    make_video: ['description']
+    make_video: ['description'],
+    show_on_canvas: ['path']
   }
   for (const t of tools) {
     check(
@@ -759,9 +760,69 @@ async function runLiveVideoSuite() {
   }
 }
 
+/**
+ * show_on_canvas needs no key: it copies a file into the folder Forge names in
+ * FORGE_CANVAS_DIR. With the variable set the copy must land there (original
+ * untouched, title used as the name); without it the tool must say so, not
+ * pretend. Offline and free, so it always runs.
+ */
+async function runCanvasSuite() {
+  console.log('\n[1b] show_on_canvas (FORGE_CANVAS_DIR)')
+  const scratch = join(tmpdir(), `forge-bridge-canvas-${process.pid}`)
+  const board = join(scratch, 'board')
+  const src = join(scratch, 'hero.png')
+  rmSync(scratch, { recursive: true, force: true })
+  mkdirSync(scratch, { recursive: true })
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')
+  writeFileSync(src, png)
+  writeFileSync(join(scratch, 'notes.exe'), 'nope')
+
+  const withBoard = openServer({ ...envWithoutKey(), FORGE_CANVAS_DIR: board })
+  try {
+    await handshake(withBoard, 'canvas')
+    const res = await withBoard.request('tools/call', {
+      name: 'show_on_canvas',
+      arguments: { path: src, title: 'Landing hero' }
+    })
+    const text = textOf(res.result)
+    const copied = join(board, 'Landing hero.png')
+    check('canvas: posting a png succeeds', res.result && !res.result.isError, text)
+    check('canvas: the copy is on the board under its title', existsSync(copied), text)
+    check('canvas: the bytes are the original bytes', existsSync(copied) && readFileSync(copied).equals(png))
+    check('canvas: the original is left in place', existsSync(src))
+    const again = await withBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: src, title: 'Landing hero' } })
+    check('canvas: a second post never overwrites the first', existsSync(join(board, 'Landing hero -2.png')), textOf(again.result))
+    const wrongType = await withBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: join(scratch, 'notes.exe') } })
+    check('canvas: a non-board file type is refused', wrongType.result?.isError === true, textOf(wrongType.result))
+    const relative = await withBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: 'hero.png' } })
+    check('canvas: a relative path is refused', relative.result?.isError === true, textOf(relative.result))
+    const missing = await withBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: join(scratch, 'gone.png') } })
+    check('canvas: a missing file is refused', missing.result?.isError === true && /no file/i.test(textOf(missing.result)), textOf(missing.result))
+  } finally {
+    withBoard.close()
+  }
+
+  const env = envWithoutKey()
+  delete env['FORGE_CANVAS_DIR']
+  const noBoard = openServer(env)
+  try {
+    await handshake(noBoard, 'canvas-absent')
+    const res = await noBoard.request('tools/call', { name: 'show_on_canvas', arguments: { path: src } })
+    check(
+      'canvas: outside a Forge pane it says there is no board',
+      res.result?.isError === true && /FORGE_CANVAS_DIR/.test(textOf(res.result)),
+      textOf(res.result)
+    )
+  } finally {
+    noBoard.close()
+  }
+  rmSync(scratch, { recursive: true, force: true })
+}
+
 async function main() {
   console.log(`bridge-smoke → ${SERVER}`)
   await runAbsentSuite()
+  await runCanvasSuite()
   if (!forceAbsent) await runLiveTextSuite()
   runDriftSuite()
   if (liveImage) await runLiveImageSuite()

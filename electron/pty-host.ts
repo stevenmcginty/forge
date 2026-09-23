@@ -18,6 +18,7 @@ import { applyRemoteControl } from './bridge/remote-control'
 import { applyClaudeSession } from './bridge/claude-session'
 import { presenceFile } from './presence'
 import { gitRemoteOrigin, stripRemoteCredentials } from './git-remote'
+import { canvasEnvFor } from './hub-ipc'
 
 /**
  * The PTY host: owns one PtySessionManager and bridges it to the renderer.
@@ -827,13 +828,24 @@ export function registerPtyHandlers(): void {
     const linkPath = getLink().listen()
     const shareDir = shareDirFor(cwd)
 
+    /*
+     * The canvas board's folder for this pane's project (`FORGE_CANVAS_DIR`).
+     * Any CLI can save an image, clip or note there and it shows up on the
+     * board; the forge-bridge MCP server the CLI spawns inherits it too, which
+     * is how make_image/show_on_canvas know where to post. A path under the data
+     * dir, not the data dir itself, and nothing reads it to pick a profile — so
+     * it is not identity-bearing the way FORGE_DATA_DIR is (see ENV_DENYLIST).
+     */
+    const canvasEnv = canvasEnvFor(cwd, projectName)
+
     const env = {
       ...(geminiEnv ?? {}),
       ...(glmEnv ?? {}),
       ...(repoUrl ? { FORGE_REPO_URL: repoUrl } : {}),
       ...shareEnv,
       ...(linkPath ? { [SHARE_LINK_ENV]: linkPath } : {}),
-      ...(shareDir ? { [SHARE_DIR_ENV]: shareDir } : {})
+      ...(shareDir ? { [SHARE_DIR_ENV]: shareDir } : {}),
+      ...canvasEnv
     }
 
     const blocked = notice ?? glmNotice
