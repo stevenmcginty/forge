@@ -1,0 +1,556 @@
+/*
+ * The artifact panel. It takes the board's whole region — beside the agents,
+ * so a page an agent is building sits next to the pane building it — in the
+ * deck's opaque sheet: a head with the title, the Preview/Code switch and the
+ * actions, then a stage. An HTML page is a sheet of paper on the desk (its
+ * own white, inset with a shadow); markdown is a calm reading column.
+ */
+
+.artifact {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-chrome);
+  background: var(--sheet-bg);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--glass-shadow);
+  overflow: hidden;
+}
+
+.artifact__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  height: 54px;
+  padding: 0 10px 0 8px;
+  border-bottom: 1px solid var(--glass-line);
+}
+
+.artifact__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 30px;
+  padding: 0 12px 0 8px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.artifact__back:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.artifact__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  color: var(--text-primary);
+}
+
+.artifact__meta {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.artifact__updated {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-on-accent);
+  background: var(--accent);
+  box-shadow: 0 0 18px -4px var(--accent-glow);
+  animation: artifact-updated 2.6s var(--ease-out) both;
+}
+
+@keyframes artifact-updated {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  10%,
+  75% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.artifact__seg {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
+}
+
+.artifact__seg > button {
+  height: 26px;
+  padding: 0 13px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.artifact__seg > button:hover {
+  color: var(--text-secondary);
+}
+
+.artifact__seg > button[data-on='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.artifact__acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+
+.artifact__act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.artifact__act:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.artifact__act--primary {
+  max-width: 140px;
+  padding: 0 11px;
+  color: color-mix(in srgb, var(--accent) 85%, var(--text-primary));
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+}
+
+.artifact__act--quiet:hover {
+  color: var(--warn);
+}
+
+/* ---------------------------------------------------------------- stage */
+
+.artifact__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background:
+    radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--text-primary) 3%, transparent), transparent 60%),
+    var(--bg-base);
+}
+
+.artifact__frame {
+  flex: 1;
+  margin: 16px;
+  border: 0;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px var(--glass-line),
+    0 24px 60px -24px rgba(0, 0, 0, 0.85);
+}
+
+.artifact__media {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact__media .bprev--img {
+  inset: 18px;
+  width: calc(100% - 36px);
+  height: calc(100% - 36px);
+}
+
+.artifact__wait {
+  margin: auto;
+  color: var(--text-dim);
+}
+
+.artifact__code {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 16px 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-terminal);
+  counter-reset: none;
+  user-select: text;
+}
+
+.artifact__line {
+  display: block;
+  padding: 0 20px 0 0;
+  white-space: pre;
+}
+
+.artifact__ln {
+  display: inline-block;
+  width: 54px;
+  padding-right: 16px;
+  text-align: right;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.artifact__prose {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 34px 40px 48px;
+}
+
+.artifact__nav {
+  position: absolute;
+  top: calc(50% - 20px);
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-full);
+  background: var(--sheet-bg);
+  border: 1px solid var(--glass-line-strong);
+  color: var(--text-secondary);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.artifact__stage:hover .artifact__nav,
+.artifact__nav:focus-visible {
+  opacity: 1;
+}
+
+.artifact__nav[data-dir='prev'] {
+  left: 4px;
+}
+
+.artifact__nav[data-dir='next'] {
+  right: 4px;
+}
+
+/* ------------------------------------------------------------ html thumb */
+
+/* A 1200px-wide page, drawn at a third of the size, no pointer, no script. */
+.artifact-thumb {
+  position: absolute;
+  inset: 10px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #fff;
+  pointer-events: none;
+}
+
+.artifact-thumb__frame {
+  width: 1200px;
+  height: 900px;
+  border: 0;
+  transform: scale(0.3);
+  transform-origin: 0 0;
+}
+
+.btile[data-hero='true'] .artifact-thumb__frame {
+  transform: scale(0.52);
+}
+
+/* ------------------------------------------------------------- markdown */
+
+.artifact__md {
+  max-width: 760px;
+  margin: 0 auto;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.artifact__md .md__p {
+  margin: 0 0 16px;
+}
+
+.artifact__md .md__h {
+  margin: 28px 0 12px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.artifact__md .md__h:first-child {
+  margin-top: 0;
+}
+
+.artifact__md h1.md__h,
+.artifact__md h2.md__h,
+.artifact__md h3.md__h {
+  font-size: 26px;
+  line-height: 1.25;
+}
+
+.artifact__md h4.md__h {
+  font-size: 19px;
+  line-height: 1.3;
+}
+
+.artifact__md h5.md__h,
+.artifact__md h6.md__h {
+  font-size: 15.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.artifact__md .md__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 16px;
+  padding-left: 24px;
+}
+
+.artifact__md .md__list .md__list {
+  margin: 6px 0 0;
+}
+
+.artifact__md .md__list li::marker {
+  color: var(--accent);
+}
+
+.artifact__md .md__quote {
+  margin: 0 0 16px;
+  padding: 4px 0 4px 18px;
+  border-left: 3px solid var(--accent);
+  color: var(--text-secondary);
+}
+
+.artifact__md .md__hr {
+  margin: 24px 0;
+  border: 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.artifact__md .md__link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  cursor: pointer;
+}
+
+.artifact__md .md__inline-code {
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  color: color-mix(in srgb, var(--info) 85%, var(--text-primary));
+  background: color-mix(in srgb, var(--info) 10%, var(--bg-sunken));
+  border: 1px solid color-mix(in srgb, var(--info) 20%, var(--line-soft));
+  border-radius: var(--r-sm);
+}
+
+.artifact__md .md__codeblock {
+  margin: 0 0 16px;
+  background: var(--bg-terminal);
+  border: 1px solid var(--line-hairline);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.artifact__md .md__code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 0 6px 0 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.artifact__md .md__lang {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.artifact__md .md__copy-btn {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.artifact__md .md__copy-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.artifact__md .md__code {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.58;
+  white-space: pre;
+}
+
+.artifact__md .md__tablewrap {
+  margin: 0 0 16px;
+  overflow-x: auto;
+  border: 1px solid var(--line-hairline);
+  border-radius: 12px;
+}
+
+.artifact__md .md__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.artifact__md .md__table th,
+.artifact__md .md__table td {
+  padding: 9px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.artifact__md .md__table th {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+}
+
+.artifact__md .md__table tr:last-child td {
+  border-bottom: 0;
+}
+
+/* A markdown tile on the board: the same page, small, cut at the frame. */
+.bprev--md {
+  overflow: hidden;
+}
+
+.artifact__md--thumb {
+  max-width: none;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.artifact__md--thumb .md__h {
+  margin: 8px 0 4px;
+}
+
+.artifact__md--thumb h1.md__h,
+.artifact__md--thumb h2.md__h,
+.artifact__md--thumb h3.md__h {
+  font-size: 15px;
+}
+
+.artifact__md--thumb h4.md__h {
+  font-size: 13px;
+}
+
+.artifact__md--thumb .md__p,
+.artifact__md--thumb .md__list,
+.artifact__md--thumb .md__codeblock,
+.artifact__md--thumb .md__tablewrap,
+.artifact__md--thumb .md__quote {
+  margin-bottom: 6px;
+}
+
+.artifact__md--thumb .md__code-header {
+  display: none;
+}
+
+.artifact__md--thumb .md__code {
+  padding: 6px 8px;
+  font-size: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact__updated {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .artifact__updated {
+  animation: none;
+}
+
+.artifact__note {
+  flex: none;
+  height: 22px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-full);
+  border: 1px dashed var(--warn-line);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--warn);
+  cursor: help;
+}

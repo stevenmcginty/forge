@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { CanvasItem } from '@shared/hub'
 import { useCanvasFeed, type CanvasFeed } from '@/hooks/useHub'
 import { getHubRuntime } from '@/lib/hubRuntime'
@@ -9,6 +9,7 @@ import type { SurfaceProps } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
 import { useActiveTab, useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
+import { ArtifactView, HtmlThumb, isMarkdown, MarkdownBody, useArtifactText, type ArtifactActions } from './ArtifactView'
 import './BoardSurface.css'
 
 /**
@@ -19,7 +20,9 @@ import './BoardSurface.css'
  * drag a tile onto a pane and its path lands at the prompt, exactly as a
  * file dragged out of Explorer would; or press "→ Everest" to paste it into
  * the pane you are in. The newest piece is shown large, the rest in an even
- * grid; a click opens it full size, arrows walk the board, Esc comes back.
+ * grid; a click opens it as an artifact beside the panes — HTML live in a
+ * sandbox, markdown formatted, pictures whole — arrows walk the board, Esc
+ * comes back.
  *
  * Files come from `useCanvasFeed` — anything an agent or a bridge tool saves
  * into the project's canvas folder appears here by itself, and anything you
@@ -29,15 +32,17 @@ export function BoardSurface({ active }: SurfaceProps): ReactNode {
   const { actions } = useApp()
   const feed = useCanvasFeed()
   const items = useMemo(() => [...feed.items].sort((a, b) => b.mtime - a.mtime), [feed.items])
-  const [open, setOpen] = useState<string | null>(null)
+  const open = useSyncExternalStore(openStore.subscribe, openStore.get)
+  const setOpen = openStore.set
   const [dropping, setDropping] = useState(false)
   const gridRef = useRef<HTMLDivElement | null>(null)
   useFlipChildren(gridRef, items.map((i) => i.id).join('|'))
 
   const openIndex = open ? items.findIndex((i) => i.id === open) : -1
   useEffect(() => {
-    if (open && openIndex < 0) setOpen(null)
-  }, [open, openIndex])
+    // Only once the board has loaded: an empty list is "not read yet", not "gone".
+    if (open && openIndex < 0 && items.length) setOpen(null)
+  }, [open, openIndex, items.length, setOpen])
 
   const onDrop = async (e: React.DragEvent): Promise<void> => {
     e.preventDefault()
@@ -109,9 +114,10 @@ export function BoardSurface({ active }: SurfaceProps): ReactNode {
       )}
 
       {openIndex >= 0 ? (
-        <Lightbox
-          items={items}
+        <OpenArtifact
+          item={items[openIndex]!}
           index={openIndex}
+          count={items.length}
           feed={feed}
           onStep={(d) => setOpen(items[(openIndex + d + items.length) % items.length]!.id)}
           onClose={() => setOpen(null)}
@@ -154,25 +160,8 @@ function useItemUrl(item: CanvasItem, feed: CanvasFeed): string | null {
   return url
 }
 
-function useItemText(item: CanvasItem, feed: CanvasFeed): string | null {
-  const [text, setText] = useState<string | null>(null)
-  const { readText } = feed
-  useEffect(() => {
-    if (item.kind !== 'text' && item.kind !== 'html') return undefined
-    let live = true
-    void readText(item.id).then((t) => {
-      if (live) setText(t ? (item.kind === 'html' ? t.replace(/<[^>]+>/g, ' ') : t).replace(/\s+\n/g, '\n').slice(0, 900) : null)
-    })
-    return () => {
-      live = false
-    }
-  }, [item.id, item.kind, item.mtime, readText])
-  return text
-}
-
 export function Preview({ item, feed, large = false }: { item: CanvasItem; feed: CanvasFeed; large?: boolean }): ReactNode {
   const url = useItemUrl(item, feed)
-  const text = useItemText(item, feed)
   if (item.kind === 'image') {
     return url ? <img className="bprev bprev--img" src={url} alt={item.title} draggable={false} /> : <span className="bprev bprev--wait" />
   }
@@ -195,10 +184,25 @@ export function Preview({ item, feed, large = false }: { item: CanvasItem; feed:
       <span className="bprev bprev--wait" />
     )
   }
+  return <TextPreview item={item} feed={feed} />
+}
+
+/** html: a still, script-free render; markdown: formatted; text: the words. */
+function TextPreview({ item, feed }: { item: CanvasItem; feed: CanvasFeed }): ReactNode {
+  const text = useArtifactText(item, feed)
+  if (text === null) return <span className="bprev bprev--wait" />
+  if (item.kind === 'html') return <HtmlThumb html={text} title={item.title} />
+  if (isMarkdown(item)) {
+    return (
+      <span className="bprev bprev--text bprev--md">
+        <MarkdownBody source={text.slice(0, 2400)} className="artifact__md--thumb" />
+      </span>
+    )
+  }
   return (
     <span className="bprev bprev--text">
-      <span className="bprev__kind">{item.kind === 'html' ? 'HTML' : 'Text'}</span>
-      <span className="bprev__body">{text ?? ''}</span>
+      <span className="bprev__kind">Text</span>
+      <span className="bprev__body">{text.slice(0, 900)}</span>
     </span>
   )
 }
@@ -252,10 +256,10 @@ function Tile({
       <footer className="btile__foot">
         <span className="btile__title truncate">{item.title}</span>
         <span className="btile__meta mono">
-          {KIND_WORD[item.kind]} · {size(item.bytes)} · {ago(item.mtime)}
+          {isMarkdown(item) ? 'markdown' : KIND_WORD[item.kind]} · {size(item.bytes)} · {ago(item.mtime)}
         </span>
       </footer>
-      <ItemActions item={item} feed={feed} compact />
+      <ItemActions item={item} feed={feed} />
     </article>
   )
 }
@@ -264,7 +268,7 @@ const KIND_WORD: Record<CanvasItem['kind'], string> = { image: 'image', video: '
 
 /* -------------------------------------------------------------- actions */
 
-function ItemActions({ item, feed, compact = false }: { item: CanvasItem; feed: CanvasFeed; compact?: boolean }): ReactNode {
+function useItemActions(item: CanvasItem, feed: CanvasFeed): ArtifactActions {
   const { actions } = useApp()
   const tab = useActiveTab()
   const paneId = tab?.activePaneId ?? null
@@ -311,94 +315,87 @@ function ItemActions({ item, feed, compact = false }: { item: CanvasItem; feed: 
     }
   }
 
+  return { toPane, paneName, copy: () => void copy(), copied, remove: () => void feed.remove(item.id) }
+}
+
+function ItemActions({ item, feed }: { item: CanvasItem; feed: CanvasFeed }): ReactNode {
+  const a = useItemActions(item, feed)
   return (
-    <div className={compact ? 'bacts bacts--compact' : 'bacts'} onClick={(e) => e.stopPropagation()}>
-      <button type="button" className="bact bact--primary" onClick={toPane} title={paneName ? `Paste its path into ${paneName}` : 'Paste its path into the pane you are in'}>
+    <div className="bacts bacts--compact" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="bact bact--primary"
+        onClick={a.toPane}
+        title={a.paneName ? `Paste its path into ${a.paneName}` : 'Paste its path into the pane you are in'}
+      >
         <span aria-hidden="true">→</span>
-        <span className="truncate">{paneName ?? 'Pane'}</span>
+        <span className="truncate">{a.paneName ?? 'Pane'}</span>
       </button>
-      <button type="button" className="bact" onClick={() => void copy()} title={item.kind === 'image' ? 'Copy the picture (or its path)' : 'Copy its path'}>
-        <Icon name={copied ? 'check' : 'clipboard'} size={12} />
-        {compact ? null : copied ? 'Copied' : 'Copy'}
+      <button type="button" className="bact" onClick={a.copy} title={item.kind === 'image' ? 'Copy the picture (or its path)' : 'Copy its path'}>
+        <Icon name={a.copied ? 'check' : 'clipboard'} size={12} />
       </button>
       <button type="button" className="bact" onClick={() => void window.forge.openPath(item.path)} title="Open in its own app">
         <Icon name="expand" size={12} />
-        {compact ? null : 'Open in app'}
       </button>
-      <button
-        type="button"
-        className="bact bact--quiet"
-        title="Take it off the board (deletes the file from the canvas folder)"
-        onClick={() => void feed.remove(item.id)}
-      >
+      <button type="button" className="bact bact--quiet" title="Take it off the board (deletes the file from the canvas folder)" onClick={a.remove}>
         <Icon name="trash" size={12} />
-        {compact ? null : 'Remove'}
       </button>
     </div>
   )
 }
 
-/* -------------------------------------------------------------- lightbox */
+/* -------------------------------------------------------------- artifact */
 
-function Lightbox({
-  items,
+/**
+ * Which piece is open, kept outside the component so leaving the board (for
+ * the agents, the browser) and coming back finds it still open.
+ */
+const openStore = (() => {
+  let value: string | null = null
+  const listeners = new Set<() => void>()
+  return {
+    get: (): string | null => value,
+    set: (next: string | null): void => {
+      if (next === value) return
+      value = next
+      for (const l of listeners) l()
+    },
+    subscribe: (cb: () => void): (() => void) => {
+      listeners.add(cb)
+      return () => {
+        listeners.delete(cb)
+      }
+    }
+  }
+})()
+
+function OpenArtifact({
+  item,
   index,
+  count,
   feed,
   onStep,
   onClose
 }: {
-  items: CanvasItem[]
+  item: CanvasItem
   index: number
+  count: number
   feed: CanvasFeed
   onStep: (delta: number) => void
   onClose: () => void
 }): ReactNode {
-  const item = items[index]!
-  const ref = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (ref.current) popIn(ref.current, { from: 0.96, lift: 6 })
-  }, [])
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.defaultPrevented) return
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      } else if (e.key === 'ArrowRight') onStep(1)
-      else if (e.key === 'ArrowLeft') onStep(-1)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, onStep])
-
+  const acts = useItemActions(item, feed)
   return (
-    <div className="blight" role="dialog" aria-label={item.title} onClick={onClose}>
-      <div className="blight__panel" ref={ref} onClick={(e) => e.stopPropagation()}>
-        <div className="blight__stage">
-          <Preview key={item.id} item={item} feed={feed} large />
-        </div>
-        <footer className="blight__foot">
-          <span className="blight__title truncate">{item.title}</span>
-          <span className="btile__meta mono">
-            {KIND_WORD[item.kind]} · {size(item.bytes)} · {ago(item.mtime)} · {index + 1} of {items.length}
-          </span>
-          <ItemActions item={item} feed={feed} />
-          <button type="button" className="bact" onClick={onClose} title="Back to the board (Esc)">
-            <Icon name="close" size={12} />
-          </button>
-        </footer>
-        {items.length > 1 ? (
-          <>
-            <button type="button" className="blight__nav" data-dir="prev" onClick={() => onStep(-1)} aria-label="Previous (←)">
-              <Icon name="chevronLeft" size={18} />
-            </button>
-            <button type="button" className="blight__nav" data-dir="next" onClick={() => onStep(1)} aria-label="Next (→)">
-              <Icon name="chevronRight" size={18} />
-            </button>
-          </>
-        ) : null}
-      </div>
-    </div>
+    <ArtifactView
+      item={item}
+      feed={feed}
+      index={index}
+      count={count}
+      media={<Preview key={item.id} item={item} feed={feed} large />}
+      actions={acts}
+      onStep={onStep}
+      onClose={onClose}
+    />
   )
 }
 
