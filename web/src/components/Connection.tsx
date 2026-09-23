@@ -1,9 +1,36 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { PIN_MAX_DIGITS, PIN_MIN_DIGITS, WEB_PROTO, type WebRefusal } from '@shared/web'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  HOST_STALE_MS,
+  PIN_MAX_DIGITS,
+  PIN_MIN_DIGITS,
+  WEB_FEATURE_PASSKEY,
+  WEB_PROTO,
+  type WebHostRecord,
+  type WebPasskeyRequestOptions,
+  type WebRefusal
+} from '@shared/web'
 import { Icon, type IconName } from '@/components/Icon'
+import { unlockWithPasskey } from '../lib/client'
+import { useDeskFacts } from '../lib/features'
 import { useMobile } from '../lib/mobile'
+import {
+  biometricButtonLabel,
+  biometricName,
+  biometricUnlockLabel,
+  declineOffer,
+  enrolPasskey,
+  getPasskeyAssertion,
+  listPasskeys,
+  offerDeclined,
+  platformPasskeyAvailable,
+  prepareEnrolment,
+  thisDevicePasskey,
+  type PreparedEnrolment
+} from '../lib/passkey'
 import { useForge } from '../state'
+import { BottomSheet } from './BottomSheet'
 import './Sheets.phone.css'
+import './Passkey.css'
 
 /**
  * The connection screens — the part of this client that is not a spinner.
@@ -345,6 +372,42 @@ export function Refused({
 }
 
 /**
+ * A passkey ask refused faster than this was the browser declining to ask
+ * without a tap, not a person pressing Cancel — nobody cancels a system sheet
+ * in under half a second.
+ */
+const GESTURE_REFUSAL_MS = 450
+
+/** The one automatic fingerprint ask this page load gets. See `PinPrompt`. */
+let passkeyAutoTried = false
+
+/** A fingerprint, on the icon grid (16×16, 1.4 stroke). Shape for the button, never colour alone. */
+export function FingerprintGlyph({ size = 20 }: { size?: number }): ReactNode {
+  return (
+    <svg
+      className="fingerprint-glyph"
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M3.4 5.2A5.4 5.4 0 0 1 13 6.4" />
+      <path d="M2.6 9.2a5.6 5.6 0 0 1 .2-2" />
+      <path d="M5 13.4a8 8 0 0 1-.9-3.6 3.9 3.9 0 0 1 7.8 0v.6" />
+      <path d="M8 9.6c0 1.9.5 3.3 1.4 4.6" />
+      <path d="M6.2 10a1.8 1.8 0 0 1 3.6-.2c.1 1.4.4 2.3 1 3.2" />
+      <path d="M13.2 9.2v.8a8 8 0 0 1-.3 2" />
+    </svg>
+  )
+}
+
+/**
  * "This desktop asks for its unlock PIN."
  *
  * A text box rather than an apology, because nothing has gone wrong: the desktop
@@ -365,15 +428,27 @@ export function Refused({
 export function PinPrompt({
   message,
   invalid,
-  retryAfterMs
+  retryAfterMs,
+  passkey,
+  afterPasskey
 }: {
   message: string
   invalid: boolean
   /** The desktop's own lockout, when the last answer spent one. */
   retryAfterMs?: number
+  /** Unlock options: this desktop will take this phone's fingerprint / Face ID instead. */
+  passkey?: WebPasskeyRequestOptions
+  /** The last `hello` carried a passkey — with `passkey`, its challenge had lapsed. */
+  afterPasskey?: boolean
 }): ReactNode {
   const { state, actions } = useForge()
   const [pin, setPin] = useState('')
+  const pinRef = useRef<HTMLInputElement | null>(null)
+  // The biometric is the first answer when there is one; after a cancel the PIN
+  // is, and the two buttons trade places in emphasis (never in position).
+  const [declined, setDeclined] = useState(false)
+  const [asking, setAsking] = useState(false)
+  const askingRef = useRef(false)
   // The lockout counts down here rather than being a static "about Ns", because
   // the box is disabled while it runs and a frozen number over a dead form
   // reads as broken rather than as waiting.
@@ -385,6 +460,54 @@ export function PinPrompt({
     const timer = window.setInterval(() => setWait((s) => Math.max(0, s - 1)), 1000)
     return () => window.clearInterval(timer)
   }, [waiting])
+
+  const offer = !!passkey && !waiting
+
+  const tryPasskey = useCallback(
+    async (auto: boolean): Promise<void> => {
+      if (!passkey || askingRef.current) return
+      askingRef.current = true
+      setAsking(true)
+      const began = performance.now()
+      const outcome = await getPasskeyAssertion(passkey)
+      askingRef.current = false
+      setAsking(false)
+      if (outcome.kind === 'ok') {
+        unlockWithPasskey(outcome.assertion)
+        return
+      }
+      // An automatic ask the browser turned down at once is a browser wanting
+      // a tap first (Safari does), not a person saying no: leave the button
+      // lit and wait for the tap.
+      if (auto && outcome.kind === 'cancelled' && performance.now() - began < GESTURE_REFUSAL_MS) return
+      // Cancelled or failed: the PIN, quietly. No red line — the person chose
+      // this, or the phone could not, and either way the box is the way in.
+      setDeclined(true)
+      pinRef.current?.focus()
+    },
+    [passkey]
+  )
+
+  // Asked once per page load without a tap, when the page is on screen — and
+  // again, without counting, when the desktop says the last answer was right
+  // but its challenge had lapsed (a fresh one rides this very refusal).
+  useEffect(() => {
+    if (!passkey || waiting) return
+    if (afterPasskey) {
+      void tryPasskey(true)
+      return
+    }
+    if (passkeyAutoTried) return
+    const go = (): void => {
+      if (document.visibilityState !== 'visible' || passkeyAutoTried) return
+      passkeyAutoTried = true
+      void tryPasskey(true)
+    }
+    go()
+    if (passkeyAutoTried) return
+    document.addEventListener('visibilitychange', go)
+    return () => document.removeEventListener('visibilitychange', go)
+  }, [passkey, afterPasskey, waiting, tryPasskey])
 
   const submit = (event: FormEvent): void => {
     event.preventDefault()
@@ -425,6 +548,28 @@ export function PinPrompt({
         aria-hidden="true"
       />
 
+      {/* The fingerprint first, above the box, when the desktop offered it:
+          one lime button on the screen, and it is this one until the person
+          turns it down. */}
+      {offer ? (
+        <>
+          <button
+            type="button"
+            className="cta-btn gate__go gate__passkey"
+            data-tone={declined ? 'quiet' : undefined}
+            data-testid="passkey-unlock"
+            disabled={asking}
+            onClick={() => void tryPasskey(false)}
+          >
+            <FingerprintGlyph />
+            {asking ? 'Waiting for the phone…' : biometricButtonLabel()}
+          </button>
+          <p className="gate__or" aria-hidden="true">
+            or the PIN
+          </p>
+        </>
+      ) : null}
+
       <label className="gate__field">
         <span className="eyebrow gate__label">Unlock PIN</span>
         <input
@@ -440,7 +585,10 @@ export function PinPrompt({
           autoComplete="current-password"
           inputMode="numeric"
           maxLength={PIN_MAX_DIGITS}
-          autoFocus
+          /* Not when a fingerprint is on offer: a keyboard over the button
+             that is the quicker way in would be the page choosing for them. */
+          autoFocus={!passkey}
+          ref={pinRef}
           data-testid="pin-input"
           value={pin}
           disabled={waiting}
@@ -452,16 +600,17 @@ export function PinPrompt({
         />
       </label>
 
-      {/* Reserved for the "Use fingerprint" button a later change adds. Empty,
-          it takes no room. */}
-      <div className="gate__slot" data-slot="passkey" />
-
       {/* The lockout the desktop itself imposed — every strike against it was
           a wrong PIN sent from here, so this page closes the till while it
           runs rather than posting digits it knows will be refused. */}
       {waiting ? <p className="gate__hint">Too many tries — the desktop has locked the door for another {wait}s.</p> : null}
 
-      <button type="submit" className="cta-btn gate__go" disabled={waiting || pin.length < PIN_MIN_DIGITS}>
+      <button
+        type="submit"
+        className="cta-btn gate__go"
+        data-tone={offer && !declined ? 'quiet' : undefined}
+        disabled={waiting || pin.length < PIN_MIN_DIGITS}
+      >
         Unlock
       </button>
       <p className="gate__hint">
@@ -492,6 +641,146 @@ export function Unreachable({ error }: { error: string }): ReactNode {
       </button>
       <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
     </GateFrame>
+  )
+}
+
+/**
+ * The desktop is awake and publishing, but speaks a different protocol — which
+ * the rendezvous read turns into "absent", and the frozen view used to call
+ * asleep. A real protocol bump never gets as far as a `refused` frame (the
+ * subprotocol is refused during the upgrade), so the record is where this page
+ * learns which side is older: `record.proto` against this bundle's WEB_PROTO,
+ * and `record.app` for the desktop's version.
+ */
+export function hostSkew(record: WebHostRecord | null, now = Date.now()): WebHostRecord | null {
+  if (!record || record.proto === WEB_PROTO) return null
+  // A stale record is a desktop that is off, whatever version it was.
+  return now - record.at < HOST_STALE_MS ? record : null
+}
+
+export function VersionSkew({ record }: { record: WebHostRecord }): ReactNode {
+  const { state, actions } = useForge()
+  const plan = recovery('proto', state.session?.email ?? '', { proto: record.proto })
+  const name = record.name || 'The desktop'
+  return (
+    <GateFrame reason="proto">
+      <GateLead icon={plan.icon} title={plan.title}>
+        <p className="gate__body">
+          {name} is running Forge {record.app || '(unknown version)'}, which speaks a different protocol from this page.
+        </p>
+        <p className="gate__hint">{plan.hint}</p>
+      </GateLead>
+      {plan.action === 'reload' ? (
+        <button type="button" className="cta-btn gate__go" onClick={() => window.location.reload()}>
+          Reload the page
+        </button>
+      ) : (
+        <button type="button" className="cta-btn gate__go" onClick={() => actions.refind()}>
+          Look again
+        </button>
+      )}
+      <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
+    </GateFrame>
+  )
+}
+
+/* ------------------------------------------------------ the passkey offer */
+
+/** Offered at most once per page load, whatever the answer. */
+let passkeyOffered = false
+
+/**
+ * "Unlock with your fingerprint next time?" — a one-time sheet after the PIN
+ * opened the door, on a phone that can hold a passkey, when the desktop can
+ * take one and this phone has none enrolled. "Not now" is remembered for this
+ * browser. Mounted once, from App.
+ */
+export function PasskeyOffer(): ReactNode {
+  const { state, actions } = useForge()
+  const mobile = useMobile()
+  const facts = useDeskFacts()
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const prepared = useRef<PreparedEnrolment | null>(null)
+  const live = state.connection.state === 'live'
+  const eligible = mobile && live && facts.unlockedWith === 'pin' && facts.features.includes(WEB_FEATURE_PASSKEY)
+
+  useEffect(() => {
+    if (!eligible || passkeyOffered || offerDeclined()) return
+    let gone = false
+    void (async () => {
+      if (!(await platformPasskeyAvailable()) || gone) return
+      const list = await listPasskeys(actions.request)
+      if (gone || !list.ok || !list.canRegister || thisDevicePasskey(list.passkeys)) return
+      if (passkeyOffered) return
+      passkeyOffered = true
+      prepared.current = await prepareEnrolment(actions.request)
+      if (gone) return
+      setOpen(true)
+    })()
+    return () => {
+      gone = true
+    }
+  }, [eligible, actions])
+
+  const name = biometricName()
+  const close = (): void => setOpen(false)
+
+  return (
+    <BottomSheet
+      open={open}
+      onClose={close}
+      label={`Unlock with your ${name} next time?`}
+      subtitle={`Skip the PIN on this phone. The PIN still works, and changing it on the desktop turns this off.`}
+      testId="passkey-offer"
+    >
+      <div className="passkey-offer">
+        {error ? (
+          <p className="passkey-offer__error" role="alert">
+            <AlertGlyph />
+            <span>{error}</span>
+          </p>
+        ) : null}
+        <div className="passkey-offer__actions">
+          <button
+            type="button"
+            className="bsbtn"
+            onClick={() => {
+              declineOffer()
+              close()
+            }}
+          >
+            Not now
+          </button>
+          <button
+            type="button"
+            className="bsbtn"
+            data-tone="act"
+            disabled={busy}
+            data-testid="passkey-offer-accept"
+            onClick={async () => {
+              setBusy(true)
+              setError('')
+              const outcome = await enrolPasskey(actions.request, prepared.current)
+              setBusy(false)
+              // Spent or not, a fresh challenge for any second try.
+              prepared.current = null
+              if (!outcome.ok) void prepareEnrolment(actions.request).then((next) => (prepared.current = next))
+              if (outcome.ok) {
+                close()
+                actions.setNotice(`${biometricUnlockLabel()} is on for this phone.`)
+                return
+              }
+              if (!outcome.cancelled) setError(outcome.message)
+            }}
+          >
+            <FingerprintGlyph />
+            {busy ? 'Waiting for the phone…' : biometricButtonLabel()}
+          </button>
+        </div>
+      </div>
+    </BottomSheet>
   )
 }
 

@@ -14,6 +14,8 @@ import {
   type WebMirrorChunk,
   type WebMirrorInputFrame,
   type WebMirrorOkFrame,
+  type WebPasskeyAssertion,
+  type WebPasskeyRequestOptions,
   type WebRefusal,
   type WebRequest,
   type WebResult,
@@ -25,6 +27,7 @@ import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ForemanState } from '@shared/foreman'
 import type { GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
+import { publishUsage } from './usage'
 
 /**
  * The browser's end of the Forge Web link — one socket, and everything the page
@@ -269,7 +272,24 @@ export type Connection =
    * asked yet" from "that one did not open the door" — the same screen either
    * way, but only one of them owes the person a red line.
    */
-  | { state: Extract<WebConnectionState, 'pin'>; message: string; invalid: boolean; retryAfterMs?: number }
+  | {
+      state: Extract<WebConnectionState, 'pin'>
+      message: string
+      invalid: boolean
+      retryAfterMs?: number
+      /**
+       * The desktop will also take a passkey (fingerprint / Face ID) for this
+       * ask: `pin-required` carried unlock options. Absent from an old desktop,
+       * and from one where this account has none enrolled under this PIN.
+       */
+      passkey?: WebPasskeyRequestOptions
+      /**
+       * The `hello` this answers carried a passkey. With `passkey` on a
+       * `pin-required`, that is the stale-challenge case — the answer was right
+       * but its challenge had lapsed — and the page asks the biometric again.
+       */
+      afterPasskey?: boolean
+    }
   | { state: Extract<WebConnectionState, 'live'>; desktopName: string; appVersion: string }
   | { state: Extract<WebConnectionState, 'refused'>; reason: WebRefusal; message: string; retryAfterMs?: number; proto?: number; appVersion?: string }
   | { state: Extract<WebConnectionState, 'offline'>; message: string; reason?: WebShutdownReason; retryAfterMs?: number }
@@ -433,7 +453,7 @@ export interface MirrorWatcher {
    * The watch is over, or is not going to happen. `needsPin` is a question
    * rather than a failure — show a PIN box and ask again with what was typed.
    */
-  onStop: (reason: string, needsPin: boolean) => void
+  onStop: (reason: string, needsPin: boolean, passkey?: WebPasskeyRequestOptions) => void
 }
 
 let watcher: MirrorWatcher | null = null
@@ -467,6 +487,14 @@ export function askForScreen(pin: string): void {
   sendUp?.({ type: 'mirror-start', ...(pin ? { pin } : {}) })
 }
 
+/**
+ * "Show me that screen", answered with a passkey instead of the PIN — only ever
+ * in reply to a `mirror-stop` that carried passkey options.
+ */
+export function askForScreenWithPasskey(passkey: WebPasskeyAssertion): void {
+  sendUp?.({ type: 'mirror-start', passkey })
+}
+
 /** The viewer closed. The desktop stops capturing on this frame. */
 export function stopWatching(): void {
   sendUp?.({ type: 'mirror-stop' })
@@ -480,6 +508,82 @@ export function stopWatching(): void {
  */
 export function sendMirrorInput(input: Omit<WebMirrorInputFrame, 'type'>): void {
   sendUp?.({ type: 'mirror-input', ...input })
+}
+
+/* ------------------------------------------------------ what the desk can do
+ *
+ * `hello-ok.features` and how this socket was let in, as module-level facts
+ * with a subscription, for the same reason the mirror has slots: the page's
+ * state provider builds its picture field by field, and the handful of
+ * surfaces that gate a feature on these (the fingerprint row, streamed
+ * dictation, the file viewer) read them here rather than through it. One
+ * client per page, so one set of facts. `lib/features.ts` is the React side.
+ */
+
+/** How the live socket got in: with the PIN, with a passkey, or with neither (no PIN is set). */
+export type UnlockedWith = 'pin' | 'passkey' | 'none'
+
+export interface DeskFacts {
+  /** `hello-ok.features` of the last admitted socket. Empty from an old desktop. */
+  features: readonly string[]
+  unlockedWith: UnlockedWith
+}
+
+let deskFacts: DeskFacts = { features: [], unlockedWith: 'none' }
+const deskListeners = new Set<() => void>()
+
+function setDeskFacts(next: DeskFacts): void {
+  if (
+    next.unlockedWith === deskFacts.unlockedWith &&
+    next.features.length === deskFacts.features.length &&
+    next.features.every((f, i) => f === deskFacts.features[i])
+  ) {
+    return
+  }
+  deskFacts = next
+  for (const listener of deskListeners) listener()
+}
+
+/** The current facts. The same object until they change, for `useSyncExternalStore`. */
+export function desktopFacts(): DeskFacts {
+  return deskFacts
+}
+
+export function subscribeDesktopFacts(listener: () => void): () => void {
+  deskListeners.add(listener)
+  return () => deskListeners.delete(listener)
+}
+
+/** Does the desktop this page last reached announce `feature`? Never true before a `hello-ok`. */
+export function desktopHas(feature: string): boolean {
+  return deskFacts.features.includes(feature)
+}
+
+/** The live client's `request`, for code that is not under the state provider. */
+let requestUp: ((body: WebRequest) => Promise<WebResult>) | null = null
+
+export function desktopRequest(body: WebRequest): Promise<WebResult> {
+  return requestUp
+    ? requestUp(body)
+    : Promise.resolve({ kind: 'failed', code: 'no-window', message: 'Not connected to the desktop.' })
+}
+
+/** The live client's passkey answer to the PIN question. See `ForgeClient.submitPasskey`. */
+let passkeyUp: ((assertion: WebPasskeyAssertion) => void) | null = null
+
+/**
+ * Answer the desktop's PIN question with a passkey instead: reconnect, and the
+ * next `hello` carries it. Only after a `pin-required` that offered one.
+ */
+export function unlockWithPasskey(assertion: WebPasskeyAssertion): void {
+  passkeyUp?.(assertion)
+}
+
+/** Unlock options as the wire carries them, checked just enough to hand to WebAuthn. */
+function isPasskeyOptions(value: unknown): value is WebPasskeyRequestOptions {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Partial<WebPasskeyRequestOptions>
+  return typeof v.challenge === 'string' && typeof v.rpId === 'string' && Array.isArray(v.allowCredentials)
 }
 
 /* ------------------------------------------------------------------- class */
@@ -657,6 +761,10 @@ export class ForgeClient {
   private sentPin = ''
   /** When the tab last went hidden, or 0 while it is visible. */
   private pinHiddenAt = 0
+  /** A passkey answer for the *next* hello only. See `submitPasskey`. */
+  private passkeyAnswer: WebPasskeyAssertion | null = null
+  /** The hello in flight carried a passkey (and no PIN). Read by `hello-ok` and the refusal. */
+  private sentPasskey = false
 
   constructor(handlers: ForgeHandlers) {
     this.handlers = handlers
@@ -664,6 +772,8 @@ export class ForgeClient {
     // than the instance, so nothing outside this file can reach the rest of the
     // client through it.
     sendUp = (frame) => this.send(frame)
+    requestUp = (body) => this.request(body)
+    passkeyUp = (assertion) => this.submitPasskey(assertion)
     this.watchPinGrace()
     this.watchWakeups()
   }
@@ -711,6 +821,19 @@ export class ForgeClient {
   submitPin(pin: string): void {
     if (!this.credentials) return
     this.pin = pin.trim()
+    this.retry()
+  }
+
+  /**
+   * The person answered the PIN question with a fingerprint / Face ID. The
+   * same one-shot shape as `submitPin`: held for the next `hello` only, and
+   * never remembered — a passkey answer is signed over a single-use challenge,
+   * so replaying it on a reconnect could only ever be refused.
+   */
+  submitPasskey(assertion: WebPasskeyAssertion): void {
+    if (!this.credentials) return
+    this.passkeyAnswer = assertion
+    this.pin = ''
     this.retry()
   }
 
@@ -1339,6 +1462,12 @@ export class ForgeClient {
       // rather than leaving a stale typed PIN to be replayed by the reconnect
       // loop. A previously-successful PIN may still ride along; see `pinForHello`.
       const pin = this.pinForHello()
+      // A passkey rides only when no PIN does: the desktop judges `pin` and
+      // ignores `passkey` when both are present, so sending both would spend
+      // the challenge for nothing.
+      const passkey = pin ? null : this.passkeyAnswer
+      this.passkeyAnswer = null
+      this.sentPasskey = passkey !== null
 
       socket.onopen = () => {
         if (superseded()) return
@@ -1368,7 +1497,8 @@ export class ForgeClient {
           // protocol, the first `hello` of every sign-in carries no PIN by design,
           // and a desktop with none set should see a frame that looks exactly like
           // it always did.
-          ...(pin ? { pin } : {})
+          ...(pin ? { pin } : {}),
+          ...(passkey ? { passkey } : {})
         })
       }
 
@@ -1452,7 +1582,12 @@ export class ForgeClient {
         this.reauthed = false
         this.reAsked.clear()
         if (this.sentPin) this.rememberedPin = this.sentPin
+        setDeskFacts({
+          features: Array.isArray(frame.features) ? frame.features.filter((f): f is string => typeof f === 'string') : [],
+          unlockedWith: this.sentPin ? 'pin' : this.sentPasskey ? 'passkey' : 'none'
+        })
         this.sentPin = ''
+        this.sentPasskey = false
         this.handlers.onPicture(frame)
         this.handlers.onConnection({ state: 'live', desktopName: frame.desktopName, appVersion: frame.appVersion })
         // Both timers start here rather than at `onopen`, because this frame is
@@ -1492,7 +1627,8 @@ export class ForgeClient {
       case 'refused':
         this.onRefused(frame.reason, typeof frame.message === 'string' ? frame.message : '', frame.retryAfterMs, {
           ...(typeof frame.proto === 'number' ? { proto: frame.proto } : {}),
-          ...(typeof frame.appVersion === 'string' ? { appVersion: frame.appVersion } : {})
+          ...(typeof frame.appVersion === 'string' ? { appVersion: frame.appVersion } : {}),
+          ...(isPasskeyOptions(frame.passkey) ? { passkey: frame.passkey } : {})
         })
         return
 
@@ -1593,6 +1729,10 @@ export class ForgeClient {
         this.handlers.onGit(frame.snapshot)
         return
 
+      case 'usage':
+        publishUsage(frame)
+        return
+
       case 'transcript':
         this.handlers.onTranscript(frame.sessionId, frame.update)
         return
@@ -1680,7 +1820,8 @@ export class ForgeClient {
       case 'mirror-stop':
         watcher?.onStop(
           typeof frame.reason === 'string' && frame.reason ? frame.reason : 'The desktop stopped sharing its screen.',
-          frame.needsPin === true
+          frame.needsPin === true,
+          frame.needsPin === true && isPasskeyOptions(frame.passkey) ? frame.passkey : undefined
         )
         return
 
@@ -1695,7 +1836,14 @@ export class ForgeClient {
    * A value a newer desktop invented falls out here, at the edge, through
    * `isWebRefusal` — which is exactly the job shared/web.ts gives that guard.
    */
-  private onRefused(rawReason: unknown, message: string, retryAfterMs?: number, desk: { proto?: number; appVersion?: string } = {}): void {
+  private onRefused(
+    rawReason: unknown,
+    message: string,
+    retryAfterMs?: number,
+    desk: { proto?: number; appVersion?: string; passkey?: WebPasskeyRequestOptions } = {}
+  ): void {
+    const afterPasskey = this.sentPasskey
+    this.sentPasskey = false
     if (!isWebRefusal(rawReason)) {
       this.stopped = true
       this.handlers.onConnection({
@@ -1722,7 +1870,10 @@ export class ForgeClient {
         state: 'pin',
         message,
         invalid: reason === 'pin-invalid',
-        ...(retryAfterMs ? { retryAfterMs } : {})
+        ...(retryAfterMs ? { retryAfterMs } : {}),
+        // Only the question carries unlock options; a wrong answer never does.
+        ...(reason === 'pin-required' && desk.passkey ? { passkey: desk.passkey } : {}),
+        ...(afterPasskey ? { afterPasskey: true } : {})
       })
       return
     }

@@ -11,6 +11,7 @@ import { EMPTY_TRANSCRIPT, mergeTranscript, transcriptFromLines } from '@/lib/fe
 import { allFilesFromDataTransfer, isImageFile, uploadFileChunks } from '../lib/file'
 import { packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
+import { publishScreenPane, useComposerFocus, withdrawScreenPane, type ScreenPane } from '../lib/pane-screen'
 import { publishPaneStatus, publishPaneView, registerPaneViewSetter, type PaneFace } from '../lib/pane-status'
 import type { Transcript } from '@/lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
@@ -21,6 +22,7 @@ import { registerAnswerScreen, SCREEN_TAIL_LINES } from './AnswerCard'
 import { ChatView } from './ChatView'
 import { Feed } from './Feed'
 import { HandoffMenu } from './HandoffMenu'
+import { useTextScale } from './MoreSheet'
 
 /**
  * How long a burst of output may hold the conversation view still.
@@ -32,6 +34,39 @@ import { HandoffMenu } from './HandoffMenu'
  * has.
  */
 const PARSE_INTERVAL_MS = 80
+
+/** How long the phone's text size must hold still before the terminal refits to it. */
+const TEXT_SIZE_SETTLE_MS = 300
+
+/**
+ * Put text on the clipboard. The async API where the page may use it; the old
+ * select-and-copy where it may not (an insecure origin, an older WebView), which
+ * still works from inside the tap that asked.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // Refused — fall through to the old way.
+  }
+  try {
+    const area = document.createElement('textarea')
+    area.value = text
+    area.setAttribute('readonly', '')
+    area.style.position = 'fixed'
+    area.style.opacity = '0'
+    document.body.appendChild(area)
+    area.select()
+    const ok = document.execCommand('copy')
+    area.remove()
+    return ok
+  } catch {
+    return false
+  }
+}
 
 /** HH:MM off a Foreman log entry's epoch, the way the decision log shows it. */
 function clockOf(at: number): string {
@@ -131,6 +166,16 @@ export function PaneView({
    */
   const mobile = useMobile()
   const fontSize = mobile ? 14 : 12
+  /**
+   * A− / A+ from the ⋯ sheet, applied to the terminal's type on a phone. Not a
+   * rebuild: the host is told the new size and refits once (`setFontSize`), so
+   * a change of text size costs one resize rather than a detach, a re-attach
+   * and a full replay. The mount reads it through the ref for the same reason.
+   */
+  const [textScale] = useTextScale()
+  const fontPx = mobile ? Math.round(fontSize * textScale) : fontSize
+  const fontPxRef = useRef(fontPx)
+  fontPxRef.current = fontPx
   /** No desktop at all: decision 10's read-only twin, drawn from the cache. */
   const cached = state.stage.kind === 'offline'
   /** Is the socket answering this second? Only input and the badge read this. */
@@ -561,7 +606,7 @@ export function PaneView({
 
     let attached = false
     const host = mountTerm(holder, {
-      fontSize,
+      fontSize: fontPxRef.current,
       fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
       accent: profile.accent,
       // Everything xterm produces goes up the wire, not merely the keystrokes:
@@ -632,7 +677,7 @@ export function PaneView({
     const holder = holderRef.current
     if (!holder || !cached) return
     const host = mountTerm(holder, {
-      fontSize,
+      fontSize: fontPxRef.current,
       fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
       accent: profile.accent,
       onData: () => {
@@ -671,6 +716,19 @@ export function PaneView({
     // above; without them a terminal rebuilt while the link was down would come
     // up taking keys for a socket that is not there.
   }, [live, cached, leaf.id])
+
+  /**
+   * The phone's text size, on a terminal that is already running. See `fontPx`.
+   *
+   * Applied once the size has stopped moving: A+ tapped three times is one new
+   * grid for the desktop, not three resizes and the echoes of the first two
+   * arriving after the third. A host just built already has the size (the
+   * mount reads the ref), so for it this is a no-op.
+   */
+  useEffect(() => {
+    const timer = window.setTimeout(() => hostRef.current?.setFontSize(fontPx), TEXT_SIZE_SETTLE_MS)
+    return () => window.clearTimeout(timer)
+  }, [fontPx, cached, leaf.id])
 
   /* --------------------------------------------- and the desktop's own grid */
 
@@ -722,8 +780,16 @@ export function PaneView({
    * so the hold is in place before the card's first layout reaches the
    * ResizeObserver. One terminal serves every face — Chat and Cards only lay
    * themselves over it — so this one hold covers all three.
+   *
+   * Typing is the same shape of problem. While the composer's box has the caret
+   * the phone folds its chrome away (typing mode, styles.css) and the keyboard
+   * slides up; both are changes of height only, and a PTY resized for each of
+   * them would repaint — and, on the normal buffer, duplicate — the screen twice
+   * per message typed. So the grid is held from focus to blur as well, drawn
+   * against the bottom of the box where the prompt is.
    */
-  const holdGrid = mobile && asking && focused
+  const typing = useComposerFocus()
+  const holdGrid = mobile && focused && (asking || (typing && onScreen))
   useLayoutEffect(() => {
     hostRef.current?.hold(holdGrid)
     // `leaf.id` and `cached` rebuild the host, and a new host starts unheld.
@@ -788,6 +854,49 @@ export function PaneView({
   useEffect(() => {
     if (mobile && onScreen && live && alive) actionsRef.current.claim(leaf.id)
   }, [mobile, onScreen, live, alive, leaf.id])
+
+  /* ------------------------------------------------- the status line's pane */
+
+  /**
+   * What the status line can do to this pane, while it is the one on screen.
+   *
+   * The line sits in the composer's dock, outside this tree — see
+   * lib/pane-screen.ts. The three actions go through refs so that publishing
+   * happens on the edges that change what the line shows (this pane coming on
+   * screen, its condition moving) and not on every render.
+   */
+  const workspaceRef = useRef(workspace)
+  workspaceRef.current = workspace
+  const showViewRef = useRef(showView)
+  showViewRef.current = showView
+  const condition: ScreenPane['condition'] = cached ? 'frozen' : !live ? 'reconnecting' : asking ? 'waiting' : null
+  const screenPane = focused && onScreen
+  useLayoutEffect(() => {
+    if (!screenPane) return
+    publishScreenPane({
+      paneId: leaf.id,
+      condition,
+      showView: (face) => showViewRef.current(face),
+      copyScreen: () => {
+        const text = hostRef.current?.screenText() ?? ''
+        const say = (words: string): void => actionsRef.current.setNotice(words)
+        if (!text) {
+          say('Nothing on the screen to copy.')
+          return
+        }
+        void copyText(text).then((ok) => say(ok ? 'Copied' : 'Could not copy — this browser refused the clipboard.'))
+      },
+      stepTab: (step) => {
+        const { tabs, activeTabId } = workspaceRef.current
+        const at = tabs.findIndex((t) => t.id === activeTabId)
+        const next = at < 0 ? undefined : tabs[at + step]
+        // The ends are ends: a swipe past the last tab stays on it rather than
+        // wrapping to the first, which would read as the row jumping.
+        if (next) void actionsRef.current.layout({ op: 'select-tab', tabId: next.id })
+      }
+    })
+    return () => withdrawScreenPane(leaf.id)
+  }, [screenPane, condition, leaf.id])
 
   /* ----------------------------------------------- pasted / dropped images */
 
@@ -897,6 +1006,14 @@ export function PaneView({
         if (!focused && live) void actions.layout({ op: 'focus-pane', paneId: leaf.id })
       }}
     >
+      {/*
+        The desk's slim header. Not on a phone: the tab strip names the tab and
+        the status line names the pane and says what is wrong with it in words
+        (Waiting / Reconnecting / Frozen) — a floating chip here sat over the
+        first line of the conversation, and a bare "SH Shell" band was 44px of
+        label over a terminal that had none to spare.
+      */}
+      {!mobile ? (
       <header className="pane__header">
         <div className="pane__leading">
           <AgentBadge profile={profile} size="sm" />
@@ -983,6 +1100,7 @@ export function PaneView({
           </div>
         ) : null}
       </header>
+      ) : null}
 
       {!mobile ? (
         <HandoffMenu

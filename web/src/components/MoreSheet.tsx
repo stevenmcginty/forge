@@ -1,8 +1,22 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { WEB_FEATURE_PASSKEY, type WebPasskeyInfo } from '@shared/web'
 import { Icon } from '@/components/Icon'
+import { useDeskFacts } from '../lib/features'
+import {
+  biometricName,
+  biometricUnlockLabel,
+  enrolPasskey,
+  forgetPasskey,
+  listPasskeys,
+  platformPasskeyAvailable,
+  prepareEnrolment,
+  thisDevicePasskey,
+  type PreparedEnrolment
+} from '../lib/passkey'
 import { getVoiceAutoStop, setVoiceAutoStop } from '../lib/voice-prefs'
 import { useForge, type NotifySupport } from '../state'
 import { BottomSheet, SheetConfirm, SheetGlyph, SheetRow, SheetSection, SheetSwitch } from './BottomSheet'
+import { FingerprintGlyph } from './Connection'
 import { rustDeskLink } from './Workspace'
 import './MoreSheet.css'
 
@@ -50,9 +64,10 @@ export function MoreSheet({
   screen: MoreSheetAction
 }): ReactNode {
   const { state, actions } = useForge()
-  const [step, setStep] = useState<'list' | 'sign-out'>('list')
+  const [step, setStep] = useState<'list' | 'sign-out' | 'passkey-forget'>('list')
   const [autoStop, setAutoStop] = useState(getVoiceAutoStop)
   const [scale, setScale] = useTextScale()
+  const unlock = usePasskeyRow(open)
 
   // Every opening starts on the list, reading the stored preference afresh —
   // the composer may have changed nothing, but another tab may have.
@@ -70,12 +85,24 @@ export function MoreSheet({
     <BottomSheet
       open={open}
       onClose={onClose}
-      onBack={step === 'sign-out' ? () => setStep('list') : undefined}
-      label={step === 'sign-out' ? 'Sign out' : 'More'}
-      title={step === 'sign-out' ? null : undefined}
+      onBack={step !== 'list' ? () => setStep('list') : undefined}
+      label={step === 'sign-out' ? 'Sign out' : step === 'passkey-forget' ? biometricUnlockLabel() : 'More'}
+      title={step !== 'list' ? null : undefined}
       testId="more-sheet"
     >
-      {step === 'sign-out' ? (
+      {step === 'passkey-forget' ? (
+        <SheetConfirm
+          question={`Stop unlocking with your ${biometricName()} on this phone?`}
+          detail="The desktop forgets this phone's passkey at once. The PIN keeps working, and you can set it up again here."
+          confirmLabel="Forget on this phone"
+          onCancel={() => setStep('list')}
+          onConfirm={() => {
+            setStep('list')
+            void unlock.forget()
+          }}
+          testId="passkey-forget-confirm"
+        />
+      ) : step === 'sign-out' ? (
         <SheetConfirm
           question="Sign out of Forge on this phone?"
           detail="You will need your email and password to get back in, and this phone stops getting alerts until you do."
@@ -185,6 +212,17 @@ export function MoreSheet({
               }}
               testId="more-auto-stop"
             />
+            {unlock.row ? (
+              <SheetRow
+                icon={<FingerprintGlyph />}
+                label={biometricUnlockLabel()}
+                secondary={unlock.row.detail}
+                disabled={!unlock.row.onPress}
+                onClick={unlock.row.onPress === 'forget' ? () => setStep('passkey-forget') : unlock.row.onPress}
+                trailing={unlock.row.on ? <Icon name="check" size={18} /> : undefined}
+                testId="more-passkey"
+              />
+            ) : null}
           </SheetSection>
 
           <SheetSection>
@@ -201,6 +239,95 @@ export function MoreSheet({
       )}
     </BottomSheet>
   )
+}
+
+/* ------------------------------------------------------ fingerprint unlock */
+
+interface PasskeyRow {
+  on: boolean
+  detail: string
+  /** A handler, `'forget'` (the row opens the confirm step), or absent for a greyed row. */
+  onPress?: (() => void) | 'forget'
+}
+
+/**
+ * The "Fingerprint unlock" row: shown only when the desktop announces passkeys
+ * and has a PIN set (this socket had to answer one to get in). On: this phone's
+ * credential is in the desktop's list — tap to forget it. Off: tap to set up.
+ * Either change needs a socket opened with the PIN itself; one opened with the
+ * fingerprint says so instead of offering a button the desktop would refuse.
+ */
+function usePasskeyRow(open: boolean): { row: PasskeyRow | null; forget: () => Promise<void> } {
+  const { actions } = useForge()
+  const facts = useDeskFacts()
+  const shown = facts.features.includes(WEB_FEATURE_PASSKEY) && facts.unlockedWith !== 'none'
+  const [capable, setCapable] = useState<boolean | null>(null)
+  const [list, setList] = useState<{ mine: WebPasskeyInfo | null; canRegister: boolean } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const prepared = useRef<PreparedEnrolment | null>(null)
+
+  useEffect(() => {
+    if (!open || !shown) return
+    let gone = false
+    setList(null)
+    void (async () => {
+      const can = await platformPasskeyAvailable()
+      if (gone) return
+      setCapable(can)
+      const answer = await listPasskeys(actions.request)
+      if (gone) return
+      if (!answer.ok) {
+        setList({ mine: null, canRegister: false })
+        return
+      }
+      const mine = thisDevicePasskey(answer.passkeys)
+      setList({ mine, canRegister: answer.canRegister })
+      // Ready before the tap, so the tap reaches the biometric inside its gesture.
+      prepared.current = can && !mine && answer.canRegister ? await prepareEnrolment(actions.request) : null
+    })()
+    return () => {
+      gone = true
+    }
+  }, [open, shown, actions])
+
+  const setUp = async (): Promise<void> => {
+    setBusy(true)
+    const outcome = await enrolPasskey(actions.request, prepared.current)
+    prepared.current = null
+    setBusy(false)
+    if (outcome.ok) {
+      setList({ mine: thisDevicePasskey(outcome.passkeys), canRegister: outcome.canRegister })
+      return
+    }
+    if (!outcome.cancelled) actions.setNotice(outcome.message)
+    prepared.current = await prepareEnrolment(actions.request)
+  }
+
+  const forget = async (): Promise<void> => {
+    const mine = list?.mine
+    if (!mine) return
+    setBusy(true)
+    const outcome = await forgetPasskey(actions.request, mine.credentialId)
+    setBusy(false)
+    if (outcome.ok) {
+      setList({ mine: thisDevicePasskey(outcome.passkeys), canRegister: outcome.canRegister })
+      return
+    }
+    actions.setNotice(outcome.message)
+  }
+
+  if (!shown) return { row: null, forget }
+  if (capable === false) return { row: { on: false, detail: 'This phone cannot hold a passkey' }, forget }
+  if (!list || capable === null) return { row: { on: false, detail: 'Checking…' }, forget }
+  if (busy) return { row: { on: !!list.mine, detail: 'Waiting for the phone…' }, forget }
+  if (list.mine) {
+    return list.canRegister
+      ? { row: { on: true, detail: 'On — tap to forget on this phone', onPress: 'forget' }, forget }
+      : { row: { on: true, detail: 'On — unlock with the PIN to change this' }, forget }
+  }
+  return list.canRegister
+    ? { row: { on: false, detail: 'Off — tap to set up', onPress: () => void setUp() }, forget }
+    : { row: { on: false, detail: 'Off — unlock with the PIN to set this up' }, forget }
 }
 
 /* ------------------------------------------------------------- alerts */

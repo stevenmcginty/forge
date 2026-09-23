@@ -9,13 +9,16 @@ import {
 } from 'react'
 import { Icon } from '@/components/Icon'
 import type { MirrorButton, MirrorKey } from '@shared/mobile'
-import { PIN_MAX_DIGITS, PIN_MIN_DIGITS } from '@shared/web'
-import { askForScreen, sendMirrorInput, stopWatching, watchMirror } from '../lib/client'
+import { PIN_MAX_DIGITS, PIN_MIN_DIGITS, type WebPasskeyRequestOptions } from '@shared/web'
+import { askForScreen, askForScreenWithPasskey, sendMirrorInput, stopWatching, watchMirror } from '../lib/client'
+import { biometricButtonLabel, getPasskeyAssertion } from '../lib/passkey'
 import { fractionFor, keyFor, notchesFor } from '../lib/mirror-input'
 import { startTouchpad, type TouchpadHandle, type TouchpadState } from '../lib/touchpad'
 import { canPaintScreen, startScreen, type ScreenPainter } from '../lib/screen'
 import { useForge } from '../state'
 import { useMobile } from '../lib/mobile'
+import { useBackClose } from '../lib/back-stack'
+import { FingerprintGlyph } from './Connection'
 import './Mirror.css'
 import './Sheets.phone.css'
 
@@ -123,8 +126,11 @@ const ANSWER_MS = 15_000
 type Phase =
   /** Asked, and nothing has come back yet. */
   | { kind: 'asking' }
-  /** The desktop wants its unlock PIN, again, before it will show anything. */
-  | { kind: 'pin'; message: string }
+  /**
+   * The desktop wants its unlock PIN, again, before it will show anything —
+   * or this phone's fingerprint, when `passkey` carries a fresh challenge.
+   */
+  | { kind: 'pin'; message: string; passkey?: WebPasskeyRequestOptions }
   /** Frames are arriving, or are about to. */
   | { kind: 'live' }
   /** It is not happening, and this is why. */
@@ -179,6 +185,8 @@ function buttonOf(button: number): MirrorButton | null {
 export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
   const { state } = useForge()
   const desktopName = state.picture?.desktopName || 'the desktop'
+  // Android Back closes the mirror, the way its close button does.
+  useBackClose(true, onClose)
 
   const [phase, setPhase] = useState<Phase>({ kind: 'asking' })
   const [canControl, setCanControl] = useState(false)
@@ -186,6 +194,11 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
   /** What `lib/screen.ts` says is wrong with the picture, or '' when nothing is. */
   const [trouble, setTrouble] = useState('')
   const [pin, setPin] = useState('')
+  /** The fingerprint is out on the phone's own sheet right now. */
+  const [asking, setAsking] = useState(false)
+  /** The person turned the fingerprint down this time: the PIN becomes the lime answer. */
+  const [declined, setDeclined] = useState(false)
+  const pinRef = useRef<HTMLInputElement | null>(null)
   /**
    * Which way a pointer becomes the desk's. Chosen at mount by the only honest
    * signal there is — `(pointer: coarse)` is a phone or a tablet — and then by
@@ -558,7 +571,7 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
       onChunk: (chunk) => {
         painter.push({ key: chunk.key === true, timestamp: chunk.timestamp, data: bytesOf(chunk.data) })
       },
-      onStop: (reason, needsPin) => {
+      onStop: (reason, needsPin, passkey) => {
         window.clearTimeout(answerTimer.current)
         // Whatever else has happened, this page is not driving anything now.
         // The desk has stopped listening, and a mode left armed would send the
@@ -566,7 +579,8 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
         release()
         setCanControl(false)
         setTrouble('')
-        setPhase(needsPin ? { kind: 'pin', message: reason } : { kind: 'over', message: reason })
+        setDeclined(false)
+        setPhase(needsPin ? { kind: 'pin', message: reason, ...(passkey ? { passkey } : {}) } : { kind: 'over', message: reason })
       }
     })
 
@@ -603,6 +617,41 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
     // is a sentence rather than a spinner.
     armRef.current()
   }, [pin])
+
+  /**
+   * The fresh check answered with the fingerprint. A cancel or a failure is the
+   * PIN box, focused, with nothing shouted; the desktop's own refusal of a bad
+   * answer arrives as the same `mirror-stop` a wrong PIN earns.
+   */
+  const passkeyOptions = phase.kind === 'pin' ? phase.passkey : undefined
+  const askingRef = useRef(false)
+  const tryPasskey = useCallback(
+    async (auto: boolean): Promise<void> => {
+      if (!passkeyOptions || askingRef.current) return
+      askingRef.current = true
+      setAsking(true)
+      const began = performance.now()
+      const outcome = await getPasskeyAssertion(passkeyOptions)
+      askingRef.current = false
+      setAsking(false)
+      if (outcome.kind === 'ok') {
+        setPhase({ kind: 'asking' })
+        askForScreenWithPasskey(outcome.assertion)
+        armRef.current()
+        return
+      }
+      // Refused at once, unasked: the browser wants a tap. Leave the button lit.
+      if (auto && outcome.kind === 'cancelled' && performance.now() - began < 450) return
+      setDeclined(true)
+      pinRef.current?.focus()
+    },
+    [passkeyOptions]
+  )
+
+  // Offered first, once per fresh challenge, without waiting for a tap.
+  useEffect(() => {
+    if (passkeyOptions) void tryPasskey(true)
+  }, [passkeyOptions, tryPasskey])
 
   /* ------------------------------------------------------------- the input */
 
@@ -1386,7 +1435,21 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
             }}
           >
             <p className="mirror__note">{phase.message}</p>
+            {phase.passkey ? (
+              <button
+                type="button"
+                className="cta-btn mirror__passkey"
+                data-tone={declined ? 'quiet' : undefined}
+                data-testid="mirror-passkey"
+                disabled={asking}
+                onClick={() => void tryPasskey(false)}
+              >
+                <FingerprintGlyph />
+                {asking ? 'Waiting for the phone…' : biometricButtonLabel()}
+              </button>
+            ) : null}
             <input
+              ref={pinRef}
               className="gate__input"
               value={pin}
               // Digits only and never longer than the protocol allows, exactly
@@ -1398,9 +1461,14 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
               autoComplete="one-time-code"
               maxLength={PIN_MAX_DIGITS}
               aria-label="The desktop's unlock PIN"
-              autoFocus
+              autoFocus={!phase.passkey}
             />
-            <button type="submit" className="cta-btn" disabled={pin.length < PIN_MIN_DIGITS}>
+            <button
+              type="submit"
+              className="cta-btn"
+              data-tone={phase.passkey && !declined ? 'quiet' : undefined}
+              disabled={pin.length < PIN_MIN_DIGITS}
+            >
               Show me the screen
             </button>
           </form>

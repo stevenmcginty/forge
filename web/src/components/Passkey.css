@@ -1,0 +1,134 @@
+/*
+ * The fingerprint / Face ID pieces of the doorway and the offer sheet.
+ *
+ * One lime button per screen: while a fingerprint is on offer it is the lime
+ * one and "Unlock" steps back to a quiet outline; after a cancel they trade
+ * emphasis (never position). Tokens from web/src/phone-tokens.css on a phone;
+ * the desk's gate keeps its own theme tokens.
+ */
+
+.gate__passkey {
+  gap: var(--s-3, 8px);
+}
+
+.gate__passkey .fingerprint-glyph {
+  flex: none;
+}
+
+/* "or the PIN" — a quiet line between the two ways in. */
+.gate__or {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+/* At the desk: the quiet variant is an outline in the theme's ink. */
+.gate__go[data-tone='quiet'] {
+  color: var(--text-primary);
+  background: transparent;
+  border-color: var(--line-strong);
+}
+
+.gate__go[data-tone='quiet']:hover:not(:disabled) {
+  background: var(--bg-hover);
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------------- on a phone */
+
+.app[data-shell='gate'] .gate__passkey {
+  gap: var(--p-2);
+}
+
+.app[data-shell='gate'] .gate__or {
+  margin: var(--p-1) 0 calc(-1 * var(--p-1));
+  font-size: var(--p-t-small);
+  color: var(--p-ink-3);
+}
+
+.app[data-shell='gate'] .gate__go[data-tone='quiet'],
+.app[data-shell='gate'] .gate__go[data-tone='quiet']:hover:not(:disabled) {
+  color: var(--p-ink);
+  background: transparent;
+  border-color: var(--p-line-strong);
+}
+
+.app[data-shell='gate'] .gate__go[data-tone='quiet']:active:not(:disabled) {
+  background: var(--p-press);
+}
+
+/* Disabled and quiet: still an outline, plainly a button, plainly not ready. */
+.app[data-shell='gate'] .gate__go[data-tone='quiet']:disabled {
+  opacity: 0.45;
+  color: var(--p-ink-2);
+  background: transparent;
+  border-color: var(--p-line-strong);
+}
+
+/* ------------------------------------------------------ the offer sheet */
+
+.passkey-offer {
+  display: grid;
+  gap: var(--p-3);
+  padding: var(--p-2) var(--p-3) var(--p-3);
+}
+
+.passkey-offer__actions {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: var(--p-2);
+}
+
+.passkey-offer__actions .bsbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--p-2);
+}
+
+.passkey-offer__actions .bsbtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.passkey-offer__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--p-2);
+  margin: 0;
+  padding: var(--p-3);
+  font-size: var(--p-t-label);
+  line-height: 1.45;
+  color: var(--p-ink);
+  background: var(--p-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--p-danger) 40%, transparent);
+  border-radius: var(--p-r-row);
+}
+
+.passkey-offer__error .alert-glyph {
+  flex: none;
+  margin-top: 1px;
+  color: var(--p-danger);
+}
+
+/* ------------------------------------------------ the screen's fresh check */
+
+.mirror__passkey {
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  gap: var(--s-3, 8px);
+}
+
+.mirror__card .cta-btn[data-tone='quiet'] {
+  color: var(--text-primary);
+  background: transparent;
+  border-color: var(--line-strong);
+}
+
+.mirror__card .cta-btn[data-tone='quiet']:hover:not(:disabled) {
+  background: var(--bg-hover);
+  box-shadow: none;
+}

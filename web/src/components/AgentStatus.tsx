@@ -4,7 +4,9 @@ import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { badgeColor, isShellProfile } from '@/lib/agents'
 import type { PaneStatus, PermissionMode } from '@/lib/rich'
+import { useMobile } from '../lib/mobile'
 import type { PaneFace } from '../lib/pane-status'
+import { StatusLine } from './StatusLine'
 
 /** What the face button offers, named by the face it would give you. */
 const VIEW_TITLE: Record<PaneFace, string> = {
@@ -76,6 +78,12 @@ export function AgentStatus({
   chip?: ReactNode
 }): ReactNode {
   const [open, setOpen] = useState(false)
+  const mobile = useMobile()
+  // The phone draws its own line: a view switch, the pane's condition in words
+  // and its context ring, and a sheet for the rest. See StatusLine.
+  if (mobile) {
+    return <StatusLine profile={profile} status={status} live={live} view={view} onFlipView={onFlipView} chip={chip} />
+  }
   const shell = isShellProfile(profile)
   const accent = badgeColor(profile)
   const mode = status?.mode ?? 'unknown'

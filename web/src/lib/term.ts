@@ -109,6 +109,16 @@ export interface TermHost {
    * nothing at all.
    */
   hold: (on: boolean) => void
+  /**
+   * Set this browser's own type size and refit to it — one `resize` at most,
+   * and none when the new size lands on the same grid. The phone's text size.
+   */
+  setFontSize: (px: number) => void
+  /**
+   * The rows on screen right now as plain text — what "Copy screen" copies.
+   * Wrapped rows are joined back into their lines, trailing blanks dropped.
+   */
+  screenText: () => string
   write: (data: string, after?: () => void) => void
   /**
    * Wipe the screen and scrollback and paint a catch-up buffer over it, ordered
@@ -591,6 +601,12 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
 
   if (!options.readOnly) term.onData(options.onData)
 
+  /**
+   * This browser's own type size. Starts as `options.fontSize` and moves only
+   * through `setFontSize` — the phone's A− / A+ — which refits once rather than
+   * rebuilding the terminal and paying for a full replay.
+   */
+  let baseFont = options.fontSize
   let lastCols = 0
   let lastRows = 0
   /** Whether the grid is being held. See `hold` on TermHost. */
@@ -639,7 +655,7 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
    * the second branch finds nothing to change and costs a comparison.
    *
    * The scale comes out of the two grids rather than out of any measurement of
-   * a character: `natural` is what this box holds at `options.fontSize`, so
+   * a character: `natural` is what this box holds at `baseFont`, so
    * `natural.cols / desired.cols` is exactly the factor the type has to come
    * down by for `desired.cols` of them to fit the same width. Never *up*,
    * because a desk pane narrower than this window is better letterboxed than
@@ -651,7 +667,7 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     // it, rather than a hand-rolled resize that would be the same call minus
     // whatever else it does on the way.
     if (!desired) {
-      if (term.options.fontSize !== options.fontSize) term.options.fontSize = options.fontSize
+      if (term.options.fontSize !== baseFont) term.options.fontSize = baseFont
       try {
         fitAddon.fit()
       } catch {
@@ -661,7 +677,7 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     }
     if (desired.cols < 1 || desired.rows < 1) return
     const scale = natural ? Math.min(natural.cols / desired.cols, natural.rows / desired.rows) : 1
-    const size = scale >= 1 ? options.fontSize : Math.max(MIN_FONT_PX, Math.floor(options.fontSize * scale))
+    const size = scale >= 1 ? baseFont : Math.max(MIN_FONT_PX, Math.floor(baseFont * scale))
     if (term.options.fontSize !== size) term.options.fontSize = size
     if (term.cols === desired.cols && term.rows === desired.rows) return
     try {
@@ -679,11 +695,11 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
 
   // The finger, which is the only pointer a phone has, and the wheel on a
   // desktop browser. See `enableTouchScroll`. The size handed over is the one
-  // currently *drawn* rather than `options.fontSize`, because `apply` above may
+  // currently *drawn* rather than `baseFont`, because `apply` above may
   // be shrinking the desktop's grid into this box — and a row is as tall as
   // the type it is set in.
   const scrollCarry: ScrollCarry = { px: 0 }
-  const rowHeightOf = (): number => rowHeight(term, term.options.fontSize ?? options.fontSize)
+  const rowHeightOf = (): number => rowHeight(term, term.options.fontSize ?? baseFont)
   const releaseTouch = enableTouchScroll(
     container,
     term,
@@ -720,8 +736,8 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     // of here from this line on owes the screen an `apply` to put it back: a
     // pane following a desk grid at 8px would otherwise be left drawn at the
     // browser's own 13px, overflowing a box it has already been shrunk to fit.
-    const borrowed = term.options.fontSize !== options.fontSize
-    if (borrowed) term.options.fontSize = options.fontSize
+    const borrowed = term.options.fontSize !== baseFont
+    if (borrowed) term.options.fontSize = baseFont
     let proposed
     try {
       proposed = fitAddon.proposeDimensions()
@@ -931,8 +947,34 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
         holding = false
         held = null
         anchor()
-        fit()
+        // A box still on the move — a keyboard that is slower to close than
+        // HOLD_RELEASE_MS — has a settle pending, and that settle fits at the
+        // shape that stays. Fitting here too would announce a shape halfway
+        // through the slide: one repaint, and on the normal buffer one copy of
+        // the screen, for nothing.
+        if (!settling) fit()
       }, HOLD_RELEASE_MS)
+    },
+    setFontSize: (px) => {
+      if (!(px > 0) || px === baseFont) return
+      baseFont = px
+      // Measured afresh at the new size; the grid it lands on is the wish, and
+      // the wish is what the desktop is told.
+      natural = null
+      fit()
+    },
+    screenText: () => {
+      const buffer = term.buffer.active
+      const rows: BufferRow[] = []
+      const top = buffer.viewportY
+      for (let y = top; y < top + term.rows; y++) {
+        const line = buffer.getLine(y)
+        if (!line) continue
+        rows.push({ text: line.translateToString(true), wrapped: line.isWrapped })
+      }
+      // The screen's first row may continue one above it; `joinBufferRows`
+      // starts a line there anyway, which is what a copy of the screen wants.
+      return joinBufferRows(rows).replace(/\s+$/, '')
     },
     write: (data, after) => {
       if (after) term.write(data, after)

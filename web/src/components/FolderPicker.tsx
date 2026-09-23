@@ -54,14 +54,25 @@ type ParentKey = 'desktop' | 'documents' | 'projectsroot'
 /** Which screen of the popover is up. */
 type View = 'choose' | 'create' | 'browse'
 
+/**
+ * What was just put on the rail, as far as this side can name it: the id when
+ * the project was already there, otherwise the folder or the name that was
+ * sent. The desktop answers `ok` without an id, so the caller finds the new
+ * project in the `projects` push that follows.
+ */
+export type AddedProject = { projectId: string } | { path: string } | { name: string }
+
 export function FolderPicker({
   anchor,
   open,
-  onClose
+  onClose,
+  onAdded
 }: {
   anchor: HTMLElement | null
   open: boolean
   onClose: () => void
+  /** A project is on the rail because of this picker. The phone uses it to go straight on to an agent. */
+  onAdded?: (added: AddedProject) => void
 }): ReactNode {
   const { state, actions } = useForge()
   const mobile = useMobile()
@@ -176,6 +187,7 @@ export function FolderPicker({
       actions.selectProject(already.id)
       actions.setNotice(`${already.name} is already in the rail.`)
       onClose()
+      onAdded?.({ projectId: already.id })
       return
     }
     setBusy(true)
@@ -191,6 +203,7 @@ export function FolderPicker({
         // last two segments are the part anybody reads.
         actions.setNotice(`Added ${shortPath(path)} on the desktop.`)
         onClose()
+        onAdded?.({ path })
         return
       }
       setError(result.kind === 'failed' ? result.message : 'That folder could not be added.')
@@ -211,6 +224,7 @@ export function FolderPicker({
         // `projects` push is what redraws this page.
         actions.setNotice(`Created ${leaf} on the desktop.`)
         onClose()
+        onAdded?.({ name: leaf })
         return
       }
       if (result.kind === 'project-exists') {

@@ -4225,16 +4225,20 @@ button.astatus__mode:not(:disabled):hover {
   display: none;
 }
 
-[data-mobile] .pane[data-view='feed'] .feed__scroll,
-[data-mobile] .pane[data-view='chat'] .chatview__scroll {
-  padding-top: 52px;
-  scroll-padding-top: 52px;
-}
-
 /*
- * The terminal face of the same pane: the pill floats at the same corner, so
- * the grid starts below it — the same 52px the feed reserves — rather than
- * covering the top rows.
+ * No band at the top of a pane any more. It was kept for a floating header
+ * whose buttons have all moved — the view switch and the pane's condition
+ * (Waiting / Reconnecting / Frozen) live in the status line now — so Chat and
+ * Cards start at the top of the stage and the terminal's first row is its
+ * first row.
+ *
+ * ## The keys' band, at the bottom instead
+ *
+ * The Terminal view's keys (Esc, Tab, Ctrl, the arrows, Enter) used to take
+ * the status line's row, which hid the view switch, the model chip and the
+ * context ring on exactly the view that needs a way back. They now float above
+ * the dock (`.composer__keys` below) and lie over the bottom 52px of the
+ * stage — so the terminal keeps that band free, in every face.
  *
  * On `.xterm`, not on `.pane__terminal`, and the difference is the whole of
  * the rule. FitAddon reads `parseInt(getComputedStyle(container).height)` and
@@ -4243,26 +4247,47 @@ button.astatus__mode:not(:disabled):hover {
  * container's resolved height is its *border* box, padding included. Measured
  * in scripts/viewtoggle-check.mjs: at `padding-top: 52px` and at `137px` on the
  * container it still reported the same height. So a padding on the container
- * never moved the proposed grid at all: the rows were sized for the whole box,
- * drawn 52px lower than the fit assumed, and the bottom three or so ran off
- * the stage — which on an alt-screen TUI is its prompt and its footer. Padding
- * on `.xterm` is the one the addon was written to honour, so the grid is now
- * exactly the rows that fit under the pill.
+ * never moves the proposed grid at all: the rows are sized for the whole box
+ * and the bottom ones run under the keys. Padding on `.xterm` is the one the
+ * addon was written to honour, so the grid is exactly the rows above the keys.
  *
- * Held in *both* faces, though only one of them can show it: this box is what
+ * Held in *every* face, though only one of them can show it: this box is what
  * FitAddon measures, the rows it works out are sent to the desktop as a real
  * PTY resize, and the desktop answers a resize by jiggling the row count to
  * force a repaint (`resizeForViewer` in electron/pty-host.ts). Claude Code
  * paints the normal buffer, so every one of those repaints lands in the
  * scrollback as another copy of the screen instead of overwriting it. A
  * padding that came and went with the view flip would mint duplicate screens
- * under a thumb, and in cards view the terminal is `opacity: 0` and nothing
- * can be seen there anyway — so reserving the space costs nothing and buys a
- * grid that cannot depend on which face is up.
+ * under a thumb, and in Chat and Cards the terminal is `opacity: 0` and
+ * nothing can be seen there anyway — so reserving the band costs nothing and
+ * buys a grid that cannot depend on which face is up. Every pane, shells too:
+ * a shell shows the keys as well.
+ *
+ * Landscape has no band: there the keys sit inside the status line's own row
+ * (see the `max-height: 500px` block), which is the same height in every view.
  */
-.app[data-mobile] .pane[data-kind='agent'] .pane__terminal .xterm,
-[data-mobile] .pane[data-kind='agent'] .pane__terminal .xterm {
-  padding-top: 52px;
+.app[data-mobile] .pane .pane__terminal .xterm {
+  padding-bottom: calc(52px + var(--s-2));
+}
+
+/*
+ * The keys float: out of the dock's flow, pinned to its top edge, drawn over
+ * the band above. So the dock is the status line plus the box in every view —
+ * the keys can come and go with the view without the terminal's box moving
+ * by a pixel (scripts/viewtoggle-check.mjs).
+ */
+.app[data-mobile] .session-composer {
+  position: relative;
+}
+
+.app[data-mobile] .session-composer .composer__keys {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  z-index: 1;
+  background: var(--p-bg);
+  box-shadow: inset 0 1px 0 var(--p-line);
 }
 
 /*
@@ -4555,8 +4580,10 @@ button.astatus__mode:not(:disabled):hover {
 
 /*
  * Landscape on a phone: height is the scarce axis, and a third of it was
- * chrome. The status strip folds away — the pane header already says who is
- * running — and the two pill rows give back what 40px targets took.
+ * chrome. The status line stays — it is the only way between Chat, Cards and
+ * Terminal — but a little shorter, and in Terminal view the keys join its row
+ * rather than floating over a band of their own. The two pill rows give back
+ * what 40px targets took.
  *
  * 500px, not 430px: iPhone 16 Pro Max is 440 CSS px tall in landscape, and
  * the previous 430px fold missed it — the one phone that already needed a
@@ -4564,9 +4591,15 @@ button.astatus__mode:not(:disabled):hover {
  * in landscape too.
  */
 @media (max-height: 500px) {
-  .app[data-mobile] .astatus {
-    display: none;
+  .app[data-mobile] .session-composer .astatus.pstat {
+    height: 48px;
   }
+
+  .app[data-mobile] .session-composer .pstat .pstat__row {
+    height: 48px;
+    min-height: 48px;
+  }
+
 
   .app[data-mobile] .ptop {
     height: calc(var(--p-hit) + env(safe-area-inset-top, 0px));
@@ -5302,5 +5335,147 @@ button.astatus__mode:not(:disabled):hover {
   .popover[aria-label='Hand off to'] .popover__row {
     min-height: 44px;
     border-radius: var(--r-lg);
+  }
+}
+
+/* ======================================================= the phone's pane
+ *
+ * Typing mode, the landscape edges, the terminal's scrollbar and the text
+ * size. The status line itself is StatusLine.css.
+ */
+
+/*
+ * Typing mode: while the composer's box has the caret, the tab strip, the pane
+ * chips and the status line fold away, and the conversation gets their height.
+ * Blur, and they come back. Heights, not `display`, so the fold is a motion —
+ * and `--p-dur` is 0 under reduced motion, so there it is a cut.
+ *
+ * The terminal does not see any of this as a resize: PaneView holds its grid
+ * from focus to blur (`hold` in lib/term.ts), so the fold and the keyboard's
+ * slide are drawn against the bottom of the box rather than sent to the PTY.
+ */
+.app[data-mobile] .tabstrip {
+  transition:
+    height var(--p-dur) var(--p-ease),
+    opacity var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .mpanes__chips {
+  max-height: 64px;
+  transition:
+    max-height var(--p-dur) var(--p-ease),
+    padding var(--p-dur) var(--p-ease),
+    opacity var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile]:has(.session-composer .composer__input:focus) .tabstrip {
+  height: 0;
+  overflow: hidden;
+  opacity: 0;
+  border-bottom-width: 0;
+}
+
+.app[data-mobile]:has(.session-composer .composer__input:focus) .mpanes__chips {
+  max-height: 0;
+  padding-block: 0;
+  overflow: hidden;
+  opacity: 0;
+  border-bottom-width: 0;
+}
+
+.app[data-mobile]:has(.session-composer .composer__input:focus) .astatus.pstat {
+  height: 0;
+  opacity: 0;
+}
+
+/*
+ * Landscape: the Terminal view's keys join the status line's row, at its right
+ * end, so the terminal needs no band for them and the row is the same height
+ * in every view. "Landscape" is short *and* wide: a portrait phone with the
+ * keyboard up is short too, but 390px has no room for the keys beside the view
+ * switch, so there they float above the dock as they do upright.
+ */
+@media (max-height: 500px) and (min-width: 600px) {
+  .app[data-mobile] .pane .pane__terminal .xterm {
+    padding-bottom: var(--s-2);
+  }
+
+  .app[data-mobile] .session-composer .composer__keys {
+    top: 0;
+    right: var(--p-3);
+    bottom: auto;
+    left: auto;
+    width: 352px;
+    height: 48px;
+    padding: 2px 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .app[data-mobile] .session-composer[data-view='term'] .pstat .pstat__row {
+    padding-right: calc(352px + var(--p-3) * 2);
+  }
+
+  /* Typing mode keeps this row in Terminal view: a command typed in the box
+     still wants Esc and the arrows beside it. */
+  .app[data-mobile]:has(.session-composer .composer__input:focus) .session-composer[data-view='term'] .astatus.pstat {
+    height: 48px;
+    opacity: 1;
+  }
+}
+
+/* A landscape too narrow for the chip beside the keys; Chat and Cards have it. */
+@media (max-height: 500px) and (min-width: 600px) and (max-width: 799px) {
+  .app[data-mobile] .session-composer[data-view='term'] .pstat .mchip {
+    display: none;
+  }
+}
+
+/*
+ * Landscape puts the notch or the punch-hole on a long edge. The top and the
+ * bottom insets were already honoured; these are the other two, so the title
+ * bar, the tabs and the box edge clear the cut-out.
+ */
+.app[data-mobile] {
+  padding-inline: env(safe-area-inset-left, 0px) env(safe-area-inset-right, 0px);
+}
+
+/*
+ * The terminal's scrollbar on a phone is a grey thumb over the last column
+ * that a finger cannot grab anyway — a drag anywhere scrolls the scrollback
+ * (`enableTouchScroll` in lib/term.ts). FitAddon already leaves its width free,
+ * so hiding it moves no column.
+ */
+.app[data-mobile] .xterm .xterm-scrollable-element > .scrollbar {
+  display: none;
+}
+
+/*
+ * Text size (A− / A+ in the ⋯ sheet): the conversation's reading size follows
+ * it. The terminal's type follows it too, in PaneView, where a change refits
+ * the grid once.
+ */
+.app[data-mobile] .pane__chat .chatview {
+  --chat-read: calc(16px * var(--p-text-scale, 1));
+}
+
+/*
+ * Terminal view's "Chat" button, at the head of the box's row, was the only
+ * way back to the conversation while the keys had the status line's place.
+ * The status line is back in every view with all three faces on it, so where
+ * that switch is drawn the button is a second "Chat" a thumb's width away.
+ */
+.app[data-mobile] .session-composer:has(.pseg) .composer__face {
+  display: none;
+}
+
+/* The toast clears the Terminal view's keys where they float over the display. */
+.app[data-mobile] .app__display:has(+ .session-composer[data-view='term']) > .notice {
+  bottom: calc(52px + var(--p-3));
+}
+
+@media (max-height: 500px) and (min-width: 600px) {
+  .app[data-mobile] .app__display:has(+ .session-composer[data-view='term']) > .notice {
+    bottom: var(--p-3);
   }
 }

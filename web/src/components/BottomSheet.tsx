@@ -10,6 +10,7 @@ import {
   type ReactNode
 } from 'react'
 import { createPortal } from 'react-dom'
+import { useBackClose } from '../lib/back-stack'
 import './BottomSheet.css'
 
 /**
@@ -30,9 +31,10 @@ import './BottomSheet.css'
  *
  * Every open sheet sits on a stack, and `closeTopSheet()` pops the newest one
  * the way Esc does — through its `onBack` when it has one (a sheet showing a
- * confirm step steps back to its list), through `onClose` otherwise. That is
- * the whole of the Android Back contract: a later change pushes a history entry
- * while `openSheetCount() > 0` and calls `closeTopSheet()` on `popstate`.
+ * confirm step steps back to its list), through `onClose` otherwise. Android
+ * Back does the same through `useBackClose` (lib/back-stack.ts): every open
+ * sheet holds one history entry, and the system Back pops the newest sheet
+ * rather than leaving the app.
  */
 
 interface SheetEntry {
@@ -101,6 +103,9 @@ export function BottomSheet({
   backRef.current = onBack ?? onClose
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+
+  // Android Back: the same step Esc takes.
+  useBackClose(open, () => backRef.current())
 
   useEffect(() => {
     if (open) {

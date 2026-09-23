@@ -1,0 +1,563 @@
+/*
+ * The phone's project sheet (ProjectSheet.tsx). Tokens from phone-tokens.css,
+ * which `.app[data-mobile]` carries and this layer sits inside.
+ *
+ * A full-height panel from the left edge — the side the ☰ is on — on the same
+ * raised surface, curve and scrim as the bottom sheets, so the two read as one
+ * family. Rows are the sheets' 56px rows; the one project on screen is a
+ * pressed row with a ringed dot (a shape and a weight, not a hue). Nothing in
+ * here is lime: nothing in a list of projects is "act here". Amber is only the
+ * "!" of a waiting pane and a conflicted file, and both carry the mark as well.
+ */
+
+.pjs-layer {
+  position: fixed;
+  inset: 0;
+  /* Under the bottom sheets (+5), which open on top of it. */
+  z-index: calc(var(--z-popover) + 2);
+  font-family: var(--p-font);
+  color: var(--p-ink);
+}
+
+.pjs-layer[data-state='closed'] {
+  pointer-events: none;
+}
+
+.pjs__scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--p-scrim);
+  opacity: 0;
+  transition: opacity var(--p-dur-sheet) var(--p-ease);
+}
+
+.pjs-layer[data-state='open'] .pjs__scrim {
+  opacity: 1;
+}
+
+.pjs {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  /* A 44px strip of the app stays in view: context, and somewhere to tap out. */
+  width: min(360px, calc(100% - 44px));
+  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  background: var(--p-raised);
+  border-right: 1px solid var(--p-line);
+  border-radius: 0 var(--p-r-sheet) var(--p-r-sheet) 0;
+  box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35);
+  transform: translateX(-100%);
+  transition: transform var(--p-dur-sheet) var(--p-ease-sheet);
+  outline: none;
+  overflow: hidden;
+  /* Vertical scrolling stays the browser's; a sideways pull is the close gesture. */
+  touch-action: pan-y;
+}
+
+.pjs-layer[data-state='open'] .pjs {
+  transform: translateX(0);
+}
+
+.pjs-layer[data-dragging='true'] .pjs {
+  transition: none;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.pjs__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--p-1);
+  min-height: 60px;
+  padding: var(--p-2) var(--p-2) var(--p-1) var(--p-5);
+}
+
+.pjs__head:has(> .pjs__icon-btn:first-child) {
+  padding-left: var(--p-1);
+}
+
+.pjs__title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--p-2);
+  margin: 0;
+  font-size: var(--p-t-title);
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--p-ink);
+}
+
+.pjs__count {
+  font-size: var(--p-t-chrome);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--p-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.pjs__icon-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--p-hit);
+  height: var(--p-hit);
+  padding: 0;
+  color: var(--p-ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.pjs__icon-btn:active {
+  background: var(--p-press);
+}
+
+.pjs__icon-btn:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+/* ------------------------------------------------------------------ body */
+
+.pjs__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--p-2) var(--p-6);
+  animation: pjs-page-in var(--p-dur) var(--p-ease);
+}
+
+/* Pages come in from the right; the list comes back from the left. */
+.pjs__body[data-page='main'] {
+  animation-name: pjs-page-back;
+}
+
+@keyframes pjs-page-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+
+@keyframes pjs-page-back {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
+
+.pjs__body > .bssec {
+  margin-top: var(--p-3);
+  padding-top: var(--p-1);
+  border-top: 1px solid var(--p-line);
+}
+
+.pjs .bsbtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- filter */
+
+.pjs__filter {
+  display: flex;
+  align-items: center;
+  gap: var(--p-2);
+  height: var(--p-hit);
+  margin: var(--p-1) var(--p-2) var(--p-2);
+  padding: 0 var(--p-3);
+  color: var(--p-ink-3);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-row);
+  transition: border-color var(--p-dur-fast) var(--p-ease);
+}
+
+.pjs__filter:focus-within {
+  border-color: var(--p-ink-2);
+}
+
+.pjs__filter-icon {
+  flex: none;
+}
+
+.pjs__filter-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  /* 16px, so a phone does not zoom the page to type in it. */
+  font: 400 var(--p-t-body) / 1.2 var(--p-font);
+  color: var(--p-ink);
+  background: transparent;
+  border: 0;
+  outline: none;
+  user-select: text;
+}
+
+.pjs__filter-input::placeholder {
+  color: var(--p-ink-3);
+}
+
+.pjs__filter-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* ---------------------------------------------------------- project rows */
+
+.pjrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: var(--p-row);
+  border-radius: var(--p-r-row);
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.pjrow + .pjrow {
+  margin-top: 2px;
+}
+
+/* The project on screen: a pressed row, a ringed dot, a heavier name. */
+.pjrow[data-current='true'] {
+  background: var(--p-press);
+}
+
+.pjrow__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  min-height: var(--p-row);
+  padding: var(--p-2) var(--p-1) var(--p-2) var(--p-4);
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-row) 0 0 var(--p-r-row);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pjrow:has(> .pjrow__main:active) {
+  background: var(--p-hover);
+}
+
+.pjrow[data-current='true']:has(> .pjrow__main:active) {
+  background: color-mix(in srgb, var(--p-press) 92%, var(--p-ink));
+}
+
+.pjrow__main:focus-visible,
+.pjrow__more:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+.pjrow__dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pj-color, var(--p-ink-3));
+}
+
+.pjrow[data-current='true'] .pjrow__dot {
+  box-shadow:
+    0 0 0 3px var(--p-press),
+    0 0 0 4.5px var(--pj-color, var(--p-ink-3));
+}
+
+.pjrow__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pjrow__name,
+.pjrow__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pjrow__name {
+  font-size: var(--p-t-body);
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--p-ink);
+}
+
+.pjrow[data-current='true'] .pjrow__name {
+  font-weight: 650;
+}
+
+.pjrow__path {
+  font: 400 var(--p-t-mono) / 1.35 var(--p-mono);
+  color: var(--p-ink-3);
+}
+
+.pjrow__panes {
+  flex: none;
+  font-size: var(--p-t-small);
+  color: var(--p-ink-2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A pane here is waiting: an amber disc with the mark in it. */
+.pjrow__ask {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  font: 800 var(--p-t-small) / 1 var(--p-font);
+  color: var(--p-attn-ink);
+  background: var(--p-attn);
+  border-radius: 50%;
+}
+
+.pjrow__more {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--p-hit);
+  height: var(--p-hit);
+  margin-right: var(--p-1);
+  padding: 0;
+  color: var(--p-ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.pjrow__more:active {
+  background: var(--p-hover);
+}
+
+@media (hover: hover) {
+  .pjrow:hover {
+    background: var(--p-hover);
+  }
+
+  .pjrow[data-current='true']:hover {
+    background: var(--p-press);
+  }
+}
+
+/* ------------------------------------------------------ add a project */
+
+.pjs__add {
+  margin-top: var(--p-1);
+}
+
+.pjs__add-ring {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--p-line-strong);
+  border-radius: 50%;
+}
+
+/* ------------------------------------------------------------------ git */
+
+.pjgit__head {
+  width: 100%;
+}
+
+.pjgit__chev svg {
+  transition: transform var(--p-dur) var(--p-ease);
+}
+
+.pjgit[data-open='true'] .pjgit__chev svg {
+  transform: rotate(180deg);
+}
+
+.pjgit__sync {
+  padding: var(--p-1) var(--p-3) var(--p-2);
+}
+
+/* Fetch / Pull / Push: one control, three equal 44px segments. */
+.pjseg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  height: var(--p-hit);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-row);
+  overflow: hidden;
+}
+
+.pjseg__btn {
+  min-width: 0;
+  padding: 0 var(--p-1);
+  font: 500 var(--p-t-chrome) / 1 var(--p-font);
+  color: var(--p-ink);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.pjseg__btn + .pjseg__btn {
+  border-left: 1px solid var(--p-line-strong);
+}
+
+.pjseg__btn:disabled {
+  color: var(--p-ink-3);
+  cursor: default;
+}
+
+.pjseg__btn:active:not(:disabled),
+.pjseg__btn[aria-busy='true'] {
+  background: var(--p-press);
+}
+
+.pjseg__btn:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+.pjgit__hint {
+  margin: var(--p-2) var(--p-1) 0;
+  font-size: var(--p-t-small);
+  line-height: 1.35;
+  color: var(--p-ink-3);
+}
+
+/* -------------------------------------------------------- changes page */
+
+.pjs__lede {
+  margin: 0 var(--p-3) var(--p-2);
+  font-size: var(--p-t-label);
+  line-height: 1.4;
+  color: var(--p-ink-2);
+}
+
+.pjs__lede .mono {
+  font-family: var(--p-mono);
+  font-size: var(--p-t-mono);
+  color: var(--p-ink);
+}
+
+.pjchg__group + .pjchg__group {
+  margin-top: var(--p-1);
+}
+
+.pjchg__dir {
+  padding: var(--p-3) var(--p-3) var(--p-1);
+  font: 400 var(--p-t-mono) / 1.35 var(--p-mono);
+  color: var(--p-ink-3);
+  overflow-wrap: anywhere;
+}
+
+.pjchg__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The status letter: its shape is the meaning; only a conflict is also amber. */
+.pjchg__letter {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 var(--p-1);
+  font: 650 var(--p-t-mono) / 1 var(--p-mono);
+  color: var(--p-ink-2);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  border-radius: 8px;
+}
+
+.pjchg__letter[data-letter='U'] {
+  color: var(--p-attn-ink);
+  background: var(--p-attn);
+  border-color: var(--p-attn);
+}
+
+.pjcommit {
+  display: grid;
+  gap: var(--p-2);
+  margin: var(--p-4) var(--p-3) 0;
+  padding-top: var(--p-4);
+  border-top: 1px solid var(--p-line);
+}
+
+.pjcommit .psheet__error {
+  margin: 0;
+}
+
+/* ------------------------------------------------- skills and commands */
+
+.pjs__slash {
+  display: inline;
+  overflow-wrap: anywhere;
+}
+
+.pjs__slash-mark {
+  margin-right: 1px;
+  color: var(--p-ink-3);
+}
+
+.pjs__args {
+  margin-left: var(--p-2);
+  font: 400 var(--p-t-mono) / 1.3 var(--p-mono);
+  color: var(--p-ink-3);
+}
+
+.pjs__clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------ remove confirm */
+
+/* "Its 3 open panes will close." — the cost, on its own line in full ink. */
+.pjs__consequence {
+  display: block;
+  margin-top: var(--p-2);
+  font-weight: 600;
+  color: var(--p-ink);
+}
+
+/* ------------------------------------------------------------------ misc */
+
+.pjs__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Stacked, so "Remove from Forge" reads on one line; Cancel sits nearest the thumb. */
+.pjs__confirm-actions {
+  grid-template-columns: 1fr;
+}

@@ -1,0 +1,446 @@
+/*
+ * The phone's status line (StatusLine.tsx). Tokens from phone-tokens.css.
+ *
+ * One 52px row under the conversation, in every view: the view switch on the
+ * left, what the pane is on the right. Selectors carry `.pstat` so they outrank
+ * the strip's older phone rules (styles.css, ModelChip.css, Composer.css) in
+ * whatever order the sheets land.
+ */
+
+.app[data-mobile] .astatus.pstat {
+  flex: none;
+  height: 52px;
+  overflow: hidden;
+  /* Typing mode folds the line away and back; see styles.css. */
+  transition:
+    height var(--p-dur) var(--p-ease),
+    opacity var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .pstat .pstat__row {
+  display: flex;
+  align-items: center;
+  gap: var(--p-2);
+  box-sizing: border-box;
+  height: 52px;
+  min-height: 52px;
+  padding: 0 var(--p-3);
+  overflow: hidden;
+  /* Vertical drags still scroll the page; horizontal ones are the tab swipe. */
+  touch-action: pan-y;
+  cursor: default;
+}
+
+.pstat__gap {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* -------------------------------------------------------- view switch
+ *
+ * Three labelled segments in a quiet track. Each segment is a full 44px hit;
+ * the face drawn inside it is 36px, and the face on screen is raised — a
+ * surface and a line, never a colour — with its label in full ink.
+ */
+
+.pseg {
+  flex: none;
+  display: flex;
+  height: var(--p-hit);
+  border-radius: var(--p-r-row);
+  background: var(--p-surface);
+  box-shadow: inset 0 0 0 1px var(--p-line);
+}
+
+.pseg__btn {
+  display: grid;
+  place-items: center;
+  min-width: var(--p-hit);
+  height: var(--p-hit);
+  margin: 0;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--p-ink-2);
+  font: 600 var(--p-t-small) / 1 var(--p-font);
+  letter-spacing: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pseg__btn:first-child {
+  padding-left: 4px;
+}
+
+.pseg__btn:last-child {
+  padding-right: 4px;
+}
+
+.pseg__face {
+  display: grid;
+  place-items: center;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 9px;
+  white-space: nowrap;
+  transition:
+    background var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease),
+    box-shadow var(--p-dur-fast) var(--p-ease);
+}
+
+.pseg__btn[data-on='true'] {
+  color: var(--p-ink);
+  cursor: default;
+}
+
+.pseg__btn[data-on='true'] .pseg__face {
+  background: var(--p-press);
+  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+}
+
+.pseg__btn[data-on='false']:active .pseg__face {
+  background: var(--p-hover);
+}
+
+.pseg__btn:focus-visible {
+  outline: none;
+}
+
+.pseg__btn:focus-visible .pseg__face {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------ the right side */
+
+/* The chip may give ground to the switch; its words end in an ellipsis. */
+.app[data-mobile] .pstat .mchip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.pstat__ctx,
+.pstat__badge,
+.pstat__who {
+  display: inline-flex;
+  align-items: center;
+  height: var(--p-hit);
+  margin: 0;
+  border: 0;
+  border-radius: var(--p-r-row);
+  background: transparent;
+  color: var(--p-ink);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.pstat__ctx:active,
+.pstat__badge:active,
+.pstat__who:active {
+  background: var(--p-press);
+}
+
+.pstat__ctx:focus-visible,
+.pstat__badge:focus-visible,
+.pstat__who:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+/* Context: a ring and its number. Neutral, then amber from 80, red from 92 —
+   the number is always there, and turns bold as the colour arrives. */
+.pstat__ctx {
+  flex: none;
+  gap: 6px;
+  padding: 0 6px;
+  font: 600 var(--p-t-small) / 1 var(--p-font);
+  font-variant-numeric: tabular-nums;
+}
+
+.pstat__ctx .pring,
+.pgauge .pring {
+  color: var(--p-ink-2);
+}
+
+.pstat__ctx[data-level='warn'],
+.pstat__ctx[data-level='warn'] .pring,
+.pgauge[data-level='warn'] .pring {
+  color: var(--p-attn);
+}
+
+.pstat__ctx[data-level='full'],
+.pstat__ctx[data-level='full'] .pring,
+.pgauge[data-level='full'] .pring {
+  color: var(--p-danger);
+}
+
+.pstat__ctx:not([data-level='calm']) .pstat__pct {
+  font-weight: 750;
+}
+
+.pring {
+  flex: none;
+  display: block;
+}
+
+.pring__track {
+  fill: none;
+  stroke: var(--p-line-strong);
+}
+
+.pring__arc {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--p-dur) var(--p-ease);
+}
+
+/* Before there is a reading, the agent's badge holds the ring's place. */
+.pstat__badge {
+  flex: none;
+  justify-content: center;
+  min-width: var(--p-hit);
+  padding: 0 var(--p-1);
+}
+
+/* A shell: its badge, its name, its folder. */
+.pstat__who {
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: var(--p-2);
+  padding: 0 var(--p-2) 0 var(--p-1);
+  font: 600 var(--p-t-label) / 1 var(--p-font);
+  text-align: left;
+}
+
+.pstat__name {
+  flex: none;
+}
+
+.pstat__place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--p-ink-3);
+  font: 400 var(--p-t-mono) / 1 var(--p-mono);
+}
+
+/* ------------------------------------------------------- the condition
+ *
+ * Waiting / Reconnecting / Frozen, as a word beside a shape. Amber is spent
+ * only on Waiting, which is the one that is waiting on *you*; the other two
+ * are the link's news and stay in ink.
+ */
+
+/* Drawn 32px tall, hit 44px: the border is an inset shadow on a box with
+   6px of transparent border above and below it. */
+.pstat__cond {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: var(--p-hit);
+  margin: 0;
+  padding: 0 12px 0 6px;
+  border: 6px solid transparent;
+  border-inline-width: 0;
+  background-clip: padding-box;
+  border-radius: calc(var(--p-r-pill));
+  background-color: transparent;
+  font: 650 var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink-2);
+  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pstat__cond:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -4px;
+}
+
+.pstat__word {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pstat__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--p-r-pill);
+  font: 800 13px / 1 var(--p-font);
+}
+
+.pstat__cond[data-condition='waiting'] {
+  color: var(--p-attn);
+  background-color: var(--p-attn-soft);
+  box-shadow: inset 0 0 0 1px var(--p-attn-line);
+}
+
+.pstat__cond[data-condition='waiting'] .pstat__mark {
+  background: var(--p-attn);
+  color: var(--p-attn-ink);
+}
+
+/* Reconnecting: an open ring that turns. */
+.pstat__cond[data-condition='reconnecting'] .pstat__mark {
+  border: 2px solid var(--p-line-strong);
+  border-top-color: var(--p-ink-2);
+  animation: pstat-turn 1.1s linear infinite;
+}
+
+/* Frozen: a ring with a bar through it — stopped, not broken. */
+.pstat__cond[data-condition='frozen'] .pstat__mark {
+  border: 2px solid var(--p-ink-3);
+}
+
+.pstat__cond[data-condition='frozen'] .pstat__mark::before {
+  content: '';
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--p-ink-3);
+}
+
+@keyframes pstat-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pstat__cond[data-condition='reconnecting'] .pstat__mark {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .pstat__cond[data-condition='reconnecting'] .pstat__mark {
+  animation: none;
+}
+
+/* ----------------------------------------------------------- the sheet */
+
+.pgauge {
+  display: flex;
+  align-items: center;
+  gap: var(--p-4);
+  padding: var(--p-2) var(--p-3) var(--p-3);
+}
+
+.pgauge__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--p-1);
+  min-width: 0;
+}
+
+.pgauge__big {
+  font: 650 var(--p-t-title) / 1.25 var(--p-font);
+  font-variant-numeric: tabular-nums;
+  color: var(--p-ink);
+}
+
+.pgauge__sub {
+  font-size: var(--p-t-small);
+  line-height: 1.4;
+  color: var(--p-ink-2);
+}
+
+.plimit {
+  display: grid;
+  gap: 6px;
+  padding: var(--p-2) var(--p-3) var(--p-3);
+}
+
+.plimit__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--p-3);
+}
+
+.plimit__label {
+  font-size: var(--p-t-body);
+  font-weight: 500;
+  color: var(--p-ink);
+}
+
+.plimit__pct {
+  font-size: var(--p-t-label);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--p-ink);
+}
+
+.plimit[data-level='warn'] .plimit__pct {
+  color: var(--p-attn);
+  font-weight: 750;
+}
+
+.plimit[data-level='full'] .plimit__pct {
+  color: var(--p-danger);
+  font-weight: 750;
+}
+
+/* The fill is a whole bar slid into view — a transform, not a width. */
+.plimit__bar {
+  position: relative;
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--p-r-pill);
+  background: var(--p-line);
+}
+
+.plimit__bar > span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--p-ink-2);
+  transition: transform var(--p-dur) var(--p-ease);
+}
+
+.plimit[data-level='warn'] .plimit__bar > span {
+  background: var(--p-attn);
+}
+
+.plimit[data-level='full'] .plimit__bar > span {
+  background: var(--p-danger);
+}
+
+.plimit__reset {
+  font-size: var(--p-t-small);
+  color: var(--p-ink-2);
+}
+
+.psheet__footer {
+  margin: 0 var(--p-3) var(--p-3);
+  padding: var(--p-3);
+  max-height: 40vh;
+  overflow: auto;
+  font: 400 12px / 1.5 var(--p-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--p-ink-2);
+  background: var(--p-bg);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-row);
+}
+
+/* In every view. Composer.css used to hide the line in Terminal view and give
+   its row to the keys; the keys now float above the dock instead (styles.css). */
+.app[data-mobile] .session-composer[data-view] .astatus.pstat {
+  display: block;
+}

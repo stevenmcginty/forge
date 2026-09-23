@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { EmptyState } from '@/components/EmptyState'
 import { Icon } from '@/components/Icon'
 import { useMobile } from '../lib/mobile'
@@ -11,6 +11,7 @@ import { MobilePanes } from './MobilePanes'
 import { Mirror } from './Mirror'
 import { useTextScale } from './MoreSheet'
 import { OfflineBanner } from './OfflineBanner'
+import { ProjectSheet } from './ProjectSheet'
 import { Rail } from './Rail'
 import { SessionComposer } from './SessionComposer'
 import { SplitView } from './Panes'
@@ -63,6 +64,21 @@ export function Workspace(): ReactNode {
   useEffect(() => setDrawerOpen(false), [state.projectId])
   const newTabRef = useRef<HTMLButtonElement | null>(null)
   const [chooserOpen, setChooserOpen] = useState(false)
+  /**
+   * "New agent here" in the project sheet, and the end of adding a project:
+   * select it, put the sheet away and open the agent chooser — one step where
+   * there used to be three.
+   */
+  const currentProjectId = state.projectId
+  const newAgentIn = useCallback(
+    (projectId: string) => {
+      if (projectId !== currentProjectId) actions.selectProject(projectId)
+      setDrawerOpen(false)
+      setChooserOpen(true)
+    },
+    [actions, currentProjectId]
+  )
+  const closeDrawer = useCallback(() => setDrawerOpen(false), [])
   const offline = state.stage.kind === 'offline'
   const live = !offline && state.connection.state === 'live'
   /**
@@ -161,26 +177,16 @@ export function Workspace(): ReactNode {
       */}
       <UpdateBanner update={update} />
       <div className="app__body">
-        {mobile && drawerOpen ? (
-          <div className="mdrawer__scrim" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
-        ) : null}
-        <aside
-          className="app__left"
-          data-collapsed={collapsed}
-          data-drawer={mobile ? (drawerOpen ? 'open' : 'closed') : undefined}
-          // Any project row closes the drawer, the current one included: the
-          // effect above only hears a *change*, and a tap on the project already
-          // on screen left the drawer standing over it.
-          onClick={
-            mobile
-              ? (e) => {
-                  if (e.target instanceof Element && e.target.closest('.prow')) setDrawerOpen(false)
-                }
-              : undefined
-          }
-        >
-          <Rail collapsed={collapsed} />
-        </aside>
+        {/*
+          On a phone the rail is not drawn at all: the ☰ opens the project
+          sheet instead (below, over everything). A tap on any project row
+          closes it, the current one included.
+        */}
+        {mobile ? null : (
+          <aside className="app__left" data-collapsed={collapsed}>
+            <Rail collapsed={collapsed} />
+          </aside>
+        )}
         <main className="app__main">
           {/*
             The one swap in the whole shell. GitHub mode replaces the terminal
@@ -200,7 +206,11 @@ export function Workspace(): ReactNode {
                   icon="folder"
                   eyebrow="Forge"
                   title="No project selected"
-                  body="Pick one in the rail, or press + there to look through that desktop’s folders and add one."
+                  body={
+                    mobile
+                      ? 'Open the project list at the top left to pick one, or to add a folder from that desktop.'
+                      : 'Pick one in the rail, or press + there to look through that desktop’s folders and add one.'
+                  }
                 />
               ) : activeTabId ? (
                 workspace.tabs
@@ -250,6 +260,8 @@ export function Workspace(): ReactNode {
       {mobile && gridShown ? null : notice}
 
       {watching ? <Mirror onClose={() => setWatching(false)} /> : null}
+
+      {mobile ? <ProjectSheet open={drawerOpen} onClose={closeDrawer} onNewAgent={newAgentIn} /> : null}
 
       <AgentChooser
         anchor={newTabRef.current}

@@ -1,0 +1,350 @@
+/*
+ * The live file viewer: a full-height sheet over a project's folder on the
+ * desktop. Rows and buttons come from BottomSheet.css; this file adds the
+ * crumbs, the list rows' second line, and the read-only code view.
+ *
+ * Tokens from web/src/phone-tokens.css (the sheet layer re-declares them).
+ * Nothing here is lime: reading is not acting.
+ */
+
+/* Full height on a phone, and a roomier panel at a desk: a file needs width. */
+.bsheet-layer[data-testid='live-files'] .bsheet {
+  height: calc(100% - 48px - env(safe-area-inset-top, 0px));
+}
+
+.app:not([data-mobile]) .bsheet-layer[data-testid='live-files'] .bsheet {
+  width: min(880px, calc(100% - 32px));
+  height: min(760px, calc(100% - 64px));
+  max-height: min(760px, calc(100% - 64px));
+}
+
+.lf__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--p-2);
+  min-width: 0;
+}
+
+.lf__title-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf__title-note {
+  flex: none;
+  font-size: var(--p-t-small);
+  font-weight: 500;
+  color: var(--p-ink-3);
+}
+
+/* ------------------------------------------------------------ crumbs */
+
+.lf__crumbs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 0 calc(-1 * var(--p-2));
+  padding: 0 var(--p-3) var(--p-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--p-raised);
+  border-bottom: 1px solid var(--p-line);
+}
+
+.lf__crumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.lf__crumb-step {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.lf__crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-height: var(--p-hit);
+  max-width: 60vw;
+  padding: 0 var(--p-2);
+  font: 500 var(--p-t-label) / 1.2 var(--p-font);
+  color: var(--p-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-row);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button.lf__crumb:active {
+  background: var(--p-press);
+}
+
+.lf__crumb:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+/* Where you are: ink and weight, not colour alone. */
+.lf__crumb[aria-current='page'] {
+  font-weight: 650;
+  color: var(--p-ink);
+}
+
+.lf__crumb[data-file='true'] {
+  font-family: var(--p-mono);
+  font-size: var(--p-t-mono);
+  cursor: default;
+}
+
+.lf__sep {
+  flex: none;
+  color: var(--p-ink-3);
+  font-size: var(--p-t-label);
+}
+
+/* ------------------------------------------------------------ the list */
+
+.lf__list {
+  padding: var(--p-1) 0 var(--p-2);
+}
+
+.lf__row {
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  width: 100%;
+  min-height: var(--p-row);
+  padding: var(--p-2) var(--p-3);
+  text-align: left;
+  color: var(--p-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-row);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.lf__row:active {
+  background: var(--p-press);
+}
+
+.lf__row:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+.lf__row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  color: var(--p-ink-2);
+}
+
+.lf__row[data-kind='folder'] .lf__row-icon {
+  color: var(--p-ink);
+}
+
+.lf__row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lf__row-name {
+  overflow: hidden;
+  font-size: var(--p-t-chrome);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lf__row-sub {
+  font-size: var(--p-t-small);
+  line-height: 1.3;
+  color: var(--p-ink-3);
+}
+
+.lf__row-chev {
+  display: inline-flex;
+  flex: none;
+  color: var(--p-ink-3);
+}
+
+.lf__empty,
+.lf__note {
+  margin: 0;
+  padding: var(--p-3);
+  font-size: var(--p-t-small);
+  line-height: 1.45;
+  color: var(--p-ink-2);
+}
+
+/* ------------------------------------------------------------ the file */
+
+.lf__file {
+  display: flex;
+  flex-direction: column;
+  padding: var(--p-2) 0 var(--p-3);
+}
+
+.lf__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--p-2);
+  margin: 0;
+  padding: 0 var(--p-2) var(--p-2);
+}
+
+.lf__path {
+  min-width: 0;
+  font: var(--p-t-mono) / 1.4 var(--p-mono);
+  color: var(--p-ink-2);
+  overflow-wrap: anywhere;
+}
+
+.lf__meta-facts {
+  font-size: var(--p-t-small);
+  color: var(--p-ink-3);
+}
+
+.lf__file .lf__note {
+  margin: 0 0 var(--p-2);
+  padding: var(--p-2) var(--p-3);
+  color: var(--p-ink);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-row);
+}
+
+/* Two columns that scroll sideways together; the numbers stay put. */
+.lf__code {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  overflow-x: auto;
+  background: var(--p-surface);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-row);
+  -webkit-overflow-scrolling: touch;
+}
+
+.lf__code:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 2px;
+}
+
+.lf__gutter,
+.lf__text {
+  margin: 0;
+  padding: var(--p-2) 0;
+  font: var(--p-t-mono) / 1.55 var(--p-mono);
+  white-space: pre;
+  tab-size: 4;
+}
+
+.lf__gutter {
+  position: sticky;
+  left: 0;
+  flex: none;
+  min-width: 3ch;
+  padding-right: var(--p-2);
+  padding-left: var(--p-2);
+  text-align: right;
+  color: var(--p-ink-3);
+  background: var(--p-surface);
+  border-right: 1px solid var(--p-line);
+  user-select: none;
+}
+
+.lf__text {
+  flex: none;
+  padding-right: var(--p-4);
+  padding-left: var(--p-3);
+  color: var(--p-ink);
+}
+
+/* ------------------------------------------------------------ states */
+
+.lf__state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--p-3);
+  padding: var(--p-5) var(--p-3);
+}
+
+.lf__state .pbar {
+  max-width: 200px;
+}
+
+.lf__state-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--p-ink);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-row);
+}
+
+.lf__state-title {
+  margin: 0;
+  font-size: var(--p-t-title);
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--p-ink);
+}
+
+.lf__state-text {
+  margin: 0;
+  font-size: var(--p-t-label);
+  line-height: 1.45;
+  color: var(--p-ink-2);
+}
+
+.lf__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--p-2);
+  width: 100%;
+  margin: 0;
+  padding: var(--p-3);
+  font-size: var(--p-t-label);
+  line-height: 1.45;
+  color: var(--p-ink);
+  background: var(--p-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--p-danger) 40%, transparent);
+  border-radius: var(--p-r-row);
+}
+
+.lf__error .alert-glyph {
+  flex: none;
+  margin-top: 1px;
+  color: var(--p-danger);
+}
+
+.lf__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--p-2);
+}

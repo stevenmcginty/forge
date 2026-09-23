@@ -89,6 +89,31 @@ export interface Picture {
   handoff: Record<string, HandoffRecord[]>
 }
 
+/* ------------------------------------------------------- insert into draft
+ *
+ * Skills and commands tapped in the project sheet land in the composer's draft
+ * for the focused pane — visible, editable, sent by a person — rather than
+ * being typed straight into the PTY where Chat view cannot show them. The
+ * composer owns the drafts, so this is a one-way bus: the sheet calls
+ * `insertIntoDraft`, and `SessionComposer` is the listener that places the text
+ * and focuses the box. False when nothing is listening (no composer mounted).
+ */
+type DraftInsertListener = (text: string) => boolean
+const draftInsertListeners = new Set<DraftInsertListener>()
+
+export function insertIntoDraft(text: string): boolean {
+  let placed = false
+  for (const listener of draftInsertListeners) placed = listener(text) || placed
+  return placed
+}
+
+export function onDraftInsert(listener: DraftInsertListener): () => void {
+  draftInsertListeners.add(listener)
+  return () => {
+    draftInsertListeners.delete(listener)
+  }
+}
+
 /** What the whole page is doing, before any of the connection detail. */
 export type Stage =
   /** Reading /config.json. */

@@ -35,7 +35,7 @@ import { matchVoiceCommand, type VoiceCommandMatch } from '../lib/voice-commands
 import { watchLevel, type LevelMonitor } from '../lib/voice-level'
 import { getVoiceAutoStop } from '../lib/voice-prefs'
 import type { PermissionMode } from '@/lib/rich'
-import { useForge, useProfiles, useWorkspace } from '../state'
+import { onDraftInsert, useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStatus } from './AgentStatus'
 import { AnswerCard } from './AnswerCard'
 import { BACK_TAB, Composer, type VoiceControls } from './Composer'
@@ -155,6 +155,25 @@ export function SessionComposer(): ReactNode {
   const reviewTimer = useRef(0)
   /** Bumped to focus the box — only ever after a gesture. */
   const [focusSignal, setFocusSignal] = useState(0)
+
+  /*
+   * A skill or command tapped in the project sheet: "/name " goes to the front
+   * of this pane's draft (a slash command only means anything first), taking
+   * the place of one already there, and the box takes focus so it can be read,
+   * finished and sent.
+   */
+  useEffect(
+    () =>
+      onDraftInsert((text) => {
+        if (!paneId) return false
+        const before = draftsRef.current[paneId] ?? ''
+        const rest = before.replace(/^\s+/, '').replace(/^\/\S+\s*/, '')
+        setDraftFor(paneId, rest ? `${text.replace(/\s*$/, ' ')}${rest}` : text)
+        setFocusSignal((n) => n + 1)
+        return true
+      }),
+    [paneId, setDraftFor]
+  )
 
   /**
    * Stop was pressed and the agent has not stopped yet. Cleared by the strip
@@ -497,7 +516,7 @@ export function SessionComposer(): ReactNode {
       const started = await startRecording(() => {
         actions.setNotice('Ten minutes is the most one recording takes — sending what was said.')
         void finishVoiceRef.current()
-      })
+      }, { sessionId: pane, request: actions.request })
       starting.current = false
       const end = pendingEnd.current
       pendingEnd.current = null

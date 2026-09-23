@@ -1,5 +1,15 @@
 import { type ReactNode } from 'react'
-import { Connecting, PinPrompt, Refused, Unconfigured, Unreachable } from './components/Connection'
+import {
+  Connecting,
+  hostSkew,
+  PasskeyOffer,
+  PinPrompt,
+  Refused,
+  Unconfigured,
+  Unreachable,
+  VersionSkew
+} from './components/Connection'
+import { LiveFiles } from './components/LiveFiles'
 import { SignIn } from './components/SignIn'
 import { Unpaired } from './components/Unpaired'
 import { Workspace } from './components/Workspace'
@@ -35,6 +45,19 @@ import { useForge } from './state'
  * made decision 9 and decision 10 two applications instead of two halves of one.
  */
 export function App(): ReactNode {
+  // Mounted beside whatever screen is up rather than inside Workspace: the
+  // fingerprint offer and the live file viewer are sheets that open on their
+  // own events, and each renders nothing until it has something to show.
+  return (
+    <>
+      <Screen />
+      <PasskeyOffer />
+      <LiveFiles />
+    </>
+  )
+}
+
+function Screen(): ReactNode {
   const { state } = useForge()
 
   switch (state.stage.kind) {
@@ -48,7 +71,11 @@ export function App(): ReactNode {
       return <Connecting attempt={0} note="Looking for the desktop…" />
     case 'unreachable':
       return <Unreachable error={state.stage.error} />
-    case 'offline':
+    case 'offline': {
+      // Awake and publishing, but on another protocol: not asleep, and the
+      // frozen view would say it was. Say which side is older instead.
+      const skew = hostSkew(state.stage.record)
+      if (skew) return <VersionSkew record={skew} />
       // A machine we have already seen stays the frozen workspace. An account
       // that has never published a host is a different sentence — not asleep,
       // unpaired — and a workspace here would look like login failed.
@@ -56,6 +83,7 @@ export function App(): ReactNode {
         return <Unpaired message={state.stage.message} />
       }
       return <Workspace />
+    }
     case 'connected':
       break
   }
@@ -72,6 +100,8 @@ export function App(): ReactNode {
           message={state.connection.message}
           invalid={state.connection.invalid}
           retryAfterMs={state.connection.retryAfterMs}
+          passkey={state.connection.passkey}
+          afterPasskey={state.connection.afterPasskey}
         />
       )
     case 'refused':
