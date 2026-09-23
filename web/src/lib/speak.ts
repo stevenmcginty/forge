@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { ChatBlock, ChatTurn } from '@shared/chat'
+import { getReadAloudVoice } from './voice-prefs'
 
 /**
  * "Read aloud": the phone speaks an agent's latest reply with its own
@@ -172,17 +173,22 @@ export function speechSupported(): boolean {
 }
 
 /**
- * A voice in the phone's own language, on-device first. `getVoices()` is
+ * The voice picked in the ⋯ sheet, while the phone still has it; otherwise a
+ * voice in the phone's own language, on-device first. `getVoices()` is
  * often empty until the browser has loaded its list (`voiceschanged`); rather
  * than wait on that, an empty list means the browser's default voice, told
  * the language through `utterance.lang`.
  */
 function pickVoice(): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices()
+  const saved = getReadAloudVoice()
+  const chosen = saved ? voices.find((voice) => voice.voiceURI === saved) : undefined
+  if (chosen) return chosen
   const want = (navigator.language || 'en').toLowerCase()
   const base = want.split('-')[0]
   let best: SpeechSynthesisVoice | null = null
   let bestScore = 0
-  for (const voice of window.speechSynthesis.getVoices()) {
+  for (const voice of voices) {
     const lang = voice.lang.toLowerCase().replace('_', '-')
     const match = lang === want ? 4 : lang.split('-')[0] === base ? 2 : 0
     if (!match) continue
@@ -238,6 +244,34 @@ export function stopSpeaking(): void {
   setSpeaking(null)
 }
 
+const SAMPLE = 'This is how Forge will read replies to you.'
+
+/**
+ * One sentence in `voice` (null: the automatic pick), so a voice can be heard
+ * before it reads a reply. It cuts off any reply being read and belongs to no
+ * pane, so the status strip's button goes back from Stop. Synchronous for the
+ * same reason `speakReply` is.
+ */
+export function speakSample(voice: SpeechSynthesisVoice | null): void {
+  if (!speechSupported()) return
+  const synth = window.speechSynthesis
+  const mine = ++session
+  synth.cancel()
+  setSpeaking(null)
+  const spoken = voice ?? pickVoice()
+  const utterance = new SpeechSynthesisUtterance(SAMPLE)
+  if (spoken) utterance.voice = spoken
+  utterance.lang = spoken?.lang ?? navigator.language
+  // Held like a reply's queue, so Chrome does not collect it mid-sentence.
+  const done = (): void => {
+    if (session === mine) queue = []
+  }
+  utterance.onend = done
+  utterance.onerror = done
+  queue = [utterance]
+  synth.speak(utterance)
+}
+
 function subscribe(listener: () => void): () => void {
   // Asking once is what makes the browser start loading its voices, so the
   // list is usually there by the first tap.
@@ -255,4 +289,34 @@ export function useSpeakingPane(): string | null {
     () => speaking,
     () => null
   )
+}
+
+/* ------------------------------------------------------------ the voices */
+
+const NO_VOICES: SpeechSynthesisVoice[] = []
+let voiceList: SpeechSynthesisVoice[] = NO_VOICES
+
+/**
+ * The device's voices as one stable array. `getVoices()` hands back a new
+ * array on every call, so it is kept until the list itself changes — a store
+ * snapshot that differs on every read would re-render for ever.
+ */
+function currentVoices(): SpeechSynthesisVoice[] {
+  if (!speechSupported()) return NO_VOICES
+  const now = window.speechSynthesis.getVoices()
+  const same = now.length === voiceList.length && now.every((voice, i) => voice.voiceURI === voiceList[i].voiceURI)
+  if (!same) voiceList = now.length ? now : NO_VOICES
+  return voiceList
+}
+
+function subscribeVoices(listener: () => void): () => void {
+  if (!speechSupported()) return () => {}
+  const synth = window.speechSynthesis
+  synth.addEventListener('voiceschanged', listener)
+  return () => synth.removeEventListener('voiceschanged', listener)
+}
+
+/** The voices this device can speak in — empty until the browser has loaded them. */
+export function useVoices(): SpeechSynthesisVoice[] {
+  return useSyncExternalStore(subscribeVoices, currentVoices, () => NO_VOICES)
 }

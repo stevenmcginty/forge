@@ -5,6 +5,7 @@
  */
 
 const AUTO_STOP_KEY = 'forge.voice.autoStop'
+const READ_ALOUD_VOICE_KEY = 'forge.voice.readAloud'
 
 /** Stop recording and send after a pause in speech. Off unless Steve turns it on. */
 export function getVoiceAutoStop(): boolean {
@@ -21,5 +22,26 @@ export function setVoiceAutoStop(on: boolean): void {
     else localStorage.removeItem(AUTO_STOP_KEY)
   } catch {
     // Storage refused: the setting simply does not persist.
+  }
+}
+
+/**
+ * The voice Read aloud speaks in, as the device's `voiceURI`. Empty means
+ * Automatic — and so does a saved voice the phone no longer has.
+ */
+export function getReadAloudVoice(): string {
+  try {
+    return localStorage.getItem(READ_ALOUD_VOICE_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setReadAloudVoice(voiceURI: string): void {
+  try {
+    if (voiceURI) localStorage.setItem(READ_ALOUD_VOICE_KEY, voiceURI)
+    else localStorage.removeItem(READ_ALOUD_VOICE_KEY)
+  } catch {
+    // Storage refused: the choice simply does not persist.
   }
 }

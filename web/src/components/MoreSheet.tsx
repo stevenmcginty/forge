@@ -13,7 +13,8 @@ import {
   thisDevicePasskey,
   type PreparedEnrolment
 } from '../lib/passkey'
-import { getVoiceAutoStop, setVoiceAutoStop } from '../lib/voice-prefs'
+import { speakSample, speechSupported, useVoices } from '../lib/speak'
+import { getReadAloudVoice, getVoiceAutoStop, setReadAloudVoice, setVoiceAutoStop } from '../lib/voice-prefs'
 import { useForge, type NotifySupport } from '../state'
 import { BottomSheet, SheetConfirm, SheetGlyph, SheetRow, SheetSection, SheetSwitch } from './BottomSheet'
 import { FingerprintGlyph } from './Connection'
@@ -64,8 +65,10 @@ export function MoreSheet({
   screen: MoreSheetAction
 }): ReactNode {
   const { state, actions } = useForge()
-  const [step, setStep] = useState<'list' | 'sign-out' | 'passkey-forget'>('list')
+  const [step, setStep] = useState<'list' | 'sign-out' | 'passkey-forget' | 'voice'>('list')
   const [autoStop, setAutoStop] = useState(getVoiceAutoStop)
+  const [voiceURI, setVoiceURI] = useState(getReadAloudVoice)
+  const voices = useVoices()
   const [scale, setScale] = useTextScale()
   const unlock = usePasskeyRow(open)
 
@@ -75,22 +78,45 @@ export function MoreSheet({
     if (!open) return
     setStep('list')
     setAutoStop(getVoiceAutoStop())
+    setVoiceURI(getReadAloudVoice())
   }, [open])
 
   const alerts = alertsRow(state.notifyPermission, state.pushActive)
   const email = state.session?.email ?? ''
   const at = TEXT_SCALE_STEPS.indexOf(scale)
+  const chosenVoice = voiceURI ? (voices.find((voice) => voice.voiceURI === voiceURI) ?? null) : null
 
   return (
     <BottomSheet
       open={open}
       onClose={onClose}
       onBack={step !== 'list' ? () => setStep('list') : undefined}
-      label={step === 'sign-out' ? 'Sign out' : step === 'passkey-forget' ? biometricUnlockLabel() : 'More'}
-      title={step !== 'list' ? null : undefined}
+      label={
+        step === 'sign-out'
+          ? 'Sign out'
+          : step === 'passkey-forget'
+            ? biometricUnlockLabel()
+            : step === 'voice'
+              ? 'Read-aloud voice'
+              : 'More'
+      }
+      title={step === 'sign-out' || step === 'passkey-forget' ? null : undefined}
+      subtitle={step === 'voice' ? 'Tap a voice to hear it' : undefined}
       testId="more-sheet"
     >
-      {step === 'passkey-forget' ? (
+      {step === 'voice' ? (
+        <VoicePicker
+          voices={voices}
+          chosen={voiceURI}
+          onPick={(voice) => {
+            const uri = voice?.voiceURI ?? ''
+            setReadAloudVoice(uri)
+            setVoiceURI(uri)
+            // Straight into speech, no await: the phone only talks inside the tap.
+            speakSample(voice)
+          }}
+        />
+      ) : step === 'passkey-forget' ? (
         <SheetConfirm
           question={`Stop unlocking with your ${biometricName()} on this phone?`}
           detail="The desktop forgets this phone's passkey at once. The PIN keeps working, and you can set it up again here."
@@ -212,6 +238,17 @@ export function MoreSheet({
               }}
               testId="more-auto-stop"
             />
+            {speechSupported() ? (
+              <SheetRow
+                icon={<Icon name="voice" size={20} />}
+                label="Read-aloud voice"
+                secondary={
+                  chosenVoice ? chosenVoice.name : voiceURI && !voices.length ? 'Loading voices…' : 'Automatic'
+                }
+                onClick={() => setStep('voice')}
+                testId="more-read-aloud-voice"
+              />
+            ) : null}
             {unlock.row ? (
               <SheetRow
                 icon={<FingerprintGlyph />}
@@ -328,6 +365,137 @@ function usePasskeyRow(open: boolean): { row: PasskeyRow | null; forget: () => P
   return list.canRegister
     ? { row: { on: false, detail: 'Off — tap to set up', onPress: () => void setUp() }, forget }
     : { row: { on: false, detail: 'Off — unlock with the PIN to set this up' }, forget }
+}
+
+/* --------------------------------------------------------- read-aloud voice */
+
+function voiceLang(voice: SpeechSynthesisVoice): string {
+  return voice.lang.replace('_', '-')
+}
+
+/**
+ * The phone's voices in two groups: its own language first (the exact locale,
+ * then the rest of the language, each by name), and every other language after,
+ * by language then name. The list is the device's own — Android and iPhone
+ * offer different voices — so nothing here names one.
+ */
+function groupVoices(voices: SpeechSynthesisVoice[]): {
+  mine: SpeechSynthesisVoice[]
+  other: SpeechSynthesisVoice[]
+} {
+  const want = (navigator.language || 'en').toLowerCase()
+  const base = want.split('-')[0]
+  const byName = (a: SpeechSynthesisVoice, b: SpeechSynthesisVoice): number => a.name.localeCompare(b.name)
+  const exact: SpeechSynthesisVoice[] = []
+  const near: SpeechSynthesisVoice[] = []
+  const other: SpeechSynthesisVoice[] = []
+  for (const voice of voices) {
+    const lang = voiceLang(voice).toLowerCase()
+    if (lang === want) exact.push(voice)
+    else if (lang.split('-')[0] === base) near.push(voice)
+    else other.push(voice)
+  }
+  other.sort((a, b) => voiceLang(a).localeCompare(voiceLang(b)) || byName(a, b))
+  return { mine: [...exact.sort(byName), ...near.sort(byName)], other }
+}
+
+/**
+ * The list the "Read-aloud voice" row opens: Automatic, the phone's own
+ * language, then other languages folded behind one row (Android lists hundreds).
+ * A tap picks, saves and plays a sample, and the sheet stays open so another
+ * voice can be tried. The chosen row carries the tick — a shape, not a tint.
+ */
+function VoicePicker({
+  voices,
+  chosen,
+  onPick
+}: {
+  voices: SpeechSynthesisVoice[]
+  /** The saved `voiceURI`; empty for Automatic. */
+  chosen: string
+  onPick: (voice: SpeechSynthesisVoice | null) => void
+}): ReactNode {
+  const [showOther, setShowOther] = useState(false)
+  const { mine, other } = groupVoices(voices)
+  const chosenFound = voices.some((voice) => voice.voiceURI === chosen)
+  const othersOpen = showOther || other.some((voice) => voice.voiceURI === chosen) || (!mine.length && other.length > 0)
+
+  const row = (voice: SpeechSynthesisVoice, i: number): ReactNode => (
+    <VoiceRow
+      key={`${i}:${voice.voiceURI}`}
+      label={voice.name}
+      note={`${voiceLang(voice)} · ${voice.localService ? 'On device' : 'Online'}`}
+      current={voice.voiceURI === chosen}
+      onPick={() => onPick(voice)}
+    />
+  )
+
+  return (
+    <>
+      <SheetSection title="This phone's language">
+        <div role="radiogroup" aria-label="Read-aloud voice">
+          <VoiceRow
+            label="Automatic"
+            note="A voice in this phone's language, on-device first"
+            // A saved voice the phone no longer has speaks as Automatic, so it reads as one.
+            current={!chosen || (voices.length > 0 && !chosenFound)}
+            onPick={() => onPick(null)}
+          />
+          {mine.map(row)}
+        </div>
+        {!voices.length ? <p className="mseg__note">Loading voices…</p> : null}
+      </SheetSection>
+      {other.length ? (
+        <SheetSection title="Other languages">
+          {othersOpen ? (
+            <div role="radiogroup" aria-label="Read-aloud voice, other languages">
+              {other.map(row)}
+            </div>
+          ) : (
+            <SheetRow
+              icon={<Icon name="globe" size={20} />}
+              label={`Show ${other.length} more ${other.length === 1 ? 'voice' : 'voices'}`}
+              onClick={() => setShowOther(true)}
+              testId="voice-show-other"
+            />
+          )}
+        </SheetSection>
+      ) : null}
+      <p className="mseg__note">More voices can be added in the phone's text-to-speech settings.</p>
+    </>
+  )
+}
+
+/** One voice: ModelChip's pick row — a radio by role, a tick on the chosen one. */
+function VoiceRow({
+  label,
+  note,
+  current,
+  onPick
+}: {
+  label: string
+  note: string
+  current: boolean
+  onPick: () => void
+}): ReactNode {
+  return (
+    <button
+      type="button"
+      className="bsrow mpick"
+      role="radio"
+      aria-checked={current}
+      data-current={current ? 'true' : undefined}
+      onClick={onPick}
+    >
+      <span className="bsrow__text">
+        <span className="bsrow__label">{label}</span>
+        <span className="bsrow__sub">{note}</span>
+      </span>
+      <span className="bsrow__trail mpick__tick" aria-hidden="true">
+        {current ? <Icon name="check" size={20} /> : null}
+      </span>
+    </button>
+  )
 }
 
 /* ------------------------------------------------------------- alerts */
