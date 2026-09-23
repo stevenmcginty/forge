@@ -93,7 +93,7 @@ export function BoardSurface({ active }: SurfaceProps): ReactNode {
           </span>
           <p className="board__empty-title">Nothing on the board yet</p>
           <p className="board__empty-text">
-            Ask an agent to make an image, or say “show it on the canvas”. Anything saved into this project’s canvas
+            Ask an agent to make an image, or say “show it on the board”. Anything saved into this project’s board
             folder appears here by itself — and you can drop files straight onto the board.
           </p>
         </div>
@@ -337,7 +337,7 @@ function ItemActions({ item, feed }: { item: CanvasItem; feed: CanvasFeed }): Re
       <button type="button" className="bact" onClick={() => void window.forge.openPath(item.path)} title="Open in its own app">
         <Icon name="expand" size={12} />
       </button>
-      <button type="button" className="bact bact--quiet" title="Take it off the board (deletes the file from the canvas folder)" onClick={a.remove}>
+      <button type="button" className="bact bact--quiet" title="Take it off the board (deletes the file from the board’s folder)" onClick={a.remove}>
         <Icon name="trash" size={12} />
       </button>
     </div>

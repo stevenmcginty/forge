@@ -402,12 +402,3 @@
   will-change: transform, opacity;
 }
 
-/* ============================================================ voice socket
- *
- * The agent switch and the dictation pill were drawn for a 26px status bar;
- * in the dock they stand a little taller so they read as the controls they are.
- */
-.dock__voice .agentbtn,
-.dock__voice .dpill {
-  height: 24px;
-}

@@ -13,32 +13,30 @@ import { useUiCommand } from '@/lib/uiCommands'
 import { useDictation } from '@/state/Dictation'
 import { useActiveTab, useApp } from '@/state/AppState'
 import type { HubAction, HubCaption } from '@/state/VoiceHubController'
-import { DictationSetup } from '../DictationSetup'
 import { Icon } from '../Icon'
-import { Popover } from '../Popover'
-import { setBarTarget, useBarMode, useBarTarget } from './barMode'
-import { ACTION_GLYPH, brainWord, hubAsk, isLive, useHubPreview, useHubView, voiceState, type DictationLike } from './hubView'
+import { setBarTarget, useBarTarget } from './barMode'
+import { ACTION_GLYPH, hubAsk, listenState, useHubPreview, useHubView } from './hubView'
 import { KeyRecorder, Keys } from './KeyRecorder'
+import { ListenToggle } from './VoicePill'
 import './Composer.css'
 
 /**
- * The composer: the main agent's bar — type, speak, and the palette.
+ * The one bar: the only place you talk to Forge.
  *
- *   target      where Enter sends. Forge (the default, "Ask Forge…") is the
- *               main agent, which knows the whole app and acts inside it. One
- *               click on the chip aims at the pane you are in instead ("→
- *               Everest"), typed as a hand at that prompt would; Esc in the
- *               bar comes back to Forge.
- *   mic mode    one mic, and beside it the Dictate / Agent switch
- *               (Ctrl+Shift+L, remembered; the Right Ctrl talk key follows it).
- *                 Dictate  Parakeet words, raw. Aimed at Forge they land in
- *                          the bar to be read and fixed; aimed at a pane they
- *                          go straight into it.
- *                 Agent    the main agent hears it — Gemini Live or GPT on
- *                          their live session, Claude through Parakeet.
- *   replies     what Forge says rises above the bar with a trail of what it
- *               did ("✓ Opened Codex pane · ✓ Typed into Everest"), which opens
- *               into the full list.
+ *   type        Enter asks Forge, the main agent, which knows the whole app and
+ *               acts inside it ("Ask Forge…"). One click on the target chip
+ *               aims at the pane you are in instead ("→ Everest"), typed as a
+ *               hand at that prompt would; Esc in the bar comes back to Forge.
+ *   Listen      one switch, off or on. On is a hands-free conversation with
+ *               the main agent: it sends when you pause, answers, and listens
+ *               again. Right Shift flips it too. The brain's name and what it
+ *               is doing are inside the switch, in words.
+ *   dictate     no button: the Dictate key (Right Ctrl) is the hidden power
+ *               key for raw words into the focused pane — or into this bar,
+ *               when the bar has focus. The bar says so while it runs.
+ *   replies     what Forge says grows the bar upward, with a trail of what it
+ *               did ("✓ Opened Codex pane · ✓ Typed into Everest") that opens
+ *               into the whole list.
  *   palette     "/" (or Ctrl+K) turns the bar into the palette: saved prompts
  *               and every command, each with its keys. Ctrl+S saves the text
  *               in the bar as a new prompt.
@@ -60,25 +58,20 @@ type PaletteItem =
   | { kind: 'prompt'; key: string; prompt: SavedPrompt }
   | { kind: 'command'; key: string; id: string; title: string; group: string; keys: string[] }
 
-const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
-
-export function Composer(): ReactNode {
+export function Composer({ lead }: { lead?: ReactNode }): ReactNode {
   const { state, actions } = useApp()
   const tab = useActiveTab()
   const dictation = useDictation()
   const hub = useHubView()
   const preview = useHubPreview()
-  const mode = useBarMode()
   const target = useBarTarget()
   const [text, setText] = useState('')
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [cursor, setCursor] = useState(0)
   const [saving, setSaving] = useState<string | null>(null)
-  const [setupOpen, setSetupOpen] = useState(false)
   const [focused, setFocused] = useState(false)
   const fieldRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
-  const micRef = useRef<HTMLButtonElement | null>(null)
 
   const paneId = tab?.activePaneId ?? null
   const leaf = tab && paneId ? findLeaf(tab.root, paneId) : null
@@ -88,24 +81,10 @@ export function Composer(): ReactNode {
 
   // No pane to aim at means Forge, whatever the chip last said.
   const toForge = target === 'forge' || !paneId || !paneName
-  const live = isLive(hub.phase)
-  const brain = brainWord(hub)
-  const listening = preview?.dictating ?? dictation.listening
-  const d: DictationLike = {
-    phase: preview?.dictating ? 'listening' : dictation.status.phase,
-    listening,
-    needsSetup: dictation.needsSetup,
-    wake: dictation.status.mode === 'wake',
-    capturing: dictation.status.capturing
-  }
-  const vs = voiceState(mode, hub, d)
-  // The mic's bars meter Parakeet; on a live session they rest at a steady
-  // mid height (the pill carries the live meter).
-  const level = listening
-    ? Math.min(1, Math.max(0, preview?.dictating ? (preview.dictationLevel ?? 0.5) : dictation.status.level))
-    : vs.micOn
-      ? 0.4
-      : 0
+  const ls = listenState(hub)
+  // The Dictate key's own session — not the agent's, which shares the sidecar.
+  const dictating = (preview?.dictating ?? dictation.listening) && !state.agentListening && !ls.on
+  const intoBar = dictating && focused
   const slash = text.startsWith('/')
   // The palette belongs to the bar: it shows while you are in the bar.
   const showPalette = (paletteOpen || slash) && focused
@@ -139,15 +118,14 @@ export function Composer(): ReactNode {
     const route = composerRouteNow()
     if (route?.({ text: message, paneId })) {
       setText('')
-      if (listening) dictation.toggle()
+      if (intoBar) dictation.toggle()
       return
     }
     if (toForge) {
       hubAsk(hub, message, 'typed')
       setText('')
-      if (listening) dictation.toggle()
-      const pill = document.querySelector('.vpill')
-      if (pill && shellRef.current) fireComet(shellRef.current, pill, 'var(--accent)')
+      if (intoBar) dictation.toggle()
+      if (shellRef.current) fireComet(shellRef.current, shellRef.current.querySelector('.listen') ?? shellRef.current, 'var(--accent)')
       return
     }
     if (!paneId || !sendToPane(paneId, message)) {
@@ -155,8 +133,8 @@ export function Composer(): ReactNode {
       return
     }
     setText('')
-    // Sent: the mic's job is done too. Dictation into the bar ends with the send.
-    if (listening) dictation.toggle()
+    // Sent: the words in the bar are done with. Dictation into the bar ends with the send.
+    if (intoBar) dictation.toggle()
     const el = document.querySelector(`.pane[data-pane-id="${paneId}"], .mtile[data-pane-id="${paneId}"]`)
     if (el && shellRef.current) fireComet(shellRef.current, el, profile?.accent ?? '#c6ff4a')
   }
@@ -165,7 +143,7 @@ export function Composer(): ReactNode {
     setText('')
     setPaletteOpen(false)
     setSaving(null)
-    if (listening) dictation.toggle()
+    if (intoBar) dictation.toggle()
     focusField()
   }
 
@@ -248,86 +226,30 @@ export function Composer(): ReactNode {
     return () => window.removeEventListener('pointerdown', onDown, true)
   }, [risen])
 
-  /* ---------------------------------------------------------------- mic */
-
-  const hotkey = hotkeyLabel(state.settings.sttHotkey || 'ControlRight')
-  const onMic = (): void => {
-    if (mode === 'agent') {
-      // The main agent's own listening, on every brain: a live provider opens
-      // its session; Claude arms and captures through Parakeet.
-      if (listening) dictation.toggle()
-      else hub.toggle()
-      return
-    }
-    if (dictation.needsSetup) {
-      setSetupOpen((v) => !v)
-      return
-    }
-    // One microphone at a time.
-    if (live) hub.stop()
-    if (!listening) {
-      // Aimed at Forge the words land in the bar, to be read and fixed first;
-      // aimed at a pane they go straight into it.
-      if (toForge) focusField()
-      else if (paneId) {
-        fieldRef.current?.blur()
-        terminalHost.focus(paneId)
-      }
-    }
-    dictation.toggle()
-  }
-
-  const flipMode = (next: 'dictate' | 'agent'): void => {
-    if (next === mode) return
-    keymap.run('voice.mode.toggle')
-  }
-
   /* --------------------------------------------------------------- words */
 
-  const placeholder =
-    mode === 'dictate' && listening && vs.recording
-      ? toForge
-        ? 'Listening — speak, then fix anything and send'
-        : `Listening — your words go straight into ${paneName}`
-      : !toForge
-        ? `Type straight into ${paneName}   ·   Esc for Forge`
-        : mode === 'agent' && vs.recording
-          ? 'Listening — talk, or type'
-          : 'Ask Forge…   ·   / for prompts'
-
-  const micTitle =
-    mode === 'agent'
-      ? live && hub.phase !== 'error'
-        ? `Stop — Forge stops listening (${brain})`
-        : hub.realtime
-          ? `Talk to Forge — opens a live session with ${brain} (or ${hotkey} anywhere)`
-          : `Talk to Forge — Parakeet hears you, ${brain} answers (or ${hotkey} anywhere)`
-      : dictation.needsSetup
-        ? 'Dictation needs setting up — click to fix it'
-        : listening
-          ? 'Stop dictation'
-          : toForge
-            ? `Dictate into this bar (or ${hotkey} anywhere)`
-            : `Dictate straight into ${paneName} (or ${hotkey} anywhere)`
-
-  const showSetup = dictation.needsSetup && mode === 'dictate'
-  // In the bar the mic says it short ("Listening", "Mic on"); the rest of the
-  // sentence ("· not recording") shows while there is room, and always in the pill.
-  const [micHead, ...micRest] = vs.word.split(' · ')
-  const micWord = vs.look === 'offline' || vs.look === 'error' ? null : cap(micHead ?? '')
-  const micMore = !vs.recording && micRest.length ? ` · ${micRest.join(' · ')}` : null
+  const dictateKey = hotkeyLabel(state.settings.sttHotkey || 'ControlRight')
+  const placeholder = dictating
+    ? intoBar
+      ? `Dictating into the bar — ${dictateKey} to stop`
+      : `Dictating into ${paneName ?? 'the pane'} — ${dictateKey} to stop`
+    : !toForge
+      ? `Type straight into ${paneName}   ·   Esc for Forge`
+      : ls.recording
+        ? 'Listening — talk, or type'
+        : 'Ask Forge…   ·   / for prompts'
 
   return (
     <div
       ref={shellRef}
       className="dock__composer comp"
-      data-listening={vs.recording ? 'true' : undefined}
-      data-live={mode === 'agent' && live ? 'true' : undefined}
-      data-mode={mode}
+      data-listening={ls.recording || dictating ? 'true' : undefined}
+      data-live={ls.on ? 'true' : undefined}
+      data-look={ls.look}
       data-target={toForge ? 'forge' : 'pane'}
       data-empty={text ? undefined : 'true'}
       data-palette={showPalette ? 'true' : undefined}
-      style={{ '--pane-accent': profile?.accent ?? 'var(--accent)', '--lvl': level } as React.CSSProperties}
+      style={{ '--pane-accent': profile?.accent ?? 'var(--accent)' } as React.CSSProperties}
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) {
           e.preventDefault()
@@ -335,8 +257,6 @@ export function Composer(): ReactNode {
         }
       }}
     >
-      {!showPalette && !saving ? <CaptionRail captions={hub.captions} actions={hub.actions} /> : null}
-
       {showPalette && !saving ? (
         <Palette
           items={items}
@@ -354,204 +274,136 @@ export function Composer(): ReactNode {
             setSaving(null)
             if (ok) {
               setText('')
-              actions.setNotice('Saved — find it with / in the composer')
+              actions.setNotice('Saved — find it with / in the bar')
             }
             focusField()
           }}
         />
       ) : null}
 
-      <span className="comp__voice" data-mode={mode}>
-        <button
-          ref={micRef}
-          type="button"
-          className="dock__mic comp__mic"
-          data-on={vs.micOn ? 'true' : undefined}
-          data-look={vs.look}
-          data-setup={showSetup ? 'true' : undefined}
-          aria-pressed={vs.micOn}
-          title={micTitle}
-          aria-label={micTitle}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={onMic}
-        >
-          {showSetup ? (
-            <span className="comp__mic-setup" aria-hidden="true">
-              !
-            </span>
-          ) : (
-            <span className="dock__bars" aria-hidden="true">
-              {[0.55, 0.85, 1, 0.75, 0.5].map((w, i) => (
-                <span key={i} style={{ '--w': w } as React.CSSProperties} />
-              ))}
-            </span>
-          )}
-          {micWord ? (
-            <span className="dock__mic-word">
-              {micWord}
-              {micMore ? <span className="comp__mic-more">{micMore}</span> : null}
-            </span>
-          ) : null}
-        </button>
-        <span className="comp__mode" role="radiogroup" aria-label="What the mic does">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={mode === 'dictate'}
-            data-on={mode === 'dictate' ? 'true' : undefined}
-            title="Dictate — Parakeet words straight into where the bar is aimed (Ctrl+Shift+L flips)"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => flipMode('dictate')}
-          >
-            Dictate
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={mode === 'agent'}
-            data-on={mode === 'agent' ? 'true' : undefined}
-            title={`Agent — Forge hears you and acts: ${brain} (Ctrl+Shift+L flips)`}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => flipMode('agent')}
-          >
-            Agent
-          </button>
-        </span>
-      </span>
-      <Popover
-        anchor={micRef.current}
-        open={setupOpen}
-        onClose={() => setSetupOpen(false)}
-        align="start"
-        side="top"
-        width={330}
-        label="Dictation setup"
-      >
-        <DictationSetup
-          problem={dictation.needsSetup ? (dictation.status.error?.msg ?? null) : null}
-          onRetry={() => setSetupOpen(false)}
-          compact
+      {/* What Forge says, and what it did, grow the bar upward. */}
+      <CaptionRail captions={hub.captions} actions={hub.actions} />
+
+      <div className="comp__row">
+        {lead}
+        <ListenToggle />
+
+        <textarea
+          ref={fieldRef}
+          className="dock__field"
+          rows={1}
+          value={text}
+          spellCheck
+          placeholder={placeholder}
+          aria-label={placeholder}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onChange={(e) => {
+            setText(e.target.value)
+            if (!e.target.value) setPaletteOpen(false)
+          }}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return
+            if (showPalette && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+              e.preventDefault()
+              const step = e.key === 'ArrowDown' ? 1 : -1
+              setCursor((c) => (items.length ? (c + step + items.length) % items.length : 0))
+              return
+            }
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              if (showPalette) runItem(items[cursor])
+              else send(text)
+              return
+            }
+            if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyK') {
+              e.preventDefault()
+              setPaletteOpen((v) => !v)
+              return
+            }
+            if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyS') {
+              e.preventDefault()
+              if (text.trim() && !slash) setSaving(text.trim())
+              return
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              if (saving !== null) setSaving(null)
+              else if (showPalette) {
+                setPaletteOpen(false)
+                if (slash) setText('')
+              } else if (!toForge) setBarTarget('forge')
+              else backToPane()
+            }
+          }}
         />
-      </Popover>
 
-      <textarea
-        ref={fieldRef}
-        className="dock__field"
-        rows={1}
-        value={text}
-        spellCheck
-        placeholder={placeholder}
-        aria-label={placeholder}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        onChange={(e) => {
-          setText(e.target.value)
-          if (!e.target.value) setPaletteOpen(false)
-        }}
-        onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing) return
-          if (showPalette && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-            e.preventDefault()
-            const step = e.key === 'ArrowDown' ? 1 : -1
-            setCursor((c) => (items.length ? (c + step + items.length) % items.length : 0))
-            return
-          }
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault()
-            if (showPalette) runItem(items[cursor])
-            else send(text)
-            return
-          }
-          if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyK') {
-            e.preventDefault()
-            setPaletteOpen((v) => !v)
-            return
-          }
-          if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyS') {
-            e.preventDefault()
-            if (text.trim() && !slash) setSaving(text.trim())
-            return
-          }
-          if (e.key === 'Escape') {
-            e.preventDefault()
-            if (saving !== null) setSaving(null)
-            else if (showPalette) {
-              setPaletteOpen(false)
-              if (slash) setText('')
-            } else if (!toForge) setBarTarget('forge')
-            else backToPane()
-          }
-        }}
-      />
+        {dictating ? (
+          <span className="comp__dictating" role="status" title={`The Dictate key is on — ${dictateKey} stops it`}>
+            <span className="comp__dictating-dot" aria-hidden="true">
+              ●
+            </span>
+            Dictating
+          </span>
+        ) : null}
 
-      <button
-        type="button"
-        className="dock__target comp__target"
-        data-target={toForge ? 'forge' : 'pane'}
-        disabled={!paneName}
-        title={
-          toForge
-            ? paneName
-              ? `Asking Forge, the main agent (${brain}). Click to type straight into ${paneName} instead.`
-              : `Asking Forge, the main agent (${brain}).`
-            : `Typing straight into ${paneName}. Click (or Esc in the bar) to ask Forge instead.`
-        }
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => setBarTarget(toForge ? 'pane' : 'forge')}
-      >
-        <span className="dock__target-arrow" aria-hidden="true">
-          →
-        </span>
-        {toForge ? <Icon name="forge" size={11} className="comp__target-mark" /> : null}
-        <span className="truncate">{toForge ? 'Forge' : paneName}</span>
-      </button>
+        <button
+          type="button"
+          className="dock__target comp__target"
+          data-target={toForge ? 'forge' : 'pane'}
+          disabled={!paneName}
+          title={
+            toForge
+              ? paneName
+                ? `Asking Forge, the main agent (${hub.brainLabel}). Click to type straight into ${paneName} instead.`
+                : `Asking Forge, the main agent (${hub.brainLabel}).`
+              : `Typing straight into ${paneName}. Click (or Esc in the bar) to ask Forge instead.`
+          }
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setBarTarget(toForge ? 'pane' : 'forge')}
+        >
+          <span className="dock__target-arrow" aria-hidden="true">
+            →
+          </span>
+          {toForge ? <Icon name="forge" size={11} className="comp__target-mark" /> : null}
+          <span className="truncate">{toForge ? 'Forge' : paneName}</span>
+        </button>
 
-      {text && !slash ? (
-        <span className="comp__acts">
-          <button
-            type="button"
-            className="comp__act"
-            title="Save this as a prompt (Ctrl+S)"
-            aria-label="Save as a prompt"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setSaving(text.trim())}
-          >
-            <Icon name="pin" size={13} />
-          </button>
-          <button
-            type="button"
-            className="comp__act"
-            title="Cancel — clear the bar"
-            aria-label="Cancel"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={cancel}
-          >
-            <Icon name="close" size={12} />
-          </button>
-          <button
-            type="button"
-            className="comp__send"
-            title={toForge ? 'Ask Forge (Enter)' : `Send to ${paneName} (Enter)`}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => send(text)}
-          >
-            {toForge ? 'Ask' : 'Send'}
-            <span aria-hidden="true">⏎</span>
-          </button>
-        </span>
-      ) : listening ? (
-        <span className="comp__acts">
-          <button
-            type="button"
-            className="comp__act comp__act--word"
-            title="Stop listening"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={cancel}
-          >
-            Cancel
-          </button>
-        </span>
-      ) : null}
+        {text && !slash ? (
+          <span className="comp__acts">
+            <button
+              type="button"
+              className="comp__act"
+              title="Save this as a prompt (Ctrl+S)"
+              aria-label="Save as a prompt"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setSaving(text.trim())}
+            >
+              <Icon name="pin" size={13} />
+            </button>
+            <button
+              type="button"
+              className="comp__act"
+              title="Cancel — clear the bar"
+              aria-label="Cancel"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={cancel}
+            >
+              <Icon name="close" size={12} />
+            </button>
+            <button
+              type="button"
+              className="comp__send"
+              title={toForge ? 'Ask Forge (Enter)' : `Send to ${paneName} (Enter)`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => send(text)}
+            >
+              {toForge ? 'Ask' : 'Send'}
+              <span aria-hidden="true">⏎</span>
+            </button>
+          </span>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -574,11 +426,11 @@ function clock(at: number): string {
 }
 
 /**
- * Above the bar: the last thing he said (italic), the last thing Forge said
- * (upright), each fading a few seconds after it settles, and the trail of what
- * it did — which opens into the whole list. Opaque, and pointer-transparent
- * except for the trail's own toggle and list, so it never blurs a terminal and
- * never eats a click meant for one.
+ * Inside the bar, above its row: the last thing he said (italic), the last
+ * thing Forge said (upright), each fading a few seconds after it settles, and
+ * the trail of what it did — which opens into the whole list. The bar grows
+ * upward to hold it. Pointer-transparent except for the trail's own toggle and
+ * list, so a click there always means the trail.
  */
 function CaptionRail({ captions, actions }: { captions: HubCaption[]; actions: HubAction[] }): ReactNode {
   const [now, setNow] = useState(() => Date.now())

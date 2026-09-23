@@ -9,6 +9,7 @@ import { earconListening } from '@/lib/earcon'
 import { voiceSpeaker, type VoiceConfig } from '@/lib/tts'
 import { useApp } from '@/state/AppState'
 import { MainAgentCard } from './MainAgent'
+import { VoiceKeysCard } from './VoiceKeys'
 import { Card, Row, Section, TextField, Toggle } from './parts'
 import { SpeechEngineCard } from './SpeechEngineCard'
 
@@ -20,13 +21,15 @@ import { SpeechEngineCard } from './SpeechEngineCard'
  *
  *   1. Main agent    who answers the bar (the ONE `agentBrain` setting),
  *                    one card per engine — MainAgent.tsx
- *   2. Conversation  talking to it hands-free: the pause that ends your turn,
+ *   2. Voice keys    the Dictate key and the Listen key, side by side, so
+ *                    neither can take the other's — VoiceKeys.tsx
+ *   3. Conversation  talking to it hands-free: the pause that ends your turn,
  *                    when it stops listening, talking over it, spoken replies
- *   3. Dictation     Parakeet into a pane: the talk key, auto-send, the wake
- *                    word, and the engine's files
- *   4. Speech engine whether Parakeet is installed
- *   5. Voice         which voice speaks the replies
- *   6. Habits        relay, where new projects go, the project summary
+ *   4. Dictation     Parakeet into a pane with the Dictate key: auto-send, the
+ *                    wake word, and the engine's files
+ *   5. Speech engine whether Parakeet is installed
+ *   6. Voice         which voice speaks the replies
+ *   7. Habits        relay, where new projects go, the project summary
  *
  * Plain choices rather than sliders: three or four named values you can read
  * at a glance, plus the stored value when it is none of them.
@@ -42,6 +45,7 @@ export function VoiceSection(): ReactNode {
       blurb="The bar at the bottom is Forge’s main agent. It knows every project, tab and pane, and it can open agents, type into them, browse and take you places — inside Forge, whichever engine answers."
     >
       <MainAgentCard />
+      <VoiceKeysCard />
       <ConversationCard />
       <DictationCard />
       <SpeechEngineCard />
@@ -128,7 +132,7 @@ function ConversationCard(): ReactNode {
   const idleTimeout = 120_000
 
   return (
-    <Card title="Conversation" hint="In Agent mode the mic stays open between turns: you talk, it answers, it listens again.">
+    <Card title="Conversation" hint="With Listen on, the mic stays open between turns: you talk, it answers, it listens again.">
       <Row label="Pause that ends your turn" hint="How long you can stop talking before what you said goes to the agent">
         <Choice
           label="Pause that ends your turn"
@@ -174,38 +178,17 @@ const DICTATE_STOPS: ChoiceOption[] = [
   { value: 0, label: 'Never' }
 ]
 
-/** The talk keys Forge can listen for (the same list the dictation pill offers). */
-const TALK_KEYS = ['ControlRight', 'ControlLeft', 'AltRight', 'ShiftRight', 'ScrollLock', 'Pause', 'F8', 'F9'] as const
-
 function DictationCard(): ReactNode {
   const { state, actions } = useApp()
   const s = state.settings
+  const key = hotkeyLabel(s.sttHotkey || 'ControlRight')
 
   return (
     <Card
       title="Dictation"
-      hint="Parakeet hears you on this machine — the audio never leaves it. Tap the talk key to start or stop; hold it to push-to-talk. Words land in the pane."
+      hint={`Parakeet hears you on this machine — the audio never leaves it. The Dictate key (${key}) types your words, raw, into the pane you are in. Change the key under Voice keys.`}
     >
-      <Row label="Talk key" hint="Works in every pane and in the bar" htmlFor="va-talk-key">
-        <select
-          id="va-talk-key"
-          className="select mono"
-          value={s.sttHotkey}
-          onKeyDown={(e) => e.stopPropagation()}
-          onChange={(e) => actions.patchSettings({ sttHotkey: e.target.value })}
-        >
-          {TALK_KEYS.includes(s.sttHotkey as (typeof TALK_KEYS)[number]) ? null : (
-            <option value={s.sttHotkey}>{hotkeyLabel(s.sttHotkey)}</option>
-          )}
-          {TALK_KEYS.map((code) => (
-            <option key={code} value={code}>
-              {hotkeyLabel(code)}
-            </option>
-          ))}
-        </select>
-      </Row>
-
-      <Row label="Auto-send dictation" hint="Dictate mode: press Enter in the pane after each phrase. Off, you press Enter yourself.">
+      <Row label="Auto-send dictation" hint="Press Enter in the pane after each dictated phrase. Off, you press Enter yourself.">
         <Toggle
           checked={s.dictateAutoSend}
           onChange={(on) => actions.patchSettings({ dictateAutoSend: on })}
@@ -213,7 +196,7 @@ function DictationCard(): ReactNode {
         />
       </Row>
 
-      <Row label="Stop dictating after" hint="Silence that closes the mic in Dictate mode">
+      <Row label="Stop dictating after" hint="Silence that closes the mic after the Dictate key">
         <Choice
           label="Stop dictating after"
           value={s.sttAutoStopSeconds}

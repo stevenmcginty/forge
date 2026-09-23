@@ -91,13 +91,13 @@ export function AppearanceSection(): ReactNode {
           />
         </Row>
         <Row
-          label="Full-size text in the mosaic"
+          label="Full-size text on the Wall"
           hint="Same type size however many tiles are up — each tile is a window onto its terminal, showing the latest output. Off shrinks whole terminals to fit instead. Neither reflows a running TUI. Double-click a tile’s header to override one tile."
         >
           <Toggle
             checked={s.mosaicText !== 'scaled'}
             onChange={(on) => actions.setMosaicText(on ? 'lifesize' : 'scaled')}
-            label="Full-size text in the mosaic"
+            label="Full-size text on the Wall"
           />
         </Row>
         <Row

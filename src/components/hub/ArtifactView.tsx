@@ -235,7 +235,7 @@ export function ArtifactView({
           </span>
         </span>
         {failed ? (
-          <span className="artifact__note" role="status" title="The file could not be read from the canvas folder. It may have been moved or deleted.">
+          <span className="artifact__note" role="status" title="The file could not be read from the board’s folder. It may have been moved or deleted.">
             Failed to load
           </span>
         ) : null}
@@ -272,7 +272,7 @@ export function ArtifactView({
           <button type="button" className="artifact__act" onClick={() => void window.forge.openPath(item.path)} title="Open in its own app">
             <Icon name="expand" size={12} />
           </button>
-          <button type="button" className="artifact__act artifact__act--quiet" onClick={actions.remove} title="Take it off the board (deletes the file from the canvas folder)">
+          <button type="button" className="artifact__act artifact__act--quiet" onClick={actions.remove} title="Take it off the board (deletes the file from the board’s folder)">
             <Icon name="trash" size={12} />
           </button>
         </span>

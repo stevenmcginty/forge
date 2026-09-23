@@ -88,8 +88,7 @@ const GROUPS: Array<{ kind: AgentBrainKind; title: string; note: string }> = [
 const CLAUDE_MODELS = [
   { id: 'opus', label: 'Opus — smartest, the default' },
   { id: 'sonnet', label: 'Sonnet — faster, lighter on usage' },
-  { id: 'haiku', label: 'Haiku — lightest' },
-  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna — via your Codex login, fastest' }
+  { id: 'haiku', label: 'Haiku — lightest' }
 ]
 
 const GEMINI_MODELS = [
@@ -420,7 +419,7 @@ function BrainDetails({ spec, probe }: { spec: AgentBrainSpec; probe: Probe | un
       ) : null}
 
       {spec.id === 'claude' ? (
-        <Row label="Model" hint="Opus, Sonnet and Haiku use your Claude login; Luna uses your Codex login. Takes effect on the next turn." htmlFor="mag-claude-model">
+        <Row label="Model" hint="Opus, Sonnet and Haiku use your Claude login. Takes effect on the next turn. For GPT, pick Codex as the main agent." htmlFor="mag-claude-model">
           <select
             id="mag-claude-model"
             className="select"
@@ -428,7 +427,11 @@ function BrainDetails({ spec, probe }: { spec: AgentBrainSpec; probe: Probe | un
             onKeyDown={(e) => e.stopPropagation()}
             onChange={(e) => actions.patchSettings({ voiceClaudeModel: e.target.value })}
           >
-            {CLAUDE_MODELS.some((m) => m.id === s.voiceClaudeModel) ? null : <option value={s.voiceClaudeModel}>{s.voiceClaudeModel}</option>}
+            {CLAUDE_MODELS.some((m) => m.id === s.voiceClaudeModel) ? null : (
+              <option value={s.voiceClaudeModel}>
+                {/luna/i.test(s.voiceClaudeModel) ? 'GPT-5.6 Luna — no longer offered, pick another' : s.voiceClaudeModel}
+              </option>
+            )}
             {CLAUDE_MODELS.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}

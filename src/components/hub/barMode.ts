@@ -2,15 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { GestureIntent } from '@/lib/stt-gesture'
 
 /**
- * The bottom bar's two switches, and the one place anything reads them.
- *
- *   mode     what the mic (and the Right Ctrl talk key) is for.
- *              dictate  Parakeet words, raw, into wherever they are aimed —
- *                       exactly what the talk key has always done.
- *              agent    the main agent hears it: Gemini Live or GPT on their
- *                       own live session, or Claude through Parakeet (each
- *                       finished phrase is asked of the brain, not typed).
- *            Remembered across launches. Ctrl+Shift+L flips it.
+ * The bottom bar's target, and the legacy mic mode.
  *
  *   target   where a typed line goes when you press Enter.
  *              forge    the main agent — the default, "Ask Forge…".
@@ -18,9 +10,19 @@ import type { GestureIntent } from '@/lib/stt-gesture'
  *            Not remembered: every launch starts on Forge. Esc in the bar
  *            comes back to Forge.
  *
- * The voice hooks outside the hub UI (useDictation) read the mode through
- * `barMode()` and hand Agent-mode input to the handlers HubLayer registers
- * here, so nothing below src/components needs to import the hub controller.
+ *   mode     LEGACY, pinned to 'dictate'. The bar no longer has a Dictate ⇄
+ *            Agent switch: it has one Listen toggle (hub.start / hub.stop),
+ *            and the Dictate key (Right Ctrl) is raw dictation into the
+ *            focused pane. Pinned, `agentVoiceNow()` is always null, so that
+ *            key and its phrases can never be taken for the agent by a stale
+ *            'agent' left in localStorage by the old switch. The Listen key
+ *            (Right Shift) and the toggle reach the agent through
+ *            `agentVoiceAlways()` / the hub.
+ *
+ * The voice hooks outside the hub UI (useDictation) read these through
+ * `barMode()`, `agentVoiceNow()` and `agentVoiceAlways()`, and hand agent
+ * input to the handlers HubLayer registers here, so nothing below
+ * src/components needs to import the hub controller.
  */
 
 export type BarMode = 'dictate' | 'agent'
@@ -28,15 +30,18 @@ export type BarTarget = 'forge' | 'pane'
 
 const MODE_KEY = 'forge.bar.mode'
 
-function readMode(): BarMode {
+/** The old switch's remembered 'agent' is dropped, once, so it cannot come back. */
+function forgetStoredMode(): void {
   try {
-    return localStorage.getItem(MODE_KEY) === 'agent' ? 'agent' : 'dictate'
+    localStorage.removeItem(MODE_KEY)
   } catch {
-    return 'dictate'
+    /* nothing stored, or no storage */
   }
 }
 
-let mode: BarMode = typeof window === 'undefined' ? 'dictate' : readMode()
+if (typeof window !== 'undefined') forgetStoredMode()
+
+const mode = 'dictate' as BarMode
 let target: BarTarget = 'forge'
 const listeners = new Set<() => void>()
 
@@ -55,15 +60,9 @@ export function barMode(): BarMode {
   return mode
 }
 
+/** Legacy: the mode is pinned to 'dictate'; any other value is ignored. */
 export function setBarMode(next: BarMode): void {
-  if (next === mode) return
-  mode = next
-  try {
-    localStorage.setItem(MODE_KEY, next)
-  } catch {
-    /* remembered for this run only */
-  }
-  emit()
+  if (next !== mode) return
 }
 
 export function useBarMode(): BarMode {

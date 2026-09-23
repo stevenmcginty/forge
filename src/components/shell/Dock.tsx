@@ -5,14 +5,12 @@ import { usePaneRuntime } from '@/hooks/usePaneRuntime'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { usePaneActivity } from '@/lib/paneActivity'
-import { shellSheet, toolsHost, useDockVoice, useShellSheet } from '@/lib/shellSlots'
+import { shellSheet, useShellSheet } from '@/lib/shellSlots'
 import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
 import { useUiCommand } from '@/lib/uiCommands'
 import { useActiveProject, useActiveWorkspace, useApp, usePaneCount, useViewMode } from '@/state/AppState'
 import { AgentBadge } from '../AgentBadge'
-import { AgentButton } from '../AgentButton'
-import { DictationPill } from '../DictationPill'
 import { Composer } from '../hub/Composer'
 import { Icon } from '../Icon'
 import { RailStack } from '../rail/RailStack'
@@ -21,19 +19,15 @@ import { StateChip } from './StateChip'
 import './Dock.css'
 
 /**
- * The dock: the whole of the deck's bottom edge, and nothing else.
+ * The dock: one bar along the deck's bottom edge, and nothing else.
  *
- *   project pill   which project you are in; opens the project sheet (every
- *                  project, with its tasks, git, activity and share sections —
- *                  everything the old left rail held).
- *   composer       type or speak. Enter sends to the pane you are in, the same
- *                  keystrokes a hand at that prompt would make; the mic is the
- *                  existing dictation engine.
- *   panes pill     how many panes, and a switcher over all of them.
- *   tools          the references that used to crowd a second toolbar row:
- *                  Skills, Commands, tab colours, canvas text size, reset.
- *   voice socket   the agent switch and the dictation pill — or, once the voice
- *                  hub plugs in (setDockVoice), whatever it puts here.
+ * The bar (./hub/Composer) is the only place you talk to Forge: the project
+ * you are in at its left (it opens the project sheet — every project, with its
+ * tasks, git, activity and share sections), the Listen switch, the text, and
+ * where the text goes. The panes live on the Wall and in the tabs; the
+ * references that used to sit in a Tools pill (Skills, Commands, tab colours,
+ * Wall text) are in the top bar's "…" menu and in the palette (Ctrl+K). The
+ * panes switcher is still one key away (Ctrl+Shift+E).
  *
  * It floats over the backdrop, below the stage, so it never covers a terminal
  * and its glass only ever blurs a still picture.
@@ -42,20 +36,23 @@ export function Dock(): ReactNode {
   const project = useActiveProject()
   return (
     <div className="dock" role="toolbar" aria-label="Dock">
-      <ProjectPill />
-      {project ? <Composer /> : <div className="dock__composer dock__composer--idle">Add a project to start</div>}
-      <PanesPill />
-      <ToolsPill />
-      <VoiceSocket />
+      {project ? (
+        <Composer lead={<ProjectPill />} />
+      ) : (
+        <div className="dock__composer dock__composer--idle">
+          <ProjectPill />
+          Add a project to start
+        </div>
+      )}
       <ProjectSheet />
       <PanesSheet />
-      <ToolsSheet />
     </div>
   )
 }
 
 /* ------------------------------------------------------------ project pill */
 
+/** The project you are in, as the bar's first word; opens the project sheet. */
 function ProjectPill(): ReactNode {
   const project = useActiveProject()
   const open = useShellSheet() === 'projects'
@@ -68,7 +65,7 @@ function ProjectPill(): ReactNode {
   return (
     <button
       type="button"
-      className="dock__pill dock__project"
+      className="dock__project comp__project"
       data-open={open ? 'true' : undefined}
       data-sheet-toggle="projects"
       aria-expanded={open}
@@ -108,35 +105,6 @@ function ProjectSheet(): ReactNode {
 
 /* -------------------------------------------------------------- panes pill */
 
-function PanesPill(): ReactNode {
-  const { used, max } = usePaneCount()
-  const workspace = useActiveWorkspace()
-  const count = workspace.tabs.reduce((n, t) => n + collectLeaves(t.root).length, 0)
-  const open = useShellSheet() === 'panes'
-  useUiCommand('open-panes-switcher', () => shellSheet.set('panes'))
-  useUiCommand('close-panes-switcher', () => {
-    if (shellSheet.get() === 'panes') shellSheet.set(null)
-  })
-  useUiCommand('toggle-panes-switcher', () => toggleSheet('panes'))
-
-  return (
-    <button
-      type="button"
-      className="dock__pill dock__panes"
-      data-open={open ? 'true' : undefined}
-      data-sheet-toggle="panes"
-      aria-expanded={open}
-      title={`Panes in this project: ${count} · all projects ${used}/${max}`}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => toggleSheet('panes')}
-    >
-      <Icon name="viewMosaic" size={13} />
-      <span className="dock__count">{count}</span>
-      <span className="dock__pill-word">{count === 1 ? 'pane' : 'panes'}</span>
-    </button>
-  )
-}
-
 interface Row {
   leaf: PaneLeaf
   tab: TerminalTab
@@ -148,6 +116,12 @@ function PanesSheet(): ReactNode {
   const viewMode = useViewMode()
   const { used, max } = usePaneCount()
   const open = useShellSheet() === 'panes'
+  // No pill in the dock any more: the switcher answers to its keys and the palette.
+  useUiCommand('open-panes-switcher', () => shellSheet.set('panes'))
+  useUiCommand('close-panes-switcher', () => {
+    if (shellSheet.get() === 'panes') shellSheet.set(null)
+  })
+  useUiCommand('toggle-panes-switcher', () => toggleSheet('panes'))
   const { map: callSigns } = useCallSigns()
   const rows = useMemo<Row[]>(
     () => workspace.tabs.flatMap((tab) => collectLeaves(tab.root).map((leaf) => ({ leaf, tab }))),
@@ -195,9 +169,9 @@ function PanesSheet(): ReactNode {
             type="button"
             data-active={viewMode === 'mosaic' ? 'true' : undefined}
             onClick={() => actions.setViewMode('mosaic')}
-            title="Canvas — every pane at once (Ctrl+G)"
+            title="Wall — every pane at once (Ctrl+G)"
           >
-            Canvas
+            Wall
           </button>
         </div>
       </header>
@@ -310,68 +284,5 @@ function PaneRow({
       <StateChip activity={activity} />
       {current ? <span className="prow__here">here</span> : null}
     </button>
-  )
-}
-
-/* ------------------------------------------------------------------ tools */
-
-function ToolsPill(): ReactNode {
-  const open = useShellSheet() === 'tools'
-  useUiCommand('toggle-tools', () => toggleSheet('tools'))
-  return (
-    <button
-      type="button"
-      className="dock__pill dock__tools"
-      data-open={open ? 'true' : undefined}
-      data-sheet-toggle="tools"
-      aria-expanded={open}
-      aria-label="Tools"
-      title="Tools — Skills, Commands, tab colours, canvas text"
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => toggleSheet('tools')}
-    >
-      <Icon name="dots" size={15} />
-      <span className="dock__pill-word">Tools</span>
-    </button>
-  )
-}
-
-/**
- * The Tools sheet is only a host: TerminalGrid portals its reference buttons
- * into it (see toolsHost), so every one keeps its own flyout and behaviour.
- */
-function ToolsSheet(): ReactNode {
-  return (
-    <Sheet id="tools" className="sheet--tools" label="Tools">
-      <header className="sheet__head">
-        <span className="sheet__eyebrow">Tools</span>
-      </header>
-      <div className="sheet__tools" ref={toolsHost.set}>
-        <span className="sheet__tools-empty">Open Agents to use these.</span>
-      </div>
-    </Sheet>
-  )
-}
-
-/* ------------------------------------------------------------ voice socket */
-
-/**
- * The voice hub's dock. Today: the agent switch and the dictation pill, moved
- * here from the status bar unchanged (the pill is also where the floating hub
- * docks back to). The live voice hub replaces both with `setDockVoice`.
- */
-function VoiceSocket(): ReactNode {
-  const Plugged = useDockVoice()
-  return (
-    <div className="dock__voice" data-plugged={Plugged ? 'true' : undefined}>
-      {Plugged ? (
-        <Plugged />
-      ) : (
-        <>
-          <AgentButton />
-          <DictationPill />
-        </>
-      )}
-    </div>
   )
 }

@@ -1,127 +1,158 @@
 /*
- * The dock's voice capsule. Same glass, rim and height as every other dock
- * pill (Dock.css), so it reads as part of the one instrument; the waveform is
- * the only thing in the dock that moves.
+ * Listen — the one voice switch, inside the bar. A small track whose knob
+ * slides across (the shape says off or on), the brain's name above what it is
+ * doing, and a live waveform only while it is on. The words carry the state;
+ * the colour only agrees with them.
  */
 
-.vpill {
+.listen {
   --wave: var(--text-dim);
   --wave-dim: color-mix(in srgb, var(--text-primary) 22%, transparent);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: var(--dock-h);
-  padding: 0 7px 0 4px;
-  border-radius: var(--r-full);
-  background: var(--glass-bg-strong);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid var(--glass-line);
-  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
-  transition:
-    border-color var(--dur-med) var(--ease-out),
-    box-shadow var(--dur-med) var(--ease-out);
+  gap: 4px;
+  flex: none;
 }
 
-.vpill[data-look='listening'] {
-  --wave: var(--accent);
-  --wave-dim: color-mix(in srgb, var(--accent) 38%, transparent);
-}
-.vpill[data-look='speaking'] {
-  --wave: var(--text-primary);
-  --wave-dim: color-mix(in srgb, var(--accent) 45%, transparent);
-}
-.vpill[data-look='thinking'] {
-  --wave: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
-}
-.vpill[data-look='connecting'] {
-  --wave: var(--text-secondary);
-}
-.vpill[data-look='error'] {
-  --wave: var(--warn);
-}
-
-/* Live: the rim lights, the way the composer's does while it listens. */
-.vpill[data-mode='live'] {
-  border-color: color-mix(in srgb, var(--accent) 34%, var(--glass-line-strong));
-  box-shadow:
-    var(--glass-shadow),
-    0 0 30px -10px var(--accent-glow),
-    inset 0 1px 0 var(--glass-hi);
-}
-
-.vpill[data-mode='live'][data-look='listening'] {
-  border-color: var(--accent-line);
-  box-shadow:
-    var(--glass-shadow),
-    0 0 0 3px var(--accent-softer),
-    0 0 28px -4px var(--accent-glow),
-    inset 0 1px 0 var(--glass-hi);
-}
-
-.vpill[data-look='error'] {
-  border-color: var(--warn-line);
-}
-
-.vpill__main {
+.listen__btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 12px 0 8px;
+  gap: 9px;
+  height: 36px;
+  padding: 0 12px 0 10px;
   border-radius: var(--r-full);
   color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.listen__btn:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.listen[data-on='true'] .listen__btn {
+  color: var(--text-primary);
+  background: var(--accent-soft);
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    0 0 18px -6px var(--accent-glow);
+}
+
+/* Listening for real: the rim lights a step further. */
+.listen[data-recording='true'] .listen__btn {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    0 0 0 3px var(--accent-softer),
+    0 0 22px -4px var(--accent-glow);
+}
+
+.listen[data-look='error'] .listen__btn {
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+/* ------------------------------------------------------------------ track */
+
+.listen__track {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 15px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--bg-sunken) 80%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
   transition: background var(--dur-fast) var(--ease-out);
 }
 
-.vpill__main:hover {
-  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
-  color: var(--text-primary);
+.listen__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition:
+    transform var(--dur-glide) var(--spring-glide),
+    background var(--dur-fast) var(--ease-out);
 }
 
-.vpill__wave {
-  display: inline-flex;
-  flex: none;
-  width: 46px;
-  height: 22px;
-  color: var(--wave);
+.listen[data-on='true'] .listen__track {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
-.vpill__text {
+.listen[data-on='true'] .listen__knob {
+  transform: translate3d(11px, 0, 0);
+  background: var(--accent);
+}
+
+.listen[data-look='error'] .listen__knob {
+  background: var(--warn);
+}
+
+/* ------------------------------------------------------------------ words */
+
+.listen__text {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 1px;
-  min-width: 74px;
+  min-width: 0;
 }
 
-.vpill__eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.listen__brain {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-display);
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.16em;
+  line-height: 11px;
   text-transform: uppercase;
   color: var(--text-dim);
-  line-height: 11px;
 }
 
+.listen[data-on='true'] .listen__brain {
+  color: color-mix(in srgb, var(--accent) 75%, var(--text-dim));
+}
 
-.vpill__word {
+.listen__word {
   display: inline-flex;
   align-items: baseline;
   gap: 5px;
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   line-height: 16px;
   color: var(--text-primary);
 }
 
-.vpill__glyph {
+.listen[data-look='offline'] .listen__word,
+.listen[data-look='muted'] .listen__word {
+  color: var(--text-secondary);
+}
+
+.listen[data-look='error'] .listen__word {
+  color: var(--warn);
+}
+
+.listen__word-text {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listen__glyph {
   display: inline-block;
   width: 9px;
   font-size: 9px;
@@ -129,44 +160,75 @@
   color: var(--wave);
 }
 
-.vpill[data-look='offline'] .vpill__word,
-.vpill[data-look='muted'] .vpill__word {
-  color: var(--text-secondary);
+.listen[data-look='listening'] {
+  --wave: var(--accent);
+  --wave-dim: color-mix(in srgb, var(--accent) 38%, transparent);
 }
 
-.vpill__word-text {
-  max-width: 230px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.listen[data-look='speaking'] {
+  --wave: var(--text-primary);
+  --wave-dim: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-/* Agent mode wears the accent in its eyebrow; Dictate stays plain. */
-.vpill[data-mode='agent'] .vpill__eyebrow,
-.vpill[data-mode='live'] .vpill__eyebrow {
-  color: color-mix(in srgb, var(--accent) 70%, var(--text-dim));
+.listen[data-look='thinking'] {
+  --wave: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
 }
 
-/* A failure says why, in words, with the "!" in front of it. */
-.vpill[data-look='error'] .vpill__word {
-  color: var(--warn);
-  letter-spacing: 0.01em;
+.listen[data-look='error'] {
+  --wave: var(--warn);
 }
 
-.vpill[data-look='error'] .vpill__glyph {
-  display: inline-grid;
-  place-items: center;
-  width: 13px;
-  height: 13px;
+.listen__wave {
+  display: inline-flex;
+  flex: none;
+  width: 30px;
+  height: 18px;
+  color: var(--wave);
+  animation: listen-wave-in var(--dur-pop) var(--spring-pop) both;
+}
+
+@keyframes listen-wave-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+/* "Why?" beside a failure: the full reason, one click away. */
+.listen__why {
+  height: 24px;
+  padding: 0 9px;
   border-radius: var(--r-full);
-  font-size: 9px;
-  font-weight: 800;
-  color: var(--bg-base);
-  background: var(--warn);
+  border: 1px solid var(--warn-line);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--warn);
 }
 
-.vpill__main[aria-expanded='true'] {
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+.listen__why:hover,
+.listen__why[aria-expanded='true'] {
+  background: var(--warn-soft);
+}
+
+@media (max-width: 1500px) {
+  .listen__word-text {
+    max-width: 140px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .listen__knob,
+  .listen__wave {
+    transition: none;
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] :is(.listen__knob, .listen__wave) {
+  transition: none !important;
+  animation: none !important;
 }
 
 /* ------------------------------------------------------------ the details */
@@ -276,85 +338,4 @@
   font-size: var(--t-xs);
   line-height: 1.55;
   color: var(--text-dim);
-}
-
-.vpill__chips {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  animation: vpill-chips-in var(--dur-pop) var(--spring-pop) both;
-}
-
-@keyframes vpill-chips-in {
-  from {
-    opacity: 0;
-    transform: translate3d(-6px, 0, 0) scale(0.94);
-  }
-}
-
-.vpill__chip,
-.vpill__go {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 10px;
-  border-radius: var(--r-full);
-  border: 1px solid var(--glass-line);
-  font-family: var(--font-display);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
-  white-space: nowrap;
-}
-
-.vpill__chip:hover {
-  color: var(--text-primary);
-  border-color: var(--glass-line-strong);
-}
-
-.vpill__chip[data-on='true'] {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
-.vpill__chip[data-unavailable='true'] {
-  cursor: default;
-  color: var(--text-dim);
-  border-style: dashed;
-  text-transform: none;
-  letter-spacing: 0.02em;
-}
-
-.vpill__count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  border-radius: var(--r-full);
-  background: var(--accent);
-  color: var(--text-on-accent);
-  font-size: 9.5px;
-  letter-spacing: 0;
-}
-
-.vpill__go {
-  color: var(--text-on-accent);
-  background: var(--accent);
-  border-color: transparent;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .vpill__chips {
-    animation: none;
-  }
-}
-
-:root[data-reduced-motion='true'] .vpill__chips {
-  animation: none;
 }

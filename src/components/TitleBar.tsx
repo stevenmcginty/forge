@@ -1,18 +1,23 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { shellSheet, tabsHost, useHost, useShellSheet, useShellMode, useSurfaces, viewHost } from '@/lib/shellSlots'
+import { HUB_CHEAT_SHEET_EVENT } from '@/lib/hubnav'
+import { shellSheet, tabsHost, toolsHost, useHost, useShellSheet, useShellMode, useSurfaces, viewHost } from '@/lib/shellSlots'
 import { collectLeaves } from '@/lib/splitTree'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { useActiveWorkspace, useApp } from '@/state/AppState'
 import { AccountChip } from './AccountChip'
+import { CommandKeys } from './hub/KeyRecorder'
 import { Icon } from './Icon'
 import { Popover } from './Popover'
 import { ScreenshotTray } from './ScreenshotTray'
+import { toggleSheet } from './shell/Sheet'
 import './shell/DeckBar.css'
 
 /**
  * The deck's one top layer: the mark and the agents' tabs on the left, the
- * mode switcher in the middle, the Tabs/Canvas switch, the tucked-away tools
- * and settings on the right. Three grid columns, so the three can never
+ * mode switcher in the middle, and on the right the Tabs | Wall switch and one
+ * "…" menu that holds everything else — Settings, the keyboard sheet, the
+ * panes switcher, the tools (Skills, Commands, tab colours, Wall text), the
+ * screenshot shelf and the account. Three grid columns, so the three can never
  * collide: however many tabs there are, they scroll inside their own column
  * (fading at the cut edge) and a "3 more" chip lists the ones out of sight.
  * Transparent over the backdrop — the window is draggable anywhere along it —
@@ -23,9 +28,8 @@ import './shell/DeckBar.css'
  * styles are its own, in shell/DeckBar.css.)
  */
 export function TitleBar(): ReactNode {
-  const { state, actions } = useApp()
+  const { state } = useApp()
   const [focused, setFocused] = useState(true)
-  const inSettings = state.view === 'settings'
   const isDevChannel = state.info?.channel === 'dev'
 
   useEffect(() => window.forge.window.onState((s) => setFocused(s.focused)), [])
@@ -46,20 +50,9 @@ export function TitleBar(): ReactNode {
       <ModePill />
 
       <div className="deckbar__right">
-        {/* Tabs / Canvas, portalled in by TerminalGrid (see viewHost). */}
+        {/* Tabs | Wall, portalled in by TerminalGrid (see viewHost). */}
         <div className="deckbar__view" ref={viewHost.set} />
-        <ShelfButton />
-        <button
-          type="button"
-          className="deckbar__btn"
-          title={inSettings ? 'Close settings (Esc)' : 'Settings (Ctrl+,)'}
-          aria-label="Settings"
-          aria-pressed={inSettings}
-          data-on={inSettings ? 'true' : undefined}
-          onClick={() => (inSettings ? actions.closeSettings() : actions.openSettings())}
-        >
-          <Icon name="gear" size={15} />
-        </button>
+        <DeckMenu />
         {/* Reserved for the native window controls (3 × 46px on Windows 11). */}
         <div className="deckbar__controls-gap" />
       </div>
@@ -296,24 +289,57 @@ function TabOverflow(): ReactNode {
   )
 }
 
-/* ----------------------------------------------------------------- shelf */
+/* ------------------------------------------------------------- the … menu */
 
 /**
- * The clipping tool and the account, tucked into one drawer: the screenshot
- * shelf (drag a shot onto a pane, as ever) and the account chip that used to
- * sit at the foot of the rail.
+ * Everything the top bar used to spread across four buttons, in one menu:
+ * Settings, the keyboard sheet, the panes switcher, the tools TerminalGrid
+ * portals in (see toolsHost), the screenshot shelf (drag a shot onto a pane,
+ * as ever) and the account.
+ *
+ * It stays mounted while closed, only hidden, so the tools keep their own
+ * state and flyouts; a click inside one of their pop-ups does not close it.
+ * A fresh screenshot still announces itself: a count on the "…" button.
  */
-function ShelfButton(): ReactNode {
-  const ref = useRef<HTMLButtonElement | null>(null)
+function DeckMenu(): ReactNode {
+  const { state, actions } = useApp()
+  const btnRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
   const open = useShellSheet() === 'shelf'
+  const toggle = (): void => shellSheet.set(shellSheet.get() === 'shelf' ? null : 'shelf')
   useUiCommand('open-shelf', () => shellSheet.set('shelf'))
   useUiCommand('close-shelf', () => {
     if (shellSheet.get() === 'shelf') shellSheet.set(null)
   })
-  useUiCommand('toggle-shelf', () => shellSheet.set(shellSheet.get() === 'shelf' ? null : 'shelf'))
+  useUiCommand('toggle-shelf', toggle)
+  useUiCommand('toggle-tools', toggle)
+
+  // Esc, or a click anywhere that is not the menu, its button, or one of the
+  // tools' own pop-ups, puts it away.
+  useEffect(() => {
+    if (!open) return undefined
+    const onDown = (e: PointerEvent): void => {
+      const t = e.target as HTMLElement | null
+      if (!t) return
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return
+      if (t.closest('.popover, .rexp, .comet')) return
+      shellSheet.set(null)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      shellSheet.set(null)
+    }
+    window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [open])
 
   // The shelf is folded away, so a fresh screenshot has to announce itself on
-  // the button: a count of shots that arrived since it was last opened.
+  // the button: a count of shots that arrived since the menu was last opened.
   const [fresh, setFresh] = useState(0)
   const known = useRef<Set<string> | null>(null)
   useEffect(() => {
@@ -335,34 +361,67 @@ function ShelfButton(): ReactNode {
     if (open) setFresh(0)
   }, [open])
 
+  const run = (fn: () => void): void => {
+    shellSheet.set(null)
+    fn()
+  }
+  const inSettings = state.view === 'settings'
+
   return (
-    <>
+    <span className="deckmenu">
       <button
-        ref={ref}
+        ref={btnRef}
         type="button"
         className="deckbar__btn"
-        title={fresh > 0 ? `${fresh} new screenshot${fresh === 1 ? '' : 's'} on the shelf` : 'Screenshot shelf and account'}
-        aria-label="Screenshot shelf and account"
+        title={fresh > 0 ? `${fresh} new screenshot${fresh === 1 ? '' : 's'} — the menu has the shelf` : 'Menu — Settings, tools, screenshots, account'}
+        aria-label="Menu"
+        aria-haspopup="menu"
         aria-expanded={open}
         data-on={open ? 'true' : undefined}
-        onClick={() => shellSheet.set(open ? null : 'shelf')}
+        onClick={toggle}
       >
-        <Icon name="camera" size={15} />
+        <Icon name="dots" size={16} />
         {fresh > 0 ? <span className="deckbar__badge">{fresh > 9 ? '9+' : fresh}</span> : null}
       </button>
-      <Popover
-        anchor={ref.current}
-        open={open}
-        onClose={() => shellSheet.set(null)}
-        align="end"
-        width={300}
-        label="Screenshot shelf and account"
-      >
-        <div className="deckbar__shelf" data-shell-overlay="">
+      <div ref={menuRef} className="deckmenu__panel" data-shell-overlay="" hidden={!open} role="menu" aria-label="Menu">
+        <div className="deckmenu__rows">
+          <button
+            type="button"
+            role="menuitem"
+            className="deckmenu__row"
+            onClick={() => run(() => (inSettings ? actions.closeSettings() : actions.openSettings()))}
+          >
+            <Icon name="gear" size={14} />
+            <span className="deckmenu__label">{inSettings ? 'Close settings' : 'Settings'}</span>
+            <CommandKeys id="app.settings" />
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="deckmenu__row"
+            onClick={() => run(() => window.dispatchEvent(new CustomEvent(HUB_CHEAT_SHEET_EVENT)))}
+          >
+            <Icon name="key" size={14} />
+            <span className="deckmenu__label">Keyboard shortcuts</span>
+            <CommandKeys id="app.cheatSheet" />
+          </button>
+          <button type="button" role="menuitem" className="deckmenu__row" onClick={() => run(() => toggleSheet('panes'))}>
+            <Icon name="viewMosaic" size={14} />
+            <span className="deckmenu__label">Every pane</span>
+            <CommandKeys id="ui.toggle-panes-switcher" />
+          </button>
+        </div>
+        <div className="deckmenu__section">
+          <span className="deckmenu__eyebrow">Tools</span>
+          <div className="deckmenu__tools" ref={toolsHost.set}>
+            <span className="deckmenu__empty">Open Agents to use these.</span>
+          </div>
+        </div>
+        <div className="deckbar__shelf">
           <ScreenshotTray />
           <AccountChip />
         </div>
-      </Popover>
-    </>
+      </div>
+    </span>
   )
 }

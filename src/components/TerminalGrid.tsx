@@ -212,7 +212,7 @@ export function TerminalGrid(): ReactNode {
     <div className="grid">
       {/*
         One slim top layer: on the deck the tabs live in the top bar, the
-        Tabs/Canvas switch beside the window tools, and the references in the
+        Tabs/Wall switch beside the window tools, and the references in the
         dock's Tools sheet — each portalled into a host the shell registers
         (see tabsHost in lib/shellSlots). Without the hosts, the old strip.
       */}
@@ -388,7 +388,7 @@ function ViewToggle({ mode }: { mode: WorkspaceViewMode }): ReactNode {
 
   const options: Array<{ value: WorkspaceViewMode; icon: 'viewTabs' | 'viewMosaic'; label: string; word: string }> = [
     { value: 'tabs', icon: 'viewTabs', label: 'Tab view', word: 'Tabs' },
-    { value: 'mosaic', icon: 'viewMosaic', label: 'Canvas — every session as a live tile', word: 'Canvas' }
+    { value: 'mosaic', icon: 'viewMosaic', label: 'Wall — every session as a live tile', word: 'Wall' }
   ]
 
   return (
@@ -564,7 +564,7 @@ function Tab({
       />
 
       {onWall ? (
-        <span className="tab__wall" title="On the mosaic wall" aria-label="On the mosaic wall">
+        <span className="tab__wall" title="On the Wall" aria-label="On the Wall">
           <Icon name="viewMosaic" size={10} />
         </span>
       ) : null}

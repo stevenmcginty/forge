@@ -67,25 +67,25 @@ const CORE: UiCommandSpec[] = [
   { id: 'toggle-project-sheet', title: 'Projects', group: 'Shell' },
   { id: 'open-project-sheet', title: 'Open the project sheet', group: 'Shell' },
   { id: 'close-project-sheet', title: 'Close the project sheet', group: 'Shell' },
-  { id: 'toggle-panes-switcher', title: 'Panes switcher', group: 'Panes', defaultKey: 'Ctrl+Shift+E' },
+  { id: 'toggle-panes-switcher', title: 'Every pane (switcher)', group: 'Panes', defaultKey: 'Ctrl+Shift+E' },
   { id: 'open-panes-switcher', title: 'Open the panes switcher', group: 'Panes' },
   { id: 'close-panes-switcher', title: 'Close the panes switcher', group: 'Panes' },
-  { id: 'focus-composer', title: 'Type or speak', group: 'Shell', defaultKey: 'Ctrl+Shift+J' },
+  { id: 'focus-composer', title: 'Ask Forge (the bar)', group: 'Shell', defaultKey: 'Ctrl+Shift+J' },
   { id: 'blur-composer', title: 'Back to the pane', group: 'Shell' },
   { id: 'toggle-composer', title: 'Composer focus', group: 'Shell' },
   // Ctrl+, stays the built-in app.settings; binding it twice would be a conflict.
   { id: 'toggle-settings', title: 'Settings', group: 'Shell' },
   { id: 'open-settings', title: 'Open settings', group: 'Shell', arg: 'section' },
   { id: 'close-settings', title: 'Close settings', group: 'Shell' },
-  { id: 'toggle-shelf', title: 'Shelf & account', group: 'Shell', defaultKey: 'Ctrl+Shift+S' },
+  { id: 'toggle-shelf', title: 'Menu: shelf & account', group: 'Shell', defaultKey: 'Ctrl+Shift+S' },
   { id: 'open-shelf', title: 'Open the shelf', group: 'Shell' },
   { id: 'close-shelf', title: 'Close the shelf', group: 'Shell' },
-  { id: 'toggle-tools', title: 'Tools (Skills, Commands…)', group: 'Shell', defaultKey: 'Ctrl+Shift+Y' },
+  { id: 'toggle-tools', title: 'Tools: Skills, Commands, tab colours, Wall text', group: 'Shell', defaultKey: 'Ctrl+Shift+Y' },
   { id: 'set-mode', title: 'Switch mode', group: 'Modes', arg: 'mode' },
   { id: 'next-mode', title: 'Next mode', group: 'Modes', defaultKey: 'Ctrl+Shift+]' },
   { id: 'previous-mode', title: 'Previous mode', group: 'Modes', defaultKey: 'Ctrl+Shift+[' },
   // Ctrl+G stays the built-in view.toggle.
-  { id: 'toggle-canvas-view', title: 'Tabs or canvas', group: 'Panes' },
+  { id: 'toggle-canvas-view', title: 'Tabs or Wall', group: 'Panes' },
   { id: 'close-overlays', title: 'Close sheets and pop-ups', group: 'Shell' }
 ]
 

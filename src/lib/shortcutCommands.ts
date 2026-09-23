@@ -71,7 +71,7 @@ export const BUILTIN_COMMANDS: KeyCommandDef[] = [
   { id: 'project.prev', title: 'Previous project', group: 'Projects', defaultKeys: ['Ctrl+Shift+PageUp'], scope: 'workspace' },
 
   /* ----------------------------------------------------------- canvas */
-  { id: 'canvas.show', title: 'Go to the canvas', group: 'Canvas', defaultKeys: ['Ctrl+Shift+K'], scope: 'workspace' },
+  { id: 'canvas.show', title: 'Go to the Board', group: 'Board', defaultKeys: ['Ctrl+Shift+K'], scope: 'workspace' },
 
   /* -------------------------------------------------------- clipboard */
   { id: 'clipboard.copy', title: 'Copy selection', group: 'Clipboard', defaultKeys: ['Ctrl+Shift+C'], scope: 'workspace' },
@@ -79,7 +79,7 @@ export const BUILTIN_COMMANDS: KeyCommandDef[] = [
 
   /* ------------------------------------------------------------- view */
   { id: 'rail.toggle', title: 'Show or hide the rail', group: 'View', defaultKeys: ['Ctrl+Shift+B'], scope: 'workspace' },
-  { id: 'view.toggle', title: 'Tabs ⇄ mosaic', group: 'View', defaultKeys: ['Ctrl+G'], scope: 'workspace' },
+  { id: 'view.toggle', title: 'Tabs ⇄ Wall', group: 'View', defaultKeys: ['Ctrl+G'], scope: 'workspace' },
   { id: 'font.bigger', title: 'Bigger terminal text', group: 'View', defaultKeys: ['Ctrl+=', 'Ctrl+NumpadAdd'], scope: 'workspace' },
   { id: 'font.smaller', title: 'Smaller terminal text', group: 'View', defaultKeys: ['Ctrl+-', 'Ctrl+NumpadSubtract'], scope: 'workspace' },
   { id: 'font.reset', title: 'Reset terminal text size', group: 'View', defaultKeys: ['Ctrl+0'], scope: 'workspace' },
@@ -89,10 +89,12 @@ export const BUILTIN_COMMANDS: KeyCommandDef[] = [
    * VoiceHubController) through `setCommandHandler`; until one is set the key
    * passes straight through to the terminal.
    */
-  { id: 'voice.live.toggle', title: 'Start / stop live talk', group: 'Voice', defaultKeys: ['Ctrl+Shift+Space'], scope: 'global' },
+  { id: 'voice.live.toggle', title: 'Listen on / off', group: 'Voice', defaultKeys: ['Ctrl+Shift+Space'], scope: 'global' },
   { id: 'voice.mute', title: 'Mute / unmute the mic', group: 'Voice', defaultKeys: ['Ctrl+Shift+M'], scope: 'global' },
   { id: 'voice.interrupt', title: 'Interrupt the assistant', group: 'Voice', defaultKeys: ['Ctrl+Shift+.'], scope: 'global' },
-  { id: 'voice.mode.toggle', title: 'Mic: Dictate ⇄ Agent', group: 'Voice', defaultKeys: ['Ctrl+Shift+L'], scope: 'global' },
+  // Retired: the bar has one Listen switch now, no Dictate ⇄ Agent mode. The id stays so
+  // a saved override still parses; with no default key and no handler it never fires.
+  { id: 'voice.mode.toggle', title: 'Mic mode (retired)', group: 'Voice', defaultKeys: [], scope: 'global' },
 
   /* ------------------------------------------------------- voice keys
    * One key on its own each, fired by useDictation's gesture engine: tap to
@@ -108,16 +110,16 @@ export const BUILTIN_COMMANDS: KeyCommandDef[] = [
     defaultKeys: ['ControlRight'],
     scope: 'global',
     kind: 'talk',
-    description: 'Tap to start or stop, hold to talk. Your words are typed into the pane you are in.'
+    description: 'Tap to start or stop, hold to talk. Your words are typed, raw, into the pane you are in.'
   },
   {
     id: TALK_AGENT_ID,
-    title: 'Agent key',
+    title: 'Listen key',
     group: 'Voice',
     defaultKeys: ['ShiftRight'],
     scope: 'global',
     kind: 'talk',
-    description: 'Tap to start or stop, hold to talk. The main agent listens, whichever way the Dictate ⇄ Agent switch is set.'
+    description: 'Tap to turn Listen on or off — a hands-free conversation with the main agent. Hold to talk.'
   }
 ]
 

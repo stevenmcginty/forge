@@ -5,7 +5,7 @@ import { useVoiceHubController, type HubAction, type HubCaption, type HubPhase, 
 /**
  * The hub UI's one view of the voice engine.
  *
- * Every surface here (the dock pill, the composer) reads `useHubView()`
+ * Every surface here (the bar and its Listen switch) reads `useHubView()`
  * instead of the controller directly, for two reasons:
  *
  *   - the words. Each phase has one word and one glyph, used everywhere, so a
@@ -246,88 +246,47 @@ export function errorReason(provider: VoiceHubProvider, raw: string | null | und
   return `${who}: ${why}`
 }
 
-/* ---------------------------------------------------------- the one state */
+const NOT_RECORDING = 'mic on · not recording'
 
-/** The brain in words, as the bar and the pill name it. */
-export function brainWord(hub: Pick<HubView, 'provider' | 'availability' | 'brainLabel'>): string {
-  if (hub.brainLabel) return hub.brainLabel
-  if (hub.provider !== 'claude') return PROVIDER_SHORT[hub.provider]
-  const anyLive = hub.availability['gemini-live'] || hub.availability['gpt-realtime'] || hub.availability['gpt-realtime-mini']
-  return anyLive ? 'Claude' : 'Claude (text)'
-}
+/* ------------------------------------------------------------ one bar */
 
-export interface DictationLike {
-  phase: string
-  listening: boolean
-  needsSetup: boolean
-  /** Wake mode: listening for the wake word is not recording. */
-  wake?: boolean
-  capturing?: boolean
-}
-
-export interface VoiceState {
+export interface ListenState {
+  /** Listen is on: a hands-free conversation with the main agent. */
+  on: boolean
   look: HubLook
   glyph: string
+  /** The state in words, without the brain's name ("listening", "key refused"). */
   word: string
-  /** The mic is open (the bars move, the rim lights). */
-  micOn: boolean
-  /** Really recording — the only case the word may say "listening". */
+  /** Really recording: the only case the word may say "listening". */
   recording: boolean
 }
 
-const NOT_RECORDING = 'mic on · not recording'
-
-/**
- * Agent mode is hands-free: the end of a sentence sends it, and the mic stays
- * open for the next turn. The engine's own words win when it has them.
- */
-function agentListening(hub: HubView): string {
-  const note = hub.listenNote
-  return note && /^listening/i.test(note) ? note.charAt(0).toLowerCase() + note.slice(1) : 'listening · next turn'
-}
-
-function dictationState(d: DictationLike): VoiceState {
-  if (d.needsSetup) return { look: 'error', glyph: '!', word: 'set up', micOn: false, recording: false }
-  if (d.phase === 'starting') return { look: 'connecting', glyph: LOOK_GLYPH.connecting, word: 'starting…', micOn: false, recording: false }
-  if (d.listening) {
-    if (d.wake && !d.capturing) return { look: 'muted', glyph: '◐', word: NOT_RECORDING, micOn: true, recording: false }
-    return { look: 'listening', glyph: LOOK_GLYPH.listening, word: 'listening', micOn: true, recording: true }
-  }
-  if (d.phase === 'finishing') return { look: 'thinking', glyph: LOOK_GLYPH.thinking, word: 'writing', micOn: false, recording: false }
-  return { look: 'offline', glyph: LOOK_GLYPH.offline, word: 'ready', micOn: false, recording: false }
+/** "Gemini: key refused" under a "Gemini Live" eyebrow reads "key refused". */
+function reasonWord(reason: string): string {
+  return reason.replace(/^[^:]{1,28}:\s*/, '')
 }
 
 /**
- * What the voice side is doing, in one word — honest about recording. On the
- * Claude path a moving mic level with no capture reads "mic on · not
- * recording", never "listening".
+ * The one bar's state, read live from the hub and honest about recording:
+ * "listening" only while something really records, "mic on · not recording"
+ * when the mic is open and nothing is, "starting…" while it warms up, the
+ * reason itself on a failure, and "not listening" when Listen is off.
  */
-export function voiceState(mode: 'dictate' | 'agent', hub: HubView, d: DictationLike): VoiceState {
-  if (mode === 'dictate') return dictationState(d)
+export function listenState(hub: HubView): ListenState {
   const phase = hub.phase
   if (phase === 'error') {
-    return { look: 'error', glyph: '!', word: hub.errorReason ?? errorReason(hub.provider, hub.error, hub.brainLabel), micOn: false, recording: false }
+    const reason = hub.errorReason ?? errorReason(hub.provider, hub.error, hub.brainLabel)
+    return { on: false, look: 'error', glyph: '!', word: reasonWord(reason), recording: false }
   }
-  if (phase === 'thinking' || phase === 'speaking') {
-    return { look: phase, glyph: LOOK_GLYPH[phase], word: LOOK_WORD[phase], micOn: phase === 'speaking' ? false : !hub.muted, recording: false }
-  }
-  if (hub.realtime) {
-    if (phase === 'off') return { look: 'offline', glyph: LOOK_GLYPH.offline, word: 'ready', micOn: false, recording: false }
-    if (phase === 'connecting') return { look: 'connecting', glyph: LOOK_GLYPH.connecting, word: 'connecting…', micOn: false, recording: false }
-    if (hub.muted) return { look: 'muted', glyph: LOOK_GLYPH.muted, word: 'muted', micOn: false, recording: false }
-    return { look: 'listening', glyph: LOOK_GLYPH.listening, word: agentListening(hub), micOn: true, recording: true }
-  }
-  // Claude: the armed agent's own session, or Parakeet phrases asked of it.
+  if (phase === 'off') return { on: false, look: 'offline', glyph: LOOK_GLYPH.offline, word: 'not listening', recording: false }
+  if (phase === 'thinking') return { on: true, look: 'thinking', glyph: LOOK_GLYPH.thinking, word: 'thinking…', recording: false }
+  if (phase === 'speaking') return { on: true, look: 'speaking', glyph: LOOK_GLYPH.speaking, word: 'speaking', recording: false }
   if (hub.starting || phase === 'connecting') {
-    return { look: 'connecting', glyph: LOOK_GLYPH.connecting, word: 'starting…', micOn: false, recording: false }
+    return { on: true, look: 'connecting', glyph: LOOK_GLYPH.connecting, word: 'starting…', recording: false }
   }
-  if (phase === 'listening') {
-    if (hub.muted) return { look: 'muted', glyph: LOOK_GLYPH.muted, word: 'muted', micOn: false, recording: false }
-    // The engine's own words win when it has them ('Waiting for "Hey Jarvis"').
-    const note = hub.listenNote?.toLowerCase()
-    return hub.capturing === true
-      ? { look: 'listening', glyph: LOOK_GLYPH.listening, word: agentListening(hub), micOn: true, recording: true }
-      : { look: 'muted', glyph: '◐', word: note && note !== 'listening' && note !== 'off' ? hub.listenNote! : NOT_RECORDING, micOn: true, recording: false }
-  }
-  return dictationState(d)
+  if (hub.muted) return { on: true, look: 'muted', glyph: LOOK_GLYPH.muted, word: 'muted', recording: false }
+  if (hub.capturing === true) return { on: true, look: 'listening', glyph: LOOK_GLYPH.listening, word: 'listening', recording: true }
+  const note = (hub.listenNote ?? '').trim()
+  const word = note && !/^(listening|off|starting|thinking|speaking)/i.test(note) ? note.charAt(0).toLowerCase() + note.slice(1) : NOT_RECORDING
+  return { on: true, look: 'muted', glyph: '◐', word, recording: false }
 }

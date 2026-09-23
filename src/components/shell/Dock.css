@@ -19,8 +19,7 @@
 }
 
 .dock__pill,
-.dock__composer,
-.dock__voice {
+.dock__composer {
   flex: none;
   min-height: var(--dock-h);
   background: var(--glass-bg-strong);
@@ -296,26 +295,6 @@
   opacity: 0;
 }
 
-/* ----------------------------------------------------------- voice socket */
-
-.dock__voice {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--dock-h);
-  padding: 0 12px;
-  border-radius: var(--r-full);
-}
-
-.dock__voice[data-plugged='true'] {
-  padding: 0;
-  background: none;
-  border: 0;
-  box-shadow: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-
 /* ================================================================= sheets */
 
 .sheet {
@@ -356,26 +335,6 @@
   width: 360px;
   height: min(700px, calc(100vh - 38px - var(--dock-clear) - 20px));
   transform-origin: 30px 100%;
-}
-
-.sheet--tools {
-  right: 0;
-  width: 300px;
-  transform-origin: calc(100% - 150px) 100%;
-}
-
-.sheet__tools {
-  padding: 8px;
-}
-
-.sheet__tools:has(.deck-tools) .sheet__tools-empty {
-  display: none;
-}
-
-.sheet__tools-empty {
-  display: block;
-  padding: 14px 8px;
-  color: var(--text-muted);
 }
 
 .sheet--panes {

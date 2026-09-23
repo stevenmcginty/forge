@@ -11,7 +11,7 @@ import './CheatSheet.css'
  * key shown here. Esc, the same keys again, or a click outside closes it.
  */
 
-const GROUP_ORDER = ['Voice', 'App', 'Shell', 'Modes', 'Panes', 'Tabs', 'Projects', 'Canvas', 'View', 'Clipboard', 'Agents', 'Prompts']
+const GROUP_ORDER = ['Voice', 'App', 'Shell', 'Modes', 'Panes', 'Tabs', 'Projects', 'Board', 'View', 'Clipboard', 'Agents', 'Prompts']
 
 export function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }): ReactNode {
   const { actions } = useApp()

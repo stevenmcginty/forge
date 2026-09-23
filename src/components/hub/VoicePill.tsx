@@ -1,74 +1,52 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { hotkeyLabel } from '@/hooks/useDictation'
+import { useKeymap } from '@/hooks/useHub'
+import { formatCombo } from '@/lib/keymap'
+import { TALK_AGENT_ID } from '@/lib/shortcutCommands'
 import { useApp } from '@/state/AppState'
-import { useDictation } from '@/state/Dictation'
 import { Popover } from '../Popover'
-import { useBarMode } from './barMode'
-import { brainWord, errorReason, isLive, useHubPreview, useHubView, voiceState, type DictationLike } from './hubView'
+import { listenState, useHubView } from './hubView'
 import { Waveform } from './Waveform'
 import './VoicePill.css'
 
 /**
- * The dock's voice socket: the main agent's state, in a waveform and words.
+ * Listen — the one voice control, inside the bar.
  *
- * The eyebrow says who is listening — "Agent · Gemini Live", "Agent · Claude
- * (text)", "Dictate · Parakeet" — and the word says what it is doing, honestly:
- * "listening" only while something is really recording, "mic on · not
- * recording" when the mic is open and nothing is, "starting…" while the
- * recogniser warms up, and on a failure the reason itself ("Gemini: key
- * refused"). Clicking it opens the details: the full error text with Copy,
- * Try again, and the way to Settings.
+ * Off or on, nothing else. On is a hands-free conversation with the main
+ * agent: it hears you, sends when you pause, answers, and listens again. The
+ * switch says so by shape (the knob moves across) as well as by words: the
+ * brain's name ("Gemini Live") and what it is doing ("listening", "thinking…",
+ * "mic on · not recording", "key refused"), read live from the hub. Right
+ * Shift flips the same switch, so the knob follows a start made from the key.
  *
- * The mode switch itself lives in the bar (Dictate / Agent beside the mic).
- * While the agent is live two chips sit here:
+ * A failure keeps its reason in the word; "Why?" beside it opens the full
+ * text with Copy, Try again and Settings.
  *
- *   Quiet     the mic off for a moment; the session stays up.
- *   Discuss   talk it through, change nothing — tools that would change Forge
- *             are held as a plan until you say (or press) Go. Realtime only.
- *
- * Nothing here takes focus: every control prevents the mousedown focus move.
+ * It never takes focus: the pane or the bar you were typing in keeps the keys.
  */
-export function VoicePill(): ReactNode {
-  const { state, actions } = useApp()
+export function ListenToggle(): ReactNode {
+  const { actions } = useApp()
   const hub = useHubView()
-  const preview = useHubPreview()
-  const dictation = useDictation()
-  const mode = useBarMode()
-  const mainRef = useRef<HTMLButtonElement | null>(null)
+  const km = useKeymap()
+  const ls = listenState(hub)
+  const whyRef = useRef<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  const dictating = preview?.dictating ?? dictation.listening
-  const d: DictationLike = {
-    phase: preview?.dictating ? 'listening' : dictation.status.phase,
-    listening: dictating,
-    needsSetup: dictation.needsSetup,
-    wake: dictation.status.mode === 'wake',
-    capturing: dictation.status.capturing
-  }
-  const vs = voiceState(mode, hub, d)
-  const agentLive = mode === 'agent' && isLive(hub.phase) && hub.phase !== 'error'
-  const brain = brainWord(hub)
-  const planned = hub.actions.filter((a) => a.status === 'planned').length
-  const failed = mode === 'agent' && hub.phase === 'error'
-  const fullError = failed ? (hub.error ?? '') : mode === 'dictate' && dictation.needsSetup ? (dictation.status.error?.msg ?? '') : ''
-
-  const dictLevel = useRef(0)
-  dictLevel.current = preview?.dictating ? (preview.dictationLevel ?? 0.5) : dictation.status.level
-  const useHubMeter = mode === 'agent' && isLive(hub.phase) && !dictating
-
-  const key = hotkeyLabel(state.settings.sttHotkey || 'ControlRight')
-  const eyebrow = mode === 'agent' ? `Agent · ${brain}` : 'Dictate · Parakeet'
-  const title = fullError
-    ? `${vs.word} — ${fullError}. Click for details.`
-    : mode === 'agent'
-      ? `Forge, the main agent (${brain}) — ${vs.word}. Click for details. The mic beside the bar talks to it (or ${key}).`
-      : `Dictation (${key}) — ${vs.word}. Click for details. Flip the mic to Agent to talk to Forge (Ctrl+Shift+L).`
+  const failed = hub.phase === 'error'
+  const brain = hub.brainLabel
+  const agentKey = km.commands.find((c) => c.id === TALK_AGENT_ID)?.keys[0] ?? null
+  const keyWord = agentKey ? ` (${formatCombo(agentKey)})` : ''
+  const said = `${brain} · ${ls.word}`
+  const title = failed
+    ? `${said}. Click to try again${keyWord}; "Why?" shows the full reason.`
+    : ls.on
+      ? `${said}. Click to stop listening${keyWord}.`
+      : `${said}. Click to listen — talk to Forge hands-free: it sends when you pause and answers${keyWord}.`
 
   const noFocus = (e: React.MouseEvent): void => e.preventDefault()
 
   const copy = (): void => {
-    void navigator.clipboard?.writeText(fullError).then(
+    void navigator.clipboard?.writeText(hub.error ?? '').then(
       () => {
         setCopied(true)
         window.setTimeout(() => setCopied(false), 1600)
@@ -78,175 +56,92 @@ export function VoicePill(): ReactNode {
   }
 
   return (
-    <div
-      className="vpill"
-      data-mode={agentLive ? 'live' : mode}
-      data-look={vs.look}
-      data-recording={vs.recording ? 'true' : undefined}
-    >
+    <span className="listen" data-on={ls.on ? 'true' : undefined} data-look={ls.look} data-recording={ls.recording ? 'true' : undefined}>
       <button
-        ref={mainRef}
         type="button"
-        className="vpill__main"
+        role="switch"
+        aria-checked={ls.on}
+        className="listen__btn"
         title={title}
-        aria-label={title}
-        aria-expanded={open}
+        aria-label={`Listen: ${ls.on ? 'on' : 'off'} — ${said}`}
         onMouseDown={noFocus}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (ls.on ? hub.stop() : hub.start())}
       >
-        <span className="vpill__wave">
-          {useHubMeter ? (
-            <Waveform look={vs.look} read={hub.readLevels} width={46} height={22} />
-          ) : (
-            <Waveform
-              look={vs.look}
-              read={() => ({ mic: dictLevel.current, out: 0 })}
-              width={46}
-              height={22}
-              strands={2}
-            />
-          )}
+        <span className="listen__track" aria-hidden="true">
+          <span className="listen__knob" />
         </span>
-        <span className="vpill__text">
-          <span className="vpill__eyebrow">{eyebrow}</span>
-          <span className="vpill__word">
-            <span className="vpill__glyph" aria-hidden="true">
-              {vs.glyph}
+        <span className="listen__text">
+          <span className="listen__brain">{brain}</span>
+          <span className="listen__word">
+            <span className="listen__glyph" aria-hidden="true">
+              {ls.glyph}
             </span>
-            <span className="vpill__word-text">{vs.word}</span>
+            <span className="listen__word-text">{ls.word}</span>
           </span>
         </span>
+        {ls.on ? (
+          <span className="listen__wave" aria-hidden="true">
+            <Waveform look={ls.look} read={hub.readLevels} width={30} height={18} strands={2} />
+          </span>
+        ) : null}
       </button>
 
-      {agentLive ? (
-        <span className="vpill__chips">
-          <button
-            type="button"
-            className="vpill__chip"
-            data-on={hub.muted ? 'true' : undefined}
-            aria-pressed={hub.muted}
-            title={hub.muted ? 'Quiet is on — the mic is off. Click to listen again (Ctrl+Shift+M)' : 'Quiet — mic off for a moment, the session stays up (Ctrl+Shift+M)'}
-            onMouseDown={noFocus}
-            onClick={() => hub.setMuted(!hub.muted)}
-          >
-            Quiet
-          </button>
-          {hub.discussionAvailable ? (
-            <button
-              type="button"
-              className="vpill__chip"
-              data-on={hub.discussionMode ? 'true' : undefined}
-              aria-pressed={hub.discussionMode}
-              title={
-                hub.discussionMode
-                  ? 'Discussing — nothing that changes Forge runs until you say "go"'
-                  : 'Discuss — talk it through; actions are held as a plan until you say "go"'
-              }
-              onMouseDown={noFocus}
-              onClick={() => hub.setDiscussionMode(!hub.discussionMode)}
-            >
-              Discuss
-              {hub.discussionMode && planned ? <span className="vpill__count">{planned}</span> : null}
-            </button>
-          ) : null}
-          {hub.discussionMode && planned ? (
-            <button
-              type="button"
-              className="vpill__go"
-              title={`Run the ${planned} planned step${planned === 1 ? '' : 's'} now — the same as saying "go"`}
-              onMouseDown={noFocus}
-              onClick={() => hub.go()}
-            >
-              Go
-            </button>
-          ) : null}
-        </span>
+      {failed ? (
+        <button
+          ref={whyRef}
+          type="button"
+          className="listen__why"
+          aria-expanded={open}
+          title="The full reason, with Copy"
+          onMouseDown={noFocus}
+          onClick={() => setOpen((v) => !v)}
+        >
+          Why?
+        </button>
       ) : null}
 
-      <Popover anchor={mainRef.current} open={open} onClose={() => setOpen(false)} align="end" side="top" width={360} label="Forge voice details">
-        <div className="vcard" data-look={vs.look}>
+      <Popover anchor={whyRef.current} open={open && failed} onClose={() => setOpen(false)} align="start" side="top" width={360} label="Why the main agent stopped">
+        <div className="vcard" data-look="error">
           <header className="vcard__head">
-            <span className="vcard__eyebrow">{mode === 'agent' ? 'Forge · the main agent' : 'Dictation'}</span>
-            <span className="vcard__brain">{mode === 'agent' ? brain : `Parakeet · ${key}`}</span>
+            <span className="vcard__eyebrow">Forge · the main agent</span>
+            <span className="vcard__brain">{brain}</span>
           </header>
           <p className="vcard__state">
             <span className="vcard__glyph" aria-hidden="true">
-              {vs.glyph}
+              !
             </span>
-            {failed ? (hub.errorReason ?? errorReason(hub.provider, hub.error, hub.brainLabel)) : vs.word}
+            {ls.word}
           </p>
-          {fullError ? (
-            <div className="vcard__error" role="alert">
-              <pre className="vcard__raw">{fullError}</pre>
-              <div className="vcard__row">
-                <button type="button" className="ghost-btn vcard__btn" onMouseDown={noFocus} onClick={copy}>
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-                {failed ? (
-                  <button
-                    type="button"
-                    className="ghost-btn vcard__btn"
-                    onMouseDown={noFocus}
-                    onClick={() => {
-                      setOpen(false)
-                      hub.start()
-                    }}
-                  >
-                    Try again
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="ghost-btn vcard__btn"
-                  onMouseDown={noFocus}
-                  onClick={() => {
-                    setOpen(false)
-                    actions.openSettings('voice')
-                  }}
-                >
-                  Settings
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {mode === 'agent' && !fullError && (hub.fallbackReason || hub.notice) ? (
-            <p className="vcard__note">
-              <span aria-hidden="true">◆</span> {hub.fallbackReason ?? hub.notice}
-            </p>
-          ) : null}
-          <p className="vcard__hint">
-            {mode === 'agent'
-              ? `The mic in the bar talks to Forge; it can open panes, type into them and help with a prompt. Ctrl+Shift+L flips the mic to Dictate.`
-              : `The mic in the bar types your words straight in. Ctrl+Shift+L flips it to Agent, so Forge hears you instead.`}
-          </p>
-          {mode === 'agent' && !fullError ? (
-            <div className="vcard__row">
-              <button
-                type="button"
-                className="ghost-btn vcard__btn"
-                onMouseDown={noFocus}
-                onClick={() => {
-                  setOpen(false)
-                  hub.toggle()
-                }}
-              >
-                {agentLive ? 'Stop listening' : 'Start listening'}
-              </button>
-              <button
-                type="button"
-                className="ghost-btn vcard__btn"
-                onMouseDown={noFocus}
-                onClick={() => {
-                  setOpen(false)
-                  actions.openSettings('voice')
-                }}
-              >
-                Settings
-              </button>
-            </div>
-          ) : null}
+          <pre className="vcard__raw">{hub.error ?? 'No more detail than that.'}</pre>
+          <div className="vcard__row">
+            <button type="button" className="ghost-btn vcard__btn" onMouseDown={noFocus} onClick={copy}>
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+            <button
+              type="button"
+              className="ghost-btn vcard__btn"
+              onMouseDown={noFocus}
+              onClick={() => {
+                setOpen(false)
+                hub.start()
+              }}
+            >
+              Try again
+            </button>
+            <button
+              type="button"
+              className="ghost-btn vcard__btn"
+              onMouseDown={noFocus}
+              onClick={() => {
+                setOpen(false)
+                actions.openSettings('voice')
+              }}
+            >
+              Settings
+            </button>
+          </div>
         </div>
       </Popover>
-    </div>
+    </span>
   )
 }

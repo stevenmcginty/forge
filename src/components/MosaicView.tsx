@@ -765,7 +765,7 @@ export function MosaicView({
           icon="viewMosaic"
           eyebrow={project.name}
           title="Nothing running yet"
-          body="The mosaic shows every session in this project at once. Open one and it turns up here."
+          body="The Wall shows every session in this project at once. Open one and it turns up here."
           action={
             <button type="button" className="cta-btn" onClick={onNewTerminal}>
               <Icon name="plus" size={14} />
@@ -1310,7 +1310,7 @@ function MosaicTile({
         }
       >
         {zoomed ? (
-          <button type="button" className="ghost-btn mtile__back" title="Back to the mosaic (Esc)" onClick={onBack}>
+          <button type="button" className="ghost-btn mtile__back" title="Back to the Wall (Esc)" onClick={onBack}>
             <Icon name="chevronLeft" size={12} />
             Mosaic
           </button>
@@ -1355,7 +1355,7 @@ function MosaicTile({
               title={
                 interactive
                   ? 'Stop typing in this tile (Esc)'
-                  : 'Type in this tile without leaving the mosaic'
+                  : 'Type in this tile without leaving the Wall'
               }
               onClick={() => onToggleInteract(paneId)}
             >
