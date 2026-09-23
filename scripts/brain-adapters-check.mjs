@@ -25,6 +25,8 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+// Never hand a check the environment's AI keys (this shell's may be someone else's, refused).
+for (const k of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY']) delete process.env[k]
 
 const ROOT = resolve(import.meta.dirname, '..')
 const L = await import('../electron/cli-launch.ts')

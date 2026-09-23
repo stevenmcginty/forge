@@ -115,6 +115,7 @@ import {
   setStaleTarget
 } from './stale-watcher'
 import { disposeUpdater, initUpdater, registerUpdateHandlers, setUpdateTarget } from './updater'
+import { forwardRendererConsole } from './renderer-log'
 import {
   disposeSourceUpdater,
   initSourceUpdater,
@@ -518,6 +519,8 @@ function createWindow(): void {
     event.preventDefault()
   })
 
+  // Dev: renderer warnings/errors and the hub's state trace into dev.log.
+  if (isDev) forwardRendererConsole(mainWindow.webContents)
   setPtyTarget(mainWindow)
   setSttTarget(mainWindow)
   setSttModelTarget(mainWindow)

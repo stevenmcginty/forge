@@ -43,6 +43,8 @@ import { useActiveTab, useApp } from '@/state/AppState'
 
 const OFF: SttStatus = { phase: 'off', level: 0, error: null, ready: false }
 const TALK_KEYS_MIGRATED = 'forge.talkKeys.migrated'
+/** Where the Dictate key goes when it lands on the Agent key: its default first. */
+const DICTATE_FALLBACK_KEYS = ['ControlRight', 'AltRight', 'ScrollLock', 'Pause', 'F8', 'F9']
 
 export interface Dictation {
   status: SttStatus
@@ -342,6 +344,31 @@ export function useDictationEngine(): Dictation {
     // Only the first ready settings decide this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready])
+
+  /**
+   * The two talk keys never share a key. The registry gives a shared combo to
+   * the first command listed — Dictate — so a Dictate key set to the Agent
+   * key's combo (the settings dropdown offers Right Shift) silently unbinds
+   * the Agent key: Right Shift dictates and the agent never hears it. That was
+   * Steve's live profile after the one-time move above had already run. So on
+   * every such clash the Agent key keeps its key and Dictate goes back to
+   * Right Ctrl (or the first free talk key), and he is told.
+   */
+  const clashKey = useSyncExternalStore(subscribeKeymap, () => {
+    const hit = getKeymapView().conflicts.find(
+      (c) => c.commandIds.includes(TALK_DICTATE_ID) && c.commandIds.includes(TALK_AGENT_ID)
+    )
+    return hit ? hit.combo : null
+  })
+  useEffect(() => {
+    if (!ready || !clashKey || hotkey !== clashKey) return
+    const taken = new Set(getKeymapView().commands.flatMap((c) => (c.id === TALK_DICTATE_ID ? [] : c.keys)))
+    taken.add(clashKey)
+    const next = DICTATE_FALLBACK_KEYS.find((k) => !taken.has(k))
+    if (!next) return
+    patchRef.current({ sttHotkey: next })
+    noticeRef.current(`${formatCombo(clashKey)} is the Agent key, so the Dictate key moved to ${formatCombo(next)}`)
+  }, [ready, clashKey, hotkey])
 
   useEffect(() => attachTalkKey(window, hotkey, () => phaseRef.current === 'listening', applyIntent), [hotkey, applyIntent])
   useEffect(

@@ -27,6 +27,8 @@
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+// Never hand a check the environment's AI keys (this shell's may be someone else's, refused).
+for (const k of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY']) delete process.env[k]
 
 const ROOT = resolve(import.meta.dirname, '..')
 

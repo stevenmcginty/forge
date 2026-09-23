@@ -26,6 +26,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+// Never hand a check the environment's AI keys (this shell's may be someone else's, refused).
+for (const k of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY']) delete process.env[k]
 
 /**
  * `electron`, stubbed — the same trick git-check.mjs plays, for the same reason.

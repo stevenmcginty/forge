@@ -105,7 +105,9 @@ async function cliBrainSetup(): Promise<CliBrainSetup | null> {
     return null
   }
   const settings = getSettings()
-  const key = settings.geminiKey.trim() && !settings.geminiKey.trim().startsWith('enc:') ? settings.geminiKey.trim() : String(process.env['GEMINI_API_KEY'] ?? '').trim()
+  // Forge's saved key only (decrypted by main), or the Google login — never the
+  // environment's GEMINI_API_KEY, which may be some other shell's refused key.
+  const key = settings.geminiKey.trim().startsWith('enc:') ? '' : settings.geminiKey.trim()
   return { node, mcpScript: script, linkFile: brainLink.linkFile, workDir: join(getDataDir(), 'brains'), geminiKey: key }
 }
 

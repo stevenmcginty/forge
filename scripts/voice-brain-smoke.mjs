@@ -26,6 +26,8 @@
  *     every time Steve talks over it.
  */
 import { registerHooks } from 'node:module'
+// Never hand a check the environment's AI keys (this shell's may be someone else's, refused).
+for (const k of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY']) delete process.env[k]
 
 registerHooks({
   resolve(spec, context, next) {

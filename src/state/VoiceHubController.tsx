@@ -715,6 +715,13 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   })
   const brainLabel = agentBrainSpec(pickedBrain.brain).label
 
+  // Dev evidence: one line per state change. Main copies `[hub]` lines into
+  // dev.log (electron/renderer-log.ts), so a live "it did nothing" leaves a trail.
+  const traceLine = `[hub] phase=${phase} capturing=${capturing} starting=${starting} brain=${pickedBrain.brain} requested=${requestedBrain}${liveProvider ? ` live=${liveProvider}` : ''} armed=${agent.armed} errorReason=${errorReason ?? '-'} listenNote=${listenNote}`
+  useEffect(() => {
+    if (import.meta.env.DEV) console.info(traceLine)
+  }, [traceLine])
+
   const value = useMemo<VoiceHubController>(
     () => ({
       phase,

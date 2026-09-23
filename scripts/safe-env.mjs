@@ -149,6 +149,8 @@ export function makeSandbox(label) {
   const env = (extra = {}) => {
     const out = { ...process.env }
     for (const k of PANE_VARS) drop(out, k)
+    // No inherited AI keys: a check that wants one passes it in `extra`, deliberately.
+    for (const k of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY']) drop(out, k)
     const drive = parse(home).root.replace(/[\\/]+$/, '')
     const vars = {
       HOME: home,

@@ -53,8 +53,9 @@ const liveVideo = process.argv.includes('--live-video')
  * and nothing is written back.
  */
 function findApiKey() {
-  const fromEnv = (process.env['GEMINI_API_KEY'] ?? '').trim()
-  if (fromEnv) return { key: fromEnv, source: 'GEMINI_API_KEY' }
+  // A deliberately provided test key only, never the shell's inherited GEMINI_API_KEY.
+  const fromEnv = (process.env['FORGE_TEST_GEMINI_KEY'] ?? '').trim()
+  if (fromEnv) return { key: fromEnv, source: 'FORGE_TEST_GEMINI_KEY' }
   const candidates = [
     join(homedir(), 'Desktop', 'DictationMic', 'gemini.key'),
     join(homedir(), '.gemini-key')

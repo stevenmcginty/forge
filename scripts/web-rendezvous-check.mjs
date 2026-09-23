@@ -48,6 +48,8 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+// Never hand a check the environment's AI keys (this shell's may be someone else's, refused).
+for (const k of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY']) delete process.env[k]
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const CONFIG = join(ROOT, 'companion', 'firebase.json')

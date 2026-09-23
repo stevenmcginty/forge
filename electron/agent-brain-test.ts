@@ -46,8 +46,8 @@ async function bodyLine(res: Response): Promise<string> {
 async function httpReason(vendor: string, res: Response): Promise<BrainTestResult> {
   const detail = await bodyLine(res)
   if (res.status === 429) return { ok: false, reason: `${vendor}: 429 free-tier limit`, detail }
-  if (res.status === 400 && /api key not valid|invalid api key/i.test(detail)) return { ok: false, reason: `${vendor}: key refused`, detail }
-  if (res.status === 401 || res.status === 403) return { ok: false, reason: `${vendor}: key refused`, detail }
+  if (res.status === 400 && /api key not valid|invalid api key/i.test(detail)) return { ok: false, reason: `${vendor}: key refused (the key saved in Settings)`, detail }
+  if (res.status === 401 || res.status === 403) return { ok: false, reason: `${vendor}: key refused (the key saved in Settings)`, detail }
   return { ok: false, reason: `${vendor}: failed (${res.status})`, detail }
 }
 
@@ -80,7 +80,7 @@ export async function testGeminiKey(key: string, extraModel: string | null, fetc
     }
     const live = ids.has(GEMINI_LIVE_MODEL)
     const extra = extraModel && extraModel.trim() ? extraModel.trim() : null
-    const bits = [`Gemini key OK · ${GEMINI_LIVE_MODEL} ${live ? 'available' : 'NOT listed'}`]
+    const bits = [`Gemini key OK (the key saved in Settings) · ${GEMINI_LIVE_MODEL} ${live ? 'available' : 'NOT listed'}`]
     if (extra) bits.push(`${extra} ${ids.has(extra) ? 'available' : 'NOT listed'}`)
     return { ok: live, reason: bits.join(' · '), detail: `${ids.size} models listed` }
   } catch (err) {
@@ -204,12 +204,14 @@ export async function testGeminiCli(settingsKey: string): Promise<BrainTestResul
   const version = await runLaunch(launch, ['--version'])
   const v = /([0-9]+\.[0-9]+\.[0-9]+)/.exec(version.out)?.[1] ?? '?'
   if (!version.ok) return { ok: false, reason: `Gemini CLI: found but it did not start (${launch.found})`, detail: version.out.slice(0, 200) }
-  const key = settingsKey.trim() && !settingsKey.trim().startsWith('enc:') ? settingsKey : String(process.env['GEMINI_API_KEY'] ?? '')
+  // The key saved in Settings (main has already decrypted it) — never an
+  // environment variable, which is not what Forge itself will use.
+  const key = settingsKey.trim().startsWith('enc:') ? '' : settingsKey
   switch (geminiAuthFor(geminiGoogleLogin(), key)) {
     case 'google':
       return { ok: true, reason: `Gemini CLI ${v} · Google login` }
     case 'key':
-      return { ok: true, reason: `Gemini CLI ${v} · no Google login on this PC — using your Gemini key (free-tier limits)` }
+      return { ok: true, reason: `Gemini CLI ${v} · no Google login on this PC — using the key saved in Settings (free-tier limits)` }
     default:
       return { ok: false, reason: `Gemini CLI: not logged in — run gemini and sign in with Google · ${v}` }
   }
