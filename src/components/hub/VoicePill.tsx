@@ -4,19 +4,29 @@ import { formatCombo } from '@/lib/keymap'
 import { TALK_AGENT_ID } from '@/lib/shortcutCommands'
 import { useApp } from '@/state/AppState'
 import { Popover } from '../Popover'
-import { listenState, useHubView } from './hubView'
+import { LOOK_GLYPH, listenState, useHubView, type ListenState } from './hubView'
 import { Waveform } from './Waveform'
 import './VoicePill.css'
+
+/**
+ * The knob's mark: the look, except that "mic on · not recording" (a muted
+ * look with the ◐ glyph) gets its own half-ring, apart from a real mute's ⊘.
+ */
+function knobMark(ls: ListenState): string {
+  return ls.look === 'muted' && ls.glyph !== LOOK_GLYPH.muted ? 'idle' : ls.look
+}
 
 /**
  * Listen — the one voice control, inside the bar.
  *
  * Off or on, nothing else. On is a hands-free conversation with the main
  * agent: it hears you, sends when you pause, answers, and listens again. The
- * switch says so by shape (the knob moves across) as well as by words: the
- * brain's name ("Gemini Live") and what it is doing ("listening", "thinking…",
- * "mic on · not recording", "key refused"), read live from the hub. Right
- * Shift flips the same switch, so the knob follows a start made from the key.
+ * switch says so by shape (a hollow knob at the left, a solid one across a lit
+ * track), the mark on the knob says what it is doing (the hub's own glyphs —
+ * see VoicePill.css), and the words say both: the brain's name ("Gemini Live")
+ * and its state ("listening", "thinking…", "mic on · not recording", "key
+ * refused"), read live from the hub. Right Shift flips the same switch, so the
+ * knob follows a start made from the key.
  *
  * A failure keeps its reason in the word; "Why?" beside it opens the full
  * text with Copy, Try again and Settings.
@@ -56,7 +66,13 @@ export function ListenToggle(): ReactNode {
   }
 
   return (
-    <span className="listen" data-on={ls.on ? 'true' : undefined} data-look={ls.look} data-recording={ls.recording ? 'true' : undefined}>
+    <span
+      className="listen"
+      data-on={ls.on ? 'true' : undefined}
+      data-look={ls.look}
+      data-mark={knobMark(ls)}
+      data-recording={ls.recording ? 'true' : undefined}
+    >
       <button
         type="button"
         role="switch"
@@ -73,9 +89,6 @@ export function ListenToggle(): ReactNode {
         <span className="listen__text">
           <span className="listen__brain">{brain}</span>
           <span className="listen__word">
-            <span className="listen__glyph" aria-hidden="true">
-              {ls.glyph}
-            </span>
             <span className="listen__word-text">{ls.word}</span>
           </span>
         </span>

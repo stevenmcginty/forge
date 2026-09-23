@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "bounce-easing",
+        "value": "var(--spring-pop)",
+        "createdAt": "2026-09-23T23:02:47.014Z",
+        "reason": "User confirmed var(--spring-pop) is intentional: Forge's house motion token, used across the bottom bar"
+      }
+    ]
+  }
+}
