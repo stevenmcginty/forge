@@ -67,6 +67,8 @@ export function ChatView({
   const stick = useRef(true)
   // A finger on the transcript owns the scroll; nothing snaps under it.
   const touching = useRef(false)
+  /** The scroller's height at the last scroll event, to tell a resize from a reader. */
+  const viewHeight = useRef(0)
   const [unseen, setUnseen] = useState(false)
 
   const lastId = turns.length ? turns[turns.length - 1]!.id : ''
@@ -105,6 +107,17 @@ export function ChatView({
     if (!el) return
     if (touching.current) {
       stick.current = false
+      return
+    }
+    // A scroll caused by the box itself changing height — the phone keyboard
+    // opening, a rotation — is not the reader scrolling away. Without this the
+    // shrink showed up here as a 300px gap, unstuck the reader, and the
+    // ResizeObserver's re-stick arrived too late to find them stuck.
+    const height = el.clientHeight
+    const resized = height !== viewHeight.current
+    viewHeight.current = height
+    if (resized && stick.current) {
+      el.scrollTop = el.scrollHeight
       return
     }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
