@@ -1,22 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import {
-  assignCallSigns,
-  normalisePrompt,
-  renameCallSign,
-  type CallSignMap,
-  type KeymapFile,
-  type SavedPrompt,
-  type SavedPromptInput
-} from '@shared/hub'
+import { normalisePrompt, type KeymapFile, type SavedPrompt, type SavedPromptInput } from '@shared/hub'
 
 /**
  * The hub's own small JSON files, beside settings.json in the data dir:
  *
  *   prompts.json            saved prompts
  *   keymap.json             the user's shortcut overrides
- *   callsigns/<project>.json  paneId → call-sign, one file per project
  *
  * Deliberately not in settings.json or the layout files: those have their own
  * owners and their own wire shapes (the phone reads the layouts). Same write
@@ -29,7 +20,6 @@ import {
 export class HubStore {
   private prompts: SavedPrompt[] | null = null
   private keymap: KeymapFile | null = null
-  private readonly callSigns = new Map<string, CallSignMap>()
   private readonly dataDir: string
 
   constructor(dataDir: string) {
@@ -83,47 +73,6 @@ export class HubStore {
     this.keymap = cleanKeymap(file)
     this.write('keymap.json', this.keymap)
     return this.keymap
-  }
-
-  /* --------------------------------------------------------- call-signs */
-
-  getCallSigns(projectId: string): CallSignMap {
-    const key = safeId(projectId)
-    let map = this.callSigns.get(key)
-    if (!map) {
-      const raw = this.read<unknown>(join('callsigns', `${key}.json`), {})
-      map = {}
-      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-        for (const [id, name] of Object.entries(raw as Record<string, unknown>)) {
-          if (typeof name === 'string' && name.trim()) map[id] = name
-        }
-      }
-      this.callSigns.set(key, map)
-    }
-    return map
-  }
-
-  /** Name every live pane that has no name yet. Writes only when something changed. */
-  syncCallSigns(projectId: string, paneIds: readonly string[], prune: boolean): { map: CallSignMap; changed: boolean } {
-    const result = assignCallSigns(this.getCallSigns(projectId), paneIds, { prune })
-    if (result.changed) this.putCallSigns(projectId, result.map)
-    return result
-  }
-
-  renameCallSign(
-    projectId: string,
-    paneId: string,
-    name: string
-  ): { ok: true; map: CallSignMap } | { ok: false; error: string } {
-    const result = renameCallSign(this.getCallSigns(projectId), paneId, name)
-    if (result.ok) this.putCallSigns(projectId, result.map)
-    return result
-  }
-
-  private putCallSigns(projectId: string, map: CallSignMap): void {
-    const key = safeId(projectId)
-    this.callSigns.set(key, map)
-    this.write(join('callsigns', `${key}.json`), map)
   }
 
   /* ------------------------------------------------------------- files */

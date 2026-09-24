@@ -2,6 +2,7 @@ import type { ClaudePermissionMode, MosaicState, MosaicTile, TerminalTab, Worksp
 import { TAB_NAME_POOL, TAB_TEXT_PALETTE } from './agents'
 import { collectLeaves, makeLeaf } from './splitTree'
 import { makeId } from './ids'
+import { terminalName } from './terminal-names'
 
 /**
  * How a tab is born, and what a workspace looks like with nothing in it.
@@ -123,6 +124,17 @@ export function uniqueTabName(wanted: string, tabs: TerminalTab[]): string {
   const name = wanted.trim().slice(0, 40)
   const taken = new Set(tabs.map((t) => t.title.trim().toLowerCase()))
   return taken.has(name.toLowerCase()) ? numberedFree(name, taken) : name
+}
+
+/**
+ * A pane's one name, read off the tab it sits in: the tab's name for its first
+ * pane, "Zeb 2" (or the pane's own title) for a split — see
+ * shared/terminal-names.ts. Every screen that names a terminal asks this.
+ */
+export function paneNameInTab(tab: Pick<TerminalTab, 'title' | 'root'>, paneId: string): string {
+  const leaves = collectLeaves(tab.root)
+  const index = leaves.findIndex((l) => l.id === paneId)
+  return terminalName(tab.title, index >= 0 ? leaves[index]!.title : '', Math.max(0, index))
 }
 
 export function makeTab(

@@ -80,7 +80,13 @@ let flushTimer: NodeJS.Timeout | null = null
 export interface LiveSession {
   id: string
   projectName: string
+  /**
+   * The title it launched under. Remote Control and FORGE_SHARE_AGENT carry it
+   * for the life of the process, so it never moves — `name` is the one that does.
+   */
   paneTitle: string
+  /** The terminal's one name now ("Zeb" — see shared/terminal-names.ts), as the renderer last said it. */
+  name: string
   /** False for a plain shell — nothing was bootstrapped into it. */
   agent: boolean
   /** True when Forge is managing this pane's Claude session id. */
@@ -88,6 +94,14 @@ export interface LiveSession {
 }
 
 const live = new Map<string, LiveSession>()
+
+/**
+ * Each pane's one name and what runs in it ("Claude Code"), as the renderer
+ * last sent them over IPC.ptyRename. Apart from `live` because the renderer
+ * names a pane before — or while — its process spawns, and a name outlives a
+ * relaunch. Gone with the pane (killPane).
+ */
+const names = new Map<string, { name: string; kind: string }>()
 
 /**
  * Every pane with a process behind it, right now.
@@ -595,6 +609,7 @@ export function killPane(id: string): boolean {
   widths.delete(id)
   pending.delete(id)
   live.delete(id)
+  names.delete(id)
   clearJiggle(id)
   owners.forget(id)
   link?.unregister(id)
@@ -881,6 +896,7 @@ export function registerPtyHandlers(): void {
       id: spec.id,
       projectName,
       paneTitle,
+      name: names.get(spec.id)?.name || paneTitle,
       // A pane whose agent is not installed is a plain shell, and the quit
       // confirmation must not claim an agent is running in it.
       agent: Boolean(plan.command.trim()) && !notice,
@@ -908,6 +924,11 @@ export function registerPtyHandlers(): void {
       cwd,
       projectName
     })
+    // Registered under the launch title first, so the link remembers the name
+    // FORGE_SHARE_AGENT carries; then known by its one name, if the renderer
+    // has already said it.
+    const named = names.get(spec.id)
+    if (named) getLink().rename(spec.id, named.name, named.kind)
 
     // A pane is born to whoever opened it, and every pane is opened here — the
     // renderer owns the split tree, so a tab a browser asks for is still created
@@ -966,10 +987,19 @@ export function registerPtyHandlers(): void {
     owners.noteWish(String(id), DESK_VIEWER, Number(cols), Number(rows))
   })
 
-  ipcMain.on(IPC.ptyRename, (_e, id: string, title: string) => {
-    // Keeps the share link's registry current so share_panes/pane_send/pane_read
-    // resolve a pane by the title it has now, not the one it launched with.
-    link?.rename(String(id), String(title))
+  ipcMain.on(IPC.ptyRename, (_e, id: string, title: string, kind?: string) => {
+    // The pane's one name, sent by the renderer whenever it changes (and once
+    // per pane on load). Keeps the share link's registry — share_panes,
+    // pane_send, pane_read — and Foreman's and the browser's labels on the name
+    // Steve sees, not the one the pane launched with.
+    const key = String(id ?? '')
+    const name = String(title ?? '').trim()
+    if (!key || !name) return
+    const entry = { name, kind: String(kind ?? '').trim() }
+    names.set(key, entry)
+    const session = live.get(key)
+    if (session) session.name = name
+    link?.rename(key, entry.name, entry.kind)
   })
 
   ipcMain.handle(IPC.ptyKill, (_e, id: string) => killPane(String(id)))

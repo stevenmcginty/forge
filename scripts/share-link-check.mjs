@@ -332,6 +332,44 @@ console.log('\nrenaming')
   ok(true, 'renaming a pane nothing registered is a silent no-op, not a throw')
 }
 
+/* ------------------------------------------------------ one name per terminal */
+
+console.log('\none name per terminal')
+{
+  // Launched under the kind label (what FORGE_SHARE_AGENT carries), then told
+  // each terminal's one name — the tab's, "Zeb 2" for a split — by the
+  // renderer over IPC.ptyRename.
+  const link = linkOf()
+  link.register({ id: 'z1', title: 'Claude Code', agent: 'claude', cwd: FORGE, projectName: 'Forge' })
+  link.register({ id: 'z2', title: 'Claude Code', agent: 'claude', cwd: FORGE, projectName: 'Forge' })
+  link.register({ id: 'v1', title: 'Codex', agent: 'codex', cwd: FORGE, projectName: 'Forge' })
+  link.rename('z1', 'Zeb', 'Claude Code')
+  link.rename('z2', 'Zeb 2', 'Claude Code')
+  link.rename('v1', 'Viggo', 'Codex')
+  for (const id of ['z1', 'z2']) link.noteOutput(id, T0 - 9000)
+  const caller = { from: 'Codex', cwd: FORGE }
+
+  const zeb = link.handle({ op: 'send', ...caller, pane: 'Zeb', text: 'hi' }, T0)
+  ok(zeb.ok && zeb.id === 'z1', 'pane_send "Zeb" reaches the terminal by its one name', JSON.stringify(zeb))
+  const split = link.handle({ op: 'send', ...caller, pane: 'Zeb 2', text: 'hi' }, T0)
+  ok(split.ok && split.id === 'z2', 'and "Zeb 2" the pane split into its tab', JSON.stringify(split))
+
+  const nope = link.handle({ op: 'send', ...caller, pane: 'Nope', text: 'hi' }, T0 + 30_000)
+  ok(
+    !nope.ok && /No pane in this project is called "Nope"\. Open now: Zeb \(Claude Code\), Zeb 2 \(Claude Code\), Viggo \(Codex\)\./.test(nope.error),
+    'a miss lists every terminal by its name and kind',
+    nope.error
+  )
+  ok(!/\b(z1|z2|v1)\b|Terminal \d/.test(nope.error), 'and no internal label', nope.error)
+
+  const twoClaudes = link.handle({ op: 'send', ...caller, pane: 'claude', text: 'hi' }, T0 + 30_000)
+  ok(
+    !twoClaudes.ok && /^ambiguous:.*Zeb \(Claude Code\), Zeb 2 \(Claude Code\)/.test(twoClaudes.error),
+    'an agent word two terminals answer to is asked about, by name',
+    twoClaudes.error
+  )
+}
+
 /* -------------------------------------------------------------------- reading */
 
 console.log('\nreading a pane')

@@ -12,8 +12,8 @@ import { HubStore } from './hub-store'
 import { getDataDir, getProjects } from './store'
 
 /**
- * Main-process wiring for the hub backends: the canvas board, call-signs,
- * saved prompts and the keymap file. The logic lives in canvas-board.ts and
+ * Main-process wiring for the hub backends: the canvas board, saved prompts
+ * and the keymap file. The logic lives in canvas-board.ts and
  * hub-store.ts; this file only answers IPC and pushes changes to every window.
  */
 
@@ -102,18 +102,6 @@ export function registerHubHandlers(): void {
     activeProjectId = typeof projectId === 'string' && projectId ? projectId : null
   })
 
-  ipcMain.handle(HUB_IPC.callSignsSync, (_e, projectId: string, paneIds: string[], prune: boolean) => {
-    const ids = Array.isArray(paneIds) ? paneIds.filter((id) => typeof id === 'string' && id) : []
-    const result = getStore().syncCallSigns(String(projectId), ids, prune === true)
-    if (result.changed) broadcast(HUB_IPC.callSignsChanged, String(projectId), result.map)
-    return result.map
-  })
-  ipcMain.handle(HUB_IPC.callSignsRename, (_e, projectId: string, paneId: string, name: string) => {
-    const result = getStore().renameCallSign(String(projectId), String(paneId), String(name ?? ''))
-    if (result.ok) broadcast(HUB_IPC.callSignsChanged, String(projectId), result.map)
-    return result
-  })
-
   ipcMain.handle(HUB_IPC.promptsList, () => getStore().listPrompts())
   ipcMain.handle(HUB_IPC.promptsSave, (_e, input: SavedPromptInput) => {
     const result = getStore().savePrompt(input)
@@ -138,11 +126,6 @@ export function registerHubHandlers(): void {
 export function postToBoard(projectId: string | null, path: string, title: string): void {
   const target = projectId || activeProjectId
   if (target) void getBoard().post(target, path, title)
-}
-
-/** A pane's call-sign in a project, if it has one. */
-export function callSignFor(projectId: string, paneId: string): string | undefined {
-  return getStore().getCallSigns(projectId)[paneId]
 }
 
 export function disposeHub(): void {

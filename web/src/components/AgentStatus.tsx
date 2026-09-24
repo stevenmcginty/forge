@@ -69,8 +69,8 @@ export function AgentStatus({
 }: {
   profile: AgentProfile
   /**
-   * The pane's tab by its own name ("Wanda"), set only where it says more than
-   * the pane's name. The deck draws it beside the name; the phone ignores it.
+   * The terminal's one name ("Zeb", "Zeb 2" — shared/terminal-names.ts). The
+   * deck draws it beside the agent's kind; the phone ignores it.
    */
   tab?: string
   status?: PaneStatus

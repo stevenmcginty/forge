@@ -275,7 +275,7 @@ await check('off after an ending says why; an error still wins', () => {
 console.log('the conversation: dictation by voice')
 const panes = { everest: 'p1', skylar: 'p2', codex: 'p2', 'the codex': 'p2', this: 'p1' }
 const resolve = (s) => panes[s.toLowerCase()] ?? null
-await check('"type this into <call-sign>: …" with and without the colon', () => {
+await check('"type this into <name>: …" with and without the colon', () => {
   assert.deepEqual(V.parseVoiceDictation('Type this into Everest: echo hi.', resolve), { kind: 'pane', target: 'Everest', paneId: 'p1', text: 'echo hi', submit: false })
   assert.deepEqual(V.parseVoiceDictation('Type this into Everest echo hi.', resolve), { kind: 'pane', target: 'Everest', paneId: 'p1', text: 'echo hi', submit: false })
   assert.deepEqual(V.parseVoiceDictation('okay, type into Skylar, git status', resolve), { kind: 'pane', target: 'Skylar', paneId: 'p2', text: 'git status', submit: false })

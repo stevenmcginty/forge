@@ -669,14 +669,14 @@
   color: var(--vb-ink-2);
 }
 
-/* Who the words go to, in that agent's colour (the call-sign ink, deck.css). */
+/* Who the words go to, in that agent's colour (the name ink, deck.css). */
 .app[data-face='deck'] .dk-composer .astatus__name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--callsign-ink, var(--vb-ink));
+  color: var(--name-ink, var(--vb-ink));
 }
 
-/* The tab's own name, the loudest word on the strip, on its call-sign chip. */
+/* The terminal's one name, the loudest word on the strip, on its chip. */
 .app[data-face='deck'] .dk-composer .astatus__tab {
   padding: 1px 8px;
   font-family: var(--font-display);
@@ -1037,7 +1037,7 @@
 /* Before the tab's name, the pane's own ("Claude Code"), quieter. */
 /* "To Wanda": the agent's own colour, as on the strip it stands in for. */
 .app[data-face='deck'] .dk-vline__to .dk-vline__name {
-  color: var(--callsign-ink, var(--vb-ink));
+  color: var(--name-ink, var(--vb-ink));
 }
 
 .app[data-face='deck'] .dk-vline__pane {

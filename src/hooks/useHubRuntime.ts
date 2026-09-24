@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { terminalName } from '@shared/terminal-names'
 import { buildActionPanes } from '@/lib/actionPanes'
+import { resolveProfile } from '@/lib/agents'
 import { hubApi } from '@/lib/hubApi'
 import { runSavedPrompt, setHubRuntime } from '@/lib/hubRuntime'
 import type { NavPane } from '@/lib/hubnav'
@@ -8,6 +10,7 @@ import type { KeyCommandDef } from '@/lib/keymap'
 import { defineCommands, loadKeymapOverrides, setCommandHandler } from '@/lib/keymapRegistry'
 import { relayComet } from '@/lib/relayComet'
 import { agentCommandId, promptCommandId } from '@/lib/shortcutCommands'
+import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
 import { useActiveWorkspace, useApp } from '@/state/AppState'
 
@@ -15,7 +18,8 @@ import { useActiveWorkspace, useApp } from '@/state/AppState'
  * Keeps the hub's backends in step with the app. Mounted exactly once, from
  * useShortcuts (which App mounts once):
  *
- *  - tells main which project is open, so bridge-out media lands on its board;
+ *  - tells main which project is open, so bridge-out media lands on its board,
+ *    and every terminal's one name;
  *  - registers the hub runtime (panes by their one name, focus, typing) that
  *    the voice tools and the keymap use;
  *  - loads keymap.json and keeps two command sources current: one command per
@@ -31,12 +35,38 @@ export function useHubRuntime(): void {
 
   /* ------------------------------------------------------- the pane list */
 
-  // Each pane by its one name (shared/terminal-names.ts). `callSign` carries
-  // the same name for the pane UI that still reads it until it moves to `name`.
-  const panes = useMemo<NavPane[]>(
-    () => buildActionPanes(workspace, profiles).map((p) => ({ ...p, callSign: p.name })),
-    [workspace, profiles]
-  )
+  // Each pane by its one name (shared/terminal-names.ts).
+  const panes = useMemo<NavPane[]>(() => buildActionPanes(workspace, profiles), [workspace, profiles])
+
+  /* ------------------------------------------------ names, told to main */
+
+  // Every terminal's one name, in every open project — not only the one on
+  // screen — goes to main whenever it changes, so share_panes/pane_send,
+  // Foreman's pane list and the browser's owner labels call a pane what the
+  // screen does. Main holds it across a relaunch and applies it the moment the
+  // pane's process registers (electron/pty-host.ts). Optional-chained: a stale
+  // preload's rename takes no kind, which only costs the "(Claude Code)".
+  const sentNames = useRef(new Map<string, string>())
+  useEffect(() => {
+    const pty = window.forge?.pty
+    if (!pty?.rename) return
+    const sent = sentNames.current
+    const seen = new Set<string>()
+    for (const ws of Object.values(state.workspaces)) {
+      for (const tab of ws.tabs) {
+        collectLeaves(tab.root).forEach((leaf, indexInTab) => {
+          const name = terminalName(tab.title, leaf.title, indexInTab)
+          const kind = resolveProfile(profiles, leaf.profileId).name
+          const said = `${name} (${kind})`
+          seen.add(leaf.id)
+          if (sent.get(leaf.id) === said) return
+          sent.set(leaf.id, said)
+          pty.rename(leaf.id, name, kind)
+        })
+      }
+    }
+    for (const id of [...sent.keys()]) if (!seen.has(id)) sent.delete(id)
+  }, [state.workspaces, profiles])
 
   useEffect(() => {
     void hubApi()?.canvas.setActive(projectId).catch(() => {})

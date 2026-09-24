@@ -162,7 +162,10 @@ export function PaneView({
    * on screen does — on coming on screen and on a click. See the claim below.
    */
   fullScreen?: boolean
-  /** The deck's Full screen: the tab's name ("Wanda") beside the pane's, as the Wall tile shows it. */
+  /**
+   * The deck: the terminal's one name ("Zeb", "Zeb 2") on its chip beside the
+   * agent's kind, as the Wall tile shows it.
+   */
   tabTitle?: string | null
   /**
    * The deck's Full screen: its Chat / Cards / Terminal switch, in the slim
@@ -1067,7 +1070,7 @@ export function PaneView({
       <header className="pane__header">
         <div className="pane__leading">
           <AgentBadge profile={profile} size="sm" />
-          <span className="pane__title truncate">{paneDisplayTitle(profile, leaf.title)}</span>
+          <span className="pane__title truncate">{tabTitle ? profile.name : paneDisplayTitle(profile, leaf.title)}</span>
           {tabTitle ? <span className="pane__tab truncate">{tabTitle}</span> : null}
         </div>
 
@@ -1156,8 +1159,8 @@ export function PaneView({
                 className="ghost-btn pane__action pane__close"
                 data-danger="true"
                 disabled={!live}
-                aria-label={`Close ${paneDisplayTitle(profile, leaf.title)}`}
-                title={live ? `Close ${paneDisplayTitle(profile, leaf.title)}` : 'The desktop is not answering, so it cannot close one'}
+                aria-label={`Close ${tabTitle ?? paneDisplayTitle(profile, leaf.title)}`}
+                title={live ? `Close ${tabTitle ?? paneDisplayTitle(profile, leaf.title)}` : 'The desktop is not answering, so it cannot close one'}
                 onClick={(e) => {
                   e.stopPropagation()
                   onClose(e.currentTarget)

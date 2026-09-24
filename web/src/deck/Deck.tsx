@@ -36,7 +36,7 @@ import '@/components/shell/deck.css'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { Popover } from '@/components/Popover'
-import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { columnsFor } from '@/lib/mosaicLayout'
 import { collectLeaves } from '@/lib/splitTree'
 import { alpha, findTheme, mix } from '@/theme/themes'
@@ -46,7 +46,7 @@ import { FACES } from '../components/StatusLine'
 import { requestPaneView, usePaneView } from '../lib/pane-status'
 import { getClaudeView } from '../lib/view-pref'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
-import { AgentStateChip, bringForward, type DeckAgent } from './agents'
+import { AgentStateChip, bringForward, deckAgent, type DeckAgent } from './agents'
 import { composerField, composerOpen } from './composer'
 import { useDeckDictation } from './dictation'
 import type { BarPlace, DeckView } from './view'
@@ -149,7 +149,6 @@ export function DeckStage({
     .filter((tab) => drawn.has(tab.id))
     .flatMap((tab) => collectLeaves(tab.root).map((leaf) => ({ leaf, tab })))
   const total = slots.length
-  const manyTabs = workspace.tabs.length > 1
 
   return (
     <>
@@ -163,7 +162,7 @@ export function DeckStage({
           const focused = here && leaf.id === focusId
           const shown = wall || focused
           const profile = resolveProfile(profiles, leaf.profileId)
-          const agent: DeckAgent = { leaf, tab, profile, title: paneDisplayTitle(profile, leaf.title) }
+          const agent = deckAgent(leaf, tab, profile)
           // Chat, Cards and Terminal are an agent's; a shell has only its terminal.
           const faces = !isShellProfile(profile)
           const open = (): void => {
@@ -187,7 +186,7 @@ export function DeckStage({
               {wall ? (
                 <TileLabel
                   agent={agent}
-                  tabTitle={manyTabs && tab.title.trim() !== agent.title ? tab.title : null}
+                  tabTitle={agent.name}
                   focused={focused}
                   faces={faces}
                   live={live}
@@ -204,8 +203,8 @@ export function DeckStage({
                 onlyPane={!wall || total === 1}
                 onScreen={shown}
                 fullScreen={!wall && shown}
-                tabTitle={tab.title.trim() && tab.title.trim() !== agent.title ? tab.title : null}
-                faceSwitch={!wall && faces ? <FaceSwitch paneId={leaf.id} name={agent.title} /> : null}
+                tabTitle={agent.name}
+                faceSwitch={!wall && faces ? <FaceSwitch paneId={leaf.id} name={agent.name} /> : null}
                 onClose={!wall && shown ? (anchor) => setClosingTarget({ agent, anchor }) : null}
               />
             </div>
@@ -221,7 +220,7 @@ export function DeckStage({
           align="end"
           side="bottom"
           width={260}
-          label={`Close ${closingTarget.agent.title}?`}
+          label={`Close ${closingTarget.agent.name}?`}
         >
           <div className="tab-confirm" onPointerDown={(e) => e.stopPropagation()}>
             <div className="tab-confirm__head">
@@ -230,7 +229,7 @@ export function DeckStage({
               </span>
             </div>
             <p className="tab-confirm__body">
-              Are you sure you want to close <strong className="tab-confirm__name truncate">“{closingTarget.agent.title}”</strong>?
+              Are you sure you want to close <strong className="tab-confirm__name truncate">“{closingTarget.agent.name}”</strong>?
             </p>
             <p className="tab-confirm__hint">
               Running processes in this window will be stopped.
@@ -284,7 +283,8 @@ function TileLabel({
   onClose
 }: {
   agent: DeckAgent
-  tabTitle: string | null
+  /** The terminal's one name, on its chip — always shown. */
+  tabTitle: string
   focused: boolean
   /** An agent's tile carries its Chat / Cards / Terminal switch; a shell's does not. */
   faces: boolean
@@ -296,21 +296,21 @@ function TileLabel({
   return (
     <div
       className="dk-tile__label"
-      title={`${agent.title}${tabTitle ? ` — tab ${tabTitle}` : ''}. Double-click for full screen`}
+      title={`${tabTitle} (${agent.title}). Double-click for full screen`}
       onClick={onSelect}
       onDoubleClick={onOpen}
     >
       <AgentBadge profile={agent.profile} size="sm" />
       <span className="dk-tile__name truncate">{agent.title}</span>
-      {tabTitle ? <span className="dk-tile__tab truncate">{tabTitle}</span> : null}
+      <span className="dk-tile__tab truncate">{tabTitle}</span>
       <span className="dk-tile__spacer" />
       {focused ? <span className="dk-tile__active">Active</span> : null}
       <AgentStateChip paneId={agent.leaf.id} compact />
-      {faces ? <FaceSwitch paneId={agent.leaf.id} name={agent.title} compact /> : null}
+      {faces ? <FaceSwitch paneId={agent.leaf.id} name={agent.name} compact /> : null}
       <button
         type="button"
         className="dk-tile__open"
-        aria-label={`Full screen: ${agent.title}`}
+        aria-label={`Full screen: ${agent.name}`}
         title="Full screen — this agent alone"
         onClick={(e) => {
           e.stopPropagation()
@@ -324,8 +324,8 @@ function TileLabel({
         type="button"
         className="dk-tile__close"
         disabled={!live}
-        aria-label={`Close ${agent.title}`}
-        title={live ? `Close ${agent.title}` : 'The desktop is not answering, so it cannot close one'}
+        aria-label={`Close ${agent.name}`}
+        title={live ? `Close ${agent.name}` : 'The desktop is not answering, so it cannot close one'}
         onClick={(e) => {
           e.stopPropagation()
           onClose(e.currentTarget)

@@ -625,7 +625,7 @@ if (!existsSync(electronExe)) {
     check('browser_list shows both tabs and Rex as the other owner', (cross[2]?.text ?? '').includes('owned by Rex (claude)') && (cross[2]?.text ?? '').includes('yours'), cross[2]?.text)
     const infos = await app.send({ cmd: 'infos' })
     const ownA = infos.find((s) => s.id === idA)?.owner
-    check('the surface records its owner (pane id, call-sign, CLI) for the badge', ownA?.id === 'pane:pane-A' && ownA?.label === 'Rex' && ownA?.agent === 'claude', JSON.stringify(ownA))
+    check('the surface records its owner (pane id, pane name, CLI) for the badge', ownA?.id === 'pane:pane-A' && ownA?.label === 'Rex' && ownA?.agent === 'claude', JSON.stringify(ownA))
     const linkBody = JSON.parse(readFileSync(ready.linkFile, 'utf8'))
     const forged = join(scratch, 'forged-link.json')
     writeFileSync(forged, JSON.stringify({ ...linkBody, token: 'f'.repeat(64) }), 'utf8')

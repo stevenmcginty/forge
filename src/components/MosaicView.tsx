@@ -10,6 +10,7 @@ import {
   type ReactNode
 } from 'react'
 import type { MosaicRect, MosaicTile as MosaicTileRect, PaneLeaf, Project, TerminalTab, Workspace } from '@shared/types'
+import { paneNameInTab } from '@shared/workspace'
 import { isPaneDead, paneStatusLabel, usePaneRuntime } from '@/hooks/usePaneRuntime'
 import { launchCommand, leafPermissionMode, paneDisplayTitle, permissionChip, resolveProfile } from '@/lib/agents'
 import {
@@ -42,7 +43,6 @@ import { useForeman } from '@/state/Foreman'
 import { askToClose } from './CloseConfirm'
 import { enterOnce, reducedMotion, useFlipChildren } from '@/lib/motion'
 import { usePaneActivity } from '@/lib/paneActivity'
-import { useCallSign } from '@/hooks/useHub'
 import { useActiveWorkspace, useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
@@ -133,7 +133,7 @@ export function wallReference(cells: Cell[]): PaneGeometry {
  * at once.
  */
 export function useCloseTerminal(): (paneId: string) => void {
-  const { state, actions } = useApp()
+  const { actions } = useApp()
   const foreman = useForeman()
   const workspace = useActiveWorkspace()
   return useCallback(
@@ -161,8 +161,7 @@ export function useCloseTerminal(): (paneId: string) => void {
         close()
         return
       }
-      const leaf = collectLeaves(tab.root).find((l) => l.id === paneId)
-      const name = paneDisplayTitle(resolveProfile(state.settings.agentProfiles, leaf?.profileId ?? ''), leaf?.title ?? '')
+      const name = paneNameInTab(tab, paneId)
       // The question sits on the X that was pressed — or on the tile, for a
       // middle-click, which leaves no button with the focus.
       const tiles = Array.from(document.querySelectorAll<HTMLElement>(`[data-pane-id="${CSS.escape(paneId)}"]`))
@@ -175,7 +174,7 @@ export function useCloseTerminal(): (paneId: string) => void {
         document.body
       askToClose({ name, why, anchor, close })
     },
-    [actions, foreman, state.settings.agentProfiles, workspace]
+    [actions, foreman, workspace]
   )
 }
 
@@ -1093,7 +1092,6 @@ function MosaicTile({
   const profile = resolveProfile(state.settings.agentProfiles, cell.leaf.profileId)
   const runtime = usePaneRuntime(paneId)
   const activity = usePaneActivity(paneId, runtime)
-  const callSign = useCallSign(paneId)
   const dead = isPaneDead(runtime)
   const permChip = permissionChip(profile, leafPermissionMode(cell.leaf))
   const [dropping, setDropping] = useState(false)
@@ -1215,7 +1213,8 @@ function MosaicTile({
   const placed = rect
   /** This tile was pointed the other way from the rest of the wall by hand. */
   const override = refit !== lifesize
-  const name = paneDisplayTitle(profile, cell.leaf.title)
+  // The terminal's one name ("Zeb", "Zeb 2") — see shared/terminal-names.ts.
+  const name = paneNameInTab(cell.tab, paneId)
 
   return (
     <section
@@ -1267,7 +1266,7 @@ function MosaicTile({
       >
         <AgentBadge profile={profile} size="sm" />
 
-        <span className="mtile__title truncate">{callSign ?? name}</span>
+        <span className="mtile__title truncate">{name}</span>
         {permChip ? (
           <span className="mtile__perm mono" data-danger={permChip.danger ? 'true' : undefined}>
             {permChip.label}
@@ -1276,7 +1275,7 @@ function MosaicTile({
         {/* Only ever says how this tile differs from the wall — see toggleFit. */}
         {override ? <span className="mtile__refit mono">{refit ? 'full size' : 'scaled'}</span> : null}
         <span className="mtile__tab truncate" title={statusLabel || undefined}>
-          {callSign ? `${name} · ${cell.tab.title}` : cell.tab.title}
+          {profile.name}
         </span>
         {/* The halo's word: which tile the keyboard is on, and how. */}
         {interactive || selected ? (
@@ -1347,7 +1346,7 @@ function MosaicTile({
           type="button"
           className="mtile__hit"
           title={`Click for full screen — ${name}`}
-          aria-label={`Open ${name} in ${cell.tab.title} full screen`}
+          aria-label={`Open ${name} full screen`}
           onPointerEnter={() => onSelect(paneId)}
           onFocus={() => onSelect(paneId)}
           onClick={() => onOpenFull(paneId)}

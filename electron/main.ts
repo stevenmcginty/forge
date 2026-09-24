@@ -64,13 +64,12 @@ import {
   setVoiceAgentTarget
 } from './voice-agent/ipc'
 import { registerRealtimeHandlers } from './realtime/ipc'
-import { callSignFor, disposeHub, keymapOverride, postToBoard, registerHubHandlers } from './hub-ipc'
+import { disposeHub, keymapOverride, postToBoard, registerHubHandlers } from './hub-ipc'
 import { browserKeyCombo } from '@shared/browser'
 import { guardArtifactFrames, installArtifactScheme } from './artifact-scheme'
 import {
   disposeBrowserPanes,
   registerBrowserPanes,
-  setBrowserCallerNamer,
   setBrowserShotHook,
   setBrowserWindow
 } from './browser-panes/ipc'
@@ -1460,13 +1459,9 @@ void app
       registerShotsHandlers()
       registerHubHandlers()
       registerBrowserPanes()
-      // The browser's screenshots land on the canvas board, and a tab's owner
-      // is labelled by its pane's call-sign.
+      // The browser's screenshots land on the canvas board. A tab's owner is
+      // labelled by its pane's one name, which the PTY host already holds.
       setBrowserShotHook((path, _owner, id, project) => postToBoard(project || null, path, `Browser ${id}`))
-      setBrowserCallerNamer((owner, projectId, paneId) => {
-        const sign = projectId ? callSignFor(projectId, paneId) : undefined
-        return sign ? { ...owner, label: sign } : owner
-      })
       registerSttHandlers()
       registerSttModelHandlers()
       registerAgentProbeHandlers()

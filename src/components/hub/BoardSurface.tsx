@@ -473,7 +473,7 @@ function useItemActions(item: CanvasItem, feed: CanvasFeed): ArtifactActions {
   const paneId = tab?.activePaneId ?? null
   const rt = getHubRuntime()
   const pane = paneId ? rt?.panes().find((p) => p.paneId === paneId) : null
-  const paneName = pane ? (pane.callSign ?? `panel ${pane.number}`) : null
+  const paneName = pane ? pane.name : null
   const [copied, setCopied] = useState(false)
   const [removeArmed, setRemoveArmed] = useState(false)
 

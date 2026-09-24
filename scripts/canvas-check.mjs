@@ -1,6 +1,6 @@
 /**
- * Check for the hub backends: the canvas board, pane call-signs, saved
- * prompts and the keymap registry.
+ * Check for the hub backends: the canvas board, saved prompts and the keymap
+ * registry, plus the navigator that finds a terminal by its one name.
  *
  *   node scripts/canvas-check.mjs
  *
@@ -208,33 +208,6 @@ try {
   ok(!existsSync(join(root, 'canvas', 'proj-b', 'forge-image-3.png')), 'with no project open nothing is posted')
   feed.close()
   board.close()
-
-  /* --------------------------------------------------------- call-signs */
-
-  console.log('\ncall-signs')
-  const store = new HubStore(root)
-  const first = store.syncCallSigns('proj-a', ['p1', 'p2', 'p3'], true)
-  const names = Object.values(first.map)
-  ok(first.map.p1 === 'Everest' && first.map.p2 === 'Skylar' && first.map.p3 === 'Vega', 'new panes get names from the pool, in pool order', JSON.stringify(first.map))
-  ok(new Set(names.map(hub.callSignKey)).size === names.length, 'names are unique in a project')
-  ok(!store.syncCallSigns('proj-a', ['p1', 'p2', 'p3'], true).changed, 'a second sync with the same panes changes nothing')
-  const other = store.syncCallSigns('proj-b', ['q1'], true)
-  ok(other.map.q1 === 'Everest', 'each project has its own names')
-  const reopened = new HubStore(root)
-  ok(JSON.stringify(reopened.getCallSigns('proj-a')) === JSON.stringify(first.map), 'names persist across a restart')
-  ok(!reopened.syncCallSigns('proj-a', [], false).changed, 'an unloaded workspace (no prune) never drops names')
-  const pruned = reopened.syncCallSigns('proj-a', ['p1', 'p3', 'p4'], true)
-  ok(!pruned.map.p2 && pruned.map.p4 === 'Skylar', 'a closed pane frees its name for the next one', JSON.stringify(pruned.map))
-  const renamed = reopened.renameCallSign('proj-a', 'p1', '  Summit   Two ')
-  ok(renamed.ok && renamed.map.p1 === 'Summit Two', 'rename trims and keeps it', JSON.stringify(renamed))
-  ok(!reopened.renameCallSign('proj-a', 'p3', 'summit two').ok, 'rename refuses a name another pane has (any case)')
-  ok(!reopened.renameCallSign('proj-a', 'p3', '4').ok, 'rename refuses a bare number (it would clash with "panel 4")')
-  ok(!reopened.renameCallSign('proj-a', 'p3', 'canvas').ok, 'rename refuses a word the resolver owns')
-  ok(!reopened.renameCallSign('proj-a', 'p3', '').ok, 'rename refuses an empty name')
-  ok(new HubStore(root).getCallSigns('proj-a').p1 === 'Summit Two', 'a rename persists')
-  const many = hub.assignCallSigns({}, Array.from({ length: hub.CALL_SIGN_POOL.length + 3 }, (_, i) => `x${i}`))
-  const manyNames = Object.values(many.map)
-  ok(new Set(manyNames.map(hub.callSignKey)).size === manyNames.length && manyNames.includes('Everest 2'), 'past the pool it counts on, still unique')
 
   /* ----------------------------------------------------------- resolver */
 

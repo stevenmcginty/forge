@@ -15,7 +15,7 @@ import './browser.css'
  * a chip that says whose it is in words, and one tab at a time on the stage.
  *
  * Many agents browse at once, so the strip is the overview — a chip per tab
- * with the owner's logo and call-sign and a word for its state ("Everest is
+ * with the owner's logo and name and a word for its state ("Zeb is
  * driving", "Yours", "Loading…") — and a click brings that tab forward. A tab
  * that arrives is shown straight away unless Steve is on one of his own, in
  * which case its chip pops in and waits. With no tabs, a calm empty state and

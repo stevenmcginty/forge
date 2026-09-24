@@ -82,7 +82,7 @@
 
 /* A pane's terminal is opaque; the pane is a window with small corners. No
    header row on the Wall: the tile label names it. Full screen shows a slim
-   one (below) with the call-sign. */
+   one (below) with the terminal's name. */
 .app[data-face='deck'] .pane {
   overflow: hidden;
   background: var(--bg-terminal);
@@ -94,8 +94,8 @@
 }
 
 /*
- * Call-signs: a tab's own name ("Zeb") and the name of the agent the words go
- * to, drawn in that agent's colour — Claude's for a Claude pane, Antigravity's
+ * Names: a terminal's one name ("Zeb", "Zeb 2") and the name of the agent the
+ * words go to, drawn in that agent's colour — Claude's for a Claude pane, Antigravity's
  * for an Antigravity one. Declared where `--pane-accent` is set inline (a
  * Wall slot, a pane, the composer's strip, the voice line's "To"), so each
  * resolves against its own agent. The ink is the accent drawn 30% toward the
@@ -104,12 +104,12 @@
  * only agrees with it. A shell is not an agent and stays in plain ink.
  */
 .app[data-face='deck'] :is(.dk-slot, .pane, .astatus, .dk-vline__to) {
-  --callsign: var(--pane-accent, var(--text-primary));
-  --callsign-ink: color-mix(in srgb, var(--callsign) 70%, var(--text-primary));
+  --name-tint: var(--pane-accent, var(--text-primary));
+  --name-ink: color-mix(in srgb, var(--name-tint) 70%, var(--text-primary));
 }
 
 :root[data-appearance='light'] .app[data-face='deck'] :is(.dk-slot, .pane, .astatus, .dk-vline__to) {
-  --callsign-ink: color-mix(in srgb, var(--callsign) 26%, var(--text-primary));
+  --name-ink: color-mix(in srgb, var(--name-tint) 26%, var(--text-primary));
 }
 
 .app[data-face='deck']
@@ -118,21 +118,21 @@
     .astatus[data-shell='true'],
     .dk-slot:has(> .dk-tile__label > .agent-badge[data-shell='true'])
   ) {
-  --callsign: var(--text-secondary);
-  --callsign-ink: var(--text-primary);
+  --name-tint: var(--text-secondary);
+  --name-ink: var(--text-primary);
 }
 
 /* The chip: the title pill's 14% tint, plus a hairline so it is a shape on any theme. */
 .app[data-face='deck']
   :is(.dk-panes[data-view='focus'] .pane__tab, .dk-tile__tab, .dk-composer .astatus__tab) {
-  color: var(--callsign-ink);
-  background: color-mix(in srgb, var(--callsign) 14%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--callsign) 32%, transparent);
+  color: var(--name-ink);
+  background: color-mix(in srgb, var(--name-tint) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--name-tint) 32%, transparent);
 }
 
 /*
  * Full screen: one terminal owns the stage, so it says whose it is — the
- * desk's call-sign (src/components/hub/PaneName.css) in a slim header. The name
+ * desk's pane name (src/components/hub/PaneName.css) in a slim header. The name
  * bold and at full contrast whether or not the pane has the keys, on a pill in
  * the agent's colour with a solid bar before it: a shape, so it reads as a
  * label even where the colour does not. Hand off stays in the "…" menu.
@@ -170,7 +170,7 @@
   background: var(--pane-accent, var(--accent));
 }
 
-/* The tab's own name ("Zeb") on its call-sign chip, the same size as the title. */
+/* The terminal's one name ("Zeb") on its chip, the same size as the title. */
 .app[data-face='deck'] .dk-panes[data-view='focus'] .pane__tab {
   flex: 0 1 auto;
   min-width: 0;

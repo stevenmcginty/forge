@@ -483,9 +483,9 @@ function ActionMark({ status }: { status: 'running' | 'ok' | 'failed' }): ReactN
   )
 }
 
-/** Who the next message goes to, in words: "Claude Code, tab Wanda" — or a shell, said plainly. */
+/** Who the next message goes to, in words: "Zeb (Claude Code)" — or a shell, said plainly. */
 function toTitle(agent: DeckAgent): string {
-  const who = agent.tabName ? `${agent.title}, tab ${agent.tabName}` : agent.title
+  const who = `${agent.name} (${agent.title})`
   return isShellProfile(agent.profile)
     ? `Your next message goes to ${who} — a shell, not an agent`
     : `Your next message goes to ${who}`
@@ -568,8 +568,8 @@ export function VoiceLine({ place }: { place: BarPlace }): ReactNode {
           >
             <span className="dk-vline__eyebrow">To</span>
             <AgentBadge profile={current.profile} size="sm" />
-            {current.tabName ? <span className="dk-vline__pane">{current.title}</span> : null}
-            <span className="dk-vline__name">{current.tabName ?? current.title}</span>
+            <span className="dk-vline__pane">{current.title}</span>
+            <span className="dk-vline__name">{current.name}</span>
             <AgentStateChip paneId={current.leaf.id} compact />
           </span>
         ) : (

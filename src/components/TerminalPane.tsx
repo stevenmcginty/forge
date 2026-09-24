@@ -17,9 +17,9 @@ import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost, type TerminalSpec } from '@/lib/terminals'
 import { remoteControlName, REMOTE_CONTROL_URL } from '@shared/remote'
+import { paneNameInTab } from '@shared/workspace'
 import { enterOnce } from '@/lib/motion'
 import { usePaneActivity } from '@/lib/paneActivity'
-import { useCallSign } from '@/hooks/useHub'
 import { useActiveWorkspace, useApp } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
@@ -101,7 +101,6 @@ export function TerminalPane({
   const [dropping, setDropping] = useState(false)
   const runtime = usePaneRuntime(leaf.id)
   const activity = usePaneActivity(leaf.id, runtime)
-  const callSign = useCallSign(leaf.id)
   const branch = useBranch(project.id)
   const watcher = watcherChip(runtime)
   const [editing, setEditing] = useState(false)
@@ -137,6 +136,10 @@ export function TerminalPane({
    */
   const handoff = useHandoffFlow()
   const paneTab = workspace.tabs.find((t) => collectLeaves(t.root).some((l) => l.id === leaf.id)) ?? null
+  // The terminal's one name: its tab's ("Zeb") for the first pane, "Zeb 2" or
+  // its own title for a split. See shared/terminal-names.ts.
+  const name = paneTab ? paneNameInTab(paneTab, leaf.id) : paneDisplayTitle(profile, leaf.title)
+  const firstInTab = paneTab ? collectLeaves(paneTab.root)[0]?.id === leaf.id : false
   const handoffAble = !isShellProfile(profile)
   const handoffAutoSend = paneTab?.settings?.handoffAutoSend === true
   const handoffChip = paneHandoffChip(leaf.id, handoff.records)
@@ -247,12 +250,16 @@ export function TerminalPane({
 
   const commitTitle = (): void => {
     setEditing(false)
-    if (draft !== leaf.title) {
-      const title = draft.trim()
+    const title = draft.trim()
+    if (title === name) return
+    // The first pane in a tab is named by its tab, so renaming it renames the
+    // tab; a split pane has a title of its own, and clearing it gives back
+    // "Zeb 2". Main hears the new name from useHubRuntime, which tells it
+    // every terminal's name as it changes.
+    if (paneTab && firstInTab) {
+      if (title) actions.renameTab(paneTab.id, title)
+    } else {
       actions.renamePane(leaf.id, title)
-      // Tells main so electron/share-link.ts's registry — and therefore
-      // share_panes/pane_send/pane_read — follows the rename too.
-      window.forge.pty.rename(leaf.id, paneDisplayTitle(profile, title))
     }
   }
 
@@ -436,9 +443,8 @@ export function TerminalPane({
         <AgentBadge profile={profile} size="sm" />
 
         {/*
-          Who this is, in two weights: the call-sign when the pane has one (its
-          short spoken name) and the pane's title beside it, muted; without one,
-          the title leads and the agent's name follows.
+          Who this is, in two weights: the terminal's one name (what you say to
+          reach it) and, muted beside it, what runs in it.
         */}
         <div className="pane__ident">
           {editing ? (
@@ -447,14 +453,14 @@ export function TerminalPane({
               value={draft}
               autoFocus
               spellCheck={false}
-              placeholder={profile.name}
+              placeholder={name}
               onChange={(e) => setDraft(e.target.value)}
               onBlur={commitTitle}
               onKeyDown={(e) => {
                 e.stopPropagation()
                 if (e.key === 'Enter') commitTitle()
                 if (e.key === 'Escape') {
-                  setDraft(leaf.title)
+                  setDraft(name)
                   setEditing(false)
                 }
               }}
@@ -463,23 +469,18 @@ export function TerminalPane({
             <button
               type="button"
               className="pane__title truncate"
-              data-callsign={callSign ? 'true' : undefined}
               title="Click to rename"
               onClick={() => {
-                setDraft(leaf.title)
+                setDraft(name)
                 setEditing(true)
               }}
             >
-              {callSign ?? paneDisplayTitle(profile, leaf.title)}
+              {name}
             </button>
           )}
           {editing ? null : (
             <span className="pane__kind truncate" title={statusLabel ? `${profile.name} · ${statusLabel}` : profile.name}>
-              {callSign
-                ? paneDisplayTitle(profile, leaf.title)
-                : paneDisplayTitle(profile, leaf.title) === profile.name
-                  ? ''
-                  : profile.name}
+              {profile.name}
             </span>
           )}
         </div>

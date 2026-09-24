@@ -1,7 +1,8 @@
 import { useMemo, type ReactNode } from 'react'
-import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
 import type { AgentProfile, PaneLeaf, TerminalTab } from '@shared/types'
+import { paneNameInTab } from '@shared/workspace'
 import { usePaneStatus } from '../lib/pane-status'
 import { useForge, useProfiles, useWorkspace } from '../state'
 
@@ -15,19 +16,15 @@ export interface DeckAgent {
   leaf: PaneLeaf
   tab: TerminalTab
   profile: AgentProfile
-  /** The pane's name: "Claude Code". */
+  /** What runs in it: "Claude Code". The kind, never a name. */
   title: string
-  /** Its tab's own name ("Wanda"), when that says more than `title`; else null. */
-  tabName?: string | null
+  /** Its one name ("Zeb", "Zeb 2" — shared/terminal-names.ts). Always shown. */
+  name: string
 }
 
-/**
- * A tab's name as the words' destination: "Wanda" beside "Claude Code". Null
- * when the tab has none, or its name is only the pane's own again.
- */
-export function tabNameFor(tabTitle: string | undefined, paneTitle: string): string | null {
-  const name = (tabTitle ?? '').trim()
-  return name && name !== paneTitle ? name : null
+/** A pane as the deck names it: its one name, and what runs in it. */
+export function deckAgent(leaf: PaneLeaf, tab: TerminalTab, profile: AgentProfile): DeckAgent {
+  return { leaf, tab, profile, title: profile.name, name: paneNameInTab(tab, leaf.id) }
 }
 
 /** Every pane in the active project, tab by tab, in the order the desk has them. */
@@ -41,11 +38,7 @@ export function useDeckAgents(): {
   const profiles = useProfiles()
   return useMemo(() => {
     const agents = workspace.tabs.flatMap((tab) =>
-      collectLeaves(tab.root).map((leaf) => {
-        const profile = resolveProfile(profiles, leaf.profileId)
-        const title = paneDisplayTitle(profile, leaf.title)
-        return { leaf, tab, profile, title, tabName: tabNameFor(tab.title, title) }
-      })
+      collectLeaves(tab.root).map((leaf) => deckAgent(leaf, tab, resolveProfile(profiles, leaf.profileId)))
     )
     const front = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0] ?? null
     const inFront = front ? agents.filter((a) => a.tab.id === front.id) : []

@@ -30,7 +30,7 @@ import { BrowserManager } from './manager'
 export interface BrowserServiceDeps {
   dataDir: string
   downloadsDir: string
-  /** Fill in a pane caller's label/agent/project (call-signs, pane titles). */
+  /** Fill in a pane caller's label/agent/project (the pane's one name). */
   resolveCaller?: (caller: BrowserOwner) => { owner: BrowserOwner; project?: string }
   /** A screenshot was taken — the canvas board hook. `project` is the tab's project id ('' = none). */
   onShot?: (path: string, owner: BrowserOwner, id: string, project: string) => void

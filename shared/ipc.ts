@@ -7,10 +7,11 @@ export const IPC = {
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
   /**
-   * The pane was renamed in the UI, after launch. Renderer → main, one-way,
+   * A pane's one name ("Zeb" — shared/terminal-names.ts) and what runs in it
+   * ("Claude Code"), sent whenever the name changes. Renderer → main, one-way,
    * like ptyWrite/ptyResize. Keeps electron/share-link.ts's registry (and
-   * therefore `share_panes`/`pane_send`/`pane_read`) in step with a rename —
-   * see ShareLink.rename.
+   * therefore `share_panes`/`pane_send`/`pane_read`), Foreman's pane list and
+   * the browser's owner labels on that name — see ShareLink.rename.
    */
   ptyRename: 'pty:rename',
   ptyKill: 'pty:kill',

@@ -18,22 +18,14 @@ import { BrowserService, type BrowserServiceDeps } from './service'
 
 let service: BrowserService | null = null
 /** Hooks other modules install, kept here so the order of registration does not matter. */
-let nameCaller: ((owner: BrowserOwner, projectId: string | undefined, paneId: string) => BrowserOwner) | null = null
 let shotHook: NonNullable<BrowserServiceDeps['onShot']> | null = null
 
-/** A pane caller, named from the PTY host's own record of that pane, then by any installed namer (call-signs). */
+/** A pane caller, named from the PTY host's own record of that pane: its one name ("Zeb"). */
 function resolveFromPanes(caller: BrowserOwner): { owner: BrowserOwner; project?: string } {
   const paneId = caller.id.slice('pane:'.length)
   const live = liveSessions().find((s) => s.id === paneId)
   const project = live ? getProjects().find((p) => p.name === live.projectName)?.id : undefined
-  let owner: BrowserOwner = live ? { ...caller, label: live.paneTitle || caller.label } : caller
-  if (nameCaller) {
-    try {
-      owner = nameCaller(owner, project, paneId)
-    } catch (err) {
-      console.error('[browser] caller namer failed:', err)
-    }
-  }
+  const owner: BrowserOwner = live ? { ...caller, label: live.name || live.paneTitle || caller.label } : caller
   return { owner, ...(project ? { project } : {}) }
 }
 
@@ -73,14 +65,6 @@ export function setBrowserWindow(win: BrowserWindow | null): void {
 export function disposeBrowserPanes(): void {
   service?.dispose()
   service = null
-}
-
-/**
- * Name a pane caller better than its title — call-signs. Gets the owner as the
- * PTY host named it, the pane's project id (when known) and its pane id.
- */
-export function setBrowserCallerNamer(namer: (owner: BrowserOwner, projectId: string | undefined, paneId: string) => BrowserOwner): void {
-  nameCaller = namer
 }
 
 /** Every browser screenshot, for the canvas board. */

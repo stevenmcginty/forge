@@ -62,7 +62,7 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
           {current ? (
             <>
               <AgentBadge profile={current.profile} size="sm" />
-              <span className="dk-agents__name truncate">{current.title}</span>
+              <span className="dk-agents__name truncate">{current.name}</span>
               <AgentStateChip paneId={current.leaf.id} compact />
             </>
           ) : (
@@ -95,14 +95,14 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
         <button
           type="button"
           className="dk-agents__ask"
-          title={`Waiting on you: ${waiting.map((a) => a.title).join(', ')}. Go to ${waiting[0].title}`}
+          title={`Waiting on you: ${waiting.map((a) => a.name).join(', ')}. Go to ${waiting[0].name}`}
           onClick={() => void go(waiting[0])}
         >
           <span className="dk-agents__ask-glyph" aria-hidden="true">
             ◆
           </span>
           <span className="truncate">
-            {waiting.length === 1 ? `${waiting[0].title} needs you` : `${waiting.length} need you`}
+            {waiting.length === 1 ? `${waiting[0].name} needs you` : `${waiting.length} need you`}
           </span>
         </button>
       ) : null}
@@ -239,20 +239,14 @@ function AgentsList({
                 </span>
                 <AgentBadge profile={agent.profile} size="sm" />
                 <span className="dk-arow__text">
-                  <span className="dk-arow__name truncate">{agent.title}</span>
-                  {tabCount > 1 || agent.title !== agent.profile.name ? (
-                    <span className="dk-arow__kind truncate">
-                      {agent.title !== agent.profile.name ? agent.profile.name : ''}
-                      {agent.title !== agent.profile.name && tabCount > 1 ? ' · ' : ''}
-                      {tabCount > 1 ? `tab ${agent.tab.title}` : ''}
-                    </span>
-                  ) : null}
+                  <span className="dk-arow__name truncate">{agent.name}</span>
+                  <span className="dk-arow__kind truncate">{agent.title}</span>
                 </span>
                 {here ? <span className="dk-arow__here">Active</span> : null}
                 <AgentStateChip paneId={agent.leaf.id} />
               </button>
               {confirming ? (
-                <span className="dk-arow__confirm" role="group" aria-label={`Close ${agent.title}?`}>
+                <span className="dk-arow__confirm" role="group" aria-label={`Close ${agent.name}?`}>
                   <span className="dk-arow__confirm-q">Close?</span>
                   <button type="button" className="dk-arow__yes" onClick={() => close(agent)}>
                     Close
@@ -266,8 +260,8 @@ function AgentsList({
                   type="button"
                   className="dk-arow__close"
                   disabled={!live}
-                  aria-label={`Close ${agent.title}`}
-                  title={live ? `Close ${agent.title} — asks first` : 'The desktop is not answering, so it cannot close one'}
+                  aria-label={`Close ${agent.name}`}
+                  title={live ? `Close ${agent.name} — asks first` : 'The desktop is not answering, so it cannot close one'}
                   onClick={() => setClosing(agent.leaf.id)}
                 >
                   <Icon name="close" size={12} />

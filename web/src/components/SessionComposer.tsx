@@ -16,8 +16,8 @@ import {
   permissionSpec,
   tabsToPermissionMode
 } from '@shared/agents'
-import { badgeColor, isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
-import { tabNameFor } from '../deck/agents'
+import { paneNameInTab } from '@shared/workspace'
+import { badgeColor, isShellProfile, resolveProfile } from '@/lib/agents'
 import { toggleDeckDictation } from '../deck/dictation'
 import { dictationKeyName, useDictationKey } from '../deck/dictation-key'
 import { noKeys, optionKeys, readPaneAsk, sendAnswerKeys } from '../lib/answer-send'
@@ -765,13 +765,13 @@ export function SessionComposer({
   if (!tab) return null
 
   /*
-   * Who the words go to. The deck names the pane and its tab — "Claude Code ·
-   * Wanda" — then the project; on a shell, or with no pane, it says so
-   * plainly rather than a name the words would not reach.
+   * Who the words go to. The deck names the terminal by its one name and what
+   * runs in it — "Zeb · Claude Code" — then the project; on a shell, or with
+   * no pane, it says so plainly rather than a name the words would not reach.
    */
-  const paneName = profile && leaf ? paneDisplayTitle(profile, leaf.title) : null
-  const tabName = face === 'deck' && paneName ? tabNameFor(tab.title, paneName) : null
-  const where = [paneName, tabName, project].filter(Boolean).join(' · ')
+  const kindName = profile && leaf ? profile.name : null
+  const paneName = face === 'deck' && leaf ? paneNameInTab(tab, leaf.id) : null
+  const where = [paneName, kindName, project].filter(Boolean).join(' · ')
   const to =
     face === 'deck'
       ? isAgent
@@ -890,7 +890,7 @@ export function SessionComposer({
       {profile ? (
         <AgentStatus
           profile={profile}
-          tab={tabName ?? undefined}
+          tab={paneName ?? undefined}
           status={status}
           live={canType}
           view={activeView}

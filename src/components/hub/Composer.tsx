@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SavedPrompt, SavedPromptTarget } from '@shared/hub'
-import { useCallSign, useKeymap, useSavedPrompts } from '@/hooks/useHub'
+import { paneNameInTab } from '@shared/workspace'
+import { useKeymap, useSavedPrompts } from '@/hooks/useHub'
 import { hotkeyLabel } from '@/hooks/useDictation'
-import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { resolveProfile } from '@/lib/agents'
 import { HUB_COMPOSER_EVENT, type HubComposerDetail } from '@/lib/hubnav'
 import { runSavedPrompt } from '@/lib/hubRuntime'
 import { fireComet, usePresence } from '@/lib/motion'
@@ -81,8 +82,8 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
   const paneId = tab?.activePaneId ?? null
   const leaf = tab && paneId ? findLeaf(tab.root, paneId) : null
   const profile = leaf ? resolveProfile(state.settings.agentProfiles, leaf.profileId) : null
-  const callSign = useCallSign(paneId ?? '')
-  const paneName = leaf && profile ? (callSign ?? paneDisplayTitle(profile, leaf.title)) : null
+  // The terminal's one name ("Zeb", "Zeb 2") — see shared/terminal-names.ts.
+  const paneName = tab && leaf && profile ? paneNameInTab(tab, leaf.id) : null
 
   // No pane to aim at means Forge, whatever the chip last said.
   const toForge = target === 'forge' || !paneId || !paneName

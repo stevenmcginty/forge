@@ -108,7 +108,9 @@ function paneInfo(paneId: string): ForemanPaneInfo | null {
     id: paneId,
     cwd: session.cwd ?? '',
     projectName: live?.projectName ?? '',
-    title: live?.paneTitle ?? '',
+    // Its one name ("Zeb"), which the renderer keeps current — not the kind
+    // label it launched under.
+    title: live?.name || live?.paneTitle || '',
     sessionId: paneSessionId(paneId),
     agent: live?.agent ?? false
   }

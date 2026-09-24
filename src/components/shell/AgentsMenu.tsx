@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { PaneLeaf, TerminalTab } from '@shared/types'
-import { useCallSigns } from '@/hooks/useHub'
+import { paneNameInTab } from '@shared/workspace'
 import { usePaneRuntime } from '@/hooks/usePaneRuntime'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
-import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { resolveProfile } from '@/lib/agents'
 import { usePaneActivity } from '@/lib/paneActivity'
 import { shellSheet, useShellMode, useShellSheet } from '@/lib/shellSlots'
 import { collectLeaves } from '@/lib/splitTree'
@@ -73,7 +73,6 @@ function PanesSheet(): ReactNode {
     if (shellSheet.get() === 'panes') shellSheet.set(null)
   })
   useUiCommand('toggle-panes-switcher', () => toggleSheet('panes'))
-  const { map: callSigns } = useCallSigns()
   const rows = useMemo<Row[]>(
     () => workspace.tabs.flatMap((tab) => collectLeaves(tab.root).map((leaf) => ({ leaf, tab }))),
     [workspace.tabs]
@@ -165,10 +164,8 @@ function PanesSheet(): ReactNode {
             key={row.leaf.id}
             row={row}
             index={i}
-            callSign={callSigns[row.leaf.id] ?? null}
             current={row.leaf.id === currentId}
             cursor={i === cursor}
-            showTab={workspace.tabs.length > 1}
             profiles={state.settings.agentProfiles}
             onHover={() => setCursor(i)}
             onPick={() => pick(row)}
@@ -197,20 +194,16 @@ function PanesSheet(): ReactNode {
 function PaneRow({
   row,
   index,
-  callSign,
   current,
   cursor,
-  showTab,
   profiles,
   onHover,
   onPick
 }: {
   row: Row
   index: number
-  callSign: string | null
   current: boolean
   cursor: boolean
-  showTab: boolean
   profiles: Parameters<typeof resolveProfile>[0]
   onHover: () => void
   onPick: () => void
@@ -218,7 +211,8 @@ function PaneRow({
   const profile = resolveProfile(profiles, row.leaf.profileId)
   const runtime = usePaneRuntime(row.leaf.id)
   const activity = usePaneActivity(row.leaf.id, runtime)
-  const title = paneDisplayTitle(profile, row.leaf.title)
+  // The terminal's one name ("Zeb", "Zeb 2") — see shared/terminal-names.ts.
+  const name = paneNameInTab(row.tab, row.leaf.id)
   return (
     <button
       type="button"
@@ -234,11 +228,8 @@ function PaneRow({
     >
       <span className="prow__num mono">{index + 1}</span>
       <AgentBadge profile={profile} size="sm" />
-      <span className="prow__name truncate">{callSign ?? title}</span>
-      <span className="prow__kind truncate">
-        {callSign ? title : title === profile.name ? '' : profile.name}
-        {showTab ? ` · ${row.tab.title}` : ''}
-      </span>
+      <span className="prow__name truncate">{name}</span>
+      <span className="prow__kind truncate">{profile.name}</span>
       <StateChip activity={activity} />
       {current ? <span className="prow__here">here</span> : null}
     </button>

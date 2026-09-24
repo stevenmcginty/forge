@@ -36,7 +36,6 @@ let saved = null
 globalThis.window = {
   forgeHub: {
     canvas: {},
-    callSigns: {},
     prompts: {},
     keymap: {
       get: async () => ({ version: 1, overrides: {} }),

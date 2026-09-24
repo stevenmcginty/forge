@@ -1,79 +1,13 @@
-import type { CallSignMap, SavedPrompt, SavedPromptInput } from '@shared/hub'
+import type { SavedPrompt, SavedPromptInput } from '@shared/hub'
 import { hubApi } from './hubApi'
 
 /**
- * Renderer-side caches of the call-sign maps and the saved prompts, kept in
- * step with main's pushes. Plain external stores (subscribe + snapshot) so
- * the hooks can use useSyncExternalStore and the hub runtime can read them
- * without React.
+ * Renderer-side cache of the saved prompts, kept in step with main's pushes.
+ * A plain external store (subscribe + snapshot) so the hooks can use
+ * useSyncExternalStore and the hub runtime can read it without React.
  */
 
 type Listener = () => void
-
-/* ----------------------------------------------------------- call-signs */
-
-const callSigns = new Map<string, CallSignMap>()
-const callSignListeners = new Set<Listener>()
-const EMPTY_MAP: CallSignMap = Object.freeze({}) as CallSignMap
-let callSignWired = false
-
-function notifyCallSigns(): void {
-  for (const l of callSignListeners) l()
-}
-
-function wireCallSigns(): void {
-  if (callSignWired) return
-  const hub = hubApi()
-  if (!hub) return
-  callSignWired = true
-  hub.callSigns.onChanged((projectId, map) => {
-    callSigns.set(projectId, map)
-    notifyCallSigns()
-  })
-}
-
-export function subscribeCallSigns(cb: Listener): () => void {
-  wireCallSigns()
-  callSignListeners.add(cb)
-  return () => {
-    callSignListeners.delete(cb)
-  }
-}
-
-export function getCallSigns(projectId: string | null): CallSignMap {
-  return (projectId && callSigns.get(projectId)) || EMPTY_MAP
-}
-
-/** Name the project's live panes. `prune` only once its saved layout is loaded. */
-export async function syncCallSigns(projectId: string, paneIds: string[], prune: boolean): Promise<void> {
-  const hub = hubApi()
-  if (!hub) return
-  wireCallSigns()
-  try {
-    const map = await hub.callSigns.sync(projectId, paneIds, prune)
-    const before = callSigns.get(projectId)
-    if (!before || JSON.stringify(before) !== JSON.stringify(map)) {
-      callSigns.set(projectId, map)
-      notifyCallSigns()
-    }
-  } catch (err) {
-    console.error('[callsigns] sync failed', err)
-  }
-}
-
-export async function renameCallSign(
-  projectId: string,
-  paneId: string,
-  name: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const hub = hubApi()
-  if (!hub) return { ok: false, error: 'Call-signs are not available in this build — restart Forge.' }
-  const result = await hub.callSigns.rename(projectId, paneId, name)
-  if (!result.ok) return result
-  callSigns.set(projectId, result.map)
-  notifyCallSigns()
-  return { ok: true }
-}
 
 /* -------------------------------------------------------- saved prompts */
 

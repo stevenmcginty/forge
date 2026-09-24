@@ -10,5 +10,5 @@ import type { HubApi } from '@shared/hub'
  */
 export function hubApi(): HubApi | null {
   const hub = (window as unknown as { forgeHub?: Partial<HubApi> }).forgeHub
-  return hub && hub.canvas && hub.callSigns && hub.prompts && hub.keymap ? (hub as HubApi) : null
+  return hub && hub.canvas && hub.prompts && hub.keymap ? (hub as HubApi) : null
 }

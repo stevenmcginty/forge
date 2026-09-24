@@ -4,10 +4,10 @@ import { reducedMotion } from '@/lib/motion'
 import './NavBeacon.css'
 
 /**
- * "Go to Everest." The move itself is the shell's — the tab crossfades, the
+ * "Go to Zeb." The move itself is the shell's — the tab crossfades, the
  * canvas camera glides the tile into view, the focus reticle flies — and this
  * is the arrival: the pane's edge pulses once in its own colour and its
- * call-sign flies up on a flag, so the eye lands on the right pane by name
+ * name flies up on a flag, so the eye lands on the right pane by name
  * rather than by hunting for which border lit.
  *
  * One fixed layer over the stage, following the pane's box for the length of
@@ -33,7 +33,7 @@ export function NavBeacon(): ReactNode {
     const on = (e: Event): void => {
       const d = (e as CustomEvent<HubFocusDetail>).detail
       if (!d || d.kind !== 'pane') return
-      setBeacon({ key: ++seq.current, paneId: d.paneId, label: d.callSign ?? `Panel ${d.number}`, number: d.number })
+      setBeacon({ key: ++seq.current, paneId: d.paneId, label: d.name, number: d.number })
     }
     window.addEventListener(HUB_FOCUS_EVENT, on)
     return () => window.removeEventListener(HUB_FOCUS_EVENT, on)

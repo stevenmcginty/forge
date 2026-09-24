@@ -183,8 +183,8 @@ export interface ForgeApi {
      */
     write(id: string, data: string, claim?: boolean): void
     resize(id: string, cols: number, rows: number): void
-    /** The pane was renamed in the UI. See `IPC.ptyRename`. */
-    rename(id: string, title: string): void
+    /** The pane's one name, and what runs in it. See `IPC.ptyRename`. */
+    rename(id: string, title: string, kind?: string): void
     kill(id: string): Promise<boolean>
     list(): Promise<Array<{ id: string; pid: number }>>
     /** Returns an unsubscribe function. */

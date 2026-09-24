@@ -102,7 +102,6 @@ export function focusNavTarget(
     tabId: pane.tabId,
     number: pane.number,
     name: pane.name,
-    callSign: pane.name,
     source
   })
   return { ok: true, summary: `Went to ${pane.name}.` }

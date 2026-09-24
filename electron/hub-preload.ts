@@ -25,11 +25,6 @@ export function hubPreloadApi(ipc: IpcRenderer): HubApi {
       setActive: (projectId) => ipc.invoke(HUB_IPC.canvasActive, projectId),
       onChanged: (cb) => on(HUB_IPC.canvasChanged, cb)
     },
-    callSigns: {
-      sync: (projectId, paneIds, prune) => ipc.invoke(HUB_IPC.callSignsSync, projectId, paneIds, prune),
-      rename: (projectId, paneId, name) => ipc.invoke(HUB_IPC.callSignsRename, projectId, paneId, name),
-      onChanged: (cb) => on(HUB_IPC.callSignsChanged, cb)
-    },
     prompts: {
       list: () => ipc.invoke(HUB_IPC.promptsList),
       save: (input) => ipc.invoke(HUB_IPC.promptsSave, input),

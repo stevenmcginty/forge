@@ -1,15 +1,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import type { CallSignMap, CanvasItem, CanvasLayoutPatch, CanvasSnapshot, SavedPrompt } from '@shared/hub'
+import type { CanvasItem, CanvasLayoutPatch, CanvasSnapshot, SavedPrompt } from '@shared/hub'
 import { hubApi } from '@/lib/hubApi'
-import {
-  deletePrompt,
-  getCallSigns,
-  getPrompts,
-  renameCallSign,
-  savePrompt,
-  subscribeCallSigns,
-  subscribePrompts
-} from '@/lib/hubStores'
+import { deletePrompt, getPrompts, savePrompt, subscribePrompts } from '@/lib/hubStores'
 import {
   getKeymapView,
   resetCommandKeys,
@@ -125,30 +117,6 @@ export function useCanvasFeed(projectId?: string | null): CanvasFeed {
 /** Same rule as electron/hub-store.ts safeId — main keys pushes by the sanitised id. */
 function safeId(id: string): string {
   return String(id ?? '').replace(/[^a-zA-Z0-9_-]/g, '_') || '_'
-}
-
-/* ----------------------------------------------------------- call-signs */
-
-/** paneId → call-sign for a project (the active one by default), plus rename. */
-export function useCallSigns(projectId?: string | null): {
-  map: CallSignMap
-  rename(paneId: string, name: string): Promise<{ ok: true } | { ok: false; error: string }>
-} {
-  const { state } = useApp()
-  const pid = projectId === undefined ? state.activeProjectId : projectId
-  const map = useSyncExternalStore(subscribeCallSigns, () => getCallSigns(pid ?? null))
-  const rename = useCallback(
-    async (paneId: string, name: string) =>
-      pid ? renameCallSign(pid, paneId, name) : { ok: false as const, error: 'No project is open.' },
-    [pid]
-  )
-  return { map, rename }
-}
-
-/** One pane's call-sign (for a pane header). */
-export function useCallSign(paneId: string, projectId?: string | null): string | null {
-  const { map } = useCallSigns(projectId)
-  return map[paneId] ?? null
 }
 
 /* -------------------------------------------------------- saved prompts */

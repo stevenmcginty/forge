@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Project, TerminalTab, Workspace } from '@shared/types'
+import { paneNameInTab } from '@shared/workspace'
 import { usePaneRuntime } from '@/hooks/usePaneRuntime'
-import { useCallSign } from '@/hooks/useHub'
-import { ACCENT_PALETTE, TAB_TEXT_PALETTE, paneDisplayTitle, resolveProfile, splitProfiles } from '@/lib/agents'
+import { ACCENT_PALETTE, TAB_TEXT_PALETTE, resolveProfile, splitProfiles } from '@/lib/agents'
 import { PATH_DRAG_TYPE, TASK_DRAG_TYPE } from '@/lib/mosaicLayout'
 import { usePaneActivity } from '@/lib/paneActivity'
 import { droppedFilePaths, maybeFiles } from '@/lib/paths'
@@ -141,8 +141,8 @@ function StripTile({
   const profile = resolveProfile(state.settings.agentProfiles, cell.leaf.profileId)
   const runtime = usePaneRuntime(paneId)
   const activity = usePaneActivity(paneId, runtime)
-  const callSign = useCallSign(paneId)
-  const name = callSign ?? paneDisplayTitle(profile, cell.leaf.title)
+  // The terminal's one name ("Zeb", "Zeb 2") — see shared/terminal-names.ts.
+  const name = paneNameInTab(cell.tab, paneId)
   const ref = useRef<HTMLDivElement | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -236,7 +236,7 @@ function StripTile({
         type="button"
         className="wstrip__hit"
         aria-label={`Open ${name} full screen`}
-        title={`${name} · ${cell.tab.title} — click for full screen, right-click for the tab's colours and settings`}
+        title={`${name} · ${profile.name} — click for full screen, right-click for the tab's colours and settings`}
         onClick={() => onOpen(paneId)}
       />
 

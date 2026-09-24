@@ -20,13 +20,8 @@ import { resolvePaneTarget, type ActionPane } from './appactions'
  * Pure: no DOM, no React. The focus side effects live in hubRuntime.ts.
  */
 
-export interface NavPane extends ActionPane {
-  /**
-   * @deprecated The same string as `name`, the terminal's one name. Kept only
-   * while the pane UI still reads it; read `name`.
-   */
-  callSign?: string
-}
+/** A pane the navigator can reach — by its one name, `name`. */
+export type NavPane = ActionPane
 
 export type NavTarget =
   /** The Board (agent images and artifacts). Internal name kept: `canvas`. */
@@ -93,8 +88,6 @@ export type HubFocusDetail =
       number: number
       /** The terminal's one name. */
       name: string
-      /** @deprecated The same as `name`, for the beacon until it reads `name`. */
-      callSign: string | null
       source: HubFocusSource
     }
   | { kind: 'canvas'; source: HubFocusSource }

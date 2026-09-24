@@ -15,6 +15,7 @@ import {
   shareBytes
 } from '@shared/share'
 import type { ShareLinkPaneView, ShareLinkRequest, ShareLinkResponse } from '@shared/share'
+import { listTerminals, nameKey, resolveTerminal, type TerminalResolution } from '@shared/terminal-names'
 
 /**
  * One agent types into another agent's terminal.
@@ -65,10 +66,12 @@ import type { ShareLinkPaneView, ShareLinkRequest, ShareLinkResponse } from '@sh
 export interface ShareLinkPane {
   /** The session id — what `write` and `replay` are keyed by. */
   id: string
-  /** The name a person would say: the pane's title. */
+  /** The name a person would say: the terminal's one name ("Zeb" — see shared/terminal-names.ts). */
   title: string
   /** Which CLI is running in it — 'codex', 'claude', 'opencode'. May be empty. */
   agent: string
+  /** What runs in it as the desk names it ("Claude Code"). Empty until the renderer says. */
+  kind?: string
   /** The pane's working directory. Breaks ties between same-named panes. */
   cwd: string
   /** Forge's name for the project. The scope: a send never leaves it. */
@@ -151,6 +154,7 @@ export class ShareLink {
       id,
       title,
       agent: String(pane.agent ?? '').trim(),
+      kind: String(pane.kind ?? existing?.kind ?? '').trim(),
       cwd: String(pane.cwd ?? ''),
       projectName: String(pane.projectName ?? '').trim(),
       // Set once, from whichever registration got here first, and never moved
@@ -172,12 +176,15 @@ export class ShareLink {
    * `launchTitle` is deliberately untouched, because it is standing in for an
    * env var on a live process, and that cannot be renamed out from under it.
    * A pane nobody has registered yet is a no-op: it will show its real title
-   * as soon as `register` runs.
+   * as soon as `register` runs. `kind`, when given, is what runs in it
+   * ("Claude Code"), for the words a miss lists.
    */
-  rename(id: string, title: string): void {
+  rename(id: string, title: string, kind?: string): void {
     const pane = this.panes.get(String(id ?? ''))
     if (!pane) return
     pane.title = String(title ?? '').trim()
+    const k = String(kind ?? '').trim()
+    if (k) pane.kind = k
   }
 
   /** The pane is gone. Nothing outlives the session it describes. */
@@ -301,11 +308,13 @@ export class ShareLink {
   /**
    * Which pane is being addressed, within one project.
    *
-   * Name, then id, then agent — each step only reached when the one before it
-   * matched nothing, so "Codex" resolves to the pane called Codex rather than to
-   * the three panes running codex. Two matches at any step is an `ambiguous`
-   * refusal naming both, never a guess: guessing which agent to interrupt is the
-   * one mistake this feature must not make.
+   * By its one name, through the same resolver every other tool uses
+   * (shared/terminal-names.ts): exact name, a unique prefix, then — only once
+   * no name matched — the pane's id and what runs in it ("codex", "Claude
+   * Code"), and last a close match. So "Codex" reaches the pane called Codex
+   * rather than the three panes running codex. Two equally good answers are an
+   * `ambiguous` refusal naming both, never a guess: guessing which agent to
+   * interrupt is the one mistake this feature must not make.
    */
   private resolve(
     scope: string,
@@ -313,41 +322,55 @@ export class ShareLink {
     now: number
   ): { pane: ShareLinkPane } | { error: ShareLinkResponse } {
     const known = [...this.panes.values()].filter((p) => this.scopeOf(p) === scope)
-    const want = String(needle ?? '').trim().toLowerCase()
+    const want = String(needle ?? '').trim()
     if (!want) {
       return {
         error: { ok: false, error: '`pane` is required — name the pane to reach.', panes: known.map((p) => this.viewOf(p, now)) }
       }
     }
 
-    for (const field of [
-      (p: ShareLinkPane): string => p.title.toLowerCase(),
-      (p: ShareLinkPane): string => p.id.toLowerCase(),
-      (p: ShareLinkPane): string => p.agent.toLowerCase()
-    ]) {
-      const hits = known.filter((p) => field(p) === want)
-      if (hits.length === 1) return { pane: hits[0] as ShareLinkPane }
-      if (hits.length > 1) {
-        return {
-          error: {
-            ok: false,
-            error: `ambiguous: ${hits.length} panes in this project answer to "${needle}". Use a pane name from share_panes.`,
-            candidates: hits.map((p) => `${p.title} (${p.agent || 'shell'})`)
-          }
+    type Named = { name: string; pane: ShareLinkPane }
+    const named: Named[] = known.map((p) => ({ name: p.title, pane: p }))
+    const kindKeys = (p: ShareLinkPane): string[] => [nameKey(p.agent), nameKey(p.kind ?? '')].filter(Boolean)
+    const pick = (test: (p: ShareLinkPane) => boolean): TerminalResolution<Named> => {
+      const hits = named.filter((n) => test(n.pane))
+      if (hits.length === 1) return { kind: 'one', pane: hits[0]! }
+      return hits.length > 1 ? { kind: 'ambiguous', matches: hits } : { kind: 'none' }
+    }
+    const found = resolveTerminal(want, named, {
+      fallback: () => {
+        const byId = pick((p) => p.id.toLowerCase() === want.toLowerCase())
+        return byId.kind !== 'none' ? byId : pick((p) => kindKeys(p).includes(nameKey(want)))
+      },
+      isKindWord: (word) => known.some((p) => kindKeys(p).includes(word))
+    })
+
+    if (found.kind === 'one') return { pane: found.pane.pane }
+    if (found.kind === 'ambiguous') {
+      const hits = found.matches.map((n) => n.pane)
+      return {
+        error: {
+          ok: false,
+          error: `ambiguous: ${hits.length} panes in this project answer to "${needle}": ${this.namesOf(hits)}. Say which one by name.`,
+          candidates: hits.map((p) => this.namesOf([p]))
         }
       }
     }
-
     return {
       error: {
         ok: false,
         error:
           known.length === 0
             ? 'There are no other panes open in this project.'
-            : `No pane in this project is called "${needle}".`,
+            : `No pane in this project is called "${needle}". Open now: ${this.namesOf(known)}.`,
         panes: known.map((p) => this.viewOf(p, now))
       }
     }
+  }
+
+  /** "Zeb (Claude Code), Viggo (Codex)" — each pane by its one name and what runs in it. */
+  private namesOf(panes: readonly ShareLinkPane[]): string {
+    return listTerminals(panes.map((p) => ({ name: p.title, profileName: p.kind || p.agent || 'shell' })))
   }
 
   /* -------------------------------------------------------------- handling */

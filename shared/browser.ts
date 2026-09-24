@@ -178,7 +178,7 @@ export function browserKeyCombo(e: { code: string; ctrl: boolean; alt: boolean; 
 /** Who opened a tab and drives it. `id` is a pane id, 'voice', or 'user'. */
 export interface BrowserOwner {
   id: string
-  /** The words shown on the surface: a pane's call-sign or title, "Voice", "You". */
+  /** The words shown on the surface: a pane's one name ("Zeb"), "Voice", "You". */
   label: string
   /** CLI exe name ('claude', 'codex', …) for the logo. Empty for voice and user. */
   agent: string
