@@ -9,7 +9,15 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from 'react'
-import type { MosaicRect, MosaicTile as MosaicTileRect, PaneLeaf, Project, TerminalTab, Workspace } from '@shared/types'
+import type {
+  MosaicGrid,
+  MosaicRect,
+  MosaicTile as MosaicTileRect,
+  PaneLeaf,
+  Project,
+  TerminalTab,
+  Workspace
+} from '@shared/types'
 import { paneNameInTab } from '@shared/workspace'
 import { isPaneDead, paneStatusLabel, usePaneRuntime } from '@/hooks/usePaneRuntime'
 import { launchCommand, leafPermissionMode, paneDisplayTitle, permissionChip, resolveProfile } from '@/lib/agents'
@@ -23,16 +31,18 @@ import {
   cascadeAt,
   clampResize,
   collides,
-  columnsFor,
   contentBounds,
   emptyMosaic,
   freeSpot,
+  gridFromDrag,
+  gridLabel,
   nearestTile,
   normalise,
   othersOf,
   placeMissing,
   snapMove,
   snapResize,
+  wallColumns,
   type MosaicDir,
   type MosaicEdges
 } from '@/lib/mosaicLayout'
@@ -77,10 +87,17 @@ import './MosaicView.css'
  *
  *   auto    Forge places the tiles in a uniform grid. Nothing to arrange, and
  *           in scaled mode the type is the same size on every tile because they
- *           all scale against the biggest pane on the wall.
- *   custom  you place them. Drag a header, drag an edge. The first move or resize seeds custom
- *           mode from exactly where the auto grid had put everything, so
- *           crossing over is invisible; "Reset to grid" crosses back.
+ *           all scale against the biggest pane on the wall. Dragging a tile's
+ *           edge resizes every tile together, so the wall stays uniform: its
+ *           side picks the column count (1-6) nearest the width you drag to,
+ *           its bottom sets every row's height, and past the window the wall
+ *           scrolls. A label by the pointer says the grid in words while you
+ *           drag. Double-click an edge, or "Fit to window" in the menu, and the
+ *           grid goes back to filling the window.
+ *   custom  you place them. Drag a header and the wall turns freeform: the
+ *           first move seeds custom mode from exactly where the auto grid had
+ *           put everything, so crossing over is invisible. Here an edge
+ *           resizes just its own tile. "Reset to grid" crosses back.
  *
  * Click a tile's terminal and you type into it right there on the wall, at the
  * pane's own cols and rows, however small the tile is; Esc or a click on the
@@ -213,8 +230,24 @@ interface DragSession {
   fit: boolean | undefined
   /** The wall was still on the auto grid when this drag started. */
   seed: Record<string, MosaicTileRect> | null
+  /** An edge dragged on the auto grid: it resizes the whole grid, not the tile. */
+  grid: GridDrag | null
   onMove: (e: PointerEvent) => void
   onUp: (e: PointerEvent) => void
+}
+
+/** The auto grid's half of a resize: every tile at once, measured on press. */
+interface GridDrag {
+  /** The grid size stored before the drag; the axis not dragged keeps it. */
+  base: MosaicGrid
+  /** What the drag has asked for so far; committed on release. */
+  next: MosaicGrid
+  /** Tiles on the wall. */
+  count: number
+  /** The canvas's width, its column gutter and the narrowest a column may be. */
+  width: number
+  gap: number
+  minW: number
 }
 
 export function MosaicView({
@@ -250,7 +283,9 @@ export function MosaicView({
     cells[0]?.leaf.id ??
     null
 
-  const columns = columnsFor(cells.length)
+  /** The size the user dragged the auto grid to, if they did. */
+  const grid = mosaic.grid
+  const columns = wallColumns(cells.length, grid)
 
   const wallRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
@@ -258,6 +293,7 @@ export function MosaicView({
   // cells rather than jumping. Keyed on membership, never on a drag.
   useFlipChildren(canvasRef, cells.map((c) => c.leaf.id).join(','))
   const ghostRef = useRef<HTMLDivElement | null>(null)
+  const gridLabelRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<DragSession | null>(null)
   const [area, setArea] = useState({ width: 960, height: 600 })
   const [dropHint, setDropHint] = useState(false)
@@ -291,15 +327,15 @@ export function MosaicView({
    * would have given it. A dropped tab therefore lands looking like the wall it
    * landed on, rather than at some arbitrary default.
    */
+  const rowH = grid?.rowH
   const defaultSize = useMemo(() => {
     const n = Math.max(1, cells.length)
-    const cols = columnsFor(n)
-    const rows = Math.ceil(n / cols)
+    const rows = Math.ceil(n / columns)
     return {
-      w: Math.max(MOSAIC_MIN_W, Math.round((area.width - MOSAIC_GAP * (cols - 1)) / cols)),
-      h: Math.max(MOSAIC_MIN_H, Math.round((area.height - MOSAIC_GAP * (rows - 1)) / rows))
+      w: Math.max(MOSAIC_MIN_W, Math.round((area.width - MOSAIC_GAP * (columns - 1)) / columns)),
+      h: rowH ?? Math.max(MOSAIC_MIN_H, Math.round((area.height - MOSAIC_GAP * (rows - 1)) / rows))
     }
-  }, [area, cells.length])
+  }, [area, cells.length, columns, rowH])
 
   /*
    * One scale for the whole wall, taken from the largest pane on it.
@@ -396,6 +432,39 @@ export function MosaicView({
     const dx = s.pointerX - s.originX
     const dy = s.pointerY - s.originY
 
+    // An edge on the auto grid: the whole grid follows, written straight onto
+    // the wall's custom properties. CSS reflows every tile; React sits it out.
+    if (s.grid) {
+      const g = s.grid
+      const tileW = s.start.w + (s.edges.right ? dx : s.edges.left ? -dx : 0)
+      const tileH = s.start.h + (s.edges.bottom ? dy : s.edges.top ? -dy : 0)
+      const asked = gridFromDrag({ width: g.width }, g.count, tileW, tileH, s.edges, g.gap, g.minW)
+      // A side let go at the column count the wall already had leaves the
+      // columns Forge's choice, so they still follow the number of tiles.
+      if (g.base.cols === undefined && asked.cols === wallColumns(g.count, g.base)) delete asked.cols
+      g.next = { ...g.base, ...asked }
+      const cols = wallColumns(g.count, g.next)
+      const wall = wallRef.current
+      if (wall) {
+        wall.style.setProperty('--mosaic-cols', String(cols))
+        if (g.next.rowH) wall.style.setProperty('--mosaic-row-h', `${g.next.rowH}px`)
+        else wall.style.removeProperty('--mosaic-row-h')
+      }
+      const label = gridLabelRef.current
+      const host = label?.parentElement
+      if (label && host) {
+        const text = gridLabel(cols, g.next.rowH)
+        if (label.textContent !== text) label.textContent = text
+        label.hidden = false
+        // Beside the pointer, kept inside the view so it is never cut off.
+        const box = host.getBoundingClientRect()
+        const x = Math.max(4, Math.min(box.width - label.offsetWidth - 4, s.pointerX - box.left + 14))
+        const y = Math.max(4, Math.min(box.height - label.offsetHeight - 4, s.pointerY - box.top + 18))
+        label.style.transform = `translate3d(${x}px, ${y}px, 0)`
+      }
+      return
+    }
+
     if (s.mode === 'move') {
       const snapped = snapMove({ x: s.start.x + dx, y: s.start.y + dy, w: s.start.w, h: s.start.h }, s.others)
       s.current = snapped
@@ -464,6 +533,24 @@ export function MosaicView({
       const start = rects[paneId]
       if (!start) return
 
+      // An edge on the auto grid resizes every tile together and never turns
+      // the wall freeform; only a header drag does that.
+      let gridDrag: GridDrag | null = null
+      if (!custom && mode === 'resize') {
+        const canvasEl = canvasRef.current
+        const wall = wallRef.current
+        const gap = canvasEl ? parseFloat(getComputedStyle(canvasEl).columnGap) : NaN
+        const minW = wall ? parseFloat(getComputedStyle(wall).getPropertyValue('--mosaic-tile-min-w')) : NaN
+        gridDrag = {
+          base: { ...grid },
+          next: { ...grid },
+          count: cells.length,
+          width: canvasEl?.clientWidth ?? area.width,
+          gap: Number.isFinite(gap) ? gap : MOSAIC_GAP,
+          minW: Number.isFinite(minW) ? minW : MOSAIC_MIN_W
+        }
+      }
+
       const session: DragSession = {
         paneId,
         el,
@@ -480,7 +567,8 @@ export function MosaicView({
         current: start,
         raf: 0,
         fit: tiles[paneId]?.fit,
-        seed: custom ? null : rects,
+        seed: custom || gridDrag ? null : rects,
+        grid: gridDrag,
         onMove: () => {},
         onUp: () => {}
       }
@@ -511,6 +599,17 @@ export function MosaicView({
         // A press that never became a drag leaves no trace at all.
         if (!session.armed) return
 
+        if (session.grid) {
+          // The wall already shows the new grid; the dispatch makes it stick,
+          // and React re-renders the same custom properties the drag wrote.
+          const label = gridLabelRef.current
+          if (label) label.hidden = true
+          session.el.removeAttribute('data-dragging')
+          const next = session.grid.next
+          actions.setMosaicGrid(next.cols === undefined && next.rowH === undefined ? null : next)
+          return
+        }
+
         const final = session.mode === 'move' ? freeSpot(session.current, session.others) : session.current
         // Write the committed box straight onto the element before dispatching,
         // so the frame between release and re-render is already correct.
@@ -533,8 +632,13 @@ export function MosaicView({
       window.addEventListener('pointerup', session.onUp)
       window.addEventListener('pointercancel', session.onUp)
     },
-    [actions, currentRects, custom, frame, interactiveId, tiles]
+    [actions, area.width, cells.length, currentRects, custom, frame, grid, interactiveId, tiles]
   )
+
+  /** Double-click an edge on the auto grid: back to filling the window. */
+  const fitGrid = useCallback((): void => {
+    if (!custom && grid) actions.setMosaicGrid(null)
+  }, [actions, custom, grid])
 
   // A drag must not outlive the view it started in.
   useEffect(() => {
@@ -785,7 +889,9 @@ export function MosaicView({
         className="mosaic__wall"
         data-custom={custom}
         data-dropping={dropHint || undefined}
-        style={{ '--mosaic-cols': columns } as React.CSSProperties}
+        style={
+          { '--mosaic-cols': columns, ...(rowH ? { '--mosaic-row-h': `${rowH}px` } : {}) } as React.CSSProperties
+        }
         onDragOver={onDragOver}
         onDragLeave={() => setDropHint(false)}
         onDrop={onDrop}
@@ -810,6 +916,7 @@ export function MosaicView({
               onClose={closeTerminal}
               onSelect={setPicked}
               onBeginDrag={beginDrag}
+              onFitGrid={fitGrid}
               onToggleFit={toggleFit}
               onToggleInteract={toggleInteract}
             />
@@ -817,6 +924,8 @@ export function MosaicView({
           <div className="mosaic__ghost" ref={ghostRef} />
         </div>
       </div>
+      {/* The grid in words while an edge drag resizes every tile. See frame. */}
+      <div className="mosaic__gridlabel" ref={gridLabelRef} role="status" hidden />
     </div>
   )
 }
@@ -1065,6 +1174,7 @@ function MosaicTile({
   onClose,
   onSelect,
   onBeginDrag,
+  onFitGrid,
   onToggleFit,
   onToggleInteract
 }: {
@@ -1089,6 +1199,8 @@ function MosaicTile({
     mode: 'move' | 'resize',
     edges: MosaicEdges
   ) => void
+  /** Double-click on an edge of the auto grid: back to filling the window. */
+  onFitGrid: () => void
   onToggleFit: (paneId: string) => void
   onToggleInteract: (paneId: string) => void
 }): ReactNode {
@@ -1377,7 +1489,9 @@ function MosaicTile({
           key={handle.key}
           className="mtile__grip"
           data-edge={handle.key}
+          title={placed ? undefined : 'Drag to resize every tile together. Double-click to fit the grid to the window.'}
           onPointerDown={(e) => onBeginDrag(paneId, e, 'resize', handle.edges)}
+          onDoubleClick={placed ? undefined : onFitGrid}
         />
       ))}
     </section>

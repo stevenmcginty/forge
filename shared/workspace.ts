@@ -49,7 +49,8 @@ export function withPrunedMosaic(ws: Workspace): Workspace {
   const same =
     Object.keys(tiles).length === Object.keys(m.tiles).length && wallTabs.length === m.wallTabs.length
   if (same) return ws
-  if (Object.keys(tiles).length === 0) return { ...ws, mosaic: emptyMosaic() }
+  // The grid's dragged size is not a box and outlives them.
+  if (Object.keys(tiles).length === 0) return { ...ws, mosaic: m.grid ? { ...emptyMosaic(), grid: m.grid } : emptyMosaic() }
   return { ...ws, mosaic: { ...m, tiles, wallTabs } }
 }
 

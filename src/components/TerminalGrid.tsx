@@ -190,19 +190,30 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
       {viewMode === 'mosaic' ? <MosaicTextToggle /> : null}
 
       {/*
-        The freeform wall's one control, parked here rather than over the
-        tiles: the mosaic must not gain a toolbar the moment you drag
-        something, or every tile shifts down by the height of it.
+        The wall's layout controls, parked here rather than over the tiles:
+        the mosaic must not gain a toolbar the moment you drag something, or
+        every tile shifts down by the height of it.
       */}
       {viewMode === 'mosaic' && mosaic.mode === 'custom' ? (
         <button
           type="button"
           className="ghost-btn tabstrip__reset"
-          title="Freeform wall — drag a header to move it, an edge to resize it, double-click a header to refit its terminal. Click here to put every tile back in the grid."
+          title="Freeform wall — drag a header to move it, an edge to resize just that tile, double-click a header to refit its terminal. Click here to put every tile back in the grid, where an edge resizes all tiles together."
           onClick={() => actions.resetMosaicLayout()}
         >
           <Icon name="restart" size={11} />
           Reset to grid
+        </button>
+      ) : null}
+      {viewMode === 'mosaic' && mosaic.mode === 'auto' && mosaic.grid ? (
+        <button
+          type="button"
+          className="ghost-btn tabstrip__reset"
+          title="On the grid, dragging a tile's edge resizes all tiles together. Click here to go back to the grid that fills the window."
+          onClick={() => actions.setMosaicGrid(null)}
+        >
+          <Icon name="restart" size={11} />
+          Fit to window
         </button>
       ) : null}
 

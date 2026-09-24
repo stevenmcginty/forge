@@ -21,6 +21,7 @@ import type {
   AppInfo,
   ClaudePermissionMode,
   LayoutNode,
+  MosaicGrid,
   MosaicState,
   MosaicTextMode,
   MosaicTile,
@@ -58,7 +59,7 @@ import { DEFAULT_RAIL_OPEN } from '@shared/rail'
 import { ACCENT_PALETTE, DEFAULT_PROFILE_ID, tabDefaultProfileId } from '@/lib/agents'
 import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
-import { emptyMosaic, sanitiseMosaic } from '@/lib/mosaicLayout'
+import { emptyMosaic, sanitiseGrid, sanitiseMosaic } from '@/lib/mosaicLayout'
 import { plannerPaneId } from '@/lib/planner'
 import { DEFAULT_HUB, nextHubMode } from '@/lib/voicehub'
 import { basename } from '@/lib/paths'
@@ -480,6 +481,7 @@ type Action =
   | { type: 'mosaicTiles'; tiles: Record<string, MosaicTile>; custom?: boolean; wallTab?: string }
   | { type: 'mosaicFit'; paneId: string; fit: boolean }
   | { type: 'mosaicReset' }
+  | { type: 'mosaicGrid'; grid: MosaicGrid | null }
   | { type: 'taskAdd'; text: string }
   | { type: 'taskRemove'; id: string }
   | { type: 'tasksMaximized'; on: boolean }
@@ -1245,6 +1247,7 @@ function reducer(state: AppState, action: Action): AppState {
         const wallTabs =
           action.wallTab && !m.wallTabs.includes(action.wallTab) ? [...m.wallTabs, action.wallTab] : m.wallTabs
         return {
+          ...m,
           mode: action.custom ? 'custom' : m.mode,
           tiles: { ...m.tiles, ...action.tiles },
           wallTabs
@@ -1263,7 +1266,18 @@ function reducer(state: AppState, action: Action): AppState {
       })
 
     case 'mosaicReset':
-      return mapMosaic(state, (m) => (m.mode === 'auto' && m.wallTabs.length === 0 ? null : emptyMosaic()))
+      return mapMosaic(state, (m) =>
+        m.mode === 'auto' && m.wallTabs.length === 0 && !m.grid ? null : emptyMosaic()
+      )
+
+    case 'mosaicGrid':
+      return mapMosaic(state, (m) => {
+        const grid = action.grid ? sanitiseGrid(action.grid) : undefined
+        if (grid?.cols === m.grid?.cols && grid?.rowH === m.grid?.rowH) return null
+        const next: MosaicState = { mode: m.mode, tiles: m.tiles, wallTabs: m.wallTabs }
+        if (grid) next.grid = grid
+        return next
+      })
 
     case 'taskAdd': {
       const text = action.text.trim().slice(0, MAX_TASK_TEXT)
@@ -1539,8 +1553,13 @@ export interface AppActions {
   setMosaicTiles(tiles: Record<string, MosaicTile>, opts?: { custom?: boolean; wallTab?: string }): void
   /** Opt a single tile in or out of refitting its PTY to its box. */
   setMosaicFit(paneId: string, fit: boolean): void
-  /** Back to the auto grid, forgetting every hand-placed box. */
+  /** Back to the auto grid, forgetting every hand-placed box and the grid's dragged size. */
   resetMosaicLayout(): void
+  /**
+   * Size the auto grid — every tile together — or, with null, hand it back to
+   * the window: Forge's column count, rows sharing the height.
+   */
+  setMosaicGrid(grid: MosaicGrid | null): void
 
   /* ---------------------------------------------------- delegation panel */
   /** Put a task card on the tray, ready to be dragged onto an agent. */
@@ -2167,6 +2186,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       setPreviewUrl: (projectId, url) => dispatch({ type: 'setPreviewUrl', projectId, url }),
       setDevCommand: (projectId, command) => dispatch({ type: 'setDevCommand', projectId, command }),
       resetMosaicLayout: () => dispatch({ type: 'mosaicReset' }),
+      setMosaicGrid: (grid) => dispatch({ type: 'mosaicGrid', grid }),
       setNotice: (message) => dispatch({ type: 'notice', message }),
       openDataDir: () => void window.forge.store.revealDataDir(),
 

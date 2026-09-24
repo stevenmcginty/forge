@@ -248,6 +248,20 @@ export interface MosaicTile extends MosaicRect {
 export type MosaicLayoutMode = 'auto' | 'custom'
 
 /**
+ * The size the user gave the auto grid by dragging a tile's edge — every tile
+ * together, so the wall stays uniform. Each half is optional and absent means
+ * Forge's own choice.
+ *
+ * `cols`  1..6. Absent = the column count for the number of tiles.
+ * `rowH`  row height in px, at least a terminal's minimum. Absent = the rows
+ *         share the window's height between them.
+ */
+export interface MosaicGrid {
+  cols?: number
+  rowH?: number
+}
+
+/**
  * How the mosaic draws terminal text — the wall's one legibility decision.
  *
  * `lifesize` every tile refits its PTY to its own box, so the type is exactly
@@ -274,6 +288,8 @@ export interface MosaicState {
    * strip just says which ones you placed by hand.
    */
   wallTabs: string[]
+  /** The auto grid's size, when the user dragged one. Only read in `auto` mode. */
+  grid?: MosaicGrid
 }
 
 /** One project's terminal workspace. */
