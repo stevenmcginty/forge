@@ -54,3 +54,44 @@
     padding: 0 5px;
   }
 }
+
+/*
+ * Full screen: one terminal owns the whole stage, so its call-sign is the only
+ * cue for which agent you are talking to. It gets a taller header, a bigger
+ * name at full contrast whether or not the pane has the keyboard, and a solid
+ * bar in the pane's tab colour before it — a shape, so the name reads as a
+ * label even where the colour does not.
+ */
+.deck .grid[data-view='full'] .pane .pane__header {
+  height: calc(var(--pane-head-h) + 8px);
+}
+
+.deck .grid[data-view='full'] .pane .pane__title[data-callsign='true'] {
+  position: relative;
+  padding: 2px var(--s-2) 2px calc(var(--s-2) + 7px);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 14%, transparent);
+  border-radius: var(--r-sm, 4px);
+}
+
+.deck .grid[data-view='full'] .pane .pane__title[data-callsign='true']::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--pane-accent, var(--accent));
+}
+
+.deck .grid[data-view='full'] .pane .pane__title[data-callsign='true']:hover {
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 22%, transparent);
+}
+
+.deck .grid[data-view='full'] .pane .pane__kind {
+  font-size: var(--t-sm);
+}
