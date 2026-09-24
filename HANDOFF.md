@@ -1,5 +1,13 @@
 # Handoff
 
+## Desktop voice bar: Listen + voice agent as one unit (2026-09-24, merged to master, not pushed)
+
+- **Asked (Steve):** the desktop bar's Listen toggle and agent picker were "not very good"; redesign like the desktop's other icon pickers, but better.
+- **Built (designer, worktree, merged 16:56):** Listen and the picker share one rim; the brain is named once (on the chip). New `src/components/hub/BrainMark.tsx` gives each brain a mark. Menu rows: mark tile, name, a second line, status as glyph + word ("✓ IN USE", "● READY", "! NOT LOGGED IN", "◇ NEEDS KEY"); unpickable rows have dashed tiles. At ~900px the chip shrinks to its mark. `src/components/shell/Dock.css` rules moved to the new classes. Behaviour unchanged (keys, probes, `brainSwitchWaits`, aria).
+- **Checked:** typecheck + build in the worktree; screenshots dark and paper, 1400 and 900, in the session scratchpad `voicebar/`. Live dev renderer hot-updated cleanly. Keyboard path and Right Shift not re-tested (code unchanged).
+- **Known:** while a live session waits for a switch, the chip names the newly picked brain, not the one still talking. At 900px a fallback shows only mark + diamond.
+- **Next:** BrainMark uses invented marks. Steve wants real company logos everywhere (memory `terminal-badge-is-company-logo`): swap BrainMark and `AgentBadge` (desktop + web) to one real-logo set. Research: `AgentProfile` has no icon field; web gets full profiles already, so no wire change; no icon package installed. Findings in the session scratchpad `agent-icons/findings.md`.
+
 ## Forge Web: desktop terminal status row on Full screen and Wall (2026-09-24, uncommitted)
 
 - **Asked (Steve):** bring the desktop pane status display to the web: agent icon, status indicator, terminal name, current agent, live.
