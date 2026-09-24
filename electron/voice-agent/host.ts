@@ -729,7 +729,7 @@ export class VoiceAgentHost {
             '',
             'Work:',
             '- {"kind":"send_prompt","target":"Zeb","text":"<the full brief>","submit":true} — hand a prompt to a terminal. `target` is its name ("Zeb"), or spoken words: "the claude one", "this". Put the whole brief in `text`; never speak it aloud as well.',
-            '- {"kind":"use_skill","name":"code-review","target":"terminal 1"} — type /name into a pane, unsubmitted.',
+            '- {"kind":"use_skill","name":"code-review","target":"Zeb"} — type /name into a terminal, unsubmitted.',
             '',
             'Media (these take seconds to minutes — say so before you start):',
             '- {"kind":"make_image","description":"...","count":1,"aspect":"16:9"}',
