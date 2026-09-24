@@ -1,5 +1,13 @@
 # Handoff
 
+## Wall click-to-type + Expand; voice bar mic/send; real logos on every terminal (2026-09-24 17:05, merged to master, not pushed)
+
+- **Wall (Steve):** a click on a tile's terminal now enters in-place typing (was: opened Full screen). Always-visible Expand button beside the X opens Full screen. The terminal-icon button shows only while typing, as "Stop typing". Esc or a click on empty Wall leaves typing. Enter on the arrow-key ring alone still opens Full screen. `src/components/MosaicView.tsx`, `.css`.
+- **Wall tile scroll ("can't scroll in the Wall"):** still unexplained. The debugger could not reproduce it: the wheel scrolled scaled and life-size tiles, pwsh and Claude Code, on Steve's real layout. The WallStrip lead is dead: `WallStrip` is not mounted since 5c1ac5d (its new wheel code in `src/components/shell/WallStrip.tsx` is inert). Remaining lead: after a renderer reload the xterm is rebuilt from the 192 KB pty-host replay (`electron/pty-host.ts:53,288`), so `baseY` can be ~0 and `scrollPeek` returns false. Next step: in the live renderer, read `term.buffer.active.baseY` for a tile that won't scroll.
+- **Voice bar:** one disc at the right end of the desktop bar: mic when empty (dictation toggle, same as D), Send with text, stop square while recording. Old "Ask ⏎" button gone. `src/components/hub/DictateButton.*`, `Composer.*`. Rebased over the other session's Listen+picker unit (8a146d5). Dead rule left: `Dock.css:781` `.comp__send`.
+- **Logos:** `AgentBadge` draws the real brand logo (Simple Icons CC0 / LobeHub MIT paths in `shared/agent-logos.ts`); shells get `>_`; unknown agents keep letters. Web uses the same component; reaches Forge Web on push. Next: `src/components/hub/BrainMark.tsx` (invented marks) should switch to `shared/agent-logos.ts`.
+- **Checked:** typecheck, lint:hooks, mosaic-check 60; throwaway-Forge checks for click-to-type and the bar states; badge screenshots. Dev renderer hot-updated cleanly after each merge.
+
 ## Desktop voice bar: Listen + voice agent as one unit (2026-09-24, merged to master, not pushed)
 
 - **Asked (Steve):** the desktop bar's Listen toggle and agent picker were "not very good"; redesign like the desktop's other icon pickers, but better.
