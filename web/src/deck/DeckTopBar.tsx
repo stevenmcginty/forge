@@ -2,6 +2,7 @@ import type { ReactNode, Ref } from 'react'
 import { Icon, type IconName } from '@/components/Icon'
 import { CommandsButton, SkillsButton } from '../components/Flyouts'
 import { AgentsMenu } from './AgentsMenu'
+import { DictationKeySetting } from './DictationKey'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
 import { DECK_THEMES, swatchOf } from './theme'
 import type { BarPlace, DeckView } from './view'
@@ -227,6 +228,7 @@ function DeckMenuBody({
           )
         )}
       </div>
+      <DictationKeySetting />
       <div className="dk-menu__section">
         <span className="dk-menu__eyebrow">Theme · this browser</span>
         <div className="dk-themes" role="radiogroup" aria-label="Theme">

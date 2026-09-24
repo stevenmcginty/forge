@@ -2,8 +2,10 @@ import { useSyncExternalStore } from 'react'
 import { providerSpec } from '@shared/realtime'
 import {
   isWebVoiceOpenAIProvider,
+  WEB_VOICE_NAV_ARG,
   type WebRequest,
   type WebResult,
+  type WebVoiceNav,
   type WebVoiceOpenAIProvider,
   type WebVoiceProvider,
   type WebVoiceSetup
@@ -20,6 +22,7 @@ import type {
   RealtimeToolCall
 } from '@/lib/realtime/session'
 import { buildRolloverSummary } from '@/lib/realtime/summary'
+import { toolLabel } from '@/lib/toolLabels'
 import { ClaudeVoiceSession } from './claudeVoice'
 import { readVoiceAgent, UPDATE_DESKTOP_WORDS, voiceFailureWords, type WebVoicePhase } from './voice-words'
 
@@ -44,7 +47,10 @@ import { readVoiceAgent, UPDATE_DESKTOP_WORDS, voiceFailureWords, type WebVoiceP
  *   voice-connect  GPT Realtime: this page's WebRTC SDP offer, exchanged by
  *                  main; only OpenAI's SDP answer comes back (the key and the
  *                  client secret stay in main)
- *   voice-tool     each tool call, run there by the same `runRealtimeTool`
+ *   voice-tool     each tool call, run there by the same `runRealtimeTool` —
+ *                  except moving around (the Wall or Full screen, a pane, a
+ *                  tab, a project): the desktop resolves where, and this page
+ *                  goes there on its own deck (`setVoiceNavigator`)
  *   voice-context  polled while live; a change is told to the model, at most
  *                  every `contextMinGapMs` — ContextTracker's rule
  *
@@ -77,6 +83,10 @@ export interface WebVoiceState {
   muted: boolean
   /** The agent Listen runs: this browser's pick, Gemini Live until one is made. */
   agent: WebVoiceProvider
+  /** The newest caption, for the bar's voice line: who spoke and what, as it grows. */
+  caption: { role: 'user' | 'assistant'; text: string } | null
+  /** The newest tool call in words ("Opening tabs", then what it said), until the next conversation. */
+  lastAction: { label: string; status: 'running' | 'ok' | 'failed' } | null
 }
 
 const AGENT_KEY = 'forge-web-voice-agent'
@@ -92,8 +102,26 @@ function storedAgent(): WebVoiceProvider {
   }
 }
 
-let state: WebVoiceState = { phase: 'off', error: null, ended: null, muted: false, agent: storedAgent() }
+let state: WebVoiceState = {
+  phase: 'off',
+  error: null,
+  ended: null,
+  muted: false,
+  agent: storedAgent(),
+  caption: null,
+  lastAction: null
+}
 const listeners = new Set<() => void>()
+
+/**
+ * What the bar shows beside the phase: the newest caption and tool call.
+ * Display only. It tells the listeners and nothing else, so a caption never
+ * re-arms the idle clock or the watchdog the way `set` does.
+ */
+function show(patch: Pick<Partial<WebVoiceState>, 'caption' | 'lastAction'>): void {
+  state = { ...state, ...patch }
+  listeners.forEach((fn) => fn())
+}
 
 function set(patch: Partial<WebVoiceState>): void {
   const next = { ...state, ...patch }
@@ -161,6 +189,20 @@ export function setVoiceLink(next: VoiceLink | null): void {
   link = next
 }
 
+/** Applies a navigation answer to this page's own deck. */
+export type VoiceNavigator = (nav: WebVoiceNav) => void
+
+let navigate: VoiceNavigator | null = null
+
+/**
+ * DeckKeys installs it while the deck face is up. Only while one is installed
+ * does a tool call say this page navigates itself; without it the desktop
+ * moves, as it did before.
+ */
+export function setVoiceNavigator(next: VoiceNavigator | null): void {
+  navigate = next
+}
+
 async function ask(body: WebRequest): Promise<WebResult> {
   if (!link) return { kind: 'failed', code: 'no-window', message: 'Not connected to the desktop.' }
   return link.request(body)
@@ -219,6 +261,20 @@ function armIdle(): void {
 function upsertCaption(c: RealtimeCaption): void {
   const i = captions.findIndex((x) => x.id === c.id)
   captions = i >= 0 ? captions.map((x, j) => (j === i ? c : x)) : [...captions, c].slice(-MAX_CAPTIONS)
+  const text = c.text.trim()
+  if (text) show({ caption: { role: c.role, text } })
+}
+
+/** A tool's name while it runs, as words: "Opening tabs". */
+function runningWords(name: string): string {
+  return toolLabel(name).replace(/^./, (ch) => ch.toUpperCase())
+}
+
+/** A tool's answer as words: its first line, without the OK:/FAILED: marker. */
+function answerWords(name: string, answer: RealtimeToolAnswer): string {
+  const first = (answer.text.split('\n')[0] ?? '').replace(/^(OK|FAILED):\s*/, '').trim()
+  if (first) return first
+  return answer.ok ? runningWords(name) : `${runningWords(name)} failed`
 }
 
 /** VoiceHubController's `onUserCaption`: a stop phrase ends it; one still growing waits a beat. */
@@ -243,16 +299,29 @@ async function relayTool(call: RealtimeToolCall): Promise<RealtimeToolAnswer> {
   actions = [...actions, entry].slice(-MAX_ACTIONS)
   toolsRunning++
   onPhase()
+  show({ lastAction: { label: runningWords(call.name), status: 'running' } })
   try {
-    const res = await ask({ kind: 'voice-tool', name: call.name, args: call.args })
-    const answer: RealtimeToolAnswer =
-      res.kind === 'voice-tool'
-        ? res.answer
-        : res.kind === 'failed'
+    const go = navigate
+    const args = go ? { ...call.args, [WEB_VOICE_NAV_ARG]: true } : call.args
+    const res = await ask({ kind: 'voice-tool', name: call.name, args })
+    let answer: RealtimeToolAnswer
+    if (res.kind === 'voice-tool') {
+      // Where to go is for this page; the model gets the words.
+      const { nav, ...said } = res.answer
+      if (nav && go) go(nav)
+      answer = said
+    } else {
+      answer =
+        res.kind === 'failed'
           ? { ok: false, text: `FAILED: ${voiceFailureWords(res)}` }
           : { ok: false, text: 'FAILED: the desktop answered with something this page does not understand.' }
+    }
     entry.label = `${call.name}: ${answer.text.split('\n')[0]}`
     entry.status = answer.ok ? 'ok' : 'failed'
+    // Only the newest call speaks for the bar: an older one finishing late does not.
+    if (actions[actions.length - 1] === entry) {
+      show({ lastAction: { label: answerWords(call.name, answer), status: entry.status } })
+    }
     return answer
   } finally {
     toolsRunning--
@@ -434,6 +503,7 @@ async function rollover(reason: string): Promise<void> {
 function endConversation(end: ConversationEnd): void {
   run++
   teardown()
+  show({ caption: null })
   set({ phase: 'off', error: null, ended: endedNote(end) })
 }
 
@@ -443,6 +513,7 @@ export function startWebVoice(): void {
   if (session || state.phase === 'connecting') return
   captions = []
   actions = []
+  show({ caption: null, lastAction: null })
   void open(null)
 }
 
@@ -490,6 +561,7 @@ export function setWebVoiceAgent(next: WebVoiceProvider): void {
   teardown()
   captions = []
   actions = []
+  show({ caption: null, lastAction: null })
   set({ agent: next })
   void open(null)
 }

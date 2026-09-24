@@ -2249,7 +2249,36 @@ export interface WebVoiceToolAnswer {
   ok: boolean
   text: string
   image?: { mime: string; base64: string }
+  /**
+   * Where the browser should go. Set only on a navigation tool called with
+   * `WEB_VOICE_NAV_ARG`; the desktop resolved the target and left its own
+   * view alone. An older page never sends the arg, so it never gets one.
+   */
+  nav?: WebVoiceNav
 }
+
+/**
+ * Navigation from a browser's voice agent, applied by that browser to its own
+ * deck (src/lib/realtime/web-nav.ts resolves it). Every field is optional and
+ * applied in order: project, then view, then tab, then pane.
+ */
+export interface WebVoiceNav {
+  /** The project to show. */
+  projectId?: string
+  /** Full screen ('tabs') or the Wall ('mosaic') — the desktop's words. */
+  view?: 'tabs' | 'mosaic'
+  /** The tab to bring forward, in `projectId` (or the one on screen). */
+  tabId?: string
+  /** The pane to make active, in `tabId`. */
+  paneId?: string
+}
+
+/**
+ * Put in a `voice-tool` request's `args` by a page that applies `nav` itself.
+ * The desktop strips it before the tool sees the args; without it, navigation
+ * runs on the desktop as it always did, so an older page keeps working.
+ */
+export const WEB_VOICE_NAV_ARG = 'forgeWebNav'
 
 /**
  * Main asking the renderer for its half of a voice request, over

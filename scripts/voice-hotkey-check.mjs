@@ -49,6 +49,7 @@ globalThis.window = {
 }
 
 const G = await import('../src/lib/stt-gesture.ts')
+const W = await import('../web/src/lib/talk-key.ts')
 const km = await import('../src/lib/keymap.ts')
 const { BUILTIN_COMMANDS, TALK_AGENT_ID, TALK_DICTATE_ID } = await import('../src/lib/shortcutCommands.ts')
 const reg = await import('../src/lib/keymapRegistry.ts')
@@ -268,6 +269,93 @@ console.log('\nDictate key on Right Alt, UK (AltGr) layout')
   win.fire('keyup', 'AltLeft')
   eq(dictate.log, [], 'Left Alt is not Right Alt')
   dictate.off()
+}
+
+console.log('\nForge Web deck: D on Right Alt, UK (AltGr) layout (web/src/lib/talk-key.ts)')
+{
+  // The same Chromium sequence as above, through the browser's copy of the wiring.
+  const altGr = async (win, holdMs, { repeats = 0, extra } = {}) => {
+    win.fire('keydown', 'ControlLeft', false, { ctrlKey: true })
+    win.fire('keydown', 'AltRight', false, { ctrlKey: false, altKey: false })
+    if (holdMs) await sleep(holdMs)
+    for (let i = 0; i < repeats; i++) {
+      win.fire('keydown', 'ControlLeft', true, { ctrlKey: false })
+      win.fire('keydown', 'AltRight', true, { ctrlKey: false, altKey: false })
+    }
+    extra?.()
+    win.fire('keyup', 'ControlLeft', false, { ctrlKey: false })
+    win.fire('keyup', 'AltRight', false, { ctrlKey: false, altKey: false })
+  }
+  let suspended = false
+  const win = fakeWindow()
+  const d = { log: [], listening: false }
+  const off = W.attachTalkKey(
+    win,
+    'AltRight',
+    () => d.listening,
+    (intent) => {
+      d.log.push(intent)
+      if (intent === 'toggle') d.listening = !d.listening
+      else d.listening = intent === 'ptt-start'
+    },
+    { cancel: () => d.log.push('cancel'), suspended: () => suspended }
+  )
+  const reset = () => {
+    d.log.length = 0
+    d.listening = false
+  }
+
+  await altGr(win, 0)
+  eq(d.log, ['toggle'], 'a Right Alt tap toggles D, the fake Left Ctrl ignored')
+  reset()
+
+  let midHold = null
+  await altGr(win, W.MODIFIER_TAP_MS + 80, { repeats: 5, extra: () => (midHold = [...d.log]) })
+  eq(midHold, ['ptt-start'], 'a Right Alt hold keeps D listening through the fake Left Ctrl repeats')
+  eq(d.log, ['ptt-start', 'ptt-end'], '…and stops and sends on release')
+  reset()
+
+  await altGr(win, 0, {
+    extra: () => {
+      win.fire('keydown', 'Digit4', false, { ctrlKey: true, altKey: true })
+      win.fire('keyup', 'Digit4', false, { ctrlKey: true, altKey: true })
+    }
+  })
+  eq(d.log, [], 'AltGr+4 (the euro sign) types and never fires D')
+  const typed = win.fire('keydown', 'AltRight', false, { ctrlKey: false, altKey: false })
+  win.fire('keyup', 'AltRight')
+  ok(!typed.prevented, 'Right Alt is only read, never swallowed')
+  reset()
+
+  suspended = true
+  await altGr(win, 0)
+  eq(d.log, [], 'nothing fires while a field is recording a key')
+  suspended = false
+
+  win.fire('compositionstart')
+  await altGr(win, 0)
+  eq(d.log, [], 'nothing fires while an IME composition runs')
+  win.fire('compositionend')
+  win.fire('keydown', 'AltRight', false, { isComposing: true })
+  win.fire('keyup', 'AltRight')
+  eq(d.log, [], '…or while the key event itself is composing')
+  await altGr(win, 0)
+  eq(d.log, ['toggle'], 'and fires again once the composition ends')
+  reset()
+  off()
+
+  // The recorder: Right Alt records as Right Alt, not as "Left Ctrl + another key".
+  const ev = (code, mods = {}) => ({ code, repeat: false, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods })
+  let s = W.recordKeyDown(null, ev('ControlLeft', { ctrlKey: true }))
+  s = W.recordKeyDown(s.held, ev('AltRight'))
+  const upCtrl = W.recordKeyUp(s.held, 'ControlLeft')
+  ok(upCtrl.ignored === true, 'the recorder ignores AltGr\'s fake Left Ctrl coming up')
+  const upAlt = W.recordKeyUp(upCtrl.held, 'AltRight')
+  eq(upAlt.key, 'AltRight', 'the recorder records Right Alt on a UK layout')
+  s = W.recordKeyDown(null, ev('ShiftLeft', { shiftKey: true }))
+  s = W.recordKeyDown(s.held, ev('KeyA', { shiftKey: true }))
+  ok(s.refused === true && W.recordKeyUp(s.held, 'ShiftLeft').key === undefined, 'Shift+A records nothing')
+  eq(W.recordKeyDown(null, ev('F8')).key, 'F8', 'F8 records at once')
 }
 
 console.log('\ndirect key (F8)')

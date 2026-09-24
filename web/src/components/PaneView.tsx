@@ -146,13 +146,19 @@ export function PaneView({
   leaf,
   focused,
   onlyPane,
-  onScreen
+  onScreen,
+  fullScreen = false
 }: {
   leaf: PaneLeaf
   focused: boolean
   onlyPane: boolean
   /** Whether this pane's tab is the one on screen. See `SplitView`. */
   onScreen: boolean
+  /**
+   * The deck's Full screen: this pane claims its grid the way a phone's pane
+   * on screen does — on coming on screen and on a click. See the claim below.
+   */
+  fullScreen?: boolean
 }): ReactNode {
   const { state, actions } = useForge()
   const profiles = useProfiles()
@@ -869,10 +875,22 @@ export function PaneView({
    * today — but the moment a second viewer is watching the same pane, two
    * clients re-claiming on every push is the grid changing hands over and over
    * while nobody is typing at all.
+   *
+   * The deck's Full screen follows the same rule (`fullScreen`): without it a
+   * desk-owned pane stays at the desk's grid, drawn at 12px in a corner of the
+   * stage or shrunk into it — `apply` in lib/term.ts never scales a followed
+   * grid up. It fits first, because the claim applies the *stored* wish, and
+   * the last one this browser announced is the Wall tile's: the fit that saw
+   * the Full screen box was the ResizeObserver's leading edge, which stays
+   * quiet on the wire. Fitting here tells the desktop the box it really has,
+   * so the claim lands on one grid rather than the tile's and then this one.
    */
+  const claims = mobile || fullScreen
   useEffect(() => {
-    if (mobile && onScreen && live && alive) actionsRef.current.claim(leaf.id)
-  }, [mobile, onScreen, live, alive, leaf.id])
+    if (!claims || !onScreen || !live || !alive) return
+    if (!mobile) hostRef.current?.fit()
+    actionsRef.current.claim(leaf.id)
+  }, [claims, mobile, onScreen, live, alive, leaf.id])
 
   /* ------------------------------------------------- the status line's pane */
 
@@ -1206,7 +1224,7 @@ export function PaneView({
             // A tap is the clearest statement of intent there is. Somebody at the
             // desk may have typed since this pane came on screen; the thumb that
             // taps it now wants it back.
-            if (mobile && live && alive) actions.claim(leaf.id)
+            if (claims && live && alive) actions.claim(leaf.id)
           }}
         />
       </div>

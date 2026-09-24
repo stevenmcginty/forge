@@ -563,21 +563,12 @@
   animation-name: dk-sheet-drop;
 }
 
-/* Listen: VoicePill.css's switch; a failure is one line of words beside it. */
+/* Listen: VoicePill.css's switch; a failure's sentence is on the voice line (voicebar.css). */
 .app[data-face='deck'] .dk-listen {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-}
-
-.app[data-face='deck'] .dk-listen__error {
-  max-width: 260px;
-  overflow: hidden;
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 /* Up here the project pill and Listen are the capsule's own height. */

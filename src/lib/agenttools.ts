@@ -71,6 +71,12 @@ export interface VoiceAgentToolDeps {
    * when it changes; the Claude session gets it with a turn.
    */
   getAppContext?(): string
+  /**
+   * The executor's context right now — what `runAction` would resolve against.
+   * Optional: only a browser's navigation (./realtime/web-nav.ts) reads it, to
+   * resolve a project or a tab without switching the desktop to it.
+   */
+  actionContext?(): ActionContext | null
 }
 
 /** Undo the registration. Safe to call twice. */

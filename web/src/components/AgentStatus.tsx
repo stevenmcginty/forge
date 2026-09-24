@@ -6,7 +6,7 @@ import { badgeColor, isShellProfile } from '@/lib/agents'
 import type { PaneStatus, PermissionMode } from '@/lib/rich'
 import { useMobile } from '../lib/mobile'
 import type { PaneFace } from '../lib/pane-status'
-import { StatusLine } from './StatusLine'
+import { KeysToggle, StatusLine } from './StatusLine'
 
 /** What the face button offers, named by the face it would give you. */
 const VIEW_TITLE: Record<PaneFace, string> = {
@@ -225,6 +225,19 @@ export function AgentStatus({
             {nextView === 'chat' ? <ChatIcon /> : <Icon name={nextView === 'term' ? 'terminal' : 'note'} size={12} />}
             <span className="astatus__view-label">{view === 'chat' ? 'Chat' : view === 'feed' ? 'Cards' : 'Terminal'}</span>
           </button>
+        ) : null}
+
+        {/* The deck's terminal keys, behind the phone's toggle: only in the
+            Terminal view, and a word as well as the slash for its state. */}
+        {onToggleKeys && (view ?? 'term') === 'term' ? (
+          <KeysToggle
+            shown={keysShown ?? false}
+            word
+            onClick={(event) => {
+              event.stopPropagation()
+              onToggleKeys()
+            }}
+          />
         ) : null}
       </div>
 

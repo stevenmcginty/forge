@@ -79,11 +79,13 @@ const REVIEW_MS = 1500
 
 const IDLE: VoiceState = { phase: 'idle' }
 const KEYS_PREF = 'forge.phone.terminal-keys'
+/** The deck's own: a laptop window narrowed into the phone face keeps the phone's. */
+const DECK_KEYS_PREF = 'forge.deck.terminal-keys'
 
-function savedKeysShown(): boolean {
+function savedKeysShown(pref: string): boolean {
   if (typeof window === 'undefined') return false
   try {
-    return window.localStorage.getItem(KEYS_PREF) === 'shown'
+    return window.localStorage.getItem(pref) === 'shown'
   } catch {
     return false
   }
@@ -747,7 +749,8 @@ export function SessionComposer({
 
   // Above the early returns: a hook below them is skipped for a project with no
   // tabs, and React unmounts the whole page ("Rendered fewer hooks").
-  const [keysShown, setKeysShown] = useState(savedKeysShown)
+  const keysPref = face === 'deck' ? DECK_KEYS_PREF : KEYS_PREF
+  const [keysShown, setKeysShown] = useState(() => savedKeysShown(keysPref))
 
   if (offline && state.offlineMode === 'github') return null
   if (!tab) return null
@@ -820,7 +823,7 @@ export function SessionComposer({
     const next = !keysShown
     setKeysShown(next)
     try {
-      window.localStorage.setItem(KEYS_PREF, next ? 'shown' : 'hidden')
+      window.localStorage.setItem(keysPref, next ? 'shown' : 'hidden')
     } catch {
       // Storage can be unavailable in private browsing; this tap still works.
     }
