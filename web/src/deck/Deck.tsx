@@ -166,7 +166,13 @@ export function DeckStage({
                 onOpen={open}
               />
             ) : null}
-            <PaneView leaf={leaf} focused={focused} onlyPane={!wall || total === 1} onScreen={shown} />
+            <PaneView
+              leaf={leaf}
+              focused={focused}
+              onlyPane={!wall || total === 1}
+              onScreen={shown}
+              fullScreen={!wall && shown}
+            />
           </div>
         )
       })}
