@@ -12,7 +12,7 @@ import { AgentChooser } from './AgentChooser'
 import { CommandsButton } from './CommandsFlyout'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
-import { MosaicView } from './MosaicView'
+import { MosaicView, WallLayoutSwitch } from './MosaicView'
 import { SkillsButton } from './SkillsFlyout'
 import { FocusReticle } from './shell/FocusReticle'
 import { PaneCarousel } from './shell/PaneCarousel'
@@ -194,17 +194,7 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
         the mosaic must not gain a toolbar the moment you drag something, or
         every tile shifts down by the height of it.
       */}
-      {viewMode === 'mosaic' && mosaic.mode === 'custom' ? (
-        <button
-          type="button"
-          className="ghost-btn tabstrip__reset"
-          title="Freeform wall — drag a header to move it, an edge to resize just that tile, double-click a header to refit its terminal. Click here to put every tile back in the grid, where an edge resizes all tiles together."
-          onClick={() => actions.resetMosaicLayout()}
-        >
-          <Icon name="restart" size={11} />
-          Reset to grid
-        </button>
-      ) : null}
+      {viewMode === 'mosaic' ? <WallLayoutSwitch /> : null}
       {viewMode === 'mosaic' && mosaic.mode === 'auto' && mosaic.grid ? (
         <button
           type="button"

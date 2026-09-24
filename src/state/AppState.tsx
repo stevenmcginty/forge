@@ -22,6 +22,7 @@ import type {
   ClaudePermissionMode,
   LayoutNode,
   MosaicGrid,
+  MosaicLayoutMode,
   MosaicState,
   MosaicTextMode,
   MosaicTile,
@@ -480,7 +481,8 @@ type Action =
    */
   | { type: 'mosaicTiles'; tiles: Record<string, MosaicTile>; custom?: boolean; wallTab?: string }
   | { type: 'mosaicFit'; paneId: string; fit: boolean }
-  | { type: 'mosaicReset' }
+  | { type: 'mosaicMode'; mode: MosaicLayoutMode }
+  | { type: 'mosaicOrder'; order: string[] }
   | { type: 'mosaicGrid'; grid: MosaicGrid | null }
   | { type: 'taskAdd'; text: string }
   | { type: 'taskRemove'; id: string }
@@ -1265,16 +1267,22 @@ function reducer(state: AppState, action: Action): AppState {
         return { ...m, tiles: { ...m.tiles, [action.paneId]: next } }
       })
 
-    case 'mosaicReset':
-      return mapMosaic(state, (m) =>
-        m.mode === 'auto' && m.wallTabs.length === 0 && !m.grid ? null : emptyMosaic()
-      )
+    case 'mosaicMode':
+      // Only the mode: the boxes stay, so Free comes back exactly as it was.
+      return mapMosaic(state, (m) => (m.mode === action.mode ? null : { ...m, mode: action.mode }))
+
+    case 'mosaicOrder':
+      return mapMosaic(state, (m) => {
+        const same = m.order?.length === action.order.length && action.order.every((id, i) => m.order![i] === id)
+        return same ? null : { ...m, order: [...action.order] }
+      })
 
     case 'mosaicGrid':
       return mapMosaic(state, (m) => {
         const grid = action.grid ? sanitiseGrid(action.grid) : undefined
         if (grid?.cols === m.grid?.cols && grid?.rowH === m.grid?.rowH) return null
-        const next: MosaicState = { mode: m.mode, tiles: m.tiles, wallTabs: m.wallTabs }
+        const next: MosaicState = { ...m }
+        delete next.grid
         if (grid) next.grid = grid
         return next
       })
@@ -1553,8 +1561,15 @@ export interface AppActions {
   setMosaicTiles(tiles: Record<string, MosaicTile>, opts?: { custom?: boolean; wallTab?: string }): void
   /** Opt a single tile in or out of refitting its PTY to its box. */
   setMosaicFit(paneId: string, fit: boolean): void
-  /** Back to the auto grid, forgetting every hand-placed box and the grid's dragged size. */
-  resetMosaicLayout(): void
+  /**
+   * The wall's Grid | Free switch. The hand-placed boxes are kept either way,
+   * so going back to Free puts every tile where it was. Going to Free needs
+   * boxes for tiles that never had one — MosaicView's WallLayoutSwitch seeds
+   * them through setMosaicTiles instead.
+   */
+  setMosaicMode(mode: MosaicLayoutMode): void
+  /** The grid's reading order, pane ids first slot first — a header dragged to another slot. */
+  setMosaicOrder(order: string[]): void
   /**
    * Size the auto grid — every tile together — or, with null, hand it back to
    * the window: Forge's column count, rows sharing the height.
@@ -2186,7 +2201,8 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       setPlannerSessionId: (sessionId) => dispatch({ type: 'plannerSession', sessionId }),
       setPreviewUrl: (projectId, url) => dispatch({ type: 'setPreviewUrl', projectId, url }),
       setDevCommand: (projectId, command) => dispatch({ type: 'setDevCommand', projectId, command }),
-      resetMosaicLayout: () => dispatch({ type: 'mosaicReset' }),
+      setMosaicMode: (mode) => dispatch({ type: 'mosaicMode', mode }),
+      setMosaicOrder: (order) => dispatch({ type: 'mosaicOrder', order }),
       setMosaicGrid: (grid) => dispatch({ type: 'mosaicGrid', grid }),
       setNotice: (message) => dispatch({ type: 'notice', message }),
       openDataDir: () => void window.forge.store.revealDataDir(),
@@ -2550,7 +2566,7 @@ export function useViewMode(): WorkspaceViewMode {
   return useActiveWorkspace().viewMode ?? 'tabs'
 }
 
-/** The active project's freeform wall — the auto grid until it has been moved. */
+/** The active project's wall layout — Grid (auto) until someone switches it to Free. */
 export function useMosaic(): MosaicState {
   return mosaicOf(useActiveWorkspace())
 }

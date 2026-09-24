@@ -1,5 +1,5 @@
 /**
- * Geometry check for the freeform mosaic wall.
+ * Geometry check for the mosaic wall — the grid's slot order and the freeform wall.
  *
  *   node scripts/mosaic-check.mjs
  *
@@ -293,6 +293,51 @@ console.log('\ngrid drag')
   ok(M.sanitiseGrid('junk') === undefined && M.sanitiseGrid(null) === undefined, 'junk is no grid')
 }
 
+/* ------------------------------------------------------------ grid order */
+
+// On the grid a header drag moves a tile to another slot: the others shift
+// along, nothing overlaps, and the wall never turns freeform.
+console.log('\ngrid order')
+{
+  const ids = ['a', 'b', 'c', 'd', 'e']
+  ok(M.wallOrder(ids) === ids && M.wallOrder(ids, []) === ids, 'no order: tab order')
+  ok(M.wallOrder(ids, ['c', 'a']).join() === 'c,a,b,d,e', 'arranged tiles first, the rest in tab order')
+  ok(M.wallOrder(ids, ['gone', 'e', 'e', 'b']).join() === 'e,b,a,c,d', 'a closed pane or a repeat leaves no hole')
+
+  ok(M.moveToSlot(ids, ['a'], 2).join() === 'b,c,a,d,e', 'dragged forward, the tile takes that slot')
+  ok(M.moveToSlot(ids, ['e'], 0).join() === 'e,a,b,c,d', 'dragged back, the others shift along')
+  ok(M.moveToSlot(ids, ['b'], 99).join() === 'a,c,d,e,b', 'past the end is last')
+  ok(M.moveToSlot(ids, ['c'], 2).join() === ids.join(), 'dropped on its own slot, nothing moves')
+  ok(M.moveToSlot(ids, ['d', 'e'], 1).join() === 'a,d,e,b,c', 'a dropped tab moves all its tiles together')
+  const moved = M.moveToSlot(ids, ['a'], 3)
+  ok(moved.length === ids.length && new Set(moved).size === ids.length, 'every tile is still there, once')
+
+  // Five tiles on a 3-column grid, 300×200 slots with 20px gutters.
+  const slots = ids.map((_, i) => ({ x: (i % 3) * 320, y: Math.floor(i / 3) * 220, w: 300, h: 200 }))
+  ok(M.slotAt(slots, { x: 650, y: 20 }) === 2, 'the slot under the pointer', String(M.slotAt(slots, { x: 650, y: 20 })))
+  ok(M.slotAt(slots, { x: 310, y: 100 }) === 0 || M.slotAt(slots, { x: 310, y: 100 }) === 1, 'a gutter picks a neighbour')
+  ok(M.slotAt(slots, { x: 470, y: 520 }) === 4, 'below the last tile is the nearest slot', String(M.slotAt(slots, { x: 470, y: 520 })))
+  ok(M.slotAt([], { x: 0, y: 0 }) === -1, 'no slots, no slot')
+
+  // The whole gesture: drag tile a over slot 4's box and let go.
+  const after = M.moveToSlot(ids, ['a'], M.slotAt(slots, { x: 330, y: 300 }))
+  ok(after.indexOf('a') === 4 && after.join() === 'b,c,d,e,a', 'reorder moves a tile to the slot it was dropped on', after.join())
+}
+
+// The Free switch starts from where the grid had each tile, and gives saved
+// freeform boxes back exactly.
+console.log('\nfree switch')
+{
+  const measured = { a: { x: 0, y: 0, w: 300, h: 200 }, b: { x: 320, y: 0, w: 300, h: 200 } }
+  const fresh = M.seedFree({}, measured, ['a', 'b'])
+  ok(same(fresh.a, measured.a) && same(fresh.b, measured.b), 'no saved boxes: every tile starts where the grid had it')
+  const saved = { a: { x: 400, y: 50, w: 500, h: 300 } }
+  const mixed = M.seedFree(saved, measured, ['a', 'b'])
+  ok(!mixed.a, 'a saved box is not replaced')
+  ok(mixed.b && !M.rectsOverlap(mixed.b, saved.a), 'a new tile is nudged clear of the saved ones', show(mixed.b))
+  ok(Object.keys(M.seedFree(saved, {}, ['a', 'c'])).length === 0, 'a tile the grid never drew is left to placeMissing')
+}
+
 /* ----------------------------------------------------------- persistence */
 
 console.log('\npersistence')
@@ -340,6 +385,43 @@ console.log('\npersistence')
   ok(junkGrid.grid === undefined, 'a grid size with nothing sane in it is dropped')
   const emptied = M.sanitiseMosaic({ mode: 'custom', tiles: {}, wallTabs: [], grid: { cols: 2 } }, panes, tabs)
   ok(emptied.mode === 'auto' && emptied.grid && emptied.grid.cols === 2, 'an emptied custom wall keeps its grid size')
+
+  // A wall like Steve's: five overlapping freeform boxes. It stays in the mode
+  // it was left in — Free stays Free, and a wall switched to Grid keeps the
+  // boxes so Free can give them back.
+  const messy = {
+    a: { x: 0, y: 0, w: 900, h: 700 },
+    b: { x: 600, y: 60, w: 700, h: 400 },
+    c: { x: 450, y: 450, w: 900, h: 500 }
+  }
+  const free = M.sanitiseMosaic(JSON.parse(JSON.stringify({ mode: 'custom', tiles: messy, wallTabs: [] })), panes, tabs)
+  ok(free.mode === 'custom' && same(free.tiles.b, messy.b), 'a freeform wall comes back freeform, boxes intact')
+  const gridded = M.sanitiseMosaic(JSON.parse(JSON.stringify({ mode: 'auto', tiles: messy, wallTabs: [] })), panes, tabs)
+  ok(gridded.mode === 'auto' && same(gridded.tiles.c, messy.c), 'a wall switched to Grid keeps its freeform boxes for Free')
+
+  const ordered = M.sanitiseMosaic(
+    JSON.parse(JSON.stringify({ mode: 'auto', tiles: {}, wallTabs: [], order: ['c', 'gone', 7, 'c', 'a'] })),
+    panes,
+    tabs
+  )
+  ok(ordered.order && ordered.order.join() === 'c,a', 'a grid order survives, minus closed panes, junk and repeats', String(ordered.order))
+  const emptyOrdered = M.sanitiseMosaic({ mode: 'custom', tiles: {}, wallTabs: [], order: ['b'] }, panes, tabs)
+  ok(emptyOrdered.mode === 'auto' && emptyOrdered.order && emptyOrdered.order[0] === 'b', 'an emptied custom wall keeps its grid order')
+  ok(M.sanitiseMosaic({ mode: 'auto', tiles: {}, wallTabs: [], order: ['gone'] }, panes, tabs).order === undefined, 'an order of nothing live is no order')
+}
+
+{
+  // Closing panes prunes the order with the boxes, and the order outlives them.
+  const W = await import('../shared/workspace.ts')
+  const leaf = (id) => ({ type: 'leaf', id, profileId: 'pwsh' })
+  const ws = {
+    tabs: [{ id: 't1', title: 'T', root: leaf('b'), activePaneId: 'b' }],
+    activeTabId: 't1',
+    viewMode: 'mosaic',
+    mosaic: { mode: 'auto', tiles: { a: { x: 0, y: 0, w: 300, h: 200 } }, wallTabs: [], order: ['a', 'b'] }
+  }
+  const pruned = W.withPrunedMosaic(ws).mosaic
+  ok(pruned.order && pruned.order.join() === 'b', 'a closed pane leaves the grid order', JSON.stringify(pruned))
 }
 
 /* ------------------------------------------------------------ tile wheel */

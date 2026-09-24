@@ -32,6 +32,8 @@
 }
 
 .mosaic__wall .mosaic__canvas {
+  /* The ghost, and a freeform tile's box, are placed against this. */
+  position: relative;
   display: grid;
   grid-template-columns: repeat(var(--mosaic-cols, 3), minmax(var(--mosaic-tile-min-w), 1fr));
   grid-auto-rows: var(--mosaic-row-h, minmax(var(--mosaic-tile-min-h), 1fr));
@@ -48,11 +50,13 @@
  */
 .mosaic__wall[data-custom='true'] .mosaic__canvas {
   display: block;
-  position: relative;
   gap: 0;
 }
 
-/* Where a dragged tile will actually land once it has been nudged clear. */
+/*
+ * Where a dragged tile will land: on the grid, the slot it will take; on the
+ * freeform wall, the spot it will be nudged clear to.
+ */
 .mosaic__ghost {
   display: none;
   position: absolute;
@@ -87,6 +91,74 @@
 
 .mosaic__gridlabel[hidden] {
   display: none;
+}
+
+/*
+ * The Grid | Free switch (WallLayoutSwitch), in the menu's Tools. The chosen
+ * side is a solid block with a bold word and the other an outline with a light
+ * one, so which is on reads by shape and weight, never by colour alone.
+ */
+.wallmode {
+  display: inline-flex;
+  flex: none;
+  height: 20px;
+  margin-right: var(--s-2);
+  margin-bottom: var(--s-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.wallmode__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0 var(--s-3) 0 var(--s-2);
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--t-xs);
+  font-weight: 400;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.wallmode__btn + .wallmode__btn {
+  border-left: 1px solid var(--line-strong);
+}
+
+.wallmode__btn:hover:not([data-on='true']) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.wallmode__btn[data-on='true'] {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  font-weight: 700;
+  cursor: default;
+}
+
+.wallmode__btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Seated as a row in the menu's Tools: full width, the two halves shared evenly. */
+.deck .deck-tools > .wallmode {
+  width: 100%;
+  height: 36px;
+  margin: 0;
+  border-radius: 10px;
+}
+
+.deck .deck-tools > .wallmode .wallmode__btn {
+  flex: 1;
+  justify-content: center;
+  gap: 8px;
+  font-size: var(--t-md);
 }
 
 /* A tab is overhead and about to be dropped. */
@@ -127,6 +199,8 @@
   border-radius: var(--tile-r, var(--r-pane));
   overflow: hidden;
   box-shadow: var(--tile-shadow);
+  /* Its slot on the grid — the tiles sit in the DOM in tab order. */
+  order: var(--tile-slot, 0);
   transition:
     border-color var(--dur-med) var(--ease-out),
     box-shadow var(--dur-med) var(--ease-out);
@@ -169,7 +243,8 @@
  * it ever saves, but promoting the one being dragged is exactly what it is for.
  */
 .mtile[data-dragging] {
-  z-index: var(--z-divider);
+  /* Over every other tile's header, which sits at --z-divider. */
+  z-index: calc(var(--z-divider) + 1);
   will-change: transform, left, top, width, height;
   border-color: var(--accent);
   box-shadow: var(--shadow-card);

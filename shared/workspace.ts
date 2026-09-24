@@ -45,13 +45,24 @@ export function withPrunedMosaic(ws: Workspace): Workspace {
   const tiles: Record<string, MosaicTile> = {}
   for (const [id, rect] of Object.entries(m.tiles)) if (livePanes.has(id)) tiles[id] = rect
   const wallTabs = m.wallTabs.filter((id) => liveTabs.has(id))
+  const order = m.order?.filter((id) => livePanes.has(id))
 
   const same =
-    Object.keys(tiles).length === Object.keys(m.tiles).length && wallTabs.length === m.wallTabs.length
+    Object.keys(tiles).length === Object.keys(m.tiles).length &&
+    wallTabs.length === m.wallTabs.length &&
+    (order?.length ?? 0) === (m.order?.length ?? 0)
   if (same) return ws
-  // The grid's dragged size is not a box and outlives them.
-  if (Object.keys(tiles).length === 0) return { ...ws, mosaic: m.grid ? { ...emptyMosaic(), grid: m.grid } : emptyMosaic() }
-  return { ...ws, mosaic: { ...m, tiles, wallTabs } }
+  if (Object.keys(tiles).length === 0) {
+    // The grid's dragged size and reading order are not boxes and outlive them.
+    const next = emptyMosaic()
+    if (m.grid) next.grid = m.grid
+    if (order?.length) next.order = order
+    return { ...ws, mosaic: next }
+  }
+  const next: MosaicState = { ...m, tiles, wallTabs }
+  if (order?.length) next.order = order
+  else delete next.order
+  return { ...ws, mosaic: next }
 }
 
 /**

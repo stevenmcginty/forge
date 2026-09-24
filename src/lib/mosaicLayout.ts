@@ -2,7 +2,7 @@ import type { MosaicGrid, MosaicRect, MosaicState, MosaicTile } from '@shared/ty
 import { emptyMosaic } from '@shared/workspace'
 
 /**
- * The geometry of the freeform mosaic wall.
+ * The geometry of the mosaic wall: the even grid, and the freeform wall.
  *
  * Everything here is pure arithmetic on boxes — no DOM, no React — so the rules
  * that decide where a tile lands can be tested on their own (scripts/mosaic-check.mjs)
@@ -12,7 +12,8 @@ import { emptyMosaic } from '@shared/workspace'
  * scrolling canvas, y growing downwards, unaffected by scroll position. A tile
  * is a plain {x, y, w, h}.
  *
- * Two rules hold everywhere:
+ * On the grid, CSS lays the tiles out and only their order is ours (wallOrder,
+ * moveToSlot, slotAt). On the freeform wall two rules hold everywhere:
  *
  *   1. Tiles never overlap. A move that would land on top of something is
  *      nudged to the nearest free spot; a resize that would grow into something
@@ -366,6 +367,86 @@ export function gridLabel(cols: number, rowH?: number): string {
   return `${across} · ${rowH ? `${rowH} px rows` : 'rows fill the window'}`
 }
 
+/* ------------------------------------------------------------- grid order */
+
+/**
+ * The grid's reading order: the ids the user arranged, in that order, then
+ * every id nobody arranged in the order it came in. Ids in `order` that are not
+ * in `ids` are ignored, so a closed pane never leaves a hole.
+ */
+export function wallOrder(ids: string[], order?: string[]): string[] {
+  if (!order || order.length === 0) return ids
+  const live = new Set(ids)
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const id of order) {
+    if (!live.has(id) || seen.has(id)) continue
+    out.push(id)
+    seen.add(id)
+  }
+  for (const id of ids) if (!seen.has(id)) out.push(id)
+  return out
+}
+
+/**
+ * Move tiles to a slot in the grid: `moving` (in its own order) lands at
+ * `slot`, and every other tile keeps its order and shifts along to make room.
+ * One tile dragged to slot 0 is first; one dragged past the end is last.
+ */
+export function moveToSlot(ids: string[], moving: string[], slot: number): string[] {
+  const going = new Set(moving)
+  const rest = ids.filter((id) => !going.has(id))
+  const here = moving.filter((id) => ids.includes(id))
+  const at = Math.max(0, Math.min(rest.length, Math.round(slot)))
+  return [...rest.slice(0, at), ...here, ...rest.slice(at)]
+}
+
+/**
+ * The grid slot under a point: the slot whose box holds it, else the one whose
+ * centre is nearest — so a drop in a gutter, or past the last tile, still lands
+ * somewhere sensible. -1 only when there are no slots at all.
+ */
+export function slotAt(slots: MosaicRect[], point: { x: number; y: number }): number {
+  const inside = slots.findIndex(
+    (r) => point.x >= r.x && point.x < r.x + r.w && point.y >= r.y && point.y < r.y + r.h
+  )
+  if (inside >= 0) return inside
+  let best = -1
+  let bestD = Number.POSITIVE_INFINITY
+  slots.forEach((r, i) => {
+    const dx = r.x + r.w / 2 - point.x
+    const dy = r.y + r.h / 2 - point.y
+    const d = dx * dx + dy * dy
+    if (d < bestD) {
+      best = i
+      bestD = d
+    }
+  })
+  return best
+}
+
+/**
+ * The boxes the Free switch has to invent: one for every id without a saved
+ * box, taken from where the grid shows it right now so nothing jumps, and
+ * nudged clear of the saved boxes (which come back exactly where the user left
+ * them). An id the grid never drew is left to placeMissing.
+ */
+export function seedFree(
+  saved: Record<string, MosaicRect>,
+  measured: Record<string, MosaicRect>,
+  ids: string[]
+): Record<string, MosaicRect> {
+  const out: Record<string, MosaicRect> = {}
+  const taken: MosaicRect[] = Object.values(saved)
+  for (const id of ids) {
+    if (saved[id] || !measured[id]) continue
+    const placed = freeSpot(measured[id]!, taken)
+    out[id] = placed
+    taken.push(placed)
+  }
+  return out
+}
+
 /**
  * The auto grid as boxes. Used to seed custom mode when the wall was never
  * rendered (a tab dropped straight onto the view toggle); when it *was*
@@ -528,7 +609,16 @@ export function sanitiseMosaic(raw: unknown, livePaneIds: Set<string>, liveTabId
   }
   const grid = sanitiseGrid(src.grid)
   if (grid) out.grid = grid
+  if (Array.isArray(src.order)) {
+    const order = [...new Set(src.order.filter((id): id is string => typeof id === 'string' && livePaneIds.has(id)))]
+    if (order.length > 0) out.order = order
+  }
   // A custom wall with nothing on it is just the grid with extra steps.
-  if (out.mode === 'custom' && Object.keys(out.tiles).length === 0) return grid ? { ...emptyMosaic(), grid } : emptyMosaic()
+  if (out.mode === 'custom' && Object.keys(out.tiles).length === 0) {
+    const back = emptyMosaic()
+    if (out.grid) back.grid = out.grid
+    if (out.order) back.order = out.order
+    return back
+  }
   return out
 }

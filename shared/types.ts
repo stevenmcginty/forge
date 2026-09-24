@@ -240,10 +240,12 @@ export interface MosaicTile extends MosaicRect {
 }
 
 /**
- * How the wall arranges itself.
+ * How the wall arranges itself — the Wall's Grid | Free switch.
  *
- * `auto`   the uniform grid: Forge places every tile, nobody drags anything.
- * `custom` freeform: every tile has a box the user put it in.
+ * `auto`   Grid, the default: Forge places every tile in an even grid. A header
+ *          drag moves a tile to another slot (see `order`), an edge drag resizes
+ *          every tile together (see `grid`).
+ * `custom` Free: every tile has a box the user put it in.
  */
 export type MosaicLayoutMode = 'auto' | 'custom'
 
@@ -277,10 +279,14 @@ export interface MosaicGrid {
  */
 export type MosaicTextMode = 'lifesize' | 'scaled'
 
-/** A project's freeform wall. Absent until the user first moves a tile. */
+/** A project's wall layout. Absent until the user first arranges something. */
 export interface MosaicState {
   mode: MosaicLayoutMode
-  /** paneId → box. Only read in `custom` mode. */
+  /**
+   * paneId → box. The boxes are only read in `custom` mode, and kept while the
+   * wall is on the grid so switching back to Free puts every tile where it was.
+   * A tile's `fit` is read in both modes.
+   */
   tiles: Record<string, MosaicTile>
   /**
    * Tabs the user dragged out of the strip and onto the wall. Purely a marker:
@@ -290,6 +296,12 @@ export interface MosaicState {
   wallTabs: string[]
   /** The auto grid's size, when the user dragged one. Only read in `auto` mode. */
   grid?: MosaicGrid
+  /**
+   * The grid's reading order, when the user dragged a tile to another slot:
+   * pane ids, first slot first. Panes not listed follow in tab order. Only read
+   * in `auto` mode.
+   */
+  order?: string[]
 }
 
 /** One project's terminal workspace. */
