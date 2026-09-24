@@ -1,5 +1,11 @@
 # Handoff
 
+## Forge Web: name contrast, and one-name-per-terminal plan (2026-09-24)
+
+- **Colours (e05b937):** tab name (Zeb) is a chip tinted with the agent colour in the Full screen header and on Wall tiles; agent name in the strip and voice line takes `badgeColor(profile)`; project pill has a tinted fill, ring and bold name. Lowest contrast 7.26:1 across the six themes. Follow-up: the two-letter badges (`src/components/AgentBadge.css`) nearly vanish on the paper theme. Shots: session scratchpad `contrast/`.
+- **Naming (in progress):** one terminal has three names: kind label ("Claude Code", `PaneLeaf.title` fallback), call-sign ("Atlas", `shared/hub.ts`, `electron/hub-store.ts`), tab name ("Zeb", `nextTabName`). `send_prompt`/`close_pane`/`use_skill` match only the kind label (`appactions.ts:534`), so "Zeb" fails; hubnav matches call-sign then kind label; `pane_send`/`pane_read` use `electron/share-link.ts:310`. Realtime snapshot (`realtime/context.ts:56`) says the call-sign; the Claude manifest (`appmanifest.ts:260`) says "Terminal N — Claude Code".
+- **Plan:** the tab name is the only name; drop call-signs; split panes are "Zeb 2"; one shared resolver in `shared/` for every tool; snapshot `Zeb · Claude Code · working`; misses list real names. Decided (Steve): A. `open_agent_pane` takes an explicit name again, used everywhere; pool name only when none is given (reverses ee35b79). Full maps: session scratchpad `names-sources.md`, `names-resolvers.md`.
+
 ## Forge Web dock no longer covers the bottom panes; agent tabs take pool names (2026-09-24)
 
 - **Asked (Steve):** the chat box at the bottom merged with terminal four; agent-made tab names like "UI Fix" should follow the normal names.
