@@ -7,7 +7,7 @@ import {
 import { ACTION_SPECS } from '../appmanifest'
 import { toolLabel } from '../toolLabels'
 import type { RealtimeToolAnswer } from './session'
-import { geminiToolDeclarations } from './tool-format'
+import { geminiToolDeclarations, openAIToolSpecs } from './tool-format'
 import { HUB_REALTIME_TOOLS, runHubTool } from './tools-hub'
 import { BROWSER_REALTIME_TOOLS, runBrowserHubTool } from './tools-browser'
 import { MAIN_REALTIME_TOOLS, runMainAgentTool } from './tools-main'
@@ -224,9 +224,9 @@ export async function runRealtimeTool(
 
 /* ---------------------------------------------------- provider formatting */
 
-/** OpenAI's function tool shape (the session config in main adds `type`). */
+/** OpenAI's function tool shape — the conversion lives in ./tool-format.ts. */
 export function toOpenAITools(tools: RealtimeToolSpec[] = REALTIME_TOOLS): RealtimeToolSpec[] {
-  return tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }))
+  return openAIToolSpecs(tools)
 }
 
 /** Gemini's function declarations — the conversion lives in ./tool-format.ts. */

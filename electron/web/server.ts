@@ -30,6 +30,8 @@ import {
   parseFrame,
   wireDim,
   wireString,
+  isWebVoiceOpenAIProvider,
+  VOICE_CLAUDE_POLL_MS,
   type WebClientFrame,
   type WebErrorCode,
   type WebFolder,
@@ -46,8 +48,12 @@ import {
   type WebSession,
   type WebShutdownReason,
   type WebUsageFrame,
+  type WebVoiceClaudeEvent,
+  type WebVoiceConnectRequest,
+  type WebVoiceProvider,
   type WebVoiceSetup,
-  type WebVoiceToolAnswer
+  type WebVoiceToolAnswer,
+  type WebVoiceToolSpec
 } from '@shared/web'
 /*
  * The one validator, shared with the phone link. `readMirrorInput` never looks
@@ -192,6 +198,30 @@ const GIT_ACTIONS: readonly GitActionKind[] = ['fetch', 'pull', 'push', 'switch'
  */
 const MAX_PUSH_ENDPOINT_CHARS = 2048
 const MAX_PUSH_KEY_CHARS = 256
+
+/**
+ * Wire bounds for `voice-connect`. A browser's SDP offer is a few kilobytes;
+ * the persona and the tool list are what `voice-setup` sent it, so they fit
+ * the frame they came in. Past these a field is not one of those things.
+ */
+const VOICE_SDP_MAX = 64 * 1024
+const VOICE_INSTRUCTIONS_MAX = 120_000
+const VOICE_TOOLS_MAX = 64
+const VOICE_TOOL_DESCRIPTION_MAX = 16_000
+
+/**
+ * `voice-claude` bounds. A turn is raw 16 kHz 16-bit mono PCM, so
+ * MAX_DICTATION_BYTES is two minutes of talking; `seq` is bounded to what that
+ * many MAX_FILE_CHUNK_BYTES slices could be. A sentence to speak is one Edge
+ * request (electron/edge-tts.ts's MAX_EDGE_TTS_CHARS); a turn to say is one
+ * spoken turn. Events nobody collects are kept only to a point: past it the
+ * browser has stopped asking, and the oldest go.
+ */
+const VOICE_PCM_RATE = 16_000
+const VOICE_TURN_MAX_SLICES = 400
+const VOICE_SPEAK_MAX = 900
+const VOICE_SAY_MAX = 8000
+const VOICE_QUEUE_MAX = 2000
 
 /**
  * Fewest milliseconds between two `usage` frames for one pane. Claude Code
@@ -511,19 +541,36 @@ export interface WebServerHost {
    * A desktop browser running the main voice agent. The audio goes from the
    * browser to the provider directly; these supply the rest. The setup, the
    * tool calls and the context are the renderer's (its voice hub builds and
-   * answers them), so a host forwards those; the token is minted in main from
-   * the stored key, which never leaves main. All four or none: a host without
-   * them answers `unsupported`, and the browser says to update the desktop.
+   * answers them), so a host forwards those; the token (Gemini) and the SDP
+   * exchange (GPT Realtime) are done in main with the stored key, which never
+   * leaves main. A host without them answers `unsupported`, and the browser
+   * says to update the desktop.
    */
 
-  /** The persona, tools and context, or a sentence (no key, no window). */
-  voiceSetup?: (carryover: string | null) => Promise<{ ok: true; setup: WebVoiceSetup } | { ok: false; error: string }>
-  /** One single-use ephemeral token, for one connect. */
+  /** The persona, tools and context for one provider, or a sentence (no key, no window). */
+  voiceSetup?: (
+    provider: WebVoiceProvider,
+    carryover: string | null
+  ) => Promise<{ ok: true; setup: WebVoiceSetup } | { ok: false; error: string }>
+  /** One single-use Gemini Live ephemeral token, for one connect. */
   voiceToken?: () => Promise<{ ok: true; token: string; expiresAt: number } | { ok: false; error: string }>
+  /** One GPT Realtime WebRTC handshake: the browser's SDP offer in, OpenAI's SDP answer out. */
+  voiceConnect?: (
+    req: WebVoiceConnectRequest
+  ) => Promise<{ ok: true; sdp: string; expiresAt: number | null } | { ok: false; error: string }>
   /** One tool call, answered the way the desktop's own voice session answers it. Never rejects. */
   voiceTool?: (name: string, args: Record<string, unknown>) => Promise<WebVoiceToolAnswer>
   /** The app context as it is now. */
   voiceContext?: () => Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /**
+   * Claude as this browser's voice agent (`voice-claude` in shared/web.ts):
+   * a session on the desktop whose events go to `onEvent` until `close`.
+   * Opening again from anywhere hands the session over, and the one that had
+   * it hears `closed`.
+   */
+  voiceClaudeOpen?: (onEvent: (event: WebVoiceClaudeEvent) => void) => VoiceClaudeLink
+  /** One sentence as the desktop's Edge voice, base64 MP3. Never rejects. */
+  voiceSpeak?: (text: string) => Promise<{ ok: true; audio: string; mime: string } | { ok: false; error: string }>
 
   /**
    * Put a pasted image on this machine's clipboard so an agent that reads
@@ -697,6 +744,29 @@ export interface WebShutdownNotice {
  */
 let viewerSeq = 0
 
+/** A browser's Claude voice session, as the host hands it over. */
+export interface VoiceClaudeLink {
+  /** One turn; the host adds the app context. */
+  say(text: string): Promise<void>
+  interrupt(): Promise<void>
+  close(): void
+}
+
+/**
+ * One socket's Claude voice session: the link, the events waiting for its
+ * next `events` request (and that request, parked, when it came first), and
+ * the turn being uploaded. `dead` once the host said `closed`: the events
+ * still reach the page, and nothing else is done with it.
+ */
+interface VoiceClaudeState {
+  link: VoiceClaudeLink | null
+  queue: WebVoiceClaudeEvent[]
+  waiter: ((events: WebVoiceClaudeEvent[]) => void) | null
+  waitTimer: NodeJS.Timeout | null
+  turn: { id: string; slices: Buffer[]; bytes: number } | null
+  dead: boolean
+}
+
 interface Client {
   socket: WebSocket
   source: string
@@ -758,6 +828,8 @@ interface Client {
   mirrorCount: number
   /** Whether this second's `limit` refusal has already been sent. */
   toldLimit: boolean
+  /** Claude as this browser's voice agent, while it has it. See `voice-claude`. */
+  voiceClaude: VoiceClaudeState | null
   /** Drops a socket that never says hello. Cleared once it has. */
   helloTimer: NodeJS.Timeout | null
   /** The next native ping, and the deadline for its pong. See `schedulePing`. */
@@ -1394,6 +1466,7 @@ export class WebServer {
       mirrorSecond: 0,
       mirrorCount: 0,
       toldLimit: false,
+      voiceClaude: null,
       helloTimer: null,
       pingTimer: null,
       pongTimer: null
@@ -1454,6 +1527,8 @@ export class WebServer {
       // a file in `~/.claude` polling for a socket that closed is exactly the
       // watch nobody will ever stop.
       this.stopTranscripts(client)
+      // A Claude conversation nobody can hear any more.
+      this.closeVoiceClaude(client)
       // A browser that has hung up is not a device anybody is typing on, so it
       // stops holding the grid of anything it held. Unconditional, because a
       // socket that never said hello never owned anything and this costs a walk
@@ -3023,19 +3098,26 @@ export class WebServer {
         /*
          * The voice agent in a desktop browser. Authenticated like every other
          * request on this socket — there is no other door to it — and the key
-         * stays in main: `voice-token` hands out a single-use ephemeral token.
+         * stays in main: `voice-token` hands out a single-use ephemeral token,
+         * `voice-connect` does the whole OpenAI handshake and returns only SDP.
          */
         case 'voice-setup': {
           if (!this.host.voiceSetup) {
             failed('unsupported', 'This Forge cannot run the voice agent for a browser.')
             return
           }
-          if (request.provider !== 'gemini-live') {
-            failed('unsupported', 'This desktop can only run Gemini Live in a browser for now.')
+          // Claude's setup is the idle clock and nothing else: its session is
+          // opened with `voice-claude`, on this desktop.
+          if (
+            request.provider !== 'gemini-live' &&
+            request.provider !== 'claude' &&
+            !isWebVoiceOpenAIProvider(request.provider)
+          ) {
+            failed('bad-frame', 'That is not a voice agent.')
             return
           }
           const carryover = wireString(request.carryover, 4000)
-          const res = await this.host.voiceSetup(carryover || null)
+          const res = await this.host.voiceSetup(request.provider, carryover || null)
           if (!res.ok) {
             failed('failed', res.error)
             return
@@ -3050,7 +3132,7 @@ export class WebServer {
             return
           }
           if (request.provider !== 'gemini-live') {
-            failed('unsupported', 'This desktop can only run Gemini Live in a browser for now.')
+            failed('bad-frame', 'Only Gemini Live connects with a token.')
             return
           }
           const res = await this.host.voiceToken()
@@ -3059,6 +3141,41 @@ export class WebServer {
             return
           }
           answer({ kind: 'voice-token', token: res.token, expiresAt: res.expiresAt })
+          return
+        }
+
+        case 'voice-connect': {
+          if (!this.host.voiceConnect) {
+            failed('unsupported', 'This Forge cannot run the voice agent for a browser.')
+            return
+          }
+          if (!isWebVoiceOpenAIProvider(request.provider)) {
+            failed('bad-frame', 'Only GPT Realtime connects with an SDP offer.')
+            return
+          }
+          // Raw, not wireString: trimming would cut the offer's final CRLF.
+          const sdp = typeof request.sdp === 'string' ? request.sdp : ''
+          if (!sdp.startsWith('v=') || sdp.length > VOICE_SDP_MAX) {
+            failed('bad-frame', 'That is not an SDP offer.')
+            return
+          }
+          const tools = voiceTools(request.tools)
+          if (!tools) {
+            failed('bad-frame', 'The voice tools are not a tool list.')
+            return
+          }
+          const res = await this.host.voiceConnect({
+            provider: request.provider,
+            voice: wireString(request.voice, 64),
+            instructions: wireString(request.instructions, VOICE_INSTRUCTIONS_MAX),
+            tools,
+            sdp
+          })
+          if (!res.ok) {
+            failed('failed', res.error)
+            return
+          }
+          answer({ kind: 'voice-connect', sdp: res.sdp, expiresAt: res.expiresAt })
           return
         }
 
@@ -3094,6 +3211,10 @@ export class WebServer {
           answer({ kind: 'voice-context', text: res.text })
           return
         }
+
+        case 'voice-claude':
+          await this.onVoiceClaude(client, request, answer, failed)
+          return
 
         case 'passkey-register-begin':
         case 'passkey-register-finish':
@@ -3176,6 +3297,192 @@ export class WebServer {
     return this.host.sessions().slice(0, MAX_SESSIONS).map(toWireSession)
   }
 
+  /* ------------------------------------------------------ voice: Claude */
+
+  /** `voice-claude`, one op. See the request's comment in shared/web.ts. */
+  private async onVoiceClaude(
+    client: Client,
+    request: Record<string, unknown>,
+    answer: (result: WebResult) => void,
+    failed: (code: WebErrorCode, message: string) => void
+  ): Promise<void> {
+    // Bound, not bare: a host may be a class as well as an object of arrows.
+    const voiceClaudeOpen = this.host.voiceClaudeOpen?.bind(this.host)
+    const voiceSpeak = this.host.voiceSpeak?.bind(this.host)
+    const transcribeAudio = this.host.transcribeAudio?.bind(this.host)
+    if (!voiceClaudeOpen || !voiceSpeak || !transcribeAudio) {
+      failed('unsupported', 'This Forge cannot run Claude as a voice agent for a browser.')
+      return
+    }
+    const op = request.op
+    if (op === 'open') {
+      this.closeVoiceClaude(client)
+      const state: VoiceClaudeState = { link: null, queue: [], waiter: null, waitTimer: null, turn: null, dead: false }
+      client.voiceClaude = state
+      state.link = voiceClaudeOpen((event) => this.pushVoiceClaude(client, state, event))
+      answer({ kind: 'ok' })
+      return
+    }
+    if (op === 'close') {
+      this.closeVoiceClaude(client)
+      answer({ kind: 'ok' })
+      return
+    }
+    const state = client.voiceClaude
+    if (op === 'events') {
+      if (!state) {
+        answer({ kind: 'voice-claude-events', events: [], open: false })
+        return
+      }
+      if (state.queue.length || state.dead) {
+        answer({ kind: 'voice-claude-events', events: state.queue.splice(0), open: !state.dead })
+        return
+      }
+      // One wait per socket: an older one (a retried poll) is answered empty.
+      this.flushVoiceClaude(state)
+      state.waiter = (events) => answer({ kind: 'voice-claude-events', events, open: !state.dead })
+      state.waitTimer = setTimeout(() => this.flushVoiceClaude(state), VOICE_CLAUDE_POLL_MS)
+      return
+    }
+    const link = state && !state.dead ? state.link : null
+    if (!state || !link) {
+      failed('failed', 'Claude is not listening for this browser — turn Listen on again.')
+      return
+    }
+    switch (op) {
+      case 'append': {
+        const turnId = wireString(request.turnId, 64)
+        const seq = typeof request.seq === 'number' && Number.isInteger(request.seq) ? request.seq : -1
+        const data = typeof request.data === 'string' ? request.data.trim() : ''
+        if (!turnId || seq < 0 || seq >= VOICE_TURN_MAX_SLICES) {
+          failed('bad-frame', 'That is not a slice of a turn.')
+          return
+        }
+        if (data.length > MAX_FILE_CHUNK_BASE64 || (data && !/^[A-Za-z0-9+/]+=*$/.test(data))) {
+          failed('bad-frame', 'That slice could not be read.')
+          return
+        }
+        if (state.turn?.id !== turnId) state.turn = { id: turnId, slices: [], bytes: 0 }
+        const turn = state.turn
+        const bytes = Buffer.from(data, 'base64')
+        turn.bytes += bytes.length - (turn.slices[seq]?.length ?? 0)
+        if (turn.bytes > MAX_DICTATION_BYTES) {
+          state.turn = null
+          failed('limit', 'That turn is too long to send.')
+          return
+        }
+        turn.slices[seq] = bytes
+        answer({ kind: 'ok' })
+        return
+      }
+      case 'done': {
+        const turnId = wireString(request.turnId, 64)
+        const chunks = typeof request.chunks === 'number' && Number.isInteger(request.chunks) ? request.chunks : -1
+        const turn = state.turn
+        if (!turn || turn.id !== turnId) {
+          failed('failed', 'That turn is not held here.')
+          return
+        }
+        state.turn = null
+        if (chunks < 1 || chunks > VOICE_TURN_MAX_SLICES || turn.slices.length > chunks) {
+          failed('bad-frame', 'That turn has the wrong number of slices.')
+          return
+        }
+        for (let i = 0; i < chunks; i++) {
+          if (!turn.slices[i]) {
+            failed('bad-frame', `Missing slice ${i} of ${chunks}.`)
+            return
+          }
+        }
+        const pcm = Buffer.concat(turn.slices)
+        if (pcm.length < 2) {
+          answer({ kind: 'voice-heard', text: '' })
+          return
+        }
+        const heard = await transcribeAudio(wavOf(pcm, VOICE_PCM_RATE), 'audio/wav')
+        if (!heard.ok) {
+          failed('failed', heard.error)
+          return
+        }
+        answer({ kind: 'voice-heard', text: heard.text.trim() })
+        return
+      }
+      case 'cancel': {
+        if (state.turn?.id === wireString(request.turnId, 64)) state.turn = null
+        answer({ kind: 'ok' })
+        return
+      }
+      case 'say': {
+        const text = wireString(request.text, VOICE_SAY_MAX)
+        if (!text) {
+          failed('bad-frame', 'There was nothing to say.')
+          return
+        }
+        await link.say(text)
+        answer({ kind: 'ok' })
+        return
+      }
+      case 'speak': {
+        const text = wireString(request.text, VOICE_SPEAK_MAX)
+        if (!text) {
+          failed('bad-frame', 'There was nothing to speak.')
+          return
+        }
+        const res = await voiceSpeak(text)
+        if (!res.ok) {
+          failed('failed', res.error)
+          return
+        }
+        answer({ kind: 'voice-speech', audio: res.audio, mime: res.mime })
+        return
+      }
+      case 'interrupt': {
+        await link.interrupt()
+        answer({ kind: 'ok' })
+        return
+      }
+      default:
+        failed('bad-frame', 'That is not a voice-claude op.')
+    }
+  }
+
+  /**
+   * One event for a socket's Claude session: queued, and handed at once to an
+   * `events` request that is waiting. `closed` means the host has let go
+   * (another browser opened it, or the desktop's window went): the session is
+   * dead from here, and the page hears why.
+   */
+  private pushVoiceClaude(client: Client, state: VoiceClaudeState, event: WebVoiceClaudeEvent): void {
+    if (client.voiceClaude !== state || state.dead) return
+    state.queue.push(event)
+    if (state.queue.length > VOICE_QUEUE_MAX) state.queue.splice(0, state.queue.length - VOICE_QUEUE_MAX)
+    if (event.type === 'closed') {
+      state.dead = true
+      state.turn = null
+    }
+    this.flushVoiceClaude(state)
+  }
+
+  /** Answer a waiting `events` with whatever is queued (possibly nothing). */
+  private flushVoiceClaude(state: VoiceClaudeState): void {
+    if (state.waitTimer) clearTimeout(state.waitTimer)
+    state.waitTimer = null
+    const waiter = state.waiter
+    state.waiter = null
+    waiter?.(state.queue.splice(0))
+  }
+
+  /** End a socket's Claude session, if it has one. Idempotent. */
+  private closeVoiceClaude(client: Client): void {
+    const state = client.voiceClaude
+    if (!state) return
+    client.voiceClaude = null
+    state.dead = true
+    state.turn = null
+    this.flushVoiceClaude(state)
+    state.link?.close()
+  }
+
   private send(client: Client, frame: WebServerFrame): void {
     if (client.socket.readyState !== client.socket.OPEN) return
     try {
@@ -3196,6 +3503,7 @@ export class WebServer {
     // idempotence, for the transcript tails behind this socket.
     this.dropViewer(client)
     this.stopTranscripts(client)
+    this.closeVoiceClaude(client)
     try {
       client.socket.close(code, closeReason(reason))
     } catch {
@@ -3383,6 +3691,53 @@ function readPushSubscription(value: unknown): WebPushSubscription | null {
   // value and carrying it would say nothing.
   if (typeof raw.expirationTime === 'number') subscription.expirationTime = raw.expirationTime
   return subscription
+}
+
+/**
+ * Raw 16-bit little-endian mono PCM as a WAV file — what the speech-to-text
+ * providers take. The browser sends bare samples (`voice-claude` `append`) so
+ * a turn can be cut anywhere; the one header is written here, once.
+ */
+function wavOf(pcm: Buffer, rate: number): Buffer {
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0, 'ascii')
+  header.writeUInt32LE(36 + pcm.length, 4)
+  header.write('WAVE', 8, 'ascii')
+  header.write('fmt ', 12, 'ascii')
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(rate, 24)
+  header.writeUInt32LE(rate * 2, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36, 'ascii')
+  header.writeUInt32LE(pcm.length, 40)
+  return Buffer.concat([header, pcm])
+}
+
+/**
+ * `voice-connect`'s tool list, rebuilt field by field: a name the renderer's
+ * `runRealtimeTool` could know, a description, and a JSON Schema object.
+ * Anything else, or too many, is not a tool list.
+ */
+function voiceTools(value: unknown): WebVoiceToolSpec[] | null {
+  if (!Array.isArray(value) || value.length > VOICE_TOOLS_MAX) return null
+  const tools: WebVoiceToolSpec[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+    const raw = item as Record<string, unknown>
+    const name = wireString(raw.name, 64)
+    const params = raw.parameters
+    if (!/^[a-z][a-z0-9_]*$/.test(name)) return null
+    if (!params || typeof params !== 'object' || Array.isArray(params)) return null
+    tools.push({
+      name,
+      description: wireString(raw.description, VOICE_TOOL_DESCRIPTION_MAX),
+      parameters: params as Record<string, unknown>
+    })
+  }
+  return tools
 }
 
 /**

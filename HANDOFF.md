@@ -1,5 +1,26 @@
 # Handoff
 
+## Forge Web: agent switcher — Gemini Live, ChatGPT, Claude (2026-09-24, uncommitted)
+
+- **Decided (Steve):** in the laptop browser, flip the main voice agent between Gemini Live, ChatGPT (GPT Realtime) and Claude (Opus).
+- **UI:** an agent chip in the browser voice bar names the agent; click opens a 3-row sheet, the one in use shows a tick and "in use". Choice kept in browser localStorage, default Gemini. Desktop `agentBrain` is not changed.
+- **ChatGPT:** `OpenAIRealtimeSession` in the browser; its SDP offer goes over a new `voice-connect` op, main exchanges it via `connectOpenAI`. Key and secret stay in main.
+- **Claude:** `web/src/deck/claudeVoice.ts` — energy end-of-speech (800 ms) → desktop transcribes (`transcribeAudio`) → a second browser-only `VoiceAgentHost` (`electron/voice-agent/ipc.ts`, always Claude) → reply spoken with desktop Edge TTS (`voiceSpeak`), browser `speechSynthesis` only if a sentence fails. Barge-in interrupts. Events by long-poll (`events` op, 20 s).
+- **Checked:** typecheck, lint:hooks, realtime:check 26, dictation:check 31, web:build, build. Nothing live-tested (no real mic for GPT or Claude, no live flip). Needs a desktop restart (main changed) and a web deploy.
+- **Known limits:** browser Claude runs in the home folder, not the active project. Sentence splitter copied into `claudeVoice.ts`. `web/src/deck/DeckTopBar.css` has big-window hunks from a parallel session, not this job.
+
+## Forge Web deck top bar tidy (2026-09-24, uncommitted)
+
+- **Fixed (CSS only, `web/src/deck/DeckTopBar.css`):** voice capsule now truly centred (grid `minmax(max-content,1fr) minmax(0,auto) minmax(max-content,1fr)`); Skills/Commands lost the desktop tab-strip margins that sat them 2px high; Wall button no longer changes width on/off; wider name caps for project pill and agent name on big screens.
+- **Checked:** web-client tsc, web:build, before/after screenshots 960–2560px from a local harness (session scratchpad `topbar/shoot.mjs`). Full `npm run typecheck` was blocked by another session's in-progress `electron/web-host.ts`.
+- **Open:** at ≤860px Skills and Commands are hidden with no other way in.
+
+## Send tag + bigger agent names (2026-09-24, uncommitted)
+
+- **Send tag:** every relay comet into a pane now also shows a chip under the target's header: a paper plane + "Sending" with pulsing dots while the comet flies, then a tick + "Sent", then it fades (`sendTag` in `src/lib/relayComet.ts`, CSS `.send-tag` at the end of `src/components/shell/deck.css`). Word and shape, not colour only. `fireComet` got an optional `onLand` callback (`src/lib/motion.ts`); a 1.2 s fallback lands the tag if the comet is cancelled.
+- **Names bigger:** Full screen pane name 12.5 → 15px (`deck.css` `.deck .pane__title`), Wall tile 12.5 → 15px (`.mtile__title`), live strip 11.5 → 13px (`.wstrip__name`).
+- **Checked:** typecheck, build. Not live-tested; Steve tests.
+
 ## Forge Web (laptop browser): Gemini Live agent + D uses the phone flow (2026-09-24)
 
 - **Decided (Steve):** the deck face gets the main voice agent, starting with Gemini Live. Claude next, then GPT Realtime. D in a laptop browser acts like the phone: spoken commands, review countdown with Undo, auto-send.

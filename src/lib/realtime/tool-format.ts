@@ -1,11 +1,16 @@
 import type { RealtimeToolSpec } from '@shared/realtime'
 
 /**
- * A tool list in Gemini Live's shape. Pure, and apart from ./tools.ts on
- * purpose: ./gemini.ts needs only this, and Forge Web (web/src/deck) runs the
- * same GeminiLiveSession in a browser, where ./tools.ts and the renderer-only
- * tool implementations behind it cannot be bundled.
+ * A tool list in each vendor's shape. Pure, and apart from ./tools.ts on
+ * purpose: ./gemini.ts and ./openai.ts need only this, and Forge Web
+ * (web/src/deck) runs the same sessions in a browser, where ./tools.ts and the
+ * renderer-only tool implementations behind it cannot be bundled.
  */
+
+/** OpenAI's function tool shape (the session config in main adds `type`). */
+export function openAIToolSpecs(tools: RealtimeToolSpec[]): RealtimeToolSpec[] {
+  return tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }))
+}
 
 /**
  * Gemini's Schema is OpenAPI-flavoured: upper-case type names and no

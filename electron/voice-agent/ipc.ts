@@ -8,13 +8,15 @@ import type {
   VoiceAgentStatus,
   VoiceAgentToolResult
 } from '@shared/types'
+import { isCodexClaudeModel } from '@shared/agent-brain'
+import type { WebVoiceClaudeEvent } from '@shared/web'
 import { getDataDir, getSettings } from '../store'
 import { bridgeConfigPath, resolveBridgeScript } from '../bridge/mcp-config'
 import type { BrowserLink } from '../browser-panes/link'
 import { createBrainLink } from './brain-link'
 import { findWindowsLaunchable } from '../cli-launch'
 import { whichCommand } from '../which'
-import { DEFAULT_VOICE_CLAUDE_MODEL, VoiceAgentHost, type VoiceAgentShot } from './host'
+import { CODEX_VOICE_MODELS, DEFAULT_VOICE_CLAUDE_MODEL, VoiceAgentHost, type VoiceAgentShot } from './host'
 import type { CliBrainSetup } from './cli-brains'
 
 /**
@@ -133,12 +135,98 @@ function ensureHost(): VoiceAgentHost {
   return host
 }
 
+/* ------------------------------------------------ Claude for a browser
+ *
+ * Forge Web's Listen, with Claude picked (web/src/deck/voiceAgent.ts): a
+ * second host, so a browser conversation never lands in the desk's voice bar
+ * and the desk's never lands in the browser. Its events go to the browser that
+ * opened it (electron/web/server.ts's `voice-claude`), never to the window;
+ * its tool questions go to the window like the desk's, because only the
+ * renderer knows what is on screen — `resolveTool` below hands each answer to
+ * both hosts, and ids are UUIDs, so only the asker takes it.
+ */
+
+let webHost: VoiceAgentHost | null = null
+/** The browser that owns `webHost` now. Replaced by the next `openWebVoiceAgent`. */
+let webSink: ((event: WebVoiceClaudeEvent) => void) | null = null
+
+export interface WebVoiceAgentLink {
+  /** One turn, context block and all. */
+  say(text: string): void
+  /** Barge-in: the turn stops, the conversation stays. */
+  interrupt(): Promise<boolean>
+  /** The browser is done with it. A no-op once another browser has taken over. */
+  close(): void
+}
+
+/**
+ * The Claude model a browser turn runs on: the desk's Claude setting — but a
+ * browser that picked Claude hears Claude, so a Codex model left in that
+ * setting (the codex-cli adapter, ./host.ts `route`) falls back to Opus here.
+ */
+function webClaudeModel(): string {
+  const model = (getSettings().voiceClaudeModel || '').trim()
+  if (!model || CODEX_VOICE_MODELS.has(model) || isCodexClaudeModel(model)) return DEFAULT_VOICE_CLAUDE_MODEL
+  return model
+}
+
+function ensureWebHost(): VoiceAgentHost {
+  if (webHost) return webHost
+  webHost = new VoiceAgentHost({
+    sendEvent: (event) => webSink?.(event),
+    sendToolRequest: (request) => send(IPC.voiceAgentToolRequest, request),
+    getModel: webClaudeModel,
+    // Always this Claude session: `agentBrain` picks the desk's brain, and a
+    // CLI brain there must not answer a browser that asked for Claude.
+    getBrain: () => 'claude',
+    getBridgeServer: bridgeServer,
+    captureScreen,
+    getAssetsDir: () => join(getDataDir(), 'bridge-out'),
+    getChromeProfileDir: () => join(getDataDir(), 'chrome-jarvis')
+  })
+  return webHost
+}
+
+/**
+ * A browser takes the Claude voice session: a fresh conversation, opened now
+ * so the first turn does not wait on the SDK starting. A browser that held it
+ * before is told `closed`.
+ */
+export function openWebVoiceAgent(onEvent: (event: WebVoiceClaudeEvent) => void): WebVoiceAgentLink {
+  const previous = webSink
+  webSink = onEvent
+  if (previous && previous !== onEvent) previous({ type: 'closed', reason: 'Claude is listening in another browser now.' })
+  const brain = ensureWebHost()
+  brain.stop()
+  brain.start({})
+  const mine = (): boolean => webSink === onEvent
+  return {
+    say: (text) => {
+      if (mine()) brain.sendUtterance(text)
+    },
+    interrupt: async () => (mine() ? brain.interrupt() : false),
+    close: () => {
+      if (!mine()) return
+      webSink = null
+      brain.stop()
+    }
+  }
+}
+
 /** Where the brain's events and tool questions go. */
 export function setVoiceAgentTarget(win: BrowserWindow | null): void {
   target = win
   // The window that owned the conversation is gone, and with it every pending
-  // tool round trip. A session left running would be talking to nobody.
+  // tool round trip. A session left running would be talking to nobody. The
+  // browser's session asks that window its tool questions too, so it goes as
+  // well — and its browser is told why.
   if (!win && host) host.stop()
+  if (!win && webHost && webSink) {
+    const sink = webSink
+    webSink = null
+    webHost.stop()
+    sink({ type: 'closed', reason: 'The Forge window on the desktop closed.' })
+  }
 }
 
 export function registerVoiceAgentHandlers(): void {
@@ -157,8 +245,10 @@ export function registerVoiceAgentHandlers(): void {
     host ? await host.interrupt() : false
   )
   ipcMain.handle(IPC.voiceAgentToolResult, (_e, result: VoiceAgentToolResult): boolean => {
-    if (!host) return false
-    host.resolveTool(result)
+    if (!host && !webHost) return false
+    // Both hosts ask on the one channel; each ignores ids it did not issue.
+    host?.resolveTool(result)
+    webHost?.resolveTool(result)
     return true
   })
 }
@@ -175,6 +265,9 @@ export function askRendererTool(name: string, args: unknown): Promise<string> {
 export function disposeVoiceAgent(): void {
   host?.dispose()
   host = null
+  webSink = null
+  webHost?.dispose()
+  webHost = null
   brainLink?.close()
   brainLink = null
   brainLinkReady = null

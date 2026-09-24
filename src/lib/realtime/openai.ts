@@ -1,4 +1,8 @@
-import { OPENAI_ROLLOVER_AT_MS } from '@shared/realtime'
+import {
+  OPENAI_ROLLOVER_AT_MS,
+  type RealtimeOpenAIConnectRequest,
+  type RealtimeOpenAIConnectResult
+} from '@shared/realtime'
 import type {
   RealtimeCaption,
   RealtimeSession,
@@ -6,7 +10,7 @@ import type {
   RealtimeState,
   RealtimeToolAnswer
 } from './session'
-import { toOpenAITools } from './tools'
+import { openAIToolSpecs } from './tool-format'
 import { micError } from './errors'
 
 /**
@@ -30,6 +34,33 @@ import { micError } from './errors'
  * which rolls over to a fresh session seeded with a summary.
  */
 
+/**
+ * Where a connect sends its SDP offer and gets OpenAI's answer. On the desktop
+ * that is main, over the preload bridge (the default below); Forge Web injects
+ * one that asks the desktop over its socket (web/src/deck/voiceAgent.ts).
+ * Either way main does the handshake, so page script never holds the key or
+ * the client secret. `undefined` means there is no bridge at all.
+ */
+export type OpenAIConnect = (req: RealtimeOpenAIConnectRequest) => Promise<RealtimeOpenAIConnectResult | undefined>
+
+type DesktopRealtimeBridge = { openaiConnect(req: RealtimeOpenAIConnectRequest): Promise<RealtimeOpenAIConnectResult> }
+
+/**
+ * The desktop's own bridge — electron/preload.ts's `realtime.openaiConnect`.
+ * Read off `window` loosely so this file also builds for a browser, where
+ * there is no `window.forge` (and a connect is always injected).
+ */
+function desktopBridge(): DesktopRealtimeBridge | undefined {
+  return (window as unknown as { forge?: { realtime?: DesktopRealtimeBridge } }).forge?.realtime
+}
+
+const desktopOpenAIConnect: OpenAIConnect = async (req) => desktopBridge()?.openaiConnect(req)
+
+export interface OpenAIRealtimeOptions extends RealtimeSessionOptions {
+  /** Defaults to the desktop's preload bridge. */
+  connect?: OpenAIConnect
+}
+
 interface OaiEvent {
   type: string
   item_id?: string
@@ -50,6 +81,8 @@ function analyserLevel(an: AnalyserNode | null, buf: Float32Array<ArrayBuffer> |
 export class OpenAIRealtimeSession implements RealtimeSession {
   readonly provider: 'gpt-realtime' | 'gpt-realtime-mini'
   private readonly opts: RealtimeSessionOptions
+  private readonly connectCall: OpenAIConnect
+  private readonly injected: boolean
   private pc: RTCPeerConnection | null = null
   private dc: RTCDataChannel | null = null
   private stream: MediaStream | null = null
@@ -65,8 +98,10 @@ export class OpenAIRealtimeSession implements RealtimeSession {
   private userCaptions = new Map<string, RealtimeCaption>()
   private botCaptions = new Map<string, RealtimeCaption>()
 
-  constructor(opts: RealtimeSessionOptions) {
+  constructor(opts: OpenAIRealtimeOptions) {
     this.opts = opts
+    this.connectCall = opts.connect ?? desktopOpenAIConnect
+    this.injected = !!opts.connect
     this.provider = opts.provider === 'gpt-realtime-mini' ? 'gpt-realtime-mini' : 'gpt-realtime'
   }
 
@@ -90,8 +125,7 @@ export class OpenAIRealtimeSession implements RealtimeSession {
 
   async start(): Promise<void> {
     this.state('connecting')
-    const bridge = window.forge.realtime
-    if (!bridge) throw new Error('This Forge build has no realtime bridge — restart Forge')
+    if (!this.injected && !desktopBridge()) throw new Error('This Forge build has no realtime bridge — restart Forge')
 
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
@@ -151,7 +185,7 @@ export class OpenAIRealtimeSession implements RealtimeSession {
     }
 
     try {
-      await this.connect(bridge, pc, opened)
+      await this.connect(pc, opened)
     } finally {
       window.clearTimeout(openTimer)
     }
@@ -163,23 +197,20 @@ export class OpenAIRealtimeSession implements RealtimeSession {
   }
 
   /** The SDP handshake through main, then the event channel opening. */
-  private async connect(
-    bridge: NonNullable<typeof window.forge.realtime>,
-    pc: RTCPeerConnection,
-    opened: Promise<void>
-  ): Promise<void> {
+  private async connect(pc: RTCPeerConnection, opened: Promise<void>): Promise<void> {
     const offer = await pc.createOffer()
     this.bailIfStopped()
     await pc.setLocalDescription(offer)
     this.bailIfStopped()
-    const answer = await bridge.openaiConnect({
+    const answer = await this.connectCall({
       model: this.opts.model,
       voice: this.opts.voice,
       instructions: this.opts.instructions,
-      tools: toOpenAITools(this.opts.tools),
+      tools: openAIToolSpecs(this.opts.tools),
       sdp: offer.sdp ?? ''
     })
     this.bailIfStopped()
+    if (!answer) throw new Error('This Forge build has no realtime bridge — restart Forge')
     if (!answer.ok) throw new Error(answer.error)
     await pc.setRemoteDescription({ type: 'answer', sdp: answer.sdp })
     this.bailIfStopped()

@@ -23,6 +23,7 @@ import {
   type WebVoiceToolAnswer
 } from '@shared/web'
 import { commandExe } from '@shared/agents'
+import { providerSpec } from '@shared/realtime'
 import { isSessionId } from '@shared/session'
 import { collectLeaves } from '@shared/splitTree'
 import type {
@@ -47,7 +48,9 @@ import { WebAuth, googleJwksFetcher } from './web/auth'
 import { checkFolder, listFolder } from './web/fs-browse'
 import { saveInboxFile, saveInboxImage } from './web/inbox'
 import { transcribeAudio } from './voice-bridge'
-import { mintGeminiToken } from './realtime/tokens'
+import { speakEdge } from './edge-tts'
+import { openWebVoiceAgent } from './voice-agent/ipc'
+import { connectOpenAI, mintGeminiToken } from './realtime/tokens'
 import { filePasskeyStorage } from './web/passkey'
 import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
@@ -753,6 +756,15 @@ interface PendingVoiceAsk {
 const pendingVoice = new Map<string, PendingVoiceAsk>()
 /** Setup and context are quick reads in the renderer. */
 const VOICE_ASK_MS = 8000
+
+/**
+ * Said to a browser Claude session once, with its first turn: its persona is
+ * the desk's (electron/voice-agent/persona.ts), so where it is being heard
+ * comes in the bracketed block the model reads and never speaks.
+ */
+const WEB_CLAUDE_NOTE =
+  "You are being heard and spoken through Forge Web in the user's browser, away from the desktop. Your tools still run on the desktop."
+
 /**
  * A tool can be slow — a pane that has to mount, a browser step — but a
  * browser waiting on it must not wait forever, and its own request gives up at
@@ -1546,14 +1558,63 @@ async function start(): Promise<void> {
     transcribeAudio: (bytes, mime) => transcribeAudio(bytes, mime),
     // A browser's voice agent. The key is checked here so "no key" is said at
     // once; the bundle is the renderer's, built with the voice hub's functions.
-    voiceSetup: async (carryover) => {
-      if (!getSettings().geminiKey?.trim()) {
+    voiceSetup: async (provider, carryover) => {
+      const settings = getSettings()
+      // Claude hears through this desktop's speech-to-text: the same keys dictation uses.
+      if (provider === 'claude' && !settings.groqKey?.trim() && !settings.geminiKey?.trim()) {
+        return { ok: false, error: 'No speech-to-text key — add a Groq or Gemini key in Settings → Voice on the desktop' }
+      }
+      if (provider === 'gemini-live' && !settings.geminiKey?.trim()) {
         return { ok: false, error: 'No Gemini key is set — add one in Settings → Models & APIs' }
       }
-      const reply = await askVoice({ op: 'setup', carryover }, VOICE_ASK_MS)
-      return reply.setup ? { ok: true, setup: reply.setup } : { ok: false, error: reply.error ?? 'The desktop gave no voice setup.' }
+      if (provider !== 'gemini-live' && provider !== 'claude' && !settings.openaiKey?.trim()) {
+        return { ok: false, error: 'No OpenAI key is set — add one in Settings → Models & APIs' }
+      }
+      const reply = await askVoice({ op: 'setup', provider, carryover }, VOICE_ASK_MS)
+      if (!reply.setup) return { ok: false, error: reply.error ?? 'The desktop gave no voice setup.' }
+      // A window still on an older renderer ignores `provider` and builds Gemini's.
+      if (reply.setup.provider !== provider) {
+        return { ok: false, error: 'The Forge window on the desktop is out of date — restart Forge there to use this agent.' }
+      }
+      return { ok: true, setup: reply.setup }
     },
     voiceToken: () => mintGeminiToken(getSettings().geminiKey),
+    // The whole OpenAI handshake, here: the browser gets OpenAI's SDP answer
+    // and nothing else. The model is the provider's, never the browser's say.
+    voiceConnect: ({ provider, voice, instructions, tools, sdp }) =>
+      connectOpenAI(getSettings().openaiKey, { model: providerSpec(provider).model, voice, instructions, tools, sdp }),
+    // Claude for a browser: its own session in main (electron/voice-agent/
+    // ipc.ts). Each turn carries the app context when it changed since the
+    // last — the desk's rule (src/state/VoiceAgent.tsx) — and the first one
+    // says where Claude is being heard, since its persona is the desk's.
+    voiceClaudeOpen: (onEvent) => {
+      const link = openWebVoiceAgent(onEvent)
+      let told = ''
+      let first = true
+      return {
+        say: async (text) => {
+          const reply = await askVoice({ op: 'context' }, VOICE_ASK_MS)
+          const context = typeof reply.context === 'string' ? reply.context.trim() : ''
+          const block: string[] = []
+          if (first) block.push(WEB_CLAUDE_NOTE)
+          if (context && context !== told) block.push(context)
+          first = false
+          if (context) told = context
+          link.say(block.length ? `[${block.join('\n\n')}]\n\n${text}` : text)
+        },
+        interrupt: async () => {
+          await link.interrupt()
+        },
+        close: () => link.close()
+      }
+    },
+    // One sentence of a browser Claude's reply, in the desk's Edge voice.
+    voiceSpeak: async (text) => {
+      const result = await speakEdge({ text, voice: getSettings().voiceEdgeVoice })
+      return result.ok
+        ? { ok: true, audio: result.audio.toString('base64'), mime: result.mime }
+        : { ok: false, error: result.error }
+    },
     voiceTool: (name, args) => voiceTool(name, args),
     voiceContext: async () => {
       const reply = await askVoice({ op: 'context' }, VOICE_ASK_MS)

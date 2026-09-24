@@ -17,13 +17,22 @@ import {
 } from './dictation'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
 import type { BarPlace, DeckView } from './view'
-import { holdWebVoiceMic, setVoiceLink, stopWebVoice, toggleWebVoice, useWebVoice, webVoiceSupported } from './voiceAgent'
-import { voicePhaseWord, type WebVoicePhase } from './voice-words'
+import {
+  holdWebVoiceMic,
+  setVoiceLink,
+  setWebVoiceAgent,
+  stopWebVoice,
+  toggleWebVoice,
+  useWebVoice,
+  webVoiceSupported
+} from './voiceAgent'
+import { voiceAgentWord, voicePhaseWord, WEB_VOICE_AGENTS, type WebVoicePhase } from './voice-words'
 
 /**
- * The voice bar: the project you are in, Listen, D — and, in the top bar,
- * Type. One group, drawn in the top bar or leading the dock at the bottom edge
- * (the default); the "…" menu says where it is in a word and moves it.
+ * The voice bar: the project you are in, the voice agent, Listen, D — and, in
+ * the top bar, Type. One group, drawn in the top bar or leading the dock at the
+ * bottom edge (the default); the "…" menu says where it is in a word and moves
+ * it.
  */
 export function VoiceBar({ place }: { place: BarPlace }): ReactNode {
   return (
@@ -32,6 +41,7 @@ export function VoiceBar({ place }: { place: BarPlace }): ReactNode {
         <ProjectPill place={place} />
         {place === 'top' ? <ProjectsSheet /> : null}
       </span>
+      <AgentChip place={place} />
       <ListenSwitch />
       <DictateButton />
       {place === 'top' ? <TypeButton /> : null}
@@ -90,9 +100,66 @@ export function ProjectsSheet(): ReactNode {
   )
 }
 
-/* ---------------------------------------------------------------- Listen */
+/* ----------------------------------------------------------- the agent */
 
-const BRAIN = 'Gemini Live'
+/**
+ * Which agent Listen runs, as a word — Gemini, ChatGPT or Claude — and a menu
+ * of the three. The pick is this browser's (./voiceAgent.ts remembers it);
+ * made mid-conversation, the live one closes and the new one opens in its
+ * place. The one in use is ticked and says "in use", never colour alone.
+ */
+function AgentChip({ place }: { place: BarPlace }): ReactNode {
+  const voice = useWebVoice()
+  const open = useDeckSheet() === 'voice'
+  const word = voiceAgentWord(voice.agent)
+  return (
+    <span className="dk-voicebar__agent">
+      <button
+        type="button"
+        className="dk-agentpick"
+        data-open={open ? 'true' : undefined}
+        data-place={place}
+        data-sheet-toggle="voice"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`Voice agent: ${word}`}
+        title={`Voice agent: ${word} — pick Gemini, ChatGPT or Claude`}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => deckSheet.toggle('voice')}
+      >
+        <span className="dk-agentpick__name">{word}</span>
+        <Icon name="chevronDown" size={11} className="dk-agentpick__chev" />
+      </button>
+      <DeckSheet id="voice" className="dk-sheet--voice" label="Voice agent">
+        <div className="dk-menu__rows" role="menu">
+          {WEB_VOICE_AGENTS.map((id) => {
+            const here = id === voice.agent
+            return (
+              <button
+                key={id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={here}
+                className="dk-menu__row"
+                data-on={here ? 'true' : undefined}
+                onClick={() => {
+                  deckSheet.set(null)
+                  setWebVoiceAgent(id)
+                }}
+              >
+                {here ? <Icon name="check" size={14} /> : <span />}
+                <span className="dk-menu__label">{voiceAgentWord(id)}</span>
+                {here ? <span className="dk-menu__detail">in use</span> : <span />}
+              </button>
+            )
+          })}
+        </div>
+      </DeckSheet>
+    </span>
+  )
+}
+
+/* ---------------------------------------------------------------- Listen */
 
 type Look = 'offline' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted' | 'error'
 
@@ -120,7 +187,7 @@ function lookOf(phase: WebVoicePhase, muted: boolean): { look: Look; mark: strin
  * the turn, the reply is spoken, it listens again by itself — and a second
  * press, "that's all", or quiet closes it. VoicePill.css's switch, imported
  * rather than copied, with the phase as its word and a failure as one line
- * beside it.
+ * beside it. The agent's name is the chip's, just before it.
  */
 function ListenSwitch(): ReactNode {
   const voice = useWebVoice()
@@ -131,7 +198,7 @@ function ListenSwitch(): ReactNode {
   const { look, mark } = lookOf(voice.phase, voice.muted)
   const word = voicePhaseWord(voice.phase, voice.muted)
   const failed = voice.phase === 'error'
-  const said = `${BRAIN} · ${word}`
+  const said = `${voiceAgentWord(voice.agent)} · ${word}`
   const title = !supported
     ? 'Listen — this browser cannot run the voice agent here (it needs a secure page and a microphone).'
     : !live && !on
@@ -164,7 +231,6 @@ function ListenSwitch(): ReactNode {
           <span className="listen__knob" />
         </span>
         <span className="listen__text">
-          <span className="listen__brain">{BRAIN}</span>
           <span className="listen__word">
             <span className="listen__word-text">{word}</span>
           </span>

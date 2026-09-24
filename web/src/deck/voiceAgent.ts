@@ -1,25 +1,49 @@
 import { useSyncExternalStore } from 'react'
-import type { WebRequest, WebResult, WebVoiceSetup } from '@shared/web'
+import { providerSpec } from '@shared/realtime'
+import {
+  isWebVoiceOpenAIProvider,
+  type WebRequest,
+  type WebResult,
+  type WebVoiceOpenAIProvider,
+  type WebVoiceProvider,
+  type WebVoiceSetup
+} from '@shared/web'
 import { endedNote, stopPhraseOf, stuckAfterMs, stuckReason, type ConversationEnd } from '@/lib/realtime/conversation'
 import { GeminiLiveSession, type GeminiTokenGetter } from '@/lib/realtime/gemini'
-import type { RealtimeCaption, RealtimeState, RealtimeToolAnswer, RealtimeToolCall } from '@/lib/realtime/session'
+import { OpenAIRealtimeSession, type OpenAIConnect } from '@/lib/realtime/openai'
+import type {
+  RealtimeCaption,
+  RealtimeSession,
+  RealtimeSessionEvents,
+  RealtimeState,
+  RealtimeToolAnswer,
+  RealtimeToolCall
+} from '@/lib/realtime/session'
 import { buildRolloverSummary } from '@/lib/realtime/summary'
-import { voiceFailureWords, type WebVoicePhase } from './voice-words'
+import { ClaudeVoiceSession } from './claudeVoice'
+import { readVoiceAgent, UPDATE_DESKTOP_WORDS, voiceFailureWords, type WebVoicePhase } from './voice-words'
 
 /**
  * Listen, on the deck face: the desktop's main voice agent, run in this
  * browser.
  *
- * The session is the voice hub's own `GeminiLiveSession` (src/lib/realtime/
- * gemini.ts), not a copy: this page's microphone and speakers, Gemini's server
- * VAD, so it is hands-free — a pause sends the turn, the reply is spoken, it
- * listens again by itself, and talking over it is barge-in. What makes it the
+ * The session is the voice hub's own — `GeminiLiveSession` (src/lib/realtime/
+ * gemini.ts) or `OpenAIRealtimeSession` (./openai.ts), whichever agent the
+ * chip picked — not a copy: this page's microphone and speakers, the
+ * provider's server VAD, so it is hands-free — a pause sends the turn, the
+ * reply is spoken, it listens again by itself, and talking over it is
+ * barge-in. Claude is the exception: no realtime session exists for it, so
+ * ./claudeVoice.ts hears here, the desktop's own Claude session thinks, and
+ * the desktop's Edge voice is played here (`voice-claude`). What makes it the
  * SAME agent comes from the desktop over the Forge Web socket:
  *
  *   voice-setup    persona, voice, tools and app context, built by the desktop
  *                  renderer with the functions the voice hub uses
- *   voice-token    a single-use ephemeral token per connect (the key stays in
- *                  the desktop's main process)
+ *   voice-token    Gemini: a single-use ephemeral token per connect (the key
+ *                  stays in the desktop's main process)
+ *   voice-connect  GPT Realtime: this page's WebRTC SDP offer, exchanged by
+ *                  main; only OpenAI's SDP answer comes back (the key and the
+ *                  client secret stay in main)
  *   voice-tool     each tool call, run there by the same `runRealtimeTool`
  *   voice-context  polled while live; a change is told to the model, at most
  *                  every `contextMinGapMs` — ContextTracker's rule
@@ -30,6 +54,9 @@ import { voiceFailureWords, type WebVoicePhase } from './voice-words'
  * the same watchdog. A session Gemini cannot resume rolls over into a new one
  * carrying a short summary. An older desktop answers "does not understand",
  * and the switch says to update it.
+ *
+ * Which agent is this browser's own choice (the chip beside Listen),
+ * remembered here and never sent to the desktop's `agentBrain` setting.
  *
  * A module store, like ./dictation.ts, so the session outlives the switch
  * moving between the top bar and the dock. DeckKeys (./VoiceBar.tsx) owns its
@@ -48,15 +75,24 @@ export interface WebVoiceState {
   ended: string | null
   /** The mic is held shut (D is recording). */
   muted: boolean
+  /** The agent Listen runs: this browser's pick, Gemini Live until one is made. */
+  agent: WebVoiceProvider
 }
 
-const PROVIDER = 'gemini-live' as const
-const LABEL = 'Gemini Live'
+const AGENT_KEY = 'forge-web-voice-agent'
 const CONTEXT_POLL_MS = 5000
 const MAX_CAPTIONS = 40
 const MAX_ACTIONS = 20
 
-let state: WebVoiceState = { phase: 'off', error: null, ended: null, muted: false }
+function storedAgent(): WebVoiceProvider {
+  try {
+    return readVoiceAgent(window.localStorage.getItem(AGENT_KEY))
+  } catch {
+    return readVoiceAgent(null)
+  }
+}
+
+let state: WebVoiceState = { phase: 'off', error: null, ended: null, muted: false, agent: storedAgent() }
 const listeners = new Set<() => void>()
 
 function set(patch: Partial<WebVoiceState>): void {
@@ -65,7 +101,8 @@ function set(patch: Partial<WebVoiceState>): void {
     next.phase === state.phase &&
     next.error === state.error &&
     next.ended === state.ended &&
-    next.muted === state.muted
+    next.muted === state.muted &&
+    next.agent === state.agent
   ) {
     return
   }
@@ -96,8 +133,13 @@ export function webVoiceSupported(): boolean {
 
 /* ---------------------------------------------------------------- session */
 
+/** What this module drives: a realtime session, or Claude's (./claudeVoice.ts), which has no provider id. */
+type LiveSession = Omit<RealtimeSession, 'provider'>
+
 let link: VoiceLink | null = null
-let session: GeminiLiveSession | null = null
+let session: LiveSession | null = null
+/** What the watchdog's words call the live session ("GPT Realtime went quiet..."). */
+let label = ''
 /** Bumped by every start and stop, so a late answer for an old session lands nowhere. */
 let run = 0
 let rolling = false
@@ -105,6 +147,8 @@ let setup: WebVoiceSetup | null = null
 let captions: RealtimeCaption[] = []
 let actions: Array<{ label: string; status: 'running' | 'ok' | 'failed' }> = []
 let toolsRunning = 0
+/** Tools Claude is running on the desktop (its own, not relayed through `relayTool`). */
+let desktopTools = 0
 let lastContext = ''
 let lastContextAt = 0
 let contextTimer: number | null = null
@@ -152,12 +196,12 @@ function onPhase(): void {
     idleTimer = clearTimer(idleTimer)
     return
   }
-  const ms = stuckAfterMs({ phase: state.phase, toolRunning: toolsRunning > 0 })
+  const ms = stuckAfterMs({ phase: state.phase, toolRunning: toolsRunning > 0 || desktopTools > 0 })
   if (ms !== null) {
     const stuck = state.phase === 'connecting' ? 'connecting' : 'thinking'
     stuckTimer = window.setTimeout(() => {
       if (session !== live) return
-      fail(stuckReason(LABEL, stuck, ms))
+      fail(stuckReason(label, stuck, ms))
     }, ms)
   }
   if (state.phase === 'listening') armIdle()
@@ -217,10 +261,55 @@ async function relayTool(call: RealtimeToolCall): Promise<RealtimeToolAnswer> {
 }
 
 const getToken: GeminiTokenGetter = async () => {
-  const res = await ask({ kind: 'voice-token', provider: PROVIDER })
+  const res = await ask({ kind: 'voice-token', provider: 'gemini-live' })
   if (res.kind === 'voice-token') return { ok: true, token: res.token, expiresAt: res.expiresAt }
   if (res.kind === 'failed') return { ok: false, error: voiceFailureWords(res) }
   return { ok: false, error: 'The desktop answered with something this page does not understand.' }
+}
+
+/**
+ * GPT Realtime's connect, over the socket: the offer and the session it is for
+ * go to the desktop, main does the handshake with its key, and only OpenAI's
+ * SDP answer comes back. The model is the provider's, chosen there.
+ */
+function connectFor(provider: WebVoiceOpenAIProvider): OpenAIConnect {
+  return async (req) => {
+    const res = await ask({
+      kind: 'voice-connect',
+      provider,
+      voice: req.voice,
+      instructions: req.instructions,
+      tools: req.tools,
+      sdp: req.sdp
+    })
+    if (res.kind === 'voice-connect') return { ok: true, sdp: res.sdp, expiresAt: res.expiresAt }
+    if (res.kind === 'failed') return { ok: false, error: voiceFailureWords(res) }
+    return { ok: false, error: 'The desktop answered with something this page does not understand.' }
+  }
+}
+
+/** The session for the setup's provider, or null for one this page cannot run. */
+function makeSession(setup: WebVoiceSetup, events: RealtimeSessionEvents): LiveSession | null {
+  if (setup.provider === 'claude') {
+    return new ClaudeVoiceSession({
+      ask,
+      events: {
+        ...events,
+        // Claude's tools run on the desktop, not through relayTool; any sign of
+        // life from it re-arms the watchdog, and a tool running is not quiet.
+        onActivity: (running) => {
+          desktopTools = running
+          onPhase()
+        }
+      }
+    })
+  }
+  const base = { model: setup.model, voice: setup.voice, instructions: setup.instructions, tools: setup.tools, events }
+  if (setup.provider === 'gemini-live') return new GeminiLiveSession({ ...base, provider: 'gemini-live', getToken })
+  if (isWebVoiceOpenAIProvider(setup.provider)) {
+    return new OpenAIRealtimeSession({ ...base, provider: setup.provider, connect: connectFor(setup.provider) })
+  }
+  return null
 }
 
 function fromState(st: RealtimeState): WebVoicePhase {
@@ -231,6 +320,7 @@ function fromState(st: RealtimeState): WebVoicePhase {
 function teardown(): void {
   const old = session
   session = null
+  desktopTools = 0
   clearTimers()
   old?.stop()
 }
@@ -243,8 +333,9 @@ function fail(reason: string): void {
 
 async function open(carryover: string | null): Promise<void> {
   const mine = ++run
+  const agent = state.agent
   set({ phase: 'connecting', error: null, ended: null })
-  const res = await ask({ kind: 'voice-setup', provider: PROVIDER, ...(carryover ? { carryover } : {}) })
+  const res = await ask({ kind: 'voice-setup', provider: agent, ...(carryover ? { carryover } : {}) })
   if (mine !== run) return
   if (res.kind !== 'voice-setup') {
     set({
@@ -254,36 +345,38 @@ async function open(carryover: string | null): Promise<void> {
     })
     return
   }
+  // A desktop that built another agent's setup predates this one's.
+  if (res.setup.provider !== agent) {
+    set({ phase: 'error', error: UPDATE_DESKTOP_WORDS })
+    return
+  }
   setup = res.setup
-  const live: GeminiLiveSession = new GeminiLiveSession({
-    provider: PROVIDER,
-    model: res.setup.model,
-    voice: res.setup.voice,
-    instructions: res.setup.instructions,
-    tools: res.setup.tools,
-    getToken,
-    events: {
-      onState: (st, detail) => {
-        if (session !== live) return
-        if (st === 'closed') {
-          if (!rolling) set({ phase: 'off' })
-          return
-        }
-        set(st === 'error' && detail ? { phase: 'error', error: detail } : { phase: fromState(st) })
-      },
-      onCaption: (c) => {
-        if (session !== live) return
-        upsertCaption(c)
-        if (c.role === 'user') onUserCaption(c)
-      },
-      // A session that is no longer the one the switch shows runs nothing (V1).
-      onToolCall: (call) =>
-        session === live ? relayTool(call) : Promise.resolve({ ok: false, text: 'This voice session has ended; nothing was done.' }),
-      onExpiring: (reason) => {
-        if (session === live) void rollover(reason)
+  label = agent === 'claude' ? 'Claude' : providerSpec(agent).label
+  const live: LiveSession | null = makeSession(res.setup, {
+    onState: (st, detail) => {
+      if (session !== live) return
+      if (st === 'closed') {
+        if (!rolling) set({ phase: 'off' })
+        return
       }
+      set(st === 'error' && detail ? { phase: 'error', error: detail } : { phase: fromState(st) })
+    },
+    onCaption: (c) => {
+      if (session !== live) return
+      upsertCaption(c)
+      if (c.role === 'user') onUserCaption(c)
+    },
+    // A session that is no longer the one the switch shows runs nothing (V1).
+    onToolCall: (call) =>
+      session === live ? relayTool(call) : Promise.resolve({ ok: false, text: 'This voice session has ended; nothing was done.' }),
+    onExpiring: (reason) => {
+      if (session === live) void rollover(reason)
     }
   })
+  if (!live) {
+    set({ phase: 'error', error: UPDATE_DESKTOP_WORDS })
+    return
+  }
   session = live
   // The watchdog runs from here: a socket that never sets up must not sit on Connecting.
   onPhase()
@@ -300,7 +393,8 @@ async function open(carryover: string | null): Promise<void> {
     lastContextAt = 0
     const first = takeContext(res.setup.context, Date.now(), 0)
     if (first) live.sendContext(first, false)
-    contextTimer = window.setInterval(() => void pollContext(live), CONTEXT_POLL_MS)
+    // Claude's turns carry the context from the desktop itself; nothing to poll.
+    if (res.setup.provider !== 'claude') contextTimer = window.setInterval(() => void pollContext(live), CONTEXT_POLL_MS)
     onPhase()
   } catch (err) {
     live.stop()
@@ -311,14 +405,17 @@ async function open(carryover: string | null): Promise<void> {
   }
 }
 
-async function pollContext(live: GeminiLiveSession): Promise<void> {
+async function pollContext(live: LiveSession): Promise<void> {
   const res = await ask({ kind: 'voice-context' })
   if (session !== live || res.kind !== 'voice-context') return
   const fresh = takeContext(res.text, Date.now(), setup?.contextMinGapMs ?? 0)
   if (fresh) live.sendContext(fresh, false)
 }
 
-/** Gemini could not resume: a new session, carrying a short account of this one. */
+/**
+ * The session cannot go on (Gemini could not resume, GPT Realtime's hour is up
+ * or its connection failed): a new one, carrying a short account of this one.
+ */
 async function rollover(reason: string): Promise<void> {
   if (!session || rolling) return
   rolling = true
@@ -369,4 +466,30 @@ export function holdWebVoiceMic(held: boolean): void {
   if (state.muted === held) return
   session?.setMuted(held)
   set({ muted: held })
+}
+
+/**
+ * The chip's pick. Remembered in this browser. Picked mid-conversation, the
+ * live session closes cleanly and the new agent opens in its place, so Listen
+ * stays on; picked while off (or failed), it is simply the next one Listen
+ * opens.
+ */
+export function setWebVoiceAgent(next: WebVoiceProvider): void {
+  if (next === state.agent) return
+  try {
+    window.localStorage.setItem(AGENT_KEY, next)
+  } catch {
+    /* this page still switches */
+  }
+  const on = !!session || state.phase === 'connecting'
+  if (!on) {
+    set({ agent: next, ...(state.phase === 'error' ? { phase: 'off' as const, error: null } : {}) })
+    return
+  }
+  run++
+  teardown()
+  captions = []
+  actions = []
+  set({ agent: next })
+  void open(null)
 }

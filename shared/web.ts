@@ -88,6 +88,7 @@ import type {
   HandoffRecord,
   Project,
   SplitDirection,
+  VoiceAgentEvent,
   Workspace
 } from './types'
 import type { SkillsList } from './skills'
@@ -1490,10 +1491,17 @@ export type WebRequest =
    * raw key never leaves main.
    *
    * `voice-setup` is answered `{ kind: 'voice-setup' }`; `carryover` is the
-   * short account of a session that is being rolled over, or absent. Only
-   * `gemini-live` is built; any other provider is `unsupported`.
-   * `voice-token` is answered `{ kind: 'voice-token' }` — one token per
-   * connect, since a resume after `goAway` needs a fresh one.
+   * short account of a session that is being rolled over, or absent. Gemini
+   * Live, GPT Realtime and Claude are built (Claude's setup carries no persona
+   * or tools — its session lives on the desktop; see `voice-claude`).
+   * `voice-token` (Gemini Live only) is answered `{ kind: 'voice-token' }` —
+   * one token per connect, since a resume after `goAway` needs a fresh one.
+   * `voice-connect` (GPT Realtime only) carries the browser's WebRTC SDP
+   * offer; main mints a client secret with the stored key, posts the offer
+   * with it (electron/realtime/tokens.ts's `connectOpenAI`) and answers
+   * `{ kind: 'voice-connect' }` with OpenAI's SDP answer — neither the key nor
+   * the secret reaches the browser. The model comes from `provider`, never
+   * from the browser.
    * `voice-tool` runs one tool call through the renderer's `runRealtimeTool`,
    * and is answered `{ kind: 'voice-tool' }` even when the tool failed (a
    * failure is an answer the model says out loud).
@@ -1505,8 +1513,51 @@ export type WebRequest =
    */
   | { kind: 'voice-setup'; provider: WebVoiceProvider; carryover?: string }
   | { kind: 'voice-token'; provider: WebVoiceProvider }
+  | ({ kind: 'voice-connect' } & WebVoiceConnectRequest)
   | { kind: 'voice-tool'; name: string; args: Record<string, unknown> }
   | { kind: 'voice-context' }
+  /**
+   * Claude as a browser's voice agent. Not a realtime audio session: the
+   * browser hears (its own end-of-speech detection), the desktop transcribes
+   * and thinks (the same `transcribeAudio` dictation uses, and a Claude Agent
+   * SDK session of its own — electron/voice-agent/ipc.ts's
+   * `openWebVoiceAgent`, never the desk's voice bar's), and the browser speaks
+   * the reply with audio the desktop's Edge voice made. Tools run on the
+   * desktop, as they do for the desk's Claude.
+   *
+   *   open       this socket owns the browser Claude session from now (one
+   *              browser at a time: another browser's `open` closes this one
+   *              with a `closed` event). Answered `ok`.
+   *   append     one slice of a turn's audio: raw PCM, 16-bit little-endian,
+   *              16 kHz mono, base64, at most MAX_FILE_CHUNK_BYTES raw. `seq`
+   *              from 0; a new `turnId` drops any turn not yet `done`.
+   *              Answered `ok`.
+   *   done       the turn ended (`chunks` slices). The desktop transcribes it
+   *              and answers `{ kind: 'voice-heard' }` — it does NOT send the
+   *              words to Claude, so the browser can end on a stop phrase or
+   *              drop its own echo first.
+   *   cancel     drop the turn. Answered `ok`.
+   *   say        one turn to Claude (the desktop adds the app context when it
+   *              changed). Answered `ok`; the reply arrives through `events`.
+   *   events     held until there is something to say, or up to
+   *              VOICE_CLAUDE_POLL_MS; answered `{ kind: 'voice-claude-events' }`.
+   *   speak      one sentence of the reply as the desktop's Edge voice, MP3;
+   *              answered `{ kind: 'voice-speech' }`.
+   *   interrupt  barge-in: stop the turn, keep the conversation. Answered `ok`.
+   *   close      end the session. Answered `ok`, also when there was none.
+   *
+   * Every op but `open` and `close` on a socket that holds no session is
+   * `failed`. The socket closing closes the session.
+   */
+  | { kind: 'voice-claude'; op: 'open' }
+  | { kind: 'voice-claude'; op: 'append'; turnId: string; seq: number; data: string }
+  | { kind: 'voice-claude'; op: 'done'; turnId: string; chunks: number }
+  | { kind: 'voice-claude'; op: 'cancel'; turnId: string }
+  | { kind: 'voice-claude'; op: 'say'; text: string }
+  | { kind: 'voice-claude'; op: 'events' }
+  | { kind: 'voice-claude'; op: 'speak'; text: string }
+  | { kind: 'voice-claude'; op: 'interrupt' }
+  | { kind: 'voice-claude'; op: 'close' }
   /**
    * Begin enrolling this browser's passkey. Only on a socket that opened with
    * the PIN (or a passkey) on a desktop that still has that same PIN set; any
@@ -2111,18 +2162,65 @@ export type WebResult =
   | { kind: 'voice-setup'; setup: WebVoiceSetup }
   /** The answer to `voice-token`: single-use, for one connect. Never the key. */
   | { kind: 'voice-token'; token: string; expiresAt: number }
+  /** The answer to `voice-connect`: OpenAI's SDP answer. Never the key or the client secret. */
+  | { kind: 'voice-connect'; sdp: string; expiresAt: number | null }
   /** The answer to `voice-tool`. */
   | { kind: 'voice-tool'; answer: WebVoiceToolAnswer }
   /** The answer to `voice-context`. Empty when the desktop has nothing to say yet. */
   | { kind: 'voice-context'; text: string }
+  /** The answer to `voice-claude` `done`: what was heard ('' for nothing). */
+  | { kind: 'voice-heard'; text: string }
+  /**
+   * The answer to `voice-claude` `events`: everything since the last answer,
+   * in order (empty when the wait ran out). `open` false: this socket holds no
+   * session any more.
+   */
+  | { kind: 'voice-claude-events'; events: WebVoiceClaudeEvent[]; open: boolean }
+  /** The answer to `voice-claude` `speak`: one sentence, base64. */
+  | { kind: 'voice-speech'; audio: string; mime: string }
 
 /* ------------------------------------------------------ the voice agent
  *
- * See `voice-setup` in `WebRequest`. Provider-neutral in name so GPT Realtime
- * can join later; only Gemini Live exists today.
+ * See `voice-setup` in `WebRequest`. Gemini Live and GPT Realtime run in a
+ * browser; Claude is heard in the browser and runs on the desktop
+ * (`voice-claude`). A desktop that predates Claude answers `unsupported`.
  */
 
-export type WebVoiceProvider = 'gemini-live'
+/**
+ * What the browser Claude session says, in order: the voice brain's own
+ * events (shared/types.ts `VoiceAgentEvent`), plus `closed` when the session
+ * ended under the browser (another browser took it, or the desktop let go).
+ */
+export type WebVoiceClaudeEvent = VoiceAgentEvent | { type: 'closed'; reason: string }
+
+/**
+ * How long a `voice-claude` `events` request is held open with nothing to
+ * say. Under the browser's 30 s request deadline, with room for the tunnel.
+ */
+export const VOICE_CLAUDE_POLL_MS = 20_000
+
+export type WebVoiceProvider = 'gemini-live' | 'gpt-realtime' | 'gpt-realtime-mini' | 'claude'
+
+/** The providers whose connect is a WebRTC SDP exchange (`voice-connect`). */
+export type WebVoiceOpenAIProvider = 'gpt-realtime' | 'gpt-realtime-mini'
+
+export function isWebVoiceOpenAIProvider(value: unknown): value is WebVoiceOpenAIProvider {
+  return value === 'gpt-realtime' || value === 'gpt-realtime-mini'
+}
+
+/**
+ * `voice-connect`'s body: the browser's SDP offer, and the session it is for —
+ * the voice, persona and tools `voice-setup` handed it, sent back because the
+ * OpenAI session is configured on the client secret main mints for this one
+ * connect. The model is `provider`'s, looked up in main.
+ */
+export interface WebVoiceConnectRequest {
+  provider: WebVoiceOpenAIProvider
+  voice: string
+  instructions: string
+  tools: WebVoiceToolSpec[]
+  sdp: string
+}
 
 /** A tool the voice model may call — shared/realtime.ts's `RealtimeToolSpec`, restated for the wire. */
 export interface WebVoiceToolSpec {
@@ -2160,7 +2258,7 @@ export interface WebVoiceToolAnswer {
  * wire frame, declared here beside the requests it serves.
  */
 export type WebVoiceAskEvent =
-  | { requestId: string; op: 'setup'; carryover: string | null }
+  | { requestId: string; op: 'setup'; provider: WebVoiceProvider; carryover: string | null }
   | { requestId: string; op: 'tool'; name: string; args: Record<string, unknown> }
   | { requestId: string; op: 'context' }
 
