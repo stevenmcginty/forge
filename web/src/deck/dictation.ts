@@ -62,7 +62,7 @@ export function undoDeckDictation(): void {
 
 /**
  * Press D: start, or stop and send it to be written down. A press while the
- * words are on their way does nothing — a second tap of Right Ctrl must not
+ * words are on their way does nothing — a second tap of D's key must not
  * throw a sentence away. A press over a review records more, and the new
  * words join the ones waiting, as the phone's mic does.
  */

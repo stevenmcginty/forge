@@ -989,6 +989,130 @@
   }
 }
 
+/* ---------------------------------------------------------- dictation key
+ *
+ * The "…" menu's "Dictation key: Right Alt [Change]" (./DictationKey.tsx).
+ * The key is a keycap and its name; Change and Reset are words on rimmed
+ * buttons drawn 32px tall, their hit area reaching 44px; the recording field
+ * says "Press the new key…" and, when a key cannot be D's, a cross and why.
+ */
+.app[data-face='deck'] .dk-dkey__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.app[data-face='deck'] .dk-dkey__label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--vb-ink);
+  white-space: nowrap;
+}
+
+.app[data-face='deck'] .dk-dkey__cap {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--vb-rim);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--vb-d-ink);
+  background: var(--vb-fill);
+}
+
+.app[data-face='deck'] .dk-dkey__acts {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.app[data-face='deck'] .dk-dkey__btn {
+  position: relative;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--vb-rim);
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--vb-ink);
+  background: var(--vb-fill);
+}
+
+/* The hit area reaches 44px past the 32px drawing. */
+.app[data-face='deck'] .dk-dkey__btn::before {
+  content: '';
+  position: absolute;
+  inset: -6px -3px;
+}
+
+.app[data-face='deck'] .dk-dkey__btn:hover {
+  border-color: var(--vb-rim-hover);
+  background: var(--vb-fill-hover);
+}
+
+.app[data-face='deck'] .dk-dkey__btn:focus-visible,
+.app[data-face='deck'] .dk-dkey__field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.app[data-face='deck'] .dk-dkey__hint {
+  font-size: 11.5px;
+  color: var(--vb-ink-2);
+}
+
+.app[data-face='deck'] .dk-dkey__rec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app[data-face='deck'] .dk-dkey__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px dashed var(--vb-rim-hover);
+  border-radius: 10px;
+  text-align: left;
+  color: var(--vb-ink);
+  background: var(--vb-fill);
+}
+
+/* Refused: the rim goes solid and doubles; the words below say why. */
+.app[data-face='deck'] .dk-dkey__field[data-refused='true'] {
+  border-style: solid;
+  border-color: var(--vb-warn-ink);
+  box-shadow: inset 0 0 0 1px var(--vb-warn-ink);
+}
+
+.app[data-face='deck'] .dk-dkey__prompt {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.app[data-face='deck'] .dk-dkey__was {
+  font-size: 11.5px;
+  color: var(--vb-ink-2);
+  white-space: nowrap;
+}
+
+.app[data-face='deck'] .dk-dkey__refusal {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--vb-warn-ink);
+}
+
 /* ------------------------------------------------------------ still */
 
 @media (prefers-reduced-motion: reduce) {

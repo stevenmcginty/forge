@@ -8,6 +8,7 @@ import { useActiveProject, useForge } from '../state'
 import { AgentStateChip, useDeckAgents } from './agents'
 import { composerField, composerOpen, focusedField, openComposer } from './composer'
 import { useDictationSeat } from '../lib/dictation-seat'
+import { attachTalkKey, type GestureIntent } from '../lib/talk-key'
 import {
   cancelDeckDictation,
   deckDictationPhase,
@@ -17,6 +18,7 @@ import {
   useDeckDictation,
   type DeckDictationPhase
 } from './dictation'
+import { dictationKeyName, dictationKeySuspended, useDictationKey } from './dictation-key'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
 import type { BarPlace, DeckView } from './view'
 import {
@@ -403,12 +405,6 @@ export function VoiceLine({ place }: { place: BarPlace }): ReactNode {
 /* -------------------------------------------------------------------- D */
 
 /**
- * D's key, as words on the button ("D · Right Ctrl") and in its title. One
- * constant on purpose: rebinding D replaces this with the stored binding.
- */
-export const D_SHORTCUT = 'Right Ctrl'
-
-/**
  * Whether D may start: a live link, an agent on screen for the words to go to
  * (the pane the bar talks to), and the composer that runs the dictation.
  */
@@ -432,6 +428,23 @@ function pressD(canStart: boolean, phase: DeckDictationPhase): void {
 }
 
 /**
+ * D's key, as the desktop's Dictate key reads it: a tap is a press of D; a
+ * hold opens the microphone and its release stops and sends. A hold that
+ * turns into a combo (Right Alt held a beat before AltGr+4) throws the
+ * recording away. Read live, not as of the last render.
+ */
+function applyDKey(intent: GestureIntent, canStart: boolean): void {
+  const phase = deckDictationPhase()
+  const open = phase === 'starting' || phase === 'recording'
+  if (intent === 'ptt-end') {
+    if (open) toggleDeckDictation(canStart)
+    return
+  }
+  if (intent === 'ptt-start' && open) return
+  pressD(canStart, phase)
+}
+
+/**
  * D: the phone's dictation — the words go to the agent on screen: spoken
  * commands act, anything else waits in the composer with a countdown and
  * Undo, then sends. Its own tint, apart from the accent, and every state in a
@@ -439,7 +452,9 @@ function pressD(canStart: boolean, phase: DeckDictationPhase): void {
  * "Listening" while the microphone is open, a turning arc and "Writing" while
  * the desktop writes it down, an arrow and "Sending" while the words wait.
  */
-function DictateButton({ shortcut = D_SHORTCUT }: { shortcut?: string }): ReactNode {
+function DictateButton({ shortcut: named }: { shortcut?: string }): ReactNode {
+  const stored = useDictationKey()
+  const shortcut = named ?? dictationKeyName(stored)
   const phase = useDeckDictation()
   const canStart = useCanDictate()
   const supported = deckDictationSupported()
@@ -449,14 +464,14 @@ function DictateButton({ shortcut = D_SHORTCUT }: { shortcut?: string }): ReactN
     : !canStart && !busy
       ? 'Dictate — needs a live link and an agent to send the words to.'
       : phase === 'recording'
-        ? `Listening. Press again (or tap ${shortcut}) to stop — then the words wait a moment with Undo, and send.`
+        ? `Listening. Press again (or tap ${shortcut}) to stop — then the words wait a moment with Undo, and send. Esc throws it away.`
         : phase === 'starting'
           ? 'Opening the microphone…'
           : phase === 'transcribing'
             ? 'The desktop is writing it down…'
             : phase === 'review'
               ? 'Sending in a moment — Undo (or Esc) keeps the words to edit. Press to add more.'
-              : `Dictate (${shortcut}) — talk, press again; commands like "stop" act, other words send after a moment with Undo.`
+              : `Dictate (${shortcut}: tap to start and stop, or hold to talk) — commands like "stop" act, other words send after a moment with Undo. Change the key in the … menu.`
   return (
     <button
       type="button"
@@ -561,13 +576,17 @@ export function toggleComposer(): void {
  * The deck face's keyboard, from anywhere — including a terminal that has the
  * keys, which is the point of each of them:
  *
- *   Right Ctrl, tapped alone   D (the desktop's dictation key)
- *   Esc, while words wait      Undo the dictation's send
- *   Ctrl+Shift+G               the composer (the desktop's voice card key)
- *   Ctrl+G                     the Wall, on or off (the desktop's mosaic key)
+ *   Right Alt (or the key       D, the desktop's Dictate key: tap to start
+ *   set in the … menu)          or stop, hold to talk while it is down
+ *   Esc, while D listens        throw the recording away
+ *   Esc, while words wait       Undo the dictation's send
+ *   Ctrl+Shift+G                the composer (the desktop's voice card key)
+ *   Ctrl+G                      the Wall, on or off (the desktop's mosaic key)
  *
- * Right Ctrl only counts as a tap: pressed and released with no other key and
- * no click between, so Right Ctrl+C is still Ctrl+C.
+ * D's key runs the desktop's gestures (../lib/talk-key.ts): a modifier only
+ * counts pressed on its own, so Right Alt+C is not D, and it is never
+ * swallowed, so AltGr characters still type on a UK layout. None of these
+ * keys fire while the … menu is recording a new D key.
  */
 export function DeckKeys({
   view,
@@ -580,8 +599,8 @@ export function DeckKeys({
 }): ReactNode {
   const canStart = useCanDictate()
   const phase = useDeckDictation()
-  const latest = useRef({ canStart, phase, view, onView, place })
-  latest.current = { canStart, phase, view, onView, place }
+  const latest = useRef({ canStart, view, onView, place })
+  latest.current = { canStart, view, onView, place }
 
   // Listen's link to the desktop, handed over whenever it changes (a reconnect
   // may replace it), and its mic held shut while D records and the desktop
@@ -592,20 +611,41 @@ export function DeckKeys({
   const dictating = phase === 'starting' || phase === 'recording' || phase === 'transcribing'
   useEffect(() => holdWebVoiceMic(dictating), [dictating])
 
+  const dKey = useDictationKey()
+  useEffect(
+    () =>
+      attachTalkKey(
+        window,
+        dKey,
+        () => {
+          const phase = deckDictationPhase()
+          return phase === 'starting' || phase === 'recording'
+        },
+        (intent) => applyDKey(intent, latest.current.canStart),
+        { cancel: cancelDeckDictation, suspended: dictationKeySuspended }
+      ),
+    [dKey]
+  )
+
   useEffect(() => {
-    let armed = false
     const onDown = (e: KeyboardEvent): void => {
-      if (e.code === 'ControlRight') {
-        armed = !e.repeat && !e.shiftKey && !e.altKey && !e.metaKey
-        return
-      }
-      armed = false
-      // Esc, from anywhere, while dictated words wait to send: Undo.
-      if (e.key === 'Escape' && deckDictationPhase() === 'review') {
-        e.preventDefault()
-        e.stopPropagation()
-        undoDeckDictation()
-        return
+      if (dictationKeySuspended()) return
+      if (e.key === 'Escape' && !e.isComposing) {
+        const phase = deckDictationPhase()
+        // Esc, from anywhere, while dictated words wait to send: Undo.
+        if (phase === 'review') {
+          e.preventDefault()
+          e.stopPropagation()
+          undoDeckDictation()
+          return
+        }
+        // …and while D listens (or the desktop writes it down): throw it away.
+        if (phase === 'starting' || phase === 'recording' || phase === 'transcribing') {
+          e.preventDefault()
+          e.stopPropagation()
+          cancelDeckDictation()
+          return
+        }
       }
       if (!e.ctrlKey || e.altKey || e.metaKey || e.code !== 'KeyG') return
       e.preventDefault()
@@ -619,27 +659,8 @@ export function DeckKeys({
         now.onView(now.view === 'wall' ? 'focus' : 'wall')
       }
     }
-    const onUp = (e: KeyboardEvent): void => {
-      if (e.code !== 'ControlRight') return
-      const tapped = armed
-      armed = false
-      if (!tapped) return
-      const now = latest.current
-      pressD(now.canStart, now.phase)
-    }
-    const disarm = (): void => {
-      armed = false
-    }
     window.addEventListener('keydown', onDown, true)
-    window.addEventListener('keyup', onUp, true)
-    window.addEventListener('pointerdown', disarm, true)
-    window.addEventListener('blur', disarm)
-    return () => {
-      window.removeEventListener('keydown', onDown, true)
-      window.removeEventListener('keyup', onUp, true)
-      window.removeEventListener('pointerdown', disarm, true)
-      window.removeEventListener('blur', disarm)
-    }
+    return () => window.removeEventListener('keydown', onDown, true)
   }, [])
 
   // Leaving the deck face (a window narrowed to a phone's) closes the microphone.
