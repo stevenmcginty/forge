@@ -4,6 +4,7 @@ import { endedNote, stopPhraseOf, stuckAfterMs, stuckReason, type ConversationEn
 import { GeminiLiveSession, type GeminiTokenGetter } from '@/lib/realtime/gemini'
 import type { RealtimeCaption, RealtimeState, RealtimeToolAnswer, RealtimeToolCall } from '@/lib/realtime/session'
 import { buildRolloverSummary } from '@/lib/realtime/summary'
+import { toolLabel } from '@/lib/toolLabels'
 import { voiceFailureWords, type WebVoicePhase } from './voice-words'
 
 /**
@@ -48,6 +49,10 @@ export interface WebVoiceState {
   ended: string | null
   /** The mic is held shut (D is recording). */
   muted: boolean
+  /** The newest caption, for the bar's voice line: who spoke and what, as it grows. */
+  caption: { role: 'user' | 'assistant'; text: string } | null
+  /** The newest tool call in words ("Opening tabs", then what it said), until the next conversation. */
+  lastAction: { label: string; status: 'running' | 'ok' | 'failed' } | null
 }
 
 const PROVIDER = 'gemini-live' as const
@@ -56,8 +61,18 @@ const CONTEXT_POLL_MS = 5000
 const MAX_CAPTIONS = 40
 const MAX_ACTIONS = 20
 
-let state: WebVoiceState = { phase: 'off', error: null, ended: null, muted: false }
+let state: WebVoiceState = { phase: 'off', error: null, ended: null, muted: false, caption: null, lastAction: null }
 const listeners = new Set<() => void>()
+
+/**
+ * What the bar shows beside the phase: the newest caption and tool call.
+ * Display only. It tells the listeners and nothing else, so a caption never
+ * re-arms the idle clock or the watchdog the way `set` does.
+ */
+function show(patch: Pick<Partial<WebVoiceState>, 'caption' | 'lastAction'>): void {
+  state = { ...state, ...patch }
+  listeners.forEach((fn) => fn())
+}
 
 function set(patch: Partial<WebVoiceState>): void {
   const next = { ...state, ...patch }
@@ -175,6 +190,20 @@ function armIdle(): void {
 function upsertCaption(c: RealtimeCaption): void {
   const i = captions.findIndex((x) => x.id === c.id)
   captions = i >= 0 ? captions.map((x, j) => (j === i ? c : x)) : [...captions, c].slice(-MAX_CAPTIONS)
+  const text = c.text.trim()
+  if (text) show({ caption: { role: c.role, text } })
+}
+
+/** A tool's name while it runs, as words: "Opening tabs". */
+function runningWords(name: string): string {
+  return toolLabel(name).replace(/^./, (ch) => ch.toUpperCase())
+}
+
+/** A tool's answer as words: its first line, without the OK:/FAILED: marker. */
+function answerWords(name: string, answer: RealtimeToolAnswer): string {
+  const first = (answer.text.split('\n')[0] ?? '').replace(/^(OK|FAILED):\s*/, '').trim()
+  if (first) return first
+  return answer.ok ? runningWords(name) : `${runningWords(name)} failed`
 }
 
 /** VoiceHubController's `onUserCaption`: a stop phrase ends it; one still growing waits a beat. */
@@ -199,6 +228,7 @@ async function relayTool(call: RealtimeToolCall): Promise<RealtimeToolAnswer> {
   actions = [...actions, entry].slice(-MAX_ACTIONS)
   toolsRunning++
   onPhase()
+  show({ lastAction: { label: runningWords(call.name), status: 'running' } })
   try {
     const res = await ask({ kind: 'voice-tool', name: call.name, args: call.args })
     const answer: RealtimeToolAnswer =
@@ -209,6 +239,10 @@ async function relayTool(call: RealtimeToolCall): Promise<RealtimeToolAnswer> {
           : { ok: false, text: 'FAILED: the desktop answered with something this page does not understand.' }
     entry.label = `${call.name}: ${answer.text.split('\n')[0]}`
     entry.status = answer.ok ? 'ok' : 'failed'
+    // Only the newest call speaks for the bar: an older one finishing late does not.
+    if (actions[actions.length - 1] === entry) {
+      show({ lastAction: { label: answerWords(call.name, answer), status: entry.status } })
+    }
     return answer
   } finally {
     toolsRunning--
@@ -337,6 +371,7 @@ async function rollover(reason: string): Promise<void> {
 function endConversation(end: ConversationEnd): void {
   run++
   teardown()
+  show({ caption: null })
   set({ phase: 'off', error: null, ended: endedNote(end) })
 }
 
@@ -346,6 +381,7 @@ export function startWebVoice(): void {
   if (session || state.phase === 'connecting') return
   captions = []
   actions = []
+  show({ caption: null, lastAction: null })
   void open(null)
 }
 

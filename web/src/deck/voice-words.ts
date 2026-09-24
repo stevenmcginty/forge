@@ -39,3 +39,25 @@ export function voicePhaseWord(phase: WebVoicePhase, muted: boolean): string {
       return 'Failed'
   }
 }
+
+/** The voice line's sentence while nobody has said anything yet: what is happening, and what to do. */
+export function voiceHint(phase: WebVoicePhase, muted: boolean): string {
+  switch (phase) {
+    case 'connecting':
+      return 'Opening a conversation with the voice agent…'
+    case 'listening':
+      return muted ? 'The mic is held while D records' : 'Talk; a pause sends it. Say "that\'s all" to stop.'
+    case 'thinking':
+      return 'Working on it…'
+    case 'speaking':
+      return 'Talk over it to interrupt'
+    case 'off':
+    case 'error':
+      return ''
+  }
+}
+
+/** A tool call's outcome, as the word beside its shape. */
+export function actionStatusWord(status: 'running' | 'ok' | 'failed'): string {
+  return status === 'running' ? 'Running' : status === 'ok' ? 'Done' : 'Failed'
+}

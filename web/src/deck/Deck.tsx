@@ -46,8 +46,10 @@ import { AgentStateChip, bringForward, type DeckAgent } from './agents'
 import { composerField, composerOpen } from './composer'
 import { useDeckDictation } from './dictation'
 import type { BarPlace, DeckView } from './view'
-import { ProjectsSheet, VoiceBar } from './VoiceBar'
+import { ProjectsSheet, VoiceBar, VoiceLine } from './VoiceBar'
 import './deck.css'
+// After deck.css (and so after DeckTopBar.css and VoicePill.css): the bar's own look has the last word.
+import './voicebar.css'
 
 /* ---------------------------------------------------------------- backdrop */
 
@@ -249,6 +251,7 @@ export function DeckDock({ place }: { place: BarPlace }): ReactNode {
 
   return (
     <div className="dk-dock dk-composer" role="toolbar" aria-label="Dock">
+      <VoiceLine place="bottom" />
       {composing ? (
         <SessionComposer face="deck" lead={<VoiceBar place="bottom" />} />
       ) : (
