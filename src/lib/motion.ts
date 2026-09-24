@@ -193,10 +193,12 @@ export function usePresence(open: boolean, exitMs = 170): { mounted: boolean; cl
  *
  * One absolutely-positioned element per flight, moved along a gentle arc by a
  * handful of transform keyframes and removed when it lands. Nothing in the page
- * is touched but the target's `data-hit` attribute.
+ * is touched but the target's `data-hit` attribute. `onLand` runs as it lands
+ * (at once when there is no flight to watch).
  */
-export function fireComet(from: Element, to: Element, color: string): void {
+export function fireComet(from: Element, to: Element, color: string, onLand?: () => void): void {
   const hit = (): void => {
+    onLand?.()
     const target = to as HTMLElement
     target.dataset['hit'] = 'true'
     window.setTimeout(() => {

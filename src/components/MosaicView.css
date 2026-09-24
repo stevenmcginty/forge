@@ -348,7 +348,7 @@
 .mtile__title {
   min-width: 0;
   font-family: var(--font-display);
-  font-size: var(--t-md);
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text-secondary);

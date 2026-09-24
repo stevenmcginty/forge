@@ -46,6 +46,52 @@ function paneColor(paneId: string): string {
   return accent || 'var(--accent)'
 }
 
+/** The target's header: where its name is, and where the send tag sits. */
+function headOf(to: HTMLElement): HTMLElement | null {
+  return to.querySelector<HTMLElement>('.pane__header, .mtile__head, .wstrip__head')
+}
+
+const tags = new Map<string, HTMLElement>()
+
+/**
+ * The send tag: a small "Sending" chip under the target's header while the
+ * comet is in flight, turning to "Sent" with a tick as it lands, then fading.
+ * A word and a shape, not just a colour, so the send reads without the pane's
+ * accent. A second send to the same pane replaces the first tag.
+ */
+function sendTag(paneId: string, to: HTMLElement, color: string): { land: () => void } {
+  tags.get(paneId)?.remove()
+  const head = headOf(to)
+  const box = (head ?? to).getBoundingClientRect()
+  const el = document.createElement('div')
+  el.className = 'send-tag'
+  el.dataset['state'] = 'sending'
+  el.style.setProperty('--comet', color)
+  el.style.left = `${box.left + box.width / 2}px`
+  el.style.top = `${head ? box.bottom + 6 : box.top + 38}px`
+  el.innerHTML =
+    '<span class="send-tag__icon" aria-hidden="true"></span><span class="send-tag__word">Sending</span><span class="send-tag__dots" aria-hidden="true"><i></i><i></i><i></i></span>'
+  document.body.appendChild(el)
+  tags.set(paneId, el)
+  let landed = false
+  return {
+    land: () => {
+      if (landed || !el.isConnected) return
+      landed = true
+      el.dataset['state'] = 'sent'
+      const word = el.querySelector('.send-tag__word')
+      if (word) word.textContent = 'Sent'
+      window.setTimeout(() => {
+        el.dataset['state'] = 'leaving'
+        window.setTimeout(() => {
+          el.remove()
+          if (tags.get(paneId) === el) tags.delete(paneId)
+        }, 260)
+      }, 900)
+    }
+  }
+}
+
 /**
  * Fly a comet into `toPaneId`. `from` is the sending pane's id, or an element
  * (the bar that sent it); absent or not on screen, it starts at the bar.
@@ -62,7 +108,11 @@ export function relayComet(toPaneId: string, from?: string | Element | null): vo
         (from instanceof Element && from.isConnected ? from : null) ??
         barElement() ??
         to
-      fireComet(source, to, paneColor(toPaneId))
+      const color = paneColor(toPaneId)
+      const tag = sendTag(toPaneId, to, color)
+      fireComet(source, to, color, tag.land)
+      // Belt and braces: a comet cancelled mid-flight never lands.
+      window.setTimeout(tag.land, 1200)
     } catch {
       /* decoration only: a relay never fails over its comet */
     }
