@@ -10,8 +10,8 @@ import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
 import { ConnectionSheet, LinkDot, linkStateOf, linkWord, useTrackLastHeard } from './ConnectionSheet'
 import { HandoffMenu } from './HandoffMenu'
 import { MoreSheet } from './MoreSheet'
-import { DeckTopBar, type DeckMenuRow, type DeckWhere } from '../deck/DeckTopBar'
-import type { DeckView } from '../deck/view'
+import { DeckTopBar, type DeckMenuRow } from '../deck/DeckTopBar'
+import type { BarPlace, DeckView } from '../deck/view'
 import { WaitingBadge, WaitingPill } from './WaitingPill'
 import { rustDeskLink } from './Workspace'
 
@@ -71,7 +71,9 @@ export function TopBar({
   deck?: {
     view: DeckView
     onView: (view: DeckView) => void
-    where: DeckWhere | null
+    /** Where the voice bar lives: the top bar, or the dock at the bottom edge. */
+    place: BarPlace
+    onPlace: (place: BarPlace) => void
     themeId: string
     onTheme: (id: string) => void
   }
@@ -260,6 +262,13 @@ export function TopBar({
         onSelect: () => void actions.requestNotifyPermission()
       })
     }
+    deckRows.push({
+      id: 'voicebar',
+      icon: 'voice',
+      label: deck.place === 'top' ? 'Voice bar: Top' : 'Voice bar: Bottom',
+      detail: deck.place === 'top' ? 'move to bottom' : 'move to top',
+      onSelect: () => deck.onPlace(deck.place === 'top' ? 'bottom' : 'top')
+    })
     deckRows.push({ id: 'signout', icon: 'user', label: 'Sign out', detail: state.session?.email, onSelect: () => actions.signOut() })
   }
   const deckLinkTitle = offline
@@ -332,10 +341,11 @@ export function TopBar({
         </header>
       ) : deck ? (
         <DeckTopBar
-          where={deck.where}
           link={{ state: offline ? 'offline' : state.connection.state, warm: state.warm, name: desktopName, title: deckLinkTitle }}
           view={deck.view}
           onView={deck.onView}
+          place={deck.place}
+          onPlace={deck.onPlace}
           rows={deckRows}
           menuRef={deckMenuRef}
           themeId={deck.themeId}

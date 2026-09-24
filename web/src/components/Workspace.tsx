@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { EmptyState } from '@/components/EmptyState'
 import { Icon } from '@/components/Icon'
-import { collectLeaves } from '@/lib/splitTree'
 import { useMobile } from '../lib/mobile'
 import { useNarrow } from '../lib/narrow'
 import { useActiveProject, useForge, useWorkspace } from '../state'
@@ -19,9 +18,10 @@ import { SplitView } from './Panes'
 import { TabStrip } from './TabStrip'
 import { TopBar } from './TopBar'
 import { UpdateBanner } from './UpdateBanner'
-import { DeckBackdrop, DeckDock, DeckSheetHost, DeckStage, PanesSheet } from '../deck/Deck'
+import { DeckBackdrop, DeckDock, DeckSheetHost, DeckStage } from '../deck/Deck'
 import { useDeckTheme } from '../deck/theme'
-import { useDeckView } from '../deck/view'
+import { useBarPlace, useDeckView } from '../deck/view'
+import { DeckKeys } from '../deck/VoiceBar'
 
 /**
  * Forge Web: three regions, two faces, not a copy of the desktop IDE.
@@ -67,6 +67,7 @@ export function Workspace(): ReactNode {
   const deck = !mobile
   const { themeId, setTheme } = useDeckTheme(deck)
   const [deckView, setDeckView] = useDeckView()
+  const [barPlace, setBarPlace] = useBarPlace()
   const [drawerOpen, setDrawerOpen] = useState(false)
   // Collapsed by the click, or collapsed by the window. One flag either way, so
   // the rail has one set of markup rather than a full row squeezed into 56px.
@@ -152,26 +153,13 @@ export function Workspace(): ReactNode {
   // (see lib/term.ts) already fits and reports on exactly that. A second
   // refit-everything path would send a duplicate `resize` per pane per drag.
 
-  /** The deck's top-bar chip: which tab, how many panes, and whether any of them needs you. */
-  const deckWhere = (() => {
-    if (!deck || !project) return null
-    const tab = workspace.tabs.find((t) => t.id === activeTabId)
-    if (!tab) return null
-    const leaves = workspace.tabs.flatMap((t) => collectLeaves(t.root))
-    return {
-      tab: tab.title,
-      tabs: workspace.tabs.length,
-      panes: leaves.length,
-      waiting: leaves.filter((leaf) => state.asking.has(leaf.id)).length
-    }
-  })()
-
   return (
     <div
       className={deck ? 'app deck' : 'app'}
       data-ready="true"
       data-shell={deck ? 'deck' : 'app'}
       data-face={deck ? 'deck' : undefined}
+      data-bar={deck ? barPlace : undefined}
       data-mobile={mobile ? 'true' : undefined}
       style={mobile ? ({ '--phone-text-scale': textScale } as CSSProperties) : undefined}
     >
@@ -183,7 +171,7 @@ export function Workspace(): ReactNode {
         mobile={mobile}
         deck={
           deck
-            ? { view: deckView, onView: setDeckView, where: deckWhere, themeId, onTheme: setTheme }
+            ? { view: deckView, onView: setDeckView, place: barPlace, onPlace: setBarPlace, themeId, onTheme: setTheme }
             : undefined
         }
       />
@@ -217,6 +205,7 @@ export function Workspace(): ReactNode {
           ) : (
             <DeckStage
               view={deckView}
+              onView={setDeckView}
               drawn={drawn.current}
               empty={
                 !project ? (
@@ -224,7 +213,11 @@ export function Workspace(): ReactNode {
                     icon="folder"
                     eyebrow="Forge"
                     title="No project selected"
-                    body="Pick one from the project at the left of the bar below, or add a folder from that desktop there."
+                    body={
+                      barPlace === 'top'
+                        ? 'Pick one from the project pill in the bar above, or add a folder from that desktop there.'
+                        : 'Pick one from the project at the left of the bar below, or add a folder from that desktop there.'
+                    }
                   />
                 ) : !activeTabId ? (
                   <EmptyState
@@ -338,8 +331,8 @@ export function Workspace(): ReactNode {
       </div>
       )}
 
-      {deck ? <DeckDock /> : null}
-      {deck ? <PanesSheet view={deckView} onView={setDeckView} /> : null}
+      {deck ? <DeckDock place={barPlace} onPlace={setBarPlace} /> : null}
+      {deck ? <DeckKeys view={deckView} onView={setDeckView} place={barPlace} /> : null}
 
       {mobile && gridShown ? null : notice}
 

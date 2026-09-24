@@ -1,30 +1,43 @@
 /*
- * Mirrors the deck top bar; redesign in progress on desktop-redesign — re-sync
- * when it lands. Its own file on purpose, so the whole bar can be replaced
- * without touching the rest of the face.
+ * The deck face's top bar — the only chrome above the panes, so it is slim:
+ * one 40px row on the backdrop, no slab. Its own file on purpose, so the whole
+ * bar can be replaced without touching the rest of the face.
  *
- * No slab: a strip of the backdrop with three things on it — the mark, one
- * glass chip in the middle (the deck's centred object), and a small cluster on
- * the right. Three grid columns, the outer two equal, so the chip sits dead
- * centre and nothing runs into it.
+ * Three grid columns: what the stage shows on the left (mark, Agents, Wall),
+ * the voice bar in the middle of whatever room is left, the pane tools, the
+ * link and "…" on the right. The middle column takes the slack, so nothing
+ * runs into anything as the window narrows; the responsive rules at the foot
+ * shed words before they shed controls.
  */
 
 .app[data-face='deck'] .dk-bar {
   position: relative;
-  z-index: var(--z-dock);
+  /* Over the floating composer, so a sheet dropping from the bar is never under it. */
+  z-index: calc(var(--z-dock) + 1);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 16px;
+  column-gap: 12px;
   flex: none;
   height: var(--dk-bar-h);
-  padding: 0 12px 0 16px;
+  padding: 0 8px 0 10px;
 }
 
-.app[data-face='deck'] .dk-bar__left {
+.app[data-face='deck'] .dk-bar__left,
+.app[data-face='deck'] .dk-bar__right {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.app[data-face='deck'] .dk-bar__right {
+  justify-content: flex-end;
+}
+
+.app[data-face='deck'] .dk-bar__centre {
+  display: flex;
+  justify-content: center;
   min-width: 0;
 }
 
@@ -42,131 +55,339 @@
 
 .app[data-face='deck'] .dk-bar__wordmark {
   flex: none;
+  margin-left: 2px;
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.34em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
 
-/* ------------------------------------------------------------ where chip */
+.app[data-face='deck'] .dk-bar__rule {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px 0 2px;
+  background: var(--glass-line-strong);
+}
 
-.app[data-face='deck'] .dk-where {
+/* The bar's round-cornered square buttons: +, Type, the pane tools. */
+.app[data-face='deck'] .dk-bar__icon,
+.app[data-face='deck'] .dk-tools > .ghost-btn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: transparent;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-bar__icon:hover:not(:disabled),
+.app[data-face='deck'] .dk-tools > .ghost-btn:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.app[data-face='deck'] .dk-bar__icon[data-on='true'],
+.app[data-face='deck'] .dk-tools > .ghost-btn[data-on='true'] {
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.app[data-face='deck'] .dk-bar__icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.app[data-face='deck'] .dk-bar button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The tally beside Skills keeps its word, just smaller. */
+.app[data-face='deck'] .dk-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.app[data-face='deck'] .dk-tools > .tabstrip__skills {
+  display: inline-flex;
+  gap: 3px;
+  width: auto;
+  min-width: 28px;
+  padding: 0 7px;
+}
+
+.app[data-face='deck'] .dk-tools .tabstrip__tally {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.app[data-face='deck'] .dk-tools .tabstrip__slash {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- agents
+ *
+ * The Agents button: who is on screen and in what state, as the pane header
+ * used to say it — badge, name, a shape and a word — plus how many there are.
+ */
+
+.app[data-face='deck'] .dk-agents {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.app[data-face='deck'] .dk-agents__anchor {
   position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.app[data-face='deck'] .dk-agents__btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  max-width: min(520px, 46vw);
+  min-width: 0;
+  max-width: 400px;
   height: 30px;
-  padding: 0 12px 0 12px;
-  border-radius: var(--r-full);
+  padding: 0 9px 0 7px;
+  border-radius: 9px;
   color: var(--text-secondary);
   background: var(--glass-bg);
   -webkit-backdrop-filter: blur(16px) saturate(1.3);
   backdrop-filter: blur(16px) saturate(1.3);
-  border: 1px solid var(--glass-line);
-  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 var(--glass-hi);
+  border: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 22%, var(--glass-line));
+  box-shadow: inset 0 1px 0 var(--glass-hi);
   transition:
     color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-med) var(--ease-out);
 }
 
-.app[data-face='deck'] .dk-where:hover {
+.app[data-face='deck'] .dk-agents__btn:hover {
   color: var(--text-primary);
-  border-color: var(--glass-line-strong);
+  border-color: color-mix(in srgb, var(--pane-accent, var(--accent)) 38%, var(--glass-line-strong));
 }
 
-.app[data-face='deck'] .dk-where[data-open='true'] {
+.app[data-face='deck'] .dk-agents__btn[data-open='true'] {
   color: var(--text-primary);
   border-color: var(--accent-line);
   box-shadow:
-    0 8px 24px -10px rgba(0, 0, 0, 0.6),
     0 0 0 3px var(--accent-softer),
     inset 0 1px 0 var(--glass-hi);
 }
 
-.app[data-face='deck'] .dk-where:focus-visible,
-.app[data-face='deck'] .dk-view > button:focus-visible,
-.app[data-face='deck'] .dk-menu__btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.app[data-face='deck'] .dk-where > svg {
-  flex: none;
-  color: var(--text-muted);
-}
-
-.app[data-face='deck'] .dk-where__tab {
+.app[data-face='deck'] .dk-agents__name {
   min-width: 0;
+  max-width: 180px;
   font-family: var(--font-display);
   font-size: 12.5px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.015em;
   color: var(--text-primary);
 }
 
-.app[data-face='deck'] .dk-where__meta {
-  flex: none;
-  font-family: var(--font-display);
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  color: var(--text-dim);
+.app[data-face='deck'] .dk-agents__name--none {
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
-/* A pane waiting on an answer: a diamond and the words, in warn. */
-.app[data-face='deck'] .dk-where__ask {
+.app[data-face='deck'] .dk-agents__count {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.app[data-face='deck'] .dk-agents__chev {
+  flex: none;
+  margin-left: -3px;
+  color: var(--text-dim);
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+.app[data-face='deck'] .dk-agents__btn[data-open='true'] .dk-agents__chev {
+  transform: rotate(180deg);
+}
+
+/* Somebody else is waiting on you: a diamond and the words, in warn. */
+.app[data-face='deck'] .dk-agents__ask {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  flex: none;
-  height: 18px;
-  padding: 0 7px;
+  gap: 5px;
+  min-width: 0;
+  max-width: 190px;
+  height: 24px;
+  padding: 0 9px 0 8px;
   border-radius: var(--r-full);
   font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--warn);
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+  animation: dk-ask-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.app[data-face='deck'] .dk-agents__ask:hover {
+  box-shadow: inset 0 0 0 1px var(--warn-line-strong, var(--warn));
+}
+
+.app[data-face='deck'] .dk-agents__ask-glyph {
+  flex: none;
+  font-size: 8px;
+}
+
+@keyframes dk-ask-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-6px, 0, 0) scale(0.94);
+  }
+}
+
+/* ------------------------------------------------------------ state chip
+ *
+ * StateChip: a shape, a word, and a colour, in that order of importance.
+ * Working turns its arc; everything else holds still.
+ */
+
+.app[data-face='deck'] .dk-schip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 18px;
+  padding: 0 7px 0 6px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.app[data-face='deck'] .dk-schip[data-compact='true'] {
+  height: 17px;
+  padding: 0 6px 0 5px;
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+}
+
+.app[data-face='deck'] .dk-schip[data-state='working'] {
+  color: color-mix(in srgb, var(--pane-accent, var(--accent)) 70%, var(--text-primary));
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 12%, transparent);
+}
+
+.app[data-face='deck'] .dk-schip[data-state='attention'] {
   color: var(--warn);
   background: var(--warn-soft);
   box-shadow: inset 0 0 0 1px var(--warn-line);
 }
 
-.app[data-face='deck'] .dk-where__ask > span {
-  font-size: 8px;
+.app[data-face='deck'] .dk-schip[data-state='frozen'] {
+  color: var(--info);
 }
 
-.app[data-face='deck'] .dk-where__chev {
+.app[data-face='deck'] .dk-sglyph {
   flex: none;
-  color: var(--text-dim);
-  transition: transform var(--dur-glide) var(--spring-glide);
 }
 
-.app[data-face='deck'] .dk-where[data-open='true'] .dk-where__chev {
-  transform: rotate(180deg);
+.app[data-face='deck'] .dk-sglyph[data-state='working'] {
+  animation: dk-turn 1.1s linear infinite;
 }
 
-/* ----------------------------------------------------------------- right */
+@keyframes dk-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
-.app[data-face='deck'] .dk-bar__right {
-  display: flex;
+/* ------------------------------------------------------------------ wall */
+
+.app[data-face='deck'] .dk-wall {
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
+  /* Wide enough for the close mark, so switching never nudges the bar. */
+  min-width: 82px;
   gap: 6px;
-  min-width: 0;
+  flex: none;
+  height: 30px;
+  padding: 0 11px 0 9px;
+  border-radius: 9px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  border: 1px solid var(--glass-line);
+  background: transparent;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
+
+.app[data-face='deck'] .dk-wall:hover {
+  color: var(--text-primary);
+  border-color: var(--glass-line-strong);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+/* Off: four empty windows. On: the windows fill, a close mark joins them and
+   the button reads as pressed — shape and word first, the accent agreeing. */
+.app[data-face='deck'] .dk-wall__glyph rect {
+  fill: transparent;
+  transition: fill var(--dur-fast) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-wall[data-on='true'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, #000 30%, transparent);
+}
+
+.app[data-face='deck'] .dk-wall[data-on='true'] .dk-wall__glyph rect {
+  fill: currentColor;
+}
+
+.app[data-face='deck'] .dk-wall__x {
+  margin-left: 1px;
+  opacity: 0.8;
+}
+
+/* ------------------------------------------------------------------ link */
 
 /* The link: a shape and a word first, the desktop's name after. */
 .app[data-face='deck'] .dk-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 220px;
+  max-width: 200px;
   height: 24px;
-  padding: 0 10px 0 8px;
+  padding: 0 9px 0 8px;
   border-radius: var(--r-full);
   border: 1px solid var(--glass-line);
   background: color-mix(in srgb, var(--text-primary) 4%, transparent);
@@ -211,40 +432,269 @@
   border-color: color-mix(in srgb, var(--info) 30%, transparent);
 }
 
-/* Tabs | Wall — the deck's `.viewtoggle`, with words. */
-.app[data-face='deck'] .dk-view {
+/* ------------------------------------------------------------- voice bar
+ *
+ * The project, Listen, D and Type as one object — a glass capsule in the top
+ * bar, a run of controls leading the dock. The grip at its left drags it
+ * between the two.
+ */
+
+.app[data-face='deck'] .dk-voicebar {
   display: flex;
-  gap: 2px;
-  padding: 2px;
-  background: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
-  border: 1px solid var(--glass-line);
-  border-radius: var(--r-full);
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  min-width: 0;
+  transition: transform var(--dur-glide) var(--spring-glide);
 }
 
-.app[data-face='deck'] .dk-view > button {
+.app[data-face='deck'] .dk-bar .dk-voicebar {
+  height: 32px;
+  padding: 0 3px 0 2px;
+  border-radius: 11px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
+  border: 1px solid var(--glass-line);
+  box-shadow: 0 8px 24px -14px rgba(0, 0, 0, 0.6), inset 0 1px 0 var(--glass-hi);
+}
+
+.app[data-face='deck'] .dk-voicebar[data-dragging='true'] {
+  position: relative;
+  padding: 2px 4px 2px 2px;
+  border-radius: 12px;
+  background: var(--sheet-bg);
+  z-index: calc(var(--z-sheet) + 2);
+  transform: translate3d(0, var(--dk-drag-y, 0px), 0) scale(1.02);
+  transition: none;
+  box-shadow:
+    0 24px 60px -18px rgba(0, 0, 0, 0.8),
+    0 0 0 2px var(--accent-line);
+}
+
+.app[data-face='deck'] .dk-bar:has(.dk-voicebar[data-dragging='true']),
+.app[data-face='deck'] .dk-dock:has(.dk-voicebar[data-dragging='true']) {
+  z-index: calc(var(--z-sheet) + 3);
+}
+
+.app[data-face='deck'] .dk-voicebar__grip {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: grab;
+  touch-action: none;
+}
+
+.app[data-face='deck'] .dk-voicebar__grip:hover {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.app[data-face='deck'] .dk-voicebar[data-dragging='true'] .dk-voicebar__grip {
+  cursor: grabbing;
+  color: var(--accent);
+}
+
+.app[data-face='deck'] .dk-voicebar__project {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.app[data-face='deck'] .dk-voicebar__listen {
+  display: inline-flex;
+}
+
+.app[data-face='deck'] .dk-voicebar__listen:empty {
+  display: none;
+}
+
+/* Up here the project pill and Listen are the capsule's own height. */
+.app[data-face='deck'] .dk-bar .dk-project {
+  height: 26px;
+  max-width: 170px;
+  padding: 0 9px 0 10px;
+}
+
+.app[data-face='deck'] .dk-bar .dk-project__chev {
+  transform: rotate(0deg);
+}
+
+.app[data-face='deck'] .dk-bar .dk-project[data-open='true'] .dk-project__chev {
+  transform: rotate(180deg);
+}
+
+.app[data-face='deck'] .dk-bar .listen__btn {
+  height: 26px;
+  padding: 0 10px 0 4px;
+  gap: 7px;
+}
+
+.app[data-face='deck'] .dk-bar .listen__track {
+  transform: scale(0.85);
+  margin: 0 -2px;
+}
+
+.app[data-face='deck'] .dk-bar .listen__text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.app[data-face='deck'] .dk-bar .listen__word {
+  font-size: 12px;
+}
+
+.app[data-face='deck'] .dk-bar .listen__why {
+  height: 22px;
+}
+
+/* ------------------------------------------------------------------- D
+ *
+ * Raw dictation. Its own tint (the theme's info blue-violet, not Listen's
+ * accent), and its state in the shape: the letter at rest, a stop square and
+ * "Listening" while the mic is open, a turning arc and "…" while the desktop
+ * writes it down.
+ */
+
+.app[data-face='deck'] .dk-dictate {
+  --d: var(--info);
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 10px 0 8px;
-  border-radius: var(--r-full);
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 8px;
+  color: var(--d);
+  background: color-mix(in srgb, var(--d) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--d) 30%, transparent);
   font-family: var(--font-display);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
   transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out),
+    padding var(--dur-glide) var(--spring-glide);
 }
 
-.app[data-face='deck'] .dk-view > button:hover {
+/* In the dock, D stands as tall as the pill and Listen beside it. */
+.app[data-face='deck'] .dk-dock .dk-dictate {
+  min-width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.app[data-face='deck'] .dk-dictate:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--d) 20%, transparent);
+}
+
+.app[data-face='deck'] .dk-dictate:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.app[data-face='deck'] .dk-dictate:focus-visible {
+  outline: 2px solid var(--d);
+  outline-offset: 2px;
+}
+
+.app[data-face='deck'] .dk-dictate__letter {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.app[data-face='deck'] .dk-dictate__word {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.app[data-face='deck'] .dk-dictate[data-phase='recording'] {
+  padding: 0 10px 0 8px;
+  color: var(--text-on-accent, #fff);
+  background: var(--d);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--d) 22%, transparent),
+    0 0 18px -4px var(--d);
+  animation: dk-d-ring 1.6s var(--ease-out) infinite;
+}
+
+.app[data-face='deck'] .dk-dictate__stop {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.app[data-face='deck'] .dk-dictate__spin {
+  animation: dk-turn 0.9s linear infinite;
+}
+
+@keyframes dk-d-ring {
+  50% {
+    box-shadow:
+      0 0 0 5px color-mix(in srgb, var(--d) 12%, transparent),
+      0 0 22px -4px var(--d);
+  }
+}
+
+/* ------------------------------------------------------------- drop zone
+ *
+ * While the voice bar is dragged: the edge it can go to, as a dashed band with
+ * the words. Solid and lit when letting go would move it.
+ */
+
+.app[data-face='deck'] .dk-dropzone {
+  position: fixed;
+  left: 50%;
+  z-index: calc(var(--z-sheet) + 1);
+  display: grid;
+  place-items: center;
+  width: min(720px, calc(100vw - 32px));
+  height: 64px;
+  border: 1.5px dashed var(--glass-line-strong);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--bg-base) 70%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: dk-sheet-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.app[data-face='deck'] .dk-dropzone[data-edge='bottom'] {
+  bottom: 12px;
+}
+
+.app[data-face='deck'] .dk-dropzone[data-edge='top'] {
+  top: 6px;
+  height: 48px;
+}
+
+.app[data-face='deck'] .dk-dropzone[data-over='true'] {
+  border-style: solid;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-base));
+  box-shadow: 0 0 0 4px var(--accent-softer);
+}
+
+.app[data-face='deck'] .dk-dropzone__words {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-dropzone[data-over='true'] .dk-dropzone__words {
   color: var(--text-primary);
-}
-
-.app[data-face='deck'] .dk-view > button[data-active='true'] {
-  color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 /* ------------------------------------------------------------- the … menu */
@@ -474,35 +924,59 @@
   color: var(--accent);
 }
 
-/* A smaller window: the wordmark gives its room first, then the words. */
-@media (max-width: 1100px) {
-  .app[data-face='deck'] .dk-where__meta {
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-face='deck'] .dk-sglyph[data-state='working'],
+  .app[data-face='deck'] .dk-dictate__spin,
+  .app[data-face='deck'] .dk-dictate[data-phase='recording'],
+  .app[data-face='deck'] .dk-agents__ask,
+  .app[data-face='deck'] .dk-dropzone {
+    animation: none;
+  }
+}
+
+/* A smaller window: words go first, then the least-used controls. */
+@media (max-width: 1440px) {
+  .app[data-face='deck'] .dk-bar__wordmark,
+  .app[data-face='deck'] .dk-link__name {
     display: none;
   }
 }
 
-@media (max-width: 900px) {
-  .app[data-face='deck'] .dk-link__name,
-  .app[data-face='deck'] .dk-view > button > span {
+@media (max-width: 1240px) {
+  .app[data-face='deck'] .dk-bar .listen__brain,
+  .app[data-face='deck'] .dk-agents__count {
     display: none;
+  }
+
+  .app[data-face='deck'] .dk-agents__name {
+    max-width: 120px;
   }
 }
 
-@media (max-width: 640px) {
-  .app[data-face='deck'] .dk-bar {
-    column-gap: 8px;
-    padding: 0 8px 0 10px;
+@media (max-width: 1060px) {
+  .app[data-face='deck'] .dk-wall {
+    min-width: 0;
   }
 
-  .app[data-face='deck'] .dk-bar__wordmark {
+  .app[data-face='deck'] .dk-wall__word,
+  .app[data-face='deck'] .dk-link__word,
+  .app[data-face='deck'] .dk-agents__btn .dk-schip__word {
     display: none;
   }
 
-  .app[data-face='deck'] .dk-where {
-    max-width: 52vw;
+  .app[data-face='deck'] .dk-agents__ask {
+    max-width: 120px;
+  }
+}
+
+@media (max-width: 860px) {
+  .app[data-face='deck'] .dk-tools,
+  .app[data-face='deck'] .dk-bar .listen__text {
+    display: none;
   }
 
-  .app[data-face='deck'] .dk-where__tab {
-    max-width: 22vw;
+  .app[data-face='deck'] .dk-bar .dk-project {
+    max-width: 110px;
   }
 }

@@ -1,7 +1,9 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Popover } from '@/components/Popover'
 import type { VoiceControls } from '../components/Composer'
 import type { VoiceState } from '../lib/dictate'
+import { listenHost, listenPhase } from './composer'
 import '@/components/hub/VoicePill.css'
 
 /**
@@ -14,6 +16,12 @@ import '@/components/hub/VoicePill.css'
  * here, the desktop transcribes (`dictate` / `dictate-stream`), the words land
  * in the bar and send after the review beat, exactly as the mic did. The deck's
  * "brain" slot says "Dictation" until the voice agent reaches the browser.
+ *
+ * Drawn where the voice bar is: SessionComposer renders the switch (the
+ * recording is the composer's), and the switch portals itself into the voice
+ * bar group (`listenHost`) — the top bar or the dock — so it keeps its state
+ * wherever it shows. Its phase is published (`listenPhase`) so a dictation in
+ * flight brings the floating composer up to show the words arriving.
  *
  * Every state is a shape on the knob and a word, colour only agreeing:
  *
@@ -54,7 +62,12 @@ export function ListenSwitch({
 }): ReactNode {
   const whyRef = useRef<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
+  const host = listenHost.use()
   const ls = lookOf(state, fault)
+  useEffect(() => {
+    listenPhase.set(state.phase)
+  }, [state.phase])
+  useEffect(() => () => listenPhase.set('idle'), [])
   const failed = ls.look === 'error'
   const unavailable = !controls
   const said = `${BRAIN} · ${ls.word}`
@@ -82,7 +95,7 @@ export function ListenSwitch({
   // It never takes focus: the bar or the pane you were typing in keeps the keys.
   const noFocus = (e: React.MouseEvent): void => e.preventDefault()
 
-  return (
+  const drawn = (
     <span
       className="listen dk-listen"
       data-on={ls.on ? 'true' : undefined}
@@ -131,7 +144,7 @@ export function ListenSwitch({
         open={open && failed}
         onClose={() => setOpen(false)}
         align="start"
-        side="top"
+        side={host?.closest('.dk-bar') ? 'bottom' : 'top'}
         width={340}
         label="Why dictation stopped"
       >
@@ -164,4 +177,5 @@ export function ListenSwitch({
       </Popover>
     </span>
   )
+  return host ? createPortal(drawn, host) : drawn
 }

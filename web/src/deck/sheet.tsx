@@ -5,10 +5,10 @@ import { usePresence } from '@/lib/motion'
  * The deck face's sheets and its "…" menu: one open at a time, the rule
  * src/components/shell/Sheet.tsx keeps on the desktop. A store rather than
  * state in the shell because the triggers (the dock's project pill, the top
- * bar's pane chip, the menu button) and the sheets live in different
+ * bar's Agents button, the menu button) and the sheets live in different
  * components.
  */
-export type DeckSheetId = 'projects' | 'panes' | 'menu'
+export type DeckSheetId = 'projects' | 'agents' | 'menu'
 
 let open: DeckSheetId | null = null
 const listeners = new Set<() => void>()

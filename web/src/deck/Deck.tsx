@@ -26,26 +26,29 @@
  * Dock.css is not imported: its `.prow` would restyle the rail rows this face
  * puts in its projects sheet. DeckBar.css is not imported because that bar is
  * being redrawn on the desktop now.
+ *
+ * Laid out as a stage and one slim top bar: focus (one agent, edge to edge)
+ * or the Wall, the Agents menu and the Wall switch in the bar, and a voice bar
+ * that lives in the top bar or in the dock (./view.ts `BarPlace`).
  */
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import '@/components/shell/deck-tokens.css'
 import '@/components/shell/deck.css'
+import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
+import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { columnsFor } from '@/lib/mosaicLayout'
 import { collectLeaves } from '@/lib/splitTree'
 import { alpha, findTheme, mix } from '@/theme/themes'
-import { leafBoxes } from '../components/Panes'
 import { PaneView } from '../components/PaneView'
-import { Rail } from '../components/Rail'
 import { SessionComposer } from '../components/SessionComposer'
-import { useActiveProject, useForge, useWorkspace } from '../state'
-import { PanesSheet } from './PanesSheet'
-import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
-import type { DeckView } from './view'
+import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
+import { AgentStateChip, bringForward, type DeckAgent } from './agents'
+import { composerField, composerOpen, listenPhase } from './composer'
+import { useRawDictation } from './dictation'
+import type { BarPlace, DeckView } from './view'
+import { ProjectsSheet, VoiceBar } from './VoiceBar'
 import './deck.css'
-
-/** The deck's pane gutter: `.deck .split > .split__divider` in deck.css, 20px. */
-const DECK_GUTTER_PX = 20
 
 /* ---------------------------------------------------------------- backdrop */
 
@@ -71,46 +74,55 @@ export function DeckBackdrop({ themeId }: { themeId: string }): ReactNode {
 /* ------------------------------------------------------------------- stage */
 
 /**
- * The stage: one tab's panes, or the Wall — every pane in the project at once.
+ * The stage: one agent on the whole of it (focus), or the Wall — every agent in
+ * the project at once.
  *
  * One keyed container for both, on purpose. A browser pane *is* its xterm
  * (see Panes.tsx), so a view switch that rebuilt the panes would dispose every
  * terminal, re-attach and re-replay each one — and a replay taken while the
  * link is live has the terminal answer the queries in it again, into the
  * shell. Here every pane of every tab that has been on screen is a direct child
- * keyed on its id; Tabs places the current tab's by its split tree (with the
- * deck's 20px gutter) and hides the rest, the Wall lays them all on the deck's
- * auto grid (`columnsFor`, MosaicView's rule). Switching moves boxes.
+ * keyed on its id; focus shows the front tab's active pane edge to edge and
+ * hides the rest (`display: none`, which `fit()` in lib/term.ts refuses to
+ * measure, so a hidden pane never resizes its PTY), the Wall lays them all on
+ * the deck's auto grid (`columnsFor`, MosaicView's rule). Switching moves boxes.
  *
- * On the Wall, pressing a tile in another tab brings that tab forward first, so
- * the bar below always talks to the pane with the ring on it. None of the
- * desk's freeform arranging, zoom or tile dragging: the wire has no verb for
- * any of it.
+ * No pane header in either: the top bar names the agent on screen and its
+ * state, and on the Wall each tile carries one slim label with the same words.
+ * Pressing a tile brings its tab forward first, so the bar always talks to the
+ * pane with the ring on it; the label's expand (or a double click on the label)
+ * puts it on the whole stage.
  */
 export function DeckStage({
   view,
+  onView,
   drawn,
   empty
 }: {
   view: DeckView
+  onView: (view: DeckView) => void
   drawn: Set<string>
   /** What the stage says when there is no project, or no tab. Workspace's words. */
   empty: ReactNode | null
 }): ReactNode {
   const { state, actions } = useForge()
   const workspace = useWorkspace()
+  const profiles = useProfiles()
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
   const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0] ?? null
 
   if (empty || !activeTab) return <div className="dk-stage__empty">{empty}</div>
 
   const wall = view === 'wall'
-  // Everything on the Wall has been seen; it stays mounted when Tabs comes back.
+  // Everything on the Wall has been seen; it stays mounted when focus comes back.
   if (wall) for (const tab of workspace.tabs) drawn.add(tab.id)
+  const frontLeaves = collectLeaves(activeTab.root)
+  const focusId = (frontLeaves.find((l) => l.id === activeTab.activePaneId) ?? frontLeaves[0])?.id ?? null
   const slots = workspace.tabs
     .filter((tab) => drawn.has(tab.id))
-    .flatMap((tab) => leafBoxes(tab.root, DECK_GUTTER_PX).map(({ leaf, style }) => ({ leaf, tab, style })))
+    .flatMap((tab) => collectLeaves(tab.root).map((leaf) => ({ leaf, tab })))
   const total = slots.length
+  const manyTabs = workspace.tabs.length > 1
 
   return (
     <div
@@ -118,32 +130,42 @@ export function DeckStage({
       data-view={view}
       style={wall ? ({ '--dk-wall-cols': columnsFor(total) } as CSSProperties) : undefined}
     >
-      {slots.map(({ leaf, tab, style }) => {
+      {slots.map(({ leaf, tab }) => {
         const here = tab.id === activeTab.id
-        const shown = wall || here
-        const alone = wall ? total === 1 : collectLeaves(tab.root).length === 1
+        const focused = here && leaf.id === focusId
+        const shown = wall || focused
+        const profile = resolveProfile(profiles, leaf.profileId)
+        const agent: DeckAgent = { leaf, tab, profile, title: paneDisplayTitle(profile, leaf.title) }
+        const open = (): void => {
+          onView('focus')
+          if (!live) return
+          void bringForward(actions, activeTab.id, agent).then((refused) => {
+            if (refused) actions.setNotice(refused)
+          })
+        }
         return (
           <div
             key={leaf.id}
             className="dk-slot"
             data-shown={shown ? 'true' : 'false'}
-            data-here-tab={here ? 'true' : undefined}
-            style={wall ? undefined : style}
+            data-focused={wall && focused ? 'true' : undefined}
+            style={{ '--pane-accent': profile.accent } as CSSProperties}
             onPointerDownCapture={
               wall && !here && live ? () => void actions.layout({ op: 'select-tab', tabId: tab.id }) : undefined
             }
           >
-            {wall && workspace.tabs.length > 1 ? (
-              <span className="dk-slot__tab" title={`In the tab “${tab.title}”`}>
-                {tab.title}
-              </span>
+            {wall ? (
+              <TileLabel
+                agent={agent}
+                tabTitle={manyTabs ? tab.title : null}
+                focused={focused}
+                onSelect={() => {
+                  if (live && !focused) void actions.layout({ op: 'focus-pane', paneId: leaf.id })
+                }}
+                onOpen={open}
+              />
             ) : null}
-            <PaneView
-              leaf={leaf}
-              focused={wall ? here && leaf.id === tab.activePaneId : leaf.id === tab.activePaneId}
-              onlyPane={alone}
-              onScreen={shown}
-            />
+            <PaneView leaf={leaf} focused={focused} onlyPane={!wall || total === 1} onScreen={shown} />
           </div>
         )
       })}
@@ -151,29 +173,88 @@ export function DeckStage({
   )
 }
 
+/**
+ * A Wall tile's one line: who, which tab, the state in a shape and a word, and
+ * the way to full screen. The tile with the ring on it also says "Active", so
+ * which one the bar talks to never rests on the ring's colour.
+ */
+function TileLabel({
+  agent,
+  tabTitle,
+  focused,
+  onSelect,
+  onOpen
+}: {
+  agent: DeckAgent
+  tabTitle: string | null
+  focused: boolean
+  onSelect: () => void
+  onOpen: () => void
+}): ReactNode {
+  return (
+    <div
+      className="dk-tile__label"
+      title={`${agent.title}${tabTitle ? ` — tab ${tabTitle}` : ''}. Double-click for full screen`}
+      onClick={onSelect}
+      onDoubleClick={onOpen}
+    >
+      <AgentBadge profile={agent.profile} size="sm" />
+      <span className="dk-tile__name truncate">{agent.title}</span>
+      {tabTitle ? <span className="dk-tile__tab truncate">{tabTitle}</span> : null}
+      <span className="dk-tile__spacer" />
+      {focused ? <span className="dk-tile__active">Active</span> : null}
+      <AgentStateChip paneId={agent.leaf.id} compact />
+      <button
+        type="button"
+        className="dk-tile__open"
+        aria-label={`Full screen: ${agent.title}`}
+        title="Full screen — this agent alone"
+        onClick={(e) => {
+          e.stopPropagation()
+          onOpen()
+        }}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <Icon name="expand" size={12} />
+      </button>
+    </div>
+  )
+}
+
 /* -------------------------------------------------------------------- dock */
 
 /**
- * The dock: one bar along the bottom edge — Dock.tsx's. The project you are in
- * leads it (and opens the projects sheet), then Listen, then the words and
- * where they go. It floats over the backdrop below the stage, so it never
- * covers a terminal.
+ * Where the words are written, by where the voice bar is.
+ *
+ *   bottom  the dock: one bar along the bottom edge (Dock.tsx's) — the voice
+ *           bar group leads it, then the words and where they go. It floats
+ *           below the stage, so it never covers a terminal.
+ *   top     the voice bar group is in the top bar, and the words float as a
+ *           card over the foot of the stage — only while they are wanted: asked
+ *           for (Ctrl+Shift+G, Type, D with no text field focused), while a
+ *           dictation is filling them, or while they hold unsent words. Send,
+ *           or Esc on an empty box, puts it away; so does a click elsewhere
+ *           while it is empty. Hidden, it stays mounted — SessionComposer owns
+ *           the drafts and Listen's recording, and both must outlive a hide.
  */
-export function DeckDock(): ReactNode {
+export function DeckDock({ place, onPlace }: { place: BarPlace; onPlace: (place: BarPlace) => void }): ReactNode {
   const { state } = useForge()
   const project = useActiveProject()
   const workspace = useWorkspace()
   const offline = state.stage.kind === 'offline'
   const hasTab = workspace.tabs.length > 0
   const githubMode = offline && state.offlineMode === 'github'
+  const composing = !!project && hasTab && !githubMode
+
+  if (place === 'top') return composing ? <FloatingComposer /> : null
 
   return (
-    <div className="dk-dock" role="toolbar" aria-label="Dock">
-      {project && hasTab && !githubMode ? (
-        <SessionComposer face="deck" lead={<ProjectPill />} />
+    <div className="dk-dock dk-composer" role="toolbar" aria-label="Dock">
+      {composing ? (
+        <SessionComposer face="deck" lead={<VoiceBar place="bottom" onPlace={onPlace} />} />
       ) : (
         <div className="dk-bar-idle">
-          <ProjectPill />
+          <VoiceBar place="bottom" onPlace={onPlace} />
           <span className="dk-bar-idle__words">
             {!project ? 'Pick a project to start' : githubMode ? 'The desktop is asleep' : 'No terminals open here yet'}
           </span>
@@ -184,50 +265,82 @@ export function DeckDock(): ReactNode {
   )
 }
 
-/** The project you are in, as the bar's first word; opens the projects sheet. */
-function ProjectPill(): ReactNode {
-  const project = useActiveProject()
-  const open = useDeckSheet() === 'projects'
-  return (
-    <button
-      type="button"
-      className="dk-project"
-      data-open={open ? 'true' : undefined}
-      data-sheet-toggle="projects"
-      aria-expanded={open}
-      aria-haspopup="dialog"
-      title="Projects — switch, add, git"
-      style={{ '--project': project?.color ?? 'var(--accent)' } as CSSProperties}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => deckSheet.toggle('projects')}
-    >
-      <span className="dk-project__dot" aria-hidden="true" />
-      <span className="dk-project__name truncate">{project?.name ?? 'No project'}</span>
-      <Icon name="chevronDown" size={11} className="dk-project__chev" />
-    </button>
-  )
-}
+/** How long after Send the box may take to empty (the claim wait) and still count as sent. */
+const SENT_GRACE_MS = 8000
 
-/**
- * Every project, rising out of the dock — Dock.tsx's ProjectSheet, holding this
- * page's own rail (projects, Add project, git) at full width. Picking a project
- * is the end of the errand: the sheet goes.
- */
-function ProjectsSheet(): ReactNode {
-  const { state } = useForge()
-  const projectId = state.projectId
-  const last = useRef(projectId)
+function FloatingComposer(): ReactNode {
+  const open = composerOpen.use()
+  const listening = listenPhase.use()
+  const raw = useRawDictation()
+  const [hasDraft, setHasDraft] = useState(false)
+  const sentAt = useRef(0)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  // The draft lives in SessionComposer; its box is the one place to read it.
   useEffect(() => {
-    if (last.current === projectId) return
-    last.current = projectId
-    if (deckSheet.get() === 'projects') deckSheet.set(null)
-  }, [projectId])
+    const tick = (): void => {
+      const words = (composerField()?.value ?? '').trim()
+      setHasDraft(words.length > 0)
+      if (!words && sentAt.current) {
+        if (Date.now() - sentAt.current < SENT_GRACE_MS) composerOpen.set(false)
+        sentAt.current = 0
+      } else if (sentAt.current && Date.now() - sentAt.current >= SENT_GRACE_MS) {
+        sentAt.current = 0
+      }
+    }
+    tick()
+    const timer = window.setInterval(tick, 250)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const busy = listening !== 'idle' || raw !== 'idle'
+  const shown = open || hasDraft || listening !== 'idle'
+
+  // A click elsewhere puts an empty, idle box away — not one holding words.
+  useEffect(() => {
+    if (!open) return undefined
+    const onDown = (e: PointerEvent): void => {
+      const t = e.target as Element | null
+      if (!t || ref.current?.contains(t)) return
+      if (t.closest('.popover, .bsheet-layer, [data-voicebar]')) return
+      if (busy || (composerField()?.value ?? '').trim()) return
+      composerOpen.set(false)
+    }
+    window.addEventListener('pointerdown', onDown, true)
+    return () => window.removeEventListener('pointerdown', onDown, true)
+  }, [open, busy])
+
   return (
-    <DeckSheet id="projects" className="dk-sheet--projects" label="Projects">
-      <div className="dk-sheet__rail">
-        <Rail collapsed={false} />
-      </div>
-    </DeckSheet>
+    <div
+      ref={ref}
+      className="dk-float dk-composer"
+      data-shown={shown ? 'true' : 'false'}
+      aria-hidden={shown ? undefined : true}
+      onKeyDownCapture={(e) => {
+        const field = composerField()
+        if (!field || e.target !== field) return
+        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && field.value.trim()) {
+          sentAt.current = Date.now()
+        } else if (e.key === 'Escape' && !field.value.trim()) {
+          e.preventDefault()
+          composerOpen.set(false)
+          field.blur()
+          // The keys go back to the agent on screen.
+          document
+            .querySelector<HTMLTextAreaElement>(
+              '.app[data-face="deck"] .dk-slot[data-shown="true"] .pane[data-focused="true"] .xterm-helper-textarea'
+            )
+            ?.focus()
+        }
+      }}
+      onClickCapture={(e) => {
+        if ((e.target as Element).closest('.composer__send') && (composerField()?.value ?? '').trim()) {
+          sentAt.current = Date.now()
+        }
+      }}
+    >
+      <SessionComposer face="deck" />
+    </div>
   )
 }
 
@@ -244,5 +357,3 @@ function ProjectsSheet(): ReactNode {
 export function DeckSheetHost(): ReactNode {
   return <div className="app dk-sheet-host" data-shell="app" data-ready="true" />
 }
-
-export { PanesSheet }
