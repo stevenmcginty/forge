@@ -26,9 +26,11 @@ import {
   setVoiceLink,
   setVoiceNavigator,
   setWebVoiceAgent,
+  startWebVoice,
   stopWebVoice,
   toggleWebVoice,
   useWebVoice,
+  webVoiceState,
   webVoiceSupported,
   type WebVoiceState
 } from './voiceAgent'
@@ -205,6 +207,35 @@ function useLive(): boolean {
   return state.stage.kind === 'connected' && state.connection.state === 'live'
 }
 
+/** Listen's key, as on the desktop (the Listen key's default there). */
+const LISTEN_KEY = 'ShiftRight'
+const LISTEN_KEY_NAME = 'Right Shift'
+
+/**
+ * Listen's key, as the desktop's HubLayer reads it: a tap turns Listen on or
+ * off; a hold turns it on and its release leaves it listening (hands-free).
+ * A hold that turns into Shift+letter takes back the start it made. Needs a
+ * live link, like the switch.
+ */
+let listenHoldStarted = false
+function applyListenKey(intent: GestureIntent, live: boolean): void {
+  if (intent === 'ptt-end') {
+    listenHoldStarted = false
+    return
+  }
+  const phase = webVoiceState().phase
+  const off = phase === 'off' || phase === 'error'
+  if (off) {
+    if (!live || !webVoiceSupported()) return
+    listenHoldStarted = intent === 'ptt-start'
+    startWebVoice()
+  } else if (intent === 'toggle') stopWebVoice()
+}
+function cancelListenHold(): void {
+  if (listenHoldStarted) stopWebVoice()
+  listenHoldStarted = false
+}
+
 /**
  * Listen: the desktop's main voice agent, talking through this browser
  * (./voiceAgent.ts). One press opens a hands-free conversation — a pause sends
@@ -233,8 +264,8 @@ function ListenSwitch(): ReactNode {
       : failed
         ? `${said}: ${voice.error ?? 'no more detail'}. Click to try again.`
         : on
-          ? `${said}. Talk; a pause sends it. Click (or say "that's all") to stop.`
-          : `${said}${voice.ended ? ` — ${voice.ended}` : ''}. Click to talk to the voice agent, hands-free.`
+          ? `${said}. Talk; a pause sends it. Click, tap ${LISTEN_KEY_NAME}, or say "that's all" to stop.`
+          : `${said}${voice.ended ? ` — ${voice.ended}` : ''}. Click (or tap ${LISTEN_KEY_NAME}) to talk to the voice agent, hands-free.`
   return (
     <span
       className="listen dk-listen"
@@ -250,7 +281,7 @@ function ListenSwitch(): ReactNode {
         aria-checked={on}
         className="listen__btn"
         title={title}
-        aria-label={`Listen, ${agent}: ${word}`}
+        aria-label={`Listen (${LISTEN_KEY_NAME}), ${agent}: ${word}`}
         disabled={!!blocked}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => toggleWebVoice()}
@@ -717,6 +748,23 @@ export function DeckKeys({
         (intent) => applyDKey(intent, latest.current.canStart),
         { cancel: cancelDeckDictation, suspended: dictationKeySuspended }
       ),
+    [dKey]
+  )
+
+  const live = useLive()
+  const liveRef = useRef(live)
+  liveRef.current = live
+  useEffect(
+    () =>
+      dKey === LISTEN_KEY
+        ? undefined
+        : attachTalkKey(
+            window,
+            LISTEN_KEY,
+            () => false,
+            (intent) => applyListenKey(intent, liveRef.current),
+            { cancel: cancelListenHold, suspended: dictationKeySuspended }
+          ),
     [dKey]
   )
 

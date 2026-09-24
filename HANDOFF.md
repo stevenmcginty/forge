@@ -1,5 +1,11 @@
 # Handoff
 
+## Forge Web: Listen key (Right Shift) in the browser (2026-09-24)
+
+- **Asked (Steve):** the browser had no key to talk to the voice agent, only D's key.
+- **Fix:** `web/src/deck/VoiceBar.tsx` `DeckKeys` wires Right Shift to Listen, same gesture as the desktop HubLayer: tap on/off, hold turns it on and stays hands-free, Shift+letter takes back a hold's start. Skipped if D's key is set to Right Shift. Not rebindable in the browser yet. Listen's tooltip names the key.
+- **Checked:** typecheck (all four), voice-hotkey:check. Not live-tested.
+
 ## Wall → Full screen fix merged; New beside Wall; Full screen names the pane in the browser (2026-09-24 13:30)
 
 - **Cause of "I thought you fixed it":** the Wall → Full screen scaling fix (ad8950f, "Full screen claims the pane's grid") and 4 sibling commits were built in worktree branch `worktree-agent-ab599473cfdab9e9b` but never merged. Now merged (a8c32af), conflicts with bfa0040's agent picker resolved; the agent chip sits in the AAA voice bar.

@@ -148,6 +148,11 @@ export function useWebVoice(): WebVoiceState {
   return useSyncExternalStore(subscribe, () => state, () => state)
 }
 
+/** The same, read now rather than as of the last render (the Listen key). */
+export function webVoiceState(): WebVoiceState {
+  return state
+}
+
 /** The page can run it at all: a secure page with a microphone and AudioWorklet. */
 export function webVoiceSupported(): boolean {
   return (
