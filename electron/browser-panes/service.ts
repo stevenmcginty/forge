@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { BrowserWindow, IpcMain } from 'electron'
+import type { BrowserWindow, IpcMain, WebContents } from 'electron'
 import {
   BROWSER_IPC,
   USER_OWNER,
@@ -7,6 +7,7 @@ import {
   normaliseSurfaceUrl,
   type BrowserAgentReply,
   type BrowserAgentRequest,
+  type BrowserAppKeys,
   type BrowserHistoryAction,
   type BrowserOwner,
   type BrowserRect,
@@ -50,6 +51,8 @@ export class BrowserService {
   readonly link: BrowserLink
   private readonly deps: BrowserServiceDeps
   private window: BrowserWindow | null = null
+  /** Stops listening to the old window's renderer. */
+  private offHost: (() => void) | null = null
   /** The project the window is showing — where tabs from callers with no project land. */
   private activeProject = ''
   /** Owner id → project, learned when a caller is resolved. */
@@ -68,6 +71,12 @@ export class BrowserService {
         if (win && !win.isDestroyed()) win.webContents.send(BROWSER_IPC.changed, list)
       },
       onShot: (path, owner, id, project) => this.deps.onShot?.(path, owner, id, project),
+      onAppKey: (key, takeFocus) => {
+        const win = this.window
+        if (!win || win.isDestroyed()) return
+        if (takeFocus) win.webContents.focus()
+        win.webContents.send(BROWSER_IPC.key, key)
+      },
       hostZoom: () => {
         const win = this.window
         return win && !win.isDestroyed() ? win.webContents.getZoomFactor() : 1
@@ -87,8 +96,32 @@ export class BrowserService {
   }
 
   setWindow(win: BrowserWindow | null): void {
+    this.offHost?.()
+    this.offHost = null
     this.window = win
     this.manager.setWindow(win)
+    if (win && !win.isDestroyed()) this.offHost = this.watchHost(win.webContents)
+  }
+
+  /**
+   * A native view is shown and hidden only by the renderer's surfaces, and a
+   * renderer that reloads or dies runs none of their cleanups — so the page
+   * would stay drawn over whatever mode comes back (the Wall, usually). Every
+   * view is hidden the moment the renderer starts a new document or goes away;
+   * the surfaces that mount again show their own.
+   */
+  private watchHost(host: WebContents): () => void {
+    const onNavigate = (details: { isMainFrame: boolean; isSameDocument: boolean }): void => {
+      if (details.isMainFrame && !details.isSameDocument) this.manager.hideAll()
+    }
+    const onGone = (): void => this.manager.hideAll()
+    host.on('did-start-navigation', onNavigate)
+    host.on('render-process-gone', onGone)
+    return () => {
+      if (host.isDestroyed()) return
+      host.off('did-start-navigation', onNavigate)
+      host.off('render-process-gone', onGone)
+    }
   }
 
   /** One tool call from anyone. Pane callers are resolved to their name and project first. */
@@ -142,6 +175,7 @@ export class BrowserService {
       this.manager.setBounds(String(id ?? ''), sane ? bounds : null)
     })
     ipc.handle(BROWSER_IPC.move, (_e, id: unknown, rect: BrowserRect) => this.manager.move(String(id ?? ''), rect))
+    ipc.on(BROWSER_IPC.keys, (_e, keys: BrowserAppKeys) => this.manager.setAppKeys(keys))
     ipc.on(BROWSER_IPC.project, (_e, project: unknown) => {
       this.activeProject = String(project ?? '')
     })
@@ -152,6 +186,8 @@ export class BrowserService {
   }
 
   dispose(): void {
+    this.offHost?.()
+    this.offHost = null
     this.link.close()
     this.manager.dispose()
     this.window = null

@@ -89,8 +89,91 @@ export const BROWSER_IPC = {
   /** Renderer → main: the voice hub calling one of the seven tools. */
   agent: 'browser:agent',
   /** Main → renderer: the whole surface list changed. */
-  changed: 'browser:changed'
+  changed: 'browser:changed',
+  /** Renderer → main, one-way: the keys that belong to Forge, not to a page (BrowserAppKeys). */
+  keys: 'browser:keys',
+  /** Main → renderer: one of those keys was pressed while a page had the keyboard (BrowserPageKey). */
+  key: 'browser:key'
 } as const
+
+/**
+ * The keys a page must hand back to Forge. A WebContentsView takes the keyboard
+ * away from the renderer entirely, so without this every shortcut and the voice
+ * keys die the moment Steve clicks into a page. `combos` are keymap combos
+ * ("Ctrl+Shift+O", see browserKeyCombo); `talk` are the voice keys, as
+ * KeyboardEvent.code ("ControlRight", "F13").
+ */
+export interface BrowserAppKeys {
+  combos: string[]
+  talk: string[]
+}
+
+/** A key pressed in a page, replayed to the renderer's own listeners. */
+export interface BrowserPageKey {
+  type: 'keyDown' | 'keyUp'
+  code: string
+  key: string
+  ctrl: boolean
+  alt: boolean
+  shift: boolean
+  meta: boolean
+  repeat: boolean
+  location: number
+}
+
+const KEY_CODE_NAMES: Record<string, string> = {
+  Comma: ',',
+  Period: '.',
+  Slash: '/',
+  Backslash: '\\',
+  BracketLeft: '[',
+  BracketRight: ']',
+  Semicolon: ';',
+  Quote: "'",
+  Backquote: '`',
+  Minus: '-',
+  Equal: '=',
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  Escape: 'Esc',
+  Space: 'Space',
+  Enter: 'Enter',
+  Tab: 'Tab',
+  Backspace: 'Backspace',
+  Delete: 'Delete',
+  Insert: 'Insert',
+  Home: 'Home',
+  End: 'End',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+  NumpadAdd: 'NumpadAdd',
+  NumpadSubtract: 'NumpadSubtract',
+  NumpadEnter: 'NumpadEnter'
+}
+
+/**
+ * A key event as a keymap combo — the same string src/lib/keymap.ts
+ * `comboFromEvent` makes, for main, which cannot import the renderer's lib.
+ * scripts/browser-check.mjs holds the two to the same answers.
+ */
+export function browserKeyCombo(e: { code: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }): string | null {
+  const code = String(e.code ?? '')
+  let key: string | null = null
+  if (/^Key[A-Z]$/.test(code)) key = code.slice(3)
+  else if (/^Digit[0-9]$/.test(code)) key = code.slice(5)
+  else if (/^Numpad[0-9]$/.test(code)) key = code
+  else if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) key = code
+  else key = KEY_CODE_NAMES[code] ?? null
+  if (!key) return null
+  const mods: string[] = []
+  if (e.ctrl) mods.push('Ctrl')
+  if (e.alt) mods.push('Alt')
+  if (e.shift) mods.push('Shift')
+  if (e.meta) mods.push('Meta')
+  return [...mods, key].join('+')
+}
 
 /** Who opened a tab and drives it. `id` is a pane id, 'voice', or 'user'. */
 export interface BrowserOwner {
@@ -193,6 +276,10 @@ export interface BrowserApi {
   setProject: (projectId: string) => void
   agent: (req: BrowserAgentRequest) => Promise<BrowserAgentReply>
   onChanged: (cb: (list: BrowserSurfaceInfo[]) => void) => () => void
+  /** Fire-and-forget: the keys a page must give back to Forge. Absent on an older preload. */
+  setAppKeys?: (keys: BrowserAppKeys) => void
+  /** One of those keys, pressed in a page. Absent on an older preload. */
+  onAppKey?: (cb: (key: BrowserPageKey) => void) => () => void
 }
 
 /**
@@ -208,7 +295,7 @@ export const BROWSER_CONFIRM_RULE =
 export const BROWSER_INSTRUCTIONS = [
   `${BROWSER_PREAMBLE}`,
   'Tabs open on the Forge canvas beside the panes, where the user can watch and use them. Every tab shares one signed-in session, so a site the user signed into once is signed in for you too.',
-  'The loop: browser_open (gives you a tab id) → browser_read (numbered list of what you can click) → browser_click / browser_type with a number from that read → browser_read again. Calls without an id act on your own current tab.',
+  'The loop: browser_open (gives you a tab id) → browser_read (numbered list of what you can click) → browser_click / browser_type with a number from that read → browser_read again. Calls without an id act on your own current tab — sub-agents inside one pane share that tab, so if you are one of several, pass your tab id on every call.',
   BROWSER_CONFIRM_RULE
 ].join('\n')
 

@@ -65,7 +65,7 @@ import {
 } from './voice-agent/ipc'
 import { registerRealtimeHandlers } from './realtime/ipc'
 import { callSignFor, disposeHub, postToBoard, registerHubHandlers } from './hub-ipc'
-import { installArtifactScheme } from './artifact-scheme'
+import { guardArtifactFrames, installArtifactScheme } from './artifact-scheme'
 import {
   disposeBrowserPanes,
   registerBrowserPanes,
@@ -518,6 +518,8 @@ function createWindow(): void {
     if (devUrl && url.startsWith(devUrl)) return
     event.preventDefault()
   })
+  // Artifacts stay in their frames: no navigating a Board frame out to the web.
+  guardArtifactFrames(mainWindow.webContents)
 
   // Dev: renderer warnings/errors and the hub's state trace into dev.log.
   if (isDev) forwardRendererConsole(mainWindow.webContents)

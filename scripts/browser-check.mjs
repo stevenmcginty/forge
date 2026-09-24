@@ -5,6 +5,8 @@
  *   1. persistence   BrowserSurfaceStore round-trips surfaces through disk, keeps ids
  *                    unique across restarts, and survives a damaged file.
  *   2. refs          formatRead numbers from 1, caps the list, and badRef refuses junk.
+ *   2b. overlays     the page hides under every pop-up that overlaps it (overlays.ts), and
+ *                    main names keys exactly as the keymap does (browserKeyCombo).
  *   3. tool schema   bridge/browser-tools.mjs offers exactly the seven tools, with words
  *                    and schemas identical to shared/browser.ts (the canonical copy).
  *   4. link auth     the real BrowserLink answers the right token and refuses a wrong,
@@ -18,6 +20,9 @@
  *                    clicking, typing and screenshotting local pages IN PARALLEL, then
  *                    isolation, cross-tab by id, a wrong token over the real pipe, and the
  *                    surfaces file after the app has quit.
+ *   6b. failures     a failing iframe, shadow DOM, a typed password never read back, pages
+ *                    off screen when the renderer reloads, Forge's keys taken from a page,
+ *                    a crashed tab reborn, a hung tab answering and closing.
  *
  *   --live [--shots <dir>]  also: a VISIBLE window mounting the real React surface,
  *                    an agent opening https://example.com, browser_read + browser_screenshot
@@ -129,6 +134,39 @@ section('2. ref numbering')
   check('badRef refuses 0, -1, 1.2e9, NaN, "x"', [0, -1, 1.2e9, Number.NaN, 'x'].every((r) => badRef(r)))
   check('badRef accepts 1 and 7', !badRef(1) && !badRef(7))
   check('the page script parks refs on window.__forgeRefs and starts at 1', READ_SCRIPT.includes('window.__forgeRefs = refs') && READ_SCRIPT.includes("'[' + refs.length + '] '"))
+}
+
+/* ------------------------------------------------- 2b. overlays and keys */
+section('2b. what the page hides under, and the keys it hands back')
+{
+  const { COVERS } = await import('../src/components/browser/overlays.ts')
+  const covers = COVERS.split(',').map((s) => s.trim())
+  for (const sel of ['[data-shell-overlay]', '.spop', '.cheat', '.sheet', '.popover', '.blight', '.deckmenu__panel', '.approval', '.onboard', '.wnew']) {
+    check(`the page hides while ${sel} overlaps it`, covers.includes(sel), COVERS)
+  }
+  const drawnBy = {
+    '.deckmenu__panel': 'src/components/TitleBar.tsx',
+    '.approval': 'src/components/ApprovalPrompt.tsx',
+    '.onboard': 'src/components/Onboarding.tsx',
+    '.wnew': 'src/components/WhatsNew.tsx'
+  }
+  for (const [sel, file] of Object.entries(drawnBy)) {
+    check(`${sel} is still a class ${file} draws`, readFileSync(join(ROOT, file), 'utf8').includes(`className="${sel.slice(1)}"`))
+  }
+  const K = await import('../src/lib/keymap.ts')
+  const codes = ['KeyA', 'KeyO', 'KeyZ', 'Digit0', 'Digit9', 'Numpad5', 'F1', 'F13', 'F24', 'F25', 'Comma', 'Period', 'Slash', 'Backslash', 'BracketLeft',
+    'Semicolon', 'Quote', 'Backquote', 'Minus', 'Equal', 'ArrowLeft', 'ArrowDown', 'Escape', 'Space', 'Enter', 'Tab', 'Backspace', 'Delete', 'Insert', 'Home',
+    'End', 'PageUp', 'PageDown', 'NumpadAdd', 'NumpadSubtract', 'NumpadEnter', 'ControlRight', 'ShiftLeft', 'MetaLeft', 'CapsLock', '']
+  const drift = []
+  for (const code of codes) {
+    for (let m = 0; m < 16; m++) {
+      const mods = { ctrl: !!(m & 1), alt: !!(m & 2), shift: !!(m & 4), meta: !!(m & 8) }
+      const main = S.browserKeyCombo({ code, ...mods })
+      const renderer = K.comboFromEvent({ code, ctrlKey: mods.ctrl, altKey: mods.alt, shiftKey: mods.shift, metaKey: mods.meta })
+      if (main !== renderer) drift.push(`${code}/${m}: main ${main} vs keymap ${renderer}`)
+    }
+  }
+  check("main's browserKeyCombo names every key exactly as the keymap's comboFromEvent", drift.length === 0, drift.slice(0, 8).join('\n'))
 }
 
 /* --------------------------------------------------------- 3. tool schema */
@@ -250,6 +288,12 @@ section('5. ownership and concurrency (fake driver)')
   check('screenshot returns the file path', shot.ok && shot.imagePath === '/tmp/b1.png')
   const closed = await ops.run('browser_close', {}, A)
   check('close with no id closes the caller\'s current tab', closed.ok && records.every((r) => r.id !== 'b1'))
+  const stuck = [{ id: 'b7', owner: A, url: 'u', title: 't', project: '', rect: S.BROWSER_DEFAULT_RECT, createdAt: 1, updatedAt: 1 }]
+  const wedged = new BrowserAgentOps({ ...driver, records: () => stuck, read: () => new Promise(() => {}), close: async () => stuck.splice(0).length > 0 })
+  void wedged.run('browser_read', { id: 'b7' }, A)
+  const t1 = Date.now()
+  const shut = await Promise.race([wedged.run('browser_close', { id: 'b7' }, A), delay(1000).then(() => null)])
+  check('browser_close never waits behind a hung call on the same tab', shut?.ok === true && Date.now() - t1 < 500, JSON.stringify(shut))
 }
 
 /* ------------------------------------------------------------ 6. Electron */
@@ -310,6 +354,16 @@ const server = createServer((req, res) => {
         '<a href="/form?who=' + who + '&n=2">Next page</a>' })
     } else if (url.pathname === '/result') {
       page(res, { title: 'Result ' + who, body: '<h1>Hello, ' + (url.searchParams.get('name') || '') + '</h1><p>for agent ' + who + '</p>' })
+    } else if (url.pathname === '/login') {
+      page(res, { title: 'Login', body: '<h1>Sign in</h1><input type="password" name="pw" placeholder="Password"><input name="code" autocomplete="one-time-code" placeholder="Code">' })
+    } else if (url.pathname === '/framed') {
+      page(res, { title: 'Framed', body: '<h1>Framed page</h1><iframe src="http://127.0.0.1:1/"></iframe>' })
+    } else if (url.pathname === '/shadow') {
+      page(res, { title: 'Shadow', body: '<h1>Shadow page</h1><x-card></x-card><script>customElements.define("x-card", class extends HTMLElement { connectedCallback() { this.attachShadow({ mode: "open" }).innerHTML = "<button>Inside shadow</button><p>Shadow words</p>" } })</script>' })
+    } else if (url.pathname === '/keys') {
+      page(res, { title: 'Keys', body: '<h1>Keys page</h1><input id="f" autofocus><script>window.__got = []; addEventListener("keydown", function (e) { window.__got.push(e.code + (e.ctrlKey ? "+ctrl" : "")) }, true)</script>' })
+    } else if (url.pathname === '/hang') {
+      page(res, { title: 'Hang', body: '<h1>Hang page</h1><script>window.onload = function () { setTimeout(function () { for (;;) {} }, 50) }</script>' })
     } else { res.writeHead(404); res.end('no') }
   }, delay)
 })
@@ -329,6 +383,14 @@ app.whenReady().then(async () => {
     focusable: false, skipTaskbar: true, backgroundColor: '#101114', title: 'Forge browser check',
     webPreferences: { preload: cfg.preload, contextIsolation: true, sandbox: false } })
   service.setWindow(win)
+  // What main hands the renderer as page keys, recorded for the key checks.
+  const sentKeys = []
+  const realSend = win.webContents.send.bind(win.webContents)
+  win.webContents.send = (channel, ...args) => {
+    if (channel === 'browser:key') sentKeys.push(args[0])
+    return realSend(channel, ...args)
+  }
+  const tabOf = (id) => service.manager['tabs'].get(id)
   if (cfg.live) await win.loadFile(cfg.html)
   else await win.loadURL('about:blank')
   win.showInactive()
@@ -337,6 +399,25 @@ app.whenReady().then(async () => {
   control = async (cmd) => {
     if (cmd.cmd === 'infos') return service.manager.infos()
     if (cmd.cmd === 'eval') return await win.webContents.executeJavaScript(cmd.js)
+    if (cmd.cmd === 'tab') {
+      const t = tabOf(cmd.id)
+      return t ? { visible: t.visible, drawn: !!t.view && t.view.getVisible(), error: t.error } : { error: 'no tab' }
+    }
+    if (cmd.cmd === 'show') { service.manager.setBounds(cmd.id, { x: 0, y: 0, width: 400, height: 300 }); return true }
+    if (cmd.cmd === 'reloadHost') { win.webContents.reload(); return true }
+    if (cmd.cmd === 'crash') { tabOf(cmd.id).view.webContents.forcefullyCrashRenderer(); return true }
+    if (cmd.cmd === 'keys') { service.manager.setAppKeys(cmd.keys); return true }
+    if (cmd.cmd === 'press') {
+      const wc = tabOf(cmd.id).view.webContents
+      for (const ev of cmd.events) {
+        wc.sendInputEvent(ev)
+        await new Promise((r) => setTimeout(r, 40))
+      }
+      await new Promise((r) => setTimeout(r, 300))
+      return true
+    }
+    if (cmd.cmd === 'sentKeys') return sentKeys
+    if (cmd.cmd === 'tabEval') return await tabOf(cmd.id).view.webContents.executeJavaScript(cmd.js)
     if (cmd.cmd === 'composite') {
       const tabs = service.manager['tabs']
       const tab = [...tabs.values()].find((t) => t.visible && t.view)
@@ -552,6 +633,91 @@ if (!existsSync(electronExe)) {
     check('over the real pipe, a wrong token is refused', wrong[0]?.isError === true && (wrong[0]?.text ?? '').includes('token is wrong'), wrong[0]?.text)
     const [closed] = await Promise.all([agent(h, ready.linkFile, rex, [{ op: 'browser_close' }])])
     check("Rex's close with no id closes Rex's tab", !closed[0]?.isError && (closed[0]?.text ?? '').includes(`Closed tab ${idA}`), closed[0]?.text)
+
+    section('6b. Electron: iframes, shadow DOM, passwords, renderer reload, page keys, crash, hang')
+    const wait = (ms) => new Promise((res) => setTimeout(res, ms))
+    const tess = { id: 'pane-C', name: 'Tess', agent: 'claude' }
+    const tabIn = (r) => (r?.text ?? '').match(/tab (b\d+)/)?.[1]
+    const secret = 'hunter2secret'
+    const run1 = await agent(h, ready.linkFile, tess, [
+      { op: 'browser_open', args: { url: `${ready.base}/framed` } },
+      { op: 'browser_open', args: { url: `${ready.base}/shadow` } },
+      { op: 'browser_read' },
+      { op: 'browser_open', args: { url: `${ready.base}/login` } },
+      { op: 'browser_read' },
+      { op: 'browser_type', args: { ref: 1, text: secret } },
+      { op: 'browser_type', args: { ref: 2, text: '774411' } },
+      { op: 'browser_read' },
+      { op: 'browser_click', args: { ref: 1 } }
+    ])
+    const [, , , , , typedPw, typedCode, loginReadStep, clickPw] = run1
+    check('a page whose iframe fails still opens as loaded', !run1[0]?.isError && /Opened tab b\d+ \(yours\)/.test(run1[0]?.text ?? '') && !(run1[0]?.text ?? '').includes('did not load'), run1[0]?.text)
+    check('browser_read sees buttons and words inside an open shadow root', (run1[2]?.text ?? '').includes('button "Inside shadow"') && (run1[2]?.text ?? '').includes('Shadow words'), run1[2]?.text)
+    check(
+      'typing into the password and one-time-code fields worked',
+      (typedPw?.text ?? '').startsWith('Typed that into "Password"') && (typedCode?.text ?? '').startsWith('Typed that into "Code"'),
+      `${typedPw?.text}\n${typedCode?.text}`
+    )
+    const loginRead = loginReadStep?.text ?? ''
+    check('browser_read says a secret field is filled, and still names it', /input password "Password" \(filled in — hidden\)/.test(loginRead) && loginRead.includes('"Code" (filled in — hidden)'), loginRead)
+    check('browser_read never shows a typed password or one-time code', !loginRead.includes(secret) && !loginRead.includes('774411'), loginRead)
+    check('clicking a password field never echoes its value', (clickPw?.text ?? '').startsWith('Clicked') && !(clickPw?.text ?? '').includes(secret), clickPw?.text)
+    const pwValue = await app.send({ cmd: 'tabEval', id: tabIn(run1[3]), js: 'document.querySelector("input[type=password]").value' })
+    check('…while the field really holds what was typed', pwValue === secret, String(pwValue))
+
+    const loginId = tabIn(run1[3])
+    await app.send({ cmd: 'show', id: loginId })
+    const shownTab = await app.send({ cmd: 'tab', id: loginId })
+    check('a tab given bounds is drawn', shownTab.visible === true && shownTab.drawn === true, JSON.stringify(shownTab))
+    await app.send({ cmd: 'reloadHost' })
+    await wait(1000)
+    const afterReload = await app.send({ cmd: 'tab', id: loginId })
+    check('when the renderer reloads, the page comes off the screen', afterReload.visible === false && afterReload.drawn === false, JSON.stringify(afterReload))
+
+    const keysRun = await agent(h, ready.linkFile, tess, [{ op: 'browser_open', args: { url: `${ready.base}/keys` } }])
+    const keysId = tabIn(keysRun[0])
+    await app.send({ cmd: 'show', id: keysId })
+    await app.send({ cmd: 'keys', keys: { combos: ['Ctrl+Shift+O'], talk: ['F13'] } })
+    await app.send({
+      cmd: 'press',
+      id: keysId,
+      events: [
+        { type: 'keyDown', keyCode: 'O', modifiers: ['control', 'shift'] },
+        { type: 'keyUp', keyCode: 'O', modifiers: ['control', 'shift'] },
+        { type: 'keyDown', keyCode: 'A' },
+        { type: 'keyUp', keyCode: 'A' },
+        { type: 'keyDown', keyCode: 'F13' },
+        { type: 'keyUp', keyCode: 'F13' }
+      ]
+    })
+    const sent = (await app.send({ cmd: 'sentKeys' })) ?? []
+    const got = (await app.send({ cmd: 'tabEval', id: keysId, js: 'window.__got' })) ?? []
+    const keyWords = `sent to Forge: ${JSON.stringify(sent)}\npage saw: ${JSON.stringify(got)}`
+    check("a Forge shortcut pressed in a page is handed to Forge's renderer", sent.some((k) => k.type === 'keyDown' && k.code === 'KeyO' && k.ctrl && k.shift), keyWords)
+    check('…and the page never sees it', Array.isArray(got) && !got.some((c) => String(c).startsWith('KeyO')), keyWords)
+    check('the voice key is handed to Forge, down and up (a hold needs its key-up)', sent.filter((k) => k.code === 'F13').map((k) => k.type).join() === 'keyDown,keyUp', keyWords)
+    check('ordinary keys still reach the page and stay there', Array.isArray(got) && got.includes('KeyA') && !sent.some((k) => k.code === 'KeyA'), keyWords)
+
+    await app.send({ cmd: 'crash', id: keysId })
+    await wait(1500)
+    const crashed = ((await app.send({ cmd: 'infos' })) ?? []).find((s) => s.id === keysId)
+    check('a crashed page says so on its surface', /crashed/i.test(crashed?.error ?? ''), JSON.stringify(crashed))
+    const revived = await agent(h, ready.linkFile, tess, [{ op: 'browser_read', args: { id: keysId } }])
+    check('the next call on a crashed tab gets a fresh page', !revived[0]?.isError && (revived[0]?.text ?? '').includes('Keys page'), revived[0]?.text)
+
+    const hung = await agent(h, ready.linkFile, tess, [
+      { op: 'browser_open', args: { url: `${ready.base}/hang` } },
+      { op: 'browser_read' },
+      { op: 'browser_close' }
+    ])
+    const readMs = (hung[1]?.t1 ?? 0) - (hung[1]?.t0 ?? 0)
+    check('reading a hung page says "not responding" instead of waiting forever', (hung[1]?.text ?? '').includes('not responding') && readMs < 15_000, `${readMs}ms: ${hung[1]?.text}`)
+    check('browser_close frees a hung tab at once', !hung[2]?.isError && (hung[2]?.text ?? '').includes('Closed tab') && (hung[2]?.t1 ?? 0) - (hung[2]?.t0 ?? 0) < 5_000, hung[2]?.text)
+    // Tess's other tabs go, so only Zora's is left for the after-quit checks.
+    const tessIds = [tabIn(run1[0]), tabIn(run1[1]), loginId, keysId].filter(Boolean)
+    const tidy = await agent(h, ready.linkFile, tess, tessIds.map((id) => ({ op: 'browser_close', args: { id } })))
+    check("Tess's remaining tabs close", tessIds.length === 4 && tidy.every((r) => !r.isError), tidy.map((r) => r.text).join('\n'))
+
     await app.send({ cmd: 'quit' })
     await app.exited
     const { BrowserSurfaceStore } = await import('../electron/browser-panes/store.ts')

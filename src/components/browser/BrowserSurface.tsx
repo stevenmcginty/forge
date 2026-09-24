@@ -5,6 +5,7 @@ import { commandExe } from '@shared/agents'
 import { AgentBadge } from '../AgentBadge'
 import { Icon } from '../Icon'
 import { browserBridge } from './bridge'
+import { COVERS, TRIMS } from './overlays'
 import './browser.css'
 
 /**
@@ -21,7 +22,8 @@ import './browser.css'
  *              native page never chases a transform frame by frame, so it is
  *              never seen stretched or lagging behind its frame.
  *   covered    the deck's pop-ups (settings, sheets, the cheat sheet, a
- *              popover) are drawn by the renderer, i.e. *under* the page, so
+ *              popover, the title-bar menu, prompts — ./overlays.ts) are drawn
+ *              by the renderer, i.e. *under* the page, so
  *              while one overlaps the placeholder the view hides; the
  *              composer's palette and captions only trim the page's bottom
  *              edge up to where they start.
@@ -47,10 +49,6 @@ interface Props {
 
 /** How long the box must hold still before the page is shown on it. */
 const SETTLE_MS = 90
-/** Deck pop-ups that hide the page while they overlap it. */
-const COVERS = '.spop, .cheat, .sheet, .popover, .blight'
-/** Things that rise from the dock: the page's bottom edge stops above them. */
-const TRIMS = '.cpal, .csave, .crail, .barrive, .dtoast'
 
 function sameBounds(a: BrowserViewBounds | null, b: BrowserViewBounds | null): boolean {
   if (!a || !b) return a === b

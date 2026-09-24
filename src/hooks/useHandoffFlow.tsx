@@ -192,15 +192,22 @@ export function HandoffProvider({ children }: { children: ReactNode }): ReactNod
       if (!marked) return
       waiting.current.delete(record.id)
       const body = await window.forge.handoff.read(id, record.id)
+      const opened = act.openAgentPane(title, handoffTakePrompt(marked, body?.body ?? null), {
+        profileId: profile.id,
+        submit: want.autoSend
+      })
+      if (opened === null) {
+        // Refused — the session or tab limit, which the reducer has already put
+        // in the notice. The pack goes back to ready, so it is offered again
+        // once there is room, rather than sitting "taken" by nobody.
+        void window.forge.handoff.mark(id, record.id, { status: 'ready', toAgent: '', toTitle: '' })
+        return
+      }
       adopting.current.push({
         handoffId: record.id,
         title: title.slice(0, 40),
         before: new Set(ws.tabs.flatMap((t) => collectLeaves(t.root)).map((l) => l.id)),
         at: Date.now()
-      })
-      act.openAgentPane(title, handoffTakePrompt(marked, body?.body ?? null), {
-        profileId: profile.id,
-        submit: want.autoSend
       })
       act.setNotice(`Handed off to ${profile.name}`)
     },

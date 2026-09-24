@@ -23,7 +23,12 @@
   min-height: 0;
 }
 
-/* -------------------------------------------------------------- tab strip */
+/* -------------------------------------------------------------- tab strip
+ *
+ * The desktop no longer draws a tab strip (the wall strip replaced it), but
+ * Forge Web imports this file and its TabStrip.tsx still wears .tabstrip and
+ * .tab, so these rules stay until Forge Web moves off them.
+ */
 
 .tabstrip {
   display: flex;
@@ -133,50 +138,6 @@
   background: var(--accent-softer);
 }
 
-/* ------------------------------------------------------------ view toggle */
-
-.viewtoggle {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  flex: none;
-  margin-bottom: var(--s-2);
-  padding: 1px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--r-sm);
-}
-
-.viewtoggle__btn {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 20px;
-  border-radius: var(--r-xs);
-  color: var(--text-dim);
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
-}
-
-.viewtoggle__btn:hover {
-  color: var(--text-secondary);
-  background: var(--bg-hover);
-}
-
-.viewtoggle__btn[data-active='true'] {
-  color: var(--accent);
-  background: var(--accent-softer);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
-}
-
-/* Spring-loaded: a tab is being held over it and the view is about to flip. */
-.viewtoggle__btn[data-springing='true'] {
-  color: var(--accent-bright);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
 /* -------------------------------------------------------------------- tab */
 
 .tab {
@@ -240,63 +201,6 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tab-tint) 24%, transparent);
 }
 
-/* The terminal-text colour, said in the strip. Its own element rather than a
-   pseudo on the title, which truncates — a dot that disappears on a long tab
-   name is worse than no dot. */
-.tab__textdot {
-  position: relative;
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: var(--r-full);
-  background: var(--tab-text-tint);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tab-text-tint) 55%, transparent);
-}
-
-/*
- * Circular animation around the coloured dot when this tab is actively processing / working.
- * Uses an arc in the tab's session colour, orbiting the 8px session dot.
- */
-.tab__textdot::after {
-  content: '';
-  position: absolute;
-  inset: -4px;
-  border-radius: var(--r-full);
-  border: 1.5px solid transparent;
-  border-top-color: var(--tab-text-tint);
-  border-right-color: color-mix(in srgb, var(--tab-text-tint) 40%, transparent);
-  opacity: 0;
-  transition: opacity var(--dur-med) var(--ease-out);
-  pointer-events: none;
-}
-
-.tab[data-working='true'] .tab__textdot::after,
-.tab__textdot[data-working='true']::after {
-  opacity: 1;
-  animation: tab-dot-orbit 1100ms linear infinite;
-}
-
-@keyframes tab-dot-orbit {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tab[data-working='true'] .tab__textdot::after,
-  .tab__textdot[data-working='true']::after {
-    animation: none;
-    border-color: color-mix(in srgb, var(--tab-text-tint) 70%, transparent);
-  }
-}
-
-:root[data-reduced-motion='true'] .tab[data-working='true'] .tab__textdot::after,
-:root[data-reduced-motion='true'] .tab__textdot[data-working='true']::after {
-  animation: none;
-  border-color: color-mix(in srgb, var(--tab-text-tint) 70%, transparent);
-}
-
-
 .tab__menu-name {
   flex: 1;
   min-width: 0;
@@ -328,34 +232,6 @@
   flex: 1;
   min-width: 0;
   font-size: var(--t-sm);
-}
-
-.tab__title-input {
-  flex: 1;
-  min-width: 60px;
-  height: 19px;
-  padding: 0 var(--s-2);
-  font-size: var(--t-sm);
-  background: var(--bg-base);
-  border: 1px solid var(--accent-line);
-  border-radius: var(--r-xs);
-}
-
-/*
- * "This tab is on the wall." The tab is untouched — its panes were always in
- * the mosaic, because the mosaic is a view over every pane in the project — but
- * this is the one you dragged there and placed by hand, and the strip should
- * say so rather than leave you hunting for it among sixteen tiles.
- */
-.tab__wall {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 14px;
-  height: 14px;
-  border-radius: var(--r-xs);
-  color: var(--accent);
-  background: var(--accent-softer);
 }
 
 .tab__close {

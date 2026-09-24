@@ -22,7 +22,8 @@ export const CANVAS_DIR_ENV = 'FORGE_CANVAS_DIR'
 
 /** Same list as shared/hub.ts `canvasKindOf`. */
 const CANVAS_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.mp4', '.webm', '.md', '.txt', '.html']
-const MAX_BYTES = 512 * 1024 * 1024
+/** Same as electron/canvas-board.ts CANVAS_MAX_BYTES: anything bigger could be posted but never shown. */
+const MAX_BYTES = 256 * 1024 * 1024
 
 export const SHOW_ON_BOARD_TOOL = {
   name: 'show_on_board',
@@ -90,7 +91,7 @@ export function postToCanvas(src, title) {
   } catch {
     return { ok: false, error: `There is no file at ${from}.` }
   }
-  if (size > MAX_BYTES) return { ok: false, error: 'That file is over 512 MB — too big for the board.' }
+  if (size > MAX_BYTES) return { ok: false, error: 'That file is over 256 MB — too big for the board.' }
   try {
     mkdirSync(dir, { recursive: true })
   } catch (err) {

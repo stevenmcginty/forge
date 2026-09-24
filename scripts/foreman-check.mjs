@@ -406,6 +406,43 @@ try {
     host.dispose()
   }
 
+  /* ------------------------------------------------- the driven pane closed */
+
+  console.log('\nthe driven pane is closed mid-job')
+  {
+    let gone = false
+    const { host, writes } = harness(answerWith('/gaffer Build a sweet shop site.'), {
+      paneInfo: (paneId) =>
+        (paneId === PANE && !gone) || paneId === HIRED
+          ? { id: paneId, cwd: 'C:\\work\\sweets', projectName: 'sweets', title: 'Claude', sessionId: '', agent: true }
+          : null
+    })
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    const before = writes.length
+    gone = true
+    const sent = await host.callTool(PANE, 'send_to_pane', { text: 'carry on' })
+    ok(/has been closed/.test(sent), 'a send to the closed driven pane says it is gone', sent)
+    ok(writes.length === before, 'and types nothing', String(writes.length - before))
+    ok(host.stateOf(PANE).status === 'off', 'and the job is stopped rather than left billing', host.stateOf(PANE).status)
+    host.dispose()
+  }
+  {
+    let gone = false
+    const { host } = harness(answerWith('/gaffer Build a sweet shop site.'), {
+      paneInfo: (paneId) =>
+        paneId === PANE && !gone
+          ? { id: paneId, cwd: 'C:\\work\\sweets', projectName: 'sweets', title: 'Claude', sessionId: '', agent: true }
+          : null
+    })
+    host.start({ paneId: PANE, seed: 'a sweet shop' })
+    await settle()
+    gone = true
+    const read = await host.callTool(PANE, 'read_pane', {})
+    ok(/has been closed/.test(read) && host.stateOf(PANE).status === 'off', 'so does a read of it', read)
+    host.dispose()
+  }
+
   /* ------------------------------------------------------------- finishing */
 
   console.log('\nfinishing')

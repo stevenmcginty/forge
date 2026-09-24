@@ -1,13 +1,28 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { session as electronSession, WebContentsView, type BaseWindow, type Session, type WebContents } from 'electron'
+import {
+  clipboard,
+  Menu,
+  session as electronSession,
+  WebContentsView,
+  type BaseWindow,
+  type ContextMenuParams,
+  type Input,
+  type MenuItemConstructorOptions,
+  type Session,
+  type WebContents
+} from 'electron'
 import {
   ARTIFACT_PARTITION,
   BROWSER_DEFAULT_RECT,
   BROWSER_PARTITION,
+  USER_OWNER,
+  browserKeyCombo,
   isArtifactUrl,
   normaliseBrowserUrl,
+  type BrowserAppKeys,
   type BrowserHistoryAction,
+  type BrowserPageKey,
   type BrowserOwner,
   type BrowserRect,
   type BrowserSurfaceInfo,
@@ -68,7 +83,14 @@ const HIDDEN_SIZE = { width: 1280, height: 800 }
 const MOUSE_ACK_MS = 2_500
 /** One screenshot route's budget before trying the other. */
 const SHOT_MS = 8_000
-
+/**
+ * A page script or input event that has not answered in this long never will
+ * on its own: a busy loop, or a blocking alert()/confirm() waiting for a hand.
+ * Without a bound the tab's queue waits forever, browser_close included.
+ */
+const PAGE_MS = 10_000
+const NOT_RESPONDING =
+  'the page is not responding — a script on it is busy, or it is showing a dialog (alert, confirm) that someone has to close. browser_close still works'
 interface Tab {
   view: WebContentsView | null
   visible: boolean
@@ -94,6 +116,8 @@ export interface BrowserManagerDeps {
   hostZoom?: () => number
   /** `<data dir>\canvas` — what artifact tabs may show. Without it they show nothing. */
   artifactRoot?: string
+  /** A key that belongs to Forge was pressed in a page. Sent on to the renderer. */
+  onAppKey?: (key: BrowserPageKey, takeFocus: boolean) => void
 }
 
 function errText(err: unknown): string {
@@ -183,6 +207,11 @@ export class BrowserManager implements BrowserDriver {
   private readonly tabs = new Map<string, Tab>()
   private window: BaseWindow | null = null
   private changeTimer: ReturnType<typeof setTimeout> | null = null
+  /** Forge's own keys (setAppKeys): taken from a page and handed to the renderer. */
+  private appCombos = new Set<string>()
+  private appTalk = new Set<string>()
+  /** Modifier voice keys held down in a page right now. */
+  private readonly talkHeld = new Set<string>()
 
   constructor(deps: BrowserManagerDeps) {
     this.deps = deps
@@ -211,6 +240,95 @@ export class BrowserManager implements BrowserDriver {
         tab.view.setVisible(tab.visible)
       }
     }
+  }
+
+  /**
+   * Take every view off the screen. For a renderer that reloaded or died: its
+   * surfaces never ran their cleanups, and those that mount again re-show theirs.
+   */
+  hideAll(): void {
+    for (const tab of this.tabs.values()) {
+      tab.visible = false
+      if (tab.view && !tab.view.webContents.isDestroyed()) tab.view.setVisible(false)
+    }
+  }
+
+  /* ----------------------------------------------------------------- keys */
+
+  /** The renderer's current keymap: which keys a page must hand back. */
+  setAppKeys(keys: BrowserAppKeys | null | undefined): void {
+    const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((k): k is string => typeof k === 'string' && k.length > 0 && k.length < 40).slice(0, 400) : [])
+    this.appCombos = new Set(list(keys?.combos))
+    this.appTalk = new Set(list(keys?.talk))
+    this.talkHeld.clear()
+  }
+
+  /**
+   * A page has the keyboard, so the renderer's own listeners never see a key.
+   * Forge's shortcuts are taken from the page and replayed in the renderer; a
+   * voice key is replayed too, down and up, but only read — the page still
+   * gets it, so Right Ctrl + C still copies in the page.
+   */
+  private pageKey(event: { preventDefault: () => void }, input: Input): void {
+    if ((input.type !== 'keyDown' && input.type !== 'keyUp') || input.isComposing) return
+    const key: BrowserPageKey = {
+      type: input.type,
+      code: input.code,
+      key: input.key,
+      ctrl: input.control,
+      alt: input.alt,
+      shift: input.shift,
+      meta: input.meta,
+      repeat: input.isAutoRepeat,
+      location: input.location
+    }
+    const send = (takeFocus = false): void => this.deps.onAppKey?.(key, takeFocus)
+    // Never swallowed: Chromium drops the key-up of a key-down taken from a
+    // page, and a hold-to-talk that never hears its key-up never ends.
+    if (this.appTalk.has(input.code)) {
+      if (/^(Control|Shift|Alt|Meta)(Left|Right)$/.test(input.code)) {
+        if (input.type === 'keyDown') this.talkHeld.add(input.code)
+        else this.talkHeld.delete(input.code)
+      }
+      send()
+      return
+    }
+    if (input.type !== 'keyDown') return
+    const combo = browserKeyCombo(key)
+    if (combo && this.appCombos.has(combo)) {
+      // A shortcut hands the keyboard back to Forge too: whatever it opens
+      // (the hub's text box, settings) is where the next keys should go.
+      event.preventDefault()
+      send(true)
+      return
+    }
+    // A voice modifier is down: the gesture must hear another key land, or
+    // Right Ctrl + C would count as holding Right Ctrl. Read only.
+    if (this.talkHeld.size) send()
+  }
+
+  /** Right-click in a page: the few things a browser's menu is used for. */
+  private pageMenu(id: string, wc: WebContents, p: ContextMenuParams, artifact: boolean): void {
+    const items: MenuItemConstructorOptions[] = []
+    const link = !artifact && p.linkURL ? normaliseBrowserUrl(p.linkURL) : null
+    if (link && !link.error && link.url) {
+      const target = link.url
+      items.push(
+        { label: 'Open link in new tab', click: () => void this.open(USER_OWNER, target, '', this.store.get(id)?.project ?? '').catch(() => undefined) },
+        { label: 'Copy link address', click: () => clipboard.writeText(target) },
+        { type: 'separator' }
+      )
+    }
+    if (p.isEditable) items.push({ label: 'Cut', enabled: p.editFlags.canCut, click: () => wc.cut() })
+    items.push({ label: 'Copy', enabled: p.editFlags.canCopy, click: () => wc.copy() })
+    if (p.isEditable) items.push({ label: 'Paste', enabled: p.editFlags.canPaste, click: () => wc.paste() })
+    items.push({ label: 'Select all', click: () => wc.selectAll() }, { type: 'separator' })
+    items.push(
+      { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
+      { label: 'Reload', click: () => wc.reload() }
+    )
+    const win = this.window
+    Menu.buildFromTemplate(items).popup(win && !win.isDestroyed() ? { window: win } : {})
   }
 
   /* ---------------------------------------------------------------- state */
@@ -249,7 +367,9 @@ export class BrowserManager implements BrowserDriver {
     const record = this.store.get(id)
     if (!record) return null
     let tab = this.tabs.get(id)
-    if (tab?.view && !tab.view.webContents.isDestroyed()) return tab.view
+    if (tab?.view && !tab.view.webContents.isDestroyed() && !tab.view.webContents.isCrashed()) return tab.view
+    // A crashed page is not destroyed, just dead: a fresh view reloads it.
+    if (tab?.view) this.dropView(tab)
 
     const artifact = isArtifactUrl(record.url)
     const partition = artifact ? ARTIFACT_PARTITION : BROWSER_PARTITION
@@ -269,13 +389,35 @@ export class BrowserManager implements BrowserDriver {
     const wc = view.webContents
     wc.setBackgroundThrottling(false)
 
-    // A popup becomes a navigation of this same tab: agents get predictable
-    // pages, and nothing opens a window Forge does not manage.
+    // A new-tab link becomes a navigation of this same tab: agents get
+    // predictable pages, and nothing opens a window Forge does not manage. The
+    // one exception is a popup a script opened with a size — "Sign in with
+    // Google" and friends — which only works as a real window that keeps
+    // window.opener, so it gets one, in this same signed-in session.
     // An artifact view opens nothing and goes nowhere but other canvas files.
-    wc.setWindowOpenHandler(({ url }) => {
+    wc.setWindowOpenHandler(({ url, disposition }) => {
       const { url: safe, error } = normaliseBrowserUrl(url)
-      if (!artifact && !error && safe) void wc.loadURL(safe).catch(() => undefined)
+      if (artifact || error || !safe) return { action: 'deny' }
+      if (disposition === 'new-window') {
+        const parent = this.window && !this.window.isDestroyed() ? this.window : undefined
+        return {
+          action: 'allow',
+          // The size is the page's own (window.open's features).
+          overrideBrowserWindowOptions: { ...(parent ? { parent } : {}), autoHideMenuBar: true, backgroundColor: '#ffffff' }
+        }
+      }
+      void wc.loadURL(safe).catch(() => undefined)
       return { action: 'deny' }
+    })
+    wc.on('before-input-event', (event, input) => this.pageKey(event, input))
+    wc.on('context-menu', (_e, params) => this.pageMenu(id, wc, params, artifact))
+    // A dead renderer leaves a blank frame and nothing saying why: say it, and
+    // let the next use (Reload, or an agent's call) make a fresh view.
+    wc.on('render-process-gone', (_e, details) => {
+      const tab = this.tabs.get(id)
+      if (!tab || tab.view !== view || details.reason === 'clean-exit') return
+      tab.error = `Page crashed (${details.reason})`
+      this.changed()
     })
     wc.on('will-navigate', (event, url) => {
       if (artifact ? !isArtifactUrl(url) : !/^(https?:|about:blank)/i.test(url)) event.preventDefault()
@@ -433,24 +575,36 @@ export class BrowserManager implements BrowserDriver {
     if (failure) return { id, text: `Opened tab ${id}, but ${hostOf(url)} did not load: ${failure}. It is your tab; try browser_open again with id "${id}" or another address.` }
     return {
       id,
-      text: `Opened tab ${id} (yours): ${this.where(wc)}. browser_read is the next call — it lists what you can click, numbered.`
+      text: `Opened tab ${id} (yours): ${this.where(wc)}. browser_read is the next call — it lists what you can click, numbered. If you are one of several sub-agents in one pane, pass id "${id}" on every call: you share one current tab.`
     }
   }
 
   /** ensureView has started a load; wait for it, bounded. '' = it loaded. */
   private async firstLoad(wc: WebContents): Promise<string> {
     let failure = ''
+    let stop = (): void => undefined
     await Promise.race([
       new Promise<void>((res) => {
-        const done = (): void => res()
-        wc.once('did-finish-load', done)
-        wc.once('did-fail-load', (_e, code, desc) => {
+        // Only the main frame's load counts: a failing ad or widget iframe is
+        // not the page failing.
+        const failed = (_e: unknown, code: number, desc: string, _url: string, isMainFrame: boolean): void => {
+          if (!isMainFrame) return
           if (code !== -3) failure = `${desc} (${code})`
+          stop()
+        }
+        stop = (): void => {
+          if (!wc.isDestroyed()) {
+            wc.off('did-finish-load', stop)
+            wc.off('did-fail-load', failed)
+          }
           res()
-        })
+        }
+        wc.on('did-finish-load', stop)
+        wc.on('did-fail-load', failed)
       }),
       sleep(NAV_TIMEOUT_MS)
     ])
+    stop()
     await settle(wc, 2_000)
     return failure
   }
@@ -510,8 +664,18 @@ export class BrowserManager implements BrowserDriver {
     return (await wc.debugger.sendCommand(method, params ?? {})) as T
   }
 
+  /** A CDP call that must answer within PAGE_MS, or the page is called not responding. */
+  private async bounded<T = unknown>(wc: WebContents, method: string, params?: Record<string, unknown>): Promise<T> {
+    const answer = await within(
+      this.cdp<T>(wc, method, params).then((value) => ({ value })),
+      PAGE_MS
+    )
+    if (!answer) throw new Error(NOT_RESPONDING)
+    return answer.value
+  }
+
   private async evaluate<T>(wc: WebContents, expression: string): Promise<T> {
-    const res = await this.cdp<{ result?: { value?: T }; exceptionDetails?: { text?: string; exception?: { description?: string } } }>(
+    const res = await this.bounded<{ result?: { value?: T }; exceptionDetails?: { text?: string; exception?: { description?: string } } }>(
       wc,
       'Runtime.evaluate',
       { expression, returnByValue: true, awaitPromise: true, userGesture: true }
@@ -579,7 +743,7 @@ export class BrowserManager implements BrowserDriver {
   }
 
   private async key(wc: WebContents, key: string, code: string, vk: number, text?: string): Promise<void> {
-    await this.cdp(wc, 'Input.dispatchKeyEvent', {
+    await this.bounded(wc, 'Input.dispatchKeyEvent', {
       type: 'keyDown',
       key,
       code,
@@ -587,7 +751,7 @@ export class BrowserManager implements BrowserDriver {
       nativeVirtualKeyCode: vk,
       ...(text ? { text, unmodifiedText: text } : {})
     })
-    await this.cdp(wc, 'Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk })
+    await this.bounded(wc, 'Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk })
   }
 
   async type(id: string, ref: number | null, text: string, submit: boolean): Promise<string> {
@@ -605,12 +769,12 @@ export class BrowserManager implements BrowserDriver {
     }
     try {
       if (text.length > TYPE_KEYWISE_MAX) {
-        await this.cdp(wc, 'Input.insertText', { text })
+        await this.bounded(wc, 'Input.insertText', { text })
       } else {
         for (const ch of text) {
           if (ch === '\n') await this.key(wc, 'Enter', 'Enter', 13, '\r')
-          else await this.cdp(wc, 'Input.dispatchKeyEvent', { type: 'keyDown', key: ch, text: ch, unmodifiedText: ch })
-          if (ch !== '\n') await this.cdp(wc, 'Input.dispatchKeyEvent', { type: 'keyUp', key: ch })
+          else await this.bounded(wc, 'Input.dispatchKeyEvent', { type: 'keyDown', key: ch, text: ch, unmodifiedText: ch })
+          if (ch !== '\n') await this.bounded(wc, 'Input.dispatchKeyEvent', { type: 'keyUp', key: ch })
           await sleep(TYPE_DELAY_MS)
         }
       }

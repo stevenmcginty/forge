@@ -76,6 +76,8 @@ import {
 import { handleSignal, startMirror, stopMirror } from '@/lib/mirror'
 import { startWebMirror, stopWebMirror } from '@/lib/web-mirror'
 import { terminalHost } from '@/lib/terminals'
+import { BriefDelivery, type BriefProbe } from '@/lib/briefDelivery'
+import { CloseConfirmHost } from '@/components/CloseConfirm'
 import { confirmProjectServer } from '@/lib/devicePreview'
 import { setLiveSettings } from '@/lib/livesettings'
 
@@ -413,8 +415,19 @@ type Action =
    * A tab of hired agent panes, in a named project, without moving the human.
    * See `hireTab` on Actions.
    */
-  | { type: 'hireTab'; projectId: string; profileId: string; count: number; title: string }
-  | { type: 'openToolPane'; profileId: string; title: string; text: string; submit: boolean; paste?: boolean }
+  | { type: 'hireTab'; projectId: string; profileId: string; count: number; title: string; paneIds?: string[] }
+  | {
+      type: 'openToolPane'
+      profileId: string
+      title: string
+      text: string
+      submit: boolean
+      paste?: boolean
+      /** The new pane's id, when the caller has to know it (openAgentPane). */
+      paneId?: string
+      /** Another project than the one on screen — a pane agent's own. */
+      projectId?: string
+    }
   | { type: 'drainTypes'; paneIds: string[] }
   | { type: 'closeTab'; tabId: string }
   | { type: 'selectTab'; tabId: string }
@@ -936,7 +949,12 @@ function reducer(state: AppState, action: Action): AppState {
       if (ws.tabs.length >= MAX_TABS_PER_PROJECT) {
         return { ...state, notice: `A project holds at most ${MAX_TABS_PER_PROJECT} tabs` }
       }
-      const leaves = Array.from({ length: count }, () => makeLeaf(action.profileId, ''))
+      // The caller's ids when it minted them (so it can name the hires), else fresh ones.
+      const leaves = Array.from({ length: count }, (_, i) => {
+        const leaf = makeLeaf(action.profileId, '')
+        const id = action.paneIds?.[i]
+        return id ? { ...leaf, id } : leaf
+      })
       // Even columns: a/b nested rightwards with the ratio that leaves each
       // pane the same width as the last.
       let root: LayoutNode = leaves[leaves.length - 1]
@@ -966,19 +984,38 @@ function reducer(state: AppState, action: Action): AppState {
       if (totalPanes(state) >= MAX_SESSIONS) {
         return { ...state, notice: `Session limit reached (${MAX_SESSIONS})` }
       }
-      if (!state.activeProjectId) {
+      const projectId = action.projectId ?? state.activeProjectId
+      if (!projectId) {
         return { ...state, notice: 'Open a project first — a command needs somewhere to run' }
       }
-      if (workspaceOf(state, state.activeProjectId).tabs.length >= MAX_TABS_PER_PROJECT) {
+      const here = projectId === state.activeProjectId
+      if (!here && !state.workspaces[projectId]) {
+        return { ...state, notice: 'That project is not open — no pane opened' }
+      }
+      if (workspaceOf(state, projectId).tabs.length >= MAX_TABS_PER_PROJECT) {
         return { ...state, notice: `A project holds at most ${MAX_TABS_PER_PROJECT} tabs` }
       }
-      const leaf = makeLeaf(action.profileId, '')
+      const minted = makeLeaf(action.profileId, '')
+      const leaf = action.paneId ? { ...minted, id: action.paneId } : minted
       const tab: TerminalTab = {
         id: makeId('tab'),
         title: action.title,
         root: leaf,
         activePaneId: leaf.id,
-        textColor: nextTextColor(workspaceOf(state, state.activeProjectId).tabs)
+        textColor: nextTextColor(workspaceOf(state, projectId).tabs)
+      }
+      // Nothing to type is nothing to queue: an agent opened without a brief.
+      const pendingTypes = action.text
+        ? [
+            ...state.pendingTypes,
+            { paneId: leaf.id, text: action.text, submit: action.submit, ...(action.paste ? { paste: true } : {}) }
+          ]
+        : state.pendingTypes
+      if (!here) {
+        // A pane agent in another project asked for this one. It opens there,
+        // beside the agent that asked, and Steve's view stays exactly where it
+        // is: no project switch, no tab switch, no view change.
+        return { ...mapWorkspace(state, projectId, (ws) => ({ ...ws, tabs: [...ws.tabs, tab] })), pendingTypes }
       }
       const next = mapActiveWorkspace(state, (ws) => ({
         ...ws,
@@ -987,10 +1024,7 @@ function reducer(state: AppState, action: Action): AppState {
       }))
       return {
         ...next,
-        pendingTypes: [
-          ...next.pendingTypes,
-          { paneId: leaf.id, text: action.text, submit: action.submit, ...(action.paste ? { paste: true } : {}) }
-        ],
+        pendingTypes,
         // The command is in a terminal, and the terminal is not the page you
         // are looking at. Leaving settings open would hide the thing that just
         // happened behind the button that caused it.
@@ -1388,7 +1422,7 @@ export interface AppActions {
    * without switching project or tab. Foreman's hires go here. Refusals (limits,
    * unknown project) land in `notice`, as every other layout refusal does.
    */
-  hireTab(projectId: string, profileId: string, count: number, title: string): void
+  hireTab(projectId: string, profileId: string, count: number, title: string, paneIds?: string[]): void
   /**
    * Open a shell pane in the current project with `command` already typed into
    * it. Whether it also presses Enter is the caller's call: the update buttons
@@ -1411,8 +1445,17 @@ export interface AppActions {
    * names the profile the person picked out of the menu, and submits only when
    * the tab's `handoffAutoSend` says it may. Absent, both answers are the ones
    * above — the project's default agent, and never Enter.
+   *
+   * `anchorPaneId` is a pane agent asking: the new pane opens in *that* pane's
+   * project, not the one on screen (an unknown pane falls back to the one on
+   * screen). Answers the new pane's id, or null when it was refused — the
+   * session or tab limit, which the reducer also puts in the notice.
    */
-  openAgentPane(title: string, prompt: string, opts?: { profileId?: string; submit?: boolean }): void
+  openAgentPane(
+    title: string,
+    prompt: string,
+    opts?: { profileId?: string; submit?: boolean; anchorPaneId?: string }
+  ): string | null
   closeTab(tabId: string): void
   selectTab(tabId: string): void
   renameTab(tabId: string, title: string): void
@@ -1527,6 +1570,13 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     projects: '' as string,
     workspaces: new Map<string, string>()
   })
+  /**
+   * The state as of the last render, for the callbacks that must not answer
+   * from a stale memo: openAgentPane's limits, and the type drain's "is this
+   * pane still anywhere?".
+   */
+  const liveStateRef = useRef(state)
+  liveStateRef.current = state
 
   /* ------------------------------------------------------------ hydrate */
 
@@ -1573,16 +1623,6 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     dispatch({ type: 'drainKills', ids })
   }, [state.pendingKills])
 
-  /**
-   * When a new agent pane counts as ready for a pasted brief: it has printed at
-   * least this much since spawn (a PowerShell prompt plus an echoed command is
-   * well under 1 KiB; every agent's welcome banner is several) and has then
-   * been silent this long (longer than the busy heuristic's own quiet, so a
-   * banner still being drawn does not count as finished).
-   */
-  const BRIEF_READY_BYTES = 1500
-  const BRIEF_READY_QUIET_MS = 1500
-
   /* ------------------------------------------------------- type draining
    *
    * Deliver each queued command once its pane has a live shell.
@@ -1597,75 +1637,105 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
    * into that window lands in the input buffer *before* the prompt and is
    * repainted over. A fifth of a second is the difference between a command
    * you can read and a smear.
+   *
+   * What goes in when, and what is given up on, is src/lib/briefDelivery.ts:
+   * the record of what was delivered lives there, in a ref that outlives every
+   * run of this effect, because the queue changing mid-delivery re-runs it and
+   * a record local to one run is how a brief got pasted twice.
    */
+  const briefs = useRef(new BriefDelivery<PendingType>())
   useEffect(() => {
     if (state.pendingTypes.length === 0) return
     const queue = state.pendingTypes
+    const delivery = briefs.current
     let cancelled = false
-    const delivered: string[] = []
-    // A pane that never comes up — a shell that failed to spawn — must not
-    // leave an entry in the queue forever, re-running this effect on every
-    // render for the rest of the session.
-    const deadline = Date.now() + 30_000
+    let draining = false
+    // Scheduled in *this* run and not typed yet. A re-run cancels these and
+    // simply schedules them again — nothing of theirs has reached the pane.
+    const inFlight = new Set<PendingType>()
+
+    const probe = (paneId: string): BriefProbe => {
+      const runtime = terminalHost.runtime(paneId)
+      const r = terminalHost.readiness(paneId)
+      return {
+        status: runtime.status,
+        outputBytes: r.outputBytes,
+        quietForMs: r.quietForMs,
+        exists: tabOwning(liveStateRef.current, paneId) !== null
+      }
+    }
 
     const tick = (): void => {
       if (cancelled) return
       for (const pending of queue) {
-        if (delivered.includes(pending.paneId)) continue
-        const runtime = terminalHost.runtime(pending.paneId)
+        if (inFlight.has(pending)) continue
         // A pasted brief is for an agent, and "the shell is live" is not "the
         // agent is listening": between the echoed bootstrap command and the
         // agent's banner there is a silent gap while node loads, and a paste
         // into it lands at the PowerShell prompt — which runs it. So a paste
         // waits until the pane has printed a banner's worth and then gone
-        // quiet. See terminalHost.readiness. The deadline is the backstop: a
-        // pane that never says enough still gets its brief rather than losing
-        // it, on the strength of the bracketed paste being harmless anywhere
-        // an agent is actually up.
-        if (runtime.status === 'live' && pending.paste && Date.now() < deadline) {
-          const r = terminalHost.readiness(pending.paneId)
-          if (r.outputBytes < BRIEF_READY_BYTES || r.quietForMs < BRIEF_READY_QUIET_MS) continue
+        // quiet (terminalHost.readiness), and a pane that never does is
+        // refused its brief rather than handed it: past the deadline it is
+        // most likely a shell whose agent failed to start.
+        const step = delivery.step(pending, pending.paste === true, probe(pending.paneId), Date.now())
+        if (step === 'skip' || step === 'wait') continue
+        if (step === 'drop') {
+          delivery.markDone(pending)
+          continue
         }
-        if (runtime.status === 'live') {
-          delivered.push(pending.paneId)
-          setTimeout(() => {
-            if (cancelled) return
-            // A pasted brief goes down whole; a typed command goes through the
-            // draft so "Take back typed" can rescue it. See PendingType.paste.
-            if (pending.paste) {
-              // Focus, a frame, then the text — the DECSET 1004 race documented
-              // on TerminalPane's file drop. An agent that has just been told
-              // the terminal lost focus will drop the paste that follows it.
-              terminalHost.focus(pending.paneId)
-              requestAnimationFrame(() => {
-                if (cancelled) return
-                terminalHost.paste(pending.paneId, pending.text)
-                // A pasted brief can be submitted too, and one caller asks for
-                // it: a handoff on a tab with auto-send on. Another frame first
-                // — the bracketed paste and its terminator have to be down the
-                // pipe before the newline that submits them.
-                if (pending.submit) {
-                  requestAnimationFrame(() => {
-                    if (!cancelled) terminalHost.submit(pending.paneId)
-                  })
-                }
-              })
-              return
-            }
-            if (!terminalHost.type(pending.paneId, pending.text)) return
-            terminalHost.focus(pending.paneId)
-            if (pending.submit) terminalHost.submit(pending.paneId)
-          }, 220)
-        } else if (runtime.status === 'exited' || runtime.status === 'error') {
-          delivered.push(pending.paneId)
+        if (step === 'refuse') {
+          delivery.markDone(pending)
+          dispatch({
+            type: 'notice',
+            message: 'A new agent pane did not come up in 30 seconds, so its brief was not pasted — at a bare shell prompt every line would run'
+          })
+          continue
         }
-      }
-      if (delivered.length === queue.length || Date.now() > deadline) {
-        clearInterval(timer)
-        // Drained after the settle timeouts above have had their chance to
-        // fire; dispatching immediately would re-render and cancel them.
+        inFlight.add(pending)
         setTimeout(() => {
-          if (!cancelled) dispatch({ type: 'drainTypes', paneIds: queue.map((p) => p.paneId) })
+          if (cancelled) return
+          // A pasted brief goes down whole; a typed command goes through the
+          // draft so "Take back typed" can rescue it. See PendingType.paste.
+          if (pending.paste) {
+            // Focus, a frame, then the text — the DECSET 1004 race documented
+            // on TerminalPane's file drop. An agent that has just been told
+            // the terminal lost focus will drop the paste that follows it.
+            terminalHost.focus(pending.paneId)
+            requestAnimationFrame(() => {
+              if (cancelled) return
+              // Recorded the moment it goes in, never at scheduling time: a
+              // run cancelled before this frame has typed nothing, and the next
+              // run must still deliver it.
+              delivery.markDone(pending)
+              inFlight.delete(pending)
+              terminalHost.paste(pending.paneId, pending.text)
+              // A pasted brief can be submitted too, and one caller asks for
+              // it: a handoff on a tab with auto-send on. Another frame first
+              // — the bracketed paste and its terminator have to be down the
+              // pipe before the newline that submits them. Not gated on
+              // `cancelled`: the brief is in, and a re-run must not leave it
+              // typed but unsent.
+              if (pending.submit) requestAnimationFrame(() => terminalHost.submit(pending.paneId))
+            })
+            return
+          }
+          delivery.markDone(pending)
+          inFlight.delete(pending)
+          if (!terminalHost.type(pending.paneId, pending.text)) return
+          terminalHost.focus(pending.paneId)
+          if (pending.submit) terminalHost.submit(pending.paneId)
+        }, 220)
+      }
+      // Drained once nothing is mid-delivery, so the settle timeouts above have
+      // had their chance to fire; dispatching earlier would re-render and
+      // cancel them. Entries still waiting — a pane in a project nobody has
+      // opened yet — stay queued for the next run.
+      const finished = queue.filter((p) => delivery.isDone(p))
+      if (!draining && inFlight.size === 0 && finished.length > 0) {
+        draining = true
+        if (finished.length === queue.length) clearInterval(timer)
+        setTimeout(() => {
+          if (!cancelled) dispatch({ type: 'drainTypes', paneIds: finished.map((p) => p.paneId) })
         }, 400)
       }
     }
@@ -1961,6 +2031,18 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         })
       },
       openAgentPane: (title, prompt, opts) => {
+        // Read live, not from this memo's closure: the memo does not follow the
+        // workspaces, and the limits below are about the panes open right now.
+        const live = liveStateRef.current
+        const owner = opts?.anchorPaneId ? tabOwning(live, opts.anchorPaneId) : null
+        const projectId = owner?.projectId ?? live.activeProjectId
+        const refused =
+          !projectId ||
+          totalPanes(live) >= MAX_SESSIONS ||
+          workspaceOf(live, projectId).tabs.length >= MAX_TABS_PER_PROJECT
+        // Minted here rather than in the reducer, so the caller can be told
+        // which pane it just opened.
+        const paneId = makeId('pane')
         // The project's own default agent, not a shell and not a fixed profile:
         // a brief written for "an agent" belongs to whichever one this project
         // works with, and a Codex project should not have Claude opened at it.
@@ -1968,10 +2050,12 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         const wanted = opts?.profileId
         dispatch({
           type: 'openToolPane',
+          paneId,
+          ...(projectId && projectId !== live.activeProjectId ? { projectId } : {}),
           profileId:
             wanted && state.settings.agentProfiles.some((p) => p.id === wanted)
               ? wanted
-              : defaultProfileFor(activeProjectId),
+              : defaultProfileFor(projectId),
           title: title.slice(0, 40),
           text: prompt,
           // Typed, never submitted — the same contract dictation, task cards and
@@ -1980,9 +2064,12 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           submit: opts?.submit === true,
           paste: true
         })
+        // A refusal still went through the reducer, which says why in the notice.
+        return refused ? null : paneId
       },
       closeTab: (tabId) => dispatch({ type: 'closeTab', tabId }),
-      hireTab: (projectId, profileId, count, title) => dispatch({ type: 'hireTab', projectId, profileId, count, title }),
+      hireTab: (projectId, profileId, count, title, paneIds) =>
+        dispatch({ type: 'hireTab', projectId, profileId, count, title, ...(paneIds ? { paneIds } : {}) }),
       selectTab: (tabId) => dispatch({ type: 'selectTab', tabId }),
       renameTab: (tabId, title) => dispatch({ type: 'renameTab', tabId, title }),
       paintTab: (tabId, patch) => dispatch({ type: 'paintTab', tabId, patch }),
@@ -2348,7 +2435,13 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
 
   const value = useMemo<Ctx>(() => ({ state, actions }), [state, actions])
 
-  return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>
+  return (
+    <AppStateContext.Provider value={value}>
+      {children}
+      {/* The tile X's "close a working agent?" — one host for every caller. */}
+      <CloseConfirmHost />
+    </AppStateContext.Provider>
+  )
 }
 
 /* ------------------------------------------------------------- selectors */

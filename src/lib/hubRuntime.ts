@@ -52,9 +52,10 @@ function emitFocus(detail: HubFocusDetail): void {
 }
 
 /**
- * How to switch the terminals between tabs and the Wall. The voice tools pass
- * one built on the voice agent's own `set_view` action (tools-hub.ts), so a
- * spoken "go to the wall" lands exactly where the Tabs | Wall switch would.
+ * How to switch the terminals between Full screen ('tabs') and the Wall
+ * ('mosaic'). The voice tools pass one built on the voice agent's own
+ * `set_view` action (tools-hub.ts), so a spoken "go to the wall" lands exactly
+ * where the Wall button or Ctrl+G would.
  */
 export interface NavViews {
   setViewMode(mode: 'tabs' | 'mosaic'): void
@@ -76,7 +77,7 @@ export function focusNavTarget(
     return { ok: true, summary: 'Showing the Board.' }
   }
   if (target.kind === 'wall') {
-    if (!views) return { ok: false, summary: 'The Wall cannot be opened from here — use the Tabs | Wall switch.' }
+    if (!views) return { ok: false, summary: 'The Wall cannot be opened from here — press Ctrl+G or use the Wall button on the strip.' }
     views.setViewMode('mosaic')
     emitFocus({ kind: 'wall', source })
     return { ok: true, summary: 'Showing the Wall — every terminal at once.' }

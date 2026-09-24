@@ -67,6 +67,7 @@
     "watchdog:check": "node scripts/watchdog-check.mjs",
     "updates:check": "node scripts/updates-check.mjs",
     "agents:check": "node scripts/agents-check.mjs",
+    "agent-pane:check": "node scripts/agent-pane-check.mjs",
     "commands:check": "node scripts/commands-check.mjs",
     "mosaic:check": "node scripts/mosaic-check.mjs",
     "layout-engine:check": "node scripts/layout-engine-check.mjs",

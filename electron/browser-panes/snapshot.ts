@@ -55,31 +55,46 @@ export const READ_SCRIPT = `(() => {
     if (el.isContentEditable) return 'editable';
     return role || tag;
   };
+  // A password, card or one-time code someone typed by hand must never reach
+  // the model: such a field's value is never read, only whether it is filled.
+  const secret = (el) => el.tagName === 'INPUT' && (String(el.type).toLowerCase() === 'password' ||
+    /(^|\\s)(cc-|one-time-code|current-password|new-password)/.test(clean(el.getAttribute('autocomplete')).toLowerCase()));
   const labelOf = (el) => {
     const labelled = el.labels && el.labels.length ? el.labels[0].innerText : '';
     const candidates = [el.innerText, el.getAttribute('aria-label'), labelled, el.getAttribute('placeholder'),
-      el.value, el.getAttribute('title'), el.getAttribute('alt'), el.getAttribute('name')];
+      secret(el) ? '' : el.value, el.getAttribute('title'), el.getAttribute('alt'), el.getAttribute('name')];
     for (const c of candidates) {
       const t = clean(c);
       if (t) return t.slice(0, LIMIT_LABEL);
     }
     return '';
   };
+  // The document and every open shadow root inside it (web components).
+  const deepAll = (selector) => {
+    const out = [];
+    const walk = (root) => {
+      for (const el of root.querySelectorAll(selector)) out.push(el);
+      for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot);
+    };
+    walk(document);
+    return out;
+  };
   const refs = [];
   const items = [];
   let dropped = 0;
-  for (const el of Array.from(document.querySelectorAll(SELECTOR))) {
+  for (const el of deepAll(SELECTOR)) {
     if (!visible(el)) continue;
     if (refs.length >= LIMIT_REFS) { dropped++; continue; }
     refs.push(el);
-    const extra = (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.value && clean(el.value) !== labelOf(el)
+    const extra = secret(el) ? (el.value ? ' (filled in — hidden)' : '')
+      : (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.value && clean(el.value) !== labelOf(el)
       ? ' = "' + clean(el.value).slice(0, 40) + '"' : '';
     items.push('[' + refs.length + '] ' + kindOf(el) + ' "' + labelOf(el) + '"' + extra);
   }
   window.__forgeRefs = refs;
   const seen = new Set();
   const blocks = [];
-  for (const el of Array.from(document.querySelectorAll('h1, h2, h3, h4, p, li, td, th, pre, blockquote'))) {
+  for (const el of deepAll('h1, h2, h3, h4, p, li, td, th, pre, blockquote')) {
     if (!visible(el)) continue;
     const t = clean(el.innerText);
     if (!t || seen.has(t)) continue;
@@ -100,7 +115,8 @@ export function refPointScript(ref: number): string {
   if (!el || !el.isConnected) return null;
   el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
   const box = el.getBoundingClientRect();
-  const label = String(el.innerText || el.getAttribute('aria-label') || el.value || el.tagName).replace(/\\s+/g, ' ').trim().slice(0, 60);
+  const hidden = el.tagName === 'INPUT' && (String(el.type).toLowerCase() === 'password' || /(^|\\s)(cc-|one-time-code|current-password|new-password)/.test(String(el.getAttribute('autocomplete') || '').toLowerCase()));
+  const label = String(el.innerText || el.getAttribute('aria-label') || (hidden ? el.getAttribute('placeholder') || 'hidden field' : el.value) || el.tagName).replace(/\\s+/g, ' ').trim().slice(0, 60);
   return { x: box.left + box.width / 2, y: box.top + box.height / 2, label, w: box.width, h: box.height };
 })()`
 }

@@ -1,25 +1,26 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { HUB_CHEAT_SHEET_EVENT } from '@/lib/hubnav'
-import { shellSheet, tabsHost, toolsHost, useHost, useShellSheet, useShellMode, useSurfaces, viewHost } from '@/lib/shellSlots'
-import { collectLeaves } from '@/lib/splitTree'
+import { shellSheet, toolsHost, useShellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
+import { countLeaves } from '@/lib/splitTree'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
-import { useActiveWorkspace, useApp } from '@/state/AppState'
+import { useActiveProject, useActiveWorkspace, useApp, usePaneCount } from '@/state/AppState'
 import { AccountChip } from './AccountChip'
 import { CommandKeys } from './hub/KeyRecorder'
 import { Icon } from './Icon'
-import { Popover } from './Popover'
 import { ScreenshotTray } from './ScreenshotTray'
+import type { NewTabDetail } from './TerminalGrid'
 import { toggleSheet } from './shell/Sheet'
 import './shell/DeckBar.css'
 
 /**
- * The deck's one top layer: the mark and the agents' tabs on the left, the
- * mode switcher in the middle, and on the right the Tabs | Wall switch and one
- * "…" menu that holds everything else — Settings, the keyboard sheet, the
- * panes switcher, the tools (Skills, Commands, tab colours, Wall text), the
+ * The deck's one top layer: the mark, a quiet count of the project's agents and
+ * the new-agent button on the left, the mode switcher in the middle, and on the
+ * right one "…" menu that holds everything else — Settings, the keyboard sheet,
+ * the panes switcher, the tools (Skills, Commands, tab colours, Wall text), the
  * screenshot shelf and the account. Three grid columns, so the three can never
- * collide: however many tabs there are, they scroll inside their own column
- * (fading at the cut edge) and a "3 more" chip lists the ones out of sight.
+ * collide. There are no tabs up here any more: every terminal is on the stage,
+ * in the wall strip or on the Wall (see TerminalGrid), and Ctrl+G flips the two.
  * Transparent over the backdrop — the window is draggable anywhere along it —
  * with the native minimise/maximise/close buttons drawn by Windows into the
  * reserved gap on the far right (titleBarOverlay), never re-implemented here.
@@ -42,16 +43,12 @@ export function TitleBar(): ReactNode {
         </span>
         <span className="deckbar__wordmark">Forge</span>
         {isDevChannel ? <span className="deckbar__channel">DEV</span> : null}
-        {/* The agents' tabs, portalled in by TerminalGrid (see tabsHost). */}
-        <div className="deckbar__tabs" ref={tabsHost.set} />
-        <TabOverflow />
+        <AgentCount />
       </div>
 
       <ModePill />
 
       <div className="deckbar__right">
-        {/* Tabs | Wall, portalled in by TerminalGrid (see viewHost). */}
-        <div className="deckbar__view" ref={viewHost.set} />
         <DeckMenu />
         {/* Reserved for the native window controls (3 × 46px on Windows 11). */}
         <div className="deckbar__controls-gap" />
@@ -130,162 +127,41 @@ function ModePill(): ReactNode {
   )
 }
 
-/* ------------------------------------------------------------ tab overflow */
+/* ------------------------------------------------------------ agent count */
 
 /**
- * More tabs than the left column holds: they scroll sideways (the wheel works
- * too), each cut edge fades, the active tab is always scrolled into view, and
- * a chip counts the ones out of sight — "3 more" — and lists every tab.
+ * How many terminals the project has, and the one new-agent button that is on
+ * screen whichever size the terminals are — Ctrl+T's chooser anchors on it.
  */
-function TabOverflow(): ReactNode {
-  const { actions } = useApp()
+function AgentCount(): ReactNode {
+  const project = useActiveProject()
   const workspace = useActiveWorkspace()
-  const host = useHost(tabsHost)
-  const chipRef = useRef<HTMLButtonElement | null>(null)
-  const [hidden, setHidden] = useState<number[]>([])
-  const [open, setOpen] = useState(false)
-  const tabs = workspace.tabs
-  const activeId = workspace.activeTabId
-  const activeRef = useRef(activeId)
-  activeRef.current = activeId
-  const remeasure = useRef<() => void>(() => undefined)
-
-  useEffect(() => {
-    if (!host) return undefined
-    let raf = 0
-    let scroller: HTMLElement | null = null
-    /** The tab id last scrolled into view. */
-    let shownFor: string | null = null
-    /** Layout moved (a resize, a tab added, a font landing): check the active tab again. */
-    let ensure = true
-    const FADE = 34
-    const measure = (): void => {
-      raf = 0
-      scroller = host.querySelector<HTMLElement>('.tabstrip__tabs')
-      if (!scroller) {
-        setHidden((prev) => (prev.length ? [] : prev))
-        return
-      }
-      // The tab you are on is never the one out of sight, nor under a fade.
-      const active = scroller.querySelector<HTMLElement>('.tab[data-active="true"]')
-      if (active && (ensure || shownFor !== activeRef.current)) {
-        const first = shownFor === null || shownFor === activeRef.current
-        shownFor = activeRef.current
-        const b = scroller.getBoundingClientRect()
-        const r = active.getBoundingClientRect()
-        let left = scroller.scrollLeft
-        if (r.left - b.left < FADE) left += r.left - b.left - FADE
-        else if (b.right - r.right < FADE) left += r.right - b.right + FADE
-        if (Math.round(left) !== Math.round(scroller.scrollLeft)) {
-          scroller.scrollTo({ left: Math.max(0, left), behavior: first ? 'auto' : 'smooth' })
-        }
-      }
-      ensure = false
-      const box = scroller.getBoundingClientRect()
-      const out: number[] = []
-      scroller.querySelectorAll<HTMLElement>('.tab').forEach((el, i) => {
-        resize.observe(el)
-        const r = el.getBoundingClientRect()
-        // Out of sight: less than half of it shows.
-        const seen = Math.min(r.right, box.right) - Math.max(r.left, box.left)
-        if (seen < r.width / 2) out.push(i)
-      })
-      setHidden((prev) => (prev.join() === out.join() ? prev : out))
-      host.toggleAttribute('data-fade-start', scroller.scrollLeft > 1)
-      host.toggleAttribute('data-fade-end', scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1)
-    }
-    const later = (relayout = true): void => {
-      if (relayout) ensure = true
-      if (!raf) raf = requestAnimationFrame(measure)
-    }
-    // Scrolling by hand is his: it re-measures without pulling the active tab back.
-    const onScroll = (): void => later(false)
-    // A mouse wheel over the tabs scrolls them sideways.
-    const onWheel = (e: WheelEvent): void => {
-      const el = (e.target as HTMLElement | null)?.closest<HTMLElement>('.tabstrip__tabs')
-      if (!el || Math.abs(e.deltaX) > Math.abs(e.deltaY) || el.scrollWidth <= el.clientWidth) return
-      el.scrollLeft += e.deltaY
-      e.preventDefault()
-    }
-    const resize = new ResizeObserver(() => later())
-    const mutate = new MutationObserver(() => {
-      const next = host.querySelector<HTMLElement>('.tabstrip__tabs')
-      if (next && next !== scroller) resize.observe(next)
-      later()
-    })
-    resize.observe(host)
-    mutate.observe(host, { childList: true, subtree: true })
-    host.addEventListener('scroll', onScroll, true)
-    host.addEventListener('wheel', onWheel, { passive: false })
-    const first = host.querySelector<HTMLElement>('.tabstrip__tabs')
-    if (first) resize.observe(first)
-    remeasure.current = later
-    later()
-    return () => {
-      remeasure.current = () => undefined
-      if (raf) cancelAnimationFrame(raf)
-      resize.disconnect()
-      mutate.disconnect()
-      host.removeEventListener('scroll', onScroll, true)
-      host.removeEventListener('wheel', onWheel)
-    }
-  }, [host])
-
-  useEffect(() => remeasure.current(), [activeId, tabs.length])
-
-  if (hidden.length === 0 && !open) return null
+  const { used, max } = usePaneCount()
+  if (!project) return null
+  const n = workspace.tabs.reduce((sum, t) => sum + countLeaves(t.root), 0)
+  const atLimit = used >= max
 
   return (
-    <>
-      <button
-        ref={chipRef}
-        type="button"
-        className="deckbar__more"
-        data-open={open ? 'true' : undefined}
-        aria-expanded={open}
-        title={`${hidden.length} tab${hidden.length === 1 ? '' : 's'} out of sight — click for every tab`}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {hidden.length} more
-        <span aria-hidden="true" className="deckbar__more-chev">
-          ▾
+    <span className="deckbar__agents">
+      {n > 0 ? (
+        <span className="deckbar__count">
+          {n} {n === 1 ? 'agent' : 'agents'}
         </span>
+      ) : null}
+      <button
+        type="button"
+        className="deckbar__new"
+        data-new-agent=""
+        aria-label="New agent"
+        title={atLimit ? `Session limit reached (${max})` : 'New agent (Ctrl+T)'}
+        disabled={atLimit}
+        onClick={(e) =>
+          window.dispatchEvent(new CustomEvent<NewTabDetail>(NEW_TAB_EVENT, { detail: { anchor: e.currentTarget } }))
+        }
+      >
+        <Icon name="plus" size={13} />
       </button>
-      <Popover anchor={chipRef.current} open={open} onClose={() => setOpen(false)} align="start" width={300} label="Every tab">
-        <div className="deckbar__tablist" data-shell-overlay="" role="listbox" aria-label="Tabs">
-          <div className="deckbar__tablist-head">
-            <span>Tabs</span>
-            <span className="mono">{tabs.length}</span>
-          </div>
-          {tabs.map((t, i) => {
-            const panes = collectLeaves(t.root).length
-            const here = t.id === activeId
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="option"
-                aria-selected={here}
-                className="deckbar__tabrow"
-                data-here={here ? 'true' : undefined}
-                data-hidden={hidden.includes(i) ? 'true' : undefined}
-                onClick={() => {
-                  setOpen(false)
-                  actions.selectTab(t.id)
-                }}
-              >
-                <span className="deckbar__tabrow-num mono">{i + 1}</span>
-                <span className="deckbar__tabrow-name truncate">{t.title}</span>
-                <span className="deckbar__tabrow-meta">
-                  {panes} {panes === 1 ? 'pane' : 'panes'}
-                </span>
-                {here ? <span className="deckbar__tabrow-here">here</span> : null}
-              </button>
-            )
-          })}
-        </div>
-      </Popover>
-    </>
+    </span>
   )
 }
 

@@ -161,9 +161,9 @@ function PanesSheet(): ReactNode {
             type="button"
             data-active={viewMode === 'tabs' ? 'true' : undefined}
             onClick={() => actions.setViewMode('tabs')}
-            title="Tab view (Ctrl+G)"
+            title="Full screen — one terminal (its tab's splits too) under the wall strip (Ctrl+G)"
           >
-            Tabs
+            Full screen
           </button>
           <button
             type="button"

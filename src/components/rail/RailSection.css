@@ -69,10 +69,12 @@
   color: inherit;
 }
 
+/* Words, so --text-muted (4.5:1) rather than --text-dim (3:1, for chrome). */
 .rsec__count {
   flex: none;
   font-size: var(--t-eyebrow);
-  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
 }
 
 .rsec__status {

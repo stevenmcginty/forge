@@ -21,7 +21,8 @@ import { badRef } from './snapshot'
  * The one serialisation is **per tab**: two calls on the same page queue behind
  * each other, because interleaving a read with another caller's click on one
  * document is how refs point at the wrong thing. Calls on different tabs never
- * wait for each other.
+ * wait for each other. browser_close alone skips the queue, so a hung call can
+ * never keep a tab open.
  *
  * No Electron import: the driver is injected, so scripts/browser-check.mjs runs
  * these exact rules against a fake driver as well as the real one.
@@ -193,7 +194,9 @@ export class BrowserAgentOps {
     if ('error' in target) return fail(target.error)
     const { id } = target
     const record = this.driver.records().find((r) => r.id === id)
-    const closed = await this.queued(id, () => this.driver.close(id))
+    // Not queued: closing is how a tab stuck behind a hung call gets freed, so
+    // it must never wait for that call. Whatever was in flight fails with it.
+    const closed = await this.driver.close(id)
     for (const [who, tab] of this.lastUsed) if (tab === id) this.lastUsed.delete(who)
     if (!closed) return fail(`Tab ${id} could not be closed.`, id)
     const whose = record && record.owner.id !== owner.id ? ` (it belonged to ${ownerWords(record.owner)})` : ''

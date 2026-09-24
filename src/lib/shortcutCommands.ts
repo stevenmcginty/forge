@@ -31,7 +31,7 @@ export const BUILTIN_COMMANDS: KeyCommandDef[] = [
   },
 
   /* ---------------------------------------------------- tabs & panes */
-  { id: 'tab.new', title: 'New tab', group: 'Tabs', defaultKeys: ['Ctrl+T'], scope: 'workspace' },
+  { id: 'tab.new', title: 'New agent', group: 'Tabs', defaultKeys: ['Ctrl+T'], scope: 'workspace' },
   { id: 'pane.close', title: 'Close pane', group: 'Panes', defaultKeys: ['Ctrl+W'], scope: 'workspace' },
   { id: 'tab.close', title: 'Close tab', group: 'Tabs', defaultKeys: ['Ctrl+Shift+W'], scope: 'workspace' },
   { id: 'tab.next', title: 'Next tab', group: 'Tabs', defaultKeys: ['Ctrl+Tab'], scope: 'workspace' },
@@ -79,7 +79,7 @@ export const BUILTIN_COMMANDS: KeyCommandDef[] = [
 
   /* ------------------------------------------------------------- view */
   { id: 'rail.toggle', title: 'Show or hide the rail', group: 'View', defaultKeys: ['Ctrl+Shift+B'], scope: 'workspace' },
-  { id: 'view.toggle', title: 'Tabs ⇄ Wall', group: 'View', defaultKeys: ['Ctrl+G'], scope: 'workspace' },
+  { id: 'view.toggle', title: 'Full screen ⇄ Wall', group: 'View', defaultKeys: ['Ctrl+G'], scope: 'workspace' },
   { id: 'font.bigger', title: 'Bigger terminal text', group: 'View', defaultKeys: ['Ctrl+=', 'Ctrl+NumpadAdd'], scope: 'workspace' },
   { id: 'font.smaller', title: 'Smaller terminal text', group: 'View', defaultKeys: ['Ctrl+-', 'Ctrl+NumpadSubtract'], scope: 'workspace' },
   { id: 'font.reset', title: 'Reset terminal text size', group: 'View', defaultKeys: ['Ctrl+0'], scope: 'workspace' },

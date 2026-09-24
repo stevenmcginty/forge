@@ -175,6 +175,17 @@
   color: var(--accent);
 }
 
+/* It could not be shown ("Too big to show", "Could not load"): the text card
+   with a faint danger edge and the word in danger ink; the sentence stays calm. */
+.bprev--fail {
+  background: color-mix(in srgb, var(--danger) 4%, var(--bg-terminal));
+  border-color: color-mix(in srgb, var(--danger) 26%, var(--line-soft));
+}
+
+.bprev--fail .bprev__kind {
+  color: var(--danger);
+}
+
 .bprev__body {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -286,6 +297,15 @@
 
 .bact--quiet:hover {
   color: var(--warn);
+}
+
+/* Delete, armed: the second press deletes. Danger ink on a danger wash with a
+   danger edge, so it reads as "press again" at rest, not only under the pointer. */
+.bact[data-armed='true'],
+.bact[data-armed='true']:hover {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px var(--danger-line);
 }
 
 /* --------------------------------------------------------------- empty */

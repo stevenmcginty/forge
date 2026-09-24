@@ -46,7 +46,9 @@ export function buildAppContext(input: AppContextInput): string {
   if (!input.tabs.length) {
     lines.push('tabs: none')
   } else {
-    lines.push(`tabs: ${input.tabs.map((t) => `${t.number} "${t.title}"${t.active ? ' [current]' : ''}`).join(', ')}`)
+    lines.push(
+      `tabs (not on screen — say call-signs, never "tab 2"): ${input.tabs.map((t) => `${t.number} "${t.title}"${t.active ? ' [current]' : ''}`).join(', ')}`
+    )
   }
   if (!input.panes.length) {
     lines.push('panes: none — open one with open_agent_pane')

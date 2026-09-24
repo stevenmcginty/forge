@@ -456,4 +456,137 @@ await check('the Gemini capture worklet keeps posting mic chunks after it transf
   for (const m of posted) assert.equal(m.pcm.byteLength, 3200, 'every chunk is 100 ms of 16 kHz Int16')
 })
 
+console.log('the Wall / Full screen words (V7)')
+
+await check('every brain is taught Full screen and the Wall, and none describes the removed tab strip', async () => {
+  const setView = ACTION_SPECS.find((s) => s.kind === 'set_view')
+  assert.match(setView.what, /Full screen \("tabs"/, 'the manifest names mode tabs Full screen')
+  assert.match(setView.what, /"full screen" \/ "leave the wall" mean tabs/)
+  assert.match(setView.what, /"Go to the wall"[^.]*mean mosaic/)
+  assert.match(REALTIME_PERSONA, /Full screen, mode "tabs"/, 'the live persona too')
+  assert.match(REALTIME_PERSONA, /never say "tab 2"/, 'tab numbers are not on screen')
+  const host = readFileSync(join(ROOT, 'electron/voice-agent/host.ts'), 'utf8')
+  assert.match(host, /"tabs" — Full screen, one terminal at a time/, 'the Claude brain\'s run_app_action')
+  assert.match(host, /never "tab 2"/)
+  const { buildStateSection } = await import('../src/lib/appmanifest.ts')
+  const state = buildStateSection({
+    appVersion: '0',
+    view: { shell: 'deck', railCollapsed: false, voiceHub: 'docked', terminalFontSize: 13 },
+    projects: [{ name: 'forge', path: 'C:/forge', active: true }],
+    tabs: [{ number: 1, title: 'Main', active: true, panes: [] }]
+  })
+  assert.match(state, /Tab numbers are not on screen: name terminals by call-sign or agent, never "tab 2"\./)
+  for (const [file, text] of [
+    ['src/lib/appmanifest.ts', readFileSync(join(ROOT, 'src/lib/appmanifest.ts'), 'utf8')],
+    ['electron/voice-agent/host.ts', host],
+    ['src/lib/realtime/persona.ts', readFileSync(join(ROOT, 'src/lib/realtime/persona.ts'), 'utf8')],
+    ['src/lib/realtime/tools-hub.ts', readFileSync(join(ROOT, 'src/lib/realtime/tools-hub.ts'), 'utf8')],
+    ['src/lib/hubRuntime.ts', readFileSync(join(ROOT, 'src/lib/hubRuntime.ts'), 'utf8')]
+  ]) {
+    assert.doesNotMatch(text, /one tab at a time|Tabs \| Wall|tabs, or the Wall/, `${file} still describes the tab strip`)
+  }
+})
+
+console.log('stop while starting (V1)')
+
+/** Just enough browser for OpenAIRealtimeSession.start(), with a gate on one step. */
+function openaiEnv(gateAt) {
+  let release
+  const gate = new Promise((r) => (release = r))
+  const env = { pcs: [], connects: 0, track: { enabled: true, stopped: 0, stop() { this.stopped++ } }, release }
+  const stream = { getAudioTracks: () => [env.track], getTracks: () => [env.track] }
+  class FakePC {
+    constructor() {
+      this.closed = false
+      this.connectionState = 'new'
+      env.pcs.push(this)
+    }
+    createDataChannel() {
+      const dc = { readyState: 'connecting', close() { this.readyState = 'closed'; this.onclose?.() }, send() {} }
+      this.dc = dc
+      return dc
+    }
+    addTrack() {}
+    async createOffer() {
+      return { type: 'offer', sdp: 'v=0' }
+    }
+    async setLocalDescription() {}
+    async setRemoteDescription() {
+      queueMicrotask(() => {
+        this.dc.readyState = 'open'
+        this.dc.onopen?.()
+      })
+    }
+    close() {
+      this.closed = true
+    }
+  }
+  class FakeCtx {
+    createAnalyser() {
+      return { fftSize: 0, connect() {}, getFloatTimeDomainData() {} }
+    }
+    createMediaStreamSource() {
+      return { connect() {} }
+    }
+    async close() {
+      this.closed = true
+    }
+  }
+  const saved = { RTCPeerConnection: globalThis.RTCPeerConnection, AudioContext: globalThis.AudioContext, window: globalThis.window, document: globalThis.document }
+  globalThis.RTCPeerConnection = FakePC
+  globalThis.AudioContext = FakeCtx
+  globalThis.document = { createElement: () => ({ autoplay: false, srcObject: null }) }
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { mediaDevices: { getUserMedia: async () => (gateAt === 'mic' && (await gate), stream) } },
+    configurable: true
+  })
+  globalThis.window = {
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (t) => clearTimeout(t),
+    forge: {
+      realtime: {
+        openaiConnect: async () => {
+          env.connects++
+          if (gateAt === 'connect') await gate
+          return { ok: true, sdp: 'v=0 answer' }
+        }
+      }
+    }
+  }
+  env.restore = () => Object.assign(globalThis, saved)
+  return env
+}
+
+const { OpenAIRealtimeSession } = await import('../src/lib/realtime/openai.ts')
+const within = (p, ms = 1000) =>
+  Promise.race([p, new Promise((_, reject) => setTimeout(() => reject(new Error(`still pending after ${ms} ms`)), ms))])
+
+for (const gateAt of ['mic', 'connect']) {
+  await check(`GPT Realtime: Listen off while ${gateAt === 'mic' ? 'getUserMedia' : 'main mints the call'} is pending — the late start is torn down`, async () => {
+    const env = openaiEnv(gateAt)
+    try {
+      const states = []
+      const session = new OpenAIRealtimeSession({
+        provider: 'gpt-realtime',
+        model: 'gpt-realtime',
+        voice: 'marin',
+        instructions: '',
+        tools: [],
+        events: { onState: (s) => states.push(s), onCaption() {}, onToolCall: async () => ({ ok: true, text: '' }), onExpiring() {} }
+      })
+      const started = session.start()
+      await new Promise((r) => setTimeout(r, 0))
+      session.stop()
+      env.release()
+      await assert.rejects(within(started), /stopped while starting/)
+      assert.ok(env.track.stopped > 0, 'the mic track is stopped')
+      assert.ok(env.pcs.every((pc) => pc.closed), 'no peer connection left open')
+      if (gateAt === 'mic') assert.equal(env.pcs.length, 0, 'no peer connection was built after stop()')
+      assert.equal(states.includes('listening'), false, 'it never went live')
+    } finally {
+      env.restore()
+    }
+  })
+}
+
 console.log(process.exitCode ? `\nrealtime:check FAILED (${passed} passed)` : `\nrealtime:check passed (${passed} checks)`)

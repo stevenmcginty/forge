@@ -7,6 +7,7 @@ import type {
   RealtimeToolAnswer
 } from './session'
 import { toOpenAITools } from './tools'
+import { micError } from './errors'
 
 /**
  * GPT Realtime (and its mini) over WebRTC.
@@ -76,14 +77,30 @@ export class OpenAIRealtimeSession implements RealtimeSession {
     if (!this.stopped || s === 'closed') this.opts.events.onState(s, detail)
   }
 
+  /**
+   * stop() ran while start() was waiting (Listen pressed off during
+   * "Starting…"): release whatever start() made since, and go no further — a
+   * start that carried on would be a hidden session behind an Off switch (V1).
+   */
+  private bailIfStopped(): void {
+    if (!this.stopped) return
+    this.release()
+    throw new Error('Voice session stopped while starting')
+  }
+
   async start(): Promise<void> {
     this.state('connecting')
     const bridge = window.forge.realtime
     if (!bridge) throw new Error('This Forge build has no realtime bridge — restart Forge')
 
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-    })
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      })
+    } catch (err) {
+      throw micError(err)
+    }
+    this.bailIfStopped()
     const pc = new RTCPeerConnection()
     this.pc = pc
     this.ctx = new AudioContext()
@@ -117,6 +134,8 @@ export class OpenAIRealtimeSession implements RealtimeSession {
     let openTimer = 0
     const opened = new Promise<void>((resolve, reject) => {
       dc.onopen = () => resolve()
+      // Closed before it opened (stop() while starting): do not wait out the timer.
+      dc.onclose = () => reject(new Error('GPT Realtime closed its event channel'))
       openTimer = window.setTimeout(() => reject(new Error('GPT Realtime did not open its event channel')), 20_000)
     })
     // Awaited below; this only stops an early failure elsewhere in start()
@@ -131,8 +150,28 @@ export class OpenAIRealtimeSession implements RealtimeSession {
       }
     }
 
+    try {
+      await this.connect(bridge, pc, opened)
+    } finally {
+      window.clearTimeout(openTimer)
+    }
+    this.state('listening')
+    this.rolloverTimer = window.setTimeout(
+      () => this.opts.events.onExpiring('GPT Realtime sessions end at 60 minutes'),
+      OPENAI_ROLLOVER_AT_MS
+    )
+  }
+
+  /** The SDP handshake through main, then the event channel opening. */
+  private async connect(
+    bridge: NonNullable<typeof window.forge.realtime>,
+    pc: RTCPeerConnection,
+    opened: Promise<void>
+  ): Promise<void> {
     const offer = await pc.createOffer()
+    this.bailIfStopped()
     await pc.setLocalDescription(offer)
+    this.bailIfStopped()
     const answer = await bridge.openaiConnect({
       model: this.opts.model,
       voice: this.opts.voice,
@@ -140,15 +179,12 @@ export class OpenAIRealtimeSession implements RealtimeSession {
       tools: toOpenAITools(this.opts.tools),
       sdp: offer.sdp ?? ''
     })
+    this.bailIfStopped()
     if (!answer.ok) throw new Error(answer.error)
     await pc.setRemoteDescription({ type: 'answer', sdp: answer.sdp })
+    this.bailIfStopped()
     await opened
-    window.clearTimeout(openTimer)
-    this.state('listening')
-    this.rolloverTimer = window.setTimeout(
-      () => this.opts.events.onExpiring('GPT Realtime sessions end at 60 minutes'),
-      OPENAI_ROLLOVER_AT_MS
-    )
+    this.bailIfStopped()
   }
 
   private send(event: Record<string, unknown>): void {
@@ -272,7 +308,14 @@ export class OpenAIRealtimeSession implements RealtimeSession {
   stop(): void {
     if (this.stopped) return
     this.stopped = true
+    this.release()
+    this.opts.events.onState('closed')
+  }
+
+  /** Close the connection, the mic and the meters — whatever exists yet. */
+  private release(): void {
     if (this.rolloverTimer !== null) window.clearTimeout(this.rolloverTimer)
+    this.rolloverTimer = null
     try {
       this.dc?.close()
       this.pc?.close()
@@ -286,6 +329,5 @@ export class OpenAIRealtimeSession implements RealtimeSession {
     this.dc = null
     this.stream = null
     this.ctx = null
-    this.opts.events.onState('closed')
   }
 }

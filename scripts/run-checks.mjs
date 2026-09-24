@@ -57,6 +57,7 @@ const CHECKS = [
   // Pure source parsers (node:module registerHooks, no builds, no children)
   { name: 'activity:check', lane: 'fast' },
   { name: 'agents:check', lane: 'fast' },
+  { name: 'agent-pane:check', lane: 'fast', note: 'caller-anchored opens, one paste per brief, no brief into a shell' },
   { name: 'commands:check', lane: 'fast' },
   { name: 'draft:check', lane: 'fast' },
   { name: 'feed:check', lane: 'fast' },
@@ -78,6 +79,11 @@ const CHECKS = [
   { name: 'watchdog:check', lane: 'fast', note: 'the real watchdog on an injected clock — no waiting out its timeouts' },
   { name: 'dictation:check', lane: 'fast', note: 'talk-key gestures + warm-start wiring' },
   { name: 'voice:check', lane: 'fast', note: 'the live OpenRouter tier is opt-in via env' },
+  { name: 'realtime:check', lane: 'fast', note: 'token shapes over fake fetches; sessions over fake WebRTC' },
+  { name: 'brain-adapters:check', lane: 'fast', note: 'CLI brains via fake shims; no real CLI, no key' },
+  { name: 'gemini-live:check', lane: 'fast', note: 'the worklets in a vm; the session over a fake WebSocket' },
+  { name: 'voice-hotkey:check', lane: 'fast' },
+  { name: 'agent-bar:check', lane: 'fast' },
   { name: 'web:check', lane: 'fast', note: 'loopback sockets only; the heaviest fast check' },
 
   // esbuild-bundle-and-drive checks (one esbuild service process, temp dirs)

@@ -186,38 +186,6 @@
   padding: 0;
 }
 
-/* ------------------------------------------------------------ tab strip
- *
- * The deck has one top layer. The tabs are portalled into the top bar (see
- * tabsHost), so the strip is no longer a bar of its own — just a row of chips
- * on the window's draggable edge, each of which is not draggable itself.
- */
-
-.deck .tabstrip {
-  align-items: center;
-  gap: 4px;
-  height: 30px;
-  min-width: 0;
-  padding: 0;
-  background: none;
-  border: 0;
-  box-shadow: none;
-  -webkit-app-region: no-drag;
-}
-
-.deck .tabstrip__tabs {
-  align-items: center;
-  gap: 3px;
-}
-
-.deck .tabstrip__new {
-  flex: none;
-  width: 26px;
-  height: 26px;
-  margin-bottom: 0;
-  border-radius: var(--r-full);
-}
-
 /* The reference tools, reseated as rows in the dock's Tools sheet. */
 .deck .deck-tools {
   display: flex;
@@ -252,75 +220,6 @@
 
 .deck .deck-tools .tabstrip__tint[data-on='true']::after {
   content: 'Tab text colours: on';
-}
-
-.deck .viewtoggle {
-  margin-bottom: 0;
-  margin-right: 6px;
-  gap: 2px;
-  padding: 2px;
-  background: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
-  border: 1px solid var(--glass-line);
-  border-radius: var(--r-full);
-}
-
-.deck .viewtoggle__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  width: auto;
-  height: 24px;
-  padding: 0 10px 0 8px;
-  border-radius: var(--r-full);
-  font-family: var(--font-display);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-}
-
-.deck .viewtoggle__btn[data-active='true'] {
-  background: var(--accent-soft);
-}
-
-.deck .tab {
-  height: 26px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-}
-
-.deck .tab:hover {
-  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
-}
-
-.deck .tab[data-active='true'] {
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg-panel));
-  border-color: var(--accent-line);
-  box-shadow: 0 0 18px -6px var(--accent-glow);
-}
-
-.deck .tab[data-tint='true'] {
-  background: color-mix(in srgb, var(--tab-tint) 10%, transparent);
-}
-
-.deck .tab[data-tint='true']:hover {
-  background: color-mix(in srgb, var(--tab-tint) 14%, transparent);
-}
-
-.deck .tab[data-tint='true'][data-active='true'] {
-  background: color-mix(in srgb, var(--tab-tint) 18%, var(--bg-panel));
-  border-color: color-mix(in srgb, var(--tab-tint) 48%, transparent);
-  box-shadow: 0 0 18px -6px color-mix(in srgb, var(--tab-tint) 45%, transparent);
-}
-
-.deck .tab__title {
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
-
-/* Only the desktop's view toggle has words in it. */
-.viewtoggle__word {
-  line-height: 1;
 }
 
 /* ============================================================ empty states

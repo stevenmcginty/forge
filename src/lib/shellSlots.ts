@@ -162,17 +162,14 @@ export function useShellSheet(): ShellSheet {
 /* ------------------------------------------------------------ chrome hosts */
 
 /**
- * Where the agents' own chrome is drawn. The deck has one slim top layer, so
- * TerminalGrid does not draw a tab strip of its own: it portals its tabs into
- * the top bar (`tabsHost`), the Tabs/Canvas switch beside them (`viewHost`),
- * and its reference tools — Skills, Commands, tab colours, text size, reset —
- * into the dock's Tools sheet (`toolsHost`). Each host is an element the shell
- * registers with a ref; while one is missing the grid draws that part inline.
+ * Where the agents' own chrome is drawn. There is no tab strip any more (the
+ * wall strip on the stage replaced it), so the one host left is for
+ * TerminalGrid's reference tools — Skills, Commands, tab colours, text size,
+ * reset — which it portals into the title bar's "…" menu (`toolsHost`). The
+ * host is an element the shell registers with a ref.
  */
-export const tabsHost = store<HTMLElement | null>(null)
-export const viewHost = store<HTMLElement | null>(null)
 export const toolsHost = store<HTMLElement | null>(null)
 
-export function useHost(host: typeof tabsHost): HTMLElement | null {
+export function useHost(host: typeof toolsHost): HTMLElement | null {
   return useSyncExternalStore(host.subscribe, host.get)
 }

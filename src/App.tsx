@@ -16,7 +16,7 @@ import { SettingsPopup } from '@/components/shell/SettingsPopup'
 import { useBranchReader } from '@/components/shell/useBranch'
 import { useShortcuts } from '@/hooks/useShortcuts'
 import { HUB_FOCUS_EVENT, type HubFocusDetail } from '@/lib/hubnav'
-import { fadeIn, useFlipChildren } from '@/lib/motion'
+import { fadeIn } from '@/lib/motion'
 import { shellMode, shellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
@@ -30,8 +30,9 @@ import './App.css'
  * The desktop shell: a command deck.
  *
  * One backdrop (the room), a slim top bar (the mark, the mode switcher, the
- * tools), the stage (whatever mode is on — the agents' panes, or a registered
- * surface such as the browser beside them), and the dock along the bottom
+ * tools), the stage (whatever mode is on — the agents' terminals, or a
+ * registered surface such as the browser under the wall strip that keeps every
+ * terminal in sight), and the dock along the bottom
  * (project, type-or-speak, panes, the voice socket). Settings is a pop-up over all of it: the panes stay live
  * behind it and Esc puts you back.
  *
@@ -96,11 +97,12 @@ export function App(): ReactNode {
 
   // "Go to the canvas" (voice, Ctrl+Shift+K): the image board, once a surface
   // called `board` has registered. Until then it is only a pane-focus event.
-  // A pane picked by name while the agents are off screen brings them back; a
-  // surface that shares the stage with them (the browser) stays put.
+  // A pane picked by name while the agents are off stage brings them back —
+  // from the browser and the board too: the wall strip over those shows every
+  // terminal, but not at a size you can work in.
   const setModeRef = useRef(setMode)
   setModeRef.current = setMode
-  const agentsVisible = mode === 'agents' || surface?.placement === 'beside'
+  const agentsVisible = mode === 'agents'
   const agentsVisibleRef = useRef(agentsVisible)
   agentsVisibleRef.current = agentsVisible
   useEffect(() => {
@@ -137,20 +139,18 @@ export function App(): ReactNode {
   /* ------------------------------------------------------------ glides */
 
   const stageRef = useRef<HTMLElement | null>(null)
-  // A surface arriving beside the agents: the agents' column slides and narrows
-  // into place rather than jumping.
-  useFlipChildren(stageRef, surface?.placement === 'beside' ? surface.id : mode, 'flipStage')
+  // A mode switch crossfades in whatever took the stage. Between the agents
+  // and a surface under the wall strip, the strip itself stays put: only what
+  // is under it fades. A surface fades without the scale: its box is where the
+  // native browser view is placed, and a box that moves hides that view until
+  // it holds still (fadeIn itself does nothing under reduced motion).
   const lastMode = useRef(mode)
   useLayoutEffect(() => {
     if (lastMode.current === mode) return
-    const was = lastMode.current
     lastMode.current = mode
-    // Beside-surfaces glide (above); everything else crossfades in.
-    const beside = (id: string): boolean => surfaces.some((s) => s.id === id && s.placement === 'beside')
-    if ((was === 'agents' || beside(was)) && (mode === 'agents' || beside(mode))) return
-    const first = stageRef.current?.firstElementChild
-    if (first instanceof HTMLElement) fadeIn(first, { duration: 260, from: 0.985 })
-  }, [mode, surfaces])
+    const next = stageRef.current?.querySelector<HTMLElement>('.deck__full, .deck__surface, .grid__body')
+    if (next) fadeIn(next, { duration: 200, from: next.matches('.deck__surface, .deck__full') ? 1 : 0.985 })
+  }, [mode])
 
   const Surface = surface?.render ?? null
 
@@ -171,15 +171,19 @@ export function App(): ReactNode {
             <Surface active />
           </div>
         ) : (
-          <div className="deck__split" data-beside={Surface ? 'true' : undefined}>
+          /*
+           * The agents' column: the terminals (the Wall, or the wall strip over
+           * Full screen), or — with the browser or the board up — the wall
+           * strip alone, and the surface under it at the stage's full width.
+           * Never side by side: nothing covers or squeezes the surface.
+           */
+          <div className="deck__agents" data-beside={Surface ? 'true' : undefined}>
+            <TerminalGrid beside={Boolean(Surface)} />
             {Surface ? (
-              <section className="deck__surface" data-flip-stage="surface" aria-label={surface?.title}>
+              <section className="deck__surface" aria-label={surface?.title}>
                 <Surface active />
               </section>
             ) : null}
-            <div className="deck__agents" data-flip-stage="agents">
-              <TerminalGrid />
-            </div>
           </div>
         )}
       </main>

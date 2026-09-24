@@ -377,3 +377,16 @@
   font-size: var(--t-xs);
   color: var(--text-dim);
 }
+
+/* Motion off: the in-flight dot and the busy mark hold still at full strength. */
+@media (prefers-reduced-motion: reduce) {
+  .pane .pane__foreman[data-status='driving'] .pane__foreman-dot,
+  .pane__foot-mark--busy {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .pane .pane__foreman[data-status='driving'] .pane__foreman-dot,
+:root[data-reduced-motion='true'] .pane__foot-mark--busy {
+  animation: none;
+}

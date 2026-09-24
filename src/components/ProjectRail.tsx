@@ -262,25 +262,39 @@ function ProjectRow({
       ) : (
         <>
           <span className="prow__text">
-            <span className="prow__name truncate">{project.name}</span>
+            <span className="prow__title">
+              <span className="prow__name truncate">{project.name}</span>
+              {/*
+                Only pinned rows draw it, so it costs the list nothing — and the
+                two or three rows that do are the ones that need to say why they
+                are not where the alphabet left them. It rides on the name rather
+                than in a column of its own, where it sat out in the middle of
+                the row looking like a control.
+              */}
+              {project.pinned ? <Icon name="pin" size={11} className="prow__pin" /> : null}
+            </span>
             <span className="prow__path mono truncate">{shortPath(project.path)}</span>
             {working ? <span className="prow__activity" aria-label="Working" /> : null}
           </span>
 
           {/*
-            Only pinned rows draw it, so it costs the list nothing — and the two
-            or three rows that do are the ones that need to say why they are not
-            where the alphabet left them.
+            Only a project with shells open draws a count. A column of zeros at
+            full weight made every idle project look as busy as the live one;
+            the column itself stays (see the grid in ProjectRail.css), so the
+            counts that do show still line up.
           */}
-          {project.pinned ? <Icon name="pin" size={12} className="prow__pin" /> : null}
-
-          <span className="prow__panes mono">{panes}</span>
+          {panes > 0 ? (
+            <span className="prow__panes mono" title={`${panes} pane${panes === 1 ? '' : 's'} open`}>
+              {panes}
+            </span>
+          ) : null}
 
           <button
             ref={menuRef}
             type="button"
             className="ghost-btn prow__menu"
             title="Project settings"
+            aria-expanded={menuOpen}
             onClick={(e) => {
               e.stopPropagation()
               setMenuOpen(true)

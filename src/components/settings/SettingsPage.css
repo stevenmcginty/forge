@@ -837,6 +837,21 @@
   }
 }
 
+/* Motion off: no travelling sliver — a faint full bar says "working, size unknown". */
+@media (prefers-reduced-motion: reduce) {
+  .sengine__bar-fill[data-indeterminate='true'] {
+    width: 100% !important;
+    opacity: 0.4;
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .sengine__bar-fill[data-indeterminate='true'] {
+  width: 100% !important;
+  opacity: 0.4;
+  animation: none;
+}
+
 .sengine__progress-text {
   display: flex;
   align-items: center;

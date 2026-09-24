@@ -205,11 +205,57 @@ export function quietWords(ms: number): string {
 
 /* ------------------------------------------------------------- the ending */
 
-export type ConversationEnd = { kind: 'phrase'; phrase: string } | { kind: 'idle'; ms: number } | { kind: 'press' }
+export type ConversationEnd =
+  | { kind: 'phrase'; phrase: string }
+  | { kind: 'idle'; ms: number }
+  | { kind: 'press' }
+  /** The Agent brain setting moved while a live session was open (V6). */
+  | { kind: 'switched' }
 
 /** Why it ended, in the words listenNote shows. */
 export function endedNote(end: ConversationEnd): string {
   const why =
-    end.kind === 'phrase' ? `you said "${end.phrase}"` : end.kind === 'idle' ? `${quietWords(end.ms)} quiet` : 'you turned it off'
+    end.kind === 'phrase'
+      ? `you said "${end.phrase}"`
+      : end.kind === 'idle'
+        ? `${quietWords(end.ms)} quiet`
+        : end.kind === 'switched'
+          ? 'brain changed'
+          : 'you turned it off'
   return `Conversation ended — ${why}`
+}
+
+/**
+ * A live session whose brain setting no longer names it: the bar would show
+ * the new brain while the old one kept answering (V6). `picked` is the live
+ * provider the setting resolves to now (null: a Parakeet brain, or no key).
+ */
+export function liveBrainSwitched(live: string | null, picked: string | null): boolean {
+  return live !== null && live !== picked
+}
+
+/* ----------------------------------------------------------- the watchdog */
+
+/** Starting… with no session after this long is a connection that is not coming. */
+export const STUCK_CONNECTING_MS = 30_000
+/** Thinking… with no tool running and no reply after this long is a session gone quiet. */
+export const STUCK_THINKING_MS = 30_000
+
+/**
+ * How long a live phase may last before the watchdog ends the session, or
+ * null when no watchdog runs. Listening is his to fill (the idle clock owns
+ * it), speaking ends by itself, and a tool still running is not quiet — a
+ * video takes minutes.
+ */
+export function stuckAfterMs(i: { phase: string; toolRunning: boolean }): number | null {
+  if (i.phase === 'connecting') return STUCK_CONNECTING_MS
+  if (i.phase === 'thinking' && !i.toolRunning) return STUCK_THINKING_MS
+  return null
+}
+
+/** The watchdog's reason, for the pill (errorReasonOf reads it as "<vendor>: no reply"). */
+export function stuckReason(label: string, phase: 'connecting' | 'thinking', ms: number): string {
+  return phase === 'connecting'
+    ? `${label} did not answer: no session after ${quietWords(ms)}`
+    : `${label} went quiet: no reply for ${quietWords(ms)}`
 }

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { useApp } from '@/state/AppState'
 import { registerSurface, type SurfaceProps } from '@/lib/shellSlots'
 import { uiCommands } from '@/lib/uiCommands'
+import { startAppKeys } from './appKeys'
 import { browserBridge } from './bridge'
 import { BrowserSurfaces } from './BrowserSurfaces'
 
@@ -34,7 +35,10 @@ export function registerBrowser(): () => void {
     uiCommands.run('set-mode', 'browser')
     void browserBridge()?.open({ url: HOME_PAGE })
   })
+  // Shortcuts and the voice keys keep working while a page has the keyboard.
+  const offKeys = startAppKeys()
   return () => {
+    offKeys()
     offHandler()
     offCommand()
     offSurface()

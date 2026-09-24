@@ -111,3 +111,16 @@ export function micState(i: MicInput): MicState {
   if (i.errorReason && !capturing) listenNote = i.errorReason
   return { capturing, starting, listenNote }
 }
+
+/**
+ * The Parakeet sidecar is taking down dictation right now. While a live
+ * session is open the agent is disarmed, so this can only be the Dictate key —
+ * and the live session's own mic must not hear those words too, or the live
+ * brain answers (and acts on) a prompt meant for a pane (V5). Only a real
+ * capture counts: a sidecar still loading ('starting') is not his voice.
+ */
+export function dictationHoldsMic(st: { phase: SttPhaseWord | string; capturing?: boolean } | null | undefined): boolean {
+  if (!st) return false
+  if (st.phase === 'finishing') return true
+  return st.phase === 'listening' && st.capturing !== false
+}

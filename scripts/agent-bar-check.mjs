@@ -314,5 +314,49 @@ await check('the switch tracks the conversation: a failed turn keeps it on, endi
   assert.ok(/realtimeLive \|\| \(resolved\.provider !== 'claude' && !agent\.armed\)/.test(hubSrc), 'an open Parakeet conversation stays the one shown')
 })
 
+console.log('the live session: stop while starting, brain switch, watchdog, dictation (V1 V3 V5 V6 V8)')
+await check('V1: a start that resolves after Listen went off is stopped, and a stale session runs no tools', () => {
+  assert.ok(/await session\.start\(\)[\s\S]{0,300}if \(sessionRef\.current !== session\) \{\s*session\.stop\(\)\s*return/.test(hubSrc), 'late success is torn down')
+  assert.ok(/\} catch \(err\) \{\s*if \(sessionRef\.current !== session\) \{\s*session\.stop\(\)\s*return/.test(hubSrc), 'late failure is torn down too')
+  assert.ok(/onToolCall: \(call\) =>\s*sessionRef\.current === session\s*\? onToolCall\(call\)/.test(hubSrc), 'onToolCall is gated on the session still being the one shown')
+})
+await check('V6: changing the brain mid-session ends the live one, and says why', () => {
+  assert.equal(V.endedNote({ kind: 'switched' }), 'Conversation ended — brain changed')
+  assert.equal(V.liveBrainSwitched('gemini-live', 'gemini-live'), false, 'same brain: keep going')
+  assert.equal(V.liveBrainSwitched(null, 'gemini-live'), false, 'nothing live: nothing to end')
+  assert.equal(V.liveBrainSwitched('gemini-live', null), true, 'moved to Claude (or the key went)')
+  assert.equal(V.liveBrainSwitched('gemini-live', 'gpt-realtime'), true, 'moved to another live brain')
+  assert.ok(
+    /if \(!liveBrainSwitched\(liveProvider, pickedBrain\.realtime\)\) return\s*endConversationRef\.current\(\{ kind: 'switched' \}\)\s*\}, \[liveProvider, pickedBrain\.realtime\]\)/.test(hubSrc),
+    'the hub watches the picked brain against the live provider'
+  )
+})
+await check('V3: the watchdog — Starting… / Thinking… that never moves on ends with a reason; a running tool is not quiet', () => {
+  assert.equal(V.stuckAfterMs({ phase: 'connecting', toolRunning: false }), V.STUCK_CONNECTING_MS)
+  assert.equal(V.stuckAfterMs({ phase: 'thinking', toolRunning: false }), V.STUCK_THINKING_MS)
+  assert.equal(V.stuckAfterMs({ phase: 'thinking', toolRunning: true }), null, 'a video takes minutes')
+  for (const phase of ['listening', 'speaking', 'off', 'error']) assert.equal(V.stuckAfterMs({ phase, toolRunning: false }), null, phase)
+  assert.ok(V.STUCK_THINKING_MS >= 20_000 && V.STUCK_THINKING_MS <= 60_000, 'bounded, and not twitchy')
+  assert.equal(E.errorReasonOf('gemini', V.stuckReason('Gemini Live', 'thinking', 30_000)), 'Gemini: no reply')
+  assert.equal(E.errorReasonOf('openai', V.stuckReason('GPT Realtime', 'connecting', 30_000)), 'OpenAI: no reply')
+  assert.match(V.stuckReason('Gemini Live', 'thinking', 30_000), /Gemini Live went quiet: no reply for 30 s/)
+  assert.ok(/const ms = stuckAfterMs\(\{ phase: rtPhase, toolRunning \}\)/.test(hubSrc), 'the hub runs it on the live phase')
+  assert.ok(/setRtPhase\('error'\)\s*setRtError\(stuckReason\(/.test(hubSrc), 'it ends in the error phase, with the reason on the pill')
+})
+await check('V5: the Dictate key capturing holds the live session\'s mic shut, apart from his Mute', () => {
+  assert.equal(M.dictationHoldsMic({ phase: 'listening', capturing: true }), true)
+  assert.equal(M.dictationHoldsMic({ phase: 'listening' }), true, 'phrase mode has no capturing flag')
+  assert.equal(M.dictationHoldsMic({ phase: 'finishing' }), true)
+  assert.equal(M.dictationHoldsMic({ phase: 'listening', capturing: false }), false, 'wake monitoring is not his voice')
+  for (const phase of ['off', 'idle', 'starting', 'error']) assert.equal(M.dictationHoldsMic({ phase }), false, phase)
+  assert.equal(M.dictationHoldsMic(null), false)
+  assert.ok(/sessionRef\.current\?\.setMuted\(mutedRef\.current \|\| dictatingNow\)/.test(hubSrc), 'the hold follows the capture')
+  assert.ok(/session\.setMuted\(mutedRef\.current \|\| dictatingRef\.current\)/.test(hubSrc), 'a session that opens mid-dictation starts held')
+  assert.ok(/sessionRef\.current\.setMuted\(on \|\| dictatingRef\.current\)/.test(hubSrc), 'unmuting mid-dictation keeps the hold')
+})
+await check('V8: a held dictation phrase is not quiet on a Parakeet brain', () => {
+  assert.ok(/`\$\{agent\.turns\.length\}:\$\{agent\.dictationBuffer\.length\}`/.test(hubSrc), 'the idle clock restarts on the dictation buffer growing')
+})
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed) process.exit(1)

@@ -142,9 +142,10 @@ export const ACTION_SPECS: ActionSpec[] = [
     kind: 'set_view',
     args: '{"kind":"set_view","mode":"tabs"|"mosaic"}',
     what:
-      'Switch between one tab at a time ("tabs") and the Wall ("mosaic"): every terminal at once. "Go to the wall" and ' +
-      '"show all terminals" mean mosaic. The Board (agent images) is not a view you can set, and "canvas" names ' +
-      'nothing: if he says it, ask "the Wall or the Board?" in say and return no action.'
+      'Full screen ("tabs": one terminal) or the Wall ("mosaic": every terminal at once). "Go to the wall" / "show ' +
+      'all terminals" mean mosaic; "full screen" / "leave the wall" mean tabs. The Board (agent images) is not a ' +
+      'view you can set, and "canvas" names nothing: if he says it, ask "the Wall or the Board?" in say and return ' +
+      'no action.'
   },
   {
     kind: 'open_settings',
@@ -295,6 +296,7 @@ export function buildStateSection(s: ManifestSnapshot): string {
       for (const pane of tab.panes) lines.push(`  · ${paneLine(pane)}`)
     }
     lines.push('These Terminal numbers are what he says out loud. Use them verbatim as send_prompt targets.')
+    lines.push('Tab numbers are not on screen: name terminals by call-sign or agent, never "tab 2".')
   }
   lines.push(
     `view: projects rail ${s.view.railCollapsed ? 'collapsed' : 'open'}, ` +

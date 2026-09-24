@@ -1,42 +1,44 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
-import type { TerminalTab, WorkspaceViewMode } from '@shared/types'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
-import { ACCENT_PALETTE, TAB_TEXT_PALETTE, isShellProfile, resolveProfile, splitProfiles } from '@/lib/agents'
-import { TAB_DRAG_TYPE } from '@/lib/mosaicLayout'
 import { fadeIn, useFlipChildren } from '@/lib/motion'
-import { tabsHost as tabsHostStore, toolsHost as toolsHostStore, useHost, viewHost as viewHostStore } from '@/lib/shellSlots'
+import { toolsHost as toolsHostStore, useHost } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
-import { useAnyBusy } from '@/hooks/usePaneRuntime'
-import {
-  useActiveProject,
-  useActiveTab,
-  useActiveWorkspace,
-  useApp,
-  useMosaic,
-  usePaneCount,
-  useViewMode
-} from '@/state/AppState'
-import { AgentBadge } from './AgentBadge'
+import { uiCommands } from '@/lib/uiCommands'
+import { useActiveProject, useActiveTab, useActiveWorkspace, useApp, useMosaic, usePaneCount, useViewMode } from '@/state/AppState'
 import { AgentChooser } from './AgentChooser'
 import { CommandsButton } from './CommandsFlyout'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { MosaicView } from './MosaicView'
-import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
 import { SkillsButton } from './SkillsFlyout'
 import { FocusReticle } from './shell/FocusReticle'
+import { WallStrip } from './shell/WallStrip'
 import { SplitView } from './SplitView'
-import { Toggle } from './settings/parts'
 import './TerminalGrid.css'
 
+/** What a NEW_TAB_EVENT may carry: the button it came from, to anchor the chooser. */
+export interface NewTabDetail {
+  anchor?: HTMLElement | null
+}
+
 /**
- * The terminal area: a tab strip over the active tab's pane tree, plus the two
- * empty states that lead into it.
+ * The terminal area, in one of two sizes, plus the empty states that lead in:
+ *
+ *   Wall         (viewMode 'mosaic') every terminal at once, filling the stage.
+ *   Full screen  (viewMode 'tabs') the active tab — its splits and all — under
+ *                the wall strip, which keeps every other terminal in sight.
+ *
+ * `beside` is the browser or the board on the stage: then this draws only the
+ * wall strip, and the surface takes the room below it (see App).
+ *
+ * There is no tab strip. Tabs are still the unit a split tree lives in, but you
+ * pick a terminal from the strip or the Wall; Ctrl+G flips the two sizes and
+ * the tab shortcuts still step through the tabs Full screen shows.
  */
-export function TerminalGrid(): ReactNode {
+export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNode {
   const { state, actions } = useApp()
   const project = useActiveProject()
   const workspace = useActiveWorkspace()
@@ -45,35 +47,46 @@ export function TerminalGrid(): ReactNode {
   const mosaic = useMosaic()
   const { used, max } = usePaneCount()
 
-  const newTabRef = useRef<HTMLButtonElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
-  const tabsHost = useHost(tabsHostStore)
-  const viewHost = useHost(viewHostStore)
   const toolsHost = useHost(toolsHostStore)
   const [chooserOpen, setChooserOpen] = useState(false)
-  const [dragFrom, setDragFrom] = useState<number | null>(null)
+  const [chooserAnchor, setChooserAnchor] = useState<HTMLElement | null>(null)
 
   const atTabLimit = workspace.tabs.length >= MAX_TABS_PER_PROJECT
 
-  // Ctrl+T pops the same chooser as the + button — and meets the same ceiling.
-  useEffect(() => {
-    const open = (): void => {
-      if (!project) return
+  /**
+   * Pop the agent chooser — and meet the tab ceiling. Anchored on whatever
+   * asked for it, or else on the title bar's + (the one new-agent button that
+   * is always on screen, whichever size the terminals are).
+   */
+  const openChooser = useCallback(
+    (anchor?: HTMLElement | null): void => {
       if (atTabLimit) {
         actions.setNotice(`A project holds at most ${MAX_TABS_PER_PROJECT} tabs`)
         return
       }
+      setChooserAnchor(anchor ?? document.querySelector<HTMLElement>('[data-new-agent]'))
       setChooserOpen(true)
+    },
+    [actions, atTabLimit]
+  )
+
+  // Ctrl+T, the title bar's +, the panes sheet's "New agent": one chooser.
+  useEffect(() => {
+    const open = (e: Event): void => {
+      if (!project) return
+      openChooser((e as CustomEvent<NewTabDetail | null>).detail?.anchor)
     }
     window.addEventListener(NEW_TAB_EVENT, open)
     return () => window.removeEventListener(NEW_TAB_EVENT, open)
-  }, [project, atTabLimit, actions])
+  }, [project, openChooser])
 
   /*
    * Tab text colours reach the terminals from here rather than from
-   * TerminalPane, because in mosaic view there are no panes — there are tiles,
-   * and TerminalPane is not mounted at all. This is the one component that is
-   * up in both views and knows every tab, so it is the one that paints.
+   * TerminalPane, because on the Wall and in the strip there are no panes —
+   * there are tiles, and TerminalPane is not mounted at all. This is the one
+   * component that is up in every view and knows every tab, so it is the one
+   * that paints.
    */
   const tabs = workspace.tabs
   const tinted = state.settings.tabTextColours
@@ -88,10 +101,55 @@ export function TerminalGrid(): ReactNode {
   }, [tabs, tinted])
 
   /*
+   * The two ways between the sizes. Both also bring the agents back on stage
+   * when the browser or the board is up — the strip is the way back to them.
+   */
+  const openFull = useCallback(
+    (paneId: string): void => {
+      actions.revealPane(paneId)
+      actions.setViewMode('tabs')
+      if (beside) uiCommands.run('set-mode', 'agents')
+      // The pane may only now be mounting; give it a frame before focusing xterm.
+      requestAnimationFrame(() => requestAnimationFrame(() => terminalHost.focus(paneId)))
+    },
+    [actions, beside]
+  )
+  const toWall = useCallback((): void => {
+    actions.setViewMode('mosaic')
+    if (beside) uiCommands.run('set-mode', 'agents')
+  }, [actions, beside])
+
+  /*
+   * Esc goes from Full screen back to the Wall — but only when nobody else owns
+   * the key. A focused terminal always does: Esc is Claude Code's interrupt,
+   * the shell's clear-line and vim's normal mode, and a full-screen TUI owns it
+   * even unfocused (MosaicView's guard). So does anything with an Esc of its
+   * own — a field, a sheet, a pop-up; those listen in the capture phase and
+   * stop it, so this one, on the bubble, never hears them. The Wall button and
+   * Ctrl+G are always there instead.
+   */
+  const fullScreen = !beside && viewMode === 'tabs' && Boolean(tab)
+  const focusPaneId = tab?.activePaneId ?? null
+  useEffect(() => {
+    if (!fullScreen || state.view !== 'terminals') return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.defaultPrevented) return
+      const el = document.activeElement
+      if (el?.closest('.xterm, [data-shell-overlay], .popover')) return
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return
+      if (focusPaneId && terminalHost.isAltBuffer(focusPaneId)) return
+      e.preventDefault()
+      actions.setViewMode('mosaic')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [actions, focusPaneId, fullScreen, state.view])
+
+  /*
    * The glides. A pane that survives a re-layout — a sibling closed, a split
    * opened — slides and stretches into its new box (keyed on which panes the
    * tab holds, so dragging a divider is never animated against). A tab switch
-   * or a flip between tabs and canvas crossfades the whole body instead.
+   * or a flip between the two sizes crossfades the whole body instead.
    */
   const leafKey = `${viewMode}:${tab ? collectLeaves(tab.root).map((l) => l.id).join(',') : ''}`
   useFlipChildren(bodyRef, leafKey)
@@ -103,9 +161,11 @@ export function TerminalGrid(): ReactNode {
     if (bodyRef.current) fadeIn(bodyRef.current)
   }, [switchKey])
 
-  if (!state.ready) return <div className="grid grid--booting" />
+  if (!state.ready) return <div className="grid grid--booting" data-view={beside ? 'beside' : undefined} />
 
   if (!project) {
+    // Beside a surface there is nothing to strip yet; the surface has the stage.
+    if (beside) return <div className="grid" data-view="beside" />
     return (
       <div className="grid">
         <EmptyState
@@ -125,57 +185,16 @@ export function TerminalGrid(): ReactNode {
   }
 
   const atLimit = used >= max
+  const anyPanes = workspace.tabs.length > 0
+  const view = beside ? 'beside' : viewMode === 'mosaic' ? 'wall' : 'full'
+  // The strip is for when the terminals are not all on the stage already.
+  const showStrip = anyPanes && view !== 'wall'
+  // Panes attached full size below the strip get a marker there, not a peek.
+  const onScreen = view === 'full' && tab ? collectLeaves(tab.root).map((l) => l.id) : []
 
-  const tabStripParts = (
-    <>
-      <div className="tabstrip__tabs">
-        {workspace.tabs.map((t, index) => (
-          <Tab
-            key={t.id}
-            tab={t}
-            index={index}
-            active={t.id === workspace.activeTabId}
-            onWall={mosaic.wallTabs.includes(t.id)}
-            dragFrom={dragFrom}
-            setDragFrom={setDragFrom}
-          />
-        ))}
-      </div>
-
-      <button
-        ref={newTabRef}
-        type="button"
-        className="ghost-btn tabstrip__new"
-        title={
-          atLimit
-            ? `Session limit reached (${max})`
-            : atTabLimit
-              ? `A project holds at most ${MAX_TABS_PER_PROJECT} tabs`
-              : 'New terminal tab (Ctrl+T)'
-        }
-        disabled={atLimit}
-        onClick={() => {
-          // Still clickable at the tab cap: the press is how you find out
-          // there is one, rather than a button that quietly went dead.
-          if (atTabLimit) {
-            actions.setNotice(`A project holds at most ${MAX_TABS_PER_PROJECT} tabs`)
-            return
-          }
-          setChooserOpen(true)
-        }}
-      >
-        <Icon name="plus" size={14} />
-      </button>
-    </>
-  )
-  const tabStrip = (
-    <div className="tabstrip" role="tablist" aria-label="Terminal tabs">
-      {tabStripParts}
-    </div>
-  )
   const toolParts = (
     <>
-      {/* The wall's legibility switch, next to the toggle that gets you there. */}
+      {/* The wall's legibility switch — it sets the strip's tiles too. */}
       {viewMode === 'mosaic' ? <MosaicTextToggle /> : null}
 
       {/*
@@ -206,86 +225,71 @@ export function TerminalGrid(): ReactNode {
       <TabTintToggle />
     </>
   )
-  const viewToggle = <ViewToggle mode={viewMode} />
+
+  const chooser = (
+    <AgentChooser
+      anchor={chooserAnchor}
+      open={chooserOpen}
+      onClose={() => setChooserOpen(false)}
+      onPick={(profileId, permissionMode) => actions.newTab(profileId, permissionMode)}
+      selectedId={project.defaultProfileId}
+    />
+  )
+
+  const strip = showStrip ? (
+    <WallStrip project={project} workspace={workspace} onScreen={onScreen} onOpen={openFull} onWall={toWall} />
+  ) : null
 
   return (
-    <div className="grid">
-      {/*
-        One slim top layer: on the deck the tabs live in the top bar, the
-        Tabs/Wall switch beside the window tools, and the references in the
-        dock's Tools sheet — each portalled into a host the shell registers
-        (see tabsHost in lib/shellSlots). Without the hosts, the old strip.
-      */}
-      {tabsHost ? (
-        createPortal(tabStrip, tabsHost)
-      ) : (
-        <div className="tabstrip" role="tablist" aria-label="Terminal tabs">
-          {tabStripParts}
-          <div className="tabstrip__spacer" />
-          {toolParts}
-          {viewToggle}
+    <div className="grid" data-view={view}>
+      {/* The references live in the title bar's "…" menu (see toolsHost in lib/shellSlots). */}
+      {toolsHost ? createPortal(<div className="deck-tools">{toolParts}</div>, toolsHost) : null}
+
+      {strip}
+
+      {beside ? null : (
+        <div className="grid__body" ref={bodyRef}>
+          {viewMode === 'mosaic' ? (
+            <MosaicView project={project} workspace={workspace} onNewTerminal={() => openChooser()} onOpenFull={openFull} />
+          ) : tab ? (
+            <>
+              <SplitView
+                node={tab.root}
+                project={project}
+                activePaneId={tab.activePaneId}
+                onlyPane={countLeaves(tab.root) === 1}
+              />
+              <FocusReticle
+                rootRef={bodyRef}
+                selector=".pane[data-focused='true']"
+                targetKey={tab.activePaneId}
+                enabled={countLeaves(tab.root) > 1}
+              />
+            </>
+          ) : (
+            <EmptyState
+              icon="terminal"
+              eyebrow={project.name}
+              title="The deck is clear"
+              body={
+                <>
+                  Open an agent in <span className="mono">{project.path}</span>. Panes split, glide and keep running
+                  whatever you look at.
+                </>
+              }
+              action={
+                <button type="button" className="cta-btn" disabled={atLimit} onClick={() => openChooser()}>
+                  <Icon name="plus" size={14} />
+                  Open an agent
+                </button>
+              }
+              hint="Ctrl + T"
+            />
+          )}
         </div>
       )}
-      {tabsHost && viewHost ? createPortal(viewToggle, viewHost) : null}
-      {tabsHost && toolsHost ? createPortal(<div className="deck-tools">{toolParts}</div>, toolsHost) : null}
 
-      <div className="grid__body" ref={bodyRef}>
-        {viewMode === 'mosaic' ? (
-          <MosaicView
-            project={project}
-            workspace={workspace}
-            onNewTerminal={() => {
-              if (atTabLimit) {
-                actions.setNotice(`A project holds at most ${MAX_TABS_PER_PROJECT} tabs`)
-                return
-              }
-              setChooserOpen(true)
-            }}
-          />
-        ) : tab ? (
-          <>
-            <SplitView
-              node={tab.root}
-              project={project}
-              activePaneId={tab.activePaneId}
-              onlyPane={countLeaves(tab.root) === 1}
-            />
-            <FocusReticle
-              rootRef={bodyRef}
-              selector=".pane[data-focused='true']"
-              targetKey={tab.activePaneId}
-              enabled={countLeaves(tab.root) > 1}
-            />
-          </>
-        ) : (
-          <EmptyState
-            icon="terminal"
-            eyebrow={project.name}
-            title="The deck is clear"
-            body={
-              <>
-                Open an agent in <span className="mono">{project.path}</span>. Panes split, glide and keep running
-                whatever you look at.
-              </>
-            }
-            action={
-              <button type="button" className="cta-btn" disabled={atLimit} onClick={() => setChooserOpen(true)}>
-                <Icon name="plus" size={14} />
-                Open an agent
-              </button>
-            }
-            hint="Ctrl + T"
-          />
-        )}
-      </div>
-
-      <AgentChooser
-        anchor={newTabRef.current}
-        open={chooserOpen}
-        onClose={() => setChooserOpen(false)}
-        onPick={(profileId, permissionMode) => actions.newTab(profileId, permissionMode)}
-        selectedId={project.defaultProfileId}
-      />
+      {chooser}
     </div>
   )
 }
@@ -295,10 +299,10 @@ export function TerminalGrid(): ReactNode {
 /**
  * Full-size text on the wall, or whole terminals shrunk to fit.
  *
- * Lives in the tab strip rather than in Settings alone because it is the answer
- * to "why can I not read this", and the place you ask that is while looking at
- * the wall. Settings → Appearance has the same switch for anyone who goes
- * looking there first.
+ * Lives in the menu's Tools rather than in Settings alone because it is the
+ * answer to "why can I not read this", and the place you ask that is while
+ * looking at the wall. It sets the wall strip's tiles too. Settings →
+ * Appearance has the same switch for anyone who goes looking there first.
  */
 function MosaicTextToggle(): ReactNode {
   const { state, actions } = useApp()
@@ -312,7 +316,7 @@ function MosaicTextToggle(): ReactNode {
       aria-pressed={lifesize}
       title={
         lifesize
-          ? 'Full-size text: every tile is a window onto its terminal at the same type size as tab view, cropped to the tile with the latest output showing. Click to shrink whole terminals to fit instead.'
+          ? 'Full-size text: every tile is a window onto its terminal at the same type size as Full screen, cropped to the tile with the latest output showing. Click to shrink whole terminals to fit instead.'
           : 'Shrunk to fit: every tile keeps its terminal’s full width and shrinks the picture, so nothing reflows and the text gets smaller with every tile you add. Click for full-size text.'
       }
       onClick={() => actions.setMosaicText(lifesize ? 'scaled' : 'lifesize')}
@@ -330,7 +334,7 @@ function MosaicTextToggle(): ReactNode {
  *
  * The tints are excellent for telling four Claudes apart and a distraction when
  * you are reading one of them closely, and that flips several times an hour —
- * so it is a switch in the strip, not a setting you go and find. It hides the
+ * so it is a switch in the menu's Tools, not a setting you go and find. It hides the
  * colours rather than clearing them: each tab keeps whatever it was painted,
  * the right-click palettes still work while it is off, and turning it back on
  * restores the lot. Nothing to redo, so nothing to fear about pressing it.
@@ -354,427 +358,5 @@ function TabTintToggle(): ReactNode {
     >
       <Icon name="palette" size={12} />
     </button>
-  )
-}
-
-/* ----------------------------------------------------------- view toggle */
-
-/** How long a dragged tab has to hover the mosaic button before it flips. */
-const HOVER_FLIP_MS = 400
-
-/**
- * Tabs or mosaic. Two states, so it is a segmented control rather than a menu:
- * the choice is always visible and switching it is one click, because you will
- * be doing it constantly.
- *
- * The mosaic button is also a spring-loaded drop target: hold a dragged tab
- * over it and the view flips under the pointer, so pulling a tab out of the
- * strip and onto the wall is one gesture even when you started in tab view.
- * 400ms, because anything shorter flips the app out from under a tab merely
- * being dragged past it.
- */
-function ViewToggle({ mode }: { mode: WorkspaceViewMode }): ReactNode {
-  const { actions } = useApp()
-  const flipRef = useRef<number | null>(null)
-  const [springing, setSpringing] = useState(false)
-
-  const cancelFlip = (): void => {
-    if (flipRef.current !== null) clearTimeout(flipRef.current)
-    flipRef.current = null
-    setSpringing(false)
-  }
-
-  useEffect(() => cancelFlip, [])
-
-  const options: Array<{ value: WorkspaceViewMode; icon: 'viewTabs' | 'viewMosaic'; label: string; word: string }> = [
-    { value: 'tabs', icon: 'viewTabs', label: 'Tab view', word: 'Tabs' },
-    { value: 'mosaic', icon: 'viewMosaic', label: 'Wall — every session as a live tile', word: 'Wall' }
-  ]
-
-  return (
-    <div className="viewtoggle" role="group" aria-label="Terminal view">
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          className="viewtoggle__btn"
-          data-active={option.value === mode}
-          data-springing={option.value === 'mosaic' && springing ? 'true' : undefined}
-          aria-pressed={option.value === mode}
-          title={`${option.label} (Ctrl+G)`}
-          onClick={() => actions.setViewMode(option.value)}
-          onDragOver={(e) => {
-            if (option.value !== 'mosaic' || mode === 'mosaic') return
-            if (!e.dataTransfer.types.includes(TAB_DRAG_TYPE)) return
-            e.preventDefault()
-            e.dataTransfer.dropEffect = 'copy'
-            if (flipRef.current !== null) return
-            setSpringing(true)
-            flipRef.current = window.setTimeout(() => {
-              flipRef.current = null
-              setSpringing(false)
-              actions.setViewMode('mosaic')
-            }, HOVER_FLIP_MS)
-          }}
-          onDragLeave={cancelFlip}
-          onDrop={cancelFlip}
-        >
-          <Icon name={option.icon} size={12} />
-          <span className="viewtoggle__word">{option.word}</span>
-        </button>
-      ))}
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------- tab */
-
-function Tab({
-  tab,
-  index,
-  active,
-  onWall,
-  dragFrom,
-  setDragFrom
-}: {
-  tab: TerminalTab
-  index: number
-  active: boolean
-  /** This tab's panes were placed on the freeform wall by hand. */
-  onWall: boolean
-  dragFrom: number | null
-  setDragFrom: (i: number | null) => void
-}): ReactNode {
-  const { state, actions } = useApp()
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(tab.title)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const ref = useRef<HTMLDivElement | null>(null)
-
-  const leaves = collectLeaves(tab.root)
-  const paneIds = leaves.map((l) => l.id)
-  const working = useAnyBusy(paneIds)
-  const badges = leaves.slice(0, 3).map((leaf) => resolveProfile(state.settings.agentProfiles, leaf.profileId))
-  // Agent tabs inherit the profile accent; an explicit tab colour still wins.
-  const primaryProfile = leaves[0] ? resolveProfile(state.settings.agentProfiles, leaves[0].profileId) : null
-  const agentTint = primaryProfile && !isShellProfile(primaryProfile) ? primaryProfile.accent : undefined
-  const tabTint = tab.color ?? agentTint
-  // Older workspaces may not have a saved text colour yet. Give those tabs a
-  // deterministic fallback so the identity dot is always visible.
-  const sessionColor = tab.textColor ?? TAB_TEXT_PALETTE[index % TAB_TEXT_PALETTE.length]!
-  const agentName = primaryProfile?.name ?? 'Terminal'
-
-  const commit = (): void => {
-    setEditing(false)
-    const next = draft.trim()
-    if (next && next !== tab.title) actions.renameTab(tab.id, next)
-  }
-
-  const rename = (): void => {
-    setDraft(tab.title)
-    setEditing(true)
-  }
-
-  return (
-    <div
-      ref={ref}
-      className="tab"
-      role="tab"
-      aria-selected={active}
-      data-active={active}
-      data-tint={tabTint ? 'true' : undefined}
-      data-working={working ? 'true' : undefined}
-      title={`${agentName} · ${tab.title} · Double-click to rename · Right-click for colours${working ? ' · Working…' : ''}`}
-      style={
-        {
-          ...(tabTint ? { '--tab-tint': tabTint } : {}),
-          '--tab-text-tint': sessionColor
-        } as React.CSSProperties
-      }
-      data-onwall={onWall ? 'true' : undefined}
-      data-dragover={dragFrom !== null && dragFrom !== index ? 'true' : undefined}
-      draggable={!editing}
-      onDragStart={(e) => {
-        setDragFrom(index)
-        // Two jobs for one drag: within the strip it reorders, and over the
-        // mosaic it puts this tab's panes on the wall. The payload is what the
-        // wall reads; `dragFrom` is what the strip reads.
-        e.dataTransfer.setData(TAB_DRAG_TYPE, tab.id)
-        e.dataTransfer.effectAllowed = 'copyMove'
-      }}
-      onDragEnd={() => setDragFrom(null)}
-      onDragOver={(e) => {
-        if (dragFrom === null || dragFrom === index) return
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-      }}
-      onDrop={(e) => {
-        e.preventDefault()
-        if (dragFrom !== null && dragFrom !== index) actions.moveTab(dragFrom, index)
-        setDragFrom(null)
-      }}
-      onPointerDown={() => {
-        if (!active) actions.selectTab(tab.id)
-      }}
-      onDoubleClick={rename}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        if (!active) actions.selectTab(tab.id)
-        setMenuOpen(true)
-      }}
-      onAuxClick={(e) => {
-        if (e.button === 1) actions.closeTab(tab.id)
-      }}
-    >
-      <div className="tab__badges">
-        {badges.map((p, i) => (
-          <AgentBadge key={`${p.id}-${i}`} profile={p} size="sm" />
-        ))}
-        {leaves.length > 3 ? <span className="tab__more mono">+{leaves.length - 3}</span> : null}
-      </div>
-
-      {editing ? (
-        <input
-          className="tab__title-input"
-          value={draft}
-          autoFocus
-          spellCheck={false}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (e.key === 'Enter') commit()
-            if (e.key === 'Escape') {
-              setDraft(tab.title)
-              setEditing(false)
-            }
-          }}
-        />
-      ) : (
-        <span className="tab__title truncate">{tab.title}</span>
-      )}
-
-      {/* This dot identifies the individual session, independently of whether
-          terminal text colouring is enabled. */}
-      <span
-        className="tab__textdot"
-        data-working={working ? 'true' : undefined}
-        title={`Session colour for ${tab.title}: ${sessionColor}${working ? ' (working…)' : ''}`}
-        aria-label="Terminal session colour"
-      />
-
-      {onWall ? (
-        <span className="tab__wall" title="On the Wall" aria-label="On the Wall">
-          <Icon name="viewMosaic" size={10} />
-        </span>
-      ) : null}
-
-      <button
-        type="button"
-        className="ghost-btn tab__close"
-        data-danger="true"
-        title="Close tab"
-        onClick={(e) => {
-          e.stopPropagation()
-          actions.closeTab(tab.id)
-        }}
-      >
-        <Icon name="close" size={11} />
-      </button>
-
-      <TabMenu tab={tab} anchor={ref.current} open={menuOpen} onClose={() => setMenuOpen(false)} onRename={rename} />
-    </div>
-  )
-}
-
-/* -------------------------------------------------------------- tab menu */
-
-/**
- * Right-click a tab: two colours, the tab's own settings, a rename and a close.
- *
- * The colours are deliberately separate rather than one that drives both. A
- * tab's colour is how you find it in the strip; its terminal colour is how you
- * know which session you are typing into once you are looking at the terminal
- * and the strip is out of mind. Wanting one without the other is the normal
- * case — two Claudes on the same project, one tinted so you cannot confuse
- * them — so neither implies the other.
- *
- * The settings below them belong to the tab because a tab is one job. The
- * project answers for the folder; the tab answers for the work going on in it,
- * and "leave it to the project" stays the first option on both selects so the
- * tab is never forced to hold an opinion it does not have.
- */
-function TabMenu({
-  tab,
-  anchor,
-  open,
-  onClose,
-  onRename
-}: {
-  tab: TerminalTab
-  anchor: HTMLElement | null
-  open: boolean
-  onClose: () => void
-  onRename: () => void
-}): ReactNode {
-  const { state, actions } = useApp()
-  const { agents, shells } = splitProfiles(state.settings.agentProfiles)
-  const settings = tab.settings
-
-  return (
-    <Popover anchor={anchor} open={open} onClose={onClose} align="start" width={288} label="Tab settings">
-      <PopoverSection title="Tab colour">
-        <Swatches
-          label="Tab colour"
-          value={tab.color ?? null}
-          onPick={(color) => actions.paintTab(tab.id, { color })}
-        />
-      </PopoverSection>
-
-      <PopoverSection title="Terminal text">
-        {/* The auto-assigned tints, so a new tab's colour is one of the swatches. */}
-        <Swatches
-          label="Terminal text colour"
-          palette={TAB_TEXT_PALETTE}
-          value={tab.textColor ?? null}
-          onPick={(textColor) => actions.paintTab(tab.id, { textColor })}
-        />
-        <div className="popover__hint">
-          Repaints this tab’s terminals. New tabs pick their own colour so no two look alike; this overrides it.
-          Output that picks its own colour — Claude’s highlights, a diff, an error — keeps it.
-        </div>
-      </PopoverSection>
-
-      <PopoverSection title="Settings">
-        <div className="field">
-          <label className="field__label" htmlFor={`tab-agent-${tab.id}`}>
-            New panes open as
-          </label>
-          {/* Agents first, shells last: splitting to get a prompt is the rarer
-              want, and the list is read top-down. */}
-          <select
-            id={`tab-agent-${tab.id}`}
-            className="select"
-            value={settings?.defaultProfileId ?? ''}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => actions.setTabSettings(tab.id, { defaultProfileId: e.target.value || undefined })}
-          >
-            <option value="">Project default</option>
-            {[...agents, ...shells].map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="field">
-          <label className="field__label" htmlFor={`tab-handoff-${tab.id}`}>
-            Hand off to
-          </label>
-          {/* Agents only. A handoff is a brief written for somebody who can read
-              it, and a shell cannot. */}
-          <select
-            id={`tab-handoff-${tab.id}`}
-            className="select"
-            value={settings?.handoffTargetId ?? ''}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => actions.setTabSettings(tab.id, { handoffTargetId: e.target.value || undefined })}
-          >
-            <option value="">Ask each time</option>
-            {agents.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="tab__menu-toggle">
-          <span className="tab__menu-name">Send handoffs without asking</span>
-          <Toggle
-            checked={settings?.handoffAutoSend === true}
-            label="Send handoffs without asking"
-            // Off is written as absent, not as `false`: the two mean the same
-            // thing to every reader, and one of them keeps the file clean.
-            onChange={(on) => actions.setTabSettings(tab.id, { handoffAutoSend: on || undefined })}
-          />
-        </div>
-        <div className="popover__hint">
-          Forge presses Enter on the handoff prompts for you. Off, you read them first.
-        </div>
-      </PopoverSection>
-
-      <PopoverDivider />
-
-      <PopoverRow
-        onClick={() => {
-          onClose()
-          onRename()
-        }}
-      >
-        <span className="tab__menu-name">Rename…</span>
-      </PopoverRow>
-      <PopoverRow
-        danger
-        onClick={() => {
-          onClose()
-          actions.closeTab(tab.id)
-        }}
-      >
-        <span className="tab__menu-name">Close tab</span>
-      </PopoverRow>
-    </Popover>
-  )
-}
-
-/**
- * The palette, a custom well, and a way back out.
- *
- * "None" first and always present: a colour you cannot remove is a colour you
- * will not risk trying, and the whole feature is only useful if it is cheap to
- * change your mind.
- */
-function Swatches({
-  value,
-  onPick,
-  label,
-  palette = ACCENT_PALETTE
-}: {
-  value: string | null
-  onPick: (color: string | null) => void
-  label: string
-  palette?: string[]
-}): ReactNode {
-  return (
-    <div className="swatches" role="group" aria-label={label}>
-      <button
-        type="button"
-        className="swatch swatch--none"
-        aria-label={`${label}: none`}
-        title="No colour"
-        data-selected={value === null ? 'true' : undefined}
-        onClick={() => onPick(null)}
-      />
-      {palette.map((c) => (
-        <button
-          key={c}
-          type="button"
-          className="swatch"
-          aria-label={`${label}: ${c}`}
-          data-selected={value?.toLowerCase() === c.toLowerCase() ? 'true' : undefined}
-          style={{ background: c }}
-          onClick={() => onPick(c)}
-        />
-      ))}
-      <label className="swatch swatch--custom" title="Custom colour">
-        <input
-          type="color"
-          value={value ?? '#c6ff4a'}
-          aria-label={`${label}: custom`}
-          onChange={(e) => onPick(e.target.value)}
-        />
-      </label>
-    </div>
   )
 }

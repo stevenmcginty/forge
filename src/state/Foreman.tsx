@@ -21,11 +21,13 @@ import { resolveProfile } from '@/lib/agents'
 import {
   runAppAction,
   type ActionContext,
+  type ActionOutcome,
   type ActionPane,
   type ActionRunner,
   type AppAction
 } from '@/lib/appactions'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
+import { makeId } from '@/lib/ids'
 import { terminalHost } from '@/lib/terminals'
 import { useApp } from '@/state/AppState'
 
@@ -217,6 +219,10 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
    * are tools Foreman already has in main, against the PTY itself, and a second
    * road to the same keyboard is a second thing to keep honest. An action that
    * needs one of them fails with a sentence rather than doing nothing quietly.
+   *
+   * `openAgentPane` is here for the other caller this channel serves: a pane
+   * agent's open_agent_pane (electron/foreman/pane-caller.ts), anchored on the
+   * pane that asked, so the new agent opens in that pane's project.
    */
   const runnerRef = useRef<ActionRunner | null>(null)
   runnerRef.current = {
@@ -240,17 +246,23 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
       if (room <= 0) return { ok: false, done: 0, summary: `Session limit reached (${MAX_SESSIONS}) — nothing hired` }
       const done = Math.min(count, room)
       const title = done === 1 ? `${profile.name} (hired)` : `${profile.name} ×${done} (hired)`
-      actions.hireTab(projectId, profileId, done, title)
+      // Minted here so the answer can name them: the hires are not running yet
+      // when it goes back, so no list of live panes has them in it.
+      const paneIds = Array.from({ length: done }, () => makeId('pane'))
+      actions.hireTab(projectId, profileId, done, title, paneIds)
       const where = `in a new tab called “${title}” in this project — the hires are side by side there, not in the tab you are driving`
       return {
         ok: true,
         done,
+        paneIds,
         summary:
           done < count
             ? `Opened ${done} of ${count} ${profile.name} panes ${where} — session limit reached`
             : `Opened ${done} ${profile.name} ${done === 1 ? 'pane' : 'panes'} ${where}`
       }
     },
+    openAgentPane: ({ profileId, title, prompt, submit, anchorPaneId }) =>
+      actions.openAgentPane(title, prompt, { profileId, submit, ...(anchorPaneId ? { anchorPaneId } : {}) }),
     closePane: (paneId) => actions.closePane(paneId),
     closeTab: (tabId) => actions.closeTab(tabId),
     selectProject: (projectId) => actions.selectProject(projectId),
@@ -280,9 +292,14 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
           result = { id, ok: false, error: `Forge has no tool called ${String(request.name)}` }
         } else {
           const action = asAction(request.args)
-          // Anchored actions run in the project that owns the anchor pane.
+          // Anchored actions run in the project that owns the anchor pane. A
+          // pane agent Forge cannot place (not in any open layout) opens in the
+          // project on screen, as it always did; a hire with a lost anchor is
+          // refused by hireTab itself.
           const anchor = action && 'anchorPaneId' in action ? String(action.anchorPaneId ?? '') : ''
-          const projectId = anchor ? projectOwningRef.current(anchor) : (stateRef.current.activeProjectId ?? null)
+          const owner = anchor ? projectOwningRef.current(anchor) : null
+          const projectId =
+            anchor && (owner || action?.kind !== 'open_agent_pane') ? owner : (stateRef.current.activeProjectId ?? null)
           const ctx = contextForRef.current(projectId)
           const runner = runnerRef.current
           if (!action) {
@@ -294,7 +311,11 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
             // has a perfectly cheerful summary ("This tab is full — nothing
             // split") and Foreman has to be able to tell it from a hire that
             // actually happened.
-            const outcome = runAppAction(action, ctx, runner)
+            const outcome = await settleOpened(
+              runAppAction(action, ctx, runner),
+              projectId,
+              stateRef.current.activeProjectId ?? null
+            )
             result = outcome.ok ? { id, ok: true, result: outcome.summary } : { id, ok: false, error: outcome.summary }
           }
         }
@@ -361,6 +382,33 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
   )
 
   /**
+   * A driven pane that has left the layout takes its job with it.
+   *
+   * Closing the pane — a Wall or strip tile's X, its tab, a phone — used to
+   * leave the session open in main, billing and calling tools at a pane that
+   * was gone, with no header left on screen to switch it off from. Only a pane
+   * that has been *seen* in the layout counts as closed: after a reload the
+   * workspaces load lazily, and a job in a project not loaded yet must not be
+   * stopped for being out of sight.
+   */
+  const seenDriven = useRef(new Set<string>())
+  useEffect(() => {
+    for (const s of states.values()) {
+      const running = s.status === 'starting' || s.status === 'driving' || s.status === 'waiting'
+      if (!running) {
+        seenDriven.current.delete(s.paneId)
+        continue
+      }
+      if (projectOwningRef.current(s.paneId) !== null) {
+        seenDriven.current.add(s.paneId)
+      } else if (seenDriven.current.has(s.paneId)) {
+        seenDriven.current.delete(s.paneId)
+        stop(s.paneId)
+      }
+    }
+  }, [state.workspaces, states, stop])
+
+  /**
    * A word in Foreman's ear.
    *
    * On a running job it is a turn for Foreman's session. On a pane whose job is
@@ -419,6 +467,50 @@ export function useForeman(): ForemanCtx {
   const ctx = useContext(ForemanContext)
   if (!ctx) throw new Error('useForeman must be used inside <ForemanProvider>')
   return ctx
+}
+
+/** How long an answer waits for a pane it just opened to start. Inside main's 15 s round trip. */
+const PANE_START_WAIT_MS = 8_000
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * The real outcome of an action that opened panes, not the dispatch-time one.
+ *
+ * "Opened" at dispatch meant only that a tab was asked for: a spawn that then
+ * failed (a bad folder, the session cap in main, a conpty error) showed only in
+ * that pane, and the agent that asked went on waiting for a helper that never
+ * existed. So the answer waits, briefly, for every new pane to come up and says
+ * which did not. A pane in a project that is not on screen does not start until
+ * that project is opened — the answer says so rather than waiting for it.
+ */
+async function settleOpened(
+  outcome: ActionOutcome,
+  projectId: string | null,
+  onScreen: string | null
+): Promise<ActionOutcome> {
+  const ids = outcome.ok ? (outcome.paneIds ?? []) : []
+  if (ids.length === 0) return outcome
+  if (projectId !== onScreen) {
+    return {
+      ...outcome,
+      summary: `${outcome.summary}. Not running yet: that project is not the one on screen, and its panes start when it is opened — a brief waits for that`
+    }
+  }
+  const deadline = Date.now() + PANE_START_WAIT_MS
+  for (;;) {
+    // First, so the dispatch that opened them has rendered and mounted them.
+    await sleep(150)
+    for (const id of ids) {
+      const rt = terminalHost.runtime(id)
+      if (rt.status === 'error' || rt.status === 'exited') {
+        const why = rt.error ?? `it exited with code ${rt.exitCode ?? '?'}`
+        return { ...outcome, ok: false, summary: `Pane ${id} was opened but did not start: ${why}` }
+      }
+    }
+    if (ids.every((id) => terminalHost.runtime(id).status === 'live')) return outcome
+    if (Date.now() > deadline) return { ...outcome, summary: `${outcome.summary} (still starting)` }
+  }
 }
 
 /**

@@ -935,11 +935,26 @@ export class ForemanHost {
     }
   }
 
+  /**
+   * The driven pane has closed under a running job — its tile's X, its tab, a
+   * phone. The renderer stops the job when the pane leaves the layout; this is
+   * the belt to those braces, for a turn already in flight: a job reading and
+   * typing at a pane that no longer exists would bill on to no end, and there
+   * is no header left on screen to switch it off from.
+   */
+  private drivenGone(driven: Driven): string {
+    this.stop(driven.state.paneId)
+    driven.state.line = 'Stopped — the pane it was driving was closed'
+    this.send(driven)
+    return 'The pane you were driving has been closed, so this job has been stopped. Nothing was sent.'
+  }
+
   private async dispatch(driven: Driven, name: string, args: Record<string, unknown>): Promise<string> {
     const paneId = driven.state.paneId
     switch (name) {
       case 'read_pane': {
         const target = String(args['pane'] ?? '').trim() || paneId
+        if (target === paneId && !this.deps.paneInfo(paneId)) return this.drivenGone(driven)
         if (target !== paneId && !this.deps.paneInfo(target)) {
           return `There is no running pane with id ${target}.${this.paneList()}`
         }
@@ -951,6 +966,7 @@ export class ForemanHost {
         const text = String(args['text'] ?? '')
         if (!text) return 'Nothing was sent: `text` was empty.'
         const submit = args['submit'] === undefined ? true : args['submit'] === true
+        if (target === paneId && !this.deps.paneInfo(paneId)) return this.drivenGone(driven)
         if (target !== paneId && !this.deps.paneInfo(target)) {
           return `There is no running pane with id ${target}. Nothing was sent.${this.paneList()}`
         }

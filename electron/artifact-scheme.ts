@@ -1,6 +1,8 @@
-import { readFile, realpath, stat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { realpath, stat } from 'node:fs/promises'
 import { extname, join, sep } from 'node:path'
-import { ARTIFACT_SCHEME } from '@shared/browser'
+import { Readable } from 'node:stream'
+import { ARTIFACT_SCHEME, isArtifactUrl } from '@shared/browser'
 import { CANVAS_READ_MAX_BYTES } from './canvas-board'
 
 /**
@@ -32,6 +34,18 @@ import { CANVAS_READ_MAX_BYTES } from './canvas-board'
  * scheme loads in an iframe and a tab as it is, and every privilege that call
  * could grant (standard origin, CSP bypass, fetch, CORS, storage) is one an
  * artifact should not have. Read-only: GET and HEAD, nothing else.
+ *
+ * The Board's own tiles draw pictures and clips from here too, so a file is
+ * streamed from disk instead of read whole in main and copied over IPC. Byte
+ * ranges are answered (206), so a clip seeks without loading it all. An
+ * address carrying `?v=<mtime>` names one version of the file and may be
+ * cached; any other address (an artifact's own `pic.png`) is `no-store`.
+ *
+ * `connect-src 'none'` does not cover navigation: a sandboxed frame may still
+ * navigate itself (`location = 'https://…'`, a link, a meta refresh), and the
+ * renderer's frame-src allows https:. `guardArtifactFrames` is the lock for
+ * that — installed on the window's webContents, it refuses any navigation out
+ * of a frame that is showing an artifact to anything that is not one.
  *
  * Path safety is realpath-based: the file's real path (every symlink and
  * junction followed) must sit inside <canvas root>/<projectId>/ as that folder
@@ -175,23 +189,55 @@ export interface ArtifactSchemeOptions {
   frameAncestors?: string[]
 }
 
-function artifactHeaders(type: string, opts: ArtifactSchemeOptions): Record<string, string> {
+function artifactHeaders(type: string, opts: ArtifactSchemeOptions, versioned = false): Record<string, string> {
   return {
     'Content-Type': type,
     'Content-Security-Policy': artifactCsp(opts.frameAncestors),
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    // Agents rewrite artifacts in place; a reload must show the new file.
-    'Cache-Control': 'no-store'
+    // Agents rewrite artifacts in place; a reload must show the new file. A
+    // `?v=<mtime>` address is one version of it, so that one may be kept.
+    'Cache-Control': versioned ? 'private, max-age=31536000, immutable' : 'no-store'
   }
 }
 
 const PLAIN = 'text/plain; charset=utf-8'
 
+/**
+ * One `Range: bytes=…` header against a file of `size` bytes: the inclusive
+ * span to send, 'unsatisfiable', or null to send the whole file (no header,
+ * several ranges, or one this does not understand — all legal to ignore).
+ */
+export function parseByteRange(header: string | null, size: number): { start: number; end: number } | 'unsatisfiable' | null {
+  const m = /^\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$/i.exec(header ?? '')
+  if (!m || (m[1] === '' && m[2] === '')) return null
+  let start: number
+  let end: number
+  if (m[1] === '') {
+    // bytes=-N: the last N bytes.
+    const n = Number(m[2])
+    if (n === 0) return 'unsatisfiable'
+    start = Math.max(0, size - n)
+    end = size - 1
+  } else {
+    start = Number(m[1])
+    end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1)
+  }
+  if (start >= size || end < start) return 'unsatisfiable'
+  return { start, end }
+}
+
+type ResponseBody = ConstructorParameters<typeof Response>[0]
+
+/** A file span as a streamed body: nothing is read whole into memory. */
+function fileBody(path: string, start: number, end: number): ResponseBody {
+  return Readable.toWeb(createReadStream(path, { start, end })) as unknown as ResponseBody
+}
+
 /** The answer to one request: the file, or a plain-text refusal. Every response carries the CSP. */
 export async function artifactResponse(canvasRoot: string, request: Request, opts: ArtifactSchemeOptions = {}): Promise<Response> {
-  const refuse = (status: number, reason: string): Response =>
-    new Response(request.method === 'HEAD' ? null : reason, { status, headers: artifactHeaders(PLAIN, opts) })
+  const refuse = (status: number, reason: string, extra: Record<string, string> = {}): Response =>
+    new Response(request.method === 'HEAD' ? null : reason, { status, headers: { ...artifactHeaders(PLAIN, opts), ...extra } })
 
   if (request.method !== 'GET' && request.method !== 'HEAD') return refuse(405, 'Read-only.')
   const found = await resolveArtifact(canvasRoot, request.url)
@@ -199,11 +245,66 @@ export async function artifactResponse(canvasRoot: string, request: Request, opt
   try {
     const size = (await stat(found.path)).size
     if (size > CANVAS_READ_MAX_BYTES) return refuse(413, 'Too big.')
-    const body = request.method === 'HEAD' ? null : new Uint8Array(await readFile(found.path))
-    return new Response(body, { status: 200, headers: { ...artifactHeaders(found.type, opts), 'Content-Length': String(size) } })
+    const versioned = new URL(request.url).searchParams.has('v')
+    const headers = { ...artifactHeaders(found.type, opts, versioned), 'Accept-Ranges': 'bytes' }
+    const range = parseByteRange(request.headers.get('range'), size)
+    if (range === 'unsatisfiable') return refuse(416, 'Range not satisfiable.', { 'Content-Range': `bytes */${size}` })
+    if (range) {
+      const length = range.end - range.start + 1
+      const body = request.method === 'HEAD' ? null : fileBody(found.path, range.start, range.end)
+      return new Response(body, {
+        status: 206,
+        headers: { ...headers, 'Content-Length': String(length), 'Content-Range': `bytes ${range.start}-${range.end}/${size}` }
+      })
+    }
+    // An empty file has no span to stream; createReadStream's `end` is inclusive.
+    const body = request.method === 'HEAD' ? null : size === 0 ? new Uint8Array(0) : fileBody(found.path, 0, size - 1)
+    return new Response(body, { status: 200, headers: { ...headers, 'Content-Length': String(size) } })
   } catch {
     return refuse(404, 'Not found.')
   }
+}
+
+/* --------------------------------------------------- frame navigation */
+
+/**
+ * May a frame now at `from` go to `to`? Anything may load an artifact, and a
+ * frame that is not showing one is none of this module's business; a frame
+ * that is showing one may only go to another.
+ */
+export function artifactFrameMayNavigate(from: string, to: string): boolean {
+  return isArtifactUrl(to) || !isArtifactUrl(from)
+}
+
+/** The part of Electron's `will-frame-navigate` details this reads. */
+export interface ArtifactFrameNavigation {
+  url: string
+  isMainFrame: boolean
+  frame?: { url: string } | null
+  initiator?: { url: string } | null
+  preventDefault(): void
+}
+
+/** The part of Electron's `WebContents` this needs, so a check can pass a fake. */
+export interface ArtifactFrameHost {
+  on(event: 'will-frame-navigate', listener: (details: ArtifactFrameNavigation) => void): unknown
+}
+
+/**
+ * Keep artifacts in their frames: refuse a subframe navigation out of an
+ * artifact (or started by one) to anything that is not an artifact. Call once
+ * per webContents that frames artifacts — the main window.
+ */
+export function guardArtifactFrames(contents: ArtifactFrameHost): void {
+  contents.on('will-frame-navigate', (details) => {
+    if (details.isMainFrame) return
+    const from = details.frame?.url ?? ''
+    const by = details.initiator?.url ?? ''
+    if (!artifactFrameMayNavigate(from, details.url) || !artifactFrameMayNavigate(by, details.url)) {
+      details.preventDefault()
+      console.warn('[artifact] refused a frame navigation out of an artifact to', details.url.slice(0, 200))
+    }
+  })
 }
 
 /** The part of Electron's `Protocol` this needs, so a check can pass a fake. */

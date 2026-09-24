@@ -5,9 +5,11 @@ import type {
   RealtimeSession,
   RealtimeSessionOptions,
   RealtimeState,
+  RealtimeToolAnswer,
   RealtimeToolCall
 } from './session'
 import { toGeminiTools } from './tools'
+import { micError } from './errors'
 import { LiveTraceCounters, liveTrace, serverMessageTypes } from './live-trace'
 
 /**
@@ -107,6 +109,18 @@ export class GeminiLiveSession implements RealtimeSession {
   private outLevel = 0
   /** Set by a manual interrupt: drop the rest of this turn's audio. */
   private dropping = false
+  /**
+   * The model is still sending this turn's audio: from its first modelTurn to
+   * generationComplete / turnComplete. Gemini generates faster than real time,
+   * so a reply is usually done generating while it is still playing — and an
+   * interrupt then must not drop the NEXT reply's audio (V2).
+   */
+  private generating = false
+  /** Audio handed to the player that it has not yet reported drained. */
+  private queued = false
+  /** Tool calls asked for and not yet answered. */
+  private toolsPending = 0
+  private current: RealtimeState = 'connecting'
   private userCaption: RealtimeCaption | null = null
   private botCaption: RealtimeCaption | null = null
   private seq = 0
@@ -125,19 +139,38 @@ export class GeminiLiveSession implements RealtimeSession {
   }
 
   private state(s: RealtimeState, detail?: string): void {
+    this.current = s
     if (!this.stopped || s === 'closed') this.opts.events.onState(s, detail)
+  }
+
+  /**
+   * stop() ran while start() was waiting (Listen pressed off during
+   * "Starting…"): release whatever start() made since, and go no further. A
+   * start that carried on would be a hidden session — live mic, spoken
+   * replies, tools still firing — behind a switch that says Off (V1).
+   */
+  private bailIfStopped(): void {
+    if (!this.stopped) return
+    this.release()
+    throw new Error('Voice session stopped while starting')
   }
 
   async start(): Promise<void> {
     this.state('connecting')
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
-    })
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+      })
+    } catch (err) {
+      throw micError(err)
+    }
+    this.bailIfStopped()
     this.ctx = new AudioContext()
     const ctx = this.ctx
     ctx.onstatechange = () => liveTrace(`audio context ${ctx.state}`)
     liveTrace(`audio context created state=${ctx.state} rate=${ctx.sampleRate}Hz; mic sent as 16000Hz audio/pcm`)
     await this.ctx.audioWorklet.addModule(workletUrl)
+    this.bailIfStopped()
     const source = this.ctx.createMediaStreamSource(this.stream)
     this.capture = new AudioWorkletNode(this.ctx, 'forge-pcm-capture', { processorOptions: { targetRate: 16000 } })
     this.capture.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; level: number }>) => this.onMicChunk(e.data)
@@ -155,6 +188,7 @@ export class GeminiLiveSession implements RealtimeSession {
       }
       if (e.data.drained) {
         this.outLevel = 0
+        this.queued = false
         this.state('listening')
       }
     }
@@ -167,6 +201,7 @@ export class GeminiLiveSession implements RealtimeSession {
   /** Open (or re-open) the socket and wait for setupComplete. */
   private async connect(): Promise<void> {
     const res = await window.forge.realtime?.geminiToken()
+    this.bailIfStopped()
     if (!res) throw new Error('This Forge build has no realtime bridge — restart Forge')
     if (!res.ok) throw new Error(res.error)
     const ws = new WebSocket(`${GEMINI_LIVE_WS_URL}?access_token=${encodeURIComponent(res.token)}`)
@@ -272,24 +307,33 @@ export class GeminiLiveSession implements RealtimeSession {
         if (this.userCaption) this.caption('user', '', true)
       }
       if (sc.outputTranscription?.text) this.caption('assistant', sc.outputTranscription.text, false)
+      if (sc.modelTurn) this.generating = true
       for (const part of sc.modelTurn?.parts ?? []) {
         const data = part.inlineData?.data
         if (data && !this.dropping && (part.inlineData?.mimeType ?? '').startsWith('audio/pcm')) {
           const pcm = bufferFromB64(data)
           this.trace.audioChunk(pcm.byteLength)
+          this.queued = true
           this.player?.port.postMessage({ pcm }, [pcm])
         }
       }
+      if (sc.generationComplete) this.generating = false
       if (sc.interrupted) {
         this.player?.port.postMessage({ flush: true })
         this.dropping = false
+        this.generating = false
+        this.queued = false
         if (this.botCaption) this.caption('assistant', '', true)
         this.state('listening')
       }
       if (sc.turnComplete) {
         this.dropping = false
+        this.generating = false
         if (this.userCaption) this.caption('user', '', true)
         if (this.botCaption) this.caption('assistant', '', true)
+        // A turn with nothing to say (an action done, and the persona's "say
+        // nothing") has no playback to end Thinking… — so the turn's end does (V3).
+        if (!this.queued && this.toolsPending === 0 && this.current === 'thinking') this.state('listening')
       }
     }
     if (msg.toolCall?.functionCalls?.length) {
@@ -313,7 +357,13 @@ export class GeminiLiveSession implements RealtimeSession {
   }
 
   private async answerTool(call: RealtimeToolCall): Promise<void> {
-    const answer = await this.opts.events.onToolCall(call)
+    this.toolsPending++
+    let answer: RealtimeToolAnswer
+    try {
+      answer = await this.opts.events.onToolCall(call)
+    } finally {
+      this.toolsPending--
+    }
     const ws = this.ws
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(
@@ -372,8 +422,12 @@ export class GeminiLiveSession implements RealtimeSession {
 
   interrupt(): void {
     // The Live API has no client-side cancel: barge-in is speech. A button
-    // press flushes what is queued and drops the rest of this turn's audio.
-    this.dropping = true
+    // press flushes what is queued and, while the model is still generating,
+    // drops the rest of this turn's audio. Once it has finished generating
+    // there is no rest to drop, and a `dropping` left set would silence the
+    // next reply: only turnComplete / interrupted clear it (V2).
+    this.dropping = this.generating
+    this.queued = false
     this.player?.port.postMessage({ flush: true })
     this.outLevel = 0
     if (this.botCaption) this.caption('assistant', '', true)
@@ -389,6 +443,12 @@ export class GeminiLiveSession implements RealtimeSession {
     this.stopped = true
     this.trace.stop()
     liveTrace('session stopped')
+    this.release()
+    this.opts.events.onState('closed')
+  }
+
+  /** Close the socket, the mic and the audio graph — whatever exists yet. */
+  private release(): void {
     const ws = this.ws
     this.ws = null
     try {
@@ -402,8 +462,9 @@ export class GeminiLiveSession implements RealtimeSession {
     void this.ctx?.close().catch(() => undefined)
     this.stream = null
     this.ctx = null
+    this.capture = null
+    this.player = null
     this.micLevel = 0
     this.outLevel = 0
-    this.opts.events.onState('closed')
   }
 }

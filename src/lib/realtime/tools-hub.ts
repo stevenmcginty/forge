@@ -21,7 +21,7 @@ import {
  *
  * `show_on_canvas` (the Board tool's old name) is answered as `show_on_board`
  * but never listed. `deps` is the voice agent's: "go to the wall" switches the
- * view through its `set_view` action, the same one the Tabs | Wall switch uses.
+ * view through its `set_view` action, the same one the Wall button and Ctrl+G use.
  */
 
 export const HUB_REALTIME_TOOLS = HUB_TOOL_SPECS.map((spec) => ({

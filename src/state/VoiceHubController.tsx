@@ -15,13 +15,16 @@ import { CONTEXT_MIN_GAP_MS, ContextTracker } from '@/lib/realtime/context'
 import {
   endedNote,
   idleRemainingMs,
+  liveBrainSwitched,
   normaliseIdleTimeout,
   stopPhraseOf,
+  stuckAfterMs,
+  stuckReason,
   type ConversationEnd
 } from '@/lib/realtime/conversation'
 import { dictateToPane } from '@/lib/realtime/dictate'
 import { errorReasonOf, type ErrorSource } from '@/lib/realtime/errors'
-import { micState } from '@/lib/realtime/micstate'
+import { dictationHoldsMic, micState } from '@/lib/realtime/micstate'
 import { currentVoiceAgentToolDeps } from '@/lib/agenttools'
 import { buildStateSection } from '@/lib/appmanifest'
 import {
@@ -48,6 +51,7 @@ import type {
 import { buildRolloverSummary } from '@/lib/realtime/summary'
 import { REALTIME_TOOLS, realtimeResultLabel, realtimeToolLabel, runRealtimeTool } from '@/lib/realtime/tools'
 import { useApp } from './AppState'
+import { useDictation } from './Dictation'
 import { useVoiceAgent, type AgentPhase } from './VoiceAgent'
 
 /**
@@ -216,6 +220,7 @@ const VoiceHubContext = createContext<VoiceHubController | null>(null)
 export function VoiceHubControllerProvider({ children }: { children: ReactNode }): ReactNode {
   const { state, actions: app } = useApp()
   const agent = useVoiceAgent()
+  const dictation = useDictation()
   const s = state.settings
 
   // The ONE setting. A settings.json from before it existed migrates the way
@@ -239,6 +244,8 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   const [rtError, setRtError] = useState<string | null>(null)
   const [muted, setMutedState] = useState(false)
   const mutedRef = useRef(false)
+  /** The Dictate key is capturing: the live session's mic is held shut meanwhile (V5). */
+  const dictatingRef = useRef(false)
   const [captions, setCaptions] = useState<HubCaption[]>([])
   const captionsRef = useRef<HubCaption[]>([])
   const [rtActions, setRtActions] = useState<HubAction[]>([])
@@ -411,7 +418,12 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
             if (c.role === 'user') onUserCaption(c)
             if (c.final && c.role === 'user' && discussionRef.current && isGoCommand(c.text)) void runGo()
           },
-          onToolCall,
+          // A session that is no longer the one the switch shows (stopped while
+          // starting, rolled over) runs nothing, whatever it still hears (V1).
+          onToolCall: (call) =>
+            sessionRef.current === session
+              ? onToolCall(call)
+              : Promise.resolve({ ok: false, text: 'This voice session has ended; nothing was done.' }),
           onToolCancelled: (id) => {
             const hit = actionsRef.current.find((a) => a.status === 'running' && a.id === id)
             if (hit) upsertAction({ ...hit, status: 'failed', label: `${hit.label} (cancelled)` })
@@ -429,8 +441,13 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       pauseAgent()
       try {
         await session.start()
-        if (sessionRef.current !== session) return
-        session.setMuted(mutedRef.current)
+        // Listen went off (or a newer start began) while this one was starting:
+        // a start that resolved late is torn down, never left running (V1).
+        if (sessionRef.current !== session) {
+          session.stop()
+          return
+        }
+        session.setMuted(mutedRef.current || dictatingRef.current)
         setSessionStartedAt(Date.now())
         // What is open right now, before his first word. Changes follow,
         // throttled, from the effect below.
@@ -441,7 +458,10 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
         pendingTextRef.current = null
         if (pending) session.sendText(pending)
       } catch (err) {
-        if (sessionRef.current !== session) return
+        if (sessionRef.current !== session) {
+          session.stop()
+          return
+        }
         session.stop()
         sessionRef.current = null
         setLiveProvider(null)
@@ -626,7 +646,7 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       setMutedState(on)
       mutedRef.current = on
       if (sessionRef.current) {
-        sessionRef.current.setMuted(on)
+        sessionRef.current.setMuted(on || dictatingRef.current)
         return
       }
       // Claude: there is no mic track to mute — muting is not listening.
@@ -707,6 +727,51 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     }, 5000)
     return () => window.clearInterval(timer)
   }, [liveProvider])
+
+  /* ----------------------------------- the Dictate key, beside a live session
+   * Right Ctrl types into the focused pane through Parakeet; the live model
+   * must not hear the same words through its own mic (V5). His Mute is kept
+   * apart: this only holds the track shut while the capture runs. */
+  const dictatingNow = dictationHoldsMic(dictation.status)
+  useEffect(() => {
+    dictatingRef.current = dictatingNow
+    sessionRef.current?.setMuted(mutedRef.current || dictatingNow)
+  }, [dictatingNow, liveProvider])
+
+  /* ------------------------------ the brain setting moved mid-session (V6)
+   * The bar names the new brain at once; the old live session must not keep
+   * answering behind it. It ends, and says why — the next press opens the
+   * new brain. A rollover keeps its provider, so it never trips this. */
+  useEffect(() => {
+    if (!liveBrainSwitched(liveProvider, pickedBrain.realtime)) return
+    endConversationRef.current({ kind: 'switched' })
+  }, [liveProvider, pickedBrain.realtime])
+
+  /* ------------------------------------------------- the watchdog (V3)
+   * Starting… or Thinking… that never moves on — a socket that never sets
+   * up, a turn that never comes back — would otherwise sit there for ever:
+   * the idle clock only runs while listening. The session ends with the
+   * reason on the pill. A tool still running is not quiet. */
+  const toolRunning = rtActions.some((a) => a.status === 'running')
+  useEffect(() => {
+    if (!liveProvider) return undefined
+    const ms = stuckAfterMs({ phase: rtPhase, toolRunning })
+    if (ms === null) return undefined
+    const stuck = rtPhase === 'connecting' ? 'connecting' : 'thinking'
+    const timer = window.setTimeout(() => {
+      const session = sessionRef.current
+      if (!session) return
+      if (import.meta.env.DEV) console.info(`[hub] event=stuck phase=${stuck} ms=${ms}`)
+      sessionRef.current = null
+      session.stop()
+      setLiveProvider(null)
+      setSessionStartedAt(null)
+      pendingTextRef.current = null
+      setRtPhase('error')
+      setRtError(stuckReason(providerSpec(session.provider).label, stuck, ms))
+    }, ms)
+    return () => window.clearTimeout(timer)
+  }, [liveProvider, rtPhase, toolRunning])
 
   const setDiscussionMode = useCallback((on: boolean): void => {
     if (discussionRef.current === on) return
@@ -792,7 +857,14 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
 
   // His words landing count as not-quiet, and end "Listening again".
   const lastUser = usingRealtime ? [...captions].reverse().find((c) => c.role === 'user') : undefined
-  const userSig = usingRealtime ? (lastUser ? `${lastUser.id}:${lastUser.text.length}` : '') : String(agent.turns.length)
+  // On Parakeet a held dictation phrase adds to the buffer, not a turn: it is
+  // still his voice, so it counts too — or 2 min of dictating is "2 min quiet",
+  // and the half-held brief is sent as the conversation closes (V8).
+  const userSig = usingRealtime
+    ? lastUser
+      ? `${lastUser.id}:${lastUser.text.length}`
+      : ''
+    : `${agent.turns.length}:${agent.dictationBuffer.length}`
   const prevUserSig = useRef(userSig)
   useEffect(() => {
     if (prevUserSig.current === userSig) return

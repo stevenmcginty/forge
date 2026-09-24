@@ -10,7 +10,7 @@
  * driven through a stub `electron` module, the way web-check does it.
  */
 import { registerHooks } from 'node:module'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, renameSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, renameSync, truncateSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -138,10 +138,49 @@ try {
   ok(JSON.stringify(reread.items.map((i) => i.id)) === JSON.stringify(reversed), 'order persists across a restart', JSON.stringify(reread.items.map((i) => i.id)))
   ok(reread.items.find((i) => i.id === ids[0])?.placement?.w === 300, 'placements persist across a restart')
   ok(existsSync(join(root, 'canvas', 'proj-a.board.json')) && !existsSync(join(dir, 'proj-a.board.json')), 'the board file sits beside the folder, not in it')
-  ok(board.read('proj-a', 'clip.mp4')?.mime === 'video/mp4', 'read returns bytes and the mime type')
-  ok(board.read('proj-a', '../proj-a.board.json') === null, 'read refuses anything outside the folder')
+  const pendingRead = board.read('proj-a', 'clip.mp4')
+  ok(pendingRead instanceof Promise, 'read is asynchronous (a big clip never blocks main)')
+  const readBack = await pendingRead
+  ok(readBack?.mime === 'video/mp4' && readBack.bytes.length === 64, 'read returns bytes and the mime type')
+  ok((await board.read('proj-a', '../proj-a.board.json')) === null, 'read refuses anything outside the folder')
+  ok((await board.read('proj-a', 'missing.png')) === null, 'read of a missing file is null, not a throw')
   ok(!board.remove('proj-a', '..'), 'remove refuses anything outside the folder')
   ok(board.remove('proj-a', 'clip.mp4') && !existsSync(join(dir, 'clip.mp4')), 'remove deletes the file')
+
+  /* ------------------------------------------------------ one size limit */
+
+  console.log('\ncanvas board — one size limit for posting and showing')
+  const canvasMod = await import('../electron/canvas-board.ts')
+  const MB256 = 256 * 1024 * 1024
+  ok(canvasMod.CANVAS_MAX_BYTES === MB256, 'the board limit is 256 MB', String(canvasMod.CANVAS_MAX_BYTES))
+  ok(
+    canvasMod.CANVAS_POST_MAX_BYTES === canvasMod.CANVAS_MAX_BYTES && canvasMod.CANVAS_READ_MAX_BYTES === canvasMod.CANVAS_MAX_BYTES,
+    'post and read use the same limit (nothing can be posted that will not show)'
+  )
+  const bridgeSrc = readFileSync(new URL('../bridge/canvas-tools.mjs', import.meta.url), 'utf8')
+  ok(/const MAX_BYTES = 256 \* 1024 \* 1024\b/.test(bridgeSrc), "the bridge's show_on_board limit is the same 256 MB")
+  const boardSrc = readFileSync(new URL('../src/components/hub/BoardSurface.tsx', import.meta.url), 'utf8')
+  ok(/export const BOARD_MAX_BYTES = 256 \* 1024 \* 1024\b/.test(boardSrc), "the Board's own limit is the same 256 MB")
+  ok(/if \(tooBig\)[\s\S]{0,80}Too big to show/.test(boardSrc) && /if \(failed\)[\s\S]{0,80}Could not load/.test(boardSrc), 'a tile says "too big" or "could not load" instead of waiting forever')
+  const big = join(outside, 'huge.mp4')
+  writeFileSync(big, '')
+  truncateSync(big, MB256 + 1)
+  const bigPost = board.post('proj-a', big)
+  ok(!bigPost.ok && /256 MB/.test(bigPost.error), 'main refuses to post a file over the limit, and says the limit', JSON.stringify(bigPost))
+  process.env.FORGE_CANVAS_DIR = join(root, 'canvas', 'proj-bridge')
+  const bridgeTools = await import('../bridge/canvas-tools.mjs')
+  const bridgeBig = bridgeTools.postToCanvas(big)
+  ok(!bridgeBig.ok && /256 MB/.test(bridgeBig.error), 'the bridge refuses it too, and says the limit', JSON.stringify(bridgeBig))
+  const justUnder = join(outside, 'edge.mp4')
+  writeFileSync(justUnder, '')
+  truncateSync(justUnder, 1024)
+  ok(bridgeTools.postToCanvas(justUnder).ok, 'the bridge still posts a file under the limit')
+  delete process.env.FORGE_CANVAS_DIR
+  writeFileSync(join(dir, 'dropped-in.mp4'), '')
+  truncateSync(join(dir, 'dropped-in.mp4'), MB256 + 1)
+  ok((await board.read('proj-a', 'dropped-in.mp4')) === null, 'a file saved straight into the folder over the limit is not read')
+  rmSync(join(dir, 'dropped-in.mp4'))
+  rmSync(big)
 
   /* -------------------------------------------------------- bridge-out */
 
@@ -244,6 +283,10 @@ try {
   for (const t of ['go to the wall', 'show all terminals', 'Show me all the terminals.', 'switch to the wall']) {
     const hit = said(t)
     ok(JSON.stringify(hit?.actions) === JSON.stringify([{ kind: 'set_view', mode: 'mosaic' }]), `"${t}" → set_view mosaic, no model`, JSON.stringify(hit))
+  }
+  for (const t of ['full screen', 'Go full screen.', 'back to full screen', 'leave the wall']) {
+    const hit = said(t)
+    ok(JSON.stringify(hit?.actions) === JSON.stringify([{ kind: 'set_view', mode: 'tabs' }]), `"${t}" → set_view tabs (Full screen), no model`, JSON.stringify(hit))
   }
   for (const t of ['go to the board', 'show me the board', 'go to the canvas', 'show me the canvas']) {
     ok(said(t) === null, `"${t}" → left to the brain (never a project switch)`, JSON.stringify(said(t)))
@@ -391,6 +434,25 @@ try {
   ok(!envOf(join(root, 'repos', 'app'))?.startsWith(join(root, 'repos')), 'the board is never inside a user project folder')
   const pty = readFileSync(new URL('../electron/pty-host.ts', import.meta.url), 'utf8')
   ok(/\.\.\.canvasEnv\b/.test(pty) && /canvasEnvFor\(cwd, projectName\)/.test(pty), 'pty-host puts it in every pane\'s environment')
+
+  /* ------------------------------------------- handing a piece to a pane */
+
+  console.log('\nthe Board hands a piece to a pane — the wall strip takes drops')
+  const strip = readFileSync(new URL('../src/components/shell/WallStrip.tsx', import.meta.url), 'utf8')
+  const tileTag = /<div\s+ref=\{ref\}\s+className="wstrip__tile"[\s\S]*?>\s*\{\/\*/.exec(strip)?.[0] ?? ''
+  ok(/onDragOver=\{acceptDrag\}/.test(tileTag) && /onDrop=\{onDrop\}/.test(tileTag), 'a strip tile listens for dragover and drop', tileTag.slice(0, 120))
+  const accept = /const acceptDrag = [\s\S]*?\n  \}/.exec(strip)?.[0] ?? ''
+  ok(/PATH_DRAG_TYPE/.test(accept) && /TASK_DRAG_TYPE/.test(accept) && /maybeFiles\(e\)/.test(accept) && /preventDefault\(\)/.test(accept), 'it accepts a Board tile (path), a task card and Explorer files', accept)
+  const drop = /const onDrop = [\s\S]*?\n  \}/.exec(strip)?.[0] ?? ''
+  ok(/getData\(PATH_DRAG_TYPE\)/.test(drop) && /droppedFilePaths\(e\)/.test(drop), 'the drop reads the dragged path, else the files')
+  ok(/^\s*e\.preventDefault\(\)/m.test(drop.split('\n').slice(1, 5).join('\n')), 'the drop is always prevented (a stray file drop would navigate the window)')
+  const focusThenPaste = /terminalHost\.focus\(paneId\)\s*\n\s*requestAnimationFrame\(\(\) => terminalHost\.paste\(paneId,/
+  ok(focusThenPaste.test(drop), 'focus first, paste a frame later (the DECSET 1004 rule)')
+  const toPane = /const toPane = [\s\S]*?\n  \}/.exec(boardSrc)?.[0] ?? ''
+  ok(focusThenPaste.test(toPane), '"→ Pane" also focuses first and pastes a frame later', toPane)
+  ok(/\.wstrip__tile\[data-pane-id=/.test(toPane), '"→ Pane" flashes the pane in the wall strip too')
+  ok(/data-armed=\{a\.removeArmed/.test(boardSrc) && /if \(!removeArmed\) \{\s*setRemoveArmed\(true\)\s*return/.test(boardSrc), 'deleting a piece takes two presses, never one')
+  ok(/if \(!gone\) actions\.setNotice\(/.test(boardSrc), 'a delete that fails says so')
 } finally {
   rmSync(root, { recursive: true, force: true })
 }

@@ -59,6 +59,13 @@
     inset 0 1px 0 var(--glass-hi);
 }
 
+.dock__pill:focus-visible,
+.dock__project:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--r-full);
+}
+
 .dock__project {
   max-width: 220px;
 }
@@ -250,7 +257,7 @@
 }
 
 .dock__composer[data-listening='true'] .dock__field::placeholder {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .dock__target {
@@ -332,8 +339,8 @@
 
 .sheet--projects {
   left: 0;
-  width: 360px;
-  height: min(700px, calc(100vh - 38px - var(--dock-clear) - 20px));
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(700px, calc(100vh - 38px - var(--dock-clear) - 20px));
   transform-origin: 30px 100%;
 }
 
@@ -368,7 +375,7 @@
 .sheet__count {
   flex: 1;
   font-size: var(--t-xs);
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 
@@ -400,11 +407,18 @@
   font-family: var(--font-display);
   font-size: 11px;
   letter-spacing: 0.05em;
-  color: var(--text-dim);
+  color: var(--text-muted);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .sheet__seg > button:hover {
-  color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.sheet__seg > button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--r-full);
 }
 
 .sheet__seg > button[data-active='true'] {
@@ -424,7 +438,7 @@
 .sheet__empty {
   padding: 24px 12px;
   text-align: center;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .sheet__foot {
@@ -446,10 +460,17 @@
   margin-left: auto;
   font-size: var(--t-eyebrow);
   letter-spacing: 0.06em;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
-/* --------------------------------------------------------------- pane row */
+/* --------------------------------------------------------------- pane row
+ *
+ * The rail (ProjectRail.css) also calls its rows `.prow`, and scopes all of
+ * its own rules to `.rail`; the spacing and the ease below are scoped to this
+ * sheet's list for the same reason, so neither list can reach into the other.
+ * Forge Web's deck mirrors this row (scripts/web-deck-check.mjs), which is why
+ * the class keeps its name.
+ */
 
 .prow {
   display: grid;
@@ -462,6 +483,23 @@
   border-radius: 10px;
   text-align: left;
   color: var(--text-secondary);
+}
+
+.sheet__list .prow {
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.sheet__list .prow + .prow {
+  margin-top: var(--s-1);
+}
+
+/* Inset: the list scrolls, and a ring outside the row would be clipped. */
+.sheet__list .prow:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--r-sheet-row);
 }
 
 .prow[data-cursor='true'] {
@@ -488,7 +526,13 @@
 
 .prow__kind {
   font-size: var(--t-xs);
-  color: var(--text-dim);
+  color: var(--text-muted);
+}
+
+/* The cursor row is a lighter surface; the line steps up to stay over 4.5:1
+   there, as the rail's path does on a lit row. */
+.prow[data-cursor='true'] .prow__kind {
+  color: color-mix(in srgb, var(--text-primary) 35%, var(--text-muted));
 }
 
 .prow__here {
@@ -497,6 +541,27 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--accent);
+}
+
+/*
+ * Accent words on an accent wash, in a light theme: --accent-ink, the accent
+ * pulled toward the ink, clears 4.5:1 where the bare accent does not (3.8:1 in
+ * Paper). A separate light-only rule rather than a change to the two above,
+ * because Forge Web's deck restates those two word for word
+ * (scripts/web-deck-check.mjs) and in a dark theme the ink is the accent.
+ */
+:root[data-appearance='light'] .sheet__seg > button[data-active='true'],
+:root[data-appearance='light'] .prow__here {
+  color: var(--accent-ink);
+}
+
+/*
+ * A sheet lives inside the dock, whose --z-dock is its own stacking context,
+ * so --z-sheet alone left an open sheet under the voice hub's flag. While a
+ * sheet is up, the dock steps up to the sheet's layer.
+ */
+.dock:has(> .sheet) {
+  z-index: var(--z-sheet);
 }
 
 @media (prefers-reduced-motion: reduce) {

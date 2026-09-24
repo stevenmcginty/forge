@@ -3,7 +3,8 @@ import { useCanvasFeed } from '@/hooks/useHub'
 import { usePresence } from '@/lib/motion'
 import { useShellMode } from '@/lib/shellSlots'
 import { uiCommands } from '@/lib/uiCommands'
-import { Preview } from './BoardSurface'
+import { useApp } from '@/state/AppState'
+import { noteBoardArrivals, Preview } from './BoardSurface'
 import './BoardArrival.css'
 
 /**
@@ -11,10 +12,17 @@ import './BoardArrival.css'
  * rises at the bottom right with its picture and one button to go and see.
  * It sinks by itself after a few seconds; on the board itself the new tile
  * announces itself instead, so this stays quiet there.
+ *
+ * It also tells the board (noteBoardArrivals) what landed while it was off
+ * screen, however you then get there — Show, the switcher, the voice agent's
+ * show_on_board — so the board opens on the new piece, marked NEW, and not
+ * behind an artifact left open from before.
  */
 const SHOW_MS = 7000
 
 export function BoardArrival(): ReactNode {
+  const { state } = useApp()
+  const pid = state.activeProjectId
   const feed = useCanvasFeed()
   const mode = useShellMode()
   const [shown, setShown] = useState<{ id: string; count: number } | null>(null)
@@ -25,10 +33,11 @@ export function BoardArrival(): ReactNode {
     if (!key || key === announced.current) return undefined
     announced.current = key
     if (mode === 'board') return undefined
+    if (pid) noteBoardArrivals(pid, feed.justAdded)
     setShown({ id: feed.justAdded[0]!, count: feed.justAdded.length })
     const t = window.setTimeout(() => setShown(null), SHOW_MS)
     return () => window.clearTimeout(t)
-    // mode is read, not watched: switching to the board must not re-announce.
+    // mode and pid are read, not watched: switching to the board must not re-announce.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 

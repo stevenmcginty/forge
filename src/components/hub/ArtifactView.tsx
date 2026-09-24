@@ -20,7 +20,9 @@ import './Artifact.css'
  *              forge-artifact:// scheme (electron/artifact-scheme.ts), whose
  *              response CSP shuts every network door (connect-src 'none')
  *              and allows inline script and style — its own policy, not the
- *              renderer's, which is why scripts run in a built Forge.
+ *              renderer's, which is why scripts run in a built Forge. The
+ *              frame may not navigate itself anywhere but another artifact:
+ *              main refuses it (artifact-scheme.ts guardArtifactFrames).
  *   Markdown   formatted by Forge Web's own renderer, which builds React
  *              elements and never injects HTML, so raw HTML in the source
  *              shows as text and cannot run. Links open outside Forge.
@@ -33,24 +35,12 @@ import './Artifact.css'
  * refreshes in front of you as it works.
  */
 
-/** The thumbnails' policy (srcdoc, scripts stripped): nothing leaves, nothing loads. */
-export const ARTIFACT_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:"
-
-/** Put the CSP meta ahead of everything the page brings, after any doctype. */
-export function sandboxedDocument(html: string): string {
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">`
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(html)
-  if (doctype) return `${doctype[0]}${meta}${html.slice(doctype[0].length)}`
-  return `<!doctype html>${meta}${html}`
-}
-
 export function isMarkdown(item: CanvasItem): boolean {
   return item.kind === 'text' && (/markdown/i.test(item.mime) || /\.(md|markdown)$/i.test(item.name))
 }
 
 /** An item's whole text, re-read whenever the file changes on disk; `failed` once a read comes back empty-handed. */
-function useArtifactRead(item: CanvasItem, feed: CanvasFeed): { text: string | null; failed: boolean } {
+export function useArtifactRead(item: CanvasItem, feed: CanvasFeed): { text: string | null; failed: boolean } {
   const [text, setText] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   const { readText } = feed
@@ -81,10 +71,11 @@ export function useArtifactText(item: CanvasItem, feed: CanvasFeed): string | nu
 
 /**
  * An item's forge-artifact: address. Its folder is its project's:
- * <dataDir>/canvas/<projectId>/<file>. The frame adds `?v=<mtime>`, so a
- * rewrite is a new address and the page reloads as the agent works.
+ * <dataDir>/canvas/<projectId>/<file>. The frame (and the board's tiles) add
+ * `?v=<mtime>`, so a rewrite is a new address and the page reloads as the
+ * agent works.
  */
-function artifactAddress(item: CanvasItem): string {
+export function artifactAddress(item: CanvasItem): string {
   return artifactUrl(item.path.split(/[\\/]/).slice(-2, -1)[0] ?? '', item.id)
 }
 
@@ -107,14 +98,24 @@ export function MarkdownBody({ source, className }: { source: string; className?
   )
 }
 
-/** A still thumbnail of an HTML artifact: sandboxed with no permissions at all, scripts removed. */
-export function HtmlThumb({ html, title }: { html: string; title: string }): ReactNode {
-  // The empty sandbox already refuses script; dropping the tags just keeps the
-  // console free of one refusal per tile.
-  const doc = useMemo(() => sandboxedDocument(html.replace(/<script\b[\s\S]*?<\/script>/gi, '')), [html])
+/**
+ * A still thumbnail of an HTML artifact: the page from its own forge-artifact:
+ * address, sandboxed with no permissions at all, so no script runs. From the
+ * scheme rather than srcdoc: the renderer never reads the file, and the page's
+ * own pictures and stylesheet (relative to it) load as they do in the live view.
+ */
+export function HtmlThumb({ item }: { item: CanvasItem }): ReactNode {
   return (
     <span className="artifact-thumb">
-      <iframe className="artifact-thumb__frame" sandbox="" srcDoc={doc} title={title} tabIndex={-1} loading="lazy" referrerPolicy="no-referrer" />
+      <iframe
+        className="artifact-thumb__frame"
+        sandbox=""
+        src={`${artifactAddress(item)}?v=${item.mtime}`}
+        title={item.title}
+        tabIndex={-1}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+      />
     </span>
   )
 }
@@ -141,7 +142,9 @@ export interface ArtifactActions {
   paneName: string | null
   copy: () => void
   copied: boolean
+  /** First press arms, the second (within a few seconds) deletes the file. */
   remove: () => void
+  removeArmed: boolean
 }
 
 export function ArtifactView({
@@ -272,8 +275,16 @@ export function ArtifactView({
           <button type="button" className="artifact__act" onClick={() => void window.forge.openPath(item.path)} title="Open in its own app">
             <Icon name="expand" size={12} />
           </button>
-          <button type="button" className="artifact__act artifact__act--quiet" onClick={actions.remove} title="Take it off the board (deletes the file from the board’s folder)">
+          <button
+            type="button"
+            className="artifact__act artifact__act--quiet"
+            data-armed={actions.removeArmed ? 'true' : undefined}
+            data-danger={actions.removeArmed ? 'true' : undefined}
+            onClick={actions.remove}
+            title={actions.removeArmed ? 'Press again to delete the file for good' : 'Take it off the board (deletes the file from the board’s folder)'}
+          >
             <Icon name="trash" size={12} />
+            {actions.removeArmed ? 'Delete?' : null}
           </button>
         </span>
       </header>

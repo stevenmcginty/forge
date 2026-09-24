@@ -35,26 +35,32 @@
   overflow: hidden;
 }
 
-.deck__split {
-  display: flex;
-  gap: 12px;
-  min-height: 0;
-}
-
+/*
+ * The agents' column. The terminals fill it (the Wall, or the wall strip over
+ * Full screen — TerminalGrid lays those out); with the browser or the board up
+ * it is the wall strip on top and the surface under it at full stage width.
+ */
 .deck__agents {
   display: flex;
+  flex-direction: column;
+  gap: var(--wall-strip-gap);
   flex: 1;
   min-width: 0;
   min-height: 0;
 }
 
-/*
- * A surface beside the agents: it takes the wide left column and the agents
- * stack into a narrower one on the right — CNVS's browser layout, in Forge's
- * geometry.
- */
-.deck__split[data-beside='true'] .deck__agents {
-  flex: 0 0 clamp(360px, 36%, 720px);
+/* Beside a surface the grid is the wall strip alone: its own height, or none. */
+.deck__agents[data-beside='true'] > .grid {
+  flex: none;
+}
+
+.deck__agents[data-beside='true'] > .grid:empty {
+  display: none;
+}
+
+/* Full screen: the wall strip, then the active tab under it. */
+.deck .grid[data-view='full'] {
+  gap: var(--wall-strip-gap);
 }
 
 .deck__surface {
@@ -82,7 +88,7 @@
 .spop {
   position: fixed;
   inset: 0;
-  z-index: 48;
+  z-index: var(--z-spop);
   display: grid;
   place-items: center;
   padding: calc(var(--titlebar-h) + 8px) 24px calc(var(--dock-clear) + 4px);
@@ -210,6 +216,63 @@
 :root[data-reduced-motion='true'] .spop__panel,
 :root[data-reduced-motion='true'] .dtoast {
   animation: none !important;
+}
+
+/* ================================================================== menus
+ *
+ * One menu on the desktop. Every Popover (a tile's Tab settings, the agent
+ * chooser, the flyouts) wears the … menu's skin (DeckBar.css): the sheets'
+ * opaque surface, glass edge and drop, the concentric corners, 32px rows.
+ * Popover.css itself is left as it is because Forge Web imports it and keeps
+ * its own look; `body > .popover` because Popover portals to <body>, and the
+ * extra element outranks Popover.css whichever order the two load in.
+ */
+body > .popover {
+  padding: var(--sheet-inset);
+  background: var(--sheet-bg);
+  border-color: var(--glass-line-strong);
+  border-radius: var(--r-sheet);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
+}
+
+body > .popover .popover__eyebrow {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.2em;
+}
+
+body > .popover .popover__row {
+  min-height: var(--menu-row-h);
+  border-radius: var(--r-sheet-row);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+/* Inset: a popover scrolls, and a ring outside the row would be clipped. */
+body > .popover .popover__row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--r-sheet-row);
+}
+
+body > .popover .popover__divider {
+  background: var(--glass-line);
+}
+
+/* A destructive button in a popover's action row (Close a busy agent, …) is
+   marked as one at rest, not only under the pointer. */
+body > .popover .popover__actions .ghost-btn[data-danger='true'] {
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px var(--danger-line);
+}
+
+body > .popover .popover__actions .ghost-btn[data-danger='true']:hover {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+}
+
+/* The selected swatch's gap ring is cut from the surface it sits on. */
+body > .popover .swatch[data-selected='true'] {
+  box-shadow: 0 0 0 2px var(--sheet-bg), 0 0 0 3px var(--text-secondary);
 }
 
 /* ================================================== appearance: backdrops */

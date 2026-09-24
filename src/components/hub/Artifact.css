@@ -177,6 +177,14 @@
   color: var(--warn);
 }
 
+/* Delete, armed: as the Board tile's (BoardSurface.css .bact[data-armed]). */
+.artifact__act[data-armed='true'],
+.artifact__act[data-armed='true']:hover {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px var(--danger-line);
+}
+
 /* ---------------------------------------------------------------- stage */
 
 .artifact__stage {

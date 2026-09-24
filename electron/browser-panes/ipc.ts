@@ -3,6 +3,8 @@ import { VOICE_OWNER, type BrowserAgentReply, type BrowserOwner } from '@shared/
 import { getDataDir, getProjects } from '../store'
 import { liveSessions } from '../pty-host'
 import { askRendererTool } from '../voice-agent/ipc'
+import { askAnchoredAppAction } from '../foreman/ipc'
+import { anchoredOpenAction, paneOpenReply } from '../foreman/pane-caller'
 import { setBrainBrowserRunner } from './brain'
 import { setBrowserLinkFile } from './env'
 import { BrowserService, type BrowserServiceDeps } from './service'
@@ -43,11 +45,13 @@ export function registerBrowserPanes(): void {
     downloadsDir: app.getPath('downloads'),
     resolveCaller: resolveFromPanes,
     onShot: (path, owner, id, project) => shotHook?.(path, owner, id, project),
-    // A pane agent's open_agent_pane: the renderer runs the same tool the
-    // main agent has, so the new agent opens as a Forge tab — never a window.
-    appOp: async (op, args) => {
-      const text = await askRendererTool(op, args)
-      return { ok: !/^(FAILED|That failed|Forge did not answer|Forge could not be reached)/.test(text), text }
+    // A pane agent's open_agent_pane: the new agent opens as a Forge tab —
+    // never a window — and in the *caller's* project, anchored on the calling
+    // pane (see ../foreman/pane-caller.ts). A caller that is not a pane has no
+    // project of its own and gets the main agent's tool, in the one on screen.
+    appOp: async (op, args, caller) => {
+      const anchored = op === 'open_agent_pane' ? anchoredOpenAction(args, caller.id) : null
+      return paneOpenReply(anchored ? await askAnchoredAppAction(anchored) : await askRendererTool(op, args))
     }
   })
   service.registerIpc(ipcMain)

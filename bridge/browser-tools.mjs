@@ -31,7 +31,7 @@ export const BROWSER_CONFIRM_RULE =
 export const BROWSER_INSTRUCTIONS = [
   `${BROWSER_PREAMBLE}`,
   'Tabs open on the Forge canvas beside the panes, where the user can watch and use them. Every tab shares one signed-in session, so a site the user signed into once is signed in for you too.',
-  'The loop: browser_open (gives you a tab id) → browser_read (numbered list of what you can click) → browser_click / browser_type with a number from that read → browser_read again. Calls without an id act on your own current tab.',
+  'The loop: browser_open (gives you a tab id) → browser_read (numbered list of what you can click) → browser_click / browser_type with a number from that read → browser_read again. Calls without an id act on your own current tab — sub-agents inside one pane share that tab, so if you are one of several, pass your tab id on every call.',
   BROWSER_CONFIRM_RULE
 ].join('\n')
 

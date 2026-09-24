@@ -1,11 +1,11 @@
 import { ipcRenderer, type IpcRendererEvent } from 'electron'
-import { BROWSER_IPC, type BrowserApi, type BrowserSurfaceInfo } from '@shared/browser'
+import { BROWSER_IPC, type BrowserApi, type BrowserPageKey, type BrowserSurfaceInfo } from '@shared/browser'
 
 /**
  * `window.forgeBrowser` — the renderer's half of the built-in browser. Exposed
  * by electron/preload.ts with its own `exposeInMainWorld`, beside `forgeHub`.
  *
- * `setBounds` and `setProject` are one-way sends: the surface reports its
+ * `setBounds`, `setProject` and `setAppKeys` are one-way sends: the surface reports its
  * placeholder every frame it moves, and a round trip per frame would be waste.
  */
 export const browserApi: BrowserApi = {
@@ -23,6 +23,14 @@ export const browserApi: BrowserApi = {
     ipcRenderer.on(BROWSER_IPC.changed, listener)
     return () => {
       ipcRenderer.removeListener(BROWSER_IPC.changed, listener)
+    }
+  },
+  setAppKeys: (keys) => ipcRenderer.send(BROWSER_IPC.keys, keys),
+  onAppKey: (cb) => {
+    const listener = (_e: IpcRendererEvent, key: BrowserPageKey): void => cb(key)
+    ipcRenderer.on(BROWSER_IPC.key, listener)
+    return () => {
+      ipcRenderer.removeListener(BROWSER_IPC.key, listener)
     }
   }
 }

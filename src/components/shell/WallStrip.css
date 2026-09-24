@@ -1,0 +1,476 @@
+/*
+ * The wall strip: one row of small live terminals across the top of the stage
+ * (see WallStrip.tsx). Sizes come from the --wall-strip-* and --tile-* tokens
+ * in deck-tokens.css; the tile language (edge, head, the X, the active ring) is
+ * the Wall's own — MosaicView.css — at a smaller size, so the two read as one
+ * system.
+ *
+ * It is a glanceable rail, not a second workspace: thin chrome, the output
+ * doing the talking. Idle tiles step back a shade; the one the keyboard is on
+ * wears the accent edge and keeps its X showing.
+ */
+
+.wstrip {
+  /*
+   * The Wall's active ring, with its halo pulled in to fit the row's
+   * --tile-ring-room (4px): the Wall's 18px glow was cut flat above and below
+   * the tile by the scroller.
+   */
+  --tile-ring-active:
+    0 0 0 1px var(--accent-line),
+    0 0 8px -4px var(--accent-glow);
+  display: flex;
+  align-items: stretch;
+  gap: var(--wall-strip-gap);
+  flex: none;
+  height: var(--wall-strip-h);
+  min-width: 0;
+  animation: wstrip-in var(--dur-med) var(--spring-glide) backwards;
+}
+
+/*
+ * The row. Its padding is room for the active ring and the focus ring, which
+ * live outside each tile's box and would otherwise be cut by the scroller; the
+ * matching negative margin keeps the tiles flush with the stage edge.
+ *
+ * No scrollbar: it would cost a row of height for something the wheel (see
+ * WallStrip.tsx), the keyboard and the auto-scroll to the active tile already
+ * do. Instead the cut edges fade — driven by the row's own scroll position, so
+ * the fade only exists while there is more to see on that side, and a row that
+ * fits has no mask at all.
+ */
+.wstrip__tiles {
+  display: flex;
+  align-items: stretch;
+  gap: var(--wall-strip-gap);
+  flex: 1;
+  min-width: 0;
+  padding: var(--tile-ring-room);
+  margin: calc(var(--tile-ring-room) * -1);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  animation: wstrip-edges auto linear both;
+  animation-timeline: scroll(self inline);
+}
+
+@property --wstrip-fade-l {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --wstrip-fade-r {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes wstrip-edges {
+  0% {
+    --wstrip-fade-l: 0px;
+    --wstrip-fade-r: 36px;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--wstrip-fade-l), #000 calc(100% - var(--wstrip-fade-r)), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 var(--wstrip-fade-l), #000 calc(100% - var(--wstrip-fade-r)), transparent);
+  }
+  6% {
+    --wstrip-fade-l: 36px;
+  }
+  94% {
+    --wstrip-fade-r: 36px;
+  }
+  100% {
+    --wstrip-fade-l: 36px;
+    --wstrip-fade-r: 0px;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--wstrip-fade-l), #000 calc(100% - var(--wstrip-fade-r)), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 var(--wstrip-fade-l), #000 calc(100% - var(--wstrip-fade-r)), transparent);
+  }
+}
+
+/* ------------------------------------------------------------------ tile */
+
+.wstrip__tile {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 18%, var(--line-hairline));
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 var(--wall-strip-tile-w);
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-terminal);
+  border: 1px solid var(--edge);
+  border-radius: var(--tile-r);
+  overflow: hidden;
+  box-shadow: var(--tile-shadow);
+  transition:
+    border-color var(--dur-med) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+  animation: wstrip-tile-in var(--dur-med) var(--spring-glide) backwards;
+}
+
+/* The same edge language as a Wall tile — see MosaicView.css. */
+.wstrip__tile[data-state='working'] {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 56%, transparent);
+}
+
+.wstrip__tile[data-state='attention'] {
+  --edge: color-mix(in srgb, var(--warn) 78%, transparent);
+}
+
+.wstrip__tile[data-state='done'] {
+  --edge: color-mix(in srgb, var(--text-primary) 62%, transparent);
+}
+
+.wstrip__tile[data-status='exited'],
+.wstrip__tile[data-status='error'] {
+  --edge: var(--danger-line);
+}
+
+.wstrip__tile[data-tint='true'] {
+  --edge: color-mix(in srgb, var(--tab-tint) 60%, transparent);
+}
+
+.wstrip__tile:hover {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 48%, var(--line-strong));
+}
+
+/* The pane the keyboard is on: the accent edge, a thin halo, a little light. */
+.wstrip__tile[data-active='true'] {
+  --edge: var(--accent);
+  box-shadow: var(--tile-ring-active), var(--tile-shadow);
+}
+
+/*
+ * The Board just pasted into this pane (→ Pane): the edge lights for the
+ * 900ms BoardSurface holds data-hit, as a Wall tile's does. A colour change,
+ * not motion — under reduced motion it lights at once.
+ */
+.wstrip__tile[data-hit='true'] {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 90%, var(--text-primary));
+  transition-duration: 60ms;
+}
+
+.wstrip__tile[data-hit='true'] .wstrip__stage {
+  opacity: 1;
+}
+
+/* A file or a Board piece is overhead: this tile is the drop target. The
+   Wall tile's wash (MosaicView.css), over the output, under the head. */
+.wstrip__tile[data-dropping='true'] {
+  --edge: var(--accent-line);
+}
+
+.wstrip__tile[data-dropping='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  background: var(--accent-softer);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  pointer-events: none;
+}
+
+.wstrip__tile[data-dropping='true'] .wstrip__stage {
+  opacity: 1;
+}
+
+/* The whole tile is a button: pressing it gives, very slightly. */
+.wstrip__tile:has(> .wstrip__hit:active) {
+  transform: scale(0.985);
+}
+
+/* Keyboard on the tile's button: the ring goes round the whole tile. */
+.wstrip__tile:has(> .wstrip__hit:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* ------------------------------------------------------------------ head */
+
+.wstrip__head {
+  position: relative;
+  /* Above the hit sheet, but only its own controls take the pointer. */
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: var(--wall-strip-head-h);
+  padding: 0 0 0 7px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 4%, var(--bg-terminal));
+  border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 6%, transparent);
+  transition: background var(--dur-med) var(--ease-out);
+}
+
+/* A tab given its own colour is found by it: the head carries a wash of it. */
+.wstrip__tile[data-tint='true'] .wstrip__head {
+  background: color-mix(in srgb, var(--tab-tint) 9%, var(--bg-terminal));
+}
+
+.wstrip__tile[data-active='true'] .wstrip__head {
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 8%, var(--bg-header-live));
+}
+
+.wstrip__head > button,
+.wstrip__head > input {
+  pointer-events: auto;
+}
+
+.wstrip__name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.wstrip__tile:hover .wstrip__name,
+.wstrip__tile[data-active='true'] .wstrip__name {
+  color: var(--text-primary);
+}
+
+.wstrip__rename {
+  flex: 1;
+  min-width: 0;
+  height: 18px;
+  font-size: var(--t-sm);
+}
+
+/* "Ready" is the calm default and would sit on nearly every tile: the ring
+   says it (and the tooltip spells it). Every other state keeps its word. */
+.wstrip .statechip[data-state='idle'] {
+  padding: 0 3px;
+}
+
+.wstrip .statechip[data-state='idle'] .statechip__word {
+  display: none;
+}
+
+/* A narrow window's tiles give the name the room: the calm states fall back to
+   their glyph (each is distinct in outline alone — see StateChip), while
+   "Needs you" and a dead pane keep their words. */
+.wstrip__tile {
+  container-type: inline-size;
+}
+
+@container (max-width: 212px) {
+  .wstrip .statechip:is([data-state='working'], [data-state='done'], [data-state='starting'], [data-state='dormant']) {
+    padding: 0 4px;
+  }
+
+  .wstrip .statechip:is([data-state='working'], [data-state='done'], [data-state='starting'], [data-state='dormant']) .statechip__word {
+    display: none;
+  }
+}
+
+/*
+ * The X, flush in the tile's top-right corner: a full 24px target, the tile's
+ * own curve rounding its hover. Quiet until it matters — shown on hover, on
+ * keyboard focus, on the active tile, and on a dead one (closing is what you
+ * do next) — and red only under the pointer.
+ */
+.wstrip__close {
+  flex: none;
+  width: var(--tile-close-size);
+  height: var(--tile-close-size);
+  padding: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.wstrip__tile:hover .wstrip__close,
+.wstrip__tile:focus-within .wstrip__close,
+.wstrip__tile[data-active='true'] .wstrip__close,
+.wstrip__tile[data-status='exited'] .wstrip__close,
+.wstrip__tile[data-status='error'] .wstrip__close {
+  opacity: 1;
+}
+
+.wstrip__close:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--r-sm);
+}
+
+/* ----------------------------------------------------------------- stage */
+
+.wstrip__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  opacity: var(--wall-strip-idle);
+  transition: opacity var(--dur-med) var(--ease-out);
+}
+
+/* Idle tiles recede; anything you would look at comes forward. */
+.wstrip__tile:hover .wstrip__stage,
+.wstrip__tile:focus-within .wstrip__stage,
+.wstrip__tile[data-active='true'] .wstrip__stage,
+.wstrip__tile[data-state='attention'] .wstrip__stage {
+  opacity: 1;
+}
+
+.wstrip__tile[data-status='exited'] .wstrip__stage,
+.wstrip__tile[data-status='error'] .wstrip__stage {
+  opacity: 0.42;
+  filter: saturate(0.55);
+}
+
+/*
+ * A pane that is on screen below the strip: a marker, not a second picture.
+ * Faint machined hatching, so it reads as "the real one is down there" rather
+ * than as a terminal that has gone blank.
+ */
+.wstrip__here {
+  display: grid;
+  place-items: center;
+  opacity: 1;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 6px,
+    color-mix(in srgb, var(--text-primary) 4%, transparent) 6px 7px
+  );
+}
+
+.wstrip__here-word {
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: var(--t-eyebrow);
+  font-weight: 600;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--bg-terminal);
+  box-shadow: inset 0 0 0 1px var(--line-hairline);
+}
+
+.wstrip__tile[data-active='true'] .wstrip__here-word {
+  color: var(--accent-ink);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* The whole tile is the click target. Its hover is the edge, not a wash over
+   the terminal; a press darkens it for a beat. */
+.wstrip__hit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: pointer;
+  border-radius: inherit;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.wstrip__hit:active {
+  background: var(--accent-softer);
+}
+
+/* The tile draws the ring (above), so the sheet does not draw its own. */
+.wstrip__hit:focus-visible {
+  outline: none;
+}
+
+/* ------------------------------------------------------------ wall button */
+
+.wstrip__wall {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  width: 52px;
+  height: auto;
+  padding: 0;
+  border-radius: var(--tile-r);
+  background: var(--glass-bg-strong);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi);
+  font-family: var(--font-display);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.wstrip__wall:hover {
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 8%, var(--glass-bg-strong));
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+.wstrip__wall:active {
+  background: var(--accent-soft);
+}
+
+.wstrip__wall:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--tile-r);
+}
+
+/* ---------------------------------------------------------------- motion */
+
+@keyframes wstrip-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0);
+  }
+}
+
+@keyframes wstrip-tile-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* --dur-med is 0 under reduced motion already; this also stops the spring
+   from ever being sampled, and keeps the scroll-driven edge fade (which is
+   not motion) as it is. */
+@media (prefers-reduced-motion: reduce) {
+  .wstrip,
+  .wstrip__tile {
+    animation: none;
+  }
+
+  .wstrip__tile[data-hit='true'] {
+    transition-duration: 0ms;
+  }
+
+  .wstrip__tile:has(> .wstrip__hit:active) {
+    transform: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .wstrip,
+:root[data-reduced-motion='true'] .wstrip__tile {
+  animation: none;
+}
+
+:root[data-reduced-motion='true'] .wstrip__tile:has(> .wstrip__hit:active) {
+  transform: none;
+}
+
+:root[data-reduced-motion='true'] .wstrip__tile[data-hit='true'] {
+  transition-duration: 0ms;
+}

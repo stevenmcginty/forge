@@ -91,8 +91,13 @@ export type AppAction =
    * (shared/brain-tools.ts). `agent` is spoken ("codex", "the gemini one") and
    * matched like every profile; `prompt` is typed in once the agent is up.
    * Not in ACTION_SPECS: the JSON brains already have open_tabs.
+   *
+   * `anchorPaneId` is the pane that asked, when a pane agent asked: the new
+   * agent then opens in that pane's project, never in whichever one Steve is
+   * looking at by the time the call lands. Absent (voice, the hub), it is the
+   * project on screen.
    */
-  | { kind: 'open_agent_pane'; agent: string; prompt?: string; name?: string; submit?: boolean }
+  | { kind: 'open_agent_pane'; agent: string; prompt?: string; name?: string; submit?: boolean; anchorPaneId?: string }
 
 /** Image generation is the one thing here that cannot finish synchronously. */
 export const MAX_GENERATED_IMAGES = 4
@@ -178,9 +183,14 @@ export interface ActionRunner {
    * Foreman's hires: a tab of their own beside the anchor pane's tab, in its
    * project. Optional because only Foreman's runner has it; without it an
    * anchored `open_panes` falls back to splitting the anchor's tab. Answers
-   * how many panes it opened and a sentence about where.
+   * how many panes it opened and a sentence about where — and the new panes'
+   * ids, so the answer can name them before they are running.
    */
-  hireTab?(anchorPaneId: string, profileId: string, count: number): { ok: boolean; done: number; summary: string }
+  hireTab?(
+    anchorPaneId: string,
+    profileId: string,
+    count: number
+  ): { ok: boolean; done: number; summary: string; paneIds?: string[] }
   closePane(paneId: string): void
   closeTab(tabId: string): void
   selectProject(projectId: string): void
@@ -255,8 +265,18 @@ export interface ActionRunner {
    * A new tab running `profileId`, titled `title`, with `prompt` pasted in once
    * the agent is ready (AppState openAgentPane). Without it, open_agent_pane
    * falls back to newTab and the prompt is dropped, and says so.
+   *
+   * Answers the new pane's id, or null when Forge refused to open one (the
+   * session or tab limit). A runner that answers nothing is taken at its word.
+   * `anchorPaneId` is passed on from the action — see open_agent_pane.
    */
-  openAgentPane?(request: { profileId: string; title: string; prompt: string; submit: boolean }): void
+  openAgentPane?(request: {
+    profileId: string
+    title: string
+    prompt: string
+    submit: boolean
+    anchorPaneId?: string
+  }): string | null | void
   /** Create a folder and add it to the rail. Main process does the creating. */
   createProject?(request: { name: string; parentDir?: string }): Promise<ActionOutcome>
 }
@@ -275,6 +295,8 @@ export interface ActionOutcome {
   pending?: Promise<ActionOutcome>
   /** Absolute paths this action produced, once it has finished. */
   paths?: string[]
+  /** The panes this action opened, by id — open_agent_pane and hires set it. */
+  paneIds?: string[]
 }
 
 /* ------------------------------------------------------------- matching */
@@ -799,7 +821,16 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       let panesInTab = ctx.panesInActiveTab
       if (action.anchorPaneId && run.hireTab) {
         const hired = run.hireTab(action.anchorPaneId, profile.id, requested)
-        return { ok: hired.ok, summary: hired.summary, requested, done: hired.done }
+        const ids = hired.paneIds ?? []
+        return {
+          ok: hired.ok,
+          // The ids in the sentence itself: a hire is not running yet when this
+          // answer goes back, so no list of live panes can name it.
+          summary: ids.length ? `${hired.summary}. Pane ${plural(ids.length, 'id')}: ${ids.join(', ')}` : hired.summary,
+          requested,
+          done: hired.done,
+          ...(ids.length ? { paneIds: ids } : {})
+        }
       }
       if (action.anchorPaneId) {
         const anchor = ctx.panes?.find((p) => p.paneId === action.anchorPaneId)
@@ -934,7 +965,7 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       run.setViewMode(action.mode)
       return {
         ok: true,
-        summary: action.mode === 'mosaic' ? 'Showing the Wall — every terminal at once' : 'Back to tabs',
+        summary: action.mode === 'mosaic' ? 'Showing the Wall — every terminal at once' : 'Full screen — one terminal at a time',
         requested: 1,
         done: 1
       }
@@ -1176,13 +1207,27 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       // Enter only for a real agent, and only when asked: a plain shell runs
       // what it is given.
       const submit = action.submit === true && profile.command.trim() !== ''
-      if (prompt && run.openAgentPane) {
-        run.openAgentPane({ profileId: profile.id, title: name || profile.name, prompt, submit })
+      // An anchored open always goes through openAgentPane, prompt or not: it
+      // is the runner that knows which project the anchor pane lives in, and
+      // newTab only ever opens in the one on screen.
+      const anchor = String(action.anchorPaneId ?? '').trim()
+      if ((prompt || anchor) && run.openAgentPane) {
+        const paneId = run.openAgentPane({
+          profileId: profile.id,
+          title: name || profile.name,
+          prompt,
+          submit,
+          ...(anchor ? { anchorPaneId: anchor } : {})
+        })
+        if (paneId === null) {
+          return fail(`Forge refused to open a ${profile.name} pane — the session or tab limit is reached, or its project is not open`)
+        }
         return {
           ok: true,
-          summary: `Opened a new ${profile.name} pane inside Forge${name ? ` “${name}”` : ''} — the prompt goes in when it is ready${submit ? ' and is sent' : ', unsent'}`,
+          summary: `Opened a new ${profile.name} pane inside Forge${name ? ` “${name}”` : ''}${paneId ? ` (pane id ${paneId})` : ''}${prompt ? ` — the prompt goes in when it is ready${submit ? ' and is sent' : ', unsent'}` : ''}`,
           requested: 1,
-          done: 1
+          done: 1,
+          ...(paneId ? { paneIds: [paneId] } : {})
         }
       }
       run.newTab(profile.id)

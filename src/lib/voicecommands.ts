@@ -646,6 +646,10 @@ const VIEW_VERB = /^(?:(?:go|jump|switch|move|take me|bring me|flick|head)(?:\s+
  */
 function parseViewNav(text: string): CommandHit | 'brain' | null {
   const said = text.replace(/[.!?]+$/, '').trim()
+  // "Full screen" / "leave the wall" → one terminal at a time (view mode `tabs`).
+  if (/^(?:(?:go|switch)\s+(?:to\s+|back\s+to\s+)?|back\s+to\s+)?full\s*screen$|^(?:leave|exit|close)\s+the\s+wall$/.test(said)) {
+    return { action: { kind: 'set_view', mode: 'tabs' }, confidence: 'high' }
+  }
   if (!VIEW_VERB.test(said)) return null
   const target = resolveNavTarget(said, [], null)
   if (target.kind === 'wall') return { action: { kind: 'set_view', mode: 'mosaic' }, confidence: 'high' }

@@ -12,6 +12,7 @@ import {
   writeFileSync,
   type FSWatcher
 } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { basename, extname, join, resolve, sep } from 'node:path'
 import {
   canvasKindOf,
@@ -46,8 +47,16 @@ import { safeId } from './hub-store'
  */
 
 const DEFAULT_DEBOUNCE_MS = 250
-export const CANVAS_POST_MAX_BYTES = 512 * 1024 * 1024
-export const CANVAS_READ_MAX_BYTES = 256 * 1024 * 1024
+/**
+ * One limit for putting a file on the board and for showing it. They used to
+ * differ (post 512 MB, read 256 MB), so a clip in between was accepted, got a
+ * tile, and never drew. bridge/canvas-tools.mjs MAX_BYTES and the Board's
+ * BOARD_MAX_BYTES (src/components/hub/BoardSurface.tsx) are the same number;
+ * scripts/canvas-check.mjs holds all three to it.
+ */
+export const CANVAS_MAX_BYTES = 256 * 1024 * 1024
+export const CANVAS_POST_MAX_BYTES = CANVAS_MAX_BYTES
+export const CANVAS_READ_MAX_BYTES = CANVAS_MAX_BYTES
 
 interface ScanEntry {
   bytes: number
@@ -126,7 +135,7 @@ export class CanvasBoard {
     if (!kind) {
       return { ok: false, error: `The board shows images (png/jpg/webp/gif/svg), clips (mp4/webm) and notes (md/txt/html) — not ${extname(src) || 'that file'}.` }
     }
-    if (size > CANVAS_POST_MAX_BYTES) return { ok: false, error: 'That file is over 512 MB — too big for the board.' }
+    if (size > CANVAS_POST_MAX_BYTES) return { ok: false, error: 'That file is over 256 MB — too big for the board.' }
 
     const dir = this.dirFor(projectId)
     const cleanTitle = typeof title === 'string' ? title.trim().slice(0, 120) : ''
@@ -195,13 +204,19 @@ export class CanvasBoard {
     return snapshot
   }
 
-  read(projectId: string, id: string): { mime: string; bytes: Uint8Array } | null {
+  /**
+   * One item's bytes, read asynchronously so a big clip never stalls main (and
+   * with it every IPC call and the window) while it loads. The Board draws
+   * pictures and clips straight from forge-artifact: (artifact-scheme.ts) and
+   * comes here only as a fallback, for text, and to copy a picture.
+   */
+  async read(projectId: string, id: string): Promise<{ mime: string; bytes: Uint8Array } | null> {
     const path = this.itemPath(projectId, id)
     const kind = canvasKindOf(id)
-    if (!path || !kind || !existsSync(path)) return null
+    if (!path || !kind) return null
     try {
-      if (statSync(path).size > CANVAS_READ_MAX_BYTES) return null
-      return { mime: kind.mime, bytes: new Uint8Array(readFileSync(path)) }
+      if ((await stat(path)).size > CANVAS_READ_MAX_BYTES) return null
+      return { mime: kind.mime, bytes: new Uint8Array(await readFile(path)) }
     } catch {
       return null
     }

@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
+import { ARTIFACT_SCHEME } from '@shared/browser'
 import type { CanvasItem } from '@shared/hub'
 import { useCanvasFeed, type CanvasFeed } from '@/hooks/useHub'
+import { HUB_FOCUS_EVENT, type HubFocusDetail } from '@/lib/hubnav'
 import { getHubRuntime } from '@/lib/hubRuntime'
 import { PATH_DRAG_TYPE } from '@/lib/mosaicLayout'
 import { popIn, useFlipChildren } from '@/lib/motion'
@@ -9,7 +11,7 @@ import type { SurfaceProps } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
 import { useActiveTab, useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
-import { ArtifactView, HtmlThumb, isMarkdown, MarkdownBody, useArtifactText, type ArtifactActions } from './ArtifactView'
+import { ArtifactView, artifactAddress, HtmlThumb, isMarkdown, MarkdownBody, useArtifactRead, type ArtifactActions } from './ArtifactView'
 import './BoardSurface.css'
 
 /**
@@ -28,13 +30,34 @@ import './BoardSurface.css'
  * into the project's canvas folder appears here by itself, and anything you
  * drop on the board is copied in.
  */
+
+/**
+ * Same as electron/canvas-board.ts CANVAS_MAX_BYTES (and the bridge's
+ * MAX_BYTES): past it main will not read the file, so a tile says so instead
+ * of waiting for it forever.
+ */
+export const BOARD_MAX_BYTES = 256 * 1024 * 1024
+
+/** How close together an arrival and a "show the board" must be to count as one. */
+const REVEAL_MS = 4000
+
 export function BoardSurface({ active }: SurfaceProps): ReactNode {
-  const { actions } = useApp()
+  const { state, actions } = useApp()
+  const pid = state.activeProjectId
   const feed = useCanvasFeed()
-  const items = useMemo(() => [...feed.items].sort((a, b) => b.mtime - a.mtime), [feed.items])
+  // The feed starts empty on every visit; until it has read the folder, the
+  // board shows what it showed last time rather than "nothing on the board".
+  const loaded = feed.dir !== ''
+  useEffect(() => {
+    if (pid && loaded) lastShown.set(pid, feed.items)
+  }, [pid, loaded, feed.items])
+  const source = loaded ? feed.items : pid ? lastShown.get(pid) : undefined
+  const waiting = source === undefined && feed.available && Boolean(pid)
+  const items = useMemo(() => [...(source ?? [])].sort((a, b) => b.mtime - a.mtime), [source])
   const open = useSyncExternalStore(openStore.subscribe, openStore.get)
   const setOpen = openStore.set
   const [dropping, setDropping] = useState(false)
+  const [seeded, setSeeded] = useState<string[]>([])
   const gridRef = useRef<HTMLDivElement | null>(null)
   useFlipChildren(gridRef, items.map((i) => i.id).join('|'))
 
@@ -43,6 +66,38 @@ export function BoardSurface({ active }: SurfaceProps): ReactNode {
     // Only once the board has loaded: an empty list is "not read yet", not "gone".
     if (open && openIndex < 0 && items.length) setOpen(null)
   }, [open, openIndex, items.length, setOpen])
+
+  // Something arrived while you were elsewhere (BoardArrival noted it): the
+  // board opens on it — not behind whatever artifact was left open — and it
+  // wears its NEW tag.
+  const arrivalsVersion = useSyncExternalStore(arrivals.subscribe, arrivals.version)
+  useEffect(() => {
+    if (!pid) return
+    const ids = arrivals.take(pid)
+    if (!ids.length) return
+    setOpen(null)
+    setSeeded(ids)
+  }, [pid, arrivalsVersion, setOpen])
+
+  // Already here, and "show it on the board" (voice, a tool) posts something:
+  // the arrival and the focus event come in either order, close together.
+  const lastFocus = useRef(0)
+  const lastArrival = useRef(0)
+  useEffect(() => {
+    const on = (e: Event): void => {
+      if ((e as CustomEvent<HubFocusDetail>).detail?.kind !== 'canvas') return
+      lastFocus.current = Date.now()
+      if (Date.now() - lastArrival.current < REVEAL_MS) setOpen(null)
+    }
+    window.addEventListener(HUB_FOCUS_EVENT, on)
+    return () => window.removeEventListener(HUB_FOCUS_EVENT, on)
+  }, [setOpen])
+  const addedKey = feed.justAdded.join('|')
+  useEffect(() => {
+    if (!addedKey) return
+    lastArrival.current = Date.now()
+    if (Date.now() - lastFocus.current < REVEAL_MS) setOpen(null)
+  }, [addedKey, setOpen])
 
   const onDrop = async (e: React.DragEvent): Promise<void> => {
     e.preventDefault()
@@ -75,7 +130,7 @@ export function BoardSurface({ active }: SurfaceProps): ReactNode {
       <header className="board__head">
         <span className="board__eyebrow">Board</span>
         <span className="board__count">
-          {items.length} {items.length === 1 ? 'piece' : 'pieces'}
+          {waiting ? '' : `${items.length} ${items.length === 1 ? 'piece' : 'pieces'}`}
         </span>
         <span className="board__dir mono truncate" title={feed.dir}>
           {feed.dir}
@@ -86,7 +141,7 @@ export function BoardSurface({ active }: SurfaceProps): ReactNode {
         </button>
       </header>
 
-      {items.length === 0 ? (
+      {waiting ? null : items.length === 0 ? (
         <div className="board__empty">
           <span className="board__empty-mark" aria-hidden="true">
             <Icon name="image" size={22} />
@@ -104,7 +159,7 @@ export function BoardSurface({ active }: SurfaceProps): ReactNode {
               key={item.id}
               item={item}
               hero={i === 0}
-              fresh={feed.justAdded.includes(item.id)}
+              fresh={feed.justAdded.includes(item.id) || seeded.includes(item.id)}
               feed={feed}
               active={active}
               onOpen={() => setOpen(item.id)}
@@ -133,48 +188,167 @@ export function BoardSurface({ active }: SurfaceProps): ReactNode {
   )
 }
 
-/* ------------------------------------------------------------------ tiles */
+/** What each project's board showed last, so coming back draws it at once. */
+const lastShown = new Map<string, CanvasItem[]>()
 
-/** A blob: URL for one item, made on mount and revoked on unmount. */
-function useItemUrl(item: CanvasItem, feed: CanvasFeed): string | null {
-  const [url, setUrl] = useState<string | null>(null)
-  const { objectUrl } = feed
-  useEffect(() => {
-    if (item.kind !== 'image' && item.kind !== 'video') return undefined
-    let live = true
-    let made: string | null = null
-    void objectUrl(item.id).then((u) => {
-      if (!live) {
-        if (u) URL.revokeObjectURL(u)
-        return
+/* ------------------------------------------------------------------ media */
+
+/**
+ * Can this window draw pictures and clips straight from forge-artifact:?
+ * Only when index.html's CSP lists the scheme under img-src and media-src.
+ * Then main streams the file from disk and nothing crosses IPC; until then
+ * (or if the scheme fails for one file) the bytes are read over IPC instead —
+ * asynchronously, once per version of a file, shared by every tile showing it.
+ */
+let schemeMedia: boolean | null = null
+function schemeMediaAllowed(): boolean {
+  if (schemeMedia !== null) return schemeMedia
+  const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') ?? ''
+  const allows = (directive: string): boolean =>
+    csp
+      .split(';')
+      .map((d) => d.trim().split(/\s+/))
+      .some((parts) => parts[0] === directive && parts.includes(`${ARTIFACT_SCHEME}:`))
+  schemeMedia = allows('img-src') && allows('media-src')
+  return schemeMedia
+}
+
+interface BlobEntry {
+  path: string
+  mtime: number
+  bytes: number
+  refs: number
+  used: number
+  pending: Promise<string | null>
+}
+
+/**
+ * blob: URLs read over IPC, kept after their tiles unmount so the next visit
+ * does not read every picture again. Idle entries past the budget, and any old
+ * version of a file, are revoked.
+ */
+const blobs = new Map<string, BlobEntry>()
+const BLOB_BUDGET = 160 * 1024 * 1024
+
+function acquireBlob(item: CanvasItem, objectUrl: CanvasFeed['objectUrl']): BlobEntry {
+  const key = `${item.path}@${item.mtime}`
+  let entry = blobs.get(key)
+  if (!entry) {
+    const made: BlobEntry = { path: item.path, mtime: item.mtime, bytes: item.bytes, refs: 0, used: 0, pending: Promise.resolve(null) }
+    made.pending = objectUrl(item.id).then(
+      (u) => {
+        const kept = blobs.get(key) === made
+        if (!u || !kept) {
+          if (u) URL.revokeObjectURL(u)
+          if (kept) blobs.delete(key)
+          return null
+        }
+        return u
+      },
+      () => {
+        if (blobs.get(key) === made) blobs.delete(key)
+        return null
       }
-      made = u
-      setUrl(u)
+    )
+    blobs.set(key, made)
+    entry = made
+  }
+  entry.refs += 1
+  entry.used = Date.now()
+  return entry
+}
+
+function releaseBlob(entry: BlobEntry): void {
+  entry.refs = Math.max(0, entry.refs - 1)
+  entry.used = Date.now()
+  const newest = new Map<string, number>()
+  for (const e of blobs.values()) newest.set(e.path, Math.max(newest.get(e.path) ?? 0, e.mtime))
+  const idle = [...blobs.entries()].filter(([, e]) => e.refs === 0).sort((a, b) => a[1].used - b[1].used)
+  let total = idle.reduce((n, [, e]) => n + e.bytes, 0)
+  for (const [key, e] of idle) {
+    const stale = e.mtime < (newest.get(e.path) ?? 0)
+    if (!stale && total <= BLOB_BUDGET) continue
+    blobs.delete(key)
+    total -= e.bytes
+    void e.pending.then((u) => u && URL.revokeObjectURL(u))
+  }
+}
+
+/**
+ * Where to draw an image or clip from: the scheme when the window allows it,
+ * else a shared blob. `failed` once neither worked; `tooBig` past the limit
+ * (never tried). Nothing is fetched until `load`.
+ */
+function useItemMedia(item: CanvasItem, feed: CanvasFeed, load: boolean): { src: string | null; failed: boolean; tooBig: boolean; onError: () => void } {
+  const version = `${item.path}@${item.mtime}`
+  const isMedia = item.kind === 'image' || item.kind === 'video'
+  const tooBig = item.bytes > BOARD_MAX_BYTES
+  const [schemeBroken, setSchemeBroken] = useState<string | null>(null)
+  const [failedVersion, setFailedVersion] = useState<string | null>(null)
+  const [blob, setBlob] = useState<{ version: string; url: string } | null>(null)
+  const viaScheme = schemeMediaAllowed() && schemeBroken !== version
+  const { objectUrl } = feed
+
+  useEffect(() => {
+    if (!isMedia || !load || tooBig || viaScheme) return undefined
+    let live = true
+    const entry = acquireBlob(item, objectUrl)
+    void entry.pending.then((u) => {
+      if (!live) return
+      if (u) setBlob({ version, url: u })
+      else setFailedVersion(version)
     })
     return () => {
       live = false
-      if (made) URL.revokeObjectURL(made)
+      releaseBlob(entry)
     }
-    // mtime: a file rewritten in place gets a fresh picture.
-  }, [item.id, item.kind, item.mtime, objectUrl])
-  return url
+    // item is read through `version` (path + mtime): a file rewritten in place gets a fresh picture.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, isMedia, load, tooBig, viaScheme, objectUrl])
+
+  const src = !isMedia || !load || tooBig ? null : viaScheme ? `${artifactAddress(item)}?v=${item.mtime}` : blob?.version === version ? blob.url : null
+  const onError = (): void => {
+    if (viaScheme) setSchemeBroken(version)
+    else setFailedVersion(version)
+  }
+  return { src, failed: failedVersion === version, tooBig, onError }
 }
 
-export function Preview({ item, feed, large = false }: { item: CanvasItem; feed: CanvasFeed; large?: boolean }): ReactNode {
-  const url = useItemUrl(item, feed)
+function Unshown({ word, text }: { word: string; text: string }): ReactNode {
+  return (
+    <span className="bprev bprev--text bprev--fail" role="note">
+      <span className="bprev__kind">{word}</span>
+      <span className="bprev__body">{text}</span>
+    </span>
+  )
+}
+
+export function Preview({ item, feed, large = false, load = true }: { item: CanvasItem; feed: CanvasFeed; large?: boolean; load?: boolean }): ReactNode {
+  const { src, failed, tooBig, onError } = useItemMedia(item, feed, load)
+  if (tooBig) {
+    return <Unshown word="Too big to show" text={`${size(item.bytes)} — the board shows files up to 256 MB. Open it in its own app.`} />
+  }
+  if (failed) return <Unshown word="Could not load" text="The file could not be read from the board’s folder." />
+  if (!load) return <span className="bprev bprev--wait" />
   if (item.kind === 'image') {
-    return url ? <img className="bprev bprev--img" src={url} alt={item.title} draggable={false} /> : <span className="bprev bprev--wait" />
+    return src ? (
+      <img className="bprev bprev--img" src={src} alt={item.title} draggable={false} decoding="async" onError={onError} />
+    ) : (
+      <span className="bprev bprev--wait" />
+    )
   }
   if (item.kind === 'video') {
-    return url ? (
+    return src ? (
       <video
         className="bprev bprev--img"
-        src={url}
+        src={src}
         muted
         loop
         playsInline
+        preload={large ? 'auto' : 'metadata'}
         controls={large}
         autoPlay={large}
+        onError={onError}
         onMouseEnter={(e) => void e.currentTarget.play().catch(() => undefined)}
         onMouseLeave={(e) => {
           if (!large) e.currentTarget.pause()
@@ -184,14 +358,15 @@ export function Preview({ item, feed, large = false }: { item: CanvasItem; feed:
       <span className="bprev bprev--wait" />
     )
   }
+  if (item.kind === 'html') return <HtmlThumb item={item} />
   return <TextPreview item={item} feed={feed} />
 }
 
-/** html: a still, script-free render; markdown: formatted; text: the words. */
+/** markdown: formatted; text: the words. (html draws its own still thumbnail from the scheme.) */
 function TextPreview({ item, feed }: { item: CanvasItem; feed: CanvasFeed }): ReactNode {
-  const text = useArtifactText(item, feed)
+  const { text, failed } = useArtifactRead(item, feed)
+  if (failed) return <Unshown word="Could not load" text="The file could not be read from the board’s folder." />
   if (text === null) return <span className="bprev bprev--wait" />
-  if (item.kind === 'html') return <HtmlThumb html={text} title={item.title} />
   if (isMarkdown(item)) {
     return (
       <span className="bprev bprev--text bprev--md">
@@ -205,6 +380,25 @@ function TextPreview({ item, feed }: { item: CanvasItem; feed: CanvasFeed }): Re
       <span className="bprev__body">{text.slice(0, 900)}</span>
     </span>
   )
+}
+
+/** True once the element has come near the screen, and from then on. */
+function useNearScreen(ref: RefObject<HTMLElement | null>, eager: boolean): boolean {
+  const [near, setNear] = useState(eager)
+  useEffect(() => {
+    if (near) return undefined
+    const el = ref.current
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setNear(true)
+      return undefined
+    }
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) setNear(true)
+    }, { rootMargin: '600px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [near, ref])
+  return near
 }
 
 function Tile({
@@ -224,6 +418,8 @@ function Tile({
 }): ReactNode {
   const ref = useRef<HTMLElement | null>(null)
   const [isNew, setIsNew] = useState(fresh)
+  // A tile far down the board loads nothing until it is scrolled near.
+  const near = useNearScreen(ref, hero)
 
   // A new arrival pops in and wears a NEW tag for a few seconds.
   useEffect(() => {
@@ -250,7 +446,7 @@ function Tile({
       }}
     >
       <button type="button" className="btile__frame" onClick={onOpen} title={`Open ${item.title}`}>
-        <Preview item={item} feed={feed} />
+        <Preview item={item} feed={feed} load={near} />
       </button>
       {isNew ? <span className="btile__new">New</span> : null}
       <footer className="btile__foot">
@@ -268,6 +464,9 @@ const KIND_WORD: Record<CanvasItem['kind'], string> = { image: 'image', video: '
 
 /* -------------------------------------------------------------- actions */
 
+/** How long a pressed trash button waits for the second press that deletes. */
+const REMOVE_ARM_MS = 3000
+
 function useItemActions(item: CanvasItem, feed: CanvasFeed): ArtifactActions {
   const { actions } = useApp()
   const tab = useActiveTab()
@@ -276,6 +475,13 @@ function useItemActions(item: CanvasItem, feed: CanvasFeed): ArtifactActions {
   const pane = paneId ? rt?.panes().find((p) => p.paneId === paneId) : null
   const paneName = pane ? (pane.callSign ?? `panel ${pane.number}`) : null
   const [copied, setCopied] = useState(false)
+  const [removeArmed, setRemoveArmed] = useState(false)
+
+  useEffect(() => {
+    if (!removeArmed) return undefined
+    const t = window.setTimeout(() => setRemoveArmed(false), REMOVE_ARM_MS)
+    return () => window.clearTimeout(t)
+  }, [removeArmed])
 
   const copy = useCallback(async (): Promise<void> => {
     let what = 'path'
@@ -306,16 +512,40 @@ function useItemActions(item: CanvasItem, feed: CanvasFeed): ArtifactActions {
       actions.setNotice('Open a pane first — the path is pasted into the pane you are in')
       return
     }
-    terminalHost.paste(paneId, `"${item.path}" `)
-    requestAnimationFrame(() => terminalHost.focus(paneId))
-    const target = document.querySelector<HTMLElement>(`.pane[data-pane-id="${paneId}"], .mtile[data-pane-id="${paneId}"]`)
-    if (target) {
-      target.dataset['hit'] = 'true'
-      window.setTimeout(() => delete target.dataset['hit'], 900)
-    }
+    // Focus first, text a frame later — the path arrives as a bracketed paste,
+    // and an agent that was just told its terminal lost focus (DECSET 1004)
+    // drops it. The same order as a drop on a pane (TerminalPane, MosaicView).
+    terminalHost.focus(paneId)
+    requestAnimationFrame(() => terminalHost.paste(paneId, `"${item.path}" `))
+    // Wherever that pane is drawn — full size, on the Wall, or in the wall strip over the board.
+    document
+      .querySelectorAll<HTMLElement>(
+        `.pane[data-pane-id="${paneId}"], .mtile[data-pane-id="${paneId}"], .wstrip__tile[data-pane-id="${paneId}"]`
+      )
+      .forEach((target) => {
+        target.dataset['hit'] = 'true'
+        window.setTimeout(() => delete target.dataset['hit'], 900)
+      })
   }
 
-  return { toPane, paneName, copy: () => void copy(), copied, remove: () => void feed.remove(item.id) }
+  // The first press arms the button; the second, within a few seconds, deletes.
+  // The file goes from the board's folder for good, and agents often wrote it
+  // nowhere else, so it is never one click.
+  const remove = (): void => {
+    if (!removeArmed) {
+      setRemoveArmed(true)
+      return
+    }
+    setRemoveArmed(false)
+    void feed.remove(item.id).then(
+      (gone) => {
+        if (!gone) actions.setNotice(`Could not delete “${item.title}” — it may be open in another app`)
+      },
+      () => actions.setNotice(`Could not delete “${item.title}”`)
+    )
+  }
+
+  return { toPane, paneName, copy: () => void copy(), copied, remove, removeArmed }
 }
 
 function ItemActions({ item, feed }: { item: CanvasItem; feed: CanvasFeed }): ReactNode {
@@ -337,8 +567,17 @@ function ItemActions({ item, feed }: { item: CanvasItem; feed: CanvasFeed }): Re
       <button type="button" className="bact" onClick={() => void window.forge.openPath(item.path)} title="Open in its own app">
         <Icon name="expand" size={12} />
       </button>
-      <button type="button" className="bact bact--quiet" title="Take it off the board (deletes the file from the board’s folder)" onClick={a.remove}>
+      <button
+        type="button"
+        className="bact bact--quiet"
+        data-armed={a.removeArmed ? 'true' : undefined}
+        data-danger={a.removeArmed ? 'true' : undefined}
+        title={a.removeArmed ? 'Press again to delete the file for good' : 'Take it off the board (deletes the file from the board’s folder)'}
+        aria-label={a.removeArmed ? `Press again to delete ${item.title}` : `Delete ${item.title}`}
+        onClick={a.remove}
+      >
         <Icon name="trash" size={12} />
+        {a.removeArmed ? <span>Delete?</span> : null}
       </button>
     </div>
   )
@@ -368,6 +607,41 @@ const openStore = (() => {
     }
   }
 })()
+
+/**
+ * Arrivals the board has not shown yet, per project. BoardArrival (always
+ * mounted) notes what lands while you are elsewhere; the board takes them when
+ * it opens — closing an artifact left open from before, so the new piece is
+ * what you see — and marks them NEW.
+ */
+const arrivals = (() => {
+  const pending = new Map<string, string[]>()
+  const listeners = new Set<() => void>()
+  let version = 0
+  return {
+    note: (projectId: string, ids: string[]): void => {
+      if (!projectId || !ids.length) return
+      pending.set(projectId, [...new Set([...(pending.get(projectId) ?? []), ...ids])])
+      version += 1
+      for (const l of listeners) l()
+    },
+    take: (projectId: string): string[] => {
+      const ids = pending.get(projectId) ?? []
+      pending.delete(projectId)
+      return ids
+    },
+    version: (): number => version,
+    subscribe: (cb: () => void): (() => void) => {
+      listeners.add(cb)
+      return () => {
+        listeners.delete(cb)
+      }
+    }
+  }
+})()
+
+/** For BoardArrival: these landed on this project's board while it was not on screen. */
+export const noteBoardArrivals = arrivals.note
 
 function OpenArtifact({
   item,

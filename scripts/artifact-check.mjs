@@ -15,6 +15,9 @@
  *                  (connect-src 'none', default-src 'none', inline script,
  *                  frame-ancestors) and nosniff; content types are right;
  *                  GET and HEAD only.
+ *   3b. ranges     bodies stream from disk; byte ranges are 206s; ?v= may cache.
+ *   3c. navigation guardArtifactFrames refuses a frame navigating out of an
+ *                  artifact to anything that is not one.
  *   4. install     installArtifactScheme registers one handler per session.
  *   5. renderer    index.html's CSP lets the Board frame forge-artifact:.
  *
@@ -41,7 +44,9 @@ registerHooks({
   }
 })
 
-const { artifactResponse, artifactContentType, installArtifactScheme, resolveArtifact } = await import('../electron/artifact-scheme.ts')
+const { artifactFrameMayNavigate, artifactResponse, artifactContentType, guardArtifactFrames, installArtifactScheme, resolveArtifact } = await import(
+  '../electron/artifact-scheme.ts'
+)
 const { ARTIFACT_PARTITION, BROWSER_PARTITION, artifactUrl, isArtifactUrl, normaliseBrowserUrl, normaliseSurfaceUrl } = await import(
   '../shared/browser.ts'
 )
@@ -217,6 +222,67 @@ try {
   const dev = await artifactResponse(root, new Request('forge-artifact://proj1/page.html'), { frameAncestors: ['file:', 'http://localhost:5173'] })
   check('dev adds its own origin to frame-ancestors', (dev.headers.get('content-security-policy') ?? '').includes('frame-ancestors file: http://localhost:5173'))
 
+  /* ----------------------------------------------------------- 3b */
+  section('3b. streaming, byte ranges, versions')
+  writeFileSync(join(root, 'proj1', 'long.mp4'), 'abcdefghij')
+  const ranged = (range, url = 'forge-artifact://proj1/long.mp4') =>
+    artifactResponse(root, new Request(url, { headers: { range } }), { frameAncestors: ['file:'] })
+  const whole = await get('forge-artifact://proj1/long.mp4')
+  check('a whole file streams back in full', whole.status === 200 && (await whole.text()) === 'abcdefghij' && whole.headers.get('content-length') === '10')
+  check('byte ranges are offered', whole.headers.get('accept-ranges') === 'bytes')
+  const mid = await ranged('bytes=2-5')
+  check('bytes=2-5 is a 206 with just those bytes', mid.status === 206 && (await mid.text()) === 'cdef', String(mid.status))
+  check('with Content-Range and Content-Length', mid.headers.get('content-range') === 'bytes 2-5/10' && mid.headers.get('content-length') === '4', `${mid.headers.get('content-range')} ${mid.headers.get('content-length')}`)
+  check('a 206 still carries the CSP', (mid.headers.get('content-security-policy') ?? '').includes("connect-src 'none'"))
+  const open = await ranged('bytes=7-')
+  check('bytes=7- runs to the end', open.status === 206 && (await open.text()) === 'hij' && open.headers.get('content-range') === 'bytes 7-9/10')
+  const tail = await ranged('bytes=-3')
+  check('bytes=-3 is the last three', tail.status === 206 && (await tail.text()) === 'hij')
+  const past = await ranged('bytes=10-')
+  check('a range past the end is a 416 naming the size', past.status === 416 && past.headers.get('content-range') === 'bytes */10', String(past.status))
+  const clamp = await ranged('bytes=8-999')
+  check('an end past the file is clamped', clamp.status === 206 && (await clamp.text()) === 'ij')
+  const many = await ranged('bytes=0-1,4-5')
+  check('several ranges are answered with the whole file (allowed)', many.status === 200 && (await many.text()) === 'abcdefghij')
+  const rangedEscape = await ranged('bytes=0-5', 'forge-artifact://proj1/link/secret.txt')
+  check('a range never gets past the path checks', rangedEscape.status === 403 && !(await rangedEscape.text()).includes(SECRET), String(rangedEscape.status))
+  writeFileSync(join(root, 'proj1', 'empty.txt'), '')
+  const empty = await get('forge-artifact://proj1/empty.txt')
+  check('an empty file is a 200 with no body', empty.status === 200 && (await empty.text()) === '' && empty.headers.get('content-length') === '0')
+  const versioned = await get('forge-artifact://proj1/pic.png?v=1712345678901')
+  check('a ?v=<mtime> address is one version, so it may be cached', /max-age=\d+/.test(versioned.headers.get('cache-control') ?? '') && versioned.status === 200, versioned.headers.get('cache-control'))
+  check('an address without ?v= stays no-store', (await get('forge-artifact://proj1/pic.png')).headers.get('cache-control') === 'no-store')
+  const src = readFileSync(new URL('../electron/artifact-scheme.ts', import.meta.url), 'utf8')
+  check('bodies stream from disk (no whole-file readFile)', /createReadStream\(path, \{ start, end \}\)/.test(src) && !/\breadFile\(/.test(src))
+
+  /* ----------------------------------------------------------- 3c */
+  section('3c. an artifact cannot navigate its frame away')
+  check('artifact → artifact is allowed', artifactFrameMayNavigate('forge-artifact://proj1/page.html', 'forge-artifact://proj1/a%20b.html'))
+  check('artifact → https is refused', !artifactFrameMayNavigate('forge-artifact://proj1/page.html', 'https://x.example/?d=secret'))
+  check('artifact → about:blank, data:, javascript: are refused', ['about:blank', 'data:text/html,hi', 'javascript:alert(1)', 'file:///C:/x.html'].every((to) => !artifactFrameMayNavigate('forge-artifact://proj1/page.html', to)))
+  check('a frame that is not an artifact is left alone', artifactFrameMayNavigate('http://localhost:5173/', 'https://example.com/'))
+  check('a fresh frame may load an artifact', artifactFrameMayNavigate('', 'forge-artifact://proj1/page.html'))
+  const listeners = []
+  guardArtifactFrames({ on: (event, fn) => listeners.push({ event, fn }) })
+  check('the guard listens on will-frame-navigate', listeners.length === 1 && listeners[0].event === 'will-frame-navigate')
+  const nav = (details) => {
+    let prevented = false
+    listeners[0].fn({ isMainFrame: false, frame: null, initiator: null, ...details, preventDefault: () => (prevented = true) })
+    return prevented
+  }
+  const warn = console.warn
+  console.warn = () => {}
+  try {
+    check('refuses: the Board frame sets location to https', nav({ url: 'https://example.com/?x=1', frame: { url: 'forge-artifact://proj1/page.html?v=1' } }))
+    check('refuses: navigation started by an artifact', nav({ url: 'https://example.com/', frame: { url: '' }, initiator: { url: 'forge-artifact://proj1/page.html' } }))
+    check('allows: the Board walking to the next artifact', !nav({ url: 'forge-artifact://proj1/a%20b.html?v=2', frame: { url: 'forge-artifact://proj1/page.html?v=1' } }))
+    check('allows: the Board opening an artifact in a fresh frame', !nav({ url: 'forge-artifact://proj1/page.html?v=1', frame: { url: 'about:blank' }, initiator: { url: 'file:///C:/app/index.html' } }))
+    check('allows: other frames (the Devices preview) to go where they go', !nav({ url: 'https://example.com/', frame: { url: 'http://localhost:3000/' } }))
+    check('leaves the main frame to main.ts will-navigate', !nav({ isMainFrame: true, url: 'https://example.com/', frame: { url: 'forge-artifact://proj1/page.html' } }))
+  } finally {
+    console.warn = warn
+  }
+
   /* ------------------------------------------------------------ 4 */
   section('4. install')
   const calls = []
@@ -239,6 +305,8 @@ try {
   const frame = /<iframe\s+key=\{item\.id\}[\s\S]*?\/>/.exec(view)?.[0] ?? ''
   check('the Board frame is sandbox="allow-scripts" and nothing more', /sandbox="allow-scripts"/.test(frame) && !/allow-same-origin|allow-top-navigation|allow-forms|allow-popups/.test(view), frame)
   check('the Board frame loads the scheme, not srcdoc', /src=\{`\$\{artifactAddress\(item\)\}/.test(frame) && !/srcDoc/.test(frame), frame)
+  const thumb = /<iframe\s+className="artifact-thumb__frame"[\s\S]*?\/>/.exec(view)?.[0] ?? ''
+  check('an HTML thumbnail is sandbox="" (no script) from the scheme, not a srcdoc of the whole file', /sandbox=""/.test(thumb) && /src=\{`\$\{artifactAddress\(item\)\}/.test(thumb) && !/srcDoc/.test(view), thumb)
 } finally {
   try {
     rmSync(scratch, { recursive: true, force: true })

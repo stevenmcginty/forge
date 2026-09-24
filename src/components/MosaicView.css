@@ -29,7 +29,8 @@
   display: grid;
   grid-template-columns: repeat(var(--mosaic-cols, 3), minmax(var(--mosaic-tile-min-w), 1fr));
   grid-auto-rows: minmax(var(--mosaic-tile-min-h), 1fr);
-  gap: var(--stage-gap, 20px);
+  /* Tight gutters: the terminals are the content, not the space between them. */
+  gap: var(--wall-gap, var(--stage-gap, 20px));
   min-height: 100%;
 }
 
@@ -54,7 +55,7 @@
   z-index: var(--z-pane);
   pointer-events: none;
   border: 1px dashed var(--accent);
-  border-radius: var(--r-md);
+  border-radius: var(--tile-r, var(--r-md));
   background: var(--accent-softer);
 }
 
@@ -75,21 +76,17 @@
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: var(--r-md);
+  border-radius: inherit;
   background: var(--accent-softer);
   box-shadow: inset 0 0 0 1px var(--accent-line);
   pointer-events: none;
   z-index: var(--z-divider);
 }
 
-.mosaic--zoomed {
-  min-height: 0;
-}
-
 /* -------------------------------------------------------------------- tile */
 
 .mtile {
-  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 24%, var(--line-hairline));
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 18%, var(--line-hairline));
   position: relative;
   display: flex;
   flex-direction: column;
@@ -97,9 +94,9 @@
   min-height: 0;
   background: var(--bg-terminal);
   border: 1px solid var(--edge);
-  border-radius: var(--r-pane);
+  border-radius: var(--tile-r, var(--r-pane));
   overflow: hidden;
-  box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.8);
+  box-shadow: var(--tile-shadow);
   transition:
     border-color var(--dur-med) var(--ease-out),
     box-shadow var(--dur-med) var(--ease-out);
@@ -107,7 +104,7 @@
 
 /* The same edge language as a pane in tab view — see TerminalPane.css. */
 .mtile[data-state='working'] {
-  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 64%, transparent);
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 56%, transparent);
 }
 
 .mtile[data-state='attention'] {
@@ -118,17 +115,14 @@
   --edge: color-mix(in srgb, var(--text-primary) 62%, transparent);
 }
 
-.mtile[data-hit='true'] {
-  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 90%, white);
-  transition-duration: 60ms;
+/* A tab given its own colour: the same edge and head wash as its strip tile. */
+.mtile[data-tint='true'] {
+  --edge: color-mix(in srgb, var(--tab-tint) 60%, transparent);
 }
 
-.mtile[data-zoomed='true'] {
-  flex: 1;
-  box-shadow:
-    0 0 0 1px var(--accent-line),
-    0 0 0 4px var(--accent-softer),
-    0 14px 44px -16px var(--accent-glow);
+.mtile[data-hit='true'] {
+  --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 90%, var(--text-primary));
+  transition-duration: 60ms;
 }
 
 /* -------------------------------------------------------- freeform tiles */
@@ -171,9 +165,9 @@
   flex: none;
   padding: 0 3px;
   border-radius: var(--r-xs);
-  font-size: 8.5px;
+  font-size: var(--t-eyebrow);
   letter-spacing: 0.06em;
-  color: var(--accent);
+  color: var(--accent-ink);
   border: 1px solid var(--accent-line);
 }
 
@@ -288,16 +282,18 @@
   display: none;
 }
 
-/* The volt ring is the keyboard's ring: where Enter would zoom. */
-.mtile[data-selected='true'] {
-  box-shadow:
-    0 0 0 1.5px var(--accent),
-    0 0 0 6px var(--accent-soft),
-    0 0 42px 2px var(--accent-glow);
-}
-
 .mtile:hover {
   --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 48%, var(--line-strong));
+}
+
+/*
+ * The volt edge is the keyboard's: where Enter would go full screen. The same
+ * ring as the wall strip's active tile, kept thin so it fits the tight gutters
+ * without touching a neighbour.
+ */
+.mtile[data-selected='true'] {
+  --edge: var(--accent);
+  box-shadow: var(--tile-ring-active), var(--tile-shadow);
 }
 
 /* A dead shell is still worth showing — just visibly finished with. */
@@ -321,55 +317,45 @@
   align-items: center;
   gap: var(--s-3);
   flex: none;
-  height: var(--pane-head-h);
-  padding: 0 var(--s-2) 0 var(--s-3);
-  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 5%, var(--bg-terminal));
-  border-bottom: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 10%, var(--line-soft));
+  height: var(--tile-head-h, var(--pane-head-h));
+  padding: 0 2px 0 var(--s-4);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 4%, var(--bg-terminal));
+  border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 6%, transparent);
+  transition: background var(--dur-med) var(--ease-out);
 }
 
 /*
- * The header is the tile's handle — everywhere except zoomed, where it is a
- * back button and a title bar and moving it would mean nothing.
+ * The header is the tile's handle.
  *
  * Selection is turned off here rather than by preventing the press, because
  * preventing the press would also swallow the double-click that refits the
  * tile: dblclick is a compatibility mouse event, and preventDefault on
  * pointerdown takes the whole family with it.
  */
-.mtile[data-zoomed='false'] .mtile__head {
+.mtile .mtile__head {
   cursor: grab;
   user-select: none;
 }
 
-.mtile[data-zoomed='true'] .mtile__head,
+.mtile[data-tint='true'] .mtile__head {
+  background: color-mix(in srgb, var(--tab-tint) 9%, var(--bg-terminal));
+}
+
 .mtile[data-selected='true'] .mtile__head {
   background: color-mix(in srgb, var(--pane-accent, var(--accent)) 8%, var(--bg-header-live));
-}
-
-.mtile__back {
-  flex: none;
-  height: 20px;
-  padding: 0 var(--s-3) 0 var(--s-2);
-  font-size: var(--t-sm);
-  color: var(--accent);
-  background: var(--accent-softer);
-}
-
-.mtile__back:hover {
-  background: var(--accent-soft);
-  color: var(--accent-bright);
 }
 
 .mtile__title {
   min-width: 0;
   font-family: var(--font-display);
-  font-size: 12.5px;
+  font-size: var(--t-md);
   font-weight: 600;
-  letter-spacing: 0.015em;
+  letter-spacing: 0.02em;
   color: var(--text-secondary);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
-.mtile[data-zoomed='true'] .mtile__title,
+.mtile:hover .mtile__title,
 .mtile[data-selected='true'] .mtile__title {
   color: var(--text-primary);
 }
@@ -379,14 +365,21 @@
   flex: 1;
   min-width: 0;
   font-size: var(--t-xs);
-  color: var(--text-dim);
+  color: var(--text-muted);
+}
+
+/* The selected and the typing heads are lighter; the line steps up to stay
+   over 4.5:1 on them. */
+.mtile[data-selected='true'] .mtile__tab,
+.mtile[data-interactive='true'] .mtile__tab {
+  color: color-mix(in srgb, var(--text-primary) 35%, var(--text-muted));
 }
 
 .mtile__perm {
   flex: none;
   padding: 0 3px;
   border-radius: var(--r-xs);
-  font-size: 8.5px;
+  font-size: var(--t-eyebrow);
   letter-spacing: 0.06em;
   color: var(--warn);
   border: 1px solid var(--warn-line);
@@ -395,18 +388,6 @@
 .mtile__perm[data-danger='true'] {
   color: var(--danger);
   border-color: var(--danger-line);
-}
-
-.mtile__status {
-  flex: none;
-  font-size: var(--t-eyebrow);
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-}
-
-.mtile[data-status='exited'] .mtile__status,
-.mtile[data-status='error'] .mtile__status {
-  color: var(--danger);
 }
 
 .mtile__actions {
@@ -420,7 +401,6 @@
 
 .mtile:hover .mtile__actions,
 .mtile[data-selected='true'] .mtile__actions,
-.mtile[data-zoomed='true'] .mtile__actions,
 .mtile:focus-within .mtile__actions {
   opacity: 1;
 }
@@ -432,9 +412,44 @@
 }
 
 .mtile__action {
-  width: 20px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   padding: 0;
+}
+
+/*
+ * The X top-right: a full 24px target in the head's corner. Quiet until it
+ * matters — shown on hover, on keyboard focus, on the selected tile (so there
+ * is always one in sight), while typing in place and on a dead pane — and red
+ * only under the pointer (.ghost-btn[data-danger]).
+ */
+.mtile__close {
+  flex: none;
+  width: var(--tile-close-size, 24px);
+  height: var(--tile-close-size, 24px);
+  padding: 0;
+  color: var(--text-muted);
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.mtile:hover .mtile__close,
+.mtile:focus-within .mtile__close,
+.mtile[data-selected='true'] .mtile__close,
+.mtile[data-interactive='true'] .mtile__close,
+.mtile[data-status='exited'] .mtile__close,
+.mtile[data-status='error'] .mtile__close {
+  opacity: 1;
+}
+
+.mtile__close:focus-visible,
+.mtile__action:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--r-sm);
 }
 
 /* ------------------------------------------------------------------- stage */
@@ -459,8 +474,8 @@
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-/* On the wall the terminal is a picture: no cursors, no selection, no typing. */
-.mtile[data-zoomed='false'] .mtile__natural {
+/* A peek is a picture: no cursors, no selection, no typing. */
+.mtile__natural {
   pointer-events: none;
   user-select: none;
 }
@@ -475,8 +490,8 @@
   --edge: var(--accent);
   box-shadow:
     0 0 0 1px var(--accent-line),
-    0 0 0 4px var(--accent-softer),
-    0 14px 44px -16px var(--accent-glow);
+    0 0 0 3px var(--accent-softer),
+    0 14px 40px -16px var(--accent-glow);
 }
 
 .mtile[data-interactive='true'] .mtile__head {
@@ -503,21 +518,28 @@
 
 .mtile__hit {
   position: absolute;
-  top: var(--pane-head-h);
+  top: var(--tile-head-h, var(--pane-head-h));
   right: 0;
   bottom: 0;
   left: 0;
   z-index: var(--z-pane);
-  border-radius: 0 0 var(--r-pane) var(--r-pane);
-  /* A click here starts typing in the tile, so say so before it happens. */
-  cursor: text;
+  border-radius: 0 0 var(--tile-r, var(--r-pane)) var(--tile-r, var(--r-pane));
+  /* A click here opens the pane full screen. */
+  cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
 }
 
-.mtile__hit:hover {
+/* Hover is the edge and the X, not a wash over the output; a press is. */
+.mtile__hit:active {
   background: var(--accent-softer);
 }
 
-.mtile__hit:active {
-  background: var(--accent-soft);
+/* Keyboard on the tile: the ring goes round the whole tile, head included. */
+.mtile:has(> .mtile__hit:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.mtile__hit:focus-visible {
+  outline: none;
 }

@@ -35,10 +35,12 @@ import {
   type MosaicDir,
   type MosaicEdges
 } from '@/lib/mosaicLayout'
-import { collectLeaves } from '@/lib/splitTree'
+import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { terminalHost, type PaneGeometry, type TerminalSpec } from '@/lib/terminals'
-import { boxOf, enterOnce, glideFrom, reducedMotion, useFlipChildren, type Box } from '@/lib/motion'
+import { useForeman } from '@/state/Foreman'
+import { askToClose } from './CloseConfirm'
+import { enterOnce, reducedMotion, useFlipChildren } from '@/lib/motion'
 import { usePaneActivity } from '@/lib/paneActivity'
 import { useCallSign } from '@/hooks/useHub'
 import { useActiveWorkspace, useApp } from '@/state/AppState'
@@ -50,27 +52,20 @@ import { StateChip } from './shell/StateChip'
 import './MosaicView.css'
 
 /**
- * Where a tile was on the wall when it was zoomed, and where the zoomed tile
- * was when it was dropped back — so each view can glide the one tile in from
- * where the other left it: the camera pushing in on a pane, and pulling out.
- */
-const zoomFrom: { id: string | null; box: Box | null } = { id: null, box: null }
-
-/**
  * The mosaic: every pane in the project, from every tab, as a small live tile.
  *
  * The tiles are the real terminals — not snapshots, not a second render of the
  * scrollback. How they are drawn is the wall's one legibility setting, and it
- * applies to every tile at once (Settings → Appearance, or the Aa button in the
- * tab strip):
+ * applies to every tile at once, and to the wall strip's tiles too (Settings →
+ * Appearance, or the Aa button in the menu's Tools):
  *
  *   life-size  the default. Each tile is a window onto its terminal at scale 1:
- *              the same type size as tab view, cropped to the tile and anchored
+ *              the same type size as Full screen, cropped to the tile and anchored
  *              at the bottom-left, where the prompt and the live region are.
  *              Nothing is ever resized to achieve this — a ConPTY resize
  *              reflows destructively, and a glance must not rewrite a pane.
  *   scaled     each tile is a scale model — the PTY keeps the cols/rows it had
- *              in tab view and the whole picture is shrunk with a CSS
+ *              in Full screen and the whole picture is shrunk with a CSS
  *              transform, so nothing reflows and a full-screen TUI carries on
  *              drawing into the grid it always had. Truthful, and past four or
  *              five tiles, too small to read.
@@ -83,47 +78,106 @@ const zoomFrom: { id: string | null; box: Box | null } = { id: null, box: null }
  *   auto    Forge places the tiles in a uniform grid. Nothing to arrange, and
  *           in scaled mode the type is the same size on every tile because they
  *           all scale against the biggest pane on the wall.
- *   custom  you place them. Drag a header, drag an edge, drop a whole tab out
- *           of the strip onto the wall. The first move or resize seeds custom
+ *   custom  you place them. Drag a header, drag an edge. The first move or resize seeds custom
  *           mode from exactly where the auto grid had put everything, so
  *           crossing over is invisible; "Reset to grid" crosses back.
  *
- * Click a tile and you are typing into it right there on the wall, at the
- * pane's own cols and rows, however small the tile is; Esc or a click on the
- * empty wall stops. Double-click it and it blows up to full size in place; Esc
- * drops you back to the wall. Double-click a tile's header and its terminal
- * stops being a scale model and refits to the box for real — see MosaicTile.
+ * Click a tile and that terminal goes full screen (the Full screen view — its
+ * tab, splits and all, under the wall strip); Ctrl+G comes back. The
+ * terminal button in a tile's header types into it right there on the wall
+ * instead, at the pane's own cols and rows, however small the tile is; Esc or a
+ * click on the empty wall stops. The X top-right closes the terminal.
+ * Double-click a tile's header and its terminal stops being a scale model and
+ * refits to the box for real — see MosaicTile.
  */
 
 /** One tile: a pane plus the tab it came from, which the header names. */
-interface Cell {
+export interface Cell {
   leaf: PaneLeaf
   tab: TerminalTab
 }
 
-/**
- * How far a zoomed pane may be blown up past life size.
- *
- * Zoom does not refit the PTY, so magnifying is the only way to make a pane
- * that was one of eight in a split actually readable — at natural scale it is a
- * postage stamp adrift in the middle of the window. The character grid is
- * untouched either way; the glyphs simply get bigger.
- *
- * Capped low deliberately. Scaling all the way to fit would put a 310px pane at
- * 2.7x — a 35px font, which is a novelty rather than a terminal. 1.5x is enough
- * to make the smallest pane comfortable and does not bind at all on a pane that
- * had a tab to itself.
- */
-const ZOOM_MAX_SCALE = 1.5
+/** Every pane in the workspace, from every tab, in tab order. */
+export function cellsOf(tabs: TerminalTab[]): Cell[] {
+  return tabs.flatMap((tab) => collectLeaves(tab.root).map((leaf) => ({ leaf, tab })))
+}
 
 /**
- * How long after the last size change a refitted tile actually refits its PTY.
- *
- * Refitting on every frame of a resize drag would send a `resize` down the pipe
- * sixty times a second and have the shell reflow into every intermediate width.
- * The box follows the pointer; the terminal catches up when you stop.
+ * One scale for a whole row of scale-model tiles, taken from the largest pane
+ * among them — see the note on `reference` in MosaicView.
  */
-const REFIT_SETTLE_MS = 120
+export function wallReference(cells: Cell[]): PaneGeometry {
+  let width = 1
+  let height = 1
+  for (const cell of cells) {
+    const g = terminalHost.geometryFor(cell.leaf.id)
+    if (g.width > width) width = g.width
+    if (g.height > height) height = g.height
+  }
+  return { width, height }
+}
+
+/**
+ * Close one terminal from anywhere in the project — a Wall tile or a strip tile
+ * — with the same actions the tab strip's X and the pane header's X used.
+ *
+ * `closePane` only ever acts inside the active tab (and closes the active tab
+ * outright when it holds one pane), so a pane in another tab is revealed first
+ * and the tab you were on is put back afterwards: closing a tile must not also
+ * change what Full screen is showing. A pane alone in its tab closes the tab,
+ * exactly as its old tab X did.
+ *
+ * An agent that is working — printing, mid-turn — or that Foreman is driving
+ * is asked about first (CloseConfirm): one click, or a stray middle-click on a
+ * strip tile, used to kill a job mid-task with no way back. An idle pane closes
+ * at once.
+ */
+export function useCloseTerminal(): (paneId: string) => void {
+  const { state, actions } = useApp()
+  const foreman = useForeman()
+  const workspace = useActiveWorkspace()
+  return useCallback(
+    (paneId: string) => {
+      const tab = workspace.tabs.find((t) => collectLeaves(t.root).some((l) => l.id === paneId))
+      if (!tab) return
+      const close = (): void => {
+        if (countLeaves(tab.root) === 1) {
+          actions.closeTab(tab.id)
+          return
+        }
+        const back = workspace.activeTabId
+        actions.revealPane(paneId)
+        actions.closePane(paneId)
+        if (back && back !== tab.id) actions.selectTab(back)
+      }
+      const driven = foreman.paneState(paneId).status
+      const why =
+        driven === 'starting' || driven === 'driving' || driven === 'waiting'
+          ? 'is being driven by Foreman'
+          : terminalHost.isBusy(paneId)
+            ? 'is working'
+            : null
+      if (!why) {
+        close()
+        return
+      }
+      const leaf = collectLeaves(tab.root).find((l) => l.id === paneId)
+      const name = paneDisplayTitle(resolveProfile(state.settings.agentProfiles, leaf?.profileId ?? ''), leaf?.title ?? '')
+      // The question sits on the X that was pressed — or on the tile, for a
+      // middle-click, which leaves no button with the focus.
+      const tiles = Array.from(document.querySelectorAll<HTMLElement>(`[data-pane-id="${CSS.escape(paneId)}"]`))
+      const pressed = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      const tile = tiles.find((t) => pressed && t.contains(pressed)) ?? tiles[0]
+      const anchor =
+        (pressed && tile?.contains(pressed) ? pressed : null) ??
+        tile?.querySelector<HTMLElement>('[aria-label^="Close"]') ??
+        tile ??
+        document.body
+      askToClose({ name, why, anchor, close })
+    },
+    [actions, foreman, state.settings.agentProfiles, workspace]
+  )
+}
 
 /**
  * How far the pointer must travel before a press on a tile becomes a drag.
@@ -134,17 +188,6 @@ const REFIT_SETTLE_MS = 120
  * thing that takes a project off the auto grid forever.
  */
 const DRAG_THRESHOLD = 3
-
-/**
- * How soon after the click that started typing in a tile a second press on it
- * still counts as a double-click — which zooms instead. Windows' default
- * double-click time.
- *
- * Measured by hand rather than left to `dblclick`: the first click takes the
- * hit sheet away, so the second lands on the live terminal, which would spend
- * it selecting a word.
- */
-const DOUBLE_CLICK_MS = 500
 
 /** One live drag or resize. Lives in a ref: none of it belongs in React state. */
 interface DragSession {
@@ -177,32 +220,25 @@ interface DragSession {
 export function MosaicView({
   project,
   workspace,
-  onNewTerminal
+  onNewTerminal,
+  onOpenFull
 }: {
   project: Project
   workspace: Workspace
   onNewTerminal: () => void
+  /** Show this pane in Full screen — what a click on a tile does. */
+  onOpenFull: (paneId: string) => void
 }): ReactNode {
   const { state, actions } = useApp()
+  const closeTerminal = useCloseTerminal()
 
-  const cells = useMemo<Cell[]>(
-    () => workspace.tabs.flatMap((tab) => collectLeaves(tab.root).map((leaf) => ({ leaf, tab }))),
-    [workspace.tabs]
-  )
+  const cells = useMemo<Cell[]>(() => cellsOf(workspace.tabs), [workspace.tabs])
 
   const mosaic = workspace.mosaic ?? emptyMosaic()
   const custom = mosaic.mode === 'custom'
 
   /** The wall's default: refit every terminal to its tile at life-size type. */
   const lifesize = state.settings.mosaicText !== 'scaled'
-
-  const zoomId = state.mosaicZoom
-  const zoomCell = cells.find((c) => c.leaf.id === zoomId) ?? null
-
-  // A zoom can outlive its pane (closed from a shortcut, or the tab went away).
-  useEffect(() => {
-    if (zoomId && !zoomCell) actions.setMosaicZoom(null)
-  }, [actions, zoomCell, zoomId])
 
   const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId)
   const [picked, setPicked] = useState<string | null>(null)
@@ -278,18 +314,9 @@ export function MosaicView({
    * Tiles the user has refitted (see MosaicTile) opt out entirely and are not
    * counted here, so refitting one tile never rescales the rest of the wall.
    */
-  const reference = useMemo<PaneGeometry>(() => {
-    let width = 1
-    let height = 1
-    for (const cell of cells) {
-      const g = terminalHost.geometryFor(cell.leaf.id)
-      if (g.width > width) width = g.width
-      if (g.height > height) height = g.height
-    }
-    return { width, height }
-    // Re-measured whenever the wall's membership changes — which is also the
-    // only time a tile is mounted and could need a different scale.
-  }, [cells])
+  // Re-measured whenever the wall's membership changes — which is also the
+  // only time a tile is mounted and could need a different scale.
+  const reference = useMemo<PaneGeometry>(() => wallReference(cells), [cells])
 
   /* --------------------------------------------------------------- layout */
 
@@ -585,39 +612,23 @@ export function MosaicView({
     setDropHint(true)
   }, [])
 
-  const zoom = useCallback(
+  const openFull = useCallback(
     (paneId: string) => {
-      // Leaving the wall for the zoom or a tab is also leaving whatever tile
-      // was being typed into — hand the caret back so the keyboard follows.
+      // Leaving the wall is also leaving whatever tile was being typed into —
+      // hand the caret back so the keyboard follows.
       if (interactiveId) terminalHost.blur(interactiveId)
       setInteractiveId(null)
-      const tile = wallRef.current?.querySelector<HTMLElement>(`.mtile[data-pane-id="${paneId}"]`)
-      zoomFrom.id = paneId
-      zoomFrom.box = tile ? boxOf(tile) : null
-      // Zooming *is* selecting: the pane becomes the app's current pane, so
-      // Ctrl+W and friends act on the thing you are looking at.
-      actions.revealPane(paneId)
-      actions.setMosaicZoom(paneId)
+      onOpenFull(paneId)
     },
-    [actions, interactiveId]
-  )
-
-  const openInTab = useCallback(
-    (paneId: string) => {
-      if (interactiveId) terminalHost.blur(interactiveId)
-      setInteractiveId(null)
-      actions.revealPane(paneId)
-      actions.setViewMode('tabs')
-    },
-    [actions, interactiveId]
+    [interactiveId, onOpenFull]
   )
 
   /**
    * Enter or leave a tile's in-place interactive mode: its terminal takes the
    * keyboard right there on the wall, without leaving the mosaic. One tile at a
    * time — entering a second hands focus over rather than leaving two live.
-   * Like zoom, entering *is* selecting, so the app's current pane tracks the
-   * tile you are talking to.
+   * Entering *is* selecting, so the app's current pane tracks the tile you are
+   * talking to.
    */
   const toggleInteract = useCallback(
     (paneId: string) => {
@@ -657,7 +668,6 @@ export function MosaicView({
   /* ------------------------------------------------------- keyboard: wall */
 
   useEffect(() => {
-    if (zoomCell) return
     // While a tile is being typed into, the keys belong to it — arrows must
     // reach the shell, not move the selection ring.
     if (interactiveId) return
@@ -677,7 +687,7 @@ export function MosaicView({
 
       if (e.key === 'Enter') {
         e.preventDefault()
-        zoom(cells[index]!.leaf.id)
+        openFull(cells[index]!.leaf.id)
         return
       }
 
@@ -709,7 +719,7 @@ export function MosaicView({
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cells, columns, custom, interactiveId, selectedId, state.view, tiles, zoom, zoomCell])
+  }, [cells, columns, custom, interactiveId, openFull, selectedId, state.view, tiles])
 
   /* ---------------------------------------------------- keyboard: interact */
 
@@ -717,8 +727,8 @@ export function MosaicView({
     if (!interactiveId) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || e.ctrlKey || e.altKey || e.metaKey) return
-      // Same deal as a zoomed tile: a full-screen TUI owns Escape — in vim it
-      // means "leave insert mode" — so it is only stolen when nobody is in one.
+      // A full-screen TUI owns Escape — in vim it means "leave insert mode" —
+      // so it is only stolen when nobody is in one.
       if (terminalHost.isAltBuffer(interactiveId)) return
       e.preventDefault()
       e.stopPropagation()
@@ -733,28 +743,6 @@ export function MosaicView({
   useEffect(() => {
     if (interactiveId && !cells.some((c) => c.leaf.id === interactiveId)) setInteractiveId(null)
   }, [cells, interactiveId])
-
-  /* ------------------------------------------------------- keyboard: zoom */
-
-  useEffect(() => {
-    if (!zoomCell) return
-    const paneId = zoomCell.leaf.id
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' || e.ctrlKey || e.altKey || e.metaKey) return
-      // A full-screen TUI owns Escape — in vim it means "leave insert mode",
-      // and stealing it would be unforgivable. Ctrl+G and the back button are
-      // always there instead.
-      if (terminalHost.isAltBuffer(paneId)) return
-      e.preventDefault()
-      e.stopPropagation()
-      const tile = document.querySelector<HTMLElement>(`.mtile[data-pane-id="${paneId}"]`)
-      zoomFrom.id = paneId
-      zoomFrom.box = tile ? boxOf(tile) : null
-      actions.setMosaicZoom(null)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [actions, zoomCell])
 
   /* ------------------------------------------------------------- render */
 
@@ -772,36 +760,7 @@ export function MosaicView({
               Open a terminal
             </button>
           }
-          hint="Ctrl + G  ·  back to tabs"
-        />
-      </div>
-    )
-  }
-
-  if (zoomCell) {
-    return (
-      <div className="mosaic mosaic--zoomed">
-        <MosaicTile
-          key={zoomCell.leaf.id}
-          cell={zoomCell}
-          project={project}
-          reference={reference}
-          lifesize={lifesize}
-          zoomed
-          selected={false}
-          interactive={false}
-          onZoom={zoom}
-          onOpenInTab={openInTab}
-          onBack={() => {
-            const tile = document.querySelector<HTMLElement>(`.mtile[data-pane-id="${zoomCell.leaf.id}"]`)
-            zoomFrom.id = zoomCell.leaf.id
-            zoomFrom.box = tile ? boxOf(tile) : null
-            actions.setMosaicZoom(null)
-          }}
-          onSelect={setPicked}
-          onBeginDrag={beginDrag}
-          onToggleFit={toggleFit}
-          onToggleInteract={toggleInteract}
+          hint="Ctrl + G  ·  full screen"
         />
       </div>
     )
@@ -813,8 +772,8 @@ export function MosaicView({
         No toolbar over the wall. Crossing from the grid into freeform must not
         move a single tile, and a strip of chrome appearing above them would
         push the whole wall down by its own height — so the one control the
-        freeform wall needs (Reset to grid) lives in the tab strip, next to the
-        view toggle, where there was already a row.
+        freeform wall needs (Reset to grid) lives in the menu's Tools, beside
+        the other terminal tools.
       */}
       <div
         ref={wallRef}
@@ -839,12 +798,11 @@ export function MosaicView({
               project={project}
               reference={reference}
               lifesize={lifesize}
-              zoomed={false}
               selected={cell.leaf.id === selectedId}
               interactive={interactiveId === cell.leaf.id}
               {...(custom && tiles[cell.leaf.id] ? { rect: tiles[cell.leaf.id]! } : {})}
-              onZoom={zoom}
-              onOpenInTab={openInTab}
+              onOpenFull={openFull}
+              onClose={closeTerminal}
               onSelect={setPicked}
               onBeginDrag={beginDrag}
               onToggleFit={toggleFit}
@@ -858,104 +816,45 @@ export function MosaicView({
   )
 }
 
-/* ------------------------------------------------------------------- tile */
+/* ------------------------------------------------------------------- peek */
 
-/** The eight resize grips, and which edges each of them drags. */
-const HANDLES: Array<{ key: string; edges: MosaicEdges }> = [
-  { key: 'n', edges: { ...NO_EDGES, top: true } },
-  { key: 's', edges: { ...NO_EDGES, bottom: true } },
-  { key: 'w', edges: { ...NO_EDGES, left: true } },
-  { key: 'e', edges: { ...NO_EDGES, right: true } },
-  { key: 'nw', edges: { ...NO_EDGES, top: true, left: true } },
-  { key: 'ne', edges: { ...NO_EDGES, top: true, right: true } },
-  { key: 'sw', edges: { ...NO_EDGES, bottom: true, left: true } },
-  { key: 'se', edges: { ...NO_EDGES, bottom: true, right: true } }
-]
-
-function MosaicTile({
+/**
+ * A pane's live picture at a fixed size: the Wall's tiles and the wall strip's
+ * both draw their terminal through this.
+ *
+ * The natural box is the pane's full-size geometry, pinned in pixels. The
+ * terminal is attached into that (attachPeek) and never resized; only the box's
+ * transform changes, so glancing at a pane can never reflow it.
+ *
+ * A pane can only be attached in one place at a time: whoever mounts a
+ * PeekStage for a pane must not also be showing that pane full size.
+ */
+export function PeekStage({
   cell,
   project,
+  refit,
   reference,
-  lifesize,
-  zoomed,
-  selected,
-  interactive,
-  rect,
-  onZoom,
-  onOpenInTab,
-  onBack,
-  onSelect,
-  onBeginDrag,
-  onToggleFit,
-  onToggleInteract
+  interactive = false,
+  className = 'mtile__stage'
 }: {
   cell: Cell
   project: Project
-  /** The wall's shared scaling reference — ignored when zoomed or refitted. */
+  /** Life-size crop (true) or the scale model (false) — see below. */
+  refit: boolean
+  /** The shared scaling reference for scale-model tiles. */
   reference: PaneGeometry
-  /** The wall's default: refit rather than scale. A tile may override it. */
-  lifesize: boolean
-  zoomed: boolean
-  selected: boolean
-  /** This tile is being typed into in place — see toggleInteract. */
-  interactive: boolean
-  /** Where this tile sits on a freeform wall. Absent = the auto grid places it. */
-  rect?: MosaicTileRect
-  onZoom: (paneId: string) => void
-  onOpenInTab: (paneId: string) => void
-  onBack?: () => void
-  onSelect: (paneId: string) => void
-  onBeginDrag: (
-    paneId: string,
-    e: ReactPointerEvent<HTMLElement>,
-    mode: 'move' | 'resize',
-    edges: MosaicEdges
-  ) => void
-  onToggleFit: (paneId: string) => void
-  onToggleInteract: (paneId: string) => void
+  /** The terminal is being typed into in place — mouse coords get translated. */
+  interactive?: boolean
+  className?: string
 }): ReactNode {
-  const { state, actions } = useApp()
-  const workspaceTasks = useActiveWorkspace().tasks
+  const { state } = useApp()
   const paneId = cell.leaf.id
   const profile = resolveProfile(state.settings.agentProfiles, cell.leaf.profileId)
-  const runtime = usePaneRuntime(paneId)
-  const activity = usePaneActivity(paneId, runtime)
-  const callSign = useCallSign(paneId)
-  const dead = isPaneDead(runtime)
-  const permChip = permissionChip(profile, leafPermissionMode(cell.leaf))
-  const [dropping, setDropping] = useState(false)
 
   const stageRef = useRef<HTMLDivElement | null>(null)
   const naturalRef = useRef<HTMLDivElement | null>(null)
-  const tileRef = useRef<HTMLElement | null>(null)
-  /** When a click on the hit sheet started typing here — see DOUBLE_CLICK_MS. */
-  const typedFromClickAt = useRef(0)
 
-  // Arrive: from where the other view last had this pane (the push-in and the
-  // pull-out of a zoom), or with the one-time pop of a brand-new pane.
-  useLayoutEffect(() => {
-    const el = tileRef.current
-    if (!el) return
-    if (zoomFrom.id === paneId && zoomFrom.box) {
-      glideFrom(el, zoomFrom.box)
-      zoomFrom.id = null
-      zoomFrom.box = null
-    }
-    enterOnce(paneId, el)
-  }, [paneId, zoomed])
-
-  const specRef = useRef<TerminalSpec>({
-    cwd: project.path,
-    bootstrapCommand: launchCommand(profile, leafPermissionMode(cell.leaf)),
-    fontSize: state.settings.terminalFontSize,
-    fontFamily: state.settings.terminalFontFamily,
-    accent: profile.accent,
-    projectName: project.name,
-    paneTitle: paneDisplayTitle(profile, cell.leaf.title),
-    sessionId: cell.leaf.sessionId,
-    repoUrl: project.repoUrl
-  })
-  specRef.current = {
+  const spec: TerminalSpec = {
     cwd: project.path,
     bootstrapCommand: launchCommand(profile, leafPermissionMode(cell.leaf)),
     fontSize: state.settings.terminalFontSize,
@@ -966,32 +865,14 @@ function MosaicTile({
     sessionId: cell.leaf.sessionId,
     repoUrl: project.repoUrl
   }
+  const specRef = useRef<TerminalSpec>(spec)
+  specRef.current = spec
 
   /*
-   * The natural box is the pane's full-size geometry, pinned in pixels. The
-   * terminal is attached into that and never resized; only the box's transform
-   * changes. Read once per mount — a live pane's geometry does not move while
-   * it is sitting in a tile.
+   * Read once per mount — a live pane's geometry does not move while it is
+   * sitting in a tile.
    */
   const geometry = useMemo(() => terminalHost.geometryFor(paneId), [paneId])
-
-  /**
-   * Life-size: the tile is a scale-1 window onto the terminal, cropped to the
-   * tile's box and anchored bottom-left, where the live region is. The
-   * alternative is the scale model: the whole picture shrunk with a transform,
-   * everything visible, at the price of type nobody can read past a few tiles.
-   * Neither ever resizes the terminal — glancing at a pane must not reflow
-   * somebody's vim, and a ConPTY reflow eats scrollback (see apply()).
-   *
-   * The wall's setting decides; a tile the user double-clicked has its own
-   * answer in `rect.fit` and keeps it, remembered per project.
-   *
-   * A zoomed tile has no box, so it follows the wall's setting: in life-size
-   * mode it genuinely refits to the big stage — the one deliberate,
-   * near-tab-size resize left, because typing needs real cols — and in
-   * scale-model mode it stays a scale model: magnified, never reflowed.
-   */
-  const refit = rect?.fit ?? lifesize
 
   useLayoutEffect(() => {
     const el = naturalRef.current
@@ -1017,7 +898,7 @@ function MosaicTile({
   }, [geometry, paneId])
 
   /*
-   * Nothing in the mosaic uses WebGL.
+   * Nothing on a peek uses WebGL.
    *
    * Every surface here is scaled, and a scaled canvas is a resampled bitmap —
    * smeared shrunk, soft blown up — where xterm's DOM rows are real text that
@@ -1025,24 +906,11 @@ function MosaicTile({
    * sidesteps the context ceiling entirely: a browser will not hand out sixteen
    * live WebGL contexts, and the ones it takes back it takes back mid-frame.
    * Measured, the DOM renderer holds 60fps with sixteen live tiles, so there is
-   * nothing to buy back. WebGL belongs to tab view, where scale is always 1.
+   * nothing to buy back. WebGL belongs to Full screen, where scale is always 1.
    */
   useEffect(() => {
     terminalHost.setWebgl(paneId, false)
-    if (zoomed) terminalHost.focus(paneId)
-  }, [paneId, zoomed])
-
-  /*
-   * In-place typing: while a tile is interactive the terminal takes the keyboard
-   * right on the wall. Focused on entry, blurred on exit and on unmount — the
-   * blur matters, or the tile would keep swallowing keystrokes that belong to
-   * the wall again.
-   */
-  useEffect(() => {
-    if (!interactive) return
-    terminalHost.focus(paneId)
-    return () => terminalHost.blur(paneId)
-  }, [interactive, paneId])
+  }, [paneId])
 
   /*
    * The mouse, on a terminal drawn smaller or larger than it really is.
@@ -1065,7 +933,7 @@ function MosaicTile({
    * to the PTY, so selecting never claims the pane's grid.
    */
   useEffect(() => {
-    if (!zoomed && !interactive) return
+    if (!interactive) return
     const box = naturalRef.current
     if (!box) return
     let pressed = false
@@ -1091,7 +959,7 @@ function MosaicTile({
     return () => {
       for (const t of types) window.removeEventListener(t, translate, true)
     }
-  }, [interactive, zoomed])
+  }, [interactive])
 
   /*
    * Fit into whatever the tile ended up being.
@@ -1101,39 +969,21 @@ function MosaicTile({
    * tile is the difference between a wall that tracks the pointer and one that
    * lurches. Reads are coalesced to one per frame for the same reason.
    */
-  const against = zoomed ? geometry : reference
   useEffect(() => {
     const stage = stageRef.current
     const el = naturalRef.current
     if (!stage || !el) return
     let raf = 0
-    let settle: number | null = null
 
     const apply = (): void => {
       const w = stage.clientWidth
       const h = stage.clientHeight
       if (w < 4 || h < 4) return
 
-      if (refit && zoomed) {
-        // The one surface that truly refits: zoom is a deliberate act on one
-        // pane, nearly tab-sized, and typing into it needs real cols and rows.
-        el.style.width = `${w}px`
-        el.style.height = `${h}px`
-        el.style.transform = 'none'
-        el.style.opacity = '1'
-        // The PTY catches up after the pointer stops — see REFIT_SETTLE_MS.
-        if (settle !== null) clearTimeout(settle)
-        settle = window.setTimeout(() => {
-          settle = null
-          terminalHost.fit(paneId)
-        }, REFIT_SETTLE_MS)
-        return
-      }
-
       if (refit) {
         /*
-         * Life-size on the wall is a *window*, not a refit: the terminal keeps
-         * the exact cols and rows it had in tab view and the tile shows its
+         * Life-size is a *window*, not a refit: the terminal keeps the exact
+         * cols and rows it had in Full screen and the tile shows its
          * bottom-left corner at scale 1 — the bottom because that is where the
          * prompt and the live region are.
          *
@@ -1153,20 +1003,12 @@ function MosaicTile({
         return
       }
 
+      // The scale model hangs off the top-left, so a row of terminals all
+      // start on the same line and the eye can run along them.
       el.style.width = `${geometry.width}px`
       el.style.height = `${geometry.height}px`
-      const cap = zoomed ? ZOOM_MAX_SCALE : 1
-      const scale = Math.min(cap, w / against.width, h / against.height)
-      /*
-       * Tiles hang off the top-left, so the wall's terminals all start on the
-       * same line and the eye can run down them. A zoomed pane is centred
-       * instead: at natural scale a pane that was one of five in a split does
-       * not come close to filling the area, and shoved into a corner that reads
-       * as a layout bug rather than as the letterboxing it is.
-       */
-      const dx = zoomed ? Math.max(0, (w - geometry.width * scale) / 2) : 0
-      const dy = zoomed ? Math.max(0, (h - geometry.height * scale) / 2) : 0
-      el.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`
+      const scale = Math.min(1, w / reference.width, h / reference.height)
+      el.style.transform = `scale(${scale})`
       el.style.opacity = scale > 0 ? '1' : '0'
     }
 
@@ -1181,32 +1023,118 @@ function MosaicTile({
     ro.observe(stage)
     return () => {
       if (raf) cancelAnimationFrame(raf)
-      if (settle !== null) clearTimeout(settle)
       ro.disconnect()
     }
-  }, [against, geometry, paneId, refit, zoomed])
+  }, [geometry, reference, refit])
+
+  return (
+    <div className={className} ref={stageRef}>
+      <div className="mtile__natural" ref={naturalRef} />
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------- tile */
+
+/** The eight resize grips, and which edges each of them drags. */
+const HANDLES: Array<{ key: string; edges: MosaicEdges }> = [
+  { key: 'n', edges: { ...NO_EDGES, top: true } },
+  { key: 's', edges: { ...NO_EDGES, bottom: true } },
+  { key: 'w', edges: { ...NO_EDGES, left: true } },
+  { key: 'e', edges: { ...NO_EDGES, right: true } },
+  { key: 'nw', edges: { ...NO_EDGES, top: true, left: true } },
+  { key: 'ne', edges: { ...NO_EDGES, top: true, right: true } },
+  { key: 'sw', edges: { ...NO_EDGES, bottom: true, left: true } },
+  { key: 'se', edges: { ...NO_EDGES, bottom: true, right: true } }
+]
+
+function MosaicTile({
+  cell,
+  project,
+  reference,
+  lifesize,
+  selected,
+  interactive,
+  rect,
+  onOpenFull,
+  onClose,
+  onSelect,
+  onBeginDrag,
+  onToggleFit,
+  onToggleInteract
+}: {
+  cell: Cell
+  project: Project
+  /** The wall's shared scaling reference — ignored when refitted. */
+  reference: PaneGeometry
+  /** The wall's default: refit rather than scale. A tile may override it. */
+  lifesize: boolean
+  selected: boolean
+  /** This tile is being typed into in place — see toggleInteract. */
+  interactive: boolean
+  /** Where this tile sits on a freeform wall. Absent = the auto grid places it. */
+  rect?: MosaicTileRect
+  onOpenFull: (paneId: string) => void
+  /** Close this terminal — the X top-right. */
+  onClose: (paneId: string) => void
+  onSelect: (paneId: string) => void
+  onBeginDrag: (
+    paneId: string,
+    e: ReactPointerEvent<HTMLElement>,
+    mode: 'move' | 'resize',
+    edges: MosaicEdges
+  ) => void
+  onToggleFit: (paneId: string) => void
+  onToggleInteract: (paneId: string) => void
+}): ReactNode {
+  const { state, actions } = useApp()
+  const workspaceTasks = useActiveWorkspace().tasks
+  const paneId = cell.leaf.id
+  const profile = resolveProfile(state.settings.agentProfiles, cell.leaf.profileId)
+  const runtime = usePaneRuntime(paneId)
+  const activity = usePaneActivity(paneId, runtime)
+  const callSign = useCallSign(paneId)
+  const dead = isPaneDead(runtime)
+  const permChip = permissionChip(profile, leafPermissionMode(cell.leaf))
+  const [dropping, setDropping] = useState(false)
+
+  const tileRef = useRef<HTMLElement | null>(null)
+
+  // Arrive with the one-time pop of a brand-new pane.
+  useLayoutEffect(() => {
+    const el = tileRef.current
+    if (el) enterOnce(paneId, el)
+  }, [paneId])
+
+  /**
+   * Life-size: the tile is a scale-1 window onto the terminal, cropped to the
+   * tile's box and anchored bottom-left, where the live region is. The
+   * alternative is the scale model: the whole picture shrunk with a transform,
+   * everything visible, at the price of type nobody can read past a few tiles.
+   * Neither ever resizes the terminal — glancing at a pane must not reflow
+   * somebody's vim, and a ConPTY reflow eats scrollback (see PeekStage).
+   *
+   * The wall's setting decides; a tile the user double-clicked has its own
+   * answer in `rect.fit` and keeps it, remembered per project.
+   */
+  const refit = rect?.fit ?? lifesize
 
   /*
-   * Undo the zoom refit the moment the zoom ends, while the pane is still on
-   * the wall. A zoom left the terminal at stage cols/rows; the crop branch
-   * above has just put the box back at `geometry` pixels, so this fit lands it
-   * back on the exact dims it had in tab view — meaning leaving the mosaic
-   * re-attaches at an unchanged size and triggers no reflow at all. On a tile
-   * that never zoomed the dims already match and this is a no-op (fit only
-   * resizes on change, and the PTY flush skips repeats).
-   *
-   * Declared after the apply() effect on purpose: effects run in order, and
-   * the box must be back at its natural size before the fit measures it.
+   * In-place typing: while a tile is interactive the terminal takes the keyboard
+   * right on the wall. Focused on entry, blurred on exit and on unmount — the
+   * blur matters, or the tile would keep swallowing keystrokes that belong to
+   * the wall again.
    */
   useEffect(() => {
-    if (zoomed || !refit) return
-    terminalHost.fit(paneId)
-  }, [paneId, refit, zoomed])
+    if (!interactive) return
+    terminalHost.focus(paneId)
+    return () => terminalHost.blur(paneId)
+  }, [interactive, paneId])
 
   /* --------------------------------------------------------- dropped files */
 
   /*
-   * Same contract as a tab-view pane: a file dropped on a tile types its
+   * Same contract as a Full screen pane: a file dropped on a tile types its
    * quoted path into that tile's session. The tile has to speak for itself —
    * the wall's drag handlers only accept TAB_DRAG_TYPE, so a file drag over
    * the mosaic was declined on dragover and its drop never fired at all.
@@ -1231,7 +1159,7 @@ function MosaicTile({
     if (taskId) {
       const card = (workspaceTasks ?? []).find((t) => t.id === taskId)
       if (!card) return
-      if (!zoomed && !interactive) onToggleInteract(paneId)
+      if (!interactive) onToggleInteract(paneId)
       terminalHost.focus(paneId)
       requestAnimationFrame(() => {
         if (terminalHost.type(paneId, `${card.text} `)) actions.removeTask(card.id)
@@ -1247,26 +1175,26 @@ function MosaicTile({
      * 1004) will drop it. See the same dance in TerminalPane. On the wall,
      * taking focus *is* interactive mode: the tile you just handed a file to
      * is the tile you are now talking to, so it should also take the keys
-     * for the Enter that usually follows. A zoomed tile is already focused.
+     * for the Enter that usually follows.
      */
-    if (!zoomed && !interactive) onToggleInteract(paneId)
+    if (!interactive) onToggleInteract(paneId)
     terminalHost.focus(paneId)
     requestAnimationFrame(() => terminalHost.paste(paneId, `${quoted.join(' ')} `))
   }
 
   const statusLabel = paneStatusLabel(runtime)
-  const placed = !zoomed && rect
+  const placed = rect
   /** This tile was pointed the other way from the rest of the wall by hand. */
-  const override = !zoomed && refit !== lifesize
+  const override = refit !== lifesize
+  const name = paneDisplayTitle(profile, cell.leaf.title)
 
   return (
     <section
       ref={tileRef}
       className="mtile"
       data-pane-id={paneId}
-      data-flip={zoomed ? undefined : paneId}
+      data-flip={paneId}
       data-state={activity.state}
-      data-zoomed={zoomed}
       data-selected={selected}
       data-interactive={interactive ? 'true' : undefined}
       data-placed={placed ? 'true' : undefined}
@@ -1274,6 +1202,7 @@ function MosaicTile({
       data-override={override ? 'true' : undefined}
       data-status={runtime.status}
       data-dropping={dropping ? 'true' : undefined}
+      data-tint={cell.tab.color ? 'true' : undefined}
       onDragEnter={acceptDrag}
       onDragOver={acceptDrag}
       onDragLeave={(e) => {
@@ -1285,6 +1214,8 @@ function MosaicTile({
       style={
         {
           '--pane-accent': profile.accent,
+          // The tab's own colour, when it was given one — the wall strip's tint, here too.
+          ...(cell.tab.color ? { '--tab-tint': cell.tab.color } : {}),
           ...(placed ? { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px` } : {})
         } as React.CSSProperties
       }
@@ -1292,33 +1223,22 @@ function MosaicTile({
       <header
         className="mtile__head"
         onPointerDown={(e) => {
-          if (zoomed) return
           if ((e.target as HTMLElement).closest('button')) return
           onBeginDrag(paneId, e, 'move', NO_EDGES)
         }}
         onDoubleClick={(e) => {
-          if (zoomed) return
           if ((e.target as HTMLElement).closest('button')) return
           onToggleFit(paneId)
         }}
         title={
-          zoomed
-            ? undefined
-            : lifesize
-              ? 'Double-click: show this one shrunk to fit instead of at full size'
-              : 'Double-click: show this one at full size, cropped to the tile'
+          lifesize
+            ? 'Double-click: show this one shrunk to fit instead of at full size'
+            : 'Double-click: show this one at full size, cropped to the tile'
         }
       >
-        {zoomed ? (
-          <button type="button" className="ghost-btn mtile__back" title="Back to the Wall (Esc)" onClick={onBack}>
-            <Icon name="chevronLeft" size={12} />
-            Mosaic
-          </button>
-        ) : (
-          <AgentBadge profile={profile} size="sm" />
-        )}
+        <AgentBadge profile={profile} size="sm" />
 
-        <span className="mtile__title truncate">{callSign ?? paneDisplayTitle(profile, cell.leaf.title)}</span>
+        <span className="mtile__title truncate">{callSign ?? name}</span>
         {permChip ? (
           <span className="mtile__perm mono" data-danger={permChip.danger ? 'true' : undefined}>
             {permChip.label}
@@ -1327,13 +1247,13 @@ function MosaicTile({
         {/* Only ever says how this tile differs from the wall — see toggleFit. */}
         {override ? <span className="mtile__refit mono">{refit ? 'full size' : 'scaled'}</span> : null}
         <span className="mtile__tab truncate" title={statusLabel || undefined}>
-          {callSign ? `${paneDisplayTitle(profile, cell.leaf.title)} · ${cell.tab.title}` : cell.tab.title}
+          {callSign ? `${name} · ${cell.tab.title}` : cell.tab.title}
         </span>
         {/* The halo's word: which tile the keyboard is on, and how. */}
-        {interactive || zoomed || selected ? (
-          <span className="pane__active">{interactive ? 'Typing' : zoomed ? 'Active' : 'Selected'}</span>
+        {interactive || selected ? (
+          <span className="pane__active">{interactive ? 'Typing' : 'Selected'}</span>
         ) : null}
-        <StateChip activity={activity} compact={!zoomed} />
+        <StateChip activity={activity} compact />
         <ActivityDot paneId={paneId} status={runtime.status} />
 
         <div className="mtile__actions">
@@ -1347,87 +1267,71 @@ function MosaicTile({
               <Icon name="restart" size={12} />
             </button>
           ) : null}
-          {zoomed ? null : (
-            <button
-              type="button"
-              className="ghost-btn mtile__action"
-              data-open={interactive ? 'true' : undefined}
-              title={
-                interactive
-                  ? 'Stop typing in this tile (Esc)'
-                  : 'Type in this tile without leaving the Wall'
-              }
-              onClick={() => onToggleInteract(paneId)}
-            >
-              <Icon name="terminal" size={12} />
-            </button>
-          )}
           <button
             type="button"
             className="ghost-btn mtile__action"
-            title="Open in tab view"
-            onClick={() => onOpenInTab(paneId)}
+            data-open={interactive ? 'true' : undefined}
+            title={interactive ? 'Stop typing in this tile (Esc)' : 'Type in this tile without leaving the Wall'}
+            onClick={() => onToggleInteract(paneId)}
+          >
+            <Icon name="terminal" size={12} />
+          </button>
+          <button
+            type="button"
+            className="ghost-btn mtile__action"
+            title="Full screen"
+            onClick={() => onOpenFull(paneId)}
           >
             <Icon name="expand" size={12} />
           </button>
         </div>
+
+        {/* Always there, never under the hover fade: closing is the one action
+            a tile must never hide. */}
+        <button
+          type="button"
+          className="ghost-btn mtile__close"
+          data-danger="true"
+          aria-label={`Close ${name}`}
+          title={`Close ${name}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose(paneId)
+          }}
+        >
+          <Icon name="close" size={11} />
+        </button>
       </header>
 
-      <div
-        className="mtile__stage"
-        ref={stageRef}
-        onMouseDownCapture={(e) => {
-          /*
-           * The second half of a double-click on a tile that the first half
-           * just started typing into: zoom. Taken in the capture phase and
-           * stopped here, so xterm never sees the press and does not select a
-           * word under it. Any later press is the terminal's own — a
-           * double-click to select a word in a tile you are already typing in
-           * still does exactly that.
-           */
-          if (zoomed || !interactive || e.button !== 0) return
-          if (performance.now() - typedFromClickAt.current > DOUBLE_CLICK_MS) return
-          typedFromClickAt.current = 0
-          e.preventDefault()
-          e.stopPropagation()
-          onZoom(paneId)
-        }}
-      >
-        <div className="mtile__natural" ref={naturalRef} />
-      </div>
+      <PeekStage cell={cell} project={project} refit={refit} reference={reference} interactive={interactive} />
 
       {/*
         On the wall the terminal is scenery: this sheet sits over it so a click
-        starts typing in the tile, in place, at the terminal's own cols and
-        rows, rather than dropping the press on whatever cell of the picture
-        was under it. A double-click zooms (see the stage above). Zoomed, or
-        typing, the sheet is gone and the terminal takes its own clicks again.
+        opens the pane full screen rather than dropping the press on whatever
+        cell of the picture was under it. Typing in place (the header's
+        terminal button), the sheet is gone and the terminal takes its own
+        clicks again.
       */}
-      {zoomed || interactive ? null : (
+      {interactive ? null : (
         <button
           type="button"
           className="mtile__hit"
-          title={`Click to type here, double-click to zoom in — ${paneDisplayTitle(profile, cell.leaf.title)}`}
-          aria-label={`Type in ${paneDisplayTitle(profile, cell.leaf.title)} in ${cell.tab.title}`}
+          title={`Click for full screen — ${name}`}
+          aria-label={`Open ${name} in ${cell.tab.title} full screen`}
           onPointerEnter={() => onSelect(paneId)}
           onFocus={() => onSelect(paneId)}
-          onClick={() => {
-            typedFromClickAt.current = performance.now()
-            onToggleInteract(paneId)
-          }}
+          onClick={() => onOpenFull(paneId)}
         />
       )}
 
-      {zoomed
-        ? null
-        : HANDLES.map((handle) => (
-            <div
-              key={handle.key}
-              className="mtile__grip"
-              data-edge={handle.key}
-              onPointerDown={(e) => onBeginDrag(paneId, e, 'resize', handle.edges)}
-            />
-          ))}
+      {HANDLES.map((handle) => (
+        <div
+          key={handle.key}
+          className="mtile__grip"
+          data-edge={handle.key}
+          onPointerDown={(e) => onBeginDrag(paneId, e, 'resize', handle.edges)}
+        />
+      ))}
     </section>
   )
 }

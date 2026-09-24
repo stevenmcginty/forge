@@ -1,5 +1,26 @@
 # Handoff
 
+## Top wall strip + full review fixes (2026-09-24, uncommitted, not yet QA'd live)
+
+- **Decided (Steve):** no terminal tab strip and no Tabs|Wall switch. Terminals are either **Wall** (grid fills the stage, X close top-right on each tile) or **Full screen** (one terminal). In Full screen and over Browser/Board, a live **wall strip** of all terminals sits at the top of the stage. Browser/Board are full width below it; no more side-by-side. Data values stay `'mosaic'`/`'tabs'` (Wall/Full screen), so `set_view` and voice are unchanged.
+- **Code:** `src/components/shell/WallStrip.tsx/.css` (new), `src/App.tsx` (stage column), `TerminalGrid.tsx` (Wall/Full/Beside), `MosaicView.tsx` (zoom removed; click opens Full screen; `useCloseTerminal` with a busy-agent confirm, `src/components/CloseConfirm.tsx`), `TitleBar.tsx` ("N agents" + a + button). Projects sheet restyled (`ProjectRail.*`, `rail/*.css`, `Dock.css`).
+- **Review:** five read-only audits (browser, Board, inter-agent, voice, visual), findings in the session scratchpad `review/*.md`. The High and Medium items are fixed:
+  - agents: pane opens in the caller's project; brief delivery is idempotent (`src/lib/briefDelivery.ts`); never pastes into a bare shell; closing a pane stops its Foreman
+  - browser: hides under the … menu and prompts (`browser/overlays.ts`); app keys pass through (`appKeys.ts`); right-click menu; password values redacted from `browser_read`; hides on renderer reload
+  - Board: strip tiles accept drops; lazy `forge-artifact:` loading (CSP updated in `index.html`); size limits aligned; artifact frames sandboxed; two-press delete
+  - voice: late start torn down (V1); silent reply after interrupt (V2); 30 s no-reply watchdog; mic errors mapped; switching brain stops the old live session; Wall/Full screen wording
+  - visual: contrast ≥ 4.5:1, Paper lime-on-lime, unified menus, dead CSS
+- **Checks:** typecheck and lint are clean. `npm test` fast lane: 49 passed. realtime, brain-adapters, gemini-live, voice-hotkey, agent-bar and agent-pane are now in the fast lane.
+  - Pre-existing failures in `test:all` that are not ours: apk:check, bridge:smoke (Gemini 403), packaged:check.
+- **Left open:**
+  - A6: a Foreman hire in a project that is not on screen starts when that project is opened.
+  - A9: voice brains get the answer from dispatch time (fix: await `outcome.pending` in `src/lib/realtime/tools-main.ts`).
+  - Cross-origin iframe reading, and auto-closing page `alert()`s.
+  - The Low findings.
+  - Tab reorder and drag-tab-to-Wall are gone; the dead `TAB_DRAG_TYPE` handler is left in `MosaicView.tsx`.
+  - `state.mosaicZoom` has no UI now.
+- **Next:** Steve QA at restart, then commit.
+
 ## Gemini Live main-agent brain: mic went deaf (fixed, uncommitted)
 
 - **Cause:** `src/lib/realtime/pcm-worklet.js`. After `postMessage(..., [out.buffer])`, the buffer is detached, so `out.length` was 0. The next chunk was sized 0 and never filled. The mic sent one chunk in total, and it arrived before `setupComplete`, so it was dropped. The socket, auth, model id, setup message and tool schema were all fine.
@@ -9,12 +30,11 @@
 
 ## Still open
 
-- **No spoken or visible error when a live session goes quiet.** There is no watchdog for "socket open but no audio or reply". This was not done because another session was editing `gemini.ts` at the same time.
-- **Switching the brain during a live session leaves that session running** (`brain=claude … live=gemini-live`).
+- **Quiet live session:** partly done. A 30 s no-reply watchdog after a tool call now ends the session with the reason "no reply". There is still no general "socket open, no audio" watchdog.
+- **Brain switch during a live session:** the old session now stops. The new brain does not start on its own.
 - **Phase two, not started:** one realtime-adapter interface, so a new live model is one adapter plus one `AGENT_BRAINS` entry, and a real self-test per brain (key works, session opens, round trip comes back). Audit notes: session scratchpad `realtime-audit.md`.
   - `RealtimeSession` (`src/lib/realtime/session.ts`) already fits.
   - The blockers are the per-id switches in `VoiceHubController.createSession` and `electron/agent-brain-test.ts`, the vendor facts centralised in `shared/realtime.ts`, and the vendor voice lists and copy in the Settings UI.
-  - The `realtime:check` and `brain-adapters:check` scripts are not in `scripts/run-checks.mjs`.
 - **Unblocked:** the other session committed its realtime and tool edits (372265c). Phase two can start.
 
 ## Listen switch redesign (done, f4f6c7a)
@@ -22,3 +42,16 @@
 - `ListenToggle` in `src/components/hub/VoicePill.tsx/.css`: off is a hollow knob, on is a lit track, and the knob mark shows the phase. Steve chose to ship it as is.
 - **Known and accepted:** in the muted and starting states the knob edge is below 3:1 contrast.
 - **Check at restart:** the live Waveform, the animations, and the four themes that were not previewed.
+
+## Forge Web desktop face = the deck (2026-09-24)
+
+- **Decision (Steve):** a desktop browser should look like the new desktop deck. The phone face stays unchanged. It is built here on `desktop-redesign`, so it ships when Dev merges; it is not on master. The only web setting is the theme.
+- **Done:** `389b1e8` (not pushed). The code is in `web/src/deck/*`, with small hooks in `Workspace.tsx`, `SessionComposer.tsx`, `Composer.tsx`, `Panes.tsx` and `lib/term.ts`.
+  - Deck tokens and CSS are imported live from `src/`: `deck-tokens.css`, `deck.css` and `VoicePill.css`.
+  - `node scripts/web-deck-check.mjs` guards drift.
+  - The phone was checked pixel-identical at 390×844.
+- **Next:**
+  1. Re-sync `web/src/deck/DeckTopBar.*` when Steve's top-bar redesign lands. It is minimal on purpose, and the pane tabs live in the panes sheet.
+  2. Update `scripts/web-e2e.mjs`. It expects `.tabstrip__new` and `.prow` to be visible at 1440, and they are now inside sheets.
+  3. Risk: those three `src/` CSS files also load on the phone. Keep their rules scoped under `.deck` and add no bare `:root` variable names, or extend the drift check to enforce this.
+  4. Phase 2 is the voice agent in the browser. The desktop mints the Gemini Live or GPT Realtime token over a new wire message, and the Claude brain goes through the desktop. It waits for the voice work to settle.

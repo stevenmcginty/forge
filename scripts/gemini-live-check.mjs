@@ -15,6 +15,13 @@
  *                        chunk is realtimeInput.audio, audio/pcm;rate=16000
  *   • replies          — modelTurn audio reaches the player; state speaking
  *   • trace            — the [realtime] lines name no key or token
+ *   • stop while starting — a start stopped mid-way opens nothing and
+ *                        releases the mic (V1)
+ *   • interrupt        — during playback, after generation, the next reply
+ *                        still plays (V2)
+ *   • quiet turns      — a tool call with no spoken reply is back to
+ *                        listening on turnComplete (V3)
+ *   • the mic          — a blocked mic says "mic blocked", not "key refused" (V4)
  *
  * Run: node scripts/gemini-live-check.mjs
  */
@@ -155,7 +162,7 @@ class FakeWorkletNode {
   disconnect() {}
 }
 
-function makeEnv({ initialCtxState }) {
+function makeEnv({ initialCtxState = 'running', getUserMedia, geminiToken } = {}) {
   const sockets = []
   const contexts = []
   class FakeWebSocket {
@@ -206,17 +213,27 @@ function makeEnv({ initialCtxState }) {
       this.state = 'closed'
     }
   }
-  const track = { enabled: true, muted: false, readyState: 'live', stop() {} }
+  const track = {
+    enabled: true,
+    muted: false,
+    readyState: 'live',
+    stopped: 0,
+    stop() {
+      this.stopped++
+      this.readyState = 'ended'
+    }
+  }
   const stream = { getAudioTracks: () => [track], getTracks: () => [track] }
   globalThis.WebSocket = FakeWebSocket
   globalThis.AudioContext = FakeAudioContext
   globalThis.AudioWorkletNode = FakeWorkletNode
   Object.defineProperty(globalThis, 'navigator', {
-    value: { mediaDevices: { getUserMedia: async () => stream } },
+    value: { mediaDevices: { getUserMedia: getUserMedia ? () => getUserMedia(stream) : async () => stream } },
     configurable: true
   })
-  globalThis.window = { forge: { realtime: { geminiToken: async () => ({ ok: true, token: 'auth_tokens/SECRETTOKEN123', expiresAt: 0 }) } } }
-  return { sockets, contexts }
+  const token = async () => ({ ok: true, token: 'auth_tokens/SECRETTOKEN123', expiresAt: 0 })
+  globalThis.window = { forge: { realtime: { geminiToken: geminiToken ?? token } } }
+  return { sockets, contexts, track }
 }
 
 const { GeminiLiveSession } = await import('../src/lib/realtime/gemini.ts')
@@ -318,6 +335,172 @@ await check('the [realtime] trace covers the path and carries no key or token', 
   }
   assert.doesNotMatch(text, /SECRETTOKEN|auth_tokens\/|access_token=/)
   for (const l of trace) assert.ok(l.startsWith('[realtime] '), l)
+})
+
+/* ------------- stop while starting (V1), interrupt (V2), quiet turns (V3), the mic (V4) */
+
+const tick = () => new Promise((r) => setTimeout(r, 0))
+/** A start() that never settles is the V1 bug itself (it carried on): fail, do not hang. */
+const within = (p, ms = 1000) =>
+  Promise.race([p, new Promise((_, reject) => setTimeout(() => reject(new Error(`still pending after ${ms} ms`)), ms))])
+function newSession() {
+  const states = []
+  const tools = []
+  const session = new GeminiLiveSession({
+    provider: 'gemini-live',
+    model: GEMINI_LIVE_MODEL,
+    voice: 'Kore',
+    instructions: 'be brief',
+    tools: [],
+    events: {
+      onState: (s) => states.push(s),
+      onCaption: () => undefined,
+      onToolCall: async (call) => {
+        tools.push(call.name)
+        return { ok: true, text: 'done' }
+      },
+      onExpiring: () => undefined
+    }
+  })
+  return { session, states, tools }
+}
+/** A session through setupComplete, with its socket and player. */
+async function liveSession() {
+  const env = makeEnv()
+  const s = newSession()
+  const started = s.session.start()
+  for (let i = 0; i < 20 && !env.sockets[0]?.sent.length; i++) await tick()
+  const ws = env.sockets[0]
+  ws.serverSends({ setupComplete: {} })
+  await started
+  const player = env.contexts[0].nodes.find((n) => n.name === 'forge-pcm-player')
+  return { ...s, env, ws, player }
+}
+const audioPart = () => ({
+  inlineData: { mimeType: 'audio/pcm;rate=24000', data: Buffer.from(new Int16Array(240).fill(900).buffer).toString('base64') }
+})
+const pcmCount = (player) => player.port.sent.filter((m) => m.pcm).length
+
+await check('V1: Listen off during getUserMedia — the late start is torn down: no socket, the mic track stopped', async () => {
+  let release
+  const gate = new Promise((r) => (release = r))
+  const env = makeEnv({ getUserMedia: async (stream) => (await gate, stream) })
+  const { session, states } = newSession()
+  const started = session.start()
+  session.stop()
+  release()
+  await assert.rejects(within(started), /stopped while starting/)
+  await tick()
+  assert.equal(env.sockets.length, 0, 'no WebSocket was opened after stop()')
+  assert.equal(env.contexts.length, 0, 'no AudioContext was built after stop()')
+  assert.ok(env.track.stopped > 0, 'the late mic stream was stopped')
+  assert.deepEqual(states.filter((s) => s !== 'connecting'), ['closed'], 'nothing after closed')
+})
+
+await check('V1: Listen off during the token mint — no socket opens, the mic and audio graph are released', async () => {
+  let release
+  const gate = new Promise((r) => (release = r))
+  const env = makeEnv({ geminiToken: async () => (await gate, { ok: true, token: 'auth_tokens/SECRETTOKEN123', expiresAt: 0 }) })
+  const { session } = newSession()
+  const started = session.start()
+  for (let i = 0; i < 20 && !env.contexts[0]?.nodes.length; i++) await tick()
+  await tick()
+  session.stop()
+  release()
+  await assert.rejects(within(started), /stopped while starting/)
+  await tick()
+  assert.equal(env.sockets.length, 0, 'the socket never opened')
+  assert.equal(env.contexts[0].state, 'closed')
+  assert.ok(env.track.stopped > 0)
+})
+
+await check('V1: Listen off while the socket waits for setupComplete — start rejects, the socket is closed', async () => {
+  const env = makeEnv()
+  const { session } = newSession()
+  const started = session.start()
+  for (let i = 0; i < 20 && !env.sockets[0]?.sent.length; i++) await tick()
+  const ws = env.sockets[0]
+  session.stop()
+  // A real socket fires close after close(); the fake leaves that to us.
+  ws.onclose?.({ code: 1000, reason: '', wasClean: true })
+  await assert.rejects(within(started))
+  assert.equal(ws.readyState, 3, 'closed')
+  assert.ok(env.track.stopped > 0)
+})
+
+await check('V2: interrupt after generationComplete, during playback, does not silence the next reply', async () => {
+  const { session, ws, player } = await liveSession()
+  ws.serverSends({ serverContent: { modelTurn: { parts: [audioPart(), audioPart()] } } })
+  ws.serverSends({ serverContent: { generationComplete: true } })
+  ws.serverSends({ serverContent: { turnComplete: true } })
+  player.port.emit({ started: true }) // still playing its buffer
+  session.interrupt()
+  assert.ok(player.port.sent.some((m) => m.flush), 'the queued audio was flushed')
+  const before = pcmCount(player)
+  ws.serverSends({ serverContent: { modelTurn: { parts: [audioPart()] } } })
+  assert.equal(pcmCount(player), before + 1, 'the next reply reaches the player')
+  session.stop()
+})
+
+await check('V2: interrupt mid-generation drops the rest of that turn, and the turn after plays', async () => {
+  const { session, ws, player } = await liveSession()
+  ws.serverSends({ serverContent: { modelTurn: { parts: [audioPart()] } } })
+  session.interrupt()
+  const before = pcmCount(player)
+  ws.serverSends({ serverContent: { modelTurn: { parts: [audioPart()] } } })
+  assert.equal(pcmCount(player), before, 'the rest of the interrupted turn is dropped')
+  ws.serverSends({ serverContent: { turnComplete: true } })
+  ws.serverSends({ serverContent: { modelTurn: { parts: [audioPart()] } } })
+  assert.equal(pcmCount(player), before + 1, 'the next turn plays')
+  session.stop()
+})
+
+await check('V3: a tool call answered with no spoken reply goes back to listening on turnComplete', async () => {
+  const { session, ws, states, tools } = await liveSession()
+  ws.serverSends({ toolCall: { functionCalls: [{ id: 'c1', name: 'run_app_action', args: {} }] } })
+  assert.equal(states.at(-1), 'thinking')
+  await tick()
+  assert.deepEqual(tools, ['run_app_action'])
+  assert.ok(ws.sent.some((m) => m.toolResponse), 'the tool was answered')
+  ws.serverSends({ serverContent: { turnComplete: true } })
+  assert.equal(states.at(-1), 'listening', states.join(','))
+  session.stop()
+})
+
+await check('V3: turnComplete while audio is still queued leaves the phase to playback', async () => {
+  const { session, ws, states, player } = await liveSession()
+  ws.serverSends({ toolCall: { functionCalls: [{ id: 'c2', name: 'run_app_action', args: {} }] } })
+  await tick()
+  ws.serverSends({ serverContent: { modelTurn: { parts: [audioPart()] } } })
+  ws.serverSends({ serverContent: { turnComplete: true } })
+  assert.equal(states.at(-1), 'thinking', 'not flipped to listening before the audio plays')
+  player.port.emit({ started: true })
+  player.port.emit({ drained: true })
+  assert.equal(states.at(-1), 'listening')
+  session.stop()
+})
+
+await check('V4: a blocked microphone is "mic blocked", never "key refused"', async () => {
+  const { errorReasonOf } = await import('../src/lib/realtime/errors.ts')
+  makeEnv({
+    getUserMedia: async () => {
+      const e = new Error('Permission denied by system')
+      e.name = 'NotAllowedError'
+      throw e
+    }
+  })
+  const { session } = newSession()
+  const err = await session.start().then(
+    () => null,
+    (e) => e
+  )
+  assert.match(err?.message ?? '', /^Microphone blocked/)
+  assert.equal(errorReasonOf('gemini', err.message), 'Gemini: mic blocked')
+  assert.equal(errorReasonOf('openai', err.message), 'OpenAI: mic blocked')
+  assert.equal(errorReasonOf('gemini', 'Could not start audio source'), 'Gemini: mic blocked')
+  assert.equal(errorReasonOf('gemini', 'Microphone not found (NotFoundError) — plug one in'), 'Gemini: no mic')
+  assert.equal(errorReasonOf('gemini', 'Gemini refused (403) the key'), 'Gemini: key refused', 'a real key refusal still says so')
+  assert.equal(errorReasonOf('parakeet', 'microphone busy'), 'Parakeet: mic busy or missing', 'Parakeet keeps its own words')
 })
 
 console.log(`\ngemini-live-check: ${passed} passed${process.exitCode ? ', some FAILED' : ''}`)

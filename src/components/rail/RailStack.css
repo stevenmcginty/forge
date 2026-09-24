@@ -35,24 +35,29 @@
 
 /* --------------------------------------------------------- discovery foot */
 
+/*
+ * A quiet pill rather than a dashed box: dashed read as an empty slot waiting
+ * for something to be dropped in, and this is a link to Appearance. Muted ink,
+ * not dim, because it is words and has to clear 4.5:1.
+ */
 .rstack__more {
   flex: none;
-  align-self: stretch;
+  align-self: center;
   justify-content: center;
   height: 24px;
-  margin: var(--s-2) var(--s-3) var(--s-3);
+  margin: var(--s-3) var(--s-3) var(--s-4);
+  padding: 0 var(--s-5);
   font-size: var(--t-eyebrow);
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
-  color: var(--text-dim);
-  border: 1px dashed var(--line-hairline);
-  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--r-full);
 }
 
 .rstack__more:hover {
-  color: var(--text-secondary);
+  color: var(--text-primary);
   border-color: var(--line-strong);
-  border-style: solid;
   background: var(--bg-hover);
 }
 

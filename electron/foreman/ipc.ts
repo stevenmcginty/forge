@@ -259,6 +259,17 @@ function runAppAction(action: Record<string, unknown>): Promise<string> {
   })
 }
 
+/**
+ * The same round trip for a caller that is not Foreman: a pane agent's
+ * open_agent_pane (electron/browser-panes/ipc.ts). It needs what Foreman's
+ * hires need — an action run in the project that owns the calling pane, not
+ * the one on screen — and src/state/Foreman.tsx already answers exactly that,
+ * so it rides this channel rather than growing a second one.
+ */
+export function askAnchoredAppAction(action: Record<string, unknown>): Promise<string> {
+  return runAppAction(action)
+}
+
 /* -------------------------------------------------------------------- host */
 
 function ensureHost(): ForemanHost {
