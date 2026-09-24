@@ -30,11 +30,12 @@
  * or the Wall, the Agents menu and the Wall switch in the bar, and a voice bar
  * that lives in the top bar or in the dock (./view.ts `BarPlace`).
  */
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import '@/components/shell/deck-tokens.css'
 import '@/components/shell/deck.css'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
+import { Popover } from '@/components/Popover'
 import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { columnsFor } from '@/lib/mosaicLayout'
 import { collectLeaves } from '@/lib/splitTree'
@@ -116,6 +117,27 @@ export function DeckStage({
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
   const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0] ?? null
 
+  const [closingTarget, setClosingTarget] = useState<{ agent: DeckAgent; anchor: HTMLElement } | null>(null)
+
+  useEffect(() => {
+    if (!closingTarget) return
+    const exists = workspace.tabs.some((t) => collectLeaves(t.root).some((l) => l.id === closingTarget.agent.leaf.id))
+    if (!exists) setClosingTarget(null)
+  }, [workspace.tabs, closingTarget])
+
+  const doClose = useCallback(
+    (agent: DeckAgent) => {
+      const tab = workspace.tabs.find((t) => t.id === agent.tab.id) ?? agent.tab
+      const alone = collectLeaves(tab.root).length <= 1
+      void actions
+        .layout(alone ? { op: 'close-tab', tabId: tab.id } : { op: 'close-pane', paneId: agent.leaf.id })
+        .then((refused) => {
+          if (refused) actions.setNotice(refused)
+        })
+    },
+    [actions, workspace.tabs]
+  )
+
   if (empty || !activeTab) return <div className="dk-stage__empty">{empty}</div>
 
   const wall = view === 'wall'
@@ -130,62 +152,119 @@ export function DeckStage({
   const manyTabs = workspace.tabs.length > 1
 
   return (
-    <div
-      className="dk-panes"
-      data-view={view}
-      style={wall ? ({ '--dk-wall-cols': columnsFor(total) } as CSSProperties) : undefined}
-    >
-      {slots.map(({ leaf, tab }) => {
-        const here = tab.id === activeTab.id
-        const focused = here && leaf.id === focusId
-        const shown = wall || focused
-        const profile = resolveProfile(profiles, leaf.profileId)
-        const agent: DeckAgent = { leaf, tab, profile, title: paneDisplayTitle(profile, leaf.title) }
-        // Chat, Cards and Terminal are an agent's; a shell has only its terminal.
-        const faces = !isShellProfile(profile)
-        const open = (): void => {
-          onView('focus')
-          if (!live) return
-          void bringForward(actions, activeTab.id, agent).then((refused) => {
-            if (refused) actions.setNotice(refused)
-          })
-        }
-        return (
-          <div
-            key={leaf.id}
-            className="dk-slot"
-            data-shown={shown ? 'true' : 'false'}
-            data-focused={wall && focused ? 'true' : undefined}
-            style={{ '--pane-accent': profile.accent } as CSSProperties}
-            onPointerDownCapture={
-              wall && !here && live ? () => void actions.layout({ op: 'select-tab', tabId: tab.id }) : undefined
-            }
-          >
-            {wall ? (
-              <TileLabel
-                agent={agent}
-                tabTitle={manyTabs && tab.title.trim() !== agent.title ? tab.title : null}
+    <>
+      <div
+        className="dk-panes"
+        data-view={view}
+        style={wall ? ({ '--dk-wall-cols': columnsFor(total) } as CSSProperties) : undefined}
+      >
+        {slots.map(({ leaf, tab }) => {
+          const here = tab.id === activeTab.id
+          const focused = here && leaf.id === focusId
+          const shown = wall || focused
+          const profile = resolveProfile(profiles, leaf.profileId)
+          const agent: DeckAgent = { leaf, tab, profile, title: paneDisplayTitle(profile, leaf.title) }
+          // Chat, Cards and Terminal are an agent's; a shell has only its terminal.
+          const faces = !isShellProfile(profile)
+          const open = (): void => {
+            onView('focus')
+            if (!live) return
+            void bringForward(actions, activeTab.id, agent).then((refused) => {
+              if (refused) actions.setNotice(refused)
+            })
+          }
+          return (
+            <div
+              key={leaf.id}
+              className="dk-slot"
+              data-shown={shown ? 'true' : 'false'}
+              data-focused={wall && focused ? 'true' : undefined}
+              style={{ '--pane-accent': profile.accent } as CSSProperties}
+              onPointerDownCapture={
+                wall && !here && live ? () => void actions.layout({ op: 'select-tab', tabId: tab.id }) : undefined
+              }
+            >
+              {wall ? (
+                <TileLabel
+                  agent={agent}
+                  tabTitle={manyTabs && tab.title.trim() !== agent.title ? tab.title : null}
+                  focused={focused}
+                  faces={faces}
+                  live={live}
+                  onSelect={() => {
+                    if (live && !focused) void actions.layout({ op: 'focus-pane', paneId: leaf.id })
+                  }}
+                  onOpen={open}
+                  onClose={(anchor) => setClosingTarget({ agent, anchor })}
+                />
+              ) : null}
+              <PaneView
+                leaf={leaf}
                 focused={focused}
-                faces={faces}
-                onSelect={() => {
-                  if (live && !focused) void actions.layout({ op: 'focus-pane', paneId: leaf.id })
-                }}
-                onOpen={open}
+                onlyPane={!wall || total === 1}
+                onScreen={shown}
+                fullScreen={!wall && shown}
+                tabTitle={tab.title.trim() && tab.title.trim() !== agent.title ? tab.title : null}
+                faceSwitch={!wall && faces ? <FaceSwitch paneId={leaf.id} name={agent.title} /> : null}
+                onClose={!wall && shown ? (anchor) => setClosingTarget({ agent, anchor }) : null}
               />
-            ) : null}
-            <PaneView
-              leaf={leaf}
-              focused={focused}
-              onlyPane={!wall || total === 1}
-              onScreen={shown}
-              fullScreen={!wall && shown}
-              tabTitle={tab.title.trim() && tab.title.trim() !== agent.title ? tab.title : null}
-              faceSwitch={!wall && faces ? <FaceSwitch paneId={leaf.id} name={agent.title} /> : null}
-            />
+            </div>
+          )
+        })}
+      </div>
+
+      {closingTarget ? (
+        <Popover
+          anchor={closingTarget.anchor}
+          open
+          onClose={() => setClosingTarget(null)}
+          align="end"
+          side="bottom"
+          width={260}
+          label={`Close ${closingTarget.agent.title}?`}
+        >
+          <div className="tab-confirm" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="tab-confirm__head">
+              <span className="eyebrow tab-confirm__eyebrow">
+                Close {isShellProfile(closingTarget.agent.profile) ? 'Terminal' : 'Agent'}
+              </span>
+            </div>
+            <p className="tab-confirm__body">
+              Are you sure you want to close <strong className="tab-confirm__name truncate">“{closingTarget.agent.title}”</strong>?
+            </p>
+            <p className="tab-confirm__hint">
+              Running processes in this window will be stopped.
+            </p>
+            <div className="tab-confirm__actions">
+              <button
+                type="button"
+                className="ghost-btn tab-confirm__cancel"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setClosingTarget(null)
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ghost-btn tab-confirm__close"
+                data-danger="true"
+                autoFocus
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const target = closingTarget.agent
+                  setClosingTarget(null)
+                  doClose(target)
+                }}
+              >
+                Close
+              </button>
+            </div>
           </div>
-        )
-      })}
-    </div>
+        </Popover>
+      ) : null}
+    </>
   )
 }
 
@@ -199,16 +278,20 @@ function TileLabel({
   tabTitle,
   focused,
   faces,
+  live,
   onSelect,
-  onOpen
+  onOpen,
+  onClose
 }: {
   agent: DeckAgent
   tabTitle: string | null
   focused: boolean
   /** An agent's tile carries its Chat / Cards / Terminal switch; a shell's does not. */
   faces: boolean
+  live: boolean
   onSelect: () => void
   onOpen: () => void
+  onClose: (anchor: HTMLElement) => void
 }): ReactNode {
   return (
     <div
@@ -236,6 +319,20 @@ function TileLabel({
         onDoubleClick={(e) => e.stopPropagation()}
       >
         <Icon name="expand" size={12} />
+      </button>
+      <button
+        type="button"
+        className="dk-tile__close"
+        disabled={!live}
+        aria-label={`Close ${agent.title}`}
+        title={live ? `Close ${agent.title}` : 'The desktop is not answering, so it cannot close one'}
+        onClick={(e) => {
+          e.stopPropagation()
+          onClose(e.currentTarget)
+        }}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <Icon name="close" size={11} />
       </button>
     </div>
   )

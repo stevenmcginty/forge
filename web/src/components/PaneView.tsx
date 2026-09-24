@@ -149,7 +149,8 @@ export function PaneView({
   onScreen,
   fullScreen = false,
   tabTitle = null,
-  faceSwitch = null
+  faceSwitch = null,
+  onClose = null
 }: {
   leaf: PaneLeaf
   focused: boolean
@@ -169,6 +170,8 @@ export function PaneView({
    * Chat or Cards the box is where the keys live — so the switch sits here.
    */
   faceSwitch?: ReactNode
+  /** An optional callback when the close (X) button is pressed in the pane header. */
+  onClose?: ((anchor: HTMLElement) => void) | null
 }): ReactNode {
   const { state, actions } = useForge()
   const profiles = useProfiles()
@@ -1074,7 +1077,7 @@ export function PaneView({
           Chips travel as one trailing cluster. On a phone the
           title hides in cards view, and handoff lives in the top bar.
         */}
-        {asking || (truncated && !mobile) || cached || (!cached && !live) || (!mobile && (handoffChip || agent)) ? (
+        {asking || (truncated && !mobile) || cached || (!cached && !live) || (!mobile && (handoffChip || agent)) || onClose ? (
           <div className="pane__trailing">
             {asking ? (
               <span className="pane__perm mono" title="This pane has settled on a question and is waiting on an answer">
@@ -1145,6 +1148,22 @@ export function PaneView({
                 }}
               >
                 <Icon name="send" size={13} />
+              </button>
+            ) : null}
+            {onClose ? (
+              <button
+                type="button"
+                className="ghost-btn pane__action pane__close"
+                data-danger="true"
+                disabled={!live}
+                aria-label={`Close ${paneDisplayTitle(profile, leaf.title)}`}
+                title={live ? `Close ${paneDisplayTitle(profile, leaf.title)}` : 'The desktop is not answering, so it cannot close one'}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onClose(e.currentTarget)
+                }}
+              >
+                <Icon name="close" size={12} />
               </button>
             ) : null}
           </div>

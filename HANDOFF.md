@@ -7,6 +7,17 @@
 - **Names:** `open_agent_pane` lost its `name` argument (`shared/brain-tools.ts`, `bridge/forge-app-tools.mjs`); `openAgentPane` now sends `pooled: true`, and `openToolPane` names the tab with `nextTabName` and moves the cursor. Needs a desktop restart.
 - **Checked:** typecheck, webclient tsc, before/after screenshots. "Overlap inside the input box" was not reproduced; likely the status strip over terminal rows, which is fixed.
 
+## Forge Web: Close button (X) on Full screen and Wall tiles with confirmation prompt (2026-09-24)
+
+- **Asked (Steve):** in the web browser, have an X in the corner whether it's on full screen or the walled view, and get a prompt asking if sure we want to close/delete it, to easily close down windows.
+- **Fix:**
+  - Added close (X) button in top-right corner of Wall tiles (`dk-tile__close` in `TileLabel`, `web/src/deck/Deck.tsx`).
+  - Added close (X) button in top-right corner of Full screen pane header (`pane__close` in `PaneView.tsx`, passed via `onClose` from `DeckStage`).
+  - Anchored `Popover` confirmation prompt appears upon clicking X: asks "Are you sure you want to close “[title]”?", explains that running processes in the window will be stopped, with Cancel and danger-styled auto-focused Close button (pressing Enter or clicking Close immediately closes). Escape or clicking outside dismisses cleanly.
+  - Safe close logic: closes the tab if the pane is alone in the tab (`op: 'close-tab'`), or closes the pane (`op: 'close-pane'`). Refusal notice shown if any error is reported.
+  - Styled with hover danger tint, disabled state when offline/reconnecting, and proper keyboard focus rings.
+- **Checked:** `npm run typecheck`, `npm run lint:hooks`, `npm run web:build`.
+
 ## Forge Web deck: voice bar as symbols, smart mic/send, agent names, view switch (2026-09-24)
 
 - **Asked (Steve):** project pill and voice-agent chip looked alike; symbols not words; shortcut keys listed in settings; the bar must name the agent pane (tab name, e.g. Wanda); send button smart like the phone's; stuck in Cards/Chat with no way back; wheel scroll in Chat/Cards snapped back.
