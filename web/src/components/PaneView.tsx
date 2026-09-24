@@ -148,7 +148,8 @@ export function PaneView({
   onlyPane,
   onScreen,
   fullScreen = false,
-  tabTitle = null
+  tabTitle = null,
+  faceSwitch = null
 }: {
   leaf: PaneLeaf
   focused: boolean
@@ -162,6 +163,12 @@ export function PaneView({
   fullScreen?: boolean
   /** The deck's Full screen: the tab's name ("Wanda") beside the pane's, as the Wall tile shows it. */
   tabTitle?: string | null
+  /**
+   * The deck's Full screen: its Chat / Cards / Terminal switch, in the slim
+   * header. The deck's composer strip hides while its box has the keys, and in
+   * Chat or Cards the box is where the keys live — so the switch sits here.
+   */
+  faceSwitch?: ReactNode
 }): ReactNode {
   const { state, actions } = useForge()
   const profiles = useProfiles()
@@ -1060,6 +1067,8 @@ export function PaneView({
           <span className="pane__title truncate">{paneDisplayTitle(profile, leaf.title)}</span>
           {tabTitle ? <span className="pane__tab truncate">{tabTitle}</span> : null}
         </div>
+
+        {faceSwitch}
 
         {/*
           Chips travel as one trailing cluster. On a phone the

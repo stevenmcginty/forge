@@ -35,12 +35,15 @@ import '@/components/shell/deck-tokens.css'
 import '@/components/shell/deck.css'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
-import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { columnsFor } from '@/lib/mosaicLayout'
 import { collectLeaves } from '@/lib/splitTree'
 import { alpha, findTheme, mix } from '@/theme/themes'
 import { PaneView } from '../components/PaneView'
 import { SessionComposer } from '../components/SessionComposer'
+import { FACES } from '../components/StatusLine'
+import { requestPaneView, usePaneView } from '../lib/pane-status'
+import { getClaudeView } from '../lib/view-pref'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStateChip, bringForward, type DeckAgent } from './agents'
 import { composerField, composerOpen } from './composer'
@@ -50,6 +53,7 @@ import { ProjectsSheet, VoiceBar, VoiceLine } from './VoiceBar'
 import './deck.css'
 // After deck.css (and so after DeckTopBar.css and VoicePill.css): the bar's own look has the last word.
 import './voicebar.css'
+import './paneface.css'
 
 /* ---------------------------------------------------------------- backdrop */
 
@@ -137,6 +141,8 @@ export function DeckStage({
         const shown = wall || focused
         const profile = resolveProfile(profiles, leaf.profileId)
         const agent: DeckAgent = { leaf, tab, profile, title: paneDisplayTitle(profile, leaf.title) }
+        // Chat, Cards and Terminal are an agent's; a shell has only its terminal.
+        const faces = !isShellProfile(profile)
         const open = (): void => {
           onView('focus')
           if (!live) return
@@ -160,6 +166,7 @@ export function DeckStage({
                 agent={agent}
                 tabTitle={manyTabs && tab.title.trim() !== agent.title ? tab.title : null}
                 focused={focused}
+                faces={faces}
                 onSelect={() => {
                   if (live && !focused) void actions.layout({ op: 'focus-pane', paneId: leaf.id })
                 }}
@@ -173,6 +180,7 @@ export function DeckStage({
               onScreen={shown}
               fullScreen={!wall && shown}
               tabTitle={tab.title.trim() && tab.title.trim() !== agent.title ? tab.title : null}
+              faceSwitch={!wall && faces ? <FaceSwitch paneId={leaf.id} name={agent.title} /> : null}
             />
           </div>
         )
@@ -190,12 +198,15 @@ function TileLabel({
   agent,
   tabTitle,
   focused,
+  faces,
   onSelect,
   onOpen
 }: {
   agent: DeckAgent
   tabTitle: string | null
   focused: boolean
+  /** An agent's tile carries its Chat / Cards / Terminal switch; a shell's does not. */
+  faces: boolean
   onSelect: () => void
   onOpen: () => void
 }): ReactNode {
@@ -212,6 +223,7 @@ function TileLabel({
       <span className="dk-tile__spacer" />
       {focused ? <span className="dk-tile__active">Active</span> : null}
       <AgentStateChip paneId={agent.leaf.id} compact />
+      {faces ? <FaceSwitch paneId={agent.leaf.id} name={agent.title} compact /> : null}
       <button
         type="button"
         className="dk-tile__open"
@@ -225,6 +237,66 @@ function TileLabel({
       >
         <Icon name="expand" size={12} />
       </button>
+    </div>
+  )
+}
+
+/**
+ * Chat, Cards or Terminal for one agent pane: in Full screen's slim header,
+ * and on each Wall tile's label. The pane itself, not the composer, carries it:
+ * the composer's strip (AgentStatus's face button) gives its place to the
+ * drawer while the box has the keys, and in Chat or Cards the box is the only
+ * place the keys can go — so a switch that lived only there went with the first
+ * word typed, and Terminal was out of reach.
+ *
+ * Every face is a shape (bubble, stacked cards, prompt). The one on screen is a
+ * raised chip that also says its name in a bold word; on a Wall tile the others
+ * are their shapes alone, named on hover. Colour only agrees.
+ */
+function FaceSwitch({ paneId, name, compact = false }: { paneId: string; name: string; compact?: boolean }): ReactNode {
+  const view = usePaneView(paneId) ?? getClaudeView()
+  return (
+    <div
+      className="dk-face"
+      data-compact={compact ? 'true' : undefined}
+      role="group"
+      aria-label={`Show ${name} as`}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      {FACES.map(({ face, label, icon }) => {
+        const on = view === face
+        return (
+          <button
+            key={face}
+            type="button"
+            className="dk-face__btn"
+            data-on={on ? 'true' : 'false'}
+            aria-pressed={on}
+            aria-label={label}
+            title={on ? `${label} — showing now` : `Show as ${label}`}
+            onClick={() => {
+              if (!on) requestPaneView(paneId, face)
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              {icon}
+            </svg>
+            <span className="dk-face__word">{label}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }

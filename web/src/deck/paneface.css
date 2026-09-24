@@ -1,0 +1,93 @@
+/* ------------------------------------------------------ the face switch
+ *
+ * Chat / Cards / Terminal on an agent pane (Deck.tsx `FaceSwitch`): in Full
+ * screen's slim header, every face with its shape and its word; on a Wall
+ * tile's label, the shapes alone and the word only on the face on screen.
+ * The face on screen is a raised chip with a rim and a bold word — a shape and
+ * a word, so it reads without the colour.
+ */
+
+.app[data-face='deck'] .dk-face {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  margin-left: auto;
+  padding: 2px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+
+.app[data-face='deck'] .dk-face__btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: none;
+  cursor: pointer;
+}
+
+.app[data-face='deck'] .dk-face__btn svg {
+  flex: none;
+}
+
+.app[data-face='deck'] .dk-face__btn:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+.app[data-face='deck'] .dk-face__btn[data-on='true'] {
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--bg-terminal);
+  border-color: color-mix(in srgb, var(--text-primary) 30%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  cursor: default;
+}
+
+.app[data-face='deck'] .dk-face__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A reach past the drawing, as the other small deck buttons have. */
+.app[data-face='deck'] .dk-face__btn::after {
+  content: '';
+  position: absolute;
+  inset: -4px -1px;
+}
+
+/* On a tile: 20px in a 26px label, and only the face on screen spends a word. */
+.app[data-face='deck'] .dk-face[data-compact='true'] {
+  height: 20px;
+  margin-left: 0;
+  padding: 1px;
+  border-radius: 6px;
+}
+
+.app[data-face='deck'] .dk-face[data-compact='true'] .dk-face__btn {
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10.5px;
+  border-radius: 4px;
+}
+
+.app[data-face='deck'] .dk-face[data-compact='true'] .dk-face__btn[data-on='false'] .dk-face__word {
+  display: none;
+}
+
+.app[data-face='deck'] .dk-face[data-compact='true'] .dk-face__btn::after {
+  inset: -3px -1px;
+}

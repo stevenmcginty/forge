@@ -7,7 +7,8 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
-  type TouchEvent
+  type TouchEvent,
+  type WheelEvent as ReactWheelEvent
 } from 'react'
 import type { FeedBlock, PaneStatus, RichLine, Run } from '@/lib/rich'
 import './Feed.css'
@@ -29,6 +30,8 @@ const TOOL_FOLD_AT = 12
 const TOOL_FOLD_SHOW = 8
 /** How close to the end counts as "reading the latest". */
 const STICK_PX = 96
+/** How close to the end a reader who wheeled away must come back to be following again. */
+const AT_END_PX = 2
 
 export function Feed({
   blocks,
@@ -69,6 +72,13 @@ export function Feed({
    * to yank the feed back under their thumb.
    */
   const touching = useRef(false)
+  /**
+   * The wheel (a mouse notch, two fingers on a trackpad) took the reader up off
+   * the end. Without it a wheel stayed "near the bottom" for its first 96px and
+   * every new block snapped it back down; a finger (`touching`) never was.
+   * Same fix as web/src/components/ChatView.tsx.
+   */
+  const wheeled = useRef(false)
   /**
    * After a TUI PageUp the new older lines land at the top of the capture, so
    * sticking to the bottom would hide the thing the reader just asked to see.
@@ -125,15 +135,31 @@ export function Feed({
       stick.current = false
       return
     }
+    if (wheeled.current) {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight > AT_END_PX) {
+        stick.current = false
+        return
+      }
+      wheeled.current = false
+    }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
     stick.current = near
     if (near) setUnseen(false)
+  }, [])
+
+  const onWheelUp = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    const el = scroller.current
+    // Up, and with somewhere to go; Ctrl+wheel is the page's zoom, not a scroll.
+    if (!el || event.ctrlKey || event.deltaY >= 0 || el.scrollTop <= 0) return
+    wheeled.current = true
+    stick.current = false
   }, [])
 
   const touchY = useRef(0)
 
   const onTouchStart = useCallback((event: TouchEvent) => {
     touching.current = true
+    wheeled.current = false
     touchY.current = event.touches[0]?.clientY ?? 0
   }, [])
 
@@ -155,6 +181,7 @@ export function Feed({
     const el = scroller.current
     if (!el) return
     stick.current = true
+    wheeled.current = false
     preferTop.current = false
     setUnseen(false)
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
@@ -222,6 +249,7 @@ export function Feed({
         data-page-tui={pageTui ? 'true' : undefined}
         ref={scroller}
         onScroll={onScroll}
+        onWheel={onWheelUp}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}

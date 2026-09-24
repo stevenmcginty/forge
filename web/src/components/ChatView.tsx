@@ -6,7 +6,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode
+  type ReactNode,
+  type WheelEvent
 } from 'react'
 import type { ChatBlock, ChatTurn } from '@shared/chat'
 import { Icon } from '@/components/Icon'
@@ -27,6 +28,8 @@ import './ChatView.css'
 
 /** How close to the end counts as "reading the latest". */
 const STICK_PX = 96
+/** How close to the end a reader who wheeled away must come back to be following again. */
+const AT_END_PX = 2
 /** A gist longer than this is worth an expand even without a result note. */
 const GIST_FOLD = 64
 
@@ -67,6 +70,15 @@ export function ChatView({
   const stick = useRef(true)
   // A finger on the transcript owns the scroll; nothing snaps under it.
   const touching = useRef(false)
+  /**
+   * The wheel (a mouse notch, two fingers on a trackpad) took the reader up
+   * off the end. Without this a wheel was "near the bottom" for its first
+   * 96px, so every turn, busy line or height settle that landed meanwhile threw
+   * the reader back down — and cut short the browser's smooth scroll — while a
+   * finger (`touching`) was never snapped. Now a wheel frees the scroll the
+   * way a finger does, and the end follows again only once they reach it.
+   */
+  const wheeled = useRef(false)
   /** The scroller's height at the last scroll event, to tell a resize from a reader. */
   const viewHeight = useRef(0)
   const [unseen, setUnseen] = useState(false)
@@ -120,13 +132,29 @@ export function ChatView({
       el.scrollTop = el.scrollHeight
       return
     }
+    if (wheeled.current) {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight > AT_END_PX) {
+        stick.current = false
+        return
+      }
+      wheeled.current = false
+    }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX
     stick.current = near
     if (near) setUnseen(false)
   }, [])
 
+  const onWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    const el = scroller.current
+    // Up, and with somewhere to go; Ctrl+wheel is the page's zoom, not a scroll.
+    if (!el || event.ctrlKey || event.deltaY >= 0 || el.scrollTop <= 0) return
+    wheeled.current = true
+    stick.current = false
+  }, [])
+
   const onTouchStart = useCallback(() => {
     touching.current = true
+    wheeled.current = false
   }, [])
 
   const onTouchEnd = useCallback(() => {
@@ -147,6 +175,7 @@ export function ChatView({
     const el = scroller.current
     if (!el) return
     stick.current = true
+    wheeled.current = false
     setUnseen(false)
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [])
@@ -157,6 +186,7 @@ export function ChatView({
         className="chatview__scroll"
         ref={scroller}
         onScroll={onScroll}
+        onWheel={onWheel}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}

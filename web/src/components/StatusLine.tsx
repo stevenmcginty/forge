@@ -42,8 +42,9 @@ import './StatusLine.css'
  */
 
 /* Each face is drawn as a shape (bubble, stacked cards, prompt) and named in
-   its label, so the switch stays narrow and never leans on colour. */
-const FACES: { face: PaneFace; label: string; icon: ReactNode }[] = [
+   its label, so the switch stays narrow and never leans on colour. The deck's
+   own switch (deck/Deck.tsx `FaceSwitch`) draws the same shapes. */
+export const FACES: { face: PaneFace; label: string; icon: ReactNode }[] = [
   {
     face: 'chat',
     label: 'Chat',
