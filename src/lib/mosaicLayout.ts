@@ -1,4 +1,4 @@
-import type { MosaicRect, MosaicState, MosaicTile } from '@shared/types'
+import type { MosaicGrid, MosaicRect, MosaicState, MosaicTile } from '@shared/types'
 import { emptyMosaic } from '@shared/workspace'
 
 /**
@@ -298,6 +298,74 @@ export function columnsFor(count: number): number {
   return 4
 }
 
+/** The most columns the auto grid can be dragged out to. */
+export const MOSAIC_MAX_COLS = 6
+
+/** The tallest row a dragged grid keeps: far past any screen, short of absurd. */
+export const MOSAIC_MAX_ROW_H = 4096
+
+/** The shortest row a dragged grid can have: a terminal's minimum, on the lattice. */
+const MIN_ROW_H = Math.ceil(MOSAIC_MIN_H / MOSAIC_GRID) * MOSAIC_GRID
+
+/**
+ * The auto grid's column count: the one the user dragged, when there is one —
+ * never more than there are tiles to fill it — and the wall's own shape
+ * otherwise.
+ */
+export function wallColumns(count: number, grid?: MosaicGrid): number {
+  const n = Math.max(1, count)
+  return grid?.cols ? Math.min(grid.cols, n) : columnsFor(n)
+}
+
+/**
+ * The auto grid a resize drag asks for.
+ *
+ * On the auto grid an edge resizes every tile together, so the wall stays
+ * uniform: dragging one tile's side picks the column count whose uniform width
+ * is nearest the width you dragged it to, and dragging its top or bottom sets
+ * every row to the height you dragged it to, on the lattice and never shorter
+ * than a terminal. Only the axes whose edges were dragged come back — the other
+ * half of the grid stays whatever it was.
+ *
+ * `area` is the canvas the columns share, `gap` the gutter between them and
+ * `minW` the narrowest a column may be, so no choice ever overflows the wall.
+ */
+export function gridFromDrag(
+  area: { width: number },
+  count: number,
+  tileW: number,
+  tileH: number,
+  edges: MosaicEdges,
+  gap: number = MOSAIC_GAP,
+  minW: number = MOSAIC_MIN_W
+): MosaicGrid {
+  const out: MosaicGrid = {}
+  if (edges.left || edges.right) {
+    const fit = Math.floor((area.width + gap) / (Math.max(MOSAIC_MIN_W, minW) + gap))
+    const most = Math.max(1, Math.min(MOSAIC_MAX_COLS, count, fit))
+    let best = 1
+    let bestD = Number.POSITIVE_INFINITY
+    for (let c = 1; c <= most; c++) {
+      const d = Math.abs((area.width - gap * (c - 1)) / c - tileW)
+      if (d < bestD) {
+        best = c
+        bestD = d
+      }
+    }
+    out.cols = best
+  }
+  if (edges.top || edges.bottom) {
+    out.rowH = Math.min(MOSAIC_MAX_ROW_H, Math.max(MIN_ROW_H, snapToGrid(tileH)))
+  }
+  return out
+}
+
+/** The grid in words, for the label a grid drag shows: "3 columns · 320 px rows". */
+export function gridLabel(cols: number, rowH?: number): string {
+  const across = `${cols} column${cols === 1 ? '' : 's'}`
+  return `${across} · ${rowH ? `${rowH} px rows` : 'rows fill the window'}`
+}
+
 /**
  * The auto grid as boxes. Used to seed custom mode when the wall was never
  * rendered (a tab dropped straight onto the view toggle); when it *was*
@@ -417,6 +485,24 @@ function isRect(v: unknown): v is MosaicRect {
 }
 
 /**
+ * A dragged grid size off disk: a column count outside 1..6 or a row height
+ * outside what a terminal can use is dropped, and a grid with neither half left
+ * is no grid at all.
+ */
+export function sanitiseGrid(raw: unknown): MosaicGrid | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const src = raw as Record<string, unknown>
+  const out: MosaicGrid = {}
+  const cols = src['cols']
+  if (typeof cols === 'number' && Number.isInteger(cols) && cols >= 1 && cols <= MOSAIC_MAX_COLS) out.cols = cols
+  const rowH = src['rowH']
+  if (typeof rowH === 'number' && Number.isFinite(rowH) && rowH >= MOSAIC_MIN_H && rowH <= MOSAIC_MAX_ROW_H) {
+    out.rowH = Math.round(rowH)
+  }
+  return out.cols === undefined && out.rowH === undefined ? undefined : out
+}
+
+/**
  * Trust nothing that came off disk: a wall is a pile of numbers written by a
  * previous version of the app, and a NaN in one of them is an invisible tile.
  * Boxes for panes that no longer exist are dropped, which is also how the store
@@ -440,7 +526,9 @@ export function sanitiseMosaic(raw: unknown, livePaneIds: Set<string>, liveTabId
   if (Array.isArray(src.wallTabs)) {
     out.wallTabs = src.wallTabs.filter((id): id is string => typeof id === 'string' && liveTabIds.has(id))
   }
+  const grid = sanitiseGrid(src.grid)
+  if (grid) out.grid = grid
   // A custom wall with nothing on it is just the grid with extra steps.
-  if (out.mode === 'custom' && Object.keys(out.tiles).length === 0) return emptyMosaic()
+  if (out.mode === 'custom' && Object.keys(out.tiles).length === 0) return grid ? { ...emptyMosaic(), grid } : emptyMosaic()
   return out
 }

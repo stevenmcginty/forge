@@ -1,4 +1,6 @@
 .mosaic {
+  /* The grid label is placed against this. */
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -15,6 +17,10 @@
  * space when there is enough of it and stop shrinking when there is not, at
  * which point the wall scrolls rather than crushing sixteen terminals into
  * postage stamps.
+ *
+ * Drag a tile's edge and the whole grid follows: --mosaic-cols becomes the
+ * column count you picked, and --mosaic-row-h, when set, makes every row that
+ * tall — past the window's height the wall scrolls.
  */
 .mosaic__wall {
   flex: 1;
@@ -28,7 +34,7 @@
 .mosaic__wall .mosaic__canvas {
   display: grid;
   grid-template-columns: repeat(var(--mosaic-cols, 3), minmax(var(--mosaic-tile-min-w), 1fr));
-  grid-auto-rows: minmax(var(--mosaic-tile-min-h), 1fr);
+  grid-auto-rows: var(--mosaic-row-h, minmax(var(--mosaic-tile-min-h), 1fr));
   /* Tight gutters: the terminals are the content, not the space between them. */
   gap: var(--wall-gap, var(--stage-gap, 20px));
   min-height: 100%;
@@ -57,6 +63,30 @@
   border: 1px dashed var(--accent);
   border-radius: var(--tile-r, var(--r-md));
   background: var(--accent-softer);
+}
+
+/*
+ * The grid's size in words while an edge drag resizes every tile together —
+ * "3 columns · 320 px rows". Placed beside the pointer by the drag itself.
+ */
+.mosaic__gridlabel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: var(--z-popover);
+  padding: 3px 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-xs);
+  background: var(--bg-panel-raised);
+  box-shadow: var(--shadow-card);
+  color: var(--text-primary);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.mosaic__gridlabel[hidden] {
+  display: none;
 }
 
 /* A tab is overhead and about to be dropped. */
@@ -248,7 +278,7 @@
   cursor: nwse-resize;
 }
 
-/* In the auto grid the grips exist only to catch the first resize. */
+/* In the auto grid an edge resizes every tile at once, so one per axis is plenty. */
 .mtile:not([data-placed='true']) .mtile__grip[data-edge='e'],
 .mtile:not([data-placed='true']) .mtile__grip[data-edge='s'],
 .mtile:not([data-placed='true']) .mtile__grip[data-edge='se'] {

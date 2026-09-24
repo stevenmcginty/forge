@@ -239,6 +239,60 @@ console.log('\nkeyboard ring')
   ok(M.nearestTile(tiles, 'nope', 'right') === null, 'a tile that is not there has no neighbours')
 }
 
+/* ------------------------------------------------------------ grid drag */
+
+// On the auto grid an edge resizes every tile together: the drag picks a
+// column count and a row height, never a box for one tile.
+console.log('\ngrid drag')
+{
+  const right = { ...M.NO_EDGES, right: true }
+  const bottom = { ...M.NO_EDGES, bottom: true }
+  const corner = { ...M.NO_EDGES, right: true, bottom: true }
+  const area = { width: 1208 }
+  // At 1208 wide with 8px gutters: 1 col = 1208, 2 = 600, 3 = 397.3, 4 = 296, 5 = 235.2, 6 = 194.7.
+
+  let g = M.gridFromDrag(area, 9, 600, 300, right)
+  ok(g.cols === 2 && g.rowH === undefined, 'dragging a side picks the column count, not the row height', JSON.stringify(g))
+  g = M.gridFromDrag(area, 9, 450, 300, right)
+  ok(g.cols === 3, 'the column count is the one whose width is nearest the dragged width', JSON.stringify(g))
+  g = M.gridFromDrag(area, 9, 5000, 300, right)
+  ok(g.cols === 1, 'dragging very wide gives one column', JSON.stringify(g))
+  g = M.gridFromDrag(area, 9, 10, 300, right)
+  ok(g.cols === 5, 'never more columns than fit at a terminal’s minimum width', JSON.stringify(g))
+  g = M.gridFromDrag({ width: 3000 }, 16, 10, 300, right)
+  ok(g.cols === 6, 'never more than six columns', JSON.stringify(g))
+  g = M.gridFromDrag(area, 2, 10, 300, right)
+  ok(g.cols === 2, 'never more columns than tiles', JSON.stringify(g))
+  g = M.gridFromDrag(area, 9, 10, 300, right, 8, 230)
+  ok(g.cols === 5 && M.gridFromDrag(area, 9, 10, 300, right, 8, 240).cols === 4, 'a wider minimum column fits fewer', JSON.stringify(g))
+
+  g = M.gridFromDrag(area, 9, 600, 323, bottom)
+  ok(g.rowH === 320 && g.cols === undefined, 'dragging the bottom sets the row height, on the lattice', JSON.stringify(g))
+  g = M.gridFromDrag(area, 9, 600, 20, bottom)
+  ok(g.rowH === 144, 'a row is never shorter than a terminal (the lattice step above 140)', JSON.stringify(g))
+  g = M.gridFromDrag(area, 9, 600, 99999, bottom)
+  ok(g.rowH === M.MOSAIC_MAX_ROW_H, 'nor absurdly tall', JSON.stringify(g))
+  g = M.gridFromDrag(area, 9, 296, 250, corner)
+  ok(g.cols === 4 && g.rowH === 248, 'a corner sets both halves', JSON.stringify(g))
+
+  ok(M.wallColumns(9) === 3 && M.wallColumns(9, {}) === 3, 'no dragged columns: the wall’s own shape')
+  ok(M.wallColumns(9, { cols: 5 }) === 5, 'dragged columns win')
+  ok(M.wallColumns(2, { cols: 5 }) === 2, 'but never more than there are tiles')
+  ok(M.wallColumns(0, { cols: 5 }) === 1, 'an empty wall still has one column')
+
+  ok(M.gridLabel(3, 320) === '3 columns · 320 px rows', 'the label says the grid in words', M.gridLabel(3, 320))
+  ok(M.gridLabel(1) === '1 column · rows fill the window', 'and says when rows fill the window', M.gridLabel(1))
+
+  ok(JSON.stringify(M.sanitiseGrid({ cols: 3, rowH: 320 })) === '{"cols":3,"rowH":320}', 'a sane grid survives')
+  ok(M.sanitiseGrid({ cols: 7 }) === undefined, 'seven columns is out of range')
+  ok(M.sanitiseGrid({ cols: 0 }) === undefined, 'so is none')
+  ok(M.sanitiseGrid({ cols: 2.5 }) === undefined, 'and half a column')
+  ok(M.sanitiseGrid({ rowH: Number.NaN }) === undefined, 'a NaN row height is dropped')
+  ok(M.sanitiseGrid({ rowH: 100 }) === undefined, 'so is one shorter than a terminal')
+  ok(JSON.stringify(M.sanitiseGrid({ cols: 9, rowH: 200 })) === '{"rowH":200}', 'a bad half is dropped, the good half kept')
+  ok(M.sanitiseGrid('junk') === undefined && M.sanitiseGrid(null) === undefined, 'junk is no grid')
+}
+
 /* ----------------------------------------------------------- persistence */
 
 console.log('\npersistence')
@@ -274,6 +328,18 @@ console.log('\npersistence')
     'a custom wall with nothing on it is just the grid'
   )
   ok(M.emptyMosaic().mode === 'auto' && M.emptyMosaic().wallTabs.length === 0, 'an empty wall is an auto one')
+  ok(M.emptyMosaic().grid === undefined, 'and fills the window')
+
+  const sized = M.sanitiseMosaic(
+    JSON.parse(JSON.stringify({ mode: 'auto', tiles: {}, wallTabs: [], grid: { cols: 4, rowH: 360 } })),
+    panes,
+    tabs
+  )
+  ok(sized.grid && sized.grid.cols === 4 && sized.grid.rowH === 360, 'a dragged grid size survives the round trip')
+  const junkGrid = M.sanitiseMosaic({ mode: 'auto', tiles: {}, wallTabs: [], grid: { cols: 'x', rowH: -5 } }, panes, tabs)
+  ok(junkGrid.grid === undefined, 'a grid size with nothing sane in it is dropped')
+  const emptied = M.sanitiseMosaic({ mode: 'custom', tiles: {}, wallTabs: [], grid: { cols: 2 } }, panes, tabs)
+  ok(emptied.mode === 'auto' && emptied.grid && emptied.grid.cols === 2, 'an emptied custom wall keeps its grid size')
 }
 
 /* ------------------------------------------------------------ tile wheel */
