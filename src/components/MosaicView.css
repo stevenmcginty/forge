@@ -445,7 +445,26 @@
   opacity: 1;
 }
 
+/*
+ * Expand, beside the X: full screen for this terminal. Always shown — a click
+ * on the tile now types into it, so this is the one way out to Full screen
+ * with the pointer, and it must never be something you have to hover to find.
+ * Told apart from the X by its shape (the corner arrows), not by colour.
+ */
+.mtile__expand {
+  flex: none;
+  width: var(--tile-close-size, 24px);
+  height: var(--tile-close-size, 24px);
+  padding: 0;
+  color: var(--text-secondary);
+}
+
+.mtile__expand:hover {
+  color: var(--text-primary);
+}
+
 .mtile__close:focus-visible,
+.mtile__expand:focus-visible,
 .mtile__action:focus-visible {
   outline: var(--focus-ring);
   outline-offset: -2px;
@@ -524,8 +543,8 @@
   left: 0;
   z-index: var(--z-pane);
   border-radius: 0 0 var(--tile-r, var(--r-pane)) var(--tile-r, var(--r-pane));
-  /* A click here opens the pane full screen. */
-  cursor: pointer;
+  /* A click here starts typing into the tile in place. */
+  cursor: text;
   transition: background var(--dur-fast) var(--ease-out);
 }
 

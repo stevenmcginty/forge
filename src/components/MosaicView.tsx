@@ -82,11 +82,12 @@ import './MosaicView.css'
  *           mode from exactly where the auto grid had put everything, so
  *           crossing over is invisible; "Reset to grid" crosses back.
  *
- * Click a tile and that terminal goes full screen (the Full screen view — its
- * tab, splits and all, under the wall strip); Ctrl+G comes back. The
- * terminal button in a tile's header types into it right there on the wall
- * instead, at the pane's own cols and rows, however small the tile is; Esc or a
- * click on the empty wall stops. The X top-right closes the terminal.
+ * Click a tile's terminal and you type into it right there on the wall, at the
+ * pane's own cols and rows, however small the tile is; Esc or a click on the
+ * empty wall stops, and a click on another tile moves the typing there. The
+ * Expand button top-right sends that terminal full screen (the Full screen
+ * view — its tab, splits and all, under the wall strip); Ctrl+G comes back.
+ * The X beside it closes the terminal.
  * Double-click a tile's header and its terminal stops being a scale model and
  * refits to the box for real — see MosaicTile.
  */
@@ -225,7 +226,7 @@ export function MosaicView({
   project: Project
   workspace: Workspace
   onNewTerminal: () => void
-  /** Show this pane in Full screen — what a click on a tile does. */
+  /** Show this pane in Full screen — a tile's Expand button, or Enter on the ring. */
   onOpenFull: (paneId: string) => void
 }): ReactNode {
   const { state, actions } = useApp()
@@ -685,6 +686,11 @@ export function MosaicView({
       if (index < 0) return
 
       if (e.key === 'Enter') {
+        // A tile's own button with the focus answers Enter itself: the tile's
+        // terminal types in place, Expand goes full screen, the X closes. Only
+        // the ring on its own — moved there by the arrows — goes full screen.
+        const focused = document.activeElement
+        if (focused instanceof HTMLButtonElement && wallRef.current?.contains(focused)) return
         e.preventDefault()
         openFull(cells[index]!.leaf.id)
         return
@@ -1296,27 +1302,37 @@ function MosaicTile({
               <Icon name="restart" size={12} />
             </button>
           ) : null}
-          <button
-            type="button"
-            className="ghost-btn mtile__action"
-            data-open={interactive ? 'true' : undefined}
-            title={interactive ? 'Stop typing in this tile (Esc)' : 'Type in this tile without leaving the Wall'}
-            onClick={() => onToggleInteract(paneId)}
-          >
-            <Icon name="terminal" size={12} />
-          </button>
-          <button
-            type="button"
-            className="ghost-btn mtile__action"
-            title="Full screen"
-            onClick={() => onOpenFull(paneId)}
-          >
-            <Icon name="expand" size={12} />
-          </button>
+          {/* A click on the terminal starts the typing, so this is only ever
+              the way out — for a TUI that keeps Esc for itself. */}
+          {interactive ? (
+            <button
+              type="button"
+              className="ghost-btn mtile__action"
+              data-open="true"
+              aria-pressed="true"
+              aria-label={`Stop typing in ${name}`}
+              title="Stop typing in this tile (Esc)"
+              onClick={() => onToggleInteract(paneId)}
+            >
+              <Icon name="terminal" size={12} />
+            </button>
+          ) : null}
         </div>
 
-        {/* Always there, never under the hover fade: closing is the one action
-            a tile must never hide. */}
+        {/* Expand and the X are always there, never under the hover fade: a
+            tile must never hide how to go full screen or how to close. */}
+        <button
+          type="button"
+          className="ghost-btn mtile__expand"
+          aria-label={`Show ${name} full screen`}
+          title="Full screen"
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpenFull(paneId)
+          }}
+        >
+          <Icon name="expand" size={12} />
+        </button>
         <button
           type="button"
           className="ghost-btn mtile__close"
@@ -1335,22 +1351,24 @@ function MosaicTile({
       <PeekStage cell={cell} project={project} refit={refit} reference={reference} interactive={interactive} />
 
       {/*
-        On the wall the terminal is scenery: this sheet sits over it so a click
-        opens the pane full screen rather than dropping the press on whatever
-        cell of the picture was under it. Typing in place (the header's
-        terminal button), the sheet is gone and the terminal takes its own
-        clicks again.
+        On the wall the terminal is scenery: this sheet sits over it, and a
+        click on it (or Enter / Space with it focused) starts typing into this
+        tile in place. The sheet takes the whole activating press — down, up
+        and click all land here — so none of it reaches the terminal as a click
+        on whatever cell was under the pointer. Typing in place, the sheet is
+        gone and the terminal takes its own clicks again: selection, and
+        mouse-aware TUIs.
       */}
       {interactive ? null : (
         <button
           ref={hitRef}
           type="button"
           className="mtile__hit"
-          title={`Click for full screen — ${name}`}
-          aria-label={`Open ${name} full screen`}
+          title={`Click to type here — ${name}`}
+          aria-label={`Type in ${name}`}
           onPointerEnter={() => onSelect(paneId)}
           onFocus={() => onSelect(paneId)}
-          onClick={() => onOpenFull(paneId)}
+          onClick={() => onToggleInteract(paneId)}
         />
       )}
 

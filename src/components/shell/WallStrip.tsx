@@ -64,7 +64,9 @@ export function WallStrip({
   const rowRef = useRef<HTMLDivElement | null>(null)
 
   // A mouse wheel over the row scrolls it sideways. Not React's onWheel: that
-  // one is passive, and the page must not also scroll.
+  // one is passive, and the page must not also scroll. A vertical wheel over a
+  // tile's terminal picture is that tile's first (StripTile) and only arrives
+  // here when the terminal had nothing to scroll.
   useEffect(() => {
     const row = rowRef.current
     if (!row) return
@@ -144,6 +146,7 @@ function StripTile({
   // The terminal's one name ("Zeb", "Zeb 2") — see shared/terminal-names.ts.
   const name = paneNameInTab(cell.tab, paneId)
   const ref = useRef<HTMLDivElement | null>(null)
+  const hitRef = useRef<HTMLButtonElement | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(cell.tab.title)
@@ -154,6 +157,34 @@ function StripTile({
     const next = draft.trim()
     if (next && next !== cell.tab.title) actions.renameTab(cell.tab.id, next)
   }
+
+  /*
+   * A vertical wheel over the terminal picture scrolls that terminal, the way
+   * it does on a Wall tile (MosaicTile): scrollPeek moves a shell's scrollback
+   * or hands the gesture to a full-screen program. The wheel lands on the hit
+   * sheet, which covers the whole tile, so only a wheel whose point is over
+   * the stage counts — over the head, a sideways wheel, or Shift+wheel, the
+   * row keeps its sideways scroll. So does a terminal with nothing to scroll.
+   * Native and non-passive for the same reason as the row's listener.
+   */
+  useEffect(() => {
+    const hit = hitRef.current
+    if (!hit || onScreen) return
+    const onWheel = (e: WheelEvent): void => {
+      if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      const stage = ref.current?.querySelector<HTMLElement>('.wstrip__stage')
+      if (!stage) return
+      const r = stage.getBoundingClientRect()
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return
+      const box = stage.querySelector<HTMLElement>('.mtile__natural')
+      const scale = box && box.offsetHeight > 0 ? box.getBoundingClientRect().height / box.offsetHeight : 1
+      if (!terminalHost.scrollPeek(paneId, e.deltaY, e.deltaMode, scale)) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    hit.addEventListener('wheel', onWheel, { passive: false })
+    return () => hit.removeEventListener('wheel', onWheel)
+  }, [onScreen, paneId])
 
   /* ------------------------------------------------------- dropped files */
 
@@ -233,6 +264,7 @@ function StripTile({
     >
       {/* The whole tile is the button; the header's own controls sit above it. */}
       <button
+        ref={hitRef}
         type="button"
         className="wstrip__hit"
         aria-label={`Open ${name} full screen`}
