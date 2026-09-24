@@ -1,5 +1,15 @@
 # Handoff
 
+## Forge Web deck: voice bar as symbols, smart mic/send, agent names, view switch (2026-09-24)
+
+- **Asked (Steve):** project pill and voice-agent chip looked alike; symbols not words; shortcut keys listed in settings; the bar must name the agent pane (tab name, e.g. Wanda); send button smart like the phone's; stuck in Cards/Chat with no way back; wheel scroll in Chat/Cards snapped back.
+- **Voice bar (`web/src/deck/VoiceBar.tsx`, `voicebar.css`):** one voice-agent control (person+waves toggles Listen; agent mark + chevron opens the picker). Every state is its own shape. D button removed; D key still works. Project pill has a folder glyph.
+- **Smart mic/send (`Composer.tsx` `micPrimary` now also for `bar`):** mic when the box is empty, Send with text; runs `toggleDeckDictation`, the same flow as D. Empty-box Enter lives in the key row.
+- **Names:** placeholder "Message Claude Code · Wanda · forge"; shell says "Not an agent"; the strip (`AgentStatus` `tab` prop) shows the tab name.
+- **Settings:** `ShortcutKeys` (was `DictationKeySetting`) at the top of the … menu.
+- **View switch (c7a7318):** `FaceSwitch` in `web/src/deck/Deck.tsx` on every Claude pane (Full screen header, Wall tile). Cause: the only switch was in the composer strip, hidden while typing. Wheel scroll fix in `ChatView.tsx` and `src/components/Feed.tsx`.
+- **Checked:** typecheck, web vite build to scratch, voice-hotkey:check 73. Not live-tested.
+
 ## Forge Web: tab name in Full screen, bold on the Wall (2026-09-24)
 
 - **Asked (Steve):** Full screen said only "Claude Code"; the Wall also shows the tab name ("Wanda") but faint.

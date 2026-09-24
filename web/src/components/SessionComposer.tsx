@@ -16,7 +16,10 @@ import {
   permissionSpec,
   tabsToPermissionMode
 } from '@shared/agents'
-import { badgeColor, isShellProfile, resolveProfile } from '@/lib/agents'
+import { badgeColor, isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { tabNameFor } from '../deck/agents'
+import { toggleDeckDictation } from '../deck/dictation'
+import { dictationKeyName, useDictationKey } from '../deck/dictation-key'
 import { noKeys, optionKeys, readPaneAsk, sendAnswerKeys } from '../lib/answer-send'
 import {
   isDictationSupported,
@@ -610,18 +613,23 @@ export function SessionComposer({
     }
   }, [paneId, dropLevel, setVoice])
 
+  /*
+   * On the deck the box's mic is D on screen, so a press takes D's own road
+   * (../deck/dictation.ts): the same startVoice, with the microphone's opening
+   * counted, so Listen's mic is held shut from the press as it is for D's key.
+   */
   const voiceControls = useMemo<VoiceControls | undefined>(
     () =>
       isDictationSupported()
         ? {
-            start: () => void startVoice(),
+            start: face === 'deck' ? () => toggleDeckDictation(true) : () => void startVoice(),
             mode: setVoiceMode,
             stop: () => void finishVoice(),
             cancel: cancelVoice,
             undo: undoReview
           }
         : undefined,
-    [cancelVoice, finishVoice, setVoiceMode, startVoice, undoReview]
+    [cancelVoice, face, finishVoice, setVoiceMode, startVoice, undoReview]
   )
 
   /*
@@ -751,11 +759,31 @@ export function SessionComposer({
   // tabs, and React unmounts the whole page ("Rendered fewer hooks").
   const keysPref = face === 'deck' ? DECK_KEYS_PREF : KEYS_PREF
   const [keysShown, setKeysShown] = useState(() => savedKeysShown(keysPref))
+  const dKey = useDictationKey()
 
   if (offline && state.offlineMode === 'github') return null
   if (!tab) return null
 
-  const to = profile ? (project ? `${profile.name} · ${project}` : profile.name) : undefined
+  /*
+   * Who the words go to. The deck names the pane and its tab — "Claude Code ·
+   * Wanda" — then the project; on a shell, or with no pane, it says so
+   * plainly rather than a name the words would not reach.
+   */
+  const paneName = profile && leaf ? paneDisplayTitle(profile, leaf.title) : null
+  const tabName = face === 'deck' && paneName ? tabNameFor(tab.title, paneName) : null
+  const where = [paneName, tabName, project].filter(Boolean).join(' · ')
+  const to =
+    face === 'deck'
+      ? isAgent
+        ? where
+        : undefined
+      : profile
+        ? project
+          ? `${profile.name} · ${project}`
+          : profile.name
+        : undefined
+  const deckPlaceholder =
+    face !== 'deck' || isAgent ? undefined : profile ? `Not an agent — a command for ${where}` : 'No agent here'
   const reason = offline
     ? 'The desktop is asleep'
     : !live
@@ -862,6 +890,7 @@ export function SessionComposer({
       {profile ? (
         <AgentStatus
           profile={profile}
+          tab={tabName ?? undefined}
           status={status}
           live={canType}
           view={activeView}
@@ -923,11 +952,13 @@ export function SessionComposer({
         placeholder={
           foremanOn
             ? 'Tell Foreman…'
-            : mobile && profile
-              ? isAgent
-                ? `Talk to ${profile.name.split(' ')[0]}…`
-                : 'Type a command…'
-              : undefined
+            : deckPlaceholder
+              ? deckPlaceholder
+              : mobile && profile
+                ? isAgent
+                  ? `Talk to ${profile.name.split(' ')[0]}…`
+                  : 'Type a command…'
+                : undefined
         }
         tintedPlaceholder={mobile && !foremanOn && isAgent && profile ? profile.name.split(' ')[0] : undefined}
         placeholderTint={profile ? badgeColor(profile) : undefined}
@@ -939,6 +970,7 @@ export function SessionComposer({
         onShowChat={isAgent && activeView === 'term' ? onFlipView : undefined}
         bar={face === 'deck'}
         lead={face === 'deck' ? lead : undefined}
+        voiceKey={face === 'deck' ? dictationKeyName(dKey) : undefined}
       />
     </div>
   )

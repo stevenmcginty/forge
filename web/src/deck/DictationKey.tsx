@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { TALK_KEY_RULE } from '@/lib/keymap'
 import { recordKeyDown, recordKeyUp, type HeldKey } from '../lib/talk-key'
 import {
@@ -8,15 +8,20 @@ import {
   suspendDictationKey,
   useDictationKey
 } from './dictation-key'
+import { COMPOSER_SHORTCUT, LISTEN_KEY, LISTEN_KEY_NAME } from './VoiceBar'
 
 /**
- * "Dictation key: Right Alt [Change]" — D's key in this browser, in the "…"
- * menu. Change opens a field that records ONE key on its own, the desktop's
- * rule for a voice key: a Ctrl, Shift, Alt or Win key (left and right are
- * different), F1–F24, Scroll Lock or Pause. Right Alt on a UK layout records
- * as Right Alt, not as the Left Ctrl Windows sends first. Esc gives up.
+ * "Shortcut keys" — the top of the "…" menu: every key the deck answers to
+ * and what it does, one short line each, since the bar's buttons are symbols
+ * now. The keys are ./VoiceBar.tsx's DeckKeys; this only names them.
+ *
+ * D's key is this browser's own, and can be changed here. Change opens a
+ * field that records ONE key on its own, the desktop's rule for a voice key: a
+ * Ctrl, Shift, Alt or Win key (left and right are different), F1–F24, Scroll
+ * Lock or Pause. Right Alt on a UK layout records as Right Alt, not as the
+ * Left Ctrl Windows sends first. Esc gives up.
  */
-export function DictationKeySetting(): ReactNode {
+export function ShortcutKeys(): ReactNode {
   const key = useDictationKey()
   const [recording, setRecording] = useState(false)
   const changeRef = useRef<HTMLButtonElement | null>(null)
@@ -28,39 +33,77 @@ export function DictationKeySetting(): ReactNode {
     window.requestAnimationFrame(() => changeRef.current?.focus())
   }
 
+  // D's key can be Right Shift; then Listen's key stands down (DeckKeys).
+  const listenTaken = key === LISTEN_KEY
+
   return (
-    <div className="dk-menu__section dk-dkey">
-      <span className="dk-menu__eyebrow">Dictation · this browser</span>
-      {recording ? (
-        <DictationKeyRecorder was={key} onRecord={(code) => finish(code)} onCancel={() => finish(null)} />
-      ) : (
-        <div className="dk-dkey__row">
-          <span className="dk-dkey__label">Dictation key:</span>
-          <kbd className="dk-dkey__cap">{dictationKeyName(key)}</kbd>
-          <span className="dk-dkey__acts">
-            {key !== DEFAULT_DICTATION_KEY ? (
+    <div className="dk-menu__section dk-keys" role="group" aria-labelledby="dk-keys-title">
+      <span className="dk-menu__eyebrow" id="dk-keys-title">
+        Shortcut keys · this browser
+      </span>
+      <dl className="dk-keys__list">
+        <KeyRow keys={LISTEN_KEY_NAME}>
+          {listenTaken ? 'Voice agent: off — dictation has this key' : 'Voice agent: start or stop talking'}
+        </KeyRow>
+        {recording ? (
+          <div className="dk-keys__rec">
+            <dt className="dk-sr">Dictation key</dt>
+            <dd>
+              <DictationKeyRecorder was={key} onRecord={(code) => finish(code)} onCancel={() => finish(null)} />
+            </dd>
+          </div>
+        ) : (
+          <KeyRow keys={dictationKeyName(key)} kind="d">
+            Dictate into the pane on screen: tap, or hold to talk
+            <span className="dk-dkey__acts">
+              {key !== DEFAULT_DICTATION_KEY ? (
+                <button
+                  type="button"
+                  className="dk-dkey__btn"
+                  title={`Back to ${dictationKeyName(DEFAULT_DICTATION_KEY)}`}
+                  onClick={() => setDictationKey(DEFAULT_DICTATION_KEY)}
+                >
+                  Reset
+                </button>
+              ) : null}
               <button
+                ref={changeRef}
                 type="button"
                 className="dk-dkey__btn"
-                title={`Back to ${dictationKeyName(DEFAULT_DICTATION_KEY)}`}
-                onClick={() => setDictationKey(DEFAULT_DICTATION_KEY)}
+                aria-label={`Change the dictation key, now ${dictationKeyName(key)}`}
+                onClick={() => setRecording(true)}
               >
-                Reset
+                Change key
               </button>
+            </span>
+          </KeyRow>
+        )}
+        <KeyRow keys="Esc">Throw a dictation away, or Undo its send</KeyRow>
+        <KeyRow keys="Ctrl+G">Wall or full screen</KeyRow>
+        <KeyRow keys={COMPOSER_SHORTCUT}>Type box: open, caret in</KeyRow>
+      </dl>
+    </div>
+  )
+}
+
+/** One key and its line. A combo is a cap per key, joined by a plus. */
+function KeyRow({ keys, kind, children }: { keys: string; kind?: 'd'; children: ReactNode }): ReactNode {
+  const parts = keys.split('+')
+  return (
+    <div className="dk-keys__row" data-kind={kind}>
+      <dt className="dk-keys__keys">
+        {parts.map((part, i) => (
+          <Fragment key={part}>
+            {i > 0 ? (
+              <span className="dk-keys__plus" aria-hidden="true">
+                +
+              </span>
             ) : null}
-            <button
-              ref={changeRef}
-              type="button"
-              className="dk-dkey__btn"
-              aria-label={`Change the dictation key, now ${dictationKeyName(key)}`}
-              onClick={() => setRecording(true)}
-            >
-              Change
-            </button>
-          </span>
-        </div>
-      )}
-      {recording ? null : <span className="dk-dkey__hint">Tap to start or stop · hold to talk · Esc cancels</span>}
+            <kbd className="dk-keys__cap">{part}</kbd>
+          </Fragment>
+        ))}
+      </dt>
+      <dd className="dk-keys__what">{children}</dd>
     </div>
   )
 }

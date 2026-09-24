@@ -487,8 +487,9 @@
 
 /* ------------------------------------------------------------- voice bar
  *
- * The project, Listen, D and Type as one object — a glass capsule in the top
- * bar, a run of controls leading the dock.
+ * The project, the voice agent and Type as one object — a glass capsule in
+ * the top bar, a run of controls leading the dock. How each control looks is
+ * voicebar.css's.
  */
 
 .app[data-face='deck'] .dk-voicebar {
@@ -516,82 +517,6 @@
   min-width: 0;
 }
 
-/*
- * The voice agent, as a word: the project pill's chip, without the dot. Its
- * menu is the … menu's rows, rising from it in the dock and dropping from it
- * in the top bar, like the projects sheet.
- */
-.app[data-face='deck'] .dk-voicebar__agent {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-}
-
-.app[data-face='deck'] .dk-agentpick {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: none;
-  height: 36px;
-  padding: 0 9px 0 12px;
-  border-radius: var(--r-full);
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
-  box-shadow: inset 0 0 0 1px var(--glass-line);
-  cursor: pointer;
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.app[data-face='deck'] .dk-agentpick:hover,
-.app[data-face='deck'] .dk-agentpick[data-open='true'] {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
-}
-
-.app[data-face='deck'] .dk-agentpick:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.app[data-face='deck'] .dk-agentpick__name {
-  font-family: var(--font-display);
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-
-/* The menu rises, so the chevron points up — and flips to close. */
-.app[data-face='deck'] .dk-agentpick__chev {
-  flex: none;
-  color: var(--text-dim);
-  transform: rotate(180deg);
-  transition: transform var(--dur-glide) var(--spring-glide);
-}
-
-.app[data-face='deck'] .dk-agentpick[data-open='true'] .dk-agentpick__chev {
-  transform: rotate(0deg);
-}
-
-.app[data-face='deck'] .dk-bar .dk-agentpick {
-  height: 26px;
-  padding: 0 8px 0 10px;
-}
-
-.app[data-face='deck'] .dk-bar .dk-agentpick__name {
-  font-size: 12px;
-}
-
-.app[data-face='deck'] .dk-bar .dk-agentpick__chev {
-  transform: rotate(0deg);
-}
-
-.app[data-face='deck'] .dk-bar .dk-agentpick[data-open='true'] .dk-agentpick__chev {
-  transform: rotate(180deg);
-}
-
 .app[data-face='deck'] .dk-sheet--voice {
   bottom: calc(100% + 10px);
   left: 0;
@@ -610,15 +535,7 @@
   animation-name: dk-sheet-drop;
 }
 
-/* Listen: VoicePill.css's switch; a failure's sentence is on the voice line (voicebar.css). */
-.app[data-face='deck'] .dk-listen {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-/* Up here the project pill and Listen are the capsule's own height. */
+/* Up here the project pill is the capsule's own height. */
 .app[data-face='deck'] .dk-bar .dk-project {
   height: 26px;
   max-width: 170px;
@@ -631,119 +548,6 @@
 
 .app[data-face='deck'] .dk-bar .dk-project[data-open='true'] .dk-project__chev {
   transform: rotate(180deg);
-}
-
-.app[data-face='deck'] .dk-bar .listen__btn {
-  height: 26px;
-  padding: 0 10px 0 4px;
-  gap: 7px;
-}
-
-.app[data-face='deck'] .dk-bar .listen__track {
-  transform: scale(0.85);
-  margin: 0 -2px;
-}
-
-.app[data-face='deck'] .dk-bar .listen__text {
-  flex-direction: row;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.app[data-face='deck'] .dk-bar .listen__word {
-  font-size: 12px;
-}
-
-/* ------------------------------------------------------------------- D
- *
- * Raw dictation. Its own tint (the theme's info blue-violet, not the
- * accent), and its state in the shape: the letter at rest, a stop square and
- * "Listening" while the mic is open, a turning arc and "…" while the desktop
- * writes it down.
- */
-
-.app[data-face='deck'] .dk-dictate {
-  --d: var(--info);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  flex: none;
-  min-width: 28px;
-  height: 26px;
-  padding: 0 7px;
-  border-radius: 8px;
-  color: var(--d);
-  background: color-mix(in srgb, var(--d) 12%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--d) 30%, transparent);
-  font-family: var(--font-display);
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-med) var(--ease-out),
-    padding var(--dur-glide) var(--spring-glide);
-}
-
-/* In the dock, D stands as tall as the pill. */
-.app[data-face='deck'] .dk-dock .dk-dictate {
-  min-width: 34px;
-  height: 34px;
-  border-radius: 10px;
-}
-
-.app[data-face='deck'] .dk-dictate:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--d) 20%, transparent);
-}
-
-.app[data-face='deck'] .dk-dictate:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.app[data-face='deck'] .dk-dictate:focus-visible {
-  outline: 2px solid var(--d);
-  outline-offset: 2px;
-}
-
-.app[data-face='deck'] .dk-dictate__letter {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.app[data-face='deck'] .dk-dictate__word {
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-}
-
-.app[data-face='deck'] .dk-dictate[data-phase='recording'] {
-  padding: 0 10px 0 8px;
-  color: var(--text-on-accent, #fff);
-  background: var(--d);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--d) 22%, transparent),
-    0 0 18px -4px var(--d);
-  animation: dk-d-ring 1.6s var(--ease-out) infinite;
-}
-
-.app[data-face='deck'] .dk-dictate__stop {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: currentColor;
-}
-
-.app[data-face='deck'] .dk-dictate__spin {
-  animation: dk-turn 0.9s linear infinite;
-}
-
-@keyframes dk-d-ring {
-  50% {
-    box-shadow:
-      0 0 0 5px color-mix(in srgb, var(--d) 12%, transparent),
-      0 0 22px -4px var(--d);
-  }
 }
 
 /* ------------------------------------------------------------- the … menu */
@@ -976,8 +780,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .app[data-face='deck'] .dk-sglyph[data-state='working'],
-  .app[data-face='deck'] .dk-dictate__spin,
-  .app[data-face='deck'] .dk-dictate[data-phase='recording'],
   .app[data-face='deck'] .dk-agents__ask {
     animation: none;
   }
@@ -1013,7 +815,6 @@
 }
 
 @media (max-width: 1240px) {
-  .app[data-face='deck'] .dk-bar .listen__brain,
   .app[data-face='deck'] .dk-agents__count {
     display: none;
   }

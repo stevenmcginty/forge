@@ -4,7 +4,7 @@ import { AgentChooser } from '../components/AgentChooser'
 import { CommandsButton, SkillsButton } from '../components/Flyouts'
 import { useActiveProject, useForge } from '../state'
 import { AgentsMenu } from './AgentsMenu'
-import { DictationKeySetting } from './DictationKey'
+import { ShortcutKeys } from './DictationKey'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
 import { DECK_THEMES, swatchOf } from './theme'
 import type { BarPlace, DeckView } from './view'
@@ -247,6 +247,7 @@ function DeckMenuBody({
   }
   return (
     <>
+      <ShortcutKeys />
       <div className="dk-menu__rows" role="menu">
         {rows.map((row) =>
           row.href ? (
@@ -279,7 +280,6 @@ function DeckMenuBody({
           )
         )}
       </div>
-      <DictationKeySetting />
       <div className="dk-menu__section">
         <span className="dk-menu__eyebrow">Theme · this browser</span>
         <div className="dk-themes" role="radiogroup" aria-label="Theme">

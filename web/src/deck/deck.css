@@ -398,8 +398,8 @@
 /* --------------------------------------------------------------- the bar
  *
  * Dock.css's `.dock__composer` glass and rim, laid out as hub/Composer.css
- * lays the deck's bar: one row — project, D, the words, attach, send.
- * The picks (model, effort, mode) and the terminal keys fold into a row above
+ * lays the deck's bar: one row — project, voice agent, the words, attach,
+ * and the mic (or Send, once there are words). The picks (model, effort, mode) and the terminal keys fold into a row above
  * it that opens while you are in the bar, so at rest the dock is one line.
  */
 .app[data-face='deck'] .dk-composer .composer__card {
@@ -626,19 +626,16 @@
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
-.app[data-face='deck'] .dk-project:focus-visible,
-.app[data-face='deck'] .listen__btn:focus-visible {
+.app[data-face='deck'] .dk-project:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-.app[data-face='deck'] .dk-project__dot {
+/* A folder in the project's colour: a place, not a switch. */
+.app[data-face='deck'] .dk-project__folder {
   flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--project);
-  box-shadow: 0 0 10px 1px color-mix(in srgb, var(--project) 60%, transparent);
+  fill: var(--project);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--project) 45%, transparent));
 }
 
 .app[data-face='deck'] .dk-project__name {
@@ -658,11 +655,6 @@
 
 .app[data-face='deck'] .dk-project[data-open='true'] .dk-project__chev {
   transform: rotate(0deg);
-}
-
-.app[data-face='deck'] .dk-listen .listen__btn:disabled {
-  cursor: default;
-  opacity: 0.55;
 }
 
 /* No composer to show (no project, no tab, GitHub mode): the bar, idle. */

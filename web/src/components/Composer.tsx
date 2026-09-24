@@ -128,7 +128,8 @@ export function Composer({
   voiceLevel = null,
   onShowChat,
   lead,
-  bar = false
+  bar = false,
+  voiceKey
 }: {
   draft: string
   disabled: boolean
@@ -210,11 +211,15 @@ export function Composer({
   onShowChat?: () => void
   /**
    * The desktop-browser face's bar (web/src/deck): what leads the box — the
-   * project pill and D — drawn first in the card. With `bar`, D is the
-   * dictation, so the picks row carries no mic of its own.
+   * project pill and the voice agent — drawn first in the card. With `bar`,
+   * the end button is the phone's: the mic (D, the dictation) while the box is
+   * empty or a dictation runs, Send once there are words; the picks row
+   * carries no mic of its own.
    */
   lead?: ReactNode
   bar?: boolean
+  /** The dictation's key on the deck ("Right Alt"), for the mic's title and name. */
+  voiceKey?: string
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
@@ -414,10 +419,11 @@ export function Composer({
   /**
    * The phone's bottom-right button is the mic whenever there is nothing to
    * send — and stays the mic, the same element, for as long as a dictation
-   * runs, so a finger holding it keeps its pointer capture.
+   * runs, so a finger holding it keeps its pointer capture. The deck's bar
+   * does the same at its right end.
    */
   const micPrimary =
-    mobile &&
+    (mobile || bar) &&
     voiceControls !== undefined &&
     (phase === 'recording' || phase === 'transcribing' || (!hasDraft && !busySending))
   /** The desktop keeps the mic up in the chip row. */
@@ -533,6 +539,8 @@ export function Composer({
       analyser={voiceLevel?.analyser ?? null}
       disabled={disabled}
       primary={mobile}
+      bar={bar && !mobile}
+      keyName={voiceKey}
       cancelArmed={cancelArmed}
       onCancelArmed={setCancelArmed}
     />
@@ -1073,6 +1081,8 @@ function MicButton({
   analyser,
   disabled,
   primary,
+  bar,
+  keyName,
   cancelArmed,
   onCancelArmed
 }: {
@@ -1082,6 +1092,13 @@ function MicButton({
   disabled: boolean
   /** The phone's big bottom-right button, which says what it does in words. */
   primary: boolean
+  /**
+   * The deck bar's end button: every state a shape — a mic to start, a stop
+   * square while it listens, a turning arc while the desktop writes it down.
+   */
+  bar: boolean
+  /** Its key, named in the title and the accessible name. */
+  keyName?: string
   cancelArmed: boolean
   onCancelArmed: (armed: boolean) => void
 }): ReactNode {
@@ -1166,6 +1183,7 @@ function MicButton({
       : phase === 'transcribing'
         ? 'Working…'
         : 'Talk'
+  const keyed = keyName ? ` (${keyName})` : ''
 
   return (
     <button
@@ -1187,12 +1205,20 @@ function MicButton({
         phase === 'recording'
           ? mode === 'hold'
             ? 'Release to send — slide left to cancel'
-            : 'Stop and send'
+            : `Stop and send${keyed}`
           : phase === 'transcribing'
             ? 'Working out the words…'
-            : 'Dictate — tap to talk, or hold (/voice)'
+            : bar
+              ? `Dictate${keyed} — tap to talk and again to stop, or hold to talk. Esc throws it away.`
+              : 'Dictate — tap to talk, or hold (/voice)'
       }
-      aria-label={phase === 'recording' ? label : phase === 'transcribing' ? 'Working out the words' : 'Dictate'}
+      aria-label={
+        phase === 'recording'
+          ? `${label}${keyed}`
+          : phase === 'transcribing'
+            ? 'Working out the words'
+            : `Dictate${keyed}`
+      }
       aria-pressed={phase === 'recording'}
     >
       {primary ? (
@@ -1211,6 +1237,20 @@ function MicButton({
           <span className="composer__mic-ring" />
         ) : (
           <Glyph name="mic" size={26} weight={1.8} />
+        )
+      ) : bar ? (
+        phase === 'recording' ? (
+          cancelArmed ? (
+            <Icon name="close" size={18} />
+          ) : (
+            <span className="composer__mic-stop" aria-hidden="true" />
+          )
+        ) : phase === 'transcribing' ? (
+          <svg className="composer__mic-turn" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+            <path d="M9 2.5A6.5 6.5 0 1 1 2.5 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        ) : (
+          <Glyph name="mic" size={20} weight={1.8} />
         )
       ) : phase === 'recording' ? (
         <>

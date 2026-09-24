@@ -57,6 +57,7 @@ const MODE_LABEL: Record<PermissionMode, string> = {
 
 export function AgentStatus({
   profile,
+  tab,
   status,
   live,
   view,
@@ -67,6 +68,11 @@ export function AgentStatus({
   chip
 }: {
   profile: AgentProfile
+  /**
+   * The pane's tab by its own name ("Wanda"), set only where it says more than
+   * the pane's name. The deck draws it beside the name; the phone ignores it.
+   */
+  tab?: string
   status?: PaneStatus
   /** False while the socket is down: the strip stays, the controls go quiet. */
   live: boolean
@@ -141,6 +147,7 @@ export function AgentStatus({
         <span className="astatus__who">
           <AgentBadge profile={profile} size="sm" />
           <span className="astatus__name">{profile.name}</span>
+          {tab ? <span className="astatus__tab">{tab}</span> : null}
           {status?.model ? <span className="astatus__model">{status.model}</span> : null}
         </span>
 

@@ -15,7 +15,19 @@ export interface DeckAgent {
   leaf: PaneLeaf
   tab: TerminalTab
   profile: AgentProfile
+  /** The pane's name: "Claude Code". */
   title: string
+  /** Its tab's own name ("Wanda"), when that says more than `title`; else null. */
+  tabName?: string | null
+}
+
+/**
+ * A tab's name as the words' destination: "Wanda" beside "Claude Code". Null
+ * when the tab has none, or its name is only the pane's own again.
+ */
+export function tabNameFor(tabTitle: string | undefined, paneTitle: string): string | null {
+  const name = (tabTitle ?? '').trim()
+  return name && name !== paneTitle ? name : null
 }
 
 /** Every pane in the active project, tab by tab, in the order the desk has them. */
@@ -31,7 +43,8 @@ export function useDeckAgents(): {
     const agents = workspace.tabs.flatMap((tab) =>
       collectLeaves(tab.root).map((leaf) => {
         const profile = resolveProfile(profiles, leaf.profileId)
-        return { leaf, tab, profile, title: paneDisplayTitle(profile, leaf.title) }
+        const title = paneDisplayTitle(profile, leaf.title)
+        return { leaf, tab, profile, title, tabName: tabNameFor(tab.title, title) }
       })
     )
     const front = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0] ?? null
