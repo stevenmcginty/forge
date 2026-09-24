@@ -846,7 +846,7 @@ export const IPC = {
  * somewhere before the machine does.
  */
 export const MAX_SESSIONS = 128
-export const MAX_TABS_PER_PROJECT = 8
+export const MAX_TABS_PER_PROJECT = 9
 export const MAX_PANES_PER_TAB = 8
 
 /**

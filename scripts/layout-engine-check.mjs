@@ -295,9 +295,16 @@ console.log('\nlimits')
   // MAX_SESSIONS counts panes across *every* project, which is why the engine
   // is given the rail rather than one workspace: half the desktop's panes here
   // are in a project the op does not name.
+  // Half of MAX_SESSIONS each, packed a full tab at a time. The tab and pane
+  // limits no longer multiply out to exactly MAX_SESSIONS / 2, so the last tab
+  // may be partly full.
   const full = (prefix) => {
     const out = []
-    for (let i = 0; i < MAX_TABS_PER_PROJECT; i++) out.push(seedTab(`${prefix}t${i}`, `${prefix}${i}`, MAX_PANES_PER_TAB))
+    for (let left = MAX_SESSIONS / 2, i = 0; left > 0; i++) {
+      const n = Math.min(MAX_PANES_PER_TAB, left)
+      out.push(seedTab(`${prefix}t${i}`, `${prefix}${i}`, n))
+      left -= n
+    }
     return { tabs: out, activeTabId: `${prefix}t0` }
   }
   const both = engineOver({ p1: full('x'), p2: full('y') })
