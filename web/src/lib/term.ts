@@ -319,6 +319,18 @@ function palette(): Record<string, string> {
   return out
 }
 
+const RETHEME_EVENT = 'forge:retheme-terminals'
+
+/**
+ * The tokens moved (the desktop-browser face's theme picker): forget the cached
+ * palette and have every mounted terminal read it again. Nothing else calls
+ * this, so on a phone the palette is read once, exactly as before.
+ */
+export function rethemeTerminals(): void {
+  paletteCache = null
+  window.dispatchEvent(new Event(RETHEME_EVENT))
+}
+
 /**
  * A complete 16-colour dark theme, every slot handed over explicitly.
  *
@@ -575,6 +587,11 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
     windowsPty: { backend: 'conpty' },
     theme: themeFor(options.accent)
   })
+
+  const retheme = (): void => {
+    term.options.theme = themeFor(options.accent)
+  }
+  window.addEventListener(RETHEME_EVENT, retheme)
 
   const fitAddon = new FitAddon()
   term.loadAddon(fitAddon)
@@ -1047,6 +1064,7 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
       if (releasing) clearTimeout(releasing)
       observer.disconnect()
       releaseTouch()
+      window.removeEventListener(RETHEME_EVENT, retheme)
       term.dispose()
     }
   }

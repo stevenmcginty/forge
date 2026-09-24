@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { EmptyState } from '@/components/EmptyState'
 import { Icon } from '@/components/Icon'
+import { collectLeaves } from '@/lib/splitTree'
 import { useMobile } from '../lib/mobile'
 import { useNarrow } from '../lib/narrow'
 import { useActiveProject, useForge, useWorkspace } from '../state'
@@ -18,6 +19,9 @@ import { SplitView } from './Panes'
 import { TabStrip } from './TabStrip'
 import { TopBar } from './TopBar'
 import { UpdateBanner } from './UpdateBanner'
+import { DeckBackdrop, DeckDock, DeckSheetHost, DeckStage, PanesSheet } from '../deck/Deck'
+import { useDeckTheme } from '../deck/theme'
+import { useDeckView } from '../deck/view'
 
 /**
  * Forge Web: three regions, two faces, not a copy of the desktop IDE.
@@ -55,6 +59,14 @@ export function Workspace(): ReactNode {
    * over it. A mouse in a narrow window still gets the folded desktop layout below.
    */
   const mobile = useMobile()
+  /**
+   * Not a phone: the deck face (web/src/deck), the redesigned desktop app's
+   * look — top bar, the Wall, the dock, sheets. Its theme is applied here, in
+   * render, so it is on the root before any terminal reads its palette.
+   */
+  const deck = !mobile
+  const { themeId, setTheme } = useDeckTheme(deck)
+  const [deckView, setDeckView] = useDeckView()
   const [drawerOpen, setDrawerOpen] = useState(false)
   // Collapsed by the click, or collapsed by the window. One flag either way, so
   // the rail has one set of markup rather than a full row squeezed into 56px.
@@ -140,19 +152,40 @@ export function Workspace(): ReactNode {
   // (see lib/term.ts) already fits and reports on exactly that. A second
   // refit-everything path would send a duplicate `resize` per pane per drag.
 
+  /** The deck's top-bar chip: which tab, how many panes, and whether any of them needs you. */
+  const deckWhere = (() => {
+    if (!deck || !project) return null
+    const tab = workspace.tabs.find((t) => t.id === activeTabId)
+    if (!tab) return null
+    const leaves = workspace.tabs.flatMap((t) => collectLeaves(t.root))
+    return {
+      tab: tab.title,
+      tabs: workspace.tabs.length,
+      panes: leaves.length,
+      waiting: leaves.filter((leaf) => state.asking.has(leaf.id)).length
+    }
+  })()
+
   return (
     <div
-      className="app"
+      className={deck ? 'app deck' : 'app'}
       data-ready="true"
-      data-shell="app"
+      data-shell={deck ? 'deck' : 'app'}
+      data-face={deck ? 'deck' : undefined}
       data-mobile={mobile ? 'true' : undefined}
       style={mobile ? ({ '--phone-text-scale': textScale } as CSSProperties) : undefined}
     >
+      {deck ? <DeckBackdrop themeId={themeId} /> : null}
       <TopBar
         collapsed={mobile ? !drawerOpen : collapsed}
         onToggleRail={() => (mobile ? setDrawerOpen((v) => !v) : setRailCollapsed((v) => !v))}
         onWatchScreen={live ? () => setWatching(true) : null}
         mobile={mobile}
+        deck={
+          deck
+            ? { view: deckView, onView: setDeckView, where: deckWhere, themeId, onTheme: setTheme }
+            : undefined
+        }
       />
       {/*
         Above everything, including the reconnect strip: a UAC prompt is a
@@ -176,6 +209,53 @@ export function Workspace(): ReactNode {
         mid-redial, and the strips stack in that order.
       */}
       <UpdateBanner update={update} />
+      {deck ? (
+        <main className="dk-stage">
+          {/* GitHub mode swaps in for the stage and nothing else, as it does below. */}
+          {offline && state.offlineMode === 'github' ? (
+            <GitHubMode />
+          ) : (
+            <DeckStage
+              view={deckView}
+              drawn={drawn.current}
+              empty={
+                !project ? (
+                  <EmptyState
+                    icon="folder"
+                    eyebrow="Forge"
+                    title="No project selected"
+                    body="Pick one from the project at the left of the bar below, or add a folder from that desktop there."
+                  />
+                ) : !activeTabId ? (
+                  <EmptyState
+                    icon="terminal"
+                    eyebrow={project.name}
+                    title="No terminals open"
+                    body={
+                      <>
+                        Open one in <span className="mono">{project.path}</span>. It opens on the desktop too — this
+                        browser mirrors that machine rather than running its own.
+                      </>
+                    }
+                    action={
+                      <button
+                        ref={newTabRef}
+                        type="button"
+                        className="cta-btn"
+                        disabled={!live}
+                        onClick={() => setChooserOpen(true)}
+                      >
+                        <Icon name="plus" size={14} />
+                        Open a terminal
+                      </button>
+                    }
+                  />
+                ) : null
+              }
+            />
+          )}
+        </main>
+      ) : (
       <div className="app__body">
         {/*
           On a phone the rail is not drawn at all: the ☰ opens the project
@@ -256,6 +336,10 @@ export function Workspace(): ReactNode {
           )}
         </main>
       </div>
+      )}
+
+      {deck ? <DeckDock /> : null}
+      {deck ? <PanesSheet view={deckView} onView={setDeckView} /> : null}
 
       {mobile && gridShown ? null : notice}
 
@@ -270,6 +354,7 @@ export function Workspace(): ReactNode {
         onPick={(profileId, permissionMode) => void actions.layout({ op: 'create-tab', profileId, permissionMode })}
         selectedId={project?.defaultProfileId}
       />
+      {deck ? <DeckSheetHost /> : null}
     </div>
   )
 }

@@ -10,6 +10,8 @@ import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
 import { ConnectionSheet, LinkDot, linkStateOf, linkWord, useTrackLastHeard } from './ConnectionSheet'
 import { HandoffMenu } from './HandoffMenu'
 import { MoreSheet } from './MoreSheet'
+import { DeckTopBar, type DeckMenuRow, type DeckWhere } from '../deck/DeckTopBar'
+import type { DeckView } from '../deck/view'
 import { WaitingBadge, WaitingPill } from './WaitingPill'
 import { rustDeskLink } from './Workspace'
 
@@ -52,7 +54,8 @@ export function TopBar({
   collapsed,
   onToggleRail,
   onWatchScreen,
-  mobile = false
+  mobile = false,
+  deck
 }: {
   collapsed: boolean
   onToggleRail: () => void
@@ -60,6 +63,18 @@ export function TopBar({
   onWatchScreen: (() => void) | null
   /** Phone layout. The project identity takes the top of the page. */
   mobile?: boolean
+  /**
+   * The desktop-browser face (web/src/deck): the deck's own small bar instead of
+   * the titlebar, with everything this bar used to spread along its right edge
+   * folded into one "…" menu. Absent on a phone.
+   */
+  deck?: {
+    view: DeckView
+    onView: (view: DeckView) => void
+    where: DeckWhere | null
+    themeId: string
+    onTheme: (id: string) => void
+  }
 }): ReactNode {
   const { state, actions } = useForge()
   const project = useActiveProject()
@@ -169,6 +184,8 @@ export function TopBar({
 
   /* ------------------------------------------------------------ the phone */
   const moreBtnRef = useRef<HTMLButtonElement | null>(null)
+  /** The deck face's "…": the hand-off menu hangs from it, as it hangs from ⋯ on a phone. */
+  const deckMenuRef = useRef<HTMLButtonElement | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
   const link = linkStateOf(state)
@@ -184,6 +201,74 @@ export function TopBar({
    * page calls it.
    */
   const paneTint = paneProfile ? ({ '--pane-accent': paneProfile.accent } as CSSProperties) : undefined
+
+  /*
+   * The deck face's "…" menu: the same controls the titlebar lays along its
+   * right edge, the same conditions for showing each one and the same handlers,
+   * as rows with their state in words.
+   */
+  const deckRows: DeckMenuRow[] = []
+  if (deck) {
+    if (drivable && !offline) {
+      deckRows.push({
+        id: 'foreman',
+        icon: 'foreman',
+        label: foremanOn ? 'Foreman — switch off' : 'Foreman — drive this pane',
+        detail: foremanOn ? (foreman?.status ?? 'on') : seeding ? 'asking' : 'off',
+        on: foremanOn,
+        disabled: !live || !alive,
+        onSelect: switchForeman
+      })
+    }
+    if (isAgent && !offline) {
+      deckRows.push({
+        id: 'handoff',
+        icon: 'send',
+        label: 'Hand off…',
+        detail: handoffChip?.label.toLowerCase(),
+        disabled: !live || !alive,
+        onSelect: () => setHandoffOpen(true)
+      })
+    }
+    if (onWatchScreen) {
+      deckRows.push({ id: 'screen', icon: 'screen', label: `Watch ${desktopName || 'the desktop'}’s screen`, onSelect: onWatchScreen })
+    }
+    if (state.remoteYes.enabled && !state.remoteYes.uac) {
+      deckRows.push({
+        id: 'rustdesk',
+        icon: 'key',
+        label: 'Open RustDesk',
+        detail: 'Remote Yes ready',
+        href: rustDeskLink(state.remoteYes.address)
+      })
+    }
+    if (state.notifyPermission !== 'unsupported') {
+      deckRows.push({
+        id: 'notify',
+        icon: state.notifyPermission === 'granted' ? 'check' : 'note',
+        label: 'Notifications',
+        detail:
+          state.notifyPermission === 'granted'
+            ? state.pushActive
+              ? 'on · push'
+              : 'on'
+            : state.notifyPermission === 'denied'
+              ? 'refused in the browser'
+              : 'off — ask',
+        on: state.notifyPermission === 'granted',
+        disabled: state.notifyPermission !== 'default',
+        onSelect: () => void actions.requestNotifyPermission()
+      })
+    }
+    deckRows.push({ id: 'signout', icon: 'user', label: 'Sign out', detail: state.session?.email, onSelect: () => actions.signOut() })
+  }
+  const deckLinkTitle = offline
+    ? 'The desktop is not answering — this is the last picture it sent.'
+    : state.connection.state === 'live'
+      ? state.warm
+        ? `Mirroring ${desktopName || 'the desktop'}`
+        : `Connected to ${desktopName || 'the desktop'}, but the link has gone quiet`
+      : 'Not connected'
 
   return (
     <>
@@ -245,6 +330,17 @@ export function TopBar({
             </button>
           </div>
         </header>
+      ) : deck ? (
+        <DeckTopBar
+          where={deck.where}
+          link={{ state: offline ? 'offline' : state.connection.state, warm: state.warm, name: desktopName, title: deckLinkTitle }}
+          view={deck.view}
+          onView={deck.onView}
+          rows={deckRows}
+          menuRef={deckMenuRef}
+          themeId={deck.themeId}
+          onTheme={deck.onTheme}
+        />
       ) : (
       <header className="titlebar" data-focused="true" style={tint}>
         <div className="titlebar__left">
@@ -545,7 +641,7 @@ export function TopBar({
       <PaneHandoffMenu
         paneId={paneId}
         tab={tab ?? null}
-        anchor={mobile ? moreBtnRef.current : handoffBtnRef.current}
+        anchor={mobile ? moreBtnRef.current : deck ? deckMenuRef.current : handoffBtnRef.current}
         open={handoffOpen}
         onClose={() => setHandoffOpen(false)}
       />

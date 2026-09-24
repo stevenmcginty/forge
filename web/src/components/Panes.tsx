@@ -79,7 +79,7 @@ interface PlacedDivider {
 /** Two decimal places of a percent, exactly as the nested version rounded to. */
 const ratioOf = (ratio: number): number => Math.round(ratio * 10000) / 10000
 
-function place(node: LayoutNode, box: Box, panes: PlacedPane[], dividers: PlacedDivider[]): void {
+function place(node: LayoutNode, box: Box, panes: PlacedPane[], dividers: PlacedDivider[], gap = DIVIDER_PX): void {
   if (node.type === 'leaf') {
     panes.push({ leaf: node, box })
     return
@@ -87,37 +87,39 @@ function place(node: LayoutNode, box: Box, panes: PlacedPane[], dividers: Placed
 
   const first = ratioOf(node.ratio)
   const second = ratioOf(1 - node.ratio)
-  const half = DIVIDER_PX / 2
+  const half = gap / 2
 
   if (node.direction === 'row') {
     const span = box.width
-    place(node.a, { ...box, width: `(${span}) * ${first} - ${half}px` }, panes, dividers)
+    place(node.a, { ...box, width: `(${span}) * ${first} - ${half}px` }, panes, dividers, gap)
     dividers.push({
       id: node.id,
       direction: node.direction,
-      box: { ...box, left: `(${box.left}) + (${span}) * ${first} - ${half}px`, width: `${DIVIDER_PX}px` }
+      box: { ...box, left: `(${box.left}) + (${span}) * ${first} - ${half}px`, width: `${gap}px` }
     })
     place(
       node.b,
       { ...box, left: `(${box.left}) + (${span}) * ${first} + ${half}px`, width: `(${span}) * ${second} - ${half}px` },
       panes,
-      dividers
+      dividers,
+      gap
     )
     return
   }
 
   const span = box.height
-  place(node.a, { ...box, height: `(${span}) * ${first} - ${half}px` }, panes, dividers)
+  place(node.a, { ...box, height: `(${span}) * ${first} - ${half}px` }, panes, dividers, gap)
   dividers.push({
     id: node.id,
     direction: node.direction,
-    box: { ...box, top: `(${box.top}) + (${span}) * ${first} - ${half}px`, height: `${DIVIDER_PX}px` }
+    box: { ...box, top: `(${box.top}) + (${span}) * ${first} - ${half}px`, height: `${gap}px` }
   })
   place(
     node.b,
     { ...box, top: `(${box.top}) + (${span}) * ${first} + ${half}px`, height: `(${span}) * ${second} - ${half}px` },
     panes,
-    dividers
+    dividers,
+    gap
   )
 }
 
@@ -128,6 +130,18 @@ function styleFor(box: Box): CSSProperties {
     width: `calc(${box.width})`,
     height: `calc(${box.height})`
   }
+}
+
+/**
+ * Where each leaf of a tree sits, as inline styles, for a caller that draws the
+ * panes itself — the desktop-browser face (web/src/deck), which keeps every
+ * pane of a project in one keyed container so that switching between tabs and
+ * the Wall moves panes rather than rebuilding them. `gap` is the gutter.
+ */
+export function leafBoxes(node: LayoutNode, gap = DIVIDER_PX): Array<{ leaf: PaneLeaf; style: CSSProperties }> {
+  const panes: PlacedPane[] = []
+  place(node, { left: '0px', top: '0px', width: '100%', height: '100%' }, panes, [], gap)
+  return panes.map(({ leaf, box }) => ({ leaf, style: styleFor(box) }))
 }
 
 export function SplitView({

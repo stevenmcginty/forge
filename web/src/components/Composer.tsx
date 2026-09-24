@@ -126,7 +126,9 @@ export function Composer({
   voice: voiceControls,
   voiceState = IDLE_VOICE,
   voiceLevel = null,
-  onShowChat
+  onShowChat,
+  lead,
+  bar = false
 }: {
   draft: string
   disabled: boolean
@@ -206,6 +208,13 @@ export function Composer({
    * Chat button rides at the front of the box instead.
    */
   onShowChat?: () => void
+  /**
+   * The desktop-browser face's bar (web/src/deck): what leads the box — the
+   * project pill and the Listen switch — drawn first in the card. With `bar`,
+   * Listen stands in for the mic, so the picks row carries no mic of its own.
+   */
+  lead?: ReactNode
+  bar?: boolean
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
@@ -412,7 +421,7 @@ export function Composer({
     voiceControls !== undefined &&
     (phase === 'recording' || phase === 'transcribing' || (!hasDraft && !busySending))
   /** The desktop keeps the mic up in the chip row. */
-  const micInPicks = !mobile && voiceControls !== undefined
+  const micInPicks = !mobile && !bar && voiceControls !== undefined
 
   // One button for Enter. With words in the box it sends them; with the box
   // empty it is the Enter key itself — what confirms the option ↑/↓ landed on
@@ -787,11 +796,13 @@ export function Composer({
       data-voice={phase}
       data-voice-mode={phase === 'recording' ? voiceState.mode : undefined}
       data-cancel-armed={cancelArmed ? 'true' : undefined}
+      data-bar={bar ? 'true' : undefined}
       onSubmit={submit}
       onPaste={onPaste}
     >
       {fileInputs}
       <div className="composer__card">
+        {lead ? <div className="composer__lead">{lead}</div> : null}
         {showPicks || micInPicks ? (
           <div className="composer__picks" role="toolbar" aria-label="Agent settings">
             {!mobile && onModel && modelList.length ? (

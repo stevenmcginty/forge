@@ -1,0 +1,508 @@
+/*
+ * Mirrors the deck top bar; redesign in progress on desktop-redesign — re-sync
+ * when it lands. Its own file on purpose, so the whole bar can be replaced
+ * without touching the rest of the face.
+ *
+ * No slab: a strip of the backdrop with three things on it — the mark, one
+ * glass chip in the middle (the deck's centred object), and a small cluster on
+ * the right. Three grid columns, the outer two equal, so the chip sits dead
+ * centre and nothing runs into it.
+ */
+
+.app[data-face='deck'] .dk-bar {
+  position: relative;
+  z-index: var(--z-dock);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
+  align-items: center;
+  column-gap: 16px;
+  flex: none;
+  height: var(--dk-bar-h);
+  padding: 0 12px 0 16px;
+}
+
+.app[data-face='deck'] .dk-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.app[data-face='deck'] .dk-bar__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.app[data-face='deck'] .dk-bar__wordmark {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------------------------ where chip */
+
+.app[data-face='deck'] .dk-where {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, 46vw);
+  height: 30px;
+  padding: 0 12px 0 12px;
+  border-radius: var(--r-full);
+  color: var(--text-secondary);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
+  border: 1px solid var(--glass-line);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 var(--glass-hi);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-where:hover {
+  color: var(--text-primary);
+  border-color: var(--glass-line-strong);
+}
+
+.app[data-face='deck'] .dk-where[data-open='true'] {
+  color: var(--text-primary);
+  border-color: var(--accent-line);
+  box-shadow:
+    0 8px 24px -10px rgba(0, 0, 0, 0.6),
+    0 0 0 3px var(--accent-softer),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+.app[data-face='deck'] .dk-where:focus-visible,
+.app[data-face='deck'] .dk-view > button:focus-visible,
+.app[data-face='deck'] .dk-menu__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.app[data-face='deck'] .dk-where > svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.app[data-face='deck'] .dk-where__tab {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.app[data-face='deck'] .dk-where__meta {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+/* A pane waiting on an answer: a diamond and the words, in warn. */
+.app[data-face='deck'] .dk-where__ask {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--warn);
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+.app[data-face='deck'] .dk-where__ask > span {
+  font-size: 8px;
+}
+
+.app[data-face='deck'] .dk-where__chev {
+  flex: none;
+  color: var(--text-dim);
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+.app[data-face='deck'] .dk-where[data-open='true'] .dk-where__chev {
+  transform: rotate(180deg);
+}
+
+/* ----------------------------------------------------------------- right */
+
+.app[data-face='deck'] .dk-bar__right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The link: a shape and a word first, the desktop's name after. */
+.app[data-face='deck'] .dk-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 24px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--glass-line);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.app[data-face='deck'] .dk-link__glyph {
+  flex: none;
+}
+
+.app[data-face='deck'] .dk-link__word {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.app[data-face='deck'] .dk-link__name {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-link[data-state='live'][data-warm='true'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-softer);
+}
+
+.app[data-face='deck'] .dk-link[data-state='live']:not([data-warm='true']) {
+  color: var(--warn);
+  border-color: var(--warn-line);
+}
+
+.app[data-face='deck'] .dk-link[data-state='connecting'] {
+  color: var(--info);
+  border-color: color-mix(in srgb, var(--info) 30%, transparent);
+}
+
+/* Tabs | Wall — the deck's `.viewtoggle`, with words. */
+.app[data-face='deck'] .dk-view {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-full);
+}
+
+.app[data-face='deck'] .dk-view > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-view > button:hover {
+  color: var(--text-primary);
+}
+
+.app[data-face='deck'] .dk-view > button[data-active='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* ------------------------------------------------------------- the … menu */
+
+.app[data-face='deck'] .dk-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.app[data-face='deck'] .dk-menu__btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  border-radius: 9px;
+  color: var(--text-muted);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-menu__btn:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.app[data-face='deck'] .dk-menu__btn[data-on='true'] {
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.app[data-face='deck'] .dk-sheet.dk-menu__panel {
+  top: calc(100% + 8px);
+  right: 0;
+  width: 320px;
+  max-height: calc(100vh - var(--dk-bar-h) - 24px);
+  overflow-y: auto;
+  transform-origin: calc(100% - 16px) 0;
+  animation-name: dk-menu-in;
+}
+
+@keyframes dk-menu-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0) scale(0.97);
+  }
+}
+
+.app[data-face='deck'] .dk-menu__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px;
+  border-bottom: 1px solid var(--glass-line);
+}
+
+.app[data-face='deck'] .dk-menu__row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  text-align: left;
+  text-decoration: none;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-menu__row:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.app[data-face='deck'] .dk-menu__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.app[data-face='deck'] .dk-menu__row:disabled {
+  cursor: default;
+}
+
+.app[data-face='deck'] .dk-menu__row svg {
+  color: var(--text-muted);
+}
+
+.app[data-face='deck'] .dk-menu__row[data-on='true'] svg {
+  color: var(--accent);
+}
+
+.app[data-face='deck'] .dk-menu__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.app[data-face='deck'] .dk-menu__detail {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.app[data-face='deck'] .dk-menu__row[data-on='true'] .dk-menu__detail {
+  color: var(--accent);
+}
+
+.app[data-face='deck'] .dk-menu__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+.app[data-face='deck'] .dk-menu__eyebrow {
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* Themes: a swatch each, the one in use ringed, ticked and saying so. */
+.app[data-face='deck'] .dk-themes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.app[data-face='deck'] .dk-theme {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+}
+
+.app[data-face='deck'] .dk-theme__swatch {
+  position: relative;
+  display: block;
+  height: 38px;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid var(--glass-line-strong);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-theme__panel {
+  position: absolute;
+  left: 6px;
+  right: 16px;
+  bottom: 0;
+  height: 20px;
+  border-radius: 5px 5px 0 0;
+}
+
+.app[data-face='deck'] .dk-theme__accent {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.app[data-face='deck'] .dk-theme:hover .dk-theme__swatch {
+  border-color: var(--text-muted);
+}
+
+.app[data-face='deck'] .dk-theme[data-here='true'] .dk-theme__swatch {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+
+.app[data-face='deck'] .dk-theme:focus-visible {
+  outline: none;
+}
+
+.app[data-face='deck'] .dk-theme:focus-visible .dk-theme__swatch {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.app[data-face='deck'] .dk-theme__check {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+.app[data-face='deck'] .dk-theme__name {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-theme[data-here='true'] .dk-theme__name {
+  color: var(--text-primary);
+}
+
+.app[data-face='deck'] .dk-theme__here {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* A smaller window: the wordmark gives its room first, then the words. */
+@media (max-width: 1100px) {
+  .app[data-face='deck'] .dk-where__meta {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .app[data-face='deck'] .dk-link__name,
+  .app[data-face='deck'] .dk-view > button > span {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .app[data-face='deck'] .dk-bar {
+    column-gap: 8px;
+    padding: 0 8px 0 10px;
+  }
+
+  .app[data-face='deck'] .dk-bar__wordmark {
+    display: none;
+  }
+
+  .app[data-face='deck'] .dk-where {
+    max-width: 52vw;
+  }
+
+  .app[data-face='deck'] .dk-where__tab {
+    max-width: 22vw;
+  }
+}
