@@ -5,7 +5,7 @@ import { findRemoteSessionUrl } from '@shared/remote'
 import { findDevServerUrl } from '@shared/devserver'
 import { isTypedInput } from '@shared/typing'
 import { commandExe } from '@shared/agents'
-import { planPointerDelta, wheelDeltaPx, type ScrollCarry } from '@shared/touch-scroll'
+import { peekWheelRoute, planPointerDelta, wheelDeltaPx, type ScrollCarry } from '@shared/touch-scroll'
 import { SHARE_CAPTURE_DEFAULT_LINES } from '@shared/share'
 import { advanceDraft, clampDraft } from './draft'
 import { joinBufferRows, tidyCapture, type BufferRow } from './paneText'
@@ -952,30 +952,51 @@ class TerminalHost {
   }
 
   /**
-   * A wheel over a Wall tile that is not being typed into: move this
-   * terminal's own scrollback, and nothing else.
+   * A wheel over a Wall tile that is not being typed into: scroll what that
+   * tile shows, the way the wheel would over the same pane in Full screen.
    *
-   * Never xterm's wheel path. With mouse tracking on or a full-screen TUI up
-   * that turns a wheel into arrow keys or SGR reports on the PTY, and a tile
-   * that is only being looked at must never type into its agent — or claim
-   * the pane's grid by doing so. `scrollLines` moves the viewport and writes
-   * nothing, and xterm keeps the rest: a viewport left scrolled up stays put as
-   * output arrives, one at the bottom follows it.
+   * A plain buffer moves its own scrollback. `scrollLines` moves the viewport
+   * and writes nothing, and xterm keeps the rest: a viewport left scrolled up
+   * stays put as output arrives, one at the bottom follows it.
+   *
+   * A program on the alternate screen, or one that asked for the mouse, has
+   * no scrollback — its history lives inside the program. This used to return
+   * false for those and let the wheel scroll the Wall instead, so a Grok, an
+   * OpenCode or a vim tile never moved at all. Now the gesture goes to the
+   * program through the same planner the Full screen pane and the browser use
+   * (PageUp/PageDown, or an SGR wheel at `wheelReportCell`), sized against the
+   * real row rather than the shrunk one, so a notch scrolls the program as far
+   * as it would at full size. It is written with `claim: false`: a wheel is
+   * not typing, and a tile that is only being looked at must not take the
+   * pane's grid from the phone that holds it. Nothing is focused or selected.
    *
    * `scale` is how big the tile draws the terminal (a scale model is a CSS
-   * transform), so a notch moves the picture as far as it moves anything else
-   * on screen. Returns false when there is nothing to scroll — no terminal, a
-   * full-screen TUI's alternate buffer (it has no scrollback), or a shell
-   * that has not printed a screenful yet — so the caller can let the wheel go.
+   * transform), so a notch moves a scrollback picture as far as it moves
+   * anything else on screen. Returns false only when there is nothing to
+   * scroll — no terminal, or a plain buffer that has not printed a screenful
+   * yet — so the caller can let the wheel go to the Wall.
    */
   scrollPeek(paneId: string, deltaY: number, deltaMode: number, scale = 1): boolean {
     const entry = this.entries.get(paneId)
     if (!entry) return false
     const { term } = entry
     const buffer = term.buffer.active
-    if (buffer.type === 'alternate' || buffer.baseY === 0) {
-      entry.peekWheelPx = 0
-      return false
+    const mouse = term.modes?.mouseTrackingMode != null && term.modes.mouseTrackingMode !== 'none'
+    const route = peekWheelRoute(buffer.type === 'alternate', mouse, buffer.baseY)
+    if (route !== 'scrollback') entry.peekWheelPx = 0
+    if (route === 'none') return false
+    if (route === 'app') {
+      const height = terminalRowHeight(term, entry.spec.fontSize)
+      const plan = planPointerDelta(
+        entry.wheelCarry,
+        wheelDeltaPx(deltaY, deltaMode, height),
+        height,
+        buffer.type === 'alternate',
+        mouse,
+        term.cols
+      )
+      if (plan.kind === 'data') window.forge.pty.write(paneId, plan.data, false)
+      return true
     }
     const row = terminalRowHeight(term, entry.spec.fontSize) * (scale > 0 ? scale : 1)
     const px = deltaMode === 2 ? deltaY * term.rows * row : deltaMode === 1 ? deltaY * row : deltaY

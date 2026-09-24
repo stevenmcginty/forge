@@ -276,6 +276,23 @@ console.log('\npersistence')
   ok(M.emptyMosaic().mode === 'auto' && M.emptyMosaic().wallTabs.length === 0, 'an empty wall is an auto one')
 }
 
+/* ------------------------------------------------------------ tile wheel */
+
+// A wheel over a tile scrolls that tile, whatever runs in it. A full-screen
+// program used to hand the wheel to the Wall, so an agent TUI tile never moved.
+{
+  console.log('\ntile wheel')
+  const S = await import('../shared/touch-scroll.ts')
+  ok(S.peekWheelRoute(true, false, 0) === 'app', 'an alternate-screen program gets the wheel, not the Wall')
+  ok(S.peekWheelRoute(true, true, 0) === 'app', 'so does one that asked for the mouse')
+  ok(S.peekWheelRoute(false, true, 500) === 'app', 'mouse tracking wins over scrollback, as in xterm')
+  ok(S.peekWheelRoute(false, false, 500) === 'scrollback', 'a shell with history scrolls its scrollback')
+  ok(S.peekWheelRoute(false, false, 0) === 'none', 'a shell with no history lets the Wall scroll')
+  const carry = { px: 0 }
+  const plan = S.planPointerDelta(carry, -100 * 8, 100, true, false, 80)
+  ok(plan.kind === 'data' && plan.data === '\x1b[5~', 'a wheel up over an alt-screen tile is PageUp', JSON.stringify(plan))
+}
+
 /* -------------------------------------------------------------- verdict */
 
 console.log(`\n${pass} passed, ${fail} failed\n`)

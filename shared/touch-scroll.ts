@@ -140,3 +140,24 @@ export function planPointerDelta(
   carry.px -= steps * unit
   return planTouchScroll(steps * unitRows, altScreen, mouseTracking, cols)
 }
+
+/**
+ * Where a wheel over a Wall tile goes. The tile is a picture — the terminal
+ * under it takes no pointer events — so the Wall has to decide what xterm
+ * would have decided for a terminal under the pointer.
+ *
+ *  - `app` — the program asked for the mouse, or it is on the alternate screen
+ *    (Grok, OpenCode, vim, less). There is no scrollback to move; the gesture
+ *    belongs to the program, through `planPointerDelta` like everywhere else.
+ *  - `scrollback` — a plain buffer with history above the screen.
+ *  - `none` — a plain buffer with no history yet. Nothing in the tile can
+ *    move, so the wheel carries on to the Wall.
+ */
+export function peekWheelRoute(
+  altScreen: boolean,
+  mouseTracking: boolean,
+  scrollbackRows: number
+): 'app' | 'scrollback' | 'none' {
+  if (altScreen || mouseTracking) return 'app'
+  return scrollbackRows > 0 ? 'scrollback' : 'none'
+}
