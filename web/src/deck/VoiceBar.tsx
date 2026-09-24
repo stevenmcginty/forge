@@ -24,6 +24,7 @@ import type { BarPlace, DeckView } from './view'
 import {
   holdWebVoiceMic,
   setVoiceLink,
+  setVoiceNavigator,
   stopWebVoice,
   toggleWebVoice,
   useWebVoice,
@@ -605,9 +606,33 @@ export function DeckKeys({
   // Listen's link to the desktop, handed over whenever it changes (a reconnect
   // may replace it), and its mic held shut while D records and the desktop
   // writes it down (V5).
-  const { actions } = useForge()
+  const { state, actions } = useForge()
   const request = actions.request
   useEffect(() => setVoiceLink({ request }), [request])
+
+  // Listen's moving around lands here, on this browser's own deck: the view is
+  // this page's choice (./view.ts), and a project, tab or pane goes through the
+  // same gestures a click would send. Full screen claims the pane's grid by
+  // itself (PaneView), so nothing here resizes a terminal.
+  const nav = useRef({ actions, projectId: state.projectId })
+  nav.current = { actions, projectId: state.projectId }
+  useEffect(() => {
+    setVoiceNavigator((to) => {
+      const { actions, projectId: showing } = nav.current
+      if (to.projectId && to.projectId !== showing) actions.selectProject(to.projectId)
+      if (to.view) latest.current.onView(to.view === 'mosaic' ? 'wall' : 'focus')
+      const projectId = to.projectId ?? showing ?? undefined
+      const where = projectId ? { projectId } : {}
+      void (async () => {
+        const refused =
+          (to.tabId ? await actions.layout({ op: 'select-tab', tabId: to.tabId, ...where }) : null) ??
+          (to.paneId ? await actions.layout({ op: 'focus-pane', paneId: to.paneId, ...where }) : null)
+        if (refused) actions.setNotice(refused)
+      })()
+    })
+    return () => setVoiceNavigator(null)
+  }, [])
+
   const dictating = phase === 'starting' || phase === 'recording' || phase === 'transcribing'
   useEffect(() => holdWebVoiceMic(dictating), [dictating])
 

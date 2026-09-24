@@ -1617,7 +1617,9 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       getAppContext: () => buildContextNow(),
       // Every brain can ask for this one now (read_pane, shared/brain-tools.ts).
       readPane: (target, lines) =>
-        describePaneText(ctxRef.current, target, lines, (paneId, n) => terminalHost.snapshotText(paneId, n))
+        describePaneText(ctxRef.current, target, lines, (paneId, n) => terminalHost.snapshotText(paneId, n)),
+      // A browser's navigation resolves against it (src/lib/realtime/web-nav.ts).
+      actionContext: () => ctxRef.current
     })
   }, [runActions, buildContextNow])
 

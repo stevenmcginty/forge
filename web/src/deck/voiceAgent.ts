@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { WebRequest, WebResult, WebVoiceSetup } from '@shared/web'
+import { WEB_VOICE_NAV_ARG, type WebRequest, type WebResult, type WebVoiceNav, type WebVoiceSetup } from '@shared/web'
 import { endedNote, stopPhraseOf, stuckAfterMs, stuckReason, type ConversationEnd } from '@/lib/realtime/conversation'
 import { GeminiLiveSession, type GeminiTokenGetter } from '@/lib/realtime/gemini'
 import type { RealtimeCaption, RealtimeState, RealtimeToolAnswer, RealtimeToolCall } from '@/lib/realtime/session'
@@ -21,7 +21,10 @@ import { voiceFailureWords, type WebVoicePhase } from './voice-words'
  *                  renderer with the functions the voice hub uses
  *   voice-token    a single-use ephemeral token per connect (the key stays in
  *                  the desktop's main process)
- *   voice-tool     each tool call, run there by the same `runRealtimeTool`
+ *   voice-tool     each tool call, run there by the same `runRealtimeTool` —
+ *                  except moving around (the Wall or Full screen, a pane, a
+ *                  tab, a project): the desktop resolves where, and this page
+ *                  goes there on its own deck (`setVoiceNavigator`)
  *   voice-context  polled while live; a change is told to the model, at most
  *                  every `contextMinGapMs` — ContextTracker's rule
  *
@@ -132,6 +135,20 @@ export function setVoiceLink(next: VoiceLink | null): void {
   link = next
 }
 
+/** Applies a navigation answer to this page's own deck. */
+export type VoiceNavigator = (nav: WebVoiceNav) => void
+
+let navigate: VoiceNavigator | null = null
+
+/**
+ * DeckKeys installs it while the deck face is up. Only while one is installed
+ * does a tool call say this page navigates itself; without it the desktop
+ * moves, as it did before.
+ */
+export function setVoiceNavigator(next: VoiceNavigator | null): void {
+  navigate = next
+}
+
 async function ask(body: WebRequest): Promise<WebResult> {
   if (!link) return { kind: 'failed', code: 'no-window', message: 'Not connected to the desktop.' }
   return link.request(body)
@@ -230,13 +247,21 @@ async function relayTool(call: RealtimeToolCall): Promise<RealtimeToolAnswer> {
   onPhase()
   show({ lastAction: { label: runningWords(call.name), status: 'running' } })
   try {
-    const res = await ask({ kind: 'voice-tool', name: call.name, args: call.args })
-    const answer: RealtimeToolAnswer =
-      res.kind === 'voice-tool'
-        ? res.answer
-        : res.kind === 'failed'
+    const go = navigate
+    const args = go ? { ...call.args, [WEB_VOICE_NAV_ARG]: true } : call.args
+    const res = await ask({ kind: 'voice-tool', name: call.name, args })
+    let answer: RealtimeToolAnswer
+    if (res.kind === 'voice-tool') {
+      // Where to go is for this page; the model gets the words.
+      const { nav, ...said } = res.answer
+      if (nav && go) go(nav)
+      answer = said
+    } else {
+      answer =
+        res.kind === 'failed'
           ? { ok: false, text: `FAILED: ${voiceFailureWords(res)}` }
           : { ok: false, text: 'FAILED: the desktop answered with something this page does not understand.' }
+    }
     entry.label = `${call.name}: ${answer.text.split('\n')[0]}`
     entry.status = answer.ok ? 'ok' : 'failed'
     // Only the newest call speaks for the bar: an older one finishing late does not.

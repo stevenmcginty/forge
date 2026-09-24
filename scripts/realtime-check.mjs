@@ -601,4 +601,46 @@ await check('an older desktop\'s "does not understand" becomes "update the deskt
   assert.equal(voiceFailureWords({ code: 'failed', message: 'Could not reach Gemini: offline' }), 'Could not reach Gemini: offline')
 })
 
+await check('a browser that navigates itself is told where to go; the desktop is never asked to move', async () => {
+  const { runWebNavTool } = await import('../src/lib/realtime/web-nav.ts')
+  const { answerWebVoiceTool, WEB_VOICE_NOTE } = await import('../src/lib/realtime/web-bridge.ts')
+  const { WEB_VOICE_NAV_ARG } = await import('../shared/web.ts')
+  const ran = []
+  const deps = {
+    runAction: (action) => {
+      ran.push(action)
+      return { ok: true, summary: 'moved the desktop', requested: 1, done: 1 }
+    },
+    actionContext: () => ({
+      projects: [{ id: 'p1', name: 'forge' }, { id: 'p2', name: 'car-harness' }],
+      activeProjectId: 'p1',
+      tabs: [{ id: 't1', title: 'Main' }, { id: 't2', title: 'Docs' }]
+    })
+  }
+  const pane = { paneId: 'a', tabId: 't2', tabNumber: 2, tabTitle: 'Docs', number: 2, title: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', live: true, focused: false, agent: true, lastFocusedAt: 0, callSign: 'Everest' }
+  const rt = { panes: () => [pane], focusedPaneId: () => null, activeProjectId: () => 'p1' }
+  const nav = (name, args) => runWebNavTool(name, args, deps, rt)
+
+  assert.deepEqual(nav('run_app_action', { kind: 'set_view', mode: 'mosaic' }).nav, { view: 'mosaic' })
+  assert.deepEqual(nav('run_app_action', { kind: 'set_view', mode: 'tabs' }).nav, { view: 'tabs' })
+  assert.deepEqual(nav('run_app_action', { kind: 'switch_project', name: 'car harness' }).nav, { projectId: 'p2' })
+  assert.deepEqual(nav('run_app_action', { kind: 'focus_tab', index: 1 }).nav, { projectId: 'p1', tabId: 't2' })
+  assert.deepEqual(nav('focus_pane_by_name', { name: 'Everest' }).nav, { projectId: 'p1', tabId: 't2', paneId: 'a' })
+  assert.deepEqual(nav('focus_pane_by_name', { name: 'the wall' }).nav, { view: 'mosaic' })
+  const miss = nav('run_app_action', { kind: 'focus_tab', index: 5 })
+  assert.equal(miss.ok, false)
+  assert.equal(miss.nav, undefined)
+  assert.equal(nav('focus_pane_by_name', { name: 'the board' }), null, 'the Board stays the desktop’s')
+  assert.equal(nav('run_app_action', { kind: 'open_tabs', profileId: 'claude', count: 1 }), null, 'work still runs on the desktop')
+  assert.equal(ran.length, 0, 'no navigation reached the desktop executor')
+
+  // The arg is the switch: stripped before any tool sees it, and without it the old desktop path runs.
+  const marked = await answerWebVoiceTool('run_app_action', { kind: 'set_view', mode: 'mosaic', [WEB_VOICE_NAV_ARG]: true })
+  assert.deepEqual(marked.nav, { view: 'mosaic' })
+  assert.match(marked.text, /^OK: Showing the Wall in this browser/)
+  const older = await answerWebVoiceTool('run_app_action', { kind: 'set_view', mode: 'mosaic' })
+  assert.equal(older.nav, undefined, 'an older page gets the desktop path, not a directive')
+  assert.match(WEB_VOICE_NOTE, /browser shows, not the desktop/)
+})
+
 console.log(process.exitCode ? `\nrealtime:check FAILED (${passed} passed)` : `\nrealtime:check passed (${passed} checks)`)
