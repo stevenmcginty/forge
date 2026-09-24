@@ -1,6 +1,8 @@
-import type { ReactNode, Ref } from 'react'
+import { useRef, useState, type ReactNode, type Ref } from 'react'
 import { Icon, type IconName } from '@/components/Icon'
+import { AgentChooser } from '../components/AgentChooser'
 import { CommandsButton, SkillsButton } from '../components/Flyouts'
+import { useActiveProject, useForge } from '../state'
 import { AgentsMenu } from './AgentsMenu'
 import { DictationKeySetting } from './DictationKey'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
@@ -14,7 +16,8 @@ import './DeckTopBar.css'
  *
  * Left, the mark; then the two things that decide what the stage shows — the
  * Agents menu (which agent is on screen, every other one a click away, New
- * agent, close) and the Wall switch. Centre, the voice bar (project, D,
+ * agent, close) and the Wall switch — and New, the Agents menu's New agent a
+ * click nearer. Centre, the voice bar (project, D,
  * Type) while it lives up here rather than in the dock. Right, the pane
  * tools (skills, slash commands), the link, and one "…" menu that holds
  * everything else. TopBar
@@ -104,6 +107,7 @@ export function DeckTopBar({
         <span className="dk-bar__rule" aria-hidden="true" />
         <AgentsMenu onView={onView} />
         <WallSwitch view={view} onView={onView} />
+        <NewAgentButton onView={onView} />
       </div>
 
       <div className="dk-bar__centre">{place === 'top' ? <VoiceBar place="top" /> : null}</div>
@@ -178,6 +182,53 @@ function WallSwitch({ view, onView }: { view: DeckView; onView: (view: DeckView)
       <span className="dk-wall__word">Wall</span>
       {on ? <Icon name="close" size={10} className="dk-wall__x" /> : null}
     </button>
+  )
+}
+
+/**
+ * New, beside the Wall: exactly the Agents menu's New agent — the chooser, and
+ * the pick opens as a new tab on the whole stage — without opening the list.
+ * A plus and the word; under 860px the word goes and the label stays.
+ */
+function NewAgentButton({ onView }: { onView: (view: DeckView) => void }): ReactNode {
+  const { state, actions } = useForge()
+  const project = useActiveProject()
+  const live = state.stage.kind === 'connected' && state.connection.state === 'live'
+  const ref = useRef<HTMLButtonElement | null>(null)
+  const [open, setOpen] = useState(false)
+  if (!project) return null
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className="dk-new"
+        data-open={open ? 'true' : undefined}
+        aria-label="New agent"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        disabled={!live}
+        title={live ? 'New agent' : 'New agent — the desktop is not answering, so it cannot open one'}
+        onClick={() => {
+          deckSheet.set(null)
+          setOpen((v) => !v)
+        }}
+      >
+        <Icon name="plus" size={13} />
+        <span className="dk-new__word">New</span>
+      </button>
+      <AgentChooser
+        anchor={ref.current}
+        open={open}
+        onClose={() => setOpen(false)}
+        onPick={(profileId, permissionMode) => {
+          setOpen(false)
+          onView('focus')
+          void actions.layout({ op: 'create-tab', profileId, permissionMode })
+        }}
+        selectedId={project.defaultProfileId}
+      />
+    </>
   )
 }
 

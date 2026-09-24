@@ -77,7 +77,8 @@
 }
 
 /* A pane's terminal is opaque; the pane is a window with small corners. No
-   header row: the top bar (focus) or the tile label (Wall) names it. */
+   header row on the Wall: the tile label names it. Full screen shows a slim
+   one (below) with the call-sign. */
 .app[data-face='deck'] .pane {
   overflow: hidden;
   background: var(--bg-terminal);
@@ -85,6 +86,50 @@
 }
 
 .app[data-face='deck'] .pane__header {
+  display: none;
+}
+
+/*
+ * Full screen: one terminal owns the stage, so it says whose it is — the
+ * desk's call-sign (src/components/hub/PaneName.css) in a slim header. The name
+ * bold and at full contrast whether or not the pane has the keys, on a pill in
+ * the agent's colour with a solid bar before it: a shape, so it reads as a
+ * label even where the colour does not. Hand off stays in the "…" menu.
+ */
+.app[data-face='deck'] .dk-panes[data-view='focus'] .pane__header {
+  display: flex;
+  height: 32px;
+  padding: 0 8px 0 6px;
+  background: var(--bg-terminal);
+  border-bottom: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 14%, var(--line-soft));
+}
+
+.app[data-face='deck'] .dk-panes[data-view='focus'] .pane__title {
+  position: relative;
+  flex: 0 1 auto;
+  padding: 2px 9px 2px 15px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 20px;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 14%, transparent);
+  border-radius: 5px;
+}
+
+.app[data-face='deck'] .dk-panes[data-view='focus'] .pane__title::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--pane-accent, var(--accent));
+}
+
+.app[data-face='deck'] .dk-panes[data-view='focus'] .pane__handoff-btn {
   display: none;
 }
 

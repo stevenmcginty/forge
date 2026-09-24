@@ -24,7 +24,7 @@ import type {
 import { buildRolloverSummary } from '@/lib/realtime/summary'
 import { toolLabel } from '@/lib/toolLabels'
 import { ClaudeVoiceSession } from './claudeVoice'
-import { readVoiceAgent, UPDATE_DESKTOP_WORDS, voiceFailureWords, type WebVoicePhase } from './voice-words'
+import { readVoiceAgent, updateDesktopWords, voiceFailureWords, type WebVoicePhase } from './voice-words'
 
 /**
  * Listen, on the deck face: the desktop's main voice agent, run in this
@@ -352,7 +352,7 @@ function connectFor(provider: WebVoiceOpenAIProvider): OpenAIConnect {
       sdp: req.sdp
     })
     if (res.kind === 'voice-connect') return { ok: true, sdp: res.sdp, expiresAt: res.expiresAt }
-    if (res.kind === 'failed') return { ok: false, error: voiceFailureWords(res) }
+    if (res.kind === 'failed') return { ok: false, error: voiceFailureWords(res, provider) }
     return { ok: false, error: 'The desktop answered with something this page does not understand.' }
   }
 }
@@ -410,13 +410,13 @@ async function open(carryover: string | null): Promise<void> {
     set({
       phase: 'error',
       error:
-        res.kind === 'failed' ? voiceFailureWords(res) : 'The desktop answered with something this page does not understand.'
+        res.kind === 'failed' ? voiceFailureWords(res, agent) : 'The desktop answered with something this page does not understand.'
     })
     return
   }
   // A desktop that built another agent's setup predates this one's.
   if (res.setup.provider !== agent) {
-    set({ phase: 'error', error: UPDATE_DESKTOP_WORDS })
+    set({ phase: 'error', error: updateDesktopWords(agent) })
     return
   }
   setup = res.setup
@@ -443,7 +443,7 @@ async function open(carryover: string | null): Promise<void> {
     }
   })
   if (!live) {
-    set({ phase: 'error', error: UPDATE_DESKTOP_WORDS })
+    set({ phase: 'error', error: updateDesktopWords(agent) })
     return
   }
   session = live

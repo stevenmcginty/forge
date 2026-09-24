@@ -228,7 +228,7 @@ export class ClaudeVoiceSession {
     if (res.kind !== 'ok') {
       this.release()
       throw new Error(
-        res.kind === 'failed' ? voiceFailureWords(res) : 'The desktop answered with something this page does not understand.'
+        res.kind === 'failed' ? voiceFailureWords(res, 'claude') : 'The desktop answered with something this page does not understand.'
       )
     }
     this.opened = true
@@ -412,7 +412,7 @@ export class ClaudeVoiceSession {
     if (this.stopped) return ''
     const refused = sent.find((r) => r.kind === 'failed')
     if (refused) {
-      this.fail(voiceFailureWords(refused))
+      this.fail(voiceFailureWords(refused, 'claude'))
       return ''
     }
     const res = await this.ask({ kind: 'voice-claude', op: 'done', turnId: turn.id, chunks: turn.seq })
@@ -448,7 +448,7 @@ export class ClaudeVoiceSession {
     this.saying = sent
     const res = await sent
     if (this.stopped) return
-    if (res.kind === 'failed') this.fail(voiceFailureWords(res))
+    if (res.kind === 'failed') this.fail(voiceFailureWords(res, 'claude'))
   }
 
   private async pollEvents(): Promise<void> {
@@ -457,7 +457,7 @@ export class ClaudeVoiceSession {
       if (this.stopped) return
       if (res.kind !== 'voice-claude-events') {
         this.fail(
-          res.kind === 'failed' ? `Lost Claude on the desktop: ${voiceFailureWords(res)}` : 'The desktop answered with something this page does not understand.'
+          res.kind === 'failed' ? `Lost Claude on the desktop: ${voiceFailureWords(res, 'claude')}` : 'The desktop answered with something this page does not understand.'
         )
         return
       }

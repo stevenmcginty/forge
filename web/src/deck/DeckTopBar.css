@@ -3,7 +3,7 @@
  * one 40px row on the backdrop, no slab. Its own file on purpose, so the whole
  * bar can be replaced without touching the rest of the face.
  *
- * Three grid columns: what the stage shows on the left (mark, Agents, Wall),
+ * Three grid columns: what the stage shows on the left (mark, Agents, Wall, New),
  * the voice bar in the middle of whatever room is left, the pane tools, the
  * link and "…" on the right. The middle column takes the slack, so nothing
  * runs into anything as the window narrows; the responsive rules at the foot
@@ -382,6 +382,53 @@
 .app[data-face='deck'] .dk-wall__x {
   margin-left: 1px;
   opacity: 0.8;
+}
+
+/* ------------------------------------------------------------------- new */
+
+/* New, beside the Wall and cut from the same cloth, so the pair reads as the
+   stage's two verbs. 30px drawn; the ::after takes the target to 44px tall
+   without reaching into the Wall beside it. */
+.app[data-face='deck'] .dk-new {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  min-width: 36px;
+  height: 30px;
+  padding: 0 12px 0 9px;
+  border-radius: 9px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  border: 1px solid var(--glass-line);
+  background: transparent;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-new::after {
+  content: '';
+  position: absolute;
+  inset: -7px -3px;
+}
+
+.app[data-face='deck'] .dk-new:hover:not(:disabled),
+.app[data-face='deck'] .dk-new[data-open='true'] {
+  color: var(--text-primary);
+  border-color: var(--glass-line-strong);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.app[data-face='deck'] .dk-new:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* ------------------------------------------------------------------ link */
@@ -994,8 +1041,15 @@
 }
 
 @media (max-width: 860px) {
-  .app[data-face='deck'] .dk-tools {
+  .app[data-face='deck'] .dk-tools,
+  .app[data-face='deck'] .dk-new__word {
     display: none;
+  }
+
+  /* The plus alone, still 44px across with its ::after. */
+  .app[data-face='deck'] .dk-new {
+    width: 38px;
+    padding: 0;
   }
 
   .app[data-face='deck'] .dk-bar .dk-project {

@@ -10,6 +10,15 @@ export type WebVoicePhase = 'off' | 'connecting' | 'listening' | 'thinking' | 's
 /** What an older desktop is told to do: it answers the voice requests `unsupported`. */
 export const UPDATE_DESKTOP_WORDS = 'Update the desktop app to use voice here'
 
+/**
+ * The same, naming the agent the desktop is too old for: a desktop from before
+ * ChatGPT and Claude runs Gemini alone, so "use voice here" would read as if
+ * no voice worked. Gemini keeps the plain sentence.
+ */
+export function updateDesktopWords(agent?: WebVoiceProvider): string {
+  return agent && agent !== 'gemini-live' ? `Update the desktop app to use ${voiceAgentWord(agent)} here` : UPDATE_DESKTOP_WORDS
+}
+
 export const NO_KEY_WORDS = 'No Gemini key on the desktop — add one in its Settings → Models & APIs'
 
 export const NO_OPENAI_KEY_WORDS = 'Add an OpenAI key in Settings on the desktop'
@@ -18,13 +27,14 @@ export const NO_OPENAI_KEY_WORDS = 'Add an OpenAI key in Settings on the desktop
  * A failed voice request, in the sentence to show. An older desktop answers
  * `unsupported` with "This desktop does not understand a "voice-setup"
  * request." (or, for any agent but Gemini, "can only run Gemini Live") —
- * which means one thing to Steve: update the desktop app. A current desktop
- * says an agent it cannot run *yet* in so many words, and that is shown as is.
+ * which means one thing to Steve: update the desktop app, for the agent he
+ * picked. A current desktop says an agent it cannot run *yet* in so many
+ * words, and that is shown as is.
  */
-export function voiceFailureWords(failure: { code?: string; message?: string }): string {
+export function voiceFailureWords(failure: { code?: string; message?: string }, agent?: WebVoiceProvider): string {
   const message = failure.message ?? ''
   if (failure.code === 'unsupported' && /not yet/i.test(message)) return message
-  if (failure.code === 'unsupported' || /does not understand/i.test(message)) return UPDATE_DESKTOP_WORDS
+  if (failure.code === 'unsupported' || /does not understand/i.test(message)) return updateDesktopWords(agent)
   if (/no gemini key/i.test(message)) return NO_KEY_WORDS
   if (/no openai key/i.test(message)) return NO_OPENAI_KEY_WORDS
   return message || 'The desktop could not start the voice agent.'
