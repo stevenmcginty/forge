@@ -37,7 +37,7 @@ export function useDeckView(): [DeckView, (view: DeckView) => void] {
 }
 
 /**
- * Where the voice bar lives — the project, Listen, D and the words. Per browser,
+ * Where the voice bar lives — the project, D and the words. Per browser,
  * like the theme.
  *
  *   top     in the top bar; the words float over the foot of the stage, and

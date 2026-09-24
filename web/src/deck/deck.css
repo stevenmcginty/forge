@@ -335,7 +335,7 @@
 /* --------------------------------------------------------------- the bar
  *
  * Dock.css's `.dock__composer` glass and rim, laid out as hub/Composer.css
- * lays the deck's bar: one row — project, Listen, the words, attach, send.
+ * lays the deck's bar: one row — project, D, the words, attach, send.
  * The picks (model, effort, mode) and the terminal keys fold into a row above
  * it that opens while you are in the bar, so at rest the dock is one line.
  */
@@ -386,7 +386,7 @@
     inset 0 1px 0 var(--glass-hi);
 }
 
-/* Listening: the rim lights and says so — the word is on the switch. */
+/* Listening: the rim lights. */
 .app[data-face='deck'] .dk-composer .composer[data-voice='recording'] .composer__card {
   border-color: var(--accent-line);
   box-shadow:
@@ -562,8 +562,7 @@
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
-.app[data-face='deck'] .dk-project:focus-visible,
-.app[data-face='deck'] .listen__btn:focus-visible {
+.app[data-face='deck'] .dk-project:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -594,11 +593,6 @@
 
 .app[data-face='deck'] .dk-project[data-open='true'] .dk-project__chev {
   transform: rotate(0deg);
-}
-
-.app[data-face='deck'] .dk-listen .listen__btn:disabled {
-  cursor: default;
-  opacity: 0.55;
 }
 
 /* No composer to show (no project, no tab, GitHub mode): the bar, idle. */
@@ -1005,8 +999,8 @@
 
 /* ------------------------------------------------ a narrow desktop window
  *
- * Under 640px (lib/narrow.ts) with a mouse: the scene tightens, the bar takes
- * the width, and the Listen switch keeps its shape and loses its words.
+ * Under 640px (lib/narrow.ts) with a mouse: the scene tightens and the bar
+ * takes the width.
  */
 @media (max-width: 640px) {
   .app[data-face='deck'] {
@@ -1015,10 +1009,6 @@
 
   .app[data-face='deck'] .dk-dock {
     max-width: calc(100vw - 16px);
-  }
-
-  .app[data-face='deck'] .dk-composer .listen__text {
-    display: none;
   }
 
   .app[data-face='deck'] .dk-project {

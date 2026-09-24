@@ -210,8 +210,8 @@ export function Composer({
   onShowChat?: () => void
   /**
    * The desktop-browser face's bar (web/src/deck): what leads the box — the
-   * project pill and the Listen switch — drawn first in the card. With `bar`,
-   * Listen stands in for the mic, so the picks row carries no mic of its own.
+   * project pill and D — drawn first in the card. With `bar`, D is the
+   * dictation, so the picks row carries no mic of its own.
    */
   lead?: ReactNode
   bar?: boolean

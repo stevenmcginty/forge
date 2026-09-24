@@ -40,7 +40,6 @@ import { AgentStatus } from './AgentStatus'
 import { AnswerCard } from './AnswerCard'
 import { BACK_TAB, Composer, type VoiceControls } from './Composer'
 import { ModelChip } from './ModelChip'
-import { ListenSwitch } from '../deck/ListenSwitch'
 
 /**
  * The one text box for this browser, with the agent's status strip over it.
@@ -107,8 +106,8 @@ export function SessionComposer({
 }: {
   /**
    * The desktop-browser face (web/src/deck): the box becomes the deck's one-row
-   * bar, led by `lead` (the project pill) and the Listen switch. Absent: the
-   * phone, exactly as before.
+   * bar, led by `lead` (the voice bar group). Absent: the phone, exactly as
+   * before.
    */
   face?: 'deck'
   lead?: ReactNode
@@ -162,19 +161,6 @@ export function SessionComposer({
     voiceRef.current = next
     setVoiceState(next)
   }, [])
-  /**
-   * Why the last dictation came to nothing, kept until the next one starts, so
-   * the deck's Listen switch can say "failed" and "Why?". The notice is raised
-   * exactly as before; this only remembers its words.
-   */
-  const [voiceFault, setVoiceFault] = useState<string | null>(null)
-  const voiceFailed = useCallback(
-    (message: string) => {
-      setVoiceFault(message)
-      actions.setNotice(message)
-    },
-    [actions]
-  )
   const recording = useRef<Recording | null>(null)
   /** The recording's loudness, for the meter, the silence check and auto-stop. */
   const levelRef = useRef<LevelMonitor | null>(null)
@@ -495,11 +481,11 @@ export function SessionComposer({
       monitor?.close()
       if (!stillMine()) return
       if (audio.size === 0) {
-        voiceFailed('Nothing was recorded.')
+        actions.setNotice('Nothing was recorded.')
         return
       }
       if (silent) {
-        voiceFailed('I heard nothing — check the mic (is it on Bluetooth?)')
+        actions.setNotice('I heard nothing — check the mic (is it on Bluetooth?)')
         return
       }
       const text = await Promise.race([
@@ -510,7 +496,7 @@ export function SessionComposer({
       ])
       if (!stillMine()) return
       if (!text) {
-        voiceFailed('The desktop heard nothing in that.')
+        actions.setNotice('The desktop heard nothing in that.')
         return
       }
       const now = latest.current
@@ -526,11 +512,11 @@ export function SessionComposer({
       reviewing = true
       startReview(pane, words)
     } catch (err) {
-      if (stillMine()) voiceFailed(err instanceof Error ? err.message : 'Dictation failed.')
+      if (stillMine()) actions.setNotice(err instanceof Error ? err.message : 'Dictation failed.')
     } finally {
       if (stillMine() && !reviewing) setVoice(IDLE)
     }
-  }, [actions, runVoiceCommand, setDraftFor, setVoice, startReview, voiceFailed])
+  }, [actions, runVoiceCommand, setDraftFor, setVoice, startReview])
   const finishVoiceRef = useRef(finishVoice)
   finishVoiceRef.current = finishVoice
 
@@ -543,7 +529,6 @@ export function SessionComposer({
     if (voiceRef.current.phase === 'transcribing') return
     // Dictating over a review keeps its words: the new ones join them.
     if (voiceRef.current.phase === 'review') endReview()
-    setVoiceFault(null)
     holdRef.current = false
     pendingEnd.current = null
     starting.current = true
@@ -577,9 +562,9 @@ export function SessionComposer({
     } catch (err) {
       starting.current = false
       pendingEnd.current = null
-      voiceFailed(err instanceof Error ? err.message : 'Could not open the microphone.')
+      actions.setNotice(err instanceof Error ? err.message : 'Could not open the microphone.')
     }
-  }, [actions, endReview, setVoice, voiceFailed])
+  }, [actions, endReview, setVoice])
 
   /** The press became a hold, or a hold fell back to a tap. */
   const setVoiceMode = useCallback(
@@ -619,7 +604,6 @@ export function SessionComposer({
       window.clearTimeout(reviewTimer.current)
       voiceRun.current++
       setVoice(IDLE)
-      setVoiceFault(null)
     }
   }, [paneId, dropLevel, setVoice])
 
@@ -930,14 +914,7 @@ export function SessionComposer({
         voiceLevel={voiceLevel}
         onShowChat={isAgent && activeView === 'term' ? onFlipView : undefined}
         bar={face === 'deck'}
-        lead={
-          face === 'deck' ? (
-            <>
-              {lead}
-              <ListenSwitch state={voice} controls={voiceControls} fault={voiceFault} disabled={!canType} />
-            </>
-          ) : undefined
-        }
+        lead={face === 'deck' ? lead : undefined}
       />
     </div>
   )

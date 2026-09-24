@@ -11,7 +11,6 @@
  *     src/components/shell/deck-tokens.css   fonts, springs, geometry, glass
  *     src/components/shell/deck.css          pane / split / tab / empty chrome under `.deck`
  *     src/theme/themes.ts                    the six themes (./theme.ts)
- *     src/components/hub/VoicePill.css       the Listen switch (./ListenSwitch.tsx)
  *     src/lib/mosaicLayout.ts columnsFor     the Wall's grid (DeckStage below)
  *     src/lib/motion.ts usePresence          sheet enter/exit (./sheet.tsx)
  *
@@ -44,7 +43,7 @@ import { PaneView } from '../components/PaneView'
 import { SessionComposer } from '../components/SessionComposer'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStateChip, bringForward, type DeckAgent } from './agents'
-import { composerField, composerOpen, listenPhase } from './composer'
+import { composerField, composerOpen } from './composer'
 import { useRawDictation } from './dictation'
 import type { BarPlace, DeckView } from './view'
 import { ProjectsSheet, VoiceBar } from './VoiceBar'
@@ -235,9 +234,9 @@ function TileLabel({
  *           dictation is filling them, or while they hold unsent words. Send,
  *           or Esc on an empty box, puts it away; so does a click elsewhere
  *           while it is empty. Hidden, it stays mounted — SessionComposer owns
- *           the drafts and Listen's recording, and both must outlive a hide.
+ *           the drafts, and they must outlive a hide.
  */
-export function DeckDock({ place, onPlace }: { place: BarPlace; onPlace: (place: BarPlace) => void }): ReactNode {
+export function DeckDock({ place }: { place: BarPlace }): ReactNode {
   const { state } = useForge()
   const project = useActiveProject()
   const workspace = useWorkspace()
@@ -251,10 +250,10 @@ export function DeckDock({ place, onPlace }: { place: BarPlace; onPlace: (place:
   return (
     <div className="dk-dock dk-composer" role="toolbar" aria-label="Dock">
       {composing ? (
-        <SessionComposer face="deck" lead={<VoiceBar place="bottom" onPlace={onPlace} />} />
+        <SessionComposer face="deck" lead={<VoiceBar place="bottom" />} />
       ) : (
         <div className="dk-bar-idle">
-          <VoiceBar place="bottom" onPlace={onPlace} />
+          <VoiceBar place="bottom" />
           <span className="dk-bar-idle__words">
             {!project ? 'Pick a project to start' : githubMode ? 'The desktop is asleep' : 'No terminals open here yet'}
           </span>
@@ -270,7 +269,6 @@ const SENT_GRACE_MS = 8000
 
 function FloatingComposer(): ReactNode {
   const open = composerOpen.use()
-  const listening = listenPhase.use()
   const raw = useRawDictation()
   const [hasDraft, setHasDraft] = useState(false)
   const sentAt = useRef(0)
@@ -293,8 +291,8 @@ function FloatingComposer(): ReactNode {
     return () => window.clearInterval(timer)
   }, [])
 
-  const busy = listening !== 'idle' || raw !== 'idle'
-  const shown = open || hasDraft || listening !== 'idle'
+  const busy = raw !== 'idle'
+  const shown = open || hasDraft
 
   // A click elsewhere puts an empty, idle box away — not one holding words.
   useEffect(() => {

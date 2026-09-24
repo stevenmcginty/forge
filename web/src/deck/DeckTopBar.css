@@ -434,9 +434,8 @@
 
 /* ------------------------------------------------------------- voice bar
  *
- * The project, Listen, D and Type as one object — a glass capsule in the top
- * bar, a run of controls leading the dock. The grip at its left drags it
- * between the two.
+ * The project, D and Type as one object — a glass capsule in the top bar, a
+ * run of controls leading the dock.
  */
 
 .app[data-face='deck'] .dk-voicebar {
@@ -445,7 +444,6 @@
   gap: 4px;
   flex: none;
   min-width: 0;
-  transition: transform var(--dur-glide) var(--spring-glide);
 }
 
 .app[data-face='deck'] .dk-bar .dk-voicebar {
@@ -459,61 +457,13 @@
   box-shadow: 0 8px 24px -14px rgba(0, 0, 0, 0.6), inset 0 1px 0 var(--glass-hi);
 }
 
-.app[data-face='deck'] .dk-voicebar[data-dragging='true'] {
-  position: relative;
-  padding: 2px 4px 2px 2px;
-  border-radius: 12px;
-  background: var(--sheet-bg);
-  z-index: calc(var(--z-sheet) + 2);
-  transform: translate3d(0, var(--dk-drag-y, 0px), 0) scale(1.02);
-  transition: none;
-  box-shadow:
-    0 24px 60px -18px rgba(0, 0, 0, 0.8),
-    0 0 0 2px var(--accent-line);
-}
-
-.app[data-face='deck'] .dk-bar:has(.dk-voicebar[data-dragging='true']),
-.app[data-face='deck'] .dk-dock:has(.dk-voicebar[data-dragging='true']) {
-  z-index: calc(var(--z-sheet) + 3);
-}
-
-.app[data-face='deck'] .dk-voicebar__grip {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 14px;
-  height: 24px;
-  border-radius: 6px;
-  color: var(--text-dim);
-  cursor: grab;
-  touch-action: none;
-}
-
-.app[data-face='deck'] .dk-voicebar__grip:hover {
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
-}
-
-.app[data-face='deck'] .dk-voicebar[data-dragging='true'] .dk-voicebar__grip {
-  cursor: grabbing;
-  color: var(--accent);
-}
-
 .app[data-face='deck'] .dk-voicebar__project {
   position: relative;
   display: inline-flex;
   min-width: 0;
 }
 
-.app[data-face='deck'] .dk-voicebar__listen {
-  display: inline-flex;
-}
-
-.app[data-face='deck'] .dk-voicebar__listen:empty {
-  display: none;
-}
-
-/* Up here the project pill and Listen are the capsule's own height. */
+/* Up here the project pill is the capsule's own height. */
 .app[data-face='deck'] .dk-bar .dk-project {
   height: 26px;
   max-width: 170px;
@@ -528,34 +478,9 @@
   transform: rotate(180deg);
 }
 
-.app[data-face='deck'] .dk-bar .listen__btn {
-  height: 26px;
-  padding: 0 10px 0 4px;
-  gap: 7px;
-}
-
-.app[data-face='deck'] .dk-bar .listen__track {
-  transform: scale(0.85);
-  margin: 0 -2px;
-}
-
-.app[data-face='deck'] .dk-bar .listen__text {
-  flex-direction: row;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.app[data-face='deck'] .dk-bar .listen__word {
-  font-size: 12px;
-}
-
-.app[data-face='deck'] .dk-bar .listen__why {
-  height: 22px;
-}
-
 /* ------------------------------------------------------------------- D
  *
- * Raw dictation. Its own tint (the theme's info blue-violet, not Listen's
+ * Raw dictation. Its own tint (the theme's info blue-violet, not the
  * accent), and its state in the shape: the letter at rest, a stop square and
  * "Listening" while the mic is open, a turning arc and "…" while the desktop
  * writes it down.
@@ -582,7 +507,7 @@
     padding var(--dur-glide) var(--spring-glide);
 }
 
-/* In the dock, D stands as tall as the pill and Listen beside it. */
+/* In the dock, D stands as tall as the pill. */
 .app[data-face='deck'] .dk-dock .dk-dictate {
   min-width: 34px;
   height: 34px;
@@ -643,58 +568,6 @@
       0 0 0 5px color-mix(in srgb, var(--d) 12%, transparent),
       0 0 22px -4px var(--d);
   }
-}
-
-/* ------------------------------------------------------------- drop zone
- *
- * While the voice bar is dragged: the edge it can go to, as a dashed band with
- * the words. Solid and lit when letting go would move it.
- */
-
-.app[data-face='deck'] .dk-dropzone {
-  position: fixed;
-  left: 50%;
-  z-index: calc(var(--z-sheet) + 1);
-  display: grid;
-  place-items: center;
-  width: min(720px, calc(100vw - 32px));
-  height: 64px;
-  border: 1.5px dashed var(--glass-line-strong);
-  border-radius: 18px;
-  background: color-mix(in srgb, var(--bg-base) 70%, transparent);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  transform: translateX(-50%);
-  pointer-events: none;
-  animation: dk-sheet-in var(--dur-pop) var(--spring-pop) both;
-}
-
-.app[data-face='deck'] .dk-dropzone[data-edge='bottom'] {
-  bottom: 12px;
-}
-
-.app[data-face='deck'] .dk-dropzone[data-edge='top'] {
-  top: 6px;
-  height: 48px;
-}
-
-.app[data-face='deck'] .dk-dropzone[data-over='true'] {
-  border-style: solid;
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--bg-base));
-  box-shadow: 0 0 0 4px var(--accent-softer);
-}
-
-.app[data-face='deck'] .dk-dropzone__words {
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--text-secondary);
-}
-
-.app[data-face='deck'] .dk-dropzone[data-over='true'] .dk-dropzone__words {
-  color: var(--text-primary);
 }
 
 /* ------------------------------------------------------------- the … menu */
@@ -929,8 +802,7 @@
   .app[data-face='deck'] .dk-sglyph[data-state='working'],
   .app[data-face='deck'] .dk-dictate__spin,
   .app[data-face='deck'] .dk-dictate[data-phase='recording'],
-  .app[data-face='deck'] .dk-agents__ask,
-  .app[data-face='deck'] .dk-dropzone {
+  .app[data-face='deck'] .dk-agents__ask {
     animation: none;
   }
 }
@@ -944,7 +816,6 @@
 }
 
 @media (max-width: 1240px) {
-  .app[data-face='deck'] .dk-bar .listen__brain,
   .app[data-face='deck'] .dk-agents__count {
     display: none;
   }
@@ -971,8 +842,7 @@
 }
 
 @media (max-width: 860px) {
-  .app[data-face='deck'] .dk-tools,
-  .app[data-face='deck'] .dk-bar .listen__text {
+  .app[data-face='deck'] .dk-tools {
     display: none;
   }
 

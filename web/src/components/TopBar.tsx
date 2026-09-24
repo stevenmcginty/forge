@@ -345,7 +345,6 @@ export function TopBar({
           view={deck.view}
           onView={deck.onView}
           place={deck.place}
-          onPlace={deck.onPlace}
           rows={deckRows}
           menuRef={deckMenuRef}
           themeId={deck.themeId}

@@ -1,91 +1,27 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
 import { Rail } from '../components/Rail'
 import { useActiveProject, useForge } from '../state'
 import { useDeckAgents } from './agents'
-import { composerField, composerOpen, focusedField, listenHost, openComposer } from './composer'
+import { composerField, composerOpen, focusedField, openComposer } from './composer'
 import { cancelRawDictation, rawDictationSupported, toggleRawDictation, useRawDictation, type RawTarget } from './dictation'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
 import type { BarPlace, DeckView } from './view'
 
 /**
- * The voice bar: the project you are in, Listen, D — and, in the top bar,
- * Type. One group, drawn in the top bar (the default) or leading the dock at
- * the bottom edge; its grip drags it from one to the other, and the "…" menu
- * says where it is in a word and moves it too.
+ * The voice bar: the project you are in, D — and, in the top bar, Type. One
+ * group, drawn in the top bar or leading the dock at the bottom edge (the
+ * default); the "…" menu says where it is in a word and moves it.
  */
-export function VoiceBar({ place, onPlace }: { place: BarPlace; onPlace: (place: BarPlace) => void }): ReactNode {
-  const [drag, setDrag] = useState<{ dy: number; over: boolean } | null>(null)
-  const startY = useRef(0)
-  const other: BarPlace = place === 'top' ? 'bottom' : 'top'
-
-  const onDown = (e: ReactPointerEvent<HTMLSpanElement>): void => {
-    if (e.button !== 0) return
-    e.preventDefault()
-    e.currentTarget.setPointerCapture(e.pointerId)
-    startY.current = e.clientY
-    setDrag({ dy: 0, over: false })
-  }
-  const onMove = (e: ReactPointerEvent<HTMLSpanElement>): void => {
-    if (!drag) return
-    const over = place === 'top' ? e.clientY > window.innerHeight - 150 : e.clientY < 120
-    setDrag({ dy: e.clientY - startY.current, over })
-  }
-  const onUp = (): void => {
-    if (drag?.over) onPlace(other)
-    setDrag(null)
-  }
-
-  const host = typeof document === 'undefined' ? null : document.querySelector('.app[data-face="deck"]')
-
+export function VoiceBar({ place }: { place: BarPlace }): ReactNode {
   return (
-    <div
-      className="dk-voicebar"
-      data-voicebar="true"
-      data-place={place}
-      data-dragging={drag ? 'true' : undefined}
-      style={drag ? ({ '--dk-drag-y': `${drag.dy}px` } as CSSProperties) : undefined}
-    >
-      <span
-        className="dk-voicebar__grip"
-        role="button"
-        tabIndex={-1}
-        aria-label={`Voice bar grip — drag it to the ${other} edge`}
-        title={`Drag to the ${other === 'bottom' ? 'bottom edge to dock the bar there' : 'top bar to put the bar back up there'}`}
-        onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerCancel={() => setDrag(null)}
-      >
-        <svg width="6" height="14" viewBox="0 0 6 14" aria-hidden="true">
-          {[2, 7, 12].map((y) => (
-            <g key={y}>
-              <circle cx="1.3" cy={y} r="1.1" fill="currentColor" />
-              <circle cx="4.7" cy={y} r="1.1" fill="currentColor" />
-            </g>
-          ))}
-        </svg>
-      </span>
-
+    <div className="dk-voicebar" data-voicebar="true" data-place={place}>
       <span className="dk-voicebar__project">
         <ProjectPill place={place} />
         {place === 'top' ? <ProjectsSheet /> : null}
       </span>
-      <span className="dk-voicebar__listen" ref={(el) => listenHost.set(el)} />
       <DictateButton />
       {place === 'top' ? <TypeButton /> : null}
-
-      {drag && host
-        ? createPortal(
-            <div className="dk-dropzone" data-edge={other} data-over={drag.over ? 'true' : undefined} aria-hidden="true">
-              <span className="dk-dropzone__words">
-                {drag.over ? 'Let go' : 'Drop here'} — the voice bar goes to the {other === 'bottom' ? 'bottom edge' : 'top bar'}
-              </span>
-            </div>,
-            host
-          )
-        : null}
     </div>
   )
 }
@@ -165,7 +101,7 @@ export const D_SHORTCUT = 'Right Ctrl'
 
 /**
  * D: dictation, raw — the words are typed where the caret is (or into the
- * composer), never sent. Its own tint, apart from Listen's accent, and every
+ * composer), never sent. Its own tint, apart from the accent, and every
  * state in a shape and a word: the letter at rest, a stop square and
  * "Listening" while the microphone is open, a turning arc and "…" while the
  * desktop writes it down.

@@ -4,14 +4,14 @@
  *   node scripts/web-deck-check.mjs
  *
  * The desktop-browser face (web/src/deck) imports what it safely can from the
- * redesigned desktop — the tokens, the pane chrome, the themes, the Listen
- * switch's stylesheet — and redraws the rest from the deck's own numbers. The
- * desktop redesign is still moving, so this fails the moment the two part:
+ * redesigned desktop — the tokens, the pane chrome, the themes — and redraws
+ * the rest from the deck's own numbers. The desktop redesign is still moving,
+ * so this fails the moment the two part:
  *
  *   1. every `var(--x)` the web deck CSS reads is still defined somewhere it
  *      can come from (the deck tokens, the design tokens, or the web deck CSS);
  *   2. every class and state the web deck draws on an imported deck stylesheet
- *      still has a rule there (the Listen switch, the pane chrome);
+ *      still has a rule there (the pane chrome);
  *   3. every value restated from a deck file still equals the deck's own;
  *   4. the Calm backdrop and the StateChip shapes still match their sources.
  *
@@ -89,7 +89,6 @@ const SRC = {
   dock: read('src/components/shell/Dock.css'),
   shell: read('src/components/shell/Shell.css'),
   comp: read('src/components/hub/Composer.css'),
-  voice: read('src/components/hub/VoicePill.css'),
   backdrop: read('src/components/shell/Backdrop.tsx'),
   stateChip: read('src/components/shell/StateChip.tsx'),
   mosaic: read('src/lib/mosaicLayout.ts')
@@ -112,43 +111,6 @@ const missing = [...used].filter((name) => !defined.has(name))
 log(missing.length === 0, `every token the web deck reads is defined (${used.size} read)${missing.length ? `: missing ${missing.join(', ')}` : ''}`)
 
 /* -------------------------------------------- 2. imported sheets still style us */
-
-const voiceClasses = [
-  '.listen',
-  '.listen__btn',
-  '.listen__track',
-  '.listen__knob',
-  '.listen__text',
-  '.listen__brain',
-  '.listen__word',
-  '.listen__word-text',
-  '.listen__why',
-  '.vcard',
-  '.vcard__head',
-  '.vcard__eyebrow',
-  '.vcard__brain',
-  '.vcard__state',
-  '.vcard__glyph',
-  '.vcard__raw',
-  '.vcard__row',
-  '.vcard__btn'
-]
-const voiceText = stripComments(SRC.voice)
-const lostVoice = voiceClasses.filter((c) => !new RegExp(`${c.replace('.', '\\.')}(?![a-z0-9_-])`).test(voiceText))
-log(lostVoice.length === 0, `VoicePill.css still styles every class the Listen switch draws${lostVoice.length ? `: lost ${lostVoice.join(', ')}` : ''}`)
-
-const states = [
-  `[data-on='true']`,
-  `[data-look='error']`,
-  `[data-look='muted']`,
-  `[data-recording='true']`,
-  `[data-mark='listening']`,
-  `[data-mark='thinking']`,
-  `[data-mark='idle']`,
-  `[data-mark='error']`
-]
-const lostStates = states.filter((s) => !voiceText.includes(`.listen${s}`))
-log(lostStates.length === 0, `and every state it sets has a look there${lostStates.length ? `: lost ${lostStates.join(', ')}` : ''}`)
 
 const deckSelectors = [
   '.deck .pane',

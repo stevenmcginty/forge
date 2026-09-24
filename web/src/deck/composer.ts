@@ -1,12 +1,11 @@
 import { useSyncExternalStore } from 'react'
 
 /*
- * The deck face's little shared stores for the voice bar: whether the floating
- * composer has been asked for, where the Listen switch draws itself, and what
- * Listen is doing. Module-level, like ./sheet.tsx, because the triggers (the
- * top bar, the D button, the keyboard) and the composer live in different
- * components — and the composer itself (SessionComposer) is shared with the
- * phone and not the deck's to change.
+ * The deck face's little shared store for the voice bar: whether the floating
+ * composer has been asked for. Module-level, like ./sheet.tsx, because the
+ * triggers (the top bar, the D button, the keyboard) and the composer live in
+ * different components — and the composer itself (SessionComposer) is shared
+ * with the phone and not the deck's to change.
  */
 
 function store<T>(initial: T): {
@@ -34,17 +33,6 @@ function store<T>(initial: T): {
 
 /** The floating composer, asked for (a shortcut, Type, or the D button's words). */
 export const composerOpen = store(false)
-
-/**
- * Where the Listen switch draws itself — a span in the voice bar group, in
- * the top bar or the dock. SessionComposer renders the switch (it owns the
- * recording); ./ListenSwitch.tsx portals it here, so it keeps its state and
- * its place in the React tree while it sits somewhere else on screen.
- */
-export const listenHost = store<HTMLElement | null>(null)
-
-/** Listen's phase, published by the switch: a dictation in flight keeps the composer up. */
-export const listenPhase = store<'idle' | 'recording' | 'transcribing' | 'review'>('idle')
 
 /** The composer's text box, in whichever place the bar is. */
 export function composerField(): HTMLTextAreaElement | null {

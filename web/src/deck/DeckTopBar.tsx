@@ -13,8 +13,8 @@ import './DeckTopBar.css'
  *
  * Left, the mark; then the two things that decide what the stage shows — the
  * Agents menu (which agent is on screen, every other one a click away, New
- * agent, close) and the Wall switch. Centre, the voice bar (project, Listen,
- * D, Type) while it lives up here rather than in the dock. Right, the pane
+ * agent, close) and the Wall switch. Centre, the voice bar (project, D,
+ * Type) while it lives up here rather than in the dock. Right, the pane
  * tools (skills, slash commands), the link, and one "…" menu that holds
  * everything else. TopBar
  * supplies the menu's rows — Foreman, hand off, the screen, notifications,
@@ -76,7 +76,6 @@ export function DeckTopBar({
   view,
   onView,
   place,
-  onPlace,
   rows,
   menuRef,
   themeId,
@@ -86,7 +85,6 @@ export function DeckTopBar({
   view: DeckView
   onView: (view: DeckView) => void
   place: BarPlace
-  onPlace: (place: BarPlace) => void
   rows: DeckMenuRow[]
   menuRef?: Ref<HTMLButtonElement>
   themeId: string
@@ -107,7 +105,7 @@ export function DeckTopBar({
         <WallSwitch view={view} onView={onView} />
       </div>
 
-      <div className="dk-bar__centre">{place === 'top' ? <VoiceBar place="top" onPlace={onPlace} /> : null}</div>
+      <div className="dk-bar__centre">{place === 'top' ? <VoiceBar place="top" /> : null}</div>
 
       <div className="dk-bar__right">
         <span className="dk-tools" role="group" aria-label="Pane tools">

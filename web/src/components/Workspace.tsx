@@ -331,7 +331,7 @@ export function Workspace(): ReactNode {
       </div>
       )}
 
-      {deck ? <DeckDock place={barPlace} onPlace={setBarPlace} /> : null}
+      {deck ? <DeckDock place={barPlace} /> : null}
       {deck ? <DeckKeys view={deckView} onView={setDeckView} place={barPlace} /> : null}
 
       {mobile && gridShown ? null : notice}
