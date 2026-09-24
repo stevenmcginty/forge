@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useKeymap } from '@/hooks/useHub'
-import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { HUB_CHEAT_SHEET_EVENT } from '@/lib/hubnav'
 import { shellSheet, toolsHost, useShellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { setVoiceBarPlace, useVoiceBarPlace } from '@/lib/voiceBarPlace'
-import { useActiveProject, useApp, usePaneCount, useViewMode } from '@/state/AppState'
+import { useActiveProject, useApp, useViewMode } from '@/state/AppState'
 import { AccountChip } from './AccountChip'
 import { CommandKeys } from './hub/KeyRecorder'
 import { Icon } from './Icon'
 import { ScreenshotTray } from './ScreenshotTray'
-import type { NewTabDetail } from './TerminalGrid'
 import { AgentsMenu } from './shell/AgentsMenu'
 import { Dock } from './shell/Dock'
 import { toggleSheet } from './shell/Sheet'
@@ -149,26 +147,11 @@ function ModePill(): ReactNode {
  */
 function AgentControls(): ReactNode {
   const project = useActiveProject()
-  const { used, max } = usePaneCount()
   if (!project) return null
-  const atLimit = used >= max
 
   return (
     <span className="deckbar__agents">
       <AgentsMenu />
-      <button
-        type="button"
-        className="deckbar__new"
-        data-new-agent=""
-        aria-label="New agent"
-        title={atLimit ? `Session limit reached (${max})` : 'New agent (Ctrl+T)'}
-        disabled={atLimit}
-        onClick={(e) =>
-          window.dispatchEvent(new CustomEvent<NewTabDetail>(NEW_TAB_EVENT, { detail: { anchor: e.currentTarget } }))
-        }
-      >
-        <Icon name="plus" size={13} />
-      </button>
       <WallSwitch />
     </span>
   )

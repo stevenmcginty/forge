@@ -29,7 +29,7 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
   const open = useDeckSheet() === 'agents'
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
   const activeTabId = (workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0])?.id ?? null
-  const plusRef = useRef<HTMLButtonElement | null>(null)
+  const anchorRef = useRef<HTMLButtonElement | null>(null)
   const [chooserOpen, setChooserOpen] = useState(false)
 
   const waiting = agents.filter((a) => a.leaf.id !== current?.leaf.id && state.asking.has(a.leaf.id))
@@ -48,6 +48,7 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
     <div className="dk-agents">
       <span className="dk-agents__anchor">
         <button
+          ref={anchorRef}
           type="button"
           className="dk-agents__btn"
           data-open={open ? 'true' : undefined}
@@ -89,18 +90,6 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
         </DeckSheet>
       </span>
 
-      <button
-        ref={plusRef}
-        type="button"
-        className="dk-bar__icon dk-agents__plus"
-        data-on={chooserOpen ? 'true' : undefined}
-        disabled={!live}
-        aria-label="New agent"
-        title={live ? 'New agent — opens in a new tab here and on the desktop' : 'The desktop is not answering, so it cannot open one'}
-        onClick={() => setChooserOpen((v) => !v)}
-      >
-        <Icon name="plus" size={14} />
-      </button>
 
       {waiting.length > 0 ? (
         <button
@@ -119,7 +108,7 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
       ) : null}
 
       <AgentChooser
-        anchor={plusRef.current}
+        anchor={anchorRef.current}
         open={chooserOpen}
         onClose={() => setChooserOpen(false)}
         onPick={(profileId, permissionMode) => {
