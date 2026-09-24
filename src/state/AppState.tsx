@@ -50,7 +50,7 @@ import {
  * through the same three functions this reducer does, so it comes out with the
  * same name, colour and shape.
  */
-import { EMPTY_WORKSPACE, makeTab, nextTextColor, withPrunedMosaic } from '@shared/workspace'
+import { EMPTY_WORKSPACE, makeTab, nextTabName, nextTextColor, withPrunedMosaic } from '@shared/workspace'
 import { DEFAULT_FOREMAN_BRIEF } from '@shared/foreman'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
@@ -432,6 +432,8 @@ type Action =
       paste?: boolean
       /** The new pane's id, when the caller has to know it (openAgentPane). */
       paneId?: string
+      /** Name the tab from TAB_NAME_POOL, as a hand-made tab is, and ignore `title`. */
+      pooled?: true
       /** Another project than the one on screen — a pane agent's own. */
       projectId?: string
       /** See PendingType.relay. */
@@ -1006,9 +1008,12 @@ function reducer(state: AppState, action: Action): AppState {
       }
       const minted = makeLeaf(action.profileId, '')
       const leaf = action.paneId ? { ...minted, id: action.paneId } : minted
+      const target = workspaceOf(state, projectId)
+      const pooled = action.pooled ? nextTabName(target.tabs, target.nameCursor ?? 0) : null
+      const cursor = pooled ? { nameCursor: pooled.cursor } : {}
       const tab: TerminalTab = {
         id: makeId('tab'),
-        title: action.title,
+        title: pooled?.title ?? action.title,
         root: leaf,
         activePaneId: leaf.id,
         textColor: nextTextColor(workspaceOf(state, projectId).tabs)
@@ -1030,12 +1035,13 @@ function reducer(state: AppState, action: Action): AppState {
         // A pane agent in another project asked for this one. It opens there,
         // beside the agent that asked, and Steve's view stays exactly where it
         // is: no project switch, no tab switch, no view change.
-        return { ...mapWorkspace(state, projectId, (ws) => ({ ...ws, tabs: [...ws.tabs, tab] })), pendingTypes }
+        return { ...mapWorkspace(state, projectId, (ws) => ({ ...ws, tabs: [...ws.tabs, tab], ...cursor })), pendingTypes }
       }
       const next = mapActiveWorkspace(state, (ws) => ({
         ...ws,
         tabs: [...ws.tabs, tab],
-        activeTabId: tab.id
+        activeTabId: tab.id,
+        ...cursor
       }))
       return {
         ...next,
@@ -2079,7 +2085,10 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
             wanted && state.settings.agentProfiles.some((p) => p.id === wanted)
               ? wanted
               : defaultProfileFor(projectId),
+          // Every agent tab takes the next pool name, like one opened by hand —
+          // an agent's own label ("UI Fix") broke the naming Steve relies on.
           title: title.slice(0, 40),
+          pooled: true,
           text: prompt,
           // Typed, never submitted — the same contract dictation, task cards and
           // the tab handover all honour. Pasted rather than typed because these

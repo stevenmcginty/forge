@@ -44,7 +44,7 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
     name: 'open_agent_pane',
     description: [
       'Open a new coding-agent pane INSIDE Forge — the only way to start an agent. agent is who, in words: "claude", "codex", "gemini", "antigravity", "glm", "kimi", "opencode", "qwen", "grok", or a plain "shell".',
-      'prompt is typed into the new pane once the agent is up (sent only when submit is true). name is an optional title for its tab.',
+      'prompt is typed into the new pane once the agent is up (sent only when submit is true).',
       'Never start an agent CLI any other way — no run_command, no open_desktop_app, no new console or terminal window. The answer says which pane opened, or why none did.'
     ].join(' '),
     parameters: {
@@ -52,7 +52,6 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
       properties: {
         agent: { type: 'string', description: 'Which agent, in words: "codex", "claude", "gemini"…' },
         prompt: { type: 'string', description: 'Optional: the first prompt to type into it' },
-        name: { type: 'string', description: 'Optional: a short title for the new tab' },
         submit: { type: 'boolean', description: 'Optional: press Enter after the prompt. Default false.' }
       },
       required: ['agent']

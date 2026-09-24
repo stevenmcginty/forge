@@ -30,7 +30,7 @@
  * or the Wall, the Agents menu and the Wall switch in the bar, and a voice bar
  * that lives in the top bar or in the dock (./view.ts `BarPlace`).
  */
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import '@/components/shell/deck-tokens.css'
 import '@/components/shell/deck.css'
 import { AgentBadge } from '@/components/AgentBadge'
@@ -308,7 +308,8 @@ function FaceSwitch({ paneId, name, compact = false }: { paneId: string; name: s
  *
  *   bottom  the dock: one bar along the bottom edge (Dock.tsx's) — the voice
  *           bar group leads it, then the words and where they go. It floats
- *           below the stage, so it never covers a terminal.
+ *           below the stage, so it never covers a terminal: the stage stops
+ *           where the dock's resting height says (useDockClearance).
  *   top     the voice bar group is in the top bar, and the words float as a
  *           card over the foot of the stage — only while they are wanted: asked
  *           for (Ctrl+Shift+G, Type, D with no text field focused), while a
@@ -325,11 +326,13 @@ export function DeckDock({ place }: { place: BarPlace }): ReactNode {
   const hasTab = workspace.tabs.length > 0
   const githubMode = offline && state.offlineMode === 'github'
   const composing = !!project && hasTab && !githubMode
+  const dockRef = useRef<HTMLDivElement | null>(null)
+  useDockClearance(dockRef, place === 'bottom')
 
   if (place === 'top') return composing ? <FloatingComposer /> : null
 
   return (
-    <div className="dk-dock dk-composer" role="toolbar" aria-label="Dock">
+    <div ref={dockRef} className="dk-dock dk-composer" role="toolbar" aria-label="Dock">
       <VoiceLine place="bottom" />
       {composing ? (
         <SessionComposer face="deck" lead={<VoiceBar place="bottom" />} />
@@ -344,6 +347,48 @@ export function DeckDock({ place }: { place: BarPlace }): ReactNode {
       <ProjectsSheet />
     </div>
   )
+}
+
+/** The dock's words or picks have the keys: it is growing for now, not for good. */
+const DOCK_TYPING = '.composer__input:focus, .composer__picks:focus-within, .composer__picks [aria-expanded="true"]'
+
+/**
+ * The stage makes room for the dock as it really is, not as a guess: the
+ * dock's height at rest, measured, goes on the deck root as `--dk-dock-h`, and
+ * deck.css turns it into the stage's clearance. The terminal keys, a voice
+ * line, a draft of several lines left in the box — each is the dock's height
+ * for as long as it stays, and the panes above refit to it once.
+ *
+ * At rest means the words or the picks do not have the keys. The picks row
+ * that opens while you are in the box, and each line a draft grows by while
+ * you type it, float over the foot of the stage instead: refitting every
+ * terminal (and resizing every PTY) on each focus and each new line would
+ * jolt the panes while you write. Leaving the box measures again.
+ */
+function useDockClearance(ref: RefObject<HTMLDivElement | null>, on: boolean): void {
+  useEffect(() => {
+    const dock = ref.current
+    const root = dock?.closest<HTMLElement>('.app[data-face="deck"]')
+    if (!on || !dock || !root) return undefined
+    let frame = 0
+    const measure = (): void => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        if (dock.querySelector(DOCK_TYPING)) return
+        root.style.setProperty('--dk-dock-h', `${Math.ceil(dock.getBoundingClientRect().height)}px`)
+      })
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(dock)
+    dock.addEventListener('focusout', measure)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      dock.removeEventListener('focusout', measure)
+      root.style.removeProperty('--dk-dock-h')
+    }
+  }, [ref, on])
 }
 
 /** How long after Send the box may take to empty (the claim wait) and still count as sent. */

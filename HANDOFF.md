@@ -1,5 +1,12 @@
 # Handoff
 
+## Forge Web dock no longer covers the bottom panes; agent tabs take pool names (2026-09-24)
+
+- **Asked (Steve):** the chat box at the bottom merged with terminal four; agent-made tab names like "UI Fix" should follow the normal names.
+- **Dock:** the stage reserved a fixed 96px guess, but the dock grows to 134px (keys row, voice line, a draft left in the box). `useDockClearance` in `web/src/deck/Deck.tsx` measures the dock's resting height into `--dk-dock-h`; `--dk-dock-clear` in `deck.css` uses it. Growth while typing (picks row, extra lines) floats instead, so terminals are not refitted on every focus. Shots: session scratchpad `dock/{before,after}`.
+- **Names:** `open_agent_pane` lost its `name` argument (`shared/brain-tools.ts`, `bridge/forge-app-tools.mjs`); `openAgentPane` now sends `pooled: true`, and `openToolPane` names the tab with `nextTabName` and moves the cursor. Needs a desktop restart.
+- **Checked:** typecheck, webclient tsc, before/after screenshots. "Overlap inside the input box" was not reproduced; likely the status strip over terminal rows, which is fixed.
+
 ## Forge Web deck: voice bar as symbols, smart mic/send, agent names, view switch (2026-09-24)
 
 - **Asked (Steve):** project pill and voice-agent chip looked alike; symbols not words; shortcut keys listed in settings; the bar must name the agent pane (tab name, e.g. Wanda); send button smart like the phone's; stuck in Cards/Chat with no way back; wheel scroll in Chat/Cards snapped back.
