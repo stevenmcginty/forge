@@ -1131,6 +1131,35 @@ function MosaicTile({
     return () => terminalHost.blur(paneId)
   }, [interactive, paneId])
 
+  /*
+   * The wheel over the picture scrolls that terminal's scrollback — no click
+   * first, no typing mode, nothing selected or focused that was not already.
+   *
+   * The wheel lands on the hit sheet, not the terminal: the sheet covers the
+   * stage and the terminal under it takes no pointer events at all (a peek is
+   * a picture). So the sheet hands it to scrollPeek, which moves the buffer
+   * without ever going near xterm's wheel path or the PTY. Native and
+   * non-passive, because React's onWheel is passive and the wall behind must
+   * not scroll too. A tile with nothing to scroll (a full-screen TUI, a shell
+   * with no history yet) lets the wheel carry on to the wall. Typing in place
+   * the sheet is gone and xterm has its own wheel again.
+   */
+  const hitRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    const hit = hitRef.current
+    if (!hit || interactive) return
+    const onWheel = (e: WheelEvent): void => {
+      if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      const box = tileRef.current?.querySelector<HTMLElement>('.mtile__natural')
+      const scale = box && box.offsetHeight > 0 ? box.getBoundingClientRect().height / box.offsetHeight : 1
+      if (!terminalHost.scrollPeek(paneId, e.deltaY, e.deltaMode, scale)) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    hit.addEventListener('wheel', onWheel, { passive: false })
+    return () => hit.removeEventListener('wheel', onWheel)
+  }, [interactive, paneId])
+
   /* --------------------------------------------------------- dropped files */
 
   /*
@@ -1314,6 +1343,7 @@ function MosaicTile({
       */}
       {interactive ? null : (
         <button
+          ref={hitRef}
           type="button"
           className="mtile__hit"
           title={`Click for full screen — ${name}`}

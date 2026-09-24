@@ -15,6 +15,7 @@ import { Icon } from './Icon'
 import { MosaicView } from './MosaicView'
 import { SkillsButton } from './SkillsFlyout'
 import { FocusReticle } from './shell/FocusReticle'
+import { PaneCarousel } from './shell/PaneCarousel'
 import { SplitView } from './SplitView'
 import './TerminalGrid.css'
 
@@ -250,6 +251,7 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
                 targetKey={tab.activePaneId}
                 enabled={countLeaves(tab.root) > 1}
               />
+              <PaneCarousel rootRef={bodyRef} count={workspace.tabs.reduce((n, t) => n + countLeaves(t.root), 0)} />
             </>
           ) : (
             <EmptyState

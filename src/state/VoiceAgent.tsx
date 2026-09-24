@@ -281,6 +281,8 @@ export function escapeIsOurs(e: KeyboardEvent): boolean {
   if (e.key !== 'Escape' || e.defaultPrevented) return false
   const target = e.target
   if (!(target instanceof Element)) return true
+  // A "press the new keys" field owns Esc: it means "cancel the rebind".
+  if (target.closest('.krec')) return false
   return !target.closest('.xterm') || !!target.closest('.vhub')
 }
 

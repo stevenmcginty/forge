@@ -179,6 +179,15 @@ export function hasHandler(id: string): boolean {
 }
 
 /**
+ * True while a "press the new keys" field is listening. The talk keys
+ * (src/lib/stt-gesture.ts) are not combos, so commandForCombo never sees them;
+ * they ask here instead, so recording one does not also start dictation.
+ */
+export function shortcutsSuspended(): boolean {
+  return suspended > 0
+}
+
+/**
  * Stop every shortcut while a "press the new keys" field is listening, so
  * Ctrl+W can be recorded instead of closing a pane. Returns the release.
  */

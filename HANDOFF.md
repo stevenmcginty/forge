@@ -1,5 +1,19 @@
 # Handoff
 
+## Settings › Shortcuts rebinding (2026-09-24, uncommitted)
+
+- **Cause:** the talk-key listener (`src/lib/stt-gesture.ts`, window capture phase) ignored `suspendShortcuts()`. While the key recorder listened, a non-modifier talk key was swallowed before the field saw it, and Right Ctrl started dictation, whose typed text took focus and cancelled the recorder.
+- **Fix:** `shortcutsSuspended()` in `src/lib/keymapRegistry.ts`; the talk key stands down while it is true. `escapeIsOurs` (`src/state/VoiceAgent.tsx`) leaves Esc to the recorder (`.krec`), so Esc cancels the rebind without ending a voice chat.
+- **Checked** in a throwaway instance: rebind shows, old combo dead, new combo live, survives relaunch (`keymap.json`). Typecheck, hub:check, dictation:check and voice-hotkey:check pass.
+- **Not reproduced:** Steve's exact case (Right Ctrl talk key + left-hand combos) worked before the fix. If it still fails, find out which keys he pressed.
+
+## Forge Web: Listen switch and voice-bar grip removed (2026-09-24, b44df5b, pushed, CI green)
+
+- **Decided (Steve):** in the browser, Listen did nothing useful next to D, so it goes. D (Right Ctrl) is the browser's dictation. The drag grip on the voice bar goes too. The bar stays at the bottom by default; the "…" menu still moves it.
+- **Code:** `web/src/deck/ListenSwitch.tsx` deleted; `VoiceBar.tsx` has no grip or drop zone. Web only, nothing in `src/`. The phone face is unchanged.
+- **Left open (low):** typing `/voice` in the deck composer still starts a recording, and a click elsewhere can hide the composer while it records (`web/src/deck/Deck.tsx:294`).
+- `scripts/web-deck-check.mjs` already failed before this change (`.dk-seg`, `.dk-prow*`, missing `web/src/deck/PanesSheet.tsx`). Still to fix.
+
 ## Top wall strip + full review fixes (2026-09-24, uncommitted, not yet QA'd live)
 
 - **Decided (Steve):** no terminal tab strip and no Tabs|Wall switch. Terminals are either **Wall** (grid fills the stage, X close top-right on each tile) or **Full screen** (one terminal). In Full screen and over Browser/Board, a live **wall strip** of all terminals sits at the top of the stage. Browser/Board are full width below it; no more side-by-side. Data values stay `'mosaic'`/`'tabs'` (Wall/Full screen), so `set_view` and voice are unchanged.

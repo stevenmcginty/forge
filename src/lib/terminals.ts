@@ -350,6 +350,8 @@ interface Entry {
   disposers: Array<() => void>
   /** Remainder of a TUI wheel/finger gesture. Shared with the cards view. */
   wheelCarry: ScrollCarry
+  /** Pixels of a Wall-tile wheel not yet worth a whole line — see scrollPeek. */
+  peekWheelPx: number
 }
 
 interface Listeners {
@@ -950,6 +952,45 @@ class TerminalHost {
   }
 
   /**
+   * A wheel over a Wall tile that is not being typed into: move this
+   * terminal's own scrollback, and nothing else.
+   *
+   * Never xterm's wheel path. With mouse tracking on or a full-screen TUI up
+   * that turns a wheel into arrow keys or SGR reports on the PTY, and a tile
+   * that is only being looked at must never type into its agent — or claim
+   * the pane's grid by doing so. `scrollLines` moves the viewport and writes
+   * nothing, and xterm keeps the rest: a viewport left scrolled up stays put as
+   * output arrives, one at the bottom follows it.
+   *
+   * `scale` is how big the tile draws the terminal (a scale model is a CSS
+   * transform), so a notch moves the picture as far as it moves anything else
+   * on screen. Returns false when there is nothing to scroll — no terminal, a
+   * full-screen TUI's alternate buffer (it has no scrollback), or a shell
+   * that has not printed a screenful yet — so the caller can let the wheel go.
+   */
+  scrollPeek(paneId: string, deltaY: number, deltaMode: number, scale = 1): boolean {
+    const entry = this.entries.get(paneId)
+    if (!entry) return false
+    const { term } = entry
+    const buffer = term.buffer.active
+    if (buffer.type === 'alternate' || buffer.baseY === 0) {
+      entry.peekWheelPx = 0
+      return false
+    }
+    const row = terminalRowHeight(term, entry.spec.fontSize) * (scale > 0 ? scale : 1)
+    const px = deltaMode === 2 ? deltaY * term.rows * row : deltaMode === 1 ? deltaY * row : deltaY
+    // A reversal starts from nothing, not from what the other direction left.
+    if (Math.sign(px) !== Math.sign(entry.peekWheelPx)) entry.peekWheelPx = 0
+    entry.peekWheelPx += px
+    const lines = Math.trunc(entry.peekWheelPx / row)
+    if (lines !== 0) {
+      entry.peekWheelPx -= lines * row
+      term.scrollLines(lines)
+    }
+    return true
+  }
+
+  /**
    * The last `lines` lines of a pane, as text. Null for a pane this window has no
    * terminal for.
    *
@@ -1070,7 +1111,8 @@ class TerminalHost {
       webglWanted: false,
       webglLoading: false,
       disposers: [],
-      wheelCarry: { px: 0 }
+      wheelCarry: { px: 0 },
+      peekWheelPx: 0
     }
 
     const dataSub = term.onData((data) => {

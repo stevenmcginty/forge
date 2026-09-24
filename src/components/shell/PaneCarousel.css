@@ -1,0 +1,85 @@
+/*
+ * Full screen's carousel arrows (PaneCarousel.tsx). No chrome and no slab:
+ * a tall, thin chevron on each edge of the window, faint at rest, up while the
+ * mouse moves over the stage, clear when you point at one.
+ *
+ * The chevrons are drawn in the stage's own side padding (--stage-pad-x), on
+ * the backdrop, never over the pane. The hit zones reach out to the window
+ * edge (so a maximised window's screen edge is the target) and in only as far
+ * as nothing lives: on the left, the pane border and xterm's 12px left padding
+ * short of the first glyph column; on the right, the pane border and no
+ * further, because xterm's scrollbar runs down the pane's right edge.
+ */
+
+.pcar {
+  position: absolute;
+  inset: 0 calc(-1 * var(--stage-pad-x, 0px));
+  z-index: var(--z-divider);
+  pointer-events: none;
+}
+
+.pcar__btn {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  align-items: center;
+  height: 72px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  opacity: 0.35;
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateY(-50%);
+  transition: opacity 220ms var(--ease-out);
+}
+
+/* Stage padding, the pane's 1px border, and 10 of xterm's 12px left padding. */
+.pcar__btn[data-side='prev'] {
+  left: 0;
+  width: calc(var(--stage-pad-x, 0px) + 11px);
+  justify-items: start;
+}
+
+/* Stage padding and the pane's border: the scrollbar starts right after. */
+.pcar__btn[data-side='next'] {
+  right: 0;
+  width: calc(var(--stage-pad-x, 0px) + 1px);
+  justify-items: end;
+}
+
+.pcar[data-awake='true'] .pcar__btn {
+  opacity: 0.8;
+}
+
+.pcar .pcar__btn:hover,
+.pcar .pcar__btn:focus-visible {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+.pcar__btn:focus-visible {
+  outline: 1px solid var(--accent-line);
+  outline-offset: 1px;
+  border-radius: var(--r-sm, 4px);
+}
+
+/* Centred in the stage padding: on the backdrop, not the pane. */
+.pcar__chev {
+  width: 6px;
+  height: 26px;
+  margin: 0 max(0px, calc((var(--stage-pad-x, 0px) - 6px) / 2));
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pcar__btn {
+    transition: none;
+  }
+}

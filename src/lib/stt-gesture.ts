@@ -21,6 +21,8 @@
  * `src/hooks/useDictation.ts` is the only thing that feeds it real key events.
  */
 
+import { shortcutsSuspended } from './keymapRegistry'
+
 export const MODIFIER_TAP_MS = 450
 export const DIRECT_PTT_MS = 700
 
@@ -202,6 +204,12 @@ export function attachTalkKey(
   }
 
   const onKeyDown = (e: TalkKeyEvent): void => {
+    // A "press the new keys" field is recording: the key is its to take, so
+    // it is neither swallowed nor allowed to start the mic.
+    if (shortcutsSuspended()) {
+      disarm()
+      return
+    }
     if (!modifier) {
       if (e.code !== code) return
       if (e.repeat) return
@@ -235,6 +243,10 @@ export function attachTalkKey(
   }
 
   const onKeyUp = (e: TalkKeyEvent): void => {
+    if (shortcutsSuspended()) {
+      disarm()
+      return
+    }
     if (!modifier) {
       if (e.code !== code) return
       const next = directUp(gesture, performance.now(), listening())
