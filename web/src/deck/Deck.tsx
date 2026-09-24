@@ -158,7 +158,7 @@ export function DeckStage({
             {wall ? (
               <TileLabel
                 agent={agent}
-                tabTitle={manyTabs ? tab.title : null}
+                tabTitle={manyTabs && tab.title.trim() !== agent.title ? tab.title : null}
                 focused={focused}
                 onSelect={() => {
                   if (live && !focused) void actions.layout({ op: 'focus-pane', paneId: leaf.id })
@@ -172,6 +172,7 @@ export function DeckStage({
               onlyPane={!wall || total === 1}
               onScreen={shown}
               fullScreen={!wall && shown}
+              tabTitle={tab.title.trim() && tab.title.trim() !== agent.title ? tab.title : null}
             />
           </div>
         )

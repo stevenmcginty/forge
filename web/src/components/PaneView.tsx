@@ -147,7 +147,8 @@ export function PaneView({
   focused,
   onlyPane,
   onScreen,
-  fullScreen = false
+  fullScreen = false,
+  tabTitle = null
 }: {
   leaf: PaneLeaf
   focused: boolean
@@ -159,6 +160,8 @@ export function PaneView({
    * on screen does — on coming on screen and on a click. See the claim below.
    */
   fullScreen?: boolean
+  /** The deck's Full screen: the tab's name ("Wanda") beside the pane's, as the Wall tile shows it. */
+  tabTitle?: string | null
 }): ReactNode {
   const { state, actions } = useForge()
   const profiles = useProfiles()
@@ -1055,6 +1058,7 @@ export function PaneView({
         <div className="pane__leading">
           <AgentBadge profile={profile} size="sm" />
           <span className="pane__title truncate">{paneDisplayTitle(profile, leaf.title)}</span>
+          {tabTitle ? <span className="pane__tab truncate">{tabTitle}</span> : null}
         </div>
 
         {/*

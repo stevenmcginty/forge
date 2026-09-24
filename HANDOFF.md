@@ -1,5 +1,11 @@
 # Handoff
 
+## Forge Web: tab name in Full screen, bold on the Wall (2026-09-24)
+
+- **Asked (Steve):** Full screen said only "Claude Code"; the Wall also shows the tab name ("Wanda") but faint.
+- **Fix:** `PaneView` takes an optional `tabTitle`; the deck's Full screen header shows "Claude Code · Wanda" at the same 15px bold. The Wall tile's tab name is now 12px bold, full contrast, like the pane name. Hidden when the tab name equals the pane name.
+- **Checked:** typecheck. Not viewed on screen.
+
 ## Forge Web: Listen key (Right Shift) in the browser (2026-09-24)
 
 - **Asked (Steve):** the browser had no key to talk to the voice agent, only D's key.
