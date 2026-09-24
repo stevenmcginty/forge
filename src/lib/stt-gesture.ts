@@ -10,7 +10,7 @@
  * Combos (Ctrl+C, Alt+Tab) never fire. Direct keys (F8) toggle on press and
  * stop on a long release if that press is what opened the mic.
  *
- * A modifier talk key (Right Ctrl for Dictate, Right Shift for the Agent key)
+ * A modifier talk key (Right Alt for Dictate, Right Shift for the Agent key)
  * counts only when it goes down and comes back up with nothing else pressed:
  * Shift+A types a capital, Shift+click selects, and neither fires. Left and
  * right are different keys — the hook matches `KeyboardEvent.code` exactly, so
@@ -43,7 +43,7 @@ export function idleGesture(): GestureState {
   return { down: false, t0: 0, other: false, ptt: false, startedListening: false }
 }
 
-/** Right Ctrl and friends — tap vs hold is a real distinction. */
+/** Right Alt and friends — tap vs hold is a real distinction. */
 export function isModifierHotkey(code: string): boolean {
   return /^(Control|Alt|Shift|Meta)(Left|Right)$/.test(code)
 }
@@ -221,6 +221,11 @@ export function attachTalkKey(
       return
     }
     if (e.code !== code) {
+      // An auto-repeat is not a new key: its first press already counted.
+      // This matters for Right Alt on a UK (AltGr) layout, where Windows
+      // repeats a fake Left Ctrl alongside Right Alt the whole time it is
+      // held; without this, every hold-to-talk ended half a second in.
+      if (e.repeat) return
       interrupt()
       return
     }

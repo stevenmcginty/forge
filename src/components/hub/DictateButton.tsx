@@ -6,7 +6,7 @@ import { listenState, useHubPreview, useHubView } from './hubView'
 import './DictateButton.css'
 
 /**
- * D: raw dictation, one press. It is the Dictate key (Right Ctrl by default)
+ * D: raw dictation, one press. It is the Dictate key (Right Alt by default)
  * as a button — `dictation.toggle` is the same intent the key sends
  * (useDictation's applyIntent('toggle')), so the words land wherever the key
  * would put them: the focused pane, or the text field that had focus. The press
@@ -22,7 +22,7 @@ export function DictateButton(): ReactNode {
   const hub = useHubView()
   const preview = useHubPreview()
   const ls = listenState(hub)
-  const key = hotkeyLabel(state.settings.sttHotkey || 'ControlRight')
+  const key = hotkeyLabel(state.settings.sttHotkey || 'AltRight')
 
   // The Dictate key's own session — the agent shares the sidecar (as in Composer).
   const own = !state.agentListening && !ls.on

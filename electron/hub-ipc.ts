@@ -42,6 +42,20 @@ function getStore(): HubStore {
 }
 
 /**
+ * The user's keys for one command, from keymap.json, or null when it keeps its
+ * default. For the few keys the main process must read itself (Developer
+ * tools, which has to work while the renderer is blank).
+ */
+export function keymapOverride(commandId: string): string[] | null {
+  try {
+    const keys = getStore().getKeymap().overrides[commandId]
+    return Array.isArray(keys) ? keys : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * `FORGE_CANVAS_DIR` for a pane, from the pane's cwd: the project whose folder
  * the pane runs in (the deepest match, so a nested project wins over its
  * parent), else the project with the pane's project name. A pane in no project

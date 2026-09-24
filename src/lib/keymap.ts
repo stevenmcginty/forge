@@ -28,8 +28,10 @@ export type KeyCombo = string
  *   nobody's editing key (Ctrl+Shift+G, Ctrl+,).
  * `workspace`: only while the terminal workspace is on screen, and not while a
  *   text field has focus (xterm's own textarea excepted — see useShortcuts).
+ * `bar`: only inside the Forge bar's text box. The bar reads these itself
+ *   (Composer); useShortcuts never fires them.
  */
-export type CommandScope = 'global' | 'workspace'
+export type CommandScope = 'global' | 'workspace' | 'bar'
 
 export interface KeyCommandDef {
   id: string

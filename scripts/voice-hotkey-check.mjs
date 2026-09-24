@@ -1,5 +1,5 @@
 /**
- * The two voice keys: Dictate (Right Ctrl) and Agent (Right Shift).
+ * The two voice keys: Dictate (Right Alt) and Agent (Right Shift).
  *
  *   node scripts/voice-hotkey-check.mjs
  *
@@ -219,6 +219,57 @@ console.log('\nDictate key (Right Ctrl) beside the Agent key')
   agent.off()
 }
 
+console.log('\nDictate key on Right Alt, UK (AltGr) layout')
+{
+  // The order and flags below are what Chromium reported for a real Right Alt
+  // held on Windows with the UK layout (2026-09-24 probe): a fake Left Ctrl
+  // goes down first, and repeats beside Right Alt for as long as it is held.
+  const altGr = async (win, holdMs, { repeats = 0, extra, beforeUp } = {}) => {
+    win.fire('keydown', 'ControlLeft', false, { ctrlKey: true })
+    win.fire('keydown', 'AltRight', false, { ctrlKey: false, altKey: false })
+    if (holdMs) await new Promise((r) => setTimeout(r, holdMs))
+    for (let i = 0; i < repeats; i++) {
+      win.fire('keydown', 'ControlLeft', true, { ctrlKey: false })
+      win.fire('keydown', 'AltRight', true, { ctrlKey: false, altKey: false })
+    }
+    extra?.()
+    beforeUp?.()
+    win.fire('keyup', 'ControlLeft', false, { ctrlKey: false })
+    win.fire('keyup', 'AltRight', false, { ctrlKey: false, altKey: false })
+  }
+  const win = fakeWindow()
+  const dictate = wire(win, 'AltRight')
+
+  await altGr(win, 0)
+  eq(dictate.log, ['toggle'], 'a Right Alt tap toggles, the fake Left Ctrl ignored')
+  dictate.log.length = 0
+  dictate.listening = false
+
+  let midHold = null
+  await altGr(win, G.MODIFIER_TAP_MS + 80, { repeats: 5, beforeUp: () => (midHold = [...dictate.log]) })
+  eq(midHold, ['ptt-start'], 'a Right Alt hold keeps the mic open through the fake Left Ctrl repeats')
+  eq(dictate.log, ['ptt-start', 'ptt-end'], '…and closes it on release')
+  dictate.log.length = 0
+
+  await altGr(win, 0, {
+    extra: () => {
+      win.fire('keydown', 'Digit4', false, { ctrlKey: true, altKey: true })
+      win.fire('keyup', 'Digit4', false, { ctrlKey: true, altKey: true })
+    }
+  })
+  eq(dictate.log, [], 'AltGr+4 (the euro sign) types and never fires')
+  const typed = win.fire('keydown', 'AltRight', false, { ctrlKey: false, altKey: false })
+  win.fire('keyup', 'AltRight')
+  ok(!typed.prevented, 'Right Alt is only read, never swallowed, so AltGr characters still type')
+  dictate.log.length = 0
+  dictate.listening = false
+
+  win.fire('keydown', 'AltLeft')
+  win.fire('keyup', 'AltLeft')
+  eq(dictate.log, [], 'Left Alt is not Right Alt')
+  dictate.off()
+}
+
 console.log('\ndirect key (F8)')
 {
   const win = fakeWindow()
@@ -234,20 +285,20 @@ console.log('\nkeymap: voice keys accept a lone modifier, nothing else does')
 {
   const base = km.resolveKeymap(BUILTIN_COMMANDS, {})
   ok(base.conflicts.length === 0 && base.rejected.length === 0, 'built-ins resolve clean with both voice keys', JSON.stringify([base.conflicts, base.rejected]))
-  eq(base.keysFor[TALK_DICTATE_ID], ['ControlRight'], 'Dictate key defaults to Right Ctrl')
+  eq(base.keysFor[TALK_DICTATE_ID], ['AltRight'], 'Dictate key defaults to Right Alt')
   eq(base.keysFor[TALK_AGENT_ID], ['ShiftRight'], 'Agent key defaults to Right Shift')
   eq(km.formatCombo('ShiftRight'), 'Right Shift', 'shown as "Right Shift"')
   eq(km.formatCombo('Ctrl+Shift+G'), 'Ctrl+Shift+G', 'ordinary combos display as before')
 
   const left = km.setBinding(BUILTIN_COMMANDS, {}, TALK_AGENT_ID, ['ShiftLeft'])
   ok(left.ok && left.overrides[TALK_AGENT_ID][0] === 'ShiftLeft', 'the Agent key can be moved to Left Shift', JSON.stringify(left))
-  const byLabel = km.setBinding(BUILTIN_COMMANDS, {}, TALK_AGENT_ID, ['Right Alt'])
-  ok(byLabel.ok && byLabel.overrides[TALK_AGENT_ID][0] === 'AltRight', 'a label ("Right Alt") is stored as its code', JSON.stringify(byLabel))
+  const byLabel = km.setBinding(BUILTIN_COMMANDS, {}, TALK_AGENT_ID, ['Left Alt'])
+  ok(byLabel.ok && byLabel.overrides[TALK_AGENT_ID][0] === 'AltLeft', 'a label ("Left Alt") is stored as its code', JSON.stringify(byLabel))
   for (const bad of ['Shift+A', 'A', 'Ctrl+Shift+G']) {
     ok(!km.setBinding(BUILTIN_COMMANDS, {}, TALK_AGENT_ID, [bad]).ok, `a voice key refuses ${bad}`)
   }
-  const clash = km.setBinding(BUILTIN_COMMANDS, {}, TALK_AGENT_ID, ['ControlRight'])
-  ok(!clash.ok && clash.conflictsWith?.includes(TALK_DICTATE_ID), 'Agent on Right Ctrl clashes with the Dictate key', JSON.stringify(clash))
+  const clash = km.setBinding(BUILTIN_COMMANDS, {}, TALK_AGENT_ID, ['AltRight'])
+  ok(!clash.ok && clash.conflictsWith?.includes(TALK_DICTATE_ID), 'Agent on Right Alt clashes with the Dictate key', JSON.stringify(clash))
 
   const loner = km.setBinding(BUILTIN_COMMANDS, {}, 'view.toggle', ['ShiftRight'])
   ok(!loner.ok && /only works for the Dictate and Agent/.test(loner.error), 'an ordinary command refuses Right Shift, with the reason', JSON.stringify(loner))
@@ -280,7 +331,7 @@ console.log('\nkeymap registry: where each voice key is stored')
   ok(view?.customised === true && view.keys[0] === 'ShiftLeft', 'the settings view shows the Dictate key as changed')
 
   reg.resetCommandKeys(TALK_DICTATE_ID)
-  eq(written, ['ControlRight'], 'Reset puts the Dictate key back to Right Ctrl')
+  eq(written, ['AltRight'], 'Reset puts the Dictate key back to Right Alt')
   reg.resetCommandKeys(TALK_AGENT_ID)
   eq(reg.keyForCommand(TALK_AGENT_ID), 'ShiftRight', 'Reset puts the Agent key back to Right Shift')
   unbind()

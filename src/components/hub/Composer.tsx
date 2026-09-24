@@ -6,6 +6,8 @@ import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { HUB_COMPOSER_EVENT, type HubComposerDetail } from '@/lib/hubnav'
 import { runSavedPrompt } from '@/lib/hubRuntime'
 import { fireComet, usePresence } from '@/lib/motion'
+import { comboFromEvent } from '@/lib/keymap'
+import { commandForCombo, setCommandHandler } from '@/lib/keymapRegistry'
 import { composerRouteNow } from '@/lib/shellSlots'
 import { findLeaf } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
@@ -32,7 +34,7 @@ import './Composer.css'
  *               the main agent: it sends when you pause, answers, and listens
  *               again. Right Shift flips it too. The brain's name and what it
  *               is doing are inside the switch, in words.
- *   D           raw dictation (DictateButton): the Dictate key (Right Ctrl) as
+ *   D           raw dictation (DictateButton): the Dictate key (Right Alt) as
  *               a small button beside Listen — raw words into the focused
  *               pane, or into this bar when the bar has focus. It says
  *               "● Rec" while it runs.
@@ -196,6 +198,19 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
 
   useEffect(() => setCursor(0), [query, showPalette])
 
+  /** What the bar's own keys do, fresh every render; the text box's keydown and the registry both call these. */
+  const barKeys = useRef<Record<string, () => void>>({})
+  barKeys.current = {
+    'bar.palette': () => setPaletteOpen((v) => !v),
+    'bar.saveDraft': () => {
+      if (text.trim() && !slash) setSaving(text.trim())
+    }
+  }
+  useEffect(() => {
+    const offs = Object.keys(barKeys.current).map((id) => setCommandHandler(id, () => barKeys.current[id]?.()))
+    return () => offs.forEach((off) => off())
+  }, [])
+
   const runItem = (item: PaletteItem | undefined): void => {
     if (!item) return
     if (item.kind === 'save') {
@@ -236,7 +251,7 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
 
   /* --------------------------------------------------------------- words */
 
-  const dictateKey = hotkeyLabel(state.settings.sttHotkey || 'ControlRight')
+  const dictateKey = hotkeyLabel(state.settings.sttHotkey || 'AltRight')
   const placeholder = dictating
     ? intoBar
       ? `Dictating into the bar — ${dictateKey} to stop`
@@ -326,14 +341,12 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
               else send(text)
               return
             }
-            if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyK') {
+            // The bar's own keys (Ctrl+K, Ctrl+S by default), from Settings › Shortcuts.
+            const combo = comboFromEvent(e.nativeEvent)
+            const barCommand = combo ? commandForCombo(combo) : null
+            if (barCommand?.scope === 'bar') {
               e.preventDefault()
-              setPaletteOpen((v) => !v)
-              return
-            }
-            if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyS') {
-              e.preventDefault()
-              if (text.trim() && !slash) setSaving(text.trim())
+              barKeys.current[barCommand.id]?.()
               return
             }
             if (e.key === 'Escape') {

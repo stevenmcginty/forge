@@ -28,7 +28,7 @@ import { useActiveTab, useApp } from '@/state/AppState'
  * There are two such keys, both captured here the same way (a window listener
  * in the capture phase, so they work with focus inside an xterm pane):
  *
- *   Dictate key  settings.sttHotkey, default Right Ctrl — everything above.
+ *   Dictate key  settings.sttHotkey, default Right Alt — everything above.
  *   Agent key    keymap.json's `voice.talk.agent`, default Right Shift — the
  *                main agent listens (hub.start / hub.stop through the handlers
  *                HubLayer registers), whichever way the Dictate ⇄ Agent switch
@@ -43,8 +43,9 @@ import { useActiveTab, useApp } from '@/state/AppState'
 
 const OFF: SttStatus = { phase: 'off', level: 0, error: null, ready: false }
 const TALK_KEYS_MIGRATED = 'forge.talkKeys.migrated'
+const DICTATE_ALT_RIGHT_MIGRATED = 'forge.dictateKey.altRight'
 /** Where the Dictate key goes when it lands on the Agent key: its default first. */
-const DICTATE_FALLBACK_KEYS = ['ControlRight', 'AltRight', 'ScrollLock', 'Pause', 'F8', 'F9']
+const DICTATE_FALLBACK_KEYS = ['AltRight', 'ControlRight', 'ScrollLock', 'Pause', 'F8', 'F9']
 
 export interface Dictation {
   status: SttStatus
@@ -326,7 +327,7 @@ export function useDictationEngine(): Dictation {
    * One-time move for the old single talk key. Right Shift was that key in
    * older Forge profiles, and it is now the Agent key's default: keep Right
    * Shift for the agent (what it did while Jarvis was armed) and give Dictate
-   * its own default, Right Ctrl. Runs once per profile; a later choice stands.
+   * its own default, Right Alt. Runs once per profile; a later choice stands.
    */
   const ready = state.ready
   useEffect(() => {
@@ -339,8 +340,28 @@ export function useDictationEngine(): Dictation {
     }
     const agent = getKeymapView().commands.find((c) => c.id === TALK_AGENT_ID)
     if (hotkey === 'ShiftRight' && agent && !agent.customised && agent.defaultKeys[0] === 'ShiftRight') {
-      patchRef.current({ sttHotkey: 'ControlRight' })
+      patchRef.current({ sttHotkey: 'AltRight' })
     }
+    // Only the first ready settings decide this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready])
+
+  /**
+   * One-time move from Right Ctrl, the old Dictate default, to Right Alt, the
+   * new one (Steve, 2026-09-24). Skipped when another command already has
+   * Right Alt. Runs once per profile; a later choice stands.
+   */
+  useEffect(() => {
+    if (!ready) return
+    try {
+      if (localStorage.getItem(DICTATE_ALT_RIGHT_MIGRATED)) return
+      localStorage.setItem(DICTATE_ALT_RIGHT_MIGRATED, '1')
+    } catch {
+      return
+    }
+    if (hotkey !== 'ControlRight') return
+    const taken = getKeymapView().commands.some((c) => c.id !== TALK_DICTATE_ID && c.keys.includes('AltRight'))
+    if (!taken) patchRef.current({ sttHotkey: 'AltRight' })
     // Only the first ready settings decide this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready])
@@ -352,7 +373,7 @@ export function useDictationEngine(): Dictation {
    * the Agent key: Right Shift dictates and the agent never hears it. That was
    * Steve's live profile after the one-time move above had already run. So on
    * every such clash the Agent key keeps its key and Dictate goes back to
-   * Right Ctrl (or the first free talk key), and he is told.
+   * Right Alt (or the first free talk key), and he is told.
    */
   const clashKey = useSyncExternalStore(subscribeKeymap, () => {
     const hit = getKeymapView().conflicts.find(

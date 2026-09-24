@@ -84,6 +84,9 @@ export function useShortcuts(): void {
       // Settings, the way every other app opens settings. Also from a text
       // field: Ctrl+, is nobody's editing key.
       'app.settings': () => (L().state.view === 'settings' ? L().actions.closeSettings() : L().actions.openSettings()),
+      // The main process reads this key itself (electron/main.ts), so it works
+      // on a blank window. Nothing to do here; the handler marks it as live.
+      'app.devtools': () => false,
 
       'tab.new': () => {
         window.dispatchEvent(new CustomEvent(NEW_TAB_EVENT))
@@ -176,6 +179,8 @@ export function useShortcuts(): void {
       if (!combo) return
       const command = commandForCombo(combo)
       if (!command || !hasHandler(command.id)) return
+      // The bar's own keys are read by the bar (Composer), in its text box only.
+      if (command.scope === 'bar') return
 
       if (command.scope === 'workspace') {
         // Text fields (renaming a pane/tab, popover forms, the voice composer)

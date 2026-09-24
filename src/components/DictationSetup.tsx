@@ -12,9 +12,9 @@ import './DictationSetup.css'
  */
 
 const HOTKEYS = [
+  'AltRight',
   'ControlRight',
   'ControlLeft',
-  'AltRight',
   'ShiftRight',
   'ScrollLock',
   'Pause',

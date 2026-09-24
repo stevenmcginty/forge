@@ -65,6 +65,10 @@ export function KeyRecorder({
       return
     }
     if (e.repeat) return
+    // Right Alt on a UK (AltGr) layout: Windows sends a fake Left Ctrl down
+    // first, then Right Alt. Without this, Right Alt counted as "Left Ctrl +
+    // another key" and nothing was ever recorded. The fake Ctrl is replaced.
+    if (e.code === 'AltRight' && lone.current?.code === 'ControlLeft' && !lone.current.other) lone.current = null
     if (isLoneModifier(e.code)) {
       if (!lone.current) lone.current = { code: e.code, other: false }
       else lone.current.other = true
@@ -98,8 +102,10 @@ export function KeyRecorder({
 
   /** A lone modifier coming back up with nothing pressed alongside it. */
   const onKeyUp = (e: React.KeyboardEvent): void => {
-    setHeld('')
     const down = lone.current
+    // The fake Left Ctrl of AltGr comes up before Right Alt does: not ours.
+    if (down?.code === 'AltRight' && e.code === 'ControlLeft') return
+    setHeld('')
     if (!down || down.code !== e.code) return
     lone.current = null
     if (down.other) return

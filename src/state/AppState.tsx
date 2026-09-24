@@ -224,7 +224,7 @@ const FALLBACK_SETTINGS: Settings = {
   sttPython: '',
   sttModelDir: '',
   sttAutoStopSeconds: 10,
-  sttHotkey: 'ControlRight',
+  sttHotkey: 'AltRight',
   sttWarmStart: true,
   voiceHub: DEFAULT_HUB,
   voiceOverlayWindow: true,

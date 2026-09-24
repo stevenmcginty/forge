@@ -177,7 +177,7 @@ const DICTATE_STOPS: ChoiceOption[] = [
 function DictationCard(): ReactNode {
   const { state, actions } = useApp()
   const s = state.settings
-  const key = hotkeyLabel(s.sttHotkey || 'ControlRight')
+  const key = hotkeyLabel(s.sttHotkey || 'AltRight')
 
   return (
     <Card

@@ -21,6 +21,30 @@ export const BUILTIN_COMMANDS: KeyCommandDef[] = [
   { id: 'voice.hubCard', title: 'Ask Forge (go to the bar)', group: 'Voice', defaultKeys: ['Ctrl+Shift+G'], scope: 'global' },
   { id: 'app.settings', title: 'Settings', group: 'App', defaultKeys: ['Ctrl+,'], scope: 'global' },
   {
+    id: 'app.devtools',
+    title: 'Developer tools',
+    group: 'App',
+    defaultKeys: ['F12'],
+    scope: 'global',
+    description: 'Opens the developer tools. The main process reads this key, so it works even when the window is blank.'
+  },
+  {
+    id: 'bar.palette',
+    title: 'Command list (in the bar)',
+    group: 'Bar',
+    defaultKeys: ['Ctrl+K'],
+    scope: 'bar',
+    description: 'Shows or hides the list of / commands while you type in the Forge bar.'
+  },
+  {
+    id: 'bar.saveDraft',
+    title: 'Save the draft (in the bar)',
+    group: 'Bar',
+    defaultKeys: ['Ctrl+S'],
+    scope: 'bar',
+    description: 'Saves what you typed in the Forge bar as a prompt.'
+  },
+  {
     id: 'app.cheatSheet',
     title: 'Keyboard cheat sheet',
     group: 'App',
@@ -107,7 +131,7 @@ export const BUILTIN_COMMANDS: KeyCommandDef[] = [
     id: TALK_DICTATE_ID,
     title: 'Dictate key',
     group: 'Voice',
-    defaultKeys: ['ControlRight'],
+    defaultKeys: ['AltRight'],
     scope: 'global',
     kind: 'talk',
     description: 'Tap to start or stop, hold to talk. Your words are typed, raw, into the pane you are in.'

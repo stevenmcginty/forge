@@ -1,5 +1,14 @@
 # Handoff
 
+## Dictate key is Right Alt; every app key is in Settings › Shortcuts (2026-09-24)
+
+- **Cause:** UK layout. Windows sends Right Alt as AltGr: a fake Left Ctrl goes down first, then Right Alt, and the fake Ctrl auto-repeats beside it while held (proved with real SendInput in a probe window). `KeyRecorder.tsx` saw "Left Ctrl + another key" and recorded nothing. `stt-gesture.ts` treated each fake-Ctrl repeat as a new combo key, so a hold ended at ~0.5 s.
+- **Fix:** the recorder drops a Left Ctrl that is followed by Right Alt; the gesture ignores other keys' auto-repeats. Right Alt is never swallowed, so AltGr characters still type.
+- **Default:** Dictate is now Right Alt. A one-time move (`forge.dictateKey.altRight`) changes a profile still on Right Ctrl.
+- **Rebindable now:** `bar.palette` (Ctrl+K) and `bar.saveDraft` (Ctrl+S), new scope `bar`, read by Composer; `app.devtools` (F12), read in main from keymap.json so it works on a blank window. Left as-is: carousel Esc/arrows/Enter, OpenCode scroll keys, dev-only Ctrl+Shift+R.
+- **Checked:** voice-hotkey:check (new AltGr cases fail on the old code), dictation, hub, canvas, typecheck. Live in a throwaway Forge with the recorded key sequence: move to Right Alt, record F9 then Right Alt in Settings, hold talks (listening) and release stops (idle), Left Alt does nothing.
+- **Not changed:** Forge Web still uses Right Ctrl for D.
+
 ## Settings › Shortcuts rebinding (2026-09-24, uncommitted)
 
 - **Cause:** the talk-key listener (`src/lib/stt-gesture.ts`, window capture phase) ignored `suspendShortcuts()`. While the key recorder listened, a non-modifier talk key was swallowed before the field saw it, and Right Ctrl started dictation, whose typed text took focus and cancelled the recorder.

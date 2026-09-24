@@ -219,8 +219,8 @@ function defaultSettings(): Settings {
     sttPython: detectSttPython(),
     sttModelDir: detectSttModelDir(),
     sttAutoStopSeconds: 10,
-    sttHotkey: 'ControlRight',
-    // On: the first Right Ctrl should open the mic, not wait out a 660 MB load.
+    sttHotkey: 'AltRight',
+    // On: the first press of the Dictate key should open the mic, not wait out a 660 MB load.
     sttWarmStart: true,
     // The voice hub starts where it always was — in the status bar. Dragging it
     // out (or Ctrl+Shift+G) is the opt-in; see src/lib/voicehub.ts. There is no

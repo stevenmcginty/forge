@@ -12,7 +12,7 @@ import type { GestureIntent } from '@/lib/stt-gesture'
  *
  *   mode     LEGACY, pinned to 'dictate'. The bar no longer has a Dictate ⇄
  *            Agent switch: it has one Listen toggle (hub.start / hub.stop),
- *            and the Dictate key (Right Ctrl) is raw dictation into the
+ *            and the Dictate key (Right Alt) is raw dictation into the
  *            focused pane. Pinned, `agentVoiceNow()` is always null, so that
  *            key and its phrases can never be taken for the agent by a stale
  *            'agent' left in localStorage by the old switch. The Listen key

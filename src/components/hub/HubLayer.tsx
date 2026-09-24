@@ -28,7 +28,7 @@ import './PaneName.css'
  *   keys          `app.cheatSheet`
  *   agent voice   the Listen key (Right Shift) and any phrase meant for the
  *                 agent go to the main agent (setAgentVoice, read by
- *                 useDictation). The Dictate key (Right Ctrl) stays raw
+ *                 useDictation). The Dictate key (Right Alt) stays raw
  *                 dictation into the focused pane.
  *
  * The engine stays headless in VoiceHubControllerProvider; nothing here can

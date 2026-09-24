@@ -64,7 +64,8 @@ import {
   setVoiceAgentTarget
 } from './voice-agent/ipc'
 import { registerRealtimeHandlers } from './realtime/ipc'
-import { callSignFor, disposeHub, postToBoard, registerHubHandlers } from './hub-ipc'
+import { callSignFor, disposeHub, keymapOverride, postToBoard, registerHubHandlers } from './hub-ipc'
+import { browserKeyCombo } from '@shared/browser'
 import { guardArtifactFrames, installArtifactScheme } from './artifact-scheme'
 import {
   disposeBrowserPanes,
@@ -363,7 +364,10 @@ function createWindow(): void {
   // (close window), Ctrl+R and friends before the renderer ever sees them.
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return
-    if (input.key === 'F12') {
+    // Developer tools: F12 unless changed in Settings › Shortcuts. Read here,
+    // not in the renderer, so it still opens on a blank (crashed) window.
+    const combo = browserKeyCombo({ code: input.code, ctrl: input.control, alt: input.alt, shift: input.shift, meta: input.meta })
+    if (combo && (keymapOverride('app.devtools') ?? ['F12']).includes(combo)) {
       event.preventDefault()
       mainWindow?.webContents.toggleDevTools()
     }
