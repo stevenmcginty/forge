@@ -25,6 +25,7 @@ on:
       - 'shared/**'
       - 'src/theme/**'
       - 'src/components/**'
+      - 'src/lib/**'
       - 'src/App.css'
       - 'firebase.json'
       - 'package.json'
