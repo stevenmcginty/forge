@@ -566,7 +566,7 @@
   background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
-/* On: lit, and the square beside the word is filled (off, it is hollow). */
+/* On: lit, and the wall screens fill in (off, they are hollow). */
 .deckbar__wall[data-on='true'] {
   color: var(--accent-ink);
   background: var(--accent-soft);
@@ -579,8 +579,16 @@
 }
 
 .deckbar__wallmark {
-  font-size: 11px;
-  line-height: 1;
+  flex: none;
+}
+
+.deckbar__wallmark rect {
+  fill: transparent;
+  transition: fill var(--dur-fast) var(--ease-out);
+}
+
+.deckbar__wall[data-on='true'] .deckbar__wallmark rect {
+  fill: currentColor;
 }
 
 /* ------------------------------------------- the … menu's Voice bar row */

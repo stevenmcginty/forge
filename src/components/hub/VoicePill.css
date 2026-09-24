@@ -1,96 +1,90 @@
 /*
- * Listen — the one voice switch, inside the bar.
+ * Cohesive On/Off Microphone Button with Built-in Synthesizer Indicator.
  *
- * Off or on is the shape of a switch: off is a hollow track with a hollow knob
- * at the left; on is a lit track with a solid knob at the right. What it is
- * doing, while on, is the mark on the knob — the same marks as the hub's
- * glyphs, so it reads without the words:
+ * Merges the agent selection pop-up (BrainPicker.css) and the listening toggle
+ * into a single, cohesive capsule button (.vunit).
  *
- *   ◌ starting   a turning arc, and a light running along a half-lit track
- *   ● listening  a dot with a ping, on a fully lit track, the pill ringed
- *   ⊘ muted      a struck ring, on a hatched track (on, but not hearing)
- *   ◐ mic on     a half-filled ring, on the same hatched track
- *   ◆ thinking   a turning diamond
- *   ▶ speaking   a play mark, beside the live reply waveform
- *   !  failed    the knob back at the left, in warn, with a bang
- *
- * The words say the same thing; colour only agrees with them. `--lamp` is the
- * colour of "live" and `--lamp-ink` whatever sits on it, so every theme (and a
- * light one) gets a knob that contrasts with its own track.
- */
-
-/* ------------------------------------------------------------------- unit
- *
- * Listen and the voice agent picker (BrainPicker.css) share one rim, mounted
- * by Composer: the switch and its state on the left, who answers on the right.
- * The rim is the unit's, so "on" lights the whole unit — rim and glow — and the
- * Listen half fills; the agent's tile takes the same lit ring.
+ * Left segment:  Microphone on/off switch with built-in dynamic synthesizer
+ *                indicator that actively dances to voice and audio levels.
+ * Right segment: Integrated voice agent selector tile + dropdown chevron.
  */
 
 .vunit {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  flex: 0 1 auto;
-  min-width: 0;
-  height: 36px;
-  padding: 2px;
+  gap: 0;
+  flex: none;
+  height: 34px;
+  padding: 2px 3px 2px 3px;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
   box-shadow: inset 0 0 0 1px var(--glass-line);
-  transition: box-shadow var(--dur-med) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out);
 }
 
+.vunit:hover {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+
+/* Listening ON: The entire cohesive button illuminates */
 .vunit:has(.listen[data-on='true']) {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
   box-shadow:
-    inset 0 0 0 1px var(--accent-line),
-    0 0 18px -6px var(--accent-glow);
+    inset 0 0 0 1.5px var(--accent-line),
+    0 0 18px -4px var(--accent-glow);
 }
 
-/* Listening for real: the rim lights a step further. */
+/* Actively capturing speech */
 .vunit:has(.listen[data-recording='true']) {
   box-shadow:
-    inset 0 0 0 1px var(--accent-line),
-    0 0 0 3px var(--accent-softer),
-    0 0 22px -4px var(--accent-glow);
+    inset 0 0 0 1.5px var(--accent-line),
+    0 0 0 2px var(--accent-softer),
+    0 0 24px -3px var(--accent-glow);
 }
 
+/* Error state */
 .vunit:has(.listen[data-look='error']) {
-  box-shadow: inset 0 0 0 1px var(--warn-line);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  box-shadow:
+    inset 0 0 0 1.5px var(--warn-line),
+    0 0 14px -4px var(--warn-glow);
 }
+
+/* ---------------------------------------------------------------- microphone */
 
 .listen {
   --lamp: var(--accent);
   --lamp-ink: var(--text-on-accent);
-  --knob-x: 0px;
-  --wave: var(--text-muted);
-  --wave-dim: color-mix(in srgb, var(--text-primary) 22%, transparent);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   flex: none;
   height: 100%;
 }
 
-/* A failure speaks in warn; the ink on it is the page itself, which every
-   theme already keeps legible against its warn. */
 .listen[data-look='error'] {
   --lamp: var(--warn);
-  --lamp-ink: var(--bg-base);
-  --wave: var(--warn);
 }
 
 .listen__btn {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  height: 32px;
-  padding: 0 12px 0 6px;
+  gap: 6px;
+  height: 30px;
+  padding: 0 6px 0 7px;
   border-radius: var(--r-full);
   color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  outline: none;
   transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
 }
 
 .listen__btn:hover {
@@ -99,404 +93,104 @@
 }
 
 .listen__btn:focus-visible {
-  outline: 2px solid var(--lamp);
+  outline: var(--focus-ring);
   outline-offset: 1px;
-  border-radius: var(--r-full);
 }
 
-/* On: the Listen half fills; the rim around it is the unit's. */
+/* On: active accent fill and color */
 .listen[data-on='true'] .listen__btn {
-  color: var(--text-primary);
-  background: var(--accent-soft);
-}
-
-/* On, but not hearing you: the fill steps back a shade. */
-.listen[data-look='muted'] .listen__btn {
-  background: var(--accent-softer);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .listen[data-look='error'] .listen__btn {
-  background: var(--warn-soft);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
 }
 
-/* ------------------------------------------------------------------ track */
-
-.listen__track {
-  position: relative;
+.listen__mic-wrap {
+  display: inline-grid;
+  place-items: center;
   flex: none;
-  width: 34px;
-  height: 20px;
-  overflow: hidden;
-  border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
-  box-shadow: inset 0 0 0 1.5px var(--glass-line-strong);
+}
+
+.listen__mic-icon {
+  flex: none;
   transition:
-    background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+    transform var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
-/* The track's texture: a running light while starting, a hatch while it is on
-   but not hearing you. Empty otherwise. */
-.listen__track::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
+.listen[data-on='true'] .listen__mic-icon {
+  color: var(--accent);
+  transform: scale(1.06);
 }
 
-.listen[data-on='true'] .listen__track {
-  background: var(--lamp);
-  box-shadow: none;
-}
+/* ---------------------------------------------------- synthesizer indicator */
 
-.listen[data-look='connecting'] .listen__track {
-  background: color-mix(in srgb, var(--lamp) 34%, transparent);
-  box-shadow: inset 0 0 0 1.5px var(--accent-line);
-}
-
-.listen[data-look='connecting'] .listen__track::before {
-  width: 55%;
-  background: linear-gradient(90deg, transparent, var(--lamp), transparent);
-  transform: translate3d(40%, 0, 0);
-  animation: listen-run 1.1s var(--ease-in-out) infinite;
-}
-
-.listen[data-look='muted'] .listen__track {
-  background: color-mix(in srgb, var(--lamp) 16%, transparent);
-  box-shadow: inset 0 0 0 1.5px var(--accent-line);
-}
-
-.listen[data-look='muted'] .listen__track::before {
-  background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--lamp) 55%, transparent) 0 2px, transparent 2px 5px);
-}
-
-.listen[data-look='error'] .listen__track {
-  background: var(--warn-soft);
-  box-shadow: inset 0 0 0 1.5px var(--warn-line-strong);
-}
-
-/* ------------------------------------------------------------------- knob */
-
-.listen__knob {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  /* Off: a hollow ring, the ○ of the glyphs. */
-  background: transparent;
-  box-shadow: inset 0 0 0 2px var(--text-muted);
-  transform: translate3d(var(--knob-x), 0, 0);
+.listen__synth {
+  display: block;
+  flex: none;
+  color: var(--text-muted);
+  opacity: 0.5;
   transition:
-    transform var(--dur-glide) var(--spring-glide),
-    background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
 }
 
-.listen[data-on='true'] {
-  --knob-x: 14px;
-}
-
-.listen[data-on='true'] .listen__knob {
-  background: var(--lamp-ink);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--bg-sunken) 55%, transparent);
-}
-
-.listen[data-look='error'] .listen__knob {
-  background: var(--lamp);
-  box-shadow: none;
-}
-
-/* A lean toward where a click will send it. */
-.listen:not([data-on='true']) .listen__btn:hover {
-  --knob-x: 2px;
-}
-
-.listen[data-on='true'] .listen__btn:hover {
-  --knob-x: 12px;
-}
-
-.listen:not([data-on='true']):not([data-look='error']) .listen__btn:hover .listen__track {
-  box-shadow: inset 0 0 0 1.5px var(--text-muted);
-}
-
-/* The mark on the knob. Both pseudo-elements sit centred and hidden; each state
-   gives them a shape and brings them in. */
-.listen__knob::before,
-.listen__knob::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 6px;
-  height: 6px;
-  opacity: 0;
-  transform: scale(0.4);
-  transition:
-    opacity var(--dur-fast) var(--ease-out),
-    transform var(--dur-pop) var(--spring-pop);
-}
-
-.listen[data-on='true'] .listen__knob::before,
-.listen[data-look='error'] .listen__knob::before {
-  opacity: 1;
-  transform: none;
-}
-
-/* ◌ starting: an arc turning. */
-.listen[data-mark='connecting'] .listen__knob::before {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  box-sizing: border-box;
-  border: 2px solid var(--lamp);
-  border-right-color: transparent;
-  border-top-color: transparent;
-  animation: listen-spin 0.8s linear infinite;
-}
-
-/* ● listening: a dot, and a ring pinging out of it. */
-.listen[data-mark='listening'] .listen__knob::before,
-.listen[data-mark='listening'] .listen__knob::after {
-  border-radius: 50%;
-}
-
-.listen[data-mark='listening'] .listen__knob::before {
-  background: var(--lamp);
-}
-
-.listen[data-mark='listening'] .listen__knob::after {
-  box-sizing: border-box;
-  border: 1.5px solid var(--lamp);
-  opacity: 0;
-  animation: listen-ping 1.5s var(--ease-out) infinite;
-}
-
-/* ⊘ muted: a ring, struck through. */
-.listen[data-mark='muted'] .listen__knob::before {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  box-sizing: border-box;
-  border: 1.5px solid var(--lamp);
-}
-
-.listen[data-mark='muted'] .listen__knob::after {
-  width: 1.5px;
-  height: 10px;
-  background: var(--lamp);
-  opacity: 1;
-  transform: rotate(-45deg);
-}
-
-/* ◐ mic on, not recording: a half-filled ring. */
-.listen[data-mark='idle'] .listen__knob::before {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  box-sizing: border-box;
-  border: 1.5px solid var(--lamp);
-  background: linear-gradient(90deg, var(--lamp) 50%, transparent 50%);
-}
-
-/* ◆ thinking: a diamond, turning. */
-.listen[data-mark='thinking'] .listen__knob::before {
-  width: 6px;
-  height: 6px;
-  border-radius: 1px;
-  background: var(--lamp);
-  transform: rotate(45deg);
-  animation: listen-think 1.6s var(--ease-in-out) infinite;
-}
-
-/* ▶ speaking: a play mark, nudged right to sit optically centred. */
-.listen[data-mark='speaking'] .listen__knob::before {
-  width: 7px;
-  height: 8px;
-  left: 2px;
-  background: var(--lamp);
-  clip-path: polygon(0 0, 100% 50%, 0 100%);
-}
-
-/* ! failed: a bar and a point, in the page's ink on warn. */
-.listen[data-mark='error'] .listen__knob::before,
-.listen[data-mark='error'] .listen__knob::after {
-  width: 2px;
-  border-radius: 1px;
-  background: var(--lamp-ink);
-  opacity: 1;
-  transform: none;
-}
-
-.listen[data-mark='error'] .listen__knob::before {
-  height: 5px;
-  top: 3px;
-  bottom: auto;
-}
-
-.listen[data-mark='error'] .listen__knob::after {
-  height: 2px;
-  top: auto;
-  bottom: 3px;
-}
-
-@keyframes listen-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes listen-ping {
-  0% {
-    opacity: 0.9;
-    transform: scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(2.1);
-  }
-}
-
-@keyframes listen-think {
-  0% {
-    transform: rotate(45deg) scale(1);
-  }
-  50% {
-    transform: rotate(135deg) scale(0.7);
-  }
-  100% {
-    transform: rotate(225deg) scale(1);
-  }
-}
-
-@keyframes listen-run {
-  from {
-    transform: translate3d(-100%, 0, 0);
-  }
-  to {
-    transform: translate3d(190%, 0, 0);
-  }
-}
-
-/* ------------------------------------------------------------------ words */
-
-.listen__word {
-  display: inline-flex;
-  align-items: baseline;
-  font-family: var(--font-display);
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 16px;
-  color: var(--text-primary);
-}
-
-/* Off, the word is the quiet half of the unit: the agent's name leads. */
-.listen[data-look='offline'] .listen__word,
-.listen[data-look='muted'] .listen__word {
+.listen__btn:hover .listen__synth {
+  opacity: 0.8;
   color: var(--text-secondary);
 }
 
-.listen[data-look='error'] .listen__word {
+.listen[data-on='true'] .listen__synth {
+  opacity: 1;
+  color: var(--accent);
+  filter: drop-shadow(0 0 4px var(--accent-glow));
+}
+
+.listen[data-look='error'] .listen__synth {
+  opacity: 0.9;
   color: var(--warn);
 }
 
-.listen__word-text {
-  max-width: 190px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* --------------------------------------------------------------- error badge */
 
-.listen[data-look='listening'] {
-  --wave: var(--accent);
-  --wave-dim: color-mix(in srgb, var(--accent) 38%, transparent);
-}
-
-.listen[data-look='speaking'] {
-  --wave: var(--text-primary);
-  --wave-dim: color-mix(in srgb, var(--accent) 45%, transparent);
-}
-
-.listen[data-look='thinking'] {
-  --wave: color-mix(in srgb, var(--accent) 80%, var(--text-primary));
-}
-
-.listen__wave {
-  display: inline-flex;
-  flex: none;
-  width: 30px;
-  height: 18px;
-  color: var(--wave);
-  animation: listen-wave-in var(--dur-pop) var(--spring-pop) both;
-}
-
-@keyframes listen-wave-in {
-  from {
-    opacity: 0;
-    transform: scale(0.6);
-  }
-}
-
-/* "Why?" beside a failure: the full reason, one click away. */
 .listen__why {
-  height: 24px;
-  margin-right: 2px;
-  padding: 0 9px;
-  border-radius: var(--r-full);
-  border: 1px solid var(--warn-line);
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  border-radius: 50%;
   font-family: var(--font-display);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--warn);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--bg-base);
+  background: var(--warn);
+  border: 0;
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--warn-glow);
+  transition: transform var(--dur-fast) var(--ease-out);
 }
 
-.listen__why:hover,
-.listen__why[aria-expanded='true'] {
-  background: var(--warn-soft);
+.listen__why:hover {
+  transform: scale(1.1);
 }
 
-.listen__why:focus-visible {
-  outline: 2px solid var(--warn);
-  outline-offset: 2px;
-  border-radius: var(--r-full);
-}
-
-@media (max-width: 1500px) {
-  .listen__word-text {
-    max-width: 140px;
-  }
-}
-
-/* Still, every state keeps its shape: the marks stay, only the motion goes. */
-@media (prefers-reduced-motion: reduce) {
-  .listen__knob,
-  .listen__knob::before,
-  .listen__knob::after,
-  .listen__track::before,
-  .listen__wave {
-    /* !important: the per-mark rules above are more specific. */
-    transition: none !important;
-    animation: none !important;
-  }
-}
-
-:root[data-reduced-motion='true'] .listen :is(.listen__knob, .listen__track, .listen__wave),
-:root[data-reduced-motion='true'] .listen :is(.listen__knob, .listen__track)::before,
-:root[data-reduced-motion='true'] .listen .listen__knob::after {
-  transition: none !important;
-  animation: none !important;
-}
-
-/* ------------------------------------------------------------ the details */
+/* ---------------------------------------------------------------- error card */
 
 .vcard {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--sheet-bg);
+  border-radius: var(--r-popover);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--glass-shadow);
 }
 
 .vcard__head {
@@ -529,37 +223,23 @@
   gap: 7px;
   margin: 0;
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.01em;
-  color: var(--text-primary);
-}
-
-.vcard[data-look='error'] .vcard__state {
   color: var(--warn);
 }
 
 .vcard__glyph {
-  font-size: 11px;
-  color: var(--accent);
-}
-
-.vcard[data-look='error'] .vcard__glyph {
+  font-size: 12px;
   color: var(--warn);
-}
-
-.vcard__error {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 .vcard__raw {
   max-height: 140px;
   margin: 0;
-  padding: 9px 11px;
+  padding: 8px 10px;
   overflow: auto;
-  border-radius: 9px;
+  border-radius: 8px;
   border: 1px solid var(--warn-line);
   background: color-mix(in srgb, var(--warn) 7%, var(--bg-sunken));
   font-family: var(--font-mono);
@@ -583,19 +263,23 @@
   font-size: var(--t-xs);
 }
 
-.vcard__note {
-  margin: 0;
-  font-size: var(--t-xs);
-  color: var(--text-secondary);
+/* Light appearance adjustments */
+:root[data-appearance='light'] .vunit:has(.listen[data-on='true']) {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
-.vcard__note > span {
-  color: var(--accent);
+:root[data-appearance='light'] .listen[data-on='true'] .listen__btn {
+  color: var(--accent-ink);
 }
 
-.vcard__hint {
-  margin: 0;
-  font-size: var(--t-xs);
-  line-height: 1.55;
-  color: var(--text-dim);
+:root[data-appearance='light'] .listen[data-on='true'] .listen__synth {
+  color: var(--accent-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vunit,
+  .listen__btn,
+  .listen__synth {
+    transition: none;
+  }
 }

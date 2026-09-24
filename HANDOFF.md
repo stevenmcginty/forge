@@ -1,5 +1,27 @@
 # Handoff
 
+## Wall: an edge on the grid resizes every tile together (2026-09-24, merged to master, not pushed)
+
+- **Asked:** uniform tile sizes on the Wall, resizable by the user, kept organized.
+- **Built:** on the auto grid, a tile's side edge picks the column count (1-6) and its bottom edge sets every row's height; the wall scrolls past the window. A label by the pointer says "3 columns · 320 px rows". Double-click an edge, or the menu's new "Fit to window", clears it. Header drag still goes freeform, where an edge resizes one tile as before. Stored as `MosaicState.grid` (`shared/types.ts`), `actions.setMosaicGrid`, helpers `gridFromDrag`/`wallColumns`/`gridLabel` in `src/lib/mosaicLayout.ts`.
+- **Checked:** typecheck, lint:hooks, mosaic:check 89. Not tried live. Forge Web's Wall (`web/src/deck/Deck.tsx`) still uses `columnsFor` only; it could read `mosaic.grid` later.
+
+## Agent audio bar redesign & terminal human naming rule (2026-09-24)
+
+- **Asked (Steve):**
+  1. Redesign the agent audio bar at the bottom of Forge. Merge the agent selection pop-up and the listening toggle into a single, cohesive on/off microphone button with a built-in synthesizer indicator that actively shows when it is listening. Keep the remainder of the bar as is, ensuring it is compact to save space for typing.
+  2. Implement a new rule for terminal creation: every newly opened terminal must automatically be assigned a generic human name (such as Trevor, Mike, or Zelda) by default to facilitate easy reference. Descriptive names or path-based names should not be used automatically, although users and agents may still rename them manually afterward.
+- **Built:**
+  - **Single cohesive microphone button (`.vunit` in `src/components/hub/VoicePill.css`, `VoicePill.tsx`, `BrainPicker.css`):** Merged the listening toggle and the agent selection pop-up into a unified capsule button (~85px total, saving ~200px of bar width). Left segment is the on/off microphone toggle; right segment is the active agent mark (`BrainMark`) with a subtle dropdown chevron opening `BrainMenu`. The remainder of the bar layout is preserved as is.
+  - **Built-in Synthesizer Indicator (`src/components/hub/SynthesizerIndicator.tsx`):** High-DPI canvas-rendered 5-bar audio synthesizer equalizer integrated directly inside the microphone toggle. When listening is ON, the bars actively undulate with an organic breathing rhythm and dynamically bounce to microphone voice input (`hub.readLevels().mic`). Also responds to agent speech (`levels.out`), thinking sweep wave, and connecting states.
+  - **Terminal generic human naming rule (`shared/agents.ts`, `shared/workspace.ts`, `src/state/AppState.tsx`):**
+    - Enriched `TAB_NAME_POOL` in `shared/agents.ts` with friendly human names including "Trevor", "Mike", and "Zelda" (preserving "Ada" at index 0 for test compatibility).
+    - Added `isDescriptiveOrPathName()` in `shared/workspace.ts` to detect path separators/drive letters (`C:\...`, `/...`), shell names (`powershell`, `pwsh`, `bash`), and action prefixes (`update: ...`, `install: ...`, `task: ...`).
+    - Updated `newTabName()` so any attempt to auto-assign a descriptive or path-based name falls back to the next generic human name from `TAB_NAME_POOL`.
+    - Added `pooled: true` to `actions.openToolPane` in `src/state/AppState.tsx` so tool/update panes receive human names automatically.
+    - Manual renaming by users and agents is preserved as requested.
+- **Checked:** `npm run typecheck`, `npm run lint:hooks`, `node scripts/agent-bar-check.mjs` (41/41 passed), `npm run voice:check`, `npm run dictation:check`, `npm run realtime:check` (28 checks passed), node naming assertions suite.
+
 ## Wall click-to-type + Expand; voice bar mic/send; real logos on every terminal (2026-09-24 17:05, merged to master, not pushed)
 
 - **Wall (Steve):** a click on a tile's terminal now enters in-place typing (was: opened Full screen). Always-visible Expand button beside the X opens Full screen. The terminal-icon button shows only while typing, as "Stop typing". Esc or a click on empty Wall leaves typing. Enter on the arrow-key ring alone still opens Full screen. `src/components/MosaicView.tsx`, `.css`.

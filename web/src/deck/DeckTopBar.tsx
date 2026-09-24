@@ -169,16 +169,7 @@ function WallSwitch({ view, onView }: { view: DeckView; onView: (view: DeckView)
       title={on ? 'Leave the Wall — back to one agent on the whole screen (Ctrl+G)' : 'Wall — every agent in this project at once (Ctrl+G)'}
       onClick={() => onView(on ? 'focus' : 'wall')}
     >
-      <svg className="dk-wall__glyph" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-        {[
-          [2.3, 2.3],
-          [8.7, 2.3],
-          [2.3, 8.7],
-          [8.7, 8.7]
-        ].map(([x, y]) => (
-          <rect key={`${x}-${y}`} x={x} y={y} width="5" height="5" rx="1.1" strokeWidth="1.4" stroke="currentColor" />
-        ))}
-      </svg>
+      <Icon name="wall" size={13} className="dk-wall__glyph" />
       <span className="dk-wall__word">Wall</span>
       {on ? <Icon name="close" size={10} className="dk-wall__x" /> : null}
     </button>

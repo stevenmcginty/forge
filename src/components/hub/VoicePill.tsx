@@ -3,39 +3,20 @@ import { useKeymap } from '@/hooks/useHub'
 import { formatCombo } from '@/lib/keymap'
 import { TALK_AGENT_ID } from '@/lib/shortcutCommands'
 import { useApp } from '@/state/AppState'
+import { Icon } from '../Icon'
 import { Popover } from '../Popover'
-import { LOOK_GLYPH, listenState, useHubView, type ListenState } from './hubView'
-import { Waveform } from './Waveform'
+import { listenState, useHubView } from './hubView'
+import { SynthesizerIndicator } from './SynthesizerIndicator'
 import './VoicePill.css'
 
 /**
- * The knob's mark: the look, except that "mic on · not recording" (a muted
- * look with the ◐ glyph) gets its own half-ring, apart from a real mute's ⊘.
- */
-function knobMark(ls: ListenState): string {
-  return ls.look === 'muted' && ls.glyph !== LOOK_GLYPH.muted ? 'idle' : ls.look
-}
-
-/**
- * Listen — the one voice control, inside the bar.
+ * ListenToggle — the microphone half of the cohesive on/off microphone button.
  *
- * Off or on, nothing else. On is a hands-free conversation with the main
- * agent: it hears you, sends when you pause, answers, and listens again. The
- * switch says so by shape (a hollow knob at the left, a solid one across a lit
- * track), the mark on the knob says what it is doing (the hub's own glyphs —
- * see VoicePill.css), and the word says it too ("listening", "thinking…",
- * "mic on · not recording", "key refused"), read live from the hub. Right Shift flips the same switch, so the
- * knob follows a start made from the key.
+ * Toggles hands-free listening on/off for Forge's voice agent. Features a built-in
+ * synthesizer indicator showing live audio levels and state dynamics in real time.
  *
- * It is the left half of the voice unit (Composer mounts it with the agent
- * picker inside one rim — VoicePill.css `.vunit`), so the brain's name is said
- * once, by the picker beside it; here it stays in the title and the
- * accessible name.
- *
- * A failure keeps its reason in the word; "Why?" beside it opens the full
- * text with Copy, Try again and Settings.
- *
- * It never takes focus: the pane or the bar you were typing in keeps the keys.
+ * Click toggles listening (Right Shift shortcut).
+ * The button never steals focus from the active pane or typing box.
  */
 export function ListenToggle(): ReactNode {
   const { actions } = useApp()
@@ -52,10 +33,10 @@ export function ListenToggle(): ReactNode {
   const keyWord = agentKey ? ` (${formatCombo(agentKey)})` : ''
   const said = `${brain} · ${ls.word}`
   const title = failed
-    ? `${said}. Click to try again${keyWord}; "Why?" shows the full reason.`
+    ? `${said}. Click to try again${keyWord}; click "!" for details.`
     : ls.on
       ? `${said}. Click to stop listening${keyWord}.`
-      : `${said}. Click to listen — talk to Forge hands-free: it sends when you pause and answers${keyWord}.`
+      : `${said}. Click to listen — talk to Forge hands-free${keyWord}.`
 
   const noFocus = (e: React.MouseEvent): void => e.preventDefault()
 
@@ -74,7 +55,6 @@ export function ListenToggle(): ReactNode {
       className="listen"
       data-on={ls.on ? 'true' : undefined}
       data-look={ls.look}
-      data-mark={knobMark(ls)}
       data-recording={ls.recording ? 'true' : undefined}
     >
       <button
@@ -87,17 +67,16 @@ export function ListenToggle(): ReactNode {
         onMouseDown={noFocus}
         onClick={() => (ls.on ? hub.stop() : hub.start())}
       >
-        <span className="listen__track" aria-hidden="true">
-          <span className="listen__knob" />
+        <span className="listen__mic-wrap" aria-hidden="true">
+          <Icon name="mic" size={15} className="listen__mic-icon" />
         </span>
-        <span className="listen__word">
-          <span className="listen__word-text">{ls.word}</span>
-        </span>
-        {ls.on ? (
-          <span className="listen__wave" aria-hidden="true">
-            <Waveform look={ls.look} read={hub.readLevels} width={30} height={18} strands={2} />
-          </span>
-        ) : null}
+        <SynthesizerIndicator
+          look={ls.look}
+          readLevels={hub.readLevels}
+          width={24}
+          height={14}
+          className="listen__synth"
+        />
       </button>
 
       {failed ? (
@@ -107,10 +86,11 @@ export function ListenToggle(): ReactNode {
           className="listen__why"
           aria-expanded={open}
           title="The full reason, with Copy"
+          aria-label="Why listening stopped — view details"
           onMouseDown={noFocus}
           onClick={() => setOpen((v) => !v)}
         >
-          Why?
+          !
         </button>
       ) : null}
 

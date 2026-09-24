@@ -1,45 +1,36 @@
 /*
- * The voice agent chip — the right half of the voice unit (VoicePill.css) —
- * and its menu (BrainPicker.tsx).
+ * The voice agent picker — integrated into the cohesive microphone button.
  *
- * The chip is the brain's mark in a round tile, then its name, then a chevron.
- * It sits inside the unit's rim, so it has none of its own: Listen and the
- * agent read as one control. Every state is a word or a shape: a fallback
- * carries a diamond on the tile and says why in the name; in the menu the
- * brain in use has an inverted tile, a check AND "in use"; a brain that cannot
- * be picked has a dashed tile, its status glyph and word (◇ Needs key,
- * ✕ Not installed, ! Not logged in) and a line saying what to do.
+ * Sits as the right segment of the capsule (.vunit), cleanly separated from
+ * the microphone toggle by a hairline seam. Displays the active agent mark
+ * and dropdown chevron, opening the BrainMenu popover on click.
  */
 
 .bpick-chip {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  /* The chip gives up width before its neighbours: D and the text field keep theirs. */
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 240px;
-  height: 32px;
-  padding: 0 9px 0 5px;
+  gap: 3px;
+  flex: none;
+  height: 30px;
+  padding: 0 6px 0 5px;
   border-radius: var(--r-full);
-  font-family: var(--font-display);
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  outline: none;
   transition:
     background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
 
-/* The seam between Listen and the agent: a hairline, inside the one rim. */
+/* Hairline seam between microphone toggle and agent selector */
 .bpick-chip::before {
   content: '';
   position: absolute;
-  left: -2px;
-  top: 9px;
-  bottom: 9px;
+  left: -1px;
+  top: 6px;
+  bottom: 6px;
   width: 1px;
   background: var(--glass-line);
   pointer-events: none;
@@ -47,7 +38,7 @@
 
 .bpick-chip:hover,
 .bpick-chip[data-open='true'] {
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
 .bpick-chip:focus-visible {
@@ -61,34 +52,40 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   color: var(--text-primary);
   background: color-mix(in srgb, var(--text-primary) 9%, transparent);
-  transition: box-shadow var(--dur-med) var(--ease-out);
+  transition:
+    box-shadow var(--dur-med) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
-/* Listen on: the agent's tile takes the same lit rim — this is who hears you. */
+/* When listening is ON: the agent tile lights up subtly with accent */
 .vunit:has(.listen[data-on='true']) .bpick-chip__tile {
-  box-shadow: inset 0 0 0 1.5px var(--accent-line);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
 }
 
-/* A fallback: a small diamond on the tile's shoulder, cut out of the bar. */
+/* Fallback diamond indicator */
 .bpick-chip__mark {
   position: absolute;
   top: -1px;
   right: -1px;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 1px;
   background: var(--warn);
   box-shadow: 0 0 0 1.5px var(--bg-panel);
   transform: rotate(45deg);
 }
 
+/* Hidden in the compact button to conserve maximum space for typing */
 .bpick-chip__name {
-  min-width: 0;
+  display: none;
 }
 
 .bpick-chip__chev {
@@ -105,19 +102,7 @@
 
 .bpick-chip[data-open='true'] .bpick-chip__chev {
   transform: rotate(180deg);
-}
-
-/* A narrow window: the chip keeps its mark; the name is in the title and the
-   accessible name, and one click away in the menu. */
-@media (max-width: 1100px) {
-  .bpick-chip {
-    gap: 4px;
-    padding-right: 7px;
-  }
-
-  .bpick-chip__name {
-    display: none;
-  }
+  color: var(--text-primary);
 }
 
 /* ------------------------------------------------------------------ menu */
@@ -253,8 +238,6 @@
   color: var(--text-primary);
 }
 
-/* Ready is the quiet case, so it is ink, not a colour. Needs-something is warn;
-   broken is danger — each also has its own glyph and word. */
 .bpick__state[data-tone='ok'] {
   color: var(--text-secondary);
 }

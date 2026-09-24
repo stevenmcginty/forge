@@ -191,8 +191,8 @@ function NewAgentButton(): ReactNode {
 
 /**
  * Wall on or off. On: every agent at once. Off: Full screen, one terminal.
- * The state is a shape as well as a light — a filled square beside the word
- * when on, a hollow one when off — and aria-pressed for a screen reader.
+ * The state is a shape as well as a light — the masonry wall fills in beside
+ * the word when on, and stays hollow when off — and aria-pressed for a screen reader.
  * Over the browser or the board it brings the agents back, as the Wall.
  */
 function WallSwitch(): ReactNode {
@@ -220,9 +220,7 @@ function WallSwitch(): ReactNode {
         actions.setViewMode(on ? 'tabs' : 'mosaic')
       }}
     >
-      <span className="deckbar__wallmark" aria-hidden="true">
-        {on ? '■' : '□'}
-      </span>
+      <Icon name="wall" size={13} className="deckbar__wallmark" />
       Wall
     </button>
   )

@@ -2090,6 +2090,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           type: 'openToolPane',
           profileId: shell.id,
           title: title.slice(0, 40),
+          pooled: true,
           text: command,
           // A caller that knows its own answer gives one; the update buttons
           // don't, and inherit the auto-run setting they have always had.

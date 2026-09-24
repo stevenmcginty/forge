@@ -28,6 +28,7 @@ export type IconName =
   | 'send'
   | 'viewTabs'
   | 'viewMosaic'
+  | 'wall'
   | 'chevronLeft'
   | 'expand'
   | 'user'
@@ -155,13 +156,24 @@ const PATHS: Record<IconName, ReactNode> = {
       <rect x="2.2" y="5.4" width="11.6" height="7.2" rx="1.3" />
     </>
   ),
-  // Four little windows: the mosaic.
+  // Four terminal panes laid in a masonry wall bond: the Wall.
+  // Staggered wide and compact screens (top: wide + narrow, bottom: narrow + wide)
+  // so it reads unmistakably as a wall of live terminals, not a generic 2×2 grid.
+  wall: (
+    <>
+      <rect x="1.8" y="2.4" width="6.8" height="4.8" rx="1.1" />
+      <rect x="9.8" y="2.4" width="4.4" height="4.8" rx="1.1" />
+      <rect x="1.8" y="8.8" width="4.4" height="4.8" rx="1.1" />
+      <rect x="7.4" y="8.8" width="6.8" height="4.8" rx="1.1" />
+    </>
+  ),
+  // The mosaic wall: shares the same masonry terminal screens layout.
   viewMosaic: (
     <>
-      <rect x="2.3" y="2.3" width="5" height="5" rx="1.1" />
-      <rect x="8.7" y="2.3" width="5" height="5" rx="1.1" />
-      <rect x="2.3" y="8.7" width="5" height="5" rx="1.1" />
-      <rect x="8.7" y="8.7" width="5" height="5" rx="1.1" />
+      <rect x="1.8" y="2.4" width="6.8" height="4.8" rx="1.1" />
+      <rect x="9.8" y="2.4" width="4.4" height="4.8" rx="1.1" />
+      <rect x="1.8" y="8.8" width="4.4" height="4.8" rx="1.1" />
+      <rect x="7.4" y="8.8" width="6.8" height="4.8" rx="1.1" />
     </>
   ),
   chevronLeft: <path d="M9.6 4.4L6 8l3.6 3.6" />,

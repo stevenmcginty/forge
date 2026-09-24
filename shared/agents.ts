@@ -306,8 +306,8 @@ export const TAB_TEXT_PALETTE = ['#C6FF4A', '#7FD1FF', '#C08BFF', '#FFB347', '#5
 export const TAB_NAME_POOL = [
   // A→Z
   'Ada', 'Bo', 'Cleo', 'Dara', 'Eli', 'Fern', 'Gus', 'Hana', 'Iris', 'Jude',
-  'Kai', 'Lena', 'Mira', 'Nico', 'Otis', 'Pia', 'Quinn', 'Rex', 'Sana', 'Tobin',
-  'Uma', 'Vera', 'Wren', 'Xan', 'Yara', 'Zane',
+  'Kai', 'Lena', 'Mike', 'Nico', 'Otis', 'Pia', 'Quinn', 'Rex', 'Sana', 'Trevor',
+  'Uma', 'Vera', 'Wren', 'Xan', 'Yara', 'Zelda',
   // and again
   'Alma', 'Bram', 'Cass', 'Dez', 'Esme', 'Finn', 'Greta', 'Hugo', 'Ines', 'Juno',
   'Kira', 'Lars', 'Mae', 'Nell', 'Olen', 'Pax', 'Quill', 'Remy', 'Soren', 'Thea',

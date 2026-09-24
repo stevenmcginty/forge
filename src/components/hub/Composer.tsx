@@ -315,8 +315,14 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
 
       <div className="comp__row">
         {lead}
-        {/* The voice unit: Listen and who answers it, one rim (VoicePill.css). */}
-        <span className="vunit">
+        {/* Cohesive on/off microphone button with built-in synthesizer indicator and agent picker */}
+        <span
+          className="vunit"
+          data-listening={ls.on ? 'true' : undefined}
+          data-recording={ls.recording ? 'true' : undefined}
+          data-look={ls.look}
+          aria-label="Agent voice controls"
+        >
           <ListenToggle />
           <BrainPicker />
         </span>

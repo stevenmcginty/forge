@@ -96,16 +96,45 @@ export function nextTabName(tabs: TerminalTab[], cursor: number): { title: strin
 }
 
 /**
+ * Detect path-based or automatic descriptive names (such as "update: ...",
+ * "install: ...", "claude", "powershell", "/path/to/folder", etc.) that should
+ * not be automatically assigned to newly opened terminals.
+ */
+export function isDescriptiveOrPathName(name: string): boolean {
+  const trimmed = name.trim()
+  if (!trimmed) return false
+  // Path-based: contains path separators, drive letters, or relative path dots
+  if (/[\\/]/.test(trimmed) || /^[a-zA-Z]:/.test(trimmed) || /^\.\.?([\\/]|$)/.test(trimmed)) {
+    return true
+  }
+  // Descriptive prefixes / actions like "update: ...", "install: ...", "run: ..."
+  if (/^(update|install|run|build|test|fix|task|brief|cmd|exec|tool):\s*/i.test(trimmed)) {
+    return true
+  }
+  // Shell or generic tool names
+  const lower = trimmed.toLowerCase()
+  if (['powershell', 'pwsh', 'cmd', 'bash', 'zsh', 'sh', 'terminal', 'shell', 'console'].includes(lower)) {
+    return true
+  }
+  return false
+}
+
+/**
  * A new tab's name in `ws`: `wanted` when the caller chose one (made unique),
- * else the next pool name. Where the cursor lands either way — a chosen name
- * does not use up a pool name, so the cursor stays put.
+ * unless it is descriptive or path-based, in which case the next generic human
+ * name from the pool is used. Every newly opened terminal is assigned a generic
+ * human name (such as Trevor, Mike, or Zelda) by default.
  */
 export function newTabName(
   ws: Pick<Workspace, 'tabs' | 'nameCursor'>,
   wanted?: string
 ): { title: string; cursor: number } {
   const cursor = ws.nameCursor ?? 0
-  return wanted?.trim() ? { title: uniqueTabName(wanted, ws.tabs), cursor } : nextTabName(ws.tabs, cursor)
+  const clean = wanted?.trim()
+  if (clean && !isDescriptiveOrPathName(clean)) {
+    return { title: uniqueTabName(clean, ws.tabs), cursor }
+  }
+  return nextTabName(ws.tabs, cursor)
 }
 
 /** "Blue Car 2", "Blue Car 3"… — the first numbered variant of `base` nobody is wearing. */
