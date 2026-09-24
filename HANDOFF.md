@@ -1,5 +1,12 @@
 # Handoff
 
+## Wall: Grid | Free switch, header drag reorders on the grid (2026-09-24 17:44, merged to master, not pushed)
+
+- **Asked (Steve):** the Wall was a mess of overlapping tiles. Freeform may stay, but there must be an obvious way into a tidy, symmetrical mode.
+- **Cause:** ca3eed3/ad373e3 only helped the auto grid; Steve's wall was already freeform, and any header drag (or fit double-click) turned the wall freeform with no visible way back.
+- **Built (fb02d43, 8dd31b9):** `WallLayoutSwitch` (Grid | Free) in the title bar right after "+ New", only while the Wall shows, plus a copy in the "…" menu's Tools; "Fit" chip when the grid has a dragged size. On the grid a header drag moves the tile to the slot under the pointer (`MosaicState.order`, CSS `order`, dashed target box); fit double-click no longer turns the wall freeform. Free seeds from the grid or restores saved boxes. "Reset to grid" and `resetMosaicLayout` are gone.
+- **Checked:** typecheck, lint:hooks, mosaic-check 113, layout-engine-check 56; throwaway Forge: 5 overlapping tiles → Grid gives 0 overlaps, reorder keeps Grid; title-bar shots at 1599/959px. Not checked: narrow window with the voice bar on Top.
+
 ## Wall: an edge on the grid resizes every tile together (2026-09-24, merged to master, not pushed)
 
 - **Asked:** uniform tile sizes on the Wall, resizable by the user, kept organized.
