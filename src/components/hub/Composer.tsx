@@ -39,10 +39,11 @@ import './Composer.css'
  *               is doing are inside the switch, in words.
  *   agent       the chip beside Listen names the voice agent that will answer
  *               and opens a menu to switch it in place (BrainPicker).
- *   D           raw dictation (DictateButton): the Dictate key (Right Alt) as
- *               a small button beside Listen — raw words into the focused
- *               pane, or into this bar when the bar has focus. It says
- *               "● Rec" while it runs.
+ *   mic / send  the bar's end button (DictateButton). Empty bar: a mic, the
+ *               Dictate key (Right Alt) as a button — raw words into the
+ *               focused pane, or into this bar when the bar has focus; a stop
+ *               square while it records. Words in the bar: Send, the same as
+ *               Enter.
  *   replies     what Forge says grows the bar upward, with a trail of what it
  *               did ("✓ Opened Codex pane · ✓ Typed into Everest") that opens
  *               into the whole list.
@@ -319,7 +320,6 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
           <ListenToggle />
           <BrainPicker />
         </span>
-        <DictateButton />
 
         <textarea
           ref={fieldRef}
@@ -413,18 +413,23 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
             >
               <Icon name="close" size={12} />
             </button>
-            <button
-              type="button"
-              className="comp__send"
-              title={toForge ? 'Ask Forge (Enter)' : `Send to ${paneName} (Enter)`}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => send(text)}
-            >
-              {toForge ? 'Ask' : 'Send'}
-              <span aria-hidden="true">⏎</span>
-            </button>
           </span>
         ) : null}
+
+        {/* Always last: the mic while the bar is empty, Send once it has words. */}
+        <DictateButton
+          send={
+            text.trim()
+              ? showPalette
+                ? { label: 'Run', title: 'Run the highlighted item (Enter)', onSend: () => runItem(items[cursor]) }
+                : {
+                    label: toForge ? 'Ask Forge' : `Send to ${paneName}`,
+                    title: toForge ? 'Ask Forge (Enter)' : `Send to ${paneName} (Enter)`,
+                    onSend: () => send(text)
+                  }
+              : null
+          }
+        />
       </div>
     </div>
   )

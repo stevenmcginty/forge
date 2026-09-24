@@ -1,9 +1,9 @@
 /*
  * The one bar. Its glass, rim and listening light are Dock.css's
  * `.dock__composer`; this file lays it out — the captions and the trail inside
- * it, growing it upward, above one row of project, Listen, text, target and
- * send — and adds what rises out of it: the palette and the save form. What
- * rises is opaque (`--sheet-bg`): it can sit over a live terminal, and nothing
+ * it, growing it upward, above one row of project, Listen, agent, text,
+ * target and the mic/send button — and adds what rises out of it: the palette
+ * and the save form. What rises is opaque (`--sheet-bg`): it can sit over a live terminal, and nothing
  * here is ever blurred over streaming output.
  */
 
@@ -153,26 +153,6 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   border: 1px solid var(--glass-line);
-}
-
-.comp__send {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 11px 0 12px;
-  border-radius: var(--r-full);
-  font-family: var(--font-display);
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--text-on-accent);
-  background: var(--accent);
-  box-shadow: 0 0 18px -6px var(--accent-glow);
-}
-
-.comp__send:hover {
-  background: var(--accent-bright, var(--accent));
 }
 
 /* The plain Enter glyph gives way to the real Send button once there is text. */
