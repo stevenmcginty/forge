@@ -398,8 +398,8 @@ await check('Settings and the picker read one status: the same probe, the same w
 })
 await check('the chip names the brain that answers; a fallback says why, in words', () => {
   assert.equal(S.barBrainLabel('claude', P.resolveAgentBrain('claude', {})), 'Claude')
-  assert.equal(S.barBrainLabel('gemini-live', P.resolveAgentBrain('gemini-live', {})), 'Claude · Gemini Live needs a key')
-  assert.equal(S.barBrainLabel('groq', P.resolveAgentBrain('groq', {})), 'Claude · Groq (text) needs a key')
+  assert.equal(S.barBrainLabel('gemini-live', P.resolveAgentBrain('gemini-live', {})), 'Claude · Gemini Live: no key')
+  assert.equal(S.barBrainLabel('groq', P.resolveAgentBrain('groq', {})), 'Claude · Groq (text): no key')
   assert.equal(S.barBrainLabel('gemini-live', P.resolveAgentBrain('gemini-live', { geminiKey: 'k' })), 'Gemini Live')
 })
 await check('a pick made while Listen is on: next turn on Parakeet, next press when a live session is involved', () => {

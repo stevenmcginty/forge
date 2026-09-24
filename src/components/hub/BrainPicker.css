@@ -11,7 +11,9 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  flex: none;
+  /* The chip gives up width before its neighbours: D and the text field keep theirs. */
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 260px;
   height: 28px;
   margin-bottom: 4px;

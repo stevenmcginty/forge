@@ -64,12 +64,12 @@ export function brainUnavailable(status: BrainStatus): boolean {
 /**
  * The bar's name for the brain: the one that will actually answer, and — when
  * the pick fell back for want of a key — the pick and why, in words
- * ("Claude · Gemini Live needs a key").
+ * ("Claude · Gemini Live: no key").
  */
 export function barBrainLabel(chosen: AgentBrainId, resolved: { brain: AgentBrainId; fallbackReason: string | null }): string {
   const answering = agentBrainSpec(resolved.brain).label
   if (!resolved.fallbackReason || chosen === resolved.brain) return answering
-  return `${answering} · ${agentBrainSpec(chosen).label} needs a key`
+  return `${answering} · ${agentBrainSpec(chosen).label}: no key`
 }
 
 /**
