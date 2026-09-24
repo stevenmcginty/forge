@@ -34,7 +34,56 @@ export function publishPaneStatus(paneId: string, status: PaneStatus | undefined
   if (previous === status) return
   if (status === undefined) statuses.delete(paneId)
   else statuses.set(paneId, status)
+  trackDone(paneId, previous?.busy ?? false, status)
   emit()
+}
+
+/*
+ * "Done": a long stretch of work that has just ended, held for a few seconds
+ * before the pane settles back to Ready — the desktop's rule and its numbers
+ * (src/lib/paneActivity.ts), run here on the busy flag each pane reads off its
+ * own screen. Module-level for the same reason the statuses are: the Wall
+ * tile, the Agents menu and the voice line must agree on the same pane.
+ */
+
+/** How long "Done" stays up before the pane settles back to Ready. */
+const DONE_HOLD_MS = 6000
+/** A stretch shorter than this finishing is not news. */
+const DONE_MIN_WORK_MS = 8000
+
+const busySince = new Map<string, number>()
+const doneUntil = new Map<string, number>()
+const doneTimers = new Map<string, number>()
+
+function trackDone(paneId: string, wasBusy: boolean, status: PaneStatus | undefined): void {
+  const busy = status?.busy ?? false
+  const at = Date.now()
+  if (busy && !wasBusy) {
+    busySince.set(paneId, at)
+    doneUntil.delete(paneId)
+  }
+  if (!busy && wasBusy) {
+    const since = busySince.get(paneId)
+    busySince.delete(paneId)
+    if (status !== undefined && since !== undefined && at - since >= DONE_MIN_WORK_MS) {
+      doneUntil.set(paneId, at + DONE_HOLD_MS)
+      // "Done" ends by itself; nothing else would redraw the chips when it does.
+      const old = doneTimers.get(paneId)
+      if (old !== undefined) window.clearTimeout(old)
+      doneTimers.set(
+        paneId,
+        window.setTimeout(() => {
+          doneTimers.delete(paneId)
+          doneUntil.delete(paneId)
+          emit()
+        }, DONE_HOLD_MS + 30)
+      )
+    }
+  }
+  if (status === undefined) {
+    busySince.delete(paneId)
+    doneUntil.delete(paneId)
+  }
 }
 
 /** Which face — the composer reads this to hide TUI keys on a phone. */
@@ -72,6 +121,15 @@ export function usePaneStatus(paneId: string | null): PaneStatus | undefined {
     subscribe,
     () => (paneId ? statuses.get(paneId) : undefined),
     () => undefined
+  )
+}
+
+/** Whether this pane has just finished a long stretch of work ("Done"). */
+export function usePaneDone(paneId: string | null): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => (paneId ? (doneUntil.get(paneId) ?? 0) > Date.now() : false),
+    () => false
   )
 }
 

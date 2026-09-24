@@ -91,3 +91,14 @@
 .app[data-face='deck'] .dk-face[data-compact='true'] .dk-face__btn::after {
   inset: -3px -1px;
 }
+
+/*
+ * Full screen in a narrow window: the header also carries the pulse and the
+ * state chip, so the faces not on screen keep their shapes and give up their
+ * words (named on hover), as on a tile. The one on screen keeps its word.
+ */
+@media (max-width: 640px) {
+  .app[data-face='deck'] .dk-face:not([data-compact='true']) .dk-face__btn[data-on='false'] .dk-face__word {
+    display: none;
+  }
+}

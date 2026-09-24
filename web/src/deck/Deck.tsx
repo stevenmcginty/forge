@@ -46,7 +46,7 @@ import { FACES } from '../components/StatusLine'
 import { requestPaneView, usePaneView } from '../lib/pane-status'
 import { getClaudeView } from '../lib/view-pref'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
-import { AgentStateChip, bringForward, deckAgent, type DeckAgent } from './agents'
+import { AgentStateChip, bringForward, deckAgent, OutputPulse, type DeckAgent } from './agents'
 import { composerField, composerOpen } from './composer'
 import { useDeckDictation } from './dictation'
 import type { BarPlace, DeckView } from './view'
@@ -268,9 +268,11 @@ export function DeckStage({
 }
 
 /**
- * A Wall tile's one line: who, which tab, the state in a shape and a word, and
- * the way to full screen. The tile with the ring on it also says "Active", so
- * which one the bar talks to never rests on the ring's colour.
+ * A Wall tile's one line, in the desktop pane header's order: the agent's
+ * badge, its output pulse, the tab's name, the agent's name, and the state in
+ * a shape and a word — then the tools. The tile with the ring on it also says
+ * "Active", so which one the bar talks to never rests on the ring's colour.
+ * Too narrow for one line, the tools drop to a second rather than clip.
  */
 function TileLabel({
   agent,
@@ -300,40 +302,44 @@ function TileLabel({
       onClick={onSelect}
       onDoubleClick={onOpen}
     >
-      <AgentBadge profile={agent.profile} size="sm" />
-      <span className="dk-tile__name truncate">{agent.title}</span>
-      <span className="dk-tile__tab truncate">{tabTitle}</span>
-      <span className="dk-tile__spacer" />
-      {focused ? <span className="dk-tile__active">Active</span> : null}
-      <AgentStateChip paneId={agent.leaf.id} compact />
-      {faces ? <FaceSwitch paneId={agent.leaf.id} name={agent.name} compact /> : null}
-      <button
-        type="button"
-        className="dk-tile__open"
-        aria-label={`Full screen: ${agent.name}`}
-        title="Full screen — this agent alone"
-        onClick={(e) => {
-          e.stopPropagation()
-          onOpen()
-        }}
-        onDoubleClick={(e) => e.stopPropagation()}
-      >
-        <Icon name="expand" size={12} />
-      </button>
-      <button
-        type="button"
-        className="dk-tile__close"
-        disabled={!live}
-        aria-label={`Close ${agent.name}`}
-        title={live ? `Close ${agent.name}` : 'The desktop is not answering, so it cannot close one'}
-        onClick={(e) => {
-          e.stopPropagation()
-          onClose(e.currentTarget)
-        }}
-        onDoubleClick={(e) => e.stopPropagation()}
-      >
-        <Icon name="close" size={11} />
-      </button>
+      <span className="dk-tile__ident">
+        <AgentBadge profile={agent.profile} size="sm" />
+        <OutputPulse paneId={agent.leaf.id} />
+        <span className="dk-tile__tab truncate">{tabTitle}</span>
+        <span className="dk-tile__name truncate">{agent.title}</span>
+        <AgentStateChip paneId={agent.leaf.id} compact />
+      </span>
+      <span className="dk-tile__tools">
+        {focused ? <span className="dk-tile__active">Active</span> : null}
+        {faces ? <FaceSwitch paneId={agent.leaf.id} name={agent.name} compact /> : null}
+        <button
+          type="button"
+          className="dk-tile__open"
+          aria-label={`Full screen: ${agent.name}`}
+          title="Full screen — this agent alone"
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpen()
+          }}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <Icon name="expand" size={12} />
+        </button>
+        <button
+          type="button"
+          className="dk-tile__close"
+          disabled={!live}
+          aria-label={`Close ${agent.name}`}
+          title={live ? `Close ${agent.name}` : 'The desktop is not answering, so it cannot close one'}
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose(e.currentTarget)
+          }}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <Icon name="close" size={11} />
+        </button>
+      </span>
     </div>
   )
 }
