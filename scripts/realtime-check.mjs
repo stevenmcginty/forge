@@ -316,18 +316,99 @@ await check('B2 stubs, unknown tools and missing deps fail in words, never throw
   assert.match(bad.text, /no "kind"/)
 })
 
+await check('one name per terminal: the tab name resolves everywhere, and open_agent_pane keeps an explicit name', async () => {
+  const { terminalName, resolveTerminal, listTerminals } = await import('../shared/terminal-names.ts')
+  const { resolvePaneTarget, runAppAction } = await import('../src/lib/appactions.ts')
+  const { resolveNavTarget } = await import('../src/lib/hubnav.ts')
+  const { newTabName } = await import('../shared/workspace.ts')
+  // Tab "Zeb" holds a Claude pane and a Codex pane split beside it; tab "Viggo" holds Antigravity.
+  const leaves = [
+    ['z1', 'tz', 'Zeb', '', 0, 'claude', 'Claude Code', true],
+    ['z2', 'tz', 'Zeb', '', 1, 'codex', 'Codex', false],
+    ['v1', 'tv', 'Viggo', '', 0, 'antigravity', 'Antigravity', false]
+  ]
+  const panes = leaves.map(([paneId, tabId, tabTitle, leafTitle, i, profileId, profileName, focused], n) => ({
+    paneId, tabId, tabNumber: tabId === 'tz' ? 1 : 2, tabTitle, number: n + 1, name: terminalName(tabTitle, leafTitle, i),
+    profileId, profileName, live: true, focused, agent: true, lastFocusedAt: 0
+  }))
+  assert.deepEqual(panes.map((p) => p.name), ['Zeb', 'Zeb 2', 'Viggo'])
+  assert.equal(terminalName('Zeb', 'Blue', 1), 'Blue', 'a split pane given its own name keeps it')
+  assert.equal(terminalName('Zeb', 'ignored', 0), 'Zeb', 'the first pane is always its tab')
+
+  const at = (said) => resolvePaneTarget(said, panes, 'z1')
+  assert.equal(at('Zeb').pane.paneId, 'z1', '"Zeb" is the pane on tab Zeb')
+  assert.equal(at('zeb').pane.paneId, 'z1', 'case does not matter')
+  assert.equal(at('Zeb 2').pane.paneId, 'z2', '"Zeb 2" is the split pane')
+  assert.equal(at('zeb two').pane.paneId, 'z2', 'spoken numbers too')
+  assert.equal(at('Zed').pane.paneId, 'z1', 'a near miss lands')
+  assert.equal(at('the codex one').pane.paneId, 'z2', 'agent words still work')
+  assert.equal(at('terminal 3').pane.paneId, 'v1', 'numbers are still understood when said')
+  assert.equal(resolveNavTarget('go to Viggo', panes, 'z1').pane.paneId, 'v1', 'focus_pane_by_name uses the same resolver')
+  assert.equal(resolveTerminal('Blue', panes).kind, 'none')
+  assert.equal(listTerminals(panes), 'Zeb (Claude Code), Zeb 2 (Codex), Viggo (Antigravity)')
+
+  const ctx = {
+    projects: [{ id: 'p1', name: 'forge' }], profiles: [
+      { id: 'claude', name: 'Claude Code', badge: 'CC', command: 'claude', kind: 'agent' },
+      { id: 'codex', name: 'Codex', badge: 'CX', command: 'codex', kind: 'agent' }
+    ],
+    defaultProfileId: 'claude', activeProjectId: 'p1', activeProjectName: 'forge', loadedProjectIds: ['p1'],
+    tabs: [{ id: 'tz', title: 'Zeb' }, { id: 'tv', title: 'Viggo' }, { id: 'tb', title: 'Blue Car' }],
+    activeTabId: 'tz', focusedPaneId: 'z1', paneCount: 3, panesInActiveTab: 2, maxSessions: 16, maxPanesPerTab: 8, panes
+  }
+  const calls = []
+  const run = {
+    newTab: () => calls.push(['newTab']), splitPane: () => {}, closePane: () => {}, closeTab: () => {},
+    selectProject: () => {}, selectTab: () => {},
+    renameTab: (id, t) => calls.push(['renameTab', id, t]),
+    renamePane: (id, t) => calls.push(['renamePane', id, t]),
+    sendPrompt: async () => ({ ok: true, summary: 'sent', requested: 1, done: 1 }),
+    // The runner names the tab the way AppState does, from the same helper.
+    openAgentPane: (req) => {
+      calls.push(['openAgentPane', req])
+      return { paneId: 'pane-new', name: newTabName({ tabs: ctx.tabs.map((t) => ({ ...t })), nameCursor: 0 }, req.name).title }
+    }
+  }
+  const miss = runAppAction({ kind: 'send_prompt', target: 'Blue', text: 'hi' }, ctx, run)
+  assert.equal(miss.summary, 'No terminal called “Blue”. Open now: Zeb (Claude Code), Zeb 2 (Codex), Viggo (Antigravity)')
+  const sent = runAppAction({ kind: 'send_prompt', target: 'Zeb 2', text: 'hi', submit: false }, ctx, run)
+  assert.match(sent.summary, /^Typing into Zeb 2 — /)
+
+  // rename_tab: a split pane is renamed on its own; the tab's own pane renames the tab.
+  runAppAction({ kind: 'rename_tab', which: 'Zeb 2', name: 'Docs' }, ctx, run)
+  runAppAction({ kind: 'rename_tab', which: 'Zeb', name: 'Main' }, ctx, run)
+  assert.deepEqual(calls.slice(-2), [['renamePane', 'z2', 'Docs'], ['renameTab', 'tz', 'Main']])
+
+  // open_agent_pane: an explicit name is kept, made unique when it is taken, and the answer says the final name.
+  const opened = runAppAction({ kind: 'open_agent_pane', agent: 'codex', prompt: 'go', name: 'Blue Car' }, ctx, run)
+  assert.equal(calls.at(-1)[1].name, 'Blue Car', 'the name reaches the runner')
+  assert.match(opened.summary, /^Opened Blue Car 2 \(Codex\) inside Forge/)
+  assert.equal(newTabName({ tabs: [{ title: 'Blue Car' }], nameCursor: 0 }, 'Blue Car').title, 'Blue Car 2')
+  assert.equal(newTabName({ tabs: [{ title: 'Blue Car' }, { title: 'blue car 2' }] }, 'Blue Car').title, 'Blue Car 3')
+  assert.equal(newTabName({ tabs: [], nameCursor: 0 }).title, 'Ada', 'no name: the next pool name, as ever')
+
+  // Every schema that opens an agent pane takes the name.
+  const specs = await import('../shared/brain-tools.ts')
+  const open = specs.MAIN_AGENT_TOOL_SPECS.find((t) => t.name === 'open_agent_pane')
+  assert.equal(open.parameters.properties.name.type, 'string')
+  const host = readFileSync(join(ROOT, 'electron/foreman/host.ts'), 'utf8')
+  assert.match(host, /run\('open_agent_pane', \{ profileId: args\.profileId, count: args\.count, name: args\.name \}\)/)
+})
+
 await check('read_pane resolves targets like send_prompt, and asks when ambiguous', () => {
-  const pane = (number, title, profileName, focused = false) => ({
-    paneId: `p${number}`, tabId: 't1', tabNumber: 1, tabTitle: 'one', number, title,
+  const pane = (number, name, profileName, focused = false) => ({
+    paneId: `p${number}`, tabId: 't1', tabNumber: 1, tabTitle: 'one', number, name,
     profileId: profileName.toLowerCase(), profileName, live: true, focused, agent: true, lastFocusedAt: 0
   })
   const ctx = { panes: [pane(1, 'api', 'Claude', true), pane(2, 'web', 'Claude')], focusedPaneId: 'p1' }
   const read = (id, n) => `${id}:${n}`
-  assert.match(describePaneText(ctx, 'terminal 2', 10, read), /Terminal 2 .*last 10 lines:\np2:10/)
+  // A number is still understood when said; the answer names the pane by its name.
+  assert.match(describePaneText(ctx, 'terminal 2', 10, read), /^web, last 10 lines:\np2:10/)
+  assert.match(describePaneText(ctx, 'Web', 10, read), /^web, last 10 lines:\np2:10/)
   assert.match(describePaneText(ctx, 'this', 999, read), /p1:200/)
   // The focused Claude pane is what "the claude one" means (resolvePaneTarget's
   // own rule); with nothing focused there is no honest tie-break, so it asks.
-  assert.match(describePaneText(ctx, 'the claude one', 5, read), /Terminal 1 [\s\S]*p1:5/)
+  assert.match(describePaneText(ctx, 'the claude one', 5, read), /^api[\s\S]*p1:5/)
   const unfocused = { panes: ctx.panes.map((p) => ({ ...p, focused: false })), focusedPaneId: null }
   assert.match(describePaneText(unfocused, 'the claude one', 5, read), /^FAILED: more than one pane matches/)
   assert.match(describePaneText({ panes: [], focusedPaneId: null }, 'x', 5, read), /no panes are open/)
@@ -475,7 +556,9 @@ await check('every brain is taught Full screen and the Wall, and none describes 
     projects: [{ name: 'forge', path: 'C:/forge', active: true }],
     tabs: [{ number: 1, title: 'Main', active: true, panes: [] }]
   })
-  assert.match(state, /Tab numbers are not on screen: name terminals by call-sign or agent, never "tab 2"\./)
+  // Terminals are called by their one name: no brain is told to use numbers or call-signs.
+  assert.match(state, /Numbers are not on screen: call terminals by name, never "terminal 2" or "tab 2"\./)
+  assert.doesNotMatch(state, /call-sign/)
   for (const [file, text] of [
     ['src/lib/appmanifest.ts', readFileSync(join(ROOT, 'src/lib/appmanifest.ts'), 'utf8')],
     ['electron/voice-agent/host.ts', host],
@@ -617,7 +700,7 @@ await check('a browser that navigates itself is told where to go; the desktop is
       tabs: [{ id: 't1', title: 'Main' }, { id: 't2', title: 'Docs' }]
     })
   }
-  const pane = { paneId: 'a', tabId: 't2', tabNumber: 2, tabTitle: 'Docs', number: 2, title: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', live: true, focused: false, agent: true, lastFocusedAt: 0, callSign: 'Everest' }
+  const pane = { paneId: 'a', tabId: 't2', tabNumber: 2, tabTitle: 'Docs', number: 2, name: 'Docs', profileId: 'claude', profileName: 'Claude Code', live: true, focused: false, agent: true, lastFocusedAt: 0 }
   const rt = { panes: () => [pane], focusedPaneId: () => null, activeProjectId: () => 'p1' }
   const nav = (name, args) => runWebNavTool(name, args, deps, rt)
 
@@ -625,7 +708,7 @@ await check('a browser that navigates itself is told where to go; the desktop is
   assert.deepEqual(nav('run_app_action', { kind: 'set_view', mode: 'tabs' }).nav, { view: 'tabs' })
   assert.deepEqual(nav('run_app_action', { kind: 'switch_project', name: 'car harness' }).nav, { projectId: 'p2' })
   assert.deepEqual(nav('run_app_action', { kind: 'focus_tab', index: 1 }).nav, { projectId: 'p1', tabId: 't2' })
-  assert.deepEqual(nav('focus_pane_by_name', { name: 'Everest' }).nav, { projectId: 'p1', tabId: 't2', paneId: 'a' })
+  assert.deepEqual(nav('focus_pane_by_name', { name: 'Docs' }).nav, { projectId: 'p1', tabId: 't2', paneId: 'a' })
   assert.deepEqual(nav('focus_pane_by_name', { name: 'the wall' }).nav, { view: 'mosaic' })
   const miss = nav('run_app_action', { kind: 'focus_tab', index: 5 })
   assert.equal(miss.ok, false)

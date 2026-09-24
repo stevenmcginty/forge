@@ -25,7 +25,7 @@ type Dir = 'left' | 'right' | 'up' | 'down'
  * the built-in handlers. A handler that answers `false` did nothing, and the
  * key carries on to the terminal as if Forge had never looked at it.
  *
- * It also mounts the hub runtime (call-signs, the voice tools' view of the
+ * It also mounts the hub runtime (the terminals by name, the voice tools' view of the
  * panes), because this hook is mounted exactly once, for the life of the app.
  */
 export function useShortcuts(): void {

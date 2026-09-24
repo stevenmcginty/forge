@@ -166,20 +166,21 @@ await check('a keyed brain with no key falls back to Claude and says why', () =>
 })
 
 console.log('live context')
-await check('the manifest names call-sign, panel, agent, state and focus; unchanged state is not re-sent', () => {
+await check('the manifest names each terminal once (name, agent, state, focus); unchanged state is not re-sent', () => {
   const text = C.buildAppContext({
     projectName: 'Forge Dev',
     otherProjects: ['landing'],
     branch: 'desktop-redesign',
-    tabs: [{ number: 1, title: 'Main', active: true }],
     panes: [
-      { paneId: 'a', tabId: 't', tabNumber: 1, tabTitle: 'Main', number: 1, title: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', live: true, focused: true, agent: true, lastFocusedAt: 0, callSign: 'Everest', state: 'working' },
-      { paneId: 'b', tabId: 't', tabNumber: 1, tabTitle: 'Main', number: 2, title: 'Codex', profileId: 'codex', profileName: 'Codex', live: true, focused: false, agent: true, lastFocusedAt: 0, callSign: 'Skylar', state: 'asking' }
+      { paneId: 'a', tabId: 't', tabNumber: 1, tabTitle: 'Zeb', number: 1, name: 'Zeb', profileId: 'claude', profileName: 'Claude Code', live: true, focused: true, agent: true, lastFocusedAt: 0, state: 'working' },
+      { paneId: 'b', tabId: 't', tabNumber: 1, tabTitle: 'Zeb', number: 2, name: 'Zeb 2', profileId: 'codex', profileName: 'Codex', live: true, focused: false, agent: true, lastFocusedAt: 0, state: 'asking' }
     ]
   })
   assert.match(text, /branch desktop-redesign/)
-  assert.match(text, /Everest · panel 1 · tab 1 · Claude Code · working · FOCUSED/)
-  assert.match(text, /Skylar · panel 2 · tab 1 · Codex · asking/)
+  assert.match(text, /- Zeb · Claude Code · working · focused/)
+  assert.match(text, /- Zeb 2 · Codex · asking/)
+  // One name per terminal: no numbers, no tab line, no call-signs.
+  assert.doesNotMatch(text, /panel \d|tab \d|Terminal \d|call-sign/)
   const t = new C.ContextTracker()
   assert.equal(t.take(text), text)
   assert.equal(t.take(text), null, 'the same state is not sent twice')

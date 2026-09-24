@@ -998,11 +998,13 @@ export class ForemanHost {
         const profileId = String(args['profileId'] ?? '').trim()
         if (!profileId) return 'Nothing was opened: `profileId` was empty.'
         const count = clamp(args['count'], 1, 4, 1)
+        const name = typeof args['name'] === 'string' ? args['name'].trim() : ''
         const summary = await this.deps.runAppAction({
           kind: 'open_panes',
           profileId,
           count,
           direction: 'row',
+          ...(name ? { name } : {}),
           // Beside the driven pane, in its project — never wherever the human
           // happens to be looking by now.
           anchorPaneId: paneId
@@ -1236,9 +1238,13 @@ export class ForemanHost {
           ].join('\n'),
           {
             profileId: z.string().describe('The launch profile id — antigravity, grok, glm, claude, codex'),
-            count: z.number().optional().describe('How many panes. Default 1.')
+            count: z.number().optional().describe('How many panes. Default 1.'),
+            name: z
+              .string()
+              .optional()
+              .describe('Name for the new terminal; shown on its tab and used by every tool. Omit to get the next free name.')
           },
-          async (args) => run('open_agent_pane', { profileId: args.profileId, count: args.count })
+          async (args) => run('open_agent_pane', { profileId: args.profileId, count: args.count, name: args.name })
         ),
 
         tool(

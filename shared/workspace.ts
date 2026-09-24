@@ -90,10 +90,39 @@ export function nextTabName(tabs: TerminalTab[], cursor: number): { title: strin
   }
   // A hundred open tabs is well past the session limit, but a name is not worth
   // crashing over: fall back to the next free numbered variant of the one due.
-  const base = TAB_NAME_POOL[start]!
+  return { title: numberedFree(TAB_NAME_POOL[start]!, taken), cursor: start + 1 }
+}
+
+/**
+ * A new tab's name in `ws`: `wanted` when the caller chose one (made unique),
+ * else the next pool name. Where the cursor lands either way — a chosen name
+ * does not use up a pool name, so the cursor stays put.
+ */
+export function newTabName(
+  ws: Pick<Workspace, 'tabs' | 'nameCursor'>,
+  wanted?: string
+): { title: string; cursor: number } {
+  const cursor = ws.nameCursor ?? 0
+  return wanted?.trim() ? { title: uniqueTabName(wanted, ws.tabs), cursor } : nextTabName(ws.tabs, cursor)
+}
+
+/** "Blue Car 2", "Blue Car 3"… — the first numbered variant of `base` nobody is wearing. */
+function numberedFree(base: string, taken: Set<string>): string {
   let n = 2
   while (taken.has(`${base} ${n}`.toLowerCase())) n++
-  return { title: `${base} ${n}`, cursor: start + 1 }
+  return `${base} ${n}`
+}
+
+/**
+ * A name somebody chose for a new tab ("Blue Car"), kept unless another tab in
+ * the project already wears it — then "Blue Car 2", "Blue Car 3", the way the
+ * pool's own overflow is numbered. A terminal's name is how every tool finds
+ * it, so two tabs must never share one.
+ */
+export function uniqueTabName(wanted: string, tabs: TerminalTab[]): string {
+  const name = wanted.trim().slice(0, 40)
+  const taken = new Set(tabs.map((t) => t.title.trim().toLowerCase()))
+  return taken.has(name.toLowerCase()) ? numberedFree(name, taken) : name
 }
 
 export function makeTab(

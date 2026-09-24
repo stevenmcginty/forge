@@ -19,7 +19,7 @@
 import { browserAsk } from './browser-tools.mjs'
 
 export const OPEN_AGENT_PANE_DESCRIPTION =
-  'Open a new coding-agent pane INSIDE Forge — the only way to start an agent. agent is who, in words: "claude", "codex", "gemini", "antigravity", "glm", "kimi", "opencode", "qwen", "grok", or a plain "shell". prompt is typed into the new pane once the agent is up (sent only when submit is true). Never start an agent CLI any other way — no run_command, no open_desktop_app, no new console or terminal window. The answer says which pane opened, or why none did.'
+  'Open a new coding-agent pane INSIDE Forge — the only way to start an agent. agent is who, in words: "claude", "codex", "gemini", "antigravity", "glm", "kimi", "opencode", "qwen", "grok", or a plain "shell". prompt is typed into the new pane once the agent is up (sent only when submit is true). name is the new terminal’s name, shown on its tab; omit it for the next free name. Never start an agent CLI any other way — no run_command, no open_desktop_app, no new console or terminal window. The answer says which pane opened, or why none did.'
 
 export const APP_INSTRUCTION_LINE = 'To start another agent, call open_agent_pane — never launch a CLI in a new window.'
 
@@ -32,6 +32,10 @@ export const APP_TOOLS = [
       properties: {
         agent: { type: 'string', description: 'Which agent, in words: "codex", "claude", "gemini"…' },
         prompt: { type: 'string', description: 'Optional: the first prompt to type into it' },
+        name: {
+          type: 'string',
+          description: 'Name for the new terminal; shown on its tab and used by every tool. Omit to get the next free name.'
+        },
         submit: { type: 'boolean', description: 'Optional: press Enter after the prompt. Default false.' }
       },
       required: ['agent']

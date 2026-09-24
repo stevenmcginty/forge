@@ -9,7 +9,7 @@ import {
   type ReactNode
 } from 'react'
 import { MAX_PANES_PER_TAB, MAX_SESSIONS, MAX_TABS_PER_PROJECT } from '@shared/ipc'
-import { isShellProfile } from '@shared/agents'
+import { newTabName } from '@shared/workspace'
 import {
   idleForemanState,
   type ForemanState,
@@ -17,6 +17,7 @@ import {
   type ForemanToolRequest,
   type ForemanToolResult
 } from '@shared/foreman'
+import { buildActionPanes } from '@/lib/actionPanes'
 import { resolveProfile } from '@/lib/agents'
 import {
   runAppAction,
@@ -157,27 +158,7 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
     const proj = projectId ? (st.projects.find((p) => p.id === projectId) ?? null) : null
     const ws = proj ? st.workspaces[proj.id] : undefined
     const tab = ws?.tabs.find((t) => t.id === ws.activeTabId) ?? null
-    const panes: ActionPane[] = []
-    ws?.tabs.forEach((t, tabIndex) => {
-      for (const leaf of collectLeaves(t.root)) {
-        const profile = resolveProfile(st.settings.agentProfiles, leaf.profileId)
-        const status = terminalHost.runtime(leaf.id).status
-        panes.push({
-          paneId: leaf.id,
-          tabId: t.id,
-          tabNumber: tabIndex + 1,
-          tabTitle: t.title,
-          number: panes.length + 1,
-          title: leaf.title.trim() || profile.name,
-          profileId: profile.id,
-          profileName: profile.name,
-          live: status !== 'exited' && status !== 'error',
-          focused: leaf.id === t.activePaneId && t.id === ws?.activeTabId,
-          agent: !isShellProfile(profile),
-          lastFocusedAt: 0
-        })
-      }
-    })
+    const panes: ActionPane[] = buildActionPanes(ws, st.settings.agentProfiles)
     let total = 0
     for (const w of Object.values(st.workspaces)) for (const t of w.tabs) total += countLeaves(t.root)
     return {
@@ -231,7 +212,7 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
     // Hires get a tab of their own, in the project that owns the driven pane,
     // and the human's view stays where it is. The limits are checked here so
     // Foreman hears a sentence back rather than a notice it cannot see.
-    hireTab: (anchorPaneId, profileId, count) => {
+    hireTab: (anchorPaneId, profileId, count, name) => {
       const st = stateRef.current
       const projectId = projectOwningRef.current(anchorPaneId)
       const ws = projectId ? st.workspaces[projectId] : undefined
@@ -245,7 +226,10 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
       }
       if (room <= 0) return { ok: false, done: 0, summary: `Session limit reached (${MAX_SESSIONS}) — nothing hired` }
       const done = Math.min(count, room)
-      const title = done === 1 ? `${profile.name} (hired)` : `${profile.name} ×${done} (hired)`
+      // The hire's tab is named like any other: Foreman's own name for it
+      // ("Blue Car 2" if "Blue Car" is taken), else the next free pool name —
+      // never the agent kind, which is not a name.
+      const title = newTabName(ws, name).title
       // Minted here so the answer can name them: the hires are not running yet
       // when it goes back, so no list of live panes has them in it.
       const paneIds = Array.from({ length: done }, () => makeId('pane'))
@@ -261,13 +245,19 @@ export function ForemanProvider({ children }: { children: ReactNode }): ReactNod
             : `Opened ${done} ${profile.name} ${done === 1 ? 'pane' : 'panes'} ${where}`
       }
     },
-    openAgentPane: ({ profileId, title, prompt, submit, anchorPaneId }) =>
-      actions.openAgentPane(title, prompt, { profileId, submit, ...(anchorPaneId ? { anchorPaneId } : {}) }),
+    openAgentPane: ({ profileId, title, prompt, submit, name, anchorPaneId }) =>
+      actions.openAgentPane(title, prompt, {
+        profileId,
+        submit,
+        ...(name ? { name } : {}),
+        ...(anchorPaneId ? { anchorPaneId } : {})
+      }),
     closePane: (paneId) => actions.closePane(paneId),
     closeTab: (tabId) => actions.closeTab(tabId),
     selectProject: (projectId) => actions.selectProject(projectId),
     selectTab: (tabId) => actions.selectTab(tabId),
     renameTab: (tabId, title) => actions.renameTab(tabId, title),
+    renamePane: (paneId, title) => actions.renamePane(paneId, title),
     setViewMode: (mode) => actions.setViewMode(mode),
     openSettings: (section) => actions.openSettings(section as Parameters<typeof actions.openSettings>[0])
   }

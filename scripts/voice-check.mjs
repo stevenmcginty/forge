@@ -120,7 +120,7 @@ function pane(over = {}) {
     tabNumber: 1,
     tabTitle: 'build',
     number: 1,
-    title: 'PowerShell',
+    name: 'PowerShell',
     profileId: 'pwsh',
     profileName: 'PowerShell',
     live: true,
@@ -133,14 +133,14 @@ function pane(over = {}) {
 
 /** The default workspace the executor tests target: one shell, two Claudes. */
 const PANES = [
-  pane({ paneId: 'pane1', number: 1, title: 'PowerShell', focused: true }),
+  pane({ paneId: 'pane1', number: 1, name: 'PowerShell', focused: true }),
   pane({
     paneId: 'pane2',
     number: 2,
     tabId: 't2',
     tabNumber: 2,
     tabTitle: 'notes',
-    title: 'Claude Code',
+    name: 'Claude Code',
     profileId: 'claude',
     profileName: 'Claude Code',
     agent: true
@@ -931,11 +931,11 @@ console.log('\nFree-flow dispatch (send_prompt)')
 
 /** Three Claude panes and a shell — the shape "the claude one" is ambiguous in. */
 const CROWDED = [
-  pane({ paneId: 'p1', number: 1, title: 'PowerShell', focused: true }),
-  pane({ paneId: 'p2', number: 2, title: 'build', profileId: 'claude', profileName: 'Claude Code', agent: true }),
-  pane({ paneId: 'p3', number: 3, title: 'docs', profileId: 'claude', profileName: 'Claude Code', agent: true }),
-  pane({ paneId: 'p4', number: 4, title: 'tests', profileId: 'claude', profileName: 'Claude Code', agent: true }),
-  pane({ paneId: 'p5', number: 5, title: 'sidebar', profileId: 'kimi', profileName: 'Kimi', agent: true })
+  pane({ paneId: 'p1', number: 1, name: 'PowerShell', focused: true }),
+  pane({ paneId: 'p2', number: 2, name: 'build', profileId: 'claude', profileName: 'Claude Code', agent: true }),
+  pane({ paneId: 'p3', number: 3, name: 'docs', profileId: 'claude', profileName: 'Claude Code', agent: true }),
+  pane({ paneId: 'p4', number: 4, name: 'tests', profileId: 'claude', profileName: 'Claude Code', agent: true }),
+  pane({ paneId: 'p5', number: 5, name: 'sidebar', profileId: 'kimi', profileName: 'Kimi', agent: true })
 ]
 
 await test('the grammar dispatches a named terminal without a model', () => {
@@ -981,7 +981,7 @@ await test('talking ABOUT a terminal is not talking TO it', () => {
   }
 })
 
-await test('targets resolve by number, ordinal, title and agent', () => {
+await test('targets resolve by name, number, ordinal and agent', () => {
   const at = (spoken, focusedId = 'p1') => resolvePaneTarget(spoken, CROWDED, focusedId)
   assert.equal(at('terminal two').pane.paneId, 'p2')
   assert.equal(at('terminal 2').pane.paneId, 'p2')
@@ -1040,9 +1040,8 @@ await test('the ambiguous case comes back as a question listing the candidates',
   )
   assert.equal(out.ok, false)
   assert.match(out.summary, /^Which one\?/)
-  assert.match(out.summary, /Terminal 2 “build”/)
-  assert.match(out.summary, /Terminal 3 “docs”/)
-  assert.match(out.summary, /Terminal 4 “tests”/)
+  // Candidates by their one name and kind — never "Terminal N".
+  assert.equal(out.summary, 'Which one? build (Claude Code), docs (Claude Code), tests (Claude Code)')
   assert.equal(run.calls.length, 0, 'nothing may be sent while it is ambiguous')
 })
 
@@ -1054,7 +1053,7 @@ await test('a resolved agent pane is typed into and submitted, once', async () =
     run
   )
   assert.equal(out.ok, true)
-  assert.match(out.summary, /Sending to Terminal 2 “build”… say “wait” to hold/)
+  assert.match(out.summary, /Sending to build… say “wait” to hold/)
   const settled = await out.pending
   assert.equal(settled.done, 1)
   assert.deepEqual(run.calls, [['sendPrompt', 'p2', 'build me a landing page', true, null, true]])
@@ -1125,9 +1124,9 @@ await test('the whole flow: open three, then dispatch to the second', async () =
 
   // 2 — "in terminal two, build me a landing page for a cafe" goes to that one.
   const three = [
-    pane({ paneId: 'a', number: 1, title: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', agent: true, focused: true }),
-    pane({ paneId: 'b', number: 2, title: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', agent: true }),
-    pane({ paneId: 'c', number: 3, title: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', agent: true })
+    pane({ paneId: 'a', number: 1, name: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', agent: true, focused: true }),
+    pane({ paneId: 'b', number: 2, name: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', agent: true }),
+    pane({ paneId: 'c', number: 3, name: 'Claude Code', profileId: 'claude', profileName: 'Claude Code', agent: true })
   ]
   const said = parseUtterance('in terminal two, build me a landing page for a cafe', C)
   assert.equal(said.actions[0].kind, 'send_prompt')
@@ -1842,15 +1841,15 @@ const SNAPSHOT = {
       number: 1,
       title: 'build',
       active: true,
-      panes: [{ number: 1, title: 'PowerShell', profileName: 'PowerShell', status: 'live', focused: true, agent: false }]
+      panes: [{ name: 'build', profileName: 'PowerShell', status: 'live', focused: true, agent: false }]
     },
     {
       number: 2,
       title: 'notes',
       active: false,
       panes: [
-        { number: 2, title: 'Claude Code', profileName: 'Claude Code', status: 'live', focused: false, agent: true },
-        { number: 3, title: 'docs', profileName: 'Claude Code', status: 'live', focused: false, agent: true }
+        { name: 'notes', profileName: 'Claude Code', status: 'live', focused: false, agent: true },
+        { name: 'notes 2', profileName: 'Claude Code', status: 'live', focused: false, agent: true }
       ]
     }
   ],
@@ -1880,7 +1879,7 @@ await test('the manifest describes the app, the actions, the limits and the stat
   assert.ok(text.includes('8 panes maximum per tab'))
   assert.ok(text.includes('C:\\Users\\steve\\Desktop\\forge'))
   assert.ok(text.includes('[ACTIVE]'))
-  assert.ok(text.includes('1. "build" [CURRENT]'))
+  assert.ok(text.includes('- build · PowerShell · live'))
   assert.ok(text.includes('kimmy'), 'spoken aliases should be listed')
   assert.ok(text.includes('draftPrompt'))
   // Small enough to send every turn — about 2.4k tokens. It grew when
@@ -1931,16 +1930,16 @@ await test('the SKILLS roster names every skill, and never carries a whole parag
   }
 })
 
-await test('the manifest gives every pane the spoken handle Steve uses', () => {
+await test('the manifest names every terminal once, by the name on its tab', () => {
   const text = buildManifest(SNAPSHOT)
-  // The numbering runs across tabs, in tab then pane order — the same walk the
-  // executor's ActionPane list uses, which is what makes "terminal two" mean
-  // one thing to him, to the model and to the code.
-  assert.ok(text.includes('Terminal 1 — "PowerShell"'), 'pane 1 has no handle')
-  assert.ok(text.includes('Terminal 2 — "Claude Code"'), 'pane 2 has no handle')
-  assert.ok(text.includes('Terminal 3 — "docs"'), 'pane 3 has no handle')
-  assert.match(text, /Terminal 1 — "PowerShell" \(PowerShell, live, plain shell[^)]*, FOCUSED\)/)
-  assert.match(text, /These Terminal numbers are what he says out loud/)
+  // One line per terminal — name, kind, state, flags — in tab then pane order,
+  // the same walk the executor's ActionPane list uses. The name is the one on
+  // the tab; a split pane is "notes 2". No "Terminal N", no tab line.
+  assert.ok(text.includes('- build · PowerShell · live · plain shell — never auto-submitted · FOCUSED'), 'pane 1 by name')
+  assert.ok(text.includes('- notes · Claude Code · live'), 'pane 2 by name')
+  assert.ok(text.includes('- notes 2 · Claude Code · live'), 'pane 3 by name')
+  assert.doesNotMatch(text, /Terminal \d|call-sign|\d\. "build"/)
+  assert.match(text, /Each terminal has one name, the one on its tab/)
   // And the model is told how to use them.
   assert.ok(text.includes('# DISPATCHING TO A TERMINAL'))
   assert.ok(text.includes('send_prompt'))
@@ -2008,7 +2007,7 @@ await test('the manifest copes with an empty app', () => {
     paneCount: 0
   })
   assert.ok(text.includes('projects: none yet'))
-  assert.ok(text.includes('tabs: none open'))
+  assert.ok(text.includes('terminals: none open'))
   assert.ok(text.includes('(none configured)'))
 })
 

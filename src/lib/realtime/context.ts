@@ -7,10 +7,11 @@ import type { NavPane } from '../hubnav'
  *
  * Fields, in the order the model reads them (named in b7-api.md):
  *   project   — the open project, its git branch when known, the other projects
- *   tabs      — number, title, which is current
- *   panes     — call-sign, panel number, tab, agent type (the profile name —
- *               Claude Code, Codex, Gemini, GLM…), state word (working / ready /
- *               asking / starting / exited), FOCUSED on the active one
+ *   terminals — one line each: its one name (shared/terminal-names.ts), agent
+ *               kind (the profile name — Claude Code, Codex, Gemini, GLM…),
+ *               state word (working / ready / asking / starting / exited),
+ *               focused on the active one. No numbers and no second name: the
+ *               tab's name IS the first terminal's name, so tabs get no line.
  * The last lines of a pane are NOT here — that is read_pane, on demand.
  *
  * ~40 tokens a pane; a busy 12-pane project is well under 1k. The Claude
@@ -31,7 +32,6 @@ export interface AppContextInput {
   projectName: string | null
   otherProjects: string[]
   branch: string | null
-  tabs: Array<{ number: number; title: string; active: boolean }>
   panes: ContextPane[]
 }
 
@@ -43,21 +43,13 @@ export function buildAppContext(input: AppContextInput): string {
     lines.push(`project: ${input.projectName}${input.branch ? ` · branch ${input.branch}` : ''}`)
   }
   if (input.otherProjects.length) lines.push(`other projects: ${input.otherProjects.slice(0, 12).join(', ')}`)
-  if (!input.tabs.length) {
-    lines.push('tabs: none')
-  } else {
-    lines.push(
-      `tabs (not on screen — say call-signs, never "tab 2"): ${input.tabs.map((t) => `${t.number} "${t.title}"${t.active ? ' [current]' : ''}`).join(', ')}`
-    )
-  }
   if (!input.panes.length) {
-    lines.push('panes: none — open one with open_agent_pane')
+    lines.push('terminals: none — open one with open_agent_pane')
   } else {
-    lines.push('panes (call-sign, panel, tab, agent, state):')
+    lines.push('terminals (name · agent · state) — call each by its name, never by a number:')
     for (const p of input.panes) {
-      const name = p.callSign ?? `Panel ${p.number}`
       const agent = p.agent ? p.profileName : `${p.profileName} (plain shell)`
-      lines.push(`- ${name} · panel ${p.number} · tab ${p.tabNumber} · ${agent} · ${p.state}${p.focused ? ' · FOCUSED' : ''}`)
+      lines.push(`- ${p.name} · ${agent} · ${p.state}${p.focused ? ' · focused' : ''}`)
     }
   }
   return lines.join('\n')

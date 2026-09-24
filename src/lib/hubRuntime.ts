@@ -1,4 +1,5 @@
 import type { CanvasItem, SavedPrompt, SavedPromptTarget } from '@shared/hub'
+import { listTerminals } from '@shared/terminal-names'
 import { hubApi } from './hubApi'
 import {
   describeNavPane,
@@ -24,7 +25,7 @@ import {
  */
 
 export interface HubRuntime {
-  /** Every pane in the active project, numbered the manifest's way, with call-signs. */
+  /** Every pane in the active project, in the manifest's order, each by its one name. */
   panes(): NavPane[]
   focusedPaneId(): string | null
   activeProjectId(): string | null
@@ -84,11 +85,11 @@ export function focusNavTarget(
   }
   if (target.kind === 'which_view') return { ok: false, summary: WALL_OR_BOARD }
   if (target.kind === 'ambiguous') {
-    return { ok: false, summary: `More than one pane matches: ${target.candidates.map(describeNavPane).join('; ')}. Which one?` }
+    return { ok: false, summary: `More than one terminal matches: ${listTerminals(target.candidates)}. Which one?` }
   }
   if (target.kind === 'none') {
-    const list = target.candidates.map(describeNavPane).join('; ')
-    return { ok: false, summary: list ? `No pane matches that. Open panes: ${list}.` : 'No panes are open.' }
+    const list = listTerminals(target.candidates)
+    return { ok: false, summary: list ? `No terminal by that name. Open now: ${list}.` : 'No terminals are open.' }
   }
   if (!rt) return { ok: false, summary: 'Forge is still starting up.' }
   const pane = target.pane
@@ -100,13 +101,14 @@ export function focusNavTarget(
     paneId: pane.paneId,
     tabId: pane.tabId,
     number: pane.number,
-    callSign: pane.callSign ?? null,
+    name: pane.name,
+    callSign: pane.name,
     source
   })
-  return { ok: true, summary: `Went to ${pane.callSign ? `${pane.callSign} (panel ${pane.number})` : `panel ${pane.number}`}.` }
+  return { ok: true, summary: `Went to ${pane.name}.` }
 }
 
-/** "Everest", "panel 4", "the wall", "the board" → go there. */
+/** "Zeb", "panel 4", "the wall", "the board" → go there. */
 export function goTo(spoken: string, source: HubFocusSource, views?: NavViews): { ok: boolean; summary: string } {
   const rt = runtime
   if (!rt) return { ok: false, summary: 'Forge is still starting up.' }
@@ -154,7 +156,7 @@ export function runSavedPrompt(
     const target = resolveNavTarget(opts.paneTarget, rt.panes(), paneId)
     if (target.kind !== 'pane') return focusNavTarget(target, opts.source ?? 'ui')
     paneId = target.pane.paneId
-    label = target.pane.callSign ?? `panel ${target.pane.number}`
+    label = target.pane.name
   }
   if (!paneId) return { ok: false, summary: 'No pane is focused to type it into.' }
   if (!rt.typeIntoPane(paneId, prompt.text, Boolean(prompt.submit))) {

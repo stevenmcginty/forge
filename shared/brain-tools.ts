@@ -44,7 +44,7 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
     name: 'open_agent_pane',
     description: [
       'Open a new coding-agent pane INSIDE Forge — the only way to start an agent. agent is who, in words: "claude", "codex", "gemini", "antigravity", "glm", "kimi", "opencode", "qwen", "grok", or a plain "shell".',
-      'prompt is typed into the new pane once the agent is up (sent only when submit is true).',
+      'prompt is typed into the new pane once the agent is up (sent only when submit is true). name is the new terminal’s name, shown on its tab; omit it for the next free name.',
       'Never start an agent CLI any other way — no run_command, no open_desktop_app, no new console or terminal window. The answer says which pane opened, or why none did.'
     ].join(' '),
     parameters: {
@@ -52,6 +52,10 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
       properties: {
         agent: { type: 'string', description: 'Which agent, in words: "codex", "claude", "gemini"…' },
         prompt: { type: 'string', description: 'Optional: the first prompt to type into it' },
+        name: {
+          type: 'string',
+          description: 'Name for the new terminal; shown on its tab and used by every tool. Omit to get the next free name.'
+        },
         submit: { type: 'boolean', description: 'Optional: press Enter after the prompt. Default false.' }
       },
       required: ['agent']
@@ -60,7 +64,7 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
   {
     name: 'type_into_pane',
     description: [
-      'Type text straight into one pane, as keystrokes — what Steve means by "type this into Everest" or "put this in the terminal". target is spoken: a call-sign ("Everest"), "panel 2", "the codex one", or "this" for the focused pane.',
+      'Type text straight into one pane, as keystrokes — what Steve means by "type this into Zeb" or "put this in the terminal". target is the terminal’s name ("Zeb"), or spoken: "the codex one", or "this" for the focused pane.',
       'Multi-line text is pasted. submit presses Enter afterwards; text "" with submit true presses Enter alone (to send what is already there). If two panes match, the answer lists them: ask which.'
     ].join(' '),
     parameters: {
@@ -91,7 +95,7 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
   {
     name: 'read_pane',
     description:
-      'Read the recent screen text of one pane — what an agent has been saying or printing. target is spoken: "Everest", "panel 2", "the claude one", "this" for the focused pane.',
+      'Read the recent screen text of one pane — what an agent has been saying or printing. target is the terminal’s name ("Zeb"), or spoken: "the claude one", "this" for the focused pane.',
     parameters: {
       type: 'object',
       properties: {

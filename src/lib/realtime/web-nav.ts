@@ -81,7 +81,7 @@ export function runWebNavTool(
     if (target.kind === 'pane') {
       const pane = target.pane
       const projectId = rt.activeProjectId()
-      return ok(`Went to ${pane.callSign ? `${pane.callSign} (panel ${pane.number})` : `panel ${pane.number}`} ${HERE}.`, {
+      return ok(`Went to ${pane.name} ${HERE}.`, {
         ...(projectId ? { projectId } : {}),
         tabId: pane.tabId,
         paneId: pane.paneId

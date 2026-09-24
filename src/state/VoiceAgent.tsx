@@ -10,7 +10,6 @@ import {
   type RefObject
 } from 'react'
 import { MAX_PANES_PER_TAB, MAX_SESSIONS } from '@shared/ipc'
-import { isShellProfile } from '@shared/agents'
 import {
   isSttSetupError,
   type AgentProfile,
@@ -42,6 +41,7 @@ import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
 import { earconListening } from '@/lib/earcon'
 import { speaker } from '@/lib/speech'
 import { chooseEngine, pickVaried, takeSpeechChunks, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
+import { buildActionPanes } from '@/lib/actionPanes'
 import { resolveProfile } from '@/lib/agents'
 import { buildManifest, type ManifestSnapshot } from '@/lib/appmanifest'
 import {
@@ -55,7 +55,7 @@ import {
 } from '@/lib/appactions'
 import { makeId } from '@/lib/ids'
 import { relayComet } from '@/lib/relayComet'
-import { collectLeaves, countLeaves } from '@/lib/splitTree'
+import { countLeaves } from '@/lib/splitTree'
 import { terminalHost, type PaneStatus } from '@/lib/terminals'
 import { toolLabel } from '@/lib/toolLabels'
 import { transcriptBus, typedTranscript } from '@/lib/transcriptSource'
@@ -1141,34 +1141,11 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    * Steve says them out loud. Built once, then used for both — the numbering
    * cannot drift because there is only one walk.
    */
-  const panes = useMemo<ActionPane[]>(() => {
-    if (!workspace) return []
-    const out: ActionPane[] = []
-    workspace.tabs.forEach((tab, tabIndex) => {
-      for (const leaf of collectLeaves(tab.root)) {
-        const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
-        const status = terminalHost.runtime(leaf.id).status
-        out.push({
-          paneId: leaf.id,
-          tabId: tab.id,
-          tabNumber: tabIndex + 1,
-          tabTitle: tab.title,
-          number: out.length + 1,
-          title: leaf.title.trim() || profile.name,
-          profileId: profile.id,
-          profileName: profile.name,
-          // Reachable, not visible — a background tab's pane is 'idle' because
-          // nothing has mounted it yet, and the runner will wake it.
-          live: status !== 'exited' && status !== 'error',
-          focused: leaf.id === tab.activePaneId && tab.id === workspace.activeTabId,
-          agent: !isShellProfile(profile),
-          lastFocusedAt: focusedAt.current.get(leaf.id) ?? 0
-        })
-      }
-    })
-    return out
+  const panes = useMemo<ActionPane[]>(
+    () => buildActionPanes(workspace, state.settings.agentProfiles, (id) => focusedAt.current.get(id) ?? 0),
     // paneCount changes whenever a pane is added or removed; the rest is state.
-  }, [workspace, state.settings.agentProfiles, paneCount, focusedPaneId])
+    [workspace, state.settings.agentProfiles, paneCount, focusedPaneId]
+  )
 
   // Snapshotted every render and read through a ref, so the transcript
   // subscription never has to be torn down and rebuilt.
@@ -1244,6 +1221,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     selectProject: (projectId) => actions.selectProject(projectId),
     selectTab: (tabId) => actions.selectTab(tabId),
     renameTab: (tabId, title) => actions.renameTab(tabId, title),
+    renamePane: (paneId, title) => actions.renamePane(paneId, title),
     setViewMode: (mode) => actions.setViewMode(mode),
     openSettings: (section) => actions.openSettings(section as Parameters<typeof actions.openSettings>[0]),
     // Media generation goes to the main process, which holds the key, writes
@@ -1290,7 +1268,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     },
     // open_agent_pane: a new tab inside Forge, the prompt pasted once the
     // agent's banner has landed (AppState's pendingTypes readiness gate).
-    openAgentPane: ({ profileId, title, prompt, submit }) => actions.openAgentPane(title, prompt, { profileId, submit }),
+    openAgentPane: ({ profileId, title, prompt, submit, name }) =>
+      actions.openAgentPane(title, prompt, { profileId, submit, ...(name ? { name } : {}) }),
     recallMemory: () => agentMemory.recall(project?.id ?? null),
     forgetMemory: () => agentMemory.forget(project?.id ?? null),
 
@@ -1421,8 +1400,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         panes: panes
           .filter((p) => p.tabId === tab.id)
           .map((p) => ({
-            number: p.number,
-            title: p.title,
+            name: p.name,
             profileName: p.profileName,
             status: terminalHost.runtime(p.paneId).status,
             focused: p.focused,
@@ -1461,8 +1439,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   manifestRef.current = useMemo(() => buildManifest(snapshot), [snapshot])
 
   /**
-   * The compact live manifest (src/lib/realtime/context.ts): call-signs from the
-   * hub runtime, state words from the terminal host. Built on demand, never
+   * The compact live manifest (src/lib/realtime/context.ts): terminal names from
+   * the hub runtime, state words from the terminal host. Built on demand, never
    * cached — it is cheap and it must be current.
    */
   const buildContextNow = useCallback((): string => {
@@ -1481,7 +1459,6 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       projectName: active?.name ?? null,
       otherProjects: snap.projects.filter((p) => !p.active).map((p) => p.name),
       branch: projectBranch(projectIdRef.current),
-      tabs: snap.tabs.map((t) => ({ number: t.number, title: t.title, active: t.active })),
       panes: (rt?.panes() ?? []).map((p) => ({ ...p, state: stateOf(p.paneId) }))
     })
   }, [])
@@ -2221,8 +2198,8 @@ ${said}` : said)
 
   /* --------------------------------------------------------------- panes */
 
-  // Derived from the same numbered list the agent uses, so the popover and the
-  // spoken "terminal two" can never disagree about which pane that is.
+  // Derived from the same list the agent uses, so the popover and the spoken
+  // "Zeb" can never disagree about which pane that is.
   const panesRef = useRef(panes)
   panesRef.current = panes
   const profilesRef = useRef(state.settings.agentProfiles)
@@ -2233,7 +2210,7 @@ ${said}` : said)
         paneId: p.paneId,
         tabId: p.tabId,
         tabTitle: p.tabTitle,
-        title: `${p.number}. ${p.title}`,
+        title: p.name,
         profile: resolveProfile(profilesRef.current, p.profileId),
         status: terminalHost.runtime(p.paneId).status
       })),

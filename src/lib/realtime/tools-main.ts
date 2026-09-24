@@ -1,6 +1,7 @@
 import { isMainAgentTool, MAIN_AGENT_TOOL_SPECS } from '@shared/brain-tools'
 import type { VoiceAgentToolDeps } from '../agenttools'
-import { describeNavPane, resolveNavTarget, type NavPane } from '../hubnav'
+import { listTerminals } from '@shared/terminal-names'
+import { resolveNavTarget, type NavPane } from '../hubnav'
 import { getHubRuntime } from '../hubRuntime'
 import type { RealtimeToolAnswer } from './session'
 
@@ -26,7 +27,7 @@ export { isMainAgentTool }
 
 type Resolved = { ok: true; pane: NavPane } | { ok: false; text: string }
 
-/** A spoken target → one pane, with call-signs. Never guesses between two. */
+/** A spoken target → one pane, by its name. Never guesses between two. */
 function resolvePane(target: string): Resolved {
   const rt = getHubRuntime()
   if (!rt) return { ok: false, text: 'FAILED: Forge is still starting up.' }
@@ -34,16 +35,16 @@ function resolvePane(target: string): Resolved {
   const hit = resolveNavTarget(said, rt.panes(), rt.focusedPaneId())
   if (hit.kind === 'pane') return { ok: true, pane: hit.pane }
   if (hit.kind === 'ambiguous') {
-    return { ok: false, text: `FAILED: more than one pane matches — ${hit.candidates.map(describeNavPane).join('; ')}. Ask which one.` }
+    return { ok: false, text: `FAILED: more than one terminal matches — ${listTerminals(hit.candidates)}. Ask which one.` }
   }
   if (hit.kind === 'canvas') return { ok: false, text: 'FAILED: the Board is not a pane — name a pane.' }
   if (hit.kind === 'wall') return { ok: false, text: 'FAILED: the Wall is every pane at once, not one pane — name a pane.' }
   if (hit.kind === 'which_view') return { ok: false, text: 'FAILED: "canvas" is not a pane — name a pane.' }
-  const list = hit.candidates.map(describeNavPane).join('; ')
-  return { ok: false, text: list ? `FAILED: no pane matches "${said}". Open panes: ${list}.` : 'FAILED: no panes are open.' }
+  const list = listTerminals(hit.candidates)
+  return { ok: false, text: list ? `FAILED: no terminal called "${said}". Open now: ${list}.` : 'FAILED: no terminals are open.' }
 }
 
-const label = (p: NavPane): string => (p.callSign ? `${p.callSign} (panel ${p.number})` : `panel ${p.number}`)
+const label = (p: NavPane): string => p.name
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -100,7 +101,7 @@ export async function runMainAgentTool(
         if (help) {
           return {
             ok: true,
-            text: `OK: the prompt is typed into ${label(found.pane)}, NOT sent. Ask him whether to send it; on yes call type_into_pane with target "${found.pane.callSign ?? `panel ${found.pane.number}`}", text "" and submit true.`
+            text: `OK: the prompt is typed into ${label(found.pane)}, NOT sent. Ask him whether to send it; on yes call type_into_pane with target "${found.pane.name}", text "" and submit true.`
           }
         }
         if (!text.trim()) return { ok: true, text: `OK: pressed Enter in ${label(found.pane)}.` }
@@ -109,7 +110,8 @@ export async function runMainAgentTool(
 
       case 'read_pane': {
         if (!deps?.readPane) return { ok: false, text: 'FAILED: reading panes is not available in this build.' }
-        // Call-signs are resolved here; the reader itself speaks "terminal N".
+        // Resolved here, by name; the pane is handed on by its position,
+        // which the reader resolves to exactly this pane.
         const found = resolvePane(String(args['target'] ?? ''))
         const target = found.ok ? `terminal ${found.pane.number}` : String(args['target'] ?? '')
         if (!found.ok && /more than one/.test(found.text)) return { ok: false, text: found.text }

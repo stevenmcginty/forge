@@ -1,4 +1,5 @@
 import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
+import { distance, listTerminals, resolveTerminal, type TerminalResolution } from '@shared/terminal-names'
 import type { AgentProfile, SplitDirection } from '@shared/types'
 import { skillHandler } from './skillbus'
 
@@ -29,6 +30,8 @@ export type AppAction =
        * whatever the human is looking at by then.
        */
       anchorPaneId?: string
+      /** A hire's name, when Foreman gave one: its tab's, so its first terminal's. */
+      name?: string
     }
   /**
    * `which` is spoken, not an enum: 'focused' / 'current' still mean what they
@@ -65,8 +68,8 @@ export type AppAction =
    * `send_prompt` there is no `submit` here at all, not even an opt-in.
    *
    * `target` is spoken and goes through the same `resolvePaneTarget` as
-   * `send_prompt`: "terminal two", "the kimi one", or nothing at all for the
-   * focused pane.
+   * `send_prompt`: a terminal's name ("Zeb"), "the kimi one", or nothing at
+   * all for the focused pane.
    */
   | { kind: 'use_skill'; name: string; target?: string }
   /**
@@ -79,9 +82,9 @@ export type AppAction =
   | { kind: 'recall_memory' }
   | { kind: 'forget_memory' }
   /**
-   * Hand a prompt to one of the open terminals — "in terminal two, build me a
-   * landing page". `target` is spoken, not an id ("terminal two", "the claude
-   * one", "this"), and is resolved by `resolvePaneTarget` below. `flesh` records
+   * Hand a prompt to one of the open terminals — "in Zeb, build me a landing
+   * page". `target` is spoken, not an id ("Zeb", "the claude one", "this"),
+   * and is resolved by `resolvePaneTarget` below. `flesh` records
    * whether the brain expanded a half-sentence into a real brief, so the chip
    * can say so. `submit` false means type it and leave the Enter to Steve.
    */
@@ -96,6 +99,9 @@ export type AppAction =
    * agent then opens in that pane's project, never in whichever one Steve is
    * looking at by the time the call lands. Absent (voice, the hub), it is the
    * project on screen.
+   *
+   * `name` is the new terminal's name when the caller chose one ("Blue Car");
+   * absent, it takes the next free tab name like a tab opened by hand.
    */
   | { kind: 'open_agent_pane'; agent: string; prompt?: string; name?: string; submit?: boolean; anchorPaneId?: string }
 
@@ -116,11 +122,13 @@ export interface ActionProject {
 /**
  * One open terminal, as the agent sees it.
  *
- * `number` is the spoken handle — "Terminal 3" — and is assigned by walking the
- * tabs in order and the panes inside each tab in order, which is exactly the
- * order `buildManifest` prints. That shared numbering is the whole point: Steve,
- * the manifest and the executor all have to mean the same pane by "terminal
- * two", or free-flow dispatch is a lottery.
+ * `name` is the terminal's one name: its tab's ("Zeb"), or "Zeb 2" for a pane
+ * split into that tab (shared/terminal-names.ts). It is what every brain is
+ * shown and what every answer says.
+ *
+ * `number` is assigned by walking the tabs in order and the panes inside each
+ * tab in order, which is exactly the order `buildManifest` prints. It is still
+ * understood when said ("terminal two") but never printed.
  */
 export interface ActionPane {
   paneId: string
@@ -129,7 +137,8 @@ export interface ActionPane {
   tabTitle: string
   /** 1-based, across every tab in the active project. */
   number: number
-  title: string
+  /** The terminal's one name. */
+  name: string
   profileId: string
   profileName: string
   /**
@@ -189,13 +198,16 @@ export interface ActionRunner {
   hireTab?(
     anchorPaneId: string,
     profileId: string,
-    count: number
+    count: number,
+    name?: string
   ): { ok: boolean; done: number; summary: string; paneIds?: string[] }
   closePane(paneId: string): void
   closeTab(tabId: string): void
   selectProject(projectId: string): void
   selectTab(tabId: string): void
   renameTab?(tabId: string, title: string): void
+  /** Rename a split pane — "Zeb 2" — which has a name of its own, not its tab's. */
+  renamePane?(paneId: string, title: string): void
   setViewMode?(mode: 'tabs' | 'mosaic'): void
   openSettings?(section?: string): void
   /**
@@ -262,12 +274,15 @@ export interface ActionRunner {
    */
   closeMany?(request: { tabIds: string[]; label: string }): Promise<ActionOutcome>
   /**
-   * A new tab running `profileId`, titled `title`, with `prompt` pasted in once
-   * the agent is ready (AppState openAgentPane). Without it, open_agent_pane
-   * falls back to newTab and the prompt is dropped, and says so.
+   * A new tab running `profileId`, with `prompt` pasted in once the agent is
+   * ready (AppState openAgentPane). `name` is the caller's name for it; absent,
+   * it takes the next free tab name. Without this runner, open_agent_pane falls
+   * back to newTab and the prompt is dropped, and says so.
    *
-   * Answers the new pane's id, or null when Forge refused to open one (the
-   * session or tab limit). A runner that answers nothing is taken at its word.
+   * Answers the new pane's id and the name it ended up with ("Blue Car 2" when
+   * "Blue Car" was taken) — or the id alone, from a runner that does not know
+   * the name — or null when Forge refused to open one (the session or tab
+   * limit). A runner that answers nothing is taken at its word.
    * `anchorPaneId` is passed on from the action — see open_agent_pane.
    */
   openAgentPane?(request: {
@@ -275,8 +290,9 @@ export interface ActionRunner {
     title: string
     prompt: string
     submit: boolean
+    name?: string
     anchorPaneId?: string
-  }): string | null | void
+  }): { paneId: string; name: string } | string | null | void
   /** Create a folder and add it to the rail. Main process does the creating. */
   createProject?(request: { name: string; parentDir?: string }): Promise<ActionOutcome>
 }
@@ -310,26 +326,6 @@ function soundKey(s: string): string {
   return norm(s)
     .replace(/(.)\1+/g, '$1')
     .replace(/[aeiou]/g, '')
-}
-
-function distance(a: string, b: string): number {
-  if (a === b) return 0
-  const rows = a.length + 1
-  const cols = b.length + 1
-  let prev = new Array<number>(cols)
-  let curr = new Array<number>(cols)
-  for (let j = 0; j < cols; j++) prev[j] = j
-  for (let i = 1; i < rows; i++) {
-    curr[0] = i
-    for (let j = 1; j < cols; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      curr[j] = Math.min(prev[j]! + 1, curr[j - 1]! + 1, prev[j - 1]! + cost)
-    }
-    const swap = prev
-    prev = curr
-    curr = swap
-  }
-  return prev[cols - 1]!
 }
 
 /** How close is close enough — short words get less rope. */
@@ -523,13 +519,14 @@ function targetTokens(spoken: string): string[] {
 }
 
 /**
- * Resolve "terminal two" / "the claude one" / "this" to exactly one pane.
+ * Resolve "Zeb" / "the claude one" / "this" / "terminal two" to exactly one pane.
  *
- * The order is deliberate: an explicit number beats everything, because a number
- * is the one handle that cannot be misheard into meaning something else. Then a
- * pane's own title, then the agent running in it. Anything with two equally good
- * answers comes back `ambiguous` rather than picking one — sending a brief to
- * the wrong agent is worse than being asked which one.
+ * A terminal's name first — the one on its tab, the only one Steve sees — by
+ * `resolveTerminal` (shared/terminal-names.ts), the resolver every tool uses.
+ * What a name cannot settle goes to the handles below: a number, "this", the
+ * agent running in it. Anything with two equally good answers comes back
+ * `ambiguous` rather than picking one — sending a brief to the wrong agent is
+ * worse than being asked which one.
  */
 export function resolvePaneTarget(
   spoken: string,
@@ -538,6 +535,33 @@ export function resolvePaneTarget(
 ): TargetResolution {
   const all = panes ?? []
   if (all.length === 0) return { kind: 'none', candidates: [] }
+  const hit = resolveTerminal(spoken ?? '', all, {
+    fallback: () => asTerminal(resolveByHandle(spoken, all, focusedPaneId)),
+    isKindWord: (word) => all.some((p) => namesAgent(p, word))
+  })
+  if (hit.kind === 'one') return { kind: 'pane', pane: hit.pane }
+  if (hit.kind === 'ambiguous') return { kind: 'ambiguous', candidates: hit.matches }
+  return { kind: 'none', candidates: all }
+}
+
+function asTerminal(r: TargetResolution): TerminalResolution<ActionPane> {
+  if (r.kind === 'pane') return { kind: 'one', pane: r.pane }
+  if (r.kind === 'ambiguous') return { kind: 'ambiguous', matches: r.candidates }
+  return { kind: 'none' }
+}
+
+/** Exactly an agent word for this pane: its id, its name, that name's first word, or an alias. */
+function namesAgent(pane: ActionPane, key: string): boolean {
+  if (PROFILE_ALIASES[key] === pane.profileId) return true
+  return key === norm(pane.profileId) || key === norm(pane.profileName) || key === norm(pane.profileName.split(/\s+/)[0] ?? '')
+}
+
+/**
+ * Everything but a name: a number, "this", a bare noun, an agent word — what
+ * `resolvePaneTarget` understood before terminals had names, kept because it is
+ * still what people say ("terminal two", "the claude one").
+ */
+function resolveByHandle(spoken: string, all: ActionPane[], focusedPaneId: string | null): TargetResolution {
 
   const focused = all.find((p) => p.paneId === focusedPaneId) ?? all.find((p) => p.focused) ?? null
   const raw = (spoken ?? '').trim()
@@ -590,12 +614,6 @@ export function resolvePaneTarget(
     return focused ? { kind: 'pane', pane: focused } : { kind: 'ambiguous', candidates: all }
   }
 
-  /* --- a title: "the build pane", "notes" -------------------------------- */
-  const name = meaningful.join(' ')
-  const byTitle = matchPanesByTitle(all, name)
-  if (byTitle.length === 1) return { kind: 'pane', pane: byTitle[0]! }
-  if (byTitle.length > 1) return pickAmong(byTitle, focused)
-
   /* --- an agent: "the claude one", "the kimi pane" ----------------------- */
   const byAgent = all.filter((p) => meaningful.some((t) => matchesProfileWord(p, t)))
   if (byAgent.length === 1) return { kind: 'pane', pane: byAgent[0]! }
@@ -622,30 +640,6 @@ function pickAmong(candidates: ActionPane[], focused: ActionPane | null): Target
   return { kind: 'ambiguous', candidates }
 }
 
-function matchPanesByTitle(panes: ActionPane[], name: string): ActionPane[] {
-  const q = norm(name)
-  if (!q || q.length < 2) return []
-  const exact = panes.filter((p) => norm(p.title) === q)
-  if (exact.length) return exact
-  const prefix = panes.filter((p) => {
-    const n = norm(p.title)
-    return n.length > 1 && (n.startsWith(q) || q.startsWith(n))
-  })
-  if (prefix.length) return prefix
-  /**
-   * Deliberately stricter than `closeEnough`, which is tuned for mis-heard
-   * agent *names* and collapses vowels — under that rule "claude" and "build"
-   * are one edit apart as skeletons, and "the claude one" would silently
-   * resolve to a pane titled "build". A pane title is typed, not spoken, so a
-   * plain edit distance is the right amount of forgiveness.
-   */
-  return panes.filter((p) => {
-    const n = norm(p.title)
-    if (n.length < 3) return false
-    return distance(q, n) <= (Math.max(q.length, n.length) <= 5 ? 1 : 2)
-  })
-}
-
 /** Does one spoken word name the agent running in this pane? */
 function matchesProfileWord(pane: ActionPane, word: string): boolean {
   const q = norm(word)
@@ -660,9 +654,24 @@ function matchesProfileWord(pane: ActionPane, word: string): boolean {
   return closeEnough(q, n)
 }
 
-/** "Terminal 2 “build”" — how a pane is named back to the user. */
+/** "Zeb" — how a pane is named back to the user: its one name, nothing else. */
 export function paneLabel(pane: ActionPane): string {
-  return `Terminal ${pane.number} “${pane.title}”`
+  return pane.name
+}
+
+/**
+ * A terminal named outright — "Zeb 2" — by name alone: no numbers, no agent
+ * words. The tab actions try it first, so a split pane's name reaches the pane
+ * rather than prefix-matching its tab ("Zeb 2" is not "Zeb").
+ */
+function paneNamed(spoken: string, panes: ActionPane[]): ActionPane | null {
+  const hit = resolveTerminal(spoken ?? '', panes)
+  return hit.kind === 'one' ? hit.pane : null
+}
+
+/** The first pane in its tab — the one whose name is the tab's. */
+function isTabsOwnPane(pane: ActionPane, panes: ActionPane[]): boolean {
+  return panes.find((p) => p.tabId === pane.tabId)?.paneId === pane.paneId
 }
 
 /* ---------------------------------------------------------- tab targeting */
@@ -731,11 +740,11 @@ export function resolveTabTarget(spoken: string, tabs: ActionTab[], activeTabId:
   return { kind: 'none', candidates: all }
 }
 
-/** "tab 1 “build”, tab 2 “notes”" — candidates, for asking which. */
-function listTabs(tabs: ActionTab[], all: ActionTab[]): string {
+/** "Zeb, Viggo" — candidates by name, for asking which. Tab numbers are never printed. */
+function listTabs(tabs: ActionTab[]): string {
   return tabs
     .slice(0, 8)
-    .map((t) => `tab ${all.indexOf(t) + 1} “${t.title}”`)
+    .map((t) => t.title)
     .join(', ')
 }
 
@@ -820,7 +829,10 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       let target = ctx.focusedPaneId
       let panesInTab = ctx.panesInActiveTab
       if (action.anchorPaneId && run.hireTab) {
-        const hired = run.hireTab(action.anchorPaneId, profile.id, requested)
+        const wanted = String(action.name ?? '').trim()
+        const hired = wanted
+          ? run.hireTab(action.anchorPaneId, profile.id, requested, wanted)
+          : run.hireTab(action.anchorPaneId, profile.id, requested)
         const ids = hired.paneIds ?? []
         return {
           ok: hired.ok,
@@ -877,10 +889,10 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
         return { ok: true, summary: 'Closed the focused pane', requested: 1, done: 1 }
       }
       const resolved = resolvePaneTarget(which, ctx.panes ?? [], ctx.focusedPaneId)
-      if (resolved.kind === 'ambiguous') return fail(`Which one? ${listPanes(resolved.candidates)}`)
+      if (resolved.kind === 'ambiguous') return fail(`Which one? ${listTerminals(resolved.candidates)}`)
       if (resolved.kind === 'none') {
         if (resolved.candidates.length === 0) return fail('No terminals open')
-        return fail(`No terminal called “${which}”. Open now: ${listPanes(resolved.candidates)}`)
+        return fail(`No terminal called “${which}”. Open now: ${listTerminals(resolved.candidates)}`)
       }
       run.closePane(resolved.pane.paneId)
       return { ok: true, summary: `Closed ${paneLabel(resolved.pane)}`, requested: 1, done: 1 }
@@ -888,17 +900,19 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
 
     case 'close_tab': {
       const which = (action.which ?? '').trim()
-      const resolved = resolveTabTarget(
-        which === 'current' ? '' : which,
-        ctx.tabs,
-        ctx.activeTabId
-      )
+      // A terminal's name closes the tab it is in: "close Zeb 2" is Zeb's tab.
+      const named = which && which !== 'current' ? paneNamed(which, ctx.panes ?? []) : null
+      const owner = named ? ctx.tabs.findIndex((t) => t.id === named.tabId) : -1
+      const resolved: TabResolution =
+        owner >= 0
+          ? { kind: 'tab', tab: ctx.tabs[owner]!, index: owner }
+          : resolveTabTarget(which === 'current' ? '' : which, ctx.tabs, ctx.activeTabId)
       if (resolved.kind === 'ambiguous') {
-        return fail(`Which tab? ${listTabs(resolved.candidates, ctx.tabs)}`)
+        return fail(`Which tab? ${listTabs(resolved.candidates)}`)
       }
       if (resolved.kind === 'none') {
         if (ctx.tabs.length === 0) return fail('No tab open')
-        return fail(`No tab called “${which}”. Open now: ${listTabs(ctx.tabs, ctx.tabs)}`)
+        return fail(`No tab called “${which}”. Open now: ${listTabs(ctx.tabs)}`)
       }
       run.closeTab(resolved.tab.id)
       return { ok: true, summary: `Closed “${resolved.tab.title}”`, requested: 1, done: 1 }
@@ -952,8 +966,21 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
     case 'rename_tab': {
       const name = action.name.trim()
       if (!name) return fail('No new name given')
-      const resolved = resolveTabTarget(action.which === 'current' ? '' : action.which, ctx.tabs, ctx.activeTabId)
-      if (resolved.kind === 'ambiguous') return fail(`Which tab? ${listTabs(resolved.candidates, ctx.tabs)}`)
+      // A terminal's name first. A split pane ("Zeb 2") has a name of its own
+      // and is renamed on its own; the first pane in a tab is named by its tab.
+      const panes = ctx.panes ?? []
+      const named = action.which && action.which !== 'current' ? paneNamed(action.which, panes) : null
+      if (named && !isTabsOwnPane(named, panes)) {
+        if (!run.renamePane) return fail('Renaming is not available here')
+        run.renamePane(named.paneId, name)
+        return { ok: true, summary: `Renamed “${named.name}” to “${name}”`, requested: 1, done: 1 }
+      }
+      const owner = named ? ctx.tabs.findIndex((t) => t.id === named.tabId) : -1
+      const resolved: TabResolution =
+        owner >= 0
+          ? { kind: 'tab', tab: ctx.tabs[owner]!, index: owner }
+          : resolveTabTarget(action.which === 'current' ? '' : action.which, ctx.tabs, ctx.activeTabId)
+      if (resolved.kind === 'ambiguous') return fail(`Which tab? ${listTabs(resolved.candidates)}`)
       if (resolved.kind === 'none') return fail(ctx.tabs.length ? `No tab called “${action.which}”` : 'No tab open')
       if (!run.renameTab) return fail('Renaming is not available here')
       run.renameTab(resolved.tab.id, name)
@@ -1078,9 +1105,9 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       const resolved = resolvePaneTarget(action.target ?? '', ctx.panes ?? [], ctx.focusedPaneId)
       if (resolved.kind === 'none') {
         if (resolved.candidates.length === 0) return fail('No terminals open — say “open a claude terminal” first')
-        return fail(`No terminal called “${action.target}”. Open now: ${listPanes(resolved.candidates)}`)
+        return fail(`No terminal called “${action.target}”. Open now: ${listTerminals(resolved.candidates)}`)
       }
-      if (resolved.kind === 'ambiguous') return fail(`Which one? ${listPanes(resolved.candidates)}`)
+      if (resolved.kind === 'ambiguous') return fail(`Which one? ${listTerminals(resolved.candidates)}`)
 
       const pane = resolved.pane
       if (!pane.live) return fail(`${paneLabel(pane)}’s shell has exited — nothing to type it into`)
@@ -1140,10 +1167,10 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
     }
 
     /**
-     * The free-flow one: "in terminal two, build me a landing page".
+     * The free-flow one: "in Zeb, build me a landing page".
      *
      * Three rules, in order of how much damage getting them wrong would do:
-     *   1. Never guess between two panes — ask, and list them by number.
+     *   1. Never guess between two panes — ask, and list them by name.
      *   2. Never press Enter in a plain shell. A misheard sentence typed at a
      *      PowerShell prompt is a command; at a coding agent it is a question.
      *   3. Never press Enter at all unless Settings says to (voiceAutoRelay).
@@ -1156,10 +1183,10 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
 
       if (resolved.kind === 'none') {
         if (resolved.candidates.length === 0) return fail('No terminals open — say “open a claude terminal” first')
-        return fail(`No terminal called “${action.target}”. Open now: ${listPanes(resolved.candidates)}`)
+        return fail(`No terminal called “${action.target}”. Open now: ${listTerminals(resolved.candidates)}`)
       }
       if (resolved.kind === 'ambiguous') {
-        return fail(`Which one? ${listPanes(resolved.candidates)}`)
+        return fail(`Which one? ${listTerminals(resolved.candidates)}`)
       }
 
       const pane = resolved.pane
@@ -1212,19 +1239,24 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       // newTab only ever opens in the one on screen.
       const anchor = String(action.anchorPaneId ?? '').trim()
       if ((prompt || anchor) && run.openAgentPane) {
-        const paneId = run.openAgentPane({
+        const opened = run.openAgentPane({
           profileId: profile.id,
           title: name || profile.name,
           prompt,
           submit,
+          ...(name ? { name } : {}),
           ...(anchor ? { anchorPaneId: anchor } : {})
         })
-        if (paneId === null) {
+        if (opened === null) {
           return fail(`Forge refused to open a ${profile.name} pane — the session or tab limit is reached, or its project is not open`)
         }
+        const paneId = typeof opened === 'string' ? opened : opened?.paneId
+        // The name it ended up with, which is not always the one asked for:
+        // "Blue Car" already taken makes this one "Blue Car 2".
+        const called = (typeof opened === 'object' ? opened?.name : '') || name
         return {
           ok: true,
-          summary: `Opened a new ${profile.name} pane inside Forge${name ? ` “${name}”` : ''}${paneId ? ` (pane id ${paneId})` : ''}${prompt ? ` — the prompt goes in when it is ready${submit ? ' and is sent' : ', unsent'}` : ''}`,
+          summary: `Opened ${called ? `${called} (${profile.name})` : `a new ${profile.name} pane`} inside Forge${paneId ? ` (pane id ${paneId})` : ''}${prompt ? ` — the prompt goes in when it is ready${submit ? ' and is sent' : ', unsent'}` : ''}`,
           requested: 1,
           done: 1,
           ...(paneId ? { paneIds: [paneId] } : {})
@@ -1233,7 +1265,7 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       run.newTab(profile.id)
       return {
         ok: true,
-        summary: `Opened a new ${profile.name} pane inside Forge${prompt ? ' (the prompt could not be typed here — send it with type_into_pane)' : ''}`,
+        summary: `Opened a new ${profile.name} pane inside Forge${name ? ` (it could not be named “${name}” here — rename it with rename_tab)` : ''}${prompt ? ' (the prompt could not be typed here — send it with type_into_pane)' : ''}`,
         requested: 1,
         done: 1
       }
@@ -1242,12 +1274,4 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
     default:
       return fail('I did not understand that')
   }
-}
-
-/** "Terminal 1 “build”, Terminal 2 “notes”" — candidates, for asking which. */
-function listPanes(panes: ActionPane[]): string {
-  return panes
-    .slice(0, 8)
-    .map((p) => `Terminal ${p.number} “${p.title}” (${p.profileName})`)
-    .join(', ')
 }

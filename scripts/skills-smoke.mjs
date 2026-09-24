@@ -463,7 +463,7 @@ async function main() {
     tabNumber: n,
     tabTitle: `Tab ${n}`,
     number: n,
-    title: `Terminal ${n}`,
+    name: `Tab ${n}`,
     profileId: 'claude',
     profileName: 'Claude Code',
     live: true,
@@ -473,7 +473,7 @@ async function main() {
     ...over
   })
 
-  const PANES = [pane(1), pane(2, { profileId: 'kimi', profileName: 'Kimi', title: 'notes' })]
+  const PANES = [pane(1), pane(2, { profileId: 'kimi', profileName: 'Kimi', name: 'notes' })]
   const CTX = {
     projects: [],
     profiles: [],
@@ -498,7 +498,7 @@ async function main() {
   const spy = {
     useSkill: (req) => {
       seen.push(req)
-      return { ok: true, summary: `Typed /${req.name} into ${req.pane.title}`, requested: 1, done: 1 }
+      return { ok: true, summary: `Typed /${req.name} into ${req.pane.name}`, requested: 1, done: 1 }
     }
   }
 

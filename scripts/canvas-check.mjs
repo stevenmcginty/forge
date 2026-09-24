@@ -239,15 +239,16 @@ try {
   /* ----------------------------------------------------------- resolver */
 
   console.log('\nresolver')
-  const pane = (n, id, title, profileName, callSign, focused = false) => ({
-    paneId: id, tabId: `t${n}`, tabNumber: n, tabTitle: title, number: n, title, profileId: profileName.toLowerCase(),
-    profileName, live: true, focused, agent: true, lastFocusedAt: 0, callSign
+  // Each terminal has one name, its tab's (shared/terminal-names.ts).
+  const pane = (n, id, name, profileName, focused = false) => ({
+    paneId: id, tabId: `t${n}`, tabNumber: n, tabTitle: name, number: n, name, profileId: profileName.toLowerCase(),
+    profileName, live: true, focused, agent: true, lastFocusedAt: 0
   })
   const panes = [
-    pane(1, 'p1', 'Claude Code', 'Claude Code', 'Everest', true),
-    pane(2, 'p2', 'Codex', 'Codex', 'Skylar'),
-    pane(3, 'p3', 'Gemini', 'Gemini', 'Vega'),
-    pane(4, 'p4', 'Claude Code', 'Claude Code', 'Orion')
+    pane(1, 'p1', 'Everest', 'Claude Code', true),
+    pane(2, 'p2', 'Skylar', 'Codex'),
+    pane(3, 'p3', 'Vega', 'Gemini'),
+    pane(4, 'p4', 'Orion', 'Claude Code')
   ]
   const r = (s) => nav.resolveNavTarget(s, panes, 'p1')
   const hitId = (t) => (t.kind === 'pane' ? t.pane.paneId : t.kind)
@@ -266,7 +267,7 @@ try {
   ok(r('go to the canvas').kind === 'which_view', '"go to the canvas" → asks: the Wall or the Board?', JSON.stringify(r('go to the canvas')))
   ok(r('the canvas').kind === 'which_view', '"the canvas" → asks, never a guess')
   ok(r('show me the canvas board').kind === 'which_view', '"the canvas board" → still asks')
-  ok(hitId(r('Everist')) === 'p1', 'a near-miss call-sign still lands ("Everist")')
+  ok(hitId(r('Everist')) === 'p1', 'a near-miss name still lands ("Everist")')
   ok(hitId(r('the codex one')) === 'p2', '"the codex one" → by agent')
   ok(r('panel 9').kind === 'none', '"panel 9" with four panes → none, not a guess')
   ok(r('zanzibar').kind === 'none', 'an unknown name → none')
@@ -326,7 +327,7 @@ try {
   const went = await tools.runHubTool('focus_pane_by_name', { name: 'go to panel 3' })
   await sleep(20)
   ok(went.ok && seen.revealed.at(-1) === 'p3' && seen.focused.at(-1) === 'p3', 'focus_pane_by_name "panel 3" reveals and focuses it', JSON.stringify(went))
-  ok(seen.events.some((d) => d.kind === 'pane' && d.paneId === 'p3' && d.callSign === 'Vega' && d.source === 'voice'), 'and fires the focus event D2 animates')
+  ok(seen.events.some((d) => d.kind === 'pane' && d.paneId === 'p3' && d.name === 'Vega' && d.source === 'voice'), 'and fires the focus event D2 animates')
   const toBoard = await tools.runHubTool('focus_pane_by_name', { name: 'the board' })
   ok(toBoard.ok && /Board/.test(toBoard.text) && seen.events.some((d) => d.kind === 'canvas'), '"the board" fires the Board focus event', JSON.stringify(toBoard))
   const before = seen.events.length
@@ -340,7 +341,11 @@ try {
   const noDeps = await tools.runHubTool('focus_pane_by_name', { name: 'show all terminals' })
   ok(!noDeps.ok && /Wall/.test(noDeps.text), 'without the voice agent it says so rather than pretending', JSON.stringify(noDeps))
   const listed = await tools.runHubTool('list_panes_with_names', {})
-  ok(/Everest \(panel 1\)/.test(listed.text) && /Orion \(panel 4\)/.test(listed.text), 'list_panes_with_names shows call-signs and panel numbers', listed.text)
+  ok(
+    /Everest \(Claude Code\), focused/.test(listed.text) && /Orion \(Claude Code\)/.test(listed.text) && !/panel \d/.test(listed.text),
+    'list_panes_with_names shows each terminal by its name and agent, no numbers',
+    listed.text
+  )
   const ran = await tools.runHubTool('run_saved_prompt', { prompt: 'code review', pane: 'Skylar' })
   ok(ran.ok && JSON.stringify(seen.typed.at(-1)) === JSON.stringify(['p2', 'Review the diff.', false]), 'run_saved_prompt types into the named pane, unsent', JSON.stringify(ran))
   const toComposer = await tools.runHubTool('run_saved_prompt', { prompt: 'plan it' })

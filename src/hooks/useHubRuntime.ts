@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
-import { isShellProfile } from '@shared/agents'
-import { resolveProfile } from '@/lib/agents'
+import { buildActionPanes } from '@/lib/actionPanes'
 import { hubApi } from '@/lib/hubApi'
 import { runSavedPrompt, setHubRuntime } from '@/lib/hubRuntime'
 import type { NavPane } from '@/lib/hubnav'
-import { getCallSigns, getPrompts, subscribeCallSigns, subscribePrompts, syncCallSigns } from '@/lib/hubStores'
+import { getPrompts, subscribePrompts } from '@/lib/hubStores'
 import type { KeyCommandDef } from '@/lib/keymap'
 import { defineCommands, loadKeymapOverrides, setCommandHandler } from '@/lib/keymapRegistry'
 import { relayComet } from '@/lib/relayComet'
 import { agentCommandId, promptCommandId } from '@/lib/shortcutCommands'
-import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
 import { useActiveWorkspace, useApp } from '@/state/AppState'
 
@@ -17,11 +15,9 @@ import { useActiveWorkspace, useApp } from '@/state/AppState'
  * Keeps the hub's backends in step with the app. Mounted exactly once, from
  * useShortcuts (which App mounts once):
  *
- *  - names every new pane (call-signs), and releases the names of closed ones
- *    once the project's saved layout has actually been read;
  *  - tells main which project is open, so bridge-out media lands on its board;
- *  - registers the hub runtime (panes with call-signs, focus, typing) that the
- *    voice tools and the keymap use;
+ *  - registers the hub runtime (panes by their one name, focus, typing) that
+ *    the voice tools and the keymap use;
  *  - loads keymap.json and keeps two command sources current: one command per
  *    saved prompt (its hotkey as the default) and one "new pane" per agent
  *    profile (unbound until Steve binds it).
@@ -30,45 +26,17 @@ export function useHubRuntime(): void {
   const { state, actions } = useApp()
   const workspace = useActiveWorkspace()
   const projectId = state.activeProjectId
-  const loaded = projectId ? Boolean(state.workspaces[projectId]) : false
-  const callSigns = useSyncExternalStore(subscribeCallSigns, () => getCallSigns(projectId))
   const prompts = useSyncExternalStore(subscribePrompts, getPrompts)
   const profiles = state.settings.agentProfiles
 
   /* ------------------------------------------------------- the pane list */
 
-  const panes = useMemo<NavPane[]>(() => {
-    const out: NavPane[] = []
-    workspace.tabs.forEach((tab, tabIndex) => {
-      for (const leaf of collectLeaves(tab.root)) {
-        const profile = resolveProfile(profiles, leaf.profileId)
-        const status = terminalHost.runtime(leaf.id).status
-        out.push({
-          paneId: leaf.id,
-          tabId: tab.id,
-          tabNumber: tabIndex + 1,
-          tabTitle: tab.title,
-          number: out.length + 1,
-          title: leaf.title.trim() || profile.name,
-          profileId: profile.id,
-          profileName: profile.name,
-          live: status !== 'exited' && status !== 'error',
-          focused: leaf.id === tab.activePaneId && tab.id === workspace.activeTabId,
-          agent: !isShellProfile(profile),
-          lastFocusedAt: 0,
-          ...(callSigns[leaf.id] ? { callSign: callSigns[leaf.id] } : {})
-        })
-      }
-    })
-    return out
-  }, [workspace, profiles, callSigns])
-
-  const paneKey = panes.map((p) => p.paneId).join('|')
-
-  useEffect(() => {
-    if (!projectId) return
-    void syncCallSigns(projectId, paneKey ? paneKey.split('|') : [], loaded)
-  }, [projectId, paneKey, loaded])
+  // Each pane by its one name (shared/terminal-names.ts). `callSign` carries
+  // the same name for the pane UI that still reads it until it moves to `name`.
+  const panes = useMemo<NavPane[]>(
+    () => buildActionPanes(workspace, profiles).map((p) => ({ ...p, callSign: p.name })),
+    [workspace, profiles]
+  )
 
   useEffect(() => {
     void hubApi()?.canvas.setActive(projectId).catch(() => {})

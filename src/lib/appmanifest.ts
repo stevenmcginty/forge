@@ -19,13 +19,11 @@ import { skillCatalogue } from './skillbus'
 
 export interface ManifestPane {
   /**
-   * The spoken handle — "Terminal 3". 1-based across every tab in the active
-   * project, tab order then pane order, and identical to `ActionPane.number` in
-   * appactions.ts because both are built from the same walk. Steve, the model
-   * and the executor have to mean the same pane by "terminal two".
+   * The terminal's one name — "Zeb", "Zeb 2" — identical to `ActionPane.name`
+   * in appactions.ts because both are built from the same walk. Steve, the
+   * model and the executor have to mean the same terminal by it.
    */
-  number: number
-  title: string
+  name: string
   profileName: string
   status: string
   focused: boolean
@@ -118,8 +116,8 @@ export const ACTION_SPECS: ActionSpec[] = [
   },
   {
     kind: 'close_pane',
-    args: '{"kind":"close_pane","which":"focused"|"terminal 3"|"<pane title>"}',
-    what: 'Close one pane (closing a tab’s last pane closes the tab). which is spoken — a Terminal number works.'
+    args: '{"kind":"close_pane","which":"focused"|"<terminal name>"}',
+    what: 'Close one pane (closing a tab’s last pane closes the tab). which is the terminal’s name, as listed under CURRENT STATE.'
   },
   {
     kind: 'close_tab',
@@ -196,16 +194,16 @@ export const ACTION_SPECS: ActionSpec[] = [
   },
   {
     kind: 'send_prompt',
-    args: '{"kind":"send_prompt","target":"terminal 2","text":"","flesh":true,"count":1}',
+    args: '{"kind":"send_prompt","target":"<terminal name>","text":"","flesh":true,"count":1}',
     what:
-      'Hand a prompt to one of the open terminals listed under CURRENT STATE. target is spoken — "terminal 2", ' +
-      '"the claude one", "this" for the focused pane. Leave text empty to send the draftPrompt from this same ' +
+      'Hand a prompt to one of the open terminals listed under CURRENT STATE. target is its name ("Zeb"), ' +
+      'or spoken — "the claude one", "this" for the focused pane. Leave text empty to send the draftPrompt from this same ' +
       'reply (preferred — do not write the prompt out twice). Set flesh true when you expanded his words into a ' +
       'proper brief. If two terminals match equally, do NOT guess: return no action and ask which one.'
   },
   {
     kind: 'use_skill',
-    args: '{"kind":"use_skill","name":"<skill>","target":"terminal 2"}',
+    args: '{"kind":"use_skill","name":"<skill>","target":"<terminal name>"}',
     what:
       'Type /<skill> into a terminal, ready but NEVER submitted — Steve presses Enter himself. Only skills listed ' +
       'under SKILLS exist. target is spoken, as for send_prompt; omit it for the focused terminal.'
@@ -253,15 +251,16 @@ export const SAY_RULES: string[] = [
   '- Do not narrate yourself: no "I will now", no "let me", no "processing". Answer, or say what happened.',
   '- Do not read out what is already on screen — Forge speaks its own outcome chips ("Opened 3 Claude Code tabs")',
   '  and shows `understood` beside your reply. Saying either again is the "on and on" he complained about.',
-  '- Never recite a drafted prompt, code, JSON or a path. Refer to it: "the brief is ready for terminal two".',
+  '- Never recite a drafted prompt, code, JSON or a path. Refer to it: "the brief is ready for Zeb".',
   '- If nothing is worth hearing, leave `say` out. Silence is a valid reply and often the right one.'
 ]
 
+/** "Zeb · Claude Code · working · FOCUSED" — name, kind, state, flags; the realtime brains' shape. */
 function paneLine(pane: ManifestPane): string {
-  const bits = [pane.profileName, pane.status]
+  const bits = [pane.name, pane.profileName, pane.status]
   if (!pane.agent) bits.push('plain shell — never auto-submitted')
   if (pane.focused) bits.push('FOCUSED')
-  return `Terminal ${pane.number} — "${pane.title}" (${bits.join(', ')})`
+  return bits.join(' · ')
 }
 
 /**
@@ -273,7 +272,7 @@ function paneLine(pane: ManifestPane): string {
  * for it through `get_app_state` only when it needs to know (see
  * src/lib/agenttools.ts). Same text either way, deliberately: two renderings
  * of "which terminal is which" would eventually disagree, and the whole point
- * of the Terminal numbering is that everyone means the same pane by it.
+ * of a terminal's one name is that everyone means the same pane by it.
  */
 export function buildStateSection(s: ManifestSnapshot): string {
   const lines: string[] = []
@@ -288,15 +287,15 @@ export function buildStateSection(s: ManifestSnapshot): string {
     }
   }
   if (s.tabs.length === 0) {
-    lines.push('tabs: none open in the active project')
+    lines.push('terminals: none open in the active project')
   } else {
-    lines.push('tabs in the active project:')
-    for (const tab of s.tabs) {
-      lines.push(`- ${tab.number}. "${tab.title}"${tab.active ? ' [CURRENT]' : ''}`)
-      for (const pane of tab.panes) lines.push(`  · ${paneLine(pane)}`)
-    }
-    lines.push('These Terminal numbers are what he says out loud. Use them verbatim as send_prompt targets.')
-    lines.push('Tab numbers are not on screen: name terminals by call-sign or agent, never "tab 2".')
+    // One line per terminal, a tab's terminals together. No tab line: a tab's
+    // name is its first terminal's name, and a second line would read as a
+    // second name.
+    lines.push('terminals in the active project (name · agent · state):')
+    for (const tab of s.tabs) for (const pane of tab.panes) lines.push(`- ${paneLine(pane)}`)
+    lines.push('Each terminal has one name, the one on its tab. Use it verbatim as the send_prompt target.')
+    lines.push('Numbers are not on screen: call terminals by name, never "terminal 2" or "tab 2".')
   }
   lines.push(
     `view: projects rail ${s.view.railCollapsed ? 'collapsed' : 'open'}, ` +
@@ -423,13 +422,13 @@ export function buildManifest(s: ManifestSnapshot): string {
   lines.push('')
   lines.push('# DISPATCHING TO A TERMINAL')
   lines.push(
-    'He works out loud: "open three claude terminals", then "in terminal two, this is the prompt — a landing page',
+    'He works out loud: "open three claude terminals", then "in Zeb, this is the prompt — a landing page',
     'for a cafe". When he names a terminal, in ONE reply: put the finished fleshed-out brief in draftPrompt (a page',
     'of structure for real work, near-verbatim for a one-line fix), return',
     '{"kind":"send_prompt","target":"<his words>","text":"","flesh":true,"count":1} — empty text means that draft,',
     'so you never write it twice — and keep say to one line naming the terminal.',
     'If his words fit two terminals equally ("the claude one", three Claude panes), return NO action and ask which,',
-    'by Terminal number. Forge presses Enter itself when auto-relay is on and the target runs an agent; a plain',
+    'by name. Forge presses Enter itself when auto-relay is on and the target runs an agent; a plain',
     'shell is only ever typed into.'
   )
 

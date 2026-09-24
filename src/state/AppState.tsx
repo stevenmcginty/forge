@@ -50,7 +50,7 @@ import {
  * through the same three functions this reducer does, so it comes out with the
  * same name, colour and shape.
  */
-import { EMPTY_WORKSPACE, makeTab, nextTabName, nextTextColor, withPrunedMosaic } from '@shared/workspace'
+import { EMPTY_WORKSPACE, makeTab, newTabName, nextTextColor, withPrunedMosaic } from '@shared/workspace'
 import { DEFAULT_FOREMAN_BRIEF } from '@shared/foreman'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
@@ -432,8 +432,13 @@ type Action =
       paste?: boolean
       /** The new pane's id, when the caller has to know it (openAgentPane). */
       paneId?: string
-      /** Name the tab from TAB_NAME_POOL, as a hand-made tab is, and ignore `title`. */
+      /**
+       * Name the tab as a hand-made tab is named — the next TAB_NAME_POOL name —
+       * or `name` when the caller chose one, and ignore `title` either way.
+       */
       pooled?: true
+      /** With `pooled`: the caller's own name, made unique ("Blue Car 2") if taken. */
+      name?: string
       /** Another project than the one on screen — a pane agent's own. */
       projectId?: string
       /** See PendingType.relay. */
@@ -1009,7 +1014,7 @@ function reducer(state: AppState, action: Action): AppState {
       const minted = makeLeaf(action.profileId, '')
       const leaf = action.paneId ? { ...minted, id: action.paneId } : minted
       const target = workspaceOf(state, projectId)
-      const pooled = action.pooled ? nextTabName(target.tabs, target.nameCursor ?? 0) : null
+      const pooled = action.pooled ? newTabName(target, action.name) : null
       const cursor = pooled ? { nameCursor: pooled.cursor } : {}
       const tab: TerminalTab = {
         id: makeId('tab'),
@@ -1201,7 +1206,15 @@ function reducer(state: AppState, action: Action): AppState {
       })
 
     case 'renamePane':
-      return mapActiveTab(state, (t) => ({ ...t, root: updateLeaf(t.root, action.paneId, { title: action.title }) }))
+      // Any tab of the project on screen, not only the active one: a split
+      // pane ("Zeb 2") renamed by voice is usually in a tab nobody is looking at.
+      return mapActiveWorkspace(state, (ws) => {
+        const tabs = ws.tabs.map((t) => {
+          const root = updateLeaf(t.root, action.paneId, { title: action.title })
+          return root === t.root ? t : { ...t, root }
+        })
+        return tabs.some((t, i) => t !== ws.tabs[i]) ? { ...ws, tabs } : null
+      })
 
     case 'setRatio':
       return mapActiveTab(state, (t) => {
@@ -1481,8 +1494,13 @@ export interface AppActions {
       anchorPaneId?: string
       /** The pane the brief comes from, for its relay comet only (see PendingType.relay). */
       relayFrom?: string
+      /**
+       * The new terminal's name ("Blue Car"), for a caller that chose one — made
+       * unique if another tab wears it. Absent, the next pool name, as ever.
+       */
+      name?: string
     }
-  ): string | null
+  ): { paneId: string; name: string } | null
   closeTab(tabId: string): void
   selectTab(tabId: string): void
   renameTab(tabId: string, title: string): void
@@ -2070,8 +2088,12 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           totalPanes(live) >= MAX_SESSIONS ||
           workspaceOf(live, projectId).tabs.length >= MAX_TABS_PER_PROJECT
         // Minted here rather than in the reducer, so the caller can be told
-        // which pane it just opened.
+        // which pane it just opened — and what it is called. The reducer names
+        // it the same way from the same workspace; only two opens landing in
+        // one render could make this answer differ from the tab.
         const paneId = makeId('pane')
+        const wantedName = opts?.name?.trim() ?? ''
+        const name = projectId ? newTabName(workspaceOf(live, projectId), wantedName).title : wantedName
         // The project's own default agent, not a shell and not a fixed profile:
         // a brief written for "an agent" belongs to whichever one this project
         // works with, and a Codex project should not have Claude opened at it.
@@ -2086,9 +2108,12 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
               ? wanted
               : defaultProfileFor(projectId),
           // Every agent tab takes the next pool name, like one opened by hand —
-          // an agent's own label ("UI Fix") broke the naming Steve relies on.
+          // an agent's own label ("UI Fix") broke the naming Steve relies on —
+          // unless the caller named the terminal outright (open_agent_pane's
+          // `name`), which is then its one name everywhere.
           title: title.slice(0, 40),
           pooled: true,
+          ...(wantedName ? { name: wantedName } : {}),
           text: prompt,
           // Typed, never submitted — the same contract dictation, task cards and
           // the tab handover all honour. Pasted rather than typed because these
@@ -2098,7 +2123,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           relay: { from: opts?.relayFrom ?? opts?.anchorPaneId ?? null }
         })
         // A refusal still went through the reducer, which says why in the notice.
-        return refused ? null : paneId
+        return refused ? null : { paneId, name }
       },
       closeTab: (tabId) => dispatch({ type: 'closeTab', tabId }),
       hireTab: (projectId, profileId, count, title, paneIds) =>

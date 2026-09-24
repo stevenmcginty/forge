@@ -77,9 +77,8 @@ const APP_STATE = [
   'projects:',
   '- alpha — C:\\work\\alpha  [ACTIVE]',
   '- beta — C:\\work\\beta',
-  'tabs in the active project:',
-  '- 1. "build" [CURRENT]',
-  '  · Terminal 1 — "claude" (Claude Code, running, FOCUSED)',
+  'terminals in the active project (name · agent · state):',
+  '- build · Claude Code · running · FOCUSED',
   '',
   '# WHAT YOU CAN DO',
   'run_app_action kinds: open_tabs, close_tab, send_prompt, switch_project, focus_tab'

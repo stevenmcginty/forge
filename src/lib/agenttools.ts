@@ -66,7 +66,7 @@ export interface VoiceAgentToolDeps {
    */
   readPane?(target: string, lines: number): string | Promise<string>
   /**
-   * The compact live manifest (src/lib/realtime/context.ts) — call-signs,
+   * The compact live manifest (src/lib/realtime/context.ts) — terminal names,
    * agents, state words. Handed to the realtime brains at session start and
    * when it changes; the Claude session gets it with a turn.
    */

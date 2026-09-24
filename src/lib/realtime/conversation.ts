@@ -6,7 +6,7 @@
  * conversation rather than *to* the agent, so they never reach a brain:
  *
  *   stop phrases     "that's all", "stop listening" (and close variants) end it
- *   voice dictation  "type this into Everest: …", "dictate into the Codex
+ *   voice dictation  "type this into Zeb: …", "dictate into the Codex
  *                    pane …", "put this in the bar …" — raw words, no rewrite
  *   the idle clock   `agentIdleTimeoutMs` of quiet ends it, and says so
  *
@@ -81,7 +81,7 @@ export type VoiceDictation =
   /** Into the bar's text box, to be read and fixed before sending. */
   | { kind: 'bar'; text: string }
 
-/** Resolves spoken target words ("Everest", "the Codex pane", "this pane") to a pane id, or null. */
+/** Resolves spoken target words ("Zeb", "the Codex pane", "this pane") to a pane id, or null. */
 export type TargetResolver = (spoken: string) => string | null
 
 /** "okay, can you …" before the verb. */
@@ -114,7 +114,7 @@ function splitSubmit(text: string): { text: string; submit: boolean } {
   return { text: trimmed, submit: false }
 }
 
-/** "Everest," → "Everest": the separator after a spoken name. */
+/** "Zeb," → "Zeb": the separator after a spoken name. */
 function bareWord(w: string): string {
   return w.replace(/^[\s"'“”]+|[\s,:;.!?"'“”–—-]+$/g, '')
 }
@@ -122,7 +122,7 @@ function bareWord(w: string): string {
 /**
  * A spoken "type this into …", or null when the phrase is not one.
  *
- * The target is found two ways. With a separator — "type this into Everest:
+ * The target is found two ways. With a separator — "type this into Zeb:
  * echo hi" — it is everything before the first colon, comma or dash. Without
  * one, which is what a recogniser usually writes, the shortest run of words
  * (up to four) that `resolve` knows is the target, plus any "pane" / "one"

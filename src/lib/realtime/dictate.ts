@@ -2,8 +2,8 @@ import { getHubRuntime } from '@/lib/hubRuntime'
 import { resolveNavTarget } from '@/lib/hubnav'
 
 /**
- * Raw words into one pane, no brain — the bar's "→ Everest" target and
- * "type this into Everest: …" said inside a conversation (B11). One
+ * Raw words into one pane, no brain — the bar's "→ Zeb" target and
+ * "type this into Zeb: …" said inside a conversation (B11). One
  * implementation, so the two can never type differently.
  *
  * Moved here from VoiceHubController's `dictateTo`, unchanged: it reveals the
@@ -30,17 +30,17 @@ export async function dictateToPane(
   return { ok: false, summary: `${name} has no live terminal, so nothing was typed.` }
 }
 
-/** "Everest", "panel 2", or "that pane". */
+/** The pane's one name — "Zeb" — or "that pane". */
 export function paneWords(paneId: string): string {
   const pane = getHubRuntime()
     ?.panes()
     .find((p) => p.paneId === paneId)
-  return pane ? (pane.callSign ?? `panel ${pane.number}`) : 'that pane'
+  return pane ? pane.name : 'that pane'
 }
 
 /**
- * Spoken target words → one pane id: a call-sign, an agent type ("the Codex
- * pane"), "this pane", a number. Two equally good answers are no answer —
+ * Spoken target words → one pane id: a terminal's name, an agent type ("the
+ * Codex pane"), "this pane", a number. Two equally good answers are no answer —
  * the resolver never guesses.
  */
 export function resolveSpokenPane(spoken: string): string | null {
