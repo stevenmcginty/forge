@@ -1,4 +1,11 @@
-import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import {
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
+} from 'react'
 import type { AgentProfile } from '@shared/types'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
@@ -187,32 +194,7 @@ export function StatusLine({
         }}
       >
         {!shell && onFlipView && screen ? <Segments view={view ?? 'chat'} onPick={screen.showView} /> : null}
-        {onToggleKeys && (view ?? 'term') === 'term' ? (
-          <button
-            type="button"
-            className="pkeys-toggle"
-            aria-pressed={keysShown}
-            aria-label={keysShown ? 'Hide terminal keys' : 'Show terminal keys'}
-            title={keysShown ? 'Hide terminal keys' : 'Show terminal keys'}
-            onClick={onToggleKeys}
-          >
-            {/* Off is a shape, not a colour: a slash draws across the keyboard,
-                cutting a clean gap through it, and draws back out when on. */}
-            <span className="pkeys-toggle__face">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-                <mask id="pkeys-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="20">
-                  <rect width="20" height="20" fill="#fff" stroke="none" />
-                  <path className="pkeys-toggle__slash" d="M3.5 3.5l13 13" pathLength={1} stroke="#000" strokeWidth="4.5" />
-                </mask>
-                <g mask="url(#pkeys-cut)">
-                  <rect x="2.5" y="5" width="15" height="10" rx="2.5" />
-                  <path d="M6 8.25h.01M8.67 8.25h.01M11.33 8.25h.01M14 8.25h.01M7 12h6" />
-                </g>
-                <path className="pkeys-toggle__slash" d="M3.5 3.5l13 13" pathLength={1} />
-              </svg>
-            </span>
-          </button>
-        ) : null}
+        {onToggleKeys && (view ?? 'term') === 'term' ? <KeysToggle shown={keysShown} onClick={onToggleKeys} /> : null}
         {canRead ? (
           <button
             type="button"
@@ -276,6 +258,57 @@ export function StatusLine({
         screen={screen}
       />
     </div>
+  )
+}
+
+/* ---------------------------------------------------------- keys toggle */
+
+/**
+ * The terminal-keys toggle, drawn the same wherever it sits: the phone's status
+ * line, and the deck's pane status row (AgentStatus) beside its "Terminal"
+ * button. With `word`, the state is also a word beside the shape ("Keys on" /
+ * "Keys off") — the deck's rule; the phone keeps its narrow, shape-only face.
+ */
+export function KeysToggle({
+  shown,
+  onClick,
+  word = false
+}: {
+  shown: boolean
+  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void
+  word?: boolean
+}): ReactNode {
+  const title = shown ? 'Hide terminal keys' : 'Show terminal keys'
+  return (
+    <button
+      type="button"
+      className="pkeys-toggle"
+      aria-pressed={shown}
+      aria-label={word ? `Keys ${shown ? 'on' : 'off'} — ${shown ? 'hide' : 'show'} the terminal keys` : title}
+      title={title}
+      onClick={onClick}
+    >
+      {/* Off is a shape, not a colour: a slash draws across the keyboard,
+          cutting a clean gap through it, and draws back out when on. */}
+      <span className="pkeys-toggle__face">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+          <mask id="pkeys-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="20">
+            <rect width="20" height="20" fill="#fff" stroke="none" />
+            <path className="pkeys-toggle__slash" d="M3.5 3.5l13 13" pathLength={1} stroke="#000" strokeWidth="4.5" />
+          </mask>
+          <g mask="url(#pkeys-cut)">
+            <rect x="2.5" y="5" width="15" height="10" rx="2.5" />
+            <path d="M6 8.25h.01M8.67 8.25h.01M11.33 8.25h.01M14 8.25h.01M7 12h6" />
+          </g>
+          <path className="pkeys-toggle__slash" d="M3.5 3.5l13 13" pathLength={1} />
+        </svg>
+      </span>
+      {word ? (
+        <span className="pkeys-toggle__word" aria-hidden="true">
+          Keys {shown ? 'on' : 'off'}
+        </span>
+      ) : null}
+    </button>
   )
 }
 

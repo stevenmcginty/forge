@@ -499,12 +499,14 @@
 }
 
 /* Open while the words or the drawer itself have the focus, or while one of
-   the drawer's menus is open — never merely because the project sheet is. */
+   the drawer's menus is open — never merely because the project sheet is.
+   The keys are not the focus's: they live behind the status row's keyboard
+   toggle (voicebar.css, "terminal keys"). */
 .app[data-face='deck']
   .dk-composer
   .composer[data-voice='idle']
-  .composer__card:has(.composer__input:focus, .composer__picks:focus-within, .composer__keys:focus-within, .composer__picks [aria-expanded='true'])
-  :is(.composer__picks, .composer__keys) {
+  .composer__card:has(.composer__input:focus, .composer__picks:focus-within, .composer__picks [aria-expanded='true'])
+  .composer__picks {
   display: flex;
   animation: dk-drawer var(--dur-glide) var(--spring-glide) both;
 }
@@ -516,7 +518,6 @@
   .session-composer:has(
     .composer[data-voice='idle'] .composer__input:focus,
     .composer[data-voice='idle'] .composer__picks:focus-within,
-    .composer[data-voice='idle'] .composer__keys:focus-within,
     .composer[data-voice='idle'] .composer__picks [aria-expanded='true'],
     .composer:not([data-voice='idle'])
   )

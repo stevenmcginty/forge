@@ -1000,7 +1000,9 @@ export function Composer({
             <Key label="↑" onClick={() => onRaw('\x1b[A')} disabled={disabled} title="Up" />
             <Key label="↓" onClick={() => onRaw('\x1b[B')} disabled={disabled} title="Down" />
             <Key label="→" onClick={() => onRaw('\x1b[C')} disabled={disabled} title="Right" />
-            {mobile && voiceControls ? (
+            {/* The deck's bar too: its key row is a set Steve opens on
+                purpose, and Enter belongs in it even with words in the box. */}
+            {(mobile && voiceControls) || bar ? (
               <Key label="Enter" onClick={() => onRaw('\r')} disabled={disabled} title="Enter" />
             ) : null}
           </div>

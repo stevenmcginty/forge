@@ -630,6 +630,138 @@
   outline-offset: 2px;
 }
 
+/* --------------------------------------------------------- terminal keys
+ *
+ * The phone's keyboard toggle (StatusLine's KeysToggle), beside the Terminal
+ * button and drawn like it: 22px on the 24px strip, its hit area reaching past
+ * the drawing. Its state is a word ("Keys on" / "Keys off") and a shape (the
+ * slash through the keyboard, and a doubled rim while on); colour only agrees.
+ * The keys it shows sit in the drawer row above the bar, Terminal view only,
+ * and go while a dictation runs — deck.css keeps them off the box's focus.
+ */
+.app[data-face='deck'] .dk-composer .pkeys-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  height: 22px;
+  padding: 0 9px 0 5px;
+  border: 1px solid var(--vb-rim);
+  border-radius: var(--r-sm);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--vb-ink);
+  background: var(--vb-fill);
+  box-shadow: none;
+}
+
+.app[data-face='deck'] .dk-composer .pkeys-toggle:hover {
+  background: var(--vb-fill-hover);
+  border-color: var(--vb-rim-hover);
+}
+
+.app[data-face='deck'] .dk-composer .pkeys-toggle[aria-pressed='true'] {
+  background: var(--vb-fill-hover);
+  border-color: var(--vb-ink);
+  box-shadow: inset 0 0 0 1px var(--vb-ink);
+}
+
+.app[data-face='deck'] .dk-composer .pkeys-toggle::after {
+  content: '';
+  position: absolute;
+  inset: -5px -3px;
+}
+
+.app[data-face='deck'] .dk-composer .pkeys-toggle__face,
+.app[data-face='deck'] .dk-composer .pkeys-toggle[aria-pressed] .pkeys-toggle__face {
+  width: 16px;
+  height: 16px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.app[data-face='deck'] .dk-composer .pkeys-toggle__face svg {
+  width: 16px;
+  height: 16px;
+}
+
+.app[data-face='deck'] .dk-composer .pkeys-toggle__slash {
+  transition: stroke-dashoffset var(--dur-fast) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-composer .pkeys-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.app[data-face='deck'] .dk-composer .pkeys-toggle:focus-visible .pkeys-toggle__face {
+  outline: none;
+}
+
+.app[data-face='deck']
+  .dk-composer
+  .session-composer[data-keys='shown'][data-view='term']
+  .composer[data-voice='idle']
+  .composer__keys {
+  display: flex;
+  animation: dk-drawer var(--dur-glide) var(--spring-glide) both;
+}
+
+.app[data-face='deck'] .dk-composer .composer__keys {
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0;
+  overflow: visible;
+  mask-image: none;
+}
+
+.app[data-face='deck'] .dk-composer .composer__keys::after {
+  display: none;
+}
+
+.app[data-face='deck'] .dk-composer .composer__key {
+  height: var(--vb-h);
+  min-width: var(--vb-h);
+  padding: 0 12px;
+  border-radius: 12px;
+  font: 600 12.5px / 1 var(--font-mono);
+  color: var(--vb-ink);
+  background: var(--vb-fill);
+  border: 1px solid var(--vb-rim);
+  box-shadow: none;
+}
+
+.app[data-face='deck'] .dk-composer .composer__key:hover:not(:disabled) {
+  color: var(--vb-ink);
+  background: var(--vb-fill-hover);
+  border-color: var(--vb-rim-hover);
+}
+
+/* Armed Ctrl: the key reads "Ctrl on", and its rim doubles. */
+.app[data-face='deck'] .dk-composer .composer__key[data-active='true'],
+.app[data-face='deck'] .dk-composer .composer__key[data-active='true']:hover:not(:disabled) {
+  color: var(--vb-ink);
+  background: var(--vb-fill-hover);
+  border-color: var(--vb-accent-ink);
+  box-shadow: inset 0 0 0 1px var(--vb-accent-ink);
+}
+
+.app[data-face='deck'] .dk-composer .composer__key:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-face='deck'] .dk-composer .pkeys-toggle__slash {
+    transition: none;
+  }
+}
+
 /* ------------------------------------------------------------ voice line */
 
 .app[data-face='deck'] .dk-vline {
