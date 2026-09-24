@@ -23,10 +23,14 @@ function knobMark(ls: ListenState): string {
  * agent: it hears you, sends when you pause, answers, and listens again. The
  * switch says so by shape (a hollow knob at the left, a solid one across a lit
  * track), the mark on the knob says what it is doing (the hub's own glyphs —
- * see VoicePill.css), and the words say both: the brain's name ("Gemini Live")
- * and its state ("listening", "thinking…", "mic on · not recording", "key
- * refused"), read live from the hub. Right Shift flips the same switch, so the
+ * see VoicePill.css), and the word says it too ("listening", "thinking…",
+ * "mic on · not recording", "key refused"), read live from the hub. Right Shift flips the same switch, so the
  * knob follows a start made from the key.
+ *
+ * It is the left half of the voice unit (Composer mounts it with the agent
+ * picker inside one rim — VoicePill.css `.vunit`), so the brain's name is said
+ * once, by the picker beside it; here it stays in the title and the
+ * accessible name.
  *
  * A failure keeps its reason in the word; "Why?" beside it opens the full
  * text with Copy, Try again and Settings.
@@ -86,11 +90,8 @@ export function ListenToggle(): ReactNode {
         <span className="listen__track" aria-hidden="true">
           <span className="listen__knob" />
         </span>
-        <span className="listen__text">
-          <span className="listen__brain">{brain}</span>
-          <span className="listen__word">
-            <span className="listen__word-text">{ls.word}</span>
-          </span>
+        <span className="listen__word">
+          <span className="listen__word-text">{ls.word}</span>
         </span>
         {ls.on ? (
           <span className="listen__wave" aria-hidden="true">
