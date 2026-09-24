@@ -1,5 +1,13 @@
 # Handoff
 
+## Forge Web: desktop terminal status row on Full screen and Wall (2026-09-24, uncommitted)
+
+- **Asked (Steve):** bring the desktop pane status display to the web: agent icon, status indicator, terminal name, current agent, live.
+- **Built:** row = badge · output pulse · tab name · agent name · state chip. Full screen header (`web/src/components/PaneView.tsx` when `fullScreen`) and Wall tiles (`TileLabel`, `web/src/deck/Deck.tsx`). State glyphs and words ported from `src/components/shell/StateChip.tsx` into `web/src/deck/agents.tsx`, because that desktop file imports `terminalHost`. New states done (tick) and reconnecting. `OutputPulse` listens to `actions.onData` and reuses `src/components/ActivityDot.css`. `usePaneDone` in `web/src/lib/pane-status.ts` uses the desktop "Done" rule. No wire change and no desktop restart.
+- **Gaps:** no starting/exited/failed on the web (no source); dormant says "Not running"; no "Working 12m" timer; `AgentStatus.tsx` strip dot is still colour-only; Wall shows the tab name even with one tab.
+- **Known nit:** `useAgentState` checks offline/reconnecting before asking, so a pane waiting for input shows "Reconnecting"/"Frozen", not "Needs you", while the link is down.
+- **Checked:** typecheck, lint:hooks, vite build to scratch (web/dist untouched); refuter confirmed. Not seen in a browser; ~400px fit unverified. `scripts/web-deck-check.mjs` was already broken (reads the deleted `web/src/deck/PanesSheet.tsx`).
+
 ## Forge Web: name contrast, and one-name-per-terminal plan (2026-09-24)
 
 - **Colours (e05b937):** tab name (Zeb) is a chip tinted with the agent colour in the Full screen header and on Wall tiles; agent name in the strip and voice line takes `badgeColor(profile)`; project pill has a tinted fill, ring and bold name. Lowest contrast 7.26:1 across the six themes. Follow-up: the two-letter badges (`src/components/AgentBadge.css`) nearly vanish on the paper theme. Shots: session scratchpad `contrast/`.

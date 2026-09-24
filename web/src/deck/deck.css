@@ -116,7 +116,7 @@
   :is(
     .pane[data-kind='shell'],
     .astatus[data-shell='true'],
-    .dk-slot:has(> .dk-tile__label > .agent-badge[data-shell='true'])
+    .dk-slot:has(> .dk-tile__label > .dk-tile__ident > .agent-badge[data-shell='true'])
   ) {
   --callsign: var(--text-secondary);
   --callsign-ink: var(--text-primary);
@@ -148,6 +148,7 @@
 .app[data-face='deck'] .dk-panes[data-view='focus'] .pane__title {
   position: relative;
   flex: 0 1 auto;
+  min-width: 0;
   padding: 2px 9px 2px 15px;
   font-family: var(--font-display);
   font-size: 15px;
@@ -298,10 +299,11 @@
 
 .app[data-face='deck'] .dk-tile__label {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
+  column-gap: 7px;
   flex: none;
-  height: 26px;
+  min-height: 26px;
   padding: 0 4px 0 8px;
   background: color-mix(in srgb, var(--pane-accent, var(--accent)) 6%, var(--bg-terminal));
   border-bottom: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 12%, var(--line-soft));
@@ -334,8 +336,25 @@
   border-radius: 4px;
 }
 
-.app[data-face='deck'] .dk-tile__spacer {
-  flex: 1;
+.app[data-face='deck'] .dk-tile__ident {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  /* The basis is the badge, the pulse and the widest state chip: below that
+     the tools wrap to a second line, so the chip's word never clips. The
+     names give way first. */
+  flex: 1 1 160px;
+  min-width: 0;
+  height: 26px;
+}
+
+.app[data-face='deck'] .dk-tile__tools {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  height: 26px;
+  margin-left: auto;
 }
 
 .app[data-face='deck'] .dk-tile__active {

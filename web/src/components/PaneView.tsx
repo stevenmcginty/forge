@@ -18,6 +18,7 @@ import { mountTerm, type TermHost } from '../lib/term'
 import { screenTurns } from '../lib/screen-turns'
 import { replyText } from '../lib/speak'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
+import { AgentStateChip, OutputPulse } from '../deck/agents'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { registerAnswerScreen, SCREEN_TAIL_LINES } from './AnswerCard'
 import { ChatView } from './ChatView'
@@ -1065,10 +1066,18 @@ export function PaneView({
       */}
       {!mobile ? (
       <header className="pane__header">
+        {/*
+          The deck's Full screen reads in the desktop pane header's order: badge,
+          output pulse, the tab's name, the agent's name, the state in a shape
+          and a word. The state chip then says what WAITING / FROZEN /
+          RECONNECTING say below, so those step aside for it.
+        */}
         <div className="pane__leading">
           <AgentBadge profile={profile} size="sm" />
-          <span className="pane__title truncate">{paneDisplayTitle(profile, leaf.title)}</span>
+          {fullScreen ? <OutputPulse paneId={leaf.id} /> : null}
           {tabTitle ? <span className="pane__tab truncate">{tabTitle}</span> : null}
+          <span className="pane__title truncate">{paneDisplayTitle(profile, leaf.title)}</span>
+          {fullScreen ? <AgentStateChip paneId={leaf.id} /> : null}
         </div>
 
         {faceSwitch}
@@ -1079,7 +1088,7 @@ export function PaneView({
         */}
         {asking || (truncated && !mobile) || cached || (!cached && !live) || (!mobile && (handoffChip || agent)) || onClose ? (
           <div className="pane__trailing">
-            {asking ? (
+            {asking && !fullScreen ? (
               <span className="pane__perm mono" title="This pane has settled on a question and is waiting on an answer">
                 WAITING
               </span>
@@ -1097,7 +1106,7 @@ export function PaneView({
                 CUT
               </span>
             ) : null}
-            {cached ? (
+            {cached && !fullScreen ? (
               <span className="pane__perm mono" data-frozen="true" title="The last transcript this browser was sent">
                 FROZEN
               </span>
@@ -1108,7 +1117,7 @@ export function PaneView({
               on screen is where the pane had got to and the catch-up buffer will
               repaint it the moment the socket is back.
             */}
-            {!cached && !live ? (
+            {!cached && !live && !fullScreen ? (
               <span
                 className="pane__perm mono"
                 data-reconnecting="true"
