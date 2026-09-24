@@ -76,14 +76,17 @@
 }
 
 .deckbar__new {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px 0 9px;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
-  box-shadow: inset 0 0 0 1px var(--glass-line);
-  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
   -webkit-app-region: no-drag;
   transition:
     color var(--dur-fast) var(--ease-out),
@@ -92,19 +95,13 @@
 }
 
 .deckbar__new:hover:not(:disabled) {
-  color: var(--accent);
-  background: var(--accent-softer);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
-}
-
-.deckbar__new:active:not(:disabled) {
-  background: var(--accent-soft);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
 .deckbar__new:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
-  border-radius: var(--r-full);
 }
 
 .deckbar__new:disabled {

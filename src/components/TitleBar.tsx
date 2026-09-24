@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useKeymap } from '@/hooks/useHub'
+import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { HUB_CHEAT_SHEET_EVENT } from '@/lib/hubnav'
 import { shellSheet, toolsHost, useShellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { setVoiceBarPlace, useVoiceBarPlace } from '@/lib/voiceBarPlace'
-import { useActiveProject, useApp, useViewMode } from '@/state/AppState'
+import { useActiveProject, useApp, usePaneCount, useViewMode } from '@/state/AppState'
 import { AccountChip } from './AccountChip'
 import { CommandKeys } from './hub/KeyRecorder'
 import { Icon } from './Icon'
 import { ScreenshotTray } from './ScreenshotTray'
+import type { NewTabDetail } from './TerminalGrid'
 import { AgentsMenu } from './shell/AgentsMenu'
 import { Dock } from './shell/Dock'
 import { toggleSheet } from './shell/Sheet'
@@ -153,7 +155,37 @@ function AgentControls(): ReactNode {
     <span className="deckbar__agents">
       <AgentsMenu />
       <WallSwitch />
+      <NewAgentButton />
     </span>
+  )
+}
+
+/**
+ * New agent, right beside the Wall switch. Opens Ctrl+T's chooser, anchored
+ * on this button, same as the Agents menu's own "New agent" row.
+ */
+function NewAgentButton(): ReactNode {
+  const { used, max } = usePaneCount()
+  const { commands } = useKeymap()
+  const combo = commands.find((c) => c.id === 'tab.new')?.keys[0]
+  const atLimit = used >= max
+  const keys = combo ? ` (${combo})` : ''
+
+  return (
+    <button
+      type="button"
+      className="deckbar__new"
+      data-new-agent=""
+      aria-label="New agent"
+      title={atLimit ? `Session limit reached (${max})` : `New agent${keys}`}
+      disabled={atLimit}
+      onClick={(e) =>
+        window.dispatchEvent(new CustomEvent<NewTabDetail>(NEW_TAB_EVENT, { detail: { anchor: e.currentTarget } }))
+      }
+    >
+      <Icon name="plus" size={13} />
+      New
+    </button>
   )
 }
 
