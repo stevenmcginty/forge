@@ -10,6 +10,8 @@
  *    next turn; the silence window rides along with every agent start.
  *  - ONE brain setting: the migration from the two old pickers, and the
  *    no-key fallback, route every turn.
+ *  - The voice agent picker beside Listen: one row per brain, the pick
+ *    writes agentBrain as Settings does, and both read one status.
  *
  *   node scripts/agent-bar-check.mjs
  */
@@ -357,6 +359,58 @@ await check('V5: the Dictate key capturing holds the live session\'s mic shut, a
 })
 await check('V8: a held dictation phrase is not quiet on a Parakeet brain', () => {
   assert.ok(/`\$\{agent\.turns\.length\}:\$\{agent\.dictationBuffer\.length\}`/.test(hubSrc), 'the idle clock restarts on the dictation buffer growing')
+})
+
+/* ---------------------------------------- the voice agent picker (bar) */
+
+const S = await import('../src/lib/brainStatus.ts')
+const pickerSrc = readFileSync(new URL('../src/components/hub/BrainPicker.tsx', import.meta.url), 'utf8')
+const composerSrc = readFileSync(new URL('../src/components/hub/Composer.tsx', import.meta.url), 'utf8')
+const mainAgentSrc = readFileSync(new URL('../src/components/settings/MainAgent.tsx', import.meta.url), 'utf8')
+
+console.log('the voice bar: the voice agent picker')
+await check('the picker is one chip beside Listen, in the one bar', () => {
+  assert.ok(/<ListenToggle \/>\s*<BrainPicker \/>/.test(composerSrc), 'rendered right after Listen')
+  assert.ok(/AGENT_BRAINS\.map\(\(spec\) =>/.test(pickerSrc), 'one row per brain')
+  assert.ok(/role="menuitemradio"\s*aria-checked=\{inUse\}/.test(pickerSrc), 'the brain in use is checked')
+  assert.ok(/data-tone="use">\s*in use/.test(pickerSrc), 'and says "in use" in words')
+  assert.ok(/disabled=\{off\}/.test(pickerSrc), 'an unavailable brain cannot be picked')
+  assert.ok(/actions\.openSettings\('voice'\)/.test(pickerSrc), 'Voice settings… lands on the Main agent card')
+})
+await check('picking a row writes agentBrain, as Settings does', () => {
+  assert.ok(/onClick=\{\(\) => onPick\(spec\.id\)\}/.test(pickerSrc), 'the row picks its own brain')
+  assert.ok(/onPick=\{\(id\) => \{\s*if \(id !== chosen\) actions\.patchSettings\(\{ agentBrain: id \}\)/.test(pickerSrc), 'the pick is the agentBrain setting')
+  assert.ok(/onPick=\{\(\) => actions\.patchSettings\(\{ agentBrain: spec\.id \}\)\}/.test(mainAgentSrc), 'the same write as the Settings card')
+})
+await check('Settings and the picker read one status: the same probe, the same words', () => {
+  assert.ok(/import \{ useBrainProbes \} from '@\/hooks\/useBrainStatus'/.test(mainAgentSrc))
+  assert.ok(/import \{ statusOf,[^}]*\} from '@\/lib\/brainStatus'/.test(mainAgentSrc))
+  assert.ok(/useBrainProbes\(s\)/.test(pickerSrc) && /statusOf\(spec, s, probes\[spec\.id\]\)/.test(pickerSrc))
+  const none = { geminiKey: '', openaiKey: '', groqKey: '', openrouterKey: '' }
+  const claude = B.agentBrainSpec('claude')
+  assert.equal(S.statusOf(B.agentBrainSpec('gemini-live'), none, undefined).word, 'Needs key')
+  assert.equal(S.statusOf(claude, none, undefined).word, 'Checking…')
+  assert.equal(S.statusOf(claude, none, { busy: false, result: { ok: true, reason: 'ok' } }).word, 'Ready')
+  assert.equal(S.statusOf(B.agentBrainSpec('codex-cli'), none, { busy: false, result: { ok: false, reason: 'codex: command not found' } }).word, 'Not installed')
+  assert.equal(S.statusOf(B.agentBrainSpec('gemini-cli'), none, { busy: false, result: { ok: false, reason: 'Not logged in' } }).word, 'Not logged in')
+  for (const word of ['Needs key', 'Not installed', 'Not logged in']) assert.equal(S.brainUnavailable({ word, glyph: '', tone: 'need' }), true, word)
+  for (const word of ['Ready', 'Checking…', 'Not ready']) assert.equal(S.brainUnavailable({ word, glyph: '', tone: 'ok' }), false, word)
+})
+await check('the chip names the brain that answers; a fallback says why, in words', () => {
+  assert.equal(S.barBrainLabel('claude', P.resolveAgentBrain('claude', {})), 'Claude')
+  assert.equal(S.barBrainLabel('gemini-live', P.resolveAgentBrain('gemini-live', {})), 'Claude · Gemini Live needs a key')
+  assert.equal(S.barBrainLabel('groq', P.resolveAgentBrain('groq', {})), 'Claude · Groq (text) needs a key')
+  assert.equal(S.barBrainLabel('gemini-live', P.resolveAgentBrain('gemini-live', { geminiKey: 'k' })), 'Gemini Live')
+})
+await check('a pick made while Listen is on: next turn on Parakeet, next press when a live session is involved', () => {
+  const W = (o) => S.brainSwitchWaits({ listening: true, liveRealtime: false, current: 'claude', target: 'codex-cli', ...o })
+  assert.equal(W({ listening: false, target: 'gemini-live' }), false, 'Listen off: nothing to wait for')
+  assert.equal(W({}), false, 'Parakeet to Parakeet: the host re-reads the brain every turn')
+  assert.equal(W({ target: 'groq' }), false, 'to a text brain: next turn too')
+  assert.equal(W({ target: 'gemini-live' }), true, 'Parakeet to a live brain: opens on the next press (B11)')
+  assert.equal(W({ liveRealtime: true, current: 'gemini-live', target: 'claude' }), true, 'a live session ends on the switch (V6)')
+  assert.equal(W({ liveRealtime: true, current: 'gemini-live', target: 'gemini-live' }), false, 'the brain in use')
+  assert.ok(/brainSwitchWaits\(\{ listening, liveRealtime, current, target: spec\.id \}\)[\s\S]{0,40}'Starts next time you press Listen'/.test(pickerSrc), 'the row says so')
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

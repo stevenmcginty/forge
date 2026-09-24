@@ -20,6 +20,7 @@ import type { HubAction, HubCaption } from '@/state/VoiceHubController'
 import { Icon } from '../Icon'
 import { setBarTarget, useBarTarget } from './barMode'
 import { ACTION_GLYPH, hubAsk, listenState, useHubPreview, useHubView } from './hubView'
+import { BrainPicker } from './BrainPicker'
 import { DictateButton } from './DictateButton'
 import { KeyRecorder, Keys } from './KeyRecorder'
 import { ListenToggle } from './VoicePill'
@@ -36,6 +37,8 @@ import './Composer.css'
  *               the main agent: it sends when you pause, answers, and listens
  *               again. Right Shift flips it too. The brain's name and what it
  *               is doing are inside the switch, in words.
+ *   agent       the chip beside Listen names the voice agent that will answer
+ *               and opens a menu to switch it in place (BrainPicker).
  *   D           raw dictation (DictateButton): the Dictate key (Right Alt) as
  *               a small button beside Listen — raw words into the focused
  *               pane, or into this bar when the bar has focus. It says
@@ -312,6 +315,7 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
       <div className="comp__row">
         {lead}
         <ListenToggle />
+        <BrainPicker />
         <DictateButton />
 
         <textarea

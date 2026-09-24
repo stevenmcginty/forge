@@ -1,0 +1,131 @@
+/*
+ * The voice agent chip beside Listen, and its menu (BrainPicker.tsx).
+ *
+ * The chip is quiet — the bar's secondary type on a hairline — so it never
+ * reads as a second Listen. Every state is a word or a shape: a fallback
+ * carries ◆ and says why, the brain in use a tick AND "in use", and each other
+ * row its status glyph and word (● Ready, ◇ Needs key, ✕ Not installed …).
+ */
+
+.bpick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  max-width: 260px;
+  height: 28px;
+  margin-bottom: 4px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  box-shadow: inset 0 0 0 1px var(--line-hairline);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.bpick-chip:hover,
+.bpick-chip[data-open='true'] {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.bpick-chip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.bpick-chip__name {
+  min-width: 0;
+}
+
+.bpick-chip__mark {
+  flex: none;
+  font-size: 9px;
+  color: var(--warn);
+}
+
+.bpick-chip__chev {
+  flex: none;
+  color: var(--text-dim);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.bpick-chip[data-open='true'] .bpick-chip__chev {
+  transform: rotate(180deg);
+}
+
+/* ------------------------------------------------------------------ menu */
+
+.bpick__row {
+  gap: var(--s-3);
+}
+
+.bpick__row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.bpick__tick {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  color: var(--accent);
+}
+
+.bpick__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bpick__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bpick__sub {
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+}
+
+.bpick__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.bpick__glyph {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.bpick__state[data-tone='use'] {
+  color: var(--text-primary);
+}
+
+.bpick__state[data-tone='ok'] {
+  color: var(--ok);
+}
+
+.bpick__state[data-tone='need'] {
+  color: var(--warn);
+}
+
+.bpick__state[data-tone='bad'] {
+  color: var(--danger);
+}

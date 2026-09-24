@@ -761,6 +761,11 @@
   min-width: 26px;
 }
 
+.dock[data-place='top'] .bpick-chip {
+  height: 26px;
+  max-width: 180px;
+}
+
 .dock[data-place='top'] .dock__field {
   height: 28px;
   min-height: 28px;
@@ -841,9 +846,10 @@
 
 /*
  * Typing up here: the text needs the width, so while there is text in the bar
- * the project keeps its dot and Listen keeps its switch (the knob still shows
- * the state by shape), and both give their words back when the bar is empty.
+ * the project keeps its dot, Listen keeps its switch (the knob still shows
+ * the state by shape) and the voice agent chip keeps its chevron, and all
+ * three give their words back when the bar is empty.
  */
-.dock[data-place='top'] .comp:not([data-empty='true']) :is(.listen__text, .dock__project-name) {
+.dock[data-place='top'] .comp:not([data-empty='true']) :is(.listen__text, .dock__project-name, .bpick-chip__name) {
   display: none;
 }

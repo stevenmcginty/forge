@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { Settings } from '@shared/types'
 import {
   AGENT_BRAINS,
@@ -6,11 +6,11 @@ import {
   migrateAgentBrain,
   type AgentBrainKey,
   type AgentBrainKind,
-  type AgentBrainSpec,
-  type BrainTestResult,
-  type BrainTestTarget
+  type AgentBrainSpec
 } from '@shared/agent-brain'
 import { GEMINI_VOICES, OPENAI_VOICES, providerSpec, resolveVoice } from '@shared/realtime'
+import { useBrainProbes } from '@/hooks/useBrainStatus'
+import { statusOf, type BrainStatus as Status, type Probe } from '@/lib/brainStatus'
 import { resolveAgentBrain } from '@/lib/realtime/provider'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENROUTER_MODEL } from '@/lib/voicebrain'
 import { useApp } from '@/state/AppState'
@@ -106,106 +106,7 @@ const GROQ_MODELS = [
   { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B — cheapest, 6k tokens/min free' }
 ]
 
-/* ---------------------------------------------------------------- status */
-
-interface Probe {
-  busy: boolean
-  result: BrainTestResult | null
-}
-
-type Tone = 'ok' | 'need' | 'bad' | 'wait'
-interface Status {
-  word: string
-  glyph: string
-  tone: Tone
-}
-
-const READY: Status = { word: 'Ready', glyph: '●', tone: 'ok' }
-const NEEDS_KEY: Status = { word: 'Needs key', glyph: '◇', tone: 'need' }
-const CHECKING: Status = { word: 'Checking…', glyph: '◌', tone: 'wait' }
-
-function keyOf(s: Settings, key: AgentBrainKey | null): string {
-  return key ? String(s[key] ?? '').trim() : ''
-}
-
-/** The status word, from the Test result — or from the key alone when there is nothing to test yet. */
-function statusOf(spec: AgentBrainSpec, s: Settings, probe: Probe | undefined): Status {
-  if (spec.key && !keyOf(s, spec.key)) return NEEDS_KEY
-  const r = probe?.result
-  if (!r) return CHECKING
-  if (r.ok) return READY
-  const why = `${r.reason} ${r.detail ?? ''}`.toLowerCase()
-  if (/not found|not installed|isn.t installed|no such file|enoent|cannot find|missing cli/.test(why)) {
-    return { word: 'Not installed', glyph: '✕', tone: 'bad' }
-  }
-  if (/not logged in|not signed in|log ?in first|sign ?in first|unauthenticated|run .*\/?login/.test(why)) {
-    return { word: 'Not logged in', glyph: '!', tone: 'need' }
-  }
-  if (/no key|key refused|still encrypted|invalid api key|api key not valid/.test(why)) return NEEDS_KEY
-  return { word: 'Not ready', glyph: '!', tone: 'bad' }
-}
-
-/**
- * Test results, kept for the session so reopening Settings does not probe
- * every engine again. A probe is read-only (a model list, a CLI's version and
- * auth status — electron/agent-brain-test.ts), so running them on arrival is
- * what lets every card carry a real status word rather than "untested".
- * Keyed on the inputs that change the answer: the key, and Claude's model.
- */
-const probeCache = new Map<string, { sig: string; at: number; result: BrainTestResult }>()
-const PROBE_TTL = 5 * 60_000
-
-function probeSig(spec: AgentBrainSpec, s: Settings): string {
-  return `${keyOf(s, spec.key)}|${spec.id === 'claude' ? s.voiceClaudeModel : ''}`
-}
-
-async function runTest(target: BrainTestTarget): Promise<BrainTestResult> {
-  const api = (window.forge as unknown as { agentBrain?: { test(t: BrainTestTarget): Promise<BrainTestResult> } }).agentBrain
-  if (!api) return { ok: false, reason: 'This Forge build cannot test yet — restart Forge' }
-  try {
-    return await api.test(target)
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
-  }
-}
-
-function useProbes(s: Settings): { probes: Record<string, Probe>; test: (spec: AgentBrainSpec) => void } {
-  const [probes, setProbes] = useState<Record<string, Probe>>(() => {
-    const out: Record<string, Probe> = {}
-    for (const spec of AGENT_BRAINS) {
-      const hit = probeCache.get(spec.id)
-      if (hit && hit.sig === probeSig(spec, s)) out[spec.id] = { busy: false, result: hit.result }
-    }
-    return out
-  })
-
-  const test = (spec: AgentBrainSpec): void => {
-    const sig = probeSig(spec, s)
-    setProbes((p) => ({ ...p, [spec.id]: { busy: true, result: p[spec.id]?.result ?? null } }))
-    void runTest({ kind: 'brain', id: spec.id }).then((result) => {
-      probeCache.set(spec.id, { sig, at: Date.now(), result })
-      setProbes((p) => ({ ...p, [spec.id]: { busy: false, result } }))
-    })
-  }
-
-  // On arrival, and again when a key or Claude's model changes: probe every
-  // engine that has what it needs and no fresh answer.
-  const sigs = AGENT_BRAINS.map((spec) => probeSig(spec, s)).join('\n')
-  useEffect(() => {
-    for (const spec of AGENT_BRAINS) {
-      if (spec.key && !keyOf(s, spec.key)) continue
-      const hit = probeCache.get(spec.id)
-      if (hit && hit.sig === probeSig(spec, s) && Date.now() - hit.at < PROBE_TTL) {
-        setProbes((p) => (p[spec.id]?.result === hit.result ? p : { ...p, [spec.id]: { busy: false, result: hit.result } }))
-        continue
-      }
-      test(spec)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sigs])
-
-  return { probes, test }
-}
+/* Status words and the probe behind them: lib/brainStatus.ts and hooks/useBrainStatus.ts, shared with the voice bar's picker. */
 
 /* ------------------------------------------------------------------ card */
 
@@ -214,7 +115,7 @@ export function MainAgentCard(): ReactNode {
   const s = state.settings
   const chosen = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
   const resolved = resolveAgentBrain(chosen, s)
-  const { probes, test } = useProbes(s)
+  const { probes, test } = useBrainProbes(s)
   const [open, setOpen] = useState<Set<string>>(() => new Set())
 
   const toggleOpen = (id: string): void =>
