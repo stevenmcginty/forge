@@ -150,22 +150,44 @@
 
 /* ------------------------------------------------------------ the project */
 
+/*
+ * Where you are, so it has to be found at a glance: a pill tinted with the
+ * project's own colour and ringed in it, the name bold in full ink. The ink
+ * never takes the colour (a project may be red or pale), so the name reads
+ * the same whatever the tint; the folder and the ring carry the colour.
+ */
 .app[data-face='deck'] .dk-voicebar .dk-project {
+  --project-ring: color-mix(in srgb, var(--project) 72%, transparent);
   color: var(--vb-ink);
-  background: var(--vb-fill);
-  box-shadow: inset 0 0 0 1px var(--vb-rim);
+  background: color-mix(in srgb, var(--project) 16%, var(--bg-panel));
+  box-shadow: inset 0 0 0 1.5px var(--project-ring);
 }
 
 .app[data-face='deck'] .dk-voicebar .dk-project:hover,
 .app[data-face='deck'] .dk-voicebar .dk-project[data-open='true'] {
   color: var(--vb-ink);
-  background: var(--vb-fill-hover);
-  box-shadow: inset 0 0 0 1px var(--vb-rim-hover);
+  background: color-mix(in srgb, var(--project) 24%, var(--bg-panel));
+  box-shadow: inset 0 0 0 1.5px var(--project);
+}
+
+/* On paper the project colours are too pale to ring or fill a folder: pulled toward the ink. */
+:root[data-appearance='light'] .app[data-face='deck'] .dk-voicebar .dk-project {
+  --project-ring: color-mix(in srgb, var(--project) 45%, var(--text-primary));
+}
+
+:root[data-appearance='light'] .app[data-face='deck'] .dk-voicebar .dk-project:hover,
+:root[data-appearance='light'] .app[data-face='deck'] .dk-voicebar .dk-project[data-open='true'] {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--project) 30%, var(--text-primary));
+}
+
+:root[data-appearance='light'] .app[data-face='deck'] .dk-voicebar .dk-project__folder {
+  fill: color-mix(in srgb, var(--project) 65%, var(--text-primary));
+  filter: none;
 }
 
 .app[data-face='deck'] .dk-voicebar .dk-project__name {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.01em;
 }
 
@@ -647,31 +669,22 @@
   color: var(--vb-ink-2);
 }
 
+/* Who the words go to, in that agent's colour (the call-sign ink, deck.css). */
 .app[data-face='deck'] .dk-composer .astatus__name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--vb-ink);
+  color: var(--callsign-ink, var(--vb-ink));
 }
 
-/* The tab's own name, the loudest word on the strip: who the words go to. */
+/* The tab's own name, the loudest word on the strip, on its call-sign chip. */
 .app[data-face='deck'] .dk-composer .astatus__tab {
+  padding: 1px 8px;
   font-family: var(--font-display);
   font-size: 13.5px;
   font-weight: 700;
+  line-height: 18px;
   letter-spacing: 0.01em;
-  color: var(--vb-ink);
-}
-
-.app[data-face='deck'] .dk-composer .astatus__tab::before {
-  content: '·';
-  margin-right: 6px;
-  font-weight: 400;
-  color: var(--vb-ink-2);
-}
-
-.app[data-face='deck'] .dk-composer .astatus:has(.astatus__tab) .astatus__name {
-  font-weight: 500;
-  color: var(--vb-ink-2);
+  border-radius: 5px;
 }
 
 .app[data-face='deck'] .dk-composer .astatus__model,
@@ -1022,6 +1035,11 @@
 }
 
 /* Before the tab's name, the pane's own ("Claude Code"), quieter. */
+/* "To Wanda": the agent's own colour, as on the strip it stands in for. */
+.app[data-face='deck'] .dk-vline__to .dk-vline__name {
+  color: var(--callsign-ink, var(--vb-ink));
+}
+
 .app[data-face='deck'] .dk-vline__pane {
   white-space: nowrap;
   color: var(--vb-ink-2);

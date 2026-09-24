@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import type { WebVoiceProvider } from '@shared/web'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
-import { isShellProfile } from '@/lib/agents'
+import { badgeColor, isShellProfile } from '@/lib/agents'
 import { usePresence } from '@/lib/motion'
 import { Rail } from '../components/Rail'
 import { useActiveProject, useForge } from '../state'
@@ -561,7 +561,11 @@ export function VoiceLine({ place }: { place: BarPlace }): ReactNode {
       ) : null}
       {live ? (
         current ? (
-          <span className="dk-vline__seg dk-vline__to" title={toTitle(current)}>
+          <span
+            className="dk-vline__seg dk-vline__to"
+            title={toTitle(current)}
+            style={{ '--pane-accent': badgeColor(current.profile) } as CSSProperties}
+          >
             <span className="dk-vline__eyebrow">To</span>
             <AgentBadge profile={current.profile} size="sm" />
             {current.tabName ? <span className="dk-vline__pane">{current.title}</span> : null}
