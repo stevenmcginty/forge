@@ -1130,17 +1130,18 @@ function MosaicTile({
   }, [interactive, paneId])
 
   /*
-   * The wheel over the picture scrolls that terminal's scrollback — no click
-   * first, no typing mode, nothing selected or focused that was not already.
+   * The wheel over the picture scrolls that terminal — no click first, no
+   * typing mode, nothing selected or focused that was not already.
    *
    * The wheel lands on the hit sheet, not the terminal: the sheet covers the
    * stage and the terminal under it takes no pointer events at all (a peek is
-   * a picture). So the sheet hands it to scrollPeek, which moves the buffer
-   * without ever going near xterm's wheel path or the PTY. Native and
-   * non-passive, because React's onWheel is passive and the wall behind must
-   * not scroll too. A tile with nothing to scroll (a full-screen TUI, a shell
-   * with no history yet) lets the wheel carry on to the wall. Typing in place
-   * the sheet is gone and xterm has its own wheel again.
+   * a picture). So the sheet hands it to scrollPeek, which moves a shell's
+   * scrollback, or hands the gesture to a full-screen program (an agent TUI,
+   * vim) the way the Full screen pane would. Native and non-passive, because
+   * React's onWheel is passive and the wall behind must not scroll too. Only
+   * a tile with nothing to scroll (a shell with no history yet) lets the
+   * wheel carry on to the wall. Typing in place the sheet is gone and xterm
+   * has its own wheel again.
    */
   const hitRef = useRef<HTMLButtonElement | null>(null)
   useEffect(() => {
